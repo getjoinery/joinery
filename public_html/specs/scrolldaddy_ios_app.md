@@ -97,25 +97,33 @@ leaves the device.
   packet tunnel are standard Network Extension capabilities, no special
   Apple approval needed — unlike FamilyControls).
 
-### Part 1 (reusable Joinery account module) — feasible with one server-side gap
+### Part 1 (reusable Joinery account module) — server side complete, app work only
 
-The platform's action API already exposes every account flow the app needs
+The platform's action API exposes every account flow the app will ever need
 **session-less or sessioned**: `register`, `password_reset_1`/`password_reset_2`,
-`password_edit`, `account_edit`, `contact_preferences`, `change_tier`. The gap
-is **authentication**: API keys are admin-provisioned — a phone app cannot
-ship one. The server needs **self-provisioned session keys** (login with
-email/password → key pair). This is core platform work, reusable by every
-future app — see "Server-side work."
+`password_edit`, `account_edit`, `contact_preferences`, `change_tier`.
+Authentication is self-provisioned session keys: `auth/login` with
+email/password mints a session-type API key pair, and the app authenticates
+with the standard key headers (see `docs/api.md`). The account forms are
+served as JSON definitions (`GET /api/v1/form/{action}`), so when in-app
+account management ships (post-launch — see "Billing strategy"), JoineryKit
+adds one generic form renderer instead of a screen per form, and form
+changes never require an app release. At launch the module is login-only.
 
 Billing is the one genuinely constrained area: **Apple requires In-App Purchase
 for digital subscriptions sold inside an app.** See "Billing strategy" below —
 phased, with IAP as the end state.
 
-### Part 2 (filter management) — feasible, pure API-surface work
+### Part 2 (filter management) — server side complete, app work only
 
-All filter business logic (block model, tier gating, validation) already exists
-in the plugin's logic layer. The work is exposing it as API actions and
-building the SwiftUI screens that mirror the web editor. No new policy model.
+The full filter surface is exposed as API actions under the
+`dns_filtering/` namespace — devices (with DoH/DoT endpoints per device),
+blocks, custom rules, catalog, account summary, query log, domain/URL
+testing — documented in `plugins/dns_filtering/docs/overview.md` § API
+Surface. The actions call the same logic functions as the web editor, so
+tier gating, validation, and save semantics live in one place. The work is
+building the SwiftUI screens that mirror the web editor. No new policy
+model.
 
 ## Architecture
 
@@ -124,7 +132,7 @@ Three Swift packages plus the app shell, developed on the Mac mini per
 
 | Layer | Package | Reusable for | Contents |
 |---|---|---|---|
-| Account | **JoineryKit** | any app on any Joinery deployment | API client (base URL + branding injected), session-key auth + Keychain storage, native login screen, **one generic server-driven form renderer** (per `specs/formwriter_json_forms.md`) that renders register, forgot/reset password, account edit, and contact preferences from server JSON definitions, subscription status screen, billing entry point |
+| Account | **JoineryKit** | any app on any Joinery deployment | API client (base URL + branding injected), session-key auth + Keychain storage, native login screen, subscription status screen. Post-launch additions: **one generic server-driven form renderer** (schema in `docs/formwriter.md` § JSON output mode) driving register, forgot/reset password, account edit, and contact preferences from server JSON definitions; billing entry point |
 | DNS filtering | **DNSFilterKit** | any ScrollDaddy-style deployment (e.g. NetworkSentry) | Device list/registration, block editor (always-on + scheduled), category/service/custom-rule screens with server-driven tier gates, `NEDNSSettingsManager` activation flow, protection-mode control |
 | Hard blocking | **Packet tunnel extension** (app extension target, shared via DNSFilterKit) | same as DNSFilterKit | `NEPacketTunnelProvider`: in-tunnel DNS forwarding to the deployment's DoH resolver, SNI/IP connection blocking from the synced hard-block list |
 | Brand | **ScrollDaddy app target** | — | Bundle ID, branding/theme, deployment base URL, App Store assets |
@@ -140,67 +148,43 @@ Design rules carried over from the web product:
   Editor UI). The API actions reuse the existing logic functions precisely so
   this invariant lives in one place.
 
-## Server-side work (all in this repo)
+## Server-side work
 
-### 1. User session keys (core platform — prerequisite spec)
-
-Specified separately in **`specs/user_session_api_keys.md`** and implemented
-before this spec: `auth/login` mints a session-type API key pair in the
-existing `apk_api_keys` table; the app then authenticates with the standard
-key headers through the unchanged `apiv1.php` flow. Includes
-`auth/session`/`auth/logout`, revocation on password change, and a profile
-sessions view. Phase 1 consumes that surface; it adds no auth work of its
-own.
-
-Also implemented before this spec: **server-driven forms**
-(`specs/formwriter_json_forms.md`) — the account forms (register,
-password reset, account edit, contact preferences) are served as JSON
-definitions, so JoineryKit ships one generic form renderer instead of a
-screen per form, and form changes never require an app release.
-
-### 2. ScrollDaddy API actions (plugin)
-
-Specified and implemented in **`specs/implemented/plugin_api_actions.md`**
-(two phases: plugin-aware core action layer, then the full ScrollDaddy
-action surface — devices, blocks, custom rules, catalog, account summary,
-query log, domain/URL testing — plus the `sbr_hard_block` column and the
-merged hard-block hostname list in device responses). The action surface is
-documented in `plugins/dns_filtering/docs/overview.md` § API Surface.
-
-### 3. Apple IAP integration (core platform — post-launch)
-
-A payment integration parallel to `StripeHelper`:
-
-- `AppStoreHelper` validating StoreKit 2 transactions via the App Store Server
-  API; webhook endpoint in `/ajax/` for App Store Server Notifications V2
-  (renewals, cancellations, refunds) — same role Stripe webhooks play today.
-- Product-ID → subscription-tier mapping (admin-configured), driving the same
-  tier assignment path `change_tier` uses.
-- Reconciliation rule: a user has one subscription source (Stripe **or** App
-  Store); the server records the source and routes manage/cancel accordingly.
+None. The API surface the app consumes is in place: session-key auth
+(`auth/login`/`auth/session`/`auth/logout`, revocation on password change),
+server-driven account forms, and the full `dns_filtering/` action surface
+including the `sbr_hard_block` column and the merged hard-block hostname
+list in device responses (`docs/api.md`,
+`plugins/dns_filtering/docs/overview.md` § API Surface). In-app billing —
+server and client — is its own spec, `specs/mobile_app_billing.md`,
+consumed post-launch.
 
 ## Billing strategy (the one real constraint)
 
 Apple's rules for digital subscriptions:
 
-1. **At launch — account-exists model.** The app signs users in, displays
-   subscription status, and free-tier users get full free-tier function
-   (category blocking on the always-on block — the free-tier floor stays
-   intact). Paid-tier purchase is *not offered inside the app*; in the US
-   storefront an external purchase link to the website is permitted, elsewhere
-   the app simply doesn't sell (reader-app pattern: NextDNS, Netflix). This
-   ships the full filter + DNS experience with zero IAP work.
-2. **Post-launch — StoreKit 2 IAP.** In-app subscribe/upgrade/downgrade via
-   Apple, reconciled server-side per "Apple IAP integration" above. Apple
-   takes 15–30%; price the IAP tiers accordingly (admin price per product ID).
-   This is its own work item, schedulable any time after the Phase 3 release,
-   independent of Phase 4.
+1. **At launch — login-only.** Accounts are created on the website (free or
+   paid); the app signs users in, displays subscription status, and every
+   tier gets its full function (category blocking on the always-on block —
+   the free-tier floor stays intact). No purchase and no registration inside
+   the app (login-only pattern: NextDNS, Netflix). Because the app offers no
+   account creation, Apple's in-app account-deletion requirement is not
+   triggered. This ships the full filter + DNS experience with zero IAP work
+   and no account screens beyond login.
+2. **Later phase — in-app account management.** Registration, password
+   reset, account edit, and contact preferences via the generic server-driven
+   form renderer (the endpoints exist; this is client work). Adding
+   registration triggers Apple's account-deletion requirement, so in-app
+   deletion ships in the same phase.
+3. **Later phase — StoreKit 2 IAP.** In-app subscribe/upgrade/downgrade via
+   Apple, per `specs/mobile_app_billing.md`. Independent of the
+   account-management phase and of Phase 4.
 
 ## App flows
 
 **Onboarding (the whole point — minutes, zero copy/paste):**
-1. Launch → JoineryKit login/register screen (register hits the existing
-   `register` action; new users land on the free tier).
+1. Sign up on the website (free or paid), download the app, log in
+   (JoineryKit login screen).
 2. App registers this phone as a device (`devices` action; server returns the
    DoH URL).
 3. App saves the DoH configuration via `NEDNSSettingsManager`, then shows the
@@ -235,32 +219,31 @@ iOS Simulator against `dev.getjoinery.com`; Phases 3–4 require a **physical
 iPhone**, because Network Extensions (DNS settings and packet tunnels) do not
 run in the Simulator.
 
-### Phase 1 — Account (JoineryKit + server session-key auth)
+### Phase 1 — Account (JoineryKit, login-only)
 
-Server: session-key auth and server-driven forms already in place per
-`specs/user_session_api_keys.md` and `specs/formwriter_json_forms.md`
-(implemented before this spec). App: JoineryKit package with a native login
-screen, the generic form renderer driving register, forgot/reset password,
-account edit, and contact preferences from server definitions, a
-subscription status screen, and Keychain key storage. JoineryKit sends the
+App work against the existing auth endpoints: JoineryKit package with a
+native login screen, Keychain key storage, and a subscription status
+screen. Accounts are created on the website; a "Forgot password?" link
+opens the website's reset page in the browser. The generic server-driven
+form renderer and the in-app account screens it drives (registration,
+password reset, account edit, contact preferences) are the post-launch
+account-management phase — see "Billing strategy." JoineryKit sends the
 `client-app`/`client-version` headers on every request (hyphen form —
 underscore header names are dropped by proxy_fcgi stacks; see the client
-headers section of `docs/api.md`) and renders any 426
-`UpgradeRequired` response as a blocking upgrade screen with an App Store
-deep link (per `specs/user_session_api_keys.md`). ScrollDaddy app
-target exists but is a thin shell.
+headers section of `docs/api.md`) and renders any 426 `UpgradeRequired`
+response as a blocking upgrade screen with an App Store deep link.
+ScrollDaddy app target exists but is a thin shell.
 
-**Gate:** XCUITest suite in the Simulator — register a new user, log in/out,
-password-reset round-trip via the reset email, account edit persists,
-session keys revoked on password change, invalid-credential and rate-limit
-paths render correctly. Server-side: the auth and form endpoints are covered
-in `/tests/` by their own specs.
+**Gate:** XCUITest suite in the Simulator — log in/out with a
+website-created account, session keys revoked on password change,
+invalid-credential and rate-limit paths render correctly. Server-side: the
+auth endpoints are covered in `/tests/` by their own specs.
 
-### Phase 2 — Filters (ScrollDaddy API actions + editor UI)
+### Phase 2 — Filters (editor UI)
 
-Server: plugin API actions (devices, blocks, rules, catalog, account summary).
-App: DNSFilterKit screens — device registration, always-on editor, scheduled
-blocks, custom rules, server-driven tier gates.
+App work against the existing `dns_filtering/` actions: DNSFilterKit
+screens — device registration, always-on editor, scheduled blocks, custom
+rules, server-driven tier gates.
 
 **Gate:** XCUITest in the Simulator — edits made in the app appear in the web
 editor and vice versa; tier gates server-rejected and rendered locked;
@@ -280,10 +263,11 @@ network-switch edge cases behave as documented. Then TestFlight, then review.
 
 ### Phase 4 — Strict mode (may ship later)
 
-Server: `sbr_hard_block` column + hard-block list in device API responses.
-App: packet tunnel extension, protection-level control, VPN-conflict
-detection. Nothing in Phases 1–3 depends on this phase; it can land in any
-later release without touching the earlier surfaces.
+App work against the existing hard-block surface (`block_rule_add`'s
+`hard_block` flag and the `hard_block_hostnames` list in device responses):
+packet tunnel extension, protection-level control, VPN-conflict detection.
+Nothing in Phases 1–3 depends on this phase; it can land in any later
+release without touching the earlier surfaces.
 
 **Gate:** on a physical iPhone — a hard-blocked site fails in Safari and in a
 third-party browser using its own DoH (DNS bypass); non-blocked sites load
@@ -300,11 +284,12 @@ tunnel memory stays under the extension ceiling under sustained browsing.
 
 ## Acceptance checklist
 
-1. A new user can register, subscribe (Phase 1: free tier; Phase 2: paid via
-   IAP), enable filtering, and confirm a blocked category fails to resolve —
-   entirely on the phone, without visiting the website.
-2. Password reset round-trips through the existing reset email from inside the
-   app.
+1. A user with a website-created account can log in, enable filtering, and
+   confirm a blocked category fails to resolve — with no further website
+   visits after signup.
+2. The login screen's "Forgot password?" link opens the website's reset
+   page, and the app signs in with the new password afterward (session keys
+   from the old password are revoked).
 3. Filter edits in the app are visible in the web editor and vice versa
    (single source of truth; resolver picks changes up within its ~60s reload).
 4. Disabling in-app and uninstalling the app both restore normal DNS
@@ -321,9 +306,7 @@ tunnel memory stays under the extension ceiling under sustained browsing.
 
 ## Documentation deliverables (on implementation)
 
-- `docs/api.md` — auth additions are covered by
-  `specs/user_session_api_keys.md`'s deliverables.
-- `plugins/dns_filtering/docs/overview.md` — API actions; the app as a config
-  delivery channel alongside mobileconfig.
+- `plugins/dns_filtering/docs/overview.md` — the app as a config delivery
+  channel alongside mobileconfig.
 - New `docs/mobile_apps.md` — JoineryKit integration guide for future apps
   (repo location, configuration surface, screens provided).

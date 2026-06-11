@@ -5,14 +5,12 @@ reusable Joinery account module, filter management, automatic local DNS
 configuration with safe revert, and connection-level hard blocking — delivered
 in the same four phases with a test gate after each.
 
-**Shared server work.** All server-side deliverables are platform-neutral and
-defined elsewhere: user session-key auth in `specs/user_session_api_keys.md`
-and server-driven forms in `specs/formwriter_json_forms.md` (both implemented
-before the app specs), and the ScrollDaddy plugin API actions +
-`sbr_hard_block` flag in the iOS spec. This spec adds exactly one server item
-(Play Billing). If the iOS spec is implemented first, Android Phases 1–2 are
-pure client work; otherwise the shared plugin items are built under whichever
-app spec goes first.
+**Server side.** None needed. The platform-neutral API surface both apps
+consume is in place: session-key auth, server-driven account forms, and the
+full `dns_filtering/` action surface including the hard-block hostname list
+(`docs/api.md`, `plugins/dns_filtering/docs/overview.md` § API Surface).
+Every phase is pure client work; in-app billing — server and client — is
+its own spec, `specs/mobile_app_billing.md`, consumed post-launch.
 
 ## Feasibility findings — where Android differs from iOS
 
@@ -63,18 +61,20 @@ filtering (Android requirement); OEM battery managers can kill background
 services — onboarding requests a battery-optimization exemption and the
 service auto-restarts (`START_STICKY`, boot receiver when always-on isn't set).
 
-### Part 1 — same server gap, same module shape
+### Part 1 — same module shape as JoineryKit
 
-Session-key auth and server-driven forms (shared deliverables) plus a
-reusable **`joinery-android`** Kotlin library: API client with injected base
-URL + branding, key storage in Keystore-backed `EncryptedSharedPreferences`,
-a native Compose login screen, **one generic server-driven form renderer**
-(per `specs/formwriter_json_forms.md`) driving register, forgot/reset
-password, account edit, and contact preferences from server JSON
-definitions, plus subscription status and billing entry point. Like
-JoineryKit, it sends the `client-app`/`client-version` headers on every
-request and renders any 426 `UpgradeRequired` response as a blocking upgrade
-screen with a Play Store deep link (per `specs/user_session_api_keys.md`).
+A reusable **`joinery-android`** Kotlin library over the platform's
+session-key auth: API client with injected base URL + branding, key storage
+in Keystore-backed `EncryptedSharedPreferences`, a native Compose login
+screen, and subscription status. At launch the module is login-only —
+accounts are created on the website, and "Forgot password?" opens the
+website's reset page. The post-launch account-management phase adds **one
+generic server-driven form renderer** (schema in `docs/formwriter.md` §
+JSON output mode) driving register, forgot/reset password, account edit,
+and contact preferences from server JSON definitions, plus the billing
+entry point. Like JoineryKit, it sends the `client-app`/`client-version`
+headers on every request and renders any 426 `UpgradeRequired` response as
+a blocking upgrade screen with a Play Store deep link (see `docs/api.md`).
 Same reuse target as JoineryKit: any app on any Joinery deployment.
 
 Decision: native Kotlin + Compose, no Kotlin Multiplatform sharing with the
@@ -84,33 +84,34 @@ this app size.
 
 ### Part 2 — pure client work
 
-Same plugin API actions; Compose screens mirroring the iOS editor, same
-server-driven tier gates, same "Allow = no row" submit semantics living
-server-side in the shared logic functions.
+The same `dns_filtering/` API actions the iOS app consumes; Compose screens
+mirroring the iOS editor, same server-driven tier gates, same "Allow = no
+row" submit semantics living server-side in the shared logic functions.
 
 ### Billing — same constraint, Google flavor
 
 Google Play requires **Play Billing** for digital subscriptions, with the same
 15–30% cut and the same launch strategy:
 
-1. **At launch — account-exists model.** Sign-in, status display, full
-   free-tier function; no in-app purchase offered.
-2. **Post-launch — Play Billing.** Server: `GooglePlayHelper` parallel to
-   `StripeHelper`/`AppStoreHelper` — purchase verification via the Play
-   Developer API, Real-Time Developer Notifications (Pub/Sub) webhook for
-   renewals/cancellations/refunds, admin-configured product-ID → tier mapping.
-   Subscription source becomes a three-way exclusive: Stripe, App Store, or
-   Play Store; the server records the source and routes manage/cancel
-   accordingly.
-
-Escape hatch unique to Android (noted, not planned): direct APK / F-Droid
-distribution is legal and skips Play Billing entirely.
+1. **At launch — login-only.** Accounts are created on the website (free or
+   paid); the app signs in, displays status, and every tier gets its full
+   function. No in-app purchase and no in-app registration — which also
+   means Play's account-deletion-in-app policy (triggered by in-app account
+   creation) does not apply.
+2. **Later phase — in-app account management.** Registration, password
+   reset, account edit, and contact preferences via the generic
+   server-driven form renderer (the endpoints exist; this is client work).
+   In-app account deletion ships in the same phase, per Play policy.
+3. **Later phase — Play Billing.** In-app subscribe/change via Google, per
+   `specs/mobile_app_billing.md` (which also covers the Android-only
+   F-Droid/direct-APK escape hatch). Independent of the account-management
+   phase and of Phase 4.
 
 ## Architecture
 
 | Layer | Module | Reusable for | Contents |
 |---|---|---|---|
-| Account | **`joinery-android`** | any app on any Joinery deployment | API client, session-key auth + Keystore storage, native login screen, generic server-driven form renderer, subscription status |
+| Account | **`joinery-android`** | any app on any Joinery deployment | API client, session-key auth + Keystore storage, native login screen, subscription status. Post-launch: generic server-driven form renderer, billing entry point |
 | DNS filtering | **`dnsfilter-android`** | any ScrollDaddy-style deployment | Device registration, block editor screens, tier-gate rendering, the `VpnService` (standard + strict modes), protection-level control |
 | Brand | **ScrollDaddy app module** | — | Application ID, theme, deployment base URL, Play Store assets |
 
@@ -121,10 +122,11 @@ Gradle + emulator run fine on Apple Silicon; the SSH workflow from
 
 ## App flows
 
-**Onboarding:** register/login → app registers the phone as a device (server
-returns UID) → one tap on the system VPN consent dialog → "Protected" status
-(verified by resolving a test hostname through the tunnel) → always-on block
-editor. Zero copy/paste, zero Settings visits.
+**Onboarding:** sign up on the website, download the app, log in → app
+registers the phone as a device (server returns UID) → one tap on the system
+VPN consent dialog → "Protected" status (verified by resolving a test
+hostname through the tunnel) → always-on block editor. After signup: zero
+copy/paste, zero Settings visits.
 
 **Daily use:** identical to iOS — categories, services, custom rules,
 scheduled blocks, per tier.
@@ -145,11 +147,11 @@ regression suites. A difference in Android's favor: **the emulator supports
 VpnService**, so all four gates run in the emulator; physical-device passes
 are added where OEM behavior matters.
 
-### Phase 1 — Account (`joinery-android` + shared session-key auth)
+### Phase 1 — Account (`joinery-android`)
 
 **Gate:** Compose UI test suite in the emulator against `dev.getjoinery.com` —
-register, login/logout, password-reset round-trip, account edit, session-key
-revocation on password change, error and rate-limit rendering.
+login/logout with a website-created account, session-key revocation on
+password change, error and rate-limit rendering.
 
 ### Phase 2 — Filters
 
@@ -170,8 +172,9 @@ reboot recovery. Then closed testing track, then review.
 
 ### Phase 4 — Strict mode (may ship later)
 
-Tunnel routing-scope switch + SNI/IP enforcement from the shared
-`sbr_hard_block` list; always-on/lockdown guidance. Independent of Phases 1–3.
+Tunnel routing-scope switch + SNI/IP enforcement from the
+`hard_block_hostnames` list in device API responses; always-on/lockdown
+guidance. Independent of Phases 1–3.
 
 **Gate:** a hard-blocked site fails in Chrome and in a browser using its own
 DoH (DNS bypass); non-blocked sites load normally; disabling strict mode falls
@@ -188,9 +191,12 @@ norms on a physical device.
 
 ## Acceptance checklist
 
-1. A new user can register, enable filtering, and confirm a blocked category
-   fails to resolve — entirely on the phone, without visiting the website.
-2. Password reset round-trips through the existing reset email in-app.
+1. A user with a website-created account can log in, enable filtering, and
+   confirm a blocked category fails to resolve — with no further website
+   visits after signup.
+2. The login screen's "Forgot password?" link opens the website's reset
+   page, and the app signs in with the new password afterward (session keys
+   from the old password are revoked).
 3. Filter edits in the app are visible in the web editor and vice versa.
 4. Disabling in-app and uninstalling both restore normal DNS immediately.
 5. Tier gates server-rejected and rendered locked; hard-block flags rejected
@@ -209,5 +215,3 @@ norms on a physical device.
 - `plugins/dns_filtering/docs/overview.md` — the Android app as a config
   delivery channel; Private DNS (DoT SNI subdomain) as a supported manual
   path.
-- Play Billing additions to whichever doc hosts the IAP/AppStoreHelper
-  documentation when that lands.
