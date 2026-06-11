@@ -78,18 +78,25 @@ under `/docs/` are ordinary edits.
   second variant."* Yet `docs/logic_architecture.md` itself (lines 79, 94, 106, 190, 450),
   `docs/admin_pages.md` (the "Complete Template" line 63 and every example), and the
   Form-Processing / Edit-Form patterns all use `function foo_logic($get_vars, $post_vars)`.
-- **Reality:** **The single-`array $input` form is correct and universal.** Sampled
-  `logic/register_logic.php:6`, `logic/items_logic.php:4`, `logic/checkout_logic.php:4`,
-  `adm/logic/admin_oauth_providers_logic.php:15`, `adm/logic/admin_order_delete_logic.php:12`,
-  `plugins/server_manager/logic/admin_marketplace_logic.php:4`,
-  `plugins/inbound_email/logic/admin_inbound_email_reader_logic.php:15` — **all** use
-  `(array $input): LogicResult`. Views call `process_logic(foo_logic(array_merge($_GET,$_POST)))`.
-- **Impact:** The two-arg examples are stale. A developer cannot tell which is current and may
-  write `($get_vars,$post_vars)` handlers that never receive POST data the way the framework
-  passes it. The simulation hit this first (Assumption #1).
-- **Fix:** Rewrite **all** `($get_vars, $post_vars)` examples in `docs/logic_architecture.md` and
-  `docs/admin_pages.md` to the single-`$input` signature, and change the call sites to
-  `array_merge($_GET, $_POST)`. This is the highest-volume staleness in the docs after 1.1.
+- **Reality (counted, June 2026):** the single-`array $input` form is **universal** —
+  **172 real logic files** across `logic/`, `adm/logic/`, and `plugins/*/logic/` use
+  `_logic(array $input)`; **zero** use `($get_vars, $post_vars)`. (Two one-offs use a single arg
+  under a different name — `documentation_logic($vars)`, `list_signup_logic($config)` — still
+  single-argument.) Views invoke them with one merged bundle:
+  `process_logic(foo_logic(array_merge($_GET, $_POST, $params ?? [])))`.
+- **The docs contradict their own stated rule.** The two-arg form appears **11 times in
+  `docs/logic_architecture.md`** and **once in `docs/admin_pages.md`** (counted) — a few
+  paragraphs below the line declaring "there is no second variant."
+- **Impact — not cosmetic; can actually break.** A developer who copies the two-arg signature
+  writes `function mything_logic($get_vars, $post_vars)`, but the framework/views call logic with
+  a **single** bundle. The second parameter never arrives → either a fatal "Too few arguments,"
+  or (if defaulted) a silent misread where the whole merged bundle is treated as `$get_vars` and
+  POST handling misfires. The simulation hit this first (Assumption #1).
+- **Fix (docs only, but the highest-volume staleness here):** rewrite all 12 two-arg example
+  functions in `docs/logic_architecture.md` and `docs/admin_pages.md` to the single-`$input`
+  signature, and update their call sites to `array_merge($_GET, $_POST, $params ?? [])`. It is the
+  foundational page pattern shown wrong a dozen times in the two most-read guides — fix before the
+  smaller snippet items.
 
 ### 2.2 `get_setting()` for a missing key: `''` vs `null`
 
@@ -103,47 +110,77 @@ under `/docs/` are ordinary edits.
 - **Fix:** Correct the Plugin Developer Guide's "Blank defaults" note to say `''`, matching
   `docs/settings.md`.
 
-### 2.3 Permission level for an ordinary logged-in member is never defined
+### 2.3 The permission ladder and the counterintuitive `min_permission => 0` rule are undocumented (NOT a security slip — corrected)
 
-- **Docs:** `docs/routing.md:122` lists `min_permission` as "Integer permission level required"
-  and the plugin-routes example (`docs/plugin_developer_guide.md:167`) uses
-  `'min_permission' => 0` for a member profile page. Admin docs define 5/7/9/10 but nothing
-  defines what a normal member has, or what `0` vs `1` mean at the gate.
-- **Reality:** `min_permission` calls `SessionControl::check_permission()`
-  (`includes/RouteHelper.php:312`). Non-logged-in users have permission `0`; logged-in members
-  are `1-4`; `5+` is admin. So `min_permission => 0` is effectively "public," and
-  `min_permission => 1` is "any logged-in user." The plugin example's `=> 0` on a member page is
-  therefore **wrong** — it would let anonymous users through.
-- **Impact:** A developer copying `min_permission => 0` for a profile route ships an
-  unauthenticated page. The simulation guessed correctly (Assumption #3) but only by reasoning
-  past the example.
-- **Fix:** Add a permission-level table to `docs/routing.md` (0 = public/anonymous, 1–4 =
-  member, 5/7/9 = admin tiers, 10 = superadmin) and correct the plugin-routes example to
-  `'min_permission' => 1`.
+- **Docs:** `docs/routing.md:122` lists `min_permission` as "Integer permission level required";
+  the plugin-routes example (`docs/plugin_developer_guide.md:167`) uses `'min_permission' => 0`
+  on a member profile page. Admin docs define 5/7/9/10 but nothing defines what a normal member
+  has, or what `0` vs omitting the key means.
+- **Reality (re-verified June 2026 — reverses the original draft of this finding):** the router
+  enforces with `if (isset($config['min_permission']))` (`includes/RouteHelper.php:312`) — `isset`
+  is **true even when the value is `0`** — then calls `SessionControl::check_permission($level)`.
+  And `check_permission()` (`includes/SessionControl.php`) **redirects any not-logged-in user to
+  `/login` first, regardless of `$level`**, and only afterward enforces
+  `$_SESSION['permission'] < $level`. Therefore:
+  - **`min_permission => 0` = "must be logged in, any rank"** — it does **not** make a page public.
+  - **`min_permission => 5` = "logged in and admin."**
+  - **Truly public = omit the key entirely** (then `isset` is false and no check runs).
+- **The original claim was backwards.** A prior draft of this finding (and the first-pass agent)
+  said `=> 0` meant "public" and that the doc example shipped an anonymous-readable page. **False.**
+  `=> 0` requires login; the doc example is safe and correct for a profile page.
+- **Failure mode is safe.** A developer who misreads `0` as "public" and uses it gets the
+  *opposite* — a login requirement. The page ends up **more** locked than intended, never more
+  open. No data exposure. This is the reassuring direction to be wrong in.
+- **The real (gentler) problem:** the docs never explain the permission ladder, and never explain
+  the genuinely counterintuitive split — **`0` = logged-in, *omit* = public** — which is exactly
+  backwards from every reader's intuition ("0 = no requirement = open"). A confusing-but-safe
+  trap. **Documentation gap, not a security bug.**
+- **Fix (docs only):** add a short table to `docs/routing.md` covering the levels (0 = any
+  logged-in user, 1–4 = member tiers, 5/7/9 = admin tiers, 10 = superadmin) **and** the critical
+  "`min_permission => 0` requires login; omit the key for a truly public page" distinction. Leave
+  the plugin example's `=> 0` as-is — it is correct.
 
 ---
 
 ## Severity 3 — Real platform bugs surfaced by the exercise
 
-### 3.1 `profileMenu` slug rule is unsatisfiable for any plugin with an underscore in its name
+### 3.1 Docs describe a `profileMenu` slug rule that is internally contradictory AND never enforced (dead validator)
 
 - **Docs:** `docs/plugin_developer_guide.md:387-388` — *"Must start with `<plugin-name>-` … for
   `profileMenu`, it is required by validation"* — and slugs must match `[a-z0-9-]`.
-- **Reality:** `includes/PluginHelper.php:121` enforces `^[a-z0-9][a-z0-9-]*$` (no underscores)
-  **and** `:200` enforces `strpos($slug, $this->name . '-') === 0`. For a plugin directory named
+- **The rule as written is self-contradictory for underscore-named plugins.**
+  `includes/PluginHelper.php:121` requires slugs to match `^[a-z0-9][a-z0-9-]*$` (no underscores)
+  **and** `:200` requires `strpos($slug, $this->name . '-') === 0`. For a plugin directory named
   `dns_filtering` or `inbound_email`, the required prefix is `dns_filtering-` / `inbound_email-`,
-  which **contains an underscore and therefore can never match the slug pattern.** The two rules
-  are mutually exclusive for any underscore-containing plugin name.
-- **Evidence it bites in practice:** the shipped `plugins/dns_filtering/plugin.json` declares a
-  profileMenu slug of `dns-filtering` (underscore → hyphen) — which **fails** the
-  `must start with 'dns_filtering-'` check at `PluginHelper.php:200`. Either that plugin's menu
-  validation is being bypassed, or the rule is not actually run on it.
-- **Impact:** A new developer who (a) follows the documented convention of underscores for
-  multi-word plugin names *and* (b) adds a `profileMenu` cannot pass validation. The simulation
-  avoided it only by choosing a single-word name (`linkvault`) and documenting the reasoning.
-- **Fix (code, not docs):** normalize the plugin name to a hyphenated form before building the
-  required prefix (`str_replace('_', '-', $this->name) . '-'`), and accept slugs against that
-  normalized prefix. Then update the doc to state the prefix is the *hyphenated* plugin name.
+  which contains an underscore and so can never match the no-underscore pattern. No slug
+  satisfies both.
+- **…but that validator is dead code — it is never called (re-verified June 2026).**
+  `PluginHelper::validate()` (`includes/PluginHelper.php:86`) is the only place those two rules
+  live, and a codebase-wide search finds **zero** call sites (`grep "->validate("` across
+  `includes/`, `adm/`, `utils/`, `ajax/`, `serve.php` is empty for it; it's an abstract from
+  `ComponentBase` that's implemented but never invoked).
+- **What actually runs at menu sync is much looser.** `PluginManager::syncMenus()`'s validation
+  closure (`includes/PluginManager.php:1331-1364`) checks only: `slug`/`title`/`order` present,
+  `slug` a non-empty string, and (via a separate gate) that non-core plugins don't use a `core-*`
+  slug. It does **not** enforce the `[a-z0-9-]` pattern or the `<plugin-name>-` prefix.
+- **Confirmed live:** the shipped `dns_filtering` plugin uses profileMenu slug `dns-filtering`
+  and its row exists in `amu_admin_menus` (`amu_location = user_dropdown`). That slug would
+  **fail** the strict `PluginHelper.php:200` rule — it works precisely because that rule never
+  runs.
+- **Impact (corrected — milder than first drafted):** No plugin is actually blocked. The harm is
+  (a) the docs describe an enforced rule that isn't enforced, and as written is impossible to obey
+  for underscore-named plugins — a careful developer constrains themselves for nothing (the
+  simulation chose a single-word name `linkvault` specifically to dodge it); and (b) a dead
+  validator sits in the tree that, if ever wired up as-is, would reject every underscore-named
+  plugin.
+- **Fix (split):**
+  - *Docs (primary):* drop the "must start with `<plugin-name>-`" requirement, or restate it as
+    the *hyphenated* plugin name so it is at least satisfiable, and stop describing it as
+    "required by validation" when the live path doesn't enforce it. Describe the rules
+    `syncMenus()` actually applies.
+  - *Code hygiene (optional):* either delete the unused `PluginHelper::validate()` (it misleads
+    anyone reading the code for the "real" rules), or — if it's meant to be wired up — fix the
+    underscore contradiction first (`str_replace('_', '-', $this->name) . '-'`) before invoking it.
 
 ### 3.2 CSRF docs oversell an opt-in helper (NOT a security gap — see resolution)
 
@@ -168,66 +205,121 @@ under `/docs/` are ordinary edits.
   the token is emitted automatically but verification is opt-in, and state that it is generally
   unnecessary for authenticated/admin forms. Remove the "Automatic CSRF protection" framing.
 
-### 3.3 FormWriter model-validation auto-detection does not see plugin models
+### 3.3 FormWriter's automatic **client-side** validation doesn't see plugin models (server-side validation is unaffected)
 
 - **Docs:** `docs/formwriter.md:228-253` and `docs/validation.md` — FormWriter "automatically
   detects and applies validation rules from model `field_specifications`" by mapping a field
   prefix (`usr_`) to its model class. Presented as working for any model.
-- **Reality:** The prefix→model map is built by globbing **core only**:
-  `glob(PathHelper::getIncludePath('data/*_class.php'))` — `FormWriterV2Base.php:638`. Plugin
-  data classes under `plugins/{plugin}/data/` are **not** scanned, so a plugin field like
-  `lvb_url` never resolves to `LinkvaultBookmark` and gets **no** auto-validation.
-- **Impact:** A plugin developer expecting client-side validation to appear automatically from
-  `$field_specifications` (as the docs promise) gets silently unvalidated fields. They must pass
-  `validation` options explicitly on every plugin form field. The simulation assumed auto-mapping
-  worked for plugin models (Assumption #5) — wrong.
-- **Fix:** Either extend the glob to include `plugins/*/data/*_class.php` (code), or document
-  clearly in the Plugin Developer Guide that plugin models do **not** get FormWriter
-  auto-validation and fields must declare `validation` inline.
+- **Reality (re-verified June 2026):** The prefix→model map is built by globbing **core only** —
+  `glob(PathHelper::getIncludePath('data/*_class.php'))` (`FormWriterV2Base.php:638`). Plugin data
+  classes under `plugins/{plugin}/data/` are never scanned, so a plugin field like `lvb_url` does
+  not resolve to `LinkvaultBookmark` and picks up no auto-detected rules.
+- **Scope of the impact is narrower than "unvalidated":**
+  - This auto-detection only feeds **client-side** (in-browser JS) validation rules emitted by
+    `end_form()`. **Server-side validation is unaffected** — it runs in the model's
+    `prepare()`/`save()` regardless of where the form came from, so plugin data is still validated
+    before it hits the database. This is a front-end-convenience / docs-overpromise gap, **not** a
+    data-integrity hole.
+  - **Passing the model to the form does not help, and that's the surprising part.** Field value
+    auto-fill and validation auto-detection are wired separately: a `model`/`values` passed to
+    `getFormWriter()` only feeds **values** (`registerField()` value-fill at
+    `FormWriterV2Base.php:2283-2285`); validation detection runs **solely** through the core-only
+    prefix map (`detectModelFromFieldName()` → `getModelPrefixMap()`, used at `:2312-2313`). So a
+    developer who passes the model and reasonably expects rules to come with it is wrong — the
+    simulation assumed exactly this (Assumption #5).
+  - **Workaround that works today:** pass `validation` options inline on each plugin field; they
+    merge over the (empty) auto-detected base (`FormWriterV2Base.php:2324-2326`).
+- **Fix (best first):**
+  1. *Targeted code fix (recommended):* let the `model` object already passed to `getFormWriter()`
+     drive validation detection for fields whose prefix matches that model — i.e. use the passed
+     model's `$field_specifications`, not just the core prefix map. Matches developer expectation
+     exactly (it's what the simulation assumed), needs no per-render plugin scan, and sidesteps
+     prefix collisions.
+  2. *Broader code fix:* extend the glob to `plugins/*/data/*_class.php`. Simpler to state but
+     loads every plugin's models on every form render (perf) and risks cross-plugin prefix clashes.
+  3. *Docs-only:* state in the Plugin Developer Guide that plugin form fields do **not** get
+     auto-detected client-side validation and must declare `validation` inline — and that
+     server-side validation still applies regardless.
 
-### 3.4 CRUD API has no record-level authorization on most core models
+### 3.4 CRUD API: the intended "act as the user" check is built correctly but implemented on only 4 models
 
-- **Docs:** `docs/api.md:224` — *"Any SystemBase model class is available via the API"* — and
-  `docs/api.md:29`, which says session keys are *"Always permission 4; object-level authorization
-  is the effective gate."* That second line asserts a protection that, for most models, is not
-  implemented.
-- **Reality (re-verified against code, June 2026):**
-  - **The gate.** `GET /api/v1/{ClassName}/{id}` loads the row and calls
-    `$object->authenticate_read($auth_data)` before returning it (`api/apiv1.php:446-447`). That
-    call is the only per-record gate. The `SystemBase` default is a literal no-op:
-    `function authenticate_read($data) {}` (`includes/SystemBase.php:1479`). Writes/deletes go
-    through `authenticate_write()` (`apiv1.php:477`), also a no-op by default.
-  - **Who overrides it.** Only four core models implement a real check: `videos`, `files`,
-    `stripe_invoices`, `orders` (`data/*_class.php`). Every other advertised model — `User`,
-    `Message`, `Survey`, `SurveyAnswer`, `Comment`, `Group`, `Post`, … — returns any row by id to
-    any active key with read permission (level 1, 3, or 4+; level 2 is write-only, blocked at
-    `apiv1.php:440`). `GET /api/v1/Message/5` returns another user's private message;
-    `GET /api/v1/User/123` returns another user's PII.
-  - **Session-key angle.** `auth/login` mints a permission-4 key for **any** logged-in user
-    (`docs/api.md:29`), and permission 4 includes delete. So an ordinary member's mobile-app
-    token can read and soft-delete arbitrary rows of any unprotected core model.
-- **Two corrections to the original draft of this finding:**
-  1. **Plugin models are NOT exposed.** The API calls `discover_model_classes()` with no options
-     (`apiv1.php:271`), so `include_plugins` defaults to `false`. The earlier claim conflated the
-     deletion-system call site (which passes `include_plugins => true`). Plugin models like
-     `LinkvaultBookmark` are unreachable via CRUD — the blast radius is **core models only**.
-  2. **There is no opt-in allowlist; exposure is default-on.** The only opt-*out* is overriding
-     `authenticate_read`. So the concern is not "any model" but "every core model that hasn't
-     wired up the hook" — which is most of them.
-- **Impact:** The platform's object-auth design relies on each model implementing
-  `authenticate_read`/`authenticate_write`, but only four do. The docs promise object-level
-  authorization that mostly does not exist. This is **not** safely "by design" the way CSRF is —
-  the doc's own wording (`docs/api.md:29`) describes a gate that isn't there.
+- **Intended design (confirmed with maintainer):** an API request should give the API user **the
+  same capabilities as the user account it runs as** — you can act on your own records, not other
+  people's, unless you're staff. This is the deliberate intent. It is *not* meant to be locked
+  default-deny like the joinery_ai surface; it is meant to mirror the acting user's own reach.
+- **The mechanism for that intent exists and works.** Before returning any record, the API passes
+  the acting user's identity into the model:
+  `$auth_data = ['current_user_id' => $api_user->key, 'current_user_permission' => …]`
+  (`api/apiv1.php:411`), then calls `$object->authenticate_read($auth_data)` on read
+  (`apiv1.php:446-447`) and `authenticate_write($auth_data)` on create/update/delete
+  (`apiv1.php:477,508,535`). So every model is *told who is asking* — the plumbing for
+  "act as the user" is fully in place.
+- **The reference implementation is `orders`.** Its check is exactly the intended pattern
+  (`data/orders_class.php`):
+  ```php
+  function authenticate_read($data) {
+      if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
+          if ($data['current_user_permission'] < 5) {        // not staff
+              throw new SystemAuthenticationError('…does not have permission…');
+          }
+      }
+  }
+  ```
+  "If this record isn't yours and you're not an admin, refuse." Use this as the template.
+- **The actual problem: the per-record check is only filled in on four models.** The `SystemBase`
+  default is a literal no-op — `function authenticate_read($data) {}` (`includes/SystemBase.php:1479`),
+  and `authenticate_write` likewise. Only `orders`, `files`, `videos`, and `stripe_invoices`
+  override it. Every other advertised model — `User`, `Message`, `Survey`, `SurveyAnswer`,
+  `Comment`, `Group`, `Post`, … — runs the empty default, so it returns/accepts any row by id for
+  any active key with the right CRUD tier. `GET /api/v1/Message/5` returns another user's private
+  message; `GET /api/v1/User/123` returns another user's PII. So on those models the API user can
+  do **more** than the underlying user could through the website, where page logic scopes access —
+  the opposite of the intent.
+- **Framing (corrected twice over):** This is **not** a broken mechanism and **not** a missing
+  on/off switch. The design is sound and the identity-passing is wired up correctly; the
+  per-model checks that enforce the intent were simply only written on the four models in active
+  use at the time. Reframe: *"intended per-record protection is mostly unimplemented,"* not
+  *"risky design."*
+- **Also corrected:** Plugin models are **NOT** exposed via CRUD. The API calls
+  `discover_model_classes()` with no options (`apiv1.php:271`), so `include_plugins` defaults to
+  `false`. Blast radius is **core models only**; a plugin's `LinkvaultBookmark` is unreachable.
+- **Concrete scope — which models need the check (counted June 2026).** **~41 core models carry a
+  `*_usr_user_id` (user-owned) column; only 4 implement `authenticate_read`** (`files`, `orders`,
+  `stripe_invoices`, `videos`). The remaining **~37 run the empty default.** These are
+  *candidates* — each needs a per-model decision, not a blind copy. (Caveat against the
+  overstatement pattern: this is the user-owned-column list, not a confirmed "37 live holes" —
+  each still needs a reachability + intent check. Models without a `*_usr_user_id` column, and
+  plugin models, are out of scope here.) Suggested triage of the 37:
+
+  - **Priority 1 — sensitive, owner-scope now (copy `orders`):** `address`, `phone_number`,
+    `conversations`, `conversation_participants`, `emails`, `email_recipients`, `survey_answers`,
+    `notifications`, `notification_preferences`, `mailing_list_registrants`, `order_items`,
+    `reactions`, `comments`.
+  - **Priority 0 — credential/audit tables that probably should NOT be API-readable at all
+    (consider excluding from CRUD, not just owner-scoping):** `api_keys`, `activation_codes`,
+    `login`, `request_logs`, `event_logs`, `general_errors`, `log_form_errors`, `change_tracking`,
+    `session_analytics`, `visitor_events`. (`GET /api/v1/ApiKey/{id}` returning a key row is the
+    sharpest example.)
+  - **Intentionally public / needs a deliberate "open" decision:** `posts`, `pages`,
+    `page_contents`, `events`, `event_registrants`, `event_waiting_lists`, `groups`,
+    `mailing_lists`, `products`/`product_details`, `content_versions`, `recurring_mailer`,
+    `users` (note: `users` exposes PII — public read of the full row is almost certainly wrong;
+    treat as Priority 1 unless deliberately scoped to non-PII fields).
 - **Fix (split):**
+  - *Code (the real fix):* implement `authenticate_read()` / `authenticate_write()` on every core
+    model that holds user-owned or otherwise private data, copying the `orders` pattern, working
+    the Priority-0 and Priority-1 lists above first. This is mechanical and the template exists.
+    Verify each model is actually API-reachable before assuming it's a live hole.
+  - *Architecture (optional safety net, maintainer call):* change the `SystemBase` **default**
+    from a no-op to the orders-style "owner-or-admin" check, so a model is protected the moment it
+    exists and you only override to *open* something up. This makes the safe behavior the default
+    (matching the instinct already applied to the AI surface) instead of relying on every model
+    author to remember the check. Models with no `_usr_user_id` column would need an explicit
+    decision (public, or some other ownership column).
   - *Docs:* make `authenticate_read()` / `authenticate_write()` first-class in `docs/api.md` and
-    the Plugin Developer Guide's Data Models section — document them as the required scoping hook,
-    state plainly that an unoverridden model returns all rows to any read-capable key, and show an
-    ownership-check override example. Correct the "object-level authorization is the effective
-    gate" line to say the gate exists only where a model implements it.
-  - *Architecture (maintainer decision):* consider flipping the default to deny — e.g. a base
-    `authenticate_read` that requires an explicit per-model opt-in (mirroring the `$ai_readable`
-    default-deny pattern the joinery_ai plugin already uses) — so a newly declared model is not
-    silently world-readable. This is a design call, not a doc change.
+    the Plugin Developer Guide's Data Models section — document them as the per-record scoping
+    hook, show the `orders` override as the example, and correct the `docs/api.md:29` line so it
+    says the gate exists only where a model implements it.
 
 ---
 
@@ -266,27 +358,35 @@ under `/docs/` are ordinary edits.
   `get_permission_level()` exists.
 - **Fix:** Change the example to `get_permission()`.
 
-### 4.5 `deprecated` / `superseded_by` consumption is partial
+### 4.5 `deprecated` / `superseded_by` — documented behaviors are real (correction: the doc was right; this finding's earlier skepticism was wrong)
 
 - **Docs:** `docs/plugin_developer_guide.md:233-256` describes `deprecated`/`superseded_by` with
-  several behaviors (badge, sort-to-bottom, activation warning, exclusion from new-install
-  archives).
-- **Reality:** The admin UI consumes them (`adm/admin_plugins.php:174-177`, activation warning at
-  `adm/logic/admin_plugins_logic.php:129-132`), but the parallel claims about *theme* deprecation
-  and archive exclusion were not located in code during this audit. The fields are real and
-  partly wired; not all documented effects were confirmed.
-- **Fix:** Verify each documented effect (especially "excluded from deployment archives for new
-  installs" and the theme-side behavior) against the publish pipeline, and trim any effect that
-  isn't actually implemented.
+  several behaviors (badge, sort-to-bottom, activation warning, exclusion from publish archives).
+- **Reality (re-verified June 2026):** all the documented effects are actually implemented.
+  - Admin UI badge + "replaced by" note: `adm/admin_plugins.php:174-177`.
+  - Activation warning: `adm/logic/admin_plugins_logic.php:129-132`.
+  - **Archive exclusion — confirmed for BOTH plugins and themes:**
+    `plugins/server_manager/includes/publish_upgrade.php:408-409` skips deprecated **themes**
+    and `:465-466` skips deprecated **plugins** from the publish archive.
+- **Correction:** an earlier draft of this finding said the archive-exclusion and theme-side
+  behaviors "were not located in code" and told the reader to verify before trusting the doc.
+  That skepticism was wrong — they are implemented. **No fix needed; the docs are accurate.** This
+  one is noted only to flag that the first-pass audit erred in the *cautious* direction here (the
+  opposite of the overstatement pattern elsewhere) — a reminder that the un-rechecked items can be
+  wrong in either direction.
 
 ### 4.6 Several plugin.json metadata keys are documented but never read
 
 - **Docs:** `docs/plugin_developer_guide.md:210-230` shows `author`, `license`, `homepage`,
   `provides`, `tags` in the "complete" manifest example.
-- **Reality:** `PluginManager`/`PluginHelper` load the manifest but only consume `name`,
-  `version`, `requires`, `depends`/`conflicts`, `settings`, `adminMenu`, `profileMenu`,
-  `provisioners`, `receives_upgrades`, `included_in_publish` (and `deprecated`/`superseded_by`
-  per 4.5). `author`, `license`, `homepage`, `provides`, `tags` are inert.
+- **Reality (re-verified June 2026):** `PluginManager`/`PluginHelper` load the manifest but only
+  consume `name`, `version`, `requires`, `depends`/`conflicts`, `settings`, `adminMenu`,
+  `profileMenu`, `provisioners`, `receives_upgrades`, `included_in_publish`,
+  `deprecated`/`superseded_by` (per 4.5). Confirmed inert (0 code references):
+  `author`, `license`, `homepage`, `tags`. **`provides` is referenced exactly once**
+  (`includes/PluginHelper.php:108`) — but only to reject a manifest declaring `provides: ['theme']`,
+  and that check lives inside `PluginHelper::validate()`, which is **dead code** (never called —
+  see 3.1). So `provides` is effectively inert too, just not literally zero-reference.
 - **Impact:** Low — harmless metadata. Worth a one-line note so developers don't expect behavior
   (e.g. a dependency effect from `provides`) that isn't there.
 - **Fix:** Mark these keys as "informational only / not consumed by the system" in the manifest
@@ -333,10 +433,9 @@ the real work lives. Status reflects verification against current code.
 
 | ID | One-line | Status | Notes |
 |---|---|---|---|
-| **3.4** | CRUD API: no record-level auth on most core models; `authenticate_read` default is a no-op, only 4 models override | **Verified** | Highest-severity. Plugin models *not* exposed (corrected). Needs a maintainer call on default-deny — see bucket C. Doc tail: document the hook. |
-| **3.1** | `profileMenu` slug rule unsatisfiable for any underscore-named plugin; shipped `dns_filtering` slug fails its own check | **Verified** | Two validation rules are mutually exclusive (`PluginHelper.php:121` vs `:200`). Either bypassed in practice or a latent block. Doc tail: state the prefix is hyphenated. |
-| **3.3** | FormWriter auto-validation globs core `data/` only; plugin models silently get no validation | **Verified** | `FormWriterV2Base.php:638`. Either extend the glob (code) or document the limitation (doc). Borderline B/architecture. |
-| **2.3** | Plugin-routes example uses `min_permission => 0` on a member page → ships an anonymous-readable page if copied | **Verified** | The *example* is the bug, not the engine. Mostly a doc fix (bucket B) but flagged here because copying it is a real security slip. |
+| **3.4** | CRUD API: the intended "act as the user" per-record check is built and works, but implemented on only **4 of ~41** user-owned core models; the other ~37 run an empty default and hand out any row | **Verified** | Highest-severity. Design sound, identity-passing wired; per-model checks mostly unwritten. Plugin models *not* exposed. Primary fix is **code** — see the Priority-0/Priority-1 model lists in the 3.4 finding (copy `orders`). Optional architecture call on flipping the default — bucket C. Doc tail too. |
+| **3.1** | Docs describe a `profileMenu` slug rule (`<plugin-name>-` prefix) that is self-contradictory for underscore names AND never enforced — the validator (`PluginHelper::validate()`) is dead code | **Verified — milder than drafted** | Primary fix is **docs** (rule isn't enforced; live `syncMenus()` is looser). Code tail: delete or fix the dead validator. Not a blocking bug — `dns_filtering` works today. |
+| **3.3** | FormWriter's **client-side** auto-validation globs core `data/` only, so plugin form fields get no in-browser rules; **server-side validation still works**. Passing the model doesn't help (value-fill and validation are wired separately) | **Verified — narrower than drafted** | `FormWriterV2Base.php:638`. Not a data hole. Best fix: let the passed `model` drive validation (recommended), or document the inline-`validation` workaround. |
 
 ### B. Documentation gaps & errors (code is fine; docs are wrong, stale, or missing)
 
@@ -357,16 +456,16 @@ the real work lives. Status reflects verification against current code.
 | **G4** | `SessionControl` method surface (incl. `get_user_id()`) never enumerated | Missing doc (closes G2/2.2/4.4 region) |
 | **G5** | Two plugin-admin URL surfaces documented, no guidance on which to use | Missing guidance |
 | **G6** | Plugin asset cache-busting story (`ThemeHelper::asset()` for plugins?) unspecified | Missing doc |
-| **2.3** | (doc tail) add a permission-level table to `docs/routing.md` | Missing doc |
+| **2.3** | Permission ladder undocumented; `min_permission => 0` means "logged in" while *omitting* it means "public" — counterintuitive but **safe** (corrected: not a security slip). Add a levels table + the 0-vs-omit note to `docs/routing.md` | Missing/confusing doc |
 | **3.4** | (doc tail) document `authenticate_read`/`authenticate_write` as the required scoping hook | Missing doc |
 
 ### C. Architecture / design decisions (needs a maintainer call, not just an edit)
 
 | ID | Decision to make | Why it's architectural |
 |---|---|---|
-| **3.4** | Should the CRUD API default to **deny** (per-model opt-in to read, like `$ai_readable`) instead of default-expose? | Flipping the default is a breaking, system-wide behavior change with security implications — not a doc edit. The doc fix is necessary either way; this is the deeper question. |
-| **3.1** | Normalize plugin names to hyphenated form for slug prefixes, or change the documented naming convention? | Touches the plugin-naming contract and existing shipped plugins; needs a consistent rule across PluginHelper, the convention, and existing manifests. |
-| **3.3** | Should FormWriter auto-discover plugin models for validation, or is core-only intentional (perf/coupling)? | Either extend discovery (couples FormWriter to every plugin's `data/`) or accept the limitation and document it. A design tradeoff, not an obvious fix. |
+| **3.4** | Should the `SystemBase` **default** check change from no-op to the orders-style "owner-or-admin" rule, so models are protected unless deliberately opened? | Optional safety net on top of the per-model code fix. Flipping the default is a system-wide behavior change (models without a `_usr_user_id` column need an explicit decision), so it's a design call — but the design itself is sound and the per-model fix can proceed regardless. |
+| **3.1** | Is `PluginHelper::validate()` meant to be live? If yes, fix the underscore contradiction and wire it in; if no, delete it. | Not a live design tension anymore (the validator is dead code, so nothing enforces the contradictory rule today). The only decision is keep-and-fix vs. delete — low stakes. |
+| **3.3** | Recommended fix (let the passed `model` drive validation) is low-risk and mechanical — likely not a real architecture decision. Only the *broader* "scan all plugin `data/`" option carries perf/coupling tradeoffs. | Mostly resolved: the targeted fix avoids the design tension entirely. Listed here only so the broader-scan option isn't chosen by default. |
 | **Process** | The distributable agent template (`default_agents_template.md`) drifted from the internal CLAUDE.md (4.1, 4.2). What keeps them in sync? | A regeneration/sync process question, not a one-time content fix. |
 
 ### Drift items (template vs. internal record) — bucket B mechanically, but note the process
