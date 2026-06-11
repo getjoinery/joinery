@@ -309,8 +309,12 @@ class SdScheduledBlock extends SystemBase {
 
 	/**
 	 * Add a custom domain rule to this scheduled block.
+	 *
+	 * $hard_block marks the rule for client-side connection-level enforcement
+	 * (tunnel/VPN layers); the DNS resolver ignores it. Callers gate where
+	 * the flag is allowed (block-action rules on the always-on block).
 	 */
-	function add_rule($hostname, $action) {
+	function add_rule($hostname, $action, $hard_block = false) {
 		$hostname = preg_replace('/^https?:\/\//', '', $hostname);
 
 		$testUrl = "http://$hostname";
@@ -331,6 +335,7 @@ class SdScheduledBlock extends SystemBase {
 		$rule->set('sbr_hostname', $hostname);
 		$rule->set('sbr_is_active', 1);
 		$rule->set('sbr_action', $action);
+		$rule->set('sbr_hard_block', $hard_block ? 1 : 0);
 		$rule->save();
 		$rule->load();
 		return $rule;

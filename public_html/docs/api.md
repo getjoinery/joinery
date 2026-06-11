@@ -322,6 +322,19 @@ secret_key: {key}
 
 Sessioned actions require API key write permission (level 2+) and run under session simulation as the key's user.
 
+### Plugin Actions
+
+Plugin actions are addressed as `{plugin}/{action}`, where `{plugin}` is the plugin directory name:
+
+```
+POST /api/v1/action/dns_filtering/device_edit
+GET  /api/v1/form/dns_filtering/device_edit
+```
+
+The name resolves directly to `plugins/{plugin}/logic/{action}_logic.php` (no theme chain — themes do not override plugin logic) and follows the same `_logic_api()` opt-in contract as core actions. Only **active** plugins resolve; an inactive or unknown plugin returns the same `Unknown action` 404 as a missing action, so responses do not reveal which plugins are installed. The namespace makes collisions structurally impossible — a plugin action can never shadow a core action or another plugin's.
+
+Request logs and error messages use the full namespaced name (e.g. `action dns_filtering/device_edit`). See [Plugin Developer Guide](plugin_developer_guide.md) for the plugin-side conventions.
+
 **Sessionless actions** (`requires_session => false`: `register`, `password_reset_1`, `password_reset_2`, …) are dispatched **without** key headers — a first-launch client has no credentials yet. HTTPS enforcement and both rate limiters apply unchanged, and failures log like other auth-adjacent traffic. The matching rule for fetching those actions' form definitions is in the Form Definition Endpoint section.
 
 ### Action Response Formats
@@ -388,13 +401,15 @@ Sessioned actions require API key write permission (level 2+) and run under sess
 | `event_sessions_course` | Select course sessions | Yes |
 | `orders_recurring_action` | Recurring order action | Yes |
 
+Plugin action surfaces are documented with their plugin (e.g. the DNS filtering surface in [plugins/dns_filtering/docs/overview.md](../plugins/dns_filtering/docs/overview.md)) and appear in the discovery endpoint below.
+
 ### Action Discovery Endpoint
 
 ```
 GET /api/v1/actions
 ```
 
-Returns a list of all available actions with descriptions. Useful for API consumers to programmatically determine what actions are available.
+Returns a list of all available actions with descriptions. Useful for API consumers to programmatically determine what actions are available. Actions from active plugins are listed under their namespaced name (`{plugin}/{action}`) with the same fields.
 
 **Response:**
 ```json

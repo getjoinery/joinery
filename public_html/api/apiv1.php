@@ -2,7 +2,10 @@
 /**
  * API v1 Endpoint
  *
- * @version 2.4
+ * @version 2.5
+ * @changelog 2.5 - Plugin-aware actions: {plugin}/{action} names resolve via
+ *   api_resolve_logic_path(); discovery lists active plugins' actions under
+ *   their namespaced names
  * @changelog 2.4 - User session keys: /auth/* endpoints, pre-auth dispatch of
  *   sessionless actions, client version handshake (426 UpgradeRequired),
  *   last-used tracking, key type stamped onto request logs
@@ -83,6 +86,73 @@ function api_translate_logic_result($result, $action_name) {
 	}
 
 	return array('response' => $response, 'status_code' => 200);
+}
+
+/**
+ * Resolve the path segments after /api/v1/{action|form}/ to a logic file,
+ * require it, and return naming metadata. Used by ApiActionEndpoint and
+ * ApiFormEndpoint. Exits via api_error() on any failure.
+ *
+ * Two name forms:
+ *   - {action}            core action; resolves through the theme chain
+ *                         (theme -> base logic/), exactly as views do
+ *   - {plugin}/{action}   plugin action; resolves directly to
+ *                         plugins/{plugin}/logic/{action}_logic.php for
+ *                         active plugins only. No theme chain - themes do
+ *                         not override plugin logic.
+ *
+ * An inactive or unknown plugin produces the same 404 as a missing action,
+ * so responses do not reveal which plugins are installed.
+ *
+ * @param array $url_segments ['api', 'v1', '{action|form}', '{name}'] or
+ *                            ['api', 'v1', '{action|form}', '{plugin}', '{action}']
+ * @param string $noun 'action' or 'form' - used in error messages
+ * @return array [$action_label, $action_name]
+ *   $action_label - full name for logs/messages ('{plugin}/{action}' or '{action}')
+ *   $action_name  - bare action name; logic functions are named from it
+ */
+function api_resolve_logic_path($url_segments, $noun) {
+	if (empty($url_segments[3])) {
+		api_error(ucfirst($noun) . ' name required', 'ActionError', 400);
+	}
+
+	$plugin_name = NULL;
+	if (!empty($url_segments[4])) {
+		$plugin_name = strtolower($url_segments[3]);
+		$action_name = strtolower($url_segments[4]);
+	} else {
+		$action_name = strtolower($url_segments[3]);
+	}
+
+	// Validate each segment (security: prevent path traversal)
+	if (!preg_match('/^[a-z0-9_]+$/', $action_name)
+		|| ($plugin_name !== NULL && !preg_match('/^[a-z0-9_]+$/', $plugin_name))) {
+		api_error('Invalid ' . $noun . ' name', 'ActionError', 400);
+	}
+
+	$action_label = ($plugin_name !== NULL) ? $plugin_name . '/' . $action_name : $action_name;
+
+	if ($plugin_name !== NULL) {
+		if (!PluginHelper::isPluginActive($plugin_name)) {
+			api_error('Unknown ' . $noun . ': ' . $action_label, 'ActionError', 404);
+		}
+		$logic_filepath = PathHelper::getIncludePath(
+			'plugins/' . $plugin_name . '/logic/' . $action_name . '_logic.php');
+	} else {
+		try {
+			$logic_filepath = PathHelper::getThemeFilePath($action_name . '_logic.php', 'logic');
+		} catch (Exception $e) {
+			api_error('Unknown ' . $noun . ': ' . $action_label, 'ActionError', 404);
+		}
+	}
+
+	if (!file_exists($logic_filepath)) {
+		api_error('Unknown ' . $noun . ': ' . $action_label, 'ActionError', 404);
+	}
+
+	require_once($logic_filepath);
+
+	return array($action_label, $action_name);
 }
 
 // Security headers
@@ -536,29 +606,41 @@ if (in_array($operation, $classes)) {
 
 } else if (strtolower($url_segments[2] ?? '') === 'actions' && $request_method === 'get') {
 	// Action discovery endpoint: GET /api/v1/actions
-	$logic_dir = PathHelper::getIncludePath('logic');
-	$actions = [];
+	$discover_actions = function ($logic_dir, $name_prefix) {
+		$found = [];
+		foreach (glob($logic_dir . '/*_logic.php') as $file) {
+			$basename = basename($file, '.php');           // e.g., "register_logic"
+			$action_name = substr($basename, 0, -6);       // e.g., "register" (strip "_logic")
+			$api_meta_function = $basename . '_api';        // e.g., "register_logic_api"
 
-	foreach (glob($logic_dir . '/*_logic.php') as $file) {
-		$basename = basename($file, '.php');           // e.g., "register_logic"
-		$action_name = substr($basename, 0, -6);       // e.g., "register" (strip "_logic")
-		$api_meta_function = $basename . '_api';        // e.g., "register_logic_api"
-
-		// Check file contents for the _api() function without including
-		// (some legacy files have top-level code that would execute on include)
-		$contents = file_get_contents($file);
-		if (preg_match('/function\s+' . preg_quote($api_meta_function, '/') . '\s*\(/', $contents)) {
-			require_once($file);
-			if (function_exists($api_meta_function)) {
-				$meta = call_user_func($api_meta_function);
-				$actions[$action_name] = [
-					'description' => $meta['description'] ?? '',
-					'requires_session' => $meta['requires_session'] ?? true,
-					// Form builder companion → GET /api/v1/form/{action} works
-					'has_form' => function_exists($basename . '_form'),
-				];
+			// Check file contents for the _api() function without including
+			// (some legacy files have top-level code that would execute on include)
+			$contents = file_get_contents($file);
+			if (preg_match('/function\s+' . preg_quote($api_meta_function, '/') . '\s*\(/', $contents)) {
+				require_once($file);
+				if (function_exists($api_meta_function)) {
+					$meta = call_user_func($api_meta_function);
+					$found[$name_prefix . $action_name] = [
+						'description' => $meta['description'] ?? '',
+						'requires_session' => $meta['requires_session'] ?? true,
+						// Form builder companion → GET /api/v1/form/{action} works
+						'has_form' => function_exists($basename . '_form'),
+					];
+				}
 			}
 		}
+		return $found;
+	};
+
+	$actions = $discover_actions(PathHelper::getIncludePath('logic'), '');
+
+	// Plugin actions are listed under their namespaced name
+	// ({plugin}/{action}); only active plugins are discoverable.
+	foreach (array_keys(PluginHelper::getActivePlugins()) as $plugin_name) {
+		$actions += $discover_actions(
+			PathHelper::getIncludePath('plugins/' . $plugin_name . '/logic'),
+			$plugin_name . '/'
+		);
 	}
 
 	ksort($actions);

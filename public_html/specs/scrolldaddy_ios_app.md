@@ -160,27 +160,12 @@ screen per form, and form changes never require an app release.
 
 ### 2. ScrollDaddy API actions (plugin)
 
-Expose the existing logic via `_api()` opt-ins, adding thin logic functions
-where today's surface is AJAX-only:
-
-- Devices: list, create (auto-creates always-on block), rename, delete; each
-  device response includes its DoH URL (`https://{dns_host}/resolve/{uid}`).
-- Blocks: list per device, read one (filters + services + rules + schedule),
-  save (same submit semantics as `scheduled_block_edit_logic.php`).
-- Custom rules: add/delete (today `ajax/block_rule_add.php` / `block_rule_delete.php`
-  — convert to logic functions the web AJAX endpoints and the API both call).
-- Catalog: filter categories + services list from `ScrollDaddyHelper`
-  (so the app never hardcodes the category list), with advanced-filter
-  keys flagged for tier gating.
-- Account summary: tier, feature flags, device count vs. max.
-- **Hard-block flag:** add `sbr_hard_block` (boolean, default false) to
-  `sbr_scheduled_block_rules` via the plugin's `$field_specifications`
-  (schema syncs automatically). A block-action custom rule with the flag set
-  is additionally enforced at connection level by the tunnel; the device API
-  responses include the merged hard-block hostname list so the app syncs it
-  into the tunnel extension. The flag rides the existing custom-rules tier
-  gate (`scrolldaddy_custom_rules`). The resolver ignores the column —
-  DNS-level behavior is unchanged.
+Specified and implemented in **`specs/implemented/plugin_api_actions.md`**
+(two phases: plugin-aware core action layer, then the full ScrollDaddy
+action surface — devices, blocks, custom rules, catalog, account summary,
+query log, domain/URL testing — plus the `sbr_hard_block` column and the
+merged hard-block hostname list in device responses). The action surface is
+documented in `plugins/dns_filtering/docs/overview.md` § API Surface.
 
 ### 3. Apple IAP integration (core platform — post-launch)
 

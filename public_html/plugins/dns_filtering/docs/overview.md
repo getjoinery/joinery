@@ -59,6 +59,41 @@ Custom domain rules render at the bottom of the editor with inline AJAX add/dele
 
 `SdDevice::createDevice()` automatically calls `SdScheduledBlock::getOrCreateAlwaysOnBlock($device_id)` after saving the device, ensuring every device has its always-on block available for policy edits on first page load.
 
+## API Surface
+
+The plugin exposes its logic layer as REST API actions under the `dns_filtering/` namespace (`POST /api/v1/action/dns_filtering/{action}`) — the surface the ScrollDaddy mobile apps are written against. All actions are sessioned; every tier gate and ownership check runs server-side exactly as on the web, because both surfaces call the same logic functions.
+
+| Action | Purpose |
+|---|---|
+| `devices` | List devices; each entry includes `doh_url`, `dot_hostname`, a per-block summary, `last_seen`, and the hard-block hostname list |
+| `device_edit` | Create a device (omit `device_id`) or edit one; `scrolldaddy_max_devices` gate |
+| `device_delete` | Permanently delete a device (`device_id`, `confirm=1`) |
+| `device_soft_delete` | Deactivate a device |
+| `block_list` | All blocks for one owned device, full contents |
+| `scheduled_block_edit` | Read one block (no `action` key) or save/delete with the web editor's submit semantics (`action=edit` / `action=delete`) |
+| `block_rule_add` | Add a custom domain rule (`block_id` or `device_id`, `hostname`, `action`, optional `hard_block`); `scrolldaddy_custom_rules` gate |
+| `block_rule_delete` | Delete a custom domain rule (`rule_id`) |
+| `block_filter_set` | Set/clear one filter or service toggle (save-on-change editors) |
+| `catalog` | Filter/service catalog with `advanced` flags; static per deployment — cache client-side |
+| `account_summary` | Tier name, the five `scrolldaddy_*` feature flags, device count vs. limit |
+| `querylog` | Fetch a device's query log from the DNS server |
+| `purge_querylog` | Truncate a device's query log |
+| `test_domain` | Test one domain against a device's filter |
+| `scan_url` | Fetch a page and test its external domains; heavy (seconds). SSRF-guarded — see below |
+
+The web AJAX endpoints (`ajax/block_rule_add.php`, `block_rule_delete.php`, `block_filter_set.php`, `purge_querylog.php`, `test_domain.php`, `scan_url.php`) are thin wrappers over the same logic functions, preserving their original JSON shapes (and `test_domain`'s GET contract).
+
+`scan_url`'s SSRF boundary is `scan_url_validate_target()` in `logic/scan_url_logic.php`: scheme allowlist, all-resolved-IPs private/loopback/link-local rejection (fail closed), `CURLOPT_RESOLVE` IP pinning, and manual redirect walking with per-hop revalidation. Covered by `tests/unit/scan_url_validate_target_test.php`.
+
+### Hard-block rules
+
+`sbr_hard_block` on `sbr_scheduled_block_rules` marks a custom rule for **connection-level enforcement by the client apps' tunnel/VPN layers. The DNS resolver ignores the column** — DNS-level behavior is identical with or without it.
+
+- Settable only on **block**-action rules belonging to the device's **always-on block** (`block_rule_add` rejects it elsewhere). The tunnel syncs a static hostname list with no scheduler, so a hard-block rule on a time-windowed block would be enforced 24/7 at the connection level while staying scheduled at the DNS level. Restricting it to the always-on block keeps "hard block" meaning "always blocked, at both layers."
+- Rides the `scrolldaddy_custom_rules` tier gate — no separate feature flag.
+- Device API responses (`devices`, `block_list`) include `hard_block_hostnames`: the de-duplicated active, block-action, hard-block hostnames on the always-on block (`ScrollDaddyHelper::getHardBlockHostnames()`) — the list apps sync into their tunnel extensions.
+- The web editor does not expose the flag; it is app-driven.
+
 ## DNS Resolver Flow
 
 The Go resolver (`/home/user1/scrolldaddy-dns/`) reads all block data from PostgreSQL every ~60 seconds via `LightReload()`. On each DNS query:
@@ -90,9 +125,9 @@ See the resolver's `README.md` and `/etc/scrolldaddy/OPS_GUIDE.md` for ops detai
 
 - **Data model:** `plugins/dns_filtering/data/scheduled_blocks_class.php`, `scheduled_block_filters_class.php`, `scheduled_block_services_class.php`, `scheduled_block_rules_class.php`, `devices_class.php`, `profiles_class.php`
 - **UI:** `plugins/dns_filtering/views/profile/scheduled_block_edit.php`, `devices.php`
-- **Business logic:** `plugins/dns_filtering/logic/scheduled_block_edit_logic.php`, `devices_logic.php`
-- **AJAX:** `plugins/dns_filtering/ajax/block_rule_add.php`, `block_rule_delete.php`
-- **Category list:** `plugins/dns_filtering/includes/ScrollDaddyHelper.php` (`$filters`, `$services`)
+- **Business logic:** `plugins/dns_filtering/logic/` — page logic (`scheduled_block_edit_logic.php`, `devices_logic.php`, …) plus the API action logic (`block_rule_add_logic.php`, `scan_url_logic.php`, `catalog_logic.php`, …)
+- **AJAX:** `plugins/dns_filtering/ajax/` — thin wrappers over the matching logic functions
+- **Category list & API exports:** `plugins/dns_filtering/includes/ScrollDaddyHelper.php` (`$filters`, `$services`, `exportDevice()`, `exportBlock()`, `getHardBlockHostnames()`)
 - **DNS resolver source:** `/home/user1/scrolldaddy-dns/` (Go)
 
 ## Marketing Infrastructure

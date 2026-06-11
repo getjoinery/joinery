@@ -88,9 +88,11 @@ function devices_logic(array $input): LogicResult{
 	//COUNT THE ALWAYS-ON BLOCK CONTENTS (filters + services + rules with action=block)
 	$num_blocks_always = array();
 	$always_on_block_ids = array();
+	$always_on_blocks = array();
 	foreach($devices as $device){
 		$always_on = SdScheduledBlock::getOrCreateAlwaysOnBlock($device->key);
 		$always_on_block_ids[$device->key] = $always_on->key;
+		$always_on_blocks[$device->key] = $always_on;
 
 		$filter_rows = new MultiSdScheduledBlockFilter(['block_id' => $always_on->key, 'action' => 0]);
 		$service_rows = new MultiSdScheduledBlockService(['block_id' => $always_on->key, 'action' => 0]);
@@ -112,9 +114,41 @@ function devices_logic(array $input): LogicResult{
 		$scheduled_blocks[$device->key] = $blocks;
 	}
 	$page_vars['scheduled_blocks'] = $scheduled_blocks;
-	
-	return LogicResult::render($page_vars);	
-	
+
+	// API: clean JSON payload — device entries with DoH/DoT endpoints, the
+	// hard-block hostname list, and a per-block summary
+	if($session->is_api_context()){
+		require_once(PathHelper::getIncludePath('plugins/dns_filtering/includes/ScrollDaddyHelper.php'));
+
+		$api_devices = array();
+		foreach($devices as $device){
+			$entry = ScrollDaddyHelper::exportDevice($device, $settings);
+			$entry['last_seen'] = isset($last_seen[$device->key]) ? $last_seen[$device->key] : null;
+
+			$blocks_summary = array(ScrollDaddyHelper::exportBlock($always_on_blocks[$device->key], false));
+			foreach($scheduled_blocks[$device->key] as $block){
+				$blocks_summary[] = ScrollDaddyHelper::exportBlock($block, false);
+			}
+			$entry['blocks'] = $blocks_summary;
+
+			$api_devices[] = $entry;
+		}
+
+		return LogicResult::render(array(
+			'num_devices' => $num_devices,
+			'devices' => $api_devices,
+		));
+	}
+
+	return LogicResult::render($page_vars);
+
+}
+
+function devices_logic_api() {
+	return [
+		'requires_session' => true,
+		'description' => 'List DNS-filtering devices with DoH/DoT endpoints, block summaries, and hard-block hostnames',
+	];
 }
 
 ?>
