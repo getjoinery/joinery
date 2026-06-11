@@ -2,7 +2,7 @@
 
 **Purpose:** A Discord-style realtime chat plugin for Joinery sites — text channels, threads, reactions, attachments, DMs, presence, and typing indicators. Each Joinery instance is its own "server" (no multi-org abstraction). Intended as a real alternative to Discord for communities that do not need voice/video.
 
-**Last Updated:** 2026-05-23
+**Last Updated:** 2026-06-10
 
 **Status:** Active — not yet implemented.
 
@@ -43,7 +43,7 @@
 
 The plugin has three components:
 
-1. **PHP plugin** (`plugins/chat/`) — admin UI, channel CRUD, message persistence, mention parsing, attachment uploads, notification fan-out triggers, JWT minting.
+1. **PHP plugin** (`plugins/chat/`) — admin UI, channel CRUD, message persistence, mention parsing, attachment uploads, notification fan-out triggers, WS auth token minting.
 2. **Go realtime service** — one binary per Joinery instance, runs on the same node as PHP under systemd, holds WebSocket connections, fans out messages to subscribers, tracks presence and typing.
 3. **PostgreSQL** — single source of truth for messages, channels, membership, reactions. Also the signaling bus: PHP writes a message then issues `NOTIFY`, Go is `LISTEN`ing.
 
@@ -57,21 +57,25 @@ Browser ─── WSS ───▶ Go realtime ──┐
 
 ### Realtime: Postgres LISTEN/NOTIFY
 
-PHP writes the message to the database, then issues `NOTIFY chat_chan_<channel_id>, '<message_id>'`. The Go service maintains one Postgres connection in LISTEN mode per active channel (or one connection with all channels multiplexed — implementation choice). On notification, Go loads the message row, looks up which connected WebSocket clients are subscribed to that channel, and pushes the payload.
+PHP writes the message to the database, then issues a notification on a single fixed channel: `NOTIFY chat_events, '{"type":"channel","channel_id":<id>,"message_id":<id>}'`. (DM realtime rides core's generic `message_events` channel instead — see [DM handling](#dm-handling).) The Go service holds exactly one Postgres connection in LISTEN mode, established at startup, listening on both `chat_events` and `message_events`. On notification, Go loads the message row, looks up which connected WebSocket clients are subscribed to that channel in its in-memory subscriber map, and pushes the payload. A notification for a channel with no connected subscribers is one map lookup and a discard.
 
-Rationale: keeps the dependency footprint identical to today (just Postgres — no Redis), sufficient up to tens of thousands of concurrent connections per Postgres instance, removes one service to install/monitor/back up. Revisit only if a single Joinery instance approaches Postgres's per-channel LISTEN limits.
+One fixed LISTEN channel means no LISTEN/UNLISTEN lifecycle to manage as chat channels become active and idle, and reconnect handling is a single re-`LISTEN` rather than a per-channel re-subscription pass. NOTIFY payloads carry only IDs (well under the ~8000-byte payload limit); message content is always loaded from the database.
+
+Rationale: keeps the dependency footprint identical to today (just Postgres — no Redis), sufficient up to tens of thousands of concurrent connections per Postgres instance, removes one service to install/monitor/back up.
 
 ### Realtime: WebSocket auth
 
-The WebSocket handshake uses a short-lived JWT minted by PHP:
+The WebSocket handshake uses a short-lived HMAC-signed token minted by PHP:
 
 1. Browser calls `GET /api/chat/ws_token` using its existing Joinery session cookie.
-2. PHP validates the session, mints a JWT containing `{user_id, exp}` (60s TTL), signs it with a shared secret from `Globalvars_site.php` (`chat_jwt_secret`).
-3. Browser opens `wss://<site>/ws/?token=<jwt>` (proxied through Apache via `mod_proxy_wstunnel`).
-4. Go verifies the JWT signature, extracts `user_id`, binds it to the connection. Connection is then trusted for its lifetime.
+2. PHP validates the session and mints a token: `base64url(user_id . "." . exp) . "." . hmac`, where `exp` is a unix timestamp 60 seconds out and `hmac` is HMAC-SHA256 of the payload under the chat signing key (see below).
+3. Browser opens `wss://<site>/ws/?token=<token>` (proxied through Apache via `mod_proxy_wstunnel`).
+4. Go recomputes the HMAC (constant-time compare), checks `exp`, extracts `user_id`, binds it to the connection. Connection is then trusted for its lifetime.
 5. On WebSocket drop, the browser fetches a fresh token and redoes the handshake.
 
-JWT is a handshake credential only — not re-verified per message. The shared secret lives in `Globalvars_site.php` alongside the DB credentials; rotating it logs everyone out (acceptable, rare).
+**Signing key:** derived from the existing `secret_box_key` in `Globalvars_site.php` — never used raw: `signing_key = hash_hmac('sha256', 'chat-ws-auth', base64_decode(secret_box_key))`. Domain separation means the chat verifier never holds a key valid for SecretBox's other uses. PHP signs with `hash_hmac`, Go verifies with `crypto/hmac` — standard library on both sides, no JWT dependency.
+
+The token is a handshake credential only — not re-verified per message. No new secret is provisioned; rotating `secret_box_key` invalidates outstanding tokens (60s of disruption, acceptable).
 
 ### Realtime: Go service deployment
 
@@ -81,8 +85,9 @@ Packaged the same way as the `server_manager` Go agent:
 - Installer script (`joinery-chat-installer.sh`) — self-extracting, handles fresh install and upgrade
 - systemd unit at `/etc/systemd/system/joinery-chat.service`
 - Env file at `/etc/joinery-chat/joinery-chat.env`
-- Reads database credentials and `chat_jwt_secret` from `Globalvars_site.php`
+- Reads database credentials and `secret_box_key` from `Globalvars_site.php` (derives the chat signing key from the latter)
 - Heartbeats to `ahb_agent_heartbeats` (or a chat-specific table) so the admin UI can show the service status
+- Exposes a localhost-only HTTP status endpoint (`GET /status`: connected users with presence state, connection count, uptime) — the PHP admin UI calls it for live presence, and it doubles as a liveness check
 
 Unlike `server_manager` (one agent per managed node, polling a central job queue), the chat service runs **on the same node as the Joinery instance it serves** and serves only that instance's users. One binary per site.
 
@@ -196,18 +201,9 @@ Unique constraint: `(chr_chm_channel_message_id, chr_usr_user_id, chr_emoji)`.
 
 Attachments are uploaded via the existing `UploadHandler` and routed through the cloud storage subsystem (see `docs/cloud_storage.md`).
 
-### `chp_channel_presence`
+### Presence (no table)
 
-Transient presence state, written by the Go service. Survives restarts of Go (so the admin UI can show who is connected) but is authoritative only when the Go service is up.
-
-| Column | Type | Notes |
-|---|---|---|
-| `chp_channel_presence_id` | `int8 serial` | PK |
-| `chp_usr_user_id` | `int4` | |
-| `chp_status` | `varchar(20)` | `online` / `idle` / `dnd` / `offline` |
-| `chp_last_seen_time` | `timestamp(6)` | |
-
-Unique on `chp_usr_user_id`. Typing indicators are NOT persisted — Go holds them in memory and broadcasts ephemerally.
+Presence (`online` / `idle` / `dnd` / `offline`) and typing indicators are NOT persisted — both are derived entirely from live connections and are valueless when stale. Go holds them in its in-memory connection map and broadcasts changes to subscribed clients over WebSocket. The admin UI reads presence from the Go service's status endpoint (see [Go service deployment](#realtime-go-service-deployment)); when Go is down, the failed call correctly reads as "service down, nobody connected" rather than stale rows.
 
 ---
 
@@ -219,7 +215,8 @@ Direct messages reuse the existing platform messaging system: `cnv_conversations
 
 - Render DMs in the unified chat sidebar alongside channels (using the existing inbox query pattern in `MultiConversation`).
 - Call `Conversation::get_or_create_conversation()` and `Conversation::add_message()` to write DMs.
-- Fire a `NOTIFY chat_dm_<conversation_id>, '<message_id>'` after writing a DM so the Go service can fan out to connected participants in realtime.
+
+**Realtime DM delivery — small core change.** The realtime signal must fire at the write point, not in plugin code: DMs are also written from the existing messaging UI, and those must reach an open chat window too. `Conversation::add_message()` gains a generic emission at the end: `NOTIFY message_events, '{"conversation_id":<id>,"message_id":<id>}'`. Nothing chat-flavored lives in core — a NOTIFY with no listeners is essentially free, and the chat Go service is simply the first consumer LISTENing on `message_events`. (Routing realtime through the notification system instead would be wrong: muted participants skip notifications but should still see live delivery in an open window.)
 
 **What this means for the v1 UX:**
 
@@ -234,7 +231,7 @@ DMs are plain text (existing 5000-char limit, `strip_tags`'d body). No reactions
 PHP parses `@username` and `@channel` from message bodies at write time:
 
 - `@username` resolves to a `usr_user_id`; recipient gets a notification regardless of mute state on the channel.
-- `@channel` notifies all members of the channel who are not muted.
+- `@channel` notifies users who have a `cmb_channel_members` row for the channel (i.e., have opened it at least once — rows are created lazily by `last_read` tracking), excluding muted and soft-deleted rows. It is not "everyone eligible to see the channel": for `public` and `role_gated` channels that set is unbounded (a public-channel `@channel` would ping the entire user base, including users who have never opened chat). For `invite_only` channels the two definitions coincide, since membership rows exist by definition. A true site-wide blast is an announcement feature, not a mention.
 
 Parsed mentions are stored in a `chmn_channel_message_mentions` table so notification fan-out and badge counts are queryable without re-parsing bodies.
 
@@ -260,14 +257,14 @@ To avoid surprises mid-build, the systems this plugin touches:
 
 | System | How chat plugin uses it | Modifications needed? |
 |---|---|---|
-| `Conversation` / `Message` (existing messaging) | DMs delegate here | No — read-only consumer of the API |
+| `Conversation` / `Message` (existing messaging) | DMs delegate here | Yes — `add_message()` gains a generic `NOTIFY message_events` emission at the write point (see [DM handling](#dm-handling)) |
 | `Notification::create_notification` | Mentions, channel posts, DMs | No — existing API |
 | Notification hooks system | Hook point declarations | Plugin declares hooks via `plugin.json` |
 | `User` / `usr_permission` | Role-gated channel visibility | No |
 | `UserBlock` | DMs already integrate; channels do not filter by block (you see public messages even from blockers) | No |
 | `UploadHandler` + cloud storage | Attachment uploads | No |
 | Apache vhost config | WebSocket proxy `/ws/` | Add `mod_proxy_wstunnel` directives |
-| `Globalvars_site.php` | `chat_jwt_secret` for JWT signing | Add one entry, documented in plugin docs |
+| `Globalvars_site.php` | Existing `secret_box_key` (chat signing key derived via HMAC, never used raw) | No — no new entry needed |
 | `stg_settings` / `plugin.json` settings | WebSocket port, max attachment size, idle-presence threshold, etc. | Declared in `plugin.json` |
 | Admin menu | Plugin admin UI entries | Declared in `plugin.json` (per platform convention) |
 | Web push infrastructure (`psh_push_subscriptions`, VAPID, service worker, push channel) | Browser push delivery for mentions and DMs | Built as platform-level companion work — see [Companion platform work](#companion-platform-work-web-push-notifications) |
@@ -280,13 +277,13 @@ To avoid surprises mid-build, the systems this plugin touches:
 Suggested incremental build order, each phase deliverable on its own:
 
 1. **Channels CRUD + persistence** — admin UI to create channels, plugin views to render channel list and message history (no realtime yet — page reloads to see new messages). Validates data model and visibility rules.
-2. **Go service skeleton + WS handshake** — Go binary, systemd packaging, JWT validation, basic echo. No message fan-out yet. Validates the deployment + auth path.
+2. **Go service skeleton + WS handshake** — Go binary, systemd packaging, HMAC token validation, basic echo. No message fan-out yet. Validates the deployment + auth path.
 3. **Realtime message delivery** — wire LISTEN/NOTIFY, browser receives live messages in the open channel. Validates the full realtime path end-to-end.
-4. **Presence + typing** — Go in-memory state, broadcast on join/leave/typing. Validates the ephemeral-state model.
+4. **Presence + typing** — Go in-memory state, broadcast on join/leave/typing, `/status` endpoint for the admin UI. Validates the ephemeral-state model.
 5. **Mentions + notifications** — mention parsing, notification fan-out, unread badges.
 6. **Replies + reactions** — inline quoted replies, emoji reactions on channel messages.
 7. **Attachments** — file/image uploads, image embeds, thumbnails.
-8. **DM integration** — sidebar rendering, NOTIFY hook on `Conversation::add_message` (small core change), realtime DM delivery.
+8. **DM integration** — sidebar rendering, generic `NOTIFY message_events` emission at the end of `Conversation::add_message` (small core change), realtime DM delivery.
 9. **Search** — Postgres full-text index on `chm_body`, plugin search UI.
 10. **Platform web push infrastructure + chat consumer** — see [Companion platform work](#companion-platform-work-web-push-notifications). Builds VAPID setup, service worker, subscription storage, push channel in the hooks system, and wires chat mentions and DMs to push as the first consumer.
 

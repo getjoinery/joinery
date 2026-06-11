@@ -65,6 +65,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		$page_vars['page_title'] = 'Set Password';
 	}
 	$page_vars['has_old_password'] = $has_old_password;
+	$page_vars['user'] = $user;
 
 	return LogicResult::render($page_vars);
 }
@@ -74,6 +75,30 @@ function password_edit_logic_api() {
         'requires_session' => true,
         'description' => 'Change password (logged in)',
     ];
+}
+
+/**
+ * Form builder — single source for the web password form and the JSON form
+ * definition (GET /api/v1/form/password_edit). The old-password field appears
+ * only when the user has a password to verify.
+ */
+function password_edit_logic_form($formwriter, $user = null, $input = []) {
+	$has_old_password = $user && $user->get('usr_password') !== NULL;
+
+	if ($has_old_password) {
+		$formwriter->passwordinput('usr_old_password', 'Old Password', [
+			'required' => true,
+		]);
+	}
+	$formwriter->passwordinput('usr_password', 'New Password', [
+		'required' => true,
+		'helptext' => 'Must be at least 5 characters.',
+	]);
+	$formwriter->passwordinput('usr_password_again', 'Retype New Password', [
+		'required' => true,
+	]);
+
+	$formwriter->submitbutton('btn_submit', 'Submit');
 }
 
 function password_edit_logic_descriptor(): array {

@@ -154,7 +154,8 @@ class Activation {
 			'SELECT act_usr_user_id FROM act_activation_codes WHERE
 			act_code = :act_code AND act_expires_time > NOW() AND act_purpose = :act_purpose');
 
-		$statement->bindParam(':act_code', strtolower($act_code), PDO::PARAM_STR);
+		$act_code_lower = strtolower($act_code);
+		$statement->bindParam(':act_code', $act_code_lower, PDO::PARAM_STR);
 		$statement->bindParam(':act_purpose', $act_purpose, PDO::PARAM_INT);
 		$statement->execute();
 		$statement->setFetchMode(PDO::FETCH_OBJ);
@@ -170,7 +171,8 @@ class Activation {
 	static function getTempCodeInfo($act_code, $act_purpose){
 		$statement = DbConnector::GetPreparedStatement(
 			'SELECT * FROM act_activation_codes WHERE act_code = :act_code AND act_expires_time > NOW() AND act_purpose = :act_purpose');
-		$statement->bindParam(':act_code', strtolower($act_code), PDO::PARAM_STR);
+		$act_code_lower = strtolower($act_code);
+		$statement->bindParam(':act_code', $act_code_lower, PDO::PARAM_STR);
 		$statement->bindParam(':act_purpose', $act_purpose, PDO::PARAM_INT);
 		$statement->execute();
 		$statement->setFetchMode(PDO::FETCH_OBJ);

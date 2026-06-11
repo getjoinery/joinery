@@ -31,7 +31,7 @@ Every place a component version is written or read, and what this spec does with
 |---|---|---|
 | `theme.json` / `plugin.json` `version` | Source of truth | Authors bump minor/major for meaningful releases; publish auto-bumps patch when content changed and the author didn't bump (below) |
 | `publish_upgrade.php` archive filenames `{name}-{version}.tar.gz` | Writer/reader | Unchanged mechanism; now always honest because of the publish-time check |
-| `cpr_component_releases` (new) | Publish-time ledger of what shipped | Added by this spec; the baseline for change detection |
+| `upg_upgrades.upg_component_state` (new column) | Per-release snapshot of each component's (version, tree hash) | Added by this spec; the latest release's snapshot is the baseline for change detection |
 | `upgrade.php` `get_published_archives()` (parses version from filename) | Reader | Unchanged |
 | `upgrade.php` component status table (`Version` column) | Display | Unchanged |
 | `adm/admin_plugins.php` via `Plugin::get_version()` | Display | Already reads the live manifest — correct, unchanged |
@@ -48,36 +48,41 @@ Every place a component version is written or read, and what this spec does with
 
 The root cause of non-incrementing versions is that nothing connects "this component's content changed" to "this component's version must move." Relying on author discipline (human or agent) is the demonstrated failure. The right layer is the publish step — the moment a version becomes a public artifact name.
 
-**New table: `cpr_component_releases`** — data class `plugins/server_manager/data/component_release_class.php` (`ComponentRelease` / `MultiComponentRelease`). This is publisher bookkeeping, so it belongs to the server_manager plugin (the publisher); `PluginManager::sync()` creates the table from `$field_specifications`.
+**Per-release component snapshot: `upg_upgrades.upg_component_state`** — a new `text` field on the existing `Upgrade` data class (`data/upgrades_class.php`), holding a JSON snapshot of every published component's `(version, tree_hash)` at that release, keyed by type and name:
 
-| field | type | notes |
-|---|---|---|
-| `cpr_component_release_id` | int8 serial | pk |
-| `cpr_component_type` | varchar(16) | `theme` \| `plugin` |
-| `cpr_component_name` | varchar(128) | directory name |
-| `cpr_version` | varchar(20) | version as published |
-| `cpr_content_hash` | varchar(64) | sha256 of the component tree (below) |
-| `cpr_upg_upgrade_id` | int8 | core release this shipped with |
-| `cpr_create_time` | timestamp(6) | default now() |
+```json
+{
+    "themes":  { "scrolldaddy": { "version": "1.0.1", "tree_hash": "ab12…" } },
+    "plugins": { "inbound_email": { "version": "1.15.0", "tree_hash": "cd34…" } }
+}
+```
 
-**Content hash.** A static helper `ComponentContentHash::hashTree($dir)` in `plugins/server_manager/includes/ComponentContentHash.php`: walk the component directory, take every regular file except the archive-exclusion set (`.git/`, `.gitignore` — same set as the P1.8 tar excludes), sort by relative path, and sha256 the concatenation of `relative_path . "\0" . sha256(file_contents)` entries. Deterministic across boxes; ignores permissions, mtimes, and ordering.
+The state belongs to the release, so it lives on the release row: `upg_upgrades` already records one row per publish, created by the same script that needs the state. **Baseline rule:** the snapshot of the most recent release row that carries one (`MultiUpgrade` ordered by id desc, skipping rows with an empty or unparseable snapshot); if no row carries one — every pre-existing row when this ships — the run re-baselines: records everything, bumps nothing, same as a first publish. The new row's snapshot is written once the archive loops complete. No new table, no new class — the column arrives via `$field_specifications` and `update_database`.
+
+This placement gives three properties for free:
+
+- **History** — every release records exactly which component versions shipped with it.
+- **Coherent deletion** — the publish page's existing delete action removes a release row, and the baseline naturally falls back to the previous release's snapshot: un-publishing a release un-publishes its component state.
+- **Safe degradation** — corrupt or absent snapshots are skipped by the baseline rule, never fatal.
+
+**Content hash.** A helper function `component_tree_hash($dir)` added to `publish_upgrade.php` alongside its existing helpers (`getDirContents()`, `create_zip()`): walk the component directory, take every regular file except the archive-exclusion set (`.git/`, `.gitignore` — same set as the P1.8 tar excludes), sort by relative path, and sha256 the concatenation of `relative_path . "\0" . sha256(file_contents)` entries. Deterministic across boxes; ignores permissions, mtimes, and ordering. It stays in the publish script — tree-hashing is publisher-only bookkeeping with exactly one caller, not a runtime helper concern.
 
 **Decision rule, applied per component inside the existing theme and plugin archive loops in `publish_upgrade.php`, before each `tar`:**
 
-Let `last` = the most recent `cpr_component_releases` row for this (type, name), `manifest_version` = the version currently in the manifest.
+Let `last` = this component's entry in the latest prior release's snapshot, `manifest_version` = the version currently in the manifest.
 
-1. **No `last` row** (first publish under this system, or a new component): record `(manifest_version, current_hash)`, archive as-is. No bump.
+1. **No `last` entry** (first publish under this system, or a new component): record `(manifest_version, current_hash)`, archive as-is. No bump.
 2. **`manifest_version` > `last.version`**: the author bumped deliberately. Respect it; record; archive.
 3. **`manifest_version` < `last.version`**: version went backward. Abort the publish with a clear per-component message (same posture as the core VERSION downgrade guard).
 4. **`manifest_version` == `last.version`**: compute `current_hash`.
-   - Hash equal → unchanged component. Archive as-is; no new ledger row.
+   - Hash equal → unchanged component. Archive as-is; entry carries forward.
    - Hash differs → **auto-bump the patch number** in the manifest file, then recompute the hash (the manifest is part of the tree), record the new `(version, hash)`, and archive. Output one line per auto-bump: `- scrolldaddy: content changed since 1.0.0, auto-bumped to 1.0.1`.
 
 The version-equality check comes first deliberately: it means the hash never needs the manifest's version field normalized out (when versions are equal, the field contributes identically to both hashes; when they differ, the hash isn't consulted).
 
 **Manifest write.** The auto-bump edits only the `version` value via targeted string replacement of the existing `"version" : "..."` member (tolerant of whitespace), never a full `json_decode`/`json_encode` round-trip — re-serializing would churn the whole file's formatting in the component's own repo. If the pattern can't be found (e.g. version key absent), abort with a clear message rather than guessing.
 
-**Ordering inside the loop:** read manifest → apply decision rule → (maybe) write bump → compute final hash → `tar` → insert ledger row. The archive always contains the manifest it was named after.
+**Ordering inside the loop:** read manifest → apply decision rule → (maybe) write bump → compute final hash → `tar` → stage the component's new state entry. The publish script saves the `Upgrade` row before the archive loops run today; the accumulated snapshot is set on that row in one update after both loops complete (skipped components carry their prior entries forward unchanged). An aborted publish therefore leaves its row snapshot-less, and the baseline rule skips it — a later publish still compares against the last completed snapshot, never a half-written one. The archive always contains the manifest it was named after.
 
 **Publish summary output** gains a section listing auto-bumped components, so the maintainer knows which manifest edits to commit (identical workflow to committing the `VERSION` file bump).
 
@@ -103,49 +108,52 @@ In `adm/admin_plugins.php`: remove the `available_version` badge branch and the 
 
 ## Edge cases
 
-- **First publish after this ships:** every component hits rule 1 (no baseline) — versions recorded as-is, no bumps. Enforcement begins with the second publish.
-- **Component skipped from publish** (`included_in_publish: false` or `deprecated`): skipped entirely — no hash, no ledger row, exactly as it is skipped from archiving today.
+- **First publish after this ships** (no prior row carries a snapshot): every component hits rule 1 (no baseline) — versions recorded as-is, no bumps. Enforcement begins with the next publish.
+- **Component skipped from publish** (`included_in_publish: false` or `deprecated`): skipped entirely — no hash, no decision; its prior snapshot entry carries forward, exactly as it is skipped from archiving today.
 - **Author bumps version without changing anything else:** rule 2 — respected and recorded (the bump itself is a content change in any case).
 - **Manifest-only change** (e.g. description edit, same version): hash differs → auto patch-bump. Correct: the archive contents changed.
-- **Renamed component:** appears as a new name (rule 1). Old name's ledger rows remain as history; the existing archive-wipe on publish already handles the stale archive file.
+- **Renamed component:** appears as a new name (rule 1). The old name's snapshot entry goes stale harmlessly; the existing archive-wipe on publish already handles the stale archive file.
+- **All release rows deleted via the publish page:** no snapshot remains → next publish re-baselines. Consistent with what deletion means.
 - **CLI and web publish paths:** the loops are shared, so both paths get the behavior; abort messages go through the existing `publish_output()` helper.
 
 ## Files to modify
 
 | File | Change |
 |---|---|
-| `plugins/server_manager/data/component_release_class.php` | New — `ComponentRelease` / `MultiComponentRelease` data class |
-| `plugins/server_manager/includes/ComponentContentHash.php` | New — deterministic tree hash helper |
-| `plugins/server_manager/includes/publish_upgrade.php` | Decision rule + manifest bump + ledger insert in both archive loops; summary output |
+| `data/upgrades_class.php` | Add `upg_component_state` (`text`) to `$field_specifications` |
+| `plugins/server_manager/includes/publish_upgrade.php` | `component_tree_hash()` helper; baseline load + snapshot save; decision rule + manifest bump in both archive loops; summary output |
 | `includes/ThemeManager.php` | `updateExistingMetadata()` full refresh; `onActivate()` requirements gate |
 | `includes/PluginManager.php` | `updateExistingMetadata()` merge-refresh + boolean; `validatePlugin()` dependency check via `get_version()` |
 | `adm/admin_plugins.php` | Remove dead updates UI |
 | `adm/logic/admin_plugins_logic.php` | Remove `check_updates` stub |
 
-Bump the `@version` header on each modified file. No migrations: the new table comes from `$field_specifications` via plugin sync. Verify the `cpr_` prefix is unused before building.
+No new files. Bump the `@version` header on each modified file. No migrations — the new column arrives automatically via `update_database` from the field specification.
 
 ## Testing
 
-1. **Baseline publish:** run a publish; every published component gets a `cpr_component_releases` row matching its manifest version; no manifests modified.
-2. **No-change publish:** publish again with nothing touched; no bumps, no new ledger rows, archives regenerate under the same names.
-3. **Content-change publish:** edit one file in a theme and one in a plugin; publish; both manifests show a patch bump, output names them, ledger gains two rows, archives carry the new filenames.
+1. **Baseline publish:** run a publish; the new `upg_upgrades` row's `upg_component_state` holds an entry per published component matching its manifest version; no manifests modified.
+2. **No-change publish:** publish again with nothing touched; no bumps, snapshot entries unchanged, archives regenerate under the same names.
+3. **Content-change publish:** edit one file in a theme and one in a plugin; publish; both manifests show a patch bump, output names them, the new snapshot carries the new versions and hashes, archives carry the new filenames.
 4. **Manual bump respected:** set a plugin's version to the next minor, change a file, publish; the manual version is kept (no double-bump) and recorded.
-5. **Regression refused:** set a version below its last ledger entry; publish aborts naming the component and both versions.
-6. **`.git` insensitivity:** create a `.git/` directory inside a component (git_hosting Phase 1 scenario), publish twice with no other change; second publish reports no change.
-7. **Sync refresh:** with the known-stale rows on this box (`default` theme, `inbound_email` plugin), run "Sync with Filesystem" / `update_database`; `thm_version` and `plg_metadata` versions match manifests; `_menu_slugs` in `plg_metadata` survives.
-8. **Dependency check:** with `plg_metadata` artificially stale, a plugin declaring `depends: {inbound_email: ">=1.10.0"}` activates successfully (live manifest 1.15.0 satisfies it).
-9. **Theme activation gate:** set a test theme's `requires.joinery` to `>=99.0.0`; activation is refused with the specific failure in the admin message; removing the floor allows activation; the currently-active theme is unaffected throughout.
-10. **Dead UI gone:** plugins admin page renders with no "Check for Updates" option and no updates alert; no PHP notices.
+5. **Regression refused:** set a version below its baseline entry; publish aborts naming the component and both versions; the aborted row carries no snapshot and a subsequent publish still baselines against the last completed one.
+6. **Release deletion:** delete the latest release from the publish page; the next publish baselines against the prior release's snapshot.
+7. **`.git` insensitivity:** create a `.git/` directory inside a component (git_hosting Phase 1 scenario), publish twice with no other change; second publish reports no change.
+8. **Sync refresh:** with the known-stale rows on this box (`default` theme, `inbound_email` plugin), run "Sync with Filesystem" / `update_database`; `thm_version` and `plg_metadata` versions match manifests; `_menu_slugs` in `plg_metadata` survives.
+9. **Dependency check:** with `plg_metadata` artificially stale, a plugin declaring `depends: {inbound_email: ">=1.10.0"}` activates successfully (live manifest 1.15.0 satisfies it).
+10. **Theme activation gate:** set a test theme's `requires.joinery` to `>=99.0.0`; activation is refused with the specific failure in the admin message; removing the floor allows activation; the currently-active theme is unaffected throughout.
+11. **Dead UI gone:** plugins admin page renders with no "Check for Updates" option and no updates alert; no PHP notices.
 
 ## Documentation updates
 
-- `docs/deploy_and_upgrade.md` — publish behavior: per-component release ledger, the four-way decision rule, auto patch-bump and the abort-on-regression guard, and that auto-bumped manifests are working-copy edits the maintainer commits.
+- `docs/deploy_and_upgrade.md` — publish behavior: the per-release `upg_component_state` snapshot and baseline rule, the four-way decision rule, auto patch-bump and the abort-on-regression guard, and that auto-bumped manifests are working-copy edits the maintainer commits.
 - `docs/plugin_developer_guide.md` — component versioning: authors bump minor/major for meaningful releases; publish auto-bumps patch when content changed without a bump; activation (plugins *and* themes) is gated on `requires`; dependency version constraints are evaluated against the dependency's live manifest.
 
 Per documentation rules, both docs describe the end state only — no references to the prior behavior.
 
 ## Out of scope
 
+- A dedicated component-release table with its own data class. Considered and dropped as unjustified weight: the snapshot column on `upg_upgrades` provides the baseline *and* per-release history with no new schema machinery. (A standalone `static_files` JSON state file was also considered and rejected — an orphan artifact with no owning model, weaker deletion semantics, and no history.)
+- Any UI over the release history snapshots ("when did scrolldaddy 1.0.3 ship?" stays a SQL query for now).
 - Consumer-site "update available" surfaces (the removed dead UI is not replaced).
 - Version-gating downloads in `upgrade.php` — consumers continue to refresh all published extensions by name; honest versions are bookkeeping and identity, not a download filter.
 - Signing or integrity-verifying archives.

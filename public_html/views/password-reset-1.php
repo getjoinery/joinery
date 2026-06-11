@@ -38,18 +38,10 @@
             $formwriter = $page->getFormWriter('form1', ['action' => '/password-reset-1', 'method' => 'POST']);
             $formwriter->begin_form();
 
-            $formwriter->textinput('usr_email', 'Email Address:', [
-                'type'      => 'email',
-                'required'  => true,
-                'maxlength' => 64,
-            ]);
-            ?>
+            // Shared form definition — also serves GET /api/v1/form/password_reset_1
+            password_reset_1_logic_form($formwriter, null, array_merge($_GET, $_POST));
 
-            <div style="margin-top: 1rem;">
-                <?php $formwriter->submitbutton('btn_submit', 'Send Reset Link', ['class' => 'btn btn-primary btn-block']); ?>
-            </div>
-
-            <?php $formwriter->end_form(); ?>
+            $formwriter->end_form(); ?>
 
             <div class="auth-footer-text">
                 Remember your password? <a href="/login">Login to your Account</a>

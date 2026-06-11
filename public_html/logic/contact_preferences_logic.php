@@ -24,40 +24,15 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		$user = new User($session->get_user_id(), TRUE);
 	}
 
-	$search_criteria = array('deleted' => false, 'active' => true);
-	$mailing_lists = new MultiMailingList(
-		$search_criteria,
-		array('name'=>'ASC'));
-	$mailing_lists->load();
-
 	if (!empty($_POST)) {
 		$page_vars['messages'] = $user->add_user_to_mailing_lists($_POST['new_list_subscribes']);
 
 	}
 
-	$user_subscribed_list = array();
-	$search_criteria = array('deleted' => false, 'user_id' => $user->key);
-	$user_lists = new MultiMailingListRegistrant(
-		$search_criteria);
-	$user_lists->load();
-	foreach ($user_lists as $user_list){
-		$user_subscribed_list[] = $user_list->get('mlr_mlt_mailing_list_id');
-	}
-
-	$page_vars['optionvals'] = $mailing_lists->get_dropdown_array();
-	//REMOVE ALL OF THE PRIVATE AND UNLISTED LISTS THE USER IS NOT SUBSCRIBED TO
-	foreach($page_vars['optionvals'] as $key=>$value){
-		$mailing_list = new MailingList($key, TRUE);
-		if($mailing_list->get('mlt_visibility') == MailingList::VISIBILITY_PRIVATE || $mailing_list->get('mlt_visibility') == MailingList::VISIBILITY_PUBLIC_UNLISTED){
-			if(!in_array($key, $user_subscribed_list)){
-				unset($page_vars['optionvals'][$key]);
-			}
-		}
-	}
-
-	$page_vars['checkedvals'] = $user_subscribed_list;
-	$page_vars['readonlyvals'] = array(); //DEFAULT
-	$page_vars['disabledvals'] = array();
+	$lists = contact_preferences_form_options($user);
+	$page_vars['optionvals'] = $lists['options'];
+	$page_vars['checkedvals'] = $lists['checked'];
+	$page_vars['user'] = $user;
 
 	//$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
 
@@ -78,6 +53,63 @@ function contact_preferences_logic_api() {
         'requires_session' => true,
         'description' => 'Update contact preferences',
     ];
+}
+
+/**
+ * The user's subscribable mailing lists and current subscriptions.
+ * Private and unlisted lists appear only when the user is already subscribed.
+ *
+ * @param User $user
+ * @return array ['options' => [id => name], 'checked' => [id, ...]]
+ */
+function contact_preferences_form_options($user) {
+	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
+
+	$mailing_lists = new MultiMailingList(
+		array('deleted' => false, 'active' => true),
+		array('name'=>'ASC'));
+	$mailing_lists->load();
+
+	$user_subscribed_list = array();
+	$user_lists = new MultiMailingListRegistrant(
+		array('deleted' => false, 'user_id' => $user->key));
+	$user_lists->load();
+	foreach ($user_lists as $user_list){
+		$user_subscribed_list[] = $user_list->get('mlr_mlt_mailing_list_id');
+	}
+
+	$optionvals = $mailing_lists->get_dropdown_array();
+	//REMOVE ALL OF THE PRIVATE AND UNLISTED LISTS THE USER IS NOT SUBSCRIBED TO
+	foreach($optionvals as $key=>$value){
+		$mailing_list = new MailingList($key, TRUE);
+		if($mailing_list->get('mlt_visibility') == MailingList::VISIBILITY_PRIVATE || $mailing_list->get('mlt_visibility') == MailingList::VISIBILITY_PUBLIC_UNLISTED){
+			if(!in_array($key, $user_subscribed_list)){
+				unset($optionvals[$key]);
+			}
+		}
+	}
+
+	return array('options' => $optionvals, 'checked' => $user_subscribed_list);
+}
+
+/**
+ * Form builder — single source for the web contact-preferences form and the
+ * JSON form definition (GET /api/v1/form/contact_preferences).
+ */
+function contact_preferences_logic_form($formwriter, $user = null, $input = []) {
+	if (!$user) {
+		throw new Exception('contact_preferences form requires a user');
+	}
+
+	$lists = contact_preferences_form_options($user);
+
+	$formwriter->checkboxList('new_list_subscribes', 'Check the box to subscribe:', [
+		'options' => $lists['options'],
+		'checked' => $lists['checked'],
+	]);
+
+	$formwriter->hiddeninput('zone', '', ['value' => 'optional']);
+	$formwriter->submitbutton('btn_submit', 'Submit');
 }
 
 function contact_preferences_logic_descriptor(): array {

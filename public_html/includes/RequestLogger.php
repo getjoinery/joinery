@@ -5,7 +5,8 @@
  * General-purpose: works for API calls, login attempts, registration,
  * password resets, or any site feature that needs logging or throttling.
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - log(): mark the RequestLog save as an intentional GET mutation (audit/rate-limit rows persist on any request method)
  */
 require_once(PathHelper::getIncludePath('data/request_logs_class.php'));
 
@@ -32,7 +33,14 @@ class RequestLogger {
 		if (isset($options['note']))        $log->set('rql_note', substr($options['note'], 0, 255));
 		if (isset($options['response_ms'])) $log->set('rql_response_ms', $options['response_ms']);
 
-		$log->save();
+		// A request-log row is an intentional persist on any request method
+		// (GET reads are logged and rate-limited too).
+		SystemBase::$allow_get_mutation = true;
+		try {
+			$log->save();
+		} finally {
+			SystemBase::$allow_get_mutation = false;
+		}
 	}
 
 	/**

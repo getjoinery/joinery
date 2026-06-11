@@ -124,6 +124,39 @@ function account_edit_logic_api() {
     ];
 }
 
+/**
+ * Form builder — single source for the web account form and the JSON form
+ * definition (GET /api/v1/form/account_edit).
+ */
+function account_edit_logic_form($formwriter, $user = null, $input = []) {
+	require_once(PathHelper::getIncludePath('data/address_class.php'));
+	$settings = Globalvars::get_instance();
+
+	if ($user) {
+		$formwriter->set_model($user);
+	}
+
+	$formwriter->textinput('usr_first_name', 'First Name', [
+		'maxlength' => 255
+	]);
+	$formwriter->textinput('usr_last_name', 'Last Name', [
+		'maxlength' => 255
+	]);
+
+	$nickname_display = $settings->get_setting('nickname_display_as');
+	if ($nickname_display) {
+		$formwriter->textinput('usr_nickname', $nickname_display, [
+			'maxlength' => 255
+		]);
+	}
+
+	$formwriter->dropinput('usr_timezone', 'Your Time Zone', [
+		'options' => Address::get_timezone_drop_array()
+	]);
+
+	$formwriter->submitbutton('btn_submit', 'Submit');
+}
+
 function account_edit_logic_descriptor(): array {
 	return [
 		'description'      => 'Update the current user\'s profile fields.',

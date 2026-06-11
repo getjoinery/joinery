@@ -96,6 +96,53 @@ function password_reset_2_logic_api() {
     ];
 }
 
+/**
+ * Form builder — single source for the web set-new-password form and the JSON
+ * form definition (GET /api/v1/form/password_reset_2?act_code=...). The terms
+ * checkbox appears only when the code resolves to a user who has never
+ * accepted terms (recipient auto-create / admin-add using the reset link as
+ * activation).
+ */
+function password_reset_2_logic_form($formwriter, $user = null, $input = []) {
+	require_once(PathHelper::getIncludePath('includes/Activation.php'));
+	require_once(PathHelper::getIncludePath('data/users_class.php'));
+
+	$act_code = $input['act_code'] ?? '';
+	$formwriter->hiddeninput('act_code', '', ['value' => $act_code]);
+
+	$formwriter->passwordinput('usr_password', 'New Password:', [
+		'required' => true,
+		'autocomplete' => 'new-password',
+	]);
+	$formwriter->passwordinput('usr_password_again', 'Confirm Password:', [
+		'required' => true,
+		'autocomplete' => 'new-password',
+	]);
+
+	$terms_already_accepted = true;
+	if ($act_code) {
+		$pre_user_id = Activation::getIdFromTempCode($act_code, 2);
+		if ($pre_user_id) {
+			$pre_user = new User($pre_user_id, true);
+			$terms_already_accepted = !empty($pre_user->get('usr_terms_accepted_time'));
+		}
+	}
+
+	if (!$terms_already_accepted) {
+		$settings = Globalvars::get_instance();
+		$terms_url   = trim((string)$settings->get_setting('terms_url'));
+		$privacy_url = trim((string)$settings->get_setting('privacy_url'));
+		$terms_link   = $terms_url   !== '' ? '<a href="' . htmlspecialchars($terms_url,   ENT_QUOTES, 'UTF-8') . '" target="_blank" rel="noopener">Terms of Use</a>'   : 'Terms of Use';
+		$privacy_link = $privacy_url !== '' ? '<a href="' . htmlspecialchars($privacy_url, ENT_QUOTES, 'UTF-8') . '" target="_blank" rel="noopener">Privacy Policy</a>' : 'Privacy Policy';
+
+		$formwriter->checkboxinput('accept_terms', 'I agree to the ' . $terms_link . ' and ' . $privacy_link . '.', [
+			'required' => true,
+		]);
+	}
+
+	$formwriter->submitbutton('btn_submit', 'Set Password');
+}
+
 function password_reset_2_logic_descriptor(): array {
 	return [
 		'description'      => 'Set a new password using a one-time reset code.',

@@ -50,16 +50,9 @@
                     echo '<p>You are currently not subscribed to any newsletters.</p>';
                 }
                 else{
-                    $formwriter->checkboxList('new_list_subscribes', 'Check the box to subscribe:', [
-                        'options' => $page_vars['optionvals'],
-                        'checked' => $page_vars['checkedvals'],
-                        'disabled' => $page_vars['disabledvals'],
-                        'readonly' => $page_vars['readonlyvals']
-                    ]);
-
-                    $formwriter->hiddeninput('zone', '', ['value' => 'optional']);
-                    echo '<a href="/profile/account_edit">Cancel</a> ';
-                    $formwriter->submitbutton('btn_submit', 'Submit');
+                    // Shared form definition — also serves GET /api/v1/form/contact_preferences
+                    contact_preferences_logic_form($formwriter, $page_vars['user'], array_merge($_GET, $_POST));
+                    echo '<a href="/profile/account_edit">Cancel</a>';
                 }
                 $formwriter->end_form();
                 ?>
