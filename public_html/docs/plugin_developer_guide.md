@@ -435,6 +435,7 @@ function my_feature_logic_api() {
 The action is addressed under the plugin's namespace — `POST /api/v1/action/my-plugin/my_feature` — and listed in `GET /api/v1/actions` as `my-plugin/my_feature`. Resolution goes directly to `plugins/{plugin}/logic/{action}_logic.php`; only active plugins resolve, and the namespace means a plugin action can never collide with a core action or another plugin's.
 
 - `requires_session => true` actions run under session simulation as the API key's user, so `SessionControl` works exactly as it does on the web. Use `$session->is_api_context()` when a function needs to return a JSON-clean payload instead of view-shaped objects.
+- **Authorization** defaults to the action surface's standard: the key needs the write capability (`apk_permission >= 2`). To override — e.g. a read-only action, or one requiring a higher user role — add an `'auth'` block to the descriptor: `'auth' => ['capability' => 'read', 'min_user_permission' => 5]`. The contract is enforced by `ApiAuth::authorize()`; see [docs/api.md](api.md#declaring-endpoint-authorization).
 - An optional `{action}_logic_form()` companion exposes a server-driven form definition at `GET /api/v1/form/{plugin}/{action}` — see [docs/api.md](api.md) and [docs/formwriter.md](formwriter.md#11-json-output-mode-server-driven-forms).
 - Inputs arrive through the `$input` parameter (merged GET + JSON body). Do not read `$_REQUEST` — it never sees the JSON body.
 

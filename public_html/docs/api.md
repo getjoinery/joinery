@@ -9,6 +9,31 @@ The Joinery platform provides a REST API for programmatic access to data and ope
 - **Methods:** GET (read), POST (create), PUT (update), DELETE (soft delete)
 - **HTTPS Required:** All requests must use HTTPS
 
+## Architecture
+
+Every API request flows through the front controller (`api/apiv1.php`), which runs transport preconditions (HTTPS, CORS, rate limits, client-version handshake), establishes the caller's identity once, then routes to a handler:
+
+```
+api/apiv1.php
+  ├─ transport preconditions (HTTPS, CORS, rate limits, version handshake)
+  ├─ $principal = ApiAuth::authenticate($headers, $source_ip)   → key + user, or 4xx
+  └─ route by URL:
+       /{Class}, /{Class}s   → CRUD      → ApiAuth::authorize([capability]) → model authenticate_read/write
+       /action/*, /form/*    → ApiLogicEndpoint → ApiAuth::authorize([capability]) → run logic / build form
+       /management/*         → ManagementApiRouter → ApiAuth::authorize([machine + superadmin])
+       /auth/*               → ApiAuthEndpoint (thin shell) → ApiAuth::attemptLogin / revokeSessionKey
+```
+
+The whole security boundary lives in **one class, `ApiAuth`** (`includes/ApiAuth.php`):
+
+| Method | Responsibility |
+|--------|----------------|
+| `authenticate($headers, $source_ip)` | Resolve + validate the API key, load its user, return the principal (or exit 4xx). The single authentication path for every request. |
+| `authorize($contract, $api_entry, $user_permission, $label)` | The one authorization decision point. `$contract` is a small array — `capability` (`read`/`write`/`delete`), optional `requires_machine_key`, `min_user_permission`. Called by the CRUD verbs, the logic endpoint, and the management router. |
+| `attemptLogin()` / `revokeSessionKey()` | Credential-lifecycle decisions that the thin `ApiAuthEndpoint` (the `/auth/*` HTTP shell) delegates to. |
+
+The handler classes around it are **dispatch, not auth**: `ApiLogicEndpoint` runs an action's two faces (POST execute, GET form definition), and `ManagementApiRouter` resolves control-plane handler files. They *consume* the principal and *call* `authorize()` — they don't make auth decisions themselves. See [Two authorization axes](#two-authorization-axes) for the `apk_permission`/`usr_permission` distinction and the declarative `auth` block.
+
 ## Authentication
 
 All authenticated API requests use the same two custom headers:
@@ -107,6 +132,52 @@ The `api_min_client_versions` setting holds a JSON map of `client_app` → minim
 | 4+ | Yes | Yes | Yes | Full access |
 
 **Note:** Permission level 2 grants write access but blocks read operations (GET requests).
+
+**This axis is non-monotonic** — level 2 is write-only, so it is *not* a simple "higher = more" scale. Authorization is therefore expressed as a **capability** (read / write / delete), not a minimum level:
+
+- `read` → allowed unless `apk_permission == 2`
+- `write` → allowed when `apk_permission >= 2`
+- `delete` → allowed when `apk_permission >= 4`
+
+## Two authorization axes
+
+API authorization decisions involve two distinct axes — keep them separate when reasoning about access:
+
+| Axis | Field | Meaning |
+|------|-------|---------|
+| **Key capability** | `apk_permission` | What a *key* may do on the CRUD axis (read / write / delete, non-monotonic — see above). |
+| **User role** | `usr_permission` | The owning *user's* role floor (e.g. `5` = staff, `10` = superadmin). This is the value passed to per-record `authenticate_read/write` as `current_user_permission`, and the floor the management plane gates on. |
+
+Both axes live in one class, `ApiAuth` (`includes/ApiAuth.php`), which owns the whole security boundary: `ApiAuth::authenticate()` resolves the principal from request headers, and `ApiAuth::authorize()` enforces every endpoint's authorization against a small contract — a `capability`, an optional `requires_machine_key`, and a `min_user_permission` floor.
+
+### Declaring endpoint authorization
+
+Action, form, and management endpoints may declare their authorization contract in their descriptor's optional `auth` block. Each field falls back to the router's default (which equals that surface's standard requirement) when omitted, so most endpoints declare nothing:
+
+```php
+function catalog_logic_api() {
+    return [
+        'description' => 'List blockable categories',
+        'auth' => [
+            'capability'           => 'read',   // 'read' | 'write' | 'delete' | null (no apk_permission check)
+            'requires_session'     => true,     // run under session simulation as the key's user
+            'requires_machine_key' => false,    // require apk_type = machine
+            'min_user_permission'  => 0,        // usr_permission floor
+        ],
+    ];
+}
+```
+
+Resolution order for each field: explicit `auth` value → router default → `ApiAuth::authorize` built-in default. Surface defaults:
+
+| Surface | Default contract |
+|---------|------------------|
+| Action (`POST /api/v1/action/*`) | `capability: write` |
+| Form (`GET /api/v1/form/*`) | `capability: read` |
+| CRUD verbs (`/api/v1/{Class}…`) | `read` for GET, `write` for POST/PUT, `delete` for DELETE |
+| Management (`/api/v1/management/*`) | `requires_machine_key: true, min_user_permission: 10` (no `apk_permission` check) |
+
+A management handler's `auth` block may **tighten** the default (e.g. raise the user floor or add a capability) but cannot loosen it — the machine-key + superadmin default is enforced before the handler resolves so unknown paths still fail closed.
 
 ## CRUD Endpoints
 

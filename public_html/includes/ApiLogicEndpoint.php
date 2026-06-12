@@ -1,0 +1,303 @@
+<?php
+/**
+ * API Logic Endpoint
+ *
+ * Dispatches the two HTTP faces of an action's logic function, both opted in by
+ * the same {action}_logic_api() companion:
+ *
+ *   - Action  — POST /api/v1/action/{name}: runs {action}_logic() and returns
+ *               the translated LogicResult.
+ *   - Form    — GET  /api/v1/form/{name}:  builds {action}_logic_form() through
+ *               FormWriterV2JSON and returns the JSON form definition. Exposed
+ *               iff both _logic_api() and _logic_form() exist.
+ *
+ * Both faces share one dispatch skeleton: a sessionless request (register,
+ * password_reset_1/2) is handled before key authentication — a first-launch
+ * client has no credentials yet — while a sessioned request requires key auth
+ * and runs under session simulation as the acting user. The two differ only in
+ * how a path resolves (POST _logic vs GET _logic_form), the default capability
+ * (write vs read), and the terminal step (run logic vs build form).
+ *
+ * Dispatched from api/apiv1.php in two phases per face: dispatch*PreAuth() before
+ * the key-header requirement, dispatch*Authenticated() after $api_user resolves.
+ * Uses the api_error()/api_success()/api_translate_logic_result() helpers and
+ * api_resolve_logic_path() defined in apiv1.php (single-segment names are core
+ * actions via the theme chain; {plugin}/{action} names resolve to a plugin's
+ * logic directory).
+ *
+ * @version 1.0.0
+ * @changelog 1.0.0 - Merge of the former ApiActionEndpoint and ApiFormEndpoint:
+ *   one class for an action's POST (execute) and GET (form definition) faces,
+ *   sharing the dispatch skeleton, requires_session resolution, and ApiAuth.
+ */
+
+class ApiLogicEndpoint {
+
+	/**
+	 * Whether a request runs under a simulated session. Honors the forward-
+	 * looking ['auth']['requires_session'] first, then the top-level
+	 * requires_session declaration, defaulting to true (sessioned). Shared by
+	 * both the action and form faces.
+	 */
+	protected static function requiresSession($meta) {
+		return $meta['auth']['requires_session'] ?? $meta['requires_session'] ?? true;
+	}
+
+	// ====================================================================
+	// Action face — POST /api/v1/action/{name}
+	// ====================================================================
+
+	/**
+	 * Resolve an action path to its metadata and logic function, or exit with
+	 * an API error.
+	 *
+	 * @param array $url_segments ['api','v1','action','{name}'] or
+	 *                            ['api','v1','action','{plugin}','{action}']
+	 * @return array [$action_label, $meta, $logic_function]
+	 */
+	protected static function resolveAction($url_segments) {
+		if (strtolower($_SERVER['REQUEST_METHOD']) !== 'post') {
+			api_error('Actions must use POST method', 'ActionError', 405);
+		}
+
+		list($action_label, $action_name) = api_resolve_logic_path($url_segments, 'action');
+
+		// Check for opt-in: the logic file must define {action_name}_logic_api()
+		$api_meta_function = $action_name . '_logic_api';
+		$logic_function = $action_name . '_logic';
+
+		if (!function_exists($api_meta_function)) {
+			api_error('Unknown action: ' . $action_label, 'ActionError', 404);
+		}
+
+		if (!function_exists($logic_function)) {
+			api_error('Action is misconfigured: ' . $action_label, 'ActionError', 500);
+		}
+
+		$meta = call_user_func($api_meta_function);
+
+		return array($action_label, $meta, $logic_function);
+	}
+
+	/**
+	 * Pre-authentication dispatch. Executes sessionless actions and exits;
+	 * returns for sessioned actions so key authentication continues, after
+	 * which dispatchActionAuthenticated() handles the request.
+	 */
+	public static function dispatchActionPreAuth($url_segments) {
+		list($action_label, $meta, $logic_function) = self::resolveAction($url_segments);
+
+		if (self::requiresSession($meta)) {
+			return;
+		}
+
+		self::executeAction($action_label, $logic_function, NULL);
+	}
+
+	/**
+	 * Post-authentication dispatch for sessioned actions. Always exits.
+	 */
+	public static function dispatchActionAuthenticated($url_segments, $api_entry, $api_user) {
+		list($action_label, $meta, $logic_function) = self::resolveAction($url_segments);
+
+		// Authorization: actions are POST (mutating), so they require the write
+		// capability by default — equivalent to the historical apk_permission < 2
+		// gate. A descriptor may override via its ['auth'] block.
+		require_once(PathHelper::getIncludePath('includes/ApiAuth.php'));
+		$auth = ($meta['auth'] ?? []) + ['capability' => ApiAuth::CAP_WRITE];
+		ApiAuth::authorize($auth, $api_entry, $api_user->get('usr_permission'), 'Action');
+
+		// Sessionless actions were executed pre-auth; anything reaching here
+		// with requires_session=false would be a dispatch-order bug, so run it
+		// the same way regardless.
+		$acting_user = self::requiresSession($meta) ? $api_user : NULL;
+
+		self::executeAction($action_label, $logic_function, $acting_user);
+	}
+
+	/**
+	 * Run the logic function and send the translated result. Always exits.
+	 *
+	 * @param string $action_label Full action name for logs ('{plugin}/{action}' or '{action}')
+	 * @param string $logic_function
+	 * @param User|null $api_user Acting user for session simulation (null = sessionless)
+	 */
+	protected static function executeAction($action_label, $logic_function, $api_user) {
+		$user_id = $api_user ? $api_user->key : NULL;
+
+		// Set up session simulation if needed
+		$session = SessionControl::get_instance();
+		if ($api_user) {
+			$session->set_api_user($api_user->key);
+		}
+
+		// Build parameters from JSON request body or form data
+		$get_params = $_GET;
+		$raw_input = file_get_contents('php://input');
+		$json_params = json_decode($raw_input, true);
+		$post_params = is_array($json_params) ? $json_params : $_POST;
+
+		// Populate $_POST from JSON body so logic files can use !empty($_POST)
+		// to detect submission consistently across browser POSTs and JSON API calls.
+		$_POST = $post_params;
+
+		// Call the logic function
+		require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+		try {
+			$result = call_user_func($logic_function, array_merge($get_params, $post_params));
+		} catch (Exception $e) {
+			if ($api_user) {
+				$session->clear_api_user();
+			}
+			RequestLogger::log('api', 'action ' . $action_label, false, [
+				'user_id' => $user_id,
+				'status_code' => 422,
+				'error_type' => 'ActionError',
+				'note' => $e->getMessage()
+			]);
+			$result = LogicResult::error($e->getMessage());
+		}
+
+		// Clean up session simulation
+		if ($api_user) {
+			$session->clear_api_user();
+		}
+
+		// Translate LogicResult to API response
+		$translated = api_translate_logic_result($result, $action_label);
+		$response_ms = isset($GLOBALS['api_start_time'])
+			? round((microtime(true) - $GLOBALS['api_start_time']) * 1000) : NULL;
+
+		if ($translated['status_code'] >= 400) {
+			RequestLogger::log('api', 'action ' . $action_label, false, [
+				'user_id' => $user_id,
+				'status_code' => $translated['status_code'],
+				'error_type' => $translated['response']['errortype'] ?? 'ActionError',
+				'response_ms' => $response_ms,
+				'note' => $translated['response']['error'] ?? ''
+			]);
+		} else {
+			RequestLogger::log('api', 'action ' . $action_label, true, [
+				'user_id' => $user_id,
+				'status_code' => $translated['status_code'],
+				'response_ms' => $response_ms
+			]);
+		}
+
+		header("Content-Type: application/json");
+		http_response_code($translated['status_code']);
+		echo json_encode($translated['response']) . PHP_EOL;
+		exit;
+	}
+
+	// ====================================================================
+	// Form face — GET /api/v1/form/{name}
+	// ====================================================================
+
+	/**
+	 * Resolve a form path to its metadata and builder, or exit with an API
+	 * error. Both companion functions must exist for the form to be exposed.
+	 *
+	 * @param array $url_segments ['api','v1','form','{name}'] or
+	 *                            ['api','v1','form','{plugin}','{action}']
+	 * @return array [$action_label, $action_name, $meta, $form_function]
+	 */
+	protected static function resolveForm($url_segments) {
+		if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
+			api_error('Form definitions must use GET method', 'ActionError', 405);
+		}
+
+		list($action_label, $action_name) = api_resolve_logic_path($url_segments, 'form');
+
+		$api_meta_function = $action_name . '_logic_api';
+		$form_function = $action_name . '_logic_form';
+
+		if (!function_exists($api_meta_function) || !function_exists($form_function)) {
+			api_error('Unknown form: ' . $action_label, 'ActionError', 404);
+		}
+
+		$meta = call_user_func($api_meta_function);
+
+		return array($action_label, $action_name, $meta, $form_function);
+	}
+
+	/**
+	 * Pre-authentication dispatch. Serves sessionless forms and exits; returns
+	 * for sessioned forms so key authentication continues, after which
+	 * dispatchFormAuthenticated() handles the request.
+	 */
+	public static function dispatchFormPreAuth($url_segments) {
+		list($action_label, $action_name, $meta, $form_function) = self::resolveForm($url_segments);
+
+		if (self::requiresSession($meta)) {
+			return;
+		}
+
+		self::serveForm($action_label, $action_name, $form_function, null, null);
+	}
+
+	/**
+	 * Post-authentication dispatch for sessioned forms. Always exits.
+	 */
+	public static function dispatchFormAuthenticated($url_segments, $api_entry, $api_user) {
+		list($action_label, $action_name, $meta, $form_function) = self::resolveForm($url_segments);
+
+		// Fetching a definition is a read — permission 2 is write-only. Default
+		// to the read capability (equivalent to the prior apk_permission == 2
+		// gate); a descriptor may override via its ['auth'] block.
+		require_once(PathHelper::getIncludePath('includes/ApiAuth.php'));
+		$auth = ($meta['auth'] ?? []) + ['capability' => ApiAuth::CAP_READ];
+		ApiAuth::authorize($auth, $api_entry, $api_user->get('usr_permission'), 'Form');
+
+		// Session simulation so the builder sees the acting user's timezone
+		// and session context, exactly as the action face provides
+		$session = SessionControl::get_instance();
+		$session->set_api_user($api_user->key);
+
+		self::serveForm($action_label, $action_name, $form_function, $api_user, $api_user->key);
+	}
+
+	/**
+	 * Build the definition and send it. Always exits.
+	 *
+	 * @param string $action_label Full name for logs ('{plugin}/{action}' or '{action}')
+	 * @param string $action_name Bare action name; used as the form id
+	 * @param string $form_function Builder function name
+	 * @param User|null $user Acting user for prefill (null for sessionless)
+	 * @param int|null $user_id For request logging
+	 */
+	protected static function serveForm($action_label, $action_name, $form_function, $user, $user_id) {
+		require_once(PathHelper::getIncludePath('includes/FormWriterV2JSON.php'));
+
+		$formwriter = new FormWriterV2JSON($action_name);
+
+		try {
+			call_user_func($form_function, $formwriter, $user, $_GET);
+			$definition = $formwriter->getDefinition();
+		} catch (Exception $e) {
+			if ($user_id) {
+				SessionControl::get_instance()->clear_api_user();
+			}
+			RequestLogger::log('api', 'form ' . $action_label, false, [
+				'user_id' => $user_id,
+				'status_code' => 500,
+				'error_type' => 'ActionError',
+				'note' => $e->getMessage()
+			]);
+			api_error('Unable to build form definition (' . $e->getMessage() . ')', 'ActionError', 500);
+		}
+
+		if ($user_id) {
+			SessionControl::get_instance()->clear_api_user();
+		}
+
+		RequestLogger::log('api', 'form ' . $action_label, true, [
+			'user_id' => $user_id,
+			'status_code' => 200
+		]);
+
+		api_success($definition, 'Form definition for \'' . $action_label . '\'');
+	}
+}
+
+?>

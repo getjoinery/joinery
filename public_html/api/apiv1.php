@@ -2,7 +2,14 @@
 /**
  * API v1 Endpoint
  *
- * @version 2.5
+ * @version 2.7
+ * @changelog 2.7 - Authentication chain extracted to ApiAuth::authenticate();
+ *   the front controller now resolves the principal in one call. Authorization
+ *   (former ApiAuthGate) folded into ApiAuth::authorize(); CRUD verbs call it
+ *   with a capability. Behavior unchanged (see ApiAuth).
+ * @changelog 2.6 - Authorization unified through a single gate: the five CRUD
+ *   verb gates declare a capability (read/write/delete) instead of inlining the
+ *   apk_permission comparison; behavior is unchanged.
  * @changelog 2.5 - Plugin-aware actions: {plugin}/{action} names resolve via
  *   api_resolve_logic_path(); discovery lists active plugins' actions under
  *   their namespaced names
@@ -15,6 +22,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 $settings = Globalvars::get_instance();
 require_once(PathHelper::getIncludePath('data/api_keys_class.php'));
 require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
+require_once(PathHelper::getIncludePath('includes/ApiAuth.php'));
 
 // Track request start time for response_ms logging
 $api_start_time = microtime(true);
@@ -90,8 +98,8 @@ function api_translate_logic_result($result, $action_name) {
 
 /**
  * Resolve the path segments after /api/v1/{action|form}/ to a logic file,
- * require it, and return naming metadata. Used by ApiActionEndpoint and
- * ApiFormEndpoint. Exits via api_error() on any failure.
+ * require it, and return naming metadata. Used by ApiLogicEndpoint (both the
+ * action and form faces). Exits via api_error() on any failure.
  *
  * Two name forms:
  *   - {action}            core action; resolves through the theme chain
@@ -244,8 +252,8 @@ $url_segments = explode('/', trim($request_path, '/'));
 // Sessioned forms fall through to authentication and are dispatched again
 // after $api_user resolves.
 if (strtolower($url_segments[2] ?? '') === 'form') {
-	require_once(PathHelper::getIncludePath('includes/ApiFormEndpoint.php'));
-	ApiFormEndpoint::dispatchPreAuth($url_segments);
+	require_once(PathHelper::getIncludePath('includes/ApiLogicEndpoint.php'));
+	ApiLogicEndpoint::dispatchFormPreAuth($url_segments);
 	// Returns only when the form requires a session.
 }
 
@@ -261,9 +269,9 @@ if (strtolower($url_segments[2] ?? '') === 'auth') {
 // Sessionless actions (requires_session => false: register, password resets)
 // execute here, before the key-header requirement. Sessioned actions fall
 // through to authentication and are dispatched again after $api_user resolves.
-require_once(PathHelper::getIncludePath('includes/ApiActionEndpoint.php'));
+require_once(PathHelper::getIncludePath('includes/ApiLogicEndpoint.php'));
 if (strtolower($url_segments[2] ?? '') === 'action') {
-	ApiActionEndpoint::dispatchPreAuth($url_segments);
+	ApiLogicEndpoint::dispatchActionPreAuth($url_segments);
 	// Returns only when the action requires a session.
 }
 
@@ -271,144 +279,19 @@ if (strtolower($url_segments[2] ?? '') === 'action') {
 $classes = LibraryFunctions::discover_model_classes();
 
 $source_ip = $_SERVER['REMOTE_ADDR'];
-$public_key = isset($headers['public_key']) ? $headers['public_key'] : null;
-$secret_key = isset($headers['secret_key']) ? $headers['secret_key'] : null;
-
-if (!$public_key || !$secret_key) {
-	RequestLogger::log('api_auth', 'auth_failure', false, [
-		'status_code' => 400,
-		'error_type' => 'AuthenticationError',
-		'note' => 'Missing public/secret key headers'
-	]);
-	api_error('Public/secret keys not present', 'AuthenticationError', 400);
-}
-
-try {
-	$api_entry = ApiKey::GetByColumn('apk_public_key', $public_key);
-} catch (Exception $e) {
-	RequestLogger::log('api_auth', 'auth_failure', false, [
-		'status_code' => 400,
-		'error_type' => 'AuthenticationError',
-		'note' => 'Unable to find the api key'
-	]);
-	api_error('Unable to find the api key', 'AuthenticationError', 400);
-}
-
-if (!$api_entry->key) {
-	RequestLogger::log('api_auth', 'auth_failure', false, [
-		'status_code' => 400,
-		'error_type' => 'AuthenticationError',
-		'note' => 'Unable to find the api key'
-	]);
-	api_error('Unable to find the api key', 'AuthenticationError', 400);
-}
-
-// Validate API key status
-if ($api_entry->get('apk_delete_time')) {
-	RequestLogger::log('api_auth', 'auth_failure', false, [
-		'status_code' => 401,
-		'error_type' => 'AuthenticationError',
-		'note' => 'API key has been revoked'
-	]);
-	api_error('API key has been revoked', 'AuthenticationError', 401);
-}
-
-if (!$api_entry->get('apk_is_active')) {
-	RequestLogger::log('api_auth', 'auth_failure', false, [
-		'status_code' => 401,
-		'error_type' => 'AuthenticationError',
-		'note' => 'API key is not active'
-	]);
-	api_error('API key is not active', 'AuthenticationError', 401);
-}
-
-if ($api_entry->get('apk_start_time')) {
-	$now_utc = gmdate('Y-m-d H:i:s');
-	if ($now_utc < $api_entry->get('apk_start_time')) {
-		RequestLogger::log('api_auth', 'auth_failure', false, [
-			'status_code' => 401,
-			'error_type' => 'AuthenticationError',
-			'note' => 'API key is not yet active'
-		]);
-		api_error('API key is not yet active', 'AuthenticationError', 401);
-	}
-}
-
-if ($api_entry->get('apk_expires_time')) {
-	$now_utc = gmdate('Y-m-d H:i:s');
-	if ($now_utc > $api_entry->get('apk_expires_time')) {
-		RequestLogger::log('api_auth', 'auth_failure', false, [
-			'status_code' => 401,
-			'error_type' => 'AuthenticationError',
-			'note' => 'API key has expired'
-		]);
-		api_error('API key has expired', 'AuthenticationError', 401);
-	}
-}
-
-try {
-	$api_user = new User($api_entry->get('apk_usr_user_id'), TRUE);
-} catch (Exception $e) {
-	RequestLogger::log('api_auth', 'auth_failure', false, [
-		'status_code' => 400,
-		'error_type' => 'AuthenticationError',
-		'note' => 'Unable to find the api user'
-	]);
-	api_error('Unable to find the api user', 'AuthenticationError', 400);
-}
-
-if (!$api_user->key) {
-	RequestLogger::log('api_auth', 'auth_failure', false, [
-		'status_code' => 400,
-		'error_type' => 'AuthenticationError',
-		'note' => 'Unable to find the api user'
-	]);
-	api_error('Unable to find the api user', 'AuthenticationError', 400);
-}
-
-if ($api_user->get('usr_delete_time')) {
-	RequestLogger::log('api_auth', 'auth_failure', false, [
-		'status_code' => 400,
-		'error_type' => 'AuthenticationError',
-		'note' => 'API user has been deleted'
-	]);
-	api_error('API user has been deleted', 'AuthenticationError', 400);
-}
-
-if ($authorized_ips = $api_entry->get('apk_ip_restriction')) {
-	$ip_list = str_getcsv($authorized_ips);
-	$ip_list = array_map('trim', $ip_list);
-	if (count($ip_list)) {
-		if (!in_array($_SERVER['REMOTE_ADDR'], $ip_list)) {
-			RequestLogger::log('api_auth', 'auth_failure', false, [
-				'status_code' => 401,
-				'error_type' => 'AuthenticationError',
-				'note' => 'Unauthorized IP: ' . $_SERVER['REMOTE_ADDR']
-			]);
-			api_error('Unauthorized IP', 'AuthenticationError', 401);
-		}
-	}
-}
-
-if (!$api_entry->check_secret_key($secret_key)) {
-	RequestLogger::log('api_auth', 'auth_failure', false, [
-		'status_code' => 401,
-		'error_type' => 'AuthenticationError',
-		'note' => 'Incorrect secret key'
-	]);
-	api_error('Incorrect secret key', 'AuthenticationError', 401);
-}
-
-// Authentication passed — stamp the key type onto every subsequent log row
-// and record key usage (written at most once per hour).
-RequestLogger::set_api_key_type($api_entry->get('apk_type'));
-$api_entry->touch_last_used();
+// Authentication: resolve + validate the key and load its user, or exit 4xx.
+// The full chain (key lookup, status/expiry/IP checks, secret verify, user load,
+// failure logging that feeds the api_auth rate limiter, key-type stamping, and
+// usage tracking) lives in ApiAuth::authenticate().
+$principal = ApiAuth::authenticate($headers, $source_ip);
+$api_entry = $principal['api_entry'];
+$api_user  = $principal['api_user'];
+$auth_data = $principal['auth_data'];
 
 // URL segments were parsed above the pre-auth dispatches
 $operation = isset($url_segments[2]) ? ucwords($url_segments[2]) : '';
 $entity_id = isset($url_segments[3]) ? $url_segments[3] : null;
 $request_method = strtolower($_SERVER['REQUEST_METHOD']);
-$auth_data = array('current_user_id' => $api_user->key, 'current_user_permission' => $api_user->get('usr_permission'));
 
 $response = NULL;
 
@@ -422,8 +305,8 @@ if (strtolower($url_segments[2] ?? '') === 'management') {
 
 // Sessioned form definitions — sessionless ones were served pre-auth above.
 if (strtolower($url_segments[2] ?? '') === 'form') {
-	ApiFormEndpoint::dispatchAuthenticated($url_segments, $api_entry, $api_user);
-	// dispatchAuthenticated() always exits.
+	ApiLogicEndpoint::dispatchFormAuthenticated($url_segments, $api_entry, $api_user);
+	// dispatchFormAuthenticated() always exits.
 }
 
 // Key-authenticated auth endpoints (session/logout) — login exited pre-auth.
@@ -437,9 +320,8 @@ if (in_array($operation, $classes)) {
 
 	if ($request_method == 'get') {
 
-		if ($api_entry->get('apk_permission') == 2) {
-			api_error('Unable to fetch object, insufficient api permission', 'AuthenticationError', 403);
-		}
+		ApiAuth::authorize(['capability' => ApiAuth::CAP_READ], $api_entry,
+			$auth_data['current_user_permission'], 'Fetch object');
 
 		// Single object GET
 		try {
@@ -462,9 +344,8 @@ if (in_array($operation, $classes)) {
 
 	} else if ($request_method == 'put') {
 
-		if ($api_entry->get('apk_permission') < 2) {
-			api_error('Unable to update object, insufficient api permission', 'AuthenticationError', 403);
-		}
+		ApiAuth::authorize(['capability' => ApiAuth::CAP_WRITE], $api_entry,
+			$auth_data['current_user_permission'], 'Update object');
 
 		parse_str($_SERVER['QUERY_STRING'], $url_parts);
 
@@ -494,9 +375,8 @@ if (in_array($operation, $classes)) {
 
 	} else if ($request_method == 'post') {
 
-		if ($api_entry->get('apk_permission') < 2) {
-			api_error('Unable to create object, insufficient api permission', 'AuthenticationError', 403);
-		}
+		ApiAuth::authorize(['capability' => ApiAuth::CAP_WRITE], $api_entry,
+			$auth_data['current_user_permission'], 'Create object');
 
 		try {
 			if (!$object = $class_name::CreateNew($_POST)) {
@@ -526,9 +406,8 @@ if (in_array($operation, $classes)) {
 
 	} else if ($request_method == 'delete') {
 
-		if ($api_entry->get('apk_permission') < 4) {
-			api_error('Unable to delete object, insufficient api permission', 'AuthenticationError', 403);
-		}
+		ApiAuth::authorize(['capability' => ApiAuth::CAP_DELETE], $api_entry,
+			$auth_data['current_user_permission'], 'Delete object');
 
 		try {
 			$object = new $class_name($entity_id, TRUE);
@@ -554,9 +433,8 @@ if (in_array($operation, $classes)) {
 
 } else if (in_array(substr($operation, 0, -1), $classes)) {
 
-	if ($api_entry->get('apk_permission') == 2) {
-		api_error('Unable to fetch objects, insufficient permission', 'AuthenticationError', 403);
-	}
+	ApiAuth::authorize(['capability' => ApiAuth::CAP_READ], $api_entry,
+		$auth_data['current_user_permission'], 'Fetch objects');
 
 	// Collection GET
 	$class_name = substr($operation, 0, -1);
@@ -652,8 +530,8 @@ if (in_array($operation, $classes)) {
 
 } else if (strtolower($url_segments[2] ?? '') === 'action' && isset($url_segments[3])) {
 	// Sessioned action endpoint — sessionless actions executed pre-auth above.
-	ApiActionEndpoint::dispatchAuthenticated($url_segments, $api_entry, $api_user);
-	// dispatchAuthenticated() always exits.
+	ApiLogicEndpoint::dispatchActionAuthenticated($url_segments, $api_entry, $api_user);
+	// dispatchActionAuthenticated() always exits.
 }
 
 if ($response !== NULL) {
