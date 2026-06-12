@@ -93,7 +93,7 @@ $formwriter->end_form(); // <-- emits validation JS automatically
 ?>
 ```
 
-> **Note:** `set_validate()` was removed in the FormWriterV2 migration. It was a vestigial remnant of the old jQuery Validate integration and is no longer available. Any remaining `->set_validate(...)` calls are dead code and should be removed.
+> **Note:** There is no `set_validate()` method. Validation rules live in `field_specifications` (for core model fields) or are declared inline in each input's `validation` option; `end_form()` emits the client-side script automatically. A `->set_validate(...)` call will fatal.
 
 ### Manual JavaScript Initialization
 
@@ -381,23 +381,22 @@ FormWriter provides a convenient interface for generating validation rules along
 ```php
 $formwriter = new FormWriterV2Bootstrap('contact_form');
 
-// Define validation rules
-$validation_rules = array();
-$validation_rules['email']['required']['value'] = 'true';
-$validation_rules['email']['email']['value'] = 'true';
-$validation_rules['password']['minlength']['value'] = '8';
-
-// Output validation script (generates JavaScript automatically)
-echo $formwriter->set_validate($validation_rules);
-
-// Build the form with validated fields
+// No separate "rules" array and no set_validate() call. Validation rules are
+// read from the model's field_specifications (for core fields) and/or declared
+// inline per field. end_form() emits the matching client-side JS automatically.
 $formwriter->begin_form();
-$formwriter->textinput('email', 'Email', ['required' => true, 'validation' => 'email']);
+$formwriter->textinput('email', 'Email', ['required' => true, 'validation' => ['email' => true]]);
 $formwriter->passwordinput('password', 'Password', ['validation' => ['minlength' => 8]]);
-$formwriter->end_form();
+$formwriter->end_form(); // <-- emits the validation script automatically
 ```
 
-FormWriter includes model-aware validation - it can automatically extract validation rules from model `field_specifications` for seamless integration.
+FormWriter includes model-aware validation - it extracts validation rules from a model's
+`field_specifications` by matching each field's prefix to a model. Core model fields resolve
+automatically. For a **plugin** model (which the core scan does not see), pass the owning model
+to the form — `getFormWriter('form', ['model' => $obj])` — and its `field_specifications` drive
+detection for that model's fields. You can always declare `validation` rules inline on an input
+to override or supplement what is detected. **Server-side validation in `prepare()`/`save()`
+runs regardless** of any of this — client-side detection is a convenience, not the gate.
 
 **For complete FormWriter validation documentation**, including:
 - Usage patterns and examples
@@ -517,7 +516,7 @@ if ($_POST) {
         $product->prepare();
         $product->save();
 
-        header('Location: /adm/admin_products?msg=saved');
+        header('Location: /adm/admin_products');
         exit;
     } catch (DisplayableUserException $e) {
         $error_message = $e->getMessage();
@@ -537,40 +536,21 @@ if (isset($error_message)) {
     echo '<div class="alert alert-danger">' . htmlspecialchars($error_message) . '</div>';
 }
 
-$formwriter = $page->getFormWriter('product_form');
+// Pass the model so the form auto-fills current values and (for core model
+// fields) auto-detects validation rules from field_specifications. There is no
+// separate rules array and no set_validate() call.
+$formwriter = $page->getFormWriter('product_form', ['model' => $product]);
 
-// Define validation rules
-$validation_rules = array();
-$validation_rules['pro_name']['required']['value'] = 'true';
-$validation_rules['pro_name']['minlength']['value'] = '3';
+$formwriter->begin_form(['action' => '/adm/admin_product_edit?pro_id=' . $product->key, 'method' => 'POST']);
 
-$validation_rules['pro_price']['required']['value'] = 'true';
-$validation_rules['pro_price']['number']['value'] = 'true';
+// V2 inputs take ($name, $label, $options). Values come from the model above;
+// validation rules come from field_specifications (or inline, as needed).
+$formwriter->textinput('pro_name', 'Product Name', ['required' => true, 'placeholder' => 'Enter product name']);
+$formwriter->textbox('pro_description', 'Description', ['rows' => 5, 'placeholder' => 'Enter product description']);
+$formwriter->textinput('pro_price', 'Price', ['required' => true, 'placeholder' => 'e.g., 19.99']);
+$formwriter->textinput('pro_sku', 'SKU', ['required' => true, 'placeholder' => 'e.g., PROD-001']);
 
-$validation_rules['pro_sku']['required']['value'] = 'true';
-$validation_rules['pro_sku']['pattern']['value'] = '"/^[A-Z0-9\-]+$/"';
-
-// Output validation script
-echo $formwriter->set_validate($validation_rules);
-
-// Output form
-echo $formwriter->begin_form('product_form', 'POST', $_SERVER['PHP_SELF'] . '?pro_id=' . $product->key);
-
-echo $formwriter->textinput('Product Name', 'pro_name', 'form-control', 100,
-    $product->get('pro_name'), 'Enter product name', 255);
-
-echo $formwriter->textbox('Description', 'pro_description', 'form-control', 5, 40,
-    $product->get('pro_description'), 'Enter product description');
-
-echo $formwriter->textinput('Price', 'pro_price', 'form-control', 10,
-    $product->get('pro_price'), 'e.g., 19.99', 10);
-
-echo $formwriter->textinput('SKU', 'pro_sku', 'form-control', 20,
-    $product->get('pro_sku'), 'e.g., PROD-001', 50);
-
-echo $formwriter->start_buttons();
-echo $formwriter->new_form_button('Save Product', 'btn btn-primary');
-echo $formwriter->end_buttons();
+$formwriter->submitbutton('btn_save', 'Save Product');
 
 echo $formwriter->end_form();
 
@@ -777,48 +757,37 @@ $formwriter->passwordinput('password_confirm', 'Confirm Password', [
 ]);
 ```
 
-**Legacy V1 `set_validate()` (still works):**
-
-```php
-$rules['email']['required']['value'] = 'true';
-$rules['email']['email']['value'] = 'true';
-$rules['password']['required']['value'] = 'true';
-$rules['password']['minlength']['value'] = '8';
-$rules['password_confirm']['required']['value'] = 'true';
-$rules['password_confirm']['equalTo']['value'] = '"#password"';  // V1 uses CSS selector
-```
-
 ### Product Creation Form
 
 ```php
-$rules['product_name']['required']['value'] = 'true';
-$rules['product_name']['minlength']['value'] = '3';
-$rules['product_name']['maxlength']['value'] = '255';
-
-$rules['price']['required']['value'] = 'true';
-$rules['price']['number']['value'] = 'true';
-$rules['price']['min']['value'] = '0.01';
-
-$rules['sku']['required']['value'] = 'true';
-$rules['sku']['pattern']['value'] = '"/^[A-Z0-9\-]+$/"';
+$formwriter->textinput('product_name', 'Product Name', [
+    'required' => true,
+    'validation' => ['minlength' => 3, 'maxlength' => 255]
+]);
+$formwriter->textinput('price', 'Price', [
+    'required' => true,
+    'validation' => ['numeric' => true, 'min' => 0.01]
+]);
+$formwriter->textinput('sku', 'SKU', [
+    'required' => true,
+    'validation' => ['pattern' => '/^[A-Z0-9\-]+$/']
+]);
 ```
 
 ### Contact Form with Optional Fields
 
 ```php
 // Name is required
-$rules['name']['required']['value'] = 'true';
+$formwriter->textinput('name', 'Name', ['required' => true]);
 
 // Email is required and must be valid
-$rules['email']['required']['value'] = 'true';
-$rules['email']['email']['value'] = 'true';
+$formwriter->textinput('email', 'Email', ['required' => true, 'validation' => ['email' => true]]);
 
 // Message is required with minimum length
-$rules['message']['required']['value'] = 'true';
-$rules['message']['minlength']['value'] = '10';
+$formwriter->textbox('message', 'Message', ['required' => true, 'validation' => ['minlength' => 10]]);
 
-// Phone is optional but if provided must be valid
-$rules['phone']['pattern']['value'] = '"/^[\\d\-\(\)\s]+$/"';  // Digits, dash, parens, spaces
+// Phone is optional but if provided must match the pattern
+$formwriter->textinput('phone', 'Phone', ['validation' => ['pattern' => '/^[\d\-\(\)\s]+$/']]);
 ```
 
 ---
@@ -828,7 +797,7 @@ $rules['phone']['pattern']['value'] = '"/^[\\d\-\(\)\s]+$/"';  // Digits, dash, 
 ### Validation not triggering
 
 **Problem:** Form submits without validation
-- **Check:** Is `set_validate()` being called?
+- **Check:** Is `end_form()` being called? (it emits the validation script)
 - **Check:** Is form ID correct in JoineryValidation.init()?
 - **Check:** Is joinery-validate.js loaded?
 - **Check:** Are rules defined correctly (required vs optional)?
@@ -861,9 +830,8 @@ validator flags the empty required fields instead of running the action).
 ### "equalTo" not working
 
 **Problem:** Password confirm field doesn't validate against password
-- **Check:** In FormWriter V2, use the `matches` key with a **field name** (not a CSS selector): `'matches' => 'password'`
+- **Check:** Use the `matches` key with a **field name** (not a CSS selector): `'matches' => 'password'`
 - **Check:** The target field must have a matching `name` attribute in the form
-- **Check:** In legacy V1 `set_validate()`, the value was a quoted CSS selector: `'"#password"'`
 
 ### Pattern validation failing
 

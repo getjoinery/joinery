@@ -19,6 +19,55 @@ under `/docs/` are ordinary edits.
 
 ---
 
+## Implementation status (executed 2026-06-12)
+
+Everything below has been implemented except two items deliberately left as maintainer
+decisions (noted ⏸). Verification: every modified PHP file passes `php -l` and
+`validate_php_file.php` (0 pattern violations); the `authenticate_*` methods are reached only
+from `api/apiv1.php` (confirmed — zero web-render risk), and the list endpoint already skips
+rows that throw, so owner-scoping is non-breaking.
+
+**Documentation fixes — done:** 1.1 (`getFormWriter 'v2'`, 16 call sites), 1.2 (`new Session`),
+1.3 (`set_validate`/V1 positional purge in validation.md + example_class.php), 2.1 (all 13
+two-arg logic signatures → `array $input`, bodies + call sites), 2.2 (`get_setting` → `''`),
+2.3 (permission-ladder table + `min_permission => 0` note in routing.md), 3.1-docs (slug rule
+restated to what `syncMenus()` enforces), 3.2 (CSRF reframed opt-in), 4.3 (`LogicResult::success`),
+4.4 (`get_permission_level`), 4.6 (inert manifest keys noted). 3.4-docs (per-record
+authorization section in api.md + Data Models note in the plugin guide). Gaps **G1-G6** all
+written (Multi-class authoring, `$prefix`, email-send link from scheduled-tasks, SessionControl
+method table, two admin surfaces, plugin asset cache-busting). The Data Models field-spec example
+dialect (`'type'=>'int'`/`'length'`) was corrected to the real dialect while adding G2.
+
+**Code fixes — done:**
+- **3.4 (the centerpiece):** `authenticate_read`/`authenticate_write` added to 22 core models.
+  Owner-or-staff read on the private/PII models (Address, PhoneNumber, Email, EmailRecipient,
+  MailingListRegistrant, OrderItem, SurveyAnswer, ApiKey, EventRegistrant, WaitingList) and
+  owner-or-staff read+write on the four that had neither (ActivationCode, ConversationParticipant,
+  Notification, NotificationPreference). Admin-only read+write on the seven audit/log tables
+  (RequestLog, EventLog, GeneralError, FormError, ChangeTracking, SessionAnalytic, VisitorEvent),
+  and admin-only read on Setting (secret-bearing). Public-content models (Post, Page, PageContent,
+  ProductDetail, ContentVersion, Comment, Reaction) were **intentionally left open** — owner-scoping
+  them would hide other users' published content from API reads. Plugin models remain unexposed.
+- **3.3:** `FormWriterV2Base::detectModelFromFieldName()` now resolves against the model passed to
+  `getFormWriter(['model' => $obj])` before the core-only prefix glob, so plugin form fields get
+  auto-detected client-side validation. Server-side validation was always unaffected.
+- **4.1/4.2 + email name:** distributable `default_agents_template.md` re-synced
+  (`inbound_email` link, `iem_inbound_email_messages` table, `EmailSender` not `SystemMailer`).
+
+**Left as maintainer decisions (not executed):**
+- ⏸ **3.4 architecture** — flipping the `SystemBase` default from no-op to owner-or-admin. The
+  per-model fix (the spec's primary recommendation) is done; flipping the *default* is a
+  system-wide behaviour change and stays a maintainer call.
+- ⏸ **3.1 code hygiene** — delete vs. fix-and-wire the dead `PluginHelper::validate()`. Low stakes;
+  the docs no longer describe its contradictory rule as enforced, so nothing is broken either way.
+**Agent files — done.** The internal "Internal CLAUDE.md" record (`agf_agent_files` id 2) had the
+same `SystemMailer` drift; corrected via the `AgentFile` model (`save()` + `write_to_disk()`, the
+same path the admin editor uses), which regenerated on-disk `CLAUDE.md` and `GEMINI.md`. The
+distributable `default_agents_template.md` and the internal record are now consistent on the
+email class name, the inbound-email plugin link, and the `iem_inbound_email_messages` table.
+
+---
+
 ## Severity 1 — Wrong code in docs (will not run / will silently corrupt)
 
 ### 1.1 `getFormWriter('form1', 'v2')` — the second argument is an options array, not `'v2'`

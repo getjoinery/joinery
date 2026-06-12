@@ -119,8 +119,32 @@ URL placeholders (`{slug}`, `{id}`, etc.) are extracted into a `$params` array t
 |--------|----------|-------------|
 | `view` | Yes | View file path, no `.php`. Supports `{path}`, `{file}`, `{slug}` placeholders |
 | `check_setting` | No | Setting name — route only serves if setting is truthy |
-| `min_permission` | No | Integer permission level required (uses `SessionControl::check_permission()`) |
+| `min_permission` | No | Minimum permission level required (uses `SessionControl::check_permission()`). **See the ladder below — note `0` requires login; *omit* the key for a truly public page.** |
 | `valid_page` | No | Set `false` to exclude from page statistics (default: `true`) |
+
+#### Permission levels and the `min_permission => 0` gotcha
+
+The integer passed to `min_permission` is matched against the session's permission level:
+
+| Level | Who |
+|-------|-----|
+| `0`   | Any logged-in user (no rank requirement) |
+| `1`–`4` | Member tiers |
+| `5` / `7` / `9` | Admin tiers (5 = basic admin) |
+| `10`  | Superadmin / full system admin |
+
+**The counterintuitive part — `0` is not "public":**
+
+- **`'min_permission' => 0'` = "must be logged in, any rank."** The router gates on
+  `isset($config['min_permission'])`, and `isset` is **true even when the value is `0`**.
+  `check_permission()` then redirects any not-logged-in visitor to `/login` *before* it ever
+  compares the level — so a `0` floor still forces a login.
+- **`'min_permission' => 5'` = "logged in **and** admin."**
+- **A truly public page omits the key entirely.** With no `min_permission`, `isset` is false
+  and no check runs.
+
+If you misread `0` as "open" you get the *safe* failure — the page demands a login rather than
+exposing itself — but it is still wrong. Use `0` for "any member," omit the key for "anyone."
 
 ### Custom Routes
 

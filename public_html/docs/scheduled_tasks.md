@@ -87,6 +87,12 @@ class MyTaskName implements ScheduledTaskInterface {
 }
 ```
 
+**Sending email from a task.** For digest/notification tasks, send through `EmailSender` — the
+one-call helper is `EmailSender::sendTemplate($templateName, $to, $values)`, or build an
+`EmailMessage::fromTemplate(...)` and call `$sender->send($message)` for more control. See the
+[Email System → Development Patterns](email_system.md#development-patterns) for the full API; do
+not hand-roll `mail()` or PHPMailer calls. `tasks/WeeklyEventsDigest.php` is the worked example.
+
 #### Self-deactivating tasks
 
 A task can ask the runner to flip its `sct_is_active` to `false` after the

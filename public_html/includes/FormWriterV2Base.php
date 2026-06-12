@@ -595,6 +595,22 @@ abstract class FormWriterV2Base {
 
         $prefix = $matches[1];
 
+        // Prefer a model explicitly passed to the form (getFormWriter(..., ['model' => $obj])).
+        // getModelPrefixMap() only globs core data/*_class.php, so plugin model fields would
+        // otherwise never resolve to a model and pick up no auto-detected validation. If the
+        // passed model owns this field by prefix, use it directly — this is what a developer
+        // who passes the model reasonably expects.
+        if (isset($this->options['model']) && is_object($this->options['model'])) {
+            $passed_class = get_class($this->options['model']);
+            if (isset($passed_class::$prefix) && $passed_class::$prefix === $prefix
+                && isset($passed_class::$field_specifications[$field_name])) {
+                if (!empty($this->options['debug'])) {
+                    error_log("[FormWriterV2 DEBUG] detectModelFromFieldName($field_name): ✓ resolved via passed model $passed_class");
+                }
+                return $passed_class;
+            }
+        }
+
         // Get prefix map (cached for performance)
         $prefix_map = $this->getModelPrefixMap();
 
