@@ -32,22 +32,12 @@ rows that throw, so owner-scoping is non-breaking.
 two-arg logic signatures → `array $input`, bodies + call sites), 2.2 (`get_setting` → `''`),
 2.3 (permission-ladder table + `min_permission => 0` note in routing.md), 3.1-docs (slug rule
 restated to what `syncMenus()` enforces), 3.2 (CSRF reframed opt-in), 4.3 (`LogicResult::success`),
-4.4 (`get_permission_level`), 4.6 (inert manifest keys noted). 3.4-docs (per-record
-authorization section in api.md + Data Models note in the plugin guide). Gaps **G1-G6** all
+4.4 (`get_permission_level`), 4.6 (inert manifest keys noted). Gaps **G1-G6** all
 written (Multi-class authoring, `$prefix`, email-send link from scheduled-tasks, SessionControl
 method table, two admin surfaces, plugin asset cache-busting). The Data Models field-spec example
 dialect (`'type'=>'int'`/`'length'`) was corrected to the real dialect while adding G2.
 
 **Code fixes — done:**
-- **3.4 (the centerpiece):** `authenticate_read`/`authenticate_write` added to 22 core models.
-  Owner-or-staff read on the private/PII models (Address, PhoneNumber, Email, EmailRecipient,
-  MailingListRegistrant, OrderItem, SurveyAnswer, ApiKey, EventRegistrant, WaitingList) and
-  owner-or-staff read+write on the four that had neither (ActivationCode, ConversationParticipant,
-  Notification, NotificationPreference). Admin-only read+write on the seven audit/log tables
-  (RequestLog, EventLog, GeneralError, FormError, ChangeTracking, SessionAnalytic, VisitorEvent),
-  and admin-only read on Setting (secret-bearing). Public-content models (Post, Page, PageContent,
-  ProductDetail, ContentVersion, Comment, Reaction) were **intentionally left open** — owner-scoping
-  them would hide other users' published content from API reads. Plugin models remain unexposed.
 - **3.3:** `FormWriterV2Base::detectModelFromFieldName()` now resolves against the model passed to
   `getFormWriter(['model' => $obj])` before the core-only prefix glob, so plugin form fields get
   auto-detected client-side validation. Server-side validation was always unaffected.
@@ -55,11 +45,9 @@ dialect (`'type'=>'int'`/`'length'`) was corrected to the real dialect while add
   (`inbound_email` link, `iem_inbound_email_messages` table, `EmailSender` not `SystemMailer`).
 
 **Left as maintainer decisions (not executed):**
-- ⏸ **3.4 architecture** — flipping the `SystemBase` default from no-op to owner-or-admin. The
-  per-model fix (the spec's primary recommendation) is done; flipping the *default* is a
-  system-wide behaviour change and stays a maintainer call.
 - ⏸ **3.1 code hygiene** — delete vs. fix-and-wire the dead `PluginHelper::validate()`. Low stakes;
   the docs no longer describe its contradictory rule as enforced, so nothing is broken either way.
+
 **Agent files — done.** The internal "Internal CLAUDE.md" record (`agf_agent_files` id 2) had the
 same `SystemMailer` drift; corrected via the `AgentFile` model (`save()` + `write_to_disk()`, the
 same path the admin editor uses), which regenerated on-disk `CLAUDE.md` and `GEMINI.md`. The
@@ -290,87 +278,16 @@ email class name, the inbound-email plugin link, and the `iem_inbound_email_mess
      auto-detected client-side validation and must declare `validation` inline — and that
      server-side validation still applies regardless.
 
-### 3.4 CRUD API: the intended "act as the user" check is built correctly but implemented on only 4 models
+### 3.4 CRUD API per-record authorization — MOVED to its own spec
 
-- **Intended design (confirmed with maintainer):** an API request should give the API user **the
-  same capabilities as the user account it runs as** — you can act on your own records, not other
-  people's, unless you're staff. This is the deliberate intent. It is *not* meant to be locked
-  default-deny like the joinery_ai surface; it is meant to mirror the acting user's own reach.
-- **The mechanism for that intent exists and works.** Before returning any record, the API passes
-  the acting user's identity into the model:
-  `$auth_data = ['current_user_id' => $api_user->key, 'current_user_permission' => …]`
-  (`api/apiv1.php:411`), then calls `$object->authenticate_read($auth_data)` on read
-  (`apiv1.php:446-447`) and `authenticate_write($auth_data)` on create/update/delete
-  (`apiv1.php:477,508,535`). So every model is *told who is asking* — the plumbing for
-  "act as the user" is fully in place.
-- **The reference implementation is `orders`.** Its check is exactly the intended pattern
-  (`data/orders_class.php`):
-  ```php
-  function authenticate_read($data) {
-      if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
-          if ($data['current_user_permission'] < 5) {        // not staff
-              throw new SystemAuthenticationError('…does not have permission…');
-          }
-      }
-  }
-  ```
-  "If this record isn't yours and you're not an admin, refuse." Use this as the template.
-- **The actual problem: the per-record check is only filled in on four models.** The `SystemBase`
-  default is a literal no-op — `function authenticate_read($data) {}` (`includes/SystemBase.php:1479`),
-  and `authenticate_write` likewise. Only `orders`, `files`, `videos`, and `stripe_invoices`
-  override it. Every other advertised model — `User`, `Message`, `Survey`, `SurveyAnswer`,
-  `Comment`, `Group`, `Post`, … — runs the empty default, so it returns/accepts any row by id for
-  any active key with the right CRUD tier. `GET /api/v1/Message/5` returns another user's private
-  message; `GET /api/v1/User/123` returns another user's PII. So on those models the API user can
-  do **more** than the underlying user could through the website, where page logic scopes access —
-  the opposite of the intent.
-- **Framing (corrected twice over):** This is **not** a broken mechanism and **not** a missing
-  on/off switch. The design is sound and the identity-passing is wired up correctly; the
-  per-model checks that enforce the intent were simply only written on the four models in active
-  use at the time. Reframe: *"intended per-record protection is mostly unimplemented,"* not
-  *"risky design."*
-- **Also corrected:** Plugin models are **NOT** exposed via CRUD. The API calls
-  `discover_model_classes()` with no options (`apiv1.php:271`), so `include_plugins` defaults to
-  `false`. Blast radius is **core models only**; a plugin's `LinkvaultBookmark` is unreachable.
-- **Concrete scope — which models need the check (counted June 2026).** **~41 core models carry a
-  `*_usr_user_id` (user-owned) column; only 4 implement `authenticate_read`** (`files`, `orders`,
-  `stripe_invoices`, `videos`). The remaining **~37 run the empty default.** These are
-  *candidates* — each needs a per-model decision, not a blind copy. (Caveat against the
-  overstatement pattern: this is the user-owned-column list, not a confirmed "37 live holes" —
-  each still needs a reachability + intent check. Models without a `*_usr_user_id` column, and
-  plugin models, are out of scope here.) Suggested triage of the 37:
+> This finding (the CRUD surface handing out any row by id because `authenticate_read`/
+> `authenticate_write` defaulted to no-ops) grew past a single audit item. It is now owned
+> in full by **`specs/api_crud_resource_authorization.md`**, which establishes opt-in resource
+> exposure (`$api_readable`/`$api_writable`), deny-by-default owner-or-staff row scope (flipping
+> the `SystemBase` default), and symmetric read/write field floors shared with the AI surface.
+> The interim per-model hooks added during this audit, and the deferred "flip the default"
+> decision, are both superseded there. See that spec for the current design and status.
 
-  - **Priority 1 — sensitive, owner-scope now (copy `orders`):** `address`, `phone_number`,
-    `conversations`, `conversation_participants`, `emails`, `email_recipients`, `survey_answers`,
-    `notifications`, `notification_preferences`, `mailing_list_registrants`, `order_items`,
-    `reactions`, `comments`.
-  - **Priority 0 — credential/audit tables that probably should NOT be API-readable at all
-    (consider excluding from CRUD, not just owner-scoping):** `api_keys`, `activation_codes`,
-    `login`, `request_logs`, `event_logs`, `general_errors`, `log_form_errors`, `change_tracking`,
-    `session_analytics`, `visitor_events`. (`GET /api/v1/ApiKey/{id}` returning a key row is the
-    sharpest example.)
-  - **Intentionally public / needs a deliberate "open" decision:** `posts`, `pages`,
-    `page_contents`, `events`, `event_registrants`, `event_waiting_lists`, `groups`,
-    `mailing_lists`, `products`/`product_details`, `content_versions`, `recurring_mailer`,
-    `users` (note: `users` exposes PII — public read of the full row is almost certainly wrong;
-    treat as Priority 1 unless deliberately scoped to non-PII fields).
-- **Fix (split):**
-  - *Code (the real fix):* implement `authenticate_read()` / `authenticate_write()` on every core
-    model that holds user-owned or otherwise private data, copying the `orders` pattern, working
-    the Priority-0 and Priority-1 lists above first. This is mechanical and the template exists.
-    Verify each model is actually API-reachable before assuming it's a live hole.
-  - *Architecture (optional safety net, maintainer call):* change the `SystemBase` **default**
-    from a no-op to the orders-style "owner-or-admin" check, so a model is protected the moment it
-    exists and you only override to *open* something up. This makes the safe behavior the default
-    (matching the instinct already applied to the AI surface) instead of relying on every model
-    author to remember the check. Models with no `_usr_user_id` column would need an explicit
-    decision (public, or some other ownership column).
-  - *Docs:* make `authenticate_read()` / `authenticate_write()` first-class in `docs/api.md` and
-    the Plugin Developer Guide's Data Models section — document them as the per-record scoping
-    hook, show the `orders` override as the example, and correct the `docs/api.md:29` line so it
-    says the gate exists only where a model implements it.
-
----
 
 ## Severity 4 — Stale references & smaller gaps
 
@@ -482,7 +399,7 @@ the real work lives. Status reflects verification against current code.
 
 | ID | One-line | Status | Notes |
 |---|---|---|---|
-| **3.4** | CRUD API: the intended "act as the user" per-record check is built and works, but implemented on only **4 of ~41** user-owned core models; the other ~37 run an empty default and hand out any row | **Verified** | Highest-severity. Design sound, identity-passing wired; per-model checks mostly unwritten. Plugin models *not* exposed. Primary fix is **code** — see the Priority-0/Priority-1 model lists in the 3.4 finding (copy `orders`). Optional architecture call on flipping the default — bucket C. Doc tail too. |
+| **3.4** | CRUD API per-record authorization — *moved* to `specs/api_crud_resource_authorization.md` | **Relocated** | Owned in full by the dedicated CRUD-authorization spec (opt-in exposure, deny-by-default row scope, read/write field floors). No longer tracked here. |
 | **3.1** | Docs describe a `profileMenu` slug rule (`<plugin-name>-` prefix) that is self-contradictory for underscore names AND never enforced — the validator (`PluginHelper::validate()`) is dead code | **Verified — milder than drafted** | Primary fix is **docs** (rule isn't enforced; live `syncMenus()` is looser). Code tail: delete or fix the dead validator. Not a blocking bug — `dns_filtering` works today. |
 | **3.3** | FormWriter's **client-side** auto-validation globs core `data/` only, so plugin form fields get no in-browser rules; **server-side validation still works**. Passing the model doesn't help (value-fill and validation are wired separately) | **Verified — narrower than drafted** | `FormWriterV2Base.php:638`. Not a data hole. Best fix: let the passed `model` drive validation (recommended), or document the inline-`validation` workaround. |
 
@@ -506,13 +423,11 @@ the real work lives. Status reflects verification against current code.
 | **G5** | Two plugin-admin URL surfaces documented, no guidance on which to use | Missing guidance |
 | **G6** | Plugin asset cache-busting story (`ThemeHelper::asset()` for plugins?) unspecified | Missing doc |
 | **2.3** | Permission ladder undocumented; `min_permission => 0` means "logged in" while *omitting* it means "public" — counterintuitive but **safe** (corrected: not a security slip). Add a levels table + the 0-vs-omit note to `docs/routing.md` | Missing/confusing doc |
-| **3.4** | (doc tail) document `authenticate_read`/`authenticate_write` as the required scoping hook | Missing doc |
 
 ### C. Architecture / design decisions (needs a maintainer call, not just an edit)
 
 | ID | Decision to make | Why it's architectural |
 |---|---|---|
-| **3.4** | Should the `SystemBase` **default** check change from no-op to the orders-style "owner-or-admin" rule, so models are protected unless deliberately opened? | Optional safety net on top of the per-model code fix. Flipping the default is a system-wide behavior change (models without a `_usr_user_id` column need an explicit decision), so it's a design call — but the design itself is sound and the per-model fix can proceed regardless. |
 | **3.1** | Is `PluginHelper::validate()` meant to be live? If yes, fix the underscore contradiction and wire it in; if no, delete it. | Not a live design tension anymore (the validator is dead code, so nothing enforces the contradictory rule today). The only decision is keep-and-fix vs. delete — low stakes. |
 | **3.3** | Recommended fix (let the passed `model` drive validation) is low-risk and mechanical — likely not a real architecture decision. Only the *broader* "scan all plugin `data/`" option carries perf/coupling tradeoffs. | Mostly resolved: the targeted fix avoids the design tension entirely. Listed here only so the broader-scan option isn't chosen by default. |
 | **Process** | The distributable agent template (`default_agents_template.md`) drifted from the internal CLAUDE.md (4.1, 4.2). What keeps them in sync? | A regeneration/sync process question, not a one-time content fix. |
@@ -528,9 +443,8 @@ the real work lives. Status reflects verification against current code.
 
 ## Recommended fix order
 
-1. **3.4 (API scoping)** first — the one remaining finding where the docs could actively lead a
-   developer into a security gap (still needs the API-visibility-gate verification noted above).
-   **3.2 (CSRF) is resolved as a by-design choice** — docs-only tone fix, low priority.
+1. **3.2 (CSRF)** is resolved as a by-design choice — docs-only tone fix, low priority. (CRUD
+   API scoping, formerly 3.4, is now tracked in `specs/api_crud_resource_authorization.md`.)
 2. **1.1 / 1.2 / 1.3 / 4.3 / 4.4** — broken code in docs; cheap, mechanical, high-frequency.
 3. **2.1 (logic signature)** — highest-volume staleness; rewrite examples wholesale.
 4. **3.1 (slug rule)** and **3.3 (plugin FormWriter validation)** — code fixes with doc follow-up.
