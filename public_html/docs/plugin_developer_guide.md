@@ -96,7 +96,7 @@ When developing plugins, the following core files are guaranteed to be available
 $settings = Globalvars::get_instance();
 $theme = $settings->get_setting('theme_template');
 
-$session = new Session($settings);
+$session = SessionControl::get_instance();
 if (!$session->is_logged_in()) {
     // Handle not logged in
 }
@@ -115,6 +115,25 @@ require_once(__DIR__ . '/../../includes/Globalvars.php');
 2. **Consistency** - Same pattern everywhere
 3. **Performance** - Files only loaded once
 4. **Maintainability** - Easier to refactor
+
+#### Common SessionControl methods
+
+`SessionControl::get_instance()` is the only session entry point. The methods a plugin most
+often needs:
+
+| Method | Returns | Use |
+|--------|---------|-----|
+| `is_logged_in()` | bool | Gate member-only behaviour |
+| `get_user_id()` | int user id (0/none if not logged in) | Scope queries to the current member — essential for any member-owned plugin data |
+| `get_permission()` | int permission level | Compare against the [permission ladder](#) (0 any member, 5+ admin) |
+| `check_permission($level)` | void (redirects/401s if unauthorized) | First line of an admin page — redirects to `/login` if not logged in, throws 401 if under-ranked |
+| `get_timezone($default = NULL)` | IANA tz string | Pass to `LibraryFunctions::convert_time()` for display |
+| `set_return()` / `get_return()` | void / url | Remember where to send the user back after login |
+| `get_shopping_cart()` | cart object | Commerce flows |
+
+Read `includes/SessionControl.php` for the full surface; the above is what most plugin code
+touches. Note `get_user_id()` is the member-scoping primitive — there is no `$_SESSION` access
+in plugin code.
 
 ### Plugin Naming
 
@@ -229,6 +248,14 @@ Routes outside the namespace are dropped with a logged warning.
 }
 ```
 
+> **Informational-only keys.** `author`, `license`, `homepage`, `tags`, and `provides` are
+> documentation metadata — the system reads the manifest but does **not** act on these keys.
+> In particular, `provides` does **not** create any dependency, capability, or routing effect;
+> declaring `provides: ["widget-support"]` does not make another plugin able to `depends` on it.
+> The keys the loader actually consumes are `name`, `version`, `description`, `requires`,
+> `depends`/`conflicts`, `settings`, `adminMenu`, `profileMenu`, `provisioners`,
+> `receives_upgrades`, `included_in_publish`, and `deprecated`/`superseded_by`.
+
 #### Deprecation Fields
 
 Plugins (and themes) support two optional deprecation fields:
@@ -262,25 +289,100 @@ Plugins provide data models using the SystemBase pattern:
 ```php
 // plugins/my-plugin/data/my_data_class.php
 class MyData extends SystemBase {
-    public static $prefix = 'mdt';
+    public static $prefix = 'mdt';                 // REQUIRED — see below
     public static $tablename = 'mdt_my_data';
     public static $pkey_column = 'mdt_id';
 
-    public static $field_specifications = [
-        'mdt_id' => ['required' => true, 'type' => 'int'],
-        'mdt_name' => ['required' => true, 'type' => 'varchar', 'length' => 255],
-        'mdt_description' => ['type' => 'text'],
-        'mdt_created' => ['type' => 'timestamp', 'default' => 'now()']
-    ];
+    public static $field_specifications = array(
+        'mdt_id'          => array('type' => 'int8', 'is_nullable' => false, 'serial' => true),
+        'mdt_usr_user_id' => array('type' => 'int8', 'is_nullable' => true),
+        'mdt_name'        => array('type' => 'varchar(255)', 'is_nullable' => false, 'required' => true),
+        'mdt_description' => array('type' => 'text', 'is_nullable' => true),
+        'mdt_created'     => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()'),
+    );
+
+    // REQUIRED on every model (may be empty): cleanup actions for permanent_delete().
+    public static $permanent_delete_actions = array();
 
     // Define foreign key behavior (optional - defaults to cascade)
-    protected static $foreign_key_actions = [
-        'mdt_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
-    ];
+    protected static $foreign_key_actions = array(
+        'mdt_usr_user_id' => array('action' => 'set_value', 'value' => User::USER_DELETED)
+    );
 }
 ```
 
+**Schema dialect — get this right.** Column types are SQL type strings: `int8` (with
+`'serial' => true` for an auto-increment primary key), `varchar(255)`, `text`, `timestamp(6)`,
+`numeric(10,2)`. Use `'is_nullable' => false` (a **schema** constraint) to make a column
+`NOT NULL`; `'required' => true` is a separate **validation** key checked on save. There is no
+`'length'` key and no bare `'int'` / `'varchar'` — those produce no usable column. (The same
+correct dialect appears under [Table Creation](#table-creation-automatic).)
+
+**The `$prefix` property is required.** Every column in the table is named `{$prefix}_{field}`,
+and the constructor throws `SystemBaseException('This object has no prefix.')` if it is unset
+(`includes/SystemBase.php:59`). It is also the key FormWriter and the REST API use to map a
+field back to its model. `$tablename` and `$pkey_column` are likewise required; a Multi
+collection class additionally needs `$model_class` (see [Writing a Multi (collection) class](#writing-a-multi-collection-class) below).
+
+**Per-record REST API scope.** If your model holds user-owned or otherwise private data and you
+expose it (core models are exposed to the CRUD API; plugin models are not), implement
+`authenticate_read($data)` / `authenticate_write($data)` to scope access to the acting user —
+copy the owner-or-staff pattern from `data/orders_class.php`. The defaults are no-ops (open). See
+[REST API → Per-record authorization](api.md#per-record-authorization).
+
 **Deletion Behavior**: For complete documentation on defining foreign key actions, cascading deletes, soft-delete cascading patterns, and undelete strategies, see the [Deletion System Documentation](deletion_system.md).
+
+#### Writing a Multi (collection) class
+
+Every single-row model has a companion **Multi** class (collection) in the same file, extending
+`SystemMultiBase`. It declares `$model_class` (the single-row class name) and implements
+`getMultiResults()`, which translates caller-supplied option keys into SQL filters:
+
+```php
+class MultiMyData extends SystemMultiBase {
+    public static $model_class = 'MyData';   // REQUIRED — the single-row class
+
+    protected function getMultiResults($only_count = false, $debug = false) {
+        $filters = array();
+
+        // 1. Parameterized value (safe binding) — produces  mdt_usr_user_id = ?
+        if (isset($this->options['user_id'])) {
+            $filters['mdt_usr_user_id'] = array($this->options['user_id'], PDO::PARAM_INT);
+        }
+
+        // 2. Literal condition appended as-is — produces  mdt_delete_time IS NULL
+        if (isset($this->options['active'])) {
+            $filters['mdt_delete_time'] = 'IS NULL';
+        }
+
+        // 3. ILIKE / raw fragment — produces  mdt_name ILIKE '%term%'
+        if (isset($this->options['name_like'])) {
+            $filters['mdt_name'] = "ILIKE '%" . $this->options['name_like'] . "%'";
+        }
+
+        return $this->_get_resultsv2(static::$model_class::$tablename, $filters, $this->order_by, $only_count, $debug);
+    }
+}
+```
+
+Construct and use it:
+
+```php
+$rows = new MultiMyData(
+    array('user_id' => $uid, 'active' => true),   // $options → filter keys above
+    array('mdt_created' => 'DESC'),               // $order_by
+    20, 0                                          // $limit, $offset
+);
+$total = $rows->count_all();   // count ignoring limit/offset
+$rows->load();                 // populate
+foreach ($rows as $row) { /* $row is a MyData */ }
+```
+
+The constructor signature is
+`__construct($options = array(), $order_by = array(), $limit = NULL, $offset = NULL, $operation = 'AND', $write_lock = FALSE)`.
+The **option keys are whatever `getMultiResults()` reads** (here `user_id`, `active`, `name_like`)
+— they are deliberately *not* the raw column names. Always read a Multi class's
+`getMultiResults()` to learn its accepted keys.
 
 **AI Auto-Discovery**: To make a plugin model queryable by joinery_ai recipes, declare the three `$ai_*` static properties (`$ai_readable`, `$ai_description`, `$ai_excluded_fields`) on the class. Default-deny: omit them and the model stays invisible to AI tools. See the [Joinery AI Plugin Documentation](/plugins/joinery_ai/docs/overview.md) for the property contract and the auto-block regex.
 
@@ -366,6 +468,41 @@ $page->admin_footer();
 ?>
 ```
 
+**Two admin surfaces — which to use.** A plugin can render admin pages two ways, and both
+resolve automatically:
+
+| Surface | File | Gives you |
+|---------|------|-----------|
+| **AdminPage route** (recommended) | `plugins/{plugin}/admin/{page}.php` → `/plugins/{plugin}/admin/{page}` | The full admin shell: an `AdminPage` object, `admin_header()`/`admin_footer()` chrome, `$page->getFormWriter()`, sidebar highlight. Mirrors core `/adm/` + `/adm/logic/`. |
+| **View auto-discovery** | `plugins/{plugin}/views/admin/{page}.php` → `/admin/{plugin}/{page}` | A plain view in the plugin's URL namespace, no AdminPage chrome. |
+
+Use the **AdminPage route** (`plugins/{plugin}/admin/`) for real admin tooling — list tables,
+edit forms, anything that should look and behave like the rest of the admin. Pair it with a
+`plugins/{plugin}/admin/logic/{page}_logic.php` logic file, exactly as core admin pages pair
+`/adm/` with `/adm/logic/`. Reach for `views/admin/*` only for a simple custom panel that
+genuinely doesn't want the admin chrome.
+
+#### Referencing plugin assets (CSS/JS) with cache-busting
+
+A plugin's own assets live in `plugins/{plugin}/assets/` and are served by the built-in static
+route `/plugins/{plugin}/assets/*` (the route enforces that the plugin is active and refuses to
+serve `.php`). There is **no** `PluginHelper::asset()` helper — cache-busting is done inline with
+`filemtime()`, the same mechanism themes use. Define a tiny closure in your view and reference
+assets through it:
+
+```php
+$asset = function ($rel) {
+    $path = PathHelper::getIncludePath('plugins/my-plugin/assets/' . $rel);
+    return '/plugins/my-plugin/assets/' . $rel . '?v=' . (is_file($path) ? filemtime($path) : '1');
+};
+echo '<link rel="stylesheet" href="' . htmlspecialchars($asset('css/my-plugin.css')) . '">';
+echo '<script defer src="' . htmlspecialchars($asset('js/my-plugin.js')) . '"></script>';
+```
+
+The `?v={filemtime}` query changes whenever the file changes, so browsers refetch on every edit
+and otherwise cache. Always reference your assets by their namespaced `/plugins/{plugin}/assets/…`
+URL — never a relative path.
+
 ### Plugin Menus (Declarative)
 
 Plugins declare menu contributions in `plugin.json` under two keys:
@@ -384,9 +521,16 @@ Both keys are synced into the same `amu_admin_menus` table, distinguished by an 
 
 **Slug rules (both locations):**
 
-- Must match `[a-z0-9-]`, max 32 chars, unique within the plugin.
-- Must start with `<plugin-name>-` (e.g. `mybooks-shelf`). For `adminMenu`, this is recommended; for `profileMenu`, it is required by validation.
-- Must not start with `core-` — that prefix is reserved for core menu rows seeded by migrations.
+- **Enforced at menu sync** (`PluginManager::syncMenus()`): each item must supply a
+  `slug`, `title`, and `order`; the `slug` must be a non-empty string; and the `slug` must
+  **not** start with `core-` (that prefix is reserved for core menu rows seeded by
+  migrations). These are the only rules the live sync checks.
+- **Recommended convention** (not validated): prefix the slug with your plugin name
+  (e.g. `mybooks-shelf`), keep it to `[a-z0-9-]`, ≤ 32 chars, and unique within the plugin.
+  This is what keeps your slugs from colliding with core or other plugins — but it is a
+  convention, not an enforced requirement. A bare slug like `shelf` will sync fine, and a
+  hyphenated plugin name is the right prefix for an underscore-named plugin directory
+  (e.g. `inbound_email` → `inbound-email-…`).
 
 #### `adminMenu`
 
@@ -534,7 +678,7 @@ Validation failures throw. On `activate()` the plugin does not activate; on `syn
 
 **Orphan rows:** Settings dropped from the manifest in a later version are **not** automatically deleted. Use an SQL migration if you need the row gone. Orphan setting rows are otherwise harmless — nothing reads them.
 
-**Blank defaults:** `default: ""` creates a row with an empty value. Use this for things that have no meaningful factory default but should still be present (API keys, SMTP hosts, custom CSS) so the row exists for `settings_form.php` to render and for admins to fill in. Omitting the declaration entirely means no row in `stg_settings`, even if `settings_form.php` references the name — the form-page save logic auto-creates missing rows on first submit, but until then `get_setting()` returns `null` and the field renders empty.
+**Blank defaults:** `default: ""` creates a row with an empty value. Use this for things that have no meaningful factory default but should still be present (API keys, SMTP hosts, custom CSS) so the row exists for `settings_form.php` to render and for admins to fill in. Omitting the declaration entirely means no row in `stg_settings`, even if `settings_form.php` references the name — the form-page save logic auto-creates missing rows on first submit, but until then `get_setting()` returns `''` (an empty string, and logs a notice — pass the `$fail_silently` flag to suppress it) and the field renders empty.
 
 **Uninstall:** On uninstall, PluginManager deletes rows matching the names in the current manifest. Settings declared in an earlier version but dropped from the current manifest are left in place.
 

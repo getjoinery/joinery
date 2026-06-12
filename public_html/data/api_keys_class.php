@@ -11,6 +11,15 @@ require_once(PathHelper::getIncludePath('includes/Validator.php'));
 class ApiKeyException extends SystemBaseException {}
 
 class ApiKey extends SystemBase {	public static $prefix = 'apk';
+
+	// REST API per-record read scope: only the owner (or staff, permission >= 5) may read this row via the API.
+	function authenticate_read($data) {
+		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
+			if ($data['current_user_permission'] < 5) {
+				throw new SystemAuthenticationError('Current user does not have permission to view this entry in '. static::$tablename);
+			}
+		}
+	}
 	public static $tablename = 'apk_api_keys';
 	public static $pkey_column = 'apk_api_key_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value

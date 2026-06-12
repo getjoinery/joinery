@@ -25,7 +25,7 @@ There is one auth story with **two key types**, distinguished by `apk_type` in t
 | Provisioned by | An administrator via **Admin > API Keys** | The user, via `POST /api/v1/auth/login` |
 | Identity | The user account the admin attached | The user who logged in |
 | Secret hashing | Slow hash (phpass) — appropriate for admin-chosen secrets | SHA-256 — the secret is a random 256-bit value, so a slow KDF buys nothing and would cost on every request |
-| Permission | Chosen by the admin (1–4) | Always 4; object-level authorization is the effective gate |
+| Permission | Chosen by the admin (1–4) | Always 4; per-record authorization (where the model implements it — see [Per-record authorization](#per-record-authorization)) is the effective gate |
 | Expiry | Optional, set by the admin | Always set, from the `api_session_key_lifetime_days` setting (default 365) |
 | Revocation | Admin API Keys page | `auth/logout`, the profile **App Sessions** page, the admin API Keys page (type filter), and automatically on password change |
 | Management API | Allowed (with superadmin owner) | **Never** |
@@ -109,6 +109,49 @@ The `api_min_client_versions` setting holds a JSON map of `client_app` → minim
 **Note:** Permission level 2 grants write access but blocks read operations (GET requests).
 
 ## CRUD Endpoints
+
+### Per-record authorization
+
+The `apk_permission` gradient above (1–4) decides which **HTTP verbs** a key may use
+(read / create-update / delete). It does **not** decide **which rows** the key may touch.
+That second gate is per-model and per-record: before returning or mutating a row, the API
+calls `authenticate_read($data)` (on GET) or `authenticate_write($data)` (on POST/PUT/DELETE)
+on the model, passing the acting user's identity:
+
+```php
+$data = ['current_user_id' => <acting user id>, 'current_user_permission' => <their level>];
+```
+
+A model implements one of these methods to scope access to that user's own records. The
+canonical pattern (from `data/orders_class.php`) is **owner-or-staff**:
+
+```php
+function authenticate_read($data) {
+    if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
+        if ($data['current_user_permission'] < 5) {   // not staff
+            throw new SystemAuthenticationError('… does not have permission …');
+        }
+    }
+}
+```
+
+Throwing from this method is the enforcement mechanism, and it composes cleanly with both
+read shapes: a **single** `GET /{Class}/{id}` of someone else's row returns a `400`
+TransactionError, while a **collection** `GET /{Class}s` simply **skips** rows the caller
+isn't authorized to see. `authenticate_write` works the same way for create/update/delete.
+
+**The default is open.** The `SystemBase` defaults are no-ops — a model with no override
+returns or accepts any row by id for any key with the right verb permission. So per-record
+scoping exists **only on models that implement it**. When you author a model that holds
+user-owned or otherwise private data, implement `authenticate_read`/`authenticate_write`
+(copy the `orders` pattern). For audit/log/credential tables, gate on permission alone
+(`if ($data['current_user_permission'] < 5) throw …`). Public content (posts, pages,
+products) intentionally leaves read open.
+
+> **Plugin models are not exposed via CRUD.** The CRUD surface enumerates core
+> `data/*_class.php` models only — a plugin's own data classes are unreachable through
+> `/api/v1/{Class}`. Plugins expose behaviour through [Action Endpoints](#action-endpoints)
+> instead.
 
 ### Read Single Object
 
@@ -221,7 +264,10 @@ Sets the delete timestamp on the object. Does not permanently remove data.
 
 ## Available Models
 
-Any SystemBase model class is available via the API. Class names are case-sensitive and use PascalCase.
+Any **core** SystemBase model class is available via the API (plugin models are not — see
+[Per-record authorization](#per-record-authorization)). Class names are case-sensitive and use
+PascalCase. Which **rows** a key may read or change within a model is governed by that model's
+`authenticate_read`/`authenticate_write` — see [Per-record authorization](#per-record-authorization).
 
 Common models include: `User`, `Product`, `Event`, `EventRegistrant`, `EventSession`, `Order`, `OrderItem`, `Group`, `GroupMember`, `Post`, `Page`, `Email`, `Message`, `File`, `CouponCode`, `SubscriptionTier`, `Location`, `Video`, `Comment`, `Survey`, `SurveyAnswer`, `Question`, `QuestionOption`, `MailingList`, `MailingListRegistrant`.
 

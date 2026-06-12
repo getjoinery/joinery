@@ -242,7 +242,8 @@ class Example extends SystemBase
     // - 'unique' => true       - Field must be unique across table
     // - 'unique_with' => []    - Multi-field unique constraint
     // These are checked during save() before database operations
-    // For form validation, use FormWriter's set_validate() method with rules defined separately
+    // For client-side form validation, add a 'validation' => array(...) entry to the
+    // field spec (or declare it inline on the FormWriter input); end_form() emits the JS.
 
 
     // REQUIRED: Actions to take when permanently deleting records

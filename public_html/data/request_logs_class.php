@@ -7,6 +7,19 @@ class RequestLogException extends SystemBaseException {}
 
 class RequestLog extends SystemBase {
 	public static $prefix = 'rql';
+
+	// REST API: audit/log table — admin-only (permission >= 5) read and write via the API; not user-scoped content.
+	function authenticate_read($data) {
+		if ($data['current_user_permission'] < 5) {
+			throw new SystemAuthenticationError('Current user does not have permission to view this entry in '. static::$tablename);
+		}
+	}
+
+	function authenticate_write($data) {
+		if ($data['current_user_permission'] < 5) {
+			throw new SystemAuthenticationError('Current user does not have permission to edit this entry in '. static::$tablename);
+		}
+	}
 	public static $tablename = 'rql_request_logs';
 	public static $pkey_column = 'rql_request_log_id';
 	public static $permanent_delete_actions = array();

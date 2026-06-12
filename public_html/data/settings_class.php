@@ -11,6 +11,13 @@ require_once(PathHelper::getIncludePath('includes/Validator.php'));
 class SettingException extends SystemBaseException {}
 
 class Setting extends SystemBase {	public static $prefix = 'stg';
+
+	// REST API: settings may hold sensitive config/secrets — admin-only (permission >= 5) read via the API.
+	function authenticate_read($data) {
+		if ($data['current_user_permission'] < 5) {
+			throw new SystemAuthenticationError('Current user does not have permission to view this entry in '. static::$tablename);
+		}
+	}
 	public static $tablename = 'stg_settings';
 	public static $pkey_column = 'stg_setting_id';
 

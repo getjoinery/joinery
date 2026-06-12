@@ -13,6 +13,15 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
 class WaitingListException extends SystemBaseException {}
 
 class WaitingList extends SystemBase {	public static $prefix = 'ewl';
+
+	// REST API per-record read scope: only the owner (or staff, permission >= 5) may read this row via the API.
+	function authenticate_read($data) {
+		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
+			if ($data['current_user_permission'] < 5) {
+				throw new SystemAuthenticationError('Current user does not have permission to view this entry in '. static::$tablename);
+			}
+		}
+	}
 	public static $tablename = 'ewl_waiting_lists';
 	public static $pkey_column = 'ewl_waiting_list_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value

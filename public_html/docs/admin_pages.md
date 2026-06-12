@@ -60,7 +60,7 @@ Logic files always live in `/adm/logic/` (no subdirectories). Plugin admin pages
 // defensive consistency with the rest of the codebase.
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_page_logic($get_vars, $post_vars) {
+function admin_page_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
     require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
     require_once(PathHelper::getIncludePath('includes/Pager.php'));
@@ -79,17 +79,17 @@ function admin_page_logic($get_vars, $post_vars) {
     $page_vars['session'] = $session;
 
     // Process actions BEFORE loading display data.
-    if (isset($post_vars['action']) || isset($get_vars['action'])) {
-        $action = $post_vars['action'] ?? $get_vars['action'] ?? null;
+    if (isset($input['action'])) {
+        $action = $input['action'] ?? null;
         switch ($action) {
             case 'delete':
-                $item = new Item($get_vars['item_id'], TRUE);
+                $item = new Item($input['item_id'], TRUE);
                 $item->soft_delete();
                 return LogicResult::redirect('/admin/admin_items');
 
             case 'save':
-                $item = new Item($post_vars['item_id'] ?? NULL);
-                $item->set('field_name', $post_vars['field_name']);
+                $item = new Item($input['item_id'] ?? NULL);
+                $item->set('field_name', $input['field_name']);
                 $item->prepare();
                 $item->save();
                 return LogicResult::redirect('/admin/admin_item?item_id=' . $item->key);
@@ -142,7 +142,7 @@ require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/Pager.php'));
 
-$page_vars = process_logic(admin_page_logic($_GET, $_POST));
+$page_vars = process_logic(admin_page_logic(array_merge($_GET, $_POST)));
 
 $session = $page_vars['session'];
 $settings = $page_vars['settings'];
@@ -316,7 +316,7 @@ See [FormWriter — Edit Forms](formwriter.md#edit-forms-with-edit_primary_key_v
 // View — wrap in begin_box / end_box so the form gets the standard card chrome
 $page->begin_box(array('title' => 'Edit User'));
 
-$formwriter = $page->getFormWriter('form1', 'v2', array('model' => $user));
+$formwriter = $page->getFormWriter('form1', array('model' => $user));
 $formwriter->begin_form();
 
 // Fields prefixed with the model's column prefix (e.g. usr_) pick up
@@ -620,7 +620,7 @@ $numrecords = $users->count();
 ### FormWriter
 
 ```php
-$formwriter = $page->getFormWriter('form1', 'v2', array('model' => $object));
+$formwriter = $page->getFormWriter('form1', array('model' => $object));
 $formwriter->begin_form();
 $formwriter->textinput('field_name', 'Label', array(
     'placeholder' => 'Enter value',
@@ -643,7 +643,7 @@ The view isn't wrapping the logic call with `process_logic()`.
 $page_vars = admin_page_logic($_GET, $_POST);
 
 // ✅
-$page_vars = process_logic(admin_page_logic($_GET, $_POST));
+$page_vars = process_logic(admin_page_logic(array_merge($_GET, $_POST)));
 ```
 
 ### "Undefined variable" in view

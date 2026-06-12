@@ -76,8 +76,8 @@ class LogicResult {
 Used when the logic prepares data for a view to render:
 
 ```php
-function product_logic($get_vars, $post_vars) {
-    $product = new Product($get_vars['id'], TRUE);
+function product_logic(array $input): LogicResult {
+    $product = new Product($input['id'], TRUE);
 
     $page_vars = array();
     $page_vars['product'] = $product;
@@ -91,7 +91,7 @@ function product_logic($get_vars, $post_vars) {
 Used when the logic needs to redirect to another page:
 
 ```php
-function logout_logic($get_vars, $post_vars) {
+function logout_logic(array $input): LogicResult {
     $session = SessionControl::get_instance();
     $session->log_out();
 
@@ -103,7 +103,7 @@ function logout_logic($get_vars, $post_vars) {
 Used when an error occurs that should be displayed to the user:
 
 ```php
-function secure_page_logic($get_vars, $post_vars) {
+function secure_page_logic(array $input): LogicResult {
     $session = SessionControl::get_instance();
 
     if (!$session->is_logged_in()) {
@@ -121,7 +121,7 @@ Views should always use `process_logic()` to call logic functions. This handles 
 
 ```php
 // ✅ CORRECT - Always use process_logic()
-$page_vars = process_logic(product_logic($_GET, $_POST));
+$page_vars = process_logic(product_logic(array_merge($_GET, $_POST)));
 $product = $page_vars['product'];
 ```
 
@@ -135,7 +135,7 @@ $product = $page_vars['product'];
 
 ```php
 // ❌ WRONG - Don't manually handle LogicResult in views
-$result = product_logic($_GET, $_POST);
+$result = product_logic(array_merge($_GET, $_POST));
 if ($result instanceof LogicResult) {
     if ($result->redirect) {
         LibraryFunctions::redirect($result->redirect);
@@ -145,7 +145,7 @@ if ($result instanceof LogicResult) {
 }
 
 // ✅ CORRECT - One line
-$page_vars = process_logic(product_logic($_GET, $_POST));
+$page_vars = process_logic(product_logic(array_merge($_GET, $_POST)));
 ```
 
 ## Common Patterns
@@ -153,7 +153,7 @@ $page_vars = process_logic(product_logic($_GET, $_POST));
 ### Feature Toggle Pattern
 
 ```php
-function feature_logic($get_vars, $post_vars) {
+function feature_logic(array $input): LogicResult {
     $settings = Globalvars::get_instance();
 
     if (!$settings->get_setting('feature_active')) {
@@ -168,14 +168,14 @@ function feature_logic($get_vars, $post_vars) {
 ### Permission Check Pattern
 
 ```php
-function admin_page_logic($get_vars, $post_vars) {
+function admin_page_logic(array $input): LogicResult {
     $session = SessionControl::get_instance();
 
     if (!$session->is_logged_in()) {
         return LogicResult::redirect('/login');
     }
 
-    if ($session->get_permission_level() < 5) {
+    if ($session->get_permission() < 5) {
         return LogicResult::error('You do not have permission to access this page');
     }
 
@@ -187,11 +187,11 @@ function admin_page_logic($get_vars, $post_vars) {
 ### Form Processing Pattern
 
 ```php
-function form_logic($get_vars, $post_vars) {
-    if ($post_vars) {
+function form_logic(array $input): LogicResult {
+    if (LibraryFunctions::isFormSubmission()) {
         // Process form
         $user = new User(NULL);
-        $user->set('usr_name', $post_vars['name']);
+        $user->set('usr_name', $input['name']);
         $user->save();
 
         // Redirect after POST
@@ -208,17 +208,17 @@ function form_logic($get_vars, $post_vars) {
 When editing existing records with FormWriterV2, check `edit_primary_key_value` from POST first:
 
 ```php
-function admin_item_edit_logic($get_vars, $post_vars) {
+function admin_item_edit_logic(array $input): LogicResult {
     // CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
-    if (isset($post_vars['edit_primary_key_value'])) {
-        $item = new Item($post_vars['edit_primary_key_value'], TRUE);
-    } elseif (isset($get_vars['itm_item_id'])) {
-        $item = new Item($get_vars['itm_item_id'], TRUE);
+    if (isset($input['edit_primary_key_value'])) {
+        $item = new Item($input['edit_primary_key_value'], TRUE);
+    } elseif (isset($input['itm_item_id'])) {
+        $item = new Item($input['itm_item_id'], TRUE);
     } else {
         $item = new Item(NULL);
     }
 
-    if ($post_vars) {
+    if (LibraryFunctions::isFormSubmission()) {
         // Process form...
         $item->save();
         return LogicResult::redirect('/admin/admin_item?itm_item_id=' . $item->key);
@@ -295,15 +295,15 @@ automatically. See also [Admin Pages](admin_pages.md) and [Routing](routing.md#t
 When calling code that might throw exceptions (e.g., Stripe, external APIs), catch them and return `LogicResult::error()`:
 
 ```php
-function checkout_logic($get_vars, $post_vars) {
-    if ($post_vars) {
+function checkout_logic(array $input): LogicResult {
+    if (LibraryFunctions::isFormSubmission()) {
         try {
             $cart = $session->get_shopping_cart();
-            $cart->process_payment($post_vars);
+            $cart->process_payment($input);
             return LogicResult::redirect('/order-confirmation');
 
         } catch (Exception $e) {
-            return LogicResult::error($e->getMessage(), $post_vars);
+            return LogicResult::error($e->getMessage(), $input);
         }
     }
 
@@ -314,12 +314,12 @@ function checkout_logic($get_vars, $post_vars) {
 ### Missing/Invalid Parameter Pattern
 
 ```php
-function event_logic($get_vars, $post_vars) {
-    if (empty($get_vars['event_id'])) {
+function event_logic(array $input): LogicResult {
+    if (empty($input['event_id'])) {
         return LogicResult::error('Event ID is required');
     }
 
-    $event = new Event($get_vars['event_id'], TRUE);
+    $event = new Event($input['event_id'], TRUE);
     if (!$event->get('evt_id')) {
         return LogicResult::error('Event not found');
     }
@@ -413,7 +413,7 @@ return LogicResult::render($page_vars);
 
 ```php
 // This works whether the logic returns LogicResult or a raw array
-$page_vars = process_logic(some_logic($_GET, $_POST));
+$page_vars = process_logic(some_logic(array_merge($_GET, $_POST)));
 ```
 
 ## Testing Logic Files
@@ -424,18 +424,18 @@ Because logic files return `LogicResult` objects and never `exit()` or `throw`, 
 // tests/logic/test_product_logic.php
 function test_product_logic() {
     // Test render case
-    $result = product_logic(['id' => 1], []);
+    $result = product_logic(['id' => 1]);
     assert($result instanceof LogicResult);
     assert($result->redirect === null);
     assert(!empty($result->data['product']));
 
     // Test redirect case
-    $result = product_logic([], ['delete' => 1]);
+    $result = product_logic(['delete' => 1]);
     assert($result instanceof LogicResult);
     assert($result->redirect === '/products');
 
     // Test error case
-    $result = product_logic(['id' => 999999], []);
+    $result = product_logic(['id' => 999999]);
     assert($result instanceof LogicResult);
     assert($result->error !== null);
 }
@@ -447,11 +447,11 @@ Plugins can provide their own logic files following the same patterns:
 
 ```php
 // plugins/bookings/logic/booking_logic.php
-function booking_logic($get_vars, $post_vars) {
+function booking_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('plugins/bookings/data/bookings_class.php'));
 
     // Plugin-specific logic
-    $booking = new Booking($get_vars['id'], TRUE);
+    $booking = new Booking($input['id'], TRUE);
 
     return LogicResult::render(['booking' => $booking]);
 }
@@ -483,7 +483,7 @@ Instead of completely replacing core logic, themes can create focused logic file
 // /theme/phillyzouk/logic/index_logic.php
 <?php
 
-function index_logic($get_vars, $post_vars) {
+function index_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('data/posts_class.php'));
     require_once(PathHelper::getIncludePath('data/events_class.php'));
 
@@ -520,7 +520,7 @@ function index_logic($get_vars, $post_vars) {
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 require_once(PathHelper::getThemeFilePath('index_logic.php', 'logic'));
 
-$page_vars = process_logic(index_logic($_GET, $_POST));
+$page_vars = process_logic(index_logic(array_merge($_GET, $_POST)));
 
 $page = new PublicPage();
 $page->public_header(array(
@@ -552,11 +552,11 @@ $page->public_header(array(
 
 ```php
 // ❌ Causes error
-$page_vars = product_logic($_GET, $_POST);
+$page_vars = product_logic(array_merge($_GET, $_POST));
 echo $page_vars['product'];
 
 // ✅ Works correctly
-$page_vars = process_logic(product_logic($_GET, $_POST));
+$page_vars = process_logic(product_logic(array_merge($_GET, $_POST)));
 echo $page_vars['product'];
 ```
 

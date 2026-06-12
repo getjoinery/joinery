@@ -96,7 +96,7 @@ See `/docs/` for detailed guides on specific subsystems:
 - [Creating Components from Themes](docs/creating_components_from_themes.md) - Theme component extraction
 - [Deletion System](docs/deletion_system.md) - Soft delete and permanent delete patterns
 - [Deploy and Upgrade](docs/deploy_and_upgrade.md) - Deployment and upgrade procedures
-- [Email Forwarding Plugin](plugins/email_forwarding/docs/overview.md) - Self-hosted email forwarding with virtual mailboxes
+- [Inbound Email Plugin](plugins/inbound_email/docs/overview.md) - Self-hosted inbound email: forwarding, local mailboxes, DKIM/SRS
 - [Email System](docs/email_system.md) - Email sending and templates
 - [FormWriter](docs/formwriter.md) - Form generation system
 - [Logic Architecture](docs/logic_architecture.md) - Business logic layer patterns
@@ -245,7 +245,7 @@ $session->check_permission(5); // Requires permission level 5 (admin minimum)
 - `/tests/functional/products/` - Product-related functionality
 - `/tests/integration/` - External services (Mailgun, PHPMailer, routing)
 - `/tests/models/` - Data model CRUD operations and validation
-- **Inbound email testing:** When Mailgun inbound routing is configured, received emails are stored in `iem_inbound_emails` — query that table to inspect messages: `SELECT * FROM iem_inbound_emails WHERE iem_recipient LIKE '%address%' ORDER BY iem_received_time DESC LIMIT 1;`
+- **Inbound email testing:** Received emails are stored in `iem_inbound_email_messages` (regardless of which inbound provider delivered the message). Query with `SELECT * FROM iem_inbound_email_messages WHERE iem_recipient LIKE '%address%' ORDER BY iem_received_time DESC LIMIT 1;` Plain/HTML/raw bodies live in `iem_body_plain` / `iem_body_html` / `iem_raw_message`.
 
 ### Deployment Scripts
 Located in `maintenance_scripts/install_tools/`.
@@ -401,7 +401,7 @@ See **📖 [Plugin Developer Guide](/docs/plugin_developer_guide.md)** for compl
 ## Key Integration Points
 
 **Payment Processing:** `StripeHelper`, `PaypalHelper` classes
-**Email:** `SystemMailer` with template support
+**Email:** `EmailSender` with template support
 **External APIs:** Webhooks in `/ajax/` for Stripe
 **File Management:** Secure upload handling in `/includes/UploadHandler.php`
 

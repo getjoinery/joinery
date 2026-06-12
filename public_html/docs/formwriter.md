@@ -25,7 +25,7 @@ The FormWriter system provides a structured, consistent way to build forms in th
 ### What is FormWriter?
 
 FormWriter is a PHP class system that generates HTML forms with:
-- **Automatic CSRF protection** - Every form gets a security token
+- **CSRF token emission** - Every POST form gets a security token; verification is opt-in (call `validateCSRF()`), not framework-enforced
 - **Consistent styling** - Bootstrap or Tailwind themes
 - **Validation integration** - Works seamlessly with JoineryValidator
 - **Auto-detection of validation** - Automatically applies model validation rules
@@ -53,7 +53,7 @@ All features including visibility rules, custom scripts, CSRF protection, and va
 
 ```php
 // Get FormWriter instance (automatically selects correct theme)
-$formwriter = $page->getFormWriter('contact_form', 'v2');
+$formwriter = $page->getFormWriter('contact_form');
 
 // Start the form
 $formwriter->begin_form();
@@ -118,7 +118,7 @@ FormWriter supports automatic value population:
 $user = new User($user_id, TRUE);
 
 // Pass model directly - all fields auto-fill!
-$formwriter = $page->getFormWriter('form1', 'v2', [
+$formwriter = $page->getFormWriter('form1', [
     'model' => $user
 ]);
 
@@ -136,7 +136,7 @@ $formwriter->end_form();
 
 ```php
 // Pass both model AND specific value overrides
-$formwriter = $page->getFormWriter('form1', 'v2', [
+$formwriter = $page->getFormWriter('form1', [
     'model' => $user,
     'values' => [
         'usr_email' => 'override@example.com'  // This overrides model value
@@ -150,7 +150,7 @@ When editing existing records, use `edit_primary_key_value` to pass the record's
 
 ```php
 // View file - editing an existing event
-$formwriter = $page->getFormWriter('form1', 'v2', [
+$formwriter = $page->getFormWriter('form1', [
     'model' => $event,
     'edit_primary_key_value' => $event->key
 ]);
@@ -176,19 +176,19 @@ The hidden field is named `edit_primary_key_value` (not the model's column name 
 
 ```php
 // Logic file - CORRECT pattern
-function admin_event_edit_logic($get_vars, $post_vars) {
+function admin_event_edit_logic(array $input): LogicResult {
     // CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
-    if (isset($post_vars['edit_primary_key_value'])) {
-        $event = new Event($post_vars['edit_primary_key_value'], TRUE);
-    } elseif (isset($get_vars['evt_event_id'])) {
-        $event = new Event($get_vars['evt_event_id'], TRUE);
+    if (isset($input['edit_primary_key_value'])) {
+        $event = new Event($input['edit_primary_key_value'], TRUE);
+    } elseif (isset($input['evt_event_id'])) {
+        $event = new Event($input['evt_event_id'], TRUE);
     } else {
         $event = new Event(NULL);
     }
 
     // Process form submission
-    if ($post_vars) {
-        $event->set('evt_name', $post_vars['evt_name']);
+    if (LibraryFunctions::isFormSubmission()) {
+        $event->set('evt_name', $input['evt_name']);
         // ... set other fields ...
         $event->prepare();
         $event->save();
@@ -423,7 +423,7 @@ The `datetimeinput()` method accepts DateTime values in multiple formats:
 $coupon = new CouponCode($coupon_id, TRUE);
 
 // Pass to FormWriter - handles DateTime objects automatically
-$formwriter = $page->getFormWriter('form1', 'v2', [
+$formwriter = $page->getFormWriter('form1', [
     'model' => $coupon  // DateTime objects in export_as_array() are auto-converted
 ]);
 
@@ -490,7 +490,7 @@ if($event->key){
     }
 }
 
-$formwriter = $page->getFormWriter('form1', 'v2', ['values' => $form_values]);
+$formwriter = $page->getFormWriter('form1', ['values' => $form_values]);
 $formwriter->begin_form();
 $formwriter->datetimeinput('evt_start_time', 'Event Start Time');
 $formwriter->end_form();
@@ -643,7 +643,7 @@ Models with form helpers provide static methods like `renderFormFields()`:
 
 ```php
 // In admin page, profile page, or any form
-$formwriter = $page->getFormWriter('form1', 'v2', [
+$formwriter = $page->getFormWriter('form1', [
     'model' => $address,
     'edit_primary_key_value' => $address->key
 ]);
@@ -665,7 +665,7 @@ $formwriter->end_form();
 **PhoneNumber Form Example:**
 
 ```php
-$formwriter = $page->getFormWriter('form1', 'v2', [
+$formwriter = $page->getFormWriter('form1', [
     'model' => $phone_number,
     'edit_primary_key_value' => $phone_number->key
 ]);
@@ -725,7 +725,7 @@ PhoneNumber::renderFormFields($formwriter, [
 **Admin Page (Edit Mode):**
 ```php
 $address = new Address($address_id, TRUE);
-$formwriter = $page->getFormWriter('form1', 'v2', [
+$formwriter = $page->getFormWriter('form1', [
     'model' => $address,
     'edit_primary_key_value' => $address->key
 ]);
@@ -821,7 +821,7 @@ Store form field HTML instead of echoing immediately. Essential for multiple for
 
 ```php
 // Enable deferred mode
-$form = $page->getFormWriter('form_' . $item->id, 'v2', [
+$form = $page->getFormWriter('form_' . $item->id, [
     'deferred_output' => true,
     'action' => '/admin/process?id=' . $item->id
 ]);
@@ -841,7 +841,7 @@ foreach ($items as $item) {
     $row = [];
     // ... add columns ...
 
-    $form = $page->getFormWriter('delete_' . $item->id, 'v2', [
+    $form = $page->getFormWriter('delete_' . $item->id, [
         'deferred_output' => true,
         'action' => '/admin/process'
     ]);
@@ -1084,7 +1084,7 @@ public static $field_specifications = array(
 );
 
 // In your form - NO validation setup needed!
-$formwriter = $page->getFormWriter('user_form', 'v2');
+$formwriter = $page->getFormWriter('user_form');
 $formwriter->begin_form();
 
 // Validation is AUTOMATIC from model specs!
@@ -1231,7 +1231,7 @@ try {
     // Save to database
     $user->save();
 
-    return LogicResult::success(['message' => 'User created successfully']);
+    return LogicResult::render(['message' => 'User created successfully']);
 } catch (DisplayableUserException $e) {
     // User-friendly error message
     return LogicResult::error($e->getMessage());
@@ -1251,7 +1251,7 @@ try {
 ### Security
 
 1. **Always use FormWriter** - Never build forms manually
-   - Automatic CSRF protection
+   - CSRF token emission (opt-in verification)
    - Proper input sanitization
    - XSS prevention with `htmlspecialchars()`
 
@@ -1351,23 +1351,26 @@ The first section heading omits `mt-4` if it appears at the very top of the form
 
 ## 9. Advanced Features
 
-### CSRF Protection
+### CSRF Protection (opt-in)
 
-CSRF (Cross-Site Request Forgery) protection is automatic for all POST forms:
+A CSRF token is **emitted** automatically into every POST form, but the platform does
+**not** verify it for you. Verification is opt-in: a token is only checked when a handler
+calls `validateCSRF()`. There is no framework-wide enforcement in the dispatch path, and CSRF
+is generally **unnecessary for authenticated/admin forms** (anything behind a login) — reach
+for it only on the rarer cases where you specifically want it (e.g. a sensitive unauthenticated
+POST).
 
 ```php
-// CSRF automatically enabled for POST forms
-$formwriter = new FormWriterV2Bootstrap('form', [
-    'method' => 'POST'  // CSRF token auto-generated!
-]);
+// The token is rendered into the form automatically — nothing to enable.
+$formwriter = new FormWriterV2Bootstrap('form', ['method' => 'POST']);
 
-// Server-side validation in logic file
+// To actually enforce it, opt in by calling validateCSRF() in your handler:
 require_once(PathHelper::getIncludePath('includes/FormWriterV2Bootstrap.php'));
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if (LibraryFunctions::isFormSubmission()) {
     $formwriter = new FormWriterV2Bootstrap('form');
 
-    if (!$formwriter->validateCSRF($_POST)) {
+    if (!$formwriter->validateCSRF($input)) {
         return LogicResult::error('Security token expired. Please refresh and try again.');
     }
 
@@ -1375,12 +1378,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 ```
 
-**Features:**
+**Token behaviour (when you opt in):**
 - Session-based storage
 - Per-form ID tokens
 - 2-hour default lifetime
 - One-time use tokens
 - Automatic cleanup of expired tokens
+
+> CSRF is forced **off** in JSON mode regardless — API requests authenticate via key headers,
+> which browsers never attach cross-origin.
 
 ### Automatic Local Time Conversion
 
@@ -1388,7 +1394,7 @@ FormWriter automatically converts UTC DateTime objects to the user's local timez
 
 ```php
 // In view - DateTime objects auto-converted to user's timezone!
-$formwriter = $page->getFormWriter('form1', 'v2', [
+$formwriter = $page->getFormWriter('form1', [
     'model' => $event  // DateTime fields in model are auto-converted
 ]);
 
@@ -1426,7 +1432,7 @@ $formwriter->textinput('price', 'Price', [
 Enable console logging during development:
 
 ```php
-$formwriter = $page->getFormWriter('form1', 'v2', [
+$formwriter = $page->getFormWriter('form1', [
     'debug' => true  // Logs validation detection to console
 ]);
 ```
@@ -1472,7 +1478,7 @@ if (!$formwriter->validate($_POST)) {
 
 FormWriter provides:
 - Consistent, secure form generation
-- Automatic CSRF protection
+- CSRF token emission (opt-in verification)
 - Automatic validation from models
 - Automatic value filling
 - Automatic timezone conversion
@@ -1486,7 +1492,7 @@ FormWriter provides:
 - **Clean API** - Options arrays for readable, maintainable code
 - **Auto-detection** - Minimal boilerplate code required
 - **Model Integration** - Works directly with model field specifications
-- **CSRF Protection** - Automatic for all POST forms
+- **CSRF Protection** - Token emitted automatically on POST forms; verification is opt-in via `validateCSRF()`
 - **Validation** - Single source of truth in model definitions
 
 **For more information:**

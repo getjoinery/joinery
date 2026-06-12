@@ -18,6 +18,15 @@ require_once(PathHelper::getIncludePath('data/products_class.php'));
 class OrderItemException extends SystemBaseException {}
 
 class OrderItem extends SystemBase {	public static $prefix = 'odi';
+
+	// REST API per-record read scope: only the owner (or staff, permission >= 5) may read this row via the API.
+	function authenticate_read($data) {
+		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
+			if ($data['current_user_permission'] < 5) {
+				throw new SystemAuthenticationError('Current user does not have permission to view this entry in '. static::$tablename);
+			}
+		}
+	}
 	public static $tablename = 'odi_order_items';
 	public static $pkey_column = 'odi_order_item_id';
 
