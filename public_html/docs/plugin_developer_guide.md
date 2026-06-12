@@ -630,7 +630,7 @@ Profile menu items appear in the user dropdown. They are flat — no parent/item
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `slug` | Yes | -- | Unique identifier (`[a-z0-9-]`, max 32). Must start with `<plugin-name>-`. |
+| `slug` | Yes | -- | Unique identifier; conventionally prefixed with the hyphenated plugin name (e.g. `myplugin-settings`) to avoid collisions. Sync enforces only that it is a non-empty string and does not start with `core-` (see the Slug rules above). |
 | `title` | Yes | -- | Display text (max 32 chars). |
 | `url` | Yes | -- | Target page (no `.php`). Stored as-is. |
 | `order` | Yes | -- | Sort position in the dropdown. Core slots: home=10, profile=50, signout=200. |
