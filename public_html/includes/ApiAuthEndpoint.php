@@ -8,13 +8,20 @@
  *   GET  /api/v1/auth/session  — key-authenticated (either type); user/tier summary
  *   POST /api/v1/auth/logout   — session-key-authenticated; revokes the presented key
  *
- * Dispatched from api/apiv1.php in two places, mirroring ApiFormEndpoint:
+ * Dispatched from api/apiv1.php in two places, mirroring ApiLogicEndpoint:
  * dispatchPreAuth() before the key-header requirement (login is the
  * unauthenticated entry point), dispatchAuthenticated() after $api_user
  * resolves. HTTPS enforcement and both rate limiters run before either.
  * Uses the api_error()/api_success() helpers defined in apiv1.php.
  *
- * @version 1.0.0
+ * This is a thin HTTP shell: the credential decisions (verify-and-mint on login,
+ * revoke on logout) live in ApiAuth::attemptLogin()/revokeSessionKey(). This
+ * class owns only the transport concerns — method checks, request parsing,
+ * request logging, and response shaping (user_summary).
+ *
+ * @version 1.1.0
+ * @changelog 1.1.0 - Credential decisions delegated to ApiAuth; this class is
+ *   now a thin transport shell over ApiAuth::attemptLogin()/revokeSessionKey().
  */
 
 require_once(PathHelper::getIncludePath('data/api_keys_class.php'));
@@ -77,15 +84,17 @@ class ApiAuthEndpoint {
 			api_error('Email and password are required', 'AuthenticationError', 400);
 		}
 
-		require_once(PathHelper::getIncludePath('data/users_class.php'));
-		$user = User::GetByEmail($email);
+		// The verify-and-mint decision lives in ApiAuth; this shell owns only the
+		// HTTP concerns (parsing, logging, response shaping). One failure shape
+		// for unknown email, deleted user, and wrong password — no
+		// account-existence oracle — and every failure counts toward the
+		// api_auth rate limit via the log below.
+		require_once(PathHelper::getIncludePath('includes/ApiAuth.php'));
+		$result = ApiAuth::attemptLogin($email, $password, $device_label);
 
-		// One failure path for unknown email, deleted user, and wrong
-		// password — no account-existence oracle, and every failure counts
-		// toward the api_auth rate limit.
-		if (!$user || $user->get('usr_delete_time') || !$user->check_password($password)) {
+		if (!$result['ok']) {
 			RequestLogger::log('api_auth', 'auth/login', false, [
-				'user_id' => $user ? $user->key : NULL,
+				'user_id' => $result['user'] ? $result['user']->key : NULL,
 				'status_code' => 401,
 				'error_type' => 'AuthenticationError',
 				'note' => 'Invalid login credentials'
@@ -93,8 +102,8 @@ class ApiAuthEndpoint {
 			api_error('Invalid email or password', 'AuthenticationError', 401);
 		}
 
-		$minted = ApiKey::CreateSessionKey($user->key, $device_label);
-		$api_key = $minted['api_key'];
+		$user = $result['user'];
+		$api_key = $result['api_key'];
 
 		RequestLogger::log('api_auth', 'auth/login', true, [
 			'user_id' => $user->key,
@@ -103,7 +112,7 @@ class ApiAuthEndpoint {
 
 		api_success(array(
 			'public_key' => $api_key->get('apk_public_key'),
-			'secret_key' => $minted['secret_key'],
+			'secret_key' => $result['secret_key'],
 			'expires_time' => $api_key->get('apk_expires_time'),
 			'user' => self::user_summary($user),
 		), 'Login successful');
@@ -135,7 +144,8 @@ class ApiAuthEndpoint {
 			api_error('Logout must use POST method', 'ActionError', 405);
 		}
 
-		if (!$api_entry->is_session()) {
+		require_once(PathHelper::getIncludePath('includes/ApiAuth.php'));
+		if (!ApiAuth::revokeSessionKey($api_entry)) {
 			RequestLogger::log('api_auth', 'auth/logout', false, [
 				'user_id' => $api_user->key,
 				'status_code' => 403,
@@ -144,8 +154,6 @@ class ApiAuthEndpoint {
 			]);
 			api_error('Machine keys cannot log out; revoke them from the admin API Keys page', 'AuthenticationError', 403);
 		}
-
-		$api_entry->soft_delete();
 
 		RequestLogger::log('api_auth', 'auth/logout', true, [
 			'user_id' => $api_user->key,

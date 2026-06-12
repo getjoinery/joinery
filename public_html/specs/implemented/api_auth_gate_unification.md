@@ -1,16 +1,16 @@
-# API Authorization Gate Unification
+# API Auth Consolidation (Authorization Gate + ApiAuth)
 
-**Status:** Active (awaiting implementation)
+**Status:** Implemented 2026-06-12
 **Created:** 2026-06-12
-**Scope:** Core REST API authorization dispatch. No change to authentication (key lookup, secret verification, lifecycle), no change to which endpoints exist, no change to who may call them.
+**Scope:** Core REST API authorization **and** authentication. Landed in stages: (1) one authorization gate behind a declared contract; (2) the action and form endpoints merged into one class; (3) the authentication chain and the gate consolidated into a single `ApiAuth` class (Option 2 — see §11). No change to which endpoints exist, no change to who may call them: every step is behavior-preserving, pinned by `tests/functional/api/session_keys_test.php` (62 passing).
+
+> **Naming note.** This file is named for stage 1 (the gate). Stages 2–3 broadened it into a full auth consolidation; the filename is kept stable because code comments reference it.
 
 ---
 
 ## 1. Motivation
 
-The API authenticates requests in one shared chain (`api/apiv1.php` ~lines 274–405: key lookup, secret verify, expiry/active/IP checks). That part is sound and is **out of scope** here.
-
-The problem is **authorization** — the "may this caller invoke this endpoint?" decision. Today it is implemented three separate times, once per surface, each with its own hardcoded thresholds and its own error wording:
+The original problem (stage 1) was **authorization** — the "may this caller invoke this endpoint?" decision. It was implemented three separate times, once per surface, each with its own hardcoded thresholds and its own error wording:
 
 | Surface | Router | Authorization rule (hardcoded) |
 |---|---|---|
@@ -52,7 +52,7 @@ This is the single most important thing to get right, and the reason a naive "mi
 
 ## 3. Design principle: behavior preservation via router-supplied defaults
 
-The refactor introduces one component, `ApiAuthGate`, that enforces a small authorization contract. **The contract is supplied by the router as a default that equals the constant it hardcodes today.** Because the defaults reproduce the current hardcoded values exactly, **no existing descriptor needs to change** (39 action/form `_logic_api()` functions and 7 management `_handler_api()` functions stay byte-for-byte identical).
+The refactor introduces one authorization method — originally `ApiAuthGate::enforce()`, now **`ApiAuth::authorize()`** after the stage-3 consolidation (§11) — that enforces a small authorization contract. **The contract is supplied by the router as a default that equals the constant it hardcodes today.** Because the defaults reproduce the current hardcoded values exactly, **no existing descriptor needs to change** (39 action/form `_logic_api()` functions and 7 management `_handler_api()` functions stay byte-for-byte identical).
 
 The descriptor's optional `auth` block lets a *future* endpoint override a default (e.g. a read-only action, or a management endpoint at a different permission floor). Existing endpoints declare nothing new and inherit the router default — which is, by construction, their current behavior.
 
@@ -60,9 +60,9 @@ This is what makes the change provably equivalent: we are **moving constants int
 
 ---
 
-## 4. Component: `ApiAuthGate`
+## 4. Component: the authorization gate
 
-New file: `includes/ApiAuthGate.php`.
+This logic shipped first as `ApiAuthGate::enforce()` and now lives as **`ApiAuth::authorize()`** (`includes/ApiAuth.php`) with `ApiAuth::CAP_READ/WRITE/DELETE` — see §11 for why the standalone gate class was folded into `ApiAuth`. The body below is unchanged; only the class/method name moved.
 
 ```php
 class ApiAuthGate {
@@ -173,22 +173,45 @@ Each step is a mechanical substitution of an inline check for a gate call with t
 
 5. **CRUD verbs in `apiv1.php`** — replace the five inline comparisons (lines 440, 465, 497, 529, 557) with `ApiAuthGate::enforce` calls carrying the §5 capability. These already have `$auth_data` in scope. This step is **optional / can be a second commit** — it is pure consolidation and carries marginally more risk because it is on the hottest path. Recommended but separable.
 
-6. **Run** `php -l` and `validate_php_file.php` on every touched file.
+6. **Collapse the action and form endpoints into one class.** `ApiActionEndpoint`
+   and `ApiFormEndpoint` were near-twins: identical two-phase dispatch skeleton
+   (`dispatchPreAuth` / `dispatchAuthenticated`), identical `requiresSession`
+   resolution, differing only in how a path resolves (POST `_logic` vs GET
+   `_logic_form`), the default capability (write vs read), and the terminal step
+   (run logic and translate a `LogicResult` vs build a `FormWriterV2JSON`
+   definition). They are merged into **`includes/ApiLogicEndpoint.php`** — one
+   class for both HTTP faces of an action, sharing the skeleton, `requiresSession`,
+   and the gate. The faces are exposed as `dispatchActionPreAuth` /
+   `dispatchActionAuthenticated` / `dispatchFormPreAuth` /
+   `dispatchFormAuthenticated`; the four `apiv1.php` call sites and the two
+   `require_once`s are updated, and the two old files are deleted. Bodies are
+   carried over verbatim, so this is behavior-preserving. `ManagementApiRouter`
+   and `ApiAuthEndpoint` are NOT merged — the former resolves handlers by file
+   path (not function-name convention) and the latter is password-based; folding
+   either in would add glue, not remove it.
 
-7. **Run** `tests/functional/api/session_keys_test.php` against dev — it is the behavior-preservation oracle (§8).
+7. **Run** `php -l` and `validate_php_file.php` on every touched file.
 
-### Files touched
-- `includes/ApiAuthGate.php` (new)
-- `includes/ApiActionEndpoint.php`
-- `includes/ApiFormEndpoint.php`
+8. **Run** `tests/functional/api/session_keys_test.php` against dev — it is the
+   behavior-preservation oracle (§8) — plus a direct smoke test of the form face
+   (`GET /api/v1/form/register`), which the suite does not otherwise exercise.
+
+### Files touched (final, all three stages — see §11 for stage 3)
+- `includes/ApiAuth.php` (**new** — authenticate() + authorize() + credential decisions; absorbed the stage-1 `ApiAuthGate`)
+- `includes/ApiLogicEndpoint.php` (**new** — merged action + form endpoint)
+- `includes/ApiActionEndpoint.php` (**deleted** — merged into ApiLogicEndpoint)
+- `includes/ApiFormEndpoint.php` (**deleted** — merged into ApiLogicEndpoint)
+- `includes/ApiAuthGate.php` (**created then deleted** — folded into ApiAuth in stage 3)
+- `includes/ApiAuthEndpoint.php` (now a thin HTTP shell over `ApiAuth::attemptLogin()/revokeSessionKey()`)
 - `includes/ManagementApiRouter.php`
-- `api/apiv1.php` (step 5, optional second commit)
+- `api/apiv1.php` (inline auth chain replaced by one `ApiAuth::authenticate()` call; CRUD verbs call `ApiAuth::authorize()`)
 - `docs/api.md` (§9)
+- `tests/functional/api/session_keys_test.php` (§8 new assertions)
 
 ### Files NOT touched (the proof of low risk)
 - 0 of 39 `*_logic_api()` descriptors
 - 0 of 7 `*_handler_api()` descriptors
-- The authentication chain, `ApiKey` model, lifecycle, rate limiting, per-record `authenticate_read/write`.
+- The `ApiKey` model, key lifecycle, rate limiting, per-record `authenticate_read/write`. (The authentication *chain* moved verbatim into `ApiAuth::authenticate()` in stage 3 — relocated, not changed.)
 
 ---
 
@@ -208,18 +231,20 @@ function catalog_logic_api() {
     ];
 }
 
-// A management endpoint that should also be reachable by permission-7 ops staff
-// (overrides only the user floor; still machine-key only):
-function health_handler_api() {
+// A destructive management endpoint that TIGHTENS the default — still
+// machine-key + superadmin, and additionally requires the delete capability:
+function purge_handler_api() {
     return [
-        'method'      => 'GET',
-        'description' => 'Liveness probe',
-        'auth'        => ['min_user_permission' => 7],
+        'method'      => 'POST',
+        'description' => 'Purge old backups',
+        'auth'        => ['capability' => 'delete'],
     ];
 }
 ```
 
 Resolution order for each field: `$meta['auth'][field]` (explicit) → router default (the current hardcoded value) → `ApiAuthGate` built-in default. Existing descriptors omit `auth` entirely and therefore land on the router default = today's behavior.
+
+**Management overrides can only tighten, not loosen.** The machine-key + superadmin default is enforced up front (before the handler is resolved) so unknown paths fail closed; a handler's `auth` block runs *after* resolution and can only add restrictions. To make a management endpoint reachable by a lower user role you would have to relax the router default itself — which is intentionally not supported here. Action and form endpoints, whose defaults carry no user floor, can both tighten and widen via `auth`.
 
 `requires_session` is read from `$meta['auth']['requires_session'] ?? $meta['requires_session'] ?? true`, so existing top-level declarations keep working and new endpoints may consolidate it under `auth`.
 
@@ -235,11 +260,11 @@ Resolution order for each field: `$meta['auth'][field]` (explicit) → router de
 - Sessioned action (`account_edit`) via session key returns **200** (line ~260).
 - Sessionless action (`password_reset_1`) dispatched with no key headers returns its normal result (line ~267).
 
-Add to the same suite (new assertions, still behavior-pinning):
-- A **read-only** machine key (`apk_permission = 1`) gets **403 on `POST /api/v1/action/*`** (write capability) and the appropriate result on `GET /api/v1/form/*` (read capability allowed).
-- A **write-only** machine key (`apk_permission = 2`) gets **403 on `GET /api/v1/form/*`** (read capability) and **200-path on `POST /api/v1/action/*`** (write capability). This is the non-monotonic case from §2 and is the assertion most likely to catch a regression.
+Added to the same suite (new section "Capability boundaries — non-monotonic apk_permission"), pinning the read and write boundaries with machine keys at `apk_permission` 1 and 2:
+- A **read-only** key (`apk_permission = 1`): **200 on `GET /api/v1/User/{own id}`** (read allowed) and **403 on `POST /api/v1/action/account_edit`** (write capability blocks perm 1).
+- A **write-only** key (`apk_permission = 2`): **403 on `GET /api/v1/User/{id}`** (read capability blocks perm 2 — the non-monotonic case from §2) and **200 on `POST /api/v1/action/account_edit`** (write capability allows perm 2).
 
-Run before and after; output must be identical (same pass count, same boundaries).
+The read/write boundaries are exercised through CRUD GET and an action POST rather than the form endpoint, so the test does not depend on a specific form companion existing. Result after implementation: **62 passed, 0 failed** (was 57; +5 new assertions), with every pre-existing boundary unchanged.
 
 ---
 
@@ -249,7 +274,7 @@ Update `docs/api.md` (do **not** create a new doc) to reflect the end state:
 
 - In the authorization section, name the two axes explicitly: `apk_permission` = per-key CRUD capability (read/write/delete, non-monotonic — call out that `2` is write-only), `usr_permission` = user role floor.
 - Add a short "Declaring endpoint authorization" subsection documenting the descriptor `auth` block (§7) for action/form/management authors, with the resolution order.
-- State that management endpoints are machine-key + superadmin by default and that a handler may widen/narrow via `auth`.
+- State that management endpoints are machine-key + superadmin by default and that a handler may **tighten** (not loosen) that default via `auth`.
 
 Per the docs rule, write it as the current state — no "previously the gate was inline" narrative. The reason for the change lives here in the spec and in git history.
 
@@ -259,11 +284,30 @@ Per the docs rule, write it as the current state — no "previously the gate was
 
 - **CRUD default-deny** (flipping `SystemBase::authenticate_read/write` from no-op to owner-or-admin). That is a real and recommended change but it is a **behavior change**, not behavior-preserving, so it does not belong in this refactor. Track separately.
 - Changing `apk_permission` semantics, renaming the column, or making the scale monotonic.
-- Touching authentication, hashing, key lifecycle, rate limiting, or webhook (Stripe / inbound-email) auth.
+- Changing **how** authentication works — hashing, key lifecycle, rate limiting, or webhook (Stripe / inbound-email) auth. (Stage 3 *relocated* the authentication chain into `ApiAuth::authenticate()` verbatim; it did not change its behavior.)
 - Session-key permission flexibility (they remain hardcoded to `apk_permission = 4`).
 
 ---
 
-## 11. Rollback
+## 11. Stage 3 — the `ApiAuth` consolidation (Option 2)
 
-The change is additive (one new class) plus in-place gate substitutions. Rollback is reverting the touched files; no schema, no data, no descriptor changes to unwind. If split into two commits (routers, then CRUD verbs per step 5), each is independently revertible.
+Stages 1–2 left the auth domain split across three places: the gate (`ApiAuthGate`), the credential endpoints (`ApiAuthEndpoint`), and — the real smell — **authentication itself, which was ~130 lines of inline procedural code in `apiv1.php`**, not a class at all. Stage 3 unifies the security boundary into one class, `ApiAuth`, under the **Option 2** decision (authN + authZ unified as decision logic; HTTP endpoints stay as thin shells; dispatch classes stay separate). The alternatives considered were Full (also fold the credential *endpoints* into `ApiAuth`) and Stop (leave authentication inline); Option 2 was chosen because it unifies the two same-abstraction-level concerns (authenticate/authorize) without mixing HTTP request/response handling into the auth class.
+
+**`ApiAuth` (`includes/ApiAuth.php`) owns:**
+- `authenticate(array $headers, $source_ip): array` — the full chain lifted verbatim from `apiv1.php` (key lookup → status/expiry/IP checks → secret verify → user load), returning `['api_entry','api_user','auth_data']` or exiting 4xx. The ten repeated failure blocks collapse into one private `auth_failure()` helper. Also stamps the key type and records usage on success. The front controller is now just `$principal = ApiAuth::authenticate($headers, $source_ip);`.
+- `authorize(...)` — the former `ApiAuthGate::enforce()`, byte-for-byte (with `CAP_READ/WRITE/DELETE`). `ApiAuthGate.php` is deleted; all callers (CRUD verbs in `apiv1.php`, `ApiLogicEndpoint`, `ManagementApiRouter`) call `ApiAuth::authorize()`.
+- `attemptLogin($email,$password,$device_label)` and `revokeSessionKey($api_entry)` — the credential *decisions* that `ApiAuthEndpoint` now delegates to.
+
+**`ApiAuthEndpoint` becomes a thin HTTP shell:** it keeps method checks, request parsing, request logging, and response shaping (`user_summary`), but delegates verify-and-mint (login) and revoke (logout) into `ApiAuth`. Layering points cleanly transport → domain.
+
+**What is deliberately NOT in `ApiAuth`:** the dispatch classes (`ApiLogicEndpoint`, `ManagementApiRouter`) and the credential *endpoints'* HTTP plumbing. Folding those in would mix routing/transport with auth decisions — a god-class, which Option 2 explicitly rejects.
+
+**Behavior preservation:** `authenticate()` is verbatim, so every failure response is identical (verified by direct curls: no-headers → `Public/secret keys not present`; bogus key → `Unable to find the api key`). `session_keys_test.php` stays **62 passed, 0 failed** — it exercises authentication (missing/expired/revoked keys), the login/logout delegation, and the capability boundaries. The form face was re-smoke-tested (`GET /api/v1/form/register` → definition; `POST` → 405).
+
+**Net result across all stages:** the auth domain went from "authorization decided in 4 places + authentication inline + gate + endpoint" to **one `ApiAuth` class** for the security boundary, plus separate single-purpose dispatch (`ApiLogicEndpoint`, `ManagementApiRouter`) and a thin `ApiAuthEndpoint` shell.
+
+---
+
+## 12. Rollback
+
+The change is additive (`ApiAuth.php`, `ApiLogicEndpoint.php`) plus in-place substitutions and two deletions. Rollback is reverting the touched files and restoring the deleted ones; no schema, no data, no descriptor changes to unwind. The three stages are independently revertible in reverse order (ApiAuth consolidation → endpoint merge → gate).

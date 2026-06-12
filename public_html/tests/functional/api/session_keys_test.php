@@ -116,7 +116,7 @@ function make_user($suffix, $permission = 0) {
 	return $user;
 }
 
-function make_machine_key($user_id, $name) {
+function make_machine_key($user_id, $name, $permission = 4) {
 	$secret_plaintext = 'secret_' . LibraryFunctions::random_string(16);
 	$key = new ApiKey(NULL);
 	$key->set('apk_usr_user_id', $user_id);
@@ -124,7 +124,7 @@ function make_machine_key($user_id, $name) {
 	$key->set('apk_public_key', 'public_' . LibraryFunctions::random_string(16));
 	$key->set('apk_secret_key', ApiKey::GenerateKey($secret_plaintext));
 	$key->set('apk_type', ApiKey::TYPE_MACHINE);
-	$key->set('apk_permission', 4);
+	$key->set('apk_permission', $permission);
 	$key->set('apk_is_active', TRUE);
 	$key->save();
 	$key->load();
@@ -331,6 +331,37 @@ try {
 	}
 	$r = api_request('GET', '/api/v1/management', key_headers($machine_s['api_key']->get('apk_public_key'), $machine_s['secret_key']));
 	check($r['status'] === 200, 'superadmin MACHINE key still reaches management discovery', $r['raw']);
+
+	// ------------------------------------------------------------------
+	section('Capability boundaries — non-monotonic apk_permission (ApiAuth::authorize)');
+	// apk_permission is NOT a linear scale: permission 1 is read-only and
+	// permission 2 is write-only. These pins catch a regression in the
+	// capability mapping that a "minimum level" refactor would silently cause.
+	$readonly_key  = make_machine_key($user_a->key, 'ro-' . $suffix, 1);  // read-only
+	$cleanup_key_ids[] = $readonly_key['api_key']->key;
+	$writeonly_key = make_machine_key($user_a->key, 'wo-' . $suffix, 2);  // write-only
+	$cleanup_key_ids[] = $writeonly_key['api_key']->key;
+	$ro_h = key_headers($readonly_key['api_key']->get('apk_public_key'), $readonly_key['secret_key']);
+	$wo_h = key_headers($writeonly_key['api_key']->get('apk_public_key'), $writeonly_key['secret_key']);
+
+	// Read capability: permission 1 may read; permission 2 (write-only) may NOT.
+	$r = api_request('GET', '/api/v1/User/' . $user_a->key, $ro_h);
+	check($r['status'] === 200, 'read-only key (perm 1) may GET own object', $r['raw']);
+	$r = api_request('GET', '/api/v1/User/' . $user_a->key, $wo_h);
+	check($r['status'] === 403, 'write-only key (perm 2) is denied reads (non-monotonic)', $r['raw']);
+	check(($r['json']['errortype'] ?? '') === 'AuthenticationError', 'write-only read denial is AuthenticationError');
+
+	// Write capability: permission 2 may run an action; permission 1 may NOT.
+	$r = api_request('POST', '/api/v1/action/account_edit', $ro_h, array(
+		'usr_first_name' => 'ReadOnlyAttempt', 'usr_last_name' => $user_a->get('usr_last_name'),
+		'usr_email' => $user_a->get('usr_email'), 'usr_timezone' => 'America/Chicago', 'btn_submit' => 'Save',
+	));
+	check($r['status'] === 403, 'read-only key (perm 1) is denied actions (write capability)', $r['raw']);
+	$r = api_request('POST', '/api/v1/action/account_edit', $wo_h, array(
+		'usr_first_name' => 'WriteOnlyOk', 'usr_last_name' => $user_a->get('usr_last_name'),
+		'usr_email' => $user_a->get('usr_email'), 'usr_timezone' => 'America/Chicago', 'btn_submit' => 'Save',
+	));
+	check($r['status'] === 200, 'write-only key (perm 2) may run an action (write capability)', $r['raw']);
 
 	// ------------------------------------------------------------------
 	section('Password change revokes session keys, not machine keys (acceptance #3)');

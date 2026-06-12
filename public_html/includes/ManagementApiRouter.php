@@ -27,7 +27,10 @@
  * Discovery:
  *   GET /api/v1/management  →  lists every available endpoint + metadata.
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - authorization unified through ApiAuth: the machine-key +
+ *   superadmin default is enforced up front (unchanged behavior); a handler's
+ *   ['auth'] block can tighten it further after resolution
  * @changelog 1.1 - machine-key gate: dispatch() takes the authenticated ApiKey
  *   and 403s anything that is not a machine key (session keys are user-plane only)
  */
@@ -47,16 +50,15 @@ class ManagementApiRouter {
 	 * $api_entry is the authenticated ApiKey (machine-key gate).
 	 */
 	public static function dispatch($url_segments, $auth_data, $request_method, $api_entry) {
-		// Machine-key gate — fails closed: anything that is not explicitly a
-		// machine key is rejected before the endpoint is even resolved.
-		if (!$api_entry || $api_entry->get('apk_type') !== ApiKey::TYPE_MACHINE) {
-			api_error('Management API requires a machine key', 'AuthenticationError', 403);
-		}
-
-		// Superadmin gate — single authorization check for all management endpoints.
-		if (($auth_data['current_user_permission'] ?? 0) < 10) {
-			api_error('Management API requires superadmin permission', 'AuthenticationError', 403);
-		}
+		// Authorization — the control-plane default: a machine key owned by a
+		// superadmin. Enforced up front, before the endpoint is resolved, so an
+		// unknown path still fails closed (403) for an unauthorized caller rather
+		// than leaking 404s. A handler may TIGHTEN this via its ['auth'] block
+		// (applied after resolution below); it cannot loosen this default.
+		require_once(PathHelper::getIncludePath('includes/ApiAuth.php'));
+		$management_default_auth = ['requires_machine_key' => true, 'min_user_permission' => 10];
+		ApiAuth::authorize($management_default_auth, $api_entry,
+			$auth_data['current_user_permission'] ?? 0, 'Management API');
 
 		// Extract the endpoint path (everything after "management")
 		$endpoint_segments = array_slice($url_segments, 3);
@@ -104,6 +106,15 @@ class ManagementApiRouter {
 		}
 
 		$meta = call_user_func($meta_function);
+
+		// Per-handler authorization override (optional). The default machine-key +
+		// superadmin gate already passed above; a handler's ['auth'] block can only
+		// add further restrictions (e.g. a stricter user floor or a capability).
+		if (isset($meta['auth']) && is_array($meta['auth'])) {
+			ApiAuth::authorize($meta['auth'], $api_entry,
+				$auth_data['current_user_permission'] ?? 0, 'Management API');
+		}
+
 		$expected_method = strtoupper($meta['method'] ?? 'GET');
 		$actual_method   = strtoupper($request_method);
 
