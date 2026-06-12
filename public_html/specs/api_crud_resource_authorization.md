@@ -195,8 +195,26 @@ deny-by-default does not fix this on its own. Three coordinated rules close it:
    a create that omits the owner fails under deny-by-default (null ≠ you), and a create that *supplies*
    an owner is exactly the spoof we're blocking. This is the `current_user.orders.create(...)` pattern.
 
-Net: you may update only rows you already own, you cannot reassign them, and created rows are owned by
-the caller by construction.
+**The POST `CreateNew()` fast-path must not escape the floor.** `apiv1.php`'s POST branch first tries
+`$class_name::CreateNew($_POST)` and only falls through to the field-application loop if that returns
+falsy. A model's `CreateNew()` is a business-logic factory (`User::CreateNew()` is the only one today:
+it dedups by email, hashes the password, sends activation). It bypasses the apply loop entirely, so
+rules 2–3 and the §5 write floor — all written as if every POST flows through that loop — silently
+do **not** apply to a `CreateNew` model. This is harmless *today* (`User::CreateNew()` is itself a
+curated allowlist that never reads `usr_permission`, and `User` is not owner-scoped), but it is a
+latent hole of exactly the kind this spec exists to close: the first owner-scoped model to grow a
+`CreateNew()` would escape both the owner-stamp and the unwritable drop unnoticed.
+
+The fix is to make the floor a property of the **API boundary**, not of one code path: the unwritable
+drop (§5.3) and the owner-stamp are applied to the input map **before dispatch**, so they wrap
+`CreateNew()` and the raw loop alike. Concretely — strip unwritable keys (and the owner column) from
+the working input *before* it is handed to either `CreateNew()` or the set-loop, then stamp
+`{prefix}_usr_user_id = current_user_id` for owner-column models on the created row. A model author
+can never reintroduce a privileged-field write by adding a `CreateNew()` factory, because the boundary
+already sanitized the input that factory receives.
+
+Net: you may update only rows you already own, you cannot reassign them, created rows are owned by
+the caller by construction, and the write floor holds on **every** create path — `CreateNew` or raw.
 
 ### 4.5 Collection scoping — filter the query, don't leak the count
 
@@ -251,19 +269,28 @@ public static function is_unwritable_field($field) {
 
 ### 5.3 Applying it at the REST write boundary
 
-In the `apiv1.php` POST and PUT field-application loops, **silently drop** any unwritable field
-(strong-params style — preserves round-trip read-modify-write, where a client PUTs back a full
-object including read-only fields):
+Apply the floor at the **API boundary** — sanitize the input map *once, before it reaches any create
+or update path* — so it holds regardless of whether the write flows through the field-application
+loop or the POST `CreateNew()` fast-path (§4.4). **Silently drop** any unwritable field (strong-params
+style — preserves round-trip read-modify-write, where a client PUTs back a full object including
+read-only fields):
 
 ```php
+// Boundary sanitize: runs before CreateNew() and before the set-loop alike.
+$input_fields = array_filter(
+    $input_fields,
+    fn($col) => !$class_name::is_unwritable_field($col),
+    ARRAY_FILTER_USE_KEY
+);
 foreach ($input_fields as $col => $val) {
-    if ($class_name::is_unwritable_field($col)) continue;   // dropped, keeps its DB/default value
-    $object->set($col, $val);
+    $object->set($col, $val);   // unwritable cols already gone; keep DB/default value
 }
 ```
 
 Dropping (not rejecting) matches framework convention and avoids breaking legitimate full-object
-writes; the unwritable column simply retains its stored value (PUT) or model default (POST).
+writes; the unwritable column simply retains its stored value (PUT) or model default (POST). Because
+the sanitize happens before dispatch, a `CreateNew()` factory receives an input array already stripped
+of unwritable keys — the floor cannot be bypassed by a model defining its own create path.
 
 ### 5.4 Unifying the AI surface onto the same floor
 
@@ -408,11 +435,12 @@ Two hazards ride along with raw CRUD writes; both are documented loudly (§10):
    (default empty) + `is_unwritable_field()` (§5.2). Flip the `authenticate_read`/`authenticate_write`
    defaults to owner-or-staff (§4.1). `php -l`, `validate_php_file.php`.
 2. **`apiv1.php`** — build `$readable_classes` / `$writable_classes` from the discovered list via the
-   opt-in flag (§3.2); gate each CRUD branch on the right list; drop unwritable fields **and the owner
-   column** in the POST/PUT apply loops (§5.3, §4.4); on PUT, authorize the **loaded** row before
-   applying input (§4.4); on POST, stamp `{prefix}_usr_user_id = current_user_id` for owner-column
-   models (§4.4); owner-scope the collection query for non-staff (§4.5); treat a falsy return from the
-   per-record hooks as denial (§4.3).
+   opt-in flag (§3.2); gate each CRUD branch on the right list; **sanitize the input map at the boundary
+   before dispatch** — drop unwritable fields **and the owner column** — so the floor wraps both the
+   POST `CreateNew()` fast-path and the raw set-loops (§5.3, §4.4); on PUT, authorize the **loaded** row
+   before applying input (§4.4); on POST, stamp `{prefix}_usr_user_id = current_user_id` for owner-column
+   models on the created row, on both the `CreateNew` and raw paths (§4.4); owner-scope the collection
+   query for non-staff (§4.5); treat a falsy return from the per-record hooks as denial (§4.3).
 3. **AI surface** — extend `ModelRegistry`'s writable computation to also strip
    `is_unwritable_field()` matches, folding the core write floor under `$ai_writable_fields` (§5.4).
 4. **Opt-in the inventoried models** (§7.2) — Bucket A and B get both flags (A also overrides
@@ -436,6 +464,9 @@ Two hazards ride along with raw CRUD writes; both are documented loudly (§10):
 - **Write floor:** `PUT /api/v1/User/{own id}` with `usr_permission=10` → the request may succeed
   (200) but the user's permission is **unchanged** (field dropped); `usr_password` likewise never
   set. A non-unwritable field (`usr_first_name`) on the same request **is** applied.
+- **CreateNew fast-path (§4.4):** `POST /api/v1/User` with `usr_permission=10` in the body → user is
+  created (or deduped) but `usr_permission` is **not** elevated — the boundary sanitize strips it
+  before `CreateNew()` runs, so the floor holds even though POST never enters the raw set-loop.
 - **Ownership integrity (§4.4):** A `PUT /api/v1/Order/{B's id}?ord_usr_user_id={A}` by A → 40x (PUT
   authorizes the loaded row, owned by B) and the owner column is unchanged; `POST /api/v1/Address`
   by A → created row is owned by A even if the body names another user; an `Order` create with no
