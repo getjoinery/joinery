@@ -1,0 +1,243 @@
+{
+    "account.signup": {
+        "label": "New user registration",
+        "description": "A new user account was registered.",
+        "category": "Members",
+        "payload": {
+            "user_id": "New user id",
+            "email": "New account email address",
+            "display_name": "New user display name",
+            "source_user_id": "Acting user id (the new user)"
+        },
+        "notify": {
+            "ntf_type": "account",
+            "supports_topic": true,
+            "default_email": true,
+            "title_template": "New user registered: {display_name}",
+            "body_template": "A new account was registered with email {email}.",
+            "link_template": "/admin/admin_user?usr_user_id={user_id}"
+        }
+    },
+    "newsletter.signup": {
+        "label": "Newsletter signup",
+        "description": "Someone subscribed to a mailing list / newsletter.",
+        "category": "Members",
+        "payload": {
+            "mailing_list_id": "Mailing list id",
+            "mailing_list_name": "Mailing list display name",
+            "user_id": "Subscribing user id (nullable)",
+            "source_user_id": "Acting user id (the subscriber)"
+        },
+        "notify": {
+            "ntf_type": "account",
+            "supports_topic": true,
+            "default_email": true,
+            "title_template": "Newsletter signup: {mailing_list_name}",
+            "body_template": "A user subscribed to the \"{mailing_list_name}\" mailing list.",
+            "link_template": "/admin/admin_mailing_lists"
+        }
+    },
+    "comment.posted": {
+        "label": "New comment posted",
+        "description": "A new comment was posted on a blog post.",
+        "category": "Content",
+        "payload": {
+            "comment_id": "Comment id",
+            "post_id": "Blog post id",
+            "post_title": "Blog post title",
+            "post_url": "Blog post URL",
+            "comment_excerpt": "Comment body excerpt (truncated at the call site)",
+            "author_name": "Comment author display name",
+            "source_user_id": "Acting user id (the commenter)"
+        },
+        "notify": {
+            "ntf_type": "comment",
+            "supports_topic": true,
+            "default_email": true,
+            "title_template": "New comment by {author_name}",
+            "body_template": "On \"{post_title}\": {comment_excerpt}",
+            "link_template": "{post_url}"
+        }
+    },
+    "purchase.completed": {
+        "label": "Sale completed",
+        "description": "A purchase or order was completed successfully.",
+        "category": "Orders",
+        "payload": {
+            "order_id": "Order id",
+            "user_id": "Buyer user id",
+            "source_user_id": "Acting user id (the buyer)",
+            "product_id": "Product id",
+            "product_name": "Product display name",
+            "buyer_name": "Buyer display name",
+            "buyer_email": "Buyer email address",
+            "amount": "Order total, decimal string",
+            "currency": "Configured site currency"
+        },
+        "notify": {
+            "ntf_type": "order",
+            "supports_topic": true,
+            "default_email": true,
+            "title_template": "Sale completed: {product_name}",
+            "body_template": "{buyer_name} ({buyer_email}) completed a purchase — Order #{order_id}.",
+            "link_template": "/admin/admin_orders"
+        }
+    },
+    "payment.failed": {
+        "label": "Payment failed",
+        "description": "A checkout payment was declined or failed.",
+        "category": "Orders",
+        "payload": {
+            "order_id": "Order id",
+            "user_id": "Billing user id",
+            "error_message": "Failure reason (truncated at the call site)"
+        },
+        "notify": {
+            "ntf_type": "order",
+            "supports_topic": true,
+            "default_email": true,
+            "title_template": "Checkout payment failed",
+            "body_template": "A card charge failed at checkout (Order #{order_id}): {error_message}",
+            "link_template": "/admin/admin_orders"
+        }
+    },
+    "subscription.started": {
+        "label": "New subscription",
+        "description": "A new subscriber signed up for a subscription or tier.",
+        "category": "Subscriptions",
+        "payload": {
+            "order_id": "Order id",
+            "order_item_id": "Order item id",
+            "user_id": "Subscriber user id",
+            "source_user_id": "Acting user id (the subscriber)",
+            "product_id": "Product id",
+            "product_name": "Product display name",
+            "buyer_name": "Subscriber display name",
+            "buyer_email": "Subscriber email address"
+        },
+        "notify": {
+            "ntf_type": "subscription",
+            "supports_topic": true,
+            "default_email": true,
+            "title_template": "New subscription: {product_name}",
+            "body_template": "{buyer_name} ({buyer_email}) started a subscription — Order #{order_id}.",
+            "link_template": "/admin/admin_orders"
+        }
+    },
+    "subscription.cancelled": {
+        "label": "Subscription cancelled",
+        "description": "A subscription was cancelled by the user or the provider.",
+        "category": "Subscriptions",
+        "payload": {
+            "order_item_id": "Order item id",
+            "user_id": "Subscriber user id",
+            "provider": "Payment provider (stripe / paypal)",
+            "provider_subscription_id": "Provider-side subscription id"
+        },
+        "notify": {
+            "ntf_type": "subscription",
+            "supports_topic": true,
+            "default_email": true,
+            "title_template": "Subscription cancelled",
+            "body_template": "A subscription was cancelled ({provider} subscription {provider_subscription_id}).",
+            "link_template": "/admin/admin_subscription_tiers"
+        }
+    },
+    "subscription.payment_failed": {
+        "label": "Subscription payment failed",
+        "description": "A recurring subscription charge failed or went past-due.",
+        "category": "Subscriptions",
+        "payload": {
+            "order_item_id": "Order item id",
+            "user_id": "Subscriber user id",
+            "provider": "Payment provider (stripe / paypal)",
+            "provider_subscription_id": "Provider-side subscription id"
+        },
+        "notify": {
+            "ntf_type": "subscription",
+            "supports_topic": true,
+            "default_email": true,
+            "title_template": "Subscription payment failed",
+            "body_template": "A recurring subscription payment failed ({provider} subscription {provider_subscription_id}).",
+            "link_template": "/admin/admin_orders"
+        }
+    },
+    "subscription.expired": {
+        "label": "Subscription expired",
+        "description": "A subscription or tier lapsed.",
+        "category": "Subscriptions",
+        "payload": {
+            "user_id": "Subscriber user id",
+            "tier_id": "Subscription tier id",
+            "tier_name": "Subscription tier name"
+        },
+        "notify": {
+            "ntf_type": "subscription",
+            "supports_topic": true,
+            "default_email": true,
+            "title_template": "Subscription expired",
+            "body_template": "A {tier_name} subscription has expired.",
+            "link_template": "/admin/admin_subscription_tiers"
+        }
+    },
+    "event.registered": {
+        "label": "Event registration",
+        "description": "Someone registered for an event.",
+        "category": "Events",
+        "payload": {
+            "event_id": "Event id",
+            "product_id": "Product id",
+            "product_name": "Product display name",
+            "user_id": "Registrant user id",
+            "registrant_name": "Registrant display name",
+            "order_id": "Order id",
+            "source_user_id": "Acting user id (the buyer)"
+        },
+        "notify": {
+            "ntf_type": "event",
+            "supports_topic": true,
+            "default_email": true,
+            "title_template": "Event registration",
+            "body_template": "{registrant_name} registered for {product_name}.",
+            "link_template": "/admin/admin_events"
+        }
+    },
+    "event.waitlisted": {
+        "label": "Event waiting list join",
+        "description": "Someone joined an event waiting list.",
+        "category": "Events",
+        "payload": {
+            "event_id": "Event id",
+            "event_name": "Event name",
+            "user_id": "User id",
+            "source_user_id": "Acting user id"
+        },
+        "notify": {
+            "ntf_type": "event",
+            "supports_topic": true,
+            "default_email": true,
+            "title_template": "Waiting list join: {event_name}",
+            "body_template": "Someone joined the waiting list for {event_name}.",
+            "link_template": "/admin/admin_events"
+        }
+    },
+    "event.withdrawn": {
+        "label": "Event withdrawal",
+        "description": "Someone withdrew from an event.",
+        "category": "Events",
+        "payload": {
+            "event_id": "Event id",
+            "event_name": "Event name",
+            "user_id": "Withdrawing user id",
+            "source_user_id": "Acting user id"
+        },
+        "notify": {
+            "ntf_type": "event",
+            "supports_topic": true,
+            "default_email": true,
+            "title_template": "Event withdrawal: {event_name}",
+            "body_template": "A registrant withdrew from {event_name}.",
+            "link_template": "/admin/admin_events"
+        }
+    }
+}

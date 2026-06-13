@@ -2,10 +2,10 @@
 /**
  * admin_notification_preferences.php
  *
- * Admin page where an admin opts in to notification hook point alerts and
- * chooses which should also be emailed.
+ * Admin page where an admin opts in to notification signal alerts and chooses
+ * which should also be emailed.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('adm/logic/admin_notification_preferences_logic.php'));
@@ -15,7 +15,7 @@ $page_vars = process_logic(admin_notification_preferences_logic(array_merge($_GE
 
 $session           = $page_vars['session'];
 $settings          = $page_vars['settings'];
-$hook_points       = $page_vars['hook_points'];
+$notifiable_signals = $page_vars['notifiable_signals'];
 $prefs             = $page_vars['prefs'];
 $send_queued_active = $page_vars['send_queued_active'];
 $cron_is_active    = $page_vars['cron_is_active'];
@@ -30,12 +30,12 @@ $page->admin_header(array(
 ));
 
 // Build the checkbox option list (value => "Category — Label"), and the
-// currently-checked sets, from the merged hook point declarations.
+// currently-checked sets, from the notifiable signal declarations.
 $options            = array();
 $subscribed_checked = array();
 $email_checked      = array();
 
-foreach ($hook_points as $name => $meta) {
+foreach ($notifiable_signals as $name => $meta) {
 	$category = isset($meta['category']) ? $meta['category'] : 'Other';
 	$label    = isset($meta['label']) ? $meta['label'] : $name;
 	$options[$name] = $category . ' — ' . $label;
@@ -70,7 +70,7 @@ echo '<p>Choose which site events you want to be alerted about. Alerts appear in
 	. 'receive an email when it happens.</p>';
 
 if (empty($options)) {
-	echo '<p>No notification hook points are declared.</p>';
+	echo '<p>No notifiable signals are declared.</p>';
 } else {
 	$formwriter = $page->getFormWriter('form1');
 	$formwriter->begin_form();

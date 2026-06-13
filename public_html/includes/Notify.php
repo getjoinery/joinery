@@ -1,112 +1,99 @@
 <?php
 /**
- * Notify — notification hooks dispatcher.
+ * Notify — the signal bus's notification subscriber.
  *
- * `Notify::fire($hook_point, $params)` delivers an in-app notification (and,
- * per the recipient's preferences, a queued email) to the recipients of a
- * declared hook point.
+ * Notify is subscriber #1 on the SignalBus: `Notify::handle_signal($signal,
+ * $payload)` is invoked for every dispatched signal. For signals that carry a
+ * `notify` block in the catalog (`signals.json` / a plugin's `signals` key), it
+ * renders the block's title/body/link templates against the structured payload,
+ * then delivers an in-app notification (and, per the recipient's preferences, a
+ * queued email) to the signal's recipients. Signals with no `notify` block are
+ * ignored here — they exist for other subscribers.
  *
- * Hook points are declared in `notification_hooks.json` (core) and the
- * `notificationHooks` key of plugin manifests — there is no database catalog.
+ * Recipient resolution, the preferences model (ntp_notification_preferences),
+ * and email enqueueing are unchanged; only the entry point and input (a
+ * structured payload, not a pre-rendered message) differ.
  *
- * See specs/notification_hooks.md.
+ * See docs/signals.md and docs/notifications.md.
  *
- * @version 1.0
+ * @version 2.0
  */
 
 class Notify {
 
-	/** Per-request cache of merged hook point declarations. */
-	private static $hook_points_cache = null;
+	/** Per-request dedupe of "missing template field" warnings. */
+	private static $logged_missing = array();
 
 	/**
-	 * Merged hook point declarations: core `notification_hooks.json` plus the
-	 * `notificationHooks` key of every active plugin's manifest. Cached for the
-	 * duration of the request.
+	 * Filter the merged signal catalog to the entries that carry a `notify`
+	 * block — the notifiable signals — preserving each entry's display metadata
+	 * (label/category) for the preferences UI. Keyed by signal name.
 	 *
-	 * @return array  map of hook_point_name => declaration array
+	 * @return array  map of signal_name => signal declaration (incl. notify block)
 	 */
-	public static function hook_points() {
-		if (self::$hook_points_cache !== null) {
-			return self::$hook_points_cache;
-		}
+	public static function notifiable_signals() {
+		require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
 
-		$merged = array();
-
-		$core_file = PathHelper::getIncludePath('notification_hooks.json');
-		if (is_file($core_file)) {
-			$decoded = json_decode(file_get_contents($core_file), true);
-			if (is_array($decoded)) {
-				$merged = $decoded;
+		$notifiable = array();
+		foreach (SignalBus::signals() as $name => $meta) {
+			if (isset($meta['notify']) && is_array($meta['notify'])) {
+				$notifiable[$name] = $meta;
 			}
 		}
-
-		try {
-			foreach (PluginHelper::getActivePlugins() as $plugin) {
-				$hooks = $plugin->get('notificationHooks', null);
-				if (is_array($hooks)) {
-					foreach ($hooks as $name => $meta) {
-						$merged[$name] = $meta;
-					}
-				}
-			}
-		} catch (Exception $e) {
-			error_log('[Notify] plugin hook point read failed: ' . $e->getMessage());
-		}
-
-		self::$hook_points_cache = $merged;
-		return $merged;
+		return $notifiable;
 	}
 
 	/**
-	 * Fire a hook point.
+	 * Signal-bus handler. Never throws into the bus: a notification failure must
+	 * not break the request or operation that produced the signal.
 	 *
-	 * Never throws into the caller: a notification failure must not break the
-	 * request or operation that triggered the event. On the checkout path,
-	 * call this only AFTER the charge transaction has committed.
-	 *
-	 * @param string $hook_point  declared hook point name, e.g. 'comment.posted'
-	 * @param array  $params      title (required), body, link, recipients,
-	 *                             source_user_id
+	 * @param string $signal   declared signal name, e.g. 'comment.posted'
+	 * @param array  $payload  structured payload from the dispatch site
 	 */
-	public static function fire($hook_point, array $params = array()) {
+	public static function handle_signal($signal, array $payload = array()) {
 		try {
-			self::_dispatch($hook_point, $params);
+			self::_dispatch($signal, $payload);
 		} catch (Throwable $e) {
-			error_log('[Notify] fire(' . $hook_point . ') failed: ' . $e->getMessage());
+			error_log('[Notify] handle_signal(' . $signal . ') failed: ' . $e->getMessage());
 		}
 	}
 
-	private static function _dispatch($hook_point, array $params) {
+	private static function _dispatch($signal, array $payload) {
+		require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
 		require_once(PathHelper::getIncludePath('data/notifications_class.php'));
 		require_once(PathHelper::getIncludePath('data/notification_preferences_class.php'));
 
-		$hooks    = self::hook_points();
-		$declared = isset($hooks[$hook_point]) ? $hooks[$hook_point] : null;
+		$signals  = SignalBus::signals();
+		$declared = isset($signals[$signal]) ? $signals[$signal] : null;
+		$notify   = ($declared && isset($declared['notify']) && is_array($declared['notify']))
+			? $declared['notify'] : null;
 
-		if ($declared === null) {
-			error_log('[Notify] fire() called for undeclared hook point: ' . $hook_point
-				. ' — delivering to targeted recipients only.');
-		}
-
-		$ntf_type       = ($declared && isset($declared['ntf_type'])) ? $declared['ntf_type'] : 'system';
-		$supports_topic = ($declared && !empty($declared['supports_topic']));
-		$default_email  = ($declared && !empty($declared['default_email']));
-
-		$title = isset($params['title']) ? trim($params['title']) : '';
-		$body  = isset($params['body'])  ? $params['body']  : '';
-		$link  = isset($params['link'])  ? $params['link']  : null;
-		$source_user_id = isset($params['source_user_id']) ? (int)$params['source_user_id'] : null;
-
-		if ($title === '') {
-			error_log('[Notify] fire(' . $hook_point . ') called without a title; skipping.');
+		// Not a notifiable signal — nothing to do (cheap in-memory check).
+		if ($notify === null) {
 			return;
 		}
 
-		// Targeted recipients — uid => true
+		$ntf_type       = isset($notify['ntf_type']) ? $notify['ntf_type'] : 'system';
+		$supports_topic = !empty($notify['supports_topic']);
+		$default_email  = !empty($notify['default_email']);
+
+		$title = trim(self::_render(isset($notify['title_template']) ? $notify['title_template'] : '', $payload, $signal));
+		$body  = self::_render(isset($notify['body_template']) ? $notify['body_template'] : '', $payload, $signal);
+		$link  = isset($notify['link_template'])
+			? self::_render($notify['link_template'], $payload, $signal) : null;
+
+		if ($title === '') {
+			error_log('[Notify] ' . $signal . ' rendered an empty title; skipping.');
+			return;
+		}
+
+		$source_user_id = isset($payload['source_user_id']) ? (int)$payload['source_user_id'] : null;
+
+		// Targeted recipients — uid => true. (No core signal targets directly
+		// today; kept so a future direct-notify signal can pass `recipients`.)
 		$targeted = array();
-		if (isset($params['recipients'])) {
-			$recips = is_array($params['recipients']) ? $params['recipients'] : array($params['recipients']);
+		if (isset($payload['recipients'])) {
+			$recips = is_array($payload['recipients']) ? $payload['recipients'] : array($payload['recipients']);
 			foreach ($recips as $r) {
 				$targeted[(int)$r] = true;
 			}
@@ -116,7 +103,7 @@ class Notify {
 		$topic_prefs = array();
 		if ($supports_topic) {
 			$subs = new MultiNotificationPreference(
-				array('hook_point' => $hook_point, 'subscribed' => true, 'deleted' => false)
+				array('signal_name' => $signal, 'subscribed' => true, 'deleted' => false)
 			);
 			$subs->load();
 			foreach ($subs as $pref) {
@@ -139,10 +126,10 @@ class Notify {
 			$is_targeted = isset($targeted[$uid]);
 			$pref = isset($topic_prefs[$uid]) ? $topic_prefs[$uid] : null;
 			if ($pref === null && $is_targeted) {
-				$pref = NotificationPreference::get_for($uid, $hook_point);
+				$pref = NotificationPreference::get_for($uid, $signal);
 			}
 
-			// A targeted recipient who has muted this hook point gets nothing.
+			// A targeted recipient who has muted this signal gets nothing.
 			if ($is_targeted && $pref !== null && !$pref->get('ntp_subscribed')) {
 				continue;
 			}
@@ -171,6 +158,32 @@ class Notify {
 				}
 			}
 		}
+	}
+
+	/**
+	 * Dumb `{field}` template substitution: each placeholder is replaced with the
+	 * payload value as plain text. A missing or null field substitutes the empty
+	 * string and logs once per (signal, field) for the request. No conditionals,
+	 * formatting, or modifiers — anything fancier is a derived payload field
+	 * computed at the call site.
+	 */
+	private static function _render($template, array $payload, $signal) {
+		$template = (string)$template;
+		if ($template === '' || strpos($template, '{') === false) {
+			return $template;
+		}
+		return preg_replace_callback('/\{([a-z0-9_]+)\}/i', function ($m) use ($payload, $signal) {
+			$key = $m[1];
+			if (!array_key_exists($key, $payload) || $payload[$key] === null) {
+				$dedupe = $signal . ':' . $key;
+				if (!isset(self::$logged_missing[$dedupe])) {
+					self::$logged_missing[$dedupe] = true;
+					error_log('[Notify] ' . $signal . ' template references missing payload field {' . $key . '}.');
+				}
+				return '';
+			}
+			return (string)$payload[$key];
+		}, $template);
 	}
 
 	/**

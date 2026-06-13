@@ -8,9 +8,9 @@
  * AdminPage — so a future user-facing /profile/notifications view can reuse
  * them unchanged.
  *
- * See specs/notification_hooks.md.
+ * See docs/signals.md and docs/notifications.md.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 function admin_notification_preferences_logic(array $input): LogicResult {
@@ -40,8 +40,8 @@ function admin_notification_preferences_logic(array $input): LogicResult {
 		return LogicResult::redirect('/admin/admin_notification_preferences');
 	}
 
-	$page_vars['hook_points'] = Notify::hook_points();
-	$page_vars['prefs']       = notification_preferences_load($user_id);
+	$page_vars['notifiable_signals'] = Notify::notifiable_signals();
+	$page_vars['prefs']              = notification_preferences_load($user_id);
 
 	// Check whether the email delivery pipeline is operational.
 	$send_queued = new MultiScheduledTask(array('task_class' => 'SendQueuedEmails', 'active' => true, 'deleted' => false));
@@ -60,7 +60,7 @@ function admin_notification_preferences_logic(array $input): LogicResult {
 }
 
 /**
- * Load a user's notification preferences as hook_point => array(subscribed, email).
+ * Load a user's notification preferences as signal_name => array(subscribed, email).
  * Page-object-agnostic — reusable by any preferences UI.
  */
 function notification_preferences_load($user_id) {
@@ -70,7 +70,7 @@ function notification_preferences_load($user_id) {
 	$multi = new MultiNotificationPreference(array('user_id' => $user_id, 'deleted' => false));
 	$multi->load();
 	foreach ($multi as $pref) {
-		$prefs[$pref->get('ntp_hook_point')] = array(
+		$prefs[$pref->get('ntp_signal_name')] = array(
 			'subscribed' => (bool)$pref->get('ntp_subscribed'),
 			'email'      => (bool)$pref->get('ntp_email_enabled'),
 		);
@@ -79,26 +79,26 @@ function notification_preferences_load($user_id) {
 }
 
 /**
- * Save a user's notification preferences. $subscribed_hooks and $email_hooks
- * are arrays of hook point names. One NotificationPreference row per (user,
- * hook point) — at most one row per declared hook point. Page-object-agnostic.
+ * Save a user's notification preferences. $subscribed_signals and $email_signals
+ * are arrays of signal names. One NotificationPreference row per (user, signal)
+ * — at most one row per notifiable signal. Page-object-agnostic.
  */
-function notification_preferences_save($user_id, $subscribed_hooks, $email_hooks) {
+function notification_preferences_save($user_id, $subscribed_signals, $email_signals) {
 	require_once(PathHelper::getIncludePath('includes/Notify.php'));
 	require_once(PathHelper::getIncludePath('data/notification_preferences_class.php'));
 
-	foreach (Notify::hook_points() as $hook_name => $meta) {
-		$subscribed = in_array($hook_name, $subscribed_hooks, true);
-		$email      = $subscribed && in_array($hook_name, $email_hooks, true);
+	foreach (Notify::notifiable_signals() as $signal_name => $meta) {
+		$subscribed = in_array($signal_name, $subscribed_signals, true);
+		$email      = $subscribed && in_array($signal_name, $email_signals, true);
 
-		$pref = NotificationPreference::get_for($user_id, $hook_name);
+		$pref = NotificationPreference::get_for($user_id, $signal_name);
 		if (!$pref) {
 			if (!$subscribed) {
 				continue;  // absence of a row already means "not subscribed"
 			}
 			$pref = new NotificationPreference(NULL);
 			$pref->set('ntp_usr_user_id', $user_id);
-			$pref->set('ntp_hook_point', $hook_name);
+			$pref->set('ntp_signal_name', $signal_name);
 		}
 		$pref->set('ntp_subscribed', $subscribed);
 		$pref->set('ntp_email_enabled', $email);

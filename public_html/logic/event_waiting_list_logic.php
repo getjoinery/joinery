@@ -99,11 +99,11 @@ function event_waiting_list_logic(array $input): LogicResult {
 		else{
 			$waiting_list->save();
 
-			require_once(PathHelper::getIncludePath('includes/Notify.php'));
-			Notify::fire('event.waitlisted', array(
-				'title' => 'Waiting list join: ' . $event->get('evt_name'),
-				'body'  => 'Someone joined the waiting list for ' . $event->get('evt_name') . '.',
-				'link'  => '/admin/admin_events',
+			require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
+			SignalBus::dispatch('event.waitlisted', array(
+				'event_id'       => $event->key,
+				'event_name'     => $event->get('evt_name'),
+				'user_id'        => $user->key,
 				'source_user_id' => $user->key,
 			));
 

@@ -4,9 +4,9 @@
  *
  * Sends bulk emails that are queued and past their scheduled date,
  * retries failed transactional emails with retry count tracking, and
- * sends intentionally-queued emails (e.g. notification hook emails).
+ * sends intentionally-queued emails (e.g. notification emails queued by Notify).
  *
- * @version 2.1
+ * @version 2.2
  */
 
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
@@ -82,7 +82,7 @@ class SendQueuedEmails implements ScheduledTaskInterface {
 			$parts[] = "Retried $retry_total failed: $sent sent, $permanent permanent failures";
 		}
 
-		// --- Pass 3: Send intentionally-queued emails (e.g. notification hook emails) ---
+		// --- Pass 3: Send intentionally-queued emails (e.g. notification emails queued by Notify) ---
 		$ready = new MultiQueuedEmail(
 			array('multi_status' => array(QueuedEmail::READY_TO_SEND)),
 			array('equ_queued_email_id' => 'ASC'),
