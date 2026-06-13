@@ -114,7 +114,9 @@ class ModelRegistry {
 
         if (!$is_readable) return;
 
-        $excluded = self::staticOr($class, 'ai_excluded_fields', []);
+        // Core unreadable floor ($api_unreadable_fields, shared with REST) + this surface's
+        // relevance trims ($ai_excluded_fields). One definition of "excluded."
+        $excluded = ModelSchemaBuilder::excludedFor($class);
         if (!is_array($excluded)) $excluded = [];
 
         // Strip writable ∩ excluded; warn on any conflict.
@@ -144,6 +146,18 @@ class ModelRegistry {
                     'kind'    => 'writable_auto_blocked',
                     'message' => "$f matches the auto-block regex (password/secret/key/"
                               . "token/hash). Stripped from the writable surface.",
+                ];
+                continue;
+            }
+            // Core write floor: privileged, non-credential columns the REST write boundary
+            // also drops ($api_unwritable_fields). Credentials were caught by the regex above;
+            // this folds the shared core floor under the AI write surface (§5.4).
+            if ($class::is_unwritable_field($f)) {
+                self::$warnings[] = [
+                    'class'   => $class,
+                    'kind'    => 'writable_unwritable_floor',
+                    'message' => "$f is in the core write floor (\$api_unwritable_fields). "
+                              . "Stripped from the writable surface.",
                 ];
                 continue;
             }

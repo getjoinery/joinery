@@ -1,18 +1,26 @@
 <?php
 /**
  * Example Data Model Class Template
- * 
- * This file demonstrates the complete structure and patterns for creating
- * data model classes in this system. Copy this template and modify for
- * your specific table/entity.
- * 
+ *
+ * Demonstrates the complete, current structure for a data model class: table
+ * config, schema (field_specifications), REST API + AI exposure and field-level
+ * authorization, deletion strategy, row-scope hooks, and the Multi collection.
+ * Copy this template and adapt it for your table/entity.
+ *
  * USAGE:
  * 1. Copy this file to /data/[tablename]_class.php
  * 2. Replace "Example" with your actual class name (PascalCase)
  * 3. Replace "MultiExample" with Multi + your class name
  * 4. Update all static properties for your table
  * 5. Add any custom methods specific to your entity
- * 6. Run php -l to validate syntax
+ * 6. Run php -l, then maintenance_scripts/dev_tools/validate_php_file.php
+ *
+ * RELATED DOCS:
+ * - docs/api.md ............................ REST API exposure, row scope, field floors
+ * - docs/deletion_system.md ................ $foreign_key_actions / $permanent_delete_actions
+ * - docs/validation.md ..................... field validation
+ * - docs/logic_architecture.md ............. the logic layer that wraps these models
+ * - plugins/joinery_ai/docs/overview.md .... AI model read/write surface
  */
 
 require_once(__DIR__ . '/../includes/PathHelper.php');
@@ -30,71 +38,81 @@ class Example extends SystemBase
     public static $tablename = 'exm_examples';       // Actual database table name
     public static $pkey_column = 'exm_id';          // Primary key column name
 
-    // OPTIONAL: AI auto-discovery (read)
+    // ====================================================================
+    // REST API exposure & authorization (opt-in, default-closed)
+    // Full reference: docs/api.md
+    // ====================================================================
     //
-    // Setting $ai_readable = true makes this model eligible for the joinery_ai
-    // plugin's query_model tool — once a recipe also opts the class in via its
-    // Allowed Models checkboxes. See docs/joinery_ai.md.
+    // Three independent layers, each safe by default:
+    //   1. Resource exposure — is this class a REST resource at all?
+    //   2. Row scope         — which rows may a caller touch?
+    //   3. Field floors      — which columns may be read / written?
+
+    // Layer 1 — exposure. Both default false on SystemBase: a model is NOT a
+    // CRUD resource until it opts in, and an unexposed class 404s. Read and
+    // write are separate, so a model can be read-only ($api_writable = false).
+    // Omit both for credential, config, audit/log, and join tables.
+    public static $api_readable = true;
+    public static $api_writable = true;
+
+    // Layer 2 — public read. Set true ONLY for world-readable catalog content
+    // (events, posts, pages): it skips the per-record scope AND the collection
+    // owner-filter. Leave false (default) for user-owned data — SystemBase's
+    // authenticate_read/write then default to owner-or-staff (deny). You only
+    // ever override the row-scope hooks to OPEN access, never to close it
+    // (see the authenticate_read note further down).
+    // public static $api_public_read = true;
+
+    // Layer 3 — field floors (single definitions SHARED with the AI surface).
+    // READ floor: columns never exported over any API. The credential regex
+    //   /_(password|secret|key|token|hash)$/i auto-covers *_password, *_secret,
+    //   *_key, *_token, *_hash the moment they are added, so list here ONLY
+    //   genuine secrets whose names miss the pattern.
+    public static $api_unreadable_fields = array();   // e.g. ['exm_authhash']
+    // WRITE floor: privileged, non-credential columns that must never be set
+    //   over the API (silently dropped from CRUD/AI writes). Credentials are
+    //   auto-covered by the same regex, so list only the rest (e.g. a
+    //   permission/role column).
+    public static $api_unwritable_fields = array();   // e.g. ['exm_permission']
+    // DERIVED allowlist: export_for_api() is FAIL-CLOSED — it emits declared
+    //   columns (minus the read floor) PLUS only the keys named here. Any
+    //   computed key an export_as_array() override injects is dropped unless
+    //   listed. Default empty = no derived keys leave over the API. (See the
+    //   export_as_array note further down.)
+    public static $api_derived_fields = array();      // e.g. ['display_name']
+
+    // ====================================================================
+    // AI model surface (joinery_ai) — opt-in, default-deny
+    // Full reference: plugins/joinery_ai/docs/overview.md
+    // ====================================================================
     //
-    // Default-deny: omit these properties entirely if the model is system
-    // infrastructure, contains secrets, or you simply don't want recipes
-    // reading from it.
+    // Read: $ai_readable makes the model eligible for the query_model tool —
+    // once a recipe also opts the class in via its Allowed Models checkboxes.
+    // Omit these entirely for system/infra/secret tables you don't want
+    // recipes reading from.
     public static $ai_readable        = true;
     public static $ai_description     = 'Example records used to demonstrate the data-model template.';
-    public static $ai_excluded_fields = [];                 // Per-model blocklist for sensitive columns.
-                                                            // Auto-block regex /_(password|secret|key|token|hash)$/i
-                                                            // applies on top, so list only columns it misses
-                                                            // (raw payment blobs, internal IDs, PINs, etc.).
+    // Relevance/noise trims ONLY. Genuine secrets belong in $api_unreadable_fields
+    // (the shared read floor) — ModelSchemaBuilder merges that in automatically,
+    // so never re-list secrets here. Use this for noisy-but-not-secret columns
+    // (bulky internal blobs, low-signal IDs) you want kept out of the LLM's view.
+    public static $ai_excluded_fields = [];
 
-    // OPTIONAL: untrusted-input markers
-    //
-    // List fields whose values originate outside the trust boundary —
-    // user-authored bios, message bodies, inbound email, public form
-    // responses. The query executor wraps those values in tool results
-    // with a per-run nonce, and the system prompt instructs the LLM to
-    // treat the wrapped content as data, not instructions.
-    //
-    // Probabilistic defense against indirect prompt injection. Cheap to
-    // declare; costs nothing for fields you don't list.
+    // Untrusted-input markers: fields whose values originate outside the trust
+    // boundary — user bios, message bodies, inbound email, public form answers.
+    // The query executor wraps those values with a per-run nonce so the LLM
+    // treats them as data, not instructions. Probabilistic defense against
+    // indirect prompt injection; cheap to declare, free for fields you omit.
     public static $ai_untrusted_fields = [];                // e.g. ['exm_user_note', 'exm_public_caption']
 
-    // OPTIONAL: AI auto-discovery (write) — currently a no-op
-    //
-    // Reserved for the deferred write executor. Declaring a non-empty array
-    // does nothing until create_model / update_model / delete_model ship.
-    // Only opt in when the model's prepare()/save() field-level rules are
-    // the *entire* validation gauntlet (no cross-record invariants, no
-    // payment effects, no hook firings). See specs/joinery_ai_write_tools.md.
+    // Write: opt the model into the AI write tools (create_model / update_model
+    // / delete_model) by allow-listing writable columns. The core write floor
+    // ($api_unwritable_fields + the credential regex) is stripped from this set
+    // automatically. Only opt in when the model's prepare()/save() rules are the
+    // ENTIRE validation gauntlet (no cross-record invariants, no payment
+    // effects, no hook firings). See specs/implemented/joinery_ai_write_tools.md.
     // public static $ai_writable_fields = ['exm_name', 'exm_description'];
 
-    // REQUIRED: Field definitions - controls database schema
-    public static $fields = array(
-        // Primary key - always required
-        'exm_id',
-        
-        // Example field types with naming convention: [3-char-prefix]_[fieldname]
-        'exm_name',           // varchar field - required
-        'exm_description',    // text field  
-        'exm_link',           // varchar field - URL slug
-        'exm_code',           // character field - fixed length
-        'exm_status',         // integer field - with default
-        'exm_price',          // numeric field - decimal precision
-        'exm_counter',        // int8 field - zero on create
-        'exm_small_number',   // int2 field - small integers
-        'exm_is_active',      // bool field - with default
-        'exm_category_id',    // int8 foreign key field
-        'exm_metadata',       // jsonb field
-        'exm_settings',       // json field
-        'exm_event_date',     // date field
-        
-        // Standard audit fields - recommended for all tables
-        'exm_created',        // timestamp - creation time
-        'exm_updated',        // timestamp - last update time
-        'exm_delete_time',    // timestamp - soft delete (NULL = active)
-        'exm_created_by',     // integer - user ID who created
-        'exm_updated_by'      // integer - user ID who last updated
-    );
-    
     // REQUIRED: Complete field specifications - defines database schema AND runtime behavior
     //
     // SUPPORTED DATA TYPES (from LibraryFunctions::translate_data_types):
@@ -246,43 +264,36 @@ class Example extends SystemBase
     // field spec (or declare it inline on the FormWriter input); end_form() emits the JS.
 
 
-    // REQUIRED: Actions to take when permanently deleting records
-    // This array MUST be defined (even if empty) for all model classes
-    // Defines cleanup operations when permanent_delete() is called
+    // ====================================================================
+    // Deletion strategy — full reference: docs/deletion_system.md
+    // ====================================================================
+    //
+    // $foreign_key_actions: what happens to THIS model's rows when a row they
+    // reference (a parent) is deleted. Omit a foreign key entirely to let it
+    // cascade-delete with the parent. Actions:
+    //   ['action' => 'null']                                  - set the FK to NULL
+    //   ['action' => 'set_value', 'value' => User::USER_DELETED] - reassign
+    //   ['action' => 'prevent', 'message' => '...']           - block parent deletion
+    protected static $foreign_key_actions = [
+        // 'exm_category_id' => ['action' => 'null'],
+        // 'exm_created_by'  => ['action' => 'set_value', 'value' => User::USER_DELETED],
+    ];
+
+    // $permanent_delete_actions: cleanup when permanent_delete() runs on a row
+    // of THIS model (delete owned files, cascade owned child rows). MUST be
+    // defined (even if empty) for every model class.
     public static $permanent_delete_actions = array(
-        // Example: delete related files
         // 'delete_files' => array('exm_image_path'),
-        // Example: cascade delete related records  
         // 'cascade_delete' => array(
         //     'table' => 'exm_related',
         //     'foreign_key' => 'exm_example_id'
         // )
     );
     
-    // NOTE: json_vars is LEGACY - being consolidated into field_specifications
-    // JSON fields are now AUTO-DETECTED from field_specifications using optimized is_json_field() method
-    // Auto-detection logic (in SystemBase):
-    //
-    // protected function is_json_field($field_name) {
-    //     if (!isset(static::$field_specifications[$field_name])) {
-    //         return false;
-    //     }
-    //     
-    //     $type = static::$field_specifications[$field_name]['type'] ?? '';
-    //     
-    //     // Optimized: Quick rejection based on first character
-    //     $first_char = $type[0] ?? '';
-    //     if ($first_char !== 'j') {
-    //         return false; // Not json/jsonb
-    //     }
-    //     
-    //     // Only check if starts with 'j' - much faster than string search
-    //     return $type === 'json' || $type === 'jsonb';
-    // }
-    //
-    // Usage in get_json(): if ($this->is_json_field($field)) { ... }
-    // For custom API output control, override get_json() method instead
-    
+    // JSON fields are auto-detected from field_specifications types ('json' /
+    // 'jsonb') — no separate declaration needed. get_json() / smart_get()
+    // decode them automatically.
+
     // OPTIONAL: URL namespace for generating SEO-friendly URLs
     // Used by get_url() method to create URLs like: /example/my-record-link
     // Requires a corresponding {prefix}_link field (e.g., 'exm_link') in field_specifications
@@ -326,8 +337,51 @@ class Example extends SystemBase
         
         return $result;
     }
-    
-    
+
+    // ====================================================================
+    // Row-scope authorization (REST API Layer 2) — override ONLY when needed
+    // ====================================================================
+    //
+    // The SystemBase default is owner-or-staff (deny): a caller may touch a row
+    // only if they own it (the {prefix}_usr_user_id column == current_user_id)
+    // or they are staff (permission >= 5). A model with no owner column defaults
+    // to staff-only. The contract is THROW-to-deny (return nothing to allow).
+    //
+    // Do NOT override for the common cases:
+    //   - public content      -> set $api_public_read = true (above), not here
+    //   - standard ownership   -> the default already handles it
+    // Override ONLY for non-standard ownership (e.g. sender/recipient columns,
+    // or a model owned by its own id like User):
+    //
+    // function authenticate_read($data) {
+    //     if ($this->get('exm_owner_id') != $data['current_user_id']
+    //         && (int)$data['current_user_permission'] < 5) {
+    //         throw new SystemAuthenticationError(
+    //             'Current user does not have permission to view this entry in ' . static::$tablename);
+    //     }
+    // }
+    // authenticate_write($data) is identical in shape (wording: 'edit').
+
+    // ====================================================================
+    // Custom API export (REST API Layer 3) — derived keys & child embeds
+    // ====================================================================
+    //
+    // export_as_array() returns the FULL row and is for internal/admin/webhook
+    // callers. export_for_api() — what the REST boundary and embeds use — is
+    // fail-closed: declared columns minus the read floor, plus ONLY the keys in
+    // $api_derived_fields. So if you override export_as_array() to add a computed
+    // key or embed a child model, you must:
+    //   (a) list any computed key in $api_derived_fields to expose it, and
+    //   (b) embed children via the child's export_for_api(), not export_as_array(),
+    //       so the read floor holds through the nesting.
+    //
+    // function export_as_array() {
+    //     $data = parent::export_as_array();
+    //     $data['display_name'] = $this->get('exm_name');               // expose -> add to $api_derived_fields
+    //     $category = $this->category();
+    //     $data['category'] = $category ? $category->export_for_api() : NULL;  // floor-safe embed
+    //     return $data;
+    // }
 }
 
 /**

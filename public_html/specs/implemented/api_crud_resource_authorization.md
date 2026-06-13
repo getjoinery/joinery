@@ -1,7 +1,18 @@
 # CRUD API: opt-in resources + deny-by-default row scope + field-level floors
 
-**Status:** Proposed
+**Status:** Implemented (2026-06-12)
 **Created:** 2026-06-12
+
+> **Implementation note — public read is a flag, not a no-op override.** During build, the
+> "public read = override `authenticate_read` to a no-op" approach (below) was refined to a
+> declarative `public static $api_public_read` flag on `SystemBase` (default false). The reason:
+> §4.5's collection owner-scope must know whether a model is public to decide whether to apply the
+> owner-filter, and a no-op method override is not introspectable for that decision — five public
+> Bucket A models (Post, Page, Event, PageContent, ProductDetail) carry a real `{prefix}_usr_user_id`
+> column and would have had their public collections wrongly owner-filtered. The flag captures
+> "this resource is public" as one queryable fact used by both the row-read gate and the collection
+> scope. Where the text below says "override `authenticate_read` to a no-op," read "set
+> `$api_public_read = true`." Everything else shipped as written.
 **Scope:** The core REST CRUD surface (`/api/v1/{Class}`). Establishes three independent
 authorization layers — resource exposure, row scope, and field-level read/write floors — matching
 how mainstream API frameworks separate these concerns, and unifying the field-level controls with

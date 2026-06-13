@@ -837,14 +837,18 @@ public static function get_by_name($name, $search_deleted = false) {
 		}
 	}
 
-	function authenticate_read($data=NULL){
-		if(isset($data['session'])){
-			$session = $data['session'];
+	/**
+	 * Content-visibility gate for the file-serving path (serve.php) — NOT API row
+	 * authorization. Returns bool: may this session view the file, given its
+	 * min-permission, group membership, event registration, and tier gating? A
+	 * separate question from authenticate_read (API ownership), so it carries its
+	 * own honest name and takes the session object directly.
+	 */
+	function is_viewable($session){
+		if(!$session){
+			throw new SystemDisplayablePermanentError("Session is not present to authenticate.");
 		}
-		else{
-			SystemDisplayablePermanentError("Session is not present to authenticate.");
-		}		
-		
+
 		if($this->get('fil_delete_time')){
 			return false;
 		}

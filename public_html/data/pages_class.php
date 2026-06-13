@@ -16,6 +16,12 @@ class Page extends SystemBase {	public static $prefix = 'pag';
 	public static $tablename = 'pag_pages';
 	public static $pkey_column = 'pag_page_id';
 
+	// REST CRUD exposure (Layer 1). Public catalog content (Bucket A): readable,
+	// writable, and world-readable; writes inherit the deny-by-default scope.
+	public static $api_readable = true;
+	public static $api_writable = true;
+	public static $api_public_read = true;
+
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Pages on the public site.';

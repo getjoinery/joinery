@@ -12,6 +12,11 @@ class Message extends SystemBase {	public static $prefix = 'msg';
 	public static $tablename = 'msg_messages';
 	public static $pkey_column = 'msg_message_id';
 
+	// REST CRUD exposure (Layer 1). User-owned (Bucket B): readable + writable
+	// under the deny-by-default owner-or-staff row scope.
+	public static $api_readable = true;
+	public static $api_writable = true;
+
 	// AI auto-discovery (read)
 	// NOTE: msg_body is user-generated text and a prompt-injection vector. The
 	// executor blocklist + auto-block regex prevent extracting credentials, but
@@ -60,10 +65,27 @@ function display_title(){
 		}
 	}
 
+	// REST API per-record read scope: a private message is readable only by its
+	// sender or recipient (or staff, permission >= 5). A message has no bare
+	// msg_usr_user_id column — the parties are msg_usr_user_id_sender and
+	// msg_usr_user_id_recipient — so both are checked.
+	function authenticate_read($data) {
+		$uid = $data['current_user_id'];
+		if ($this->get('msg_usr_user_id_sender') != $uid
+			&& $this->get('msg_usr_user_id_recipient') != $uid) {
+			if ($data['current_user_permission'] < 5) {
+				throw new SystemAuthenticationError(
+					'Current user does not have permission to view this entry in '. static::$tablename);
+			}
+		}
+	}
+
+	// REST API per-record write scope: a message is owned by its sender, so only
+	// the sender (or staff, permission >= 5) may create/update/delete it. There
+	// is no bare msg_usr_user_id column — the owner is msg_usr_user_id_sender.
 	function authenticate_write($data) {
-		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
-			// If the user's ID doesn't match, we have to make
-			// sure they have admin access, otherwise denied.
+		if ($this->get('msg_usr_user_id_sender') != $data['current_user_id']) {
+			// Not the sender — require staff access, otherwise denied.
 			if ($data['current_user_permission'] < 5) {
 				throw new SystemAuthenticationError(
 					'Current user does not have permission to edit this entry in '. static::$tablename);

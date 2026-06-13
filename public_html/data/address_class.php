@@ -25,6 +25,13 @@ class Address extends SystemBase {	public static $prefix = 'usa';
 	public static $tablename = 'usa_users_addrs';
 	public static $pkey_column = 'usa_users_addr_id';
 
+	// REST CRUD exposure (Layer 1). User-owned (Bucket B): readable + writable
+	// under the deny-by-default owner-or-staff row scope.
+	public static $api_readable = true;
+	public static $api_writable = true;
+	// Derived keys export_as_array() injects that may leave over the API (fail-closed allowlist).
+	public static $api_derived_fields = array('display_string', 'city_state_string', 'privacy_checked_display_string');
+
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Mailing or billing addresses attached to user accounts.';

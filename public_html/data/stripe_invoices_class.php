@@ -14,6 +14,11 @@ class StripeInvoice extends SystemBase {	public static $prefix = 'siv';
 	public static $tablename = 'siv_stripe_invoices';
 	public static $pkey_column = 'siv_stripe_invoice_id';
 
+	// REST CRUD exposure (Layer 1). User-owned (Bucket B): readable + writable
+	// under the deny-by-default owner-or-staff row scope.
+	public static $api_readable = true;
+	public static $api_writable = true;
+
 	protected static $foreign_key_actions = [
 		'siv_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
 	];

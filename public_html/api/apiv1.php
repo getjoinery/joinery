@@ -163,6 +163,53 @@ function api_resolve_logic_path($url_segments, $noun) {
 	return array($action_label, $action_name);
 }
 
+/**
+ * Layer 1 helper — read a model's API exposure flag safely. Every model inherits
+ * the SystemBase `false` default, so a class predating the property is simply not
+ * exposed. $prop is 'api_readable' or 'api_writable'.
+ */
+function api_flag($class_name, $prop) {
+	return (bool) $class_name::${$prop};
+}
+
+/**
+ * The conventional owner column for a model ({prefix}_usr_user_id), or null if the
+ * model has no such column. Used for owner-stamping (POST), owner-column dropping
+ * (writes), and owner-scoping the collection query.
+ */
+function api_owner_column($class_name) {
+	$col = $class_name::$prefix . '_usr_user_id';
+	return array_key_exists($col, $class_name::$field_specifications) ? $col : null;
+}
+
+/**
+ * Layer 3 (write) boundary sanitize — runs on the input map BEFORE it reaches any
+ * create/update path (CreateNew() or the raw set-loop), so the write floor cannot be
+ * bypassed by a model defining its own factory. Drops unwritable fields (credential
+ * pattern + $api_unwritable_fields) and the owner column (never reassignable via CRUD).
+ */
+function api_sanitize_write_input(array $input, $class_name) {
+	$owner_col = api_owner_column($class_name);
+	$clean = array();
+	foreach ($input as $key => $value) {
+		if ($class_name::is_unwritable_field($key)) continue;
+		if ($owner_col !== null && $key === $owner_col) continue;
+		$clean[$key] = $value;
+	}
+	return $clean;
+}
+
+/**
+ * Layer 2 row-scope gate. The per-record hooks are throw-to-deny; this also treats an
+ * explicit `false` return as denial (§4.3 safety net) without tripping on the void/null
+ * return of the normal hooks. $method is 'authenticate_read' or 'authenticate_write'.
+ */
+function api_authorize_row($object, $method, $auth_data) {
+	if ($object->$method($auth_data) === false) {
+		throw new SystemAuthenticationError('Authorization denied.');
+	}
+}
+
 // Security headers
 header("X-Content-Type-Options: nosniff");
 header("X-Frame-Options: DENY");
@@ -275,8 +322,12 @@ if (strtolower($url_segments[2] ?? '') === 'action') {
 	// Returns only when the action requires a session.
 }
 
-// Discover all model classes available for API
+// Discover all model classes, then apply the Layer 1 exposure opt-in. discover_model_classes()
+// must keep returning ALL models (shared with schema/deletion subsystems); the CRUD surface is
+// the filtered subset. An unexposed class is indistinguishable from a nonexistent one (404).
 $classes = LibraryFunctions::discover_model_classes();
+$readable_classes = array_values(array_filter($classes, fn($c) => api_flag($c, 'api_readable')));
+$writable_classes = array_values(array_filter($classes, fn($c) => api_flag($c, 'api_writable')));
 
 $source_ip = $_SERVER['REMOTE_ADDR'];
 // Authentication: resolve + validate the key and load its user, or exit 4xx.
@@ -320,17 +371,23 @@ if (in_array($operation, $classes)) {
 
 	if ($request_method == 'get') {
 
+		if (!in_array($class_name, $readable_classes)) {
+			api_error('Not found', 'NotFound', 404);
+		}
+
 		ApiAuth::authorize(['capability' => ApiAuth::CAP_READ], $api_entry,
 			$auth_data['current_user_permission'], 'Fetch object');
 
 		// Single object GET
 		try {
 			$object = new $class_name($entity_id, TRUE);
-			$object->authenticate_read($auth_data);
+			if (!$class_name::$api_public_read) {
+				api_authorize_row($object, 'authenticate_read', $auth_data);
+			}
 			$response = array(
 				'api_version' => '1.0',
 				'success_message' => $class_name . ' found.',
-				'data' => $object->export_as_array()
+				'data' => $object->export_for_api()
 			);
 		} catch (Exception $e) {
 			RequestLogger::log('api', $request_method . ' ' . $operation, false, [
@@ -344,6 +401,10 @@ if (in_array($operation, $classes)) {
 
 	} else if ($request_method == 'put') {
 
+		if (!in_array($class_name, $writable_classes)) {
+			api_error('Not found', 'NotFound', 404);
+		}
+
 		ApiAuth::authorize(['capability' => ApiAuth::CAP_WRITE], $api_entry,
 			$auth_data['current_user_permission'], 'Update object');
 
@@ -351,17 +412,20 @@ if (in_array($operation, $classes)) {
 
 		try {
 			$object = new $class_name($entity_id, TRUE);
-			foreach ($url_parts as $key => $value) {
+			// Authorize the row as it exists in the DB, BEFORE applying input — you may
+			// only update a row you already own (the owner column is unwritable below, so
+			// it cannot be flipped to forge ownership mid-update).
+			api_authorize_row($object, 'authenticate_write', $auth_data);
+			foreach (api_sanitize_write_input($url_parts, $class_name) as $key => $value) {
 				$object->set($key, $value);
 			}
 			$object->prepare();
-			$object->authenticate_write($auth_data);
 			$object->save();
 
 			$response = array(
 				'api_version' => '1.0',
 				'success_message' => $class_name . ' update successful.',
-				'data' => $object->export_as_array()
+				'data' => $object->export_for_api()
 			);
 		} catch (Exception $e) {
 			RequestLogger::log('api', $request_method . ' ' . $operation, false, [
@@ -375,24 +439,37 @@ if (in_array($operation, $classes)) {
 
 	} else if ($request_method == 'post') {
 
+		if (!in_array($class_name, $writable_classes)) {
+			api_error('Not found', 'NotFound', 404);
+		}
+
 		ApiAuth::authorize(['capability' => ApiAuth::CAP_WRITE], $api_entry,
 			$auth_data['current_user_permission'], 'Create object');
 
 		try {
-			if (!$object = $class_name::CreateNew($_POST)) {
+			// Boundary sanitize BEFORE dispatch so the floor wraps both CreateNew() and the
+			// raw set-loop; then stamp the owner server-side so created rows belong to the
+			// caller by construction (and a supplied owner cannot spoof).
+			$write_input = api_sanitize_write_input($_POST, $class_name);
+			$owner_col = api_owner_column($class_name);
+			if ($owner_col !== null) {
+				$write_input[$owner_col] = $auth_data['current_user_id'];
+			}
+
+			if (!$object = $class_name::CreateNew($write_input)) {
 				$object = new $class_name(NULL);
-				foreach ($_POST as $key => $value) {
+				foreach ($write_input as $key => $value) {
 					$object->set($key, $value);
 				}
 				$object->prepare();
-				$object->authenticate_write($auth_data);
+				api_authorize_row($object, 'authenticate_write', $auth_data);
 				$object->save();
 			}
 
 			$response = array(
 				'api_version' => '1.0',
 				'success_message' => 'New ' . $class_name . ' successful.',
-				'data' => $object->export_as_array()
+				'data' => $object->export_for_api()
 			);
 		} catch (Exception $e) {
 			RequestLogger::log('api', $request_method . ' ' . $operation, false, [
@@ -406,19 +483,23 @@ if (in_array($operation, $classes)) {
 
 	} else if ($request_method == 'delete') {
 
+		if (!in_array($class_name, $writable_classes)) {
+			api_error('Not found', 'NotFound', 404);
+		}
+
 		ApiAuth::authorize(['capability' => ApiAuth::CAP_DELETE], $api_entry,
 			$auth_data['current_user_permission'], 'Delete object');
 
 		try {
 			$object = new $class_name($entity_id, TRUE);
-			$object->authenticate_write($auth_data);
+			api_authorize_row($object, 'authenticate_write', $auth_data);
 			$object->soft_delete();
 			$object = new $class_name($entity_id, TRUE);
 
 			$response = array(
 				'api_version' => '1.0',
 				'success_message' => 'Deletion successful.',
-				'data' => $object->export_as_array()
+				'data' => $object->export_for_api()
 			);
 		} catch (Exception $e) {
 			RequestLogger::log('api', $request_method . ' ' . $operation, false, [
@@ -433,11 +514,16 @@ if (in_array($operation, $classes)) {
 
 } else if (in_array(substr($operation, 0, -1), $classes)) {
 
+	// Collection GET
+	$class_name = substr($operation, 0, -1);
+
+	if (!in_array($class_name, $readable_classes)) {
+		api_error('Not found', 'NotFound', 404);
+	}
+
 	ApiAuth::authorize(['capability' => ApiAuth::CAP_READ], $api_entry,
 		$auth_data['current_user_permission'], 'Fetch objects');
 
-	// Collection GET
-	$class_name = substr($operation, 0, -1);
 	$multiclassname = 'Multi' . $class_name;
 
 	parse_str($_SERVER['QUERY_STRING'], $url_parts);
@@ -459,14 +545,27 @@ if (in_array($operation, $classes)) {
 	$offset = $numperpage * $page;
 
 	$objects = new $multiclassname($url_parts, $sortarray, $numperpage, $offset);
+
+	// §4.5 owner-scope: for a non-public owner-column model read by a non-staff caller, AND
+	// the owner filter into the query itself, so count_all() is correct and there is no count
+	// disclosure. Public-read models (catalog content) and staff get the unfiltered query.
+	$is_public_read = $class_name::$api_public_read;
+	$owner_col = api_owner_column($class_name);
+	if (!$is_public_read && $owner_col !== null && (int)$auth_data['current_user_permission'] < 5) {
+		$objects->api_owner_scope = [$owner_col, $auth_data['current_user_id']];
+	}
+
 	$numobjects = $objects->count_all();
 	$objects->load();
 
 	$response_array = array();
 	foreach ($objects as $object) {
 		try {
-			$object->authenticate_read($auth_data);
-			$response_array[] = $object->export_as_array();
+			// Public-read models skip the per-record scope; owned models enforce it (backstop).
+			if (!$is_public_read) {
+				api_authorize_row($object, 'authenticate_read', $auth_data);
+			}
+			$response_array[] = $object->export_for_api();
 		} catch (Exception $e) {
 			// Skip unauthorized objects
 			continue;

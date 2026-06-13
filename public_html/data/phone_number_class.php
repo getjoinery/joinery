@@ -24,6 +24,13 @@ class PhoneNumber extends SystemBase {	public static $prefix = 'phn';
 	public static $tablename = 'phn_phone_numbers';
 	public static $pkey_column = 'phn_phone_number_id';
 
+	// REST CRUD exposure (Layer 1). User-owned (Bucket B): readable + writable
+	// under the deny-by-default owner-or-staff row scope.
+	public static $api_readable = true;
+	public static $api_writable = true;
+	// Derived keys export_as_array() injects that may leave over the API (fail-closed allowlist).
+	public static $api_derived_fields = array('key', 'phone_string');
+
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Phone numbers attached to the user\'s account.';

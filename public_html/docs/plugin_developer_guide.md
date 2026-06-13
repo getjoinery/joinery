@@ -284,7 +284,9 @@ Plugins (and themes) support two optional deprecation fields:
 
 ### Data Models
 
-Plugins provide data models using the SystemBase pattern:
+Plugins provide data models using the SystemBase pattern. For a complete annotated reference model
+covering every property — schema, REST API exposure/authorization, AI surface, deletion, and the
+Multi collection class — see **[`docs/example_class.php`](example_class.php)**.
 
 ```php
 // plugins/my-plugin/data/my_data_class.php
@@ -324,10 +326,14 @@ and the constructor throws `SystemBaseException('This object has no prefix.')` i
 field back to its model. `$tablename` and `$pkey_column` are likewise required; a Multi
 collection class additionally needs `$model_class` (see [Writing a Multi (collection) class](#writing-a-multi-collection-class) below).
 
-**Per-record REST API scope.** If your model holds user-owned or otherwise private data and you
-expose it (core models are exposed to the CRUD API; plugin models are not), implement
-`authenticate_read($data)` / `authenticate_write($data)` to scope access to the acting user —
-copy the owner-or-staff pattern from `data/orders_class.php`. The defaults are no-ops (open). See
+**REST API exposure & per-record scope.** A core model is a CRUD resource only if it opts in with
+`public static $api_readable = true;` and/or `$api_writable = true;` (both default `false`); plugin
+models are never exposed to CRUD — expose plugin behaviour through action endpoints instead. For an
+exposed model, the default row scope is **owner-or-staff (deny)**: a caller may touch a row only if
+they own it (the `{prefix}_usr_user_id` column matches the acting user) or they are staff
+(permission ≥ 5). Set `public static $api_public_read = true;` to make a resource world-readable
+(catalog content), or override `authenticate_read($data)` / `authenticate_write($data)` for a custom
+rule — copy the pattern from `data/orders_class.php`. See
 [REST API → Per-record authorization](api.md#per-record-authorization).
 
 **Deletion Behavior**: For complete documentation on defining foreign key actions, cascading deletes, soft-delete cascading patterns, and undelete strategies, see the [Deletion System Documentation](deletion_system.md).

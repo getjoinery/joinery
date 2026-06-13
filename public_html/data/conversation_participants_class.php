@@ -33,6 +33,11 @@ class ConversationParticipant extends SystemBase {
 	public static $tablename = 'cnp_conversation_participants';
 	public static $pkey_column = 'cnp_conversation_participant_id';
 
+	// REST CRUD exposure (Layer 1). User-owned (Bucket B): readable + writable
+	// under the deny-by-default owner-or-staff row scope.
+	public static $api_readable = true;
+	public static $api_writable = true;
+
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'The user\'s participation in a conversation (read state, mute setting). Does not include message bodies.';

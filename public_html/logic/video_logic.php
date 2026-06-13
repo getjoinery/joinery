@@ -29,7 +29,7 @@ function video_logic(array $input): LogicResult {
 		//SHOW IT EVEN IF UNPUBLISHED OR DELETED
 	}
 	else {
-		if(!$video->authenticate_read($session)){
+		if(!$video->is_viewable($session)){
 			require_once(LibraryFunctions::display_404_page());	
 		}
 	}	

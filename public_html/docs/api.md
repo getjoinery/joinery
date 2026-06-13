@@ -50,7 +50,7 @@ There is one auth story with **two key types**, distinguished by `apk_type` in t
 | Provisioned by | An administrator via **Admin > API Keys** | The user, via `POST /api/v1/auth/login` |
 | Identity | The user account the admin attached | The user who logged in |
 | Secret hashing | Slow hash (phpass) — appropriate for admin-chosen secrets | SHA-256 — the secret is a random 256-bit value, so a slow KDF buys nothing and would cost on every request |
-| Permission | Chosen by the admin (1–4) | Always 4; per-record authorization (where the model implements it — see [Per-record authorization](#per-record-authorization)) is the effective gate |
+| Permission | Chosen by the admin (1–4) | Always 4; per-record authorization (owner-or-staff by default — see [Per-record authorization](#per-record-authorization)) is the effective gate |
 | Expiry | Optional, set by the admin | Always set, from the `api_session_key_lifetime_days` setting (default 365) |
 | Revocation | Admin API Keys page | `auth/logout`, the profile **App Sessions** page, the admin API Keys page (type filter), and automatically on password change |
 | Management API | Allowed (with superadmin owner) | **Never** |
@@ -181,48 +181,166 @@ A management handler's `auth` block may **tighten** the default (e.g. raise the 
 
 ## CRUD Endpoints
 
-### Per-record authorization
+The CRUD surface has three independent authorization layers, each safe by default:
+**resource exposure** (is this class an endpoint at all?), **row scope** (may this caller
+touch this row?), and **field floors** (which columns may be read / written?). The
+`apk_permission` gradient (1–4) sits above all three and decides which **HTTP verbs** a key
+may use.
 
-The `apk_permission` gradient above (1–4) decides which **HTTP verbs** a key may use
-(read / create-update / delete). It does **not** decide **which rows** the key may touch.
-That second gate is per-model and per-record: before returning or mutating a row, the API
-calls `authenticate_read($data)` (on GET) or `authenticate_write($data)` (on POST/PUT/DELETE)
-on the model, passing the acting user's identity:
+### Exposing a model: checklist
+
+A new model is a CRUD resource only when you opt it in. Both API surfaces (REST and the AI
+model surface) read the **same** declarations below, so you configure each fact once.
+
+1. **Resource?** Set `$api_readable` / `$api_writable` (both default `false` → 404). Leave both
+   off for credential, config, audit/log, and join tables.
+2. **Row scope?** The `SystemBase` default is **owner-or-staff (deny)** and needs no code:
+   - Standard `{prefix}_usr_user_id` owner column → nothing to write.
+   - No owner column → automatically staff-only; nothing to write.
+   - Public catalog content → set `$api_public_read = true` (you override **to open**, never to
+     close).
+   - Non-standard ownership (e.g. sender/recipient) → override `authenticate_read` /
+     `authenticate_write` and **throw to deny**.
+3. **Secret / privileged columns?** Add genuine secrets to `$api_unreadable_fields` and
+   privileged-but-readable columns to `$api_unwritable_fields`. Skip anything matching
+   `/_(password|secret|key|token|hash)$/i` — the regex floor catches those automatically. Both
+   lists are honored by REST **and** AI.
+4. **Custom `export_as_array()` injecting derived keys?** `export_for_api()` is fail-closed: it
+   emits declared columns (minus the floor) plus only the keys you list in `$api_derived_fields`.
+   Any computed/embed key not declared there is dropped. Embed a child model via its
+   `export_for_api()` so the floor holds through the nesting.
+5. **AI surface:** keep `$ai_excluded_fields` to relevance/noise trims only — never re-list
+   secrets (the shared floor merges them in). `$ai_writable_fields` narrows writes under the
+   unwritable floor.
+6. **Doing content-visibility gating** (min-permission / group / tier on a served file)? That is
+   `is_viewable($session)`, **not** `authenticate_read` — the latter now means API row ownership
+   only.
+
+The rest of this section is the reference detail behind each step. For a complete annotated
+reference model that declares every property above (and the deletion/validation conventions), see
+**[`docs/example_class.php`](example_class.php)** — the canonical data-model template.
+
+### Resource exposure (opt-in)
+
+A model is a CRUD resource only if it opts in, with two static booleans:
 
 ```php
-$data = ['current_user_id' => <acting user id>, 'current_user_permission' => <their level>];
-```
-
-A model implements one of these methods to scope access to that user's own records. The
-canonical pattern (from `data/orders_class.php`) is **owner-or-staff**:
-
-```php
-function authenticate_read($data) {
-    if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
-        if ($data['current_user_permission'] < 5) {   // not staff
-            throw new SystemAuthenticationError('… does not have permission …');
-        }
-    }
+class Foo extends SystemBase {
+    public static $api_readable = true;   // exposed to GET /{Class}/{id} and GET /{Class}s
+    public static $api_writable = true;   // exposed to POST / PUT / DELETE /{Class}
 }
 ```
 
-Throwing from this method is the enforcement mechanism, and it composes cleanly with both
-read shapes: a **single** `GET /{Class}/{id}` of someone else's row returns a `400`
-TransactionError, while a **collection** `GET /{Class}s` simply **skips** rows the caller
-isn't authorized to see. `authenticate_write` works the same way for create/update/delete.
-
-**The default is open.** The `SystemBase` defaults are no-ops — a model with no override
-returns or accepts any row by id for any key with the right verb permission. So per-record
-scoping exists **only on models that implement it**. When you author a model that holds
-user-owned or otherwise private data, implement `authenticate_read`/`authenticate_write`
-(copy the `orders` pattern). For audit/log/credential tables, gate on permission alone
-(`if ($data['current_user_permission'] < 5) throw …`). Public content (posts, pages,
-products) intentionally leaves read open.
+Both default `false` on `SystemBase`. Read and write are separate, so a model can be
+read-only (`$api_readable = true; $api_writable = false;`). A class that is not exposed for a
+given verb is indistinguishable from one that does not exist — the request gets a **404**.
 
 > **Plugin models are not exposed via CRUD.** The CRUD surface enumerates core
 > `data/*_class.php` models only — a plugin's own data classes are unreachable through
 > `/api/v1/{Class}`. Plugins expose behaviour through [Action Endpoints](#action-endpoints)
 > instead.
+
+### Per-record authorization
+
+Exposure decides which **classes** are endpoints; row scope decides **which rows** a caller may
+touch. Before returning or mutating a row, the API calls `authenticate_read($data)` (on GET) or
+`authenticate_write($data)` (on POST/PUT/DELETE), passing the acting user's identity:
+
+```php
+$data = ['current_user_id' => <acting user id>, 'current_user_permission' => <their level>];
+```
+
+**The `SystemBase` default is owner-or-staff (deny).** A caller may touch a row only if they own
+it — the conventional `{prefix}_usr_user_id` column equals `current_user_id` — or they are staff
+(`current_user_permission >= 5`). A model with no owner column falls to staff-only. The contract
+is **throw-to-deny**: the method throws `SystemAuthenticationError` to refuse, and returns nothing
+to allow. (An explicit `false` return is also treated as denial.) It composes with both read
+shapes: a **single** `GET /{Class}/{id}` of an unauthorized row returns an error, while a
+**collection** `GET /{Class}s` simply **skips** rows the caller isn't authorized to see.
+
+You override `authenticate_read` only to make a resource **public** — there is a declarative flag
+for the common case:
+
+```php
+public static $api_public_read = true;   // catalog content: world-readable over the API
+```
+
+When `$api_public_read` is true, the read surface skips the per-record scope **and** the
+collection owner-filter — the rows are the same for everyone (Events, Products, Posts, Pages).
+When false (the default), reads are owner-or-staff. Audit/log/credential tables simply stay
+unexposed (`$api_readable = false`).
+
+**Ownership integrity.** Three rules keep the owner column itself trustworthy on writes:
+
+- **PUT authorizes the loaded row before applying input** — you may only update a row you already
+  own (the check runs against the row as stored, not as mutated by the request).
+- **The owner column is unwritable** — `{prefix}_usr_user_id` is dropped from CRUD input, so
+  ownership can never be reassigned through a field write.
+- **POST stamps the owner server-side** — created rows are owned by the caller by construction;
+  a supplied owner in the body is ignored. For non-staff callers, the **collection** query is
+  owner-filtered in SQL, so `num_results` reflects only the caller's rows (no count disclosure).
+
+### Field floors (read and write)
+
+Row scope decides **which rows**; the field floors decide **which columns** of a row may leave the
+server (read) or be set over the API (write). Both floors are single definitions **shared with the
+AI model surface**, so "secret" and "privileged" mean the same thing everywhere.
+
+**Read — the unreadable floor.** A column is never exported if **either** its name matches
+`SystemBase::CREDENTIAL_FIELD_PATTERN` — `/_(password|secret|key|token|hash)$/i`, so a new
+`*_password` / `*_secret` / `*_key` / `*_token` / `*_hash` column is protected the moment it is
+added — **or** it is listed in the model's `$api_unreadable_fields` (the explicit list for genuine
+secrets whose names don't match the pattern):
+
+```php
+// data/users_class.php
+public static $api_unreadable_fields = array(
+    'usr_authhash', 'usr_remember_tokens', 'usr_totp_backup_codes',
+);
+```
+
+CRUD reads return `export_for_api()`, which is **fail-closed (an allowlist)** — the same paradigm as
+the AI read surface, which selects only `$field_specifications` columns. A key is emitted **only** if
+it is either a **declared column** that survives the unreadable floor, **or** a key on the model's
+`$api_derived_fields` allowlist. Anything else an `export_as_array()` override injects — a computed /
+derived key — is **dropped by construction**, so a derived secret cannot leak under a name the
+credential pattern did not anticipate:
+
+```php
+// data/users_class.php — computed keys export_as_array() injects that may leave over the API
+public static $api_derived_fields = array(
+    'key', 'display_name', 'usr_day_since_register', 'usr_days_since_last_email',
+    'contact_preferences', 'phone', 'address',
+);
+```
+
+A derived key is exposed only by deliberate opt-in (default: none) — the same shape as resource
+exposure. The allowlist is still subject to the unreadable floor, so a credential-named derived key
+cannot be allowlisted back into the open. (Internal/admin/webhook code that needs the full row keeps
+calling `export_as_array()`, which is unchanged.) An override that **embeds a child model** exports
+it via the child's `export_for_api()`, so the floor holds through nested embeds, and the parent emits
+the embed key only when it is on `$api_derived_fields`.
+
+**Write — the unwritable floor.** The exact mirror. A column is never written over the API if
+**either** its name matches the same credential pattern, **or** it is listed in the model's
+`$api_unwritable_fields` — the explicit list for privileged, non-credential columns:
+
+```php
+// data/users_class.php — usr_permission is readable but must never be set via the API
+public static $api_unwritable_fields = array(
+    'usr_permission', 'usr_is_disabled', 'usr_disabled_time',
+    'usr_email_is_verified', 'usr_password_recovery_disabled',
+);
+```
+
+Unwritable fields are **silently dropped** from POST/PUT input (strong-params style) — the column
+keeps its stored value (PUT) or model default (POST), and a full-object round-trip still works.
+This is what makes a model like `User` safely writable: the dangerous column (`usr_permission`) is
+blocked at the field layer, not the whole model.
+
+The AI surface composes over the same floors: `$ai_excluded_fields` trims **reads** for
+relevance/noise on top of the unreadable floor, and `$ai_writable_fields` is an allowlist that
+narrows **writes** under the unwritable floor. Neither can re-expose a floored field.
 
 ### Read Single Object
 
@@ -279,6 +397,18 @@ Any additional query parameters are passed as filter options to the Multi class.
 }
 ```
 
+> **⚠️ Raw CRUD writes are not recommended.** `POST`/`PUT`/`DELETE` write a model's columns
+> **directly** — they bypass all business-logic validation, side effects, and workflow. Creating
+> an `Order` this way produces an order with no payment, cart, or receipt; registering for an
+> `Event` skips capacity and waitlist checks. **Use the corresponding action endpoint (checkout,
+> event signup, registration, account edit) for anything with a workflow** — it is the supported
+> write path. CRUD write is a raw escape hatch for simple records, not the front door.
+>
+> Credential and privileged columns (anything matching the credential pattern, or listed in a
+> model's `$api_unwritable_fields` — e.g. `usr_permission`) are **silently dropped** from CRUD
+> writes and can only be changed through the action that owns them. Do not rely on CRUD write to
+> set them.
+
 ### Create Object
 
 ```
@@ -288,7 +418,10 @@ Content-Type: application/x-www-form-urlencoded
 field1=value1&field2=value2
 ```
 
-If the model has a `CreateNew()` static method, it is called first. Otherwise, a new object is created and fields are set from the POST body.
+Input is sanitized at the API boundary before anything is created — unwritable fields (the write
+floor) and the owner column are dropped, and the owner is stamped from the session. If the model
+defines a `CreateNew()` static factory it is called with that sanitized input; otherwise a new
+object is created and the sanitized fields are set from the POST body.
 
 **Response:**
 ```json
@@ -305,7 +438,9 @@ If the model has a `CreateNew()` static method, it is called first. Otherwise, a
 PUT /api/v1/{ClassName}/{id}?field1=value1&field2=value2
 ```
 
-Fields to update are passed as query string parameters.
+Fields to update are passed as query string parameters. The row is authorized **as stored**
+before any input is applied (you may only update a row you already own), and unwritable fields
+plus the owner column are dropped from the update.
 
 **Response:**
 ```json

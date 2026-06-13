@@ -405,7 +405,7 @@ $routes = [
                     $file_obj = File::get_by_name($basename);
                 }
 
-                if($file_obj && $file_obj->authenticate_read(array('session'=>$session))){
+                if($file_obj && $file_obj->is_viewable($session)){
                     RouteHelper::serveStaticFile($file, 43200);
                     return true;
                 } else {

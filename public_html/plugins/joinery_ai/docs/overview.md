@@ -2,7 +2,7 @@
 
 The `joinery_ai` plugin runs LLM-driven recipes against the platform: scheduled or on-demand prompts that call Claude with a curated set of tools and persist the results. It is **admin-only** in the current state — recipes are configured by admins through the admin UI, and the recipe runner executes with the recipe owner's identity.
 
-This doc covers what plugin authors and model authors need to know. For original design rationale, see [`specs/implemented/joinery_ai.md`](../../../specs/implemented/joinery_ai.md), [`specs/implemented/joinery_ai_autodiscovery.md`](../../../specs/implemented/joinery_ai_autodiscovery.md), and [`specs/joinery_ai_write_tools.md`](../../../specs/joinery_ai_write_tools.md).
+This doc covers what plugin authors and model authors need to know. For original design rationale, see [`specs/implemented/joinery_ai.md`](../../../specs/implemented/joinery_ai.md), [`specs/implemented/joinery_ai_autodiscovery.md`](../../../specs/implemented/joinery_ai_autodiscovery.md), and [`specs/implemented/joinery_ai_write_tools.md`](../../../specs/implemented/joinery_ai_write_tools.md).
 
 ## What's in the plugin
 
@@ -156,7 +156,7 @@ System-prompt impact: the untrusted-input block is a separate text item *after* 
 
 Joinery AI is admin-only by design. Admins can already see every row in the database through the admin UI, and admin recipes legitimately need cross-user views ("show me all unpaid orders", "find users at risk of churn"). Owner-scoping would break those use cases, so `ModelQueryExecutor` does **not** inject any owner filter.
 
-If admin-only ever changes (end-user recipes), owner-scoping returns as new work — there is no inert metadata waiting to be flipped on. The defenses today are model opt-in (`$ai_readable`), the auto-block regex, per-model `$ai_excluded_fields`, and per-field `$ai_untrusted_fields` markers (see below).
+If admin-only ever changes (end-user recipes), owner-scoping returns as new work — there is no inert metadata waiting to be flipped on. The defenses today are model opt-in (`$ai_readable`), the shared unreadable floor (`SystemBase::is_unreadable_field()` — the credential auto-block regex plus per-model `$api_unreadable_fields`, the same floor the REST read surface honors), per-model `$ai_excluded_fields` for relevance/noise trims on top of that floor, and per-field `$ai_untrusted_fields` markers (see below).
 
 ### Default-deny posture
 
@@ -164,11 +164,18 @@ If admin-only ever changes (end-user recipes), owner-scoping returns as new work
 - A new recipe with no boxes checked has zero model access — `query_model` returns "no models allowed" until the author explicitly opts in.
 - Adding a column to an opted-in model surfaces it by default in any recipe that already lists the model (read posture matches the admin UI). If the column is sensitive, add it to `$ai_excluded_fields`.
 
-### Write side (deferred)
+### Write side
 
-`$ai_writable_fields` is reserved for direct-to-model writes on self-contained models (notes, bookmarks, simple records). It is **currently a no-op** — declaring it does nothing until `ModelWriteExecutor` and the `create_model` / `update_model` / `delete_model` tools ship. See [`specs/joinery_ai_write_tools.md`](../../../specs/joinery_ai_write_tools.md) (Path 1) for the design and the gauntlet test for when a model qualifies.
+`$ai_writable_fields` opts a self-contained model (notes, bookmarks, simple records) into direct AI writes through the `create_model` / `update_model` / `delete_model` tools, executed by `ModelWriteExecutor`. Enforcement is layered and default-deny:
 
-Any write that needs cross-record invariants (capacity, payment effects, hooks, external system calls) belongs in a logic file with a write-capable descriptor — see [`specs/joinery_ai_write_tools.md`](../../../specs/joinery_ai_write_tools.md) (Path 2).
+1. **Recipe allowlist** — the model must appear in the recipe's `rcp_allowed_models`.
+2. **Model opt-in** — the model must declare a non-empty `$ai_writable_fields`, or the write tools reject it ("not AI-writable").
+3. **Field allowlist** — only fields surviving the registry scan reach `set()`. The scan keeps a field only if it is in `$ai_writable_fields` and survives every strip: anything in `$ai_excluded_fields`, the credential auto-block regex, and the **shared core write floor** (`$api_unwritable_fields` + the credential pattern, via `SystemBase::is_unwritable_field()`) is removed. That floor is the same one the REST write boundary enforces, so a privileged column like `usr_permission` is unwritable on both surfaces. Dropped fields are reported in the response envelope's `fields_set`, so the LLM adapts without retrying.
+4. **Row scope** — `authenticate_write()` runs with the recipe owner's identity (owner-or-staff, throw-to-deny) before `save()`. Soft delete uses the same allowlist + opt-in + `authenticate_write` gate, with no field allowlist (it touches only `delete_time`).
+
+See [`specs/implemented/joinery_ai_write_tools.md`](../../../specs/implemented/joinery_ai_write_tools.md) (Path 1) for the gauntlet test that decides when a model qualifies for direct writes.
+
+Any write that needs cross-record invariants (capacity, payment effects, hooks, external system calls) belongs in a logic file with a write-capable descriptor — see [`specs/implemented/joinery_ai_write_tools.md`](../../../specs/implemented/joinery_ai_write_tools.md) (Path 2).
 
 ## Adding a new hand-written tool
 
@@ -248,7 +255,7 @@ SELECT rcr_tool_calls FROM rcr_recipe_runs WHERE rcr_run_id = ?;
 
 - [`specs/implemented/joinery_ai.md`](../../../specs/implemented/joinery_ai.md) — original system spec
 - [`specs/implemented/joinery_ai_autodiscovery.md`](../../../specs/implemented/joinery_ai_autodiscovery.md) — auto-discovery read-side design and threat model
-- [`specs/joinery_ai_write_tools.md`](../../../specs/joinery_ai_write_tools.md) — write-tool design covering both direct-model and logic-file paths (deferred)
+- [`specs/implemented/joinery_ai_write_tools.md`](../../../specs/implemented/joinery_ai_write_tools.md) — write-tool design covering both direct-model and logic-file paths
 - [`specs/FUTURE_descriptor_consumers.md`](../../../specs/FUTURE_descriptor_consumers.md) — Step 7: API + AI consume `_logic_descriptor()` natively
 - [Plugin Developer Guide](/docs/plugin_developer_guide.md) — plugin architecture and routing
 - [Logic Architecture](/docs/logic_architecture.md) — business logic layer

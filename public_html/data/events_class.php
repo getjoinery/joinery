@@ -45,6 +45,14 @@ class Event extends SystemBase {	public static $prefix = 'evt';
 	public static $tablename = 'evt_events';
 	public static $pkey_column = 'evt_event_id';
 
+	// REST CRUD exposure (Layer 1). Public catalog content (Bucket A): readable,
+	// writable, and world-readable; writes inherit the deny-by-default scope.
+	public static $api_readable = true;
+	public static $api_writable = true;
+	public static $api_public_read = true;
+	// Derived keys export_as_array() injects that may leave over the API (fail-closed allowlist).
+	public static $api_derived_fields = array('key');
+
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Events on the platform (workshops, meetups, classes, etc.). Recurring or one-off.';

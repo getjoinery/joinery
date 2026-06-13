@@ -233,15 +233,17 @@ function get_embed($vidwidth = 560, $vidheight = 315) {
 		}
 	}
 	
-	function authenticate_read($data=NULL){
-		
-		if(isset($data['session'])){
-			$session = $data['session'];
+	/**
+	 * Content-visibility gate for the video-serving path — NOT API row authorization.
+	 * Returns bool: may this session view the video, given min-permission, group
+	 * membership, event registration, and tier gating? A separate question from
+	 * authenticate_read (API ownership), so it has its own name and takes the session.
+	 */
+	function is_viewable($session){
+		if(!$session){
+			throw new SystemDisplayablePermanentError("Session is not present to authenticate.");
 		}
-		else{
-			SystemDisplayablePermanentError("Session is not present to authenticate.");
-		}
-		
+
 		if($this->get('vid_delete_time')){
 			return false;
 		}
