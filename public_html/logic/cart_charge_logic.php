@@ -347,12 +347,11 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				$order->set('ord_error', substr($e->getMessage(), 0, 250));
 				$order->save();
 
-				require_once(PathHelper::getIncludePath('includes/Notify.php'));
-				Notify::fire('payment.failed', array(
-					'title' => 'Checkout payment failed',
-					'body'  => 'A card charge failed at checkout (Order #' . $order->key . '): '
-						. substr($e->getMessage(), 0, 160),
-					'link'  => '/admin/admin_orders',
+				require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
+				SignalBus::dispatch('payment.failed', array(
+					'order_id'      => $order->key,
+					'user_id'       => $billing_user->key,
+					'error_message' => substr($e->getMessage(), 0, 160),
 				));
 
 				return _checkout_error($e->getMessage());
@@ -776,12 +775,15 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				} catch (Exception $e) { /* notification system not available */ }
 
 				//Admin alert: event registration.
-				require_once(PathHelper::getIncludePath('includes/Notify.php'));
-				Notify::fire('event.registered', array(
-					'title' => 'Event registration',
-					'body'  => $billing_user->display_name() . ' registered for ' . $product->get('pro_name') . '.',
-					'link'  => '/admin/admin_events',
-					'source_user_id' => $user->key,
+				require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
+				SignalBus::dispatch('event.registered', array(
+					'event_id'        => $product->get('pro_evt_event_id'),
+					'product_id'      => $product->key,
+					'product_name'    => $product->get('pro_name'),
+					'user_id'         => $user->key,
+					'registrant_name' => $billing_user->display_name(),
+					'order_id'        => $order->key,
+					'source_user_id'  => $user->key,
 				));
 			}
 
@@ -799,13 +801,16 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				} catch (Exception $e) { /* notification system not available */ }
 
 				//Admin alert: new subscription.
-				require_once(PathHelper::getIncludePath('includes/Notify.php'));
-				Notify::fire('subscription.started', array(
-					'title' => 'New subscription: ' . $product->get('pro_name'),
-					'body'  => $billing_user->display_name() . ' (' . $billing_user->get('usr_email')
-						. ') started a subscription — Order #' . $order->key . '.',
-					'link'  => '/admin/admin_orders',
+				require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
+				SignalBus::dispatch('subscription.started', array(
+					'order_id'       => $order->key,
+					'order_item_id'  => $order_item->key,
+					'user_id'        => $user->key,
 					'source_user_id' => $user->key,
+					'product_id'     => $product->key,
+					'product_name'   => $product->get('pro_name'),
+					'buyer_name'     => $billing_user->display_name(),
+					'buyer_email'    => $billing_user->get('usr_email'),
 				));
 			}
 			else{
@@ -822,13 +827,17 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				} catch (Exception $e) { /* notification system not available */ }
 
 				//Admin alert: completed sale.
-				require_once(PathHelper::getIncludePath('includes/Notify.php'));
-				Notify::fire('purchase.completed', array(
-					'title' => 'Sale completed: ' . $product->get('pro_name'),
-					'body'  => $billing_user->display_name() . ' (' . $billing_user->get('usr_email')
-						. ') completed a purchase — Order #' . $order->key . '.',
-					'link'  => '/admin/admin_orders',
+				require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
+				SignalBus::dispatch('purchase.completed', array(
+					'order_id'       => $order->key,
+					'user_id'        => $user->key,
 					'source_user_id' => $user->key,
+					'product_id'     => $product->key,
+					'product_name'   => $product->get('pro_name'),
+					'buyer_name'     => $billing_user->display_name(),
+					'buyer_email'    => $billing_user->get('usr_email'),
+					'amount'         => (string)$order->get('ord_total_cost'),
+					'currency'       => $currency_code,
 				));
 			}
 		}

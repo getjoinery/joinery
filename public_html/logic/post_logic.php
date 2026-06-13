@@ -52,14 +52,16 @@ function post_logic(array $input): LogicResult {
 			$new_comment->save();
 		}
 
-		// Notify admins subscribed to the comment.posted hook point.
-		require_once(PathHelper::getIncludePath('includes/Notify.php'));
-		Notify::fire('comment.posted', array(
-			'title' => 'New comment by ' . $new_comment->get('cmt_author_name'),
-			'body'  => 'On "' . $post->get('pst_title') . '": '
-				. mb_substr(strip_tags((string)$new_comment->get('cmt_body')), 0, 180),
-			'link'  => $post->get_url(),
-			'source_user_id' => $new_comment->get('cmt_usr_user_id'),
+		// Dispatch the comment.posted signal (Notify alerts subscribed admins).
+		require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
+		SignalBus::dispatch('comment.posted', array(
+			'comment_id'      => $new_comment->key,
+			'post_id'         => $post->key,
+			'post_title'      => $post->get('pst_title'),
+			'post_url'        => $post->get_url(),
+			'comment_excerpt' => mb_substr(strip_tags((string)$new_comment->get('cmt_body')), 0, 180),
+			'author_name'     => $new_comment->get('cmt_author_name'),
+			'source_user_id'  => $new_comment->get('cmt_usr_user_id'),
 		));
 
 		return LogicResult::redirect($_SERVER['REQUEST_URI']);

@@ -73,6 +73,7 @@ Before diving in, a quick reference for the four common things plugins need to r
 | Tables and columns | `$field_specifications` in a data class under `data/` — applied automatically on install and sync | [Table Creation](#table-creation-automatic) |
 | Admin menu entries | `adminMenu` key in `plugin.json` — created on activate, removed on deactivate/uninstall | [Admin Menus](#admin-menus-declarative) |
 | Default plugin settings | `settings` array in `plugin.json` — seeded on activate and sync | [Plugin Settings](#plugin-settings-declarative) |
+| Signals your plugin emits, or reactions to existing signals | `signals` / `signalSubscribers` keys in `plugin.json` | [Plugin Signals & Subscribers](#plugin-signals--subscribers-declarative) |
 | Other initial data (seed rows, categories, etc.) | `.sql` file in `migrations/`, numbered for order, idempotent | [Migration System](#migration-system) |
 | Activate/deactivate logic | `activate.php`, `deactivate.php` at the plugin root, each defining `{plugin}_activate()` / `_deactivate()` | [Plugin Lifecycle](#plugin-lifecycle) |
 | Uninstall external cleanup *(optional)* | `uninstall.php` defining `{plugin}_uninstall()` — only for work the declarative systems can't do (external API calls, filesystem cleanup) | [Uninstall Script](#uninstall-script) |
@@ -688,6 +689,48 @@ Validation failures throw. On `activate()` the plugin does not activate; on `syn
 **Blank defaults:** `default: ""` creates a row with an empty value. Use this for things that have no meaningful factory default but should still be present (API keys, SMTP hosts, custom CSS) so the row exists for `settings_form.php` to render and for admins to fill in. Omitting the declaration entirely means no row in `stg_settings`, even if `settings_form.php` references the name — the form-page save logic auto-creates missing rows on first submit, but until then `get_setting()` returns `''` (an empty string, and logs a notice — pass the `$fail_silently` flag to suppress it) and the field renders empty.
 
 **Uninstall:** On uninstall, PluginManager deletes rows matching the names in the current manifest. Settings declared in an earlier version but dropped from the current manifest are left in place.
+
+### Plugin Signals & Subscribers (Declarative)
+
+Plugins integrate with the [signal bus](signals.md) through two optional `plugin.json` keys. Both are merged with core for active plugins only, cached per request.
+
+**`signals`** — signals your plugin emits. Same shape as core `signals.json`: identity (`label`, `description`, `category`), a `payload` schema, and an optional `notify` block to make the signal produce notifications. Declaring a signal lets other plugins and core subscribers consume it; dispatch it from your plugin code with `SignalBus::dispatch()`.
+
+```json
+"signals": {
+  "myplugin.thing_happened": {
+    "label": "Thing happened",
+    "description": "A thing happened in My Plugin.",
+    "category": "My Plugin",
+    "payload": { "thing_id": "Thing id", "source_user_id": "Acting user id" },
+    "notify": {
+      "ntf_type": "system",
+      "supports_topic": true,
+      "default_email": false,
+      "title_template": "A thing happened (#{thing_id})",
+      "body_template": "Thing {thing_id} happened.",
+      "link_template": "/admin/myplugin/things"
+    }
+  }
+}
+```
+
+To make a plugin signal notifiable, add the `notify` block inline as above — do **not** register a separate subscriber for it; the core Notify subscriber handles any signal that carries a `notify` block.
+
+**`signalSubscribers`** — reactions to signals (yours or core's). Same shape as core `signal_subscribers.json`, with `file` relative to your plugin directory:
+
+```json
+"signalSubscribers": {
+  "myplugin_provisioner": {
+    "file": "includes/MyProvisioner.php",
+    "class": "MyProvisioner",
+    "method": "handle_signal",
+    "signals": ["subscription.expired"]
+  }
+}
+```
+
+The handler is a static method `(string $signal, array $payload): void`. Keep inline work cheap (a local insert) and push slow work to a scheduled task — see the [handler cost budget](signals.md#handler-cost-budget). The file is required lazily, only when one of its signals fires.
 
 ### Plugin Lifecycle
 

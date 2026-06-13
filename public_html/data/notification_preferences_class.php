@@ -2,12 +2,11 @@
 /**
  * NotificationPreference and MultiNotificationPreference classes
  *
- * Per-user, per-hook-point preferences for the notification hooks system.
- * One row per (user, hook point) the user has explicitly configured — absence
- * of a row means defaults apply. Two meaningful booleans: subscribe/mute and
- * also-email-me.
+ * Per-user, per-signal preferences for notification delivery. One row per
+ * (user, signal) the user has explicitly configured — absence of a row means
+ * defaults apply. Two meaningful booleans: subscribe/mute and also-email-me.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 class NotificationPreferenceException extends SystemBaseException {}
@@ -46,7 +45,7 @@ class NotificationPreference extends SystemBase {
 	public static $field_specifications = array(
 		'ntp_notification_preference_id' => array('type' => 'int8', 'is_nullable' => false, 'serial' => true),
 		'ntp_usr_user_id'   => array('type' => 'int4', 'required' => true),
-		'ntp_hook_point'    => array('type' => 'varchar(100)', 'required' => true),
+		'ntp_signal_name'   => array('type' => 'varchar(100)', 'required' => true),
 		'ntp_subscribed'    => array('type' => 'bool', 'default' => true),
 		'ntp_email_enabled' => array('type' => 'bool', 'default' => false),
 		'ntp_create_time'   => array('type' => 'timestamp(6)'),
@@ -54,11 +53,11 @@ class NotificationPreference extends SystemBase {
 	);
 
 	/**
-	 * Load the preference row for a (user, hook point) pair, or NULL if none.
+	 * Load the preference row for a (user, signal) pair, or NULL if none.
 	 */
-	public static function get_for($user_id, $hook_point) {
+	public static function get_for($user_id, $signal_name) {
 		$multi = new MultiNotificationPreference(
-			array('user_id' => $user_id, 'hook_point' => $hook_point, 'deleted' => false),
+			array('user_id' => $user_id, 'signal_name' => $signal_name, 'deleted' => false),
 			array(),
 			1
 		);
@@ -80,8 +79,8 @@ class MultiNotificationPreference extends SystemMultiBase {
 			$filters['ntp_usr_user_id'] = array($this->options['user_id'], PDO::PARAM_INT);
 		}
 
-		if (isset($this->options['hook_point'])) {
-			$filters['ntp_hook_point'] = array($this->options['hook_point'], PDO::PARAM_STR);
+		if (isset($this->options['signal_name'])) {
+			$filters['ntp_signal_name'] = array($this->options['signal_name'], PDO::PARAM_STR);
 		}
 
 		if (isset($this->options['subscribed'])) {

@@ -113,11 +113,12 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$_SESSION['terms_accepted'] = true;
 		}
 
-		require_once(PathHelper::getIncludePath('includes/Notify.php'));
-		Notify::fire('account.signup', array(
-			'title' => 'New user registered: ' . trim($user->display_name()),
-			'body'  => 'A new account was registered with email ' . $user->get('usr_email') . '.',
-			'link'  => '/admin/admin_user?usr_user_id=' . $user->key,
+		require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
+		SignalBus::dispatch('account.signup', array(
+			'user_id'        => $user->key,
+			'email'          => $user->get('usr_email'),
+			'display_name'   => trim($user->display_name()),
+			'source_user_id' => $user->key,
 		));
 
 		$returnurl = $session->get_return();

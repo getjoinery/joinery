@@ -93,14 +93,14 @@ Unlike `server_manager` (one agent per managed node, polling a central job queue
 
 ### Companion platform work: Web push notifications
 
-Push notifications are platform infrastructure, not chat-specific. The chat plugin is the first consumer, but the implementation lives in core (`/includes/`, `/data/`) so other features (purchase confirmations, post replies, crush matches, anything that fires through the [notification hooks system](implemented/notification_hooks.md)) can adopt it without re-implementing.
+Push notifications are platform infrastructure, not chat-specific. The chat plugin is the first consumer, but the implementation lives in core (`/includes/`, `/data/`) so other features (purchase confirmations, post replies, crush matches, anything that dispatches through the [signal bus](implemented/signal_bus.md)) can adopt it without re-implementing.
 
 Bundled into this project:
 
 - **`psh_push_subscriptions`** data class storing browser push subscriptions (endpoint, p256dh key, auth secret, `usr_user_id`, user_agent, last_seen_time). Lives in `/data/`.
 - **VAPID keypair** generated on first deploy, stored in `Globalvars_site.php` as `vapid_public_key` and `vapid_private_key`. Public key exposed to clients via a small config endpoint.
 - **Service worker** at `/service-worker.js` — registers for push events, displays notifications, handles click-to-open routing.
-- **Push channel** added to the notification hooks system, alongside the existing in-app and email channels. Same per-user opt-in model.
+- **Push channel** added to Notify (the signal-bus subscriber), alongside the existing in-app and email channels. Same per-user opt-in model.
 - **Composer dependency** `minishlink/web-push` for PHP-side push sending (handles VAPID signing and payload encryption).
 
 When a second consumer adopts this push infrastructure, the section should be extracted into its own spec/doc — for now it lives here as a prerequisite to chat v1.
@@ -237,7 +237,7 @@ Parsed mentions are stored in a `chmn_channel_message_mentions` table so notific
 
 ### Notification routing
 
-Reuses the existing in-app notification system (`Notification::create_notification`) and the [notification hooks](implemented/notification_hooks.md) abstraction once implemented. Hook points fired by the chat plugin:
+Reuses the existing in-app notification system (`Notification::create_notification`) and the [signal bus](implemented/signal_bus.md). Signals dispatched by the chat plugin (declared with `notify` blocks so Notify alerts recipients):
 
 - `chat.channel_message_posted` — targeted to channel members, topic for site-wide watchers
 - `chat.channel_mention` — targeted to mentioned user
@@ -259,7 +259,7 @@ To avoid surprises mid-build, the systems this plugin touches:
 |---|---|---|
 | `Conversation` / `Message` (existing messaging) | DMs delegate here | Yes — `add_message()` gains a generic `NOTIFY message_events` emission at the write point (see [DM handling](#dm-handling)) |
 | `Notification::create_notification` | Mentions, channel posts, DMs | No — existing API |
-| Notification hooks system | Hook point declarations | Plugin declares hooks via `plugin.json` |
+| Signal bus | Signal + subscriber declarations | Plugin declares signals (with `notify` blocks) via `plugin.json` |
 | `User` / `usr_permission` | Role-gated channel visibility | No |
 | `UserBlock` | DMs already integrate; channels do not filter by block (you see public messages even from blockers) | No |
 | `UploadHandler` + cloud storage | Attachment uploads | No |

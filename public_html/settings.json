@@ -30,6 +30,7 @@
     { "name": "show_admin_bar", "default": "1" },
     { "name": "show_comments", "default": "1" },
     { "name": "show_errors", "default": "0" },
+    { "name": "signal_bus_debug", "default": "0", "helptext": "When on, the signal bus logs every dispatch (signal name + JSON payload) to the error log and flags any non-JSON-serializable payload value. Debug only; leave off in production." },
     { "name": "smtp_auth", "default": "1" },
     { "name": "subscription_cancellation_enabled", "default": "1" },
     { "name": "subscription_cancellation_prorate", "default": "1" },

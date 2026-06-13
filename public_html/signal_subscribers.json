@@ -1,0 +1,8 @@
+{
+    "notify": {
+        "file": "includes/Notify.php",
+        "class": "Notify",
+        "method": "handle_signal",
+        "signals": ["*"]
+    }
+}

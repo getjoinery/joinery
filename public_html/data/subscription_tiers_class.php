@@ -236,11 +236,11 @@ class SubscriptionTier extends SystemBase {
             } catch (Exception $e) { /* notification system not available */ }
 
             // Admin alert: a subscription lapsed.
-            require_once(PathHelper::getIncludePath('includes/Notify.php'));
-            Notify::fire('subscription.expired', array(
-                'title' => 'Subscription expired',
-                'body'  => 'A ' . $current_tier->get('sbt_name') . ' subscription has expired.',
-                'link'  => '/admin/admin_subscription_tiers',
+            require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
+            SignalBus::dispatch('subscription.expired', array(
+                'user_id'   => $user_id,
+                'tier_id'   => $current_tier->key,
+                'tier_name' => $current_tier->get('sbt_name'),
             ));
 
             self::clearUserCache($user_id);

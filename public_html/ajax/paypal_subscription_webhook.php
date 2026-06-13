@@ -127,11 +127,12 @@ try {
             $order_item->set('odi_subscription_cancel_at_period_end', true);
             $order_item->save();
 
-            require_once(PathHelper::getIncludePath('includes/Notify.php'));
-            Notify::fire('subscription.cancelled', array(
-                'title' => 'Subscription cancelled',
-                'body'  => 'A PayPal subscription was cancelled (subscription ' . $subscription_id . ').',
-                'link'  => '/admin/admin_subscription_tiers',
+            require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
+            SignalBus::dispatch('subscription.cancelled', array(
+                'order_item_id'            => $order_item->key,
+                'user_id'                  => $order_item->get('odi_usr_user_id'),
+                'provider'                 => 'paypal',
+                'provider_subscription_id' => $subscription_id,
             ));
 
             // Trigger tier validation
@@ -186,11 +187,12 @@ try {
             $order_item->save();
             error_log("PayPal webhook: subscription $subscription_id payment failed");
 
-            require_once(PathHelper::getIncludePath('includes/Notify.php'));
-            Notify::fire('subscription.payment_failed', array(
-                'title' => 'Subscription payment failed',
-                'body'  => 'A recurring PayPal subscription payment failed (subscription ' . $subscription_id . ').',
-                'link'  => '/admin/admin_orders',
+            require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
+            SignalBus::dispatch('subscription.payment_failed', array(
+                'order_item_id'            => $order_item->key,
+                'user_id'                  => $order_item->get('odi_usr_user_id'),
+                'provider'                 => 'paypal',
+                'provider_subscription_id' => $subscription_id,
             ));
 
             // Send payment failure email (with dedup) and admin notification

@@ -51,7 +51,7 @@ This analysis was produced 2026-06-11 by reading all 38 active specs, the strate
 - Auth/session: SessionControl, PasswordHash, Activation, remember-me tokens, TOTP 2FA, SecretBox, per-user API keys.
 - Commerce: Product/Order/Coupon/SubscriptionTier, ShoppingCart, StripeHelper, PaypalHelper, receipts.
 - Events: Event/EventType/EventSession/EventRegistrant/WaitingList, recurring events, iCal/ICS.
-- Email: full provider abstraction (Postmark, Resend, SendGrid, Brevo, Mailjet, Amazon SES, Mailgun, PHPMailer), templates, recurring mailers, inbound IMAP/forwarding, OAuth2 SMTP relay, **notification hooks system (implemented)**.
+- Email: full provider abstraction (Postmark, Resend, SendGrid, Brevo, Mailjet, Amazon SES, Mailgun, PHPMailer), templates, recurring mailers, inbound IMAP/forwarding, OAuth2 SMTP relay, **signal bus + notifications (implemented)**.
 - Content/forms: Pages, Posts, Components + ComponentRenderer, FormWriter + FormWriterV2 (HTML5/Bootstrap/Tailwind/JSON/Base), Questions/Surveys, Validator.
 - Social primitives: Group/GroupMember, Conversation/Message, Comment, Reaction, VisitorEvent.
 - Infra: Server Manager, DNS filtering, scheduled tasks (cron runner), cloud storage (S3-compatible driver), multi-domain capability, A/B testing framework, OAuth2 core + provider catalog, analytics/session tracking, deletion system, plugin/theme marketplace + upgrade pipeline.
@@ -155,7 +155,7 @@ Then the named analytics work (Tier 1 #3 and #5) once the dashboard shell and tr
 **FUTURE_ specs:** descriptor_consumers (ready), formwriter_descriptors (ready), personal_ai_recipes (partial foundation), organizations (deferred by design), attribution_models (deferred, needs visitor-event infra).
 
 **Specs that should exist but do not (the gaps — write these):**
-- ~~Signal/trigger dispatch bus~~ ✅ written 2026-06-11 — `signal_bus.md`
+- ~~Signal/trigger dispatch bus~~ ✅ implemented — `specs/implemented/signal_bus.md`
 - Automated email workflows (now unblocked: consumes the signal bus)
 - Outgoing webhooks (now unblocked: consumes the signal bus)
 - Revenue analytics dashboard (+ per-post/event analytics)

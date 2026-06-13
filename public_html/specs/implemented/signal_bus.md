@@ -11,13 +11,13 @@ Laravel-events equivalent — a headline capability for the framework pivot.
 
 **Created:** 2026-06-11
 
-**Status:** Active — not yet implemented.
+**Status:** Implemented — 2026-06-13.
 
 **Builds on:** the implemented
-[Notification Hooks](implemented/notification_hooks.md) system
-(`includes/Notify.php`, `notification_hooks.json`,
-`ntp_notification_preferences`). This spec inserts a generic signal layer
-*beneath* it; it does not change what notifications look like to admins.
+[Notification Hooks](notification_hooks.md) system (`includes/Notify.php`,
+`notification_hooks.json`, `ntp_notification_preferences`). This spec inserts a
+generic signal layer *beneath* it; it does not change what notifications look
+like to admins.
 
 **Unblocks (do not build here):** outgoing webhooks, automated email
 workflows, per-signal analytics counters, plugin signal handlers.
@@ -488,9 +488,26 @@ Single deliverable, no new database tables:
 - Documentation per the Documentation section.
 
 **No data migration:** the platform is pre-launch, so the `ntp_signal_name`
-rename is handled by `update_database` adding the renamed column; the only
-existing `ntp_notification_preferences` rows are dev rows and may be discarded.
-Nothing else persists signal/hook state.
+rename is handled entirely by `update_database` — no migration (schema changes
+never go in migrations). As implemented:
+
+- `update_database --upgrade` **adds** `ntp_signal_name`. The field spec's
+  `'required' => true` is app-level validation only — `DatabaseUpdater` keys DB
+  nullability off `is_nullable` (unset here), so the column is created
+  `NULL`-able, exactly as `ntp_hook_point` already was. There is no `NOT NULL`
+  add to fail on, regardless of existing rows.
+- The old `ntp_hook_point` column is **not** dropped by `--upgrade`; column drops
+  are gated behind `--cleanup` (a deliberate data-loss guard). It is left as a
+  harmless nullable orphan — nothing reads it, and inserts that set only
+  `ntp_signal_name` succeed. Run `update_database --cleanup` to remove it; not
+  required for correctness. The same is true on prod deploy (`upgrade.php` runs
+  `update_database`).
+- Existing `ntp_notification_preferences` rows keep their old value in the orphan
+  column and have `NULL` `ntp_signal_name`, so their subscription is effectively
+  inactive — fine pre-launch (dev rows, discardable).
+
+Nothing else persists signal/hook state. `signal_bus_debug` seeds into
+`stg_settings` from `settings.json` during `update_database`.
 
 ## Future enhancements (out of scope)
 
