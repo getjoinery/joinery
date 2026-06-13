@@ -155,9 +155,9 @@ Then the named analytics work (Tier 1 #3 and #5) once the dashboard shell and tr
 **FUTURE_ specs:** descriptor_consumers (ready), formwriter_descriptors (ready), personal_ai_recipes (partial foundation), organizations (deferred by design), attribution_models (deferred, needs visitor-event infra).
 
 **Specs that should exist but do not (the gaps — write these):**
-- ~~Event/trigger dispatch bus~~ ✅ written 2026-06-11 — `event_bus.md`
-- Automated email workflows (now unblocked: consumes the event bus)
-- Outgoing webhooks (now unblocked: consumes the event bus)
+- ~~Signal/trigger dispatch bus~~ ✅ written 2026-06-11 — `signal_bus.md`
+- Automated email workflows (now unblocked: consumes the signal bus)
+- Outgoing webhooks (now unblocked: consumes the signal bus)
 - Revenue analytics dashboard (+ per-post/event analytics)
 - Push notification platform
 - Core block + report systems
