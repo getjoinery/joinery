@@ -25,6 +25,11 @@ class SurveyAnswer extends SystemBase {	public static $prefix = 'sva';
 	public static $tablename = 'sva_survey_answers';
 	public static $pkey_column = 'sva_survey_answer_id';
 
+	// REST CRUD exposure (Layer 1). User-owned (Bucket B): readable + writable
+	// under the deny-by-default owner-or-staff row scope.
+	public static $api_readable = true;
+	public static $api_writable = true;
+
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'The user\'s answers to survey questions.';

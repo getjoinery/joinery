@@ -31,6 +31,11 @@ class Notification extends SystemBase {
 	public static $tablename = 'ntf_notifications';
 	public static $pkey_column = 'ntf_notification_id';
 
+	// REST CRUD exposure (Layer 1). User-owned (Bucket B): readable + writable
+	// under the deny-by-default owner-or-staff row scope.
+	public static $api_readable = true;
+	public static $api_writable = true;
+
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Notifications addressed to the user.';

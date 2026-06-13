@@ -50,6 +50,14 @@ class EventSession extends SystemBase {
 	public static $tablename = 'evs_event_sessions';
 	public static $pkey_column = 'evs_event_session_id';
 
+	// REST CRUD exposure (Layer 1). Public catalog content (Bucket A): readable,
+	// writable, and world-readable; writes inherit the deny-by-default scope.
+	public static $api_readable = true;
+	public static $api_writable = true;
+	public static $api_public_read = true;
+	// Derived keys export_as_array() injects that may leave over the API (fail-closed allowlist).
+	public static $api_derived_fields = array('key');
+
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Sessions within an event (e.g. day 1, day 2 of a multi-day workshop). Each session has its own start/end time, content, and tier gating.';

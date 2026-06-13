@@ -12,6 +12,12 @@ class ProductDetail extends SystemBase {	public static $prefix = 'prd';
 	public static $tablename = 'prd_product_details';
 	public static $pkey_column = 'prd_product_detail_id';
 
+	// REST CRUD exposure (Layer 1). Public catalog content (Bucket A): readable,
+	// writable, and world-readable; writes inherit the deny-by-default scope.
+	public static $api_readable = true;
+	public static $api_writable = true;
+	public static $api_public_read = true;
+
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Per-user product entitlements — sessions purchased and consumed. Use to find users with remaining sessions, expired entitlements, etc.';

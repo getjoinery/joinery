@@ -30,6 +30,11 @@ class OrderItem extends SystemBase {	public static $prefix = 'odi';
 	public static $tablename = 'odi_order_items';
 	public static $pkey_column = 'odi_order_item_id';
 
+	// REST CRUD exposure (Layer 1). User-owned (Bucket B): readable + writable
+	// under the deny-by-default owner-or-staff row scope.
+	public static $api_readable = true;
+	public static $api_writable = true;
+
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Line items within the user\'s orders.';

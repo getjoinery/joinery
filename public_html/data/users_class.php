@@ -24,11 +24,38 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	public static $tablename = 'usr_users';
 	public static $pkey_column = 'usr_user_id';
 
+	// Universal unreadable floor (stripped from every API export). usr_password,
+	// usr_totp_secret and usr_totp_hmac_key are caught by CREDENTIAL_FIELD_PATTERN;
+	// these are the real secrets whose names do NOT match it.
+	public static $api_unreadable_fields = array(
+		'usr_authhash', 'usr_remember_tokens', 'usr_totp_backup_codes',
+	);
+
+	// REST CRUD exposure (Layer 1) + write floor (Layer 3). User is readable and
+	// writable, but privileged columns can never be set through a CRUD/AI write:
+	// usr_permission (the escalation field) and the account-status flags. Credentials
+	// (usr_password, usr_totp_*) are caught by CREDENTIAL_FIELD_PATTERN automatically.
+	public static $api_readable = true;
+	public static $api_writable = true;
+	public static $api_unwritable_fields = array(
+		'usr_permission', 'usr_is_disabled', 'usr_disabled_time',
+		'usr_email_is_verified', 'usr_password_recovery_disabled',
+	);
+	// Derived keys export_as_array() injects that may leave over the API (fail-closed
+	// allowlist). The activation-token derivation is deliberately NOT here and is removed
+	// from export_as_array() — see the export_as_array() override below.
+	public static $api_derived_fields = array(
+		'key', 'display_name', 'usr_day_since_register', 'usr_days_since_last_email',
+		'contact_preferences', 'phone', 'address',
+	);
+
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Platform users — admin records, customers, members. Includes contact info, account status, and admin flags.';
+	// Relevance/noise trims for the AI surface only. True secrets live in
+	// $api_unreadable_fields (the shared floor); they are merged in automatically by
+	// ModelSchemaBuilder::excludedFor(), so they are not repeated here.
 	public static $ai_excluded_fields = [
-		'usr_authhash', 'usr_totp_backup_codes', 'usr_remember_tokens',
 		'usr_totp_last_used_step', 'usr_signup_ip', 'usr_allowed_ips',
 		'usr_force_password_change', 'usr_password_recovery_disabled',
 		'usr_stripe_customer_id', 'usr_stripe_customer_id_test',
@@ -508,17 +535,15 @@ private static function UcName($string) {
 
 		$user_data['display_name'] = $this->display_name();
 
-		$user_data['user_activation_key'] = LibraryFunctions::encode($this->key, 'activation_key');
-
-		$user_data['user_activation_key_qs'] = 'uak=' . $user_data['user_activation_key'];
-
 		$user_data['contact_preferences'] = $this->get_contact_type_unsubscribes();
 
+		// Embed children via export_for_api() (not export_as_array()) so the unreadable
+		// floor is honored through the nested back door too (§5.5).
 		$phone = $this->phone();
-		$user_data['phone'] = $phone ? $phone->export_as_array() : NULL;
+		$user_data['phone'] = $phone ? $phone->export_for_api() : NULL;
 
 		$address = $this->address();
-		$user_data['address'] = $address ? $address->export_as_array() : NULL;
+		$user_data['address'] = $address ? $address->export_for_api() : NULL;
 
 		//$user_data['NEWSLETTER'] = self::NEWSLETTER;
 		//$user_data['EMAIL_OFFERS'] = self::EMAIL_OFFERS;
@@ -957,6 +982,19 @@ private static function UcName($string) {
 			return FALSE;
 		}
 		return TRUE;
+	}
+
+	// REST API per-record read scope: only the user themselves (or staff,
+	// permission >= 5) may read this row via the API. NOTE: the row still
+	// includes usr_password via export_as_array() even for the owner — see the
+	// export_as_array sensitive-field concern.
+	function authenticate_read($data) {
+		if ($this->key != $data['current_user_id']) {
+			if ($data['current_user_permission'] < 5) {
+				throw new SystemAuthenticationError(
+					'Current user does not have permission to view this entry in '. static::$tablename);
+			}
+		}
 	}
 
 	function authenticate_write($data) {

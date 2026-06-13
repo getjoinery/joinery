@@ -22,6 +22,12 @@ class DisplayablePermanentMailingListException extends MailingListException impl
 class MailingList extends SystemBase {	public static $prefix = 'mlt';
 	public static $tablename = 'mlt_mailing_lists';
 	public static $pkey_column = 'mlt_mailing_list_id';
+
+	// REST CRUD exposure (Layer 1). Public catalog content (Bucket A): readable,
+	// writable, and world-readable; writes inherit the deny-by-default scope.
+	public static $api_readable = true;
+	public static $api_writable = true;
+	public static $api_public_read = true;
 	public static $url_namespace = 'list';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
 
 	// AI auto-discovery (read)

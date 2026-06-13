@@ -14,6 +14,12 @@ class EventType extends SystemBase {	public static $prefix = 'ety';
 	public static $tablename = 'ety_event_types';
 	public static $pkey_column = 'ety_event_type_id';
 
+	// REST CRUD exposure (Layer 1). Public catalog content (Bucket A): readable,
+	// writable, and world-readable; writes inherit the deny-by-default scope.
+	public static $api_readable = true;
+	public static $api_writable = true;
+	public static $api_public_read = true;
+
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Categories of events (workshop, meetup, class, etc.).';

@@ -337,7 +337,7 @@ if ($access['allowed']) {
 }
 ```
 
-4. For entities with `authenticate_read()` (files, videos), add inside that method:
+4. For entities with an `is_viewable($session)` visibility gate (files, videos), add inside that method:
 ```php
 if ($this->get('{prefix}_tier_min_level')) {
     $tier_access = $this->authenticate_tier($session);

@@ -47,6 +47,13 @@ class EventRegistrant extends SystemBase {	public static $prefix = 'evr';
 	public static $tablename = 'evr_event_registrants';
 	public static $pkey_column = 'evr_event_registrant_id';
 
+	// REST CRUD exposure (Layer 1). User-owned (Bucket B): readable + writable
+	// under the deny-by-default owner-or-staff row scope.
+	public static $api_readable = true;
+	public static $api_writable = true;
+	// Derived keys export_as_array() injects that may leave over the API (fail-closed allowlist).
+	public static $api_derived_fields = array('key');
+
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'The user\'s registrations for events.';

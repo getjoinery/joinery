@@ -34,6 +34,11 @@ class NotificationPreference extends SystemBase {
 	public static $tablename = 'ntp_notification_preferences';
 	public static $pkey_column = 'ntp_notification_preference_id';
 
+	// REST CRUD exposure (Layer 1). User-owned (Bucket B): readable + writable
+	// under the deny-by-default owner-or-staff row scope.
+	public static $api_readable = true;
+	public static $api_writable = true;
+
 	protected static $foreign_key_actions = [
 		'ntp_usr_user_id' => ['action' => 'permanent_delete'],
 	];

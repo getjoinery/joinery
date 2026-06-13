@@ -17,6 +17,12 @@ class Group extends SystemBase {	public static $prefix = 'grp';
 	public static $tablename = 'grp_groups';
 	public static $pkey_column = 'grp_group_id';
 
+	// REST CRUD exposure (Layer 1). Public catalog content (Bucket A): readable,
+	// writable, and world-readable; writes inherit the deny-by-default scope.
+	public static $api_readable = true;
+	public static $api_writable = true;
+	public static $api_public_read = true;
+
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Groups the user has created (mailing lists, member groups, etc.).';

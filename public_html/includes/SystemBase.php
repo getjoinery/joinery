@@ -45,6 +45,60 @@ abstract class SystemBase {
 	static $permanent_delete_actions = array();
 
 	/**
+	 * The universal "unreadable floor": fields that must never leave the server over
+	 * ANY API surface (REST or AI). Two parts, both honored by is_unreadable_field():
+	 *
+	 *   1. CREDENTIAL_FIELD_PATTERN — credential-suffixed names are blocked
+	 *      automatically, so a new *_password / *_secret / *_key / *_token /
+	 *      *_hash column is protected the moment it is added, with no list edit.
+	 *   2. $api_unreadable_fields — an explicit per-model list for genuine secrets whose
+	 *      names do NOT match the pattern (e.g. usr_authhash, usr_remember_tokens).
+	 *
+	 * This is the single source of truth for "is this a secret." Per-surface
+	 * trims that are about relevance/noise rather than secrecy (e.g. the AI's
+	 * $ai_excluded_fields) layer on TOP of this floor, never replace it.
+	 */
+	const CREDENTIAL_FIELD_PATTERN = '/_(password|secret|key|token|hash)$/i';
+	public static $api_unreadable_fields = array();
+
+	/**
+	 * The derived-key allowlist for the fail-closed API export. export_for_api()
+	 * emits a non-column key an export_as_array() override injects ONLY if it is
+	 * named here, so a computed key (e.g. display_name) reaches the API by explicit
+	 * opt-in, never by accident. Default empty: an override that adds no entry here
+	 * exposes none of its derived keys over the API. See export_for_api().
+	 */
+	public static $api_derived_fields = array();
+
+	/**
+	 * Layer 1 — resource exposure (REST CRUD). A model is a CRUD resource only if
+	 * it opts in. Both default false: existing simply means nothing. Read and write
+	 * are separate so a model can be read-only ($api_readable = true; $api_writable
+	 * = false). The apiv1 dispatcher filters the discovered class list on these.
+	 */
+	public static $api_readable = false;
+	public static $api_writable = false;
+
+	/**
+	 * Layer 2 — public read. When true, the model's rows are world-readable over the
+	 * CRUD API: the REST read surface skips the per-record authenticate_read scope AND
+	 * the §4.5 collection owner-filter (public catalog content — Events, Posts, Pages —
+	 * is the same for everyone). When false (the default), reads are owner-or-staff and
+	 * owner-column collections are owner-scoped. This is the single, queryable fact that
+	 * says "this resource is public," used by both the row gate and the collection scope.
+	 */
+	public static $api_public_read = false;
+
+	/**
+	 * Layer 3 (write) — the unwritable floor, the exact mirror of $api_unreadable_fields.
+	 * Privileged, non-credential columns that must never be set through a CRUD/AI write
+	 * (e.g. usr_permission). Credentials are caught automatically by CREDENTIAL_FIELD_PATTERN
+	 * via is_unwritable_field(), so they need not be listed here. Shared by the REST write
+	 * boundary (dropped from input) and the AI write surface (stripped from $ai_writable_fields).
+	 */
+	public static $api_unwritable_fields = array();
+
+	/**
 	 * Set true only around an intentional GET-action mutation (e.g. a delete link).
 	 * See assert_not_get_mutation(). Always reset in a finally{} block.
 	 */
@@ -583,6 +637,66 @@ abstract class SystemBase {
 			return md5(get_class($this) . " " . $this->key);
 		}
 		throw new SystemBaseException('Cannot hash an element with no key.');
+	}
+
+	/**
+	 * True if $field is part of the universal unreadable floor — either it matches
+	 * CREDENTIAL_FIELD_PATTERN or it is listed in this model's $api_unreadable_fields. Shared
+	 * by every API surface so "secret" means the same thing everywhere.
+	 */
+	public static function is_unreadable_field($field) {
+		if (in_array($field, static::$api_unreadable_fields, true)) {
+			return true;
+		}
+		return (bool) preg_match(self::CREDENTIAL_FIELD_PATTERN, $field);
+	}
+
+	/**
+	 * Write-side mirror of is_unreadable_field(): true if $field must never be set
+	 * through an API write — either it is a privileged column listed in this model's
+	 * $api_unwritable_fields, or its name matches the shared credential pattern (a
+	 * credential is neither readable nor writable). Honored by both the REST write
+	 * boundary and the AI write surface, so "writable over an API" means one thing.
+	 */
+	public static function is_unwritable_field($field) {
+		if (in_array($field, static::$api_unwritable_fields, true)) {
+			return true;
+		}
+		return (bool) preg_match(self::CREDENTIAL_FIELD_PATTERN, $field);
+	}
+
+	/**
+	 * The fail-closed API export: the projection of export_as_array() that may leave
+	 * the server over an API surface. This is what every API boundary (REST CRUD,
+	 * embeds) must use instead of export_as_array(), which returns the full row for
+	 * internal/admin/webhook callers.
+	 *
+	 * Fail-closed (allowlist), mirroring the AI read surface's $field_specifications
+	 * allowlist: a key is emitted ONLY if it is either
+	 *   1. a declared column ($field_specifications) that survives the unreadable
+	 *      floor (is_unreadable_field), or
+	 *   2. a key on this model's $api_derived_fields allowlist (a computed key an
+	 *      export_as_array() override deliberately exposes) — still subject to the
+	 *      floor, so a credential-named derived key cannot be allowlisted into the open.
+	 *
+	 * Anything else an override injects (e.g. a computed token) is dropped by
+	 * construction, so a derived secret cannot leak under a name the credential
+	 * regex did not anticipate.
+	 */
+	function export_for_api() {
+		$full = $this->export_as_array();
+		$out = array();
+		foreach (array_keys(static::$field_specifications) as $field) {
+			if (array_key_exists($field, $full) && !static::is_unreadable_field($field)) {
+				$out[$field] = $full[$field];
+			}
+		}
+		foreach (static::$api_derived_fields as $field) {
+			if (array_key_exists($field, $full) && !static::is_unreadable_field($field)) {
+				$out[$field] = $full[$field];
+			}
+		}
+		return $out;
 	}
 
 	function export_as_array() {
@@ -1476,9 +1590,34 @@ abstract class SystemBase {
 
 	}
 
-	function authenticate_read($data) {}
+	/**
+	 * Layer 2 — deny-by-default row scope. The base contract is owner-or-staff:
+	 * a caller may touch this row only if they own it (the conventional
+	 * {prefix}_usr_user_id column matches current_user_id) or they are staff
+	 * (permission >= 5). Models with no owner column fall to staff-only — safe for
+	 * tables with no per-user ownership. A model that should be publicly readable
+	 * (posts, pages) overrides authenticate_read to a no-op: you override to *open*,
+	 * never to close. The contract is throw-to-deny.
+	 */
+	function authenticate_read($data) {
+		$owner_col = static::$prefix . '_usr_user_id';
+		$owner_matches = array_key_exists($owner_col, static::$field_specifications)
+			&& $this->get($owner_col) == $data['current_user_id'];
+		if (!$owner_matches && (int)$data['current_user_permission'] < 5) {
+			throw new SystemAuthenticationError(
+				'Current user does not have permission to view this entry in ' . static::$tablename);
+		}
+	}
 
-	function authenticate_write($data) {}
+	function authenticate_write($data) {
+		$owner_col = static::$prefix . '_usr_user_id';
+		$owner_matches = array_key_exists($owner_col, static::$field_specifications)
+			&& $this->get($owner_col) == $data['current_user_id'];
+		if (!$owner_matches && (int)$data['current_user_permission'] < 5) {
+			throw new SystemAuthenticationError(
+				'Current user does not have permission to edit this entry in ' . static::$tablename);
+		}
+	}
 
 	/**
 	 * Check whether the current user has sufficient tier access to view this entity.
@@ -1665,6 +1804,15 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 	protected $cached_references;
 	protected static $default_options = array();
 
+	/**
+	 * API collection owner-scope (§4.5). When set to [column, value] by the REST
+	 * collection endpoint for a non-staff caller, _get_resultsv2() ANDs
+	 * "column = value" onto every query — load AND count_all — so the result page
+	 * and num_results both reflect only the caller's rows, with no count disclosure.
+	 * Applied as a mandatory outer AND so an OR-operation Multi cannot escape it.
+	 */
+	public $api_owner_scope = null;
+
 	function __construct($options=array(), $order_by=array(), $limit=NULL, $offset=NULL, $operation='AND', $write_lock=FALSE) {
 		$this->multi_data = array();
 		$this->loaded = FALSE;
@@ -1726,8 +1874,19 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 			}
 		}
 
-		$where_sql = !empty($where_clauses) ? 'WHERE ' . implode(" $operation ", $where_clauses) : '';
-		
+		$inner_sql = !empty($where_clauses) ? implode(" $operation ", $where_clauses) : '';
+
+		// API owner-scope: a mandatory outer AND that the per-class $operation (which may
+		// be OR) cannot escape. Bound last, matching its position at the end of the SQL.
+		if ($this->api_owner_scope !== null) {
+			list($owner_col, $owner_val) = $this->api_owner_scope;
+			$owner_clause = "$owner_col = ?";
+			$inner_sql = ($inner_sql !== '') ? '(' . $inner_sql . ') AND ' . $owner_clause : $owner_clause;
+			$bind_params[] = [$owner_val, PDO::PARAM_INT];
+		}
+
+		$where_sql = ($inner_sql !== '') ? 'WHERE ' . $inner_sql : '';
+
 		// Handle order by with prefix inference
 		$order_sql = '';
 		if (!empty($sorts)) {

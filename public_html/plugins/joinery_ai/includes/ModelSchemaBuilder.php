@@ -10,14 +10,32 @@
  */
 class ModelSchemaBuilder {
 
-    /** Suffixes auto-stripped from both reads and writes. */
-    const AUTO_BLOCK_PATTERN = '/_(password|secret|key|token|hash)$/i';
+    /**
+     * Suffixes auto-stripped from both reads and writes. Single-sourced from the
+     * core unreadable floor (SystemBase) so the REST and AI surfaces share one
+     * definition of a credential-suffixed field.
+     */
+    const AUTO_BLOCK_PATTERN = SystemBase::CREDENTIAL_FIELD_PATTERN;
+
+    /**
+     * The fields excluded for a model: the core unreadable floor ($api_unreadable_fields,
+     * shared with the REST API) plus this surface's relevance/noise trims
+     * ($ai_excluded_fields). The regex floor is applied separately in
+     * isFieldBlocked(). Single source for "what does the AI never surface."
+     */
+    public static function excludedFor(string $class): array {
+        $ai = self::staticOr($class, 'ai_excluded_fields', []);
+        if (!is_array($ai)) $ai = [];
+        $unreadable = (isset($class::$api_unreadable_fields) && is_array($class::$api_unreadable_fields))
+            ? $class::$api_unreadable_fields : [];
+        return array_values(array_unique(array_merge($unreadable, $ai)));
+    }
 
     /**
      * Build the descriptor entry for one opted-in model.
      */
     public static function build(string $class): array {
-        $excluded = self::staticOr($class, 'ai_excluded_fields', []);
+        $excluded = self::excludedFor($class);
         $field_specs = $class::$field_specifications;
 
         $fields = [];
@@ -49,7 +67,7 @@ class ModelSchemaBuilder {
      * Combines field_specifications with the blocklist + auto-block.
      */
     public static function visibleFields(string $class): array {
-        $excluded = self::staticOr($class, 'ai_excluded_fields', []);
+        $excluded = self::excludedFor($class);
         $out = [];
         foreach (array_keys($class::$field_specifications) as $f) {
             if (self::isFieldBlocked($f, $excluded)) continue;

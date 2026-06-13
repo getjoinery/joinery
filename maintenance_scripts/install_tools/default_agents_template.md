@@ -135,7 +135,7 @@ See `/docs/` for detailed guides on specific subsystems:
 
 ### Data Model Classes
 
-Models follow an Active Record pattern. Single-row classes extend `SystemBase`; collection classes extend `SystemMultiBase`. For the full method surface and conventions, read `includes/SystemBase.php` and `includes/SystemMultiBase.php` directly, or skim a representative concrete class like `data/users_class.php` or `data/coupon_codes_class.php`.
+Models follow an Active Record pattern. Single-row classes extend `SystemBase`; collection classes extend `SystemMultiBase`. For the full method surface and conventions, read `includes/SystemBase.php` and `includes/SystemMultiBase.php` directly, or skim a representative concrete class like `data/users_class.php` or `data/coupon_codes_class.php`. For a fully annotated template covering schema, REST API exposure/authorization, the AI surface, deletion strategy, and the Multi collection class, see `docs/example_class.php`.
 
 Two non-obvious rules worth knowing up front:
 

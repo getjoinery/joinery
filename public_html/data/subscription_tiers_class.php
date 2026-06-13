@@ -14,6 +14,12 @@ class SubscriptionTier extends SystemBase {
     public static $tablename = 'sbt_subscription_tiers';
     public static $pkey_column = 'sbt_subscription_tier_id';
 
+    // REST CRUD exposure (Layer 1). Public catalog content (Bucket A): readable,
+    // writable, and world-readable; writes inherit the deny-by-default scope.
+    public static $api_readable = true;
+    public static $api_writable = true;
+    public static $api_public_read = true;
+
     // AI auto-discovery (read)
     public static $ai_readable        = true;
     public static $ai_description     = 'Membership tier definitions (free, paid tiers, etc.).';
