@@ -1,577 +1,393 @@
-# Inbound raw-message + attachment storage (reuse the cloud-storage driver seam)
+# Inbound raw-message + attachment storage (a private consumer of the offload layer)
 
 ## Overview
 
 Mail received over the **push transports** (Postfix pipe, Mailgun webhook) is stored
-with its **complete RFC822 message — base64 attachments and all — in the
-`iem_raw_message` Postgres `text` column**. That is the classic "blobs in the
-database" anti-pattern: attachments are the bulk of an email's size, base64 inflates
-them ~33%, and every byte rides along in each backup, restore, and replication stream
-while occupying the most expensive, least-scalable storage tier.
+with its complete RFC822 message — base64 attachments and all — in the
+`iem_raw_message` Postgres `text` column. That is "blobs in the database": attachments
+dominate an email's size, base64 inflates them ~33%, and every byte rides along in
+each backup, restore, and replication stream on the most expensive storage tier.
 
-This spec moves the raw bytes **out of the database** and, in doing so, makes inbound
-mail storage behave like every other large-object in the platform: it **reuses the
-existing cloud-storage driver subsystem** ([cloud_storage.md](implemented/cloud_storage.md))
-rather than inventing a parallel one. The database is left holding only what it needs
-for listing, search, and display — headers, the `text/plain`/`text/html` bodies, an
-attachment manifest, and a small descriptor saying where the raw lives. A single
-accessor resolves that descriptor regardless of transport or storage tier.
+This spec moves the raw bytes **out of the database** by making inbound mail a
+**consumer of the unified offload layer**
+([cloud_offload_unification.md](cloud_offload_unification.md)). That layer already
+owns the storage descriptor pattern, the local→cloud offload/reverse engine, the
+admin lifecycle, and — crucially — the **private store**: a bucket the platform has
+*verified non-public* and reads server-side behind a permission gate. Inbound mail is
+private and attacker-controlled, so it declares `visibility = 'private'` and inherits
+all of that. This spec adds **only the email-specific pieces**: the `iem_` descriptor,
+the mail `StorageProfile`, the ingest write + attachment manifest, the read accessor,
+and the read-dispatch at the three call sites. It adds **no** bucket config, no
+privacy gate, no offload/reverse logic — those live in the offload layer.
 
-It also **closes the attachment gap between transports.** Today IMAP mail has a
+It also **closes the attachment gap between transports.** IMAP mail has a
 per-attachment list and per-attachment download (fetched on demand from the mailbox);
-push mail has neither, because its attachments are buried inside the inline raw blob.
-Once the raw moves to a real object store and a manifest is written at ingest, push
-mail gets the same per-attachment experience IMAP already has — one reader UI, one
-endpoint, one storage seam, for all mail types.
+push mail has neither, because its attachments are buried in the inline raw blob. Once
+the raw moves to a real store and a manifest is written at ingest, push mail gets the
+same per-attachment experience — one reader UI, one endpoint, one accessor, for all
+mail types.
 
-A free side benefit: nothing in the platform full-text-searches `iem_raw_message` (only
-three call sites read it, all enumerated below), so moving the raw off-row **shrinks the
-hot table and speeds up list/search** with zero search-behavior impact.
-
-### What changed since the first draft of this spec
-
-The first draft was framed around rerouting a **Download .eml** action and an inline
-raw `<pre>` view through a new accessor. Both of those surfaces have since been
-**retired for every transport** — the user-facing surface is now the rendered body
-plus the clickable per-attachment list, and there is no whole-message raw view or
-download. So the remaining readers of a stored raw are narrower (see *Read path*), and
-this revision is built around the current code, not the retired surfaces.
+A free side benefit: nothing full-text-searches `iem_raw_message` (only three call
+sites read it, all below), so moving the raw off-row **shrinks the hot table** with
+zero search-behavior impact.
 
 ## The principle
 
 **The database holds the small, searchable, displayable parts of a message; the heavy
-raw lives in the cheapest durable store available for that transport — using the same
-storage abstraction the rest of the platform already uses for large objects.**
+raw lives in the cheapest durable store for that transport. Where "a bucket" is
+involved, it is the platform's verified-private store, reached through the shared
+offload layer — inbound mail configures none of that itself.**
 
 | Transport | Where the raw durably lives | Why |
 |-----------|-----------------------------|-----|
-| Postfix / Mailgun (push) | **platform object store** (local disk, optionally cold-offloaded to a **private** bucket) — this spec | the source keeps no copy; the platform must persist it somewhere, just not in the DB |
-| IMAP (pull) | the **remote mailbox** (no platform copy) | the mailbox is already a durable store; the platform keeps only a locator and re-fetches on demand |
+| Postfix / Mailgun (push) | platform local disk, offloaded to the **private store** by the shared engine | the source keeps no copy; the platform must persist it, just not in the DB |
+| IMAP (pull) | the **remote mailbox** (no platform copy) | the mailbox is already durable; the platform keeps only a locator and re-fetches on demand |
 
 The DB row is identical in shape for every transport: headers + text bodies +
 attachment manifest + a **storage descriptor**. One accessor resolves the descriptor.
 
-## Reusing the cloud-storage subsystem (the core of this revision)
-
-The cloud-storage feature already solved "store a large blob locally, optionally move
-it to an S3-compatible bucket, with a per-row flag as the source of truth." We reuse
-that machinery wholesale and add exactly one thing it deliberately excluded.
-
-**What we reuse verbatim:**
-
-- **The driver contract** — `CloudStorageDriver` (`put`/`get`/`delete`/`ping`). These
-  are byte-agnostic storage primitives; nothing about them is photo-specific.
-- **The S3 implementation** — `CloudStorageS3Driver`. Its `put`/`get`/`delete` are
-  generic; we instantiate it against a different bucket and never call `url()`.
-- **The factory** — `CloudStorageDriverFactory`, extended with a private-bucket builder
-  (below).
-- **The per-row-flag truth model** — mirrored as `iem_raw_storage_driver` exactly as
-  `fil_storage_driver` works for files. A misconfigured global setting can never strand
-  a message.
-- **The site-template key prefix** convention.
-- **The cold-offload task shape** — a `CloudStorageSync`-style task that drains `local`
-  rows to the bucket on cron with failure counting, plus a reverse task to pull back.
-  Same bounded-batch, same `fil_sync_failed_count`-style stuck-row handling.
-
-**The one thing the cloud-storage spec excluded, that we add here.** Its §13 says, in
-bold: *"Storing private/permissioned files in the bucket. Private files stay local.
-Period. Adding cloud-backed private files later would require a presigning + redirect
-serving path and is an explicit future-work item, not v1."* Inbound mail is private and
-attacker-controlled, so:
-
-- It **must not** go in the existing public uploads bucket (objects there are
-  world-readable by key).
-- Its reads **must not** use the driver's `url()` method (a public link to private
-  mail). Reads stay behind the existing `check_permission(5)` gate: PHP does a
-  server-side `get()` to a temp path and streams the bytes — the opposite of the
-  public-file path where PHP is bypassed.
-
-So the mail `cloud` tier is a **separate, private bucket**, read **server-side**. The
-driver code is shared verbatim; only the bucket and the read path differ. We do **not**
-add presigned URLs in this spec — server-side streaming through the existing
-permission-gated endpoint is sufficient for the low volume of attachment/raw reads, and
-keeps the `CloudStorageDriver` interface unchanged. (Presigning is a future optimization
-if egress on mail reads ever matters — it won't for a long time.)
-
-### Private-bucket configuration (one field on the existing cloud-storage page)
-
-The mail bucket is **not a separate provider or account** — that is explicitly out of
-scope for now. It is one more bucket on the customer's *existing* cloud-storage
-configuration: a single S3 access key already spans multiple buckets on AWS, R2, and B2,
-so the private mail bucket reuses the customer's existing `cloud_storage_endpoint` /
-`region` / `access_key` / `secret_key`. The only new input is a bucket name, added as one
-field on the existing `/admin/admin_cloud_storage` page:
-
-```
-cloud_storage_private_bucket   = ''     bucket name on the SAME provider/account as the public cloud storage;
-                                        reuses its endpoint/region/keys. Set on the cloud-storage admin page.
-cloud_storage_private_enabled  = false  internal latch; set true ONLY after a Save whose privacy check passed.
-```
-
-**One decision, one Save — no standalone toggle.** Mail offload is enabled as part of the
-same cloud-storage setup the customer already does, so a customer who turns on cloud
-storage doesn't accidentally leave gigabytes of mail on local disk for want of a second
-switch. The Save flow validates each configured bucket independently: the public bucket
-enables `CloudStorageSync` as today; if the private-bucket field is filled and passes its
-privacy check, `cloud_storage_private_enabled` is latched true and `OffloadInboundRawToCloud`
-is activated. A failure on one bucket shows its own per-field diagnostic and does **not**
-block the other — public uploads aren't held hostage to a mail-bucket misconfig, and vice
-versa.
-
-- Empty `cloud_storage_private_bucket` ⇒ no cloud tier; inbound raw stays `local` on disk
-  forever. The feature degrades cleanly to local-only with zero extra config.
-
-**Privacy is a hard gate, verified before any mail is stored.** Mail must never land in a
-bucket we haven't *proven* is private. Unlike the public-bucket test (which verifies
-public read *works*), the private-bucket test verifies public read is *denied*:
-
-1. PUT a scratch probe with the platform's credentials; confirm an authenticated HEAD
-   sees it (write works).
-2. Fetch the same key **anonymously** (no credentials) via the bucket's direct URL.
-3. **If the anonymous fetch returns 200, the bucket is public → the test FAILS and
-   `cloud_storage_private_enabled` is NOT set.** The admin sees: "This bucket is publicly
-   readable; inbound mail cannot be stored in a public bucket. Make the bucket private and
-   re-test." Any non-200 (403/401/404/connection refused) means anonymous read is denied →
-   the privacy check passes.
-4. DELETE the scratch probe.
-
-Until that check passes, offload never activates and mail stays `local` — there is no path
-by which mail bytes reach an unverified bucket.
-
-`CloudStorageDriverFactory` gains a builder that returns a driver bound to the private
-bucket (via the existing `fromOptions()` path, passing the shared creds + private bucket
-name), and `null` when no private bucket is configured or the privacy check has not passed:
-
-```php
-CloudStorageDriverFactory::privateDefault(): ?CloudStorageDriver
-```
-
-Everything downstream (the store, the offload task, the accessor) consumes a
-`CloudStorageDriver` and is therefore identical whether the bytes are headed for the
-private mail bucket or, in future, anywhere else a private driver points.
-
 ## Storage descriptor (per-row source of truth)
 
-Mirroring `fil_storage_driver`, each message records its own raw location:
+The offload layer keys its engine on a per-table descriptor; mail supplies its own
+columns (the names the `StorageProfile` returns):
 
 | Column | Type | Notes |
 |--------|------|-------|
 | `iem_raw_storage_driver` | varchar(16) | `inline` · `local` · `cloud` · `remote` (default `inline`) |
-| `iem_raw_storage_key` | varchar(500) | tier-invariant relative key (`inbound_email/{yyyy}/{mm}/{id}.eml`) for `local` and `cloud`; null for `inline`/`remote` |
-| `iem_raw_message` | text (existing) | **legacy/`inline` only** — populated for pre-refactor rows; new push writes leave it empty |
-| `iem_raw_sync_failed_count` | int4 (default 0) | cold-offload retry counter (mirrors `fil_sync_failed_count`) |
-| `iem_raw_sync_last_attempt` | timestamp(6), nullable | debugging breadcrumb for the offload task |
+| `iem_raw_storage_key` | varchar(500) | tier-invariant relative key (`inbound_email/{yyyy}/{mm}/{id}.eml`) for `local`/`cloud`; null for `inline`/`remote` |
+| `iem_raw_message` | text (existing) | **legacy/`inline` only** — pre-refactor rows + the write-failure fallback; new push writes leave it empty |
+| `iem_raw_sync_failed_count` | int4 (default 0) | offload retry counter (the engine's failure cap reads this) |
+| `iem_raw_sync_last_attempt` | timestamp(6), nullable | offload breadcrumb |
 
 Driver meanings:
 
 - **`inline`** — raw is in `iem_raw_message` (pre-refactor rows + the write-failure
-  fallback). Read path supports this forever; no forced migration.
+  fallback). Read forever; no forced migration.
 - **`local`** — raw is a file under the private on-disk store, located by
-  `iem_raw_storage_key`. **The default for all new push-transport writes.**
-- **`cloud`** — raw is an object in the **private** mail bucket, located by
-  `iem_raw_storage_key`. Reached only via the driver's server-side `get()`, never a
-  public URL. Set by the cold-offload task; reversible.
-- **`remote`** — no platform copy; the raw/parts are fetched on demand from the IMAP
-  source (the IMAP locator columns). Routed through the same accessor so callers are
-  transport-blind.
+  `iem_raw_storage_key`. **The default for all new push writes.**
+- **`cloud`** — raw is an object in the **private store**, located by the same key.
+  Reached only via the shared driver's server-side `get()`, never a public URL. Set by
+  the shared offload engine; reversible.
+- **`remote`** — no platform copy; parts are fetched on demand from IMAP (the IMAP
+  locator columns). Routed through the same accessor so callers are transport-blind.
 
-## The raw store — `RawMessageStore` (new)
+## The mail storage class — `RawMessageStore implements StorageProfile`
 
-A thin facade (`plugins/inbound_email/includes/RawMessageStore.php`) that owns
-reading/writing/deleting raw bytes so callers never touch paths or drivers directly. It
-dispatches on the driver: `local` hits the filesystem; `cloud` delegates to the private
-`CloudStorageDriver`.
+One class (`plugins/inbound_email/includes/RawMessageStore.php`) wears two hats:
 
-```php
-RawMessageStore::write(int $message_id, string $raw): array
-        // writes to the LOCAL tier; returns ['driver' => 'local', 'key' => <key>]
-RawMessageStore::read(string $driver, string $key): string         // returns the raw bytes
-RawMessageStore::delete(string $driver, string $key): void          // remove the stored object (no-op for inline/remote)
-RawMessageStore::offloadToCloud(InboundEmailMessage $m): bool       // local file -> private bucket; flip driver/key; used by the task
-RawMessageStore::pullBackToLocal(InboundEmailMessage $m): bool      // private bucket -> local file; used by the reverse task
-```
+1. **The offload layer's `StorageProfile`** — so the shared `CloudOffloadEngine` can
+   offload/reverse mail rows. It declares:
+   - `visibility()` → `'private'`
+   - the `iem_raw_*` column names; `table()` = `iem_inbound_email_messages`
+   - `itemsForRow($id)` → forward: the single on-disk `.eml` (`[{local_path,
+     remote_key, content_type: 'message/rfc822'}]`); null if the file is missing
+   - `reverseItemsForRow($id)` → reverse: the same single `.eml`, computed from the key
+     scheme **without** needing local bytes present (`[{remote_key, local_path,
+     content_type: 'message/rfc822'}]`) — what the engine's pull-back enumerates
+   - `eligibilityWhere()` → `''` (any `local` row is eligible; optionally restrict to
+     rows older than N days)
+   - `forwardTaskClass()`/`reverseTaskClass()` → the two shims below
+2. **The consumer's request-time byte I/O** (which the offload layer leaves to each
+   consumer):
+   ```php
+   RawMessageStore::write(int $message_id, string $raw): array   // writes LOCAL; ['driver'=>'local','key'=>…]
+   RawMessageStore::read(string $driver, string $key): string    // local file read, or forVisibility('private')->get()
+   RawMessageStore::delete(string $driver, string $key): void    // unlink / private get-delete; no-op for inline/remote
+   ```
 
-- `write()` always targets `local` (ingest never blocks on bucket I/O — same posture as
-  the cloud-storage upload path, which always lands locally first).
-- `read()` for `cloud` pulls the object to a temp path via `driver->get()`, returns its
-  bytes, and unlinks the temp.
-- `offloadToCloud()`/`pullBackToLocal()` are the per-row engine the cold-offload and
-  reverse tasks call; they encapsulate the PUT/flip/delete (and the reverse) so the
-  tasks stay thin, mirroring `File`'s cloud methods.
+`write()` always targets `local` (ingest never blocks on bucket I/O — the engine
+offloads later, same posture as the public-files path). `read()` for `cloud` pulls the
+object to a unique temp via the shared private driver, returns its bytes, and unlinks.
+There is no separate offload/pull-back code here — `RawMessageStore` provides the
+profile surface and the shared engine does the moving.
+
+> This settles the earlier "should `RawMessageStore` be its own class" question: it is
+> the mail `StorageProfile`. It exists because request-time I/O is per-consumer and the
+> profile is the natural home for the key scheme it already owns.
 
 ### One relative key, two tier bases
 
-`iem_raw_storage_key` holds a single **tier-invariant relative key**:
+`iem_raw_storage_key` holds a single tier-invariant relative key:
 
 ```
 inbound_email/{yyyy}/{mm}/{message_id}.eml
 ```
 
-(`{yyyy}/{mm}` is the received-month shard; `{message_id}` ties the object to the row.)
-Each tier supplies its own base; the relative key never changes, so **offload is a flag
-flip + byte copy with no key rewrite**:
+(`{yyyy}/{mm}` = received-month shard; `{message_id}` ties the object to the row.)
+Each tier supplies its own base, so offload is a flag flip + byte copy with **no key
+rewrite**:
 
-| Tier | Base prepended | Full location (example) |
-|------|----------------|--------------------------|
-| `local` | `{site_root}/storage/` (via `PathHelper::getSiteRoot()`) | `/var/www/html/joinerytest/storage/inbound_email/2026/06/12345.eml` |
-| `cloud` | `{site_template}/` (auto-applied by `CloudStorageS3Driver::pathPrefix()`) | bucket object `joinerytest/inbound_email/2026/06/12345.eml` |
+| Tier | Base | Full location (example) |
+|------|------|--------------------------|
+| `local` | `{site_root}/storage/` (via `PathHelper::getSiteRoot()`) | `…/storage/inbound_email/2026/06/12345.eml` |
+| `cloud` | `{site_template}/` (auto-applied by the shared S3 driver) | bucket object `joinerytest/inbound_email/2026/06/12345.eml` |
 
 - `{site_root}` resolves via `PathHelper` (never `$_SERVER['DOCUMENT_ROOT']` or
-  `__DIR__` navigation). It is the parent of `public_html`, alongside the existing
-  non-web-served `logs/`, `uploads/`, `backups/`, `config/`.
-- The local tier needs no `{site_template}` segment — each instance already has its own
-  `site_root`, so cross-instance collision is impossible. The `{site_template}` prefix
-  exists only on the **cloud** tier, where instances can share one bucket, and is applied
-  automatically by the existing driver (same convention as public file uploads).
-- Year/month sharding bounds directory / key-listing size.
-- Cloud objects are written with content-type `message/rfc822`.
-- Dev box: created dirs `777` / files `666` per the file-permission rules; production
-  install sets tighter perms. The security boundary is the web-root exclusion (local) +
-  the non-public bucket (cloud) + the permission gate — not the file mode.
-
-The store directory and the private bucket must **never** be web-served.
+  `__DIR__`); it is the parent of `public_html`, alongside `logs/`, `uploads/`,
+  `backups/`.
+- The `{site_template}` prefix exists only on the **cloud** tier (shared bucket,
+  applied automatically by the driver). The local tier needs none — each instance has
+  its own `site_root`.
+- Cloud objects are written `message/rfc822`.
+- The store directory and the private bucket must **never** be web-served. Dev perms
+  per the file-permission rules; production sets tighter. The boundary is the web-root
+  exclusion (local) + the verified-private bucket (cloud) + the permission gate.
 
 ## Write path — `InboundEmailRouter::storeMessage`
 
-`storeMessage` already holds the full raw and already calls `extractBodies()`. Both push
-providers deliver **true RFC822** to this point — Postfix pipes it on `php://input`, and
-`MailgunProvider` reads `body-mime` (the raw-MIME "store & notify" route) and *rejects*
-the request outright if `body-mime` is absent — so MIME-parsing the raw for the manifest
-is always valid here. Change only where the raw goes, and add the manifest write:
+`storeMessage` already holds the full raw and calls `extractBodies()`. Both push
+providers deliver true RFC822 here (Postfix on `php://input`; `MailgunProvider` reads
+`body-mime` and rejects the request if absent), so MIME-parsing the raw for the
+manifest is always valid. Change only where the raw goes, and add the manifest:
 
 1. Build the row as today **except** `iem_raw_message` is left empty.
-2. Insert the row first (to get the serial id). On a unique-violation dedup (SQLSTATE
-   23505 — same as today) **no file is written**, so a deduped message never orphans a
-   file; return the dedup result before touching the store.
+2. Insert first (to get the serial id). On a unique-violation dedup (SQLSTATE 23505 —
+   as today) **no file is written**, so a deduped message never orphans a file; return
+   the dedup result before touching the store.
 3. `RawMessageStore::write($id, $raw)`, then `UPDATE` the descriptor
-   (`iem_raw_storage_driver = 'local'`, `iem_raw_storage_key = <key>`).
+   (`iem_raw_storage_driver='local'`, `iem_raw_storage_key=<key>`).
 4. **Write the attachment manifest** (`ima_` rows) by MIME-parsing the raw
-   (`Horde_Mime_Part::parseMessage()`), walking the parts, and recording filename /
+   (`Horde_Mime_Part::parseMessage()`), walking the parts, recording filename /
    content-type / size / section / encoding / content-id / inline-flag — the same row
-   shape `ImapIngestor` already writes from BODYSTRUCTURE. This is what gives push mail a
-   per-attachment list and download. (The manifest is written regardless of which tier
-   the raw landed in, including the `inline` fallback below.)
-5. **File-write failure falls back to `inline`** — if `RawMessageStore::write()` fails
-   (disk full / perms), write the raw to the `iem_raw_message` column instead, log a loud
-   `INBOUND_RAW_LOCAL_WRITE_FAILED` marker so ops sees the disk problem, and continue.
-   This is the one place a new `inline` write still happens — a safety net, not the norm.
-   (No rollback choreography for the descriptor `UPDATE`: a DB `UPDATE` failing in the
-   same request immediately after its own `INSERT` succeeded is effectively impossible,
-   and the row stays re-fetchable, so handling it explicitly would be papering over a
-   non-case.)
+   shape `ImapIngestor::writeManifest()` produces from BODYSTRUCTURE. This is what gives
+   push mail a per-attachment list + download.
+5. **File-write failure falls back to `inline`** — if `write()` fails (disk full /
+   perms), store the raw in `iem_raw_message` instead, log a loud
+   `INBOUND_RAW_LOCAL_WRITE_FAILED` marker, and continue. The one place a new `inline`
+   write still happens — a safety net, not the norm.
 
-**Outbound / Sent rows are intentionally raw-less.** `storeOutboundRow()` already writes
-an empty `iem_raw_message`; under the new column they are `inline`+empty (no raw, no
-manifest, nothing to fetch). That is correct and unchanged — do not "fix" them into the
-store.
+**Outbound / Sent rows stay raw-less.** `storeOutboundRow()` already writes an empty
+`iem_raw_message`; they are `inline`+empty (no raw, no manifest). Unchanged.
 
 ### IMAP write path — `storeExtracted()` sets `remote`
 
-The IMAP ingest path (`InboundEmailRouter::storeExtracted()`) is reference-backed — it
-holds no raw to store. It **must set `iem_raw_storage_driver = 'remote'`** on the row (it
-currently sets none, which would default to `inline` and read as "empty raw"). For
-`remote`, `iem_raw_storage_key` stays null: the *key* is the IMAP locator tuple already on
-the row (`iem_iia_inbound_imap_account_id` / `iem_imap_uid` / `iem_imap_uidvalidity` /
-`iem_imap_folder`), exactly as `local`/`cloud` use `iem_raw_storage_key`. The driver flag
-is therefore the single source of truth for *how* to get the bytes; the locator columns
-say *which source and which message*. The `ima_` manifest is still written at ingest from
-BODYSTRUCTURE, unchanged.
+`storeExtracted()` is reference-backed and holds no raw. It **must set
+`iem_raw_storage_driver='remote'`** (it currently sets none → defaults to `inline` →
+reads as "empty raw"). `iem_raw_storage_key` stays null: the key is the IMAP locator
+tuple already on the row. The driver flag is the single source of truth for *how* to
+get the bytes; the locator columns say *which source/message*. The `ima_` manifest is
+still written at ingest from BODYSTRUCTURE, unchanged.
 
 ## Read path — one accessor
 
 Add to `InboundEmailMessage`:
 
 ```php
-getRawMessage(): ?string        // resolves the descriptor and returns the whole raw (forward re-attach)
-getRawMimePart(string $section): ?array   // returns one decoded MIME part: ['content','type','filename']
+getRawMessage(): ?string                  // whole raw (forward re-attach)
+getRawMimePart(string $section): ?array   // one decoded part: ['content','type','filename']
 ```
 
-(There is no whole-message *stream* accessor — the `.eml` download was retired for every
-transport, so nothing streams the whole raw; only `getRawMimePart` streams, and it streams
-a single part.)
-
-Dispatch:
+Dispatch on `iem_raw_storage_driver`:
 
 - `inline` → `iem_raw_message`.
-- `local` → `RawMessageStore::read`.
-- `cloud` → `RawMessageStore::read` → private driver `get()` → temp → bytes.
-- `remote` → delegate to the IMAP on-demand fetch (`ImapIngestor::fetchPart`); if the
-  source can't produce it, surface the "no longer available" result.
+- `local` → `RawMessageStore::read` (filesystem).
+- `cloud` → `RawMessageStore::read` → shared private driver `get()` → temp → bytes.
+- `remote` → `ImapIngestor::fetchPart`; if the source can't produce it, surface "no
+  longer available."
 
-`getRawMimePart()` for the stored-raw drivers (`inline`/`local`/`cloud`) MIME-parses the
-raw and extracts the one requested section. For `remote` it calls `fetchPart()`. This is
-the single method the attachment endpoint uses.
-
-**Bound the memory + clean the temp.** Stored raws are capped at 25 MB (the existing
-`InboundEmailRouter` size limit), but we still avoid holding a large message twice:
-`local` parses **directly from the on-disk file** (Horde parses from a stream/path), and
-`cloud` pulls the object to a unique temp path, parses from it, and unlinks it in a
-`finally` so a parse error or fatal never leaks temp files. Only `inline` (legacy) parses
-from an in-memory string, which is unavoidable for column-stored raw.
+`getRawMimePart()` for stored-raw drivers MIME-parses and extracts the one section;
+for `remote` it calls `fetchPart()`. **Bound memory + clean temp:** `local` parses
+directly from the on-disk file; `cloud` pulls to a unique temp, parses, and unlinks in
+a `finally`; only legacy `inline` parses from an in-memory string. (No whole-message
+stream accessor — the `.eml` download was retired for every transport; only
+`getRawMimePart` streams, and only one part.)
 
 ### The actual readers being rerouted
 
-There is **no** Download .eml action and **no** inline raw view anymore. The real
-readers of a stored raw, post-retirement, are:
+There is no Download .eml and no inline raw view. The real readers of a stored raw:
 
 | File | Today | Change |
 |------|-------|--------|
-| `includes/InboundEmailRouter.php` | writes `iem_raw_message` directly; `storeExtracted()` sets no driver | push `storeMessage` writes via `RawMessageStore`, leaves the column empty, inline-fallback on failure, writes the `ima_` manifest; `storeExtracted()` sets `driver='remote'` |
-| `includes/MailboxSender.php` (forward/reply re-attach) | dispatches on `account_id > 0` → `attachFromImap` else `attachFromRaw` (`Horde_Mime` over `iem_raw_message`) | dispatch on the **driver flag**: `remote` → `attachFromImap` (`fetchPart`); `inline`/`local`/`cloud` → `attachFromRaw` reading via `getRawMessage()` |
-| `logic/admin_inbound_email_attachment_logic.php` (per-attachment download) | dispatches on `account_id`; the non-IMAP branch returns "not yet available for this message" | dispatch on the **driver flag**: `remote` → `fetchPart`; `inline`/`local`/`cloud` → `getRawMimePart()` and stream the part — lighting up push per-attachment download |
+| `includes/InboundEmailRouter.php` | writes `iem_raw_message` directly; `storeExtracted()` sets no driver | push `storeMessage` writes via `RawMessageStore`, leaves the column empty, writes the `ima_` manifest, inline-fallback on failure; `storeExtracted()` sets `driver='remote'` |
+| `includes/MailboxSender.php` (forward/reply re-attach) | dispatches on `account_id > 0` → `attachFromImap` else `attachFromRaw` over `iem_raw_message` | dispatch on the **driver flag**: `remote` → `attachFromImap` (`fetchPart`); `inline`/`local`/`cloud` → `attachFromRaw` reading via `getRawMessage()` |
+| `logic/admin_inbound_email_attachment_logic.php` (per-attachment download) | dispatches on `account_id`; the non-IMAP branch returns "not yet available" | dispatch on the **driver flag**: `remote` → `fetchPart`; `inline`/`local`/`cloud` → `getRawMimePart()` + stream — lighting up push per-attachment download |
 
-**Dispatch is unified on `iem_raw_storage_driver`** — `remote` routes to the IMAP
-on-demand fetch, every other value routes to the accessor. `account_id` is no longer a
-dispatch signal (it is now purely the `remote` locator). This makes the descriptor the
-single source of truth, so the accessor is genuinely transport-blind as claimed.
+**Dispatch is unified on `iem_raw_storage_driver`** — `remote` → IMAP on-demand fetch,
+every other value → the accessor. `account_id` is no longer a dispatch signal (now
+purely the `remote` locator), so the accessor is genuinely transport-blind.
 
 ## Attachments — parity across all mail types
 
-Attachments are described by the bytes-free `ima_inbound_message_attachments` manifest
-and fetched on demand; the manifest never holds bytes. After this spec:
-
 | | Push (Postfix / Mailgun) | IMAP (pull) |
 |---|---|---|
-| Raw | `local` → `cloud` (private bucket), or `inline` legacy | `remote` (mailbox) |
-| `ima_` manifest | **written at ingest** (MIME parse of raw) | written at ingest (BODYSTRUCTURE) |
+| Raw | `local` → `cloud` (private store), or `inline` legacy | `remote` (mailbox) |
+| `ima_` manifest | **written at ingest** (MIME parse) | written at ingest (BODYSTRUCTURE) |
 | Per-attachment list | **yes** (from manifest) | yes (from manifest) |
 | Per-attachment download | **yes** — `getRawMimePart()` over stored raw | yes — `fetchPart()` from mailbox |
 | Forward re-attach | `attachFromRaw` over the accessor | `attachFromImap` (`fetchPart`) |
 
-One manifest table, one reader UI, one download endpoint, one accessor — transport- and
-tier-blind. The whole-message `.eml` is never reconstructed for the user; attachments
-are served per-part.
+One manifest table, one reader UI, one download endpoint, one accessor — transport-
+and tier-blind. The whole-message `.eml` is never reconstructed; attachments are served
+per-part.
 
-## Cold offload + reverse (reuse the sync-task shape)
+## Offload — inherited from the engine
 
-Two scheduled tasks modeled directly on `CloudStorageSync` / `CloudStorageReverseSync`:
+Mail does **not** implement offload. It registers with the shared layer and the engine
+does the work:
 
-- **`OffloadInboundRawToCloud`** — when `cloud_storage_private_enabled = true`, walks
-  `iem_` rows where `iem_raw_storage_driver = 'local'` and
-  `iem_raw_sync_failed_count < 5`, oldest first (optionally only rows older than N days).
-  On failure: increment `iem_raw_sync_failed_count`, stamp `iem_raw_sync_last_attempt`,
-  log, move on. After 5 failures the row is excluded and surfaces as stuck (same pattern
-  as files). This task is also the one-time forward migration of `local` rows once a
-  private bucket is first configured.
-- **`PullInboundRawBackToLocal`** — activated only when the admin disables the private
-  mail bucket; pulls `cloud` rows back to `local`, and self-deactivates when no `cloud`
-  rows remain.
+- **Declare `RawMessageStore` in `plugin.json` under `storage_profiles`** (class name
+  only — the registry instantiates it and reads `visibility()`; no runtime
+  self-registration). The shared `StorageProfileRegistry` then sees the mail profile the
+  same way it sees the core profile — including while the plugin is deactivated, since
+  the declaration lives on disk. `CloudStorageLifecycle` activates mail's forward task
+  when the private store is enabled (gate passed) and its reverse task on
+  disable+pull-back — the same wiring that drives the public-files tasks, over every
+  `private`-visibility profile.
+- **Drain before uninstall.** Because this plugin owns a `private` profile,
+  *uninstalling* it (which removes the declaration from disk) **requires the mail store
+  drained back to local first**, per the offload layer's drain-before-uninstall rule —
+  otherwise cloud-resident raw objects would be invisible to the bucket-immutability
+  guard and could be stranded. Deactivation alone is safe (files, and so the
+  declaration, remain).
+- **Two task shims** (registered in `plugin.json`), each a one-liner:
+  - `OffloadInboundRawToCloud` → `CloudOffloadEngine::syncBatch(new RawMessageStore())`
+  - `PullInboundRawBackToLocal` → `CloudOffloadEngine::reverseBatch(new RawMessageStore())`
 
-**`offloadToCloud()` ordering invariant** (the lesson cloud_storage's §6/§11 paid for —
-never leave the flag pointing at bytes that aren't there):
+  They exist only so the scheduler tracks mail offload status distinctly; all logic —
+  the PUT→reload→flip→delete ordering, the failure cap, batching — is the engine's.
 
-1. `PUT` to the private bucket; verify success.
-2. **Re-load the row.** If it was hard-deleted meanwhile, best-effort `delete()` the
-   just-PUT object and stop — so no cloud orphan is created in the first place.
-3. Commit the flag flip (`driver='cloud'`, key unchanged — it's tier-invariant) in one
-   `UPDATE`.
-4. **Only then** delete the local file. A crash between 3 and 4 leaves only a harmless
-   orphaned local file (the row already reads from cloud) — rare, disk waste rather than a
-   correctness problem, and not auto-reclaimed in v1.
-
-`pullBackToLocal()` runs the inverse with the opposite ordering — **commit
-`driver='local'` first, then best-effort bucket `delete()`** (logging `INBOUND_RAW_ORPHAN`
-on delete failure), because while the flag says `cloud` the bucket is authoritative. A
-local file already written but not yet flag-committed is overwritten idempotently on
-retry. Both tasks re-check the row still exists before committing, so a concurrent
-hard-delete can't strand bytes.
-
-Both piggyback on the existing 15-minute cron (`process_scheduled_tasks.php`) and its
-per-task advisory locking — no new cron entry.
+Until a private store is configured and gated (in the offload layer), mail simply
+stays `local` on disk forever; the feature degrades cleanly to local-only.
 
 ## Deletion
 
-The stored object is owned by the message row and cleaned up with it:
+The stored object is owned by the message row:
 
-- **Permanent delete / purge** (`PurgeOldMailboxMessages` and any hard-delete path) →
-  `RawMessageStore::delete()` (which dispatches to filesystem unlink or private-bucket
-  `delete()`). Define this in the message class's deletion strategy
-  (`$foreign_key_actions` / hard-delete hook) so a caller can't forget it.
-- **Soft delete** leaves the object in place (the row is recoverable, so its raw must
-  be).
-- The `ima_` manifest already cascades on the message via its `$foreign_key_actions`.
+- **Permanent delete / purge** → the message's hard-delete hook calls
+  `RawMessageStore::delete()` (filesystem unlink or private-store `delete()`). Define it
+  in the message class's deletion strategy so no caller can forget it. (Note:
+  `PurgeOldMailboxMessages` already routes through `permanent_delete()` per row rather
+  than a bulk SQL `DELETE`, so the hook fires — done in a prior change.)
+- **Soft delete** leaves the object in place (the row is recoverable).
+- The `ima_` manifest already cascades via its `$foreign_key_actions`.
 
-The hard-delete hook is the single mechanism for reclaiming stored bytes. No separate
-orphan-sweep pass — if stranded objects ever turn out to occur in practice, a sweep is
-trivial to add then; building one now would be belt-and-suspenders over a hook that
-already covers the case.
+No separate orphan-sweep — the hard-delete hook is the single reclaim path.
 
 ## Migration / backward compatibility
 
-- **No forced migration.** Pre-launch there are no production messages
-  ([no-production-users principle](../docs)); even so, `inline` rows read correctly
-  forever via the accessor.
-- **Backfill existing IMAP rows to `remote` (required for Option A, runs at upgrade).**
-  Pre-existing reference-backed rows were written before the descriptor column existed, so
-  they sit on the `inline` default. A migration sets them straight:
-  `UPDATE iem_inbound_email_messages SET iem_raw_storage_driver = 'remote' WHERE
-  iem_iia_inbound_imap_account_id IS NOT NULL AND iem_raw_storage_driver = 'inline'`.
-  This is a data-only migration (not schema), idempotent, and must land **before** the
-  driver-flag dispatch goes live, or existing IMAP attachments/forwards would route to the
-  empty-raw accessor branch. Mirrors the existing `iia_001`/`iem_003` migration pattern.
-- **No inline→files backfill task.** Pre-launch there are no production `inline` rows to
-  migrate ([no-production-users principle](../docs)); any that exist on dev/test are
-  disposable and read correctly forever via the `inline` accessor branch. New push mail
-  goes straight to `local`. If a populated DB ever needs reclaiming, a one-off
-  inline→`local` backfill (write file, build manifest, null the column) is trivial to add
-  then — it isn't built now.
-- **Legacy `inline` push rows carry no manifest**, so they show no per-attachment list
-  (the manifest is written only for *new* push mail). Acceptable given there's no
-  production data; not worth a lazy per-row manifest build.
-- **Reverse migration needs local headroom.** Disabling the private bucket pulls every
-  `cloud` row back to disk. The disable action surfaces the same headroom warning
-  cloud_storage shows — the `cloud` row count and `disk_free_space()` — before
-  activating `PullInboundRawBackToLocal`. If disk fills mid-run, per-row placement fails
-  gracefully, the row stays `cloud`, and the failure counter surfaces it as stuck.
-- New push writes always go to `local`; `inline` exists only as legacy-read + the
-  write-failure fallback.
-
-## Per-transport / per-tier end state
-
-| Driver | Transport | Raw bytes | Attachment bytes | Read path |
-|--------|-----------|-----------|------------------|-----------|
-| `inline` | legacy push | `iem_raw_message` column | MIME-parsed from column | accessor (column) |
-| `local` | push (new default) | private on-disk store | MIME-parsed from file | accessor (filesystem) |
-| `cloud` | push (offloaded) | private S3 bucket | MIME-parsed from `get()`'d temp | accessor (server-side `get()`, gated) |
-| `remote` | IMAP | none (mailbox) | `fetchPart()` from mailbox | accessor → `ImapIngestor` |
+- **No forced migration.** Pre-launch there are no production messages; `inline` rows
+  read correctly forever via the accessor.
+- **Backfill existing IMAP rows to `remote` (`iem_006`, runs at upgrade).**
+  Reference-backed rows written before the descriptor column sit on the `inline`
+  default. A data-only, idempotent migration corrects them — and must land **before**
+  the driver-flag dispatch goes live, or existing IMAP attachments/forwards route to
+  the empty-raw branch:
+  ```sql
+  UPDATE iem_inbound_email_messages SET iem_raw_storage_driver = 'remote'
+   WHERE iem_iia_inbound_imap_account_id IS NOT NULL AND iem_raw_storage_driver = 'inline';
+  ```
+  Mirrors the `iia_001`/`iem_003` pattern.
+- **No inline→files backfill.** Pre-launch there are no production `inline` rows;
+  any on dev/test read correctly via the `inline` branch. New push goes straight to
+  `local`.
+- **Legacy `inline` push rows carry no manifest** (written only for new push mail), so
+  they show no per-attachment list. Acceptable with no production data.
+- Descriptor columns are additive (default `inline` keeps existing rows readable),
+  applied by **Sync with Filesystem** / `update_database`; a migration finalizes any
+  deferred NOT-NULL/DEFAULT per the `iem_002`/`iif_001` pattern.
 
 ## Install & runtime provisioning
 
-`{site_root}/storage/` holds durable mail bytes, so it is **runtime data on par with
-`uploads/` and `backups/`**, not a scratch dir like `logs/`. The install scripts must
-provision it the same way — and, critically, **back it with a persistent Docker volume**,
-or a container rebuild silently destroys stored mail. The on-demand `inbound_email/...`
-subtree is created by `RawMessageStore` at first write; the install layer only creates
-and persists the base `storage/` directory. No new setting is introduced — the path
-derives from `PathHelper::getSiteRoot()` exactly as cloud_storage derives its prefix.
-
-Every site that provisions `uploads/`/`backups/` must add `storage/` alongside:
+`{site_root}/storage/` holds durable mail bytes — **runtime data on par with
+`uploads/` and `backups/`**, not scratch like `logs/`. It must be provisioned the same
+way and, critically, **backed by a persistent Docker volume**, or a container rebuild
+destroys stored mail. The `inbound_email/...` subtree is created by `RawMessageStore`
+at first write; the install layer creates and persists the base `storage/` dir. No new
+setting — the path derives from `PathHelper::getSiteRoot()`.
 
 | File | Existing `uploads`/`backups` treatment | Add for `storage/` |
 |------|----------------------------------------|--------------------|
 | `_site_init.sh` (dir block) | `mkdir -p $SITE_ROOT/{uploads,logs,backups}` | `mkdir -p $SITE_ROOT/storage` |
 | `_site_init.sh` (perms fallback) | `chmod -R 775 $SITE_ROOT/uploads` | `chmod -R 775 $SITE_ROOT/storage` |
-| `install.sh` (both `docker run` blocks) | `-v ${SITENAME}_uploads:.../uploads`, `-v ${SITENAME}_backups:.../backups` | **`-v ${SITENAME}_storage:/var/www/html/${SITENAME}/storage`** — the durability-critical change |
-| `install.sh` (generated `.dockerignore`) | `*/backups/*` | `*/storage/*` (runtime data stays out of the image) |
-| `install.sh` (test-clone rsync) | `--exclude='uploads/*'` | `--exclude='storage/*'` (don't copy mail into test clones) |
+| `install.sh` (both `docker run` blocks) | `-v ${SITENAME}_uploads:.../uploads` | **`-v ${SITENAME}_storage:/var/www/html/${SITENAME}/storage`** — the durability-critical change |
+| `install.sh` (generated `.dockerignore`) | `*/backups/*` | `*/storage/*` |
+| `install.sh` (test-clone rsync) | `--exclude='uploads/*'` | `--exclude='storage/*'` |
 | `build_dev_from_source.sh` (test-deploy mkdir) | `mkdir -p $deploy_directory/uploads` | `mkdir -p $deploy_directory/storage` |
 | `fix_permissions.sh` | uploads chmod block | storage chmod block |
 | `INSTALL_README.md` (volume table) | `{site}_uploads` row | `{site}_storage` row |
 
-The code-deploy/upgrade path (`utils/upgrade.php`) syncs code only and never touches the
-runtime data dirs, so `storage/` survives upgrades for free once the volume exists — the
-same property `uploads/` and `backups/` already rely on.
+`utils/upgrade.php` syncs code only and never touches runtime data dirs, so `storage/`
+survives upgrades once the volume exists — as `uploads/`/`backups/` already do.
 
 ## Files
 
 ### To create
 | File | Purpose |
 |------|---------|
-| `plugins/inbound_email/includes/RawMessageStore.php` | local + cloud(private-bucket) read/write/stream/delete + offload/pull-back, over the `CloudStorageDriver` seam |
-| `plugins/inbound_email/tasks/OffloadInboundRawToCloud.{json,php}` | cold offload `local` → private bucket; also the one-time forward migration when a bucket is first configured |
-| `plugins/inbound_email/tasks/PullInboundRawBackToLocal.{json,php}` | reverse: private bucket → local on disable; self-deactivates |
-| `plugins/inbound_email/tests/raw_message_store_test.php` | local + cloud round-trip (mock driver); key layout; missing-object handling; delete no-op for inline/remote |
+| `plugins/inbound_email/includes/RawMessageStore.php` | the mail `StorageProfile` (`visibility=private`) + request-time write/read/delete |
+| `plugins/inbound_email/tasks/OffloadInboundRawToCloud.{json,php}` | shim → `CloudOffloadEngine::syncBatch(new RawMessageStore())` |
+| `plugins/inbound_email/tasks/PullInboundRawBackToLocal.{json,php}` | shim → `CloudOffloadEngine::reverseBatch(new RawMessageStore())` |
+| `plugins/inbound_email/tests/raw_message_store_test.php` | local + cloud round-trip (mock private driver); key layout; missing-object handling; delete no-op for inline/remote |
 | `plugins/inbound_email/tests/inbound_raw_storage_test.php` | ingest writes file + manifest + empty column; accessor resolves each driver; push per-attachment download; legacy inline reads; delete removes object |
 
 ### To modify
 | File | Change |
 |------|--------|
-| `data/inbound_email_message_class.php` | add `iem_raw_storage_driver` (default `inline`), `iem_raw_storage_key`, `iem_raw_sync_failed_count`, `iem_raw_sync_last_attempt`; add `getRawMessage()`/`getRawMimePart()`; hard-delete removes the stored object; bump `@version` |
-| `includes/InboundEmailRouter.php` | `storeMessage` writes raw via `RawMessageStore`, leaves column empty, writes `ima_` manifest from the MIME parse, inline-fallback on failure; **`storeExtracted()` sets `driver='remote'`**; bump `@version` |
-| `includes/MailboxSender.php` | forward re-attach **dispatches on the driver flag** (`remote` → `attachFromImap`, else `attachFromRaw` reading via `getRawMessage()`); bump `@version` |
-| `logic/admin_inbound_email_attachment_logic.php` | **dispatch on the driver flag** (`remote` → `fetchPart`, else `getRawMimePart()` + stream); bump `@version` |
-| `includes/cloud_storage/CloudStorageDriverFactory.php` | add `privateDefault()` (shared creds + `cloud_storage_private_bucket`); bump `@version` |
-| `tasks/PurgeOldMailboxMessages.php` | delete the stored object when purging; bump `@version` |
-| `plugins/inbound_email/migrations/migrations.php` | add `iem_006_backfill_imap_remote_driver` (set existing IMAP rows to `driver='remote'`, before dispatch goes live) |
-| `settings.json` | declare `cloud_storage_private_bucket`, `cloud_storage_private_enabled` |
-| `adm/admin_cloud_storage.php` + `adm/logic/admin_cloud_storage_logic.php` | add the `cloud_storage_private_bucket` field (same page, same creds); same Save validates it independently with the **privacy hard-gate** (probe + anonymous-fetch-must-be-denied); on pass, latch `cloud_storage_private_enabled` and activate `OffloadInboundRawToCloud`; on disable, activate `PullInboundRawBackToLocal` |
-| `plugin.json` | register the two tasks (offload + reverse); bump `version` |
-| `maintenance_scripts/install_tools/_site_init.sh` | `mkdir -p $SITE_ROOT/storage` + `chmod 775` in the perms fallback |
-| `maintenance_scripts/install_tools/install.sh` | add `${SITENAME}_storage` volume mount to both `docker run` blocks; add `*/storage/*` to `.dockerignore`; add `--exclude='storage/*'` to the test-clone rsync |
-| `maintenance_scripts/install_tools/build_dev_from_source.sh` | `mkdir -p $deploy_directory/storage` in the test-deploy block |
-| `maintenance_scripts/install_tools/fix_permissions.sh` | add a `storage/` chmod block alongside `uploads/` |
-| `maintenance_scripts/install_tools/INSTALL_README.md` | add the `{site}_storage` row to the Docker volume table |
+| `data/inbound_email_message_class.php` | add the `iem_raw_*` descriptor columns; add `getRawMessage()`/`getRawMimePart()`; hard-delete removes the stored object; bump `@version` |
+| `includes/InboundEmailRouter.php` | `storeMessage` writes via `RawMessageStore`, leaves the column empty, writes the `ima_` manifest, inline-fallback; `storeExtracted()` sets `driver='remote'`; bump `@version` |
+| `includes/MailboxSender.php` | forward re-attach dispatches on the driver flag (`remote`→`attachFromImap`, else `attachFromRaw` via `getRawMessage()`); bump `@version` |
+| `logic/admin_inbound_email_attachment_logic.php` | dispatch on the driver flag (`remote`→`fetchPart`, else `getRawMimePart()` + stream); bump `@version` |
+| `plugin.json` | register the two task shims + declare `RawMessageStore` under the `storage_profiles` key (class name only); bump `version` |
+| `migrations/migrations.php` | add `iem_006_backfill_imap_remote_driver` (before dispatch goes live) |
+| install scripts (`_site_init.sh`, `install.sh`, `build_dev_from_source.sh`, `fix_permissions.sh`, `INSTALL_README.md`) | provision + persist `storage/` per the table above |
+| `plugins/inbound_email/docs/overview.md` | document the raw-message storage descriptor (`inline`/`local`/`cloud`/`remote`), the one accessor, per-attachment manifest + download parity across transports, the `{site_root}/storage/` location + Docker-volume durability, and that the cloud tier is the platform's verified-private store reached via the shared offload layer — as the current design |
 
-### Schema
-Applied by **Sync with Filesystem** / `update_database` from the data class — the new
-columns are additive (descriptor + counters); `inline` default keeps existing rows
-readable. A migration finalizes any new NOT-NULL/DEFAULT the plugin-table sync defers,
-per the existing `iem_002`/`iif_001` pattern.
+### Depends on (from the offload layer, not modified here)
+The private store, the privacy gate, `CloudStorageDriverFactory::forVisibility()`, the
+`CloudOffloadEngine`, `CloudStorageLifecycle`, `StorageProfile`/`StorageProfileRegistry`
+— all delivered by [cloud_offload_unification.md](cloud_offload_unification.md), which
+**must land first.**
 
 ## Testing
 
-- **Store round-trip** — `write` then `read` returns identical bytes for `local`; cloud
-  round-trip via a mock `CloudStorageDriver`; key layout is
-  `{site_template}/{yyyy}/{mm}/{id}.eml`; missing object fails cleanly (logged, not
+- **Store round-trip** — `write` then `read` returns identical bytes for `local`;
+  cloud round-trip via a mock private driver; key layout
+  `inbound_email/{yyyy}/{mm}/{id}.eml`; missing object fails cleanly (logged, not
   fatal); `delete` is a no-op for `inline`/`remote`.
-- **Ingest** — a pushed message writes the raw to a `local` file, writes the `ima_`
-  manifest, sets `driver='local'` + key, leaves `iem_raw_message` empty; `extractBodies`
-  still populates text columns; a simulated write failure falls back to `inline`.
+- **Ingest** — a pushed message writes a `local` file, writes the `ima_` manifest, sets
+  `driver='local'`+key, leaves `iem_raw_message` empty; `extractBodies` still populates
+  text; a simulated write failure falls back to `inline`.
 - **Read** — `getRawMessage()` returns the right bytes for `inline`/`local`/`cloud`;
   `getRawMimePart()` extracts the correct part for each stored-raw driver; a `remote`
   row delegates to `fetchPart`.
 - **Attachment parity** — a push message exposes the per-attachment list and downloads a
   single part via the same endpoint IMAP uses.
-- **Unified dispatch + IMAP backfill** — a `remote` row routes the attachment endpoint and
-  forward re-attach to `fetchPart` (not the empty-raw accessor branch); the
-  `iem_006_backfill_imap_remote_driver` migration flips pre-existing IMAP rows
-  (`account_id IS NOT NULL`) from `inline` to `remote` and is idempotent on re-run.
-- **Privacy hard-gate** — a Save with a *public* private-bucket (anonymous fetch returns
-  200) fails the check, leaves `cloud_storage_private_enabled` false, and does not activate
-  offload; a genuinely private bucket (anonymous fetch denied) passes and latches enabled;
-  a private-bucket failure does not block the public bucket's Save.
-- **Offload / reverse** — `local` → private bucket flips the flag and removes the local
-  file; failure increments the counter and surfaces as stuck after 5; reverse pulls back
-  and self-deactivates.
-- **Backward compatibility** — a pre-existing `inline` row reads correctly with no file
-  present (it serves from the column; it carries no manifest).
-- **Deletion** — permanent delete / purge removes the object (file or bucket); soft
-  delete keeps it.
-- Run `php -l` + `validate_php_file.php` on every created/modified PHP file.
+- **Unified dispatch + IMAP backfill** — a `remote` row routes the attachment endpoint
+  and forward re-attach to `fetchPart` (not the empty-raw branch); `iem_006` flips
+  pre-existing IMAP rows from `inline` to `remote` and is idempotent.
+- **Offload via the shared engine** — with a gated private store, mail's
+  `OffloadInboundRawToCloud` shim flips a `local` row to `cloud` and removes the local
+  file (the engine's behavior, exercised through the mail profile); reverse pulls back.
+- **Deletion** — permanent delete / purge removes the object; soft delete keeps it.
+- `php -l` + `validate_php_file.php` on every created/modified PHP file.
 
 ## Security
 
-- The local store is **outside the web root**; the cloud tier is a **private,
-  non-public-readable** bucket. Mail is reachable only through the permission-gated
-  reader/endpoint (`check_permission(5)`), which streams bytes server-side — never a
-  public bucket URL, never a presigned link in this spec.
-- Private-bucket privacy is a **hard gate, not a warning**: the Save flow PUTs a probe,
-  proves an anonymous fetch is denied (a 200 fails the check), and only then latches
-  `cloud_storage_private_enabled`. Mail never reaches a bucket whose privacy is unproven.
+- The local store is **outside the web root**; the cloud tier is the platform's
+  **verified-private** store, read server-side behind `check_permission(5)` — never a
+  public URL or presigned link. Mail inherits the privacy guarantee proven once by the
+  offload layer.
 - Never log or echo raw message contents or embedded credentials; the store deals in
   opaque bytes.
-- File/dir/object permissions follow the deployment's posture; the security boundary is
-  the web-root/public-bucket exclusion + the permission gate, not the file mode.
 - Untrusted-content markers on stored mail are unchanged.
-- **Graceful when the cloud tier is unreachable.** If the private-bucket credentials are
-  revoked or the bucket is down, `cloud`-stored mail can't be fetched (the same shape as
-  cloud_storage public files 404ing). A failed `get()` surfaces a clean "temporarily
-  unavailable" through the gated endpoint — never a fatal — and the storage admin
-  health/ping reflects the red state. Reads recover automatically once creds are fixed;
-  no data is lost (the bucket still holds the bytes).
+- **Graceful when the cloud tier is unreachable** — a failed `get()` surfaces a clean
+  "temporarily unavailable" through the gated endpoint, never a fatal; reads recover
+  once creds/bucket are fixed (the bucket still holds the bytes).
 
 ## Versioning
 
 - `plugin.json` minor bump (new internal storage mechanism; backward compatible —
-  `inline` rows keep working, no user-visible change except push gaining per-attachment
-  download).
-- Bump `@version` on each modified file.
+  `inline` rows keep working; push gains per-attachment download).
+- Bump `@version` on each modified file; `@version 1.0` on new files.
 
 ## Out of scope / future
 
-- **Presigned-URL reads for the cloud tier.** Server-side streaming is sufficient at
-  mail-read volume; presigning is a future egress optimization and would be the only
-  change needed to push the read path off PHP. The `CloudStorageDriver` interface is left
-  unchanged here so adding a `presignedGet()` later is additive.
-- **Reusing the existing public uploads bucket.** Excluded by design — it is
-  public-readable; inbound mail is private.
-- **A separate provider / account / credentials for the mail bucket.** Out of scope now:
-  the private mail bucket is one more bucket on the *same* provider+account as the public
-  cloud storage (bucket name only, shared endpoint/region/keys). Supporting a distinct
-  provider or instance for mail would mean a second credential set and is deferred until a
-  customer actually needs it.
-- **Per-attachment storage as first-class rows with their own bytes.** Attachments
-  remain part of the raw and are extracted on demand; the manifest stays bytes-free.
-- **IMAP raw storage.** IMAP is reference-backed; this spec only routes its `remote`
-  driver through the shared accessor.
-- **Changing the oversized-message rejection cap.** Unchanged.
+- **The offload engine, lifecycle, private store, and privacy gate** — owned by
+  [cloud_offload_unification.md](cloud_offload_unification.md).
+- **Presigned-URL reads for the cloud tier** — a future egress optimization in the
+  driver; server-side streaming suffices at mail-read volume.
+- **Per-attachment storage as first-class rows with their own bytes** — attachments stay
+  part of the raw, extracted on demand; the manifest stays bytes-free.
+- **IMAP raw storage** — IMAP is reference-backed; only its `remote` driver routes
+  through the accessor.
+- **Changing the oversized-message rejection cap** — unchanged.
