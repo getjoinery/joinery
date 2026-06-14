@@ -490,8 +490,9 @@ Each domain also has a **catch-all mode** (`ied_catch_all_mode`):
 The **Mailboxes** tab (`Emails > Incoming > Mailboxes`) is the default landing
 tab — a Gmail-style reader over locally-stored inbound messages. Each message
 shows the parsed plain-text body, a sandboxed iframe rendering of the HTML body
-(no scripts, no top-nav), and a per-attachment download; the single-message
-detail page keeps the original raw MIME with a `.eml` download.
+(no scripts, no top-nav), and a per-attachment download. Attachments are served
+one MIME part at a time through a single endpoint for every transport (see
+**Raw-message storage** below); the whole-message `.eml` is never reconstructed.
 
 Stored bodies are fully attacker-controlled — admins should never paste a
 captured token into a non-admin page or feed an untrusted body to an AI
@@ -526,6 +527,74 @@ Dedup is enforced at the DB layer by a UNIQUE constraint on
 header succeeds silently (no duplicate row). Messages with no Message-ID
 header are always inserted (NULLs are distinct in Postgres unique
 constraints).
+
+## Raw-message storage
+
+The database holds the small, searchable, displayable parts of a message — headers,
+the decoded text bodies, and the attachment manifest. The heavy raw RFC822 lives in
+the cheapest durable store for its transport, **not** in the `iem_raw_message` column.
+A per-row **storage descriptor** says where, and one accessor resolves it so callers
+are transport- and tier-blind.
+
+**The descriptor** (`iem_raw_storage_driver`, the single source of truth):
+
+| Driver | Where the raw lives | Set by |
+|--------|---------------------|--------|
+| `inline` | `iem_raw_message` (the column) | legacy rows + the local-write-failure fallback |
+| `local` | a file under `{site_root}/storage/`, keyed by `iem_raw_storage_key` | the default for every new push (Postfix/Mailgun) write |
+| `cloud` | an object in the verified-private store, the **same** key | the shared cloud-offload engine; reversible |
+| `remote` | no platform copy — parts fetched on demand from the IMAP source | the IMAP poller (`storeExtracted`) |
+
+`iem_raw_storage_key` is a single **tier-invariant** relative key,
+`inbound_email/{yyyy}/{mm}/{message_id}.eml` (received-month shard). The local tier
+prepends `{site_root}/storage/`; the cloud tier prepends the shared bucket's
+`{site_template}/` prefix automatically — so offload is a flag flip + byte copy with
+no key rewrite. `RawMessageStore` (the mail `StorageProfile`) owns the key scheme and
+the request-time `write` / `read` / `delete`.
+
+**Write path.** A pushed message is inserted with an empty `iem_raw_message`; the raw
+is then written to the **local** store and the descriptor stamped (`local` + key).
+Ingest never blocks on bucket I/O — the engine offloads later. If the local write
+fails (disk full / perms) the raw falls back to an **inline** write with a loud
+`INBOUND_RAW_LOCAL_WRITE_FAILED` marker — the one place a new `inline` write still
+happens. At ingest the **attachment manifest** (`ima_` rows) is written by MIME-parsing
+the raw, the same row shape the IMAP poller derives from BODYSTRUCTURE.
+
+**Read path.** `InboundEmailMessage::getRawMessage()` returns the whole raw (for
+forward re-attach); `getRawMimePart($section)` returns one decoded part (for
+per-attachment download). Both dispatch on the driver: `inline` reads the column,
+`local` reads the file, `cloud` pulls the private object to a unique temp and unlinks
+it, `remote` is served by the IMAP on-demand fetch at the call site. A transient cloud
+outage surfaces a clean "temporarily unavailable", never a fatal — the bytes recover
+once the store is reachable again.
+
+**Attachment parity across transports.** One manifest table, one reader list, one
+download endpoint, one accessor. Push mail (`inline`/`local`/`cloud`) and IMAP mail
+(`remote`) both expose a per-attachment list and per-part download; the dispatch is
+unified on `iem_raw_storage_driver`. The whole `.eml` is never reassembled — only the
+one requested part is streamed.
+
+**The cloud tier is the platform's verified-private store**, reached only through the
+shared offload layer's server-side `get()` behind a permission gate — never a public
+URL or presigned link. Inbound mail configures none of that itself: it declares
+`visibility = 'private'` and inherits the private store, the privacy gate, the offload
+engine, and the admin lifecycle from the cloud-storage layer (see
+[Cloud Storage](../../../docs/cloud_storage.md)). Until a private store is configured
+and gated, mail simply stays `local` on disk forever — the feature degrades cleanly to
+local-only. Offload runs through two scheduler-tracked task shims,
+`OffloadInboundRawToCloud` (forward) and `PullInboundRawBackToLocal` (reverse), each a
+one-line call into the shared engine; `RawMessageStore` is declared under
+`storage_profiles` in `plugin.json`. Because the plugin owns a `private` profile,
+**uninstalling** it requires the mail store drained back to local first (the
+offload layer's drain-before-uninstall rule); deactivation alone is safe.
+
+**Durability.** `{site_root}/storage/` is durable runtime data on par with `uploads/`
+and `backups/` — it **must** be backed by a persistent Docker volume (`{site}_storage`),
+or a container rebuild destroys stored mail. The install layer provisions and persists
+it; `upgrade.php` never touches runtime data dirs, so `storage/` survives upgrades. The
+directory and the private bucket are **never** web-served. Deletion of a message
+(permanent delete / purge) reclaims its stored object through the message's hard-delete
+hook; soft delete leaves the object in place (the row is recoverable).
 
 ## Mailbox Reader
 
@@ -823,10 +892,11 @@ mailbox-grant check as the reader** — an attachment is exactly as private as i
 message. Inline (`cid:`) parts belong to the HTML body and are excluded from the
 list. If a part can't be retrieved (message deleted/moved/account disabled), the
 endpoint says so honestly. The manifest + endpoint + reader list are
-**transport-agnostic**: Postfix/Mailgun mail can adopt the same clickable
-attachments later by populating the same table from a MIME parser over their stored
-raw — no new schema, no UI change. (The whole-message *.eml* download and raw-source
-view have been retired for every transport.)
+**transport-agnostic**: Postfix/Mailgun mail exposes the same clickable attachments,
+its manifest written from a MIME parse over the stored raw and its parts served by
+`getRawMimePart()` through the same endpoint — same table, same UI (see
+**Raw-message storage**). The whole-message *.eml* download and raw-source view do
+not exist for any transport.
 
 ### Setting up a Gmail account (end to end)
 

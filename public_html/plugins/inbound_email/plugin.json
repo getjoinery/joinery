@@ -1,7 +1,7 @@
 {
     "name": "Inbound Email",
     "description": "Self-hosted inbound email: forwarding, local mailboxes, DKIM/SRS",
-    "version": "1.15.0",
+    "version": "1.16.0",
     "author": "Joinery",
     "receives_upgrades": true,
     "included_in_publish": true,
@@ -9,6 +9,7 @@
         "php": ">=8.0"
     },
     "tags": ["email", "inbound", "forwarding", "smtp"],
+    "storage_profiles": ["RawMessageStore"],
     "adminMenu": [
         {
             "slug": "incoming",

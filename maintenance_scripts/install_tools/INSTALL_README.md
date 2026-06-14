@@ -416,6 +416,7 @@ Each site needs unique ports. The script automatically checks and suggests avail
 |--------|----------------|---------|
 | `{site}_postgres` | `/var/lib/postgresql` | Database files |
 | `{site}_uploads` | `.../uploads` | User uploaded files |
+| `{site}_storage` | `.../storage` | Durable runtime data (offloaded inbound-mail raw .eml) |
 | `{site}_config` | `.../config` | Site configuration |
 | `{site}_backups` | `.../backups` | Database backups |
 | `{site}_static` | `.../static_files` | Generated files |
@@ -478,6 +479,7 @@ After site creation:
 ├── public_html/      # Application code
 ├── config/           # Site configuration
 ├── uploads/          # User uploads
+├── storage/          # Durable runtime data (offloaded inbound-mail raw .eml)
 ├── logs/             # Application logs
 ├── static_files/     # Generated files
 └── backups/          # Database backups

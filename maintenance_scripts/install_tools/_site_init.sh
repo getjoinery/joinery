@@ -138,6 +138,9 @@ mkdir -p "$SITE_ROOT/public_html/cache"
 mkdir -p "$SITE_ROOT/logs"
 mkdir -p "$SITE_ROOT/static_files"
 mkdir -p "$SITE_ROOT/backups"
+# Durable runtime data (offloaded inbound-mail raw .eml lives here) — on par with
+# uploads/ and backups/, NOT scratch like logs/. Must be backed by a persistent volume.
+mkdir -p "$SITE_ROOT/storage"
 
 # =============================================================================
 # CONFIGURATION FILES
@@ -508,6 +511,7 @@ else
     chown -R www-data:www-data "$SITE_ROOT"
     chmod -R 755 "$SITE_ROOT/public_html"
     chmod -R 775 "$SITE_ROOT/uploads"
+    chmod -R 775 "$SITE_ROOT/storage"
     chmod -R 775 "$SITE_ROOT/public_html/cache"
     chmod -R 775 "$SITE_ROOT/logs"
 fi

@@ -31,7 +31,18 @@
  * iem_iia_inbound_imap_account_id marks a row reference-backed. See ImapIngestor
  * and specs/inbound_imap_provider.md.
  *
- * @version 1.3
+ * RAW-MESSAGE STORAGE DESCRIPTOR (specs/inbound_raw_message_storage.md). The heavy
+ * RFC822 raw lives OUT of the database; iem_raw_storage_driver is the single source
+ * of truth for where:
+ *   - 'inline'  → in iem_raw_message (legacy rows + the write-failure fallback)
+ *   - 'local'   → a file under {site_root}/storage/, located by iem_raw_storage_key
+ *   - 'cloud'   → an object in the verified-private store, same key (set by the
+ *                 shared CloudOffloadEngine; reversible)
+ *   - 'remote'  → no platform copy; parts fetched on demand from IMAP (locator cols)
+ * getRawMessage()/getRawMimePart() resolve the descriptor so callers are
+ * transport- and tier-blind; RawMessageStore owns the byte I/O and key scheme.
+ *
+ * @version 1.4
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -58,7 +69,12 @@ class InboundEmailMessage extends SystemBase {
 		'iem_subject'             => array('type'=>'varchar(1000)'),
 		'iem_body_plain'          => array('type'=>'text'),
 		'iem_body_html'           => array('type'=>'text'),
-		'iem_raw_message'         => array('type'=>'text'),
+		'iem_raw_message'         => array('type'=>'text'), // legacy/'inline' only — new push writes leave this empty
+		// Raw-message storage descriptor (specs/inbound_raw_message_storage.md).
+		'iem_raw_storage_driver'    => array('type'=>'varchar(16)', 'default'=>'inline'), // inline | local | cloud | remote
+		'iem_raw_storage_key'       => array('type'=>'varchar(500)'),                     // tier-invariant relative key (local/cloud); null for inline/remote
+		'iem_raw_sync_failed_count' => array('type'=>'int4', 'default'=>0),               // offload retry counter (engine failure cap)
+		'iem_raw_sync_last_attempt' => array('type'=>'timestamp(6)'),                     // offload breadcrumb
 		'iem_message_id_header'   => array('type'=>'varchar(255)', 'unique_with'=>array('iem_recipient')),
 		'iem_thread_key'          => array('type'=>'varchar(255)'), // indexed via migration iem_001 (no declarative non-unique index support)
 		'iem_direction'           => array('type'=>'varchar(10)', 'default'=>'inbound', 'is_nullable'=>false), // inbound | outbound (reply/forward sent from the reader)
@@ -93,6 +109,97 @@ class InboundEmailMessage extends SystemBase {
 			throw new SystemAuthenticationError(
 				'Current user does not have permission to edit this entry in ' . static::$tablename);
 		}
+	}
+
+	/**
+	 * The whole raw RFC822 message, resolved through the storage descriptor.
+	 * Returns null when there is no stored raw (empty inline, or a 'remote' row
+	 * whose whole message is never reconstructed — only its parts are fetched
+	 * on demand). 'cloud' reads degrade to null on a transient store outage so
+	 * callers never fatal.
+	 */
+	function getRawMessage(): ?string {
+		$driver = (string)$this->get('iem_raw_storage_driver') ?: 'inline';
+		$key    = (string)$this->get('iem_raw_storage_key');
+
+		if ($driver === 'inline') {
+			$raw = $this->get('iem_raw_message');
+			return ($raw === null || $raw === '') ? null : (string)$raw;
+		}
+		if ($driver === 'local' || $driver === 'cloud') {
+			require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/RawMessageStore.php'));
+			try {
+				return RawMessageStore::read($driver, $key);
+			} catch (Throwable $e) {
+				error_log('InboundEmailMessage::getRawMessage failed (driver=' . $driver
+					. ', id=' . $this->key . '): ' . $e->getMessage());
+				return null;
+			}
+		}
+		// 'remote' — the whole raw is never reconstructed; callers fetch the one
+		// part they need via ImapIngestor::fetchPart().
+		return null;
+	}
+
+	/**
+	 * One decoded MIME part of the stored raw: ['content','type','filename'].
+	 * For stored-raw drivers (inline/local/cloud) it MIME-parses the raw and
+	 * extracts the section. Returns null when the raw is unavailable or the part
+	 * is gone. 'remote' is NOT handled here — its parts come from the source
+	 * mailbox via ImapIngestor::fetchPart(); the caller routes 'remote'
+	 * separately (the dispatch is unified on iem_raw_storage_driver).
+	 */
+	function getRawMimePart(string $section): ?array {
+		$driver = (string)$this->get('iem_raw_storage_driver') ?: 'inline';
+		if ($driver === 'remote') {
+			return null;
+		}
+		// local parses from the file's bytes, cloud from a pulled-then-unlinked
+		// temp, inline from the column — all surfaced as a string by the accessor.
+		$raw = $this->getRawMessage();
+		if ($raw === null || $raw === '') {
+			return null;
+		}
+
+		require_once(PathHelper::getComposerAutoloadPath());
+		try {
+			$message = Horde_Mime_Part::parseMessage($raw);
+			$part = $message->getPart($section);
+			if ($part === null) {
+				return null;
+			}
+			return array(
+				'content'  => (string)$part->getContents(),
+				'type'     => (string)$part->getType(),
+				'filename' => $part->getName() ?: null,
+			);
+		} catch (Throwable $e) {
+			error_log('InboundEmailMessage::getRawMimePart parse failed (id=' . $this->key
+				. ', section=' . $section . '): ' . $e->getMessage());
+			return null;
+		}
+	}
+
+	/**
+	 * Hard delete: reclaim the stored raw object (local file or private-store
+	 * object) before the row goes. Soft delete leaves the object in place (the
+	 * row is recoverable). The ima_ manifest cascades via $foreign_key_actions.
+	 * This is the single reclaim path — no separate orphan sweep.
+	 */
+	function permanent_delete($debug = false) {
+		$driver = (string)$this->get('iem_raw_storage_driver');
+		$key    = (string)$this->get('iem_raw_storage_key');
+		if ($driver === 'local' || $driver === 'cloud') {
+			try {
+				require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/RawMessageStore.php'));
+				RawMessageStore::delete($driver, $key);
+			} catch (Throwable $e) {
+				// Best-effort: never let a reclaim failure block the row delete.
+				error_log('InboundEmailMessage: raw object reclaim on purge failed (id=' . $this->key
+					. '): ' . $e->getMessage());
+			}
+		}
+		return parent::permanent_delete($debug);
 	}
 
 	/**

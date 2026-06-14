@@ -18,7 +18,11 @@
  * and returns an error the reader shows inline; the draft stays in the compose
  * panel for "fix and Send again" (spec §10).
  *
- * @version 1.0
+ * Forward re-attach dispatches on the source's iem_raw_storage_driver: 'remote'
+ * fetches parts from the IMAP source; every other driver re-attaches from the
+ * stored raw via InboundEmailMessage::getRawMessage() (specs/inbound_raw_message_storage.md).
+ *
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
@@ -282,17 +286,21 @@ class MailboxSender {
 
 	/**
 	 * Re-attach the forwarded original's attachments. Returns the total bytes added.
-	 * IMAP-source: load the ima_ manifest and fetchPart() each (no MIME walk).
-	 * Hosted: parse iem_raw_message with Horde_Mime. A reference-backed original no
-	 * longer in the source mailbox fails the forward (§10) rather than sending empty.
+	 * Dispatch is unified on the raw-storage driver flag:
+	 *   - 'remote'                    → load the ima_ manifest and fetchPart() each
+	 *                                   from the source mailbox (no MIME walk).
+	 *   - 'inline'/'local'/'cloud'    → parse the stored raw (via getRawMessage())
+	 *                                   with Horde_Mime and walk its parts.
+	 * A reference-backed original no longer in the source mailbox fails the forward
+	 * (§10) rather than sending empty.
 	 */
 	private function attachOriginal(EmailMessage $email, InboundEmailMessage $source): int {
-		$account_id = intval($source->get('iem_iia_inbound_imap_account_id'));
-		if ($account_id > 0) {
-			return $this->attachFromImap($email, $source, $account_id);
+		$driver = (string)$source->get('iem_raw_storage_driver') ?: 'inline';
+		if ($driver === 'remote') {
+			return $this->attachFromImap($email, $source, intval($source->get('iem_iia_inbound_imap_account_id')));
 		}
-		$raw = (string)$source->get('iem_raw_message');
-		if (trim($raw) !== '') {
+		$raw = $source->getRawMessage();
+		if ($raw !== null && trim($raw) !== '') {
 			return $this->attachFromRaw($email, $raw);
 		}
 		return 0; // nothing stored to re-attach

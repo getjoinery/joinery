@@ -8,9 +8,12 @@
  * activate, per store present in the form; each store's Save is validated
  * independently (a private-bucket failure never blocks the public Save, and
  * vice versa). Pause and "Disable and Pull Files Back to Local" act on the
- * public store.
+ * public store; the private store has its own "Disable and Pull Back" that
+ * drains its cloud objects to local. Activation is store-level: enabling a store
+ * starts offload for every profile of that visibility (public files; private
+ * inbound-mail raw), resolved from the registry — never a single named profile.
  *
- * @version 2.0
+ * @version 2.1
  */
 
 require_once(__DIR__ . '/../../includes/PathHelper.php');
@@ -59,7 +62,7 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 					if ($test_results['ok']) {
 						$persist = CloudStorageLifecycle::persistSettings($opts, 'public', $session);
 						if ($persist['ok']) {
-							CloudStorageLifecycle::activateForward($profile);
+							CloudStorageLifecycle::activateForwardForVisibility('public');
 							$public_ok = true;
 						} else {
 							$errors[] = $persist['message'];
@@ -91,6 +94,9 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 					if ($private_test_results['ok']) {
 						$ppersist = CloudStorageLifecycle::persistSettings($private_opts, 'private', $session);
 						if ($ppersist['ok']) {
+							// Gate passed + settings latched: start offload for every
+							// private-visibility consumer (inbound-mail raw today).
+							CloudStorageLifecycle::activateForwardForVisibility('private');
 							$private_ok = true;
 						} else {
 							$private_errors[] = $ppersist['message'];
@@ -108,6 +114,7 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 						$private_errors[] = $pmutable['message'];
 					} else {
 						CloudStorageLifecycle::setEnabled('private', false, $session, ['cloud_storage_private_bucket' => '']);
+						CloudStorageLifecycle::deactivateForVisibility('private'); // stop forward; guard 1 already ensured no cloud rows remain
 						$private_ok = true;
 					}
 				}
@@ -133,7 +140,7 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 		}
 		elseif ($action === 'pause') {
 			CloudStorageLifecycle::setEnabled('public', false, $session);
-			CloudStorageLifecycle::deactivate($profile);
+			CloudStorageLifecycle::deactivateForVisibility('public');
 			$session->save_message(new DisplayMessage(
 				'Cloud storage paused. Existing cloud-stored files continue to serve from the bucket.',
 				'Paused', '/\/admin\/admin_cloud_storage/',
@@ -144,9 +151,24 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 		}
 		elseif ($action === 'disable_and_pull') {
 			CloudStorageLifecycle::setEnabled('public', false, $session);
-			CloudStorageLifecycle::activateReverse($profile);   // guard 2: deactivates forward
+			CloudStorageLifecycle::activateReverseForVisibility('public');   // guard 2: deactivates forward
 			$session->save_message(new DisplayMessage(
 				'Pull-back started. Bucket-stored files will be returned to local disk over the next several cron ticks.',
+				'Pull-back queued', '/\/admin\/admin_cloud_storage/',
+				DisplayMessage::MESSAGE_ANNOUNCEMENT,
+				DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+			));
+			return LogicResult::redirect('/admin/admin_cloud_storage');
+		}
+		elseif ($action === 'disable_and_pull_private') {
+			// Disable the private store's latch (forVisibility('private') goes null)
+			// but KEEP the bucket binding so the reverse engine can still read — it
+			// falls back to the unlatched binding to drain. The bucket is cleared
+			// later by a Save with an empty field, once guard 1 sees zero cloud rows.
+			CloudStorageLifecycle::setEnabled('private', false, $session);
+			CloudStorageLifecycle::activateReverseForVisibility('private');   // guard 2: deactivates forward
+			$session->save_message(new DisplayMessage(
+				'Private-store pull-back started. Offloaded inbound-mail raw will return to local disk over the next several cron ticks; clear the private bucket field and Save once it reaches zero to fully remove it.',
 				'Pull-back queued', '/\/admin\/admin_cloud_storage/',
 				DisplayMessage::MESSAGE_ANNOUNCEMENT,
 				DisplayMessage::MESSAGE_DISPLAY_IN_PAGE

@@ -33,7 +33,15 @@
  * (UNIQUE on iem_message_id_header, iem_recipient) is shared with the push path,
  * so re-fetching a message stores nothing new. See specs/inbound_imap_provider.md.
  *
- * @version 1.11
+ * The raw RFC822 of a stored push message does NOT live in the database. storeMessage
+ * inserts the row with an empty iem_raw_message, writes the raw to the local store via
+ * RawMessageStore (descriptor: driver='local' + key), and writes the ima_ attachment
+ * manifest by MIME-parsing the raw — giving push mail the same per-attachment list +
+ * download IMAP has. A local-write failure falls back to an inline write. The shared
+ * CloudOffloadEngine later offloads 'local' rows to the verified-private store. See
+ * specs/inbound_raw_message_storage.md.
+ *
+ * @version 1.12
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -42,6 +50,8 @@ require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_emai
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_alias_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_log_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_message_class.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_message_attachment_class.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/RawMessageStore.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/AuthenticationResults.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/SRSRewriter.php'));
 
@@ -281,7 +291,7 @@ class InboundEmailRouter {
 			'iem_subject'     => substr($subject, 0, 1000),
 			'iem_body_plain'  => $bodies['plain'],
 			'iem_body_html'   => $bodies['html'],
-			'iem_raw_message' => $raw_email,
+			'iem_raw_message' => '', // raw goes to the store after insert (see below)
 			'iem_message_id_header' => $message_id_header,
 			'iem_thread_key'  => $thread_key,
 			'iem_dkim_result'  => $auth['dkim'],
@@ -294,9 +304,10 @@ class InboundEmailRouter {
 
 		try {
 			$msg = InboundEmailMessage::CreateEntry($row);
-			return ['message' => $msg, 'dedup' => false];
 		} catch (PDOException $e) {
 			if ($e->getCode() === '23505') {
+				// Dedup before any file is written — a deduped message never orphans
+				// a stored object.
 				return ['message' => null, 'dedup' => true];
 			}
 			throw $e;
@@ -307,6 +318,117 @@ class InboundEmailRouter {
 				return ['message' => null, 'dedup' => true];
 			}
 			throw $e;
+		}
+
+		// Row inserted (we now have the serial id): write the raw to the local
+		// store, stamp the descriptor, and write the attachment manifest.
+		$this->persistRawAndManifest(intval($msg->key), $raw_email);
+
+		return ['message' => $msg, 'dedup' => false];
+	}
+
+	/**
+	 * Move the raw RFC822 off-row and record the attachment manifest for a
+	 * freshly-inserted push message.
+	 *
+	 *  1. RawMessageStore::write() → LOCAL file, then UPDATE the descriptor
+	 *     (driver='local', key). Ingest never blocks on bucket I/O; the shared
+	 *     engine offloads to the private store later.
+	 *  2. Write the ima_ manifest by MIME-parsing the raw — the same row shape
+	 *     ImapIngestor::writeManifest() produces from BODYSTRUCTURE, so push mail
+	 *     gets the same per-attachment list + download as IMAP mail.
+	 *  3. On a local-write failure, fall back to an inline write (raw in
+	 *     iem_raw_message) and log a loud marker — the one place a new 'inline'
+	 *     write still happens.
+	 *
+	 * Manifest and storage are independent: the manifest is written regardless
+	 * of which tier the raw landed on. Neither failure aborts ingest (the
+	 * message is already stored and its bodies extracted).
+	 */
+	private function persistRawAndManifest(int $message_id, string $raw_email) {
+		$db = DbConnector::get_instance()->get_db_link();
+
+		try {
+			$descriptor = RawMessageStore::write($message_id, $raw_email);
+			$upd = $db->prepare(
+				"UPDATE iem_inbound_email_messages
+				 SET iem_raw_storage_driver = ?, iem_raw_storage_key = ?
+				 WHERE iem_inbound_email_message_id = ?");
+			$upd->execute([$descriptor['driver'], $descriptor['key'], $message_id]);
+		} catch (\Throwable $e) {
+			// Disk full / perms: keep the raw inline so nothing is lost.
+			error_log('INBOUND_RAW_LOCAL_WRITE_FAILED message_id=' . $message_id . ': ' . $e->getMessage());
+			try {
+				$fallback = $db->prepare(
+					"UPDATE iem_inbound_email_messages
+					 SET iem_raw_message = ?, iem_raw_storage_driver = 'inline', iem_raw_storage_key = NULL
+					 WHERE iem_inbound_email_message_id = ?");
+				$fallback->execute([$raw_email, $message_id]);
+			} catch (\Throwable $e2) {
+				error_log('INBOUND_RAW_INLINE_FALLBACK_FAILED message_id=' . $message_id . ': ' . $e2->getMessage());
+			}
+		}
+
+		try {
+			$this->writeManifestFromRaw($message_id, $raw_email);
+		} catch (\Throwable $e) {
+			error_log('InboundEmailRouter: attachment manifest write failed for message ' . $message_id . ': ' . $e->getMessage());
+		}
+	}
+
+	/**
+	 * Write one ima_ manifest row per non-text MIME part by parsing the raw,
+	 * mirroring ImapIngestor::writeManifest() (which reads BODYSTRUCTURE). The
+	 * first inline text/plain and text/html parts are the bodies (skipped);
+	 * everything else non-multipart is a manifest entry. The MIME-section ids
+	 * (getMimeId) match what getRawMimePart() resolves, since both parse the
+	 * same raw with the same Horde method.
+	 */
+	private function writeManifestFromRaw(int $message_id, string $raw_email) {
+		require_once(PathHelper::getComposerAutoloadPath());
+
+		$message = Horde_Mime_Part::parseMessage($raw_email);
+
+		$bodyPlainId = null; $bodyHtmlId = null; $parts = array();
+		foreach ($message->partIterator() as $part) {
+			if ($part->getPrimaryType() === 'multipart') { continue; }
+			$id   = (string)$part->getMimeId();
+			$type = strtolower((string)$part->getType());
+			$name = $part->getName();
+			$disp = $part->getDisposition();
+			$isInlineText = ($type === 'text/plain' || $type === 'text/html')
+				&& $disp !== 'attachment' && ($name === null || $name === '');
+			if ($isInlineText && $type === 'text/plain' && $bodyPlainId === null) { $bodyPlainId = $id; continue; }
+			if ($isInlineText && $type === 'text/html'  && $bodyHtmlId  === null) { $bodyHtmlId  = $id; continue; }
+			$parts[] = $part;
+		}
+
+		foreach ($parts as $part) {
+			$cid  = $part->getContentId();
+			$disp = $part->getDisposition();
+			$isInline = ($disp === 'inline') || ($cid !== null && $cid !== '' && $disp !== 'attachment');
+			InboundMessageAttachment::CreateEntry(array(
+				'ima_iem_inbound_email_message_id' => $message_id,
+				'ima_filename'     => $part->getName() ? substr($part->getName(), 0, 500) : null,
+				'ima_content_type' => substr((string)$part->getType(), 0, 255),
+				'ima_size_bytes'   => strlen((string)$part->getContents()),
+				'ima_mime_part'    => substr((string)$part->getMimeId(), 0, 40),
+				'ima_encoding'     => substr($this->partTransferEncoding($part), 0, 40),
+				'ima_content_id'   => $cid ? substr(trim($cid, '<>'), 0, 255) : null,
+				'ima_is_inline'    => $isInline,
+			));
+		}
+	}
+
+	/** The transfer encoding for a parsed Horde_Mime_Part (best-effort, informational). */
+	private function partTransferEncoding($part): string {
+		try {
+			$ref = new ReflectionProperty('Horde_Mime_Part', '_transferEncoding');
+			$ref->setAccessible(true);
+			$enc = (string)$ref->getValue($part);
+			return $enc !== '' ? $enc : '7bit';
+		} catch (Throwable $e) {
+			return '';
 		}
 	}
 
@@ -356,6 +478,10 @@ class InboundEmailRouter {
 			'iem_body_plain'  => $msg['body_plain'] ?? '',
 			'iem_body_html'   => $msg['body_html'] ?? '',
 			'iem_raw_message' => '', // reference-backed: parts fetched on demand
+			// 'remote' is the single source of truth for "fetch parts from IMAP";
+			// the locator columns below say which source/message. iem_raw_storage_key
+			// stays null — the IMAP locator tuple IS the key.
+			'iem_raw_storage_driver' => 'remote',
 			'iem_message_id_header' => $message_id_header,
 			'iem_thread_key'  => $thread_key,
 			'iem_dkim_result'  => $auth['dkim'] ?? 'unverified',

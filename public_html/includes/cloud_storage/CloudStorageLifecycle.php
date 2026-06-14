@@ -19,7 +19,11 @@
  *   private → anonymous read must be DENIED (the privacy hard-gate). The probe
  *             is the sole sanctioned url() call on a private store.
  *
- * @version 1.0
+ * Store enable/disable is applied per visibility (activateForwardForVisibility
+ * etc.): a store's Save lights up offload for EVERY profile of that visibility,
+ * resolved from the registry, so consumers are never enumerated by callers.
+ *
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/cloud_storage/StorageProfile.php'));
@@ -307,6 +311,33 @@ class CloudStorageLifecycle {
 	/** Pause: stop new migrations (forward off); existing cloud rows keep serving. */
 	public static function deactivate(StorageProfile $profile): void {
 		self::_deactivate_task($profile->forwardTaskClass());
+	}
+
+	// --------------------------------------------------------------------
+	// Store-level activation — drive every profile of a visibility.
+	//
+	// A store's enable/disable is a property of the STORE, not of one
+	// consumer: enabling the private store must start offload for every
+	// private-visibility profile (mail today, more later), not just a named
+	// one. These resolve the set from the registry so a caller never has to
+	// enumerate profiles, and a newly-declared consumer is picked up for free.
+	// --------------------------------------------------------------------
+	public static function activateForwardForVisibility(string $visibility): void {
+		foreach (StorageProfileRegistry::forVisibility($visibility) as $profile) {
+			self::activateForward($profile);
+		}
+	}
+
+	public static function activateReverseForVisibility(string $visibility): void {
+		foreach (StorageProfileRegistry::forVisibility($visibility) as $profile) {
+			self::activateReverse($profile);
+		}
+	}
+
+	public static function deactivateForVisibility(string $visibility): void {
+		foreach (StorageProfileRegistry::forVisibility($visibility) as $profile) {
+			self::deactivate($profile);
+		}
 	}
 
 	private static function _activate_task(string $task_class): void {

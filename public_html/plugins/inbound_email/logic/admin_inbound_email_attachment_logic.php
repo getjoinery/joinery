@@ -7,16 +7,18 @@
  * private as its message), then retrieve the part and stream it pass-through. The
  * bytes are never persisted on the platform.
  *
- * Retrieval dispatches on the message's source:
- *   - IMAP-backed (iem_iia_inbound_imap_account_id set): fetch the single MIME
- *     part on demand via ImapIngestor (Message-ID fallback if UIDVALIDITY changed).
- *   - Stored-raw (push transports): not built yet — the seam returns a graceful
- *     "not available" so the endpoint already carries it.
+ * Retrieval dispatches on the message's iem_raw_storage_driver:
+ *   - 'remote' (IMAP-backed): fetch the single MIME part on demand via ImapIngestor
+ *     (Message-ID fallback if UIDVALIDITY changed).
+ *   - 'inline'/'local'/'cloud' (stored raw, push transports): MIME-parse the stored
+ *     raw and extract the one part via InboundEmailMessage::getRawMimePart().
+ * Dispatch is unified on the driver flag — account_id is no longer a dispatch signal
+ * (it is purely the 'remote' locator), so the path is transport-blind.
  *
  * On success this streams and exit()s. On any failure it returns a LogicResult so
  * the view can render an honest message.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -57,36 +59,49 @@ function admin_inbound_email_attachment_logic(array $input): LogicResult {
 		return _attachment_error($session, $settings, 'You do not have access to this mailbox.', $reader_url);
 	}
 
-	// Retrieve the part by message source.
-	$account_id = intval($message->get('iem_iia_inbound_imap_account_id'));
-	if ($account_id <= 0) {
-		// Stored-raw push transports — retrieval not built in this spec.
-		return _attachment_error($session, $settings,
-			'Per-attachment download is not yet available for this message.', $reader_url);
-	}
+	// Retrieve the part by the message's raw-storage driver.
+	$driver = (string)$message->get('iem_raw_storage_driver') ?: 'inline';
 
-	require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_imap_account_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/ImapIngestor.php'));
+	if ($driver === 'remote') {
+		// IMAP on-demand single-part fetch.
+		$account_id = intval($message->get('iem_iia_inbound_imap_account_id'));
+		if ($account_id <= 0) {
+			return _attachment_error($session, $settings,
+				'The source mailbox for this message is no longer available.', $reader_url);
+		}
 
-	$account = new InboundImapAccount($account_id, TRUE);
-	if (!$account->key) {
-		return _attachment_error($session, $settings,
-			'The source IMAP account for this message no longer exists.', $reader_url);
-	}
+		require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_imap_account_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/ImapIngestor.php'));
 
-	$ingestor = new ImapIngestor($account);
-	$result = $ingestor->fetchPart(
-		(string)$att->get('ima_mime_part'),
-		intval($message->get('iem_imap_uid')),
-		$message->get('iem_imap_uidvalidity') !== null ? intval($message->get('iem_imap_uidvalidity')) : null,
-		(string)$message->get('iem_imap_folder'),
-		$message->get('iem_message_id_header')
-	);
-	$ingestor->close();
+		$account = new InboundImapAccount($account_id, TRUE);
+		if (!$account->key) {
+			return _attachment_error($session, $settings,
+				'The source IMAP account for this message no longer exists.', $reader_url);
+		}
 
-	if (empty($result['ok'])) {
-		return _attachment_error($session, $settings,
-			$result['message'] ?? 'This attachment is no longer available in the source mailbox.', $reader_url);
+		$ingestor = new ImapIngestor($account);
+		$result = $ingestor->fetchPart(
+			(string)$att->get('ima_mime_part'),
+			intval($message->get('iem_imap_uid')),
+			$message->get('iem_imap_uidvalidity') !== null ? intval($message->get('iem_imap_uidvalidity')) : null,
+			(string)$message->get('iem_imap_folder'),
+			$message->get('iem_message_id_header')
+		);
+		$ingestor->close();
+
+		if (empty($result['ok'])) {
+			return _attachment_error($session, $settings,
+				$result['message'] ?? 'This attachment is no longer available in the source mailbox.', $reader_url);
+		}
+		$content = (string)$result['content'];
+	} else {
+		// Stored raw (inline / local / cloud): MIME-parse and extract the one part.
+		$part = $message->getRawMimePart((string)$att->get('ima_mime_part'));
+		if ($part === null) {
+			return _attachment_error($session, $settings,
+				'This attachment is no longer available.', $reader_url);
+		}
+		$content = (string)$part['content'];
 	}
 
 	// Stream pass-through. Sanitize the filename for the header (strip CR/LF and
@@ -99,7 +114,6 @@ function admin_inbound_email_attachment_logic(array $input): LogicResult {
 		$content_type = 'application/octet-stream';
 	}
 
-	$content = $result['content'];
 	header('Content-Type: ' . $content_type);
 	header('Content-Disposition: attachment; filename="' . $filename . '"');
 	header('X-Content-Type-Options: nosniff');
