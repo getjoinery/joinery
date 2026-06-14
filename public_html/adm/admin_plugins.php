@@ -20,16 +20,10 @@ $system_health = $page_vars['system_health'];
 $plugins = $page_vars['plugins'];
 $provisioning_plugins = $page_vars['provisioning_plugins'] ?? array();
 
-// Plugin data loaded successfully
-
-// Plugin updates will be checked by the deployment system
-// No need for version checking here anymore
-
 // Build Options dropdown links
 $altlinks = array();
 $altlinks['Sync with Filesystem'] = '/admin/admin_plugins?action=sync_filesystem';
 $altlinks['Add New'] = '/admin/admin_plugins?show_upload=1';
-$altlinks['Check for Updates'] = '/admin/admin_plugins?action=check_updates';
 
 $page->admin_header(array(
     'menu-id' => 'system-plugins',
@@ -142,11 +136,6 @@ $page->begin_box(array('altlinks' => $altlinks));
                     $version_cell = '<code>' . htmlspecialchars($plugin['version']) . '</code>';
                 } else {
                     $version_cell = '<em class="text-muted">Unknown</em>';
-                }
-
-                // Show update available
-                if (isset($plugin['update_available']) && $plugin['update_available']) {
-                    $version_cell .= '<br><span class="badge bg-warning">Update: ' . htmlspecialchars($plugin['available_version']) . '</span>';
                 }
                 array_push($rowvalues, $version_cell);
 
@@ -347,18 +336,6 @@ $page->begin_box(array('altlinks' => $altlinks));
                 }
             }
             ?>
-
-            <?php if (!empty($plugin_updates)): ?>
-            <div class="alert alert-warning mt-4">
-                <h6 class="alert-heading"><i class="fas fa-download"></i> Updates Available</h6>
-                <p class="mb-0">The following plugins have updates available:</p>
-                <ul class="mb-0 mt-2">
-                    <?php foreach ($plugin_updates as $name => $info): ?>
-                        <li><strong><?php echo htmlspecialchars($name); ?></strong> - Version <?php echo htmlspecialchars($info['available_version']); ?> available (currently <?php echo htmlspecialchars($info['installed_version']); ?>)</li>
-                    <?php endforeach; ?>
-                </ul>
-            </div>
-            <?php endif; ?>
 
             <h5 class="mb-3 mt-4">Plugin Statistics</h5>
 

@@ -258,6 +258,16 @@ Routes outside the namespace are dropped with a logged warning.
 > `depends`/`conflicts`, `settings`, `adminMenu`, `profileMenu`, `provisioners`,
 > `receives_upgrades`, `included_in_publish`, and `deprecated`/`superseded_by`.
 
+#### Component Versioning
+
+The `version` field is the source of truth for a component's released identity, and it carries through to its archive filename (`{name}-{version}.tar.gz`). Versioning is governed by three rules:
+
+- **Authors bump minor/major for meaningful releases.** A new feature or behavior change is a minor (or major) bump you make in the manifest and commit.
+- **Publish auto-bumps the patch when content changed without a bump.** At publish time, each component's working tree is content-hashed and compared against the last release's snapshot. If the files changed but the version did not, the publisher patch-bumps the manifest automatically and lists it in the publish summary for you to commit. This keeps archive filenames honest even when a content change ships without a manual bump. (See [Deploy and Upgrade](deploy_and_upgrade.md) for the full decision rule.)
+- **Activation is gated on `requires`** for plugins *and* themes. A component whose `requires.joinery` / `requires.php` / `requires.extensions` are not satisfied is refused activation with the specific failure reported. The gate runs only on activation, so an already-active component that newly fails requirements keeps running.
+
+**Dependency version constraints** (`depends`) are evaluated against the dependency's **live manifest** version, read from its `plugin.json` on disk — not a cached copy. A constraint like `"depends": {"inbound_email": ">=1.10.0"}` is satisfied whenever the installed `inbound_email` manifest reports a version that meets it.
+
 #### Deprecation Fields
 
 Plugins (and themes) support two optional deprecation fields:

@@ -38,6 +38,7 @@ class Upgrade extends SystemBase {	public static $prefix = 'upg';
 	    'upg_patch_version' => array('type'=>'int4', 'default'=>0),
 	    'upg_name' => array('type'=>'varchar(64)', 'required'=>true),
 	    'upg_release_notes' => array('type'=>'text'),
+	    'upg_component_state' => array('type'=>'text'),
 	    'upg_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
 

@@ -182,17 +182,57 @@ class PluginManager extends AbstractExtensionManager {
     }
     
     /**
-     * Update existing plugin metadata
+     * Refresh manifest-derived DB state from the live plugin.json.
+     *
+     * Replaces the plg_metadata cache with the live manifest, but preserves
+     * runtime-only keys (prefixed with '_', e.g. _menu_slugs written by
+     * saveMenuSlugsToMetadata()) carried over from the stored cache. Also
+     * refreshes plg_is_system, and plg_receives_upgrades when the manifest
+     * declares it (an absent key never clobbers the admin/preserve-on-deploy
+     * flag). Saves only on change and returns that boolean — the contract
+     * sync() relies on to count "N plugin(s) updated".
+     *
      * @param Plugin $model Plugin model object
      * @param string $name Plugin name
+     * @return bool True if a column changed and the row was saved
      */
     protected function updateExistingMetadata($model, $name) {
-        $model->load_receives_upgrades();
-        $metadata = $model->get_plugin_metadata();
-        if ($metadata) {
-            $model->set('plg_is_system', $metadata['is_system'] ?? false);
+        $manifest = $model->get_plugin_metadata();
+        if (!$manifest) return false;
+
+        // Carry runtime-only '_'-prefixed keys over from the stored cache;
+        // replace everything else with the live manifest.
+        $merged = $manifest;
+        $stored = json_decode($model->get('plg_metadata'), true);
+        if (is_array($stored)) {
+            foreach ($stored as $key => $value) {
+                if (is_string($key) && isset($key[0]) && $key[0] === '_') {
+                    $merged[$key] = $value;
+                }
+            }
         }
-        $model->save();
+
+        $desired = array(
+            'plg_metadata'  => json_encode($merged),
+            'plg_is_system' => $manifest['is_system'] ?? false,
+        );
+        if (isset($manifest['receives_upgrades'])) {
+            $desired['plg_receives_upgrades'] = $manifest['receives_upgrades'];
+        }
+
+        $changed = false;
+        foreach ($desired as $column => $value) {
+            if ($model->get($column) != $value) {
+                $model->set($column, $value);
+                $changed = true;
+            }
+        }
+
+        if ($changed) {
+            $model->save();
+            return true;
+        }
+        return false;
     }
     
     // ========== Migration Handling ==========
@@ -449,10 +489,12 @@ class PluginManager extends AbstractExtensionManager {
                     $results['errors'][] = "Required plugin not active: " . $dep_name;
                 }
 
-                // Check version constraint if specified
+                // Check version constraint if specified. Read the dependency's
+                // live plugin.json (get_version()) rather than the plg_metadata
+                // cache — enforcement should never trust a cache when the source
+                // file is on the same disk.
                 if ($dep_version && $dep_version !== '*') {
-                    $metadata = json_decode($dep_plugin->get('plg_metadata'), true);
-                    $installed_version = $metadata['version'] ?? '0.0.0';
+                    $installed_version = $dep_plugin->get_version() ?? '0.0.0';
                     // Parse constraint like ">=1.0.0"
                     if (preg_match('/^([<>=!]+)(.+)$/', $dep_version, $m)) {
                         if (!version_compare($installed_version, trim($m[2]), $m[1])) {
