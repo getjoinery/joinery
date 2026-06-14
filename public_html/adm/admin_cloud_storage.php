@@ -5,8 +5,9 @@
  * Single-button workflow: Save runs Test Connection, persists settings,
  * activates the sync task. When enabled, Pause and "Disable and Pull
  * Files Back to Local" appear alongside Save. Health status block at top.
+ * Carries the optional private-store bucket field + its privacy-gate results.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -116,6 +117,20 @@ if ($health['counts']['stuck'] > 0) {
 }
 echo '</div>';
 
+// Private store status
+echo '<div style="margin-bottom: 8px;">';
+if (!empty($private_status['enabled'])) {
+	echo $dot('#28a745') . '<strong>Private store:</strong> enabled (verified non-public)';
+	if (!empty($private_status['cloud_count'])) {
+		echo ' &middot; ' . (int)$private_status['cloud_count'] . ' object(s) in cloud';
+	}
+} elseif (!empty($private_status['configured'])) {
+	echo $dot('#ffc107') . '<strong>Private store:</strong> bucket configured but not gated. Save to run the anonymous-read-denied check.';
+} else {
+	echo $dot('#999') . '<strong>Private store:</strong> not configured';
+}
+echo '</div>';
+
 // Reverse task (only when active)
 if (!empty($health['reverse_task'])) {
 	echo '<div style="margin-bottom: 8px;">';
@@ -196,6 +211,40 @@ if (!empty($test_results)) {
 }
 
 // =====================================================
+// PRIVATE STORE: errors + privacy-gate results (inline after a failed save)
+// =====================================================
+if (!empty($private_errors)) {
+	echo '<div class="alert alert-danger">';
+	echo '<strong>Private store not saved:</strong><ul style="margin-bottom:0;">';
+	foreach ($private_errors as $e) echo '<li>' . htmlspecialchars($e) . '</li>';
+	echo '</ul></div>';
+}
+if (!empty($private_test_results)) {
+	$pageoptions = array('title' => 'Private store — privacy gate results');
+	$page->begin_box($pageoptions);
+	if (!$private_test_results['ok']) {
+		echo '<div class="alert alert-danger">The private bucket was NOT enabled. Anonymous reads must be denied before it can hold private files.</div>';
+	}
+	echo '<table class="table table-sm" style="max-width: 800px;"><tbody>';
+	foreach ($private_test_results['steps'] as $step) {
+		$icon_color = '#999'; $icon = '—';
+		if ($step['status'] === 'pass') { $icon = '✓'; $icon_color = '#28a745'; }
+		elseif ($step['status'] === 'fail') { $icon = '✗'; $icon_color = '#dc3545'; }
+		elseif ($step['status'] === 'warn') { $icon = '!'; $icon_color = '#ffc107'; }
+		echo '<tr>';
+		echo '<td style="width:30px; color:' . $icon_color . '; font-weight:bold; font-size: 1.2em;">' . $icon . '</td>';
+		echo '<td><strong>' . htmlspecialchars($step['label']) . ':</strong> ' . htmlspecialchars($step['message']);
+		if (!empty($step['raw'])) {
+			echo '<br><small class="text-muted">Raw: <code>' . htmlspecialchars($step['raw']) . '</code></small>';
+		}
+		echo '</td>';
+		echo '</tr>';
+	}
+	echo '</tbody></table>';
+	$page->end_box();
+}
+
+// =====================================================
 // SETTINGS FORM
 // =====================================================
 $pageoptions = array('title' => $enabled ? 'Cloud Storage Settings' : 'Configure Cloud Storage');
@@ -237,6 +286,14 @@ $formwriter->textinput('cloud_storage_secret_key', 'Secret Key', array(
 $formwriter->textinput('cloud_storage_public_base_url', 'Public Base URL (optional)', array(
 	'value' => $settings_values['public_base_url'],
 	'helptext' => 'Leave empty to auto-derive from endpoint+bucket. Set this when fronting the bucket with a CDN (e.g. https://cdn.example.com).',
+));
+
+// Private store — one more bucket on the SAME credentials above. Verified
+// non-public (anonymous-read-denied) before any byte lands. Leave empty for
+// no private store.
+$formwriter->textinput('cloud_storage_private_bucket', 'Private Bucket Name (optional)', array(
+	'value' => $settings_values['private_bucket'],
+	'helptext' => 'A separate bucket on the SAME provider/account (shares the endpoint, region, and keys above). On Save it is tested to confirm anonymous reads are DENIED before it is enabled. Leave empty for no private store.',
 ));
 
 // Egress-cost inline banner (live as the admin types — reflects current value).
