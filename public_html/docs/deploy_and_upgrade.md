@@ -204,6 +204,21 @@ static_files/
 └── ...
 ```
 
+**Component version integrity:**
+
+Each publish records a per-release snapshot of every published component's `(version, tree_hash)` in `upg_upgrades.upg_component_state` (JSON, keyed by `themes`/`plugins`). The snapshot of the most recent release row that carries one is the **baseline** for change detection; rows without a parseable snapshot are skipped, so an aborted publish never poisons the baseline. When no prior snapshot exists, the run re-baselines — records everything, bumps nothing.
+
+The `tree_hash` is a deterministic, git-independent SHA-256 of the component's working tree (`.git/` and `.gitignore` excluded). The manifest (`theme.json` / `plugin.json`) is hashed with its `version` member removed, so the hash measures content-minus-version.
+
+Per component, before archiving, the publisher applies a four-way decision against the baseline entry:
+
+1. **No baseline entry** — first publish of this component: record as-is, no bump.
+2. **Manifest version higher** — author bumped deliberately: respect and record.
+3. **Manifest version lower** — record and archive as-is, with a warning line in the publish summary naming the component and both versions. Not aborted: a backward component version has no destructive effect at publish time, and any resulting `depends` violation is caught fail-closed at activation.
+4. **Manifest version equal** — compare hashes. Equal → unchanged, carry the entry forward. Differ → **auto patch-bump** the manifest's `version` (targeted string edit, no reformatting) and archive under the new version.
+
+Auto-bumped manifests are ordinary working-copy edits — the publish summary lists them so the maintainer can commit the change, the same workflow as the core `VERSION` file. Authors still bump minor/major for meaningful releases; auto patch-bump is the floor that keeps archive filenames honest when a content change ships without one.
+
 ---
 
 ### publish_theme.php

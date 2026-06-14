@@ -371,6 +371,38 @@
 		}
 
 		// =====================================================
+		// Component version integrity bookkeeping
+		// =====================================================
+		// Baseline = the most recent prior release row that carries a parseable,
+		// non-empty component-state snapshot. Rows without one (every pre-existing
+		// row when this ships, or an aborted publish) are skipped, so we never
+		// compare against a half-written or absent snapshot. If none is found, the
+		// run re-baselines: every component hits "no last entry" (rule 1) and is
+		// recorded as-is with no bump.
+		$baseline_state = array('themes' => array(), 'plugins' => array());
+		$prior_releases = new MultiUpgrade(array(), array('upgrade_id' => 'DESC'), 1000, 0);
+		$prior_releases->load();
+		foreach ($prior_releases as $prior) {
+			if ($prior->key == $upgrade->key) continue; // skip the row we just created
+			$raw = $prior->get('upg_component_state');
+			if (empty($raw)) continue;
+			$decoded = json_decode($raw, true);
+			if (json_last_error() !== JSON_ERROR_NONE || !is_array($decoded)) continue;
+			$baseline_state = array(
+				'themes'  => $decoded['themes']  ?? array(),
+				'plugins' => $decoded['plugins'] ?? array(),
+			);
+			break;
+		}
+
+		// Accumulated snapshot for this release, written onto the new row after
+		// both archive loops complete. Auto-bumped manifests and regression
+		// warnings are reported in the publish summary.
+		$new_state = array('themes' => array(), 'plugins' => array());
+		$bumped_components = array();
+		$publish_warnings = array();
+
+		// =====================================================
 		// Create individual THEME archives
 		// =====================================================
 		publish_output("\nCreating individual theme archives...");
@@ -402,15 +434,46 @@
 
 			if (!$published) {
 				publish_output("- Skipping {$theme_name} (included_in_publish=false)");
+				if (isset($baseline_state['themes'][$theme_name])) {
+					$new_state['themes'][$theme_name] = $baseline_state['themes'][$theme_name];
+				}
 				continue;
 			}
 
 			if (!empty($theme_data['deprecated'])) {
 				publish_output("- Skipping {$theme_name} (deprecated)");
+				if (isset($baseline_state['themes'][$theme_name])) {
+					$new_state['themes'][$theme_name] = $baseline_state['themes'][$theme_name];
+				}
 				continue;
 			}
 
 			$theme_version = $theme_data['version'] ?? '1.0.0';
+
+			// Version integrity: read manifest -> compute hash -> decide -> (maybe) bump.
+			$current_hash = component_tree_hash($theme_dir, 'theme.json');
+			$last = $baseline_state['themes'][$theme_name] ?? null;
+			if ($last === null) {
+				// Rule 1: no baseline entry (first publish under this system or a
+				// new component). Record as-is, no bump.
+			} elseif (version_compare($theme_version, $last['version'], '>')) {
+				// Rule 2: author bumped deliberately. Respect and record.
+			} elseif (version_compare($theme_version, $last['version'], '<')) {
+				// Rule 3: version went backward. Record/archive as-is, but warn.
+				$publish_warnings[] = "theme {$theme_name}: version went backward ({$last['version']} -> {$theme_version}); recorded and archived as-is";
+				publish_output("- WARNING: {$theme_name} version went backward: {$last['version']} -> {$theme_version}");
+			} else {
+				// Rule 4: equal version. Compare hashes.
+				if (!isset($last['tree_hash']) || $last['tree_hash'] !== $current_hash) {
+					// Content changed without a bump — auto patch-bump the manifest.
+					$new_version = component_bump_manifest_version($theme_json, $theme_version);
+					publish_output("- {$theme_name}: content changed since {$theme_version}, auto-bumped to {$new_version}");
+					$bumped_components[] = "{$theme_name} ({$theme_version} -> {$new_version})";
+					$theme_version = $new_version;
+				}
+			}
+			$new_state['themes'][$theme_name] = array('version' => $theme_version, 'tree_hash' => $current_hash);
+
 			$theme_archive = $themes_dir . '/' . $theme_name . '-' . $theme_version . '.tar.gz';
 
 			// Create tar.gz with just the theme directory
@@ -459,15 +522,45 @@
 
 			if (!$published) {
 				publish_output("- Skipping {$plugin_name} (included_in_publish=false)");
+				if (isset($baseline_state['plugins'][$plugin_name])) {
+					$new_state['plugins'][$plugin_name] = $baseline_state['plugins'][$plugin_name];
+				}
 				continue;
 			}
 
 			if (!empty($plugin_data['deprecated'])) {
 				publish_output("- Skipping {$plugin_name} (deprecated)");
+				if (isset($baseline_state['plugins'][$plugin_name])) {
+					$new_state['plugins'][$plugin_name] = $baseline_state['plugins'][$plugin_name];
+				}
 				continue;
 			}
 
 			$plugin_version = $plugin_data['version'] ?? '1.0.0';
+
+			// Version integrity: read manifest -> compute hash -> decide -> (maybe) bump.
+			$current_hash = component_tree_hash($plugin_dir, 'plugin.json');
+			$last = $baseline_state['plugins'][$plugin_name] ?? null;
+			if ($last === null) {
+				// Rule 1: no baseline entry. Record as-is, no bump.
+			} elseif (version_compare($plugin_version, $last['version'], '>')) {
+				// Rule 2: author bumped deliberately. Respect and record.
+			} elseif (version_compare($plugin_version, $last['version'], '<')) {
+				// Rule 3: version went backward. Record/archive as-is, but warn.
+				$publish_warnings[] = "plugin {$plugin_name}: version went backward ({$last['version']} -> {$plugin_version}); recorded and archived as-is";
+				publish_output("- WARNING: {$plugin_name} version went backward: {$last['version']} -> {$plugin_version}");
+			} else {
+				// Rule 4: equal version. Compare hashes.
+				if (!isset($last['tree_hash']) || $last['tree_hash'] !== $current_hash) {
+					// Content changed without a bump — auto patch-bump the manifest.
+					$new_version = component_bump_manifest_version($plugin_json, $plugin_version);
+					publish_output("- {$plugin_name}: content changed since {$plugin_version}, auto-bumped to {$new_version}");
+					$bumped_components[] = "{$plugin_name} ({$plugin_version} -> {$new_version})";
+					$plugin_version = $new_version;
+				}
+			}
+			$new_state['plugins'][$plugin_name] = array('version' => $plugin_version, 'tree_hash' => $current_hash);
+
 			$plugin_archive = $plugins_dir . '/' . $plugin_name . '-' . $plugin_version . '.tar.gz';
 
 			// Create tar.gz with just the plugin directory
@@ -484,6 +577,25 @@
 				publish_output("- {$plugin_name}-{$plugin_version}.tar.gz ({$plugin_size_kb} KB)");
 			} else {
 				publish_output("- ERROR: Failed to create archive for {$plugin_name}");
+			}
+		}
+
+		// Persist the accumulated component snapshot onto this release row. Done
+		// in one update after both loops so an aborted publish leaves the row
+		// snapshot-less and the baseline rule skips it on the next run.
+		$upgrade->set('upg_component_state', json_encode($new_state));
+		$upgrade->save();
+
+		if (!empty($bumped_components)) {
+			publish_output("\nAuto-bumped component versions (commit these manifest edits):");
+			foreach ($bumped_components as $b) {
+				publish_output("  - $b");
+			}
+		}
+		if (!empty($publish_warnings)) {
+			publish_output("\nWarnings:");
+			foreach ($publish_warnings as $w) {
+				publish_output("  - $w");
 			}
 		}
 
@@ -632,6 +744,93 @@
 		
 	}
 	
+	/**
+	 * Content hash of a component working tree, git-independent and deterministic
+	 * across boxes. Walks every regular file except the archive-exclusion set
+	 * (.git/ anywhere, any .gitignore — the same set the P1.8 tar excludes use),
+	 * and sha256s the sorted concatenation of "relative_path \0 sha256(contents)".
+	 * Ignores permissions, mtimes, and directory ordering.
+	 *
+	 * The manifest (theme.json / plugin.json) is hashed with its `version` member
+	 * removed, so the hash measures content-minus-version: a patch auto-bump never
+	 * changes the hash and the decision rule never has to reason about it.
+	 *
+	 * @param string $dir Absolute path to the component directory
+	 * @param string|null $manifest_filename Top-level manifest name to version-strip
+	 * @return string Lowercase hex sha256
+	 */
+	function component_tree_hash($dir, $manifest_filename = null) {
+		$entries = array();
+		$rii = new RecursiveIteratorIterator(
+			new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
+			RecursiveIteratorIterator::SELF_FIRST
+		);
+		foreach ($rii as $file) {
+			if ($file->isDir()) continue;
+
+			$abs = $file->getPathname();
+			$rel = ltrim(str_replace('\\', '/', substr($abs, strlen($dir))), '/');
+
+			// Mirror the tar excludes: drop anything under a .git directory and
+			// any .gitignore, at any depth.
+			if (in_array('.git', explode('/', $rel), true)) continue;
+			if (basename($rel) === '.gitignore') continue;
+
+			if ($manifest_filename !== null && $rel === $manifest_filename) {
+				$decoded = json_decode(file_get_contents($abs), true);
+				if (is_array($decoded)) {
+					unset($decoded['version']);
+					$content_hash = hash('sha256', json_encode($decoded));
+				} else {
+					$content_hash = hash_file('sha256', $abs);
+				}
+			} else {
+				$content_hash = hash_file('sha256', $abs);
+			}
+			$entries[$rel] = $content_hash;
+		}
+
+		ksort($entries);
+		$blob = '';
+		foreach ($entries as $rel => $h) {
+			$blob .= $rel . "\0" . $h . "\n";
+		}
+		return hash('sha256', $blob);
+	}
+
+	/**
+	 * Auto-bump a component manifest's patch version via targeted string
+	 * replacement of the existing "version" member — never a json_decode/encode
+	 * round-trip, which would churn the whole file's formatting in the
+	 * component's own repo. Tolerant of whitespace around the colon.
+	 *
+	 * @param string $manifest_path Absolute path to theme.json / plugin.json
+	 * @param string $current_version The version currently in the manifest
+	 * @return string The new (patch-incremented) version
+	 * @throws Exception if the version can't be parsed, found, or written
+	 */
+	function component_bump_manifest_version($manifest_path, $current_version) {
+		if (!preg_match('/^(\d+)\.(\d+)\.(\d+)$/', trim($current_version), $vm)) {
+			throw new Exception("Cannot auto-bump non-semver version '$current_version' in $manifest_path");
+		}
+		$next = $vm[1] . '.' . $vm[2] . '.' . ($vm[3] + 1);
+
+		$contents = file_get_contents($manifest_path);
+		if ($contents === false) {
+			throw new Exception("Could not read manifest for auto-bump: $manifest_path");
+		}
+
+		$pattern = '/("version"\s*:\s*")' . preg_quote($current_version, '/') . '(")/';
+		$new_contents = preg_replace($pattern, '${1}' . $next . '${2}', $contents, 1, $count);
+		if ($count < 1) {
+			throw new Exception("Could not find version member to auto-bump in $manifest_path (expected \"version\": \"$current_version\")");
+		}
+		if (file_put_contents($manifest_path, $new_contents) === false) {
+			throw new Exception("Could not write auto-bumped manifest: $manifest_path");
+		}
+		return $next;
+	}
+
 	function getDirContents($dir, $exclude_folder_names = array(), &$results = array()) {
 		$files = scandir($dir);
 

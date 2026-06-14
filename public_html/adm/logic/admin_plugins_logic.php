@@ -59,10 +59,6 @@ function admin_plugins_logic(array $input): LogicResult {
 				$message = 'Upload failed: ' . htmlspecialchars($e->getMessage());
 				$message_type = 'danger';
 			}
-		} elseif ($action === 'check_updates') {
-			// Check for updates action
-			$message = 'Check for updates functionality will be implemented in a future update.';
-			$message_type = 'info';
 		} elseif ($action === 'sync_filesystem') {
 			try {
 				$plugin_manager = new PluginManager();

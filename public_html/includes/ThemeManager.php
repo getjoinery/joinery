@@ -165,6 +165,18 @@ class ThemeManager extends AbstractExtensionManager {
      * @throws Exception on validation failure
      */
     protected function onActivate($name, $model, $dblink) {
+        // Requirements gate (mirrors the plugin path, which checks requires.* via
+        // validatePlugin). Runs before any state mutation so the activate()
+        // transaction rolls back cleanly on failure. checkRequirements() is
+        // fail-closed against the VERSION file. Only fires on activation, so an
+        // already-active theme that newly fails requirements keeps running
+        // (grandfathered).
+        $theme_helper = ThemeHelper::getInstance($name);
+        $requirements = $theme_helper->checkRequirements();
+        if ($requirements !== true) {
+            throw new Exception("Cannot activate theme '$name': " . implode('; ', $requirements));
+        }
+
         // Deactivate all other themes
         $q = $dblink->prepare(
             "UPDATE thm_themes SET thm_is_active = false, thm_status = 'installed' WHERE thm_is_active = true"
@@ -210,9 +222,16 @@ class ThemeManager extends AbstractExtensionManager {
     }
     
     /**
-     * Update existing theme metadata
+     * Refresh all manifest-derived columns from the live theme.json.
+     *
+     * Reads the manifest once and diffs every manifest-backed column
+     * (display name, description, version, author, metadata, flags). Saves
+     * only when something actually changed, and returns that boolean — the
+     * contract sync() relies on to count "N theme(s) updated".
+     *
      * @param Theme $model Theme model object
      * @param string $name Theme name
+     * @return bool True if a column changed and the row was saved
      */
     protected function updateExistingMetadata($model, $name) {
         $manifest_path = $this->getExtensionPath($name) . '/theme.json';
@@ -221,23 +240,31 @@ class ThemeManager extends AbstractExtensionManager {
         $metadata = json_decode(file_get_contents($manifest_path), true);
         if (json_last_error() !== JSON_ERROR_NONE || !$metadata) return false;
 
-        $changed = false;
+        $desired = array(
+            'thm_display_name' => $metadata['name'] ?? $name,
+            'thm_description'  => $metadata['description'] ?? '',
+            'thm_version'      => $metadata['version'] ?? '1.0.0',
+            'thm_author'       => $metadata['author'] ?? 'Unknown',
+            'thm_metadata'     => json_encode($metadata),
+            'thm_is_system'    => $metadata['is_system'] ?? false,
+        );
+
+        // receives_upgrades is admin-toggleable (writeManifestReceivesUpgrades)
+        // and set false on uploaded themes by postInstall. Only refresh it when
+        // the manifest actually declares it, so a silent manifest never clobbers
+        // the preserve-on-deploy flag.
         if (isset($metadata['receives_upgrades'])) {
-            $current = $model->get('thm_receives_upgrades');
-            $desired = $metadata['receives_upgrades'];
-            if ($current != $desired) {
-                $model->set('thm_receives_upgrades', $desired);
+            $desired['thm_receives_upgrades'] = $metadata['receives_upgrades'];
+        }
+
+        $changed = false;
+        foreach ($desired as $column => $value) {
+            if ($model->get($column) != $value) {
+                $model->set($column, $value);
                 $changed = true;
             }
         }
-        if (isset($metadata['is_system'])) {
-            $current_sys = $model->get('thm_is_system');
-            $desired_sys = $metadata['is_system'];
-            if ($current_sys != $desired_sys) {
-                $model->set('thm_is_system', $desired_sys);
-                $changed = true;
-            }
-        }
+
         if ($changed) {
             $model->save();
             return true;
