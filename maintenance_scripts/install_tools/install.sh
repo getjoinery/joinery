@@ -856,6 +856,7 @@ create_test_site() {
     mkdir -p "$site_root"
 
     rsync -av --exclude='uploads/*' \
+              --exclude='storage/*' \
               --exclude='cache/*' \
               --exclude='logs/*' \
               "/var/www/html/$main_site/public_html/" \
@@ -2275,7 +2276,7 @@ do_site_docker() {
                 print_warning "Auto-removing existing container AND data volumes (-y --wipe-data)"
                 docker stop "$SITENAME" 2>/dev/null || true
                 docker rm "$SITENAME" 2>/dev/null || true
-                for vol in postgres uploads config backups static logs cache sessions apache_logs pg_logs; do
+                for vol in postgres uploads storage config backups static logs cache sessions apache_logs pg_logs; do
                     docker volume rm "${SITENAME}_${vol}" 2>/dev/null || true
                 done
                 print_success "Existing container and volumes removed"
@@ -2297,7 +2298,7 @@ do_site_docker() {
                 print_info "Stopping and removing existing container and volumes..."
                 docker stop "$SITENAME" 2>/dev/null || true
                 docker rm "$SITENAME" 2>/dev/null || true
-                for vol in postgres uploads config backups static logs cache sessions apache_logs pg_logs; do
+                for vol in postgres uploads storage config backups static logs cache sessions apache_logs pg_logs; do
                     docker volume rm "${SITENAME}_${vol}" 2>/dev/null || true
                 done
                 print_success "Existing container and volumes removed"
@@ -2380,6 +2381,7 @@ do_site_docker() {
 .git
 *.log
 */backups/*
+*/storage/*
 EOF
 
     print_success "Build context prepared at $BUILD_DIR"
@@ -2433,6 +2435,7 @@ EOF
             $CLONE_ENV_OPTS \
             -v "${SITENAME}_postgres":/var/lib/postgresql \
             -v "${SITENAME}_uploads":/var/www/html/"${SITENAME}"/uploads \
+            -v "${SITENAME}_storage":/var/www/html/"${SITENAME}"/storage \
             -v "${SITENAME}_config":/var/www/html/"${SITENAME}"/config \
             -v "${SITENAME}_backups":/var/www/html/"${SITENAME}"/backups \
             -v "${SITENAME}_static":/var/www/html/"${SITENAME}"/static_files \
@@ -2451,6 +2454,7 @@ EOF
             $CLONE_ENV_OPTS \
             -v "${SITENAME}_postgres":/var/lib/postgresql \
             -v "${SITENAME}_uploads":/var/www/html/"${SITENAME}"/uploads \
+            -v "${SITENAME}_storage":/var/www/html/"${SITENAME}"/storage \
             -v "${SITENAME}_config":/var/www/html/"${SITENAME}"/config \
             -v "${SITENAME}_backups":/var/www/html/"${SITENAME}"/backups \
             -v "${SITENAME}_static":/var/www/html/"${SITENAME}"/static_files \

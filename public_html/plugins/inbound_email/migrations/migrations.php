@@ -11,7 +11,7 @@
  * the Mailbox Reader's thread-key index is created here (same pattern as the
  * server_manager plugin's index migration).
  *
- * @version 1.3
+ * @version 1.4
  */
 return [
 	[
@@ -140,6 +140,33 @@ return [
 			$dblink->exec("UPDATE iif_inbound_imap_folders SET iif_pending_remote_create = false WHERE iif_pending_remote_create IS NULL");
 			$dblink->exec("ALTER TABLE iif_inbound_imap_folders ALTER COLUMN iif_pending_remote_create SET DEFAULT false");
 			$dblink->exec("ALTER TABLE iif_inbound_imap_folders ALTER COLUMN iif_pending_remote_create SET NOT NULL");
+		},
+	],
+
+	[
+		// Raw-message storage descriptor (specs/inbound_raw_message_storage.md).
+		// Plugin-table sync adds the new iem_raw_* columns WITHOUT their
+		// field_specifications DEFAULT (the gap iem_002/iif_001 finalize), so set
+		// the defaults and backfill any NULLs here. Then correct the
+		// reference-backed IMAP rows: they were written before the descriptor
+		// existed and sit on the 'inline' default, but their raw is 'remote'
+		// (re-fetched from the mailbox). MUST land before the driver-flag dispatch
+		// goes live, or existing IMAP attachments/forwards route to the empty-raw
+		// branch. Idempotent. Mirrors the iia_001/iem_003 pattern.
+		'id' => 'iem_006_backfill_imap_remote_driver',
+		'version' => '1.16.0',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$dblink->exec("ALTER TABLE iem_inbound_email_messages ALTER COLUMN iem_raw_storage_driver SET DEFAULT 'inline'");
+			$dblink->exec("ALTER TABLE iem_inbound_email_messages ALTER COLUMN iem_raw_sync_failed_count SET DEFAULT 0");
+			$dblink->exec("UPDATE iem_inbound_email_messages SET iem_raw_storage_driver = 'inline' WHERE iem_raw_storage_driver IS NULL");
+			$dblink->exec("UPDATE iem_inbound_email_messages SET iem_raw_sync_failed_count = 0 WHERE iem_raw_sync_failed_count IS NULL");
+			$dblink->exec(
+				"UPDATE iem_inbound_email_messages
+				 SET iem_raw_storage_driver = 'remote'
+				 WHERE iem_iia_inbound_imap_account_id IS NOT NULL
+				   AND iem_raw_storage_driver = 'inline'"
+			);
 		},
 	],
 ];

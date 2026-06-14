@@ -696,6 +696,7 @@ if [ "$IS_TEST_DEPLOY" = true ] && [[ ! -d $deploy_directory ]]; then
     mkdir -p "$deploy_directory/plugins"
     mkdir -p "$deploy_directory/static_files"
     mkdir -p "$deploy_directory/uploads"
+    mkdir -p "$deploy_directory/storage"
     echo "Created directory structure for $TARGET_SITE"
 fi
 
@@ -713,7 +714,7 @@ fi
 
 # CREATE ADDITIONAL SUBDIRECTORIES IF NEEDED (test deploys only)
 if [ "$IS_TEST_DEPLOY" = true ]; then
-    for dir in logs static_files uploads config; do
+    for dir in logs static_files uploads storage config; do
         if [[ ! -d "/var/www/html/$TARGET_SITE/$dir" ]]; then
             echo "Creating $dir directory..."
             mkdir -p "/var/www/html/$TARGET_SITE/$dir"

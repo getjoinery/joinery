@@ -5,9 +5,10 @@
  * Single-button workflow: Save runs Test Connection, persists settings,
  * activates the sync task. When enabled, Pause and "Disable and Pull
  * Files Back to Local" appear alongside Save. Health status block at top.
- * Carries the optional private-store bucket field + its privacy-gate results.
+ * Carries the optional private-store bucket field + its privacy-gate results,
+ * and a private-store "Disable and Pull Back" off-ramp when it holds cloud objects.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -130,6 +131,22 @@ if (!empty($private_status['enabled'])) {
 	echo $dot('#999') . '<strong>Private store:</strong> not configured';
 }
 echo '</div>';
+
+// Private-store pull-back: offered whenever the private store is enabled or still
+// holds cloud objects, so its off-ramp mirrors the public store's.
+$private_cloud = (int)($private_status['cloud_count'] ?? 0);
+if (!empty($private_status['enabled']) || $private_cloud > 0) {
+	echo '<div style="margin-bottom: 12px;">';
+	$pconfirm = 'Disable the private store and PULL ALL ' . $private_cloud
+		. ' cloud-stored object(s) (offloaded inbound-mail raw) BACK TO LOCAL DISK? '
+		. 'Ensure enough free space before continuing. The bucket binding stays until you clear it and Save once the count reaches zero.';
+	echo AdminPage::action_button('Disable Private Store and Pull Back', '/admin/admin_cloud_storage', array(
+		'hidden'  => array('action' => 'disable_and_pull_private'),
+		'confirm' => $pconfirm,
+		'class'   => 'btn btn-danger btn-sm',
+	));
+	echo '</div>';
+}
 
 // Reverse task (only when active)
 if (!empty($health['reverse_task'])) {

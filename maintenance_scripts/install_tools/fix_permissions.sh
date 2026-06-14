@@ -79,6 +79,13 @@ if [ "$MODE" == "production" ]; then
         echo "  Setting uploads to 770..."
         chmod -R 770 "$SITE_ROOT/uploads"
     fi
+
+    # Storage: durable runtime data (offloaded inbound-mail raw .eml) — same
+    # writable treatment as uploads; never web-served.
+    if [ -d "$SITE_ROOT/storage" ]; then
+        echo "  Setting storage to 770..."
+        chmod -R 770 "$SITE_ROOT/storage"
+    fi
 else
     # Dev mode: 777 (everyone full access) - for development server only
     echo "  Setting permissions to 777 (dev mode)..."
