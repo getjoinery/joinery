@@ -74,6 +74,7 @@ Before diving in, a quick reference for the four common things plugins need to r
 | Admin menu entries | `adminMenu` key in `plugin.json` — created on activate, removed on deactivate/uninstall | [Admin Menus](#admin-menus-declarative) |
 | Default plugin settings | `settings` array in `plugin.json` — seeded on activate and sync | [Plugin Settings](#plugin-settings-declarative) |
 | Signals your plugin emits, or reactions to existing signals | `signals` / `signalSubscribers` keys in `plugin.json` | [Plugin Signals & Subscribers](#plugin-signals--subscribers-declarative) |
+| A cloud-offload store profile (move rows' bytes to a bucket) | `storage_profiles` array in `plugin.json` — a `StorageProfile` class name | [Storage Profiles](#storage-profiles-declarative) |
 | Other initial data (seed rows, categories, etc.) | `.sql` file in `migrations/`, numbered for order, idempotent | [Migration System](#migration-system) |
 | Activate/deactivate logic | `activate.php`, `deactivate.php` at the plugin root, each defining `{plugin}_activate()` / `_deactivate()` | [Plugin Lifecycle](#plugin-lifecycle) |
 | Uninstall external cleanup *(optional)* | `uninstall.php` defining `{plugin}_uninstall()` — only for work the declarative systems can't do (external API calls, filesystem cleanup) | [Uninstall Script](#uninstall-script) |
@@ -689,6 +690,20 @@ Validation failures throw. On `activate()` the plugin does not activate; on `syn
 **Blank defaults:** `default: ""` creates a row with an empty value. Use this for things that have no meaningful factory default but should still be present (API keys, SMTP hosts, custom CSS) so the row exists for `settings_form.php` to render and for admins to fill in. Omitting the declaration entirely means no row in `stg_settings`, even if `settings_form.php` references the name — the form-page save logic auto-creates missing rows on first submit, but until then `get_setting()` returns `''` (an empty string, and logs a notice — pass the `$fail_silently` flag to suppress it) and the field renders empty.
 
 **Uninstall:** On uninstall, PluginManager deletes rows matching the names in the current manifest. Settings declared in an earlier version but dropped from the current manifest are left in place.
+
+### Storage Profiles (Declarative)
+
+A plugin contributes a cloud-offload **store profile** — code that moves a table's rows' bytes to a bucket and pulls them back — by declaring a `StorageProfile` class name in `plugin.json` under an optional `storage_profiles` key. This sits next to `settings` and the menu keys as a plugin extension point. See [Cloud Storage](cloud_storage.md) for the full architecture (driver / engine + lifecycle / visibility / profile).
+
+```json
+"storage_profiles": ["MyPluginRawStore"]
+```
+
+- Each entry is **just a class name**. The class file lives at `plugins/<plugin>/includes/<ClassName>.php`, implements the `StorageProfile` interface (`includes/cloud_storage/StorageProfile.php`), and has a **no-argument constructor**.
+- **Visibility comes from the profile, not the manifest.** The class's `visibility()` returns `'public'` or `'private'`; that single value decides which store the rows go to, how bytes are read back, and the privacy guarantee. The manifest never restates it.
+- Declarations are read **off disk, active or not.** `StorageProfileRegistry` scans every plugin's `plugin.json` regardless of activation state, so the binding-immutability guard can always see a deactivated plugin's offloaded (`cloud`) rows — deactivation leaves the files (and so the declaration and class) in place.
+
+**Drain before uninstall (private profiles).** Uninstalling a plugin removes its files, so its declaration and class disappear and the guard can no longer see its rows. A plugin that owns a **`private`** profile must therefore have its store **drained back to local first** (the Disable-and-Pull flow) before uninstall — otherwise its `cloud` rows become invisible to the guard and a later bucket change could strand them. Deactivation alone is safe; only uninstall requires the drain.
 
 ### Plugin Signals & Subscribers (Declarative)
 
