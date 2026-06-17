@@ -641,9 +641,9 @@ After Layer 3, route-level model loading is no longer a routing-system feature. 
 
 ## Step 6 — FormWriter reads from descriptors
 
-**Broken out into [`FUTURE_formwriter_descriptors.md`](../FUTURE_formwriter_descriptors.md).**
+**Folded into [`scaffolding_code_generator.md`](../scaffolding_code_generator.md).**
 
-The standalone spec covers the FormWriter `fromDescriptor()` method, the descriptor-type → field-type mapping, the migration approach for existing forms, and the dependencies. Independent of Step 7 — either can ship first.
+The `fromDescriptor()` method, the descriptor-type → field-type mapping, and the form-generation approach are now scoped as part of the scaffolding/code-generator work — the generator is its forcing function. Independent of Step 7 — either can ship first.
 
 ---
 
@@ -664,7 +664,7 @@ The standalone spec covers the four sub-pieces (REST API descriptor switch, boun
 | 3 | Add descriptors to action-shaped files | Low | Done | Rich API metadata, AI schemas |
 | 4 | Normalize logic function signatures | Medium | Done | Uniform invocation from any caller |
 | 5 | Normalize extra-param page controllers | Medium | Done (2026-05-06) | Single calling convention everywhere |
-| 6 | FormWriter reads from descriptors — see [`FUTURE_formwriter_descriptors.md`](../FUTURE_formwriter_descriptors.md) | Medium | Not started | One declaration drives forms |
+| 6 | FormWriter reads from descriptors — folded into [`scaffolding_code_generator.md`](../scaffolding_code_generator.md) | Medium | Not started | One declaration drives forms |
 | 7 | REST API + AI consume descriptors natively — see [`FUTURE_descriptor_consumers.md`](../FUTURE_descriptor_consumers.md) | Medium-large | Not started | Free integration payoff |
 
 Steps 1–5 are done. Steps 6–7 are the payoff and can begin as soon as a critical mass of descriptors exist — they do not require Step 5 to be complete.

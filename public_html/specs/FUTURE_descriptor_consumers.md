@@ -2,7 +2,7 @@
 
 **Parent spec:** [`implemented/logic_code_refactor.md`](implemented/logic_code_refactor.md) — this spec covers Step 7.
 
-**Status:** Not started. Steps 1–5 of the parent spec are done; this can begin once descriptor coverage is high enough on action-shaped logic files (Step 3 covered 18 files; 5 more need descriptors before this can fully retire `_logic_api()`). Independent of [`FUTURE_formwriter_descriptors.md`](FUTURE_formwriter_descriptors.md) (Step 6) — either can ship first.
+**Status:** Not started. Steps 1–5 of the parent spec are done; this can begin once descriptor coverage is high enough on action-shaped logic files (Step 3 covered 18 files; 5 more need descriptors before this can fully retire `_logic_api()`). Independent of the FormWriter `fromDescriptor()` work (Step 6, now folded into [`scaffolding_code_generator.md`](scaffolding_code_generator.md)) — either can ship first.
 
 The AI side of descriptor consumption (`describe_actions` / `invoke_action`) is split out to [`joinery_ai_write_tools.md`](joinery_ai_write_tools.md). It depends on the validator (7b) and descriptor coverage (7d) defined here.
 
@@ -107,7 +107,7 @@ A diff pass before deletion confirms no metadata loss: some `_logic_api()` retur
 - New descriptor types beyond what Step 3 established (unless 7d migration surfaces a need).
 - The AI's `describe_actions` / `invoke_action` tools — see [`joinery_ai_write_tools.md`](joinery_ai_write_tools.md).
 - The AI's read-side model auto-discovery — see [`implemented/joinery_ai_autodiscovery.md`](implemented/joinery_ai_autodiscovery.md).
-- Touching FormWriter — see [`FUTURE_formwriter_descriptors.md`](FUTURE_formwriter_descriptors.md). Independent.
+- Touching FormWriter — see the `fromDescriptor()` work in [`scaffolding_code_generator.md`](scaffolding_code_generator.md). Independent.
 
 ## Dependencies
 

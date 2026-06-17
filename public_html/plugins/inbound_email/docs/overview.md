@@ -882,7 +882,7 @@ mailbox is a durable remote store. So the poller stores only what the reader sho
 a locator (account + UID + UIDVALIDITY + folder) back to the message, and leaves
 `iem_raw_message` empty. A 50 GB Gmail costs the platform kilobytes per message.
 
-Every message view now shows a clickable **attachment list** (filename, size,
+Every message view shows a clickable **attachment list** (filename, size,
 type), built from the `ima_inbound_message_attachments` manifest. **Attachment
 bytes are never stored on the platform** — clicking one fetches exactly that MIME
 part on demand (`FETCH BODY[<section>]`, Message-ID fallback if UIDVALIDITY

@@ -10,13 +10,12 @@ Checklist of platform-level work that has no implementation yet. When you pick o
 - **Core block + report systems** — soft-block relationship table, report queue + admin moderation surface, enforcement hooks in messaging/feed/discovery. Pull out of `dating_platform_spec.md` into a core spec.
 - **App distribution / release automation** — TestFlight/App Store + Play Store submission, code signing, store APIs.
 - **E-commerce setup & fulfillment for the licenses** — Stripe keys, White Glove $99 product + `INSTALL` coupon, Business License purchase flow, CTA wiring. White Glove fulfillment ties into Server Manager provisioning.
-- **Scaffolding / code generators** — `create model / logic / view / admin` to eliminate boilerplate.
 - **REST API test architecture** — 40+ endpoints, zero automated tests.
 - **Plugin Builder discovery/design** — replace the 26-line `plugin_builder_hosted_product.md` stub with a real spec.
 
 ## Ready to build now (spec exists / unblocked)
 
-- **`FUTURE_formwriter_descriptors.md`** — `FormWriter::fromDescriptor()` generates fields from a descriptor's `input` schema. Low-risk, non-breaking, opportunistic adoption.
+- **`scaffolding_code_generator.md`** — declarative manifest + `php utils/scaffold.php` emits the data/logic/view/admin file set. Prerequisite for the Plugin Builder. Now also carries the FormWriter `fromDescriptor()` work (formerly `FUTURE_formwriter_descriptors.md`, Step 6 of `logic_code_refactor.md`) — the generator is its forcing function.
 - **`FUTURE_descriptor_consumers.md`** — REST API + AI tools read logic descriptors instead of duplicated `_logic_api()`. 5 files still need descriptors: `booking_logic`, `event_sessions_logic`, `cart_logic`, `event_sessions_course_logic`, `survey_logic`.
 - **`component_version_integrity.md`** — fixes a live manifest/DB version-drift bug; publish-time version bumping is missing.
 - **`sms_messaging.md`** — harden the rough 3-phase outline; prerequisite for `uptime_monitor.md` alerts, `scheduling_system.md` reminders, and 2FA-over-SMS.
