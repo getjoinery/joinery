@@ -42,7 +42,13 @@
  * getRawMessage()/getRawMimePart() resolve the descriptor so callers are
  * transport- and tier-blind; RawMessageStore owns the byte I/O and key scheme.
  *
- * @version 1.4
+ * SPAM VERDICT (specs/inbound_email_spam_filtering.md). iem_spam_verdict is the
+ * first-class disposition the reader filters on: 'spam' is held out of the inbox
+ * and shown in the Spam view; 'ham'/NULL pass. It is set by the router's DMARC
+ * rule for locally-received mail, by the IMAP junk-folder mapping for polled mail,
+ * and by manual reader corrections. NULL means not evaluated (filtering disabled).
+ *
+ * @version 1.5
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -53,6 +59,11 @@ class InboundEmailMessage extends SystemBase {
 	public static $prefix = 'iem';
 	public static $tablename = 'iem_inbound_email_messages';
 	public static $pkey_column = 'iem_inbound_email_message_id';
+
+	// Spam disposition (specs/inbound_email_spam_filtering.md). A NULL verdict
+	// means the message was not evaluated (filtering disabled).
+	const SPAM_VERDICT_HAM  = 'ham';
+	const SPAM_VERDICT_SPAM = 'spam';
 
 	protected static $foreign_key_actions = [
 		'iem_ied_inbound_email_domain_id' => ['action' => 'cascade'],
@@ -85,6 +96,9 @@ class InboundEmailMessage extends SystemBase {
 		'iem_spf_result'          => array('type'=>'varchar(16)', 'default'=>'unverified'),
 		'iem_dmarc_result'        => array('type'=>'varchar(16)', 'default'=>'unverified'),
 		'iem_auth_source'         => array('type'=>'varchar(20)', 'default'=>'none'),
+		// Spam disposition (specs/inbound_email_spam_filtering.md): 'ham' | 'spam';
+		// NULL = not evaluated (filtering disabled). Drives the reader's inbox/Spam split.
+		'iem_spam_verdict'        => array('type'=>'varchar(10)'),
 		'iem_size_bytes'          => array('type'=>'int4'),
 		// IMAP locator (populated only for reference-backed, IMAP-sourced rows;
 		// a non-null iem_iia_inbound_imap_account_id marks the row reference-backed
@@ -308,6 +322,17 @@ class MultiInboundEmailMessage extends SystemMultiBase {
 
 		if (isset($this->options['deleted'])) {
 			$filters['iem_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
+		}
+
+		// Spam disposition (specs/inbound_email_spam_filtering.md).
+		if (isset($this->options['spam_verdict'])) {
+			$filters['iem_spam_verdict'] = [$this->options['spam_verdict'], PDO::PARAM_STR];
+		}
+
+		// not_spam: exclude judged-spam rows (NULL and 'ham' pass). The default
+		// inbox view's hide-spam clause.
+		if (!empty($this->options['not_spam'])) {
+			$filters['iem_spam_verdict'] = "IS DISTINCT FROM 'spam'";
 		}
 
 		return $this->_get_resultsv2('iem_inbound_email_messages', $filters, $this->order_by, $only_count, $debug);
