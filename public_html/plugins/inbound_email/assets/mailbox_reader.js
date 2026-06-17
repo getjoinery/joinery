@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.0
+ * No framework. @version 2.1
  *
  * Two-pane layout: the main pane swaps between the conversation list and an
  * opened conversation (toggled by the `reading` class on #mbx-reader); a back
@@ -22,6 +22,7 @@
 		hasMore: false,
 		threadKey: null,
 		folderId: null,       // null = folder-unfiltered (the mailbox's "All Mail")
+		spamView: false,      // the Spam pseudo-folder (judged-spam, hidden from inbox)
 		mailboxLabel: '',     // the active mailbox label, for composing folder titles
 		mailboxes: [],
 		messages: []      // messages of the currently-open thread
@@ -117,20 +118,22 @@
 	}
 
 	function renderFolderRail() {
-		// Remove any prior rail, then render folders for the active mailbox (if it
-		// has tracked folders). The mailbox root remains the folder-unfiltered
-		// "All Mail" view; folders narrow it.
+		// Remove any prior rail, then render the active mailbox's rail: "All Mail"
+		// (folder-unfiltered root), any tracked IMAP folders, and the "Spam" view.
+		// The Spam view is always present — it reads the verdict, not folder
+		// membership, so it works for local and IMAP mailboxes alike.
 		var prior = $('#mbx-folder-rail');
 		if (prior) prior.parentNode.removeChild(prior);
 
 		var li = activeMailboxLi();
-		var folders = li && li._folders ? li._folders : [];
-		if (!li || !folders.length) return;
+		if (!li) return;
+		var folders = li._folders || [];
 
 		var ul = el('ul', 'mbx-folders');
 		ul.id = 'mbx-folder-rail';
 		ul.appendChild(folderItem(null, 'All Mail'));
 		folders.forEach(function (f) { ul.appendChild(folderItem(f.id, f.name)); });
+		ul.appendChild(folderItem('spam', 'Spam'));
 		li.parentNode.insertBefore(ul, li.nextSibling);
 		highlightFolder();
 	}
@@ -147,7 +150,7 @@
 	}
 
 	function highlightFolder() {
-		var cur = (state.folderId == null ? '' : String(state.folderId));
+		var cur = state.spamView ? 'spam' : (state.folderId == null ? '' : String(state.folderId));
 		Array.prototype.forEach.call(document.querySelectorAll('.mbx-folder'), function (li) {
 			li.classList.toggle('active', li.dataset.folder === cur);
 		});
@@ -155,7 +158,13 @@
 
 	function selectFolder(folderId, name) {
 		closeThread();                    // leave any open conversation → show the list
-		state.folderId = folderId;
+		if (folderId === 'spam') {
+			state.spamView = true;
+			state.folderId = null;
+		} else {
+			state.spamView = false;
+			state.folderId = folderId;
+		}
 		$('#mbx-list-title').textContent = (state.mailboxLabel || 'All mail')
 			+ (folderId == null ? '' : ' / ' + name);
 		highlightFolder();
@@ -174,6 +183,7 @@
 		closeThread();                    // leave any open conversation → show the list
 		state.aliasId = aliasId;
 		state.folderId = null;            // reset to the folder-unfiltered view
+		state.spamView = false;
 		state.mailboxLabel = label || 'All mail';
 		$('#mbx-list-title').textContent = state.mailboxLabel;
 		highlightMailbox();
@@ -192,7 +202,8 @@
 		if (state.filter === 'unread') p.set('unread_only', '1');
 		if (state.filter === 'starred') p.set('starred_only', '1');
 		if (state.search) { p.set('subject', state.search); p.set('sender', state.search); p.set('body', state.search); }
-		if (state.folderId != null) p.set('folder_id', String(state.folderId));
+		if (state.spamView) { p.set('spam', '1'); }
+		else if (state.folderId != null) { p.set('folder_id', String(state.folderId)); }
 		p.set('page', String(state.page));
 		return CFG.listUrl + '?' + p.toString();
 	}
@@ -316,6 +327,12 @@
 		actions.appendChild(actionBtn('Delete', true, function () {
 			if (!confirm('Delete this conversation?')) return;
 			apiAction({ action: 'delete', threadKey: t.thread_key, aliasId: state.aliasId })
+				.then(function () { closeThread(); refreshMailboxes(); loadThreads(true); });
+		}));
+		// Spam correction: in the Spam view, restore to the inbox; elsewhere, mark spam.
+		actions.appendChild(actionBtn(state.spamView ? 'Not spam' : 'Mark as spam', false, function () {
+			apiAction({ action: state.spamView ? 'mark_not_spam' : 'mark_spam',
+				threadKey: t.thread_key, aliasId: state.aliasId })
 				.then(function () { closeThread(); refreshMailboxes(); loadThreads(true); });
 		}));
 		// Move (exclusive feed) / Labels (non-exclusive) — drives membership sync.

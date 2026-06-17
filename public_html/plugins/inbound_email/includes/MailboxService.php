@@ -22,7 +22,11 @@
  * source (iem_auth_source) so the reader can show sourced verdicts or an honest
  * "unverified" — it never recomputes authentication.
  *
- * @version 1.1
+ * Spam (specs/inbound_email_spam_filtering.md): the default list/switcher hide
+ * judged-spam rows (iem_spam_verdict='spam'); the Spam view shows only them.
+ * setSpamVerdict() is the manual "Mark as spam"/"Not spam" correction.
+ *
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/MailboxViewer.php'));
@@ -131,12 +135,15 @@ class MailboxService {
 		$agg = array();
 		if (count($alias_ids)) {
 			$in = implode(',', array_map('intval', $alias_ids));
+			// Badges reflect the inbox view, so judged-spam rows are excluded (they
+			// live in the Spam view) — specs/inbound_email_spam_filtering.md.
 			$sql = "SELECT iem_iea_inbound_email_alias_id AS alias_id,
 						COUNT(*) AS total,
 						COUNT(*) FILTER (WHERE iem_is_read = false) AS unread,
 						BOOL_OR(iem_is_starred) AS any_starred
 					FROM iem_inbound_email_messages
 					WHERE iem_delete_time IS NULL
+					AND iem_spam_verdict IS DISTINCT FROM 'spam'
 					AND iem_iea_inbound_email_alias_id IN ($in)
 					GROUP BY iem_iea_inbound_email_alias_id";
 			$stmt = $db->query($sql);
@@ -189,10 +196,11 @@ class MailboxService {
 		);
 
 		if ($this->viewer->isAllAccess()) {
-			// "All mail" — every non-deleted row, including NULL-alias.
+			// "All mail" — every non-deleted, non-spam row, including NULL-alias.
 			$row = $db->query("SELECT COUNT(*) AS total,
 					COUNT(*) FILTER (WHERE iem_is_read = false) AS unread
-				FROM iem_inbound_email_messages WHERE iem_delete_time IS NULL")
+				FROM iem_inbound_email_messages
+				WHERE iem_delete_time IS NULL AND iem_spam_verdict IS DISTINCT FROM 'spam'")
 				->fetch(PDO::FETCH_ASSOC);
 			$result['all_mail'] = array(
 				'unread' => intval($row['unread']),
@@ -400,6 +408,15 @@ class MailboxService {
 
 		$where = array($this->readScopeSql($aliasId));
 		$params = array();
+
+		// Spam disposition (specs/inbound_email_spam_filtering.md): the Spam view shows
+		// only judged-spam rows; every other view hides them. A verdict is independent
+		// of folder membership, so this works for local and IMAP mailboxes alike.
+		if (!empty($filters['spam'])) {
+			$where[] = "iem_spam_verdict = 'spam'";
+		} else {
+			$where[] = "iem_spam_verdict IS DISTINCT FROM 'spam'";
+		}
 
 		// Folder dimension (specs/two_way_imap_sync.md §8): restrict to messages
 		// present in the chosen folder via the imf_ membership. Null = the
@@ -619,6 +636,31 @@ class MailboxService {
 		$sql = "UPDATE iem_inbound_email_messages
 				SET iem_is_starred = " . ($starred ? 'true' : 'false') . ",
 					iem_local_state_modified = now()
+				WHERE iem_inbound_email_message_id IN ($in) AND " . $this->mutationScopeSql();
+		$stmt = $this->db()->prepare($sql);
+		$stmt->execute();
+		return $stmt->rowCount();
+	}
+
+	/**
+	 * Manual spam correction (specs/inbound_email_spam_filtering.md): set the verdict
+	 * on in-scope rows — 'spam' (Mark as spam) moves them to the Spam view, 'ham'
+	 * (Not spam) returns them to the inbox. Rejects any other value.
+	 * @return int rows affected
+	 */
+	public function setSpamVerdict(array $message_ids, string $verdict): int {
+		$ids = $this->intList($message_ids);
+		if (!count($ids)) {
+			return 0;
+		}
+		if (!in_array($verdict, array(
+				InboundEmailMessage::SPAM_VERDICT_SPAM,
+				InboundEmailMessage::SPAM_VERDICT_HAM), true)) {
+			return 0;
+		}
+		$in = implode(',', $ids);
+		$sql = "UPDATE iem_inbound_email_messages
+				SET iem_spam_verdict = " . $this->db()->quote($verdict) . "
 				WHERE iem_inbound_email_message_id IN ($in) AND " . $this->mutationScopeSql();
 		$stmt = $this->db()->prepare($sql);
 		$stmt->execute();

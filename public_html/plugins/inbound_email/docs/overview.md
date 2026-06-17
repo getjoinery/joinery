@@ -354,6 +354,11 @@ yours to maintain; RBL checks would happen on the host relay only.
 
 ## Settings
 
+Delivery-policy settings — spam filtering, forwarding limits, the forwarded-From
+display, and retention/storage caps — are edited on the **Settings** tab. Server
+identity and provisioning (provider, mail hostname/IP, SRS, the relay) live on the
+**Setup** tab.
+
 | Setting | Default | Description |
 |---|---|---|
 | `inbound_email_enabled` | `0` | Master switch |
@@ -370,6 +375,7 @@ yours to maintain; RBL checks would happen on the host relay only.
 | `inbound_email_forwarding_smtp_port` | (empty) | Falls back to `smtp_port` |
 | `inbound_email_forwarding_smtp_username` | (empty) | Falls back to `smtp_username` |
 | `inbound_email_forwarding_smtp_password` | (empty) | Falls back to `smtp_password` |
+| `inbound_email_spam_filtering_enabled` | `0` | Act on auth verdicts to assign a spam verdict and split the inbox/Spam view. See [Spam filtering](#spam-filtering). |
 
 ## Plugin Structure
 
@@ -728,6 +734,53 @@ labelled "Sent").
   To/Cc list, `iem_is_read = true`) so the conversation renders from the local
   row immediately — no poll needed. A failed send stores **no** row and surfaces
   the error inline; the draft stays in the panel to fix and resend.
+
+## Spam filtering
+
+Spam is a **first-class verdict on the message**, `iem_spam_verdict` (`ham` /
+`spam`; NULL = not evaluated). It is what the reader filters on, so one Spam view
+works identically for locally-received mail and IMAP-polled mailboxes. There is no
+folder membership and no scoring engine involved — the verdict is the disposition.
+
+Gated by `inbound_email_spam_filtering_enabled` (default off), toggled on the
+**Settings** tab. When off, the verdict stays NULL and nothing changes.
+
+**Classification rule.** The router acts on the SPF/DKIM/DMARC verdicts it already
+records (it never computes them — see [Inbound authentication](#inbound-authentication-spf--dkim--dmarc)).
+`InboundEmailRouter::classifySpam()`:
+
+- **DMARC `fail` → `spam`.** The primary rule. DMARC is alignment-based and already
+  subsumes SPF and DKIM, so it is the one signal worth acting on directly. Applies
+  wherever a DMARC verdict exists (Postfix milters, SES).
+- **No DMARC verdict, and SPF *and* DKIM both `fail` → `spam`.** The fallback for
+  providers that supply SPF/DKIM but no DMARC field (Mailgun, SendGrid). Both must
+  fail: raw SPF/DKIM lack DMARC's alignment check, so a single failure has too many
+  legitimate causes (forwarding breaks SPF; some legit mail breaks DKIM), whereas
+  both failing is a clean "even basic auth broke" signal.
+- otherwise **`ham`**.
+
+The rule is intentionally strict because the disposition is reviewable, never
+rejection: a false positive costs a click in the Spam view, not a lost message.
+
+**Forward suppression.** A judged-`spam` message is **never relayed** — forwarding
+spam burns the platform's sending reputation and can relay abuse. The forward is
+suppressed and logged with status `spam_held`. A `forward_and_store` alias still
+stores the message (with its `spam` verdict) so it stays reviewable; only the
+outbound forward is dropped. Pure-store and catch-all-store aliases store as usual,
+verdict and all.
+
+**IMAP-polled mail.** No auth rule runs — the remote server already classified it.
+A message ingested into a folder whose `iif_role` is `junk` is marked
+`iem_spam_verdict = 'spam'`, giving the Spam view the same meaning for polled mail.
+
+**Reader.** The default inbox (and the mailbox unread badges) exclude `spam`-verdict
+rows; a **Spam** entry in the per-mailbox folder rail shows only them. Per
+conversation, **Mark as spam** (inbox) / **Not spam** (Spam view) set the verdict
+directly.
+
+A content scanner (rspamd / SpamAssassin) can be added later as a Postfix milter
+that stamps an `X-Spam` header; the router would read it and set the same
+`iem_spam_verdict = 'spam'`, reusing this entire disposition with no rework.
 
 ## Inbound Providers
 

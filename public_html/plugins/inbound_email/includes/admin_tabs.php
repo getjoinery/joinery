@@ -32,6 +32,7 @@ if (!function_exists('inbound_email_admin_tabs')) {
 			'Accounts'  => $base . 'admin_inbound_email_accounts',
 			'Logs'      => $base . 'admin_inbound_email_logs',
 			'Setup'     => $base . 'admin_inbound_email_setup',
+			'Settings'  => $base . 'admin_inbound_email_settings',
 		);
 	}
 }

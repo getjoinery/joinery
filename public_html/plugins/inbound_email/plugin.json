@@ -1,7 +1,7 @@
 {
     "name": "Inbound Email",
     "description": "Self-hosted inbound email: forwarding, local mailboxes, DKIM/SRS",
-    "version": "1.16.0",
+    "version": "1.18.0",
     "author": "Joinery",
     "receives_upgrades": true,
     "included_in_publish": true,
@@ -60,7 +60,6 @@
         { "name": "inbound_email_mailbox_retention_days", "default": "14" },
         { "name": "inbound_email_mailbox_max_per_window", "default": "500" },
         { "name": "inbound_email_provider", "default": "postfix" },
-        { "name": "mailgun_webhook_signing_key", "default": "" },
-        { "name": "sendgrid_inbound_secret", "default": "" }
+        { "name": "inbound_email_spam_filtering_enabled", "default": "0" }
     ]
 }

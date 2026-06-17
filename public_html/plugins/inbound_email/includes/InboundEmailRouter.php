@@ -41,7 +41,13 @@
  * CloudOffloadEngine later offloads 'local' rows to the verified-private store. See
  * specs/inbound_raw_message_storage.md.
  *
- * @version 1.12
+ * Spam disposition (specs/inbound_email_spam_filtering.md): classifySpam() turns the
+ * already-resolved auth verdicts into a 'ham'/'spam' verdict (primary rule: DMARC
+ * fail; fallback for no-DMARC providers: SPF and DKIM both fail). It is recorded on
+ * the stored row, and a judged-spam message is never relayed — the forward is
+ * suppressed (logged spam_held) while forward_and_store still keeps a reviewable copy.
+ *
+ * @version 1.13
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -143,6 +149,24 @@ class InboundEmailRouter {
 		// because they only apply to relay attempts.
 		if (!$forwards) {
 			return $this->handleStoreOnly($parsed, $raw_email, $envelope_recipient, $domain, $alias, $auth);
+		}
+
+		// 4b. Spam disposition (specs/inbound_email_spam_filtering.md): a judged-spam
+		// message is never relayed — forwarding spam burns the platform's sending
+		// reputation and can relay abuse. The forward is suppressed and logged
+		// spam_held; a forward_and_store alias still keeps the message (with its spam
+		// verdict) so it stays reviewable in the reader's Spam view.
+		if ($this->classifySpam($auth) === InboundEmailMessage::SPAM_VERDICT_SPAM) {
+			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_SPAM_HELD, $envelope_recipient, null, null, $domain->key);
+			if ($stores) {
+				try {
+					$this->storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $auth);
+				} catch (\Throwable $e) {
+					error_log('InboundEmailRouter: store of spam-held message failed: ' . $e->getMessage());
+					$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_ERROR, $envelope_recipient, null, 'Store of spam-held message failed: ' . $e->getMessage(), $domain->key);
+				}
+			}
+			return 0;
 		}
 
 		// 5. Rate limiting (gates the forward path only)
@@ -298,6 +322,7 @@ class InboundEmailRouter {
 			'iem_spf_result'   => $auth['spf'],
 			'iem_dmarc_result' => $auth['dmarc'],
 			'iem_auth_source'  => $auth['source'],
+			'iem_spam_verdict' => $this->classifySpam($auth),
 			'iem_size_bytes'  => strlen($raw_email),
 			'iem_received_time' => gmdate('Y-m-d H:i:s'),
 		];
@@ -1005,6 +1030,49 @@ class InboundEmailRouter {
 			'dmarc'  => 'unverified',
 			'source' => 'none',
 		);
+	}
+
+	/**
+	 * Classify a message as 'ham' or 'spam' from its already-resolved auth verdicts
+	 * (specs/inbound_email_spam_filtering.md). Returns null when filtering is off, so
+	 * the stored verdict stays NULL and behavior is exactly as before.
+	 *
+	 *   - DMARC fail → spam (the primary rule; DMARC is alignment-based and already
+	 *     subsumes SPF/DKIM, so it is the one signal worth acting on directly).
+	 *   - DMARC absent (no verdict — none/unverified) AND both SPF and DKIM fail →
+	 *     spam (the fallback for providers that supply SPF/DKIM but no DMARC, e.g.
+	 *     Mailgun/SendGrid). BOTH must fail because raw SPF/DKIM lack DMARC's
+	 *     alignment check; a single failure has too many legitimate causes
+	 *     (forwarding breaks SPF; some legit mail breaks DKIM).
+	 *   - otherwise → ham.
+	 *
+	 * This never computes verdicts — it only acts on the trusted ones already read.
+	 * The strict rule is safe because the disposition is a reviewable Spam view,
+	 * never rejection: a false positive costs a click, not a lost message.
+	 *
+	 * @param array{dkim:string,spf:string,dmarc:string,source:string} $auth
+	 * @return string|null InboundEmailMessage::SPAM_VERDICT_*, or null when disabled.
+	 */
+	private function classifySpam(array $auth): ?string {
+		if (!$this->settings->get_setting('inbound_email_spam_filtering_enabled')) {
+			return null;
+		}
+
+		$dmarc = strtolower(trim((string)($auth['dmarc'] ?? '')));
+		if ($dmarc === 'fail') {
+			return InboundEmailMessage::SPAM_VERDICT_SPAM;
+		}
+
+		// No DMARC verdict present → SPF/DKIM both-fail fallback.
+		if ($dmarc === '' || $dmarc === 'none' || $dmarc === 'unverified') {
+			$spf  = strtolower(trim((string)($auth['spf'] ?? '')));
+			$dkim = strtolower(trim((string)($auth['dkim'] ?? '')));
+			if ($spf === 'fail' && $dkim === 'fail') {
+				return InboundEmailMessage::SPAM_VERDICT_SPAM;
+			}
+		}
+
+		return InboundEmailMessage::SPAM_VERDICT_HAM;
 	}
 
 	/**

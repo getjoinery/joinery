@@ -25,7 +25,12 @@
  * failures are caught by the caller (the poller) and recorded as last_status so
  * one unreachable mailbox never stops the rest.
  *
- * @version 1.2
+ * Spam (specs/inbound_email_spam_filtering.md): a message ingested into a folder
+ * whose iif_role is 'junk' is marked iem_spam_verdict='spam' — the remote server
+ * already classified it, so no auth rule runs. This gives the reader's Spam view
+ * the same meaning for IMAP-polled mail as for locally-received mail.
+ *
+ * @version 1.3
  */
 
 require_once(PathHelper::getComposerAutoloadPath());
@@ -597,6 +602,12 @@ class ImapIngestor {
 				intval($uid), intval($serverUidValidity));
 		}
 
+		// Spam (specs/inbound_email_spam_filtering.md): a message the remote filed in
+		// a junk-role folder is spam — give the verdict its meaning for IMAP mail.
+		if ($messageId > 0 && (string)$folder->get('iif_role') === InboundImapFolder::ROLE_JUNK) {
+			$this->markSpam($messageId);
+		}
+
 		return array('dedup' => (bool)$result['dedup'], 'message_id' => $messageId);
 	}
 
@@ -639,6 +650,15 @@ class ImapIngestor {
 			 SET iem_iia_inbound_imap_account_id = ?, iem_imap_uid = ?, iem_imap_uidvalidity = ?, iem_imap_folder = ?
 			 WHERE iem_inbound_email_message_id = ? AND iem_iia_inbound_imap_account_id IS NULL');
 		$stmt->execute(array(intval($this->account->key), $uid, $uidvalidity, $folderName, $messageId));
+	}
+
+	/** Mark a row as spam (a message the remote filed in a junk-role folder). */
+	private function markSpam(int $messageId): void {
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare(
+			"UPDATE iem_inbound_email_messages SET iem_spam_verdict = '" . InboundEmailMessage::SPAM_VERDICT_SPAM . "'
+			 WHERE iem_inbound_email_message_id = ?");
+		$stmt->execute(array($messageId));
 	}
 
 	/** Mark a row as outbound (a Sent-folder message the user sent). */

@@ -3,10 +3,10 @@
  * Mailbox Reader AJAX — thread list.
  *
  * GET. Params: alias_id (optional; omit/blank = all accessible), sender,
- * subject, body, unread_only, starred_only, page. Returns the scoped
+ * subject, body, unread_only, starred_only, spam, page. Returns the scoped
  * conversation list grouped by thread, latest-first. Staff-only.
  *
- * @version 1.0
+ * @version 1.1
  */
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/MailboxService.php'));
@@ -31,6 +31,7 @@ $filters = array(
 	'body'         => isset($_GET['body']) ? trim((string)$_GET['body']) : '',
 	'unread_only'  => !empty($_GET['unread_only']),
 	'starred_only' => !empty($_GET['starred_only']),
+	'spam'         => !empty($_GET['spam']),
 );
 
 $page = isset($_GET['page']) ? intval($_GET['page']) : 1;
