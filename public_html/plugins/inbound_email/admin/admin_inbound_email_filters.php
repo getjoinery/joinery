@@ -118,12 +118,21 @@ if (($mode ?? 'list') === 'form') {
 			$formwriter->hiddeninput('fil_match_has_attachment', '', array('value' => '1'));
 		}
 
-		if (!empty($label_options)) {
-			$formwriter->dropinput('fil_action_label_id', 'Apply the label', array(
-				'options' => array('0' => '— none —') + $label_options,
-				'value' => (string)$v['fil_action_label_id'],
-			));
-		}
+		// Apply a label — a custom label (ilb_) in the global namespace, shared with the
+		// reader and IMAP sync. "Create new label…" reveals a name field and mints the
+		// label on save (Gmail's inline "New label…").
+		$formwriter->dropinput('fil_action_ilb_inbound_email_label_id', 'Apply the label', array(
+			'options' => array('0' => '— none —') + ($label_options ?? array()) + array('new' => 'Create new label…'),
+			'value' => (string)$v['fil_action_ilb_inbound_email_label_id'],
+			'visibility_rules' => array(
+				'new'     => array('show' => array('fil_action_label_new'), 'hide' => array()),
+				'default' => array('show' => array(), 'hide' => array('fil_action_label_new')),
+			),
+		));
+		$formwriter->textinput('fil_action_label_new', 'New label name', array(
+			'value' => $v['fil_action_label_new'],
+			'helptext' => 'Creates this label and applies it.',
+		));
 
 		$formwriter->checkboxinput('fil_action_star', 'Star it', array('checked' => $v['fil_action_star']));
 		$formwriter->checkboxinput('fil_action_mark_read', 'Mark as read', array('checked' => $v['fil_action_mark_read']));

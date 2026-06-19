@@ -48,6 +48,11 @@ class InboundImapFolder extends SystemBase {
 		// Owning feed. iif_name is unique within the feed (one row per folder).
 		'iif_iia_inbound_imap_account_id' => array('type'=>'int8', 'is_nullable'=>false, 'unique_with'=>array('iif_name')),
 		'iif_name'                        => array('type'=>'varchar(255)', 'is_nullable'=>false),
+		// The custom label this folder is a binding for: the folder mirrors the label
+		// (ilb_) to this one remote feed, shared across feeds by the label's global name.
+		// NULL for special-use (Sent/Trash/Junk/…) and coverage (\All) folders — their
+		// state is a column on iem_inbound_email_messages, never a label. See ensureLabel().
+		'iif_ilb_inbound_email_label_id'  => array('type'=>'int8'),
 		'iif_role'                        => array('type'=>'varchar(20)'),
 		'iif_uidvalidity'                 => array('type'=>'int8'),
 		'iif_last_seen_uid'               => array('type'=>'int8'),
@@ -76,14 +81,66 @@ class InboundImapFolder extends SystemBase {
 		return $this->get('iif_role') === self::ROLE_ALL;
 	}
 
-	/** A membership folder is any tracked, non-coverage folder. */
+	/**
+	 * This folder mirrors a custom label: a tracked, non-special-use folder. Only these
+	 * carry membership shadows (ilm_ rows). Special-use folders (Sent/Trash/Junk/…) and
+	 * the \All coverage view are columns/coverage, never labels.
+	 */
+	function bindsLabel(): bool {
+		$role = (string)$this->get('iif_role');
+		return $role === '' || $role === self::ROLE_CUSTOM;
+	}
+
+	/** A membership folder is any tracked label-binding folder (carries ilm_ shadows). */
 	function isMembership(): bool {
-		return (bool)$this->get('iif_is_tracked') && !$this->isCoverage();
+		return (bool)$this->get('iif_is_tracked') && $this->bindsLabel();
 	}
 
 	/** Created locally and not yet created on the source (sync push will CREATE it). */
 	function isPendingRemoteCreate(): bool {
 		return (bool)$this->get('iif_pending_remote_create');
+	}
+
+	/** The bound custom-label id, or null (special-use/coverage folders are never bound). */
+	function labelId(): ?int {
+		$l = $this->get('iif_ilb_inbound_email_label_id');
+		return $l !== null ? intval($l) : null;
+	}
+
+	/**
+	 * Find-or-create the custom label this folder binds to and persist
+	 * iif_ilb_inbound_email_label_id, returning the label id — or null for a special-use
+	 * or coverage folder, which is a column, not a label. A label is keyed by the folder
+	 * name in the global namespace, so the same label is shared across feeds and shown in
+	 * the reader.
+	 */
+	function ensureLabel(): ?int {
+		if (!$this->bindsLabel()) {
+			return null; // special-use / coverage: a column, never a label
+		}
+		$existing = $this->labelId();
+		if ($existing) {
+			return $existing;
+		}
+		require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_labels_class.php'));
+		$label = InboundEmailLabel::findOrCreate((string)$this->get('iif_name'));
+		if ($label === null) {
+			return null;
+		}
+		$this->set('iif_ilb_inbound_email_label_id', intval($label->key));
+		$this->prepare();
+		$this->save();
+		return intval($label->key);
+	}
+
+	/** The bound InboundEmailLabel, find-or-creating it if needed, or null for special-use/coverage. */
+	function boundLabel(): ?InboundEmailLabel {
+		$id = $this->ensureLabel();
+		if ($id === null) {
+			return null;
+		}
+		require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_labels_class.php'));
+		return new InboundEmailLabel($id, TRUE);
 	}
 
 	/**
@@ -183,6 +240,10 @@ class MultiInboundImapFolder extends SystemMultiBase {
 
 		if (isset($this->options['role'])) {
 			$filters['iif_role'] = array($this->options['role'], PDO::PARAM_STR);
+		}
+
+		if (isset($this->options['label_id'])) {
+			$filters['iif_ilb_inbound_email_label_id'] = array($this->options['label_id'], PDO::PARAM_INT);
 		}
 
 		if (isset($this->options['tracked'])) {

@@ -1,20 +1,20 @@
 <?php
 /**
  * Tests for the two-way IMAP sync engine (ImapSyncer) against a mock IMAP client
- * (the §6.2 seam), without a live server. Covers the unified per-folder presence
- * model from specs/two_way_imap_sync.md §11:
+ * (the §6.2 seam), without a live server. Covers the dedicated-label model from
+ * specs/inbound_email_labels.md (custom labels are ilm_ rows; standard state is columns):
  *
  *  - Flags push/pull, dirty-skip (local-wins), loop avoidance.
- *  - Membership push: non-exclusive COPY/EXPUNGE, exclusive MOVE + collapse.
+ *  - Custom-label push: non-exclusive COPY/EXPUNGE, exclusive MOVE + collapse.
  *  - VANISHED pull → membership cleared (clean) / skipped (dirty).
- *  - Deletion: soft-delete bridges to a Trash membership → MOVE-to-Trash push;
- *    a Trash arrival → soft-delete; archive (lose INBOX, keep others) is not a delete.
- *  - Coverage source: the folder-unfiltered view; foldersForAlias excludes \All.
- *  - Sent dedup: a local outbound row reconciles to one row by Message-ID.
+ *  - Deletion is the column: a local soft-delete pushes a COPY/MOVE to Trash; the
+ *    locator follows so it is not re-pushed.
+ *  - Label rail: custom labels are navigable; special-use (INBOX) and the \All
+ *    coverage view are not (they are columns / coverage).
  *
  * Run: php plugins/inbound_email/tests/imap_syncer_test.php  (requires schema synced).
  *
- * @version 1.0
+ * @version 2.0
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -25,7 +25,8 @@ require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_emai
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_message_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_imap_account_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_imap_folder_class.php'));
-require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_message_folder_class.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_labels_class.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_label_members_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/ImapClient.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/ImapIngestor.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/ImapSyncer.php'));
@@ -197,8 +198,7 @@ class ImapSyncerTest {
 			$this->testVanishedClearsCleanMembership();
 			$this->testVanishedSkipsDirty();
 			$this->testVanishedUidDiffFallback();
-			$this->testReconcileDeletesTrashArrival();
-			$this->testDeleteBridgeMovesToTrash();
+			$this->testSoftDeletePushesToTrash();
 			$this->testFoldersExcludeCoverage();
 		} catch (\Throwable $e) {
 			$this->fail++;
@@ -265,10 +265,20 @@ class ImapSyncerTest {
 			WHERE iem_ied_inbound_email_domain_id = " . $did)->fetchAll(PDO::FETCH_COLUMN);
 		if ($mids) {
 			$min = implode(',', array_map('intval', $mids));
-			$this->db->exec("DELETE FROM imf_inbound_message_folders WHERE imf_iem_inbound_email_message_id IN ($min)");
+			$this->db->exec("DELETE FROM ilm_inbound_label_members WHERE ilm_iem_inbound_email_message_id IN ($min)");
 		}
 		if ($accIds) {
 			$ain = implode(',', array_map('intval', $accIds));
+			// Drop the labels these test folders were bound to (and their memberships) so
+			// test labels never leak into a real mailbox's label rail.
+			$lids = $this->db->query("SELECT iif_ilb_inbound_email_label_id FROM iif_inbound_imap_folders
+				WHERE iif_iia_inbound_imap_account_id IN ($ain) AND iif_ilb_inbound_email_label_id IS NOT NULL")
+				->fetchAll(PDO::FETCH_COLUMN);
+			if ($lids) {
+				$lin = implode(',', array_map('intval', $lids));
+				$this->db->exec("DELETE FROM ilm_inbound_label_members WHERE ilm_ilb_inbound_email_label_id IN ($lin)");
+				$this->db->exec("DELETE FROM ilb_inbound_email_labels WHERE ilb_inbound_email_label_id IN ($lin)");
+			}
 			$this->db->exec("DELETE FROM iif_inbound_imap_folders WHERE iif_iia_inbound_imap_account_id IN ($ain)");
 		}
 		$this->db->exec("DELETE FROM iia_inbound_imap_accounts WHERE iia_iea_inbound_email_alias_id IN (" . ($aids ? implode(',', array_map('intval', $aids)) : 'NULL') . ")");
@@ -318,6 +328,80 @@ class ImapSyncerTest {
 
 	private function pgBool($v): bool {
 		return ($v === true || $v === 't' || $v === 'true' || $v === '1' || $v === 1);
+	}
+
+	// ── membership seeding / assertions (dedicated ilm_ model) ────────────────
+	// Truth (present_local) and the IMAP shadow (present_base + UID + binding) are the
+	// one ilm_ row. These helpers express the (local, base) element on that single row
+	// and read it back. Only custom-label folders carry rows; ensureLabel binds them.
+
+	/** The custom-label id this folder binds to, or null for special-use/coverage. */
+	private function labelId(InboundImapFolder $folder): ?int {
+		return $folder->labelId() ?? $folder->ensureLabel();
+	}
+
+	/** Seed a (message, label) element: present_local for $local, present_base for $base. */
+	private function seed(int $msgId, InboundImapFolder $folder, bool $local, bool $base,
+			?int $uid = null, ?int $uidv = null): void {
+		$labelId = $this->labelId($folder);
+		if ($labelId === null) { return; } // not a label folder
+		$folderId = intval($folder->key);
+
+		if ($base) {
+			InboundLabelMember::setBaseline($msgId, $labelId, $folderId, true, $uid, $uidv);
+			if (!$local) {
+				// base true, local false: a dirty remove.
+				$row = InboundLabelMember::find($msgId, $labelId);
+				$row->set('ilm_present_local', false);
+				$row->prepare(); $row->save();
+			}
+		} elseif ($local) {
+			// base false, local true: a dirty add (no synced shadow UID yet).
+			$row = InboundLabelMember::find($msgId, $labelId);
+			if (!$row) {
+				$row = new InboundLabelMember(NULL);
+				$row->set('ilm_iem_inbound_email_message_id', $msgId);
+				$row->set('ilm_ilb_inbound_email_label_id', $labelId);
+			}
+			$row->set('ilm_present_local', true);
+			$row->set('ilm_present_base', false);
+			$row->set('ilm_iif_inbound_imap_folder_id', $folderId);
+			$row->prepare(); $row->save();
+		}
+		// base false, local false: clean-absent → no row.
+	}
+
+	/** True iff the message carries the folder's label (present_local). */
+	private function isMember(int $msgId, InboundImapFolder $folder): bool {
+		$lid = $this->labelId($folder);
+		return $lid ? InboundLabelMember::isMember($msgId, $lid) : false;
+	}
+
+	/** The ilm_ membership row for the element, or null. */
+	private function shadow(int $msgId, InboundImapFolder $folder): ?InboundLabelMember {
+		$lid = $this->labelId($folder);
+		return $lid ? InboundLabelMember::find($msgId, $lid) : null;
+	}
+
+	/** Dirty iff present_local diverges from present_base on the row. */
+	private function isDirtyEl(int $msgId, InboundImapFolder $folder): bool {
+		$s = $this->shadow($msgId, $folder);
+		if (!$s) { return false; }
+		return (bool)$s->get('ilm_present_local') !== (bool)$s->get('ilm_present_base');
+	}
+
+	/** Clean-present: present_local and present_base both set. */
+	private function isPresentClean(int $msgId, InboundImapFolder $folder): bool {
+		$s = $this->shadow($msgId, $folder);
+		return $s && (bool)$s->get('ilm_present_local') && (bool)$s->get('ilm_present_base');
+	}
+
+	/** Clean-absent: no row, or a row with neither bit set. */
+	private function isAbsent(int $msgId, InboundImapFolder $folder): bool {
+		$lid = $this->labelId($folder);
+		if (!$lid) { return true; }
+		$s = InboundLabelMember::find($msgId, $lid);
+		return $s === null || (!(bool)$s->get('ilm_present_local') && !(bool)$s->get('ilm_present_base'));
 	}
 
 	// ── flags ────────────────────────────────────────────────────────────────
@@ -378,8 +462,7 @@ class ImapSyncerTest {
 		$client->folders['INBOX'] = array('uidvalidity' => 1, 'uidnext' => 26,
 			'messages' => array(25 => array('flags' => array(), 'message_id' => $msg->get('iem_message_id_header'))));
 		// 'Work' deliberately absent from the server until push creates it.
-		InboundMessageFolder::setPresence($msg->key, intval($inbox->key), true, true, 25, 1);
-		InboundMessageFolder::setPresence($msg->key, intval($label->key), true, false); // dirty add
+		$this->seed(intval($msg->key), $label, true, false); // dirty add
 
 		$this->syncer($client)->push(50);
 
@@ -388,8 +471,7 @@ class ImapSyncerTest {
 		$reloaded = new InboundImapFolder($label->key, TRUE);
 		$this->ok(!$reloaded->isPendingRemoteCreate(), 'pending_remote_create cleared after CREATE');
 		$this->ok($client->opCount('copy') === 1, 'membership then COPYs the message into the new folder');
-		$el = InboundMessageFolder::find($msg->key, intval($label->key));
-		$this->ok($el && !$el->isDirty(), 'new-folder membership shadow advanced to clean');
+		$this->ok($this->isPresentClean(intval($msg->key), $label), 'new-folder membership shadow advanced to clean');
 	}
 
 	private function testMembershipPushNonExclusiveCopy() {
@@ -401,14 +483,12 @@ class ImapSyncerTest {
 			'messages' => array(20 => array('flags' => array(), 'message_id' => $msg->get('iem_message_id_header'))));
 		$client->folders['Work'] = array('uidvalidity' => 1, 'uidnext' => 1, 'messages' => array());
 
-		// Base membership in INBOX (clean); a local add of Work (dirty add).
-		InboundMessageFolder::setPresence($msg->key, intval($inbox->key), true, true, 20, 1);
-		InboundMessageFolder::setPresence($msg->key, intval($work->key), true, false);
+		// The message's locator is INBOX (from the row); a local add of the Work label.
+		$this->seed(intval($msg->key), $work, true, false); // dirty add
 
 		$this->syncer($client)->push(50);
 		$this->ok($client->opCount('copy') === 1, 'non-exclusive local add → COPY (label add)');
-		$el = InboundMessageFolder::find($msg->key, intval($work->key));
-		$this->ok($el && !$el->isDirty(), 'Work membership shadow advanced to clean after COPY');
+		$this->ok($this->isPresentClean(intval($msg->key), $work), 'Work membership shadow advanced to clean after COPY');
 	}
 
 	private function testMembershipPushNonExclusiveRemove() {
@@ -421,14 +501,13 @@ class ImapSyncerTest {
 		$client->folders['Work'] = array('uidvalidity' => 1, 'uidnext' => 6,
 			'messages' => array(5 => array('flags' => array(), 'message_id' => $msg->get('iem_message_id_header'))));
 
-		InboundMessageFolder::setPresence($msg->key, intval($inbox->key), true, true, 21, 1);
-		// Local removal of Work (base true, local false) with the folder UID recorded.
-		InboundMessageFolder::setPresence($msg->key, intval($work->key), false, true, 5, 1);
+		// Local removal of the Work label (base true, local false) with the folder UID.
+		$this->seed(intval($msg->key), $work, false, true, 5, 1);
 
 		$this->syncer($client)->push(50);
 		$this->ok($client->opCount('expunge') === 1, 'non-exclusive local remove → EXPUNGE (label remove)');
-		$this->ok(InboundMessageFolder::find($msg->key, intval($work->key)) === null,
-			'removed membership row dropped (0,0)');
+		$this->ok($this->isAbsent(intval($msg->key), $work),
+			'removed membership dropped (clean-absent)');
 	}
 
 	private function testMembershipPushExclusiveMove() {
@@ -438,24 +517,19 @@ class ImapSyncerTest {
 		$exclusiveAccount->prepare(); $exclusiveAccount->save();
 		$this->account = new InboundImapAccount($this->account->key, TRUE);
 
-		$inbox = $this->makeFolder('INBOX', 'inbox');
-		$archive = $this->makeFolder('Archive', 'archive');
-		$msg = $this->makeMessage('INBOX', 30);
+		$projects = $this->makeFolder('Projects', 'custom');
+		$msg = $this->makeMessage('INBOX', 30); // locator in INBOX
 		$client->folders['INBOX'] = array('uidvalidity' => 1, 'uidnext' => 31,
 			'messages' => array(30 => array('flags' => array(), 'message_id' => $msg->get('iem_message_id_header'))));
-		$client->folders['Archive'] = array('uidvalidity' => 1, 'uidnext' => 1, 'messages' => array());
+		$client->folders['Projects'] = array('uidvalidity' => 1, 'uidnext' => 1, 'messages' => array());
 
-		InboundMessageFolder::setPresence($msg->key, intval($inbox->key), false, true, 30, 1); // removed from INBOX
-		InboundMessageFolder::setPresence($msg->key, intval($archive->key), true, false);       // added to Archive
+		$this->seed(intval($msg->key), $projects, true, false); // added to Projects (a custom label)
 
 		$this->syncer($client)->push(50);
-		$this->ok($client->opCount('move') === 1, 'exclusive add → MOVE (relocation)');
-		$keep = InboundMessageFolder::find($msg->key, intval($archive->key));
-		$this->ok($keep && !$keep->isDirty(), 'destination membership clean after MOVE');
-		$this->ok(InboundMessageFolder::find($msg->key, intval($inbox->key)) === null,
-			'exclusive collapse drops the old INBOX membership');
+		$this->ok($client->opCount('move') === 1, 'exclusive label add → MOVE (relocation)');
+		$this->ok($this->isPresentClean(intval($msg->key), $projects), 'destination membership clean after MOVE');
 		$reloaded = $this->reload($msg);
-		$this->ok($reloaded->get('iem_imap_folder') === 'Archive', 'locator follows the MOVE to Archive');
+		$this->ok($reloaded->get('iem_imap_folder') === 'Projects', 'locator follows the MOVE to Projects');
 
 		// restore non-exclusive for any later tests
 		$this->account->set('iia_folders_exclusive', false);
@@ -467,22 +541,22 @@ class ImapSyncerTest {
 
 	private function testVanishedClearsCleanMembership() {
 		$client = new FakeImapClient();
-		$inbox = $this->makeFolder('INBOX', 'inbox');
 		$work = $this->makeFolder('Work', 'custom');
+		$work2 = $this->makeFolder('Work2', 'custom');
 		$msg = $this->makeMessage('Work', 40); // locator in Work
-		$client->folders['INBOX'] = array('uidvalidity' => 1, 'highestmodseq' => 9, 'messages' => array());
 		$client->folders['Work'] = array('uidvalidity' => 1, 'highestmodseq' => 9, 'messages' => array());
+		$client->folders['Work2'] = array('uidvalidity' => 1, 'highestmodseq' => 9, 'messages' => array());
 
-		InboundMessageFolder::setPresence($msg->key, intval($inbox->key), true, true, 50, 1);
-		InboundMessageFolder::setPresence($msg->key, intval($work->key), true, true, 40, 1);
+		$this->seed(intval($msg->key), $work, true, true, 40, 1);
+		$this->seed(intval($msg->key), $work2, true, true, 50, 1);
 		$client->vanishedByFolder['Work'] = array(40); // Work copy vanished remotely
 
 		$this->syncer($client)->pull();
-		$this->ok(InboundMessageFolder::find($msg->key, intval($work->key)) === null,
+		$this->ok($this->isAbsent(intval($msg->key), $work),
 			'VANISHED clears a clean membership');
-		$this->ok(InboundMessageFolder::find($msg->key, intval($inbox->key)) !== null,
+		$this->ok($this->isMember(intval($msg->key), $work2),
 			'other membership untouched by the vanish');
-		$this->ok($this->reload($msg)->get('iem_imap_folder') === 'INBOX',
+		$this->ok($this->reload($msg)->get('iem_imap_folder') === 'Work2',
 			'locator re-pointed off the vanished folder to a surviving one');
 	}
 
@@ -491,13 +565,14 @@ class ImapSyncerTest {
 		$work = $this->makeFolder('Work2', 'custom');
 		$msg = $this->makeMessage('Work2', 41);
 		$client->folders['Work2'] = array('uidvalidity' => 1, 'highestmodseq' => 9, 'messages' => array());
-		// Dirty element (a local add not yet pushed) — pull must not clobber it.
-		InboundMessageFolder::setPresence($msg->key, intval($work->key), true, false, 41, 1);
+		// Dirty element (a local add not yet pushed) — pull must not clobber it. A
+		// not-yet-synced add has no shadow UID, so VANISHED can't even target it.
+		$this->seed(intval($msg->key), $work, true, false, 41, 1);
 		$client->vanishedByFolder['Work2'] = array(41);
 
 		$this->syncer($client)->pull();
-		$el = InboundMessageFolder::find($msg->key, intval($work->key));
-		$this->ok($el !== null && $el->isDirty(), 'VANISHED skips a dirty element (local-wins)');
+		$this->ok($this->isMember(intval($msg->key), $work) && $this->isDirtyEl(intval($msg->key), $work),
+			'VANISHED skips a dirty element (local-wins)');
 	}
 
 	private function testVanishedUidDiffFallback() {
@@ -513,12 +588,12 @@ class ImapSyncerTest {
 		$msg = $this->makeMessage('WorkDiff', 80);
 		// Membership recorded at uid 80; the folder no longer contains uid 80 — and
 		// there is no VANISHED feed, so only the UID-set diff can detect it.
-		InboundMessageFolder::setPresence($msg->key, intval($work->key), true, true, 80, 1);
+		$this->seed(intval($msg->key), $work, true, true, 80, 1);
 		$client->folders['WorkDiff'] = array('uidvalidity' => 1, 'highestmodseq' => 9,
 			'messages' => array(81 => array('flags' => array(), 'message_id' => '<other@x>')));
 
 		$this->syncer($client)->pull();
-		$this->ok(InboundMessageFolder::find($msg->key, intval($work->key)) === null,
+		$this->ok($this->isAbsent(intval($msg->key), $work),
 			'CONDSTORE-only fallback: UID-set diff detects the vanished membership (no QRESYNC)');
 
 		// Restore the fast path for the remaining tests.
@@ -529,58 +604,37 @@ class ImapSyncerTest {
 
 	// ── deletion ─────────────────────────────────────────────────────────────
 
-	private function testReconcileDeletesTrashArrival() {
+	private function testSoftDeletePushesToTrash() {
 		$client = new FakeImapClient();
 		$this->account->set('iia_sync_deletes', true);
 		$this->account->prepare(); $this->account->save();
 		$this->account = new InboundImapAccount($this->account->key, TRUE);
 
-		$trash = $this->makeFolder('Trash', 'trash');
-		$msg = $this->makeMessage('INBOX', 60);
-		// Simulate ingest having seen the message arrive in Trash (a remote delete).
-		InboundMessageFolder::setPresence($msg->key, intval($trash->key), true, true, 60, 1);
-
-		$count = $this->syncer($client)->reconcileDeletes();
-		$this->ok($count >= 1, 'reconcileDeletes acts on a Trash arrival');
-		$this->ok($this->reload($msg)->get('iem_delete_time') !== null, 'Trash arrival soft-deletes the local row');
-
-		$this->account->set('iia_sync_deletes', false);
-		$this->account->prepare(); $this->account->save();
-		$this->account = new InboundImapAccount($this->account->key, TRUE);
-	}
-
-	private function testDeleteBridgeMovesToTrash() {
-		$client = new FakeImapClient();
-		$this->account->set('iia_sync_deletes', true);
-		$this->account->prepare(); $this->account->save();
-		$this->account = new InboundImapAccount($this->account->key, TRUE);
-
-		$inbox = $this->makeFolder('INBOX', 'inbox');
-		$trash = $this->makeFolder('Trash', 'trash');
+		$this->makeFolder('INBOX', 'inbox');
+		$this->makeFolder('Trash', 'trash');
 		$msg = $this->makeMessage('INBOX', 70);
 		$client->folders['INBOX'] = array('uidvalidity' => 1, 'uidnext' => 71,
 			'messages' => array(70 => array('flags' => array(), 'message_id' => $msg->get('iem_message_id_header'))));
 		$client->folders['Trash'] = array('uidvalidity' => 1, 'uidnext' => 1, 'messages' => array());
-		InboundMessageFolder::setPresence($msg->key, intval($inbox->key), true, true, 70, 1);
 
-		// Local soft-delete via the service (all-access viewer) bridges to membership.
+		// Local soft-delete via the service (all-access viewer): column is the truth.
 		$viewer = $this->allAccessViewer();
 		$service = new MailboxService($viewer);
 		$service->softDelete(array(intval($msg->key)));
-
-		$trashEl = InboundMessageFolder::find($msg->key, intval($trash->key));
-		$this->ok($trashEl !== null && $trashEl->isDirty(), 'soft-delete bridges to a dirty Trash membership');
+		$this->ok($this->reload($msg)->get('iem_delete_time') !== null, 'soft-delete sets the iem_delete_time column');
 
 		$this->syncer($client)->push(50);
-		// On a non-exclusive feed the delete is a COPY to Trash (the Trash membership
-		// add) plus an EXPUNGE of the other folder; landing in Trash is what removes
-		// it elsewhere. (An exclusive feed would MOVE to Trash instead.)
+		// Column-driven pushTrash relocates the source into Trash: a COPY on a
+		// non-exclusive feed (Gmail treats a Trash copy as removal from every label), a
+		// MOVE on an exclusive one.
 		$toTrash = array_filter($client->ops, function ($o) {
 			return in_array($o['op'], array('copy', 'move'), true) && ($o['dest'] ?? '') === 'Trash';
 		});
 		$this->ok(count($toTrash) === 1, 'delete pushes the source message into Trash (COPY/MOVE)');
 		$this->ok(isset($client->folders['Trash']['messages']) && count($client->folders['Trash']['messages']) === 1,
 			'the source message now sits in Trash');
+		$this->ok($this->reload($msg)->get('iem_imap_folder') === 'Trash',
+			'locator follows to Trash (the already-trashed shadow, so it is not re-pushed)');
 
 		$this->account->set('iia_sync_deletes', false);
 		$this->account->prepare(); $this->account->save();
@@ -591,6 +645,7 @@ class ImapSyncerTest {
 
 	private function testFoldersExcludeCoverage() {
 		$this->makeFolder('INBOX', 'inbox');
+		$this->makeFolder('Work', 'custom');
 		$this->makeFolder('[Gmail]/All Mail', 'all');
 		$viewer = $this->allAccessViewer();
 		$data = (new MailboxService($viewer))->listMailboxes();
@@ -600,7 +655,9 @@ class ImapSyncerTest {
 		}
 		$names = $found ? array_map(function ($f) { return $f['name']; }, $found['folders']) : array();
 		$this->ok($found !== null, 'mailbox appears in the switcher');
-		$this->ok(in_array('INBOX', $names, true), 'INBOX is a navigable folder');
+		$this->ok(in_array('Work', $names, true), 'a custom-label folder is a navigable label');
+		$this->ok(!in_array('INBOX', $names, true),
+			'INBOX (special-use) is not a label — it is the column-driven default view');
 		$this->ok(!in_array('[Gmail]/All Mail', $names, true),
 			'the \\All coverage view is excluded from the folder rail');
 	}

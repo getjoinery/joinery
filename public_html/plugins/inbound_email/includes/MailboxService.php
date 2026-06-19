@@ -41,7 +41,8 @@ require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_emai
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_imap_account_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_imap_folder_class.php'));
-require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_message_folder_class.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_labels_class.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_label_members_class.php'));
 
 class MailboxService {
 
@@ -230,49 +231,65 @@ class MailboxService {
 	}
 
 	/**
-	 * The tracked membership folders of the alias's bound feed (for the folder rail
-	 * + the move/labels control) and the feed's cardinality. Shown whenever the feed
-	 * has discovered, tracked folders — independent of sync mode — so the structure
-	 * is visible before sync is switched on (folders fill as sync populates
-	 * membership). The \All coverage view is excluded.
+	 * The label rail for a mailbox (folder rail + the move/labels control), keyed by the
+	 * custom-label id (ilb_) — a label is global, so the same id space spans local and
+	 * IMAP mail and the reader never sees IMAP folder ids.
+	 *
+	 * A mailbox with a bound IMAP feed lists that feed's tracked custom-label folders
+	 * (each carries its bound label id, displayed by its remote folder name), and the
+	 * feed's cardinality drives Move-vs-Labels. A mailbox with no feed lists the global
+	 * custom labels — applying one is pure (clean) membership with no remote to sync.
+	 * Special-use folders (Sent/Trash/Junk/…) and the \All coverage view are excluded:
+	 * their state is a column on iem_inbound_email_messages, not a label.
 	 *
 	 * @return array{folders: array[], exclusive: bool}
 	 */
 	private function mailboxFolderInfo(int $aliasId): array {
-		$empty = array('folders' => array(), 'exclusive' => true);
 		$accounts = new MultiInboundImapAccount(array(
 			'alias_id' => $aliasId, 'enabled' => true, 'deleted' => false,
 		));
 		$accounts->load();
-		if (!count($accounts)) {
-			return $empty;
-		}
-		$account = new InboundImapAccount($accounts->get(0)->key, TRUE);
-		if (!$account->key) {
-			return $empty;
-		}
-		$folders = new MultiInboundImapFolder(array(
-			'account_id' => intval($account->key), 'tracked' => true,
-		), array('iif_name' => 'ASC'));
-		$folders->load();
-		$out = array();
-		foreach ($folders as $f) {
-			if ($f->get('iif_role') === InboundImapFolder::ROLE_ALL) {
-				continue; // coverage source, not navigable
+		$account = count($accounts) ? new InboundImapAccount($accounts->get(0)->key, TRUE) : null;
+
+		if ($account && $account->key) {
+			$folders = new MultiInboundImapFolder(array(
+				'account_id' => intval($account->key), 'tracked' => true,
+			), array('iif_name' => 'ASC'));
+			$folders->load();
+			$out = array();
+			foreach ($folders as $row) {
+				$f = new InboundImapFolder($row->key, TRUE);
+				$labelId = $f->ensureLabel();
+				if ($labelId === null) {
+					continue; // special-use / coverage: a column, not a label
+				}
+				$out[] = array(
+					'id'   => $labelId,
+					'name' => $f->get('iif_name'),
+					'role' => $f->get('iif_role'),
+				);
 			}
+			return array('folders' => $out, 'exclusive' => $account->foldersExclusive());
+		}
+
+		// No feed: the global custom-label set, applied as pure membership (never synced).
+		$labels = new MultiInboundEmailLabel(array('deleted' => false), array('ilb_name' => 'ASC'));
+		$labels->load();
+		$out = array();
+		foreach ($labels as $l) {
 			$out[] = array(
-				'id'   => intval($f->key),
-				'name' => $f->get('iif_name'),
-				'role' => $f->get('iif_role'),
+				'id'   => intval($l->key),
+				'name' => $l->get('ilb_name'),
+				'role' => InboundImapFolder::ROLE_CUSTOM,
 			);
 		}
-		return array('folders' => $out, 'exclusive' => $account->foldersExclusive());
+		return array('folders' => $out, 'exclusive' => false);
 	}
 
 	/**
-	 * The (non-coverage) folder ids a thread currently belongs to — the union of
-	 * its in-scope messages' present_local memberships. Pre-checks the reader's
-	 * move/labels control.
+	 * The custom-label ids a thread currently carries — the union of its in-scope
+	 * messages' present_local memberships. Pre-checks the reader's move/labels control.
+	 * The reader matches these against the active mailbox's rail and ignores any not shown.
 	 *
 	 * @return int[]
 	 */
@@ -283,76 +300,66 @@ class MailboxService {
 		}
 		$in = implode(',', array_map('intval', $ids));
 		$rows = $this->db()->query(
-			"SELECT DISTINCT imf.imf_iif_inbound_imap_folder_id AS fid
-			 FROM imf_inbound_message_folders imf
-			 JOIN iif_inbound_imap_folders f ON f.iif_inbound_imap_folder_id = imf.imf_iif_inbound_imap_folder_id
-			 WHERE imf.imf_iem_inbound_email_message_id IN ($in)
-			   AND imf.imf_present_local = true
-			   AND f.iif_role IS DISTINCT FROM '" . InboundImapFolder::ROLE_ALL . "'")->fetchAll(PDO::FETCH_COLUMN);
+			"SELECT DISTINCT ilm_ilb_inbound_email_label_id AS lid
+			 FROM ilm_inbound_label_members
+			 WHERE ilm_iem_inbound_email_message_id IN ($in) AND ilm_present_local = true")
+			->fetchAll(PDO::FETCH_COLUMN);
 		$out = array();
-		foreach ($rows as $fid) {
-			$out[] = intval($fid);
+		foreach ($rows as $lid) {
+			$out[] = intval($lid);
 		}
 		return $out;
 	}
 
 	/**
-	 * Add or remove a folder membership for a set of messages (the reader's move /
-	 * labels control). Sets `imf_present_local` (keeping the shadow base) so two-way
-	 * push reconciles it to the source as a COPY (label add) / MOVE (exclusive) /
-	 * EXPUNGE (label remove) — exactly the path proven for a programmatic change.
-	 *
-	 * Scoped three ways: the viewer must be able to mutate the message, the message
-	 * must belong to the folder's own feed/alias, and it must be reference-backed.
-	 * The \All coverage view cannot be a membership target. Returns rows affected.
+	 * Apply or remove a custom label for a set of messages — the reader's move / labels
+	 * control. InboundLabelMember::apply/remove is the truth write; it resolves whether
+	 * the label is bound to the message's feed and records the dirtiness accordingly, so
+	 * two-way push later reconciles a bound change to the source as a COPY (label add) /
+	 * MOVE (exclusive) / EXPUNGE (label remove), while an unbound (local) label never
+	 * touches a remote. Scoped to messages the viewer may mutate. Returns the count changed.
 	 */
-	public function setMembership(array $message_ids, int $folderId, bool $present): int {
+	public function setMembership(array $message_ids, int $labelId, bool $present): int {
 		$ids = $this->intList($message_ids);
-		if (!count($ids) || $folderId <= 0) {
+		if (!count($ids) || $labelId <= 0) {
 			return 0;
 		}
-		$folder = new InboundImapFolder($folderId, TRUE);
-		if (!$folder->key || $folder->isCoverage()) {
+		// The label must still exist (a stale rail entry no-ops rather than mis-applies).
+		$lk = $this->db()->prepare(
+			'SELECT 1 FROM ilb_inbound_email_labels WHERE ilb_inbound_email_label_id = ? AND ilb_delete_time IS NULL LIMIT 1');
+		$lk->execute(array($labelId));
+		if (!$lk->fetchColumn()) {
 			return 0;
 		}
-		$account = new InboundImapAccount(intval($folder->get('iif_iia_inbound_imap_account_id')), TRUE);
-		if (!$account->key) {
-			return 0;
-		}
-		$feedAliasId = intval($account->get('iia_iea_inbound_email_alias_id'));
-		$accountId = intval($account->key);
 
 		$in = implode(',', $ids);
-		$sql = "SELECT iem_inbound_email_message_id AS id
-				FROM iem_inbound_email_messages
-				WHERE iem_inbound_email_message_id IN ($in)
-				  AND iem_iea_inbound_email_alias_id = " . $feedAliasId . "
-				  AND iem_iia_inbound_imap_account_id = " . $accountId . "
-				  AND " . $this->mutationScopeSql();
-		$rows = $this->db()->query($sql)->fetchAll(PDO::FETCH_COLUMN);
+		$rows = $this->db()->query(
+			"SELECT iem_inbound_email_message_id AS id FROM iem_inbound_email_messages
+			 WHERE iem_inbound_email_message_id IN ($in) AND " . $this->mutationScopeSql())
+			->fetchAll(PDO::FETCH_COLUMN);
 
 		$count = 0;
 		foreach ($rows as $mid) {
 			$mid = intval($mid);
-			$existing = InboundMessageFolder::find($mid, $folderId);
-			$base = $existing ? (bool)$existing->get('imf_present_base') : false;
-			$uid = $existing ? ($existing->get('imf_imap_uid') !== null ? intval($existing->get('imf_imap_uid')) : null) : null;
-			$uidv = $existing ? ($existing->get('imf_imap_uidvalidity') !== null ? intval($existing->get('imf_imap_uidvalidity')) : null) : null;
-			// Set local to the requested presence, keep the shadow base — that makes
-			// the element dirty (or a no-op if already at the target) for push.
-			InboundMessageFolder::setPresence($mid, $folderId, $present, $base, $uid, $uidv);
+			if ($present) {
+				InboundLabelMember::apply($mid, $labelId);
+			} else {
+				InboundLabelMember::remove($mid, $labelId);
+			}
 			$count++;
 		}
 		return $count;
 	}
 
 	/**
-	 * Create a label/folder for a mailbox from the reader. Makes a tracked, pending
-	 * `iif_` row that does not yet exist on the source — the sync push step issues
-	 * the IMAP CREATE and clears the pending flag (§14). Idempotent: a same-named
-	 * folder is reused (and re-tracked). Returns {id, name, role} or null when the
-	 * viewer can't mutate the mailbox, the mailbox has no IMAP feed, or the name is
-	 * empty.
+	 * Create a label for a mailbox from the reader, returning {id (the label id), name,
+	 * role} or null when the viewer can't mutate the mailbox or the name is empty.
+	 *
+	 * A label is an ilb_ row in the global namespace. When the mailbox has an IMAP feed,
+	 * the label is also bound to a tracked, pending `iif_` folder that does not yet exist
+	 * on the source — the sync push issues the IMAP CREATE and clears the pending flag
+	 * (§14) so the label materializes as a remote folder. With no feed the label is
+	 * membership-only. Idempotent: a same-named label/folder is reused (and re-tracked).
 	 */
 	public function createFolder(int $aliasId, string $name): ?array {
 		$name = trim(str_replace(array("\r", "\n", '"'), '', $name));
@@ -363,37 +370,46 @@ class MailboxService {
 		if (!$this->viewer->isAllAccess() && !$this->viewer->canAccess($aliasId)) {
 			return null;
 		}
+
+		// The label (global namespace) — created regardless of feed.
+		$label = InboundEmailLabel::findOrCreate($name);
+		if ($label === null) {
+			return null;
+		}
+		$labelId = intval($label->key);
+
+		// With a feed, also bind a tracked, pending folder so the sync push CREATEs it on
+		// the source and files membership into it. Reuse a same-named folder (re-track it).
 		$accounts = new MultiInboundImapAccount(array(
 			'alias_id' => $aliasId, 'enabled' => true, 'deleted' => false,
 		));
 		$accounts->load();
-		if (!count($accounts)) {
-			return null; // no IMAP feed to create the folder on
-		}
-		$accountId = intval($accounts->get(0)->key);
-
-		// Reuse a same-named folder (re-track it); otherwise create a pending one.
-		$existing = new MultiInboundImapFolder(array('account_id' => $accountId, 'name' => $name));
-		$existing->load();
-		if (count($existing)) {
-			$folder = new InboundImapFolder($existing->get(0)->key, TRUE);
-			if (!$folder->get('iif_is_tracked')) {
+		if (count($accounts)) {
+			$accountId = intval($accounts->get(0)->key);
+			$existing = new MultiInboundImapFolder(array('account_id' => $accountId, 'name' => $name));
+			$existing->load();
+			if (count($existing)) {
+				$folder = new InboundImapFolder($existing->get(0)->key, TRUE);
+				if (!$folder->get('iif_is_tracked')) {
+					$folder->set('iif_is_tracked', true);
+					$folder->prepare();
+					$folder->save();
+				}
+			} else {
+				$folder = new InboundImapFolder(NULL);
+				$folder->set('iif_iia_inbound_imap_account_id', $accountId);
+				$folder->set('iif_name', $name);
+				$folder->set('iif_role', InboundImapFolder::ROLE_CUSTOM);
 				$folder->set('iif_is_tracked', true);
+				$folder->set('iif_pending_remote_create', true);
 				$folder->prepare();
 				$folder->save();
+				$folder->load();
 			}
-		} else {
-			$folder = new InboundImapFolder(NULL);
-			$folder->set('iif_iia_inbound_imap_account_id', $accountId);
-			$folder->set('iif_name', $name);
-			$folder->set('iif_role', InboundImapFolder::ROLE_CUSTOM);
-			$folder->set('iif_is_tracked', true);
-			$folder->set('iif_pending_remote_create', true);
-			$folder->prepare();
-			$folder->save();
-			$folder->load();
+			$folder->ensureLabel(); // bind the folder to the (same-named) label
 		}
-		return array('id' => intval($folder->key), 'name' => $folder->get('iif_name'), 'role' => $folder->get('iif_role'));
+		return array('id' => $labelId, 'name' => $label->get('ilb_name'),
+			'role' => InboundImapFolder::ROLE_CUSTOM);
 	}
 
 	// -------------------------------------------------------------- threads
@@ -434,15 +450,14 @@ class MailboxService {
 			$where[] = "iem_is_archived IS NOT TRUE";
 		}
 
-		// Folder dimension (specs/two_way_imap_sync.md §8): restrict to messages
-		// present in the chosen folder via the imf_ membership. Null = the
-		// folder-unfiltered "All Mail" view, so coverage-only messages (zero imf_
-		// rows) are reachable at the mailbox root. Each message row is unique, so
-		// the thread aggregation is not double-counted.
+		// Label dimension: restrict to messages carrying the chosen custom label.
+		// $folderId is a label id (ilb_). Null = the label-unfiltered "All Mail" view, so
+		// unlabeled messages are reachable at the mailbox root. Each message row is
+		// unique, so the thread aggregation is not double-counted.
 		if ($folderId !== null && $folderId > 0) {
-			$where[] = 'iem_inbound_email_message_id IN (SELECT imf_iem_inbound_email_message_id
-						FROM imf_inbound_message_folders
-						WHERE imf_iif_inbound_imap_folder_id = ? AND imf_present_local = true)';
+			$where[] = 'iem_inbound_email_message_id IN (SELECT ilm_iem_inbound_email_message_id
+						FROM ilm_inbound_label_members
+						WHERE ilm_ilb_inbound_email_label_id = ? AND ilm_present_local = true)';
 			$params[] = $folderId;
 		}
 
@@ -764,71 +779,11 @@ class MailboxService {
 		$stmt->execute();
 		$affected = $stmt->rowCount();
 
-		// Bridge the soft-delete into membership so the one push path moves the
-		// source message to Trash (§7.5). Only for reference-backed rows on a
-		// two-way, delete-syncing feed; otherwise the soft-delete stays local.
-		$this->bridgeDeleteToMembership($ids);
+		// The soft-delete column is the truth; two-way sync's pushTrash relocates the
+		// source message to its Trash folder (§7.5). No membership bridge is needed —
+		// trashing is column-driven, not a label.
 
 		return $affected;
-	}
-
-	/**
-	 * Translate a local soft-delete into membership dirtiness: clear every
-	 * membership (present_local=false, keeping base so push EXPUNGEs/relocates) and
-	 * add a Trash membership (present_local=true, base=false → a dirty add the push
-	 * step MOVEs to Trash). Soft-delete and membership are two representations of
-	 * one fact, bridged here (§5, §7.5). No-op unless the feed is two-way with
-	 * delete sync on.
-	 */
-	private function bridgeDeleteToMembership(array $ids): void {
-		if (!count($ids)) {
-			return;
-		}
-		$in = implode(',', array_map('intval', $ids));
-		$db = $this->db();
-		$rows = $db->query(
-			"SELECT iem_inbound_email_message_id AS id, iem_iia_inbound_imap_account_id AS account_id
-			 FROM iem_inbound_email_messages
-			 WHERE iem_inbound_email_message_id IN ($in)
-			   AND iem_iia_inbound_imap_account_id IS NOT NULL")->fetchAll(PDO::FETCH_ASSOC);
-		if (!count($rows)) {
-			return;
-		}
-
-		$accounts = array();   // id → InboundImapAccount (cached)
-		$trash = array();      // account id → ?InboundImapFolder (cached)
-		foreach ($rows as $r) {
-			$accountId = intval($r['account_id']);
-			if (!isset($accounts[$accountId])) {
-				$accounts[$accountId] = new InboundImapAccount($accountId, TRUE);
-			}
-			$account = $accounts[$accountId];
-			if (!$account->key || !$account->isTwoWay() || !$account->syncDeletes()) {
-				continue;
-			}
-			$msgId = intval($r['id']);
-
-			// Clear current local memberships (dirty removes; (0,0) elements drop).
-			$members = new MultiInboundMessageFolder(array('message_id' => $msgId, 'present_local' => true));
-			$members->load();
-			foreach ($members as $m) {
-				$base = (bool)$m->get('imf_present_base');
-				InboundMessageFolder::setPresence($msgId, intval($m->get('imf_iif_inbound_imap_folder_id')), false, $base);
-			}
-
-			// Add a Trash membership (dirty add) so push MOVEs the source to Trash.
-			if (!isset($trash[$accountId])) {
-				$trashRows = new MultiInboundImapFolder(array(
-					'account_id' => $accountId,
-					'role'       => InboundImapFolder::ROLE_TRASH,
-				));
-				$trashRows->load();
-				$trash[$accountId] = count($trashRows) ? new InboundImapFolder($trashRows->get(0)->key, TRUE) : null;
-			}
-			if ($trash[$accountId] !== null) {
-				InboundMessageFolder::setPresence($msgId, intval($trash[$accountId]->key), true, false);
-			}
-		}
 	}
 
 	// --------------------------------------------------------------- helpers

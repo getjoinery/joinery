@@ -41,9 +41,10 @@
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_labels_class.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_label_members_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_message_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_alias_class.php'));
-require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_message_folder_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_log_class.php'));
 
 class InboundEmailFilterException extends SystemBaseException {}
@@ -57,10 +58,10 @@ class InboundEmailFilter extends SystemBase {
 	const SIZE_OP_LT = 'lt';
 
 	protected static $foreign_key_actions = array(
-		// A filter dies with its mailbox or its domain. fil_action_label_id is NOT a
-		// deletion-rules foreign key (its name doesn't encode the iif_ table, so the
-		// rule engine can't resolve the parent) — the label-apply action guards for a
-		// missing folder at apply time instead.
+		// A filter dies with its mailbox or its domain. The label-apply action
+		// (fil_action_ilb_inbound_email_label_id) guards for a since-deleted label at
+		// apply time, so it is intentionally not a cascade FK — deleting a label leaves
+		// stale filter actions that simply no-op rather than cascading the filter away.
 		'fil_iea_inbound_email_alias_id'  => array('action' => 'cascade'),
 		'fil_ied_inbound_email_domain_id' => array('action' => 'cascade'),
 	);
@@ -88,7 +89,7 @@ class InboundEmailFilter extends SystemBase {
 		'fil_match_has_attachment' => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 
 		// actions
-		'fil_action_label_id'    => array('type'=>'int8'),          // FK -> iif_inbound_imap_folder_id
+		'fil_action_ilb_inbound_email_label_id' => array('type'=>'int8'),  // the custom label to apply (ilb_)
 		'fil_action_star'        => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'fil_action_mark_read'   => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'fil_action_archive'     => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
@@ -256,13 +257,13 @@ class InboundEmailFilter extends SystemBase {
 		return $out;
 	}
 
-	/** True if a label/folder (iif_) row still exists. */
-	private static function folderExists(int $folderId): bool {
-		if ($folderId <= 0) { return false; }
+	/** True if the custom label still exists and is not deleted. */
+	private static function labelExists(int $labelId): bool {
+		if ($labelId <= 0) { return false; }
 		$db = DbConnector::get_instance()->get_db_link();
 		$stmt = $db->prepare(
-			'SELECT 1 FROM iif_inbound_imap_folders WHERE iif_inbound_imap_folder_id = ? LIMIT 1');
-		$stmt->execute(array($folderId));
+			'SELECT 1 FROM ilb_inbound_email_labels WHERE ilb_inbound_email_label_id = ? AND ilb_delete_time IS NULL LIMIT 1');
+		$stmt->execute(array($labelId));
 		return (bool)$stmt->fetchColumn();
 	}
 
@@ -285,7 +286,7 @@ class InboundEmailFilter extends SystemBase {
 	 * sets unioned).
 	 */
 	function buildActionSet(): array {
-		$label = intval($this->get('fil_action_label_id'));
+		$label = intval($this->get('fil_action_ilb_inbound_email_label_id'));
 		$fwd   = trim((string)$this->get('fil_action_forward_to'));
 		return array(
 			'never_spam' => (bool)$this->get('fil_action_never_spam'),
@@ -340,14 +341,13 @@ class InboundEmailFilter extends SystemBase {
 			$done[] = 'mark_spam';
 		}
 
-		// 3a. Labels — one membership row per label (same write as the reader's
-		// Labels control; a (false,false) row would delete, but we only add here).
-		// Guard for a since-deleted folder: setPresence would FK-violate the imf->iif
-		// constraint, so skip any label whose iif_ row is gone.
+		// 3a. Labels — apply each custom label to the message (same write as the
+		// reader's Labels control). InboundLabelMember::apply is idempotent. Guard for a
+		// since-deleted label so a stale filter action is simply skipped.
 		foreach (($a['label_ids'] ?? array()) as $lid) {
 			$lid = intval($lid);
-			if ($lid > 0 && self::folderExists($lid)) {
-				InboundMessageFolder::setPresence($mid, $lid, true, false);
+			if ($lid > 0 && self::labelExists($lid)) {
+				InboundLabelMember::apply($mid, $lid);
 				$done[] = 'label:' . $lid;
 			}
 		}

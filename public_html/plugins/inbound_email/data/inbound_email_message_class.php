@@ -127,7 +127,8 @@ class InboundEmailMessage extends SystemBase {
 		// Two-way sync flag-state tracking (specs/two_way_imap_sync.md §5, §7.1).
 		// local_modified is stamped by MailboxService when flags change locally;
 		// synced_state_time is stamped by push. A flag row is dirty iff
-		// local_modified > synced_state_time. Membership dirtiness lives in imf_.
+		// local_modified > synced_state_time. Custom-label dirtiness lives in the single
+		// ilm_ row (present_local vs present_base); see specs/inbound_email_labels.md.
 		'iem_local_state_modified' => array('type'=>'timestamp(6)'),
 		'iem_synced_state_time'    => array('type'=>'timestamp(6)'),
 		'iem_received_time'       => array('type'=>'timestamp(6)', 'default'=>'now()'),

@@ -72,11 +72,10 @@ class PollImapAccounts implements ScheduledTaskInterface {
 					$syncer = new ImapSyncer($account, $ingestor);
 					$syncer->prepare();                 // capabilities + folder discovery
 					$syncer->pull();                    // flags + VANISHED (pull|both)
-					$result = $ingestor->poll($maxPerAccount); // ingest, seeding imf_ membership
+					$result = $ingestor->poll($maxPerAccount); // ingest, seeding ilm_ labels + Trash soft-deletes
 					if ($account->isTwoWay()) {
-						$syncer->push($maxPerAccount);  // STORE / COPY / MOVE / EXPUNGE
+						$syncer->push($maxPerAccount);  // STORE / COPY / MOVE / EXPUNGE / trash
 					}
-					$syncer->reconcileDeletes();        // remote Trash arrivals → soft-delete
 				} else {
 					$result = $ingestor->poll($maxPerAccount);
 				}
