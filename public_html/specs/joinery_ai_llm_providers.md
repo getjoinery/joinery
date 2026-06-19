@@ -2,7 +2,9 @@
 
 ## Goal
 
-Decouple the recipe runner from Anthropic so a **locally-hosted model can drive recipes**. The first non-Anthropic target is Google **Gemma 4 E2B** served by Ollama on the same host — used occasionally for the owner's personal recipes and for exercising the AI system without spending API tokens.
+Decouple the recipe runner from Anthropic so a **locally-hosted (or self-hosted, OpenAI-compatible) model can drive recipes** — used occasionally for the owner's personal recipes and for exercising the AI system without spending API tokens.
+
+**Scope of this spec is the provider abstraction itself.** The specific local model and the host it runs on are **deliberately deferred** — see "Local model selection (deferred)" below for why the dev box can't host a usable agent model and what the candidate targets are. The abstraction ships first; a model gets wired in once a suitable host exists.
 
 This was explicitly deferred in the original build spec — see [`implemented/joinery_ai.md`](implemented/joinery_ai.md) "Out (deferred): Local inference (Ollama, llama.cpp)" and "Custom model providers beyond Anthropic". This spec implements that deferral.
 
@@ -134,7 +136,7 @@ Provider is a **global** setting, not per-recipe — simplest for the stated occ
 |---------|---------|---------|
 | `joinery_ai_llm_provider` | `anthropic` | select: `anthropic` / `local` |
 | `joinery_ai_local_base_url` | `http://localhost:11434/v1` | OpenAI-compatible base (Ollama) |
-| `joinery_ai_local_model` | `gemma4:e2b` | model id pulled in Ollama |
+| `joinery_ai_local_model` | `` | model id served by the OpenAI-compatible host; must be set before the local provider is usable (deferred — see below) |
 | `joinery_ai_local_api_key` | `` | dummy key for servers that require one; Ollama ignores it |
 | `joinery_ai_local_timeout_seconds` | `300` | per-call HTTP timeout for local generation |
 
@@ -144,25 +146,34 @@ Provider is a **global** setting, not per-recipe — simplest for the stated occ
 
 `views/admin/edit.php:137-143` stops hardcoding Claude models. Build options from `LlmProviderFactory::build()->models()`. If the recipe's stored `rcp_model` isn't in the active provider's list (provider was switched after the recipe was authored), append it as a disabled-looking option labeled `"{value} — unavailable under current provider"` so the value is preserved and the mismatch is visible rather than silently overwritten on save.
 
-## Local model: capability reality
+## Local model selection (deferred)
 
-Gemma 4 E2B (~2.3B active params) is the configured default per the project decision that the local model runs **on the existing dev box** (3.8 GB total RAM, ~2 GB free alongside Apache/Postgres/PHP-FPM, 2 CPU cores). Be explicit about what that hardware ceiling buys, because it is a ceiling, not a tuning knob:
+No model is wired in yet, by design. The dev box (3.8 GB total RAM, ~2–2.5 GB practically obtainable alongside Apache/Postgres/PHP-FPM, 2 CPU cores, 495 MB swap) **cannot host a usable agent model**, and that's a hard ceiling, not a tuning knob:
 
-- **Reliable tool calling has a parameter cliff around 7–9B** (mid-2026 consensus). Below it, models emit malformed tool calls on real workloads regardless of inference time — slowness tolerance does not buy reliability the parameter count lacks. Every model that fits in ~2 GB (E2B, Qwen3-1.7B, Granite-nano, Llama-3.2-3B, etc.) sits well under that cliff, so **model choice within this footprint does not change the outcome** — it trades one sub-threshold model for another.
-- E2B is the chosen default not because it tool-calls well but because, as a MoE, it has the best capability-per-byte at this size and is explicitly recommended for limited-hardware agents. The adapter degrades gracefully on malformed calls (above), but **reliable multi-tool loops are not achievable on this box with any model.**
-- Recommended use on this host: exercising the provider plumbing end-to-end, and light single-shot or single-tool recipes. Recipes needing dependable multi-tool loops keep `joinery_ai_llm_provider = anthropic`.
-- The lever that *does* change reliability is RAM, not model or speed. The day this moves to a roomier host, `gemma4:e4b` (~8 GB) is the natural next step, and a ~20 GB CPU host unlocks an MoE like `qwen3-30b-a3b` — the smallest configuration that clears the tool-calling cliff while staying CPU-tractable. Both are one-line `joinery_ai_local_model` changes; the OpenAI-compatible base URL means that host can be remote.
+- **Memory is the wall, not speed.** A MoE saves *compute*, not *memory* — all weights stay resident. Gemma 4 E2B (~5.1B total) at q4 needs ~3–3.5 GB resident; this box can free ~2.5 GB only by evicting the page cache Postgres relies on, with zero headroom. It OOMs on load or gets OOM-killed mid-run. Only ~1B models (Llama 3.2 1B, Qwen3-1.7B ≈ 0.8–1.1 GB) actually load here.
+- **Reliable tool calling has a parameter cliff around 7–9B** (mid-2026 consensus). Below it, models emit malformed tool calls regardless of how long you let them run — so the ~1B models that *fit* on this box don't *function* as agents. Model choice within the box's footprint does not change that outcome.
+
+Candidate targets to evaluate once a suitable host exists (all one-line `joinery_ai_local_model` + base-URL changes — the host can be remote):
+
+| Host class | Model | Notes |
+|------------|-------|-------|
+| ~1B on this box | `llama3.2:1b` / `qwen3:1.7b` | Loads and generates; **plumbing test only** — validates the provider adapter end-to-end, not real recipes. |
+| ~8 GB host | `gemma4:e4b` | Limited-hardware agent pick; better but still below the cliff. |
+| ~20 GB CPU host | `qwen3-30b-a3b` (MoE) | Smallest config that clears the tool-calling cliff while staying CPU-tractable — the "slow but actually reliable" option. |
+| GPU host (~24 GB) | dense `gemma4:27b` / `qwen3:32b` | Most reliable local tier. |
+
+Until a host is chosen, recipes needing dependable loops keep `joinery_ai_llm_provider = anthropic`. The adapter degrades gracefully on malformed tool calls (above) regardless of model.
 
 No prompt caching exists locally, so `cache_control` is ignored and every call re-sends the full system prompt. Cost-irrelevant (free); it just means the schema block isn't amortized across iterations.
 
-## Operations (local host setup)
+## Operations (host setup)
 
-Not code, but required for the feature to function — document in the plugin overview:
+Not code, but required before the local provider can be switched on — document in the plugin overview once a host/model is chosen (deferred):
 
-1. Install Ollama on the host that runs the recipe CLI workers (workers are detached `php` processes on the same box, so `localhost:11434` is reachable).
-2. `ollama pull gemma4:e2b`.
-3. Manage RAM with the `OLLAMA_KEEP_ALIVE` server env (e.g. `5m`) so the model unloads between occasional runs rather than sitting resident — the dev box is deliberately RAM-constrained. The app does not manage server memory; this stays an ops concern.
-4. Local generation is slow on CPU; expect multi-minute runs and keep `rcp_max_iterations` modest for local recipes.
+1. Stand up an OpenAI-compatible server (Ollama, llama.cpp, vLLM, LM Studio) on a host with enough RAM for the chosen model (see "Local model selection"). The recipe CLI workers reach it via `joinery_ai_local_base_url` — `localhost` if same-box, otherwise the host's URL.
+2. Pull/serve the chosen model and set `joinery_ai_local_model` to its id.
+3. Manage RAM with the server's keep-alive (e.g. Ollama's `OLLAMA_KEEP_ALIVE=5m`) so the model unloads between occasional runs rather than sitting resident. The app does not manage server memory; this stays an ops concern.
+4. CPU-only generation is slow; expect multi-minute runs and keep `rcp_max_iterations` modest for local recipes.
 
 ## File layout
 
@@ -189,7 +200,7 @@ No change to the implemented specs (they are immutable history).
 ## Acceptance checklist
 
 - [ ] `joinery_ai_llm_provider = anthropic` runs both existing acceptance recipes unchanged (zero behavior diff — the Anthropic path is passthrough).
-- [ ] Switching to `local` with Ollama + `gemma4:e2b` running: a trivial single-tool recipe (e.g. `web_search` or a `query_model` read) completes a full tool-use loop end-to-end and produces a dashboard card.
+- [ ] Switching to `local` with an OpenAI-compatible host + the configured model running: a trivial single-tool recipe (e.g. `web_search` or a `query_model` read) completes a full tool-use loop end-to-end and produces a dashboard card. (Validated against whichever host/model is chosen later; a ~1B model on any box suffices to prove the adapter.)
 - [ ] Tool call → tool_result round-trips correctly (tool_call id preserved both directions).
 - [ ] Malformed tool arguments from the local model surface as a normal `is_error` tool_result, not a crashed run.
 - [ ] Ollama stopped → run fails with the "Local model server not reachable" message and the `api_network_error` code, throttled failure email (not per-tick).
