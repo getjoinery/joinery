@@ -11,7 +11,7 @@
  * the Mailbox Reader's thread-key index is created here (same pattern as the
  * server_manager plugin's index migration).
  *
- * @version 1.4
+ * @version 1.19.0
  */
 return [
 	[
@@ -166,6 +166,28 @@ return [
 				 SET iem_raw_storage_driver = 'remote'
 				 WHERE iem_iia_inbound_imap_account_id IS NOT NULL
 				   AND iem_raw_storage_driver = 'inline'"
+			);
+		},
+	],
+
+	[
+		// Full-text search index for the Mailbox Reader (specs/inbound_email_fulltext_search.md).
+		// The auto-updater does not create non-unique indexes, so the GIN index over
+		// the canonical search expression is created here. The expression MUST stay
+		// byte-identical to the one MailboxService::listThreads() filters on, or the
+		// planner will not use the index.
+		'id' => 'iem_007_fulltext_search_index',
+		'version' => '1.19.0',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$dblink->exec(
+				"CREATE INDEX IF NOT EXISTS iem_fulltext_idx
+				 ON iem_inbound_email_messages
+				 USING GIN (to_tsvector('english',
+						coalesce(iem_sender, '')      || ' ' ||
+						coalesce(iem_subject, '')     || ' ' ||
+						coalesce(iem_body_plain, '')  || ' ' ||
+						coalesce(iem_body_html, '')))"
 			);
 		},
 	],

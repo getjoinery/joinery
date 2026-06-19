@@ -633,7 +633,10 @@ either the alias or the user.
 The reader's **left rail** is a switcher over the addresses the viewer has been
 granted, each independently badged with its unread count. Selecting one scopes
 the whole reader to that mailbox; below the switcher are All / Unread / Starred
-filters and a debounced search box. A mailbox whose IMAP feed has discovered
+filters and a debounced search box. The search box runs a single PostgreSQL
+full-text query (`websearch_to_tsquery`) over the sender, subject, and both
+plain and HTML body fields at once, backed by the `iem_fulltext_idx` GIN index
+on the matching `to_tsvector` expression. A mailbox whose IMAP feed has discovered
 folders also lists them **indented under the selected mailbox** (an "All Mail"
 root for the folder-unfiltered view, then each tracked folder); see the Sync
 subsection for how membership drives folder contents.

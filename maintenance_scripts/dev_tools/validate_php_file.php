@@ -610,8 +610,10 @@ class MethodExistenceTest {
                         }
                     }
 
-                    // Stop looking if we hit something that's not assignment-related
-                    if ($token === ';' || $token === ',') {
+                    // Stop at the statement boundary so an assignment whose RHS
+                    // isn't a recognized pattern (e.g. $x = $arr[$k];) doesn't bleed
+                    // forward and latch onto the next `new` in the file.
+                    if ($next_token === ';' || $next_token === ',') {
                         break;
                     }
                 }

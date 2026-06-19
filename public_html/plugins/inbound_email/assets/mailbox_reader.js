@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.1
+ * No framework. @version 2.2
  *
  * Two-pane layout: the main pane swaps between the conversation list and an
  * opened conversation (toggled by the `reading` class on #mbx-reader); a back
@@ -201,7 +201,7 @@
 		if (state.aliasId != null) p.set('alias_id', String(state.aliasId));
 		if (state.filter === 'unread') p.set('unread_only', '1');
 		if (state.filter === 'starred') p.set('starred_only', '1');
-		if (state.search) { p.set('subject', state.search); p.set('sender', state.search); p.set('body', state.search); }
+		if (state.search) { p.set('q', state.search); }
 		if (state.spamView) { p.set('spam', '1'); }
 		else if (state.folderId != null) { p.set('folder_id', String(state.folderId)); }
 		p.set('page', String(state.page));

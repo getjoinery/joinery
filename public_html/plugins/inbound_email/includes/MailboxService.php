@@ -395,7 +395,7 @@ class MailboxService {
 	 * Conversation list within scope, grouped by thread, latest-first.
 	 *
 	 * @param int|null $aliasId  null = all accessible (unconstrained for superadmin)
-	 * @param array    $filters  sender, subject, body, unread_only, starred_only
+	 * @param array    $filters  q, unread_only, starred_only, spam
 	 * @param int      $page     1-based
 	 * @param int      $perpage
 	 * @return array  ['threads'=>[...], 'has_more'=>bool, 'page'=>int]
@@ -430,20 +430,19 @@ class MailboxService {
 			$params[] = $folderId;
 		}
 
-		// Row-level text filters: a thread shows if any message matches.
-		if (!empty($filters['sender'])) {
-			$where[] = 'iem_sender ILIKE ?';
-			$params[] = '%' . $this->likeEscape($filters['sender']) . '%';
-		}
-		if (!empty($filters['subject'])) {
-			$where[] = 'iem_subject ILIKE ?';
-			$params[] = '%' . $this->likeEscape($filters['subject']) . '%';
-		}
-		if (!empty($filters['body'])) {
-			$where[] = '(iem_body_plain ILIKE ? OR iem_body_html ILIKE ?)';
-			$term = '%' . $this->likeEscape($filters['body']) . '%';
-			$params[] = $term;
-			$params[] = $term;
+		// Row-level full-text filter: a thread shows if any message matches.
+		// The expression MUST stay byte-identical to iem_007's GIN index
+		// expression (plugins/inbound_email/migrations/migrations.php), or the
+		// planner will not use the index. websearch_to_tsquery tolerates
+		// arbitrary user input (stray quotes/operators won't raise).
+		if (!empty($filters['q'])) {
+			$where[] = "to_tsvector('english',
+					coalesce(iem_sender, '')      || ' ' ||
+					coalesce(iem_subject, '')     || ' ' ||
+					coalesce(iem_body_plain, '')  || ' ' ||
+					coalesce(iem_body_html, ''))
+				@@ websearch_to_tsquery('english', ?)";
+			$params[] = $filters['q'];
 		}
 
 		// Thread-level filters.
@@ -763,10 +762,6 @@ class MailboxService {
 			}
 		}
 		return array_values(array_unique($out));
-	}
-
-	private function likeEscape(string $term): string {
-		return str_replace(array('%', '_'), array('\\%', '\\_'), $term);
 	}
 
 	/** Normalize a PDO-returned boolean (PostgreSQL yields 't'/'f' or bool). */

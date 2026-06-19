@@ -300,9 +300,9 @@ class MailboxReaderTest {
 	private function testSearch() {
 		$this->out('-- search --');
 		$svc = new MailboxService($this->bethViewer());
-		$res = $svc->listThreads(null, array('subject' => 'invoice'), 1, 50);
+		$res = $svc->listThreads(null, array('q' => 'invoice'), 1, 50);
 		$keys = $this->threadKeys($res);
-		$this->ok($keys === ['<t2@x>'], 'subject search "invoice" returns only T2');
+		$this->ok($keys === ['<t2@x>'], 'full-text search "invoice" returns only T2');
 
 		$res2 = $svc->listThreads(null, array('starred_only' => true), 1, 50);
 		$this->ok($this->threadKeys($res2) === ['<t2@x>'], 'starred_only returns only T2');
