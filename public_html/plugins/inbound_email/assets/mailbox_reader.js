@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.3
+ * No framework. @version 2.4
  *
  * Two-pane layout: the main pane swaps between the conversation list and an
  * opened conversation (toggled by the `reading` class on #mbx-reader); a back
@@ -16,7 +16,8 @@
 	var state = {
 		aliasId: null,        // null = all accessible (or "All mail" for superadmin)
 		allAccess: false,
-		filter: 'all',        // all | unread | starred
+		filter: 'all',        // retained for the list endpoint; sectioned view shows all
+		lastSection: null,    // last section header emitted (for sectioned rendering)
 		search: '',
 		page: 1,
 		hasMore: false,
@@ -208,13 +209,25 @@
 		return CFG.listUrl + '?' + p.toString();
 	}
 
+	// Gmail-style section labels, keyed by the server-provided `section` bucket.
+	var SECTION_LABELS = { unread: 'Unread', starred: 'Starred', other: 'Everything else' };
+
 	function loadThreads(reset) {
-		if (reset) { state.page = 1; }
+		if (reset) { state.page = 1; state.lastSection = null; }
 		var listEl = $('#mbx-threads');
 		if (reset) { listEl.innerHTML = ''; listEl.appendChild(loadingRow()); }
 		apiGet(buildListQuery()).then(function (data) {
-			if (reset) listEl.innerHTML = '';
-			(data.threads || []).forEach(function (t) { listEl.appendChild(threadRow(t)); });
+			if (reset) { listEl.innerHTML = ''; state.lastSection = null; }
+			(data.threads || []).forEach(function (t) {
+				// The list arrives ordered by section, so emit a header each time the
+				// bucket changes — works seamlessly across paginated "Load more" calls.
+				var section = t.section || 'other';
+				if (section !== state.lastSection) {
+					listEl.appendChild(sectionHeader(section));
+					state.lastSection = section;
+				}
+				listEl.appendChild(threadRow(t));
+			});
 			if (!listEl.children.length) {
 				listEl.appendChild(emptyRow('No conversations.'));
 			}
@@ -223,8 +236,25 @@
 		});
 	}
 
+	function sectionHeader(section) {
+		return el('li', 'mbx-section', SECTION_LABELS[section] || section);
+	}
+
 	function loadingRow() { var li = el('li', 'mbx-loading', 'Loading…'); return li; }
 	function emptyRow(text) { var li = el('li', 'mbx-loading', text); return li; }
+
+	// Pull a human display name from a "Name <addr>" / bare-address sender string,
+	// hiding the email address. Falls back to the local-part when there's no name.
+	function senderName(raw) {
+		if (!raw) return '(unknown)';
+		raw = String(raw).trim();
+		var m = /^\s*"?([^"<]*?)"?\s*<[^>]+>\s*$/.exec(raw);
+		if (m && m[1].trim()) return m[1].trim();
+		// Bare address (or no display name): show the local-part, address hidden.
+		var at = raw.indexOf('@');
+		if (at > 0) return raw.slice(0, at);
+		return raw.replace(/[<>]/g, '').trim() || '(unknown)';
+	}
 
 	function threadRow(t) {
 		var li = el('li', 'mbx-thread-item' + (t.unread_count > 0 ? ' unread' : ''));
@@ -240,19 +270,24 @@
 		});
 		li.appendChild(star);
 
-		var main = el('div', 'mbx-thread-main');
-		var row1 = el('div', 'mbx-thread-row');
-		row1.appendChild(el('span', 'mbx-thread-from', t.senders || '(unknown)'));
-		row1.appendChild(el('span', 'mbx-thread-time', fmtTime(t.latest_time)));
-		main.appendChild(row1);
+		// Sender name (address hidden), fixed left column.
+		var from = el('span', 'mbx-thread-from', senderName(t.sender || t.senders));
+		from.title = t.senders || '';
+		li.appendChild(from);
 
-		var subj = el('div', 'mbx-thread-subject', t.subject || '(no subject)');
+		// Subject + snippet share one clipped line: "Subject — preview text…".
+		var mid = el('div', 'mbx-thread-mid');
+		var subj = el('span', 'mbx-thread-subject', t.subject || '(no subject)');
+		mid.appendChild(subj);
 		if (t.msg_count > 1) {
-			var c = el('span', 'mbx-thread-count', String(t.msg_count));
-			subj.appendChild(c);
+			mid.appendChild(el('span', 'mbx-thread-count', String(t.msg_count)));
 		}
-		main.appendChild(subj);
-		li.appendChild(main);
+		if (t.snippet) {
+			mid.appendChild(el('span', 'mbx-thread-snippet', ' — ' + t.snippet));
+		}
+		li.appendChild(mid);
+
+		li.appendChild(el('span', 'mbx-thread-time', fmtTime(t.latest_time)));
 
 		li.addEventListener('click', function () { openThread(t, li); });
 		return li;
@@ -726,18 +761,6 @@
 
 	// ---- wiring ----
 	function init() {
-		// Filters.
-		Array.prototype.forEach.call(document.querySelectorAll('.mbx-filter'), function (btn) {
-			btn.addEventListener('click', function () {
-				Array.prototype.forEach.call(document.querySelectorAll('.mbx-filter'), function (b) {
-					b.classList.remove('active');
-				});
-				btn.classList.add('active');
-				state.filter = btn.dataset.filter;
-				loadThreads(true);
-			});
-		});
-
 		// Debounced search.
 		var searchTimer = null;
 		$('#mbx-search').addEventListener('input', function (e) {
