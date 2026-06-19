@@ -2,7 +2,17 @@
 #
 # install_email.sh - host installer + base configurator for Inbound Email.
 #
-# Version: 2.7 - Inbound authentication verification. opendkim already runs in
+# Version: 2.8 - Optional content spam scanner (spec
+#                inbound_email_content_spam_filtering). When
+#                inbound_email_content_spam_filtering_enabled is on, installs rspamd
+#                + redis, wires rspamd as a Postfix milter AFTER opendkim+opendmarc
+#                (header-stamping only, never reject), pins its X-Spam header contract,
+#                puts the Bayes classifier on redis, and exposes the controller on
+#                loopback 11334 (no password — loopback-trusted) for the spam/ham
+#                feedback loop. Disabled deployments install none of it. redis is
+#                disposable plugin-local state; Postgres (iem_spam_verdict) is the
+#                durable signal, so no volume mount is required.
+#                2.7 - Inbound authentication verification. opendkim already runs in
 #                Mode sv; this adds the opendmarc milter and an AuthservID on
 #                both milters (sourced from inbound_email_mail_hostname, the
 #                value the app's AuthenticationResults parser trusts), then wires
@@ -480,6 +490,125 @@ elif command -v service >/dev/null 2>&1 && service opendmarc restart >/dev/null 
     echo "opendmarc: restarted (service)."
 else
     echo "WARNING: could not restart opendmarc automatically - restart it manually." >&2
+fi
+
+# --- 5b. rspamd content spam scanner (optional) ------------------------------
+# Content-layer spam filtering (spec inbound_email_content_spam_filtering).
+# Installed + wired ONLY when inbound_email_content_spam_filtering_enabled is on, so a
+# deployment that doesn't use it carries none of rspamd/redis. rspamd runs as a milter
+# AFTER opendkim+opendmarc (so it can score on the auth results), stamps an X-Spam
+# header the app reads, and NEVER rejects (add_header mode only — reviewable-verdict
+# model). Its Bayes classifier persists tokens in redis; the spam/ham feedback loop
+# teaches it via the loopback controller on 11334. redis here is DISPOSABLE
+# plugin-local state — the durable signal is iem_spam_verdict in Postgres, and the
+# corpus self-heals from corrections after a wipe (no volume mount required).
+CONTENT_SPAM="$("${DB_PSQL[@]}" -c "SELECT stg_value FROM stg_settings WHERE stg_name = 'inbound_email_content_spam_filtering_enabled'" 2>/dev/null | head -1 | tr -d '[:space:]' || true)"
+if [[ "${CONTENT_SPAM}" == "1" || "${CONTENT_SPAM}" == "true" || "${CONTENT_SPAM}" == "t" ]]; then
+    echo "content-spam: enabled - installing rspamd + redis"
+
+    CS_PACKAGES=(rspamd redis-server)
+    CS_MISSING=()
+    for pkg in "${CS_PACKAGES[@]}"; do
+        if dpkg -s "${pkg}" >/dev/null 2>&1; then
+            echo "Already installed: ${pkg}"
+        else
+            CS_MISSING+=("${pkg}")
+        fi
+    done
+    if [[ ${#CS_MISSING[@]} -gt 0 ]]; then
+        echo "Installing: ${CS_MISSING[*]}"
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -qq
+        apt-get install -y "${CS_MISSING[@]}"
+    fi
+
+    mkdir -p /etc/rspamd/local.d
+
+    # milter_headers: stamp X-Spam (binary flag) + X-Spam-Status (carries the score).
+    # The header NAMES are the contract InboundEmailRouter::readSpamHeader() parses;
+    # keep them in step with that class's SPAM_*_HEADER constants.
+    cat > /etc/rspamd/local.d/milter_headers.conf <<'RSPAMDHDR'
+# joinery-managed - content spam header contract (InboundEmailRouter::readSpamHeader).
+extended_spam_headers = true;
+use = ["spam-header", "x-spam-status", "authentication-results"];
+# spam-header adds 'X-Spam: Yes' on a spam verdict; x-spam-status adds
+# 'X-Spam-Status: Yes, score=...'. The app reads the flag + score from these.
+RSPAMDHDR
+
+    # actions: stamp headers only, NEVER reject/greylist (reviewable-verdict model).
+    cat > /etc/rspamd/local.d/actions.conf <<'RSPAMDACT'
+# joinery-managed - header-stamping only; rejection disabled (out of scope).
+reject = null;
+greylist = null;
+add_header = 6;
+RSPAMDACT
+
+    # Bayes classifier on redis (the override just pins the backend + autolearn).
+    cat > /etc/rspamd/local.d/classifier-bayes.conf <<'RSPAMDBAYES'
+# joinery-managed - Bayes tokens persist in redis (disposable; Postgres is truth).
+backend = "redis";
+servers = "127.0.0.1:6379";
+autolearn = true;
+RSPAMDBAYES
+
+    cat > /etc/rspamd/local.d/redis.conf <<'RSPAMDREDIS'
+# joinery-managed - local redis for Bayes/statistics.
+servers = "127.0.0.1:6379";
+RSPAMDREDIS
+
+    # controller worker: loopback bind + loopback-trusted, so the privileged learn
+    # command needs NO password. This is the endpoint LearnSpamFeedback POSTs to.
+    cat > /etc/rspamd/local.d/worker-controller.inc <<'RSPAMDCTRL'
+# joinery-managed - controller on loopback; learn authorized by origin (no password).
+bind_socket = "127.0.0.1:11334";
+secure_ip = "127.0.0.1";
+secure_ip = "::1";
+RSPAMDCTRL
+
+    # proxy (milter) worker: self-scan milter mode on 11332 (rspamd's default,
+    # re-asserted so a non-default base image is corrected).
+    cat > /etc/rspamd/local.d/worker-proxy.inc <<'RSPAMDPROXY'
+# joinery-managed - Postfix milter (self-scan) on 11332.
+milter = yes;
+timeout = 120s;
+upstream "local" {
+  default = yes;
+  self_scan = yes;
+}
+bind_socket = "*:11332";
+RSPAMDPROXY
+
+    # Wire rspamd into Postfix AFTER opendkim+opendmarc so it scores on auth results.
+    postconf -e "smtpd_milters = inet:localhost:8891, inet:localhost:8893, inet:localhost:11332"
+    echo "main.cf: rspamd milter appended (inet:localhost:11332, after opendkim+opendmarc)"
+
+    # Start redis + rspamd. Under systemd, enable + restart; in a container (no
+    # systemd) the container CMD must (re)start both every boot — this script
+    # re-asserts config idempotently to match (spec mail_stack_container_persistence).
+    systemctl enable redis-server >/dev/null 2>&1 || true
+    if command -v systemctl >/dev/null 2>&1 && systemctl restart redis-server 2>/dev/null; then
+        echo "redis: restarted (systemd)."
+    elif command -v service >/dev/null 2>&1 && service redis-server restart >/dev/null 2>&1; then
+        echo "redis: restarted (service)."
+    else
+        echo "WARNING: could not restart redis-server automatically - start it manually." >&2
+    fi
+
+    systemctl enable rspamd >/dev/null 2>&1 || true
+    if command -v systemctl >/dev/null 2>&1 && systemctl restart rspamd 2>/dev/null; then
+        echo "rspamd: restarted (systemd)."
+    elif command -v service >/dev/null 2>&1 && service rspamd restart >/dev/null 2>&1; then
+        echo "rspamd: restarted (service)."
+    else
+        echo "WARNING: could not restart rspamd automatically - start it manually." >&2
+    fi
+
+    echo "content-spam: rspamd milter on 11332, controller on 127.0.0.1:11334 (loopback, no password)."
+    echo "  NOTE: rspamd queries DNS RBLs while scanning - ensure outbound DNS egress or scoring degrades."
+else
+    # Disabled: section 5 already set smtpd_milters without rspamd, so a previously
+    # wired milter self-corrects on this re-run. Nothing to install.
+    echo "content-spam: disabled (inbound_email_content_spam_filtering_enabled off) - rspamd not installed."
 fi
 
 # --- 6. firewall -------------------------------------------------------------

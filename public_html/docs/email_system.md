@@ -665,8 +665,7 @@ SMTP transaction lives in one place shared with all other SMTP relaying.
 > *record* check — it inspects domains **we control** for a sane outbound/setup
 > config. It is **not** verification of an inbound message's connecting IP
 > against a record, and must never be repurposed for inbound verdicts. The app
-> **no longer computes inbound SPF/DKIM/DMARC at all** (it once hand-rolled a
-> DKIM verifier that false-failed legitimate mail — removed). Per-inbound-message
+> does **not** compute inbound SPF/DKIM/DMARC at all. Per-inbound-message
 > verdicts come from the message's `Authentication-Results` header, stamped by
 > the verifying MTA (opendkim-verify + opendmarc) and read by the inbound_email
 > plugin's `AuthenticationResults`/`InboundEmailRouter` — never from

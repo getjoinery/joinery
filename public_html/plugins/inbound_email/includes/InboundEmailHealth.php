@@ -9,10 +9,11 @@
  * rethrows any failure as ProvisioningCheckFailed with a clean message. It
  * must be side-effect-free, time-bounded, and cheap to run.
  *
- * The inbound_mail_server and domain DNS checks are provider-aware:
- * they consult InboundProviderRegistry::active() and dispatch accordingly.
+ * The inbound_mail_server, domain DNS, and content-spam-scanner checks are
+ * provider-aware: they consult InboundProviderRegistry::active() and dispatch
+ * accordingly.
  *
- * @version 1.5
+ * @version 1.6
  */
 
 require_once(PathHelper::getIncludePath('includes/ProvisioningCheckFailed.php'));
@@ -147,5 +148,42 @@ class InboundEmailHealth {
                 count($problems) . ' inbound-domain setup problem(s): ' . implode('; ', $problems)
             );
         }
+    }
+
+    /** Port the rspamd milter (proxy worker) listens on locally. */
+    const RSPAMD_MILTER_PORT = 11332;
+
+    /**
+     * Verify the content spam scanner (specs/inbound_email_content_spam_filtering.md).
+     *
+     * Optional feature, provider-aware:
+     *   - Disabled (inbound_email_content_spam_filtering_enabled off) → nothing to
+     *     verify; passes silently.
+     *   - Webhook providers (Mailgun/SendGrid/SES) get the content-spam signal from the
+     *     provider's own upstream scanning — there is no local milter — so this passes.
+     *   - Postfix path: the rspamd milter must be listening locally (same shape as
+     *     checkInboundMailServer's port-25 probe).
+     *
+     * @throws ProvisioningCheckFailed if the local rspamd milter is unreachable.
+     */
+    public static function checkContentSpamScanner() {
+        $settings = Globalvars::get_instance();
+        if (!$settings->get_setting('inbound_email_content_spam_filtering_enabled')) {
+            return;
+        }
+
+        $provider = InboundProviderRegistry::active();
+        if ($provider::isWebhook()) {
+            return;
+        }
+
+        $sock = @stream_socket_client('tcp://127.0.0.1:' . self::RSPAMD_MILTER_PORT, $errno, $errstr, 2);
+        if (!$sock) {
+            throw new ProvisioningCheckFailed(
+                'The rspamd content-spam milter (port ' . self::RSPAMD_MILTER_PORT
+                . ') is not accepting connections: ' . ($errstr ?: 'connection refused')
+            );
+        }
+        @fclose($sock);
     }
 }

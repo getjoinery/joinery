@@ -295,12 +295,11 @@ first install — keyless for *signing* until a per-domain key is added, but
 *verifying* inbound DKIM immediately — and `milter_default_action = accept`
 guarantees a keyless or down opendkim never blocks or defers mail.
 
-> The opendkim.conf the installer writes is keyed on a managed marker, so a host
-> already wired on an older version (which lacked `AuthservID`) is upgraded in
-> place on the next run. The live dev box was once found running **Debian-stock**
-> opendkim.conf with Postfix dialing a dead `inet:8891` socket — the milter was a
-> silent no-op in both directions; re-running the installer realigns the socket
-> and restores both verify and signing.
+> The opendkim.conf the installer writes is keyed on a managed marker. Re-running
+> `install_email.sh` re-asserts the managed config — the `inet:8891` socket,
+> `Mode sv`, and the `AuthservID` — and realigns Postfix's milter wiring to match,
+> so a host whose opendkim config has drifted is brought back into line on the
+> next run.
 
 Generating a key is a **per-domain** step (a key file on disk plus a DNS record
 cannot be a database lookup). `provisioning/provision_dkim.sh` does the whole
@@ -376,6 +375,8 @@ identity and provisioning (provider, mail hostname/IP, SRS, the relay) live on t
 | `inbound_email_forwarding_smtp_username` | (empty) | Falls back to `smtp_username` |
 | `inbound_email_forwarding_smtp_password` | (empty) | Falls back to `smtp_password` |
 | `inbound_email_spam_filtering_enabled` | `0` | Act on auth verdicts to assign a spam verdict and split the inbox/Spam view. See [Spam filtering](#spam-filtering). |
+| `inbound_email_content_spam_filtering_enabled` | `0` | Read the content scanner's signal (rspamd `X-Spam` header / webhook provider spam flag) into the spam verdict. Requires the master gate above. See [Content scanner](#content-scanner-rspamd). |
+| `inbound_email_rspamd_controller_url` | `http://127.0.0.1:11334` | Loopback rspamd controller endpoint the spam/ham feedback loop POSTs learn requests to. No password (loopback-trusted). |
 
 ## Plugin Structure
 
@@ -652,8 +653,8 @@ Read/star state lives **on the message row** (`iem_is_read`, `iem_is_starred`,
 `iem_read_time`) — not in a per-viewer table. On a shared mailbox this means read
 state is **shared** among everyone with access (team-inbox semantics: you see
 what a colleague already handled). Opening a thread marks it read for everyone on
-that mailbox. (Per-person read state would require reintroducing a per-(message,
-user) state table — explicitly deferred.)
+that mailbox. Read/star state is a property of the mailbox row, shared by everyone
+granted access to it.
 
 ### The viewer seam
 
@@ -672,20 +673,17 @@ may they touch*:
 `MailboxService` funnels **every** read and mutation through the viewer's scope,
 so a crafted id/thread/alias for an un-granted mailbox returns nothing and mutates
 nothing. `MailboxViewer::forUser($user_id, $permission)` builds a viewer
-independent of the session — used by tests and by the deferred member-mount.
+independent of the session.
 
 ### Permissions
 
-The reader, its endpoints, and grant management are **permission-5 (staff)** in
-v1; grants partition which mailboxes each staff member sees. Permission-10
-superadmins are all-access. **Opening the reader to non-admin members later needs
-no schema change or migration** — the grant table, per-row state, and the
-viewer/scope seam are keyed on the user generically. It is purely additive code:
-relax the endpoint permission gate (currently `get_permission() < 5` in each
-`ajax/mailbox_*.php`) and add a member-area mount. Reply/Reply-All/Forward
-(below) are staff-and-superadmin, gated by the same mailbox grant that governs
-reading; `MailboxViewer::canCompose()` is the seam for exposing them to non-admin
-members.
+The reader, its endpoints, and grant management are **permission-5 (staff)**;
+grants partition which mailboxes each staff member sees. Permission-10 superadmins
+are all-access. The grant table, per-row state, and the viewer/scope seam are keyed
+on the user generically, and each endpoint gates on `get_permission() < 5` in
+`ajax/mailbox_*.php`. Reply/Reply-All/Forward (below) are staff-and-superadmin,
+gated by the same mailbox grant that governs reading; `MailboxViewer::canCompose()`
+is the seam that authorizes composing.
 
 ### Endpoints
 
@@ -743,7 +741,17 @@ labelled "Sent").
 Spam is a **first-class verdict on the message**, `iem_spam_verdict` (`ham` /
 `spam`; NULL = not evaluated). It is what the reader filters on, so one Spam view
 works identically for locally-received mail and IMAP-polled mailboxes. There is no
-folder membership and no scoring engine involved — the verdict is the disposition.
+folder membership — the verdict is the disposition. The app runs **no scorer of its
+own**: it acts on the auth verdicts and on a binary spam result a content scanner (or
+the webhook provider) decides, recording the scanner's numeric score only for display.
+The one exception is SendGrid, which exposes a score but no binary, so its result is
+derived from a configurable threshold (see [Content scanner](#content-scanner-rspamd)).
+
+Three protection layers stack: the MTA's RBLs at RCPT time, the auth rule below
+(DMARC/SPF/DKIM), and a content scanner — the only layer that catches **authenticated
+bulk spam** (junk that passes its own DMARC/SPF/DKIM: lookalike domains, bulk mail
+from real ESPs, a compromised aligned account). All three feed the same
+`iem_spam_verdict`.
 
 Gated by `inbound_email_spam_filtering_enabled` (default off), toggled on the
 **Settings** tab. When off, the verdict stays NULL and nothing changes.
@@ -781,9 +789,66 @@ rows; a **Spam** entry in the per-mailbox folder rail shows only them. Per
 conversation, **Mark as spam** (inbox) / **Not spam** (Spam view) set the verdict
 directly.
 
-A content scanner (rspamd / SpamAssassin) can be added later as a Postfix milter
-that stamps an `X-Spam` header; the router would read it and set the same
-`iem_spam_verdict = 'spam'`, reusing this entire disposition with no rework.
+### Content scanner (rspamd)
+
+The content layer is a second verdict source **OR'd** into `classifySpam()`: a message
+is `spam` if the content scanner flagged it **or** the auth rule fires. It changes no
+downstream behavior — same `iem_spam_verdict`, same Spam view, same forward
+suppression. The signal is resolved per ingest path:
+
+- **Postfix path.** rspamd runs as a Postfix milter *after* opendkim + opendmarc (so it
+  scores on the auth results), in header-stamping mode only (**never** rejects —
+  consistent with the reviewable-verdict model). It stamps `X-Spam: Yes` on a spam
+  verdict (plus `X-Spam-Status` carrying the score); `InboundEmailRouter::readSpamHeader()`
+  reads that header, trusting it on the same basis as the `Authentication-Results` line
+  (the milter is ours, and rspamd strips any inbound-forged `X-Spam` before re-stamping).
+- **Webhook providers.** Mailgun, SendGrid and SES supply their own content/reputation
+  spam signal in the authenticated payload; each provider's `handleInbound()` surfaces it
+  as a `spam` key, carried into the router as a sibling of the auth verdicts. SES's
+  `spamVerdict` and Mailgun's `X-Mailgun-Sflag` are binary verdicts. SendGrid posts only a
+  numeric `spam_score` (its SpamAssassin score, no yes/no), so the binary is derived by
+  comparing it to `sendgrid_inbound_spam_threshold` (default `5.0`, SpamAssassin's own
+  `required_score`; tunable on the Setup tab). The raw score is recorded either way.
+- **IMAP-polled mail.** Unchanged — the remote already classified it (junk-folder mapping).
+
+Gated by `inbound_email_content_spam_filtering_enabled` (default off), which **requires
+the master `inbound_email_spam_filtering_enabled`** to be on — content filtering is a
+source feeding the same disposition. With the content gate off the milter may still stamp
+headers (harmless); the router ignores them.
+
+**Recorded score.** `iem_spam_score` (nullable) holds the scanner's/provider's numeric
+score as reported, for display and tuning only — **nothing in PHP ever branches on it**.
+The reader shows it on the message detail when present.
+
+**Provisioning (Postfix path only).** `provisioning/install_email.sh` installs `rspamd`
+and its `redis-server` dependency when the content gate is on, wires the milter on
+`inet:localhost:11332` after opendkim/opendmarc, pins the `X-Spam` header contract, puts
+the Bayes classifier on redis, and exposes the rspamd **controller** on loopback
+`127.0.0.1:11334` (trusted via `secure_ip` — **no password**, since a privileged learn
+command is authorized by originating inside the container). The
+`content_spam_scanner` provisioner (`InboundEmailHealth::checkContentSpamScanner`) probes
+the milter port. Webhook deployments install none of this — the provider scans upstream.
+rspamd queries DNS RBLs while scanning, so the host needs outbound DNS egress.
+
+**redis is disposable.** The Bayes corpus lives in redis (the container's writable layer)
+and a recreate/rebuild wipes it. That is acceptable: the **durable** signal is
+`iem_spam_verdict` in Postgres, and the corpus self-heals from ongoing corrections after a
+wipe — the failure degrades to "the filter is temporarily less sharp," never "training
+data lost." A redis volume mount is an optional deploy-layer optimization, never a
+correctness requirement.
+
+**Spam/ham feedback (Bayes training).** A reader correction (**Mark as spam** / **Not
+spam**) is the whole trigger — there is no separate "report" control. Flipping
+`iem_spam_verdict` leaves the row *diverged* from `iem_learned_verdict` (the marker of
+what was last taught). The **`LearnSpamFeedback`** scheduled task (every cron pass, gated
+on the content setting) reconciles the divergence out-of-band: for each diverged row it
+POSTs the raw RFC822 to the controller's `/learnspam` | `/learnham` over loopback and, on
+success, stamps `iem_learned_verdict = iem_spam_verdict` so the row stops re-selecting.
+Flip-backs and idempotency fall out for free. Webhook-sourced rows and rows whose raw is
+gone (pruned, or IMAP reference-backed) are marked handled as permanent no-ops; a
+controller outage leaves rows diverged to retry on the next pass, so the loop self-heals
+rather than stranding corrections. (rspamd's classifier needs roughly 200 messages of each
+class before it contributes, so early corrections have little visible effect.)
 
 ## Inbound Providers
 

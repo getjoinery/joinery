@@ -306,6 +306,14 @@ class SendGridProvider implements EmailServiceProvider, InboundEmailProvider {
                     . 'append it to the Destination URL as ?secret=… so only SendGrid can deliver mail. '
                     . 'Required — inbound is rejected when this is blank.',
             ],
+            [
+                'key' => 'sendgrid_inbound_spam_threshold',
+                'label' => 'Inbound spam score threshold',
+                'type' => 'text',
+                'helptext' => 'When content spam filtering is on, an inbound spam_score at or above this '
+                    . 'value is judged spam. SendGrid posts only a SpamAssassin score (no yes/no), so this '
+                    . 'cutoff derives the verdict. Default 5.0 (SpamAssassin\'s own default); lower is stricter.',
+            ],
         ];
     }
 
@@ -402,7 +410,43 @@ class SendGridProvider implements EmailServiceProvider, InboundEmailProvider {
             $out['auth'] = $auth;
         }
 
+        $spam = self::extractSpam($post);
+        if ($spam !== null) {
+            $out['spam'] = $spam;
+        }
+
         return $out;
+    }
+
+    /**
+     * SendGrid's content-spam signal (specs/inbound_email_content_spam_filtering.md).
+     * Unlike Mailgun/SES, SendGrid's Inbound Parse posts only a numeric spam_score
+     * (its SpamAssassin score) with NO binary verdict, so the binary has to be derived
+     * by comparing the score to a threshold. The default (sendgrid_inbound_spam_threshold,
+     * 5.0) is SpamAssassin's own canonical required_score — we echo the engine's cutoff
+     * rather than invent one, and it is tunable for deployments with a different mail
+     * mix. The score is always recorded; the comparison only sets the binary.
+     * Returns ['result'=>spam|ham,'score'=>float,'source'=>'sendgrid'] or null.
+     */
+    private static function extractSpam(array $post): ?array {
+        if (!array_key_exists('spam_score', $post)) {
+            return null;
+        }
+        $score = trim((string)$post['spam_score']);
+        if ($score === '' || !is_numeric($score)) {
+            return null;
+        }
+        $score = (float)$score;
+
+        $settings = Globalvars::get_instance();
+        $threshold = $settings->get_setting('sendgrid_inbound_spam_threshold');
+        $threshold = is_numeric($threshold) ? (float)$threshold : 5.0;
+
+        return [
+            'result' => ($score >= $threshold) ? 'spam' : 'ham',
+            'score'  => $score,
+            'source' => 'sendgrid',
+        ];
     }
 
     /**

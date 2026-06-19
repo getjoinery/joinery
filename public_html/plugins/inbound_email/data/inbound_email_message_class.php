@@ -48,7 +48,13 @@
  * rule for locally-received mail, by the IMAP junk-folder mapping for polled mail,
  * and by manual reader corrections. NULL means not evaluated (filtering disabled).
  *
- * @version 1.5
+ * CONTENT SPAM (specs/inbound_email_content_spam_filtering.md). A content scanner
+ * (rspamd milter on the Postfix path; the provider's own spam flag on webhook paths)
+ * is a second source OR'd into iem_spam_verdict by the router. iem_spam_score records
+ * its numeric score for display/tuning only (never disposition); iem_learned_verdict
+ * tracks what the LearnSpamFeedback task has taught rspamd's Bayes classifier.
+ *
+ * @version 1.6
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -99,6 +105,13 @@ class InboundEmailMessage extends SystemBase {
 		// Spam disposition (specs/inbound_email_spam_filtering.md): 'ham' | 'spam';
 		// NULL = not evaluated (filtering disabled). Drives the reader's inbox/Spam split.
 		'iem_spam_verdict'        => array('type'=>'varchar(10)'),
+		// Content spam (specs/inbound_email_content_spam_filtering.md). Recorded score
+		// from the scanner/provider (display/tuning only, NEVER read for disposition);
+		// NULL = none reported. iem_learned_verdict is the last verdict actually taught
+		// to rspamd's Bayes classifier — the LearnSpamFeedback reconcile teaches a row
+		// whenever it diverges from iem_spam_verdict; NULL = never taught.
+		'iem_spam_score'          => array('type'=>'numeric'),
+		'iem_learned_verdict'     => array('type'=>'varchar(10)'),
 		'iem_size_bytes'          => array('type'=>'int4'),
 		// IMAP locator (populated only for reference-backed, IMAP-sourced rows;
 		// a non-null iem_iia_inbound_imap_account_id marks the row reference-backed

@@ -7,7 +7,7 @@
  * Also implements RawMessageRelay via SESv2 sendEmail with Content.Raw so
  * inbound forwarding can relay raw MIME through the same AWS credential.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getComposerAutoloadPath());
@@ -569,7 +569,31 @@ class SesProvider implements EmailServiceProvider, InboundEmailProvider, RawMess
             $out['auth'] = $auth;
         }
 
+        $spam = self::extractSpam($ses);
+        if ($spam !== null) {
+            $out['spam'] = $spam;
+        }
+
         return $out;
+    }
+
+    /**
+     * SES's own content-spam signal (specs/inbound_email_content_spam_filtering.md):
+     * receipt.spamVerdict.status — PASS → ham, FAIL → spam. SES reports no score, so
+     * only the binary verdict is surfaced. Anything else (GRAY / PROCESSING_FAILED /
+     * absent) yields no signal (null), so the router falls back to the auth rule.
+     * Returns ['result'=>spam|ham, 'source'=>'ses'] or null.
+     */
+    private static function extractSpam(array $ses): ?array {
+        $status = $ses['receipt']['spamVerdict']['status'] ?? null;
+        if ($status === null) {
+            return null;
+        }
+        switch (strtoupper(trim((string)$status))) {
+            case 'PASS': return ['result' => 'ham',  'source' => 'ses'];
+            case 'FAIL': return ['result' => 'spam', 'source' => 'ses'];
+            default:     return null;
+        }
     }
 
     /**

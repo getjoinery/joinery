@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.2
+ * No framework. @version 2.3
  *
  * Two-pane layout: the main pane swaps between the conversation list and an
  * opened conversation (toggled by the `reading` class on #mbx-reader); a back
@@ -470,12 +470,20 @@
 	// header (auth_source 'milter'/'mailgun'), never computed. Without a
 	// verifying milter the message is honestly "unverified".
 	function authText(m) {
+		var base;
 		if (m.auth_source === 'milter' || m.auth_source === 'mailgun') {
-			return 'SPF ' + (m.spf_result || 'none')
+			base = 'SPF ' + (m.spf_result || 'none')
 				+ ' · DKIM ' + (m.dkim_result || 'none')
 				+ ' · DMARC ' + (m.dmarc_result || 'none');
+		} else {
+			base = 'Authentication: unverified (no verifying milter)';
 		}
-		return 'Authentication: unverified (no verifying milter)';
+		// Content-spam score (specs/inbound_email_content_spam_filtering.md): shown for
+		// transparency when the scanner reported one; never affects disposition.
+		if (m.spam_score !== null && m.spam_score !== undefined) {
+			base += ' · spam score ' + m.spam_score;
+		}
+		return base;
 	}
 
 	function messageBlock(m, expanded) {

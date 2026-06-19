@@ -24,9 +24,12 @@
  *
  * Spam (specs/inbound_email_spam_filtering.md): the default list/switcher hide
  * judged-spam rows (iem_spam_verdict='spam'); the Spam view shows only them.
- * setSpamVerdict() is the manual "Mark as spam"/"Not spam" correction.
+ * setSpamVerdict() is the manual "Mark as spam"/"Not spam" correction — which, with
+ * content filtering on, also drives the LearnSpamFeedback reconcile
+ * (specs/inbound_email_content_spam_filtering.md). getThread() returns the recorded
+ * content-spam score (iem_spam_score) for display only.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/MailboxViewer.php'));
@@ -524,7 +527,7 @@ class MailboxService {
 		$sql = "SELECT iem_inbound_email_message_id, iem_iea_inbound_email_alias_id,
 					iem_sender, iem_recipient, iem_subject, iem_received_time,
 					iem_is_read, iem_is_starred, iem_read_time, iem_dkim_result,
-					iem_spf_result, iem_dmarc_result, iem_auth_source,
+					iem_spf_result, iem_dmarc_result, iem_auth_source, iem_spam_score,
 					iem_size_bytes, iem_message_id_header, iem_direction,
 					iem_body_plain, iem_body_html
 				FROM iem_inbound_email_messages
@@ -549,6 +552,9 @@ class MailboxService {
 				'spf_result'        => $r['iem_spf_result'],
 				'dmarc_result'      => $r['iem_dmarc_result'],
 				'auth_source'       => $r['iem_auth_source'],
+				// Content-spam score (specs/inbound_email_content_spam_filtering.md):
+				// display only, NULL when none reported. Never drives disposition.
+				'spam_score'        => ($r['iem_spam_score'] !== null) ? (float)$r['iem_spam_score'] : null,
 				'size_bytes'        => intval($r['iem_size_bytes']),
 				'message_id_header' => $r['iem_message_id_header'],
 				'direction'         => $r['iem_direction'] ?: 'inbound',
