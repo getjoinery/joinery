@@ -130,9 +130,11 @@ is realized and where effort is best spent once Phases 1–2 land.
 
 ### 6. Deferred (not near-term)
 
-Autoresponder / vacation; server-side filters/rules (a Sieve-equivalent for
-store/forward mailboxes); contacts / recipient autocomplete; response-time & volume
+Autoresponder / vacation; contacts / recipient autocomplete; response-time & volume
 reporting. Real but none are beachhead blockers.
+
+Server-side filters/rules (a Sieve-equivalent for store/forward mailboxes) are split
+out into their own spec, `specs/inbound_email_filters.md` (Gmail-parity filters).
 
 ## Build-generally notes
 
