@@ -15,10 +15,12 @@
  *   require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/admin_tabs.php'));
  *   echo AdminPage::tab_menu(inbound_email_admin_tabs(), 'Mailboxes');
  *
+ * "Filters" (Gmail-parity inbound rules) sits between Accounts and Logs.
+ *
  * (A future declarative-tabs core enhancement — specs/declarative_admin_tabs.md
  * — would replace this helper with adminMenu children; kept self-contained for now.)
  *
- * @version 2.0
+ * @version 2.1
  */
 
 if (!function_exists('inbound_email_admin_tabs')) {
@@ -30,6 +32,7 @@ if (!function_exists('inbound_email_admin_tabs')) {
 		return array(
 			'Mailboxes' => $base . 'admin_inbound_email_reader',
 			'Accounts'  => $base . 'admin_inbound_email_accounts',
+			'Filters'   => $base . 'admin_inbound_email_filters',
 			'Logs'      => $base . 'admin_inbound_email_logs',
 			'Setup'     => $base . 'admin_inbound_email_setup',
 			'Settings'  => $base . 'admin_inbound_email_settings',

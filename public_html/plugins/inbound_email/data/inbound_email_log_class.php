@@ -3,7 +3,7 @@
  * InboundEmailLog - Records all inbound email transactions.
  * Also used for rate limiting by counting recent entries.
  *
- * @version 1.4
+ * @version 1.5
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -27,6 +27,10 @@ class InboundEmailLog extends SystemBase {
 	// A forward was suppressed because the message was judged spam — the platform
 	// never relays spam (specs/inbound_email_spam_filtering.md).
 	const STATUS_SPAM_HELD = 'spam_held';
+	// One or more inbound filters matched and applied actions to a stored message
+	// (specs/implemented/inbound_email_filters.md). The matched filter ids and the
+	// actions taken are recorded in iel_destinations.
+	const STATUS_FILTERED = 'filtered';
 
 	protected static $foreign_key_actions = [
 		'iel_iea_inbound_email_alias_id'  => ['action' => 'null'],

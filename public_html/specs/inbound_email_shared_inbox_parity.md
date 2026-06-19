@@ -134,7 +134,7 @@ Autoresponder / vacation; contacts / recipient autocomplete; response-time & vol
 reporting. Real but none are beachhead blockers.
 
 Server-side filters/rules (a Sieve-equivalent for store/forward mailboxes) are split
-out into their own spec, `specs/inbound_email_filters.md` (Gmail-parity filters).
+out into their own spec, `specs/implemented/inbound_email_filters.md` (Gmail-parity filters).
 
 ## Build-generally notes
 

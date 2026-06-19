@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.4
+ * No framework. @version 2.5
  *
  * Two-pane layout: the main pane swaps between the conversation list and an
  * opened conversation (toggled by the `reading` class on #mbx-reader); a back
@@ -23,6 +23,7 @@
 		hasMore: false,
 		threadKey: null,
 		folderId: null,       // null = folder-unfiltered (the mailbox's "All Mail")
+		inboxView: true,      // the Inbox view (non-archived); the default landing view
 		spamView: false,      // the Spam pseudo-folder (judged-spam, hidden from inbox)
 		mailboxLabel: '',     // the active mailbox label, for composing folder titles
 		mailboxes: [],
@@ -132,6 +133,9 @@
 
 		var ul = el('ul', 'mbx-folders');
 		ul.id = 'mbx-folder-rail';
+		// Inbox (non-archived) is the default; All Mail shows everything, archived
+		// included. Tracked IMAP folders and the Spam view follow.
+		ul.appendChild(folderItem('inbox', 'Inbox'));
 		ul.appendChild(folderItem(null, 'All Mail'));
 		folders.forEach(function (f) { ul.appendChild(folderItem(f.id, f.name)); });
 		ul.appendChild(folderItem('spam', 'Spam'));
@@ -151,7 +155,9 @@
 	}
 
 	function highlightFolder() {
-		var cur = state.spamView ? 'spam' : (state.folderId == null ? '' : String(state.folderId));
+		var cur = state.spamView ? 'spam'
+			: state.inboxView ? 'inbox'
+			: (state.folderId == null ? '' : String(state.folderId));
 		Array.prototype.forEach.call(document.querySelectorAll('.mbx-folder'), function (li) {
 			li.classList.toggle('active', li.dataset.folder === cur);
 		});
@@ -159,15 +165,21 @@
 
 	function selectFolder(folderId, name) {
 		closeThread();                    // leave any open conversation → show the list
-		if (folderId === 'spam') {
+		state.inboxView = false;
+		state.spamView = false;
+		if (folderId === 'inbox') {
+			state.inboxView = true;
+			state.folderId = null;
+		} else if (folderId === 'spam') {
 			state.spamView = true;
 			state.folderId = null;
 		} else {
-			state.spamView = false;
-			state.folderId = folderId;
+			state.folderId = folderId;    // null = All Mail; a number = a tracked folder
 		}
+		// Inbox is the mailbox's default, so its title is just the mailbox; the other
+		// views append their name.
 		$('#mbx-list-title').textContent = (state.mailboxLabel || 'All mail')
-			+ (folderId == null ? '' : ' / ' + name);
+			+ (state.inboxView ? '' : ' / ' + (name || 'All Mail'));
 		highlightFolder();
 		loadThreads(true);
 	}
@@ -184,6 +196,7 @@
 		closeThread();                    // leave any open conversation → show the list
 		state.aliasId = aliasId;
 		state.folderId = null;            // reset to the folder-unfiltered view
+		state.inboxView = true;           // default to the Inbox (non-archived) view
 		state.spamView = false;
 		state.mailboxLabel = label || 'All mail';
 		$('#mbx-list-title').textContent = state.mailboxLabel;
@@ -205,6 +218,7 @@
 		if (state.search) { p.set('q', state.search); }
 		if (state.spamView) { p.set('spam', '1'); }
 		else if (state.folderId != null) { p.set('folder_id', String(state.folderId)); }
+		else if (state.inboxView) { p.set('inbox', '1'); }
 		p.set('page', String(state.page));
 		return CFG.listUrl + '?' + p.toString();
 	}
@@ -364,6 +378,16 @@
 			apiAction({ action: 'delete', threadKey: t.thread_key, aliasId: state.aliasId })
 				.then(function () { closeThread(); refreshMailboxes(); loadThreads(true); });
 		}));
+		// Archive ("Skip the Inbox") / Move to Inbox — symmetric with star/spam, which
+		// also have manual + filter-driven paths. Hidden in the Spam view (a spam
+		// message archives nowhere useful).
+		if (!state.spamView) {
+			var archived = !!t.any_archived;
+			actions.appendChild(actionBtn(archived ? 'Move to Inbox' : 'Archive', false, function () {
+				apiAction({ action: archived ? 'unarchive' : 'archive', threadKey: t.thread_key, aliasId: state.aliasId })
+					.then(function () { t.any_archived = !archived; closeThread(); refreshMailboxes(); loadThreads(true); });
+			}));
+		}
 		// Spam correction: in the Spam view, restore to the inbox; elsewhere, mark spam.
 		actions.appendChild(actionBtn(state.spamView ? 'Not spam' : 'Mark as spam', false, function () {
 			apiAction({ action: state.spamView ? 'mark_not_spam' : 'mark_spam',

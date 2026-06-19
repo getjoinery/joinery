@@ -54,7 +54,13 @@
  * The scanner's numeric score is recorded on the row (iem_spam_score) for transparency
  * only — never read for disposition. Gated on inbound_email_content_spam_filtering_enabled.
  *
- * @version 1.14
+ * Inbound filters (specs/implemented/inbound_email_filters.md): after a locally-received
+ * message is persisted and its spam verdict set, storeMessage runs every in-scope operator
+ * filter via InboundEmailFilter::runForMessage — one hook covering the Postfix and webhook
+ * paths alike, never IMAP-polled mail. forwardStoredMessage() relays a copy for a filter's
+ * "Forward to" action, reusing the alias-forward envelope rebuild + relay.
+ *
+ * @version 1.15
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -389,6 +395,20 @@ class InboundEmailRouter {
 		// Row inserted (we now have the serial id): write the raw to the local
 		// store, stamp the descriptor, and write the attachment manifest.
 		$this->persistRawAndManifest(intval($msg->key), $raw_email);
+
+		// Inbound filters (specs/implemented/inbound_email_filters.md). storeMessage
+		// is the single local-only post-persist point, reached by every locally-
+		// received path (Postfix milter + provider webhook) — so this one call runs
+		// filters identically for all of them, and never for IMAP-polled mail (which
+		// uses storeExtracted). It runs AFTER the spam verdict is set, so a filter's
+		// never_spam/mark_spam is the last word on disposition. Best-effort: a filter
+		// failure is logged but never aborts ingest (the message is already stored).
+		try {
+			require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_filter_class.php'));
+			InboundEmailFilter::runForMessage($msg, $parsed, $alias);
+		} catch (\Throwable $e) {
+			error_log('InboundEmailRouter: inbound filter run failed for message ' . $msg->key . ': ' . $e->getMessage());
+		}
 
 		return ['message' => $msg, 'dedup' => false];
 	}
@@ -766,6 +786,40 @@ class InboundEmailRouter {
 		$alias_address = $alias->get('iea_alias') . '@' . $forwarding_domain;
 
 		list($raw_mime, $envelope_sender) = $this->buildForwardMessage($raw_email, $parsed, $domain, $alias_address);
+
+		return $this->relay($raw_mime, $envelope_sender, $destinations);
+	}
+
+	/**
+	 * Relay a copy of an already-stored message to extra destinations — the
+	 * filter "Forward to" action (specs/implemented/inbound_email_filters.md).
+	 * Reuses the exact envelope rebuild + relay the alias forward uses, so
+	 * deliverability headers (From rewrite, Reply-To, SRS) are identical, and it
+	 * works for a catch-all-stored message (no alias) because it keys off the
+	 * stored recipient/domain, not an alias row. Best-effort: returns the
+	 * per-destination relay result and never throws.
+	 *
+	 * @param InboundEmailMessage $msg          a persisted message (raw resolvable)
+	 * @param array               $destinations target addresses
+	 * @return array ['destination' => bool]
+	 */
+	public function forwardStoredMessage(InboundEmailMessage $msg, array $destinations): array {
+		$destinations = array_values(array_filter(array_map('trim', $destinations), 'strlen'));
+		if (!count($destinations)) {
+			return array();
+		}
+		$raw = $msg->getRawMessage();
+		if ($raw === null || $raw === '') {
+			error_log('InboundEmailRouter::forwardStoredMessage: no raw available for message ' . $msg->key);
+			return array();
+		}
+		$domain = new InboundEmailDomain(intval($msg->get('iem_ied_inbound_email_domain_id')), TRUE);
+		if (!$domain->key) {
+			return array();
+		}
+		$parsed = $this->parseEmail($raw);
+		list($raw_mime, $envelope_sender) = $this->buildForwardMessage(
+			$raw, $parsed, $domain, (string)$msg->get('iem_recipient'));
 
 		return $this->relay($raw_mime, $envelope_sender, $destinations);
 	}
