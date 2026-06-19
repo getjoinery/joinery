@@ -64,12 +64,7 @@ echo '<script>window.MAILBOX_READER = ' . json_encode($config, JSON_HEX_TAG | JS
 			<ul id="mbx-mailboxes" class="mbx-mailbox-list"></ul>
 		</div>
 		<div class="mbx-rail-section">
-			<h2 class="mbx-rail-title">Filters</h2>
-			<div class="mbx-filters">
-				<button type="button" class="mbx-filter active" data-filter="all">All</button>
-				<button type="button" class="mbx-filter" data-filter="unread">Unread</button>
-				<button type="button" class="mbx-filter" data-filter="starred">Starred</button>
-			</div>
+			<h2 class="mbx-rail-title">Search</h2>
 			<input type="search" id="mbx-search" class="mbx-search" placeholder="Search mail…" autocomplete="off">
 		</div>
 	</aside>

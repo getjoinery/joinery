@@ -29,7 +29,7 @@
  * (specs/inbound_email_content_spam_filtering.md). getThread() returns the recorded
  * content-spam score (iem_spam_score) for display only.
  *
- * @version 1.3
+ * @version 1.4
  */
 
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/MailboxViewer.php'));
@@ -458,14 +458,26 @@ class MailboxService {
 		}
 
 		$gk = self::GROUP_KEY_SQL;
+		// section_rank buckets each thread for the Gmail-style sectioned list:
+		// 0 = has unread, 1 = starred (all read), 2 = everything else. Ordering by
+		// it first keeps the buckets contiguous across pages, so the client renders
+		// one header per section even with pagination.
 		$sql = "SELECT
 					$gk AS thread_key,
 					MAX(iem_received_time) AS latest_time,
 					COUNT(*) AS msg_count,
 					COUNT(*) FILTER (WHERE iem_is_read = false) AS unread_count,
 					BOOL_OR(iem_is_starred) AS any_starred,
+					CASE
+						WHEN COUNT(*) FILTER (WHERE iem_is_read = false) > 0 THEN 0
+						WHEN BOOL_OR(iem_is_starred) THEN 1
+						ELSE 2
+					END AS section_rank,
 					STRING_AGG(DISTINCT iem_sender, ', ') AS senders,
+					(ARRAY_AGG(iem_sender ORDER BY iem_received_time DESC, iem_inbound_email_message_id DESC))[1] AS latest_sender,
 					(ARRAY_AGG(iem_subject ORDER BY iem_received_time DESC, iem_inbound_email_message_id DESC))[1] AS latest_subject,
+					(ARRAY_AGG(left(coalesce(iem_body_plain, ''), 400) ORDER BY iem_received_time DESC, iem_inbound_email_message_id DESC))[1] AS preview_plain,
+					(ARRAY_AGG(left(coalesce(iem_body_html, ''), 2000) ORDER BY iem_received_time DESC, iem_inbound_email_message_id DESC))[1] AS preview_html,
 					(ARRAY_AGG(iem_inbound_email_message_id ORDER BY iem_received_time DESC, iem_inbound_email_message_id DESC))[1] AS latest_id
 				FROM iem_inbound_email_messages
 				WHERE " . implode(' AND ', $where) . "
@@ -473,7 +485,7 @@ class MailboxService {
 		if (count($having)) {
 			$sql .= ' HAVING ' . implode(' AND ', $having);
 		}
-		$sql .= " ORDER BY latest_time DESC
+		$sql .= " ORDER BY section_rank ASC, latest_time DESC
 				LIMIT ? OFFSET ?";
 
 		// Fetch one extra to detect a further page.
@@ -489,12 +501,17 @@ class MailboxService {
 			$rows = array_slice($rows, 0, $perpage);
 		}
 
+		$section_for = array(0 => 'unread', 1 => 'starred', 2 => 'other');
 		$threads = array();
 		foreach ($rows as $r) {
+			$rank = intval($r['section_rank']);
 			$threads[] = array(
 				'thread_key'   => $r['thread_key'],
 				'subject'      => $r['latest_subject'],
 				'senders'      => $r['senders'],
+				'sender'       => $r['latest_sender'],
+				'snippet'      => $this->buildSnippet($r['preview_plain'], $r['preview_html']),
+				'section'      => $section_for[$rank] ?? 'other',
 				'msg_count'    => intval($r['msg_count']),
 				'unread_count' => intval($r['unread_count']),
 				'any_starred'  => (bool)$this->pgBool($r['any_starred']),
@@ -508,6 +525,27 @@ class MailboxService {
 			'has_more' => $has_more,
 			'page'     => $page,
 		);
+	}
+
+	/**
+	 * One-line preview of the latest message for the list row. Prefers the plain
+	 * body; falls back to tag-stripped HTML. Whitespace is collapsed and the
+	 * result trimmed to a short, single-line snippet (Gmail-style).
+	 */
+	private function buildSnippet(?string $plain, ?string $html): string {
+		$text = trim((string)$plain);
+		if ($text === '' && (string)$html !== '') {
+			// The HTML preview is capped upstream; a tag may be truncated mid-way,
+			// so drop any trailing partial tag before stripping.
+			$text = preg_replace('/<[^>]*$/', '', (string)$html);
+			$text = strip_tags((string)$text);
+			$text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+		}
+		$text = trim(preg_replace('/\s+/u', ' ', $text));
+		if (function_exists('mb_strimwidth')) {
+			return mb_strimwidth($text, 0, 160, '…', 'UTF-8');
+		}
+		return strlen($text) > 160 ? substr($text, 0, 159) . '…' : $text;
 	}
 
 	/**
