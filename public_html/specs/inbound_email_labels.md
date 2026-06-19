@@ -12,6 +12,11 @@ with a small projection table holding the per-message IMAP shadow/UID. The gener
 primitive (Groups) gains **no** email/IMAP columns; all IMAP machinery stays in
 the inbound-email plugin.
 
+System states (Inbox/Archive, Starred, Read, Spam) are **deliberately not** labels:
+they stay as the `iem_*` columns and the spam verdict they already are. Labels are
+Groups; system states are columns; the filter engine, reader, and importer handle
+the two directly. No unifying "filing target" abstraction — see *Scope* below.
+
 ## Why Groups (and not a new label/tag table)
 
 The recurring gap: a "label" today is an `iif_inbound_imap_folder`, which **must**
@@ -34,6 +39,41 @@ simplest option: zero new generic tables, and a ready-made helper surface
 (`get_by_name`, `add_group`, `get_groups_in_category`, `get_groups_for_member`,
 `AddMemberBulkByName`, `add_member`/`remove_member`/`is_member_in_group`). Building
 a parallel `tag_*`/`lbl_*` system would duplicate Groups.
+
+## Scope — labels generalize onto Groups; system states do not
+
+This spec generalizes exactly one thing: the **custom label**, which becomes a
+Group. It deliberately stops there. The message's system states —
+`iem_is_archived` (Inbox), `iem_is_starred`, `iem_is_read`, and the
+`iem_spam_verdict` — stay as the columns and verdict they already are, and the
+three call sites that file mail (filter engine, reader rail, Gmail import) handle
+labels and system states as two separate, directly-coded mechanisms.
+
+**Why not unify them behind one "filing target" interface.** It is tempting,
+because Gmail models `INBOX`/`STARRED`/`UNREAD`/`SPAM` as labels too, to wrap
+columns-and-Groups behind a single `add/remove/contains/members` interface so every
+call site dispatches uniformly. We are **not** doing that. The reasons:
+
+- **Groups already does the whole job for labels.** The interface would not make
+  labels work — `add_member`/`remove_member`/`get_groups_for_member` already do.
+  Its only purpose would be to also wrap the system-state columns, i.e. it is an
+  abstraction over a decision (keep states as columns) we are making precisely to
+  *avoid* treating them like labels.
+- **The states must not become Groups anyway.** `iem_is_read` is the most-written
+  per-message bool in the system; a membership row per unread message is
+  pathological. `iem_spam_verdict` is a classifier output with a companion score,
+  not a user-applied bucket. So the columns stay — and an interface that makes a
+  column "look like" a group buys uniformity nobody downstream needs.
+- **The duplication it removes is small.** Across the three call sites it collapses
+  a handful of `if` branches and one extra render loop. That is not enough
+  duplication to justify a new interface, two implementing classes, and a resolver.
+
+The one place the two populations genuinely meet is the Gmail importer, whose
+`label` field mixes custom and system label *names*. That is solved with a small
+inline mapping (system-label name → the matching column/action; anything else →
+find-or-create an `inbound_label` Group), not a platform abstraction. If a second
+consumer ever wants "file an entity into a column-state or a Group uniformly,"
+extract the interface then, shaped by two real call sites instead of one.
 
 ## Architecture — three layers
 
@@ -61,29 +101,45 @@ remote folders, with its own shadow, isolated in the plugin.
 - Reading a message's labels = `Group::get_groups_for_member($messageId,
   'inbound_label')`. The label list for the reader =
   `Group::get_groups_in_category('inbound_label')`.
-- **One additive schema change, generally useful:** a nullable `grp_color`
-  (varchar) for the reader's chip colour. (Optional — could ship colourless.) No
-  other change to the Groups model.
+- **No schema change to the Groups model.** Labels use `grp_groups` /
+  `grm_group_members` exactly as they exist; the reader renders label chips without
+  a stored colour.
 - A `Group::CATEGORY_INBOUND_LABEL` constant pins the category string in one place.
 
-The existing Groups admin/CRUD can manage labels; inbound email may ship a thin
-label management UI in its own tab and adopt any core Groups surface later.
+No new label-management UI is built. The label surfaces already exist — the
+reader's folder/label rail, the reader's apply-label control, and the filter
+*Apply label* dropdown — and this spec only repoints them from `iif_` folders to
+`inbound_label` Groups, so they keep working and now also populate for local
+(non-IMAP) mailboxes. Create/apply happen inline in those surfaces; the rare
+rename/delete housekeeping uses the existing core Groups admin.
 
 ### Layer 2 — inbound email uses label-groups
 
-- **Reader.** The folder/label rail lists the `inbound_label` groups; the
-  open-thread "Labels ▾" multi-select toggles `grm_group_members` rows;
-  `listThreads`' membership dimension filters by a `grm_group_members` subquery
-  (mechanically the same as today's `imf_` subquery). Uniform for local + IMAP mail.
+Labels go through Groups directly; system states stay on their existing columns and
+keep their existing handling. No shared abstraction between the two.
+
+- **Reader.** The folder/label rail lists the `inbound_label` groups alongside the
+  existing system views (Inbox/Starred/Spam, rendered as today from their columns).
+  The open-thread "Labels ▾" multi-select toggles `grm_group_members` rows via
+  `add_member`/`remove_member`; `listThreads`' label dimension filters by a
+  `grm_group_members` subquery (mechanically the same as today's `imf_` subquery).
+  Uniform for local + IMAP mail. **A label click filters within the active
+  mailbox** — the label is global, but the reader views it through the current
+  mailbox's window (the thread list stays mailbox-scoped, no new access surface). A
+  cross-mailbox label view is a separate future feature, not this rail.
 - **Filters.** `fil_action_label_id` → `fil_action_grp_group_id`. The *Apply label*
-  dropdown lists `inbound_label` groups (+ "Create new label…"); `applyActionSet`
-  calls `add_member($messageId)` instead of `setPresence`. Now valid for the
-  non-IMAP mailboxes filters run on, **and** for domain-wide filters (a label-group
-  is not mailbox-scoped — this also closes the filters spec's open decision (a)).
-- **Gmail import.** `label='deals'` → `Group::AddMemberBulkByName` /
-  `get_by_name(..., 'inbound_label')` find-or-create, then set the filter's label
-  action. (The "skipped: label" path in `specs/inbound_email_filter_import.md` is
-  removed once this ships.)
+  dropdown lists `inbound_label` groups (+ "Create new label…"); the label branch of
+  `applyActionSet` calls `add_member($messageId)` instead of `setPresence`. The
+  archive/star/read/spam action branches are unchanged. The label action is now
+  valid for the non-IMAP mailboxes filters run on, **and** for domain-wide filters
+  (a label-group is not mailbox-scoped — this also closes the filters spec's open
+  decision (a)).
+- **Gmail import.** A custom label (`label='deals'`) find-or-creates an
+  `inbound_label` Group (`Group::AddMemberBulkByName` /
+  `get_by_name(..., 'inbound_label')`) and wires the filter's label action. A Gmail
+  *system* label name (`INBOX`/`STARRED`/`UNREAD`/`SPAM`/`TRASH`) maps via a small
+  inline table to the matching column action instead. (The "skipped: label" path in
+  `specs/inbound_email_filter_import.md` is removed once this ships.)
 
 ### Layer 3 — IMAP folders as bindings + a sync projection
 
@@ -141,19 +197,23 @@ The design holes flagged earlier each land in the layer that owns them:
 - **UID correlation** — the projection is keyed `(message, binding)`, so the shadow
   + UID stay per-folder even though truth is per-label.
 
-## Migration
+## One-time conversion
 
-No production users yet, so a one-time, simple migration:
+Not distributed — a single local install with no production users — so this is a
+one-time conversion run once against the one database, not a per-install migration:
 
 1. For each existing **custom** `iif_` folder, find-or-create a `Group` in the
-   `inbound_label` category (same-name → same group, flagged for operator review —
-   open decision) and set `iif_grp_group_id`; leave role folders' group NULL.
+   `inbound_label` category by name (`Group::get_by_name(name, 'inbound_label')`)
+   and set `iif_grp_group_id`; leave role folders' group NULL. Find-or-create *is*
+   the merge — two feeds' same-named folders resolve to one group for free (names
+   are unique per category), so no separate merge/split policy is needed.
 2. Convert each `imf_` membership row into: a `grm_group_members` row (message →
    the folder's label-group) for current presence, and an `imap_folder_membership`
    projection row carrying the old `imf_present_base` + UID. Retire `imf_`.
 3. Repoint `fil_action_label_id` data → `fil_action_grp_group_id`.
 4. Add the non-unique index on `grm_group_members (grm_foreign_key_id)` for the
-   "labels of a message" lookup, via migration, if not already present.
+   "labels of a message" lookup, via a `/migrations/` index file, if not already
+   present.
 
 ## Testing
 
@@ -167,10 +227,14 @@ No production users yet, so a one-time, simple migration:
   binding then labeling creates the folder (pending-create) and files into it.
 - **Pull/VANISHED:** new remote folder → group+binding+membership+projection; a
   vanished UID clears exactly the right membership; special-use never makes a label.
-- **Migration:** every prior `imf_` membership resolves to the right label-group;
+- **Conversion:** every prior `imf_` membership resolves to the right label-group;
   role folders stay role-only; filter label actions still apply.
-- **Filters/import:** filter *Apply label* files an ingested local message; Gmail
-  `label='deals'` import creates/reuses the group and wires the filter.
+- **Filters/import:** filter *Apply label* files an ingested local message via
+  `add_member`; a filter combining *Apply label* + *Skip the Inbox* writes both the
+  `grm_group_members` row and `iem_is_archived` through their own action branches.
+  Gmail `label='deals'` import creates/reuses the group and wires the filter; a
+  Gmail system-label name (`STARRED`, `INBOX`) maps to the column action, not a
+  group.
 
 ## Docs
 
@@ -181,13 +245,20 @@ voice): labels are `inbound_label` groups applied to any inbound message; an IMA
 folder is a binding that mirrors a label to a feed. No doc changes land with the
 spec itself.
 
-## Open decisions (resolve at implementation, not now)
+## Decisions (resolved)
 
-- **`grp_color`** addition vs. colourless labels for v1.
-- **Same-name merge on migration** — auto-merge same-named folders across feeds into
-  one label-group (proposed) vs. keep distinct, operator-merge.
-- **Reader label scope** — a label view scoped to the active mailbox vs. spanning
-  all accessible mailboxes (labels are global; the reader is mailbox-oriented).
-- **Label management home** — inbound-email tab now vs. the core Groups admin.
-- **System views** — Inbox/Spam/Sent stay verdict/role pseudo-views (lean), not
-  label-groups.
+No open decisions remain.
+
+- **No filing-target abstraction.** Labels generalize onto Groups; system states
+  (Inbox/Archive, Starred, Read, Spam) stay as their `iem_*` columns/verdict,
+  handled directly. (See *Scope*.)
+- **IMAP folders and labels are the same object.** Layer 3 stays; the syncer's
+  remote-facing behavior is unchanged, only its internal truth/shadow storage moves
+  to Groups + the projection table.
+- **No colour.** Labels use `grp_groups`/`grm_group_members` as-is; no `grp_color`.
+- **No merge/split policy.** The one-time conversion uses find-or-create-by-name,
+  which *is* the merge; the single local feed has no name collisions anyway.
+- **Reader label scope = active mailbox.** A label click filters within the current
+  mailbox; cross-mailbox label views are a separate future feature.
+- **No new label-management UI.** Existing reader rail / apply control / filter
+  dropdown repoint to Groups; core Groups admin covers housekeeping.
