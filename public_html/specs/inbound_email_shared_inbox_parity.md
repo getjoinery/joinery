@@ -59,7 +59,7 @@ integration wedge. Everything below builds toward it.
 
 The credibility floor — content spam filtering that catches authenticated bulk spam
 the current auth-only verdict passes — is **its own spec, built first**:
-`specs/inbound_email_content_spam_filtering.md`. An inbox that leaks obvious spam
+`specs/implemented/inbound_email_content_spam_filtering.md`. An inbox that leaks obvious spam
 loses trust faster than one missing assignment, so it lands before the workflow work
 below. It is out of scope here beyond this pointer.
 

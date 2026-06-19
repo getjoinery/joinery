@@ -19,7 +19,7 @@
  *
  * Run: php plugins/inbound_email/tests/provider_auth_test.php
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -67,6 +67,7 @@ class ProviderAuthTest {
 			$this->testSnsHelpers();
 			$this->testStandardPathIgnoresProviderHeaders();
 			$this->testRouterPrecedence();
+			$this->testProviderSpamSignals();
 		} catch (\Throwable $e) {
 			$this->fail++;
 			$this->out('  EXCEPTION: ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
@@ -253,6 +254,46 @@ class ProviderAuthTest {
 		$r2 = $m->invoke($router, $raw, null);
 		$this->eq('none', $r2['source'], 'no trusted source → none');
 		$this->eq('unverified', $r2['spf'], 'forged X-Mailgun-Spf not honored on standard path');
+	}
+
+	/**
+	 * Content-spam signal extraction (specs/inbound_email_content_spam_filtering.md):
+	 * each provider's extractSpam() maps its native field/header to the sibling
+	 * 'spam' result the router consumes.
+	 */
+	private function testProviderSpamSignals() {
+		$this->out('-- Provider content-spam signals --');
+
+		// Mailgun: X-Mailgun-Sflag is the binary verdict; X-Mailgun-Sscore the score.
+		$mgRaw = "X-Mailgun-Sflag: Yes\r\nX-Mailgun-Sscore: 12.4\r\nFrom: a@b.com\r\n\r\nbody";
+		$mg = $this->callStatic('MailgunProvider', 'extractSpam', [$mgRaw]);
+		$this->eq('spam', $mg['result'], 'Mailgun Sflag Yes → spam');
+		$this->eq(12.4, $mg['score'], 'Mailgun Sscore recorded');
+		$mgHam = $this->callStatic('MailgunProvider', 'extractSpam',
+			["X-Mailgun-Sflag: No\r\nFrom: a@b.com\r\n\r\nbody"]);
+		$this->eq('ham', $mgHam['result'], 'Mailgun Sflag No → ham');
+		$mgNone = $this->callStatic('MailgunProvider', 'extractSpam', ["From: a@b.com\r\n\r\nbody"]);
+		$this->ok($mgNone === null, 'Mailgun no spam headers → null');
+
+		// SES: spamVerdict PASS → ham, FAIL → spam, else null.
+		$sesSpam = $this->callStatic('SesProvider', 'extractSpam',
+			[['receipt' => ['spamVerdict' => ['status' => 'FAIL']]]]);
+		$this->eq('spam', $sesSpam['result'], 'SES spamVerdict FAIL → spam');
+		$sesHam = $this->callStatic('SesProvider', 'extractSpam',
+			[['receipt' => ['spamVerdict' => ['status' => 'PASS']]]]);
+		$this->eq('ham', $sesHam['result'], 'SES spamVerdict PASS → ham');
+		$sesNone = $this->callStatic('SesProvider', 'extractSpam',
+			[['receipt' => ['spamVerdict' => ['status' => 'PROCESSING_FAILED']]]]);
+		$this->ok($sesNone === null, 'SES PROCESSING_FAILED → null');
+
+		// SendGrid: score thresholded at sendgrid_inbound_spam_threshold (default 5.0).
+		$sgHam = $this->callStatic('SendGridProvider', 'extractSpam', [['spam_score' => '3.7']]);
+		$this->eq('ham', $sgHam['result'], 'SendGrid score below threshold → ham');
+		$this->eq(3.7, $sgHam['score'], 'SendGrid score recorded');
+		$sgSpam = $this->callStatic('SendGridProvider', 'extractSpam', [['spam_score' => '7.2']]);
+		$this->eq('spam', $sgSpam['result'], 'SendGrid score at/above threshold → spam');
+		$sgNone = $this->callStatic('SendGridProvider', 'extractSpam', [[]]);
+		$this->ok($sgNone === null, 'SendGrid no spam_score → null');
 	}
 }
 

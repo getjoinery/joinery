@@ -84,6 +84,15 @@ interface InboundEmailProvider {
      * (recorded 'none'). A provider that does no verification omits 'auth'
      * entirely (the message is then recorded 'unverified').
      *
+     * A provider that performed its own CONTENT-spam scanning upstream MAY also
+     * include an optional 'spam' key carrying that signal
+     * (specs/inbound_email_content_spam_filtering.md). It is a content signal, not an
+     * auth verdict, so it is a sibling of 'auth', never folded into it. 'result' is
+     * the provider's binary decision (spam | ham | none); 'score' is its numeric score
+     * recorded for transparency only (never acted on in PHP). The router OR's a 'spam'
+     * result into the verdict (see InboundEmailRouter::resolveContentSpam). A provider
+     * that does no content scanning omits 'spam' entirely.
+     *
      * @return array{
      *   raw_mime: string,
      *   recipient: string,
@@ -93,6 +102,11 @@ interface InboundEmailProvider {
      *     dmarc: ?string,
      *     spf_domain?: string,
      *     dkim_domain?: string,
+     *     source: string
+     *   },
+     *   spam?: array{
+     *     result: string,
+     *     score?: float,
      *     source: string
      *   }
      * }|null

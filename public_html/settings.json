@@ -157,6 +157,7 @@
     { "name": "sendgrid_api_key", "default": "" },
     { "name": "sendgrid_click_tracking", "default": "0" },
     { "name": "sendgrid_inbound_secret", "default": "" },
+    { "name": "sendgrid_inbound_spam_threshold", "default": "5.0" },
     { "name": "sendgrid_region", "default": "global" },
     { "name": "sendgrid_sandbox_mode", "default": "0" },
     { "name": "sendgrid_verified_domain", "default": "" },

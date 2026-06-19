@@ -1,7 +1,7 @@
 {
     "name": "Inbound Email",
     "description": "Self-hosted inbound email: forwarding, local mailboxes, DKIM/SRS",
-    "version": "1.19.0",
+    "version": "1.20.0",
     "author": "Joinery",
     "receives_upgrades": true,
     "included_in_publish": true,
@@ -39,6 +39,13 @@
             "label": "DNS records for inbound domains",
             "details": "Each enabled inbound domain needs an MX record pointing here and an SPF record.",
             "check": { "type": "code", "call": "InboundEmailHealth::checkDomainDns" }
+        },
+        {
+            "key": "content_spam_scanner",
+            "label": "Content spam scanner (rspamd)",
+            "details": "Optional. rspamd milter scores inbound mail for content spam and stamps X-Spam; the router reads it into the spam verdict. Webhook providers supply their own spam signal instead.",
+            "check": { "type": "code", "call": "InboundEmailHealth::checkContentSpamScanner" },
+            "script": "provisioning/install_email.sh"
         }
     ],
     "settings": [
@@ -60,6 +67,8 @@
         { "name": "inbound_email_mailbox_retention_days", "default": "14" },
         { "name": "inbound_email_mailbox_max_per_window", "default": "500" },
         { "name": "inbound_email_provider", "default": "postfix" },
-        { "name": "inbound_email_spam_filtering_enabled", "default": "0" }
+        { "name": "inbound_email_spam_filtering_enabled", "default": "0" },
+        { "name": "inbound_email_content_spam_filtering_enabled", "default": "0" },
+        { "name": "inbound_email_rspamd_controller_url", "default": "http://127.0.0.1:11334" }
     ]
 }

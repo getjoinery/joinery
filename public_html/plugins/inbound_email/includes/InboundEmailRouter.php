@@ -47,7 +47,14 @@
  * the stored row, and a judged-spam message is never relayed — the forward is
  * suppressed (logged spam_held) while forward_and_store still keeps a reviewable copy.
  *
- * @version 1.13
+ * Content spam (specs/inbound_email_content_spam_filtering.md): a second verdict source
+ * is OR'd into classifySpam() — a content scanner signal resolved per ingest path by
+ * resolveContentSpam() (the rspamd milter's X-Spam header read by readSpamHeader() on
+ * the Postfix path; a webhook provider's own spam flag passed in as $provider_spam).
+ * The scanner's numeric score is recorded on the row (iem_spam_score) for transparency
+ * only — never read for disposition. Gated on inbound_email_content_spam_filtering_enabled.
+ *
+ * @version 1.14
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -62,6 +69,18 @@ require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/Authenti
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/SRSRewriter.php'));
 
 class InboundEmailRouter {
+
+	// Content-spam header contract (specs/inbound_email_content_spam_filtering.md).
+	// rspamd's milter_headers module stamps these on the Postfix path and
+	// readSpamHeader() parses the same names — this is the single place the name is
+	// pinned. The rspamd config in provisioning/install_email.sh stamps the IDENTICAL
+	// names; keep the two in step. SPAM_FLAG_HEADER is the binary flag ('X-Spam: Yes').
+	// The numeric score is read from SPAM_SCORE_HEADER when present (SpamAssassin-style
+	// 'X-Spam-Score'), else from the 'score=' field of SPAM_STATUS_HEADER (rspamd's
+	// native 'X-Spam-Status: Yes, score=N').
+	const SPAM_FLAG_HEADER   = 'X-Spam';
+	const SPAM_SCORE_HEADER  = 'X-Spam-Score';
+	const SPAM_STATUS_HEADER = 'X-Spam-Status';
 
 	private $settings;
 
@@ -78,9 +97,17 @@ class InboundEmailRouter {
 	 *                                   provider (the 'auth' key its handleInbound
 	 *                                   returned). Preferred over the message's
 	 *                                   Authentication-Results header when present.
+	 * @param array|null $provider_spam  Optional content-spam signal a webhook provider
+	 *                                   supplied (the 'spam' key its handleInbound
+	 *                                   returned: ['result'=>spam|ham|none, 'score'=>?float,
+	 *                                   'source'=>key]). A content-spam signal is NOT an
+	 *                                   auth verdict, so it is a sibling argument, never
+	 *                                   folded into $provider_auth. The Postfix path leaves
+	 *                                   this null — its signal is read from the milter's
+	 *                                   X-Spam header on the raw.
 	 * @return int Exit code (0=success, 67=unknown user, 75=temp failure)
 	 */
-	public function processEmail($raw_email, $envelope_recipient, $provider_auth = null) {
+	public function processEmail($raw_email, $envelope_recipient, $provider_auth = null, $provider_spam = null) {
 		$envelope_recipient = strtolower(trim($envelope_recipient));
 		$parsed = $this->parseEmail($raw_email);
 
@@ -114,6 +141,12 @@ class InboundEmailRouter {
 		// message's Authentication-Results header. No verdict => 'unverified'.
 		$auth = $this->readAuthResults($raw_email, $provider_auth);
 
+		// Content-spam signal, resolved per ingest path (rspamd milter X-Spam header
+		// on the Postfix path; the provider's own spam flag on webhook paths). Off
+		// (signal 'none', no score) unless content filtering is enabled. OR'd into the
+		// verdict by classifySpam(); the score is recorded for transparency only.
+		$content_spam = $this->resolveContentSpam($raw_email, $provider_spam);
+
 		// Look up alias
 		$alias = $this->lookupAlias($local_part, $domain);
 		if (!$alias) {
@@ -122,7 +155,7 @@ class InboundEmailRouter {
 
 			if ($catch_all_mode === InboundEmailDomain::CATCHALL_STORE) {
 				// Store every unmatched recipient — supersedes ied_reject_unmatched.
-				return $this->handleStoreOnly($parsed, $raw_email, $envelope_recipient, $domain, null, $auth);
+				return $this->handleStoreOnly($parsed, $raw_email, $envelope_recipient, $domain, null, $auth, $content_spam);
 			}
 
 			$catch_all = $domain->get('ied_catch_all_address');
@@ -148,7 +181,7 @@ class InboundEmailRouter {
 		// Pure-store mode skips forwarding-side gates (rate limit, From-header check)
 		// because they only apply to relay attempts.
 		if (!$forwards) {
-			return $this->handleStoreOnly($parsed, $raw_email, $envelope_recipient, $domain, $alias, $auth);
+			return $this->handleStoreOnly($parsed, $raw_email, $envelope_recipient, $domain, $alias, $auth, $content_spam);
 		}
 
 		// 4b. Spam disposition (specs/inbound_email_spam_filtering.md): a judged-spam
@@ -156,11 +189,11 @@ class InboundEmailRouter {
 		// reputation and can relay abuse. The forward is suppressed and logged
 		// spam_held; a forward_and_store alias still keeps the message (with its spam
 		// verdict) so it stays reviewable in the reader's Spam view.
-		if ($this->classifySpam($auth) === InboundEmailMessage::SPAM_VERDICT_SPAM) {
+		if ($this->classifySpam($auth, $content_spam['signal']) === InboundEmailMessage::SPAM_VERDICT_SPAM) {
 			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_SPAM_HELD, $envelope_recipient, null, null, $domain->key);
 			if ($stores) {
 				try {
-					$this->storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $auth);
+					$this->storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $auth, $content_spam);
 				} catch (\Throwable $e) {
 					error_log('InboundEmailRouter: store of spam-held message failed: ' . $e->getMessage());
 					$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_ERROR, $envelope_recipient, null, 'Store of spam-held message failed: ' . $e->getMessage(), $domain->key);
@@ -210,7 +243,7 @@ class InboundEmailRouter {
 		// already happened and retrying would double-forward.
 		if ($stores) {
 			try {
-				$this->storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $auth);
+				$this->storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $auth, $content_spam);
 			} catch (\Throwable $e) {
 				error_log('InboundEmailRouter: store after forward failed: ' . $e->getMessage());
 				$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_ERROR, $envelope_recipient, null, 'Store after forward failed: ' . $e->getMessage(), $domain->key);
@@ -228,7 +261,7 @@ class InboundEmailRouter {
 	 * failure so Postfix retries. The dedup mechanism is the UNIQUE
 	 * constraint on (iem_message_id_header, iem_recipient).
 	 */
-	private function handleStoreOnly($parsed, $raw_email, $envelope_recipient, $domain, $alias, $auth = null) {
+	private function handleStoreOnly($parsed, $raw_email, $envelope_recipient, $domain, $alias, $auth = null, $content_spam = null) {
 		if ($auth === null) {
 			$auth = $this->readAuthResults($raw_email);
 		}
@@ -245,7 +278,7 @@ class InboundEmailRouter {
 		}
 
 		try {
-			$saved = $this->storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $auth);
+			$saved = $this->storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $auth, $content_spam);
 			$this->logTransaction(
 				$parsed,
 				$alias,
@@ -280,10 +313,17 @@ class InboundEmailRouter {
 	 * $auth is the verdict array from readAuthResults()
 	 * (['dkim','spf','dmarc','source']); when null it is read here so a direct
 	 * caller still records honest verdicts.
+	 *
+	 * $content_spam is the content-spam signal from resolveContentSpam()
+	 * (['signal'=>spam|ham|none, 'score'=>?float]); when null it is resolved here
+	 * (Postfix milter X-Spam header), so a direct caller still records it.
 	 */
-	public function storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $auth = null) {
+	public function storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $auth = null, $content_spam = null) {
 		if ($auth === null) {
 			$auth = $this->readAuthResults($raw_email);
+		}
+		if ($content_spam === null) {
+			$content_spam = $this->resolveContentSpam($raw_email);
 		}
 		$bodies = $this->extractBodies($raw_email, $parsed);
 
@@ -322,7 +362,8 @@ class InboundEmailRouter {
 			'iem_spf_result'   => $auth['spf'],
 			'iem_dmarc_result' => $auth['dmarc'],
 			'iem_auth_source'  => $auth['source'],
-			'iem_spam_verdict' => $this->classifySpam($auth),
+			'iem_spam_verdict' => $this->classifySpam($auth, $content_spam['signal']),
+			'iem_spam_score'   => $content_spam['score'],
 			'iem_size_bytes'  => strlen($raw_email),
 			'iem_received_time' => gmdate('Y-m-d H:i:s'),
 		];
@@ -1050,12 +1091,25 @@ class InboundEmailRouter {
 	 * The strict rule is safe because the disposition is a reviewable Spam view,
 	 * never rejection: a false positive costs a click, not a lost message.
 	 *
+	 * Content layer (specs/inbound_email_content_spam_filtering.md): the message is
+	 * spam if the content scanner flagged it OR the auth rule fires —
+	 *   verdict = spam  if  content_signal == 'spam'  OR  auth_rule == spam
+	 * The $content_signal is already gated (resolveContentSpam returns 'none' unless
+	 * content filtering is enabled), so this just OR's it in. The master gate below
+	 * still governs the whole feature: with it off the verdict stays NULL regardless.
+	 *
 	 * @param array{dkim:string,spf:string,dmarc:string,source:string} $auth
+	 * @param string $content_signal  'spam' | 'ham' | 'none' (from resolveContentSpam).
 	 * @return string|null InboundEmailMessage::SPAM_VERDICT_*, or null when disabled.
 	 */
-	private function classifySpam(array $auth): ?string {
+	private function classifySpam(array $auth, string $content_signal = 'none'): ?string {
 		if (!$this->settings->get_setting('inbound_email_spam_filtering_enabled')) {
 			return null;
+		}
+
+		// Content scanner verdict, OR'd in ahead of the auth rule.
+		if ($content_signal === 'spam') {
+			return InboundEmailMessage::SPAM_VERDICT_SPAM;
 		}
 
 		$dmarc = strtolower(trim((string)($auth['dmarc'] ?? '')));
@@ -1073,6 +1127,109 @@ class InboundEmailRouter {
 		}
 
 		return InboundEmailMessage::SPAM_VERDICT_HAM;
+	}
+
+	/**
+	 * Resolve the content-spam signal for a message, per ingest path
+	 * (specs/inbound_email_content_spam_filtering.md). Returns
+	 * ['signal' => 'spam'|'ham'|'none', 'score' => ?float].
+	 *
+	 * Gated on inbound_email_content_spam_filtering_enabled: off → ('none', null), so
+	 * nothing downstream changes until the feature is turned on. (The master spam gate
+	 * is still enforced separately, in classifySpam.)
+	 *
+	 *   - Webhook providers (Mailgun/SendGrid/SES) supply their own content/reputation
+	 *     spam flag in the authenticated payload; the dispatcher hands it in as
+	 *     $provider_spam. It is a content signal, NOT an auth verdict, so it arrives as
+	 *     a sibling argument rather than inside $provider_auth.
+	 *   - Postfix path ($provider_spam null): read the rspamd milter's X-Spam header off
+	 *     the raw, trusted on the same basis as the Authentication-Results line (the
+	 *     milter is ours; an external X-Spam is stripped by rspamd before it re-stamps).
+	 *
+	 * @param string     $raw_email
+	 * @param array|null $provider_spam  ['result'=>spam|ham|none,'score'=>?float,'source'=>key]
+	 * @return array{signal:string,score:?float}
+	 */
+	private function resolveContentSpam($raw_email, $provider_spam = null): array {
+		if (!$this->settings->get_setting('inbound_email_content_spam_filtering_enabled')) {
+			return array('signal' => 'none', 'score' => null);
+		}
+
+		// Webhook provider signal (only honored with a non-empty source).
+		if (is_array($provider_spam) && !empty($provider_spam['source'])) {
+			$result = strtolower(trim((string)($provider_spam['result'] ?? 'none')));
+			$signal = in_array($result, array('spam', 'ham'), true) ? $result : 'none';
+			$score  = (isset($provider_spam['score']) && is_numeric($provider_spam['score']))
+				? (float)$provider_spam['score'] : null;
+			return array('signal' => $signal, 'score' => $score);
+		}
+
+		// Postfix milter path.
+		return $this->readSpamHeader($raw_email);
+	}
+
+	/**
+	 * Parse the rspamd milter's X-Spam header off a raw message into a content-spam
+	 * signal (specs/inbound_email_content_spam_filtering.md). Mirrors readAuthResults:
+	 * it reads a verdict the milter stamped, never computing one.
+	 *
+	 * rspamd's milter_headers 'spam' routine adds 'X-Spam: Yes' (and an
+	 * 'X-Spam-Flag: YES') only when it flags the message, so a present-and-affirmative
+	 * header is the spam signal and absence is 'none' — the header never asserts ham.
+	 * A numeric X-Spam-Score is recorded when present (display only). Only the header
+	 * block (before the first blank line) is scanned, so body text cannot spoof it.
+	 *
+	 * @param string $raw_email
+	 * @return array{signal:string,score:?float}
+	 */
+	private function readSpamHeader($raw_email): array {
+		$none = array('signal' => 'none', 'score' => null);
+
+		$normalized = str_replace("\r\n", "\n", (string)$raw_email);
+		$split_pos = strpos($normalized, "\n\n");
+		$header_block = ($split_pos === false) ? $normalized : substr($normalized, 0, $split_pos);
+
+		$flag = $this->firstHeaderValue($header_block, self::SPAM_FLAG_HEADER);
+		// Also accept the X-Spam-Flag: YES variant rspamd stamps alongside X-Spam.
+		if ($flag === null) {
+			$flag = $this->firstHeaderValue($header_block, self::SPAM_FLAG_HEADER . '-Flag');
+		}
+		if ($flag === null) {
+			return $none;
+		}
+		$flag = strtolower(trim($flag));
+		$is_spam = in_array($flag, array('yes', 'true', '1'), true);
+		if (!$is_spam) {
+			return $none;
+		}
+
+		$score = null;
+		$score_raw = $this->firstHeaderValue($header_block, self::SPAM_SCORE_HEADER);
+		if ($score_raw !== null && preg_match('/-?\d+(\.\d+)?/', $score_raw, $m)) {
+			$score = (float)$m[0];
+		} else {
+			// rspamd-native: X-Spam-Status: Yes, score=5.20 required=5.00
+			$status = $this->firstHeaderValue($header_block, self::SPAM_STATUS_HEADER);
+			if ($status !== null && preg_match('/score=\s*(-?\d+(\.\d+)?)/i', $status, $m)) {
+				$score = (float)$m[1];
+			}
+		}
+
+		return array('signal' => 'spam', 'score' => $score);
+	}
+
+	/**
+	 * First value of a header (case-insensitive) from an already-isolated header
+	 * block, or null if absent. Continuation lines are not needed for the short
+	 * single-token X-Spam* values, so this reads the first matching line only.
+	 */
+	private function firstHeaderValue($header_block, $name): ?string {
+		foreach (explode("\n", $header_block) as $line) {
+			if (preg_match('/^' . preg_quote($name, '/') . '\s*:\s*(.*)$/i', $line, $m)) {
+				return $m[1];
+			}
+		}
+		return null;
 	}
 
 	/**

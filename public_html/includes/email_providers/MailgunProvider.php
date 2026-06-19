@@ -8,7 +8,7 @@
  * relay raw MIME through the same mailgun_api_key, with no separate SMTP
  * credential.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getComposerAutoloadPath());
@@ -481,6 +481,33 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Raw
             $out['auth'] = $auth;
         }
 
+        $spam = self::extractSpam((string)$raw_mime);
+        if ($spam !== null) {
+            $out['spam'] = $spam;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Mailgun's own content-spam signal (specs/inbound_email_content_spam_filtering.md).
+     * When the domain's spam filter is on, Mailgun stamps X-Mailgun-Sflag (its binary
+     * decision: Yes/No) and X-Mailgun-Sscore (a numeric score). The flag is the
+     * verdict; the score is recorded for transparency only. Returns
+     * ['result'=>spam|ham, 'score'=>?float, 'source'=>'mailgun'] or null when absent.
+     */
+    private static function extractSpam(string $raw_mime): ?array {
+        $flag  = self::extractMimeHeader($raw_mime, 'X-Mailgun-Sflag');
+        $score = self::extractMimeHeader($raw_mime, 'X-Mailgun-Sscore');
+        if ($flag === null && $score === null) {
+            return null;
+        }
+
+        $out = ['source' => 'mailgun'];
+        $out['result'] = ($flag !== null && strtolower(trim($flag)) === 'yes') ? 'spam' : 'ham';
+        if ($score !== null && is_numeric(trim($score))) {
+            $out['score'] = (float)trim($score);
+        }
         return $out;
     }
 
