@@ -27,6 +27,7 @@ function admin_inbound_email_filters_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_alias_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_imap_account_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_imap_folder_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_labels_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
@@ -235,30 +236,20 @@ function _filter_alias_is_filterable(InboundEmailAlias $alias): bool {
 }
 
 /**
- * Label options for a scope value: the tracked IMAP folders of the chosen
- * mailbox. Empty for a domain-wide scope (apply-label is per-mailbox; see the
- * spec's open decision) or a mailbox with no IMAP feed (pure local store).
+ * Label options: every custom label (the global label namespace). A label is an ilb_
+ * row, not a per-mailbox IMAP folder, so the same list applies to any scope — including
+ * a domain-wide bucket. The reader and IMAP sync share these labels. Keyed by label id;
+ * returns [] only when no labels exist yet (the view still offers "Create new label…").
  */
-function _filter_label_options(string $scopeValue): array {
-	if (strncmp($scopeValue, 'alias:', 6) !== 0) {
-		return array();
-	}
-	$aliasId = intval(substr($scopeValue, 6));
-	if ($aliasId <= 0) {
-		return array();
-	}
-	$accounts = new MultiInboundImapAccount(array('alias_id' => $aliasId, 'deleted' => false));
-	$accounts->load();
+function _filter_label_options(string $scopeValue = ''): array {
+	$labels = new MultiInboundEmailLabel(
+		array('deleted' => false),
+		array('ilb_name' => 'ASC')
+	);
+	$labels->load();
 	$options = array();
-	foreach ($accounts as $account) {
-		$folders = new MultiInboundImapFolder(
-			array('account_id' => $account->key, 'tracked' => true),
-			array('iif_name' => 'ASC')
-		);
-		$folders->load();
-		foreach ($folders as $folder) {
-			$options[intval($folder->key)] = $folder->get('iif_name');
-		}
+	foreach ($labels as $label) {
+		$options[intval($label->key)] = $label->get('ilb_name');
 	}
 	return $options;
 }
@@ -271,7 +262,7 @@ function _filter_blank_values(): array {
 		'fil_match_has_words' => '', 'fil_match_excludes' => '',
 		'fil_match_size_op' => '', 'size_value' => '', 'size_unit' => 'MB',
 		'fil_match_has_attachment' => false,
-		'fil_action_label_id' => 0,
+		'fil_action_ilb_inbound_email_label_id' => '0', 'fil_action_label_new' => '',
 		'fil_action_star' => false, 'fil_action_mark_read' => false,
 		'fil_action_archive' => false, 'fil_action_mark_spam' => false,
 		'fil_action_never_spam' => false, 'fil_action_delete' => false,
@@ -299,7 +290,9 @@ function _filter_collect_input(array $input): array {
 		'size_value'          => trim((string)($input['size_value'] ?? '')),
 		'size_unit'           => $unit,
 		'fil_match_has_attachment' => !empty($input['fil_match_has_attachment']),
-		'fil_action_label_id'  => intval($input['fil_action_label_id'] ?? 0),
+		// Raw selection: a label id, '0' (none), or 'new' (create one inline).
+		'fil_action_ilb_inbound_email_label_id' => (string)($input['fil_action_ilb_inbound_email_label_id'] ?? '0'),
+		'fil_action_label_new'    => trim((string)($input['fil_action_label_new'] ?? '')),
 		'fil_action_star'      => !empty($input['fil_action_star']),
 		'fil_action_mark_read' => !empty($input['fil_action_mark_read']),
 		'fil_action_archive'   => !empty($input['fil_action_archive']),
@@ -330,7 +323,8 @@ function _filter_values_from_model(InboundEmailFilter $f): array {
 			'fil_action_delete') as $col) {
 		$v[$col] = (bool)$f->get($col);
 	}
-	$v['fil_action_label_id'] = intval($f->get('fil_action_label_id'));
+	$lid = intval($f->get('fil_action_ilb_inbound_email_label_id'));
+	$v['fil_action_ilb_inbound_email_label_id'] = $lid > 0 ? (string)$lid : '0';
 	$v['fil_match_size_op'] = (string)$f->get('fil_match_size_op');
 	$bytes = intval($f->get('fil_match_size_bytes'));
 	if ($bytes > 0) {
@@ -397,10 +391,10 @@ function _filter_save(array $v, array $alias_domain): InboundEmailFilter {
 		$filter->set('fil_match_size_bytes', null);
 	}
 
-	// Actions. Apply-label is per-mailbox: a domain-wide filter never labels (the
-	// spec's open decision (a) — domain-wide filters do flag/spam/forward/delete).
-	$filter->set('fil_action_label_id', ($alias_id !== null && $v['fil_action_label_id'] > 0)
-		? $v['fil_action_label_id'] : null);
+	// Actions. A label is an ilb_ row, not a mailbox-scoped folder, so the apply-label
+	// action is valid for every scope, domain-wide buckets included. The selection
+	// is a label id, or 'new' to mint a label inline (Gmail's "New label…").
+	$filter->set('fil_action_ilb_inbound_email_label_id', _filter_resolve_label($v));
 	$filter->set('fil_action_star', $v['fil_action_star']);
 	$filter->set('fil_action_mark_read', $v['fil_action_mark_read']);
 	$filter->set('fil_action_archive', $v['fil_action_archive']);
@@ -418,6 +412,26 @@ function _filter_save(array $v, array $alias_domain): InboundEmailFilter {
 	$filter->prepare();
 	$filter->save();
 	return $filter;
+}
+
+/**
+ * Resolve the filter's label selection to a label id (or null). '0'/empty means no
+ * label; 'new' find-or-creates a custom label from the typed name; an integer selects an
+ * existing label. Returns null when nothing valid is chosen, so an unset action stores
+ * cleanly.
+ */
+function _filter_resolve_label(array $v): ?int {
+	$sel = (string)($v['fil_action_ilb_inbound_email_label_id'] ?? '0');
+	if ($sel === 'new') {
+		$name = trim((string)($v['fil_action_label_new'] ?? ''));
+		if ($name === '') {
+			return null;
+		}
+		$label = InboundEmailLabel::findOrCreate($name);
+		return $label ? intval($label->key) : null;
+	}
+	$lid = intval($sel);
+	return $lid > 0 ? $lid : null;
 }
 
 /**
@@ -493,7 +507,7 @@ function _filter_action_summary(InboundEmailFilter $f): array {
 	$chips = array();
 	if ($f->get('fil_action_never_spam')) { $chips[] = 'Never spam'; }
 	if ($f->get('fil_action_mark_spam'))  { $chips[] = 'Mark spam'; }
-	if ($f->get('fil_action_label_id'))   { $chips[] = 'Label'; }
+	if ($f->get('fil_action_ilb_inbound_email_label_id')) { $chips[] = 'Label'; }
 	if ($f->get('fil_action_star'))       { $chips[] = 'Star'; }
 	if ($f->get('fil_action_mark_read'))  { $chips[] = 'Mark read'; }
 	if ($f->get('fil_action_archive'))    { $chips[] = 'Archive'; }

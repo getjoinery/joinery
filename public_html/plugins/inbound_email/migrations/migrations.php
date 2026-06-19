@@ -11,7 +11,7 @@
  * the Mailbox Reader's thread-key index is created here (same pattern as the
  * server_manager plugin's index migration).
  *
- * @version 1.19.0
+ * @version 1.21.0
  */
 return [
 	[
@@ -188,6 +188,282 @@ return [
 						coalesce(iem_subject, '')     || ' ' ||
 						coalesce(iem_body_plain, '')  || ' ' ||
 						coalesce(iem_body_html, '')))"
+			);
+		},
+	],
+
+	[
+		// Labels-on-Groups hot paths (specs/inbound_email_labels.md). The auto-updater
+		// does not create non-unique indexes, so add: the projection's VANISHED
+		// correlation by (binding, uid) and its by-message lookup (replacing the old
+		// imf_ indexes), plus the "labels of a message" lookup on the core membership
+		// join. The imf_ indexes are dropped with the imf_ table by the conversion below.
+		'id' => 'iem_008_label_group_indexes',
+		'version' => '1.20.0',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$dblink->exec(
+				"CREATE INDEX IF NOT EXISTS ifm_folder_uid_idx
+				 ON ifm_imap_folder_membership (ifm_iif_inbound_imap_folder_id, ifm_imap_uid)"
+			);
+			$dblink->exec(
+				"CREATE INDEX IF NOT EXISTS ifm_message_idx
+				 ON ifm_imap_folder_membership (ifm_iem_inbound_email_message_id)"
+			);
+			$dblink->exec(
+				"CREATE INDEX IF NOT EXISTS grm_foreign_key_idx
+				 ON grm_group_members (grm_foreign_key_id)"
+			);
+		},
+	],
+
+	[
+		// One-time conversion of IMAP folders + imf_ membership into the labels-on-
+		// Groups model (specs/inbound_email_labels.md). Runs once against the one
+		// database (the plugin is not distributed). Idempotent — find-or-create and
+		// upserts throughout — so a re-run is a no-op.
+		//
+		//   1. Bind every folder to its Group: a custom folder to a user-facing
+		//      inbound_label group (shared by name = the merge), a special-use folder
+		//      to a hidden inbound_imap_role group, the \All coverage folder to none.
+		//   2. Convert each imf_ row into a grm_group_members row (membership = the
+		//      truth, for present_local) and an ifm_ projection row (the shadow +
+		//      UID, for present_base). Then drop the retired imf_ table + its indexes.
+		//   3. Repoint each filter's label action from the old iif folder id to the
+		//      folder's bound group id.
+		'id' => 'iem_009_convert_folders_to_label_groups',
+		'version' => '1.20.0',
+		'up' => function($dbconnector) {
+			require_once(PathHelper::getIncludePath('data/groups_class.php'));
+			require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_imap_folder_class.php'));
+			require_once(PathHelper::getIncludePath('plugins/inbound_email/data/imap_folder_membership_class.php'));
+			$dblink = $dbconnector->get_db_link();
+			$pgbool = function($v) { return ($v === true || $v === 't' || $v === '1' || $v === 1); };
+
+			// 1. Bind folders -> groups.
+			$folderGroup = array(); // iif id => group id (or null for coverage)
+			$fids = $dblink->query("SELECT iif_inbound_imap_folder_id FROM iif_inbound_imap_folders")
+				->fetchAll(PDO::FETCH_COLUMN);
+			foreach ($fids as $fid) {
+				$folder = new InboundImapFolder(intval($fid), TRUE);
+				$folderGroup[intval($fid)] = $folder->key ? $folder->ensureGroup() : null;
+			}
+
+			// 2. imf_ membership -> grm_group_members (truth) + ifm_ projection (shadow).
+			$hasImf = $dblink->query("SELECT to_regclass('public.imf_inbound_message_folders')")->fetchColumn();
+			if ($hasImf) {
+				$rows = $dblink->query(
+					"SELECT imf_iem_inbound_email_message_id AS msg, imf_iif_inbound_imap_folder_id AS folder,
+							imf_present_local AS local, imf_present_base AS base,
+							imf_imap_uid AS uid, imf_imap_uidvalidity AS uidv
+					 FROM imf_inbound_message_folders")->fetchAll(PDO::FETCH_ASSOC);
+				foreach ($rows as $r) {
+					$msg = intval($r['msg']);
+					$fid = intval($r['folder']);
+					$gid = $folderGroup[$fid] ?? null;
+					if ($gid && $pgbool($r['local'])) {
+						(new Group(intval($gid), TRUE))->add_member($msg);
+					}
+					if ($pgbool($r['base'])) {
+						ImapFolderMembership::setBaseline($msg, $fid, true,
+							$r['uid'] !== null ? intval($r['uid']) : null,
+							$r['uidv'] !== null ? intval($r['uidv']) : null);
+					}
+				}
+				$dblink->exec("DROP TABLE IF EXISTS imf_inbound_message_folders");
+			}
+
+			// 3. Repoint filter label actions (old fil_action_label_id = an iif id).
+			$hasOld = $dblink->query(
+				"SELECT 1 FROM information_schema.columns
+				 WHERE table_name = 'fil_inbound_email_filters'
+				   AND column_name = 'fil_action_label_id'")->fetchColumn();
+			if ($hasOld) {
+				$filters = $dblink->query(
+					"SELECT fil_inbound_email_filter_id AS id, fil_action_label_id AS folder
+					 FROM fil_inbound_email_filters
+					 WHERE fil_action_label_id IS NOT NULL")->fetchAll(PDO::FETCH_ASSOC);
+				$upd = $dblink->prepare(
+					"UPDATE fil_inbound_email_filters
+					 SET fil_action_grp_group_id = ? WHERE fil_inbound_email_filter_id = ?");
+				foreach ($filters as $f) {
+					$gid = $folderGroup[intval($f['folder'])] ?? null;
+					if ($gid) {
+						$upd->execute(array(intval($gid), intval($f['id'])));
+					}
+				}
+				$dblink->exec("ALTER TABLE fil_inbound_email_filters DROP COLUMN IF EXISTS fil_action_label_id");
+			}
+		},
+	],
+
+	[
+		// One-time forward conversion from the Groups-based labels (the prior iteration)
+		// to the dedicated ilb_/ilm_ model (specs/inbound_email_labels.md). Runs once
+		// against the one database (the plugin is not distributed). Standard labels are
+		// columns; only custom labels become rows, so role/standard memberships are
+		// discarded — their state already lives in iem_ columns. Guarded on the legacy
+		// iif_grp_group_id column so a re-run after the drop is a no-op.
+		//
+		//   1. Create an ilb_ label per genuine custom inbound_label Group (by name),
+		//      skipping the Gmail system folders that leaked in as custom ([Gmail]/Starred
+		//      is already iem_is_starred; [Gmail]/Important is dropped).
+		//   2. Repoint each folder: a custom folder to its label, special-use/coverage to NULL.
+		//   3. Convert each custom-label grm membership into one ilm_ row (present_local),
+		//      folding the matching ifm_ shadow (present_base + UID + binding) inline.
+		//   4. Repoint each filter's label action to the new label id, drop the old column.
+		//   5/6. Drop the ifm_ table, the inbound_label/inbound_imap_role groups + their
+		//      memberships, and the legacy iif_grp_group_id column.
+		'id' => 'iem_010_convert_groups_to_dedicated_labels',
+		'version' => '1.21.0',
+		'up' => function($dbconnector) {
+			require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_labels_class.php'));
+			$dblink = $dbconnector->get_db_link();
+			$pgbool = function($v) { return ($v === true || $v === 't' || $v === '1' || $v === 1); };
+
+			// Guard: only run while the legacy binding column still exists.
+			$hasIifGroup = $dblink->query(
+				"SELECT 1 FROM information_schema.columns
+				 WHERE table_name = 'iif_inbound_imap_folders' AND column_name = 'iif_grp_group_id'")->fetchColumn();
+			if (!$hasIifGroup) {
+				return;
+			}
+
+			// 1. ilb_ label per custom inbound_label group, skipping the Gmail system leftovers.
+			$skip = array('[gmail]/starred', '[gmail]/important');
+			$groupLabel = array(); // grp id => ilb id
+			$groups = $dblink->query(
+				"SELECT grp_group_id, grp_name FROM grp_groups
+				 WHERE grp_category = 'inbound_label' AND grp_delete_time IS NULL")->fetchAll(PDO::FETCH_ASSOC);
+			foreach ($groups as $g) {
+				if (in_array(strtolower(trim((string)$g['grp_name'])), $skip, true)) {
+					continue;
+				}
+				$label = InboundEmailLabel::findOrCreate((string)$g['grp_name']);
+				if ($label) {
+					$groupLabel[intval($g['grp_group_id'])] = intval($label->key);
+				}
+			}
+
+			// 2. Repoint folder bindings: custom folder -> its label; special-use/coverage -> NULL.
+			$updFolder = $dblink->prepare(
+				"UPDATE iif_inbound_imap_folders SET iif_ilb_inbound_email_label_id = ?
+				 WHERE iif_inbound_imap_folder_id = ?");
+			$folders = $dblink->query(
+				"SELECT iif_inbound_imap_folder_id AS id, iif_grp_group_id AS gid
+				 FROM iif_inbound_imap_folders")->fetchAll(PDO::FETCH_ASSOC);
+			foreach ($folders as $f) {
+				$gid = $f['gid'] !== null ? intval($f['gid']) : 0;
+				$updFolder->execute(array($groupLabel[$gid] ?? null, intval($f['id'])));
+			}
+
+			// 3. Custom-label memberships -> ilm_ rows, folding the ifm_ shadow inline.
+			$hasIfm = $dblink->query("SELECT to_regclass('public.ifm_imap_folder_membership')")->fetchColumn();
+			$insIlm = $dblink->prepare(
+				"INSERT INTO ilm_inbound_label_members
+				   (ilm_iem_inbound_email_message_id, ilm_ilb_inbound_email_label_id, ilm_present_local,
+				    ilm_present_base, ilm_iif_inbound_imap_folder_id, ilm_imap_uid, ilm_imap_uidvalidity,
+				    ilm_create_time, ilm_update_time)
+				 VALUES (?, ?, true, ?, ?, ?, ?, now(), now())");
+			$bindFolder = $dblink->prepare(
+				"SELECT iif_inbound_imap_folder_id FROM iif_inbound_imap_folders
+				 WHERE iif_grp_group_id = ? AND iif_iia_inbound_imap_account_id = ? LIMIT 1");
+			$shadow = $dblink->prepare(
+				"SELECT ifm_present_base AS base, ifm_imap_uid AS uid, ifm_imap_uidvalidity AS uidv
+				 FROM ifm_imap_folder_membership
+				 WHERE ifm_iem_inbound_email_message_id = ? AND ifm_iif_inbound_imap_folder_id = ? LIMIT 1");
+			foreach ($groupLabel as $gid => $lid) {
+				$members = $dblink->prepare(
+					"SELECT gm.grm_foreign_key_id AS msg, m.iem_iia_inbound_imap_account_id AS feed
+					 FROM grm_group_members gm
+					 JOIN iem_inbound_email_messages m ON m.iem_inbound_email_message_id = gm.grm_foreign_key_id
+					 WHERE gm.grm_grp_group_id = ?");
+				$members->execute(array($gid));
+				foreach ($members->fetchAll(PDO::FETCH_ASSOC) as $row) {
+					$msg = intval($row['msg']);
+					$feed = $row['feed'] !== null ? intval($row['feed']) : 0;
+					$folderId = null; $base = false; $uid = null; $uidv = null;
+					if ($feed) {
+						$bindFolder->execute(array($gid, $feed));
+						$fid = $bindFolder->fetchColumn();
+						if ($fid) {
+							$folderId = intval($fid);
+							if ($hasIfm) {
+								$shadow->execute(array($msg, $folderId));
+								$s = $shadow->fetch(PDO::FETCH_ASSOC);
+								if ($s) {
+									$base = $pgbool($s['base']);
+									$uid  = $s['uid']  !== null ? intval($s['uid'])  : null;
+									$uidv = $s['uidv'] !== null ? intval($s['uidv']) : null;
+								}
+							}
+						}
+					}
+					// Unbound (local label, or no bound folder on the feed) stays clean-local.
+					if ($folderId === null) {
+						$base = true;
+					}
+					$insIlm->execute(array($msg, $lid, $base ? 'true' : 'false', $folderId, $uid, $uidv));
+				}
+			}
+
+			// 4. Repoint filter label actions, then drop the legacy column.
+			$hasFilGroup = $dblink->query(
+				"SELECT 1 FROM information_schema.columns
+				 WHERE table_name = 'fil_inbound_email_filters' AND column_name = 'fil_action_grp_group_id'")->fetchColumn();
+			if ($hasFilGroup) {
+				$updFil = $dblink->prepare(
+					"UPDATE fil_inbound_email_filters SET fil_action_ilb_inbound_email_label_id = ?
+					 WHERE fil_inbound_email_filter_id = ?");
+				$filters = $dblink->query(
+					"SELECT fil_inbound_email_filter_id AS id, fil_action_grp_group_id AS gid
+					 FROM fil_inbound_email_filters WHERE fil_action_grp_group_id IS NOT NULL")->fetchAll(PDO::FETCH_ASSOC);
+				foreach ($filters as $f) {
+					$lid = $groupLabel[intval($f['gid'])] ?? null;
+					if ($lid) {
+						$updFil->execute(array($lid, intval($f['id'])));
+					}
+				}
+				$dblink->exec("ALTER TABLE fil_inbound_email_filters DROP COLUMN IF EXISTS fil_action_grp_group_id");
+			}
+
+			// 5/6. Drop the retired shadow table, the inbound_label/inbound_imap_role groups
+			//      + their memberships (role/standard state lives in columns or is dropped),
+			//      and the legacy folder binding column.
+			$dblink->exec("DROP TABLE IF EXISTS ifm_imap_folder_membership");
+			$dblink->exec(
+				"DELETE FROM grm_group_members WHERE grm_grp_group_id IN
+				   (SELECT grp_group_id FROM grp_groups WHERE grp_category IN ('inbound_label', 'inbound_imap_role'))");
+			$dblink->exec("DELETE FROM grp_groups WHERE grp_category IN ('inbound_label', 'inbound_imap_role')");
+			$dblink->exec("ALTER TABLE iif_inbound_imap_folders DROP COLUMN IF EXISTS iif_grp_group_id");
+		},
+	],
+
+	[
+		// Dedicated-label hot paths (specs/inbound_email_labels.md). The auto-updater does
+		// not create non-unique/partial indexes, so add: the partial dirty index that makes
+		// the sync push O(dirty), the VANISHED correlation by (binding, uid), and the
+		// by-message and by-label lookups.
+		'id' => 'iem_011_label_member_indexes',
+		'version' => '1.21.0',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$dblink->exec(
+				"CREATE INDEX IF NOT EXISTS ilm_dirty_idx
+				 ON ilm_inbound_label_members (ilm_iif_inbound_imap_folder_id)
+				 WHERE ilm_present_local <> ilm_present_base"
+			);
+			$dblink->exec(
+				"CREATE INDEX IF NOT EXISTS ilm_folder_uid_idx
+				 ON ilm_inbound_label_members (ilm_iif_inbound_imap_folder_id, ilm_imap_uid)"
+			);
+			$dblink->exec(
+				"CREATE INDEX IF NOT EXISTS ilm_message_idx
+				 ON ilm_inbound_label_members (ilm_iem_inbound_email_message_id)"
+			);
+			$dblink->exec(
+				"CREATE INDEX IF NOT EXISTS ilm_label_idx
+				 ON ilm_inbound_label_members (ilm_ilb_inbound_email_label_id)"
 			);
 		},
 	],

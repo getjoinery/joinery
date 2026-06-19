@@ -36,7 +36,8 @@
 require_once(PathHelper::getComposerAutoloadPath());
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_imap_account_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_imap_folder_class.php'));
-require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_message_folder_class.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_labels_class.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_label_members_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_message_attachment_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_alias_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_domain_class.php'));
@@ -320,10 +321,11 @@ class ImapIngestor {
 	}
 
 	/**
-	 * Ingest across every tracked folder of a sync-enabled feed. Membership
-	 * (`imf_`) rows are seeded on tracked, non-coverage folders; a coverage folder
-	 * (`\All`) ingests for storage + flag pull but contributes no membership (§6.1,
-	 * §7.3). One folder's failure never aborts the rest.
+	 * Ingest across every tracked folder of a sync-enabled feed. A custom label folder
+	 * seeds a label membership (`ilm_`) row; special-use folders set their column instead
+	 * (Junk → spam verdict, Sent → outbound, Trash → soft-delete) and INBOX / the \All
+	 * coverage view ingest for storage + flag pull but record neither (§6.1, §7.3). One
+	 * folder's failure never aborts the rest.
 	 */
 	private function ingestTrackedFolders(int $maxPerRun, $alias, $domain, $recipient): array {
 		$tracked = new MultiInboundImapFolder(array(
@@ -494,9 +496,9 @@ class ImapIngestor {
 	 * Extract + store one message and its attachment manifest. Returns
 	 * ['dedup'=>bool]. Idempotent: dedup (UNIQUE message-id+recipient) means the
 	 * row already exists, so the manifest is not rewritten. When $recordMembership,
-	 * an `imf_` membership row for ($folder) is attached (local = base = true) on
-	 * both the new-row and dedup paths — the dedup path is where a message already
-	 * stored from another folder gains its second-folder membership (§7.3).
+	 * an `ilm_` label membership for ($folder) is attached (present_local = present_base
+	 * = true) on both the new-row and dedup paths — the dedup path is where a message
+	 * already stored from another folder gains its second label (§7.3).
 	 */
 	private function ingestOne($client, InboundImapFolder $folder, $uid, $data, InboundEmailRouter $router,
 			$alias, $domain, $recipient, $serverUidValidity, bool $recordMembership = false): array {
@@ -566,8 +568,7 @@ class ImapIngestor {
 			if ($existingId > 0) {
 				$this->adoptLocatorIfMissing($existingId, intval($uid), intval($serverUidValidity), $folderName);
 				if ($recordMembership) {
-					InboundMessageFolder::setPresence($existingId, intval($folder->key), true, true,
-						intval($uid), intval($serverUidValidity));
+					$this->recordFolderMembership($folder, $existingId, intval($uid), intval($serverUidValidity));
 				}
 				return array('dedup' => true, 'message_id' => $existingId);
 			}
@@ -594,12 +595,12 @@ class ImapIngestor {
 			$messageId = $this->existingMessageId((string)$envelope->message_id, $recipient);
 		}
 
-		// Attach this folder's membership (local = base = true). On the dedup path
-		// this is where a message stored from another folder gains a second
-		// membership; the new-row path seeds the first.
+		// Attach this folder's label (the message carries the binding's label; the ilm_
+		// row is truth + an in-sync shadow). On the dedup path this is where a message
+		// stored from another folder gains a second label; the new-row path seeds the
+		// first.
 		if ($recordMembership && $messageId > 0) {
-			InboundMessageFolder::setPresence($messageId, intval($folder->key), true, true,
-				intval($uid), intval($serverUidValidity));
+			$this->recordFolderMembership($folder, $messageId, intval($uid), intval($serverUidValidity));
 		}
 
 		// Spam (specs/inbound_email_spam_filtering.md): a message the remote filed in
@@ -608,7 +609,47 @@ class ImapIngestor {
 			$this->markSpam($messageId);
 		}
 
+		// Trash arrival (§7.5): a message the remote moved to its Trash folder is a
+		// remote delete — soft-delete the local row (the column is the truth) and point
+		// the locator at this Trash copy, which is also the sync push's "already in
+		// Trash" signal, so it is never re-pushed to Trash.
+		if ($messageId > 0 && (string)$folder->get('iif_role') === InboundImapFolder::ROLE_TRASH) {
+			$this->markDeletedInTrash($messageId, intval($uid), intval($serverUidValidity), $folderName);
+		}
+
 		return array('dedup' => (bool)$result['dedup'], 'message_id' => $messageId);
+	}
+
+	/**
+	 * Record that a message carries a custom label: write the single ilm_ row that is
+	 * both the truth (present_local) and the in-sync IMAP shadow (present_base + this
+	 * folder's UID) for two-way reconciliation. Only called for label-binding folders.
+	 * Idempotent.
+	 */
+	private function recordFolderMembership(InboundImapFolder $folder, int $messageId, int $uid, int $uidvalidity): void {
+		if ($messageId <= 0) {
+			return;
+		}
+		$labelId = $folder->ensureLabel();
+		if ($labelId === null) {
+			return; // special-use / coverage folder: a column, not a label
+		}
+		InboundLabelMember::setBaseline($messageId, $labelId, intval($folder->key), true, $uid, $uidvalidity);
+	}
+
+	/**
+	 * Soft-delete a row that arrived in the source Trash folder and point its locator at
+	 * that Trash copy. The locator doubling as the trash shadow is what keeps the sync
+	 * push from MOVE-ing an already-trashed message back to Trash.
+	 */
+	private function markDeletedInTrash(int $messageId, int $uid, int $uidvalidity, string $folderName): void {
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare(
+			"UPDATE iem_inbound_email_messages
+			 SET iem_delete_time = COALESCE(iem_delete_time, now()),
+				 iem_iia_inbound_imap_account_id = ?, iem_imap_folder = ?, iem_imap_uid = ?, iem_imap_uidvalidity = ?
+			 WHERE iem_inbound_email_message_id = ?");
+		$stmt->execute(array(intval($this->account->key), $folderName, $uid, $uidvalidity, $messageId));
 	}
 
 	/** The id of an already-stored row by its (Message-ID, recipient) dedup key, or 0. */

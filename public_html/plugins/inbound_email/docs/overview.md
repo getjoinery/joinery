@@ -882,8 +882,10 @@ touches IMAP mail.
   spam, never send to spam, forward to an address, delete.
 
 **Scope of a rule.** A filter belongs to a mailbox, or to *all mailboxes in a
-domain* (a domain-wide rule). Domain-wide rules do flag/spam/forward/delete but not
-apply-label (a label belongs to one mailbox).
+domain* (a domain-wide rule). A label is a custom label (an `ilb_inbound_email_labels`
+row) with a single global namespace rather than belonging to one mailbox — every scope,
+domain-wide rules included, can apply a label. The *Apply the label* dropdown lists
+the existing labels and offers **Create new label…** to mint one inline.
 
 **Engine.** The match and action logic lives on the `InboundEmailFilter` model.
 `runForMessage()` loads every in-scope enabled filter (the mailbox's own plus the
@@ -891,9 +893,9 @@ domain-wide ones), runs `matches()`, accumulates the actions of all that match, 
 applies them once in a fixed order so multi-filter interactions are well-defined:
 *never-spam → mark-spam → label/star/read/archive → forward → delete*. An explicit
 *never send to spam* always beats *mark as spam*. It runs at ingest **after** the
-spam verdict is set, so a filter is the last word on disposition; it writes flags
-and label membership directly (system authority), reusing the same primitives the
-reader uses. A forward action relays a copy through the same path alias-forwarding
+spam verdict is set, so a filter is the last word on disposition; it writes the state
+columns and label memberships directly (system authority), reusing the same primitives
+the reader uses. A forward action relays a copy through the same path alias-forwarding
 uses; a delete soft-deletes the stored copy last, so a forwarded copy still went out.
 
 **Archive ("Skip the Inbox").** The reader's default mailbox view is the **Inbox**
@@ -1127,52 +1129,64 @@ granted IMAP scope already permits the `STORE`/`COPY`/`MOVE`/`APPEND`/`EXPUNGE`
 writes. **Gmail is reconciled by the same folder model as every other host** — no
 Gmail IMAP extensions are used.
 
-**State mapped to IMAP.** Read ↔ `\Seen`, star ↔ `\Flagged`, folder/label membership
-↔ the set of folders the message appears in, deletion ↔ move to Trash.
+**State mapped to IMAP.** Read ↔ `\Seen`, star ↔ `\Flagged`, custom label ↔ the
+remote folder that mirrors it, deletion ↔ move to Trash. Standard state (read, star,
+spam, archive, deletion) is a column on the message; only **custom** labels are
+folder memberships.
 
-**Per-folder presence.** Membership is observed uniformly as *which tracked folders
-contain a message*, matched across folders by `Message-ID`. Adding a message to a
-folder is a `COPY` (a Gmail label add) on a multi-folder host or a `MOVE` on a
-classic one-folder host; removing is `STORE \Deleted` + `EXPUNGE`; deleting is a
-`MOVE` to Trash. Operators pick which folders are tracked on the mailbox editor;
-special-use folders (Inbox, Sent, Trash) are pre-selected.
+**Custom labels are rows; folders are bindings.** A custom label is an
+`ilb_inbound_email_labels` row, and a message *has* it iff it carries an
+`ilm_inbound_label_members` row with `ilm_present_local` — the same truth for
+locally-received and IMAP mail. An IMAP folder (`iif_inbound_imap_folders`) is a
+**binding** that mirrors one label to a remote folder on one feed
+(`iif_ilb_inbound_email_label_id`). Special-use folders (Inbox, Sent, Trash, Junk) and
+the `\All` coverage view bind no label — their state is a message column, not a label.
+The membership row is also the IMAP **shadow**: `ilm_present_base` records whether the
+message was in the bound folder at the last sync, alongside the folder UID, so truth
+and shadow share one row. Adding a label is a `COPY` (a Gmail label add) on a
+multi-folder host or a `MOVE` on a classic one-folder host; removing is `STORE
+\Deleted` + `EXPUNGE`; deleting is a `MOVE`/`COPY` to Trash. Operators pick which
+folders are tracked on the mailbox editor; special-use folders are pre-selected.
 
-**Changing membership from the reader.** The open-thread toolbar has a **Move ▾**
+**Changing labels from the reader.** The open-thread toolbar has a **Move ▾**
 (exclusive feeds) / **Labels ▾** (non-exclusive feeds, e.g. Gmail) control: pick a
-folder to relocate the thread, or toggle label checkboxes. Each change sets the
-local membership (`MailboxService::setMembership`, via the `set_membership` action)
-and the next sync pushes it to the source. Membership edits require a Two-way feed
-to reach the source; on a Read-only feed they stay local.
+folder to relocate the thread, or toggle label checkboxes. Each change applies or
+removes the custom-label membership (`MailboxService::setMembership`, via the
+`set_membership` action); when the label is bound to a Two-way feed the next sync
+pushes the change to the source, and an unbound (local) label is pure membership that
+never touches a remote.
 
 **Creating a label/folder.** The same control has a **New label… / New folder…**
-field. Creating one makes a tracked `iif_` folder flagged `iif_pending_remote_create`
-(it does not exist on the source yet) and files the thread into it. The folder is
-materialized on the source **during the sync push** — `ImapSyncer` issues the IMAP
-`CREATE`, clears the pending flag, then `COPY`s the message in; pull/ingest skip a
-pending folder until it exists. Creation is idempotent (a folder that already exists
-is adopted). Conversely, a label created on the *source* is discovered each sync as
-an untracked folder — tick it on the mailbox editor to start syncing it.
+field. Creating one makes an `ilb_` label; on a mailbox with an IMAP feed it also makes
+a tracked binding flagged `iif_pending_remote_create` (the remote folder does not
+exist yet) and files the thread into it. The folder is materialized on the source
+**during the sync push** — `ImapSyncer` issues the IMAP `CREATE`, clears the pending
+flag, then `COPY`s the message in; pull/ingest skip a pending folder until it exists.
+Creation is idempotent (a folder that already exists is adopted). Conversely, a label
+created on the *source* is discovered each sync as an untracked folder — tick it on
+the mailbox editor to start syncing it.
 
 **The `\All` coverage view (Gmail All Mail).** An all-mail folder is tracked as a
-**coverage source**, not a navigable folder: it ingests every message — including
-mail archived with no label — so nothing is missed, but it never carries a
-membership bit. In the reader, the **mailbox root is the folder-unfiltered “All
-Mail” view**, so coverage-only messages (no folder membership) are reachable there;
-the folders listed beneath it narrow to a single folder.
+**coverage source**, not a navigable label: it ingests every message — including
+mail archived with no label — so nothing is missed, but it carries no label. In the
+reader, the **mailbox root is the label-unfiltered “All Mail” view**, so messages with
+no label are reachable there; the labels listed beneath it narrow to one label.
 
 **Reconciliation.** Each cycle runs **Pull → Ingest → Push** on one connection.
-Flags are a three-way merge keyed on a per-row dirty signal (a local change since
-the last push wins over an incoming remote change). Membership is reconciled through
-a per-element **shadow** (the set as of last agreement), which makes each
-(message, folder) bit a conflict-free boolean merge; on a one-folder host a
-divergent move converges to the local destination within two cycles with no explicit
-tiebreak. A pushed change is re-read next cycle as a value-equal no-op, so nothing
-loops.
+Flags are a three-way merge keyed on a per-row dirty signal (a local change since the
+last push wins over an incoming remote change). Custom-label membership is reconciled
+through the single `ilm_` row: an element is dirty when `ilm_present_local` differs
+from `ilm_present_base` — a column predicate a partial index covers, so the push scans
+only the dirty rows. Each (message, label) bit is a conflict-free boolean merge; on a
+one-folder host a divergent move converges to the local destination within two cycles
+with no explicit tiebreak. A pushed change is re-read next cycle as a value-equal
+no-op, so nothing loops.
 
-**Deletion** (a separate **“Also sync deletions”** toggle): a local delete moves the
-source message to Trash; a message arriving in Trash on the source soft-deletes the
-local row. Archiving on Gmail (losing the Inbox label while keeping others / All
-Mail) is distinct from deletion and is not treated as one.
+**Deletion** (a separate **“Also sync deletions”** toggle): driven by the
+`iem_delete_time` column, not a label. A local delete moves/copies the source message
+to Trash (the locator follows, so it is never re-pushed); a message arriving in Trash
+on the source soft-deletes the local row at ingest. Archiving (the `iem_is_archived`
+column) is distinct from deletion and stays local.
 
 **Compose / Sent** (the **“Enable compose / Sent sync”** toggle, with the reader’s
 reply/forward feature): the source Sent folder is ingested like any tracked folder,
