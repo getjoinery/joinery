@@ -159,6 +159,7 @@ Candidate targets to evaluate once a suitable host exists (all one-line `joinery
 |------------|-------|-------|
 | ~1B on this box | `llama3.2:1b` / `qwen3:1.7b` | Loads and generates; **plumbing test only** — validates the provider adapter end-to-end, not real recipes. |
 | ~8 GB host | `gemma4:e4b` | Limited-hardware agent pick; better but still below the cliff. |
+| **M4 Mac mini, 16 GB** | **`qwen3:14b` (q4)** | **Recommended sweet spot.** Dense 14B clears the cliff with margin; ~9 GB weights fit the ~10–12 GB usable budget (macOS reserves ~3–4 GB, Metal GPU alloc capped ~75%). Unified memory + Metal gives multi-second turns (~15–25 tok/s), not multi-minute. Mistral Small 3 (24B) at q4 is borderline; `qwen3-30b-a3b` (MoE) won't fit (~17–18 GB resident — all experts stay resident). |
 | ~20 GB CPU host | `qwen3-30b-a3b` (MoE) | Smallest config that clears the tool-calling cliff while staying CPU-tractable — the "slow but actually reliable" option. |
 | GPU host (~24 GB) | dense `gemma4:27b` / `qwen3:32b` | Most reliable local tier. |
 
