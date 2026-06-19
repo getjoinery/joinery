@@ -3,13 +3,13 @@
  * Mailbox Reader AJAX — state mutations.
  *
  * POST, CSRF-protected. action ∈ {mark_read, mark_unread, star, unstar, delete,
- * mark_spam, mark_not_spam, set_membership, create_folder}.
+ * archive, unarchive, mark_spam, mark_not_spam, set_membership, create_folder}.
  * Targets are either ids[] (message ids) OR a thread_key (expanded server-side
  * via messageIdsInThread, optionally narrowed by alias_id). Every mutation
  * re-checks scope in SQL, so a crafted id/thread for an un-granted mailbox
  * affects nothing. Staff-only.
  *
- * @version 1.1
+ * @version 1.2
  */
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/MailboxService.php'));
@@ -76,6 +76,14 @@ switch ($action) {
 		break;
 	case 'delete':
 		$count = $service->softDelete($ids);
+		break;
+	case 'archive':
+		// "Skip the Inbox": hide from the Inbox view, keep in All Mail.
+		$count = $service->setArchived($ids, true);
+		break;
+	case 'unarchive':
+		// "Move to Inbox": restore an archived conversation.
+		$count = $service->setArchived($ids, false);
 		break;
 	case 'mark_spam':
 		// Manual correction: move to the Spam view (specs/inbound_email_spam_filtering.md).

@@ -29,7 +29,11 @@
  * (specs/inbound_email_content_spam_filtering.md). getThread() returns the recorded
  * content-spam score (iem_spam_score) for display only.
  *
- * @version 1.4
+ * Archive (specs/implemented/inbound_email_filters.md): the default Inbox view hides
+ * archived rows (iem_is_archived); All Mail shows them. setArchived() is the manual
+ * Archive / Move-to-Inbox action, symmetric with a filter's archive action.
+ *
+ * @version 1.5
  */
 
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/MailboxViewer.php'));
@@ -421,6 +425,15 @@ class MailboxService {
 			$where[] = "iem_spam_verdict IS DISTINCT FROM 'spam'";
 		}
 
+		// Inbox view (specs/implemented/inbound_email_filters.md): the default list
+		// is the Inbox — archived mail ("Skip the Inbox") is hidden. The "All Mail"
+		// view passes no inbox flag, so archived conversations remain reachable.
+		// IS NOT TRUE (not "= false") so a NULL iem_is_archived counts as not-archived
+		// — messages stored before the column existed are never-archived, not hidden.
+		if (!empty($filters['inbox'])) {
+			$where[] = "iem_is_archived IS NOT TRUE";
+		}
+
 		// Folder dimension (specs/two_way_imap_sync.md §8): restrict to messages
 		// present in the chosen folder via the imf_ membership. Null = the
 		// folder-unfiltered "All Mail" view, so coverage-only messages (zero imf_
@@ -468,6 +481,7 @@ class MailboxService {
 					COUNT(*) AS msg_count,
 					COUNT(*) FILTER (WHERE iem_is_read = false) AS unread_count,
 					BOOL_OR(iem_is_starred) AS any_starred,
+					BOOL_OR(iem_is_archived) AS any_archived,
 					CASE
 						WHEN COUNT(*) FILTER (WHERE iem_is_read = false) > 0 THEN 0
 						WHEN BOOL_OR(iem_is_starred) THEN 1
@@ -515,6 +529,7 @@ class MailboxService {
 				'msg_count'    => intval($r['msg_count']),
 				'unread_count' => intval($r['unread_count']),
 				'any_starred'  => (bool)$this->pgBool($r['any_starred']),
+				'any_archived' => (bool)$this->pgBool($r['any_archived']),
 				'latest_time'  => $r['latest_time'],
 				'latest_id'    => intval($r['latest_id']),
 			);
@@ -678,6 +693,27 @@ class MailboxService {
 		$in = implode(',', $ids);
 		$sql = "UPDATE iem_inbound_email_messages
 				SET iem_is_starred = " . ($starred ? 'true' : 'false') . ",
+					iem_local_state_modified = now()
+				WHERE iem_inbound_email_message_id IN ($in) AND " . $this->mutationScopeSql();
+		$stmt = $this->db()->prepare($sql);
+		$stmt->execute();
+		return $stmt->rowCount();
+	}
+
+	/**
+	 * Archive ("Skip the Inbox") or restore in-scope rows
+	 * (specs/implemented/inbound_email_filters.md). Archived mail is hidden from the
+	 * default Inbox view but stays in All Mail; orthogonal to read/star/spam.
+	 * @return int rows affected
+	 */
+	public function setArchived(array $message_ids, bool $archived): int {
+		$ids = $this->intList($message_ids);
+		if (!count($ids)) {
+			return 0;
+		}
+		$in = implode(',', $ids);
+		$sql = "UPDATE iem_inbound_email_messages
+				SET iem_is_archived = " . ($archived ? 'true' : 'false') . ",
 					iem_local_state_modified = now()
 				WHERE iem_inbound_email_message_id IN ($in) AND " . $this->mutationScopeSql();
 		$stmt = $this->db()->prepare($sql);

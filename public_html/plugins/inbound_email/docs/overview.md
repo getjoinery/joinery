@@ -850,6 +850,67 @@ controller outage leaves rows diverged to retry on the next pass, so the loop se
 rather than stranding corrections. (rspamd's classifier needs roughly 200 messages of each
 class before it contributes, so early corrections have little visible effect.)
 
+## Filters
+
+Operator-defined rules that match incoming mail and apply actions to it
+automatically — the inbound-email equivalent of Gmail's *Filters and Blocked
+Addresses*. Managed under the **Filters** admin tab (between Accounts and Logs),
+**one mailbox at a time**: a mailbox picker scopes the list, and *Create filter*
+is pre-scoped to the picked mailbox. The picker also offers each domain's *All
+mailboxes in `<domain>`* bucket for managing domain-wide rules. It lists **only
+mailboxes where filters can actually fire** — those that store locally-received
+mail (delivery mode store / forward-and-store, and not IMAP-backed); IMAP-polled
+and pure-forward mailboxes are omitted because the filter hook never runs for them.
+
+**Scope.** Filters run on **locally-received** mail only — the Postfix milter path
+and the provider-webhook path, both of which funnel through
+`InboundEmailRouter::storeMessage()`. They do **not** run on IMAP-polled feeds: an
+IMAP feed mirrors an upstream account that already applies its own filters, and the
+reader's two-way sync treats the remote as the source of truth for flag/label
+state. Because `storeMessage` is the single local-only path, the ingest hook there
+covers the Postfix and webhook paths identically with no per-path branch, and never
+touches IMAP mail.
+
+**A filter has two parts** (Gmail's split):
+
+- **Criteria** — From, To, Subject, *Has the words*, *Doesn't have*, Size
+  (greater/less than a value + unit), and *Has attachment*. From/To accept
+  comma-separated terms (any one matches); *Has the words* requires every word, and
+  *Doesn't have* excludes any. A filter matches when **all** non-empty criteria
+  match. At least one criterion is required.
+- **Actions** — apply a label, star, mark read, *Skip the Inbox* (archive), mark as
+  spam, never send to spam, forward to an address, delete.
+
+**Scope of a rule.** A filter belongs to a mailbox, or to *all mailboxes in a
+domain* (a domain-wide rule). Domain-wide rules do flag/spam/forward/delete but not
+apply-label (a label belongs to one mailbox).
+
+**Engine.** The match and action logic lives on the `InboundEmailFilter` model.
+`runForMessage()` loads every in-scope enabled filter (the mailbox's own plus the
+domain-wide ones), runs `matches()`, accumulates the actions of all that match, and
+applies them once in a fixed order so multi-filter interactions are well-defined:
+*never-spam → mark-spam → label/star/read/archive → forward → delete*. An explicit
+*never send to spam* always beats *mark as spam*. It runs at ingest **after** the
+spam verdict is set, so a filter is the last word on disposition; it writes flags
+and label membership directly (system authority), reusing the same primitives the
+reader uses. A forward action relays a copy through the same path alias-forwarding
+uses; a delete soft-deletes the stored copy last, so a forwarded copy still went out.
+
+**Archive ("Skip the Inbox").** The reader's default mailbox view is the **Inbox**
+(non-archived, non-spam, non-deleted); an **All Mail** rail entry shows everything,
+archived included. The open-thread toolbar offers **Archive** in the Inbox and **Move
+to Inbox** in All Mail — the manual counterpart to the filter's archive action.
+
+**Apply to existing.** A filter saved with *Also apply to matching existing mail*
+sets a pending flag drained by the `ApplyInboundEmailFilters` scheduled task, which
+pages through that mailbox's locally-received, non-deleted history in bounded
+batches and applies the same matcher and actions (forwarding is never re-applied to
+historical mail), resuming across runs via a per-filter cursor.
+
+**Logging.** Each ingest that matches at least one filter writes a `filtered` line to
+the inbound transaction log (the **Logs** tab) recording the matched filter ids and
+the actions taken.
+
 ## Inbound Providers
 
 Inbound mail is **provider-based** and composes with the platform's

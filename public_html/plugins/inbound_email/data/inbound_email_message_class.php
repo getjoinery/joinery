@@ -54,7 +54,7 @@
  * its numeric score for display/tuning only (never disposition); iem_learned_verdict
  * tracks what the LearnSpamFeedback task has taught rspamd's Bayes classifier.
  *
- * @version 1.6
+ * @version 1.7
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -97,6 +97,10 @@ class InboundEmailMessage extends SystemBase {
 		'iem_direction'           => array('type'=>'varchar(10)', 'default'=>'inbound', 'is_nullable'=>false), // inbound | outbound (reply/forward sent from the reader)
 		'iem_is_read'             => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'iem_is_starred'          => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+		// "Skip the Inbox" (specs/implemented/inbound_email_filters.md). An archived
+		// message is hidden from the default Inbox view but still reachable in All
+		// Mail; orthogonal to read/star. Set by the Archive reader action or a filter.
+		'iem_is_archived'         => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'iem_read_time'           => array('type'=>'timestamp(6)'),
 		'iem_dkim_result'         => array('type'=>'varchar(16)'),
 		'iem_spf_result'          => array('type'=>'varchar(16)', 'default'=>'unverified'),

@@ -6,7 +6,7 @@
  * unread_only, starred_only, spam, page. Returns the scoped conversation
  * list grouped by thread, latest-first. Staff-only.
  *
- * @version 1.2
+ * @version 1.3
  */
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/MailboxService.php'));
@@ -30,6 +30,9 @@ $filters = array(
 	'unread_only'  => !empty($_GET['unread_only']),
 	'starred_only' => !empty($_GET['starred_only']),
 	'spam'         => !empty($_GET['spam']),
+	// Inbox view (specs/implemented/inbound_email_filters.md): hide archived mail.
+	// The "All Mail" view omits this so archived conversations stay reachable.
+	'inbox'        => !empty($_GET['inbox']),
 );
 
 $page = isset($_GET['page']) ? intval($_GET['page']) : 1;
