@@ -11,7 +11,7 @@
  *
  * @see specs/implemented/inbound_email_filters.md
  * @see specs/inbound_email_filter_import.md
- * @version 1.4
+ * @version 1.5
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -309,16 +309,22 @@ if (($mode ?? 'list') === 'form') {
 			echo '<td>' . ($r['enabled'] ? 'Enabled' : 'Disabled') . '</td>';
 
 			echo '<td>';
-			// Edit link + enable toggle + delete, the latter two as single-button
-			// FormWriter action forms (POST, CSRF-handled).
-			echo '<a href="' . htmlspecialchars($base . '?op=edit&id=' . $r['id']) . '">Edit</a> ';
+			// A single Actions dropdown (theme's vanilla .dropdown). Edit is a GET
+			// link; Disable/Enable and Delete stay single-button FormWriter forms
+			// (POST, CSRF-handled) whose submit buttons render as menu items.
+			echo '<div class="dropdown">';
+			echo '<button type="button" class="btn btn-soft-default btn-sm dropdown-toggle" '
+				. 'data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
+			echo '<div class="dropdown-menu dropdown-menu-end">';
+
+			echo '<a class="dropdown-item" href="' . htmlspecialchars($base . '?op=edit&id=' . $r['id']) . '">Edit</a>';
 
 			$toggle = $page->getFormWriter('toggle_' . $r['id'], array('action' => $base, 'method' => 'POST'));
 			echo $toggle->begin_form();
 			$toggle->hiddeninput('op', '', array('value' => 'toggle'));
 			$toggle->hiddeninput('id', '', array('value' => $r['id']));
 			$toggle->hiddeninput('scope', '', array('value' => $active_scope));
-			$toggle->submitbutton('toggle_btn', $r['enabled'] ? 'Disable' : 'Enable');
+			$toggle->submitbutton('toggle_btn', $r['enabled'] ? 'Disable' : 'Enable', array('class' => 'dropdown-item'));
 			echo $toggle->end_form();
 
 			$del = $page->getFormWriter('delete_' . $r['id'], array('action' => $base, 'method' => 'POST'));
@@ -326,9 +332,13 @@ if (($mode ?? 'list') === 'form') {
 			$del->hiddeninput('op', '', array('value' => 'delete'));
 			$del->hiddeninput('id', '', array('value' => $r['id']));
 			$del->hiddeninput('scope', '', array('value' => $active_scope));
-			$del->submitbutton('delete_btn', 'Delete', array('onclick' => "return confirm('Delete this filter?');"));
+			$del->submitbutton('delete_btn', 'Delete', array(
+				'class' => 'dropdown-item text-danger',
+				'onclick' => "return confirm('Delete this filter?');",
+			));
 			echo $del->end_form();
 
+			echo '</div></div>';
 			echo '</td>';
 			echo '</tr>';
 		}
