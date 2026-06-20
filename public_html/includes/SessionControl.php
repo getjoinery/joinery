@@ -62,6 +62,19 @@ class SessionControl{
 	var $currpermissioncheck;
 
 	private function __construct(){
+		// No web session in CLI: there is no cookie, no browser, and nothing to
+		// persist. Actor identity for CLI workers (e.g. recipe runs) is set
+		// in-memory via set_api_user(), which manipulates $_SESSION directly and
+		// needs no started session. Starting a real session here only creates a
+		// throwaway session file and emits "headers already sent" warnings once
+		// anything has printed to stdout. php_sapi_name() is set by the runtime,
+		// never by request input, and is never 'cli' under a web server — so this
+		// branch can never affect a real HTTP request's authentication.
+		if (php_sapi_name() === 'cli') {
+			if (!isset($_SESSION)) $_SESSION = array();
+			return;
+		}
+
 		// Set secure session cookie parameters before starting the session
 		$is_secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
 			|| (!empty($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https')
