@@ -50,6 +50,13 @@ Every platform system the calendar/scheduling feature touches, and how:
 
 Every new table this spec introduces is a plain CRUD model behind **bespoke presentation** — the calendar grid, the availability editor, and the booking flow are all hand-built UI, none of them a generated list/edit page. That is exactly the model-only case the scaffold generator (`specs/implemented/scaffolding_code_generator.md`) is for; its own example for `surfaces: ["data"]` is "an entity with bespoke presentation (e.g. a calendar)." So the new models are **generated from manifests, not hand-written**: the generator emits the data class + Multi collection class — requires, `$field_specifications`, constructor, `getMultiResults()` filter branches, deletion wiring — and no pages we'd immediately discard.
 
+**Why generate these rather than hand-write them — stated plainly.** The reason is *not* effort or tokens saved. Measured honestly, generating five data-only classes is roughly break-even against writing them by hand once the manifest authoring and the verification pause are counted, and the data layer is a rounding error against the rest of this spec's implementation. The reasons that do hold up are two:
+
+1. **Consistency.** Five models that are provably identical in structure, guaranteed `validate_php_file.php`-clean, with no copy-paste drift — and a forcing function to declare every field, filter, and deletion rule up front in one manifest before any code exists.
+2. **This is a deliberate real-world test of the generator.** The scaffold generator was just built and has not yet run against non-trivial inputs. This spec is its first real consumer, and it exercises the corners on purpose — subject-keyed `unique_with`, PostgreSQL `time` columns, and the non-standard-ownership stub path. Treating this as a shakedown is the point: gaps in the generator surface here, under a checkpoint written into the plan (the pause after Phase 2.1), rather than later in some spec with no guard. Hardening a reusable platform primitive on real work is the value being bought — not labor on this feature.
+
+A caveat that comes with being the test case: this spec only exercises the generator's `surfaces: ["data"]` corner, not its main value path (the full nine-file CRUD set). So a clean run here proves the data-only and edge-type paths, not the generator end to end; the list/edit/admin templates still need their own first consumer elsewhere.
+
 | Entity (class) | Table | `surfaces` | Into |
 |---|---|---|---|
 | `Schedule` | `sch_schedules` | `["data"]` | core |
@@ -65,7 +72,7 @@ Two manifest choices are non-obvious and decided here:
 
 **What is *not* scaffolded.** The generator is creation-only — it never edits an existing file. The bookings plugin's `booking_types_class.php` and `bookings_class.php` already exist; their schema changes (Layer 4) and admin CRUD rework are hand edits. They do adopt the same descriptor-driven forms the generator emits — their edit forms render through `FormWriter::fromDescriptor()` (shipped by the scaffold spec) — so a hand-built booking-type form and a generated form share one field-declaration style.
 
-**This spec is the first substantial consumer of the generator**, so the first generation run doubles as a check on the generator itself. Phase 2.1 runs it for the schedule manifests and is immediately followed by a hard **pause to verify the output is what this spec needs before anything is built on top of it** (see the gate after Phase 2.1).
+Because this run is the generator's shakedown (above), Phase 2.1 runs it for the schedule manifests first and is immediately followed by a hard **pause to verify the output is what this spec needs before anything is built on top of it** (see the gate after Phase 2.1).
 
 ---
 
