@@ -1,13 +1,15 @@
-# Scheduling System — Native Booking Engine + External Provider Integration
+# Scheduling System — Native Booking Engine
 
 ## Overview
 
-Build a complete appointment-scheduling capability (Calendly-class) on the Joinery platform. The design is layered so the general pieces land in core and only the appointment product lives in the bookings plugin:
+Build a complete appointment-scheduling capability (Calendly-class) on the Joinery platform — self-hosted, no external dependency. The design is layered so the general pieces land in core and only the appointment product lives in the bookings plugin:
 
 1. **Core availability engine** — schedules, weekly windows, date overrides, busy-time aggregation, and a slot generator. General-purpose: usable by bookings, staff scheduling, resource booking, or any future feature that needs "who is free when."
 2. **Core calendar UI components** — a month/week calendar grid and a slot picker, built as component-system types. Usable by any feature that renders timed items.
 3. **Bookings plugin** — booking types, the public booking page, booking lifecycle (confirm / cancel / reschedule / remind), intake questions, paid bookings.
-4. **Scheduling provider abstraction** — a pluggable provider interface where the native engine is one provider and external services (Calendly, Acuity, others) are alternative providers. Hosts who prefer to keep using Calendly or Acuity connect their account; their bookings still land in the unified local booking table.
+4. **Scheduling provider seam** — a pluggable `SchedulingServiceProvider` interface and busy-source registry where the native engine is one implementation, so external services can slot in later without rearchitecting. This spec ships the seam and the native implementation only.
+
+**External integrations are a separate, deferred spec.** Importing from / connecting to Calendly, Acuity, Google, and Outlook lives in `specs/external_scheduling_integrations.md`. The target market is the "degoogle" crowd, so that work is import-first (migrate off the external service) and ongoing calendar sync is its lowest priority. The seams here are designed so all of it is additive — see Layer 1's busy-source registry and Layer 4's provider interface.
 
 **Supersedes:** `specs/calendly_integration.md` (deleted — it described fixing integration files that were removed in commit e1547005). `specs/calendly_feature_ideas.md` (deleted — Phase 6 below is the consolidated backlog).
 
@@ -21,8 +23,8 @@ Every platform system the scheduling feature touches, and how:
 
 | System | Integration |
 |---|---|
-| **OAuth2 core** (`includes/oauth/`) | Google + Microsoft for calendar read/write sync. New `CalendlyOAuthProvider` added to the core provider catalog. Consumers live in plugin/core `oauth_consumers/` dirs per the existing pattern. Tokens encrypted with SecretBox. |
-| **Scheduled tasks** | Reminder/follow-up sender task; external-provider reconciliation sync task. |
+| **OAuth2 core** (`includes/oauth/`) | Not used by the native engine. Google/Microsoft/Calendly OAuth is part of `specs/external_scheduling_integrations.md`. |
+| **Scheduled tasks** | Reminder/follow-up sender task (`BookingEmailsTask`). |
 | **Questions/Surveys** | Intake questions on booking types via `bkt_svy_survey_id` (same pattern as `evt_svy_survey_id`). No new question-collection mechanism. |
 | **Products/payments** | Paid bookings via the existing `bkt_pro_product_id` / `bkn_pro_product_id` links. Purchase-time data collection via Product Requirements. |
 | **Email** (`SystemMailer` / `EmailSender`) | Confirmation, cancellation, reschedule, reminder, and follow-up emails as email templates. ICS invite attached to confirmations via `IcsHelper`. |
@@ -82,22 +84,8 @@ Auto-discovered (EmailSender-style registry) from core `includes/scheduling/busy
 
 - **EventBusySource** (core) — events where the user is leader, plus their active registrations. Recurring events contribute through `Event::get_instances_for_range()` so virtual (unmaterialized) instances count as busy, not just materialized rows.
 - **BookingBusySource** (bookings plugin) — confirmed bookings where the user is host, including buffer padding.
-- **ExternalCalendarBusySource** (core) — busy blocks from connected Google/Microsoft calendars (below).
 
-### External calendar connections (read busy + write back)
-
-**`cal_calendar_connections`** (CalendarConnection, core)
-- `cal_calendar_connection_id` (pk)
-- `cal_usr_user_id`
-- `cal_provider` — `google` | `microsoft`
-- `cal_external_calendar_id` — which calendar on the account
-- `cal_credentials` — OAuth2Token JSON, SecretBox-encrypted
-- `cal_read_busy` (bool), `cal_write_back` (bool)
-- `cal_status`, timestamps
-
-**`cbb_calendar_busy_blocks`** — cache of fetched busy blocks (`cbb_cal_calendar_connection_id`, `cbb_start_time`, `cbb_end_time` UTC, `cbb_fetched_time`). Refreshed on demand with a short TTL when slots are requested — there is deliberately no background refresh task (it would spend API quota on hosts nobody is viewing). Browsing tolerates TTL staleness; booking **confirmation** does one live freshness check against connected calendars (see Booking creation).
-
-OAuth flow: a `CalendarSyncOAuthConsumer` (core `includes/oauth/consumers/`, purpose `calendar_sync`) requests `https://www.googleapis.com/auth/calendar` (Google) / `Calendars.ReadWrite` + `offline_access` (Microsoft), stores the token on the connection row. The connect/disconnect UI ships with the bookings plugin at `/profile/bookings/calendars` (same engine-vs-surface rule as the availability editor — connections are only consumed through scheduling today; the page promotes to core if a core consumer such as event-registration write-back ever lands). Write-back: on booking confirmation, create an event on each `cal_write_back` calendar (attendee email, intake summary, meeting location); on cancellation, delete it (store the external event id on the booking).
+External calendars (Google/Outlook) contribute busy time through this same registry via an `ExternalCalendarBusySource` defined in `specs/external_scheduling_integrations.md`. Because the registry is the only coupling point, that source slots in with no change to the generator or any other busy source — the seam is the whole reason it lives here in core.
 
 ### Slot generator
 
@@ -155,20 +143,20 @@ Both render times in the viewer's timezone; all wire data is UTC.
 | `bkt_cancellation_policy_text` | text | Shown on booking page and enforced |
 | `bkt_send_native_emails` | bool, default true | Off by default for external providers (they send their own) |
 
-**`bkn_bookings`** — rename `bkn_calendly_event_uri` → `bkn_external_uri`; drop redundant `bkn_type`; add `bkn_provider`, `bkn_invitee_timezone`, `bkn_action_token` (random token for invitee cancel/reschedule links), `bkn_external_calendar_event_id` (write-back handle), `bkn_hold_expires_time` (paid pending holds), `bkn_canceled_by` / `bkn_cancel_reason`, `bkn_is_no_show`, `bkn_utm_source/medium/campaign/content/term`. Status: `CREATED` (0) serves as the pending-hold state; a new `NEEDS_ATTENTION` constant covers paid bookings whose slot was lost during checkout.
+**`bkn_bookings`** — rename `bkn_calendly_event_uri` → `bkn_external_uri`; drop redundant `bkn_type`; add `bkn_provider`, `bkn_invitee_timezone`, `bkn_action_token` (random token for invitee cancel/reschedule links), `bkn_hold_expires_time` (paid pending holds), `bkn_canceled_by` / `bkn_cancel_reason`, `bkn_is_no_show`, `bkn_utm_source/medium/campaign/content/term`. Status: `CREATED` (0) serves as the pending-hold state; a new `NEEDS_ATTENTION` constant covers paid bookings whose slot was lost during checkout.
 
 `bkt_slug` gains a **global unique constraint** — it is the public booking URL.
 
-**Core `usr_users`** — drop `usr_calendly_uri` (field, edit form, logic). Per-host provider identity moves to the connections table (Layer 4).
+**Core `usr_users`** — drop `usr_calendly_uri` (field, edit form, logic). Per-host external-provider identity is handled by the connections table in the external-integrations spec, not by a column on the user.
 
 ### Public booking flow
 
 - **Vanity URL:** `/book/{slug}` — one serve.php placeholder route resolving the booking type (and through it the host) by globally-unique `bkt_slug`. The platform has no public username on users and this spec does not introduce one; a per-host listing page (`/book/{username}`) can come if public user handles ever exist for their own reasons.
 - **Slots endpoint:** plugin ajax endpoint returning JSON slots for a type + month, backed by SlotGenerator + busy sources + per-period caps. Public, read-only, rate-limit-friendly (no session required).
 - **Booking page:** slot_picker component + FormWriter form (name, email, additional notes), intake survey questions rendered inline via `Question::output_question()`. Invitee does not need an account; an inactive user record is created/matched by email (same pattern the old sync used).
-- **Booking creation is race-safe:** creation runs in a transaction holding a per-host advisory lock, re-runs the slot conflict check (busy sources + caps) before inserting, and — for hosts with connected external calendars — makes one live busy check rather than trusting the TTL cache. If the slot is gone, the invitee is returned to the picker with a refreshed slot list. Two simultaneous submissions for one slot must produce exactly one booking.
+- **Booking creation is race-safe:** creation runs in a transaction holding a per-host advisory lock and re-runs the slot conflict check (all registered busy sources + caps) before inserting. If the slot is gone, the invitee is returned to the picker with a refreshed slot list. Two simultaneous submissions for one slot must produce exactly one booking. (When the external-calendar busy source is later added, it participates in this same re-check.)
 - **Paid types:** if `bkt_pro_product_id` is set, the chosen slot is held — a `CREATED` booking with `bkn_hold_expires_time` 15 minutes out (mirroring `evr_expires_time` temporary reserves) — and the user is sent through the product purchase flow. Held slots count as busy, so other viewers never see them. Confirmation fires on purchase completion via the product purchase hooks and re-runs the same locked conflict check: if the slot was lost (hold expired mid-checkout, someone else booked), the booking lands in `NEEDS_ATTENTION`, the host is notified, and the payment follows the standard refund path. Expired unpaid holds release automatically.
-- **Confirmation:** booking row (status BOOKED), confirmation email to invitee + host (ICS attached, add-to-calendar links, cancel/reschedule links containing `bkn_action_token`), in-app notification to host, calendar write-back.
+- **Confirmation:** booking row (status BOOKED), confirmation email to invitee + host (ICS attached, add-to-calendar links, cancel/reschedule links containing `bkn_action_token`), in-app notification to host.
 
 ### Invitee self-service cancel / reschedule
 
@@ -230,51 +218,30 @@ The booking page logic branches once on mode; everything downstream (booking row
 
 When a connection breaks (token revoked, refresh failure, key rejected), it is marked errored and the host notified. Headless types backed by an errored connection render a "scheduling temporarily unavailable" booking page, never a broken picker; embed types keep working (the widget doesn't depend on our token).
 
-### Connections
-
-**`bpc_provider_connections`** (plugin)
-- `bpc_provider_connection_id` (pk)
-- `bpc_usr_user_id` — the host
-- `bpc_provider`
-- `bpc_credentials` — SecretBox-encrypted JSON (OAuth token, or API key + user id)
-- `bpc_external_user_uri` — provider-side account/user identifier
-- `bpc_webhook_uri` / `bpc_webhook_signing_key` — registered subscription handle + secret (encrypted)
-- `bpc_status`, timestamps
-
-Hosts connect at `/profile/bookings/connections`: OAuth providers show a Connect button (consent flow), key-based providers show the provider's `getConnectionFields()` via FormWriter. After connecting, `listEventTypes()` powers an import step that creates/links local BookingType rows with `bkt_provider` + `bkt_external_type_uri`.
-
 ### Native provider
 
-`NativeSchedulingProvider` — mode `headless`, implemented on SlotGenerator and the plugin's own booking creation. Needs no connection row. Default for all booking types; the abstraction costs native users nothing.
+`NativeSchedulingProvider` — mode `headless`, implemented on SlotGenerator and the plugin's own booking creation. Needs no connection row. Default for all booking types; the abstraction costs native users nothing. It is the **only** provider this spec ships.
 
-### Calendly provider
+### What this spec does not build
 
-- **Auth:** Calendly OAuth2 (`auth.calendly.com`). Add `CalendlyOAuthProvider` to the core catalog (`includes/oauth/providers/`, settings `oauth_calendly_client_id` / `oauth_calendly_client_secret`, secret via SecretBox) — it's just endpoints + credentials, consistent with the catalog's purpose. The plugin ships a `CalendlySchedulingOAuthConsumer` (purpose `bookings_calendly`) that stores the token on the connection row.
-- **Mode:** embed + webhooks. Calendly's v2 API exposes event types, scheduled events, and invitees but does not let third parties create invitee bookings, so the booking page embeds the Calendly inline widget (the commented-out code in `theme/tailwind/views/booking.php` is the reference; it becomes a provider-rendered fragment, not a theme fork). Tracking: pass the local booking-type id and a correlation nonce via the embed's UTM/tracking parameters; the webhook payload echoes them back.
-- **Webhooks:** register `invitee.created` / `invitee.canceled` org/user-scope subscriptions via `POST /webhook_subscriptions`; verify the `Calendly-Webhook-Signature` HMAC with the stored signing key; map v2 payloads (top-level `payload` resource, URIs not ids) into Booking rows.
-- **Reconciliation:** a scheduled sync task pages through `/scheduled_events` (cursor pagination via `next_page_token`) to heal missed webhooks.
+The interface above is the full contract — including `embed` mode, webhook ingestion, and `listEventTypes()` — so external providers slot in without reopening it. But the things only externals need are out of scope here and live in `specs/external_scheduling_integrations.md`:
 
-### Acuity provider
+- the `ProviderConnection` model (`bpc_provider_connections`) and SecretBox-encrypted credential storage,
+- the `/profile/bookings/connections` connect + import UI,
+- the Calendly and Acuity provider implementations and their OAuth/API-key consumers,
+- the `plugins/bookings/ajax/webhook_{provider}.php` endpoints and the reconciliation sync task.
 
-- **Auth:** API key + user ID (HTTP Basic) — connection fields, no OAuth required.
-- **Mode:** headless. Acuity's API supports reading availability (`/availability/times`) and creating/canceling appointments (`/appointments`), so Acuity-backed types use the native slot picker UI; invitees never leave the site.
-- **Webhooks:** Acuity webhooks for scheduled/rescheduled/canceled, HMAC-SHA256 signature verification, for changes made on the Acuity side.
-
-### Webhook endpoints
-
-`plugins/bookings/ajax/webhook_{provider}.php` — resolve the connection, `verifyWebhook()`, dispatch to `handleWebhook()`. Always 200-fast, log failures, never echo secrets.
+The native engine references none of these at runtime; a booking type's `bkt_provider` simply defaults to `native`.
 
 ---
 
 ## Deletion Strategy (foreign-key actions, decided once)
 
 - **Schedule** — cannot be soft-deleted while a non-deleted booking type references it; the editor names the dependent types. Windows and overrides cascade with their schedule.
-- **BookingType** — soft delete stops new bookings; existing future bookings stand (reminders, manage links, and write-back keep working).
+- **BookingType** — soft delete stops new bookings; existing future bookings stand (reminders and manage links keep working).
 - **Booking** — soft delete only; canceled bookings keep their rows for history and analytics.
-- **User as host** — deletion cancels their future bookings (invitees notified) and deletes their schedules, calendar connections, and provider connections via `$foreign_key_actions`.
+- **User as host** — deletion cancels their future bookings (invitees notified) and deletes their schedules via `$foreign_key_actions`. (External calendar/provider connections add to this cascade in the external-integrations spec.)
 - **User as invitee** — deletion cancels their future bookings (host notified).
-- **CalendarConnection** — disconnect deletes cached busy blocks; events already written to the external calendar are left in place.
-- **ProviderConnection** — disconnect deactivates the host's booking types for that provider; ingested bookings remain.
 
 ---
 
@@ -325,31 +292,13 @@ Within each phase, the work is broken into steps sized to be built, integrated, 
 - **3.9 Admin and host operations.** Bookings list with status filters + `calendar_grid` view, booking detail with cancel / mark-no-show, host "my bookings" profile page with host-side cancel (invitee notified with a rebook link).
   *Checkpoint:* admin sees bookings on a calendar and can cancel and mark no-show; a host cancel emails the invitee.
 
-### Phase 4 — External calendar sync
+### External integrations (deferred — separate spec)
 
-- **4.1 Connections + consent (Google).** `CalendarConnection` + busy-cache classes, `CalendarSyncOAuthConsumer`, `/profile/bookings/calendars` connect/disconnect UI.
-  *Checkpoint:* OAuth consent round-trips; encrypted token stored; connection listed with status.
-- **4.2 Busy read (Google).** Fetch via the Calendar API, on-demand cache with TTL, `ExternalCalendarBusySource`, live freshness check wired into booking confirmation.
-  *Checkpoint:* an event created directly in Google Calendar suppresses the matching slot on the booking page.
-- **4.3 Write-back (Google).** Create external event on confirmation (attendee, location, intake summary), store external id, delete on cancellation.
-  *Checkpoint:* a booking appears on the host's Google Calendar and disappears on cancel.
-- **4.4 Microsoft.** Same three capabilities via the Graph API, behind the now-proven seams.
-  *Checkpoint:* connect, busy-read, and write-back all work against an Outlook calendar.
+External calendar sync (Google/Outlook busy-read + write-back) and external scheduling providers (Calendly import/embed, Acuity) are **out of scope for this spec.** They are designed import-first for the degoogle market in `specs/external_scheduling_integrations.md` and build purely on the seams shipped above (the busy-source registry and the `SchedulingServiceProvider` interface) — no native rework.
 
-### Phase 5 — External scheduling providers
+### Phase 4 — Later (separate specs when prioritized)
 
-- **5.1 Provider connections.** `bpc_provider_connections` + `/profile/bookings/connections` (Connect button for OAuth providers, `getConnectionFields()` form for key-based).
-  *Checkpoint:* page lists discovered providers with connection state.
-- **5.2 Calendly connect + import.** `CalendlyOAuthProvider` in the core catalog, plugin consumer, `listEventTypes()` import/link creating `bkt_provider='calendly'` types.
-  *Checkpoint:* a real Calendly account connects; its event types appear as local booking types.
-- **5.3 Calendly embed + webhooks.** Booking page branches to `getEmbedHtml()` with tracking params; webhook registration, signature verification, `invitee.created`/`invitee.canceled` ingestion into `bkn_bookings`; reconciliation sync task.
-  *Checkpoint:* booking through the embedded widget produces a local Booking row; canceling in Calendly cancels it locally.
-- **5.4 Acuity headless.** API-key connection, `getAvailableSlots()`/`createBooking()`/`cancelBooking()` against the Acuity API, webhook ingestion for Acuity-side changes.
-  *Checkpoint:* an Acuity-backed type books through the native slot picker; the appointment shows in Acuity.
-
-### Phase 6 — Later (separate specs when prioritized)
-
-The items below are not in scope for Phases 1–5. Each warrants its own spec before implementation begins.
+The items below are not in scope for Phases 1–3. Each warrants its own spec before implementation begins.
 
 #### Waitlist auto-promotion
 When a confirmed booking is canceled, the first waiter for that slot gets a time-limited claim link by email (token-gated, same mechanism as `bkn_action_token`). If unclaimed within the window, the next waiter is notified. The waitlist queue has a natural sort order by `bkn_create_time` on `WAITLISTED` rows.
@@ -370,7 +319,7 @@ Queries over `bkn_bookings` and `bke_booking_emails`: booking counts, completion
 Twilio (or similar) integration, SMS consent captured at booking, and an SMS channel in the workflow engine (above). Meaningful only after the workflow engine is in place.
 
 #### Video conferencing link auto-creation
-On booking confirmation, create a unique meeting link via the Zoom API, Google Meet (Calendar API), or Teams (Graph API) and store it in a new `bkn_conferencing_url` field, included in confirmation emails and the booking detail. Google Meet is the lowest-friction path — a calendar event created via the Calendar API (already wired in Phase 4) automatically carries a Meet link. Zoom and Teams require separate OAuth integrations.
+On booking confirmation, create a unique meeting link via the Zoom API, Google Meet (Calendar API), or Teams (Graph API) and store it in a new `bkn_conferencing_url` field, included in confirmation emails and the booking detail. Google Meet is the lowest-friction path — a calendar event created via the Calendar API (wired by the external-integrations spec's calendar write-back) automatically carries a Meet link. Zoom and Teams require separate OAuth integrations.
 
 #### Add guests at booking
 An "additional attendees" field on the booking form (up to N email addresses), stored in a `bkg_booking_guests` table. All guests receive confirmation and reminder emails and appear in the calendar write-back attendee list.
@@ -388,13 +337,15 @@ A pre-booking questionnaire with conditional branching: based on answers, route 
 
 ## Files
 
-**Create (core):** `data/schedules_class.php`, `data/schedule_windows_class.php`, `data/schedule_overrides_class.php`, `data/calendar_connections_class.php`, `data/calendar_busy_blocks_class.php`, `includes/scheduling/SlotGenerator.php`, `includes/scheduling/BusySourceInterface.php`, `includes/scheduling/BusySourceRegistry.php`, `includes/scheduling/busy_sources/EventBusySource.php`, `includes/scheduling/busy_sources/ExternalCalendarBusySource.php`, `includes/oauth/providers/CalendlyOAuthProvider.php`, `includes/oauth/consumers/CalendarSyncOAuthConsumer.php`, `views/components/calendar_grid.{json,php}`, `views/components/slot_picker.{json,php}`.
+**Create (core):** `data/schedules_class.php`, `data/schedule_windows_class.php`, `data/schedule_overrides_class.php`, `includes/scheduling/SlotGenerator.php`, `includes/scheduling/BusySourceInterface.php`, `includes/scheduling/BusySourceRegistry.php`, `includes/scheduling/busy_sources/EventBusySource.php`, `views/components/calendar_grid.{json,php}`, `views/components/slot_picker.{json,php}`.
 
-**Create (plugin):** `includes/SchedulingServiceProvider.php`, `includes/SchedulingProviderRegistry.php`, `includes/scheduling_providers/{NativeSchedulingProvider,CalendlySchedulingProvider,AcuitySchedulingProvider}.php`, `includes/oauth_consumers/CalendlySchedulingOAuthConsumer.php`, `includes/busy_sources/BookingBusySource.php`, `data/provider_connections_class.php`, `data/booking_emails_class.php`, public views (`views/book/…`, manage page), profile views (availability editor, calendar connections, provider connections, my bookings), ajax (slots, webhooks), `tasks/BookingEmailsTask.{json,php}`, `tasks/ProviderSyncTask.{json,php}`, reworked admin pages.
+**Create (plugin):** `includes/SchedulingServiceProvider.php`, `includes/SchedulingProviderRegistry.php`, `includes/scheduling_providers/NativeSchedulingProvider.php`, `includes/busy_sources/BookingBusySource.php`, `data/booking_emails_class.php`, public views (`views/book/…`, manage page), profile views (availability editor, my bookings), ajax (slots endpoint), `tasks/BookingEmailsTask.{json,php}`, reworked admin pages.
 
-**Modify:** `plugins/bookings/data/bookings_class.php`, `booking_types_class.php` (schema above), `plugin.json` (settings, menu), `serve.php` (vanity route), `data/users_class.php` + `adm/admin_users_edit.php` + logic (drop `usr_calendly_uri`), `views/booking.php` + `theme/tailwind/views/booking.php` (replace placeholder/dead embed with the new flow), `settings.json` (Calendly OAuth credentials).
+**Modify:** `plugins/bookings/data/bookings_class.php`, `booking_types_class.php` (schema above), `plugin.json` (settings, menu), `serve.php` (vanity route), `data/users_class.php` + `adm/admin_users_edit.php` + logic (drop `usr_calendly_uri`), `views/booking.php` + `theme/tailwind/views/booking.php` (replace placeholder/dead embed with the native flow).
 
 **Delete:** `specs/calendly_integration.md` (done alongside this spec).
+
+External-integration files (`calendar_connections`, `provider_connections`, Calendly/Acuity providers, OAuth consumers, webhook endpoints, `ProviderSyncTask`, connection UIs, Calendly settings) are listed in `specs/external_scheduling_integrations.md`.
 
 ---
 
@@ -402,8 +353,7 @@ A pre-booking questionnaire with conditional branching: based on answers, route 
 
 When implemented, current-state docs (no migration narration):
 
-- New `docs/scheduling.md` — core engine: schedules, the wall-clock-time exception, busy sources, SlotGenerator, calendar connections, calendar UI components.
-- New `plugins/bookings/docs/overview.md` — booking types, public flow, provider abstraction, connecting Calendly/Acuity, webhook setup.
-- Update `docs/oauth2.md` — Calendly in the provider catalog/settings table; new consumers listed.
+- New `docs/scheduling.md` — core engine: schedules, the wall-clock-time exception, busy sources (and the registry seam), SlotGenerator, calendar UI components.
+- New `plugins/bookings/docs/overview.md` — booking types, public flow, the native provider, and the `SchedulingServiceProvider` seam (noting external implementations live in the external-integrations spec).
 - Update `docs/scheduled_tasks.md` task list if it enumerates tasks.
 - Add both new docs to the CLAUDE.md documentation index via the admin agent-files editor (`/admin/admin_agent_files`).
