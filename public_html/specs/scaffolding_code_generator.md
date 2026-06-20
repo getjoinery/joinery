@@ -14,7 +14,7 @@ This spec also absorbs the previously-deferred **FormWriter `fromDescriptor()`**
 - `php utils/scaffold.php <manifest>` emits a complete, syntactically valid, validator-clean file set into core or a plugin.
 - Generated code follows existing platform patterns exactly — it must be indistinguishable from hand-written files and pass `validate_php_file.php`.
 - Everything derivable is derived; everything that needs a human decision is declared in the manifest; everything that is genuine business logic is emitted as a clearly-marked stub.
-- Generated views render their forms through `FormWriter::fromDescriptor()` reading a generated `_logic_descriptor()` — one field declaration drives the form, client-side validation, and (with the descriptor-consumer work) the API/AI surfaces. Adding `fromDescriptor()` to the FormWriter implementations is part of this spec.
+- Generated views render their forms through `FormWriter::fromDescriptor()` reading a generated `_logic_descriptor()` — one field declaration drives the form, client-side validation, and (with the descriptor-consumer work) the API/AI surfaces. Adding `fromDescriptor()` to `FormWriterV2Base` (inherited by all V2 themes) is part of this spec.
 
 ## Non-Goals
 
@@ -28,74 +28,99 @@ This spec also absorbs the previously-deferred **FormWriter `fromDescriptor()`**
 For an entity `Product` (prefix `prd`, plural `products`) the generator emits — singular file/class names derive from `entity`, plural ones from `plural`:
 
 ```
-data/product_class.php                  # Product + MultiProduct
-logic/products_logic.php                # list logic
-logic/product_edit_logic.php            # create/edit logic
-views/products.php                      # public list view
-views/product_edit.php                  # public edit view
-adm/admin_products.php                  # admin list view
-adm/logic/admin_products_logic.php      # admin list logic
-adm/admin_product_edit.php              # admin edit view
-adm/logic/admin_product_edit_logic.php  # admin edit logic
+data/product_class.php                  # data        — Product + MultiProduct
+logic/products_logic.php                # public_list — list logic
+views/products.php                      # public_list — public list view
+logic/product_edit_logic.php            # public_edit — create/edit logic
+views/product_edit.php                  # public_edit — public edit view
+adm/admin_products.php                  # admin_list  — admin list view
+adm/logic/admin_products_logic.php      # admin_list  — admin list logic
+adm/admin_product_edit.php              # admin_edit  — admin edit view
+adm/logic/admin_product_edit_logic.php  # admin_edit  — admin edit logic
 ```
 
-When `into:` targets a plugin, paths are rooted at `plugins/<plugin>/` instead and the entity is registered for the plugin's normal sync. The manifest selects which surfaces to emit (e.g. admin-only entities skip the public `logic/` + `views/` pair).
+When `into:` targets a plugin, paths are rooted at `plugins/<plugin>/` instead and the entity is registered for the plugin's normal sync. Which of these files are written is controlled by `surfaces:` (see below).
+
+### Selecting what gets generated — `surfaces:`
+
+The selectable unit is a **page** — a logic+view pair — never a single file: a view without its logic is broken and a logic file with no view is pointless, so the generator never emits one half alone. The nine files group into five tokens:
+
+| Token | Emits |
+|---|---|
+| `data` | the data class (`Product` + `MultiProduct`) |
+| `public_list` | `logic/products_logic.php` + `views/products.php` |
+| `public_edit` | `logic/product_edit_logic.php` + `views/product_edit.php` |
+| `admin_list` | `adm/admin_products.php` + its logic |
+| `admin_edit` | `adm/admin_product_edit.php` + its logic |
+
+`public` and `admin` are convenience aliases — `public` = `[public_list, public_edit]`, `admin` = `[admin_list, admin_edit]`. The default is all five (`["public", "admin"]`). `data` is always emitted whenever any page token is present (every page instantiates the model); listing `data` **alone** is the model-only case — exactly what an entity with bespoke presentation (e.g. a calendar) wants: `"surfaces": ["data"]`. A read-only catalog is `["data", "public_list", "admin_list", "admin_edit"]`.
+
+**Link-omission coherence rule.** Generated pages cross-link — a list view renders an "Edit" link per row and a "New" button, both pointing at the corresponding edit page. When a referenced page is not in the selected set, the generator omits the link to it rather than emitting a dead one (a `<?php if ?>` guard in the list template keyed off the selected surfaces). Every valid selection therefore produces a coherent, working output with no dangling links.
 
 No `serve.php` edits are required: public views resolve by auto-discovery and admin pages by the `/admin/*` catch-all. The rare route that does need a `serve.php` entry (URL placeholder, feature flag, permission gate) is added by the developer by hand — the generator never touches `serve.php`.
 
 ## The manifest — the starting info we need
 
-The manifest carries exactly the information the system cannot infer. Everything else is derived.
+The manifest carries exactly the information the system cannot infer. Everything else is derived. It is a JSON file — the same format as every other declarative manifest in the platform (`plugin.json`, `settings.json`, `theme.json`, `admin_menus.json`), parsed with `json_decode`, so no new dependency is introduced.
 
-```yaml
-entity: Product                 # PascalCase single-row class name (drives singular artifacts)
-prefix: prd                     # 3-char field/table prefix
-plural: products                # REQUIRED bare plural slug; drives table + list files + URLs
-into: core                      # 'core' or 'plugins/<name>'
+```json
+{
+  "entity": "Product",                  // PascalCase single-row class name (drives singular artifacts)
+  "prefix": "prd",                      // 3-char field/table prefix
+  "plural": "products",                 // REQUIRED bare plural slug; drives table + list files + URLs
+  "into": "core",                       // 'core' or 'plugins/<name>'
 
-surfaces: [public, admin]       # which file sets to emit; default both
+  "surfaces": ["public", "admin"],      // page sets to emit; tokens: data, public_list, public_edit, admin_list, admin_edit (+ aliases public, admin); default all
 
-api:
-  readable: false               # $api_readable
-  writable: false               # $api_writable
-  public_read: false            # $api_public_read (catalog-only)
-  unwritable_fields: []         # privileged columns (non-credential)
-  derived_fields: []            # computed keys allowed out of export_as_array()
+  "api": {
+    "readable": false,                  // $api_readable
+    "writable": false,                  // $api_writable
+    "public_read": false,               // $api_public_read (catalog-only)
+    "unwritable_fields": [],            // privileged columns (non-credential)
+    "derived_fields": []                // computed keys allowed out of export_as_array()
+  },
 
-ai:
-  readable: false               # $ai_readable
-  description: ""                # $ai_description
-  writable_fields: []           # opt-in AI-writable columns
-  untrusted_fields: []          # user-supplied text → injection markers
-  excluded_fields: []           # noise hidden from the AI surface
+  "ai": {
+    "readable": false,                  // $ai_readable
+    "description": "",                  // $ai_description
+    "writable_fields": [],              // opt-in AI-writable columns
+    "untrusted_fields": [],             // user-supplied text → injection markers
+    "excluded_fields": []               // noise hidden from the AI surface
+  },
 
-owner_field: prd_usr_user_id    # optional; enables default owner-or-staff auth
-admin_permission: 5             # permission floor for admin pages
-public_permission: 0            # permission floor for public pages (0 = logged-in, null = anonymous)
+  "owner_field": "prd_usr_user_id",     // optional; enables default owner-or-staff auth
+  "admin_permission": 5,                // permission floor for admin pages
+  "public_permission": 0,               // permission floor for public pages (0 = logged-in, null = anonymous)
 
-delete:
-  strategy: soft                # 'soft' (adds {prefix}_delete_time) or 'hard'
-  foreign_key_actions: {}       # e.g. { prd_category_id: { action: null } }
-  permanent_delete_actions: {}  # e.g. { delete_files: [prd_image_path] }
+  "delete": {
+    "strategy": "soft",                 // 'soft' (adds {prefix}_delete_time) or 'hard'
+    "foreign_key_actions": {},          // e.g. { "prd_category_id": { "action": null } }
+    "permanent_delete_actions": {}      // e.g. { "delete_files": ["prd_image_path"] }
+  },
 
-fields:
-  - { name: name,    type: varchar(255), required: true, unique: true }
-  - { name: email,   type: varchar(255), as: email }          # 'as' = semantic form type
-  - { name: price,   type: numeric(10,2) }
-  - { name: status,  type: int2, default: 0, zero_on_create: true,
-      as: select, options: { 0: Draft, 1: Published } }
-  - { name: body,    type: text }                              # → textarea automatically
-  - { name: created, type: timestamp, default: now() }
+  "fields": [
+    { "name": "name",    "type": "varchar(255)", "required": true, "unique": true },
+    { "name": "email",   "type": "varchar(255)", "as": "email" },             // 'as' = semantic form type
+    { "name": "price",   "type": "numeric(10,2)" },
+    { "name": "status",  "type": "int2", "default": 0, "zero_on_create": true,
+      "as": "select", "options": { "0": "Draft", "1": "Published" } },
+    { "name": "body",    "type": "text" },                                    // → textarea automatically
+    { "name": "created", "type": "timestamp", "default": "now()" }
+  ],
 
-filters:                        # MultiProduct getMultiResults() option keys
-  - { option: status,   column: prd_status,   bind: int }
-  - { option: active,   column: prd_status,   condition: "= 1" }
-  - { option: search,   column: prd_name,     match: ilike }
+  "filters": [                          // MultiProduct getMultiResults() option keys
+    { "option": "status", "column": "prd_status", "bind": "int" },
+    { "option": "active", "column": "prd_status", "condition": "= 1" },
+    { "option": "search", "column": "prd_name",   "match": "ilike" }
+  ]
+}
 ```
+
+The `//` annotations above are for this spec only; the manifest itself is strict JSON and carries no comments.
 
 Field `name` values are written **without** the prefix in the manifest; the generator prepends `{prefix}_`. The primary key (`{prefix}_id`, `bigserial`, PK) and, for `strategy: soft`, the `{prefix}_delete_time` column are added automatically and must not be listed.
 
-Only `entity`, `prefix`, `plural`, and `fields:` are required. Everything else is optional with a sensible default: `into:` defaults to `core`, `surfaces:` to both, `delete.strategy` to `soft`, and the whole `api:` and `ai:` blocks default to off — omit them entirely and the entity simply isn't exposed to the REST/AI surfaces. The field-level `api:`/`ai:` lists (`unwritable_fields`, `writable_fields`, etc.) are likewise optional; declare them only when tuning a surface that's turned on.
+Only `entity`, `prefix`, `plural`, and `fields:` are required. Everything else is optional with a sensible default: `into:` defaults to `core`, `surfaces:` to all five page tokens, `delete.strategy` to `soft`, and the whole `api:` and `ai:` blocks default to off — omit them entirely and the entity simply isn't exposed to the REST/AI surfaces. The field-level `api:`/`ai:` lists (`unwritable_fields`, `writable_fields`, etc.) are likewise optional; declare them only when tuning a surface that's turned on.
 
 The optional **`as:`** hint sets the field's *semantic form type* — the thing a database type genuinely cannot reveal. A `varchar(255)` might be a plain string, an email, a password, or a select; the column type is identical for all of them. So `as:` is how the author says "this varchar is an email input" or "this smallint is a select with these `options:`". When `as:` is absent, the generator falls back to a mechanical DB-type → form-type default (see *Form generation*). No semantic type is ever guessed from the column.
 
@@ -138,7 +163,7 @@ $fw->submitbutton('submit', 'Save');
 
 This makes the field list a single declaration shared by the form, its client-side validation attributes, and — once `FUTURE_descriptor_consumers.md` lands — the REST/AI surfaces. It also means the generator emits *less* per-view code, not more.
 
-**`fromDescriptor()` is delivered as part of this spec.** It is added to both FormWriter implementations — `FormWriterV2HTML5` (vanilla/public default) and `FormWriterV2Bootstrap`/`FormWriterBootstrap` (admin + Bootstrap themes). The method iterates the descriptor's `input` array and emits one field per entry, dispatching on `type`; unknown types are skipped silently so hand-added fields can coexist.
+**`fromDescriptor()` is delivered as part of this spec.** It is added once to `FormWriterV2Base`, the shared parent of every V2 FormWriter — so all themes inherit it: `FormWriterV2HTML5` (vanilla/public default), `FormWriterV2Bootstrap` (admin + Bootstrap themes), and `FormWriterV2Tailwind`. This is the correct layer because the method is pure loop-and-dispatch over field methods (`textinput`, `numberinput`, `dropinput`, `checkboxinput`, `dateinput`, `textarea`, etc.) that already live on `FormWriterV2Base`; no theme-specific rendering is involved, so there is nothing to override per subclass. The method iterates the descriptor's `input` array and emits one field per entry, dispatching on `type`; unknown types are skipped silently so hand-added fields can coexist.
 
 ### Two-layer type mapping
 
@@ -206,12 +231,12 @@ The templates are the single source of truth for generated output — there is n
 ## CLI
 
 ```
-php utils/scaffold.php <manifest.yml> [--force]
+php utils/scaffold.php <manifest.json> [--force]
 ```
 
 - `--force` — overwrite existing files (default: refuse and report collisions).
 
-Which file sets are emitted is controlled declaratively by `surfaces:` in the manifest, not by a CLI flag.
+Which page sets are emitted is controlled declaratively by `surfaces:` in the manifest (five tokens — see *Selecting what gets generated*), not by a CLI flag.
 
 Before writing, it prints the resolved file list and derived names (table, URLs, filenames) so the `plural`-driven derivations can be confirmed. On success it prints the file list and the two follow-up commands the developer still owns: run `update_database` (core) or "Sync with Filesystem" (plugin) to create the table, and fill in any emitted `// TODO:` stubs.
 
@@ -221,6 +246,7 @@ Before generating, the engine fails fast with actionable errors on:
 
 - prefix not exactly 3 chars, or collides with an existing table prefix;
 - `plural` missing, not a bare lowercase snake slug, or resolving to a table (`{prefix}_{plural}`) that already exists;
+- `surfaces:` containing a token outside `{data, public_list, public_edit, admin_list, admin_edit, public, admin}`, or resolving (after alias expansion) to an empty set;
 - field `type` not in the supported set (the same types `update_database` accepts);
 - a field name that includes the prefix (must be bare) or duplicates the PK/soft-delete column;
 - `filters:` referencing a column not in `fields:`;
