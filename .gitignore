@@ -22,6 +22,7 @@ Globalvars_site.php
 /backups/
 /logs/
 /static_files/
+/storage/
 /uploads/
 /docs/api_documentation.md
 
