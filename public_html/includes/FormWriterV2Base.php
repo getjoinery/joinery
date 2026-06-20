@@ -7,7 +7,8 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
- * @version 2.7.0
+ * @version 2.8.0
+ * @changelog 2.8.0 - Added fromDescriptor() to render a form body from a *_logic_descriptor() input map (scaffolding generator)
  * @changelog 2.7.0 - Added set_values()/set_model() for post-construction value binding (form builder functions)
  * @changelog 2.6.1 - prepareCheckboxData: use array_key_exists instead of isset so null 'checked' value is treated as unchecked (not missing)
  * @changelog 2.6.0 - Phase 2 cleanup: buildAjaxSelectScript shared method, visibility/custom_script in base output methods, outputTextbox uses handleOutput
@@ -1068,6 +1069,105 @@ abstract class FormWriterV2Base {
         if (!$name) $name = 'btn_submit';
 
         $this->outputSubmitButton($name, $label, $options);
+    }
+
+    /**
+     * Render a form body from a logic descriptor.
+     *
+     * Consumes the `input` map of a *_logic_descriptor() and emits one field
+     * per entry, dispatching on the descriptor `type`. One declaration drives
+     * the rendered form, its client-side validation, and the REST/AI surfaces
+     * (see docs/formwriter.md and docs/scaffolding.md). Call between
+     * begin_form() and end_form(); hand-added $fw->...() calls interleave
+     * freely with it — call order controls field order.
+     *
+     * Lives on the base class because it is pure loop-and-dispatch over field
+     * methods (textinput, numberinput, dropinput, textbox, ...) that every V2
+     * theme already inherits — there is nothing theme-specific to override.
+     *
+     * Descriptor entry shape, keyed by field name:
+     *   ['type' => 'string'|'email'|'password'|'int'|'bool'|'select'|'text'|'date',
+     *    'required' => bool, 'label' => string,
+     *    'options' => [value => label],            // 'select' only
+     *    'placeholder' => string, 'help' => string]  // optional FormWriter hints
+     *
+     * Accepts either a full descriptor array (the `input` key is read) or a
+     * bare input map. The structural routing key `edit_primary_key_value` is
+     * skipped — FormWriter already emits it as an automatic hidden field via
+     * the edit_primary_key_value option. Unknown types are skipped silently so
+     * a descriptor and hand-added fields can coexist.
+     *
+     * @param array $descriptor A *_logic_descriptor() return array, or its 'input' sub-array
+     */
+    public function fromDescriptor(array $descriptor) {
+        // Accept either the full descriptor or just its input map.
+        $inputs = $descriptor['input'] ?? $descriptor;
+        if (!is_array($inputs)) {
+            return;
+        }
+
+        foreach ($inputs as $name => $spec) {
+            if (!is_array($spec)) {
+                continue;
+            }
+
+            // Routing key — rendered as a hidden field by the constructor, not here.
+            if ($name === 'edit_primary_key_value') {
+                continue;
+            }
+
+            $type = $spec['type'] ?? 'string';
+            $label = $spec['label'] ?? ucwords(str_replace('_', ' ', $name));
+
+            // FormWriter-only hints; API/AI descriptor consumers ignore these.
+            $options = [];
+            if (!empty($spec['required'])) {
+                $options['required'] = true;
+            }
+            if (isset($spec['placeholder'])) {
+                $options['placeholder'] = $spec['placeholder'];
+            }
+            if (isset($spec['help'])) {
+                $options['helptext'] = $spec['help'];
+            }
+            if (isset($spec['value'])) {
+                $options['value'] = $spec['value'];
+            }
+
+            switch ($type) {
+                case 'string':
+                    $this->textinput($name, $label, $options);
+                    break;
+                case 'email':
+                    $options['validation'] = 'email';
+                    $this->textinput($name, $label, $options);
+                    break;
+                case 'password':
+                    $this->passwordinput($name, $label, $options);
+                    break;
+                case 'int':
+                    $this->numberinput($name, $label, $options);
+                    break;
+                case 'bool':
+                    $this->checkboxinput($name, $label, $options);
+                    break;
+                case 'select':
+                    $options['options'] = $spec['options'] ?? [];
+                    $this->dropinput($name, $label, $options);
+                    break;
+                case 'text':
+                    // textbox() is the platform's canonical multiline field; in
+                    // plain mode it renders a textarea (pass htmlmode for rich text).
+                    $this->textbox($name, $label, $options);
+                    break;
+                case 'date':
+                    $this->dateinput($name, $label, $options);
+                    break;
+                default:
+                    // Unknown type — skip so hand-added fields can coexist.
+                    break;
+            }
+        }
     }
 
     /**

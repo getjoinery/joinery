@@ -104,7 +104,7 @@ The manifest carries exactly the information the system cannot infer. Everything
     { "name": "price",   "type": "numeric(10,2)" },
     { "name": "status",  "type": "int2", "default": 0, "zero_on_create": true,
       "as": "select", "options": { "0": "Draft", "1": "Published" } },
-    { "name": "body",    "type": "text" },                                    // → textarea automatically
+    { "name": "body",    "type": "text" },                                    // → textbox (plain multiline) automatically
     { "name": "created", "type": "timestamp", "default": "now()" }
   ],
 
@@ -163,7 +163,7 @@ $fw->submitbutton('submit', 'Save');
 
 This makes the field list a single declaration shared by the form, its client-side validation attributes, and — once `FUTURE_descriptor_consumers.md` lands — the REST/AI surfaces. It also means the generator emits *less* per-view code, not more.
 
-**`fromDescriptor()` is delivered as part of this spec.** It is added once to `FormWriterV2Base`, the shared parent of every V2 FormWriter — so all themes inherit it: `FormWriterV2HTML5` (vanilla/public default), `FormWriterV2Bootstrap` (admin + Bootstrap themes), and `FormWriterV2Tailwind`. This is the correct layer because the method is pure loop-and-dispatch over field methods (`textinput`, `numberinput`, `dropinput`, `checkboxinput`, `dateinput`, `textarea`, etc.) that already live on `FormWriterV2Base`; no theme-specific rendering is involved, so there is nothing to override per subclass. The method iterates the descriptor's `input` array and emits one field per entry, dispatching on `type`; unknown types are skipped silently so hand-added fields can coexist.
+**`fromDescriptor()` is delivered as part of this spec.** It is added once to `FormWriterV2Base`, the shared parent of every V2 FormWriter — so all themes inherit it: `FormWriterV2HTML5` (vanilla/public default), `FormWriterV2Bootstrap` (admin + Bootstrap themes), and `FormWriterV2Tailwind`. This is the correct layer because the method is pure loop-and-dispatch over field methods (`textinput`, `numberinput`, `dropinput`, `checkboxinput`, `dateinput`, `textbox`, etc.) that already live on `FormWriterV2Base`; no theme-specific rendering is involved, so there is nothing to override per subclass. The method iterates the descriptor's `input` array and emits one field per entry, dispatching on `type`; unknown types are skipped silently so hand-added fields can coexist.
 
 ### Two-layer type mapping
 
@@ -174,7 +174,7 @@ Field rendering crosses two boundaries, each owned by one place — neither gues
    | DB type | descriptor `type` |
    |---|---|
    | `varchar(n)`, `character(n)` | `string` |
-   | `text` | `text` (textarea) |
+   | `text` | `text` (textbox) |
    | `int2/int4/int8`, `integer`, `bigint` | `int` |
    | `numeric(p,s)` | `string` (numeric validation) |
    | `bool`/`boolean` | `bool` |
@@ -194,7 +194,7 @@ Field rendering crosses two boundaries, each owned by one place — neither gues
    | `int` | number input |
    | `bool` | checkbox |
    | `select` | select (`options` from descriptor) |
-   | `text` | textarea |
+   | `text` | textbox (plain multiline) |
    | `date` | date input |
 
 Adding a new input type later means touching exactly these two mappings — nothing in the templates.
