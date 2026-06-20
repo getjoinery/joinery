@@ -1,7 +1,7 @@
 <?php
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AnthropicClient.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderFactory.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunContext.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeToolRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/CostGuard.php'));
@@ -33,6 +33,11 @@ class RecipeRunner {
 
     /** Abort the run if this many consecutive tool calls return is_error. */
     const CONSECUTIVE_TOOL_ERROR_LIMIT = 3;
+
+    /** Active provider for the current run — set in run(), read by
+     *  recordTokens() for cost estimation. The runner is static and
+     *  single-run-at-a-time, so a static member is sufficient. */
+    private static $active_provider = null;
 
     public static function run(RecipeRun $run): void {
         $started = microtime(true);
@@ -84,7 +89,8 @@ class RecipeRunner {
             $run->set('rcr_workspace_before', (string)$recipe->get('rcp_workspace'));
             $run->save();
 
-            $client = self::buildClient();
+            $provider = self::buildProvider();
+            self::$active_provider = $provider;
             $allowed_tools = self::resolveAllowedTools($recipe);
             $tool_schemas = RecipeToolRegistry::schemasFor($allowed_tools);
             $unknown = RecipeToolRegistry::unknown($allowed_tools);
@@ -128,7 +134,7 @@ class RecipeRunner {
                 }
 
                 $params = [
-                    'model'      => $recipe->get('rcp_model') ?: 'claude-haiku-4-5',
+                    'model'      => $recipe->get('rcp_model') ?: $provider->defaultModel(),
                     'max_tokens' => self::PER_CALL_MAX_TOKENS,
                     'system'     => $system,
                     'messages'   => $messages,
@@ -137,7 +143,7 @@ class RecipeRunner {
                     $params['tools'] = $tool_schemas;
                 }
 
-                $response = $client->createMessage($params);
+                $response = $provider->createMessage($params);
 
                 $usage = $response['usage'] ?? [];
                 $tokens_input        += (int)($usage['input_tokens'] ?? 0);
@@ -212,8 +218,8 @@ class RecipeRunner {
             self::finishSuccess($run, $recipe, $final_text,
                 $tokens_input, $tokens_output, $tokens_cache_write, $tokens_cache_read);
 
-        } catch (AnthropicException $e) {
-            $code = self::classifyAnthropicError($e);
+        } catch (LlmProviderException $e) {
+            $code = self::classifyProviderError($e);
             $run->set('rcr_status', RecipeRun::STATUS_FAILED);
             $run->set('rcr_error', "[$code] " . $e->getMessage());
             $run->set('rcr_completed_time', gmdate('Y-m-d H:i:s'));
@@ -366,13 +372,19 @@ class RecipeRunner {
     }
 
     /**
-     * Map an Anthropic API error to a stable error code so the admin can
-     * tell config from infrastructure. The SDK throws AnthropicException
-     * with the upstream message embedded; we string-match on the body
-     * because the upstream codes aren't surfaced as a separate field.
+     * Map a provider error to a stable error code so the admin can tell config
+     * from infrastructure. Providers throw LlmProviderException with the
+     * upstream message embedded; we string-match on the body because the
+     * upstream codes aren't surfaced as a separate field. The substrings keyed
+     * here ('4xx', 'timeout', 'connection', ...) are emitted by every provider,
+     * so this works regardless of which one is active.
      */
-    private static function classifyAnthropicError(AnthropicException $e): string {
+    private static function classifyProviderError(LlmProviderException $e): string {
         $msg = strtolower($e->getMessage());
+        // Local provider: connection refused to the configured base URL.
+        if (strpos($msg, 'not reachable') !== false) {
+            return 'api_network_error';
+        }
         if (strpos($msg, '4xx') !== false) {
             if (strpos($msg, 'authentication') !== false || strpos($msg, 'auth_error') !== false
                 || strpos($msg, 'invalid x-api-key') !== false || strpos($msg, '401') !== false
@@ -406,10 +418,8 @@ class RecipeRunner {
         return $r;
     }
 
-    private static function buildClient(): AnthropicClient {
-        $settings = Globalvars::get_instance();
-        $key = $settings->get_setting('joinery_ai_anthropic_api_key');
-        return new AnthropicClient($key);
+    private static function buildProvider(): LlmProviderInterface {
+        return LlmProviderFactory::build();
     }
 
     private static function resolveAllowedTools(Recipe $recipe): array {
@@ -862,11 +872,18 @@ class RecipeRunner {
             int $in, int $out, int $cw, int $cr): void {
         $run->set('rcr_input_tokens', $in);
         $run->set('rcr_output_tokens', $out);
-        $run->set('rcr_cost_estimate', AnthropicClient::estimateCost(
-            (string)$recipe->get('rcp_model'),
-            ['input_tokens' => $in, 'output_tokens' => $out,
-             'cache_creation_input_tokens' => $cw, 'cache_read_input_tokens' => $cr]
-        ));
+        // Cost is estimated by the active provider (local providers return 0.0).
+        // recordTokens is only reached after the provider is built; guard
+        // defensively so a null never fatals the run finalizer.
+        $cost = 0.0;
+        if (self::$active_provider !== null) {
+            $cost = self::$active_provider->estimateCost(
+                (string)$recipe->get('rcp_model'),
+                ['input_tokens' => $in, 'output_tokens' => $out,
+                 'cache_creation_input_tokens' => $cw, 'cache_read_input_tokens' => $cr]
+            );
+        }
+        $run->set('rcr_cost_estimate', $cost);
     }
 
 }

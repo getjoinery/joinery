@@ -20,7 +20,12 @@
         }
     ],
     "settings": [
+        { "name": "joinery_ai_llm_provider", "default": "anthropic" },
         { "name": "joinery_ai_anthropic_api_key", "default": "" },
+        { "name": "joinery_ai_local_base_url", "default": "http://localhost:11434/v1" },
+        { "name": "joinery_ai_local_model", "default": "" },
+        { "name": "joinery_ai_local_api_key", "default": "" },
+        { "name": "joinery_ai_local_timeout_seconds", "default": "300" },
         { "name": "joinery_ai_brave_search_api_key", "default": "" },
         { "name": "joinery_ai_market_data_provider", "default": "finnhub" },
         { "name": "joinery_ai_market_data_api_key", "default": "" },
