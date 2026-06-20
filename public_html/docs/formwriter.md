@@ -806,6 +806,54 @@ Model Form Helpers follow these principles:
 4. **FormWriter Agnostic** - Works with any FormWriter implementation
 5. **Consistent Naming** - Standard `renderFormFields()` method name
 
+### Descriptor-Driven Forms (`fromDescriptor()`)
+
+`fromDescriptor()` renders an entire form body from a single field declaration — the `input` map of a logic descriptor (`*_logic_descriptor()`). One declaration drives the rendered form, its client-side validation attributes, and the REST/AI surfaces, so the field list lives in exactly one place. This is what the [scaffolding generator](scaffolding.md) emits, and any logic file can adopt it.
+
+```php
+$formwriter = $page->getFormWriter('product_edit', [
+    'model' => $product,
+    'edit_primary_key_value' => $product->key,
+]);
+
+$formwriter->begin_form();
+$formwriter->fromDescriptor(product_edit_logic_descriptor());  // every field, from one declaration
+// Hand-added fields interleave freely — call order controls field order:
+$formwriter->fileinput('prd_image', 'Image');
+$formwriter->submitbutton('btn_submit', 'Save');
+$formwriter->end_form();
+```
+
+It lives on `FormWriterV2Base`, so every theme (`FormWriterV2HTML5`, `FormWriterV2Bootstrap`, `FormWriterV2Tailwind`) inherits it — it is pure loop-and-dispatch over field methods the base already owns, with nothing theme-specific to override.
+
+**Descriptor entry shape** (keyed by field name, under the descriptor's `input`):
+
+```php
+'prd_name' => ['type' => 'string', 'required' => true, 'label' => 'Name'],
+'prd_status' => ['type' => 'select', 'label' => 'Status', 'options' => [0 => 'Draft', 1 => 'Published']],
+'prd_body' => ['type' => 'text', 'label' => 'Body', 'help' => 'Shown on the product page.'],
+```
+
+**Type → field dispatch:**
+
+| Descriptor `type` | FormWriter field |
+|---|---|
+| `string` | text input |
+| `email` | text input + email validation |
+| `password` | password input |
+| `int` | number input |
+| `bool` | checkbox |
+| `select` | select (`options` from the entry) |
+| `text` | textbox (plain multiline; pass `htmlmode` for rich text) |
+| `date` | date input |
+
+Per-entry extras pass straight through: `required` (toggles the required attribute), `label`, `placeholder`, and `help` (rendered as helptext). API/AI consumers ignore the FormWriter-only hints.
+
+Two structural rules keep `fromDescriptor()` composable:
+
+- **`edit_primary_key_value` is skipped** — `begin_form()` already emits it as a hidden field when you pass the `edit_primary_key_value` option, so it never renders as a visible input.
+- **Unknown types are skipped silently** — a field with no descriptor type (file upload, rich-text widget, custom control) is simply not rendered, leaving you to hand-add it before or after the `fromDescriptor()` call.
+
 ---
 
 ## 5. Deferred Output Mode

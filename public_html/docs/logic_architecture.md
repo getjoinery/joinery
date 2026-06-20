@@ -230,6 +230,10 @@ function admin_item_edit_logic(array $input): LogicResult {
 
 **See [FormWriter Documentation - Edit Forms](formwriter.md#edit-forms-with-edit_primary_key_value)** for complete details on why this pattern is required.
 
+### Descriptor functions & descriptor-driven forms
+
+A logic file can expose a `*_logic_descriptor()` function returning a `['description', 'requires_session', 'mutates', 'input' => [...]]` array. The `input` map is one declaration of the form's fields, consumed by three things: the rendered form (via FormWriter's [`fromDescriptor()`](formwriter.md#descriptor-driven-forms-fromdescriptor)), its client-side validation, and the REST/AI surfaces. Edit-form views render the whole body with `$fw->fromDescriptor(item_edit_logic_descriptor())` instead of hand-listing fields. The [scaffolding generator](scaffolding.md) emits both the logic (with its descriptor) and the matching view automatically — see that guide for the manifest format and the derived/declared/stubbed contract.
+
 ### Detecting form submission — use `isFormSubmission()`, never `if($input)`
 
 Logic functions in the current convention receive a single `$input`
@@ -586,6 +590,7 @@ Always use these standard variable names:
 
 - [Plugin Developer Guide](plugin_developer_guide.md) - For plugin-specific logic patterns
 - [Admin Pages Documentation](admin_pages.md) - For admin interface logic
+- [Scaffolding / Code Generator](scaffolding.md) - Generate logic + view + data class from one manifest
 - [Main Architecture Guide](../CLAUDE.md) - For overall system architecture
 
 ## Specifications
