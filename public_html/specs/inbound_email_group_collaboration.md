@@ -1,4 +1,17 @@
-# Inbound Email — Shared-Inbox Parity Roadmap
+# Inbound Email — Group / Team Collaboration (Deferred)
+
+## Status: deferred
+
+This is the **team layer** for the inbound email plugin — turning a shared mailbox
+(`legal@`, `info@`) into a real team queue. It is **deferred**. The near-term focus
+is the *individual* self-hosted experience (a Proton-suite-style self-hosted webmail),
+not multi-person shared inboxes. This spec records the group-collaboration work so it
+is ready when the team use case becomes the priority; it is not scheduled now.
+
+The individual-webmail maturity that used to live here (saved drafts, per-mailbox
+signatures, rich-text compose, the member-context panel) has been **carved out** to the
+individual track — those serve the single-user focus and are not gated on the team
+work below. See "Carved out" at the end.
 
 ## Context
 
@@ -10,36 +23,35 @@ as the mailbox), and **two-way IMAP sync** (CONDSTORE/QRESYNC, three-way flag me
 label/folder membership reconciliation, sent + deletion sync). That receiving →
 routing → sync layer is at or near parity with anything in the space.
 
-The gaps are all in the two layers *above* it. This spec records what is missing to
-make the reader a genuine quality-parity competitor, and — importantly — decides
-**which competitor** once, so future work doesn't drift toward the wrong target.
+What this spec adds sits in the layer *above* the reader: the workflow and
+collaboration features that let **multiple people** share one mailbox without stepping
+on each other. They are only worth building once the team/shared-inbox use case is the
+target.
 
-## The decision: target the shared-inbox category, not the mail-server category
+## Target when un-deferred: shared-inbox / team-helpdesk parity
 
 There are two "self-hosted email" competitor sets, and they pull in opposite
-directions. We pick one deliberately.
+directions. If/when this work is scheduled, the target is deliberately the
+**shared-inbox / team-helpdesk** category (Front / Help Scout / Hiver), *not* the
+self-hosted mail-*server* category (Mailcow / Mailu / Mail-in-a-Box).
 
-**Not a target: self-hosted mail *server* parity (Mailcow / Mailu / Mail-in-a-Box).**
-Reaching it is a category change, not a feature list — it requires *being* an
-IMAP+SMTP server with credentialed mailbox accounts, quotas, native-client (phone /
-Thunderbird) access, and content spam filtering. That is re-implementing Dovecot +
-rspamd + SOGo, it is where the "don't self-host email" reputation bites hardest, and
-it abandons our only real edge (mail tied to member records). We explicitly do **not**
-pursue it. See Non-Goals.
+**Not a target: self-hosted mail *server* parity.** Reaching it is a category change,
+not a feature list — it requires *being* an IMAP+SMTP server with credentialed mailbox
+accounts, quotas, native-client (phone / Thunderbird) access, and content spam
+filtering. That is re-implementing Dovecot + rspamd + SOGo, it is where the "don't
+self-host email" reputation bites hardest, and it abandons our only real edge (mail
+tied to member records). We explicitly do **not** pursue it. See Non-Goals.
 
-**The target: self-hosted shared inbox / team helpdesk parity (Front / Help Scout /
-Hiver).** We are roughly one workflow layer away, and this framing matches the
-integration wedge. Everything below builds toward it.
+**The target: self-hosted shared inbox / team helpdesk parity.** We are roughly one
+workflow layer away, and this framing matches the integration wedge. Everything below
+builds toward it.
 
 ## Goals
 
 - A shared mailbox (`legal@`, `info@`) becomes a real team queue: conversations can
   be owned, triaged, discussed internally, and closed — not just read.
-- The inbox is trustworthy enough to *rely on* (compose maturity here; content spam
-  filtering in its own prerequisite spec), not just inspect.
-- The reader does something Help Scout structurally cannot: show the linked
-  member / registration / order record beside the conversation. This is the
-  differentiator, not a parity item.
+- The inbox is trustworthy enough to *rely on* (content spam filtering in its own
+  prerequisite spec), not just inspect.
 
 ## Non-Goals
 
@@ -65,8 +77,8 @@ below. It is out of scope here beyond this pointer.
 
 ## Work
 
-Ordered by priority. Phases 1–2 are the table-stakes shared-inbox layer; Phases 3–5
-are polish + the differentiator; Phase 6 is deferred.
+Ordered by priority. Phases 1–2 are the table-stakes shared-inbox layer; Phase 3 is
+triage polish.
 
 ### 1. Conversation workflow (the table-stakes blocker)
 
@@ -101,40 +113,25 @@ Open / Snoozed / Closed) alongside the existing All / Unread / Starred.
 
 ### 3. Triage (tags, canned responses)
 
-- **Tags** for triage. The reader already has folder/label membership for IMAP feeds;
-  a lightweight local tag (not tied to an IMAP folder) covers store-only mailboxes.
-  Decide whether tags are a distinct concept or a presentation over local-only
-  folders — pick one (up-front, not incrementally).
+- **Tags** for triage. The local-tag substrate already exists: a custom label is a
+  first-class `ilb_inbound_email_labels` row with genuine many-to-many membership
+  (`ilm_`) in one global namespace, **decoupled from IMAP folders** (a folder may
+  *bind* to a label to mirror it, but a label needs no folder and applies to
+  store-only mailboxes). Filters apply labels as an action, including on import. So
+  triage tags **are** labels — what remains for this phase is the triage-oriented
+  surface (a queue/tag rail, bulk tag-from-the-list), not a new tag concept. See
+  `specs/implemented/inbound_email_labels.md`.
 - **Canned responses / saved replies** — a small library, inserted into the compose
   panel. Per-mailbox or shared; decide scope once.
 
-### 4. Compose maturity (noticed on day one)
+### 4. Deferred within the team layer (not near-term even when this is scheduled)
 
-Confirmed absent today, all noticed immediately by anyone used to webmail:
+Autoresponder / vacation; response-time & volume reporting. Real but none are
+beachhead blockers.
 
-- **Saved drafts** — the current compose panel is ephemeral (a hidden FormWriter form
-  populated in-memory). Persist drafts so a half-written reply survives navigation.
-- **Per-mailbox signatures** — none today (existing "signature" code is DKIM signing).
-  A signature appended on compose, editable on the alias editor.
-- **Rich-text composer** — compose is plain today. Add an HTML composer. Respect the
-  theme framework rules (vanilla by default; no framework pulled in just for this) —
-  prefer a minimal `contenteditable` over a heavy editor dependency.
-
-### 5. The differentiator: member-context panel
-
-Not a parity item — the thing that makes the reader *better* than Help Scout for a
-membership org. Beside an open conversation, show the **linked member / registration /
-order** record resolved from the sender address: who they are, their tier, recent
-events/orders, a link into their admin record. This is where the integration wedge
-is realized and where effort is best spent once Phases 1–2 land.
-
-### 6. Deferred (not near-term)
-
-Autoresponder / vacation; contacts / recipient autocomplete; response-time & volume
-reporting. Real but none are beachhead blockers.
-
-Server-side filters/rules (a Sieve-equivalent for store/forward mailboxes) are split
-out into their own spec, `specs/implemented/inbound_email_filters.md` (Gmail-parity filters).
+Server-side filters/rules (a Sieve-equivalent for store/forward mailboxes) are
+already split out and built: `specs/implemented/inbound_email_filters.md`
+(Gmail-parity filters).
 
 ## Build-generally notes
 
@@ -149,16 +146,30 @@ inbound-email-only:
 - **Canned responses** may overlap with the email-template system; check before
   adding a parallel store.
 
+## Carved out → individual track
+
+These were originally bundled here but are **individual webmail maturity**, not team
+features. They serve the near-term individual / Proton-replacement focus and are not
+gated on the team work above. They belong on the individual track:
+
+- **Compose maturity** — saved drafts (persist the ephemeral compose panel),
+  per-mailbox signatures (the alias editor; not DKIM signing), rich-text composer
+  (minimal `contenteditable`, no heavy editor dependency, vanilla per theme rules).
+- **Member-context panel** — beside an open conversation, show the linked member /
+  registration / order resolved from the sender address. This is the integration
+  differentiator and is valuable for a single user, so it moves to the individual
+  track rather than waiting on the team queue.
+- **Contacts / recipient autocomplete** — also individual-useful; moves with the above.
+
 ## Docs
 
 No doc changes land with this spec — `docs/` describe current state only, and none of
 this is built. When each phase ships, fold its description into
-`plugins/inbound_email/docs/overview.md` (extend the **Mailbox Reader** /
-**Spam filtering** sections; do not create a new doc file).
+`plugins/inbound_email/docs/overview.md` (extend the **Mailbox Reader** section; do not
+create a new doc file).
 
 ## Open decisions (resolve at implementation, not now)
 
 - Conversation state keyed by `(thread_key, alias)` vs. a representative-message row —
   confirm against how `GROUP_KEY_SQL` defines a thread.
-- Tags as a first-class concept vs. local-only folders.
 - Notes/@mentions on core messaging vs. plugin-local.
