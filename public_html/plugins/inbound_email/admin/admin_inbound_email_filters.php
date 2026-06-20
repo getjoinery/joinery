@@ -10,7 +10,8 @@
  * on change); create/edit is pre-scoped to that mailbox.
  *
  * @see specs/implemented/inbound_email_filters.md
- * @version 1.3
+ * @see specs/inbound_email_filter_import.md
+ * @version 1.4
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -156,6 +157,92 @@ if (($mode ?? 'list') === 'form') {
 	echo $formwriter->end_form();
 	echo '<p><a href="' . htmlspecialchars($base) . '">Cancel</a></p>';
 	$page->end_box();
+} elseif (($mode ?? '') === 'import') {
+	// ------------------------------------------------------- import: upload
+	$pageoptions['title'] = 'Import filters from Gmail';
+	$page->begin_box($pageoptions);
+
+	$formwriter = $page->getFormWriter('import_form', array('enctype' => 'multipart/form-data'));
+	echo $formwriter->begin_form();
+	// No hidden op: the import_upload submit drives the next step. A hidden
+	// op=import would re-enter this upload branch instead of the preview.
+	$formwriter->hiddeninput('scope', '', array('value' => $active_scope));
+
+	echo '<p><strong>Import into:</strong> ' . htmlspecialchars($active_scope_label) . '</p>';
+
+	$formwriter->fileinput('import_file', 'Gmail mailFilters.xml', array(
+		'helptext' => 'In Gmail: Settings → Filters and Blocked Addresses → Export. Upload the downloaded file here.',
+	));
+	$formwriter->submitbutton('import_upload', 'Upload and preview');
+	echo $formwriter->end_form();
+
+	echo '<p><a href="' . htmlspecialchars($base . '?scope=' . urlencode($active_scope)) . '">Cancel</a></p>';
+	$page->end_box();
+} elseif (($mode ?? '') === 'import_preview') {
+	// ------------------------------------------------------ import: preview
+	$importable = 0;
+	foreach ($candidates as $c) { if (!empty($c['importable'])) { $importable++; } }
+
+	$pageoptions['title'] = 'Import preview — ' . $importable . ' of ' . count($candidates) . ' importable';
+	$page->begin_box($pageoptions);
+
+	$formwriter = $page->getFormWriter('import_confirm');
+	echo $formwriter->begin_form();
+	$formwriter->hiddeninput('scope', '', array('value' => $active_scope));
+	$formwriter->hiddeninput('import_xml', '', array('value' => $import_xml));
+
+	echo '<p><strong>Import into:</strong> ' . htmlspecialchars($active_scope_label)
+		. '. New labels are created on confirm. Importable rows are checked by default.</p>';
+
+	echo '<table class="table"><thead><tr>'
+		. '<th>Import</th><th>Name</th><th>Criteria</th><th>Actions</th><th>Skipped</th>'
+		. '</tr></thead><tbody>';
+	foreach ($candidates as $i => $c) {
+		echo '<tr>';
+
+		echo '<td>';
+		if (!empty($c['importable'])) {
+			$formwriter->checkboxinput('import_row[' . intval($i) . ']', '', array(
+				'checked' => true,
+				'id' => 'import_row_' . intval($i),
+			));
+		} else {
+			echo '<span title="Needs at least one criterion and one action">—</span>';
+		}
+		echo '</td>';
+
+		echo '<td>' . htmlspecialchars($c['name']) . '</td>';
+
+		echo '<td>';
+		foreach (_filter_candidate_criteria_chips($c['fields']) as $chip) {
+			echo '<div><small>' . htmlspecialchars($chip) . '</small></div>';
+		}
+		echo '</td>';
+
+		echo '<td>';
+		foreach (_filter_candidate_action_chips($c['fields']) as $chip) {
+			echo '<span class="badge">' . htmlspecialchars($chip) . '</span> ';
+		}
+		if (!empty($c['label'])) {
+			echo '<span class="badge">label: ' . htmlspecialchars($c['label']) . '</span> ';
+		}
+		echo '</td>';
+
+		echo '<td>';
+		if (!empty($c['skipped'])) {
+			echo '<small>' . htmlspecialchars(implode(', ', $c['skipped'])) . '</small>';
+		}
+		echo '</td>';
+
+		echo '</tr>';
+	}
+	echo '</tbody></table>';
+
+	$formwriter->submitbutton('save_import', 'Create ' . $importable . ' filter' . ($importable === 1 ? '' : 's'));
+	echo $formwriter->end_form();
+
+	echo '<p><a href="' . htmlspecialchars($base . '?scope=' . urlencode($active_scope)) . '">Cancel</a></p>';
+	$page->end_box();
 } else {
 	// ----------------------------------------------------------------- list
 	$pageoptions['title'] = 'Filters';
@@ -188,7 +275,10 @@ if (($mode ?? 'list') === 'form') {
 
 	echo '<p><a class="btn btn-primary" href="'
 		. htmlspecialchars($base . '?op=new&scope=' . urlencode($active_scope))
-		. '">Create filter for this mailbox</a></p>';
+		. '">Create filter for this mailbox</a> '
+		. '<a class="btn btn-secondary" href="'
+		. htmlspecialchars($base . '?op=import&scope=' . urlencode($active_scope))
+		. '">Import filters</a></p>';
 
 	if (empty($rows)) {
 		echo '<p>No filters for <strong>' . htmlspecialchars($active_scope_label)

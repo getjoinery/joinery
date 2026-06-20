@@ -1,0 +1,542 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns='http://www.w3.org/2005/Atom' xmlns:apps='http://schemas.google.com/apps/2006'>
+	<title>Mail Filters</title>
+	<id>tag:mail.google.com,2008:filters:1404318321164,1417042091199,1419439128806,1419440082138,1427551228207,1427551964337,1427734022308,1427768724308,1427810905815,1427810941093,1427812796056,1427906662118,1436717411426,1436717468627,1436717548842,1436717617173,1436717658142,1436718307807,1460389846022,1491324524151,1494791804667,1494791845785,1494874284934,1494976589842,2637752258138361875,2860316273101675152,4351335299620491082,z0000001570659252654*6349549967426929120,z0000001601301059510*4940055157011368977,z0000001642781434223*1915425865930794341,z0000001672088996174*4205071631292438846,z0000001672164388848*0780390828868189710,z0000001673882164014*7595402761453895270,z0000001688148496749*4193946699350800548,z0000001700863204931*6106449033660118384,z0000001700863246229*5795352515725535323,z0000001700863266417*3693911901469569290,z0000001701450423203*1026516420092300768,z0000001731372280139*1079589158577508104,z0000001736981233642*8262478050859462943,z0000001746714211797*6643812462059861112,z0000001748446377617*8734299797235085004,z0000001751388026285*4409387407909789601,z0000001756405113635*6223641699899081238</id>
+	<updated>2026-06-19T16:46:51Z</updated>
+	<author>
+		<name>Jeremy Tunnell</name>
+		<email>jeremy.tunnell@gmail.com</email>
+	</author>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:1404318321164</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='dealnews'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:1417042091199</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='Ebates'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:1419439128806</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='cardpool'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:1419440082138</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='plated'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:1427551228207</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='Williams-Sonoma@mail.williams-sonoma.com'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:1427551964337</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='dsw@e.dsw.com'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:1427734022308</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='usmail@expediamail.com'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:1427768724308</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='Century 21'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:1427810905815</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='REI Gearmail'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:1427810941093</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='nuance'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:1427812796056</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='Southwest Click &apos;N Save'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:1427906662118</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='Hotwire Deals'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:1436717411426</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='subject' value='farecompare.com'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:1436717468627</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='info@fragrancenet.com'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldMarkAsRead' value='true'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:1436717548842</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='bedbathandbeyond'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:1436717617173</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='levis@e.levi.com'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:1436717658142</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='westelm@mail.westelm.com'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:1436718307807</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='editor@members.wayfair.com'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:1460389846022</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='retail@allenedmonds.com'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:1491324524151</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='meetup.com'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='shouldNeverSpam' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:1494791804667</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='crateandbarrel@mail.crateandbarrel.com'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:1494791845785</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='overstock.com'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:1494874284934</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='pop@my.containerstore.com'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:1494976589842</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='total wine'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:2637752258138361875</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='bananarepublic@email.bananarepublic.com'/>
+		<apps:property name='doesNotHaveTheWord' value='&quot;shipped&quot;, &quot;thank you&quot;'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:2860316273101675152</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='moosejaw'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:4351335299620491082</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='BSG@retail-email.asurion.com'/>
+		<apps:property name='shouldNeverSpam' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:z0000001570659252654*6349549967426929120</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='banana republic'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:z0000001601301059510*4940055157011368977</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='retail@click.allenedmonds.com'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:z0000001642781434223*1915425865930794341</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='us@email.blochworld.com'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:z0000001672088996174*4205071631292438846</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='service@e.airportparkingreservations.com'/>
+		<apps:property name='doesNotHaveTheWord' value='Receipt'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:z0000001672164388848*0780390828868189710</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='info@pp2f.org'/>
+		<apps:property name='doesNotHaveTheWord' value='receipt'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:z0000001673882164014*7595402761453895270</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='hello@thrivemarket.com'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:z0000001688148496749*4193946699350800548</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='DSG@e.dcsg.com'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:z0000001700863204931*6106449033660118384</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='myfrontier@emails.flyfrontier.com'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:z0000001700863246229*5795352515725535323</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='hasTheWord' value='vitacost'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:z0000001700863266417*3693911901469569290</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='info@sunshrimp.com'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:z0000001701450423203*1026516420092300768</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='WestElm@e.westelm.com'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:z0000001731372280139*1079589158577508104</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='hasTheWord' value='Peru pima'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:z0000001736981233642*8262478050859462943</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='avis@e.avis.com'/>
+		<apps:property name='doesNotHaveTheWord' value='receipt reservation'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:z0000001746714211797*6643812462059861112</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='cb2@mail.cb2.com'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:z0000001748446377617*8734299797235085004</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='ausomstore.com'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:z0000001751388026285*4409387407909789601</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='email@e.sonesta.com'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+	<entry>
+		<category term='filter'></category>
+		<title>Mail Filter</title>
+		<id>tag:mail.google.com,2008:filter:z0000001756405113635*6223641699899081238</id>
+		<updated>2026-06-19T16:46:51Z</updated>
+		<content></content>
+		<apps:property name='from' value='backcountry@b.backcountry.com'/>
+		<apps:property name='label' value='deals'/>
+		<apps:property name='shouldArchive' value='true'/>
+		<apps:property name='sizeOperator' value='s_sl'/>
+		<apps:property name='sizeUnit' value='s_smb'/>
+	</entry>
+</feed>

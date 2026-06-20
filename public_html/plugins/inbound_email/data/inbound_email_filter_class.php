@@ -37,7 +37,7 @@
  * wrapper differs.
  *
  * @see specs/implemented/inbound_email_filters.md
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -56,6 +56,9 @@ class InboundEmailFilter extends SystemBase {
 
 	const SIZE_OP_GT = 'gt';
 	const SIZE_OP_LT = 'lt';
+
+	// Gmail's size-unit enums -> bytes (used only when a real `size` value is present).
+	const GMAIL_SIZE_UNIT_BYTES = array('s_sb' => 1, 's_skb' => 1024, 's_smb' => 1048576);
 
 	protected static $foreign_key_actions = array(
 		// A filter dies with its mailbox or its domain. The label-apply action
@@ -478,6 +481,165 @@ class InboundEmailFilter extends SystemBase {
 		} catch (\Throwable $e) {
 			error_log('InboundEmailFilter: match logging failed for message ' . $msg->key . ': ' . $e->getMessage());
 		}
+	}
+
+	// ------------------------------------------------------------ Gmail import
+
+	/**
+	 * Parse a Gmail `mailFilters.xml` export into candidate structs — pure data,
+	 * NO DB writes, so it is unit-testable and safe to call for both the preview and
+	 * the confirm step. Each Gmail `<entry>` becomes one candidate:
+	 *
+	 *   [
+	 *     'name'       => 'From: dealnews',          // synthesized — Gmail filters are unnamed
+	 *     'fields'     => [fil_match_from => 'dealnews', fil_action_archive => true, ...],
+	 *     'label'      => 'deals',                   // Gmail label name, or null (resolved on confirm)
+	 *     'skipped'    => ['categorize: Updates'],   // human-readable unmapped properties
+	 *     'importable' => true,                      // >=1 criterion AND >=1 action (a label counts)
+	 *   ]
+	 *
+	 * The label is carried by NAME, not resolved here: find-or-create is a DB write,
+	 * so the parser leaves it to the confirm step. The "size trap" lives here too —
+	 * Gmail emits a default `sizeOperator`/`sizeUnit` on every entry, so a size
+	 * criterion is mapped ONLY when a `size` property carries a numeric value.
+	 *
+	 * @return array<int,array> one candidate per <entry>, in document order
+	 * @throws InboundEmailFilterException on empty input, non-XML, or a wrong root
+	 */
+	static function parseGmailExport(string $xml): array {
+		$xml = trim($xml);
+		if ($xml === '') {
+			throw new InboundEmailFilterException('The uploaded file is empty.');
+		}
+		// Untrusted input: LIBXML_NONET blocks network fetches; without LIBXML_NOENT
+		// (never passed) modern libxml does not resolve external entities (XXE-safe).
+		$prev = libxml_use_internal_errors(true);
+		$feed = simplexml_load_string($xml, 'SimpleXMLElement', LIBXML_NONET);
+		libxml_clear_errors();
+		libxml_use_internal_errors($prev);
+		if ($feed === false || strtolower($feed->getName()) !== 'feed') {
+			throw new InboundEmailFilterException('This does not look like a Gmail mailFilters.xml export.');
+		}
+
+		$appsNs = 'http://schemas.google.com/apps/2006';
+		$out = array();
+		foreach ($feed->entry as $entry) {
+			// Properties as ordered name/value pairs (label can legitimately repeat).
+			$props = array();
+			$children = $entry->children($appsNs);
+			if (isset($children->property)) {
+				foreach ($children->property as $p) {
+					$attrs = $p->attributes(); // name/value are in no namespace
+					$props[] = array((string)$attrs['name'], (string)$attrs['value']);
+				}
+			}
+			$out[] = self::mapGmailEntry($props);
+		}
+		return $out;
+	}
+
+	/** Map one Gmail entry's property pairs into a candidate struct (pure). */
+	private static function mapGmailEntry(array $props): array {
+		$fields = array();
+		$label = null;
+		$skipped = array();
+		$size = null; $sizeOp = null; $sizeUnit = null;
+
+		foreach ($props as $pair) {
+			list($name, $value) = $pair;
+			switch ($name) {
+				// ---- criteria
+				case 'from':    if (trim($value) !== '') { $fields['fil_match_from'] = trim($value); } break;
+				case 'to':      if (trim($value) !== '') { $fields['fil_match_to'] = trim($value); } break;
+				case 'subject': if (trim($value) !== '') { $fields['fil_match_subject'] = trim($value); } break;
+				case 'hasTheWord':         if (trim($value) !== '') { $fields['fil_match_has_words'] = trim($value); } break;
+				case 'doesNotHaveTheWord': if (trim($value) !== '') { $fields['fil_match_excludes'] = trim($value); } break;
+				case 'hasAttachment':      if (self::gmailTrue($value)) { $fields['fil_match_has_attachment'] = true; } break;
+				case 'size':         $size = $value; break;
+				case 'sizeOperator': $sizeOp = $value; break;
+				case 'sizeUnit':     $sizeUnit = $value; break;
+
+				// ---- actions
+				case 'shouldArchive':    if (self::gmailTrue($value)) { $fields['fil_action_archive'] = true; } break;
+				case 'shouldMarkAsRead': if (self::gmailTrue($value)) { $fields['fil_action_mark_read'] = true; } break;
+				case 'shouldStar':       if (self::gmailTrue($value)) { $fields['fil_action_star'] = true; } break;
+				case 'shouldTrash':      if (self::gmailTrue($value)) { $fields['fil_action_delete'] = true; } break;
+				case 'shouldNeverSpam':  if (self::gmailTrue($value)) { $fields['fil_action_never_spam'] = true; } break;
+				case 'forwardTo':        if (trim($value) !== '') { $fields['fil_action_forward_to'] = trim($value); } break;
+				case 'label':
+					if (trim($value) === '') { break; }
+					// First label wins; Gmail rarely emits more than one per entry.
+					if ($label === null) { $label = trim($value); }
+					else { $skipped[] = 'extra label: ' . trim($value); }
+					break;
+
+				// ---- known but unmappable -> dropped VISIBLY (a decision, not a gap)
+				case 'shouldAlwaysMarkAsImportant': if (self::gmailTrue($value)) { $skipped[] = 'mark important'; } break;
+				case 'shouldNeverMarkAsImportant':  if (self::gmailTrue($value)) { $skipped[] = 'never important'; } break;
+				case 'smartLabelToApply':           if (trim($value) !== '') { $skipped[] = 'categorize: ' . trim($value); } break;
+				case 'excludeChats':                if (self::gmailTrue($value)) { $skipped[] = 'chats excluded'; } break;
+
+				default:
+					// Anything unrecognized is surfaced, never silently lost.
+					if (trim($name) !== '') {
+						$skipped[] = trim($name) . (trim($value) !== '' ? ': ' . trim($value) : '');
+					}
+					break;
+			}
+		}
+
+		// Size is a criterion ONLY when `size` carries a numeric value (the size trap):
+		// a lone sizeOperator/sizeUnit (emitted by default on every entry) is ignored.
+		if ($size !== null && is_numeric($size) && (int)$size > 0) {
+			$fields['fil_match_size_op'] = ($sizeOp === 's_sg') ? self::SIZE_OP_GT : self::SIZE_OP_LT;
+			$mult = self::GMAIL_SIZE_UNIT_BYTES[$sizeUnit] ?? 1;
+			$fields['fil_match_size_bytes'] = (int)$size * $mult;
+		}
+
+		return array(
+			'name'       => self::synthesizeFilterName($fields, $label),
+			'fields'     => $fields,
+			'label'      => $label,
+			'skipped'    => $skipped,
+			'importable' => self::candidateHasCriterion($fields) && self::candidateHasAction($fields, $label),
+		);
+	}
+
+	/** Gmail booleans are the literal string "true". */
+	private static function gmailTrue($value): bool {
+		return strtolower(trim((string)$value)) === 'true';
+	}
+
+	/** Synthesize a readable name from the first criterion (Gmail filters are unnamed). */
+	private static function synthesizeFilterName(array $fields, ?string $label): string {
+		if (!empty($fields['fil_match_from']))      { return 'From: ' . $fields['fil_match_from']; }
+		if (!empty($fields['fil_match_to']))        { return 'To: ' . $fields['fil_match_to']; }
+		if (!empty($fields['fil_match_subject']))   { return 'Subject: ' . $fields['fil_match_subject']; }
+		if (!empty($fields['fil_match_has_words'])) { return 'Has: ' . $fields['fil_match_has_words']; }
+		if (!empty($fields['fil_match_excludes']))  { return 'Excludes: ' . $fields['fil_match_excludes']; }
+		if (!empty($fields['fil_match_has_attachment'])) { return 'Has attachment'; }
+		if (!empty($fields['fil_match_size_op']))   { return 'By size'; }
+		if ($label !== null)                        { return 'Label: ' . $label; }
+		return '(unnamed)';
+	}
+
+	/** True when a candidate has at least one matching criterion. */
+	private static function candidateHasCriterion(array $fields): bool {
+		foreach (array('fil_match_from', 'fil_match_to', 'fil_match_subject',
+				'fil_match_has_words', 'fil_match_excludes') as $f) {
+			if (!empty($fields[$f])) { return true; }
+		}
+		return !empty($fields['fil_match_has_attachment']) || !empty($fields['fil_match_size_op']);
+	}
+
+	/** True when a candidate has at least one action (a label counts as an action). */
+	private static function candidateHasAction(array $fields, ?string $label): bool {
+		if ($label !== null) { return true; }
+		foreach (array('fil_action_archive', 'fil_action_mark_read', 'fil_action_star',
+				'fil_action_delete', 'fil_action_never_spam') as $f) {
+			if (!empty($fields[$f])) { return true; }
+		}
+		return !empty($fields['fil_action_forward_to']);
 	}
 }
 

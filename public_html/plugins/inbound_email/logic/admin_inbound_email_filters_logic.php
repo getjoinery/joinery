@@ -12,7 +12,8 @@
  * Only mailboxes where filters can fire (locally-stored, non-IMAP) are offered.
  *
  * @see specs/implemented/inbound_email_filters.md
- * @version 1.2
+ * @see specs/inbound_email_filter_import.md
+ * @version 1.3
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -63,6 +64,72 @@ function admin_inbound_email_filters_logic(array $input): LogicResult {
 	}
 
 	$scope = _filter_scope_options();
+
+	// --- import step 1: the upload form ---
+	if ($op === 'import') {
+		$active_scope = _filter_active_scope($input, $scope['options']);
+		return LogicResult::render(array(
+			'mode'               => 'import',
+			'scope_options'      => $scope['options'],
+			'active_scope'       => $active_scope,
+			'active_scope_label' => $scope['options'][$active_scope] ?? $active_scope,
+			'session'            => $session,
+			'settings'           => $settings,
+		));
+	}
+
+	// --- import step 2: parse the uploaded export, render the preview ---
+	if (isset($input['import_upload'])) {
+		$active_scope = _filter_active_scope($input, $scope['options']);
+		try {
+			$xml = _filter_read_upload();
+			$candidates = InboundEmailFilter::parseGmailExport($xml);
+		} catch (\Throwable $e) {
+			return LogicResult::render(array(
+				'mode'               => 'import',
+				'scope_options'      => $scope['options'],
+				'active_scope'       => $active_scope,
+				'active_scope_label' => $scope['options'][$active_scope] ?? $active_scope,
+				'error'              => $e->getMessage(),
+				'session'            => $session,
+				'settings'           => $settings,
+			));
+		}
+		return LogicResult::render(array(
+			'mode'               => 'import_preview',
+			'scope_options'      => $scope['options'],
+			'active_scope'       => $active_scope,
+			'active_scope_label' => $scope['options'][$active_scope] ?? $active_scope,
+			'candidates'         => $candidates,
+			'import_xml'         => $xml,
+			'session'            => $session,
+			'settings'           => $settings,
+		));
+	}
+
+	// --- import step 3: confirm -> create the checked, importable rows ---
+	if (isset($input['save_import'])) {
+		$active_scope = _filter_active_scope($input, $scope['options']);
+		$xml = (string)($input['import_xml'] ?? '');
+		// Only checked boxes post back; their indices are the keys of import_row[].
+		$checked = (isset($input['import_row']) && is_array($input['import_row']))
+			? array_map('intval', array_keys($input['import_row'])) : array();
+		try {
+			$summary = _filter_import_confirm($xml, $checked, $active_scope, $scope['alias_domain']);
+		} catch (\Throwable $e) {
+			return LogicResult::render(array(
+				'mode'               => 'import',
+				'scope_options'      => $scope['options'],
+				'active_scope'       => $active_scope,
+				'active_scope_label' => $scope['options'][$active_scope] ?? $active_scope,
+				'error'              => $e->getMessage(),
+				'session'            => $session,
+				'settings'           => $settings,
+			));
+		}
+		_filter_flash($session, $summary, $scoped_list($active_scope));
+		return LogicResult::redirect($scoped_list($active_scope));
+	}
 
 	// --- save (step 2 submitted) ---
 	if (isset($input['save_filter'])) {
@@ -513,6 +580,227 @@ function _filter_action_summary(InboundEmailFilter $f): array {
 	if ($f->get('fil_action_archive'))    { $chips[] = 'Archive'; }
 	if ($f->get('fil_action_forward_to')) { $chips[] = 'Forward'; }
 	if ($f->get('fil_action_delete'))     { $chips[] = 'Delete'; }
+	return $chips;
+}
+
+// =====================================================================
+// Gmail filter import (specs/inbound_email_filter_import.md)
+// =====================================================================
+
+/** The active scope from input, falling back to the default mailbox. */
+function _filter_active_scope(array $input, array $options): string {
+	$s = (string)($input['scope'] ?? '');
+	if ($s === '' || !isset($options[$s])) {
+		$s = _filter_default_scope($options);
+	}
+	return $s;
+}
+
+/** Read and size-check the uploaded Gmail export, returning its raw XML. */
+function _filter_read_upload(): string {
+	if (empty($_FILES['import_file']) || !isset($_FILES['import_file']['error'])) {
+		throw new InboundEmailFilterException('Choose a Gmail mailFilters.xml file to upload.');
+	}
+	$f = $_FILES['import_file'];
+	if ($f['error'] === UPLOAD_ERR_NO_FILE) {
+		throw new InboundEmailFilterException('No file was selected.');
+	}
+	if ($f['error'] !== UPLOAD_ERR_OK) {
+		throw new InboundEmailFilterException('The file did not upload correctly (error code ' . intval($f['error']) . ').');
+	}
+	if (intval($f['size']) > 1048576) {
+		throw new InboundEmailFilterException('That file is too large — the limit is 1 MB.');
+	}
+	$xml = file_get_contents($f['tmp_name']);
+	if ($xml === false || trim($xml) === '') {
+		throw new InboundEmailFilterException('The uploaded file is empty.');
+	}
+	return $xml;
+}
+
+/** Resolve a scope value ('alias:N' / 'domain:N') to [alias_id|null, domain_id|null]. */
+function _filter_scope_to_ids(string $scope, array $alias_domain): array {
+	$alias_id = null; $domain_id = null;
+	if (strncmp($scope, 'alias:', 6) === 0) {
+		$alias_id = intval(substr($scope, 6));
+		$domain_id = $alias_domain[$alias_id] ?? null;
+		if ($domain_id === null) {
+			$a = new InboundEmailAlias($alias_id, TRUE);
+			$domain_id = $a->key ? intval($a->get('iea_ied_inbound_email_domain_id')) : null;
+		}
+	} elseif (strncmp($scope, 'domain:', 7) === 0) {
+		$domain_id = intval(substr($scope, 7));
+	}
+	return array($alias_id, $domain_id ? intval($domain_id) : null);
+}
+
+/**
+ * Create the checked, importable candidates as filters scoped to the active
+ * mailbox. Re-parses the carried XML (no server-side session state), resolves
+ * each candidate's label (find-or-create) on confirm, and skips any candidate
+ * whose mapped fields + resolved label already exist in the scope. Returns a
+ * human flash summary.
+ */
+function _filter_import_confirm(string $xml, array $checked, string $scope, array $alias_domain): string {
+	$candidates = InboundEmailFilter::parseGmailExport($xml);
+	$checkedSet = array_flip($checked);
+
+	list($alias_id, $domain_id) = _filter_scope_to_ids($scope, $alias_domain);
+	if (!$domain_id) {
+		throw new InboundEmailFilterException('Pick a valid mailbox before importing.');
+	}
+
+	// Signatures already present in this scope, for the re-import skip.
+	$existing = _filter_existing_signatures($alias_id, $domain_id);
+
+	$created = 0; $newLabels = 0; $dupes = 0;
+	foreach ($candidates as $i => $cand) {
+		if (empty($cand['importable']) || !isset($checkedSet[$i])) {
+			continue;
+		}
+		// Resolve the label only now (a DB write the parser deliberately deferred).
+		$labelId = null;
+		if (!empty($cand['label'])) {
+			$pre = InboundEmailLabel::getByName($cand['label']);
+			$label = InboundEmailLabel::findOrCreate($cand['label']);
+			$labelId = $label ? intval($label->key) : null;
+			if ($label && !$pre) { $newLabels++; }
+		}
+		$sig = _filter_signature($cand['fields'], $labelId);
+		if (isset($existing[$sig])) {
+			$dupes++;
+			continue;
+		}
+		_filter_create_from_candidate($cand, $labelId, $alias_id, $domain_id);
+		$existing[$sig] = true; // also collapse exact duplicates within one file
+		$created++;
+	}
+
+	$summary = 'Imported ' . $created . ' filter' . ($created === 1 ? '' : 's');
+	if ($newLabels > 0) {
+		$summary .= ' (created ' . $newLabels . ' new label' . ($newLabels === 1 ? '' : 's') . ')';
+	}
+	if ($dupes > 0) {
+		$summary .= '; ' . $dupes . ' already present';
+	}
+	return $summary . '.';
+}
+
+/** Persist one parsed candidate as a filter in the given scope. */
+function _filter_create_from_candidate(array $cand, ?int $labelId, ?int $alias_id, int $domain_id): InboundEmailFilter {
+	$fields = $cand['fields'];
+	$filter = new InboundEmailFilter(NULL);
+	$filter->set('fil_iea_inbound_email_alias_id', $alias_id);
+	$filter->set('fil_ied_inbound_email_domain_id', $domain_id);
+	$filter->set('fil_name', substr((string)$cand['name'], 0, 255));
+
+	foreach (array('fil_match_from', 'fil_match_to', 'fil_match_subject',
+			'fil_match_has_words', 'fil_match_excludes', 'fil_action_forward_to') as $c) {
+		$filter->set($c, (isset($fields[$c]) && $fields[$c] !== '') ? $fields[$c] : null);
+	}
+	foreach (array('fil_match_has_attachment', 'fil_action_archive', 'fil_action_mark_read',
+			'fil_action_star', 'fil_action_delete', 'fil_action_never_spam') as $c) {
+		$filter->set($c, !empty($fields[$c]));
+	}
+	if (!empty($fields['fil_match_size_op'])) {
+		$filter->set('fil_match_size_op', $fields['fil_match_size_op']);
+		$filter->set('fil_match_size_bytes', intval($fields['fil_match_size_bytes']));
+	}
+	$filter->set('fil_action_ilb_inbound_email_label_id', $labelId);
+
+	$filter->prepare();
+	$filter->save();
+	return $filter;
+}
+
+/**
+ * A canonical signature over a filter's identity (criteria + actions + resolved
+ * label id) for the re-import dedup. Built from the same shape for both candidates
+ * and stored models so a re-import of the same export matches and is skipped.
+ */
+function _filter_signature(array $fields, ?int $labelId): string {
+	$sig = array();
+	foreach (array('fil_match_from', 'fil_match_to', 'fil_match_subject',
+			'fil_match_has_words', 'fil_match_excludes', 'fil_action_forward_to') as $c) {
+		$v = trim((string)($fields[$c] ?? ''));
+		if ($v !== '') { $sig[$c] = $v; }
+	}
+	foreach (array('fil_match_has_attachment', 'fil_action_archive', 'fil_action_mark_read',
+			'fil_action_star', 'fil_action_delete', 'fil_action_never_spam', 'fil_action_mark_spam') as $c) {
+		if (!empty($fields[$c])) { $sig[$c] = 1; }
+	}
+	if (!empty($fields['fil_match_size_op'])) {
+		$sig['size'] = $fields['fil_match_size_op'] . ':' . intval($fields['fil_match_size_bytes'] ?? 0);
+	}
+	if ($labelId) { $sig['label'] = intval($labelId); }
+	ksort($sig);
+	return json_encode($sig);
+}
+
+/** Signatures of every non-deleted filter already in the given scope. */
+function _filter_existing_signatures(?int $alias_id, int $domain_id): array {
+	$options = array('deleted' => false);
+	if ($alias_id !== null) {
+		$options['alias_id'] = $alias_id;
+	} else {
+		$options['domain_wide'] = true;
+		$options['domain_id'] = $domain_id;
+	}
+	$multi = new MultiInboundEmailFilter($options, array('fil_inbound_email_filter_id' => 'ASC'));
+	$multi->load();
+
+	$sigs = array();
+	foreach ($multi as $f) {
+		$fields = array(
+			'fil_match_from'           => (string)$f->get('fil_match_from'),
+			'fil_match_to'             => (string)$f->get('fil_match_to'),
+			'fil_match_subject'        => (string)$f->get('fil_match_subject'),
+			'fil_match_has_words'      => (string)$f->get('fil_match_has_words'),
+			'fil_match_excludes'       => (string)$f->get('fil_match_excludes'),
+			'fil_action_forward_to'    => (string)$f->get('fil_action_forward_to'),
+			'fil_match_has_attachment' => (bool)$f->get('fil_match_has_attachment'),
+			'fil_action_archive'       => (bool)$f->get('fil_action_archive'),
+			'fil_action_mark_read'     => (bool)$f->get('fil_action_mark_read'),
+			'fil_action_star'          => (bool)$f->get('fil_action_star'),
+			'fil_action_delete'        => (bool)$f->get('fil_action_delete'),
+			'fil_action_never_spam'    => (bool)$f->get('fil_action_never_spam'),
+			'fil_action_mark_spam'     => (bool)$f->get('fil_action_mark_spam'),
+		);
+		if ($f->get('fil_match_size_op')) {
+			$fields['fil_match_size_op'] = (string)$f->get('fil_match_size_op');
+			$fields['fil_match_size_bytes'] = intval($f->get('fil_match_size_bytes'));
+		}
+		$lid = intval($f->get('fil_action_ilb_inbound_email_label_id'));
+		$sigs[_filter_signature($fields, $lid > 0 ? $lid : null)] = true;
+	}
+	return $sigs;
+}
+
+/** Compact human criteria chips for a parsed candidate (preview table). */
+function _filter_candidate_criteria_chips(array $fields): array {
+	$chips = array();
+	if (!empty($fields['fil_match_from']))      { $chips[] = 'From: ' . $fields['fil_match_from']; }
+	if (!empty($fields['fil_match_to']))        { $chips[] = 'To: ' . $fields['fil_match_to']; }
+	if (!empty($fields['fil_match_subject']))   { $chips[] = 'Subject: ' . $fields['fil_match_subject']; }
+	if (!empty($fields['fil_match_has_words'])) { $chips[] = 'Has: ' . $fields['fil_match_has_words']; }
+	if (!empty($fields['fil_match_excludes']))  { $chips[] = 'Excludes: ' . $fields['fil_match_excludes']; }
+	if (!empty($fields['fil_match_size_op'])) {
+		$chips[] = 'Size ' . ($fields['fil_match_size_op'] === 'gt' ? '>' : '<') . ' '
+			. number_format(intval($fields['fil_match_size_bytes'] ?? 0)) . ' B';
+	}
+	if (!empty($fields['fil_match_has_attachment'])) { $chips[] = 'Has attachment'; }
+	return $chips;
+}
+
+/** Compact human action chips for a parsed candidate, excluding the label. */
+function _filter_candidate_action_chips(array $fields): array {
+	$chips = array();
+	if (!empty($fields['fil_action_never_spam'])) { $chips[] = 'Never spam'; }
+	if (!empty($fields['fil_action_star']))       { $chips[] = 'Star'; }
+	if (!empty($fields['fil_action_mark_read']))  { $chips[] = 'Mark read'; }
+	if (!empty($fields['fil_action_archive']))    { $chips[] = 'Archive'; }
+	if (!empty($fields['fil_action_forward_to'])) { $chips[] = 'Forward: ' . $fields['fil_action_forward_to']; }
+	if (!empty($fields['fil_action_delete']))     { $chips[] = 'Delete'; }
 	return $chips;
 }
 ?>
