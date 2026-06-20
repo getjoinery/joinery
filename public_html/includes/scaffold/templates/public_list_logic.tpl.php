@@ -14,6 +14,7 @@ function <?= $plural ?>_logic(array $input): LogicResult {
 
 	$numperpage = 12;
 	$offset = LibraryFunctions::fetch_variable_local($input, 'offset', 0);
+	$offsetdisp = $offset ? $offset + 1 : 1;
 	$sort = LibraryFunctions::fetch_variable_local($input, 'sort', 'id');
 	$sdirection = LibraryFunctions::fetch_variable_local($input, 'sdirection', 'DESC');
 
@@ -32,6 +33,7 @@ function <?= $plural ?>_logic(array $input): LogicResult {
 	$page_vars['numrecords'] = $numrecords;
 	$page_vars['numperpage'] = $numperpage;
 	$page_vars['offset'] = $offset;
+	$page_vars['offsetdisp'] = $offsetdisp;
 	$page_vars['pager'] = new Pager(array('numrecords'=>$numrecords, 'numperpage'=>$numperpage));
 
 	return LogicResult::render($page_vars);

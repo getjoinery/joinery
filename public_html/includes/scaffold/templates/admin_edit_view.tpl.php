@@ -8,16 +8,17 @@ $page_vars = process_logic(admin_<?= $entity_snake ?>_edit_logic(array_merge($_G
 extract($page_vars);
 
 $page = new AdminPage();
+$<?= $entity_snake ?>_page_title = $<?= $entity_snake ?>->key ? 'Edit <?= $title ?>' : 'New <?= $title ?>';
 $page->admin_header([
 	'menu-id' => '<?= str_replace('_', '-', $plural) ?>',
 	'breadcrumbs' => array(
 		'<?= $title_plural ?>' => '/admin/admin_<?= $plural ?>',
-		'Edit <?= $title ?>' => '',
+		$<?= $entity_snake ?>_page_title => '',
 	),
 	'session' => $session,
 ]);
 
-$pageoptions = array('title' => 'Edit <?= $title ?>');
+$pageoptions = array('title' => $<?= $entity_snake ?>_page_title);
 $page->begin_box($pageoptions);
 
 $formwriter = $page->getFormWriter('form1', [
