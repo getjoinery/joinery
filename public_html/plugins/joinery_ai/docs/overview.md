@@ -17,7 +17,12 @@ plugins/joinery_ai/
     RecipeRunContext.php       # Per-run context passed to every tool's execute()
     RecipeToolInterface.php    # Tool contract
     RecipeToolRegistry.php     # Auto-discovers tools across plugins
-    AnthropicClient.php        # HTTP client for Anthropic Messages API
+    llm/
+      LlmProviderInterface.php   # Provider contract (createMessage / cost / models)
+      LlmProviderException.php   # Base provider error; AnthropicException extends it
+      LlmProviderFactory.php     # Builds the active provider from settings
+      AnthropicProvider.php      # Anthropic Messages API (canonical IR passthrough)
+      OpenAiCompatibleProvider.php # Ollama / llama.cpp / vLLM / LM Studio
     CostGuard.php              # Per-run token/dollar ceilings
     UrlSafetyValidator.php     # SSRF guard for fetch_url tool
     ModelRegistry.php          # Generic reads: finds models with $ai_readable
@@ -60,9 +65,28 @@ Each invocation creates an `rcr_recipe_runs` row with:
 - **token / cost totals** — for the cost guard and admin reporting
 - **output** — the final assistant message
 
-`RecipeRunner::run($recipe)` drives the tool-use loop: send the conversation to Anthropic, dispatch any `tool_use` blocks back through `RecipeToolRegistry::get($name)->execute($input, $ctx)`, append the `tool_result`, repeat until the model emits a final text response or the cost guard trips.
+`RecipeRunner::run($recipe)` drives the tool-use loop: send the conversation to the active LLM provider, dispatch any `tool_use` blocks back through `RecipeToolRegistry::get($name)->execute($input, $ctx)`, append the `tool_result`, repeat until the model emits a final text response or the cost guard trips.
 
 The `CostGuard` enforces per-run input/output token and dollar ceilings configured in plugin settings; trips raise an exception that the runner logs as `error`.
+
+## LLM providers
+
+The runner is decoupled from any specific model vendor through a provider boundary in `includes/llm/`.
+
+**Canonical IR.** The runner's loop manipulates messages and content blocks in the Anthropic Messages shape (`text`, `tool_use{id,name,input}`, `tool_result{tool_use_id,content,is_error}`; a top-level `system` array; `tools[]` with `input_schema`). That shape is the runner's canonical internal representation. `LlmProviderInterface::createMessage(array $params): array` accepts and returns that canonical shape; each provider translates canonical ↔ its own wire format entirely inside the provider class. The runner never branches on provider.
+
+**Providers:**
+
+- **`AnthropicProvider`** — the canonical IR is the Anthropic block shape, so this provider is a near-passthrough: it posts the request body as-is and returns the decoded response. Carries the cost table (`COST_PER_MTOKEN`) and the Claude model list. `AnthropicException` is kept as a subclass of `LlmProviderException` for backward compatibility, and `AnthropicClient` remains a class alias.
+- **`OpenAiCompatibleProvider`** — one provider for every OpenAI-compatible local runtime (Ollama, llama.cpp server, vLLM, LM Studio), all of which expose `/v1/chat/completions` with tool-calling. It does the real translation: canonical → OpenAI request and OpenAI response → canonical. Malformed tool arguments from small models decode to `{}` (the tool's own validation then yields a normal `is_error` result) rather than crashing the run; inline `<think>…</think>` reasoning is stripped from final text; local inference is free, so `estimateCost()` returns `0.0`. There is no local prompt caching, so `cache_control` is ignored and the full system prompt is re-sent each call.
+
+**Factory + settings.** `LlmProviderFactory::build()` reads `joinery_ai_llm_provider` (`anthropic` | `local`) and constructs the matching provider, throwing `LlmProviderException` with a configuration-specific message if the active provider's required setting is empty. Provider is a **global** setting, not per-recipe; a recipe's `rcp_model` is reinterpreted by whichever provider is active. The recipe-edit model dropdown is built from the active provider's `models()`, and a recipe whose stored `rcp_model` isn't offered by the active provider keeps the value, flagged as unavailable.
+
+Local settings: `joinery_ai_local_base_url` (default `http://localhost:11434/v1`), `joinery_ai_local_model` (must be set before the local provider runs), `joinery_ai_local_api_key` (optional; Ollama ignores it), `joinery_ai_local_timeout_seconds` (default `300` — local CPU generation is slow).
+
+**Local setup (Ollama).** Stand up an OpenAI-compatible server on a host with enough RAM for the chosen model, pull/serve the model and set `joinery_ai_local_model` to its id, point `joinery_ai_local_base_url` at it (`localhost` if same-box), and switch `joinery_ai_llm_provider` to `local`. Manage RAM with the server's keep-alive (e.g. `OLLAMA_KEEP_ALIVE=5m`) so the model unloads between occasional runs.
+
+**Capability caveat.** Reliable tool-calling has a parameter cliff around 7–9B; models small enough to run on a constrained box (~1B) load and generate but emit malformed tool calls and don't function as agents. A ~1B model (`llama3.2:1b`, `qwen3:1.7b`) validates the adapter end-to-end but isn't a real recipe driver; a dense 14B+ on a 16 GB+ host (e.g. `qwen3:14b`) is the practical floor for dependable loops. Recipes needing reliable tool use keep `joinery_ai_llm_provider = anthropic` until a suitable host exists.
 
 ## Tool architecture
 
@@ -239,7 +263,7 @@ Both can coexist — a recipe can use `query_model` for ad-hoc reads and `GetMyN
 
 ## Cost protection
 
-`CostGuard` is initialized per run from plugin settings (`max_input_tokens_per_run`, `max_output_tokens_per_run`, `max_dollars_per_run`). Each Anthropic response includes usage metrics; the guard accumulates them and raises if the next call would exceed any ceiling. The runner catches the exception, marks the run as `error`, and persists the partial trace.
+`CostGuard` is initialized per run from plugin settings (`max_input_tokens_per_run`, `max_output_tokens_per_run`, `max_dollars_per_run`). Each provider response includes usage metrics in the canonical usage block; the guard accumulates them and raises if the next call would exceed any ceiling. The runner catches the exception, marks the run as `error`, and persists the partial trace.
 
 For recipes that are expected to be expensive, raise the ceilings on the recipe row. For recipes that should be cheap, lower them.
 

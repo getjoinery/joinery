@@ -4,7 +4,7 @@
 
 Companion to `specs/scheduling_system.md` (the native booking engine). That spec ships the complete self-hosted scheduling product **and the seams** that let external scheduling and calendar services plug in without rearchitecting:
 
-- the `BusySourceInterface` registry (native spec, Layer 1), and
+- the `CalendarItemSource` registry (native spec, Layer 1), and
 - the `SchedulingServiceProvider` interface + registry (native spec, Layer 4), with `NativeSchedulingProvider` as the only shipped implementation.
 
 This spec adds the external implementations on top of those seams. It is **additive** — no native code is rearchitected.
@@ -13,7 +13,7 @@ This spec adds the external implementations on top of those seams. It is **addit
 
 **Why import-first.** The target market is the "degoogle" crowd — hosts moving *off* Google and Calendly onto self-hosted scheduling. For them, **import (migration) is more valuable than live sync.** Importing an external account's configuration so the host can recreate it natively and *leave* the external service is the point. Ongoing two-way calendar sync (read busy from / write back to Google/Outlook) does the opposite — it re-tethers users to the services they're trying to leave — so it sits at the bottom of this spec, useful only for hosts who deliberately want to keep one foot in Google.
 
-**Depends on (must already be shipped by the native spec):** the `SchedulingServiceProvider` interface + registry, the `bkt_provider` / `bkt_external_type_uri` booking-type fields, and the `BusySourceInterface` registry. This spec provides implementations for those contracts; it does not change them.
+**Depends on (must already be shipped by the native spec):** the `SchedulingServiceProvider` interface + registry, the `bkt_provider` / `bkt_external_type_uri` booking-type fields, and the `CalendarItemSource` registry. This spec provides implementations for those contracts; it does not change them.
 
 **Pre-launch note:** The platform has no production users. No data-preservation migrations are required.
 
@@ -75,7 +75,7 @@ When a connection breaks (token revoked, refresh failure, key rejected), it is m
 
 This is the part the degoogle market least wants: a live, ongoing tether to Google/Outlook for busy-read and write-back. It is included for completeness and for hosts who choose to keep it, but it is the last thing to build.
 
-It plugs into the native `BusySourceInterface` registry — `ExternalCalendarBusySource` is just another busy source, so once it exists the native slot generator already consumes it with no other change.
+It plugs into the native `CalendarItemSource` registry — `ExternalCalendarItemSource` is just another source, so once it exists the owner's personal calendar shows external events (`type=external`) and the busy projection the slot generator consumes already includes them, with no other change.
 
 **`cal_calendar_connections`** (CalendarConnection, core)
 - `cal_calendar_connection_id` (pk)
@@ -88,7 +88,9 @@ It plugs into the native `BusySourceInterface` registry — `ExternalCalendarBus
 
 **`cbb_calendar_busy_blocks`** — cache of fetched busy blocks (`cbb_cal_calendar_connection_id`, `cbb_start_time`, `cbb_end_time` UTC, `cbb_fetched_time`). Refreshed on demand with a short TTL when slots are requested — there is deliberately no background refresh task (it would spend API quota on hosts nobody is viewing). Browsing tolerates TTL staleness; booking **confirmation** does one live freshness check against connected calendars.
 
-**`ExternalCalendarBusySource`** (core) — busy blocks from connected Google/Microsoft calendars, served from the cache with on-demand refresh.
+**`ExternalCalendarItemSource`** (core) — calendar items from connected Google/Microsoft calendars (busy-blocking; owner-visible event titles where the account grants them), served from the cache with on-demand refresh.
+
+**Echo dedup (the first place `source_key` dedup applies).** When write-back is on, a confirmed native booking is also written to the host's external calendar, then read back by this source — the same meeting twice. Because write-back stamps the native booking's id into the external event's metadata, this source sets each echoed item's `source_key` to that native id. The calendar aggregation and the busy projection then collapse the echo against the native item, so it shows and counts once. This is the dedup the native spec defers here; until external feeds exist, no two sources produce the same item and there is nothing to collapse.
 
 OAuth flow: a `CalendarSyncOAuthConsumer` (core `includes/oauth/consumers/`, purpose `calendar_sync`) requests `https://www.googleapis.com/auth/calendar` (Google) / `Calendars.ReadWrite` + `offline_access` (Microsoft), stores the token on the connection row. The connect/disconnect UI ships with the bookings plugin at `/profile/bookings/calendars` (engine-vs-surface rule — connections are only consumed through scheduling today; the page promotes to core if a core consumer such as event-registration write-back ever lands). Write-back: on booking confirmation, create an event on each `cal_write_back` calendar (attendee email, intake summary, meeting location); on cancellation, delete it (store the external event id on the booking via `bkn_external_calendar_event_id`).
 
@@ -112,7 +114,7 @@ For hosts who keep Calendly live: booking page branches to `getEmbedHtml()` with
 
 ### Phase D — External calendar sync, Google then Microsoft (lowest priority)
 - **D.1 Connections + consent (Google).** `CalendarConnection` + busy-cache classes, `CalendarSyncOAuthConsumer`, `/profile/bookings/calendars` connect/disconnect UI. *Checkpoint:* OAuth consent round-trips; encrypted token stored; connection listed.
-- **D.2 Busy read (Google).** Fetch via the Calendar API, on-demand TTL cache, `ExternalCalendarBusySource`, live freshness check wired into booking confirmation. *Checkpoint:* an event created directly in Google Calendar suppresses the matching slot.
+- **D.2 Busy read (Google).** Fetch via the Calendar API, on-demand TTL cache, `ExternalCalendarItemSource`, live freshness check wired into booking confirmation. *Checkpoint:* an event created directly in Google Calendar suppresses the matching slot.
 - **D.3 Write-back (Google).** Create external event on confirmation, store external id, delete on cancellation. *Checkpoint:* a booking appears on the host's Google Calendar and disappears on cancel.
 - **D.4 Microsoft.** Same three capabilities via the Graph API, behind the now-proven seams. *Checkpoint:* connect, busy-read, and write-back all work against an Outlook calendar.
 
@@ -128,7 +130,7 @@ For hosts who keep Calendly live: booking page branches to `getEmbedHtml()` with
 
 ## Files
 
-**Create (core):** `data/calendar_connections_class.php`, `data/calendar_busy_blocks_class.php`, `includes/scheduling/busy_sources/ExternalCalendarBusySource.php`, `includes/oauth/providers/CalendlyOAuthProvider.php`, `includes/oauth/consumers/CalendarSyncOAuthConsumer.php`.
+**Create (core):** `data/calendar_connections_class.php`, `data/calendar_busy_blocks_class.php`, `includes/calendar/item_sources/ExternalCalendarItemSource.php`, `includes/oauth/providers/CalendlyOAuthProvider.php`, `includes/oauth/consumers/CalendarSyncOAuthConsumer.php`.
 
 **Create (plugin):** `includes/scheduling_providers/CalendlySchedulingProvider.php`, `includes/scheduling_providers/AcuitySchedulingProvider.php`, `includes/oauth_consumers/CalendlySchedulingOAuthConsumer.php`, `data/provider_connections_class.php`, profile views (provider connections, calendar connections), ajax (`ajax/webhook_calendly.php`, `ajax/webhook_acuity.php`), `tasks/ProviderSyncTask.{json,php}`.
 

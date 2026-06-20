@@ -6,13 +6,62 @@
 <p>API keys and runtime caps for scheduled LLM recipes. Settings starting with
 <code>joinery_ai_</code> are owned by this plugin.</p>
 
+<h4>LLM provider</h4>
+
+<?php
+$formwriter->dropinput('joinery_ai_llm_provider', 'LLM Provider', [
+    'value' => $settings->get_setting('joinery_ai_llm_provider') ?: 'anthropic',
+    'options' => [
+        'anthropic' => 'Anthropic (cloud)',
+        'local'     => 'Local / self-hosted (OpenAI-compatible)',
+    ],
+    'visibility_rules' => [
+        'local' => ['show' => [
+            'joinery_ai_local_base_url', 'joinery_ai_local_model',
+            'joinery_ai_local_api_key', 'joinery_ai_local_timeout_seconds',
+        ]],
+        'anthropic' => ['hide' => [
+            'joinery_ai_local_base_url', 'joinery_ai_local_model',
+            'joinery_ai_local_api_key', 'joinery_ai_local_timeout_seconds',
+        ]],
+    ],
+    'helptext' => 'Which backend drives recipes. The recipe model is reinterpreted '
+                . 'by whichever provider is active.',
+]);
+
+$formwriter->textinput('joinery_ai_local_base_url', 'Local Base URL', [
+    'value' => $settings->get_setting('joinery_ai_local_base_url'),
+    'placeholder' => 'http://localhost:11434/v1',
+    'helptext' => 'OpenAI-compatible endpoint (Ollama, llama.cpp, vLLM, LM Studio). '
+                . 'Use the host URL if the server is not on this box.',
+]);
+
+$formwriter->textinput('joinery_ai_local_model', 'Local Model', [
+    'value' => $settings->get_setting('joinery_ai_local_model'),
+    'placeholder' => 'qwen3:14b',
+    'helptext' => 'Model id served by the host. Must be set before the local provider runs.',
+]);
+
+$formwriter->passwordinput('joinery_ai_local_api_key', 'Local API Key', [
+    'value' => $settings->get_setting('joinery_ai_local_api_key'),
+    'placeholder' => '(optional)',
+    'helptext' => 'Only for servers that require a key; Ollama ignores it.',
+]);
+
+$formwriter->numberinput('joinery_ai_local_timeout_seconds', 'Local Timeout (s)', [
+    'value' => $settings->get_setting('joinery_ai_local_timeout_seconds'),
+    'min' => 1,
+    'helptext' => 'Per-call HTTP timeout. CPU-only local generation is slow — keep this high.',
+]);
+?>
+
 <h4>API keys</h4>
 
 <?php
 $formwriter->passwordinput('joinery_ai_anthropic_api_key', 'Anthropic API Key', [
     'value' => $settings->get_setting('joinery_ai_anthropic_api_key'),
     'placeholder' => 'sk-ant-...',
-    'helptext' => 'Required for any recipe to run. Get one from console.anthropic.com.',
+    'helptext' => 'Required when the provider is Anthropic. Get one from console.anthropic.com.',
 ]);
 
 $formwriter->passwordinput('joinery_ai_brave_search_api_key', 'Brave Search API Key', [

@@ -1,28 +1,38 @@
 <?php
 require_once(PathHelper::getComposerAutoloadPath());
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderInterface.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderException.php'));
 
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\ClientException;     // 4xx
 use GuzzleHttp\Exception\ServerException;     // 5xx
 use GuzzleHttp\Exception\ConnectException;    // network
 
-class AnthropicException extends Exception {}
+/**
+ * Kept for backward compatibility: any code that still throws or catches
+ * AnthropicException continues to work, and it is-a LlmProviderException so the
+ * runner's base-type catch handles it.
+ */
+class AnthropicException extends LlmProviderException {}
 
 /**
- * Thin wrapper around Anthropic's Messages API.
+ * Anthropic Messages API provider.
  *
- * Intentionally dumb: takes a fully-formed request body, posts it, decodes the
- * response. The runner is responsible for assembling the request — including
- * placing cache_control breakpoints on the last system block and the latest
- * tool-result turn (max 2 of the API's 4 breakpoint slots).
+ * The canonical IR is the Anthropic block shape, so this provider is a
+ * near-passthrough: createMessage() posts the request body as-is and returns
+ * the decoded response. The runner is responsible for assembling the request —
+ * including placing cache_control breakpoints on the last system block and the
+ * latest tool-result turn (max 2 of the API's 4 breakpoint slots).
  *
  * Retry policy (per spec): up to 2 retries on 5xx / transport errors with
  * 1s and 3s backoff. 4xx (auth, validation) fails immediately.
  */
-class AnthropicClient {
+class AnthropicProvider implements LlmProviderInterface {
 
     const API_URL = 'https://api.anthropic.com/v1/messages';
     const API_VERSION = '2023-06-01';
+
+    const DEFAULT_MODEL = 'claude-haiku-4-5';
 
     /**
      * USD per 1,000,000 tokens. For run-cost estimation in the dashboard;
@@ -39,6 +49,13 @@ class AnthropicClient {
         'claude-haiku-4-5'  => ['input' => 1.00, 'output' =>  5.00, 'cache_write' => 1.25, 'cache_read' => 0.10],
     ];
 
+    /** Models offered to the recipe-edit dropdown. */
+    const MODELS = [
+        'claude-opus-4-7'   => 'Claude Opus 4.7 ($5/$25 per Mtok)',
+        'claude-sonnet-4-6' => 'Claude Sonnet 4.6 ($3/$15 per Mtok)',
+        'claude-haiku-4-5'  => 'Claude Haiku 4.5 ($1/$5 per Mtok)',
+    ];
+
     /** @var string */
     private $api_key;
 
@@ -47,7 +64,7 @@ class AnthropicClient {
 
     public function __construct(string $api_key, ?Client $http = null) {
         if (!$api_key) {
-            throw new AnthropicException(
+            throw new LlmProviderException(
                 'Anthropic API key is empty. Configure joinery_ai_anthropic_api_key.'
             );
         }
@@ -58,10 +75,23 @@ class AnthropicClient {
         ]);
     }
 
+    public function id(): string {
+        return 'anthropic';
+    }
+
+    public function models(): array {
+        return self::MODELS;
+    }
+
+    public function defaultModel(): string {
+        return self::DEFAULT_MODEL;
+    }
+
     /**
-     * Send a Messages API request. $params is the raw API body — the caller
-     * provides model, max_tokens, system, messages, tools, etc. Returns the
-     * decoded response array. Throws AnthropicException on failure.
+     * Send a Messages API request. $params is the canonical request body, which
+     * for Anthropic is already the native API body — the caller provides model,
+     * max_tokens, system, messages, tools, etc. Returns the decoded response
+     * array. Throws LlmProviderException on failure.
      */
     public function createMessage(array $params): array {
         $headers = [
@@ -83,14 +113,14 @@ class AnthropicClient {
                 $body = (string)$response->getBody();
                 $decoded = json_decode($body, true);
                 if (!is_array($decoded)) {
-                    throw new AnthropicException('Anthropic returned non-JSON: ' . substr($body, 0, 200));
+                    throw new LlmProviderException('Anthropic returned non-JSON: ' . substr($body, 0, 200));
                 }
                 return $decoded;
             } catch (ClientException $e) {
                 // 4xx — auth, validation, rate-limit-pass-through. Don't retry.
                 $body = $e->hasResponse() ? (string)$e->getResponse()->getBody() : '';
                 $msg = self::extractError($body) ?: $e->getMessage();
-                throw new AnthropicException("Anthropic 4xx: $msg", $e->getCode(), $e);
+                throw new LlmProviderException("Anthropic 4xx: $msg", $e->getCode(), $e);
             } catch (ServerException $e) {
                 // 5xx — retry
                 $body = $e->hasResponse() ? (string)$e->getResponse()->getBody() : '';
@@ -102,18 +132,18 @@ class AnthropicClient {
                 continue;
             } catch (Exception $e) {
                 // Anything else — don't retry; the failure mode is unclear.
-                throw new AnthropicException('Anthropic call failed: ' . $e->getMessage(), 0, $e);
+                throw new LlmProviderException('Anthropic call failed: ' . $e->getMessage(), 0, $e);
             }
         }
 
-        throw new AnthropicException('Anthropic 5xx/transport after retries: ' . ($last_error ?? 'unknown'));
+        throw new LlmProviderException('Anthropic 5xx/transport after retries: ' . ($last_error ?? 'unknown'));
     }
 
     /**
-     * Estimate USD cost from a usage block as returned by the API:
+     * Estimate USD cost from a canonical usage block:
      *   { input_tokens, output_tokens, cache_creation_input_tokens?, cache_read_input_tokens? }
      */
-    public static function estimateCost(string $model, array $usage): float {
+    public function estimateCost(string $model, array $usage): float {
         $rates = self::COST_PER_MTOKEN[$model] ?? null;
         if (!$rates) return 0.0;
 
@@ -140,3 +170,7 @@ class AnthropicClient {
     }
 
 }
+
+// Backward-compatibility: existing references to AnthropicClient resolve to the
+// renamed provider. Removed once all references are migrated.
+class_alias('AnthropicProvider', 'AnthropicClient');

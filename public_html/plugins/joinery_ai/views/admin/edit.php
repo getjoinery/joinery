@@ -132,14 +132,29 @@ echo '</div>';
 
 // --- Model & tools ---
 $settings = Globalvars::get_instance();
-$default_model = $settings->get_setting('joinery_ai_default_model') ?: 'claude-sonnet-4-7';
+
+// Model options come from the active provider, so switching provider re-skins
+// the dropdown without touching this view. If the recipe's stored model isn't
+// offered by the active provider (provider switched after authoring), append it
+// flagged so the value is preserved and the mismatch is visible rather than
+// silently overwritten on save.
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderFactory.php'));
+try {
+    $model_options = LlmProviderFactory::build()->models();
+} catch (LlmProviderException $e) {
+    // Provider isn't configured yet (e.g. local selected with no model, or no
+    // API key). Don't crash the edit page — fall back to no preset options; the
+    // stored model is still preserved below.
+    $model_options = [];
+}
+$stored_model = (string)$recipe->get('rcp_model');
+if ($stored_model !== '' && !isset($model_options[$stored_model])) {
+    $model_options[$stored_model] = "$stored_model — unavailable under current provider";
+}
 
 $formwriter->dropinput('rcp_model', 'Model', [
-    'options' => [
-        'claude-opus-4-7'   => 'Claude Opus 4.7 ($5/$25 per Mtok)',
-        'claude-sonnet-4-6' => 'Claude Sonnet 4.6 ($3/$15 per Mtok)',
-        'claude-haiku-4-5'  => 'Claude Haiku 4.5 ($1/$5 per Mtok)',
-    ],
+    'value'   => $stored_model,
+    'options' => $model_options,
 ]);
 
 // Allowed tools — checkboxes against the live tool registry. Drop-in tools
