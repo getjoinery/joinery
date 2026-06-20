@@ -913,6 +913,33 @@ historical mail), resuming across runs via a per-filter cursor.
 the inbound transaction log (the **Logs** tab) recording the matched filter ids and
 the actions taken.
 
+**Importing from Gmail.** The Filters list has an **Import filters** button that
+ingests Gmail's `mailFilters.xml` export (*Gmail → Settings → Filters and Blocked
+Addresses → Export*) into the picked mailbox. The operator uploads the file and sees a
+**preview** — one row per Gmail filter with its synthesized name, mapped criteria,
+mapped actions, and a *Skipped* column for anything that has no platform equivalent —
+then confirms to create the checked rows. An imported filter is an ordinary
+`InboundEmailFilter`; import adds no new behavior.
+
+- **Criteria** map directly: `from`, `to`, `subject`, `hasTheWord` → *Has the words*,
+  `doesNotHaveTheWord` → *Doesn't have*, `hasAttachment`, and `size`.
+- **Actions** map directly too: archive, mark-read, star, trash → delete, never-spam,
+  and forward. Gmail's `label` action **find-or-creates a custom label** by name (a
+  nested `Parent/Child` name is kept verbatim); new labels are created on confirm and
+  their count is shown in the summary.
+- **Skipped:** importance (`shouldAlwaysMarkAsImportant` / `shouldNeverMarkAsImportant`),
+  categories (`smartLabelToApply`), and chat exclusion have no platform concept and are
+  dropped visibly, listed per row in the preview.
+- **The size default caveat:** Gmail emits a default `sizeOperator`/`sizeUnit` on every
+  exported filter even when no size is set, so a size criterion is imported **only when
+  a `size` value is actually present** — otherwise every filter would gain a bogus
+  "size < 0 MB" rule.
+
+An entry is importable only when it has at least one criterion **and** at least one
+action (a label counts). Re-importing the same file is safe: a candidate whose criteria,
+actions, and resolved label already exist in the scope is skipped and reported as
+*already present*.
+
 ## Inbound Providers
 
 Inbound mail is **provider-based** and composes with the platform's

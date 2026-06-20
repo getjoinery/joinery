@@ -519,10 +519,27 @@
 		newRow.appendChild(addBtn);
 		panel.appendChild(newRow);
 
-		btn.addEventListener('click', function () { panel.hidden = !panel.hidden; });
+		// Toggle open; stopPropagation so the document handler (which dismisses open
+		// panels) doesn't immediately re-close it. Clicks inside the panel are
+		// likewise contained so ticking labels / typing a new name keeps it open —
+		// it closes on an outside click or Esc, like the kebab menu.
+		btn.addEventListener('click', function (e) {
+			e.stopPropagation();
+			var willOpen = panel.hidden;
+			closeAllFolderPanels();
+			closeAllKebabs();
+			panel.hidden = !willOpen;
+		});
+		panel.addEventListener('click', function (e) { e.stopPropagation(); });
 		wrap.appendChild(btn);
 		wrap.appendChild(panel);
 		return wrap;
+	}
+
+	function closeAllFolderPanels() {
+		Array.prototype.forEach.call(document.querySelectorAll('.mbx-folder-panel'), function (p) {
+			p.hidden = true;
+		});
 	}
 
 	// SPF/DKIM/DMARC verdicts are READ from the message's Authentication-Results
@@ -568,9 +585,9 @@
 
 		var body = el('div', 'mbx-message-body');
 		if (m.body_html) {
-			var note = el('div', 'mbx-sandbox-note',
-				'Sandboxed HTML — stored mail is attacker-controlled; scripts and links are disabled.');
-			body.appendChild(note);
+			// Render the sender-authored (untrusted) HTML in a fully locked-down
+			// iframe: empty sandbox grants nothing, so no scripts run and the frame
+			// can't reach the session or the surrounding page.
 			var iframe = document.createElement('iframe');
 			iframe.setAttribute('sandbox', '');
 			iframe.setAttribute('srcdoc', m.body_html);
@@ -608,6 +625,7 @@
 			e.stopPropagation();
 			var willOpen = menu.hidden;
 			closeAllKebabs();
+			closeAllFolderPanels();
 			menu.hidden = !willOpen;
 		});
 		menu.addEventListener('click', function (e) { e.stopPropagation(); });
@@ -802,14 +820,14 @@
 		var composeForm = document.getElementById('mbx_compose_form');
 		if (composeForm) composeForm.addEventListener('submit', submitCompose);
 
-		// A click anywhere else closes any open kebab (⋮) menu.
-		document.addEventListener('click', function () { closeAllKebabs(); });
+		// A click anywhere else closes any open kebab (⋮) menu or Move/Labels panel.
+		document.addEventListener('click', function () { closeAllKebabs(); closeAllFolderPanels(); });
 
-		// Esc closes any kebab menu, then the compose panel, then the conversation.
+		// Esc closes any kebab menu or Move/Labels panel, then compose, then the conversation.
 		document.addEventListener('keydown', function (e) {
 			if (e.key !== 'Escape') return;
-			var open = document.querySelector('.mbx-kebab-menu:not([hidden])');
-			if (open) { closeAllKebabs(); }
+			var open = document.querySelector('.mbx-kebab-menu:not([hidden]), .mbx-folder-panel:not([hidden])');
+			if (open) { closeAllKebabs(); closeAllFolderPanels(); }
 			else if (!$('#mbx-compose').hidden) { closeCompose(); }
 			else if (state.threadKey != null) { closeThread(); }
 		});

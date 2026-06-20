@@ -13,13 +13,17 @@ of re-entering dozens of filters by hand.
 This builds on `specs/implemented/inbound_email_filters.md` — it reuses that
 feature's data model, mapping vocabulary, and the per-mailbox Filters UI. It adds
 **no** new disposition behavior: an imported filter is an ordinary
-`InboundEmailFilter` and runs through the same `runForMessage` engine.
+`InboundEmailFilter` and runs through the same `runForMessage` engine. Gmail's
+`label` action maps onto a custom label (`fil_action_ilb_inbound_email_label_id`),
+find-or-creating the `ilb_inbound_email_labels` row by name — see
+`specs/implemented/inbound_email_labels.md`.
 
 ## Scope
 
 - Imports the Gmail **filter** export (`mailFilters.xml`, an Atom feed with
-  `apps:property` elements). Nothing else — not Gmail labels, settings, vacation
-  responders, or `.mbox` mail.
+  `apps:property` elements). Nothing else — not Gmail settings, vacation
+  responders, or `.mbox` mail. (A filter's `label` *action* is imported, as a
+  custom label; the Gmail label *taxonomy* as a whole is not.)
 - Imports **into the mailbox the operator is viewing** on the Filters tab (a
   mailbox, or a domain-wide bucket — the same scope model the manual create flow
   uses). The Filters tab already lists only mailboxes where filters can fire
@@ -40,11 +44,6 @@ feature's data model, mapping vocabulary, and the per-mailbox Filters UI. It add
 
 ## Non-Goals
 
-- **No label import.** Gmail's `label` action has no target on a filterable
-  mailbox — labels are `iif_` folders that belong to IMAP feeds, and filters only
-  run on non-IMAP mailboxes (see `specs/implemented/inbound_email_filters.md`). A
-  `label` action is reported as skipped, not applied. (If local labels for
-  store-only mailboxes are ever added, this becomes a follow-up.)
 - **No importance / categories / chats.** `shouldAlwaysMarkAsImportant`,
   `shouldNeverMarkAsImportant`, `smartLabelToApply` (Categorize as), and
   chat-exclusion properties have no platform concept and are skipped (recorded in
@@ -114,7 +113,7 @@ filter would gain a bogus "size < 0 MB" criterion.
 | `shouldTrash` = `true` | `fil_action_delete` = true | soft-delete |
 | `shouldNeverSpam` = `true` | `fil_action_never_spam` = true | |
 | `forwardTo` | `fil_action_forward_to` | validated as an email on save (operator-only, no verification handshake — same as manual create) |
-| `label` | **skipped** | no label target on a filterable (non-IMAP) mailbox; reported per entry |
+| `label` | `fil_action_ilb_inbound_email_label_id` | find-or-create the `ilb_inbound_email_labels` row whose `ilb_name` equals the Gmail label, by name (case-sensitive, verbatim — Gmail nests with `/`, kept literal); resolved on **confirm**, not at parse time, so the preview shows the label name without creating it. One label action per filter; if Gmail ever emits multiple `label` properties on one entry, the first maps and the rest are reported skipped. |
 | `shouldAlwaysMarkAsImportant`, `shouldNeverMarkAsImportant` | **skipped** | no importance signal |
 | `smartLabelToApply` (Categorize as) | **skipped** | no category tabs |
 | chat-exclusion properties | **skipped** | no chat stream |
@@ -126,10 +125,11 @@ set by import (it stays available for manual filters).
 the first non-empty criterion (e.g. `From: dealnews`) so the list is readable.
 
 **Importable test.** After mapping, an entry is imported only if it has **≥ 1
-criterion AND ≥ 1 action** — the same floor the model enforces. An entry that maps
-to no actions (e.g. a label-only filter, once `label` is dropped) is **skipped**
-and shown in the preview with the reason, rather than creating a rule that does
-nothing.
+criterion AND ≥ 1 action** — the same floor the model enforces. A `label` action
+counts toward the action floor, so a label-only Gmail filter (apply-label, no
+other action) is now importable. An entry that maps to no actions at all (e.g.
+only `shouldAlwaysMarkAsImportant`, which is skipped) is **skipped** and shown in
+the preview with the reason, rather than creating a rule that does nothing.
 
 ## Design
 
@@ -146,16 +146,18 @@ matching the existing `op=`-driven wizard:
    helptext; self-documenting per the admin-page conventions.
 2. **`op=import_preview`** (on upload) — parse the XML and render a **preview
    table**: one row per `<entry>` with its synthesized name, mapped criteria,
-   mapped actions as chips, and a *Skipped* column listing any unmapped Gmail
-   properties (e.g. "label: deals", "categorize"). Importable rows have a checked
-   *Import* checkbox (default on); skipped/non-importable rows are shown disabled
-   with the reason. The raw XML is carried in a hidden field so the confirm step
-   re-parses deterministically (no server-side session state). A *"Create N
-   filters"* submit confirms.
-3. **confirm** (`save_import`) — re-parse, create one `InboundEmailFilter` per
-   checked, importable entry scoped to the active mailbox, then redirect back to
-   the scoped Filters list with a flash summary: *"Imported N filters; skipped M
-   (K label actions, …)."*
+   mapped actions as chips (a mapped `label` shows as a *"label: deals"* chip,
+   noted as create-if-new), and a *Skipped* column listing any unmapped Gmail
+   properties (e.g. "categorize: Updates", "important"). Importable rows have a
+   checked *Import* checkbox (default on); skipped/non-importable rows are shown
+   disabled with the reason. The raw XML is carried in a hidden field so the
+   confirm step re-parses deterministically (no server-side session state). A
+   *"Create N filters"* submit confirms.
+3. **confirm** (`save_import`) — re-parse, then for each checked, importable entry
+   resolve its `label` (find-or-create the `ilb_` row) and create one
+   `InboundEmailFilter` scoped to the active mailbox, then redirect back to the
+   scoped Filters list with a flash summary: *"Imported N filters (created K new
+   labels); skipped M."*
 
 All three are FormWriter forms. The preview is read-only data; the only inputs are
 the per-row checkboxes + the hidden raw XML + scope.
@@ -176,29 +178,38 @@ testable:
 [
   'name'      => 'From: dealnews',
   'fields'    => [ fil_match_from => 'dealnews', fil_action_archive => true, ... ],
-  'skipped'   => [ 'label: deals' ],     // human-readable unmapped properties
-  'importable'=> true,                    // ≥1 criterion AND ≥1 action
+  'label'     => 'deals',                 // Gmail label name, or null — resolved to an
+                                          // ilb_ id on confirm (a DB write), not at parse
+  'skipped'   => [ 'categorize: Updates' ], // human-readable unmapped properties
+  'importable'=> true,                    // ≥1 criterion AND ≥1 action (a label counts as an action)
 ]
 ```
 
 Parsing uses `SimpleXMLElement` with the `apps` namespace registered; the size
-trap and the importable test live here. The admin logic calls
+trap and the importable test live here. Because find-or-create is a DB write, the
+parser does **not** touch the database: it carries the Gmail label name in
+`'label'` and leaves resolution to the confirm step. The admin logic calls
 `parseGmailExport()` for both the preview and the confirm, then — on confirm — for
-each checked importable candidate, builds an `InboundEmailFilter`, sets the
-mapped fields + the active scope, and calls `prepare()`/`save()` (the same path
-`_filter_save()` already uses; mapping reuses, not duplicates, that save logic).
+each checked importable candidate, resolves `'label'` (if present) via
+`InboundEmailLabel::findOrCreate($name)` into `fil_action_ilb_inbound_email_label_id`,
+builds an `InboundEmailFilter`, sets the mapped fields + the active scope, and
+calls `prepare()`/`save()` (the same path `_filter_save()` already uses; mapping
+reuses, not duplicates, that save logic).
 
 The parser writes through the **model layer**; there is no new engine and no new
-class — just `parseGmailExport()` (mapping) and a create loop in the logic.
+class — just `parseGmailExport()` (mapping) and a create-plus-label-resolve loop
+in the logic.
 
 ### Idempotency / re-import
 
 To keep a double-import from doubling every rule, the confirm step **skips a
 candidate that exactly matches an existing non-deleted filter in the same scope**
 (same criteria + same actions). This is a cheap signature compare over the mapped
-fields; matches are reported in the summary as "N already present." This is a
-*should*, not a hard guarantee — the operator can still create intentional
-duplicates manually.
+fields; the label action is compared by its resolved `ilb_` id (so the signature
+is built *after* `findOrCreate`, and a re-import — which find-or-creates back to
+the same label row — matches and is skipped). Matches are reported in the summary
+as "N already present." This is a *should*, not a hard guarantee — the operator
+can still create intentional duplicates manually.
 
 ## Security
 
@@ -215,15 +226,21 @@ duplicates manually.
 
 - **`parseGmailExport()` unit tests** against `specs/mailFilters.xml` (moved to a
   test fixture on implementation): asserts 44 entries parse; the size trap yields
-  **no** size criterion; `from`/`label`/`shouldArchive` map correctly; `label`
-  lands in `skipped`; the single `subject`, `shouldMarkAsRead`, `hasTheWord`,
-  `doesNotHaveTheWord`, and `shouldNeverSpam` entries map as tabled.
+  **no** size criterion; `from`/`shouldArchive` map correctly; a `label` property
+  lands in the candidate's `'label'` (its name) — **not** in `skipped` — and does
+  not hit the DB at parse time; the single `subject`, `shouldMarkAsRead`,
+  `hasTheWord`, `doesNotHaveTheWord`, and `shouldNeverSpam` entries map as tabled.
 - **Mapping edge tests:** size *with* a value (each unit + operator → bytes);
-  `hasAttachment`; a synthetic label-only entry → non-importable; an entry with no
-  criteria → non-importable.
-- **End-to-end:** upload → preview shows the right counts → confirm creates exactly
-  the importable/checked rows scoped to the active mailbox → re-import of the same
-  file skips all as "already present."
+  `hasAttachment`; a label-only entry (label, no other action) → **importable**;
+  an entry with an importance-only action and no label → non-importable; an entry
+  with no criteria → non-importable.
+- **Label resolution (confirm):** a label name that already exists reuses its
+  `ilb_` row (no duplicate, not counted as "created"); a new name find-or-creates
+  one; nested `Parent/Child` is kept verbatim.
+- **End-to-end:** upload → preview shows the right counts (including "K new
+  labels") → confirm creates exactly the importable/checked rows scoped to the
+  active mailbox, with label actions wired to the resolved `ilb_` rows → re-import
+  of the same file skips all as "already present" and creates no further labels.
 - **Malformed input:** non-XML, wrong-root XML, and an entry with unknown
   properties all fail gracefully (clear error, nothing created).
 
@@ -231,9 +248,9 @@ duplicates manually.
 
 When this ships, fold an **Importing from Gmail** note into the Filters section of
 `plugins/inbound_email/docs/overview.md` (current-state voice; do not create a new
-doc file): the Import button, what maps, what is skipped (labels/importance/
-categories/chats), and the size-default caveat. No doc changes land with the spec
-itself.
+doc file): the Import button, what maps (including `label` → find-or-create a
+custom label), what is skipped (importance/categories/chats), and the size-default
+caveat. No doc changes land with the spec itself.
 
 The example `specs/mailFilters.xml` should move to a test fixture
 (`plugins/inbound_email/tests/fixtures/`) when implemented, rather than staying in
@@ -241,10 +258,11 @@ The example `specs/mailFilters.xml` should move to a test fixture
 
 ## Open decisions (resolve at implementation, not now)
 
-- **Skipped-label loudness.** The sample is dominated by "apply label + archive"
-  rules; after dropping `label` they import as archive-only. Confirm that
-  surfacing the dropped labels in the preview + summary is enough, versus also
-  offering (future) local labels so the label action has a target.
+- **Label auto-create loudness.** The sample is dominated by "apply label +
+  archive" rules, so a first import can create many `ilb_` labels at once. Confirm
+  that surfacing the new-label count in the preview + summary is enough, versus a
+  per-label opt-in (a checkbox to create-or-skip each new label) — the latter is
+  heavier UI for a one-shot import and is not proposed for v1.
 - **Name synthesis vs. blank.** Synthesize `From: …`-style names (proposed) or
   import unnamed and let the list show "(unnamed)".
 - **Duplicate signature.** Exact criteria+action match (proposed) vs. a looser
