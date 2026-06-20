@@ -46,6 +46,21 @@ $page->public_header(['title' => '<?= $title_plural ?>']);
 
 			</tbody>
 		</table>
+		<?= $O ?> if ($pager->is_valid_page('-1') || $pager->is_valid_page('+1')): <?= $C ?>
+
+		<div class="jy-pagination">
+			<span class="jy-pagination-info">Showing <?= $O ?> echo $offsetdisp; <?= $C ?> to <?= $O ?> echo min($offset + $numperpage, $numrecords); <?= $C ?> of <?= $O ?> echo $numrecords; <?= $C ?> results</span>
+			<div class="jy-pagination-links">
+				<?= $O ?> if ($pager->is_valid_page('-1')): <?= $C ?>
+				<a class="btn btn-outline" href="<?= $O ?> echo $pager->get_url('-1', ''); <?= $C ?>">&#8592; Previous</a>
+				<?= $O ?> endif; <?= $C ?>
+				<?= $O ?> if ($pager->is_valid_page('+1')): <?= $C ?>
+				<a class="btn btn-outline" href="<?= $O ?> echo $pager->get_url('+1', ''); <?= $C ?>">Next &#8594;</a>
+				<?= $O ?> endif; <?= $C ?>
+			</div>
+		</div>
+		<?= $O ?> endif; <?= $C ?>
+
 	</div>
 </section>
 </div>

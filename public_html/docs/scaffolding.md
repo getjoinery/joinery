@@ -192,7 +192,8 @@ Before writing, the CLI prints the resolved file list and derived names (table, 
 ### After generation — what you still own
 
 1. **Create the table.** Core entities: run `update_database` from admin utilities. Plugin entities: run "Sync with Filesystem" on the plugin (admin Plugins page). The generator never touches the database.
-2. **Fill in `// TODO:` stubs** — business rules in the data class, fields with no descriptor type in the views.
+2. **Add a menu entry** (core entities only). The generated admin pages reference `menu-id: '{plural-with-dashes}'` (e.g. `plural: coupon_codes` → `menu-id: coupon-codes`). Add a matching entry to `admin_menus.json` at the repo root so the sidebar highlights correctly. Plugin menus are declared in the plugin's `plugin.json` instead.
+3. **Fill in `// TODO:` stubs** — business rules in the data class, fields with no descriptor type in the views.
 
 ---
 

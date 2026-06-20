@@ -46,6 +46,29 @@ Every platform system the calendar/scheduling feature touches, and how:
 
 ---
 
+## Building the data layer with the scaffold generator
+
+Every new table this spec introduces is a plain CRUD model behind **bespoke presentation** — the calendar grid, the availability editor, and the booking flow are all hand-built UI, none of them a generated list/edit page. That is exactly the model-only case the scaffold generator (`specs/implemented/scaffolding_code_generator.md`) is for; its own example for `surfaces: ["data"]` is "an entity with bespoke presentation (e.g. a calendar)." So the new models are **generated from manifests, not hand-written**: the generator emits the data class + Multi collection class — requires, `$field_specifications`, constructor, `getMultiResults()` filter branches, deletion wiring — and no pages we'd immediately discard.
+
+| Entity (class) | Table | `surfaces` | Into |
+|---|---|---|---|
+| `Schedule` | `sch_schedules` | `["data"]` | core |
+| `ScheduleWindow` | `scw_schedule_windows` | `["data"]` | core |
+| `ScheduleOverride` | `sco_schedule_overrides` | `["data"]` | core |
+| `CalendarItem` (stored native entries) | `cal_items` | `["data"]` | core |
+| `BookingEmail` (send log) | `bke_booking_emails` | `["data"]` | `plugins/bookings` |
+
+Two manifest choices are non-obvious and decided here:
+
+- **Polymorphic owner → stubbed auth.** `sch_schedules` and `cal_items` are owned by a `CalendarSubject` (`subject_type` + `subject_id`), not a real `usr_users` FK, so their manifests omit `owner_field`. The generator then emits `authenticate_read/write()` as a labelled `// TODO:` stub (its documented behavior when ownership is non-standard), and the polymorphic resolve-then-owner-or-staff check is filled in by hand. The user-deletion cascade these tables depend on is declared in each manifest's `delete.foreign_key_actions`, since there is no real FK to carry it.
+- **`time` columns, no form to break.** `scw_*_time` / `sco_*_time` are PostgreSQL `time` (wall-clock), which has no form-input mapping — irrelevant here because `surfaces: ["data"]` emits no form. This is a second reason these entities are data-only: a generated form would need hand-tuning for both the wall-clock fields and the polymorphic owner, and we generate none.
+
+**What is *not* scaffolded.** The generator is creation-only — it never edits an existing file. The bookings plugin's `booking_types_class.php` and `bookings_class.php` already exist; their schema changes (Layer 4) and admin CRUD rework are hand edits. They do adopt the same descriptor-driven forms the generator emits — their edit forms render through `FormWriter::fromDescriptor()` (shipped by the scaffold spec) — so a hand-built booking-type form and a generated form share one field-declaration style.
+
+**This spec is the first substantial consumer of the generator**, so the first generation run doubles as a check on the generator itself. Phase 2.1 runs it for the schedule manifests and is immediately followed by a hard **pause to verify the output is what this spec needs before anything is built on top of it** (see the gate after Phase 2.1).
+
+---
+
 ## Layer 1: Personal Calendar (core)
 
 Lives in core (`/data/`, `/includes/calendar/`) because a calendar is a property of a subject, not of the bookings feature. This layer is the integration point the rest of the platform plugs into.
@@ -333,8 +356,17 @@ Within each phase, the work is broken into steps sized to be built, integrated, 
 
 ### Phase 2 — Availability engine
 
-- **2.1 Schedule data layer.** `Schedule`/`ScheduleWindow`/`ScheduleOverride` classes (+ Multi classes, subject-keyed), `update_database` creates the tables. Model CRUD tests in `/tests/models/`.
+- **2.1 Schedule data layer (scaffold-generated).** Write the three manifests (`schedule`, `schedule_window`, `schedule_override`, all `surfaces: ["data"]`, subject-keyed with `unique_with` on `sch_schedules`) and run `php utils/scaffold.php` for each. Hand-fill the stubbed polymorphic `authenticate_*()` on `Schedule`. `update_database` creates the tables. Model CRUD tests in `/tests/models/`.
   *Checkpoint:* tables exist; tests create/load a user subject's one schedule with windows and overrides (and soft-delete windows/overrides).
+
+> **⏸ PAUSE — verify the scaffold output before building on it.** This is the first real generation run, so it is also the proof the generator gives this spec what it needs. **Do not start 2.2 until the generated data classes are confirmed against this spec.** Check the emitted files:
+> - field names/types match Layer 2's schema (subject columns, `unique_with` on `sch_schedules`, the `time` columns, the `scw_`/`sco_` FKs to `sch_schedules`);
+> - `getMultiResults()` exposes the option keys later phases call (by subject, by schedule, active / non-deleted);
+> - the polymorphic `authenticate_*()` **stub** is present where `owner_field` was omitted, and the `delete.foreign_key_actions` cascade landed;
+> - `php -l` and `validate_php_file.php` both pass (the generator asserts this — confirm it).
+>
+> If the output is wrong or insufficient, **fix the generator or the manifests and report back before continuing** — do not hand-patch the generated classes into shape. A hand-patch would mask a generator gap that every later scaffolded entity (4.1, 5.6) hits again. Only resume once the generated data layer is correct as generated.
+
 - **2.2 SlotGenerator.** Pure computation per the algorithm above, consuming the busy projection. Unit tests must cover: DST spring-forward/fall-back dates, overrides replacing weekly windows, full-day blocks, buffer subtraction, min-notice filtering, increment vs. duration interplay, busy blocks spanning window edges.
   *Checkpoint:* test suite green; generator produces correct UTC slots for fixture schedules with seeded event busy time.
 - **2.3 Availability editor.** `/profile/bookings/availability` (plugin view over the core models) — weekly windows editor, date overrides, timezone (FormWriter throughout). Plain table/list rendering for now; the calendar preview arrives in 3.2.
@@ -351,16 +383,16 @@ Within each phase, the work is broken into steps sized to be built, integrated, 
 
 ### Phase 4 — Native personal entries
 
-- **4.1 Native entry store + source.** `cal_items` (subject-keyed; timed/all-day, `blocks_availability`, `visibility`, `type=personal`), `NativeCalendarItemSource` registered like any other source. Model CRUD tests.
+- **4.1 Native entry store + source.** Scaffold `cal_items` from a `surfaces: ["data"]` manifest (subject-keyed; timed/all-day, `blocks_availability`, `visibility`, `type=personal`) and hand-fill its stubbed polymorphic auth; hand-write `NativeCalendarItemSource`, registered like any other source. Model CRUD tests.
   *Checkpoint:* a seeded native entry appears on the owner's aggregated feed and, when blocking, in the busy projection.
 - **4.2 Authoring on the calendar.** Create / edit / delete native entries from `/profile/calendar` (FormWriter; click-to-create on the grid, edit existing). Busy entries remove availability.
   *Checkpoint:* a user blocks Tuesday 2–4pm on their calendar in the browser; the block shows on the grid and that time disappears from their booking slots.
 
 ### Phase 5 — Native booking flow (the usable MVP)
 
-- **5.1 Plugin schema + provider seam.** Booking/BookingType field rework (add/rename/drop per Schema changes above), drop `usr_calendly_uri` from core, `SchedulingServiceProvider` interface + registry + `NativeSchedulingProvider` (slots via SlotGenerator; creation lands in 5.4).
+- **5.1 Plugin schema + provider seam.** Booking/BookingType field rework (add/rename/drop per Schema changes above — **hand edits to the existing `bookings_class.php` / `booking_types_class.php`; the generator is creation-only and does not touch existing files**), drop `usr_calendly_uri` from core, `SchedulingServiceProvider` interface + registry + `NativeSchedulingProvider` (slots via SlotGenerator; creation lands in 5.4).
   *Checkpoint:* plugin sync applies the schema; registry returns the native provider; validator passes on all touched files.
-- **5.2 Admin booking-type CRUD.** Full create/edit form (duration, host, buffers, notice, window, caps, location via `visibility_rules`). Needed now — every later step requires a configurable type.
+- **5.2 Admin booking-type CRUD.** Full create/edit form (duration, host, buffers, notice, window, caps, location via `visibility_rules`), rendered through `FormWriter::fromDescriptor()` — hand-built (booking_types pre-exists), not generated. Needed now — every later step requires a configurable type.
   *Checkpoint:* an admin creates a working booking type bound to its host in the browser.
 - **5.3 Public slot browsing.** Slots JSON endpoint (generator + busy projection at `busy` visibility + per-period caps), serve.php vanity route, booking page rendering `slot_picker` from the real endpoint.
   *Checkpoint:* visiting `/book/{slug}` shows genuinely open times; booking-capped days and busy times are absent; no item titles leak to the endpoint.
@@ -368,7 +400,7 @@ Within each phase, the work is broken into steps sized to be built, integrated, 
   *Checkpoint:* end-to-end booking on dev; both emails arrive (verify via `iem_inbound_email_messages`); the slot disappears from the picker; the booking shows on the host's `/profile/calendar`; two concurrent submissions for one slot produce exactly one booking.
 - **5.5 Invitee self-service.** `/booking/manage?token=…` — cancel with reason, reschedule via slot_picker, `bkt_cancel_notice_minutes` enforcement, policy text display, notification emails.
   *Checkpoint:* cancel and reschedule both work from the email links; too-late cancellation is refused.
-- **5.6 Reminders + follow-ups.** `BookingEmailsTask` (every_run), `bke_booking_emails` send log for idempotency, suppression rules (canceled, no-show, `bkt_send_native_emails` off).
+- **5.6 Reminders + follow-ups.** `BookingEmailsTask` (every_run), `bke_booking_emails` send log for idempotency (scaffold-generated, `surfaces: ["data"]`, into the plugin), suppression rules (canceled, no-show, `bkt_send_native_emails` off).
   *Checkpoint:* task run against a near-future booking sends exactly one reminder; rerun sends nothing.
 - **5.7 Intake surveys.** `bkt_svy_survey_id` rendering inline on the booking form, answers stored against the invitee user, shown on the admin booking detail.
   *Checkpoint:* booked with intake answers; answers visible in admin.
@@ -428,9 +460,11 @@ A pre-booking questionnaire with conditional branching: based on answers, route 
 
 ## Files
 
-**Create (core):** `includes/calendar/CalendarItem.php`, `includes/calendar/CalendarSubject.php`, `includes/calendar/CalendarItemSource.php`, `includes/calendar/CalendarItemSourceRegistry.php`, `includes/calendar/item_sources/EventItemSource.php`, `includes/calendar/item_sources/NativeCalendarItemSource.php`, `data/calendar_items_class.php`, `data/schedules_class.php`, `data/schedule_windows_class.php`, `data/schedule_overrides_class.php`, `includes/scheduling/SlotGenerator.php`, `views/components/calendar_grid.{json,php}`, `views/components/slot_picker.{json,php}`, personal calendar view + native-entry editor (`/profile/calendar`).
+**Generate (scaffold manifests → data classes, `surfaces: ["data"]`):** committed manifest JSON for each new model, run through `php utils/scaffold.php`, then hand-fill the emitted auth/business stubs. Outputs: `data/schedules_class.php`, `data/schedule_windows_class.php`, `data/schedule_overrides_class.php`, `data/calendar_items_class.php` (core), and `plugins/bookings/data/booking_emails_class.php` (plugin). The `Schedule` and `CalendarItem` stubs get the polymorphic owner-or-staff `authenticate_*()` hand-filled.
 
-**Create (plugin):** `includes/SchedulingServiceProvider.php`, `includes/SchedulingProviderRegistry.php`, `includes/scheduling_providers/NativeSchedulingProvider.php`, `includes/calendar_item_sources/BookingItemSource.php`, `data/booking_emails_class.php`, public views (`views/book/…`, manage page), profile views (availability editor, my bookings), ajax (slots endpoint, personal calendar feed), `tasks/BookingEmailsTask.{json,php}`, reworked admin pages.
+**Create (core, hand-written):** `includes/calendar/CalendarItem.php` (value object — distinct from the stored `cal_items` model), `includes/calendar/CalendarSubject.php`, `includes/calendar/CalendarItemSource.php`, `includes/calendar/CalendarItemSourceRegistry.php`, `includes/calendar/item_sources/EventItemSource.php`, `includes/calendar/item_sources/NativeCalendarItemSource.php`, `includes/scheduling/SlotGenerator.php`, `views/components/calendar_grid.{json,php}`, `views/components/slot_picker.{json,php}`, personal calendar view + native-entry editor (`/profile/calendar`).
+
+**Create (plugin, hand-written):** `includes/SchedulingServiceProvider.php`, `includes/SchedulingProviderRegistry.php`, `includes/scheduling_providers/NativeSchedulingProvider.php`, `includes/calendar_item_sources/BookingItemSource.php`, public views (`views/book/…`, manage page), profile views (availability editor, my bookings), ajax (slots endpoint, personal calendar feed), `tasks/BookingEmailsTask.{json,php}`, reworked admin pages (booking-type edit via `FormWriter::fromDescriptor()`).
 
 **Modify:** `plugins/bookings/data/bookings_class.php`, `booking_types_class.php` (schema above), `plugin.json` (settings, menu), `serve.php` (vanity route), `data/users_class.php` + `adm/admin_users_edit.php` + logic (drop `usr_calendly_uri`), `views/booking.php` + `theme/tailwind/views/booking.php` (replace placeholder/dead embed with the native flow).
 
