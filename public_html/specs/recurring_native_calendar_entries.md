@@ -50,6 +50,23 @@ Add to `CalendarEntry::$field_specifications`:
 
 'cal_parent_entry_date'       => ['type' => 'date',         'is_nullable' => true],
 // The occurrence date this entry replaces (pairs with cal_parent_entry_id)
+
+// External calendar interop (iCalendar import / future sync)
+'cal_uid'                     => ['type' => 'varchar(255)',  'is_nullable' => true],
+// iCal UID — uniquely identifies this entry across calendars; used for deduplication
+// and delta sync on re-import. NULL for locally-created entries.
+
+'cal_rrule_raw'               => ['type' => 'text',          'is_nullable' => true],
+// Raw RRULE string from the iCal source (e.g. "FREQ=WEEKLY;BYDAY=MO,WE").
+// Stored verbatim so complex patterns that don't map to the decomposed fields
+// are preserved faithfully. NULL for locally-created entries.
+
+'cal_source'                  => ['type' => 'varchar(50)',   'is_nullable' => true],
+// Origin of this entry: 'google', 'proton', or NULL for locally-created.
+
+'cal_source_event_id'         => ['type' => 'varchar(255)',  'is_nullable' => true],
+// The event ID assigned by the external calendar service; paired with cal_source
+// for sync matching on re-import.
 ```
 
 `cal_recurrence_type IS NOT NULL` is the authoritative test for "is a recurring parent." No separate flag needed.
@@ -110,10 +127,6 @@ public function date_matches_pattern(string $date): bool
  */
 public function get_recurrence_description(): string
 
-/** End the series: set cal_recurrence_end_date so no instances generate on/after $date.
- *  @param string $date Y-m-d — NULL clears the end date (series continues forever)
- */
-public function end_series(?string $date): void
 ```
 
 ### `get_instances_for_range()` algorithm
