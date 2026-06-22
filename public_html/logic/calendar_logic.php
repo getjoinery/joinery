@@ -55,18 +55,25 @@ function calendar_logic(array $input): LogicResult {
             $page_vars['errors'][] = 'Enter a valid date.';
         }
 
+        $start_local = null;
+        $end_local   = null;
+
         if (empty($page_vars['errors'])) {
             if ($all_day) {
-                $start_utc = LibraryFunctions::convert_time($date . ' 00:00:00', $tz, 'UTC', 'Y-m-d H:i:s');
-                $next = date('Y-m-d', strtotime($date . ' +1 day'));
-                $end_utc = LibraryFunctions::convert_time($next . ' 00:00:00', $tz, 'UTC', 'Y-m-d H:i:s');
+                $start_local = $date . ' 00:00:00';
+                $next        = date('Y-m-d', strtotime($date . ' +1 day'));
+                $end_local   = $next . ' 00:00:00';
+                $start_utc   = LibraryFunctions::convert_time($start_local, $tz, 'UTC', 'Y-m-d H:i:s');
+                $end_utc     = LibraryFunctions::convert_time($end_local,   $tz, 'UTC', 'Y-m-d H:i:s');
             } else {
                 if ($start_t === '' || $end_t === '' || $end_t <= $start_t) {
                     $page_vars['errors'][] = 'Enter a start and end time (end after start), or mark it all-day.';
                 }
                 if (empty($page_vars['errors'])) {
-                    $start_utc = LibraryFunctions::convert_time($date . ' ' . $start_t, $tz, 'UTC', 'Y-m-d H:i:s');
-                    $end_utc   = LibraryFunctions::convert_time($date . ' ' . $end_t, $tz, 'UTC', 'Y-m-d H:i:s');
+                    $start_local = $date . ' ' . $start_t;
+                    $end_local   = $date . ' ' . $end_t;
+                    $start_utc   = LibraryFunctions::convert_time($start_local, $tz, 'UTC', 'Y-m-d H:i:s');
+                    $end_utc     = LibraryFunctions::convert_time($end_local,   $tz, 'UTC', 'Y-m-d H:i:s');
                 }
             }
         }
@@ -83,6 +90,10 @@ function calendar_logic(array $input): LogicResult {
             }
             $entry->set('cal_start_utc', $start_utc);
             $entry->set('cal_end_utc', $end_utc);
+            $entry->set('cal_start_local', $start_local);
+            $entry->set('cal_end_local', $end_local);
+            $entry->set('cal_timezone', $tz);
+            $entry->set('cal_tzdata_version', '2026a');
             $entry->set('cal_all_day', $all_day);
             $entry->set('cal_title', $title);
             $entry->set('cal_blocks_availability', $blocks);

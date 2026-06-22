@@ -168,16 +168,16 @@
 		$event_session->set('evs_evt_event_id', $event->key);
 	}
 
-	// Handle start time using FormWriterV2Base helper
-	$start_time = FormWriterV2Base::process_datetimeinput($_POST, 'evs_start_time', true);
+	// Capture local time from the form (event timezone — label tells user this).
+	// save() derives UTC from local + event timezone; session TZ is not used here.
+	$start_time = FormWriterV2Base::process_datetimeinput($_POST, 'evs_start_time', false);
 	if($start_time !== NULL){
-		$event_session->set('evs_start_time', $start_time);
+		$event_session->set('evs_start_time_local', $start_time);
 	}
 
-	// Handle end time using FormWriterV2Base helper
-	$end_time = FormWriterV2Base::process_datetimeinput($_POST, 'evs_end_time', true);
+	$end_time = FormWriterV2Base::process_datetimeinput($_POST, 'evs_end_time', false);
 	if($end_time !== NULL){
-		$event_session->set('evs_end_time', $end_time);
+		$event_session->set('evs_end_time_local', $end_time);
 	}
 
 	$editable_fields = array('evs_content', 'evs_links', 'evs_picture_link', 'evs_is_public', 'evs_title', 'evs_vid_video_id');

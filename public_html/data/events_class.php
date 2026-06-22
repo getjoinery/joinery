@@ -144,6 +144,7 @@ class Event extends SystemBase {	public static $prefix = 'evt';
 	    'evt_materialized_instance_date' => array('type'=>'date', 'is_nullable'=>true),
 	    'evt_tier_min_level' => array('type'=>'int4', 'is_nullable'=>true),
 	    'evt_tier_public_after_hours' => array('type'=>'int4', 'is_nullable'=>true),
+	    'evt_tzdata_version' => array('type'=>'varchar(10)', 'is_nullable'=>true),
 	);
 
 function get_leader() {
@@ -491,28 +492,6 @@ function get_leader() {
 		if ($this->data === NULL) {
 			throw new eventException('This request has no data.');
 		}
-
-		// Populate local time fields from UTC times (for timezone edge cases like DST)
-		if ($this->get('evt_start_time') && $this->get('evt_timezone')) {
-			$local_start = LibraryFunctions::convert_time(
-				$this->get('evt_start_time'),
-				'UTC',
-				$this->get('evt_timezone'),
-				'Y-m-d H:i:s'
-			);
-			$this->set('evt_start_time_local', $local_start);
-		}
-
-		if ($this->get('evt_end_time') && $this->get('evt_timezone')) {
-			$local_end = LibraryFunctions::convert_time(
-				$this->get('evt_end_time'),
-				'UTC',
-				$this->get('evt_timezone'),
-				'Y-m-d H:i:s'
-			);
-			$this->set('evt_end_time_local', $local_end);
-		}
-
 	}
 
 	function export_as_array($session=NULL) { 
@@ -529,15 +508,35 @@ function get_leader() {
 	}	
 	
 	function save($debug=false) {
-		
+
 		if ($this->key) {
-			//SAVE THE OLD VERSION IN THE CONTENT_VERSION TABLE
-			ContentVersion::NewVersion(ContentVersion::TYPE_EVENT, $this->key, $this->get('evt_description'), $this->get('evt_name'), $this->get('evt_name'));				
+			ContentVersion::NewVersion(ContentVersion::TYPE_EVENT, $this->key, $this->get('evt_description'), $this->get('evt_name'), $this->get('evt_name'));
 		}
-		
+
+		// Derive UTC from local + timezone. Local is the source of truth; UTC is the
+		// derived cache. Only runs when local is set so that code that writes UTC
+		// directly (e.g. materialize_instance) is not disturbed.
+		if ($this->get('evt_start_time_local') && $this->get('evt_timezone')) {
+			$this->set('evt_start_time', LibraryFunctions::convert_time(
+				$this->get('evt_start_time_local'),
+				$this->get('evt_timezone'),
+				'UTC',
+				'Y-m-d H:i:s'
+			));
+		}
+		if ($this->get('evt_end_time_local') && $this->get('evt_timezone')) {
+			$this->set('evt_end_time', LibraryFunctions::convert_time(
+				$this->get('evt_end_time_local'),
+				$this->get('evt_timezone'),
+				'UTC',
+				'Y-m-d H:i:s'
+			));
+		}
+		$this->set('evt_tzdata_version', '2026a');
+
 		parent::save($debug);
 
-	}	
+	}
 	
 	/*
 	function permanent_delete($debug=false){
@@ -1101,8 +1100,10 @@ function get_leader() {
 			$parent_local_time = $parent_start->format('H:i:s');
 
 			// Build instance start in event timezone, then convert to UTC
-			$inst_start = new DateTime($instance_date . ' ' . $parent_local_time, $event_tz);
+			$inst_start_local = new DateTime($instance_date . ' ' . $parent_local_time, $event_tz);
+			$inst_start = clone $inst_start_local;
 			$inst_start->setTimezone($utc_tz);
+			$instance->set('evt_start_time_local', $inst_start_local->format('Y-m-d H:i:s'));
 			$instance->set('evt_start_time', $inst_start->format('Y-m-d H:i:s'));
 
 			if ($this->get('evt_end_time')) {
@@ -1113,8 +1114,10 @@ function get_leader() {
 				if ($day_diff > 0) {
 					$end_date->modify('+' . $day_diff . ' days');
 				}
-				$inst_end = new DateTime($end_date->format('Y-m-d') . ' ' . $parent_end->format('H:i:s'), $event_tz);
+				$inst_end_local = new DateTime($end_date->format('Y-m-d') . ' ' . $parent_end->format('H:i:s'), $event_tz);
+				$inst_end = clone $inst_end_local;
 				$inst_end->setTimezone($utc_tz);
+				$instance->set('evt_end_time_local', $inst_end_local->format('Y-m-d H:i:s'));
 				$instance->set('evt_end_time', $inst_end->format('Y-m-d H:i:s'));
 			}
 		}
