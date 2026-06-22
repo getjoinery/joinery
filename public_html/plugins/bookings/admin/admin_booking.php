@@ -1,102 +1,77 @@
 <?php
 
-	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
-	
-	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+require_once(PathHelper::getIncludePath('plugins/bookings/logic/admin_booking_logic.php'));
 
-	require_once(PathHelper::getIncludePath('plugins/bookings/data/bookings_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/bookings/data/booking_types_class.php'));
+$page_vars = process_logic(admin_booking_logic(array_merge($_GET, $_POST)));
+extract($page_vars);
 
-	$session = SessionControl::get_instance();
-	$session->check_permission(5);
-	$settings = Globalvars::get_instance(); 
+$status_labels = array(
+	Booking::BOOKING_STATUS_CREATED => 'Hold',
+	Booking::BOOKING_STATUS_BOOKED => 'Booked',
+	Booking::BOOKING_STATUS_COMPLETED => 'Completed',
+	Booking::BOOKING_STATUS_CANCELED => 'Canceled',
+	Booking::BOOKING_STATUS_NEEDS_ATTENTION => 'Needs attention',
+);
+$tz = $session->get_timezone();
+$active = in_array((int)$booking->get('bkn_status'), array(Booking::BOOKING_STATUS_BOOKED, Booking::BOOKING_STATUS_CREATED), true);
 
-	$booking = new Booking($_GET['bkn_booking_id'], TRUE);
-	$booking_type = BookingType::GetByCalendlyUri($booking->get('bkn_type'));
-	if($booking->get('bkn_usr_user_id_booked')){
-		$booked_user = new User($booking->get('bkn_usr_user_id_booked'), true);
+$page = new AdminPage();
+$page->admin_header(array(
+	'menu-id' => 'bookings',
+	'breadcrumbs' => array('Bookings' => '/plugins/bookings/admin/admin_bookings', 'Booking' => ''),
+	'session' => $session,
+));
+
+$page->begin_box(array('title' => 'Booking #' . $booking->key));
+
+echo '<table class="table">';
+echo '<tr><th>Type</th><td>' . htmlspecialchars($type->get('bkt_name') ?: '—') . '</td></tr>';
+echo '<tr><th>When</th><td>' . LibraryFunctions::convert_time($booking->get('bkn_start_time'), 'UTC', $tz, 'l, M j, Y g:i A T')
+	. ' – ' . LibraryFunctions::convert_time($booking->get('bkn_end_time'), 'UTC', $tz, 'g:i A T') . '</td></tr>';
+echo '<tr><th>Host</th><td>' . htmlspecialchars($host->display_name()) . '</td></tr>';
+echo '<tr><th>Invitee</th><td>' . htmlspecialchars($client->display_name()) . ' (' . htmlspecialchars($client->get('usr_email')) . ')</td></tr>';
+echo '<tr><th>Status</th><td>' . ($status_labels[(int)$booking->get('bkn_status')] ?? 'Unknown')
+	. ($booking->get('bkn_is_no_show') ? ' · No-show' : '') . '</td></tr>';
+if ($booking->get('bkn_notes')) { echo '<tr><th>Notes</th><td>' . nl2br(htmlspecialchars($booking->get('bkn_notes'))) . '</td></tr>'; }
+if ($booking->get('bkn_location')) { echo '<tr><th>Location</th><td>' . nl2br(htmlspecialchars($booking->get('bkn_location'))) . '</td></tr>'; }
+if ($booking->get('bkn_cancel_reason')) { echo '<tr><th>Cancel reason</th><td>' . htmlspecialchars($booking->get('bkn_cancel_reason')) . ' (' . htmlspecialchars($booking->get('bkn_canceled_by')) . ')</td></tr>'; }
+echo '</table>';
+
+// Intake survey answers (against the invitee).
+if ($type->key && $type->get('bkt_svy_survey_id') && $client->key) {
+	require_once(PathHelper::getIncludePath('data/survey_answers_class.php'));
+	require_once(PathHelper::getIncludePath('data/questions_class.php'));
+	$answers = new MultiSurveyAnswer(array('survey_id' => $type->get('bkt_svy_survey_id'), 'user_id' => $client->key));
+	$answers->load();
+	if (count($answers)) {
+		echo '<hr><h4>Intake answers</h4><table class="table">';
+		foreach ($answers as $a) {
+			$q = new Question($a->get('sva_qst_question_id'), TRUE);
+			$qtext = $q->key ? $q->get('qst_question') : ('Question #' . $a->get('sva_qst_question_id'));
+			echo '<tr><th>' . htmlspecialchars($qtext) . '</th><td>' . nl2br(htmlspecialchars($a->get('sva_answer'))) . '</td></tr>';
+		}
+		echo '</table>';
 	}
-	if($booking->get('bkn_usr_user_id_client')){
-		$client_user = new User($booking->get('bkn_usr_user_id_client'), true);
-	}
-	/*
-	if($_REQUEST['action'] == 'delete'){
-		$booking->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		$booking->soft_delete();
+}
 
-		header("Location: /admin/admin_bookings");
-		exit();				
-	}
-	else if($_REQUEST['action'] == 'undelete'){
-		$booking->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		$booking->soft_delete();
+if ($active) {
+	echo '<hr><div style="display:flex; gap:.5rem; flex-wrap:wrap; align-items:flex-end;">';
 
-		header("Location: /admin/admin_bookings");
-		exit();				
-	}
-	*/
+	echo '<form method="post" style="display:flex; gap:.4rem; align-items:flex-end;">';
+	echo '<input type="hidden" name="bkn_booking_id" value="' . $booking->key . '">';
+	echo '<label>Cancel reason<br><input type="text" name="cancel_reason" placeholder="Optional"></label>';
+	echo '<button class="btn btn-danger" name="cancel_booking" value="1" type="submit">Cancel booking</button>';
+	echo '</form>';
 
-	$page = new AdminPage();
-	$page->admin_header(	
-	array(
-		'menu-id'=> 'bookings',
-		'breadcrumbs' => array(
-			'Bookings'=>'/admin/admin_bookings', 
-			'Booking '.$booking->key =>'',
-		),
-		'session' => $session,
-	)
-	);	
-	
-	$options['title'] = 'Booking '.$booking->key;
-	//$options['altlinks'] = array('Edit Booking' => '/admin/admin_booking_edit?bkn_booking_id='.$booking->key);
-	//$options['altlinks'] += array('Delete Booking' => '/admin/admin_booking_permanent_delete?bkn_booking_id='.$booking->key);
-	if(!$booking->get('bkn_delete_time') && $_SESSION['permission'] >= 8) {
-		//$options['altlinks']['Soft Delete'] = '/admin/admin_booking?action=delete&bkn_booking_id='.$booking->key;
-	}
+	echo '<form method="post"><input type="hidden" name="bkn_booking_id" value="' . $booking->key . '">';
+	echo '<button class="btn btn-secondary" name="mark_no_show" value="1" type="submit">Mark no-show</button></form>';
 
-	$page->begin_box($options);
-	
-	echo '<strong>Type: </strong> '.$booking_type->get('bkt_name').'<br />';
-	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($booking->get('bkn_create_time'), 'UTC', $session->get_timezone()) .'<br />';
-	echo '<strong>Starts:</strong> '.LibraryFunctions::convert_time($booking->get('bkn_start_time'), 'UTC', $session->get_timezone()) .'<br />';
-	echo '<strong>Ends:</strong> '.LibraryFunctions::convert_time($booking->get('bkn_end_time'), 'UTC', $session->get_timezone()) .'<br />';
-	
-	if($booking->get('bkn_usr_user_id_booked')){
-		echo '<strong>Provider: </strong>'.$booked_user->display_name().'<br />';
-	}
-	if($booking->get('bkn_usr_user_id_client')){
-		echo '<strong>Client: </strong>'.$client_user->display_name().'<br />';
-	}
-	
-	if($booking->get('bkn_delete_time')){
-		echo 'Status: Deleted at '.LibraryFunctions::convert_time($booking->get('bkn_delete_time'), 'UTC', $session->get_timezone()).'<br />';
-	}
-	else if($booking->get('bkn_status') == Booking::BOOKING_STATUS_CREATED) {
-		echo '<strong>Created</strong><br>';
-		echo '<strong>Location: </strong>'.$booking->get('bkn_location').'<br>';
-		echo '<strong>Cancel link:</strong> <a href="'.$booking->get('bkn_cancel_link').'">'.$booking->get('bkn_cancel_link').'</a></p><br />';
-		echo '<strong>Reschedule link:</strong> <a href="'.$booking->get('bkn_reschedule_link').'">'.$booking->get('bkn_reschedule_link').'</a></p><br />';
-	} 
-	else if($booking->get('bkn_status') == Booking::BOOKING_STATUS_BOOKED) {
-		echo '<strong>Active</strong><br>';
-		echo '<strong>Location: </strong>'.$booking->get('bkn_location').'<br>';
-		echo '<strong>Cancel link:</strong> <a href="'.$booking->get('bkn_cancel_link').'">'.$booking->get('bkn_cancel_link').'</a></p><br />';
-		echo '<strong>Reschedule link:</strong> <a href="'.$booking->get('bkn_reschedule_link').'">'.$booking->get('bkn_reschedule_link').'</a></p><br />';
-	} 
-	else if($booking->get('bkn_status') == Booking::BOOKING_STATUS_COMPLETED) {
-		echo '<strong>Completed</strong><br>';
-	} 
-	else if($booking->get('bkn_status') == Booking::BOOKING_STATUS_CANCELED) {
-		echo '<strong>Canceled</strong><br>';
-	} 	
-	
-	//echo '<strong>Link:</strong> <a href="'.$booking->get_url().'">'.$settings->get_setting('webDir').$booking->get_url().'</a><br />';	
+	echo '<form method="post"><input type="hidden" name="bkn_booking_id" value="' . $booking->key . '">';
+	echo '<button class="btn btn-secondary" name="mark_completed" value="1" type="submit">Mark completed</button></form>';
 
-	//echo '<iframe src="'.$booking->get_url().'" width="100%" height="500" style="border:1px solid black;"></iframe>';
+	echo '</div>';
+}
 
-	$page->end_box();		
-	
-	$page->admin_footer();
-?>
-
+$page->end_box();
+$page->admin_footer();

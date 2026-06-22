@@ -54,7 +54,6 @@ function admin_users_edit_logic(array $input): LogicResult {
 			return LogicResult::redirect('/admin/admin_users_edit?usr_user_id=' . $user->key);
 		}
 
-		$user->set('usr_calendly_uri', trim($input['usr_calendly_uri']));
 		$user->set('usr_first_name', trim($input['usr_first_name']));
 		$user->set('usr_last_name', trim($input['usr_last_name']));
 		$user->set('usr_password_recovery_disabled', (bool)$input['usr_password_recovery_disabled']);

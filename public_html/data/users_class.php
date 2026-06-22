@@ -59,7 +59,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 		'usr_totp_last_used_step', 'usr_signup_ip', 'usr_allowed_ips',
 		'usr_force_password_change', 'usr_password_recovery_disabled',
 		'usr_stripe_customer_id', 'usr_stripe_customer_id_test',
-		'usr_mailing_list_provider_id', 'usr_calendly_uri',
+		'usr_mailing_list_provider_id',
 	];
 	public static $ai_untrusted_fields = [
 		'usr_bio', 'usr_first_name', 'usr_last_name',
@@ -125,7 +125,6 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	    'usr_organization_name' => array('type'=>'varchar(32)'),
 	    'usr_delete_time' => array('type'=>'timestamp(6)'),
 	    'usr_password_recovery_disabled' => array('type'=>'bool'),
-	    'usr_calendly_uri' => array('type'=>'varchar(255)'),
 	    'usr_stripe_customer_id_test' => array('type'=>'varchar(32)'),
 	    'usr_allowed_ips' => array('type'=>'jsonb'),
 	    'usr_remember_tokens' => array('type'=>'jsonb', 'is_nullable'=>true),
@@ -625,19 +624,6 @@ private static function UcName($string) {
 		return $user;
 	}
 
-	public static function GetByCalendlyUri($uri) {
-		$data = SingleRowFetch('usr_users', 'usr_calendly_uri',
-			$uri, PDO::PARAM_STR, SINGLE_ROW_ALL_COLUMNS);
-
-		if ($data === NULL) {
-			return NULL;
-		}
-
-		$user = new User($data->usr_user_id);
-		$user->load_from_data($data, array_keys(User::$field_specifications));
-		return $user;
-	}
-	
 	public static function GeneratePassword($password) {
 		$password = trim($password);
 		if (strlen($password) < 8) {

@@ -1,0 +1,39 @@
+{
+    "title": "Calendar Grid",
+    "description": "Month/week calendar grid of timed items. Universal HTML5 + vanilla JS. Renders viewer-local times from UTC item data; supports a JSON feed_url for client-side paging.",
+    "category": "dynamic",
+    "config_schema": {
+        "fields": [
+            {
+                "name": "items",
+                "label": "Items",
+                "type": "hiddeninput",
+                "help": "Array of ['start','end','title','url','color','type','all_day'] — passed programmatically",
+                "default": ""
+            },
+            {
+                "name": "view",
+                "label": "Default View",
+                "type": "dropinput",
+                "default": "month",
+                "options": { "month": "Month", "week": "Week" }
+            },
+            {
+                "name": "feed_url",
+                "label": "Feed URL (JSON)",
+                "type": "textinput",
+                "help": "Optional endpoint returning {items:[...]} for a start/end range; enables client-side paging",
+                "default": ""
+            },
+            {
+                "name": "initial_date",
+                "label": "Initial Date (Y-m-d)",
+                "type": "textinput",
+                "default": ""
+            }
+        ]
+    },
+    "layout_defaults": {
+        "skip_wrapper": true
+    }
+}

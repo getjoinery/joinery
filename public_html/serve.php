@@ -107,7 +107,9 @@ $routes = [
         '/product/{slug}'      => ['view' => 'views/product', 'check_setting' => 'products_active'],
         '/list/{slug}'         => ['view' => 'views/list'],
         '/video/{slug}'        => ['view' => 'views/video', 'check_setting' => 'videos_active'],
-        
+        '/book/{slug}'         => ['view' => 'views/book', 'check_setting' => 'bookings_active'],
+        '/booking/manage'      => ['view' => 'views/booking_manage', 'check_setting' => 'bookings_active'],
+
         // Simple view routes (explicit view files)
         '/robots.txt' => ['view' => 'views/robots'],
         '/sitemap.xml' => ['view' => 'views/sitemap'],

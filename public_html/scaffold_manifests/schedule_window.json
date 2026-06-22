@@ -1,0 +1,26 @@
+{
+  "entity": "ScheduleWindow",
+  "prefix": "scw",
+  "plural": "schedule_windows",
+  "into": "core",
+  "surfaces": ["data"],
+
+  "delete": {
+    "strategy": "soft",
+    "foreign_key_actions": {
+      "scw_sch_schedule_id": { "action": "cascade" }
+    }
+  },
+
+  "fields": [
+    { "name": "sch_schedule_id", "type": "int8", "required": true },
+    { "name": "day_of_week",     "type": "int2", "required": true },
+    { "name": "start_time",      "type": "time", "required": true },
+    { "name": "end_time",        "type": "time", "required": true }
+  ],
+
+  "filters": [
+    { "option": "schedule_id",  "column": "scw_sch_schedule_id", "bind": "int" },
+    { "option": "day_of_week",  "column": "scw_day_of_week",     "bind": "int" }
+  ]
+}

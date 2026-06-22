@@ -45,7 +45,7 @@ class <?= $entity ?> extends SystemBase {
 <?php endif; ?>
 
 	public static $field_specifications = array(
-		'<?= $pkey ?>' => array('type'=>'bigserial', 'is_nullable'=>false, 'is_primary_key'=>true),
+		'<?= $pkey ?>' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true, 'is_primary_key'=>true),
 <?php foreach ($fields as $f): ?>
 		'<?= $f['col'] ?>' => array('type'=>'<?= $f['type'] ?>'<?php
 			if ($f['required'] || !$f['is_nullable']) { echo ", 'is_nullable'=>false"; }
@@ -57,7 +57,7 @@ class <?= $entity ?> extends SystemBase {
 		?>),
 <?php endforeach; ?>
 <?php if ($soft_delete): ?>
-		'<?= $delete_col ?>' => array('type'=>'timestamp with time zone', 'is_nullable'=>true),
+		'<?= $delete_col ?>' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 <?php endif; ?>
 	);
 <?php if (!empty($delete['foreign_key_actions'])): ?>
