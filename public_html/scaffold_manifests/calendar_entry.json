@@ -1,0 +1,40 @@
+{
+  "entity": "CalendarEntry",
+  "prefix": "cal",
+  "plural": "items",
+  "into": "core",
+  "surfaces": ["data"],
+
+  "owner_field": "cal_subject_id",
+
+  "ai": {
+    "readable": true,
+    "description": "Native personal calendar entries: appointments and blocked-out time created directly on a subject's calendar."
+  },
+
+  "delete": {
+    "strategy": "soft",
+    "foreign_key_actions": {
+      "cal_subject_id": { "action": "cascade" }
+    }
+  },
+
+  "fields": [
+    { "name": "subject_type",        "type": "varchar(32)",  "required": true },
+    { "name": "subject_id",          "type": "int8",         "required": true },
+    { "name": "start_utc",           "type": "timestamp(6)", "required": true },
+    { "name": "end_utc",             "type": "timestamp(6)", "required": true },
+    { "name": "all_day",             "type": "bool",         "default": false },
+    { "name": "title",               "type": "varchar(255)" },
+    { "name": "blocks_availability", "type": "bool",         "default": true },
+    { "name": "visibility",          "type": "varchar(16)",  "default": "details" },
+    { "name": "type",                "type": "varchar(16)",  "default": "personal" },
+    { "name": "create_time",         "type": "timestamp(6)", "default": "now()" },
+    { "name": "update_time",         "type": "timestamp(6)" }
+  ],
+
+  "filters": [
+    { "option": "subject_type", "column": "cal_subject_type", "bind": "str" },
+    { "option": "subject_id",   "column": "cal_subject_id",   "bind": "int" }
+  ]
+}

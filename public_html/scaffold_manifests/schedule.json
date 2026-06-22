@@ -1,0 +1,34 @@
+{
+  "entity": "Schedule",
+  "prefix": "sch",
+  "plural": "schedules",
+  "into": "core",
+  "surfaces": ["data"],
+
+  "owner_field": "sch_subject_id",
+
+  "ai": {
+    "readable": true,
+    "description": "A schedulable subject's working hours: one row per subject defining their availability timezone."
+  },
+
+  "delete": {
+    "strategy": "soft",
+    "foreign_key_actions": {
+      "sch_subject_id": { "action": "cascade" }
+    }
+  },
+
+  "fields": [
+    { "name": "subject_type", "type": "varchar(32)", "required": true, "unique_with": ["sch_subject_id"] },
+    { "name": "subject_id",   "type": "int8",        "required": true },
+    { "name": "timezone",     "type": "varchar(64)", "required": true },
+    { "name": "create_time",  "type": "timestamp", "default": "now()" },
+    { "name": "update_time",  "type": "timestamp" }
+  ],
+
+  "filters": [
+    { "option": "subject_type", "column": "sch_subject_type", "bind": "str" },
+    { "option": "subject_id",   "column": "sch_subject_id",   "bind": "int" }
+  ]
+}

@@ -110,8 +110,8 @@ class ScaffoldGenerator {
         $supported = $this->supportedTypeRegex();
         $field_cols = [];           // bare-name => prefixed col
         $reserved = [];
-        if (preg_match('/^[a-z]{3}$/', $prefix)) {
-            $reserved = [$prefix . '_id', $prefix . '_delete_time'];
+        if (preg_match('/^[a-z]{3}$/', $prefix) && !empty($m['entity'])) {
+            $reserved = [$prefix . '_' . $this->snake($m['entity']) . '_id', $prefix . '_delete_time'];
         }
         if (!empty($m['fields']) && is_array($m['fields'])) {
             foreach ($m['fields'] as $i => $f) {
@@ -373,7 +373,7 @@ class ScaffoldGenerator {
             'prefix'        => $prefix,
             'plural'        => $plural,
             'table'         => $prefix . '_' . $plural,
-            'pkey'          => $prefix . '_id',
+            'pkey'          => $prefix . '_' . $entity_snake . '_id',
             'delete_col'    => $prefix . '_delete_time',
             'soft_delete'   => $soft_delete,
             'into'          => $into,
@@ -515,6 +515,7 @@ class ScaffoldGenerator {
         if (preg_match('/^numeric\s*\(/', $t))             { return 'string'; }
         if ($t === 'bool' || $t === 'boolean')             { return 'bool'; }
         if ($t === 'date')                                 { return 'date'; }
+        if (strpos($t, 'time') === 0 && strpos($t, 'timestamp') !== 0) { return null; }   // wall-clock time: no sane default input
         if (strpos($t, 'timestamp') === 0)                 { return null; }   // system-managed
         if ($t === 'json' || $t === 'jsonb')               { return null; }   // no default input
         return null;
@@ -525,7 +526,8 @@ class ScaffoldGenerator {
              . '|int2|int4|int8|integer|bigint|smallint'
              . '|numeric\s*\(\d+,\s*\d+\)'
              . '|bool|boolean|date'
-             . '|timestamp(\s+with\s+time\s+zone)?'
+             . '|time(\(\d+\))?(\s+with(out)?\s+time\s+zone)?'
+             . '|timestamp(\(\d+\))?(\s+with\s+time\s+zone)?'
              . '|json|jsonb|bigserial)$/i';
     }
 

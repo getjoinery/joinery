@@ -1,0 +1,32 @@
+{
+    "title": "Slot Picker",
+    "description": "Booking time picker: mini-month on the left, available times on the right, viewer-timezone selector. Loads UTC slots from slots_url and writes the chosen slot's UTC start into a hidden field. Universal HTML5 + vanilla JS.",
+    "category": "dynamic",
+    "config_schema": {
+        "fields": [
+            {
+                "name": "slots_url",
+                "label": "Slots URL (JSON)",
+                "type": "textinput",
+                "help": "Endpoint returning {slots:[{start,end}]} (UTC) for a start/end range",
+                "default": ""
+            },
+            {
+                "name": "field_name",
+                "label": "Hidden Field Name",
+                "type": "textinput",
+                "help": "Name of the hidden input that receives the chosen UTC slot start",
+                "default": "slot_start"
+            },
+            {
+                "name": "initial_date",
+                "label": "Initial Date (Y-m-d)",
+                "type": "textinput",
+                "default": ""
+            }
+        ]
+    },
+    "layout_defaults": {
+        "skip_wrapper": true
+    }
+}

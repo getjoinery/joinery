@@ -1,6 +1,6 @@
 {
     "name": "Bookings Management",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "Booking and booking type management system",
     "author": "System Developer",
     "receives_upgrades": true,
@@ -17,14 +17,14 @@
                 {
                     "slug": "bookings",
                     "title": "Bookings",
-                    "url": "admin_bookings",
+                    "url": "/plugins/bookings/admin/admin_bookings",
                     "order": 3,
                     "settingActivate": "bookings_active"
                 },
                 {
                     "slug": "booking-types",
                     "title": "Booking Types",
-                    "url": "admin_booking_types",
+                    "url": "/plugins/bookings/admin/admin_booking_types",
                     "order": 5,
                     "settingActivate": "bookings_active"
                 }

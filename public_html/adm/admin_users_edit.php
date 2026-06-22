@@ -73,8 +73,6 @@ if($_SESSION['permission'] == 10){
 	]);
 }
 
-$formwriter->textinput('usr_calendly_uri', 'Calendly User URI (for calendly integration)');
-
 // IP restriction field - convert JSON array to newline-separated list for display
 $allowed_ips_raw = $user->get('usr_allowed_ips');
 $allowed_ips_display = '';
