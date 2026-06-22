@@ -121,10 +121,17 @@ class NativeSchedulingProvider implements SchedulingServiceProvider {
 		$booking->set('bkn_pro_product_id', $type->get('bkt_pro_product_id'));
 		$booking->set('bkn_start_time', $slot_start_utc);
 		$booking->set('bkn_end_time', $end_utc);
+		// Store local times using the invitee's timezone as source of truth.
+		$invitee_tz = $invitee['timezone'] ?? null;
+		if ($invitee_tz) {
+			$booking->set('bkn_start_time_local', LibraryFunctions::convert_time($slot_start_utc, 'UTC', $invitee_tz, 'Y-m-d H:i:s'));
+			$booking->set('bkn_end_time_local',   LibraryFunctions::convert_time($end_utc,        'UTC', $invitee_tz, 'Y-m-d H:i:s'));
+		}
+		$booking->set('bkn_tzdata_version', '2026a');
 		$booking->set('bkn_status', $invitee['status'] ?? Booking::BOOKING_STATUS_BOOKED);
 		$booking->set('bkn_notes', $invitee['notes'] ?? '');
 		$booking->set('bkn_location', $type->get('bkt_location_details'));
-		$booking->set('bkn_invitee_timezone', $invitee['timezone'] ?? null);
+		$booking->set('bkn_invitee_timezone', $invitee_tz);
 		$booking->set('bkn_action_token', Booking::make_action_token());
 		if (!empty($invitee['utm'])) {
 			foreach (['source','medium','campaign','content','term'] as $k) {

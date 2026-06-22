@@ -451,59 +451,41 @@ Use the static helper method to process datetime submissions:
 // In logic file
 require_once(PathHelper::getIncludePath('includes/FormWriterV2Base.php'));
 
-// Process datetime - automatically converts from user's timezone to UTC
-$start_time = FormWriterV2Base::process_datetimeinput($_POST, 'ccd_start_time', true);
+// Get local time (preferred — caller stores local; model's save() derives UTC)
+$start_time = FormWriterV2Base::process_datetimeinput($_POST, 'ccd_start_time', false);
 if($start_time !== NULL){
-    $model->set('ccd_start_time', $start_time);
+    $model->set('ccd_start_time_local', $start_time);
 }
 
-// Or get local time without UTC conversion
-$local_time = FormWriterV2Base::process_datetimeinput($_POST, 'meeting_time', false);
+// Or convert to UTC using the session timezone (for server-side validity windows
+// where there is no separate "event timezone" — e.g. coupon codes, API keys)
+$expires = FormWriterV2Base::process_datetimeinput($_POST, 'ccd_end_time', true);
 ```
 
 **FormWriterV2Base::process_datetimeinput() Parameters:**
 - `$post_vars` - The `$_POST` array
-- `$field_name` - Base field name (e.g., `'ccd_start_time'`)
-- `$to_utc` - Convert to UTC timezone (default: `true`)
+- `$field_name` - Base field name (e.g., `'evs_start_time'`)
+- `$to_utc` - When `true`, converts to UTC using the **session timezone** (suitable only when session TZ == intended TZ, e.g. server-side validity windows). Pass `false` to get the raw local string; the model's `save()` then derives UTC using the correct field-specific timezone.
 
 **Returns:**
-- ISO 8601 datetime string if `$to_utc` is true (e.g., `'2024-09-09T18:02:00+00:00'`)
-- Local datetime string if `$to_utc` is false (e.g., `'2024-09-09 18:02:00'`)
+- Local datetime string `'Y-m-d H:i:s'` if `$to_utc` is false (e.g., `'2024-09-09 18:02:00'`)
+- ISO 8601 UTC string if `$to_utc` is true (e.g., `'2024-09-09T18:02:00+00:00'`)
 - `NULL` if required fields not present in POST data
 
-**Complete example:**
+**Complete example — event with its own timezone:**
 
 ```php
-// admin_event_edit.php (view)
-$event = new Event($event_id, TRUE);
-$form_values = $event->export_as_array();
-
-// Convert UTC times to user's local timezone for display
-if($event->key){
-    if($form_values['evt_start_time']){
-        $form_values['evt_start_time'] = LibraryFunctions::convert_time(
-            $form_values['evt_start_time'],
-            'UTC',
-            $session->get_timezone(),
-            'Y-m-d H:i:s'
-        );
-    }
-}
-
-$formwriter = $page->getFormWriter('form1', ['values' => $form_values]);
-$formwriter->begin_form();
-$formwriter->datetimeinput('evt_start_time', 'Event Start Time');
-$formwriter->end_form();
-
-// admin_event_edit_logic.php (processing)
+// admin_event_edit_logic.php
 if($_POST){
-    // Process datetime from user's timezone to UTC for storage
-    $start_time = FormWriterV2Base::process_datetimeinput($_POST, 'evt_start_time', true);
+    // Store local time; Event::save() derives UTC from local + evt_timezone.
+    // Do NOT use to_utc=true here — the event's timezone, not the session
+    // timezone, is the correct basis for conversion.
+    $start_time = FormWriterV2Base::process_datetimeinput($input, 'evt_start_time', false);
     if($start_time !== NULL){
-        $event->set('evt_start_time', $start_time);
+        $event->set('evt_start_time_local', $start_time);
     }
-
-    $event->save();
+    $event->prepare();
+    $event->save();   // save() converts local+evt_timezone → UTC
 }
 ```
 

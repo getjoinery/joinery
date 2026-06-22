@@ -99,6 +99,7 @@ class EventSession extends SystemBase {
 	    'evs_session_number' => array('type'=>'int2'),
 	    'evs_delete_time' => array('type'=>'timestamp(6)'),
 	    'evs_tier_min_level' => array('type'=>'int4', 'is_nullable'=>true),
+	    'evs_tzdata_version' => array('type'=>'varchar(10)', 'is_nullable'=>true),
 	);
 
 public static function GetBySessionNumber($event_id, $session_number){
@@ -197,9 +198,30 @@ public static function GetBySessionNumber($event_id, $session_number){
 		if ($this->data === NULL) {
 			throw new eventException('This request has no data.');
 		}
-		
 	}
-	
+
+	function save($debug=false) {
+		// Derive UTC from local + the parent event's timezone (local is source of truth).
+		// Only runs when local is set so that direct UTC writes are not disturbed.
+		if ($this->get('evs_start_time_local') && $this->get('evs_evt_event_id')) {
+			require_once(PathHelper::getIncludePath('data/events_class.php'));
+			$event = new Event($this->get('evs_evt_event_id'), TRUE);
+			$tz = $event->get('evt_timezone');
+			if ($tz) {
+				$this->set('evs_start_time', LibraryFunctions::convert_time(
+					$this->get('evs_start_time_local'), $tz, 'UTC', 'Y-m-d H:i:s'
+				));
+				if ($this->get('evs_end_time_local')) {
+					$this->set('evs_end_time', LibraryFunctions::convert_time(
+						$this->get('evs_end_time_local'), $tz, 'UTC', 'Y-m-d H:i:s'
+					));
+				}
+			}
+		}
+		$this->set('evs_tzdata_version', '2026a');
+		parent::save($debug);
+	}
+
 	function record_analytic($user_id, $type=1){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();

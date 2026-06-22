@@ -129,16 +129,16 @@ function admin_event_edit_logic(array $input): LogicResult {
 			$input['evt_loc_location_id'] = NULL;
 		}
 
-		// Handle start time using FormWriterV2Base helper
-		$start_time = FormWriterV2Base::process_datetimeinput($input, 'evt_start_time', true);
+		// Capture local time from the form (event timezone — label tells user this).
+		// Event::save() derives UTC from local + evt_timezone; session TZ is not used.
+		$start_time = FormWriterV2Base::process_datetimeinput($input, 'evt_start_time', false);
 		if($start_time !== NULL){
-			$event->set('evt_start_time', $start_time);
+			$event->set('evt_start_time_local', $start_time);
 		}
 
-		// Handle end time using FormWriterV2Base helper
-		$end_time = FormWriterV2Base::process_datetimeinput($input, 'evt_end_time', true);
+		$end_time = FormWriterV2Base::process_datetimeinput($input, 'evt_end_time', false);
 		if($end_time !== NULL){
-			$event->set('evt_end_time', $end_time);
+			$event->set('evt_end_time_local', $end_time);
 		}
 
 		// Handle recurrence fields (only if not editing a materialized instance)

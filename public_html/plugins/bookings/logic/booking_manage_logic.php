@@ -90,8 +90,15 @@ function booking_manage_logic(array $input): LogicResult {
 				$conflict = true; $dblink->rollBack();
 			} else {
 				$dur = (int)($type->get('bkt_duration_minutes') ?: 30);
+				$new_end = gmdate('Y-m-d H:i:s', strtotime($slot_start) + $dur * 60);
 				$booking->set('bkn_start_time', $slot_start);
-				$booking->set('bkn_end_time', gmdate('Y-m-d H:i:s', strtotime($slot_start) + $dur * 60));
+				$booking->set('bkn_end_time', $new_end);
+				$rebook_tz = $booking->get('bkn_invitee_timezone');
+				if ($rebook_tz) {
+					$booking->set('bkn_start_time_local', LibraryFunctions::convert_time($slot_start, 'UTC', $rebook_tz, 'Y-m-d H:i:s'));
+					$booking->set('bkn_end_time_local',   LibraryFunctions::convert_time($new_end,    'UTC', $rebook_tz, 'Y-m-d H:i:s'));
+				}
+				$booking->set('bkn_tzdata_version', '2026a');
 				$booking->set('bkn_status', Booking::BOOKING_STATUS_BOOKED);
 				$booking->set('bkn_update_time', gmdate('Y-m-d H:i:s'));
 				$booking->save();
