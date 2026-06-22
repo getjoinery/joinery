@@ -95,6 +95,10 @@ public function get_instances_for_range(
  *  @param string $start_date Y-m-d
  *  @param string $end_date   Y-m-d
  *  @return string[]          Y-m-d dates
+ *
+ *  Edge-case rule: if the pattern day does not exist in a given month (e.g.
+ *  "every 31st" in November, or "Feb 29" in a non-leap year), that month is
+ *  skipped entirely — no clamping to the nearest valid date.
  */
 public function compute_dates_in_range(string $start_date, string $end_date): array
 
@@ -125,7 +129,7 @@ public function end_series(?string $date): void
 4. Return the CalendarItem array
 ```
 
-Times are stored as UTC instants in `cal_items` (unlike schedule windows, which are wall-clock). Instance times are derived by shifting the parent's `cal_start_utc` / `cal_end_utc` by the offset between the parent's anchor date and the instance date — no timezone conversion needed.
+`CalendarEntry` already stores both `cal_start_local` / `cal_end_local` (wall-clock) and `cal_start_utc` / `cal_end_utc` (derived cache), plus `cal_timezone` (IANA identifier). For each instance date, extract the wall-clock H:i:s from `cal_start_local` / `cal_end_local`, combine with the instance date, and convert to UTC using `cal_timezone`. This mirrors `Event::create_virtual_instance()` and is DST-safe: "yoga at 9am every Tuesday" stays at 9am local time across DST transitions because UTC is recomputed fresh per occurrence.
 
 ---
 
@@ -156,7 +160,7 @@ When the user edits a recurring entry the UI presents three choices:
 | Scope | Behaviour |
 |---|---|
 | **This occurrence only** | Add the occurrence date to `cal_item_exceptions`; create a standalone `cal_items` row (non-recurring) with the new values, `cal_parent_entry_id` / `cal_parent_entry_date` set for grouping. |
-| **This and future occurrences** | Set `cal_recurrence_end_date` on the parent to one day before the chosen occurrence; create a new recurring parent starting from that date with the edited values. |
+| **This and future occurrences** | Set `cal_recurrence_end_date` on the parent to one day before the chosen occurrence; create a new recurring parent starting from that date with the edited values. Copy any `cal_item_exceptions` rows from the original parent whose `cex_exception_date` falls on or after the split date to the new parent. |
 | **All occurrences** | Update the parent row in place. No exceptions are created; existing exceptions are preserved. |
 
 **Delete scopes** follow the same logic: this occurrence (exception only), this and future (end series), all (soft-delete the parent — also deletes its exception rows via cascade).
@@ -188,11 +192,11 @@ Ends:  (✓) Never
        ( ) After [__] occurrences
 ```
 
-"After N occurrences" converts to an end date in JavaScript (same pattern as the events admin).
+"After N occurrences" converts to an end date in JavaScript by reusing the same walk-forward logic already implemented in the events admin — extract and adapt that function rather than reimplementing it.
 
 **Visibility rules** use FormWriter `visibility_rules` — no hand-rolled JS toggles.
 
-When the user opens an existing occurrence (virtual or replacement) the scope-choice modal is shown before the entry form loads.
+When the user clicks a virtual occurrence on the calendar, the calendar view links to `/profile/calendar/entry/{parent_id}/occurrence/{date}` (date as `Y-m-d`). The logic layer detects the `occurrence/{date}` segment, loads the parent entry, verifies the date matches the recurrence pattern (or is a known replacement), and shows the scope-choice modal before the entry form loads. Standalone (non-recurring) entries continue to use `/profile/calendar/entry/{id}` with no occurrence segment and no modal.
 
 ---
 
