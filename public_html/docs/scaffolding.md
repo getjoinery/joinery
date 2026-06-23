@@ -116,7 +116,7 @@ Only `entity`, `prefix`, `plural`, and `fields:` are required. Everything else h
 
 ### Field naming
 
-Field `name` values are written **without** the prefix; the generator prepends `{prefix}_`. The primary key (`{prefix}_id`, `bigserial`) and, for `strategy: soft`, the `{prefix}_delete_time` column are added automatically and must not be listed. Everything else that references a column — `filters[].column`, `owner_field`, `api`/`ai` field lists, `delete` keys — uses the full prefixed column name verbatim.
+Field `name` values are written **without** the prefix; the generator prepends `{prefix}_`. The primary key (`{prefix}_{singular}_id`, an `int8` column with `'serial'=>true`) and, for `strategy: soft`, the `{prefix}_delete_time` column (`timestamp(6)`) are added automatically and must not be listed. **Serial types (`serial`/`bigserial`) cannot be declared on a field** — auto-increment is the generator-injected primary key's job; use plain `int8` for ordinary integer columns. Everything else that references a column — `filters[].column`, `owner_field`, `api`/`ai` field lists, `delete` keys — uses the full prefixed column name verbatim.
 
 ### The `as:` hint — semantic form type
 
@@ -174,7 +174,7 @@ Fields with no descriptor type are emitted as a `// TODO:` stub right after the 
 
 ### Authorization
 
-When `owner_field` is the standard `{prefix}_usr_user_id`, the generator emits nothing — SystemBase's default owner-or-staff scope applies. A non-standard owner column produces a stubbed `authenticate_read()/write()` pair with a TODO. See [docs/api.md](api.md) for the row-scope model.
+When `owner_field` is **omitted**, or set to the standard `{prefix}_usr_user_id`, the generator emits no custom auth — SystemBase's default owner-or-staff scope applies. Only a **non-standard** owner column produces an `authenticate_read()/write()` pair: a working owner-check against that column, flagged with a `// TODO: confirm this row-scope rule is correct` comment for you to harden (the polymorphic-owner case uses this path). See [docs/api.md](api.md) for the row-scope model.
 
 ---
 
@@ -184,10 +184,16 @@ When `owner_field` is the standard `{prefix}_usr_user_id`, the generator emits n
 php utils/scaffold.php <manifest.json> [--force] [--dry-run]
 ```
 
-- `--force` — overwrite existing files (default: refuse and report collisions). `--force` replaces a whole file outright (no merge); expect it only for greenfield iteration before business logic is added.
+- `--force` — overwrite existing files (default: refuse and report collisions). `--force` replaces a whole file outright (no merge); expect it only for greenfield iteration before business logic is added. It also **relaxes the existence guards**: the "table already exists" and "prefix already used" checks become warnings instead of hard errors, so you can regenerate a class whose table is already created (e.g. after fixing a template bug). All other validation stays hard.
 - `--dry-run` — render and validate, print the plan, write nothing.
 
-Before writing, the CLI prints the resolved file list and derived names (table, URLs) so the `plural`-driven derivations can be confirmed, then validates its own output: every generated file must pass `php -l` and `validate_php_file.php` with zero pattern violations. A failure aborts the write — generated code that fails validation is a generator bug.
+Before writing, the CLI prints the resolved file list and derived names (table, URLs) so the `plural`-driven derivations can be confirmed, then puts its own output through three guarantees:
+
+1. **`php -l`** — every generated file parses.
+2. **`validate_php_file.php`** — zero pattern violations (correct requires, no anti-patterns).
+3. **Database roundtrip** (data classes only) — the generated class's table is built from its real `$field_specifications` via the production `update_database` path, one synthesized row is inserted, its primary key is retrieved through the canonical `{table}_{pkey}_seq` sequence (the way `SystemBase::save()` does), the row is read back, and the whole thing is rolled back inside a transaction so nothing persists. This catches the "compiles but fails at the database" class of bug — a column type `update_database` can't create, or a primary key whose sequence `save()` can't find. It runs only when a live database is reachable; in a pure-preview context (no DB) it is skipped with a notice.
+
+Any failure aborts the write with nothing written — generated code that fails a guarantee is a generator bug.
 
 ### After generation — what you still own
 
