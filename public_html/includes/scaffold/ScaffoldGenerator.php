@@ -36,7 +36,8 @@ class ScaffoldGenerator {
     const CREDENTIAL_REGEX = '/_(password|secret|key|token|hash)$/i';
 
     protected $manifest;
-    protected $ctx;   // computed derivation context (lazy, via buildContext())
+    protected $ctx;        // computed derivation context (lazy, via buildContext())
+    protected $warnings = [];   // non-fatal advisories from the last validate() call
 
     public function __construct(array $manifest) {
         $this->manifest = $manifest;
@@ -51,11 +52,18 @@ class ScaffoldGenerator {
      * an empty list means the manifest is generatable. Read-only DB checks
      * (prefix/table collisions) are best-effort and skipped if no DB link.
      *
+     * With $force, the two existence guards (table-already-exists and
+     * prefix-already-used) are demoted from hard errors to warnings — `--force`
+     * already means "overwrite the files," and equally means "the table may
+     * already exist" (e.g. regenerating a class after a template fix). All other
+     * validation stays hard. Retrieve demoted advisories via warnings().
+     *
      * @return string[]
      */
-    public function validate(): array {
+    public function validate(bool $force = false): array {
         $m = $this->manifest;
         $errors = [];
+        $this->warnings = [];
 
         // --- required scalars ---
         $entity = $m['entity'] ?? '';
@@ -128,7 +136,11 @@ class ScaffoldGenerator {
                     $errors[] = "fields[$i].name '$name': collides with the auto-generated $col column.";
                 }
                 $type = $f['type'] ?? '';
-                if (!preg_match($supported, $type)) {
+                if (preg_match('/^(small|big)?serial(2|4|8)?$/i', trim($type))) {
+                    $errors[] = "fields[$i].type '$type': serial types are managed by the "
+                        . "generator; declare the column as int8 and let the primary key be "
+                        . "auto-generated.";
+                } elseif (!preg_match($supported, $type)) {
                     $errors[] = "fields[$i].type '$type': not a supported column type.";
                 }
                 $field_cols[$name] = $col;
@@ -165,11 +177,23 @@ class ScaffoldGenerator {
         }
 
         // --- read-only DB collision checks (best-effort) ---
+        // Under --force these are advisories, not blockers: the developer has
+        // accepted overwriting, and the table may legitimately already exist.
         if (preg_match('/^[a-z]{3}$/', $prefix) && preg_match('/^[a-z][a-z0-9_]*$/', $plural)) {
-            $errors = array_merge($errors, $this->validateAgainstDatabase($prefix, $prefix . '_' . $plural));
+            $existence = $this->validateAgainstDatabase($prefix, $prefix . '_' . $plural);
+            if ($force) {
+                $this->warnings = array_merge($this->warnings, $existence);
+            } else {
+                $errors = array_merge($errors, $existence);
+            }
         }
 
         return $errors;
+    }
+
+    /** Non-fatal advisories produced by the most recent validate() call. */
+    public function warnings(): array {
+        return $this->warnings;
     }
 
     /** Best-effort read-only collision checks against the live schema. */
@@ -306,6 +330,201 @@ class ScaffoldGenerator {
             'public_url' => '/' . $ctx['plural'],
             'admin_url'  => '/admin/admin_' . $ctx['plural'],
         ];
+    }
+
+    // ====================================================================
+    // Database-roundtrip acceptance check
+    // ====================================================================
+
+    /**
+     * Prove the generated data class round-trips through the real database:
+     * stand its table up, insert one synthesized row, retrieve the primary key
+     * the way SystemBase::save() does, read the row back, then ROLLBACK — leaving
+     * nothing behind. This turns "the file parses" into "the entity works": it is
+     * what catches the class of bug that passes php -l and the pattern validator
+     * and then throws a fatal on the first save() (a column type update_database
+     * can't create; a serial PK whose canonical sequence save() can't find).
+     *
+     * Faithful, not parallel: the table is built by the production code path
+     * (DatabaseUpdater::createTableIfMissing — same DDL, sequence and primary-key
+     * logic the platform uses), exercised against the class's *actual* emitted
+     * $field_specifications (the rendered class is loaded, not reconstructed).
+     *
+     * Runs only for the `data` surface (the only one that owns a table) and only
+     * when a live database is reachable; in a pure-preview context (no DB) it is
+     * skipped. Kept out of files() — which must stay pure for the preview/AI
+     * consumers — and called from the write path / CLI alongside php -l.
+     *
+     * @return array{ran: bool, failures: string[], skipped_reason: ?string}
+     */
+    public function verifyDatabaseRoundtrip(): array {
+        $ctx = $this->buildContext();
+        if (!in_array('data', $ctx['surfaces'], true)) {
+            return ['ran' => false, 'failures' => [], 'skipped_reason' => 'no data surface'];
+        }
+        try {
+            $dblink = DbConnector::get_instance()->get_db_link();
+        } catch (Throwable $e) {
+            return ['ran' => false, 'failures' => [], 'skipped_reason' => 'no database connection'];
+        }
+
+        $entity = $ctx['entity'];
+        $table  = $ctx['table'];
+        $pkey   = $ctx['pkey'];
+
+        // If the table already exists it has demonstrably round-tripped (it is in
+        // production). The check builds a fresh table in a transaction, which would
+        // collide with the live one — and re-proving it by drop/recreate would be
+        // destructive theatre. Skip it; this is the --force regeneration path.
+        $exists = $dblink->prepare(
+            "SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = ? LIMIT 1");
+        $exists->execute([$table]);
+        if ($exists->fetchColumn()) {
+            return ['ran' => false, 'failures' => [], 'skipped_reason' => "table {$table} already exists"];
+        }
+
+        // Load the generated class so we test its real emitted field specs.
+        $load_err = $this->loadGeneratedDataClass($ctx);
+        if ($load_err !== null) {
+            return ['ran' => true, 'failures' => [$load_err], 'skipped_reason' => null];
+        }
+
+        require_once(PathHelper::getIncludePath('includes/DatabaseUpdater.php'));
+
+        $failures = [];
+        $in_txn = false;
+        try {
+            $dblink->beginTransaction();
+            $in_txn = true;
+
+            // Build the table via the exact production path (DDL + sequence + PK).
+            // createTableIfMissing is private — invoke it directly via reflection
+            // rather than reimplementing its mapping (the whole point is fidelity).
+            $updater = new DatabaseUpdater(false);
+            $create  = new ReflectionMethod('DatabaseUpdater', 'createTableIfMissing');
+            $create->setAccessible(true);
+            $res = $create->invoke($updater, $entity, [], $dblink);
+            if (!empty($res['errors'])) {
+                foreach ($res['errors'] as $e) {
+                    $failures[] = "table {$table}: {$e}";
+                }
+                return ['ran' => true, 'failures' => $failures, 'skipped_reason' => null];
+            }
+
+            // Insert one synthesized row — skip the serial PK so the column's
+            // sequence default fills it (the step that exercises bug 3).
+            list($cols, $place, $binds) = $this->synthesizeRow($entity);
+            $sql  = 'INSERT INTO "' . $table . '" (' . implode(', ', $cols) . ') VALUES ('
+                  . implode(', ', $place) . ')';
+            $stmt = $dblink->prepare($sql);
+            foreach ($binds as $i => $b) {
+                $stmt->bindValue($i + 1, $b[0], $b[1]);
+            }
+            $stmt->execute();
+
+            // Retrieve the PK the way SystemBase::save() does — via the canonical
+            // sequence name. A divergent sequence (bug 3) surfaces right here.
+            $new_id = $dblink->lastInsertId($table . '_' . $pkey . '_seq');
+            if ($new_id === false || $new_id === null || $new_id === '' || (string)$new_id === '0') {
+                $failures[] = "primary key: lastInsertId('{$table}_{$pkey}_seq') returned no id — "
+                    . "the canonical sequence is not the column's default (scaffold bug 3 shape)";
+            } else {
+                $check = $dblink->prepare(
+                    'SELECT "' . $pkey . '" FROM "' . $table . '" WHERE "' . $pkey . '" = ?');
+                $check->execute([$new_id]);
+                if ($check->fetchColumn() === false) {
+                    $failures[] = "read-back: inserted row (id {$new_id}) not found in {$table}";
+                }
+            }
+        } catch (Throwable $e) {
+            $failures[] = "{$table}: " . $e->getMessage();
+        } finally {
+            if ($in_txn) {
+                try { $dblink->rollBack(); } catch (Throwable $e) { /* nothing to undo */ }
+            }
+        }
+
+        return ['ran' => true, 'failures' => $failures, 'skipped_reason' => null];
+    }
+
+    /**
+     * Load the rendered data class into the running process so the roundtrip
+     * check can read its real static $field_specifications. The generated file's
+     * own requires pull in SystemBase (which also defines SystemMultiBase), so no
+     * extra bootstrap is needed. Returns null on success, or an error string.
+     */
+    protected function loadGeneratedDataClass(array $ctx): ?string {
+        $entity = $ctx['entity'];
+        if (class_exists($entity, false)) {
+            return null;   // already loaded (e.g. a repeated fixture run)
+        }
+        $files = $this->files();
+        $data_rel = $ctx['paths']['data'];
+        if (!isset($files[$data_rel])) {
+            return "data class source not produced for {$entity}";
+        }
+
+        $tmp = sys_get_temp_dir() . '/scaffold_rt_' . getmypid() . '_' . $ctx['entity_snake'] . '.php';
+        file_put_contents($tmp, $files[$data_rel]);
+        try {
+            require $tmp;
+        } catch (Throwable $e) {
+            @unlink($tmp);
+            return "could not load generated data class {$entity}: " . $e->getMessage();
+        }
+        @unlink($tmp);
+        if (!class_exists($entity, false)) {
+            return "generated source did not define class {$entity}";
+        }
+        return null;
+    }
+
+    /**
+     * Build INSERT column list, placeholders and typed binds for one synthetic
+     * row covering every non-serial column. The serial PK is omitted so its
+     * sequence default fires. FK columns get a plain value — the transient table
+     * carries no foreign-key constraints, so referential integrity is not tested.
+     *
+     * @return array{0: string[], 1: string[], 2: array<array{0: mixed, 1: int}>}
+     */
+    protected function synthesizeRow(string $entity): array {
+        $cols = []; $place = []; $binds = [];
+        foreach ($entity::$field_specifications as $col => $spec) {
+            if (!empty($spec['serial'])) {
+                continue;   // serial PK: let the sequence default supply it
+            }
+            $cols[]  = '"' . $col . '"';
+            $place[] = '?';
+            $binds[] = $this->synthValue($spec['type'] ?? 'varchar(255)');
+        }
+        return [$cols, $place, $binds];
+    }
+
+    /** A type-appropriate [value, PDO::PARAM_*] pair for a column declaration. */
+    protected function synthValue(string $type): array {
+        $t = strtolower(trim($type));
+        if (preg_match('/^(int2|int4|int8|integer|bigint|smallint)$/', $t)) {
+            return [1, PDO::PARAM_INT];
+        }
+        if (preg_match('/^(numeric|decimal)/', $t)) {
+            return ['1', PDO::PARAM_STR];
+        }
+        if ($t === 'bool' || $t === 'boolean') {
+            return [false, PDO::PARAM_BOOL];
+        }
+        if ($t === 'date') {
+            return ['2020-01-01', PDO::PARAM_STR];
+        }
+        if (strpos($t, 'timestamp') === 0) {
+            return ['2020-01-01 00:00:00', PDO::PARAM_STR];
+        }
+        if (strpos($t, 'time') === 0) {
+            return ['00:00:00', PDO::PARAM_STR];
+        }
+        if ($t === 'json' || $t === 'jsonb') {
+            return ['{}', PDO::PARAM_STR];
+        }
+        return ['x', PDO::PARAM_STR];   // varchar / character / char / text
     }
 
     // ====================================================================
@@ -521,14 +740,17 @@ class ScaffoldGenerator {
         return null;
     }
 
+    /**
+     * Accepted column-type set. Single source of truth: delegate to the
+     * update_database engine's authority (DatabaseUpdater::acceptedColumnTypeRegex)
+     * so the generator can never reject a type the database supports — the drift
+     * that produced the `time` and `timestamp(6)` rejections. Serial types are
+     * excluded there on purpose; the PK is the only serial column and the
+     * generator injects it with the correct int8 + 'serial'=>true shape.
+     */
     protected function supportedTypeRegex(): string {
-        return '/^(varchar\s*\(\d+\)|character\s*\(\d+\)|text'
-             . '|int2|int4|int8|integer|bigint|smallint'
-             . '|numeric\s*\(\d+,\s*\d+\)'
-             . '|bool|boolean|date'
-             . '|time(\(\d+\))?(\s+with(out)?\s+time\s+zone)?'
-             . '|timestamp(\(\d+\))?(\s+with\s+time\s+zone)?'
-             . '|json|jsonb|bigserial)$/i';
+        require_once(PathHelper::getIncludePath('includes/DatabaseUpdater.php'));
+        return DatabaseUpdater::acceptedColumnTypeRegex();
     }
 
     // ====================================================================

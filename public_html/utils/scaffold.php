@@ -48,11 +48,14 @@ function scaffold_main(array $args): int {
 
     $gen = new ScaffoldGenerator($manifest);
 
-    // --- validate manifest ---
-    $errors = $gen->validate();
+    // --- validate manifest (--force demotes existence guards to warnings) ---
+    $errors = $gen->validate($force);
     if (!empty($errors)) {
         fwrite(STDERR, "Manifest validation failed:\n  - " . implode("\n  - ", $errors) . "\n");
         return 1;
+    }
+    foreach ($gen->warnings() as $w) {
+        echo "Warning (--force): " . $w . "\n";
     }
 
     // --- derived names + planned paths (confirmation banner) ---
@@ -80,6 +83,19 @@ function scaffold_main(array $args): int {
         return 1;
     }
     echo "  php -l: clean. validate_php_file.php: 0 pattern violations.\n\n";
+
+    // --- third guarantee: prove the data class round-trips through the DB ---
+    echo "Verifying database roundtrip...\n";
+    $rt = $gen->verifyDatabaseRoundtrip();
+    if (!$rt['ran']) {
+        echo "  database roundtrip: skipped (" . $rt['skipped_reason'] . ").\n\n";
+    } elseif (!empty($rt['failures'])) {
+        fwrite(STDERR, "\nDatabase roundtrip failed (aborting, nothing written):\n  - "
+            . implode("\n  - ", $rt['failures']) . "\n");
+        return 1;
+    } else {
+        echo "  roundtrip: table built, row inserted, PK retrieved via canonical sequence, rolled back.\n\n";
+    }
 
     if ($dry_run) {
         echo "Dry run — no files written. Re-run without --dry-run to write.\n";

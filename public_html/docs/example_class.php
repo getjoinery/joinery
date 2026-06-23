@@ -122,7 +122,9 @@ class Example extends SystemBase
     // Boolean type:  'bool'/'boolean'
     // Date types:    'date', 'timestamp', 'timestamp with time zone'
     // JSON types:    'json', 'jsonb' (jsonb recommended for performance)
-    // Serial types:  'bigserial' (auto-incrementing primary keys)
+    // Auto-increment: declare an 'int8' column and add 'serial'=>true (used for
+    //                 primary keys). Never declare a 'serial'/'bigserial' type —
+    //                 update_database manages the sequence via the 'serial' flag.
     //
     // Runtime behavior properties (do NOT affect database schema):
     // 'required' => true           - Field must be non-null and non-empty string
@@ -136,10 +138,13 @@ class Example extends SystemBase
     // - JSON fields detected from type: 'json', 'jsonb'
     //
     public static $field_specifications = array(
-        // Primary key specification
+        // Primary key specification — int8 + 'serial'=>true is the platform
+        // convention (update_database manages the canonical {table}_{pkey}_seq
+        // sequence from the 'serial' flag; a 'bigserial' type does not set it).
         'exm_id' => array(
-            'type' => 'bigserial',
+            'type' => 'int8',
             'is_nullable' => false,
+            'serial' => true,
             'is_primary_key' => true
         ),
         

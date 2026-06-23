@@ -1744,6 +1744,37 @@ class DatabaseUpdater {
             echo 'ERROR: Unrecognized data type '.$data_type;
         }
     }
+
+    /**
+     * Canonical set of column types the platform's data layer supports — the
+     * single authority for "what a data class may declare." update_database
+     * creates these columns (createTableIfMissing emits the declared type
+     * verbatim) and recognises them on the way back (translateDataTypes, above);
+     * the scaffold generator validates manifests against this same set
+     * (ScaffoldGenerator::supportedTypeRegex delegates here), so the two can
+     * never drift apart and a type the database accepts can never be rejected by
+     * the generator.
+     *
+     * Keep this list and translateDataTypes() in sync — both describe the same
+     * vocabulary, one as a declaration regex, the other as a live-type mapping.
+     *
+     * Serial types (serial/bigserial/smallserial) are intentionally excluded:
+     * auto-increment is expressed as the 'serial'=>true field-spec flag on an
+     * int8 column, never as a declared column type.
+     *
+     * @return string PCRE matching one accepted column-type declaration.
+     */
+    public static function acceptedColumnTypeRegex(): string {
+        return '/^('
+             . 'varchar\s*\(\d+\)|character\s*\(\d+\)|char\s*\(\d+\)|text'
+             . '|int2|int4|int8|integer|bigint|smallint'
+             . '|(numeric|decimal)(\s*\(\s*\d+\s*,\s*\d+\s*\))?'
+             . '|bool|boolean|date'
+             . '|time(\(\d+\))?(\s+with(out)?\s+time\s+zone)?'
+             . '|timestamp(\(\d+\))?(\s+with\s+time\s+zone)?'
+             . '|json|jsonb'
+             . ')$/i';
+    }
 }
 
 ?>

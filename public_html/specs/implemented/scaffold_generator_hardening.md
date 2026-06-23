@@ -63,6 +63,8 @@ Bug 3's root cause — a serial type that doesn't carry `'serial'=>true` — mus
 
 Remove `bigserial` (and `serial`, if present) from the supported field-type set. The primary key is the only serial column the generator creates, and it is injected by the generator with the correct `int8` + `'serial'=>true` shape — never declared by the author. A manifest that declares `bigserial`/`serial` now fails validation with an actionable message ("serial types are managed by the generator; declare the column as int8 and let the PK be auto-generated").
 
+**Fix the root that taught the broken pattern.** No real data class declares `bigserial` — every model's primary key is `int8` + `'serial'=>true`. The one exception is the annotated reference template `docs/example_class.php`, which declares its PK as `'type' => 'bigserial'`. That is the canonical "how to write a data class" doc and is the most likely origin of bug 3 (the generator's data-class template was modeled on it). Correct `docs/example_class.php`'s primary-key declaration to `int8` + `'serial'=>true` (and its accompanying "Serial types" comment) so the reference stops teaching the type that breaks `SystemBase::save()`.
+
 ### 3. `--force` bypasses the existence guards
 
 `--force` currently still fails when the table already exists, because the table-exists and prefix-collision checks are unconditional manifest-validation errors, not write-collision checks. The result: once a generated entity's table is created, you can no longer regenerate the class from its manifest (e.g. after fixing a template bug) — you are forced to hand-edit, which is exactly what masks generator gaps.
@@ -98,6 +100,7 @@ The fixture generates into a scratch location (or asserts on `files()` output pl
 
 - A generated `data` class fails the run if its table cannot be created, a row cannot be inserted, or the PK cannot be retrieved via the canonical sequence — with the failure naming the table/column and DB error.
 - A manifest declaring a `bigserial`/`serial` field is rejected with a clear message.
+- `docs/example_class.php`'s primary key declares `int8` + `'serial'=>true` (no `bigserial`).
 - `php utils/scaffold.php <manifest> --force` regenerates a class whose table already exists.
 - `docs/scaffolding.md` describes the real `owner_field` behavior.
 - The regression fixture passes and fails loudly if any of the four bugs is reintroduced.
@@ -107,6 +110,7 @@ The fixture generates into a scratch location (or asserts on `files()` output pl
 Per the docs rule, update in place as current state (no migration narration):
 
 - `docs/scaffolding.md` — correct the `owner_field` description; add the roundtrip check and the `serial`-types restriction to the "what you still own / what the generator guarantees" sections; document `--force`'s relaxed existence handling.
+- `docs/example_class.php` — change the primary-key field declaration (and the "Serial types" comment above it) from `bigserial` to `int8` + `'serial'=>true`, matching the platform convention every real model already follows (see Scope §2).
 - No new doc file is warranted; this is an extension of the existing generator guide.
 
 ## Open questions
