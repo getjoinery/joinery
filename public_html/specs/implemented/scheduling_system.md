@@ -14,7 +14,7 @@ The core is layered:
 
 **Booking is a separate spec.** The appointment-booking product — booking types, the public booking page, the booking lifecycle, intake, paid bookings, and the pluggable scheduling-provider seam — lives in **`specs/native_booking_flow.md`**, which builds on the seams shipped here (the `CalendarItemSource` registry, the busy projection, `SlotGenerator`, and the calendar UI components). Keeping it separate is the point of this design: the general pieces land in core and only the appointment product lives in the bookings plugin.
 
-**Subject identity (decided up front).** A calendar — and the schedule that defines its working hours — belongs to a *schedulable subject*, not directly to a user. `user` is the only type implemented now; `resource`, `team`, and `venue` are reserved. The seam is deliberately **narrow**: a subject is carried as a single `CalendarSubject` value object, one resolver is the only code that knows subject types exist, and only **two tables** store an owner (`sch_schedules` and `cal_items`). Adding a subject type later means editing the resolver and two tables, not the codebase, so building it in now costs almost nothing and the future extension stays cheap.
+**Subject identity (decided up front).** A calendar — and the schedule that defines its working hours — belongs to a *schedulable subject*, not directly to a user. `user` is the only type implemented now; `resource`, `team`, and `venue` are reserved. The seam is deliberately **narrow**: a subject is carried as a single `CalendarSubject` value object, one resolver is the only code that knows subject types exist, and only **two tables** store an owner (`sch_schedules` and `cal_entries`). Adding a subject type later means editing the resolver and two tables, not the codebase, so building it in now costs almost nothing and the future extension stays cheap.
 
 **Ownership model (decided).** The calendar is a system of record only for items that originate in the calendar itself; everything else is a read-only projection it links out to, with no write-back and no two-way sync. The full rule and its consequences are in the Calendar Ownership Model section below.
 
@@ -52,11 +52,11 @@ Every new table this spec introduces is a plain CRUD model behind **bespoke pres
 | `Schedule` | `sch_schedules` | `["data"]` | core |
 | `ScheduleWindow` | `scw_schedule_windows` | `["data"]` | core |
 | `ScheduleOverride` | `sco_schedule_overrides` | `["data"]` | core |
-| `CalendarEntry` (stored native entries) | `cal_items` | `["data"]` | core |
+| `CalendarEntry` (stored native entries) | `cal_entries` | `["data"]` | core |
 
 Two manifest choices are non-obvious and decided here:
 
-- **Polymorphic owner → flagged auth.** `sch_schedules` and `cal_items` are owned by a `CalendarSubject` (`subject_type` + `subject_id`), not a real `usr_users` FK. The manifest sets `owner_field` to the `subject_id` column, which makes the generator emit `authenticate_read/write()` against that column (its documented behavior for non-standard ownership); the polymorphic resolve-then-owner-or-staff check (only a `user`-typed subject maps to a user id) is filled in by hand. The user-deletion cascade these tables depend on is declared in each manifest's `delete.foreign_key_actions`, since there is no real FK to carry it.
+- **Polymorphic owner → flagged auth.** `sch_schedules` and `cal_entries` are owned by a `CalendarSubject` (`subject_type` + `subject_id`), not a real `usr_users` FK. The manifest sets `owner_field` to the `subject_id` column, which makes the generator emit `authenticate_read/write()` against that column (its documented behavior for non-standard ownership); the polymorphic resolve-then-owner-or-staff check (only a `user`-typed subject maps to a user id) is filled in by hand. Because the owner is polymorphic it can't be a real FK and the generic delete-cascade can't carry it (a blind delete by id would also hit other subject types sharing the number), so owner cleanup is handled subject-aware in `CalendarSubject::purge()`, invoked from the owner's deletion path.
 - **`time` columns, no form to break.** `scw_*_time` / `sco_*_time` are PostgreSQL `time` (wall-clock), which has no form-input mapping — irrelevant here because `surfaces:["data"]` emits no form.
 
 Because this run is the generator's shakedown, Phase 2.1 runs it for the schedule manifests first and is immediately followed by a hard **pause to verify the output is what this spec needs before anything is built on top of it** (see the gate after Phase 2.1).
@@ -71,7 +71,7 @@ Lives in core (`/data/`, `/includes/calendar/`) because a calendar is a property
 
 `CalendarSubject` (`includes/calendar/CalendarSubject.php`) is a small value object — `{type, id}` — plus a resolver that turns it into the owner record (display name, timezone, avatar). It is the **single place** that knows subject types exist; everything else passes a `CalendarSubject` around without branching on type. `user` is the only implemented type.
 
-It is not a table. Owner identity is stored as `subject_type` + `subject_id` columns on the only two owner-bearing tables — `sch_schedules` and `cal_items` — and resolved live. **Trade-off, accepted:** a polymorphic owner can't be a database foreign key to `usr_users`, so those two tables give up DB-level referential integrity on the owner column. The cost is contained by being just two tables and is covered by a declarative `$foreign_key_actions` cascade on user deletion (see Deletion Strategy); a cheap orphan check can backstop it if ever needed.
+It is not a table. Owner identity is stored as `subject_type` + `subject_id` columns on the only two owner-bearing tables — `sch_schedules` and `cal_entries` — and resolved live. **Trade-off, accepted:** a polymorphic owner can't be a database foreign key to `usr_users`, so those two tables give up DB-level referential integrity on the owner column. The cost is contained by being just two tables, and owner cleanup is handled explicitly: `CalendarSubject::purge()` deletes a subject's schedules and native entries (the latter cascading to their exceptions), called from the owner's deletion path (see Deletion Strategy).
 
 ### Calendar item
 
@@ -94,7 +94,7 @@ Two fields are worth a note:
 - **`visibility`** — a personal calendar shows the owner "Dentist, 2pm," but when a stranger loads the owner's public booking page the same item must read only as *busy*, never leaking the title. Enforcement is at the **projection boundary**, not by trusting callers: the public availability path requests items at `busy` level and the registry strips `title`/`url` before they leave the source aggregation. Owner-facing calendar requests get `details`.
 - **`source_key`** — a stable id per item, so the calendar can redraw and diff items, ICS export can give each a UID, and click-to-edit knows which item was picked. Collapsing genuine duplicates (the same meeting arriving from two sources) only becomes possible once an external feed can echo a native item, so that dedup behavior is specified in `specs/external_scheduling_integrations.md`, not here.
 
-> **Note:** the stored native-entry model is `CalendarEntry` (`data/calendar_entry_class.php`, table `cal_items`), distinct from the `CalendarItem` value object. `NativeCalendarItemSource` reads `CalendarEntry` rows and emits `CalendarItem` value objects.
+> **Note:** the stored native-entry model is `CalendarEntry` (`data/calendar_entry_class.php`, table `cal_entries`), distinct from the `CalendarItem` value object. `NativeCalendarItemSource` reads `CalendarEntry` rows and emits `CalendarItem` value objects.
 
 ### Calendar item sources
 
@@ -116,7 +116,7 @@ interface CalendarItemSource {
 Auto-discovered (EmailSender-style registry) from core `includes/calendar/item_sources/` and active plugins' `includes/calendar_item_sources/`. Core implementations:
 
 - **EventItemSource** (core) — events where the subject is leader, plus their active registrations; recurring events via `Event::get_instances_for_range()` so virtual (unmaterialized) instances appear. `blocks_availability = true`, `visibility` honoured.
-- **NativeCalendarItemSource** (core) — native `cal_items` entries (see Layer 1 / native entries).
+- **NativeCalendarItemSource** (core) — native `cal_entries` entries (see Layer 1 / native entries).
 
 The bookings plugin adds a `BookingItemSource` through this same registry (`specs/native_booking_flow.md`); external calendars add an `ExternalCalendarItemSource` (`specs/external_scheduling_integrations.md`). The registry being the only coupling point is the whole reason this lives in core: a new source appears on every calendar and gates every availability calculation with no change to the generator, the grid, or any other source.
 
@@ -130,7 +130,7 @@ There is exactly **one** upstream contract — items. "Busy time" is a *derived 
 
 The calendar is a **system of record only for items that originate in the calendar itself.** Everything else is a **read-only projection** it links out to. There is no write-back to external systems and no two-way sync.
 
-- **Native entries** (`type = personal`) — created directly on the calendar (a personal appointment, a block of busy time). Stored in `cal_items`, owned by the calendar, fully editable here. Exposed through the registry like any other source via `NativeCalendarItemSource`, so they appear on the calendar and — when `blocks_availability` — gate availability.
+- **Native entries** (`type = personal`) — created directly on the calendar (a personal appointment, a block of busy time). Stored in `cal_entries`, owned by the calendar, fully editable here. Exposed through the registry like any other source via `NativeCalendarItemSource`, so they appear on the calendar and — when `blocks_availability` — gate availability.
 - **Projected items** (events, and later bookings and external feeds) — owned by their originating system. The calendar renders them and deep-links to them (`url`) but never edits or moves them.
 
 Consequences this locks in:
@@ -202,8 +202,8 @@ A **personal calendar page** (`/profile/calendar`) renders `calendar_grid` again
 ## Deletion Strategy (foreign-key actions, decided once)
 
 - **Schedule** — one per subject; not independently deletable (it is the subject's availability, removed only when the subject is). Windows and overrides cascade with it.
-- **Native calendar entry (`cal_items`)** — owned by the calendar; hard or soft delete removes it from the calendar and the busy projection. No external side effects (nothing else references it).
-- **Subject deletion** — deletes the subject's schedules and native calendar entries via `$foreign_key_actions`. Because the subject columns aren't real foreign keys, this declarative cascade is what enforces owner cleanup. (The booking and external-integration specs add their own rows to this cascade.)
+- **Native calendar entry (`cal_entries`)** — owned by the calendar; hard or soft delete removes it from the calendar and the busy projection. No external side effects (nothing else references it).
+- **Subject deletion** — because the subject columns aren't real foreign keys (and a polymorphic owner can't be a generic cascade — a delete by id would hit other subject types sharing the number), owner cleanup is subject-aware: `CalendarSubject::purge()` deletes the subject's schedules and native calendar entries (entries cascade to their exceptions), invoked from the owner's deletion path — `User::permanent_delete()` purges the user subject. (The booking and external-integration specs add their own owned rows to this purge.)
 
 ---
 
@@ -225,7 +225,7 @@ Each phase lands working and tested before the next starts. Within each phase, w
 - **2.1 Schedule data layer (scaffold-generated).** Write the three manifests (`schedule`, `schedule_window`, `schedule_override`, all `surfaces:["data"]`, subject-keyed with `unique_with` on `sch_schedules`) and run `php utils/scaffold.php` for each. Hand-fill the polymorphic `authenticate_*()` on `Schedule`. `update_database` creates the tables. Model CRUD tests in `/tests/`.
   *Checkpoint:* tables exist; tests create/load a user subject's one schedule with windows and overrides (and soft-delete windows/overrides).
 
-> **⏸ PAUSE — verify the scaffold output before building on it.** This is the first real generation run, so it is also the proof the generator gives this spec what it needs. **Do not start 2.2 until the generated data classes are confirmed against this spec.** Check field names/types, `getMultiResults()` option keys, the polymorphic `authenticate_*()`, the `delete.foreign_key_actions` cascade, and that `php -l` + `validate_php_file.php` pass. If the output is wrong or insufficient, **fix the generator or the manifests and report back before continuing** — do not hand-patch the generated classes into shape.
+> **⏸ PAUSE — verify the scaffold output before building on it.** This is the first real generation run, so it is also the proof the generator gives this spec what it needs. **Do not start 2.2 until the generated data classes are confirmed against this spec.** Check field names/types, `getMultiResults()` option keys, the polymorphic `authenticate_*()`, and that `php -l` + `validate_php_file.php` pass. If the output is wrong or insufficient, **fix the generator or the manifests and report back before continuing** — do not hand-patch the generated classes into shape.
 
 - **2.2 SlotGenerator.** Pure computation per the algorithm above, consuming the busy projection. Unit tests must cover: DST spring-forward/fall-back, overrides replacing weekly windows, full-day blocks, buffer subtraction, min-notice filtering, increment vs. duration interplay, busy blocks spanning window edges.
   *Checkpoint:* test suite green; generator produces correct UTC slots for fixture schedules with seeded event busy time.
@@ -243,7 +243,7 @@ Each phase lands working and tested before the next starts. Within each phase, w
 
 ### Phase 4 — Native personal entries
 
-- **4.1 Native entry store + source.** Scaffold `cal_items` from a `surfaces:["data"]` manifest (subject-keyed; timed/all-day, `blocks_availability`, `visibility`, `type=personal`) and hand-fill its polymorphic auth; hand-write `NativeCalendarItemSource`, registered like any other source. Model CRUD tests.
+- **4.1 Native entry store + source.** Scaffold `cal_entries` from a `surfaces:["data"]` manifest (subject-keyed; timed/all-day, `blocks_availability`, `visibility`, `type=personal`) and hand-fill its polymorphic auth; hand-write `NativeCalendarItemSource`, registered like any other source. Model CRUD tests.
   *Checkpoint:* a seeded native entry appears on the owner's aggregated feed and, when blocking, in the busy projection.
 - **4.2 Authoring on the calendar.** Create / edit / delete native entries from `/profile/calendar` (FormWriter; click-to-create on the grid, edit existing). Busy entries remove availability.
   *Checkpoint:* a user blocks a window on their calendar in the browser; the block shows on the grid and that time disappears from their availability.
@@ -255,7 +255,7 @@ The native booking flow (booking types, public booking page, lifecycle, intake, 
 ### Later (separate specs when prioritized)
 
 #### Recurring native entries
-Repeat rules on `cal_items` (the Phase 4 store ships single instances only). Recurrence expansion can reuse the event system's `get_instances_for_range()` approach rather than a second engine.
+Repeat rules on `cal_entries` (the Phase 4 store ships single instances only). Recurrence expansion can reuse the event system's `get_instances_for_range()` approach rather than a second engine.
 
 #### Non-user subjects (resource / team / venue scheduling)
 Implement additional `subject_type` values: room/equipment/venue calendars and team pools. The schema and interfaces already key on (`subject_type`, `subject_id`); this fills in the resolver and the editor surfaces.
@@ -266,7 +266,7 @@ Implement additional `subject_type` values: room/equipment/venue calendars and t
 
 **Generate (scaffold manifests → data classes, `surfaces:["data"]`):** committed manifest JSON for each new model, run through `php utils/scaffold.php`, then hand-fill the emitted auth/business stubs. Outputs: `data/schedule_class.php`, `data/schedule_window_class.php`, `data/schedule_override_class.php`, `data/calendar_entry_class.php`. The `Schedule` and `CalendarEntry` polymorphic owner-or-staff `authenticate_*()` is hand-filled.
 
-**Create (core, hand-written):** `includes/calendar/CalendarItem.php` (value object — distinct from the stored `cal_items` model), `includes/calendar/CalendarSubject.php`, `includes/calendar/CalendarItemSource.php`, `includes/calendar/CalendarItemSourceRegistry.php`, `includes/calendar/item_sources/EventItemSource.php`, `includes/calendar/item_sources/NativeCalendarItemSource.php`, `includes/scheduling/SlotGenerator.php`, `views/components/calendar_grid.{json,php}`, `views/components/slot_picker.{json,php}`, the personal calendar view + native-entry editor (`/profile/calendar`), and the calendar feed ajax endpoint.
+**Create (core, hand-written):** `includes/calendar/CalendarItem.php` (value object — distinct from the stored `cal_entries` model), `includes/calendar/CalendarSubject.php`, `includes/calendar/CalendarItemSource.php`, `includes/calendar/CalendarItemSourceRegistry.php`, `includes/calendar/item_sources/EventItemSource.php`, `includes/calendar/item_sources/NativeCalendarItemSource.php`, `includes/scheduling/SlotGenerator.php`, `views/components/calendar_grid.{json,php}`, `views/components/slot_picker.{json,php}`, the personal calendar view + native-entry editor (`/profile/calendar`), and the calendar feed ajax endpoint.
 
 ---
 

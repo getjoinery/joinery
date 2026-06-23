@@ -2,7 +2,7 @@
 
 ## Problem
 
-The scaffold generator (`specs/implemented/scaffolding_code_generator.md`) got its first real-world consumer: the scheduling system's data layer (`schedule`, `schedule_window`, `schedule_override`, then `cal_items`, all `surfaces:["data"]`). That run surfaced **five bugs**, three of which the generator's own acceptance checks certified as clean before they blew up against the database.
+The scaffold generator (`specs/implemented/scaffolding_code_generator.md`) got its first real-world consumer: the scheduling system's data layer (`schedule`, `schedule_window`, `schedule_override`, then `cal_entries`, all `surfaces:["data"]`). That run surfaced **five bugs**, three of which the generator's own acceptance checks certified as clean before they blew up against the database.
 
 The root cause behind the worst of them is a single gap: **the generator's definition of "validated output" is too shallow.** Its post-generation guarantees are `php -l` (syntax) and `validate_php_file.php` (code patterns). Both passed on output that:
 - declared a column type `update_database` can't create,

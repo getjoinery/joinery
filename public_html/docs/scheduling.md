@@ -42,6 +42,6 @@ Two universal HTML5 + vanilla-JS component types in `views/components/`, rendere
 - **`calendar_grid`** — month/week views of timed items. `ComponentRenderer::render(null, 'calendar_grid', ['items'=>[...], 'view'=>'month', 'feed_url'=>'...', 'initial_date'=>'Y-m-d'])`. With `feed_url` it fetches `{items:[...]}` per range and pages client-side. Emits a `calendardayclick` event (date) for click-to-create.
 - **`slot_picker`** — booking time picker: mini-month + the selected day's times + a viewer-timezone selector (auto-detected, overridable). Loads UTC slots from `slots_url` (`{slots:[{start,end}]}`) and writes the chosen UTC slot start into a hidden field; emits a `slotchosen` event.
 
-## Scaffold-generated data layer
+## Data layer
 
-`sch_schedules`, `scw_schedule_windows`, `sco_schedule_overrides`, and `cal_items` are generated from `surfaces:["data"]` manifests (committed under `scaffold_manifests/`) via `php utils/scaffold.php`. The polymorphic owner-or-staff `authenticate_*()` on `Schedule` and `CalendarEntry` is hand-filled after generation (the manifest sets `owner_field` to the `subject_id` column, which makes the generator emit the flagged owner-check to harden).
+`sch_schedules`, `scw_schedule_windows`, `sco_schedule_overrides`, and `cal_entries` are core data-model classes. `Schedule` and `CalendarEntry` carry a polymorphic owner — `(subject_type, subject_id)` rather than a `usr_users` FK — so each defines a hand-written owner-or-staff `authenticate_read/write()` keyed on `subject_id`.

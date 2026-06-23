@@ -2,7 +2,7 @@
 
 ## Overview
 
-Extend native `CalendarEntry` records (`cal_items`) so a personal calendar entry can repeat on a schedule. A user blocks out "every Tuesday 9–10am for yoga" once and the calendar and availability engine see every occurrence automatically.
+Extend native `CalendarEntry` records (`cal_entries`) so a personal calendar entry can repeat on a schedule. A user blocks out "every Tuesday 9–10am for yoga" once and the calendar and availability engine see every occurrence automatically.
 
 This spec is a direct follow-on to `specs/scheduling_system.md`. The core machinery (virtual instance expansion, `NativeCalendarItemSource`, `SlotGenerator`) is already in place; this spec wires recurrence into the data layer and the authoring UI.
 
@@ -12,7 +12,7 @@ This spec is a direct follow-on to `specs/scheduling_system.md`. The core machin
 
 **Virtual-only expansion.** There is no materialization step — a recurring entry stays one database row (the parent). Instances are computed on the fly by `CalendarEntry::get_instances_for_range()`, exactly as the event system does for its recurring parents. Because native entries have no registration, there is no reason to write instance rows to the database.
 
-**Exceptions, not edits.** Skipping or moving one occurrence is done through an exception: skip the original date (stored in `cal_item_exceptions`) and optionally create a standalone replacement entry. There is no per-instance in-place editing.
+**Exceptions, not edits.** Skipping or moving one occurrence is done through an exception: skip the original date (stored in `cal_entry_exceptions`) and optionally create a standalone replacement entry. There is no per-instance in-place editing.
 
 **Edit scopes mirror common calendar conventions.** When a user edits a recurring entry they choose: this occurrence only (skip + replace), this and future (split the series), or all occurrences (update the parent).
 
@@ -22,7 +22,7 @@ This spec is a direct follow-on to `specs/scheduling_system.md`. The core machin
 
 ## Schema Changes
 
-### Additions to `cal_items`
+### Additions to `cal_entries`
 
 Add to `CalendarEntry::$field_specifications`:
 
@@ -71,20 +71,20 @@ Add to `CalendarEntry::$field_specifications`:
 
 `cal_recurrence_type IS NOT NULL` is the authoritative test for "is a recurring parent." No separate flag needed.
 
-### New table: `cal_item_exceptions`
+### New table: `cal_entry_exceptions`
 
 Stores dates to skip when expanding a recurring parent. One row per skipped occurrence (whether or not the user created a replacement entry).
 
 ```
 cex_calendar_entry_exception_id  int8 PK serial
-cex_cal_entry_id                 int8 NOT NULL FK → cal_items (recurring parent)
+cex_cal_entry_id                 int8 NOT NULL FK → cal_entries (recurring parent)
 cex_exception_date               date NOT NULL
 cex_create_time                  timestamp(6) default now()
 ```
 
 Unique constraint on `(cex_cal_entry_id, cex_exception_date)`.
 
-On hard-delete of the parent `cal_items` row, cascade-delete its exception rows.
+On hard-delete of the parent `cal_entries` row, cascade-delete its exception rows.
 
 ---
 
@@ -133,7 +133,7 @@ public function get_recurrence_description(): string
 
 ```
 1. Compute occurrence dates in the window via compute_dates_in_range()
-2. Load exception rows for this parent from cal_item_exceptions
+2. Load exception rows for this parent from cal_entry_exceptions
 3. For each date:
    a. Skip if it is in the exception set
    b. Build a CalendarItem value object (start/end adjusted to this date,
@@ -172,8 +172,8 @@ When the user edits a recurring entry the UI presents three choices:
 
 | Scope | Behaviour |
 |---|---|
-| **This occurrence only** | Add the occurrence date to `cal_item_exceptions`; create a standalone `cal_items` row (non-recurring) with the new values, `cal_parent_entry_id` / `cal_parent_entry_date` set for grouping. |
-| **This and future occurrences** | Set `cal_recurrence_end_date` on the parent to one day before the chosen occurrence; create a new recurring parent starting from that date with the edited values. Copy any `cal_item_exceptions` rows from the original parent whose `cex_exception_date` falls on or after the split date to the new parent. |
+| **This occurrence only** | Add the occurrence date to `cal_entry_exceptions`; create a standalone `cal_entries` row (non-recurring) with the new values, `cal_parent_entry_id` / `cal_parent_entry_date` set for grouping. |
+| **This and future occurrences** | Set `cal_recurrence_end_date` on the parent to one day before the chosen occurrence; create a new recurring parent starting from that date with the edited values. Copy any `cal_entry_exceptions` rows from the original parent whose `cex_exception_date` falls on or after the split date to the new parent. |
 | **All occurrences** | Update the parent row in place. No exceptions are created; existing exceptions are preserved. |
 
 **Delete scopes** follow the same logic: this occurrence (exception only), this and future (end series), all (soft-delete the parent — also deletes its exception rows via cascade).
@@ -218,7 +218,7 @@ When the user clicks a virtual occurrence on the calendar, the calendar view lin
 ### Phase 1 — Data layer
 
 1. Add recurrence fields to `CalendarEntry::$field_specifications`. Run `update_database`.
-2. Create `cal_item_exceptions` table (data class + Multi, `surfaces:["data"]`). Run `update_database`.
+2. Create `cal_entry_exceptions` table (data class + Multi, `surfaces:["data"]`). Run `update_database`.
 3. Implement `is_recurring_parent()`, `date_matches_pattern()`, `compute_dates_in_range()`, `get_instances_for_range()`, `get_recurrence_description()`, `end_series()` on `CalendarEntry`.
 4. Add `MultiCalendarEntry` filter: `recurring_only` (`cal_recurrence_type IS NOT NULL`), `non_recurring_only` (`IS NULL`).
 5. Model CRUD tests: create recurring parent, verify instance expansion, verify exception skipping.
