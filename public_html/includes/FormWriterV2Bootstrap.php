@@ -330,7 +330,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
      */
     protected function renderRadioInput($data) {
         $html = '';
-        $html .= '<div class="form-group mb-3">';
+        $html .= '<div id="' . htmlspecialchars($data['name']) . '_container" class="form-group mb-3">';
 
         if ($data['label']) {
             $html .= '<label>' . htmlspecialchars($data['label']) . '</label>';

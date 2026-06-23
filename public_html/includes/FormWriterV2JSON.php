@@ -196,6 +196,7 @@ class FormWriterV2JSON extends FormWriterV2Base {
         $field = array_merge(['type' => 'radio'], $this->commonKeys($data), [
             'value' => ($data['value'] === null) ? '' : (string)$data['value'],
             'options' => $data['options_list'] ?? [],
+            'visibility_rules' => $data['visibility_rules'] ?? null,
         ]);
         return $this->addField($field);
     }
@@ -215,6 +216,7 @@ class FormWriterV2JSON extends FormWriterV2Base {
             'readonly_values' => array_values(array_map('strval', $data['readonly'] ?? [])),
             'list_type' => $data['type'] ?? 'checkbox',
             'helptext' => $data['helptext'] ?? '',
+            'visibility_rules' => $data['visibility_rules'] ?? null,
         ];
         $validation = $this->fields[$data['name']]['validation'] ?? [];
         unset($validation['unique']);
@@ -357,8 +359,8 @@ class FormWriterV2JSON extends FormWriterV2Base {
      * renderCheckboxInput); validate them as the web renderers do, but emit
      * no script.
      */
-    protected function generateVisibilityScript($fieldName, $fieldId, $rules) {
-        $this->validateVisibilityRules($fieldId, $rules);
+    protected function generateVisibilityScript($fieldName, $fieldId, $rules, $type = 'select', $groupName = null) {
+        $this->validateVisibilityRules($fieldId, $rules, $type);
         return '';
     }
 

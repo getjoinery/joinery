@@ -693,6 +693,8 @@ GET /api/v1/form/{action_name}
 
 Returns the action's form as a JSON **definition** — fields, labels, prefilled values, validation rules, visibility rules — built by the action's form builder function and rendered through `FormWriterV2JSON`. Native apps render the definition with a generic form renderer and submit through the normal action endpoint; the schema reference, builder convention, and supported field types are documented in [docs/formwriter.md](formwriter.md#11-json-output-mode-server-driven-forms).
 
+`visibility_rules` may appear on `drop`, `checkbox`, `radio`, and radio `checkbox_list` fields. The native renderer reads the current rule key by the trigger's type — a `drop`/`radio` keys on the selected option value, a `checkbox` keys on `checked`/`unchecked` — matching web behavior exactly (see [FormWriter §6](formwriter.md#6-field-visibility--custom-scripts)).
+
 A form is served iff the action's logic file defines **both** `{action_name}_logic_api()` and `{action_name}_logic_form()` (reflected in the discovery endpoint's `has_form` flag).
 
 **Authentication mirrors the action's `requires_session` declaration:**
