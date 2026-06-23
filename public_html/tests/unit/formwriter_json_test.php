@@ -85,6 +85,22 @@ $fw->checkboxList('toppings', 'Toppings', [
     'checked' => [2],
     'disabled' => [1],
 ]);
+// Checkbox and radio triggers carry visibility_rules into the JSON contract so
+// the native renderers can apply the same per-type read semantics as the web.
+$fw->checkboxinput('repeats', 'Repeats', [
+    'visibility_rules' => [
+        'checked'   => ['show' => ['notes']],
+        'unchecked' => ['hide' => ['notes']],
+    ],
+]);
+$fw->radioinput('ends', 'Ends', [
+    'options' => ['never' => 'Never', 'date' => 'On date'],
+    'value' => 'never',
+    'visibility_rules' => [
+        'never' => ['hide' => ['start_date']],
+        'date'  => ['show' => ['start_date']],
+    ],
+]);
 $fw->dateinput('start_date', 'Start', ['value' => '2026-06-11']);
 $fw->timeinput('start_time', 'Time', ['value' => '14:30']);
 $fw->datetimeinput('evt_start', 'Event Start', ['date_value' => '2026-06-11', 'time_value' => '14:30']);
@@ -129,6 +145,20 @@ check('checkbox checked_value + is_checked', $f && $f['type'] === 'checkbox'
 
 $f = field($def, 'size');
 check('radio options/value', $f && $f['type'] === 'radio' && $f['options'] === ['s' => 'Small', 'l' => 'Large'] && $f['value'] === 's');
+
+$f = field($def, 'repeats');
+check('checkbox trigger serializes visibility_rules (checked/unchecked keys)',
+      $f && $f['type'] === 'checkbox' && $f['visibility_rules'] === [
+          'checked'   => ['show' => ['notes']],
+          'unchecked' => ['hide' => ['notes']],
+      ]);
+
+$f = field($def, 'ends');
+check('radio trigger serializes visibility_rules (option-value keys)',
+      $f && $f['type'] === 'radio' && $f['visibility_rules'] === [
+          'never' => ['hide' => ['start_date']],
+          'date'  => ['show' => ['start_date']],
+      ]);
 
 $f = field($def, 'toppings');
 check('checkbox_list options/checked/disabled_values', $f && $f['type'] === 'checkbox_list'

@@ -940,6 +940,42 @@ $formwriter->dropinput('rating_scale', 'Rating Scale', [
 **How Container Detection Works:**
 The visibility system automatically checks for `field_id_container` elements first. This is the standard FormWriter pattern where fields are wrapped in container divs.
 
+#### Trigger types: select, checkbox, and radio
+
+Any of three field types can be the **trigger** that drives show/hide. The only difference is how the current rule key is read; the `show`/`hide` target lists, container detection, and on-load evaluation are identical for all three.
+
+| Trigger | Rule keys | Reads |
+|---|---|---|
+| `dropinput` (select) | the option values | the selected value |
+| `checkboxinput` | `checked` / `unchecked` (plus optional `default`) | whether it's ticked |
+| `radioinput` (or a `checkboxList` with `type='radio'`) | the option values | the chosen option's value |
+
+A **checkbox** keys on its state, not its value:
+
+```php
+$formwriter->checkboxinput('entry_repeats', 'Repeats', [
+    'visibility_rules' => [
+        'checked'   => ['show' => ['rec_frequency', 'rec_interval', 'rec_ends']],
+        'unchecked' => ['hide' => ['rec_frequency', 'rec_interval', 'rec_ends']],
+    ],
+]);
+```
+
+A **radio group** keys on the selected option value, exactly like a select:
+
+```php
+$formwriter->radioinput('rec_ends', 'Ends', [
+    'options' => ['never' => 'Never', 'date' => 'On date', 'count' => 'After N occurrences'],
+    'visibility_rules' => [
+        'never' => ['hide' => ['rec_end_date', 'rec_count']],
+        'date'  => ['show' => ['rec_end_date'], 'hide' => ['rec_count']],
+        'count' => ['show' => ['rec_count'], 'hide' => ['rec_end_date']],
+    ],
+]);
+```
+
+**A multi-select checkbox list (`checkboxList` with `type='checkbox'`) cannot be a trigger** — it has no single current value. Attaching `visibility_rules` to one throws at generation time. It works fine as a show/hide *target*, and a single-select `type='radio'` list is a valid trigger. Likewise, keying a checkbox on anything other than `checked`/`unchecked`/`default` is rejected immediately rather than failing silently in the browser.
+
 ### Level 2: Field-Level Custom Scripts
 
 **For custom logic on a specific field**, provide the event handler body - FormWriter wraps it with `addEventListener`:
@@ -1694,9 +1730,9 @@ Call before adding fields — fields capture their value when created. Both appl
 | `numberinput` | `number` | `min`/`max`/`step` |
 | `textarea` | `textarea` | |
 | `dropinput` | `drop` | `options`, `empty_option`, `multiple`; `ajaxendpoint` serializes as `search_endpoint` |
-| `checkboxinput` | `checkbox` | `checked_value`, `is_checked` |
-| `radioinput` | `radio` | `options` |
-| `checkboxList` | `checkbox_list` | `options`, `checked`, `disabled_values`, `readonly_values`, `list_type`; submits an array under the field name |
+| `checkboxinput` | `checkbox` | `checked_value`, `is_checked`, `visibility_rules` |
+| `radioinput` | `radio` | `options`, `visibility_rules` |
+| `checkboxList` | `checkbox_list` | `options`, `checked`, `disabled_values`, `readonly_values`, `list_type`, `visibility_rules` (`list_type='radio'` only); submits an array under the field name |
 | `dateinput` | `date` | submits `name` => `YYYY-MM-DD` |
 | `timeinput` | `time` | submits `name` => `HH:MM` (24-hour), same as the web widget's hidden input |
 | `datetimeinput` | `datetime` | compound submit contract via `submit_parts` (below) |
@@ -1715,6 +1751,8 @@ Call before adding fields — fields capture their value when created. Both appl
 ```
 
 Values are in the user's timezone, exactly as on the web.
+
+**Visibility-trigger read semantics (native parity).** `visibility_rules` serialize verbatim on `drop`, `checkbox`, `radio`, and radio `checkbox_list` fields. The generic native renderer must read the current rule key the same way the web does, by the trigger's type: a `drop`/`radio` keys on the selected option value, and a `checkbox` keys on `checked` / `unchecked`. Targets resolve by field name, exactly as in [Field Visibility](#6-field-visibility--custom-scripts). This keeps web and native forms in lockstep with no schema change.
 
 **Unsupported — throws at definition time.** `fileinput`, `imageinput`, `textbox` (rich text), `repeater`, `imageselector`, `colorpicker`, and anything carrying JavaScript (`custom_script`, `onchange`) throw in JSON mode, so a non-serializable builder is caught in development rather than silently degraded in production. `visibility_rules` are fine — they are declarative data and serialize verbatim.
 

@@ -3264,6 +3264,8 @@ document.addEventListener("DOMContentLoaded", function() {
             'has_errors' => isset($this->errors[$name]),
             'errors' => $this->errors[$name] ?? [],
             'helptext' => $options['helptext'] ?? '',
+            'visibility_rules' => $options['visibility_rules'] ?? null,
+            'custom_script' => $options['custom_script'] ?? null,
         ];
     }
 
@@ -3425,6 +3427,7 @@ document.addEventListener("DOMContentLoaded", function() {
             'has_errors' => isset($this->errors[$name]),
             'errors' => $this->errors[$name] ?? [],
             'helptext' => $options['helptext'] ?? '',
+            'visibility_rules' => $options['visibility_rules'] ?? null,
         ];
     }
 
@@ -3483,7 +3486,7 @@ document.addEventListener("DOMContentLoaded", function() {
         $data = $this->prepareDropData($name, $label, $options);
         $html = $this->renderDropInput($data);
         if (!empty($data['visibility_rules'])) {
-            $html .= $this->generateVisibilityScript($data['name'], $data['id'], $data['visibility_rules']);
+            $html .= $this->generateVisibilityScript($data['name'], $data['id'], $data['visibility_rules'], 'select');
         } elseif (!empty($data['custom_script'])) {
             $html .= $this->generateFieldScript($data['id'], $data['custom_script']);
         }
@@ -3494,7 +3497,7 @@ document.addEventListener("DOMContentLoaded", function() {
         $data = $this->prepareCheckboxData($name, $label, $options);
         $html = $this->renderCheckboxInput($data);
         if (!empty($data['visibility_rules'])) {
-            $html .= $this->generateVisibilityScript($data['name'], $data['id'], $data['visibility_rules']);
+            $html .= $this->generateVisibilityScript($data['name'], $data['id'], $data['visibility_rules'], 'checkbox');
         } elseif (!empty($data['custom_script'])) {
             $html .= $this->generateFieldScript($data['id'], $data['custom_script']);
         }
@@ -3504,12 +3507,30 @@ document.addEventListener("DOMContentLoaded", function() {
     protected function outputRadioInput($name, $label, $options) {
         $data = $this->prepareRadioData($name, $label, $options);
         $html = $this->renderRadioInput($data);
+        if (!empty($data['visibility_rules'])) {
+            // Radio group shares name="{name}"; address it by that attribute.
+            $html .= $this->generateVisibilityScript($data['name'], $data['name'], $data['visibility_rules'], 'radio', $data['name']);
+        }
         $this->handleOutput($name, $html);
     }
 
     protected function outputCheckboxList($name, $label, $options) {
         $data = $this->prepareCheckboxListData($name, $label, $options);
         $html = $this->renderCheckboxList($data);
+        if (!empty($data['visibility_rules'])) {
+            // Only a single-select (radio) list has one current value, so only
+            // it can drive visibility. A multi-select checkbox list has no
+            // single value — reject it as a trigger (it works fine as a target).
+            if ($data['type'] !== 'radio') {
+                throw new DisplayableUserException(
+                    "checkboxList '{$name}' cannot be a visibility trigger: a multi-select " .
+                    "checkbox group has no single value. Use type='radio' to drive visibility, " .
+                    "or reference this field only as a show/hide target."
+                );
+            }
+            // checkboxList radios render with name="{name}[]".
+            $html .= $this->generateVisibilityScript($data['name'], $data['name'], $data['visibility_rules'], 'radio', $data['name'] . '[]');
+        }
         $this->handleOutput($name, $html);
     }
 
@@ -3640,8 +3661,25 @@ document.addEventListener("DOMContentLoaded", function() {
      * Validate visibility rules for conflicts and errors
      * @param string $fieldId - Field ID being configured
      * @param array $rules - Visibility rules to validate
+     * @param string $type - Trigger type: 'select' (default), 'checkbox', 'radio'
      */
-    protected function validateVisibilityRules($fieldId, $rules) {
+    protected function validateVisibilityRules($fieldId, $rules, $type = 'select') {
+        // Checkbox triggers key on checked-state, not on a value. Catch the
+        // common mistake of keying on the checkbox's value (e.g. '1') early,
+        // with a message that names the only valid keys.
+        if ($type === 'checkbox') {
+            $allowed = array('checked', 'unchecked', 'default');
+            $bad = array_diff(array_keys($rules), $allowed);
+            if (!empty($bad)) {
+                trigger_error(
+                    "Invalid visibility_rules keys on checkbox '{$fieldId}': " .
+                    implode(', ', $bad) . ". A checkbox trigger keys on its checked state — " .
+                    "use 'checked', 'unchecked', or 'default'.",
+                    E_USER_ERROR
+                );
+            }
+        }
+
         foreach ($rules as $selectValue => $rule) {
             $show = isset($rule['show']) ? $rule['show'] : array();
             $hide = isset($rule['hide']) ? $rule['hide'] : array();
@@ -3672,14 +3710,27 @@ document.addEventListener("DOMContentLoaded", function() {
 
     /**
      * Generate visibility rules JavaScript
+     *
+     * Trigger-type aware. The rule structure, target resolution, fade CSS,
+     * 'default' fallback, and initial-on-load evaluation are identical across
+     * types — only how the current rule key is *read* and which element(s) the
+     * change listener is wired to differ:
+     *   - select   : key = element.value;  listen on the <select>
+     *   - checkbox : key = 'checked'|'unchecked';  listen on the checkbox
+     *   - radio    : key = the checked option's value;  listen on every radio
+     *
      * @param string $fieldName - Field identifier (used for variable naming)
-     * @param string $fieldId - HTML id of the select element
+     * @param string $fieldId - HTML id of the trigger element (select/checkbox)
      * @param array $rules - Visibility rules
+     * @param string $type - Trigger type: 'select' (default), 'checkbox', 'radio'
+     * @param string|null $groupName - DOM name attribute of the radio group
+     *        (radio only). Defaults to $fieldName. checkboxList radios use
+     *        '{name}[]', so callers pass it explicitly.
      * @return string - JavaScript code
      */
-    protected function generateVisibilityScript($fieldName, $fieldId, $rules) {
-        // Validate rules first
-        $this->validateVisibilityRules($fieldId, $rules);
+    protected function generateVisibilityScript($fieldName, $fieldId, $rules, $type = 'select', $groupName = null) {
+        // Validate rules first (type-aware)
+        $this->validateVisibilityRules($fieldId, $rules, $type);
 
         // Sanitize field name for JavaScript variable
         $varName = $this->sanitizeForJsVariable($fieldName);
@@ -3706,12 +3757,43 @@ document.addEventListener("DOMContentLoaded", function() {
             $cssAdded = true;
         }
 
+        // Per-type "read current key" and listener wiring. The radio group is
+        // addressed by its DOM name attribute (single-quoted selector — field
+        // names never contain single quotes).
+        if ($groupName === null) { $groupName = $fieldName; }
+        $groupSelector = "input[name='" . $groupName . "']";
+
+        if ($type === 'checkbox') {
+            $readKey  = '    const el = document.getElementById("' . $fieldId . '");' . "\n";
+            $readKey .= '    if (!el) return;' . "\n";
+            $readKey .= '    const selected = el.checked ? "checked" : "unchecked";' . "\n";
+            $wiring  = '    const el = document.getElementById("' . $fieldId . '");' . "\n";
+            $wiring .= '    if (!el) return;' . "\n";
+            $wiring .= '    update' . $varName . 'Visibility();' . "\n";
+            $wiring .= '    el.addEventListener("change", update' . $varName . 'Visibility);' . "\n";
+        } elseif ($type === 'radio') {
+            $readKey  = '    const checkedRadio = document.querySelector("' . $groupSelector . ':checked");' . "\n";
+            $readKey .= '    const selected = checkedRadio ? checkedRadio.value : "";' . "\n";
+            $wiring  = '    const radios = document.querySelectorAll("' . $groupSelector . '");' . "\n";
+            $wiring .= '    if (!radios.length) return;' . "\n";
+            $wiring .= '    update' . $varName . 'Visibility();' . "\n";
+            $wiring .= '    radios.forEach(function(r) { r.addEventListener("change", update' . $varName . 'Visibility); });' . "\n";
+        } else { // select
+            $readKey  = '    const el = document.getElementById("' . $fieldId . '");' . "\n";
+            $readKey .= '    if (!el) return;' . "\n";
+            $readKey .= '    const selected = el.value;' . "\n";
+            $wiring  = '    const el = document.getElementById("' . $fieldId . '");' . "\n";
+            $wiring .= '    if (!el) return;' . "\n";
+            $wiring .= '    update' . $varName . 'Visibility();' . "\n";
+            $wiring .= '    el.addEventListener("change", update' . $varName . 'Visibility);' . "\n";
+        }
+
         $output = $cssOutput . '<script>' . "\n";
         $output .= '(function() {' . "\n";
         $output .= '  const visibilityRules' . $varName . ' = ' . $jsRules . ';' . "\n";
         $output .= '  ' . "\n";
         $output .= '  function update' . $varName . 'Visibility() {' . "\n";
-        $output .= '    const selected = document.getElementById("' . $fieldId . '").value;' . "\n";
+        $output .= $readKey;
         $output .= '    const rules = visibilityRules' . $varName . '[selected] || visibilityRules' . $varName . '["default"] || {};' . "\n";
         $output .= '    ' . "\n";
         $output .= '    (rules.show || []).forEach(function(id) {' . "\n";
@@ -3742,10 +3824,7 @@ document.addEventListener("DOMContentLoaded", function() {
         $output .= '  }' . "\n";
         $output .= '  ' . "\n";
         $output .= '  document.addEventListener("DOMContentLoaded", function() {' . "\n";
-        $output .= '    const selectEl = document.getElementById("' . $fieldId . '");' . "\n";
-        $output .= '    if (!selectEl) return;' . "\n";
-        $output .= '    update' . $varName . 'Visibility();' . "\n";
-        $output .= '    selectEl.addEventListener("change", update' . $varName . 'Visibility);' . "\n";
+        $output .= $wiring;
         $output .= '  });' . "\n";
         $output .= '})();' . "\n";
         $output .= '</script>';

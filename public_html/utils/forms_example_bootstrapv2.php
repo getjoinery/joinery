@@ -374,7 +374,7 @@ echo '<p>Testing the new visibility and custom script features with FormWriter V
 
 // Test 1: Simple toggle using visibility rules
 $formwriter3->dropinput('test_type_v2_1', 'Test Type (Simple Toggle)', [
-    'options' => ['Option A' => 'option_a', 'Option B' => 'option_b'],
+    'options' => ['option_a' => 'Option A', 'option_b' => 'Option B'],
     'value' => 'option_a',
     'visibility_rules' => [
         'option_a' => ['show' => ['test_field_v2_1a'], 'hide' => ['test_field_v2_1b']],
@@ -482,11 +482,45 @@ $formwriter3->textinput('test_custom_v2', 'Custom Location', [
     'placeholder' => 'Enter your location'
 ]);
 
+// Test 4: Checkbox trigger — keys are 'checked' / 'unchecked'
+$formwriter3->checkboxinput('test_repeats_v2', 'Repeats', [
+    'visibility_rules' => [
+        'checked'   => ['show' => ['test_repeat_interval_v2', 'test_repeat_ends_v2']],
+        'unchecked' => ['hide' => ['test_repeat_interval_v2', 'test_repeat_ends_v2']],
+    ],
+]);
+
+$formwriter3->numberinput('test_repeat_interval_v2', 'Every N days', [
+    'value' => 1,
+    'helptext' => 'Shown only when Repeats is ticked',
+]);
+
+// Test 5: Radio-group trigger — keys are the option values
+$formwriter3->radioinput('test_repeat_ends_v2', 'Ends', [
+    'options' => ['never' => 'Never', 'date' => 'On date', 'count' => 'After N occurrences'],
+    'value' => 'never',
+    'visibility_rules' => [
+        'never' => ['hide' => ['test_end_date_v2', 'test_end_count_v2']],
+        'date'  => ['show' => ['test_end_date_v2'], 'hide' => ['test_end_count_v2']],
+        'count' => ['show' => ['test_end_count_v2'], 'hide' => ['test_end_date_v2']],
+    ],
+]);
+
+$formwriter3->dateinput('test_end_date_v2', 'End date', [
+    'helptext' => 'Shown when Ends = On date',
+]);
+
+$formwriter3->numberinput('test_end_count_v2', 'Number of occurrences', [
+    'helptext' => 'Shown when Ends = After N occurrences',
+]);
+
 echo '<div class="alert alert-info mt-3">';
 echo '<strong>V2 Test Summary:</strong><ul>';
 echo '<li><strong>Test 1:</strong> Toggle fields with Option A/B selector</li>';
 echo '<li><strong>Test 2:</strong> Size selector updates price automatically</li>';
 echo '<li><strong>Test 3:</strong> Country selector changes field labels and visibility</li>';
+echo '<li><strong>Test 4:</strong> Checkbox trigger reveals interval + ends fields</li>';
+echo '<li><strong>Test 5:</strong> Radio trigger switches between end-date and count</li>';
 echo '</ul></div>';
 
 // Submit Button
