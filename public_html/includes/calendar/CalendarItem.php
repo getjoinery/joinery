@@ -6,7 +6,7 @@
  * A value object — NOT necessarily a stored row. Most items are projected live
  * from their owning system (an event, a booking) and exist only for the length
  * of a request; native personal entries are the exception and are persisted in
- * cal_items, but they too travel through the system as CalendarItem instances.
+ * cal_entries, but they too travel through the system as CalendarItem instances.
  *
  * All instants are UTC strings (Y-m-d H:i:s) — every wire value in the platform
  * is UTC; the viewer's timezone is applied only at render time.

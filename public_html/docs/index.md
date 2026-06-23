@@ -26,6 +26,7 @@ Welcome to the Joinery platform documentation. Select a topic from the sidebar, 
 
 - [Analytics](analytics.md) -- Visitor events, conversion tracking, and attribution reporting
 - [A/B Testing](ab_testing.md) -- Experiments, variant assignment, and conversion measurement
+- [Personal Calendar](calendar.md) -- Subject-owned timeline, item-source registry, busy projection, and recurring native entries
 - [Recurring Events](recurring_events.md) -- Virtual/materialized instance pattern for recurring events
 - [Subscription Tiers](subscription_tiers.md) -- Subscription management and feature-based access control
 - [Product Purchase Hooks](product_purchase_hooks.md) -- Plugin hooks triggered on product purchase

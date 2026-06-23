@@ -27,12 +27,11 @@ class Schedule extends SystemBase {
 		'sch_delete_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	);
 
-	// What happens to these rows when a referenced parent is deleted — docs/deletion_system.md
-	protected static $foreign_key_actions = array(
-		'sch_subject_id' => array(
-			'action' => 'cascade'
-		)
-	);
+	// The owner column (sch_subject_id) is polymorphic, so it does not match the
+	// FK auto-detection convention and no generic cascade can be built for it.
+	// Owner cleanup is handled subject-aware in CalendarSubject::purge() — see
+	// docs/calendar.md and docs/deletion_system.md.
+	protected static $foreign_key_actions = array();
 
 	// Cleanup when permanent_delete() runs on a row of this model — docs/deletion_system.md
 	public static $permanent_delete_actions = array();

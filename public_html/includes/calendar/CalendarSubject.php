@@ -11,7 +11,7 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
  * editing only this resolver and the two owner-bearing tables.
  *
  * It is a value object, not a table: owner identity is stored as
- * subject_type + subject_id columns on sch_schedules and cal_items and
+ * subject_type + subject_id columns on sch_schedules and cal_entries and
  * resolved live through here.
  */
 class CalendarSubject {
@@ -101,5 +101,34 @@ class CalendarSubject {
     /** The numeric user id when this subject is a user, else null. */
     public function getUserId(): ?int {
         return $this->type === self::TYPE_USER ? $this->id : null;
+    }
+
+    /**
+     * Permanently delete everything this subject owns: schedules and native
+     * calendar entries (the latter cascading to their recurrence exceptions).
+     *
+     * The owner column is polymorphic (subject_type + subject_id), so it can't be
+     * a real FK and the generic deletion cascade can't express it — a blind delete
+     * by id would also hit other subject types sharing the number. This is the one
+     * place that knows subject types, so subject-scoped cleanup lives here. Call it
+     * from the owner's deletion path (e.g. User::permanent_delete for a user).
+     */
+    public function purge(): void {
+        require_once(PathHelper::getIncludePath('data/schedule_class.php'));
+        require_once(PathHelper::getIncludePath('data/calendar_entry_class.php'));
+
+        $filter = ['subject_type' => $this->type, 'subject_id' => $this->id];
+
+        $schedules = new MultiSchedule($filter);
+        $schedules->load();
+        foreach ($schedules as $schedule) {
+            $schedule->permanent_delete();
+        }
+
+        $entries = new MultiCalendarEntry($filter);
+        $entries->load();
+        foreach ($entries as $entry) {
+            $entry->permanent_delete();
+        }
     }
 }

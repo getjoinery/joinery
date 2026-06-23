@@ -1114,7 +1114,14 @@ private static function UcName($string) {
 		foreach($groups as $group){
 			$group->remove_member($this->key);
 		}
-		
+
+		//DELETE CALENDAR OWNERSHIP: schedules + native entries (polymorphic owner,
+		//so not reachable by the generic FK cascade — see CalendarSubject::purge).
+		if(!$debug){
+			require_once(PathHelper::getIncludePath('includes/calendar/CalendarSubject.php'));
+			CalendarSubject::user($this->key)->purge();
+		}
+
 		//DO ANY PREP ABOVE THIS LINE
 		parent::permanent_delete($debug);
 		

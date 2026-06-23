@@ -129,6 +129,9 @@ $routes = [
         
         // Routes with special features
         '/profile' => ['view' => 'views/profile/profile'],
+        // Recurring calendar occurrence edit — must precede the wildcard.
+        '/profile/calendar/entry/{parent_id}/occurrence/{occurrence_date}' => ['view' => 'views/profile/calendar'],
+        '/profile/calendar/entry/{entry_id}' => ['view' => 'views/profile/calendar'],
         '/profile/*' => ['view' => 'views/profile/{path}'],
         '/events' => ['view' => 'views/events', 'check_setting' => 'events_active'],
         

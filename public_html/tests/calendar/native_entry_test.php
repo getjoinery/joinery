@@ -1,6 +1,6 @@
 <?php
 /**
- * Phase 4.1 checkpoint: native calendar entries (cal_items) + NativeCalendarItemSource.
+ * Phase 4.1 checkpoint: native calendar entries (cal_entries) + NativeCalendarItemSource.
  *
  *   php tests/calendar/native_entry_test.php
  *
