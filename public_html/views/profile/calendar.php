@@ -81,6 +81,11 @@ echo PublicPage::BeginPage('My Calendar', $hoptions);
 .cal-full-form h2 { margin-top: 0; }
 .cal-tz { color: #666; font-size: .85rem; }
 
+/* Import control */
+.cal-import { margin-bottom: 1rem; border: 1px solid #e2e2e2; border-radius: 6px; background: #fafafa; padding: .25rem .75rem; }
+.cal-import > summary { cursor: pointer; padding: .4rem 0; font-size: .9rem; color: #444; }
+.cal-import .form-group { margin-bottom: .6rem; }
+
 /* Recurrence section */
 .cal-recurrence-section { margin-top: .75rem; border-top: 1px solid #e8e8e8; padding-top: .75rem; }
 .cal-rec-desc { font-size: .85rem; color: #555; font-style: italic; margin-top: .25rem; min-height: 1.2em; }
@@ -157,6 +162,33 @@ echo PublicPage::BeginPage('My Calendar', $hoptions);
 <?php if (!empty($deleted)): ?><div class="cal-note">Entry deleted.</div><?php endif; ?>
 <?php if (!empty($errors)):  ?><div class="cal-error"><?php foreach ($errors as $e) { echo htmlspecialchars($e) . '<br>'; } ?></div><?php endif; ?>
 
+<?php if (!empty($import_summary)): ?>
+    <?php if (!empty($import_summary['error'])): ?>
+        <div class="cal-error"><?php echo htmlspecialchars($import_summary['error']); ?></div>
+    <?php else: $s = $import_summary; ?>
+        <div class="cal-note">
+            Imported <?php echo (int)$s['created']; ?> <?php echo ((int)$s['created'] === 1 ? 'entry' : 'entries'); ?>.
+            <?php if (!empty($s['imported_as_single'])) { echo ' ' . (int)$s['imported_as_single'] . ' event(s) with advanced repeat rules were added as single events.'; } ?>
+            <?php if (!empty($s['skipped_duplicate'])) { echo ' ' . (int)$s['skipped_duplicate'] . ' already imported.'; } ?>
+            <?php if (!empty($s['capped'])) { echo ' ' . (int)$s['capped'] . ' not processed (file too large).'; } ?>
+            <?php if (!empty($s['failed'])) { echo ' ' . count($s['failed']) . ' could not be read.'; } ?>
+            <?php if (!empty($s['warnings'])): ?><br><small><?php echo htmlspecialchars(implode(' ', array_unique($s['warnings']))); ?></small><?php endif; ?>
+        </div>
+    <?php endif; ?>
+<?php endif; ?>
+
+<details class="cal-import">
+    <summary>Import from another calendar (.ics)</summary>
+<?php
+$impform = $page->getFormWriter('cal-import-form', ['action' => '/profile/calendar', 'enctype' => 'multipart/form-data']);
+$impform->begin_form();
+$impform->hiddeninput('import_entries', '', ['value' => '1']);
+$impform->fileinput('ics_file', 'Calendar file', ['accept' => '.ics,text/calendar', 'required' => true]);
+$impform->submitbutton('btn_import', 'Import');
+$impform->end_form();
+?>
+</details>
+
 <?php
 echo ComponentRenderer::render(null, 'calendar_grid', [
     'view'         => 'month',
@@ -192,8 +224,8 @@ echo ComponentRenderer::render(null, 'calendar_grid', [
                 </label>
             </div>
             <div class="cal-scope-actions">
-                <a href="/profile/calendar" style="padding:.4rem .8rem;border-radius:4px;background:#f0f0f0;color:#333;text-decoration:none;font-size:.9rem;">Cancel</a>
-                <button type="button" id="cal-scope-ok" style="padding:.4rem .9rem;border-radius:4px;background:#2563eb;color:#fff;border:none;cursor:pointer;font-size:.9rem;font-weight:600;">Edit</button>
+                <button type="button" id="cal-scope-cancel" class="dialog-btn-cancel">Cancel</button>
+                <button type="button" id="cal-scope-ok" class="dialog-btn-confirm dialog-btn-primary">Edit</button>
             </div>
         </div>
     </div>
@@ -375,7 +407,7 @@ if ($is_edit) {
 
     <?php if (($is_edit && $display_entry->is_recurring_parent()) || $is_occurrence): ?>
     <!-- Delete-scope modal for recurring entries -->
-    <div id="del-scope-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:8000;align-items:center;justify-content:center;">
+    <div id="del-scope-backdrop" class="cal-scope-backdrop" style="display:none">
         <div class="cal-scope-modal">
             <h3>Delete recurring entry</h3>
             <div class="cal-scope-options">
@@ -395,8 +427,8 @@ if ($is_edit) {
                 </label>
             </div>
             <div class="cal-scope-actions">
-                <button type="button" id="del-scope-cancel" style="padding:.4rem .8rem;border-radius:4px;background:#f0f0f0;color:#333;border:none;cursor:pointer;font-size:.9rem;">Cancel</button>
-                <button type="button" id="del-scope-ok" style="padding:.4rem .9rem;border-radius:4px;background:#d9534f;color:#fff;border:none;cursor:pointer;font-size:.9rem;font-weight:600;">Delete</button>
+                <button type="button" id="del-scope-cancel" class="dialog-btn-cancel">Cancel</button>
+                <button type="button" id="del-scope-ok" class="dialog-btn-confirm dialog-btn-danger">Delete</button>
             </div>
         </div>
     </div>
@@ -472,6 +504,11 @@ $popwriter->checkboxinput('entry_blocks', 'Block this time (removes from booking
             var form = document.getElementById('cal-full-form');
             if (form) { form.scrollIntoView({behavior: 'smooth', block: 'start'}); }
         });
+    }
+
+    var scopeCancelBtn = document.getElementById('cal-scope-cancel');
+    if (scopeCancelBtn) {
+        scopeCancelBtn.addEventListener('click', function(){ window.location.href = '/profile/calendar'; });
     }
 
     // =========================================================================

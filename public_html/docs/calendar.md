@@ -78,6 +78,35 @@ A native entry can repeat on a schedule ("every Tuesday 9–10am"). A recurring 
 
 **The authoring form is declarative.** The recurrence editor on `/profile/calendar` is a plain FormWriter form: the "Repeats" checkbox, the frequency dropdown, the monthly-pattern radios, and the "Ends" radios are real FormWriter inputs whose show/hide is driven entirely by [`visibility_rules`](formwriter.md#6-field-visibility--custom-scripts) — there is no hand-rolled toggle JavaScript and no hidden-field marshalling. The fields submit their own values; the logic reads them directly (`entry_repeats`, `rec_frequency`, `rec_interval`, `rec_days[]`, `rec_monthly_mode`, `rec_week`, `rec_dow`, `rec_ends`, `rec_end_date`, `rec_count`) and maps them onto the `cal_recurrence_*` columns. The all-day checkbox hides the time fields the same declarative way. The edit-scope and delete-scope choices remain small modal flows (they set a `scope` field), which are not field show/hide and so stay as JavaScript.
 
+## Importing .ics files
+
+A user can populate their calendar by uploading an iCalendar (`.ics`) file exported from another calendar (Google, Apple, Outlook/Microsoft 365, Fastmail, …). The control lives on `/profile/calendar` ("Import from another calendar"); each `VEVENT` in the file becomes a native `cal_entries` row owned by the uploader's `CalendarSubject`. Import is **one-directional and manual** — a one-time read of an uploaded file. There is no feed subscription, no periodic re-fetch, and no API/CalDAV sync.
+
+`IcsImporter` (`includes/calendar/IcsImporter.php`) is the reader — the mirror of the `IcsHelper` writer. It has three pure-ish stages exposed as static methods: `parse()` (text → structured events), `translateRecurrence()` (an `RRULE` → native recurrence fields, or `null`), and `import()` (events → saved rows + a summary). The upload is handled by the `import_entries` branch in `calendar_logic()`; the file is parsed in memory and discarded (never stored on disk).
+
+**Field mapping** (`VEVENT` → `cal_entries`):
+
+| `VEVENT` | `cal_entries` |
+|---|---|
+| `SUMMARY` | `cal_title` (truncated to 255; empty → `(no title)`) |
+| `DTSTART` / `DTEND` / `DURATION` | `cal_start_utc` + `cal_end_utc` + `cal_start_local` + `cal_end_local` + `cal_timezone` |
+| `DTSTART;VALUE=DATE` | `cal_all_day = true` |
+| `TRANSP` | `cal_blocks_availability` (`TRANSPARENT` → free; `OPAQUE`/absent → busy) |
+| `UID` | `cal_uid` + `cal_source_event_id` |
+| `RRULE` | `cal_recurrence_*` when expressible + `cal_rrule_raw` (always) |
+| `EXDATE` | `cal_entry_exceptions` rows (when the event maps to a recurring parent) |
+| `RECURRENCE-ID` | exception on the parent + a standalone replacement entry (`cal_parent_entry_id` / `cal_parent_entry_date`) |
+
+Imported entries are `cal_type = personal`, `cal_visibility = details`, and `cal_source = ical_import`. `DESCRIPTION`, `LOCATION`, and `CLASS` are dropped — the native entry model is title + time + busy/recurrence and has no column for them.
+
+**Timezones.** A `DTSTART` carrying a `TZID` is stored with that zone as `cal_timezone` and the value as the local wall-clock; a UTC (`…Z`) value is stored as the UTC instant with the local derived in the uploader's timezone; a date-only value is an all-day entry; a floating value is interpreted in the uploader's timezone. A `TZID` that is not a recognized IANA zone (e.g. an Outlook Windows name) falls back to the uploader's timezone and is reported as a warning.
+
+**Recurrence subset.** The native recurrence model is a subset of `RRULE`. Common rules map to the `cal_recurrence_*` columns and then display, expand, and edit like any native recurring entry: `FREQ` daily/weekly/monthly/yearly, `INTERVAL`, weekly `BYDAY` lists, a single monthly ordinal weekday (`BYDAY=2TU`, `-1FR` → `cal_recurrence_week_of_month`), monthly/yearly by the start date's day, and `UNTIL`/`COUNT` (the latter converted to an end date via `CalendarEntry::nth_occurrence_date()`). Anything outside that subset — multiple ordinal `BYDAY`, `BYSETPOS`, `BYWEEKNO`, `BYMONTH`, sub-day granularity — is **not** expanded: the event is imported as a single entry at its `DTSTART` with the original rule preserved verbatim in `cal_rrule_raw`. The import summary reports how many events were handled this way (there is no generic `RRULE` expansion engine, so a preserved raw rule is retained but inert).
+
+**Re-import.** Duplicates are matched within the subject by `cal_source = ical_import` and `cal_source_event_id` (the `UID`). An event whose `UID` was already imported is skipped, never updated or duplicated — so re-uploading a file does not overwrite edits made after a prior import. New `UID`s are inserted.
+
+**Summary.** `import()` returns counts surfaced as a banner on the calendar page: created, already-imported (skipped), imported-as-single (advanced recurrence), warnings, failed (per-event, best-effort — one bad `VEVENT` never aborts the rest), and capped (events beyond the per-file limit, reported rather than silently dropped).
+
 ## Deletion
 
 The owner column is polymorphic (`subject_type` + `subject_id`), so it can't be a real FK and the generic delete-cascade can't express it — a blind delete by id would also hit other subject types sharing the number. Owner cleanup is therefore subject-aware: `CalendarSubject::purge()` permanently deletes a subject's schedules and native entries (the latter cascading to their `cal_entry_exceptions`), and the owner's deletion path calls it — `User::permanent_delete()` purges the user subject. Soft-deleting a user changes nothing here (the owner still exists); only a permanent delete purges. Native entries have no external side effects.
