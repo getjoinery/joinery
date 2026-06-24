@@ -197,6 +197,19 @@ surface, not a checklist to clear.
 admin pages can and do opt into it; the image picker is converged or consciously deferred.
 Pre-existing admin inline styles and `<style>` blocks are acceptable to leave in place.
 
+**Progress (the discrete, has-a-done items — opt-in page adoption is ongoing, not tracked here):**
+
+- ⬜ **Kit loader** — override `render_base_assets()` in `PublicPageJoinerySystem` to link
+  `joinery-styles.css` only.
+- ⬜ **Admin brand tokens** — `:root { --jy-color-* }` block in joinery-system `style.css`
+  mapping admin's palette onto kit tokens.
+- ⬜ **Verify chrome unchanged** — existing admin pages render identically (no `.jy-ui` opt-in
+  yet) after the kit loads globally.
+- ⬜ **Verify opt-in works** — a sample admin page wrapped in `.jy-ui` renders kit components
+  in admin's palette (browser-confirmed).
+- ⬜ **Image picker** (`imageselector-modal`) — converged onto kit buttons/`JoineryModal`, or
+  a recorded decision to defer with the reason.
+
 ### Phase 4 — Public views inline sweep
 
 The ~49 public views already opt into `.jy-ui`, so this is mostly removing their
