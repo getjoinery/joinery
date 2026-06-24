@@ -3,7 +3,6 @@
 **Status:** Active — awaiting implementation
 **Version:** 2.0
 **Policy:** Implements [css_platform_style_contract.md](css_platform_style_contract.md). Read it first — the platform already ships the `.jy-ui` kit (tokens + `.jy-ui`-scoped components + `.jy-*` chrome), loaded on every page by `render_base_assets()`. This document is *how we finish adopting it* across the surfaces that don't use it yet.
-**Already done:** [formwriter_consolidation.md](implemented/formwriter_consolidation.md) — one HTML renderer emitting the bare classes the kit styles.
 
 ## What this is (and isn't)
 
@@ -16,11 +15,10 @@ views. The work is:
    classes.
 3. **Sweep inline `style=` and in-view `<style>` blocks** into the kit / utilities.
 
-There is **no FormWriter class flip** (FormWriter already emits the bare classes the
-kit styles under `.jy-ui`) and **no "legacy bare-class layer" to delete** (scoped
-bare classes like `.jy-ui .btn` *are* the kit's vocabulary). The end state: every
-platform surface renders inside `.jy-ui` with no inline `style=` and no in-view
-`<style>` blocks. No phase touches the database.
+There is **no "legacy bare-class layer" to delete** — scoped bare classes like
+`.jy-ui .btn` *are* the kit's vocabulary. The end state: every platform surface
+renders inside `.jy-ui` with no inline `style=` and no in-view `<style>` blocks. No
+phase touches the database.
 
 Each phase is independently shippable and visually safe; phases 2–5 chunk per
 directory / per component / per plugin so no single sitting is large.

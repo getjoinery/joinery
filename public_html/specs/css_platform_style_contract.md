@@ -31,9 +31,8 @@ namespaced kit:
   control heights.
 - **A component kit, scoped under `.jy-ui`**: a full button family
   (`.jy-ui .btn` + `-primary/-secondary/-danger/-destructive/-outline/-ghost/`
-  `-block/-sm/-lg`), forms (the section is titled *"Forms (FormWriterV2HTML5 class
-  names)"* — `.form-control/.form-group/.form-label`), cards, alerts, badges,
-  tables, tabs, auth-card.
+  `-block/-sm/-lg`), forms (`.form-control/.form-group/.form-label`), cards, alerts,
+  badges, tables, tabs, auth-card.
 - **Platform chrome** as `.jy-*` classes (`.jy-site-header`, `.jy-site-footer`,
   `.jy-nav-*`, `.jy-breadcrumbs`, `.jy-panel`, `.jy-page-header`, …).
 - **Brand theming already wired**: `render_brand_token_overrides()` reads per-site
@@ -142,16 +141,11 @@ server-computed-value case.
 
 ## FormWriter
 
-FormWriter emits bare `.btn`/`.form-control`/`.form-group` — **exactly the classes
-the kit styles under `.jy-ui`** (its forms section is named for FormWriterV2HTML5).
-So there is **no class flip to do**: the requirement is simply that **forms render
-inside a `.jy-ui` scope**, where the kit picks them up. (Outside `.jy-ui`, e.g. in
-not-yet-adopted admin, the theme's own form CSS styles them — no breakage.)
-
-The renderer consolidation — one HTML renderer (`FormWriterV2HTML5`) + `V2JSON`,
-Bootstrap/Tailwind renderers and dead Tailwind themes removed — is **already done**
-([formwriter_consolidation.md](implemented/formwriter_consolidation.md)). That work
-is fully consistent with the kit: one renderer emitting the classes the kit expects.
+FormWriter emits bare `.btn`/`.form-control`/`.form-group` — exactly the classes the
+kit styles under `.jy-ui`. So there is nothing to change in FormWriter: the only
+requirement is that **forms render inside a `.jy-ui` scope**, where the kit picks
+them up. (Outside `.jy-ui` — e.g. in not-yet-adopted admin — the theme's own form CSS
+styles them, so nothing breaks before adoption.)
 
 ## Buttons
 
