@@ -379,7 +379,7 @@ FormWriter provides a convenient interface for generating validation rules along
 ### Quick Example
 
 ```php
-$formwriter = new FormWriterV2Bootstrap('contact_form');
+$formwriter = new FormWriterV2HTML5('contact_form');
 
 // No separate "rules" array and no set_validate() call. Validation rules are
 // read from the model's field_specifications (for core fields) and/or declared

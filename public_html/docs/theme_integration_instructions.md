@@ -205,7 +205,7 @@ Create `theme/$THEME_NAME/theme.json` with minimal, accurate configuration:
     "description": "Brief theme description",
     "author": "Joinery Team",
     "cssFramework": "bootstrap",
-    "formWriterBase": "FormWriterBootstrap",
+    "formWriterBase": "FormWriterV2HTML5",
     "publicPageBase": "PublicPageBase"
 }
 ```
@@ -227,8 +227,8 @@ Create `theme/$THEME_NAME/theme.json` with minimal, accurate configuration:
 ```
 
 **Important field notes:**
-- `cssFramework`: Use `"bootstrap"` for Bootstrap themes, `"html5"` for zero-dependency themes, `"tailwind"` for Tailwind
-- `formWriterBase`: Use `"FormWriterV2Bootstrap"` for Bootstrap, `"FormWriterV2HTML5"` for HTML5, `"FormWriterV2Tailwind"` for Tailwind
+- `cssFramework`: Declares which CSS the theme's chrome loads — `"bootstrap"` for Bootstrap themes, `"html5"` for zero-dependency themes. This is independent of FormWriter.
+- `formWriterBase`: Always `"FormWriterV2HTML5"`. FormWriter renders semantic HTML5 regardless of the theme's `cssFramework`.
 - `publicPageBase`: Always use `"PublicPageBase"` (NOT PublicPageFalcon)
 
 ### Step 5: Create FormWriter.php
@@ -237,31 +237,17 @@ Create `theme/$THEME_NAME/includes/FormWriter.php`:
 
 ```php
 <?php
-// FormWriter for theme - extends appropriate base for CSS framework
-require_once(PathHelper::getIncludePath('includes/FormWriterV2Bootstrap.php'));
+// FormWriter for theme - extends the HTML renderer
+require_once(PathHelper::getIncludePath('includes/FormWriterV2HTML5.php'));
 
-class FormWriter extends FormWriterV2Bootstrap {
-    // Inherits all form styling from base class
+class FormWriter extends FormWriterV2HTML5 {
+    // Inherits all form methods from FormWriterV2HTML5
     // Add theme-specific overrides here if needed
 }
 ?>
 ```
 
-**Framework mappings:**
-- Bootstrap themes → `FormWriterV2Bootstrap`
-- HTML5 zero-dependency themes → `FormWriterV2HTML5`
-- Tailwind themes → `FormWriterV2Tailwind`
-
-**HTML5 FormWriter example:**
-```php
-<?php
-require_once(PathHelper::getIncludePath('includes/FormWriterV2HTML5.php'));
-
-class FormWriter extends FormWriterV2HTML5 {
-    // Inherits all form methods from FormWriterV2HTML5
-}
-?>
-```
+Every theme extends `FormWriterV2HTML5` (or `FormWriterV2Base`), regardless of its `cssFramework`.
 
 **Important:** `FormWriterV2HTML5` generates semantic HTML form elements with CSS classes like `.form-group`, `.form-control`, `.form-label`, `.btn`, and `.form-check`. Your theme CSS must style these classes — see the [HTML5 Zero-Dependency Themes](#html5-zero-dependency-themes) section for required form CSS.
 
@@ -1954,7 +1940,7 @@ The post page's comment system requires these styles:
 Beyond the standard validation checklist, HTML5 themes must verify:
 
 - [ ] `theme.json` has `cssFramework: "html5"` and `formWriterBase: "FormWriterV2HTML5"`
-- [ ] `FormWriter.php` extends `FormWriterV2HTML5` (not `FormWriterV2Bootstrap`)
+- [ ] `FormWriter.php` extends `FormWriterV2HTML5`
 - [ ] All inline CSS from source HTML files extracted into single `style.css`
 - [ ] Utility CSS classes defined (`.mb-*`, `.mt-*`, `.text-center`, `.text-muted`, `.badge`, etc.)
 - [ ] Grid CSS defined (`.row`, `.col-lg-*`, `.col-md-*` with responsive breakpoints)
@@ -2123,11 +2109,9 @@ open('style.css', 'w').writelines(keep)
 
 ### FormWriter API Gotcha
 
-When converting views from Bootstrap-era FormWriter, the `checkboxinput()` argument order changed:
-- **Old API:** `(label, name, value, type, checked, unchecked, extra)` — 7 args, label first
-- **Current V2 API:** `(name, label, options)` — 3 args, name first
-
-If a checkbox shows its field name (e.g. "setcookie") instead of its label, the args are swapped.
+`checkboxinput()` takes `(name, label, options)` — name first, label second. If a
+checkbox shows its field name (e.g. "setcookie") instead of its label, the name and
+label arguments are swapped.
 
 ### Plugin Database Tables
 

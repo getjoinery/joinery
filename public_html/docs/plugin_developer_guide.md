@@ -1314,12 +1314,12 @@ upgrade pipeline, set both to `true`. The same pair applies to `plugin.json`.
     "joinery": ">=1.0.0"
   },
   "cssFramework": "bootstrap",
-  "formWriterBase": "FormWriterV2Bootstrap",
+  "formWriterBase": "FormWriterV2HTML5",
   "publicPageBase": "PublicPageBase"
 }
 ```
 
-**Tailwind theme.json:**
+**Plugin-integrated theme.json:**
 ```json
 {
   "name": "advanced-theme",
@@ -1334,8 +1334,8 @@ upgrade pipeline, set both to `true`. The same pair applies to `plugin.json`.
     "joinery": ">=1.0.0"
   },
   "supports_plugins": ["controld", "items"],
-  "cssFramework": "tailwind",
-  "formWriterBase": "FormWriterV2Tailwind",
+  "cssFramework": "bootstrap",
+  "formWriterBase": "FormWriterV2HTML5",
   "publicPageBase": "PublicPageBase",
   "features": {
     "responsive": true,
@@ -1443,16 +1443,13 @@ $formwriter = new FormWriter('form1');
 ```
 
 The `$page->getFormWriter()` method automatically:
-- Detects the correct FormWriter class for the theme's CSS framework
-- Loads theme-specific FormWriter implementations if available
-- Falls back to system defaults appropriately
+- Loads the theme's `FormWriter.php` if it provides one
+- Falls back to the system `FormWriterV2HTML5` renderer otherwise
 - Handles all the complexity internally
 
-#### FormWriter Framework Mapping
-- **Bootstrap themes**: Uses `FormWriterV2Bootstrap`
-- **Tailwind themes**: Uses `FormWriterV2Tailwind`
-- **HTML5 themes**: Uses `FormWriterV2HTML5` (framework-agnostic)
-- **Custom themes**: Can extend `FormWriterV2Base` for custom implementations
+#### FormWriter Class
+- FormWriter renders semantic HTML5 via `FormWriterV2HTML5`, regardless of the theme's `cssFramework`.
+- A theme's `FormWriter.php` extends `FormWriterV2HTML5` (or `FormWriterV2Base`) to add theme-specific overrides.
 
 ### Example: ControlD Plugin Migration
 
@@ -1615,7 +1612,7 @@ This shows detailed routing information in HTML comments.
 **CSS framework conflicts:**
 - Verify theme.json cssFramework matches actual implementation
 - Check PublicPage class extends proper base and implements getTableClasses()
-- Ensure FormWriter implementation (V2Bootstrap, V2Tailwind, or V2HTML5) matches CSS framework
+- Ensure the theme's `FormWriter.php` extends `FormWriterV2HTML5` (the HTML renderer used by every theme)
 - Validate CSS classes match framework documentation
 
 **Assets not loading:**
@@ -1656,29 +1653,22 @@ When cookie consent is enabled, scripts marked with `data-joinery-consent` remai
 
 ## CSS Framework Integration
 
-### Supported CSS Frameworks
+### CSS Frameworks and FormWriter
 
-The system supports multiple CSS frameworks through theme-specific implementations:
+A theme's `cssFramework` declares which CSS its chrome loads; FormWriter is unaffected and always renders semantic HTML5 via `FormWriterV2HTML5`.
 
 **Bootstrap Themes:**
 - CSS Framework: `bootstrap`
-- FormWriter Base: `FormWriterV2Bootstrap`
 - Table Classes: `table`, `table-striped`, `table-hover`
 - Container Classes: `container`, `container-fluid`
 
-**Tailwind CSS Themes:**
-- CSS Framework: `tailwind`
-- FormWriter Base: `FormWriterV2Tailwind`
-- Utility-first approach with custom classes
-- Table Classes: Custom Tailwind utility classes
-- Container Classes: `container`, `mx-auto`
-
 **HTML5 Themes (Framework-Agnostic):**
 - CSS Framework: `html5` or `custom`
-- FormWriter Base: `FormWriterV2HTML5`
 - Pure semantic HTML5 markup
 - No framework-specific classes
 - Themes can apply any CSS styling
+
+In every case FormWriter renders through `FormWriterV2HTML5`; a theme may extend it (or `FormWriterV2Base`) for custom output.
 
 ### Framework-Specific Implementations
 

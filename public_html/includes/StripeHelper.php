@@ -422,8 +422,8 @@ class StripeHelper {
 	}
 	
 	public function output_stripe_checkout_form($cart_hash){
-				require_once(PathHelper::getIncludePath('includes/FormWriterV2Bootstrap.php'));
-				$formwriter = new FormWriterV2Bootstrap('form3', ['action' => '/profile/payment_finalize', 'method' => 'post']);
+				require_once(PathHelper::getIncludePath('includes/FormWriterV2HTML5.php'));
+				$formwriter = new FormWriterV2HTML5('form3', ['action' => '/profile/payment_finalize', 'method' => 'post']);
 				$output = '
 				<script src="https://js.stripe.com/v3/"></script>
 				<script language="javascript">

@@ -1,9 +1,9 @@
 <?php
-// Load the Bootstrap FormWriter v2 implementation
-require_once(PathHelper::getIncludePath('includes/FormWriterV2Bootstrap.php'));
+// Load the HTML5 FormWriter v2 implementation (the single core HTML renderer)
+require_once(PathHelper::getIncludePath('includes/FormWriterV2HTML5.php'));
 
-// joinery-system reuses the Bootstrap FormWriter — our CSS handles Bootstrap form classes
-class FormWriter extends FormWriterV2Bootstrap {
-    // Override form classes to use our CSS names if needed in future
+// joinery-system uses the core HTML5 FormWriter; its CSS styles the emitted classes
+class FormWriter extends FormWriterV2HTML5 {
+    // Override render methods here if the admin theme ever needs to
 }
 ?>
