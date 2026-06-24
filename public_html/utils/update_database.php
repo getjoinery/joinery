@@ -235,6 +235,30 @@
 			}
 		}
 
+		// Step 3.25: Manage declarative indexes
+		echo "-----INDEXES-----<br>\n";
+		$index_result = $database_updater->manageIndexes($classes);
+
+		if (!$index_result['success']) {
+			echo 'Index management failed:<br>' . implode('<br>', $index_result['errors']) . "<br>\n";
+		}
+
+		if (!empty($index_result['messages'])) {
+			echo implode('<br>', $index_result['messages']) . "<br>\n";
+		}
+
+		if (!empty($index_result['warnings'])) {
+			foreach ($index_result['warnings'] as $warning) {
+				echo 'WARNING: ' . $warning . "<br>\n";
+			}
+		}
+
+		if (!empty($index_result['errors'])) {
+			foreach ($index_result['errors'] as $error) {
+				echo 'ERROR: ' . $error . "<br>\n";
+			}
+		}
+
 		// Step 3.5: Register deletion rules for core models only (plugins handled separately)
 		echo "-----DELETION RULES (CORE)-----<br>\n";
 		require_once(PathHelper::getIncludePath('data/deletion_rule_class.php'));
@@ -257,7 +281,8 @@
 			$table_result['errors'] ?? [],
 			$advanced_result['errors'] ?? [],
 			$primary_key_result['errors'] ?? [],
-			$constraint_result['errors'] ?? []
+			$constraint_result['errors'] ?? [],
+			$index_result['errors'] ?? []
 		);
 		
 		// Remove duplicate error messages

@@ -132,7 +132,10 @@ class Example extends SystemBase
     // 'zero_on_create' => true     - Set to 0 when creating if NULL
     // 'unique' => true             - Single field unique constraint
     // 'unique_with' => array(...)  - Multi-field unique constraint
-    // 
+    // 'index' => true              - Plain btree index on this column
+    // 'index_with' => array(...)   - Composite btree index (this column first,
+    //                                then the listed columns, in order)
+    //
     // AUTO-DETECTION:
     // - Timestamp fields detected from type: 'timestamp', 'date'
     // - JSON fields detected from type: 'json', 'jsonb'
@@ -201,6 +204,8 @@ class Example extends SystemBase
         'exm_category_id' => array(
             'type' => 'int8',              // Supported: int8 for foreign keys
             'is_nullable' => true,
+            'index' => true,               // Index the FK column — Postgres does
+                                           // NOT auto-index the referencing side
             'foreign_key' => array(
                 'table' => 'categories',
                 'column' => 'cat_id',
@@ -260,6 +265,37 @@ class Example extends SystemBase
         )
     );
     
+    // ====================================================================
+    // Advanced indexes — full reference: docs/deploy_and_upgrade.md
+    // ====================================================================
+    //
+    // Plain btree indexes are declared inline with 'index' / 'index_with' above.
+    // Anything beyond a plain btree — a method override, a partial predicate, an
+    // expression, or uniqueness scoped by a predicate — goes in this one block.
+    //
+    // Each entry: 'columns' (required, array of bare column names OR SQL
+    // expressions), optional 'method' (default 'btree'), optional 'where'
+    // (partial predicate, stored verbatim), optional 'unique' (boolean).
+    //
+    // DIVISION OF LABOUR: whole-table uniqueness stays with 'unique' /
+    // 'unique_with' above (real UNIQUE constraints — FK-referenceable). Scoped or
+    // expression uniqueness uses a 'unique' => true entry here. The two never
+    // describe the same index.
+    public static $index_specifications = array(
+        // Partial index: only the rows an "active records" query actually scans.
+        array('columns' => array('exm_category_id'), 'where' => 'exm_delete_time IS NULL'),
+
+        // Method override for a jsonb column.
+        array('columns' => array('exm_metadata'), 'method' => 'gin'),
+
+        // Expression index — e.g. case-insensitive lookups.
+        array('columns' => array('LOWER(exm_name)')),
+
+        // Partial UNIQUE index — uniqueness scoped to active rows.
+        // A plain unique constraint cannot express "unique among non-deleted rows."
+        array('columns' => array('exm_name'), 'unique' => true, 'where' => 'exm_delete_time IS NULL'),
+    );
+
     // VALIDATION: Validation rules are handled through field_specifications properties:
     // - 'required' => true     - Field must have a value
     // - 'unique' => true       - Field must be unique across table

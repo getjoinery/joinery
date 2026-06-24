@@ -839,6 +839,8 @@ class MyData extends SystemBase {
 }
 ```
 
+**Indexes** are declared the same way as for core tables and applied on install and on **Sync with Filesystem** — inline with `'index' => true` / `'index_with' => array(...)` for plain btree, or a table-level `$index_specifications` array for partial, expression, method-override, and scoped-unique indexes. See [Index Management](deploy_and_upgrade.md#index-management) for the full surface.
+
 **Choosing a prefix:** Your plugin's table prefix (e.g. `abc` in `abc_items`) must be unique across all plugins installed on a site. Use a short abbreviation of your plugin name — at least 3 characters. The system will block installation if your class names or table names collide with an installed plugin, and will warn if your prefix matches even when table names don't.
 
 ### Migration System
