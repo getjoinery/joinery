@@ -32,7 +32,7 @@ foreach ($items as $it) {
 
 $cid = 'calgrid_' . substr(md5(uniqid('', true)), 0, 8);
 ?>
-<div class="joinery-calgrid" id="<?php echo $cid; ?>"
+<div class="jy-ui joinery-calgrid" id="<?php echo $cid; ?>"
      data-view="<?php echo htmlspecialchars($view); ?>"
      data-feed="<?php echo htmlspecialchars($feed_url); ?>"
      data-initial="<?php echo htmlspecialchars($initial_date); ?>">
@@ -49,27 +49,6 @@ $cid = 'calgrid_' . substr(md5(uniqid('', true)), 0, 8);
     </div>
     <div class="calgrid-body"></div>
 </div>
-
-<style>
-.joinery-calgrid { font-family: inherit; --cg-border: #e2e2e2; }
-.calgrid-toolbar { display: flex; align-items: center; gap: .4rem; margin-bottom: .6rem; flex-wrap: wrap; }
-.calgrid-toolbar button { background: #f3f3f3; border: 1px solid var(--cg-border); border-radius: 5px; padding: .3rem .6rem; cursor: pointer; font: inherit; }
-.calgrid-toolbar button.is-active { background: #2563eb; color: #fff; border-color: #2563eb; }
-.calgrid-title { font-weight: 600; margin: 0 .5rem; }
-.calgrid-views { margin-left: auto; }
-.calgrid-grid { display: grid; grid-template-columns: repeat(7, 1fr); border: 1px solid var(--cg-border); border-bottom: none; }
-.calgrid-dow { text-align: center; font-size: .8rem; color: #666; padding: .3rem 0; border-bottom: 1px solid var(--cg-border); border-right: 1px solid var(--cg-border); background: #fafafa; }
-.calgrid-cell { min-height: 92px; border-bottom: 1px solid var(--cg-border); border-right: 1px solid var(--cg-border); padding: .25rem; vertical-align: top; }
-.calgrid-cell.is-other { background: #fbfbfb; color: #aaa; }
-.calgrid-cell.is-today .calgrid-daynum { background: #2563eb; color: #fff; border-radius: 50%; padding: 0 .35rem; }
-.calgrid-daynum { font-size: .8rem; display: inline-block; margin-bottom: .2rem; }
-.calgrid-chip { display: block; font-size: .72rem; line-height: 1.3; padding: .1rem .3rem; margin-bottom: .15rem; border-radius: 3px; color: #fff; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.calgrid-week-day { border: 1px solid var(--cg-border); border-bottom: none; padding: .4rem; display: flex; gap: .6rem; }
-.calgrid-week-day:last-child { border-bottom: 1px solid var(--cg-border); }
-.calgrid-week-date { min-width: 5.5rem; font-size: .85rem; color: #444; }
-.calgrid-week-events { flex: 1; }
-.calgrid-empty { color: #bbb; font-size: .8rem; }
-</style>
 
 <script>
 (function(){

@@ -48,17 +48,18 @@ So the "guaranteed cross-theme contract" we set out to build substantially exist
   0 components** do. Admin and components style themselves ad hoc instead.
 - **Inline styles everywhere.** ~**1,635 inline `style=` attributes** across ~186
   files (views 749, adm 422, plugins 228, includes 169, theme 67).
-- **In-view `<style>` blocks** (~33), including the 7 core components and the
-  `ComponentRenderer` framework, which inject CSS the kit should own.
-- **The system modal isn't in the kit.** `JoineryModal` (a native-`<dialog>`
-  confirm/alert/prompt API) exists, but its JS and `.dialog-*` CSS live in two themes
-  (`joinery-system` + `getjoinery`, duplicated) — not in the global kit. Yet
-  `PublicPageBase` calls `JoineryModal.confirm(...)` generically, so on any other theme
-  it throws `JoineryModal is undefined`. It needs promoting into the kit (one copy,
-  `.jy-ui`-scoped). Several other modals (image picker, cookie consent) are hand-rolled
-  separately and should later converge onto it once it gains a generic content mode.
-- **Cache-bust is manual.** The base assets bust with a hand-bumped `?v=`, not
-  `filemtime`.
+- **In-view `<style>` blocks** (~33), including the core components and the
+  `ComponentRenderer` framework, which inject CSS the kit should own. ✅ *Resolved for
+  components + `ComponentRenderer` in Phase 2;* admin/plugin blocks remain (Phases 3, 5).
+- **The system modal isn't in the kit.** ✅ *Resolved (Phase 1–2).* `JoineryModal` (a
+  native-`<dialog>` confirm/alert/prompt API) was duplicated in two themes and threw
+  `JoineryModal is undefined` on any other theme. It now lives once in the global kit
+  (`base.js` + `.jy-ui`-scoped CSS), loaded on every theme, with a generic content mode
+  (`open(content, { buttons })`); the calendar's scope/delete choosers run on it. The
+  image picker (→ Phase 3, admin) and cookie consent (kept self-contained for GDPR
+  resilience) intentionally stay separate.
+- **Cache-bust is manual.** ✅ *Resolved (Phase 1).* The base assets (and getjoinery's
+  theme assets) now bust with `filemtime()` instead of a hand-bumped `?v=`.
 - **A few duplications** — getjoinery and joinery-system still define some component
   CSS that the kit now owns.
 

@@ -1086,6 +1086,7 @@ dialog.jy-ui {
 }
 dialog.jy-ui::backdrop { background: rgba(0, 0, 0, 0.45); }
 .jy-ui .dialog-message { margin-bottom: var(--jy-space-5); line-height: 1.5; }
+.jy-ui .dialog-content { margin-bottom: var(--jy-space-5); }
 .jy-ui .dialog-input {
   display: block;
   width: 100%;
@@ -1103,25 +1104,278 @@ dialog.jy-ui::backdrop { background: rgba(0, 0, 0, 0.45); }
   outline-offset: -1px;
   border-color: var(--jy-color-primary);
 }
+/* Buttons are kit .btn / .btn-* (built by JoineryModal). The action row owns
+   only layout. */
 .jy-ui .dialog-actions { display: flex; justify-content: flex-end; gap: var(--jy-space-2); }
-.jy-ui .dialog-btn-cancel {
-  padding: 0.375rem 0.875rem;
-  border: 1px solid var(--jy-color-border);
-  border-radius: var(--jy-radius-sm);
-  background: var(--jy-color-bg);
-  color: var(--jy-color-text);
-  cursor: pointer;
-  font-size: 0.875rem;
+
+/* ─── Component layout wrapper (ComponentRenderer) ──────────────
+   Emitted by ComponentRenderer when a component instance overrides max-width /
+   max-height / vertical margin. The wrapper sets the per-instance values as
+   --jy-cl-* custom properties inline (server-computed); these rules consume
+   them. Layout chrome — jy-prefixed and unscoped, not under .jy-ui. */
+.jy-cl[data-maxw] .container,
+.jy-cl[data-maxw] .container-fluid,
+.jy-cl[data-maxw] .container-lg,
+.jy-cl[data-maxw] .container-xl {
+  max-width: var(--jy-cl-max-width);
 }
-.jy-ui .dialog-btn-cancel:hover { background: var(--jy-color-surface); }
-.jy-ui .dialog-btn-confirm {
-  padding: 0.375rem 0.875rem;
-  border: none;
-  border-radius: var(--jy-radius-sm);
-  color: var(--jy-color-primary-text);
-  cursor: pointer;
-  font-size: 0.875rem;
+.jy-cl[data-maxw]:not(:has(.container, .container-fluid, .container-lg, .container-xl)) > :first-child {
+  max-width: var(--jy-cl-max-width);
+  margin-left: auto;
+  margin-right: auto;
 }
-.jy-ui .dialog-btn-confirm:hover { opacity: 0.88; }
-.jy-ui .dialog-btn-danger  { background: var(--jy-color-danger); }
-.jy-ui .dialog-btn-primary { background: var(--jy-color-primary); }
+.jy-cl[data-maxh] > :first-child {
+  max-height: var(--jy-cl-max-height);
+  overflow: hidden;
+}
+.jy-cl[data-vmargin="none"] { margin-top: 0; margin-bottom: 0; }
+.jy-cl[data-vmargin="sm"] { margin-top: 1rem; margin-bottom: 1rem; }
+.jy-cl[data-vmargin="md"] { margin-top: 2rem; margin-bottom: 2rem; }
+.jy-cl[data-vmargin="lg"] { margin-top: 3rem; margin-bottom: 3rem; }
+.jy-cl[data-vmargin="xl"] { margin-top: 5rem; margin-bottom: 5rem; }
+
+/* ═══════════════════════════════════════════════════════════════
+   Page components (views/components/*) — each component's structure
+   lives here as a .jy-{component}-* section; per-instance values
+   arrive as inline --jy-* custom properties (server-computed).
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ─── Accordion ─────────────────────────────────────────────── */
+.jy-ui .jy-accordion { max-width: 1100px; margin: 0 auto; padding: var(--jy-space-8) var(--jy-space-4); }
+.jy-ui .jy-accordion-header { text-align: center; margin-bottom: var(--jy-space-6); }
+.jy-ui .jy-accordion-header h2 { margin: 0 0 var(--jy-space-2) 0; }
+.jy-ui .jy-accordion-header p { margin: 0; color: var(--jy-color-text-muted); }
+.jy-ui .jy-accordion details { border: 1px solid var(--jy-color-border); border-radius: var(--jy-radius-sm); margin-bottom: var(--jy-space-2); }
+.jy-ui .jy-accordion.is-flush details { border: none; border-bottom: 1px solid var(--jy-color-border); border-radius: 0; margin-bottom: 0; }
+.jy-ui .jy-accordion summary { padding: var(--jy-space-4); font-weight: 600; cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; }
+.jy-ui .jy-accordion summary::-webkit-details-marker { display: none; }
+.jy-ui .jy-accordion summary::after { content: '+'; font-size: 1.25rem; font-weight: 400; transition: transform 0.2s; }
+.jy-ui .jy-accordion details[open] > summary::after { content: '\2212'; }
+.jy-ui .jy-accordion .acc-content { padding: 0 var(--jy-space-4) var(--jy-space-4); }
+
+/* ─── Tabs ──────────────────────────────────────────────────── */
+.jy-ui .jy-tabs { max-width: 1100px; margin: 0 auto; padding: var(--jy-space-8) var(--jy-space-4); }
+.jy-ui .jy-tabs-heading { margin: 0 0 var(--jy-space-5) 0; }
+.jy-ui .jy-tabs-list { display: flex; gap: 0; justify-content: flex-start; list-style: none; margin: 0 0 var(--jy-space-5) 0; padding: 0; border-bottom: 2px solid var(--jy-color-border); }
+.jy-ui .jy-tabs.is-center .jy-tabs-list { justify-content: center; }
+.jy-ui .jy-tabs.is-pills .jy-tabs-list { border-bottom: none; }
+.jy-ui .jy-tabs-list button { background: none; border: none; padding: var(--jy-space-3) var(--jy-space-5); cursor: pointer; font-size: 1rem; color: var(--jy-color-text-muted); position: relative; margin-bottom: -2px; }
+.jy-ui .jy-tabs.is-pills .jy-tabs-list button { border-radius: 2rem; margin-right: var(--jy-space-2); margin-bottom: 0; }
+.jy-ui .jy-tabs-list button:hover { color: var(--jy-color-text); }
+.jy-ui .jy-tabs-list button[aria-selected="true"] { color: var(--jy-color-text); font-weight: 600; border-bottom: 2px solid var(--jy-color-text); }
+.jy-ui .jy-tabs.is-pills .jy-tabs-list button[aria-selected="true"] { border-bottom: none; background-color: var(--jy-color-surface-alt); }
+.jy-ui .jy-tabs-panel { display: none; }
+.jy-ui .jy-tabs-panel.active { display: block; }
+
+/* ─── Text with image ───────────────────────────────────────── */
+.jy-ui .jy-twi-section { background: var(--jy-twi-bg, transparent); }
+.jy-ui .jy-twi { max-width: 1100px; margin: 0 auto; padding: var(--jy-space-8) var(--jy-space-4); display: flex; flex-direction: row; gap: var(--jy-space-6); align-items: center; }
+.jy-ui .jy-twi.is-reverse { flex-direction: row-reverse; }
+.jy-ui .jy-twi-text { flex: 1 1 0%; min-width: 0; }
+.jy-ui .jy-twi-text h2 { margin: 0 0 var(--jy-space-4) 0; }
+.jy-ui .jy-twi-image { flex: 0 0 var(--jy-twi-img, 50%); min-width: 0; }
+.jy-ui .jy-twi-image img { width: 100%; height: auto; display: block; object-fit: cover; border-radius: var(--jy-radius-sm); }
+.jy-ui .jy-twi-cta { margin-top: var(--jy-space-4); }
+@media (max-width: 768px) {
+  .jy-ui .jy-twi { flex-direction: column; }
+  .jy-ui .jy-twi-image { flex: 0 0 100%; }
+}
+
+/* ─── Feature grid ──────────────────────────────────────────── */
+.jy-ui .jy-feature-grid { padding: var(--jy-space-8) var(--jy-space-4); background: var(--jy-fg-bg, transparent); }
+.jy-ui .jy-feature-grid-inner { max-width: 1100px; margin: 0 auto; }
+.jy-ui .jy-feature-grid-header { text-align: center; margin-bottom: 2.5rem; }
+.jy-ui .jy-feature-grid-header h2 { margin: 0 0 var(--jy-space-2) 0; }
+.jy-ui .jy-feature-grid-header p { margin: 0; color: var(--jy-color-text-muted); }
+.jy-ui .jy-feature-grid-grid { display: grid; grid-template-columns: repeat(var(--jy-fg-cols, 3), 1fr); gap: var(--jy-space-6); }
+.jy-ui .jy-feature-grid-item { text-align: center; position: relative; }
+.jy-ui .jy-feature-grid.is-left .jy-feature-grid-item { text-align: left; }
+.jy-ui .jy-feature-grid-icon { margin-bottom: var(--jy-space-3); }
+.jy-ui .jy-feature-grid:not(.is-left) .jy-feature-grid-icon { display: flex; justify-content: center; }
+.jy-ui .jy-feature-grid-icon i { font-size: 2rem; color: var(--jy-fg-icon, #333); }
+.jy-ui .jy-feature-grid-iconwrap { display: inline-flex; width: 64px; height: 64px; align-items: center; justify-content: center; background-color: var(--jy-fg-icon-bg); }
+.jy-ui .jy-feature-grid-iconwrap.is-circle { border-radius: 50%; }
+.jy-ui .jy-feature-grid-iconwrap.is-square { border-radius: 8px; }
+.jy-ui .jy-feature-grid-item h3 { margin: 0 0 var(--jy-space-2) 0; font-size: 1.1rem; }
+.jy-ui .jy-feature-grid-item p { margin: 0; color: var(--jy-color-text-muted); font-size: 0.95rem; line-height: 1.6; }
+.jy-ui .jy-feature-grid-item a.item-link { position: absolute; inset: 0; }
+@media (max-width: 768px) {
+  .jy-ui .jy-feature-grid-grid { grid-template-columns: repeat(var(--jy-fg-cols-mobile, 2), 1fr); gap: var(--jy-space-5); }
+}
+@media (max-width: 480px) {
+  .jy-ui .jy-feature-grid-grid { grid-template-columns: 1fr; }
+}
+
+/* ─── Divider ───────────────────────────────────────────────── */
+.jy-ui .jy-divider { max-width: 1100px; margin: 0 auto; padding: 0 var(--jy-space-4); }
+.jy-ui .jy-divider hr {
+  border: 0;
+  border-top-width: 1px;
+  border-top-style: var(--jy-divider-style, solid);
+  border-top-color: var(--jy-divider-color, var(--jy-color-border));
+  width: var(--jy-divider-width, 100%);
+}
+.jy-ui .jy-divider.is-centered hr { margin-left: auto; margin-right: auto; }
+
+/* ─── Spacer ────────────────────────────────────────────────── */
+.jy-ui .jy-spacer { height: 2rem; }
+.jy-ui .jy-spacer.is-sm { height: 1rem; }
+.jy-ui .jy-spacer.is-lg { height: 4rem; }
+.jy-ui .jy-spacer.is-xl { height: 6rem; }
+
+/* ─── Page title ────────────────────────────────────────────── */
+.jy-ui .jy-pagetitle { background: var(--jy-pt-bg, var(--jy-color-surface)); color: var(--jy-pt-text, var(--jy-color-text)); padding: var(--jy-space-5) var(--jy-space-4); }
+.jy-ui .jy-pagetitle-inner { max-width: 1100px; margin: 0 auto; text-align: var(--jy-pt-align, left); }
+.jy-ui .jy-pagetitle h1 { margin: 0 0 var(--jy-space-1) 0; }
+.jy-ui .jy-pagetitle-subtitle { margin: 0; color: var(--jy-color-text-muted); font-size: 1.05rem; }
+.jy-ui .jy-pagetitle-crumbs { margin-bottom: var(--jy-space-3); }
+.jy-ui .jy-pagetitle-crumbs ol { display: flex; flex-wrap: wrap; gap: var(--jy-space-1) var(--jy-space-2); list-style: none; margin: 0; padding: 0; font-size: 0.875rem; color: var(--jy-color-text-muted); }
+.jy-ui .jy-pagetitle-crumbs a { color: inherit; }
+.jy-ui .jy-pagetitle-crumbs .sep { margin-left: var(--jy-space-2); }
+
+/* ─── Text block ────────────────────────────────────────────── */
+.jy-ui .jy-textblock-section { background: var(--jy-tb-bg, transparent); color: var(--jy-tb-text, inherit); }
+.jy-ui .jy-textblock { max-width: 1100px; margin: 0 auto; padding: var(--jy-space-8) var(--jy-space-4); text-align: var(--jy-tb-align, left); }
+.jy-ui .jy-textblock-heading { margin: 0 0 var(--jy-space-4) 0; }
+
+/* ─── CTA banner ────────────────────────────────────────────── */
+.jy-ui .jy-cta-banner { background: var(--jy-cta-bg, var(--jy-color-primary)); color: var(--jy-cta-text, #fff); padding: var(--jy-space-10) var(--jy-space-5); text-align: center; }
+.jy-ui .jy-cta-banner.has-image { background-size: cover; background-position: center; }
+.jy-ui .jy-cta-banner-inner { max-width: 720px; margin: 0 auto; }
+.jy-ui .jy-cta-banner h2 { margin: 0 0 var(--jy-space-4) 0; font-size: 2rem; line-height: 1.2; }
+.jy-ui .jy-cta-banner-sub { margin: 0 0 var(--jy-space-6) 0; opacity: 0.9; font-size: 1.1rem; line-height: 1.6; }
+.jy-ui .jy-cta-banner-actions { display: flex; gap: var(--jy-space-4); justify-content: center; flex-wrap: wrap; }
+.jy-ui .jy-cta-banner-btn { display: inline-block; padding: 0.75rem 2rem; background: rgba(255, 255, 255, 0.95); color: #111; text-decoration: none; border-radius: var(--jy-radius-sm); font-weight: 600; }
+.jy-ui .jy-cta-banner-btn.is-secondary { background: transparent; border: 2px solid rgba(255, 255, 255, 0.7); color: inherit; }
+
+/* ─── Hero (static) ─────────────────────────────────────────── */
+.jy-ui .jy-hero { background: var(--jy-hero-bg, var(--jy-color-surface)); color: var(--jy-hero-text, var(--jy-color-text)); padding: 5rem 1.5rem; }
+.jy-ui .jy-hero.is-sm { padding: 3rem 1.5rem; }
+.jy-ui .jy-hero.is-lg { padding: 8rem 1.5rem; }
+.jy-ui .jy-hero.is-fullscreen { min-height: 100vh; display: flex; align-items: center; padding: 5rem 1.5rem; }
+.jy-ui .jy-hero.has-image { background-size: cover; background-position: center; }
+.jy-ui .jy-hero-inner { max-width: 720px; margin: 0 auto; width: 100%; text-align: var(--jy-hero-align, center); }
+.jy-ui .jy-hero h1 { margin: 0 0 var(--jy-space-4) 0; font-size: 2.5rem; line-height: 1.2; }
+.jy-ui .jy-hero-sub { margin: 0 0 var(--jy-space-6) 0; font-size: 1.2rem; opacity: 0.85; line-height: 1.6; }
+.jy-ui .jy-hero-btn { display: inline-block; padding: 0.75rem 2rem; text-decoration: none; border-radius: var(--jy-radius-sm); font-weight: 600; background: var(--jy-hero-text); color: var(--jy-hero-btnfg, #fff); }
+.jy-ui .jy-hero-btn.is-secondary { background: transparent; border: 2px solid currentColor; color: inherit; }
+
+/* ─── Video embed ───────────────────────────────────────────── */
+.jy-ui .jy-video { max-width: 1100px; margin: 0 auto; padding: var(--jy-space-8) var(--jy-space-4); }
+.jy-ui .jy-video h2 { margin: 0 0 var(--jy-space-5) 0; }
+.jy-ui .jy-video-frame { aspect-ratio: var(--jy-video-ratio, 16 / 9); width: 100%; }
+.jy-ui .jy-video-frame iframe { width: 100%; height: 100%; border: 0; }
+.jy-ui .jy-video-caption { margin: var(--jy-space-3) 0 0 0; color: var(--jy-color-text-muted); font-size: 0.9rem; }
+
+/* ─── Image gallery ─────────────────────────────────────────── */
+.jy-ui .jy-gallery-main img { width: 100%; max-height: 500px; object-fit: cover; border-radius: var(--jy-radius-md); display: block; }
+.jy-ui .jy-gallery-caption { text-align: center; margin: var(--jy-space-2) 0 0; color: var(--jy-color-text-muted); font-size: 0.9em; }
+.jy-ui .jy-gallery-thumbs { display: flex; gap: var(--jy-space-2); margin-top: var(--jy-space-3); overflow-x: auto; padding-bottom: var(--jy-space-1); }
+.jy-ui .jy-gallery-thumb { width: 80px; height: 60px; object-fit: cover; border-radius: var(--jy-radius-sm); cursor: pointer; flex-shrink: 0; transition: opacity 0.2s, border-color 0.2s; opacity: 0.5; border: 2px solid transparent; }
+.jy-ui .jy-gallery-thumb.is-active { opacity: 1; border-color: var(--jy-color-primary); }
+
+/* ─── List signup ───────────────────────────────────────────── */
+.jy-ui .jy-listsignup { padding: var(--jy-space-5) 0; background: var(--jy-ls-bg, transparent); color: var(--jy-ls-text, inherit); }
+.jy-ui .jy-listsignup-inner { max-width: 600px; margin: 0 auto; padding: 0 var(--jy-space-4); text-align: var(--jy-ls-align, center); }
+.jy-ui .jy-listsignup h2 { margin: 0 0 var(--jy-space-2); }
+.jy-ui .jy-listsignup-sub { margin: 0 0 var(--jy-space-4); opacity: 0.85; }
+.jy-ui .jy-listsignup-submit { margin-top: var(--jy-space-4); }
+.jy-ui.jy-listsignup-error { border: 2px dashed var(--jy-color-danger); background: var(--jy-color-danger-bg); padding: var(--jy-space-4) var(--jy-space-5); margin: var(--jy-space-4) 0; border-radius: var(--jy-radius-md); font-size: 0.9rem; }
+.jy-ui.jy-listsignup-error strong { color: var(--jy-color-danger); }
+.jy-ui.jy-listsignup-error ul { margin: var(--jy-space-2) 0 0; padding-left: var(--jy-space-5); color: var(--jy-color-text-muted); }
+/* Compact mode (single-row email + submit) */
+.jy-ui .jy-listsignup .lsu-compact .form-group,
+.jy-ui .jy-listsignup .lsu-compact .mb-3 { margin-bottom: 0 !important; }
+.jy-ui .jy-listsignup .lsu-compact-row { display: flex; gap: var(--jy-space-2); justify-content: var(--jy-ls-align, center); flex-wrap: wrap; align-items: center; }
+.jy-ui .jy-listsignup .lsu-compact-row .lsu-email-wrap { flex: 1; max-width: 300px; min-width: 200px; }
+.jy-ui .jy-listsignup .lsu-antispam { text-align: center; margin-top: var(--jy-space-2); }
+.jy-ui .jy-listsignup .lsu-antispam .form-group,
+.jy-ui .jy-listsignup .lsu-antispam .mb-3 { margin: 0 !important; display: inline-block; }
+.jy-ui .jy-listsignup .lsu-antispam input[type="text"] { width: 140px !important; padding: 0.25rem 0.5rem; font-size: 0.85em; }
+.jy-ui .jy-listsignup .lsu-list-name { margin: 0; opacity: 0.85; font-size: 0.95em; }
+.jy-ui .jy-listsignup .lsu-compact .lsu-checkbox-list { text-align: left; display: inline-block; margin-bottom: var(--jy-space-2); }
+.jy-ui .jy-listsignup .lsu-compact .lsu-checkbox-list .form-group,
+.jy-ui .jy-listsignup .lsu-compact .lsu-checkbox-list .mb-3,
+.jy-ui .jy-listsignup .lsu-compact .lsu-checkbox-list .form-check { margin-bottom: var(--jy-space-1) !important; }
+
+/* ─── Slot picker (booking time picker) ─────────────────────── */
+.jy-ui .joinery-slotpicker { --sp-accent: var(--jy-color-primary); font-family: inherit; }
+.jy-ui .slotpick-cols { display: flex; gap: var(--jy-space-5); flex-wrap: wrap; }
+.jy-ui .slotpick-cal { min-width: 270px; }
+.jy-ui .slotpick-calhead { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--jy-space-2); }
+.jy-ui .slotpick-month { font-weight: 600; }
+.jy-ui .slotpick-nav { background: var(--jy-color-surface); border: 1px solid var(--jy-color-border); border-radius: 5px; padding: .25rem .6rem; cursor: pointer; }
+.jy-ui .slotpick-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.jy-ui .slotpick-dow { text-align: center; font-size: .7rem; color: var(--jy-color-text-subtle); padding: .2rem 0; }
+.jy-ui .slotpick-day { aspect-ratio: 1; border: none; background: none; border-radius: 50%; cursor: default; color: var(--jy-color-border-strong); font: inherit; }
+.jy-ui .slotpick-day.has-slots { background: var(--jy-color-surface-alt); color: var(--sp-accent); font-weight: 600; cursor: pointer; }
+.jy-ui .slotpick-day.has-slots:hover { background: var(--jy-color-surface); }
+.jy-ui .slotpick-day.is-selected { background: var(--sp-accent); color: #fff; }
+.jy-ui .slotpick-times { flex: 1; min-width: 220px; }
+.jy-ui .slotpick-tzrow { margin-bottom: .6rem; font-size: .85rem; color: var(--jy-color-text-muted); }
+.jy-ui .slotpick-daylabel { font-weight: 600; margin-bottom: var(--jy-space-2); }
+.jy-ui .slotpick-timelist { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: .4rem; }
+.jy-ui .slotpick-slot { border: 1px solid var(--sp-accent); color: var(--sp-accent); background: var(--jy-color-bg); border-radius: 5px; padding: .5rem; cursor: pointer; font: inherit; }
+.jy-ui .slotpick-slot:hover { background: var(--jy-color-surface-alt); }
+.jy-ui .slotpick-slot.is-chosen { background: var(--sp-accent); color: #fff; }
+.jy-ui .slotpick-empty { color: var(--jy-color-text-muted); font-size: .9rem; }
+
+/* ─── Calendar grid (month/week view) ───────────────────────── */
+.jy-ui .joinery-calgrid { font-family: inherit; --cg-border: var(--jy-color-border); --cg-accent: var(--jy-color-primary); }
+.jy-ui .calgrid-toolbar { display: flex; align-items: center; gap: .4rem; margin-bottom: .6rem; flex-wrap: wrap; }
+.jy-ui .calgrid-toolbar button { background: var(--jy-color-surface); border: 1px solid var(--cg-border); border-radius: 5px; padding: .3rem .6rem; cursor: pointer; font: inherit; }
+.jy-ui .calgrid-toolbar button.is-active { background: var(--cg-accent); color: #fff; border-color: var(--cg-accent); }
+.jy-ui .calgrid-title { font-weight: 600; margin: 0 .5rem; }
+.jy-ui .calgrid-views { margin-left: auto; }
+.jy-ui .calgrid-grid { display: grid; grid-template-columns: repeat(7, 1fr); border: 1px solid var(--cg-border); border-bottom: none; }
+.jy-ui .calgrid-dow { text-align: center; font-size: .8rem; color: var(--jy-color-text-muted); padding: .3rem 0; border-bottom: 1px solid var(--cg-border); border-right: 1px solid var(--cg-border); background: var(--jy-color-surface); }
+.jy-ui .calgrid-cell { min-height: 92px; border-bottom: 1px solid var(--cg-border); border-right: 1px solid var(--cg-border); padding: .25rem; vertical-align: top; }
+.jy-ui .calgrid-cell.is-other { background: var(--jy-color-surface); color: var(--jy-color-text-subtle); }
+.jy-ui .calgrid-cell.is-today .calgrid-daynum { background: var(--cg-accent); color: #fff; border-radius: 50%; padding: 0 .35rem; }
+.jy-ui .calgrid-daynum { font-size: .8rem; display: inline-block; margin-bottom: .2rem; }
+.jy-ui .calgrid-chip { display: block; font-size: .72rem; line-height: 1.3; padding: .1rem .3rem; margin-bottom: .15rem; border-radius: 3px; color: #fff; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jy-ui .calgrid-week-day { border: 1px solid var(--cg-border); border-bottom: none; padding: .4rem; display: flex; gap: .6rem; }
+.jy-ui .calgrid-week-day:last-child { border-bottom: 1px solid var(--cg-border); }
+.jy-ui .calgrid-week-date { min-width: 5.5rem; font-size: .85rem; color: var(--jy-color-text-muted); }
+.jy-ui .calgrid-week-events { flex: 1; }
+.jy-ui .calgrid-empty { color: var(--jy-color-text-subtle); font-size: .8rem; }
+
+/* ─── Personal calendar page (/profile/calendar) ────────────── */
+.jy-ui.cal-wrap { max-width: 980px; margin: 1rem auto; }
+.jy-ui .cal-note { background: var(--jy-color-success-bg, #e6f7ec); border: 1px solid var(--jy-color-success, #2d7d46); padding: .5rem .8rem; border-radius: var(--jy-radius-sm); margin-bottom: 1rem; }
+.jy-ui .cal-error { background: var(--jy-color-danger-bg); border: 1px solid var(--jy-color-danger); padding: .5rem .8rem; border-radius: var(--jy-radius-sm); margin-bottom: 1rem; }
+.jy-ui .cal-full-form { border: 1px solid var(--jy-color-border); border-radius: var(--jy-radius-md); padding: 1rem 1.25rem; margin-top: 1.5rem; background: var(--jy-color-surface); }
+.jy-ui .cal-full-form h2 { margin-top: 0; }
+.jy-ui .cal-tz { color: var(--jy-color-text-muted); font-size: .85rem; }
+.jy-ui .cal-import { margin-bottom: 1rem; border: 1px solid var(--jy-color-border); border-radius: var(--jy-radius-md); background: var(--jy-color-surface); padding: .25rem .75rem; }
+.jy-ui .cal-import > summary { cursor: pointer; padding: .4rem 0; font-size: .9rem; color: var(--jy-color-text-muted); }
+.jy-ui .cal-import .form-group { margin-bottom: .6rem; }
+.jy-ui .cal-recurrence-section { margin-top: .75rem; border-top: 1px solid var(--jy-color-border); padding-top: .75rem; }
+.jy-ui .cal-rec-desc { font-size: .85rem; color: var(--jy-color-text-muted); font-style: italic; margin-top: .25rem; min-height: 1.2em; }
+.jy-ui .cal-rec-desc.is-static { font-style: normal; }
+/* Scope choosers (edit/delete recurring) render through JoineryModal.open;
+   only their inner content is styled here. */
+.jy-ui .cal-scope-heading { margin: 0 0 1rem; font-size: 1.05rem; }
+.jy-ui .cal-scope-options { display: flex; flex-direction: column; gap: .5rem; }
+.jy-ui .cal-scope-options label { display: flex; align-items: center; gap: .6rem; font-size: .95rem; cursor: pointer; }
+.jy-ui .cal-scope-options label small { color: var(--jy-color-text-muted); display: block; font-size: .82rem; }
+.jy-ui.cal-popup { position: fixed; z-index: 9000; width: 340px; background: var(--jy-color-bg); border-radius: var(--jy-radius-lg); box-shadow: 0 8px 28px rgba(0, 0, 0, .18), 0 2px 8px rgba(0, 0, 0, .10); display: none; }
+.jy-ui .cal-popup-header { display: flex; align-items: center; justify-content: space-between; padding: .6rem .8rem .4rem; border-bottom: 1px solid var(--jy-color-border); }
+.jy-ui .cal-popup-title { font-weight: 600; font-size: .9rem; color: var(--jy-color-text-muted); }
+.jy-ui .cal-popup-close { background: none; border: none; cursor: pointer; font-size: 1.2rem; color: var(--jy-color-text-subtle); padding: .1rem .3rem; border-radius: var(--jy-radius-sm); }
+.jy-ui .cal-popup-close:hover { background: var(--jy-color-surface); color: var(--jy-color-text); }
+.jy-ui .cal-popup-body { padding: .5rem .8rem; overflow-y: auto; max-height: calc(100vh - 190px); }
+.jy-ui .cal-popup-body .form-group { margin-bottom: .6rem; }
+.jy-ui .cal-popup-footer { display: flex; align-items: center; justify-content: space-between; padding: .6rem .8rem .8rem; border-top: 1px solid var(--jy-color-border); gap: .4rem; }
+.jy-ui .cal-popup-more { background: none; border: none; cursor: pointer; color: var(--jy-color-text-muted); font: inherit; font-size: .85rem; padding: .3rem .5rem; border-radius: var(--jy-radius-sm); text-decoration: none; }
+.jy-ui .cal-popup-more:hover { background: var(--jy-color-surface); }
+.jy-ui .cal-popup-right { display: flex; gap: .4rem; margin-left: auto; }
+.jy-ui .cal-popup-delete { background: none; border: 1px solid var(--jy-color-danger); color: var(--jy-color-danger); border-radius: var(--jy-radius-sm); padding: .3rem .7rem; cursor: pointer; font: inherit; font-size: .85rem; }
+.jy-ui .cal-popup-delete:hover { background: var(--jy-color-danger-bg); }
+.jy-ui .cal-popup-save { background: var(--jy-color-primary); color: var(--jy-color-primary-text); border: none; border-radius: var(--jy-radius-sm); padding: .3rem .9rem; cursor: pointer; font: inherit; font-size: .85rem; font-weight: 600; }
+.jy-ui .cal-popup-save:hover { background: var(--jy-color-primary-hover); }
+.jy-ui .cal-popup-error { background: var(--jy-color-danger-bg); border: 1px solid var(--jy-color-danger); padding: .3rem .6rem; border-radius: var(--jy-radius-sm); font-size: .82rem; margin: 0 .8rem .4rem; display: none; }
+.jy-ui .cal-pop-times.is-allday { display: none; }
+.jy-ui .cal-pop-time-row { display: flex; gap: .6rem; }
+.jy-ui .cal-pop-time-row .form-group { flex: 1; }
+.jy-ui .cal-pop-time-input { width: 100%; box-sizing: border-box; }

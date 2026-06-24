@@ -2,10 +2,10 @@
 /**
  * List Signup Component
  *
- * Renders a mailing list signup form that posts to the existing
- * /list/{slug} or /lists endpoints. Uses no framework-specific CSS
- * classes — only plain HTML5 and inline styles, plus whatever
- * FormWriter is loaded by the active theme.
+ * Renders a mailing list signup form that posts to the existing /list/{slug} or
+ * /lists endpoints. Renders inside the `.jy-ui` kit; styling lives in the
+ * `.jy-listsignup` section in joinery-styles.css. Background and text colour arrive
+ * as --jy-ls-* custom properties (server-computed). Forms use FormWriter.
  *
  * Available variables:
  *   $component_config - Configuration array from pac_config
@@ -14,16 +14,16 @@
  *   $component_type_record - Component object (the type definition)
  *   $component_slug - The component's slug
  *
- * @version 1.4.0
+ * @version 1.5.0
  */
 
 // Show configuration errors to admins, render nothing for regular visitors
 $config_errors = $component_data['config_errors'] ?? [];
 if (empty($component_data['is_active']) || empty($component_data['mailing_lists'])) {
 	if (!empty($config_errors) && isset($_SESSION['permission']) && $_SESSION['permission'] >= 5) {
-		echo '<div style="border: 2px dashed #dc3545; background: #fff3f3; padding: 1rem 1.5rem; margin: 1rem 0; border-radius: 6px; font-size: 0.9rem;">';
-		echo '<strong style="color: #dc3545;">List Signup Component — Configuration Issue</strong>';
-		echo '<ul style="margin: 0.5rem 0 0; padding-left: 1.5rem; color: #555;">';
+		echo '<div class="jy-ui jy-listsignup-error">';
+		echo '<strong>List Signup Component — Configuration Issue</strong>';
+		echo '<ul>';
 		foreach ($config_errors as $err) {
 			echo '<li>' . $err . '</li>';
 		}
@@ -54,21 +54,19 @@ $user_subscribed_list = $component_data['user_subscribed_list'] ?? [];
 $member_of_list = $component_data['member_of_list'] ?? false;
 $list_options = $component_data['list_options'] ?? [];
 
-// Build background style
-$bg_style = '';
+// Per-instance values as custom properties (server-computed inline)
+$vars = '--jy-ls-align: ' . htmlspecialchars($text_align) . ';';
 switch ($background_type) {
 	case 'color':
-		$bg_style = "background-color: " . htmlspecialchars($background_color) . ";";
+		$vars .= ' --jy-ls-bg: ' . htmlspecialchars($background_color) . ';';
 		break;
 	case 'gradient':
-		$bg_style = "background: linear-gradient(135deg, " . htmlspecialchars($gradient_start) . " 0%, " . htmlspecialchars($gradient_end) . " 100%);";
+		$vars .= ' --jy-ls-bg: linear-gradient(135deg, ' . htmlspecialchars($gradient_start) . ' 0%, ' . htmlspecialchars($gradient_end) . ' 100%);';
 		break;
 }
 if ($text_color) {
-	$bg_style .= " color: " . htmlspecialchars($text_color) . ";";
+	$vars .= ' --jy-ls-text: ' . htmlspecialchars($text_color) . ';';
 }
-
-$align = htmlspecialchars($text_align);
 
 // For single-list modes, if user is already subscribed, show message
 $is_logged_in = $session && $session->get_user_id();
@@ -89,34 +87,19 @@ $formwriter = new FormWriter($form_id, $form_options);
 $settings = Globalvars::get_instance();
 ?>
 
-<section class="list-signup" style="padding: 1.5rem 0; <?php echo $bg_style; ?>">
-	<div style="max-width: 600px; margin: 0 auto; padding: 0 1rem; text-align: <?php echo $align; ?>;">
+<section class="jy-ui jy-listsignup" style="<?php echo $vars; ?>">
+	<div class="jy-listsignup-inner">
 		<?php if ($heading): ?>
-			<h2 style="margin: 0 0 0.5rem;"><?php echo htmlspecialchars($heading); ?></h2>
+			<h2><?php echo htmlspecialchars($heading); ?></h2>
 		<?php endif; ?>
 
 		<?php if ($subheading): ?>
-			<p style="margin: 0 0 1rem; opacity: 0.85;"><?php echo nl2br(htmlspecialchars($subheading)); ?></p>
+			<p class="jy-listsignup-sub"><?php echo nl2br(htmlspecialchars($subheading)); ?></p>
 		<?php endif; ?>
 
 		<?php if ($already_subscribed): ?>
 			<p>You are already subscribed.</p>
 		<?php elseif ($compact_mode): ?>
-			<style>
-			.lsu-compact .form-group,
-			.lsu-compact .mb-3 { margin-bottom: 0 !important; }
-			.lsu-compact-row { display: flex; gap: 0.5rem; justify-content: <?php echo $align; ?>; flex-wrap: wrap; align-items: center; }
-			.lsu-compact-row .lsu-email-wrap { flex: 1; max-width: 300px; min-width: 200px; }
-			.lsu-antispam { text-align: center; margin-top: 0.5rem; }
-			.lsu-antispam .form-group,
-			.lsu-antispam .mb-3 { margin: 0 !important; display: inline-block; }
-			.lsu-antispam input[type="text"] { width: 140px !important; padding: 0.25rem 0.5rem; font-size: 0.85em; }
-			.lsu-list-name { margin: 0; opacity: 0.85; font-size: 0.95em; }
-			.lsu-compact .lsu-checkbox-list { text-align: left; display: inline-block; margin-bottom: 0.5rem; }
-			.lsu-compact .lsu-checkbox-list .form-group,
-			.lsu-compact .lsu-checkbox-list .mb-3,
-			.lsu-compact .lsu-checkbox-list .form-check { margin-bottom: 0.25rem !important; }
-			</style>
 			<?php
 			$formwriter->begin_form();
 
@@ -265,7 +248,7 @@ $settings = Globalvars::get_instance();
 			}
 			?>
 
-			<div style="margin-top: 1rem;">
+			<div class="jy-listsignup-submit">
 			<?php
 			$formwriter->submitbutton('submit_button', $button_text);
 			?>

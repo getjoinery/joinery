@@ -2,8 +2,10 @@
 /**
  * Page Title Component
  *
- * Page title with optional subtitle and breadcrumb navigation.
- * Pure HTML5, no framework dependencies.
+ * Page title with optional subtitle and breadcrumb navigation. Pure HTML5, no
+ * framework dependencies. Renders inside the `.jy-ui` kit; styling lives in the
+ * `.jy-pagetitle` section in joinery-styles.css. Background, text colour and
+ * alignment arrive as --jy-pt-* custom properties (server-computed).
  *
  * Available variables:
  *   $component_config - Configuration array from pac_config
@@ -26,13 +28,15 @@ if (!in_array($alignment, $allowed_alignments)) {
 	$alignment = 'left';
 }
 
-$section_style = 'background-color: ' . htmlspecialchars($bg_color) . '; color: ' . htmlspecialchars($text_color) . '; padding: 1.5rem 1rem;';
+$vars = '--jy-pt-bg: ' . htmlspecialchars($bg_color)
+	. '; --jy-pt-text: ' . htmlspecialchars($text_color)
+	. '; --jy-pt-align: ' . $alignment . ';';
 ?>
-<section style="<?php echo $section_style; ?>">
-	<div style="max-width: 1100px; margin: 0 auto; text-align: <?php echo htmlspecialchars($alignment); ?>;">
+<section class="jy-ui jy-pagetitle" style="<?php echo $vars; ?>">
+	<div class="jy-pagetitle-inner">
 		<?php if ($show_breadcrumbs && !empty($breadcrumbs)): ?>
-			<nav aria-label="Breadcrumb" style="margin-bottom: 0.75rem;">
-				<ol style="display: flex; flex-wrap: wrap; gap: 0.25rem 0.5rem; list-style: none; margin: 0; padding: 0; font-size: 0.875rem; color: #6c757d;">
+			<nav class="jy-pagetitle-crumbs" aria-label="Breadcrumb">
+				<ol>
 					<?php
 					$total = count($breadcrumbs);
 					$i = 0;
@@ -42,8 +46,8 @@ $section_style = 'background-color: ' . htmlspecialchars($bg_color) . '; color: 
 					?>
 						<li<?php if ($is_last): ?> aria-current="page"<?php endif; ?>>
 							<?php if (!$is_last && !empty($crumb['link'])): ?>
-								<a href="<?php echo htmlspecialchars($crumb['link']); ?>" style="color: inherit;"><?php echo htmlspecialchars($crumb['text']); ?></a>
-								<span aria-hidden="true" style="margin-left: 0.5rem;">/</span>
+								<a href="<?php echo htmlspecialchars($crumb['link']); ?>"><?php echo htmlspecialchars($crumb['text']); ?></a>
+								<span class="sep" aria-hidden="true">/</span>
 							<?php else: ?>
 								<?php echo htmlspecialchars($crumb['text']); ?>
 							<?php endif; ?>
@@ -54,11 +58,11 @@ $section_style = 'background-color: ' . htmlspecialchars($bg_color) . '; color: 
 		<?php endif; ?>
 
 		<?php if ($title): ?>
-			<h1 style="margin: 0 0 0.25rem 0;"><?php echo htmlspecialchars($title); ?></h1>
+			<h1><?php echo htmlspecialchars($title); ?></h1>
 		<?php endif; ?>
 
 		<?php if ($subtitle): ?>
-			<p style="margin: 0; color: #6c757d; font-size: 1.05rem;"><?php echo htmlspecialchars($subtitle); ?></p>
+			<p class="jy-pagetitle-subtitle"><?php echo htmlspecialchars($subtitle); ?></p>
 		<?php endif; ?>
 	</div>
 </section>

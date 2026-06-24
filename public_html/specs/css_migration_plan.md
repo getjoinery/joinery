@@ -1,7 +1,7 @@
 # CSS Adoption Plan — Finish Rolling Out the `.jy-ui` Kit
 
-**Status:** Active — awaiting implementation
-**Version:** 2.0
+**Status:** Active — **Phase 1 ✅ and Phase 2 ✅ complete; Phases 3–7 pending.**
+**Version:** 2.1
 **Policy:** Implements [css_platform_style_contract.md](css_platform_style_contract.md). Read it first — the platform already ships the `.jy-ui` kit (tokens + `.jy-ui`-scoped components + `.jy-*` chrome), loaded on every page by `render_base_assets()`. This document is *how we finish adopting it* across the surfaces that don't use it yet.
 
 ## What this is (and isn't)
@@ -9,10 +9,10 @@
 This is **adoption**, not authoring. The kit exists and is proven on ~49 public
 views. The work is:
 
-1. **Fill a couple of kit gaps** (notably a modal/dialog component).
-2. **Bring the non-adopting surfaces onto the kit** — admin (0 adoption) and
-   components (0 adoption) — by wrapping their content in `.jy-ui` and using kit
-   classes.
+1. **Fill the kit gaps** — the system modal (`JoineryModal`) and `filemtime`
+   cache-busting. ✅ *Done in Phase 1.*
+2. **Bring the non-adopting surfaces onto the kit** — components (✅ *done in Phase 2*),
+   then admin and plugins — by wrapping their content in `.jy-ui` and using kit classes.
 3. **Sweep inline `style=` and in-view `<style>` blocks** into the kit / utilities.
 
 There is **no "legacy bare-class layer" to delete** — scoped bare classes like
@@ -29,9 +29,9 @@ directory / per component / per plugin so no single sitting is large.
 |---|---|---|
 | Promote `JoineryModal` to kit (single copy in `base.js`, loaded on every theme incl. admin); cache-bust → filemtime | small | 1 |
 | Modal implementations to converge onto `JoineryModal` | 3 (image picker, consent, calendar editor) | 2 |
-| Components not on the kit (own `<style>` blocks) | 7 core (+ `ComponentRenderer`) | 2 |
+| Component templates onto the kit (`views/components/`) | 15 in-scope (7 with `<style>` blocks, 50 inline) + `ComponentRenderer`; `custom_html` excluded (user content) | 2 |
 | Admin pages on the kit | 0 of ~48 (+ ~422 inline styles) | 3 |
-| Public views: inline styles to sweep (already `.jy-ui`) | ~749 across 59 files | 4 |
+| Public views: inline styles to sweep (already `.jy-ui`) | ~699 across 46 files (excludes `views/components/`, now in Phase 2) | 4 |
 | Plugins on the kit | 0 (+ ~228 inline, 8 `<style>` blocks, 31 files) | 5 |
 | Themes with duplicated component CSS to retire | getjoinery, joinery-system (+ a few) | 6 |
 | `includes/` + `theme/` inline styles | 169 + 67 | 3–6 (with their surface) |
@@ -42,7 +42,7 @@ Inline-style total ≈ **1,635**; it is swept per surface, never a blocking cost
 
 Ordered: foundation/gaps first, then surfaces by reuse and isolation, then guards.
 
-### Phase 1 — Kit gaps + foundation (low risk)
+### Phase 1 — Kit gaps + foundation (low risk) — ✅ COMPLETE
 
 - **Promote `JoineryModal` into the kit** (`.jy-ui`-scoped). The system modal —
   `JoineryModal.confirm/alert/prompt`, a native `<dialog>` API — already exists, but
@@ -69,30 +69,40 @@ Ordered: foundation/gaps first, then surfaces by reuse and isolation, then guard
 CSS), loaded on every theme — admin included; kit CSS loads before theme on every page
 incl. error pages; filemtime busting in place. Zero visual change to existing pages.
 
-### Phase 2 — Components (incl. `ComponentRenderer`, calendar first)
+### Phase 2 — Components (incl. `ComponentRenderer`, calendar first) — ✅ COMPLETE
 
-Bring the 7 core components onto the kit: wrap their markup in a `.jy-ui` scope, use
-kit classes, and move each `<style>` block's rules into `joinery-styles.css` (a
-delimited feature section), then delete the block. **`ComponentRenderer`** stops
-injecting a `<style>` block + free-form inline styles — its layout rules become a
-`.jy-cl-*` kit section, and the only inline it emits is a custom-property value
-(`style="--jy-cl-max-width: …"`).
+Bring the component templates onto the kit. The surface is **15 in-scope templates** in
+`views/components/` (`custom_html` is excluded — it's a user-authored `echo $html;`
+passthrough, WYSIWYG/user content). Of those, **7 carry a `<style>` block** (accordion,
+calendar_grid, feature_grid, list_signup, slot_picker, tabs, text_with_image) and **8 carry
+only inline styles** (page_title, cta_banner, hero_static, video_embed, image_gallery,
+text_block, divider, spacer); **50 inline `style=` total** across the set. None use `.jy-ui`
+yet. For each template, in one pass: wrap its markup in a `.jy-ui` scope, switch to kit
+classes, move any `<style>` block's rules into `joinery-styles.css` (a delimited feature
+section) and delete the block, and absorb its inline styles into kit classes/utilities.
+Sweeping inline here — not deferring it to the Phase 4 view sweep — means one visit per
+file instead of two. **`ComponentRenderer`** stops injecting a `<style>` block + free-form
+inline styles — its layout rules become a `.jy-cl-*` kit section, and the only inline it
+emits is a custom-property value (`style="--jy-cl-max-width: …"`).
 
 **Calendar first, as the worked redo:** wrap `/profile/calendar` content in `.jy-ui`,
 replace its `<style>` block and the theme-only `.dialog-btn` buttons with the kit's
 `JoineryModal` + `.btn`/`.btn-danger`, and drop its inline styles. (Our calendar shipped
 non-conformant; this makes it the reference example.)
 
-**Converge the remaining modal implementations.** Three other modals exist:
-`imageselector-modal` (FormWriter image picker), `joinery-cc-modal` (cookie consent),
-and the calendar's hand-rolled entry editor. Each is **rich content** (grids, toggles,
-multi-button footers), which `JoineryModal`'s message + single-input + confirm/cancel
-API doesn't cover. So this phase first **adds a generic content mode** to `JoineryModal`
-(e.g. `JoineryModal.open(contentNode, { buttons })` accepting arbitrary DOM and a custom
-button set), then folds these in. **Caveat for consent:** `ConsentHelper` injects its own
-inline CSS so the banner renders on every page independent of any theme — it can only
-move onto `JoineryModal` *after* the Phase 1 promotion to the global kit, never while the
-modal is theme-bound.
+**Converge bespoke modals onto the content mode.** Hand-rolled rich modals are
+duplicated work, so `JoineryModal` first gains a **generic content mode** —
+`JoineryModal.open(contentNode, { buttons })` accepting arbitrary DOM and a custom button
+set — and the calendar's recurring **scope/delete choosers** fold onto it (their content
+is rich: radio groups + multi-button footers the message/input API can't cover). Two other
+rich modals stay where they are, by design, not as oversight:
+- **Image picker (`imageselector-modal`)** is a `FormWriterV2Base` widget invoked from the
+  admin component editor with admin/Bootstrap-ish styling — it converges with the **admin
+  surface in Phase 3**, not here.
+- **Cookie consent (`joinery-cc-modal`)** injects its own CSS and runs on every page so the
+  GDPR flow is independent of theme/kit load order. Routing it through `JoineryModal` would
+  couple a compliance surface to `base.js` — a resilience regression. It stays
+  self-contained; that's the right-layer call.
 
 **Collapse the modal's `.dialog-btn-*` onto kit buttons.** Phase 1 promoted `JoineryModal`
 verbatim — its buttons still use a `.dialog-btn-cancel`/`-confirm`/`-danger`/`-primary`
@@ -103,9 +113,27 @@ modal sets in `base.js` to `.btn`/`.btn-secondary`/`.btn-danger`/`.btn-primary`,
 `.dialog-btn-*` rules from `joinery-styles.css`, and drop the admin theme's leftover
 `.dialog-btn-*` CSS. The kit already ships `.jy-ui .btn-danger`, so it's a class swap.
 
-**Exit:** core components render inside `.jy-ui` with no `<style>` blocks; calendar uses
-the kit `JoineryModal` + buttons; `JoineryModal` has a content mode and the image-picker
-and consent modals run on it.
+**Exit:** all 15 in-scope component templates render inside `.jy-ui` with no `<style>`
+blocks and no inline `style=`; `ComponentRenderer` emits no `<style>` block and only a
+single custom-property inline; calendar uses the kit `JoineryModal` + buttons and its
+scope/delete choosers run on the content mode; `JoineryModal` has a content mode. (Image
+picker and consent modals are intentionally out — see above; image picker → Phase 3,
+consent stays self-contained.)
+
+**Verification status (as implemented):**
+
+- ✅ **Modal content mode + `.dialog-btn-*`→`.btn` collapse** — `JoineryModal.open(content, {buttons})` added; confirm/alert/prompt now build kit `.btn`/`.btn-*`. *Verified in browser on getjoinery and the admin theme:* both modes open, kit buttons styled, no JS errors.
+- ✅ **`ComponentRenderer`** — `<style>` block removed; layout rules now `.jy-cl-*` in the kit; only inline is the `--jy-cl-*` custom property. *Verified:* PHP syntax + validator clean; exercised live by the calendar (which renders `calendar_grid` through it).
+- ✅ **15 component templates** — each wraps in `.jy-ui`, `<style>` blocks moved to `.jy-{component}-*` kit sections, dynamic values via `--jy-*` custom props. *Verified structurally* (standalone render harness: no `<style>`, `.jy-ui` present, no fatals) for all 15. `custom_html` excluded (user content).
+- ✅ **Calendar redo** (`/profile/calendar`) — wrapped in `.jy-ui`, `<style>` block moved to a tokenized `.cal-*` kit section, broken `.dialog-btn-*` buttons fixed to kit `.btn`. *Verified live in browser* (screenshot): grid, toolbar, kit-tokened buttons, popover all render; `calendar_grid` styled by the kit. This is the one component **visually** confirmed end-to-end (the others have no live page).
+- ✅ **Calendar scope/delete modals → `JoineryModal.open`** — the recurring edit/delete scope choosers are no longer hand-rolled backdrops; their content renders through the kit content mode with kit `.btn` buttons, and the calendar view is now fully free of inline `style=` (display toggles moved to the `hidden` attribute). *Verified live:* the content-mode path (heading + radios + Cancel/Edit kit buttons, reading the chosen radio) opens and closes correctly on `/profile/calendar`.
+- ⏸ **Image picker (`imageselector-modal`) — deferred to Phase 3.** It lives in `FormWriterV2Base`, is invoked from `adm/admin_component_edit`, and is styled with admin/Bootstrap-ish classes (`btn-outline-danger`, `bx` icons, `d-flex`). It's an admin-context widget, so it converges with the admin surface in **Phase 3**, not here.
+- ⏸ **Consent (`joinery-cc-modal`) — kept self-contained by design.** `ConsentHelper` injects its own CSS and runs on every page so the GDPR banner works independent of theme/kit load order. Routing its manage-preferences modal through `JoineryModal` would couple consent to `base.js` — a resilience regression for a compliance surface. Leaving it self-contained is the right-layer call, not debt.
+
+> Note: component visual verification is limited to the calendar because the other
+> components have no live page instances (only `feature_grid` is placed, and not at a
+> routable URL); they were verified structurally via render harness. Admin previews
+> can't confirm them either — the admin theme doesn't load the kit stylesheet.
 
 ### Phase 3 — Admin (`adm/`)
 
@@ -119,8 +147,8 @@ styles. Self-contained and internal, so lower blast radius. Chunk by admin area.
 ### Phase 4 — Public views inline sweep
 
 The ~49 public views already opt into `.jy-ui`, so this is mostly removing their
-remaining inline `style=` (≈749) in favor of kit classes/utilities, plus wrapping any
-stragglers not yet in `.jy-ui`.
+remaining inline `style=` (≈699, excluding `views/components/` which is swept in Phase 2)
+in favor of kit classes/utilities, plus wrapping any stragglers not yet in `.jy-ui`.
 
 **Exit:** `views/` free of inline styles and `<style>` blocks.
 

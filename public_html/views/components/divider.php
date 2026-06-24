@@ -2,7 +2,9 @@
 /**
  * Divider Component
  *
- * Horizontal divider line. Pure HTML5, no framework dependencies.
+ * Horizontal divider line. Pure HTML5, no framework dependencies. Renders inside
+ * the `.jy-ui` kit; styling lives in the `.jy-divider` section in joinery-styles.css.
+ * Line style, width and color arrive as --jy-divider-* custom properties.
  *
  * Available variables:
  *   $component_config - Configuration array from pac_config
@@ -22,13 +24,12 @@ $width_map = [
 	'short' => '25%',
 ];
 $width_value = $width_map[$width] ?? '100%';
+$centered = ($width !== 'full') ? ' is-centered' : '';
 
-$hr_style = 'border: 0; border-top: 1px ' . htmlspecialchars($line_style) . ' ' . htmlspecialchars($color) . ';';
-$hr_style .= ' width: ' . $width_value . ';';
-if ($width !== 'full') {
-	$hr_style .= ' margin-left: auto; margin-right: auto;';
-}
+$vars = '--jy-divider-style: ' . htmlspecialchars($line_style)
+	. '; --jy-divider-color: ' . htmlspecialchars($color)
+	. '; --jy-divider-width: ' . $width_value . ';';
 ?>
-<div style="max-width: 1100px; margin: 0 auto; padding: 0 1rem;">
-	<hr style="<?php echo $hr_style; ?>">
+<div class="jy-ui jy-divider<?php echo $centered; ?>" style="<?php echo $vars; ?>">
+	<hr>
 </div>

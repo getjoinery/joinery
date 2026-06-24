@@ -2,8 +2,10 @@
 /**
  * Hero Static Component
  *
- * Single hero section with heading, subheading, background, and CTA.
- * Pure HTML5, no framework dependencies.
+ * Single hero section with heading, subheading, background, and CTA. Pure HTML5,
+ * no framework dependencies. Renders inside the `.jy-ui` kit; styling lives in the
+ * `.jy-hero` section in joinery-styles.css. Background, colours and alignment
+ * arrive as --jy-hero-* custom properties (server-computed).
  *
  * Available variables:
  *   $component_config - Configuration array from pac_config
@@ -24,38 +26,40 @@ $cta_text   = $component_config['cta_text'] ?? '';
 $cta_link   = $component_config['cta_link'] ?? '';
 $cta_style  = $component_config['cta_style'] ?? 'primary';
 
-$padding_map = ['small' => '3rem 1.5rem', 'medium' => '5rem 1.5rem', 'large' => '8rem 1.5rem'];
-$padding = $padding_map[$height] ?? $padding_map['medium'];
+// Height preset modifier ('medium' = default padding, no modifier)
+$height_mod = '';
+if ($height === 'small') { $height_mod = ' is-sm'; }
+elseif ($height === 'large') { $height_mod = ' is-lg'; }
+elseif ($height === 'fullscreen') { $height_mod = ' is-fullscreen'; }
 
-if ($height === 'fullscreen') {
-	$section_style = 'min-height: 100vh; display: flex; align-items: center; padding: ' . $padding . ';';
-} else {
-	$section_style = 'padding: ' . $padding . ';';
-}
-
+// Background: image overlays a cover background, otherwise a flat colour
 if ($bg_image) {
-	$section_style .= ' background-image: url(' . htmlspecialchars($bg_image) . '); background-size: cover; background-position: center;';
+	$bg_value = 'url(' . htmlspecialchars($bg_image) . ')';
+	$image_mod = ' has-image';
 } else {
-	$section_style .= ' background-color: ' . htmlspecialchars($bg_color) . ';';
+	$bg_value = htmlspecialchars($bg_color);
+	$image_mod = '';
 }
-$section_style .= ' color: ' . htmlspecialchars($text_color) . ';';
 
-$btn_primary   = 'display: inline-block; padding: 0.75rem 2rem; background-color: ' . htmlspecialchars($text_color) . '; color: ' . htmlspecialchars($bg_color) . '; text-decoration: none; border-radius: 4px; font-weight: 600;';
-$btn_secondary = 'display: inline-block; padding: 0.75rem 2rem; border: 2px solid currentColor; color: inherit; text-decoration: none; border-radius: 4px; font-weight: 600;';
-$btn_inline    = ($cta_style === 'secondary') ? $btn_secondary : $btn_primary;
+$btn_mod = ($cta_style === 'secondary') ? ' is-secondary' : '';
+
+$vars = '--jy-hero-bg: ' . $bg_value
+	. '; --jy-hero-text: ' . htmlspecialchars($text_color)
+	. '; --jy-hero-btnfg: ' . htmlspecialchars($bg_color)
+	. '; --jy-hero-align: ' . htmlspecialchars($alignment) . ';';
 ?>
-<section style="<?php echo $section_style; ?>">
-	<div style="max-width: 720px; margin: 0 auto; text-align: <?php echo htmlspecialchars($alignment); ?>; width: 100%;">
+<section class="jy-ui jy-hero<?php echo $height_mod . $image_mod; ?>" style="<?php echo $vars; ?>">
+	<div class="jy-hero-inner">
 		<?php if ($heading): ?>
-			<h1 style="margin: 0 0 1rem 0; font-size: 2.5rem; line-height: 1.2;"><?php echo htmlspecialchars($heading); ?></h1>
+			<h1><?php echo htmlspecialchars($heading); ?></h1>
 		<?php endif; ?>
 
 		<?php if ($subheading): ?>
-			<p style="margin: 0 0 2rem 0; font-size: 1.2rem; opacity: 0.85; line-height: 1.6;"><?php echo nl2br(htmlspecialchars($subheading)); ?></p>
+			<p class="jy-hero-sub"><?php echo nl2br(htmlspecialchars($subheading)); ?></p>
 		<?php endif; ?>
 
 		<?php if ($cta_text && $cta_link): ?>
-			<a href="<?php echo htmlspecialchars($cta_link); ?>" style="<?php echo $btn_inline; ?>"><?php echo htmlspecialchars($cta_text); ?></a>
+			<a href="<?php echo htmlspecialchars($cta_link); ?>" class="jy-hero-btn<?php echo $btn_mod; ?>"><?php echo htmlspecialchars($cta_text); ?></a>
 		<?php endif; ?>
 	</div>
 </section>

@@ -81,12 +81,15 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // ===== JoineryModal =====
-// System confirm/alert/prompt modal. Native <dialog>, lazily created on first
-// use and appended to <body>. The dialog carries the `jy-ui` class so the kit's
-// .jy-ui-scoped .dialog-* rules in joinery-styles.css reach it even though it
-// renders outside any page-level .jy-ui wrapper.
+// System modal. Native <dialog>, lazily created on first use and appended to
+// <body>. The dialog carries the `jy-ui` class so the kit's .jy-ui-scoped rules
+// reach it even though it renders outside any page-level .jy-ui wrapper. Buttons
+// are plain kit buttons (.btn / .btn-*), not a bespoke dialog-button family.
+//   confirm/alert/prompt — text modes (message + optional input).
+//   open(content, { buttons }) — content mode for arbitrary DOM + a custom
+//   button set; each button is { label, style, onClick(dialog), close }.
 const JoineryModal = (() => {
-    let dialog, msgEl, inputEl, confirmBtn, cancelBtn;
+    let dialog, msgEl, contentEl, inputEl, actionsEl;
 
     function init() {
         if (dialog) return;
@@ -94,54 +97,97 @@ const JoineryModal = (() => {
         dialog.className = 'jy-ui';
         dialog.innerHTML =
             '<p class="dialog-message"></p>' +
+            '<div class="dialog-content"></div>' +
             '<input class="dialog-input" type="text">' +
-            '<div class="dialog-actions">' +
-            '<button class="dialog-btn-cancel">Cancel</button>' +
-            '<button class="dialog-btn-confirm">Confirm</button>' +
-            '</div>';
+            '<div class="dialog-actions"></div>';
         document.body.appendChild(dialog);
-        msgEl      = dialog.querySelector('.dialog-message');
-        inputEl    = dialog.querySelector('.dialog-input');
-        confirmBtn = dialog.querySelector('.dialog-btn-confirm');
-        cancelBtn  = dialog.querySelector('.dialog-btn-cancel');
-        cancelBtn.addEventListener('click', () => dialog.close());
+        msgEl     = dialog.querySelector('.dialog-message');
+        contentEl = dialog.querySelector('.dialog-content');
+        inputEl   = dialog.querySelector('.dialog-input');
+        actionsEl = dialog.querySelector('.dialog-actions');
+    }
+
+    function makeButton(label, style, onClick) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn btn-' + (style || 'secondary');
+        btn.textContent = label;
+        btn.onclick = onClick;
+        return btn;
     }
 
     function _open(message, options, showInput, showCancel) {
         init();
+        options = options || {};
+        msgEl.style.display = '';
         msgEl.textContent = message;
+        contentEl.style.display = 'none';
+        contentEl.innerHTML = '';
+
         inputEl.style.display = showInput ? 'block' : 'none';
         if (showInput) {
-            inputEl.value       = (options && options.defaultValue)  || '';
-            inputEl.placeholder = (options && options.placeholder)   || '';
+            inputEl.value       = options.defaultValue || '';
+            inputEl.placeholder = options.placeholder   || '';
         }
-        cancelBtn.style.display = showCancel ? '' : 'none';
-        cancelBtn.textContent   = (options && options.cancelLabel)  || 'Cancel';
-        confirmBtn.textContent  = (options && options.confirmLabel) || 'Confirm';
-        const style = (options && options.confirmStyle) || 'danger';
-        confirmBtn.className = 'dialog-btn-confirm dialog-btn-' + style;
+
+        actionsEl.innerHTML = '';
+        let cancelBtn = null;
+        if (showCancel) {
+            cancelBtn = makeButton(options.cancelLabel || 'Cancel', 'secondary', () => dialog.close());
+            actionsEl.appendChild(cancelBtn);
+        }
+        const confirmBtn = makeButton(options.confirmLabel || 'Confirm', options.confirmStyle || 'danger', null);
+        actionsEl.appendChild(confirmBtn);
+
         dialog.showModal();
         if (showInput) inputEl.focus();
+        return confirmBtn;
     }
 
     function confirm(message, onConfirm, options) {
-        _open(message, options, false, true);
+        const confirmBtn = _open(message, options, false, true);
         confirmBtn.onclick = () => { dialog.close(); onConfirm(); };
     }
 
     function alert(message, onClose, options) {
         const opts = Object.assign({ confirmLabel: 'OK', confirmStyle: 'primary' }, options);
-        _open(message, opts, false, false);
+        const confirmBtn = _open(message, opts, false, false);
         confirmBtn.onclick = () => { dialog.close(); if (onClose) onClose(); };
     }
 
     function prompt(message, onConfirm, options) {
         const opts = Object.assign({ confirmStyle: 'primary' }, options);
-        _open(message, opts, true, true);
-        function submit() { dialog.close(); onConfirm(inputEl.value); }
-        confirmBtn.onclick  = submit;
-        inputEl.onkeydown   = (e) => { if (e.key === 'Enter') submit(); };
+        const confirmBtn = _open(message, opts, true, true);
+        const submit = () => { dialog.close(); onConfirm(inputEl.value); };
+        confirmBtn.onclick = submit;
+        inputEl.onkeydown  = (e) => { if (e.key === 'Enter') submit(); };
     }
 
-    return { confirm, alert, prompt };
+    // Content mode: arbitrary DOM/string + a custom button set. A button's
+    // onClick may return false to keep the dialog open (e.g. validation fail);
+    // pass close:false to keep it open unconditionally.
+    function open(content, options) {
+        init();
+        options = options || {};
+        msgEl.style.display = 'none';
+        inputEl.style.display = 'none';
+        contentEl.style.display = '';
+        contentEl.innerHTML = '';
+        if (typeof content === 'string') { contentEl.innerHTML = content; }
+        else if (content instanceof Node) { contentEl.appendChild(content); }
+
+        actionsEl.innerHTML = '';
+        const buttons = options.buttons || [{ label: 'Close', style: 'secondary' }];
+        buttons.forEach((b) => {
+            actionsEl.appendChild(makeButton(b.label, b.style, () => {
+                const keepOpen = (typeof b.onClick === 'function') && (b.onClick(dialog) === false);
+                if (!keepOpen && b.close !== false) dialog.close();
+            }));
+        });
+
+        dialog.showModal();
+        return { dialog: dialog, content: contentEl };
+    }
+
+    return { confirm, alert, prompt, open };
 })();
