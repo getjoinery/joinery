@@ -630,7 +630,7 @@ $formwriter->submitbutton('submit', 'Save');
 $formwriter->end_form();
 ```
 
-`$page->getFormWriter()` automatically returns the right FormWriter for the theme (FormWriterV2Bootstrap in admin). Never hand-roll admin forms — see [FormWriter](formwriter.md).
+`$page->getFormWriter()` returns a `FormWriterV2HTML5` instance. Never hand-roll admin forms — see [FormWriter](formwriter.md).
 
 ## Troubleshooting
 

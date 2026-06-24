@@ -26,7 +26,7 @@ The FormWriter system provides a structured, consistent way to build forms in th
 
 FormWriter is a PHP class system that generates HTML forms with:
 - **CSRF token emission** - Every POST form gets a security token; verification is opt-in (call `validateCSRF()`), not framework-enforced
-- **Consistent styling** - Bootstrap or Tailwind themes
+- **Consistent styling** - Semantic HTML5 markup that themes style with their own CSS
 - **Validation integration** - Works seamlessly with JoineryValidator
 - **Auto-detection of validation** - Automatically applies model validation rules
 - **Auto-filling values** - Pass data once, all fields populate automatically
@@ -35,13 +35,11 @@ FormWriter is a PHP class system that generates HTML forms with:
 
 ### Available Classes
 
-- **`FormWriterV2Bootstrap`** - Bootstrap 4/5 themed implementation
-- **`FormWriterV2Tailwind`** - Tailwind CSS themed implementation
-- **`FormWriterV2HTML5`** - Pure HTML5 with semantic markup (no CSS framework dependencies)
-- **`FormWriterV2JSON`** - JSON form definitions for native-app renderers (see [JSON Output Mode](#11-json-output-mode-server-driven-forms))
+- **`FormWriterV2HTML5`** - The HTML renderer. Emits semantic HTML5 markup and is used by every theme.
+- **`FormWriterV2JSON`** - JSON form definitions for native-app renderers (a different output format, not a CSS concern — see [JSON Output Mode](#11-json-output-mode-server-driven-forms))
 - **Base class: `FormWriterV2Base`** - Abstract base with all core functionality
 
-All features including visibility rules, custom scripts, CSRF protection, and validation work with all theme implementations.
+All features including visibility rules, custom scripts, CSRF protection, and validation work in both the HTML and JSON renderers.
 
 ---
 
@@ -80,15 +78,6 @@ $formwriter->end_form();
 **In logic files or other contexts:**
 
 ```php
-// Bootstrap theme
-require_once(PathHelper::getIncludePath('includes/FormWriterV2Bootstrap.php'));
-$formwriter = new FormWriterV2Bootstrap('my_form');
-
-// Tailwind theme
-require_once(PathHelper::getIncludePath('includes/FormWriterV2Tailwind.php'));
-$formwriter = new FormWriterV2Tailwind('my_form');
-
-// HTML5 (framework-agnostic)
 require_once(PathHelper::getIncludePath('includes/FormWriterV2HTML5.php'));
 $formwriter = new FormWriterV2HTML5('my_form');
 
@@ -101,7 +90,7 @@ $formwriter->end_form();
 
 ```php
 // Pass options to constructor
-$formwriter = new FormWriterV2Bootstrap('my_form', [
+$formwriter = new FormWriterV2HTML5('my_form', [
     'action' => '/process',
     'method' => 'POST',
     'enctype' => 'multipart/form-data',  // For file uploads
@@ -498,7 +487,7 @@ $formwriter->fileinput('document', 'Upload Document', [
 ]);
 
 // Important: Form must have enctype
-$formwriter = new FormWriterV2Bootstrap('upload_form', [
+$formwriter = new FormWriterV2HTML5('upload_form', [
     'enctype' => 'multipart/form-data'
 ]);
 ```
@@ -806,7 +795,7 @@ $formwriter->submitbutton('btn_submit', 'Save');
 $formwriter->end_form();
 ```
 
-It lives on `FormWriterV2Base`, so every theme (`FormWriterV2HTML5`, `FormWriterV2Bootstrap`, `FormWriterV2Tailwind`) inherits it — it is pure loop-and-dispatch over field methods the base already owns, with nothing theme-specific to override.
+It lives on `FormWriterV2Base`, so the `FormWriterV2HTML5` renderer inherits it — it is pure loop-and-dispatch over field methods the base already owns, with nothing renderer-specific to override.
 
 **Descriptor entry shape** (keyed by field name, under the descriptor's `input`):
 
@@ -886,7 +875,7 @@ foreach ($items as $item) {
 
 ### Compatibility
 
-Works with all field types, validation, visibility rules, custom scripts, and all theme implementations (Bootstrap, Tailwind, HTML5).
+Works with all field types, validation, visibility rules, and custom scripts in both the HTML (`FormWriterV2HTML5`) and JSON (`FormWriterV2JSON`) renderers.
 
 ---
 
@@ -1428,13 +1417,13 @@ POST).
 
 ```php
 // The token is rendered into the form automatically — nothing to enable.
-$formwriter = new FormWriterV2Bootstrap('form', ['method' => 'POST']);
+$formwriter = new FormWriterV2HTML5('form', ['method' => 'POST']);
 
 // To actually enforce it, opt in by calling validateCSRF() in your handler:
-require_once(PathHelper::getIncludePath('includes/FormWriterV2Bootstrap.php'));
+require_once(PathHelper::getIncludePath('includes/FormWriterV2HTML5.php'));
 
 if (LibraryFunctions::isFormSubmission()) {
-    $formwriter = new FormWriterV2Bootstrap('form');
+    $formwriter = new FormWriterV2HTML5('form');
 
     if (!$formwriter->validateCSRF($input)) {
         return LogicResult::error('Security token expired. Please refresh and try again.');
@@ -1565,7 +1554,6 @@ FormWriter provides:
 - [Model Form Helpers](#4-model-form-helpers) - Encapsulated field definitions in models
 - [Validation System](validation.md) - Complete validation documentation
 - [Admin Pages](admin_pages.md) - Using FormWriter in admin interfaces
-- Example forms: `/utils/forms_example_bootstrapv2.php`
 
 ---
 
@@ -1585,8 +1573,6 @@ FormWriterV2Base (concrete output methods)
         └── handleOutput(...)
 
 FormWriterV2HTML5::renderCheckboxInput($data)     ── HTML only
-FormWriterV2Bootstrap::renderCheckboxInput($data) ── HTML only
-FormWriterV2Tailwind::renderCheckboxInput($data)  ── HTML only
 ```
 
 ### Creating a New Theme
@@ -1635,7 +1621,7 @@ class FormWriterV2MyTheme extends FormWriterV2Base {
 
 ### Adding a New Option
 
-To add a new option (e.g., `'autocapitalize'`), change only one place — the `prepare*Data()` method in `FormWriterV2Base`. All three themes automatically receive it in `$data` and can use it in their renderer.
+To add a new option (e.g., `'autocapitalize'`), change only one place — the `prepare*Data()` method in `FormWriterV2Base`. The renderer automatically receives it in `$data` and can use it.
 
 ```php
 // In FormWriterV2Base::prepareTextData():

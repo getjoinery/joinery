@@ -2828,7 +2828,6 @@ abstract class FormWriterV2Base {
     /**
      * Output shared JavaScript for time input fields
      * Handles the updateTimeInput function and DOMContentLoaded event listener
-     * Used by both FormWriterV2Bootstrap and FormWriterV2Tailwind
      */
     protected function outputTimeInputJavaScript() {
         static $time_input_js_loaded = false;
