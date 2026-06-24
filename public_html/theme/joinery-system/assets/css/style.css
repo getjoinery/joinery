@@ -54,6 +54,49 @@
     --transition: 0.2s ease;
 }
 
+/* ===== .jy-ui kit brand tokens =====
+   Map the shared kit (.jy-ui) tokens onto joinery-system's own palette so kit
+   components opted into via .jy-ui render in admin's identity (blue #2A7BE4),
+   not the kit's default slate. style.css loads after the kit stylesheet, so
+   these :root definitions win over the kit's defaults. Driving them from this
+   theme's own --* tokens keeps admin's kit colors in sync with its chrome and
+   independent of the platform-wide jy_color_* settings (which also skin the
+   public theme). */
+:root {
+    /* Surfaces & neutrals */
+    --jy-color-bg:            var(--white);
+    --jy-color-surface:       var(--light);
+    --jy-color-surface-alt:   var(--lighter);
+    --jy-color-border:        var(--border);
+    --jy-color-border-strong: var(--secondary);
+    --jy-color-text:          var(--body-color);
+    --jy-color-text-muted:    var(--muted);
+    --jy-color-text-subtle:   var(--secondary);
+
+    /* Primary / links */
+    --jy-color-primary:       var(--primary);
+    --jy-color-primary-hover: var(--primary-dark);
+    --jy-color-primary-text:  var(--white);
+    --jy-color-link:          var(--primary);
+
+    /* Status */
+    --jy-color-success:    var(--success);
+    --jy-color-success-bg: var(--success-light);
+    --jy-color-warning:    var(--warning);
+    --jy-color-warning-bg: var(--warning-light);
+    --jy-color-danger:     var(--danger);
+    --jy-color-danger-bg:  var(--danger-light);
+    --jy-color-info:       var(--info);
+    --jy-color-info-bg:    var(--info-light);
+
+    /* Type & radius */
+    --jy-font-sans:    var(--font-sans);
+    --jy-font-display: var(--font-heading);
+    --jy-radius-sm: var(--radius-sm);
+    --jy-radius-md: var(--radius);
+    --jy-radius-lg: var(--radius-lg);
+}
+
 /* Suppress transitions during initial page load to prevent color flash */
 .preload * { transition: none !important; }
 

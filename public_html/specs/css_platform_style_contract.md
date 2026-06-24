@@ -56,8 +56,8 @@ So the "guaranteed cross-theme contract" we set out to build substantially exist
   `JoineryModal is undefined` on any other theme. It now lives once in the global kit
   (`base.js` + `.jy-ui`-scoped CSS), loaded on every theme, with a generic content mode
   (`open(content, { buttons })`); the calendar's scope/delete choosers run on it. The
-  image picker (→ Phase 3, admin) and cookie consent (kept self-contained for GDPR
-  resilience) intentionally stay separate.
+  cookie consent modal (kept self-contained for GDPR resilience) intentionally stays
+  separate.
 - **Cache-bust is manual.** ✅ *Resolved (Phase 1).* The base assets (and getjoinery's
   theme assets) now bust with `filemtime()` instead of a hand-bumped `?v=`.
 - **A few duplications** — getjoinery and joinery-system still define some component

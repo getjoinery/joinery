@@ -111,8 +111,16 @@ class PublicPageJoinerySystem extends PublicPageBase {
     // Base assets — joinery-system provides its own complete CSS; skip base
     // =====================================================================
     protected function render_base_assets() {
-        // Intentionally empty — joinery-system's style.css is self-contained.
-        // Base assets (base.css, assets/css/style.css) would conflict.
+        // joinery-system keeps its own self-contained style.css for chrome, but it
+        // links the kit stylesheet so admin pages can opt into .jy-ui components on
+        // the admin palette. Only joinery-styles.css loads here:
+        //  - base.css (reset/utility layer) is intentionally skipped — it conflicts
+        //    with joinery-system's own reset.
+        //  - base.js already loads in public_footer(), so it is not re-added.
+        // This runs immediately before render_brand_token_overrides() in
+        // global_includes_top(), so the kit's :root token defaults load first and the
+        // brand overrides win after.
+        echo '<link rel="stylesheet" href="/assets/css/joinery-styles.css?v=' . $this->asset_mtime('assets/css/joinery-styles.css') . '">' . "\n";
     }
 
     // =====================================================================

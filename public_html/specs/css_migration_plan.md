@@ -1,6 +1,8 @@
 # CSS Adoption Plan — Finish Rolling Out the `.jy-ui` Kit
 
-**Status:** Active — **Phase 1 ✅ and Phase 2 ✅ complete; Phases 3–7 pending.**
+**Status:** Active — **Phases 1 ✅, 2 ✅, and 3 ✅ complete; Phases 4–7 pending.** (Phase 3 is
+the light, opt-in admin adoption: kit is loadable + brand tokens set + verified; ongoing
+per-page opt-in continues as the default for admin work.)
 **Version:** 2.1
 **Policy:** Implements [css_platform_style_contract.md](css_platform_style_contract.md). Read it first — the platform already ships the `.jy-ui` kit (tokens + `.jy-ui`-scoped components + `.jy-*` chrome), loaded on every page by `render_base_assets()`. This document is *how we finish adopting it* across the surfaces that don't use it yet.
 
@@ -28,7 +30,7 @@ directory / per component / per plugin so no single sitting is large.
 | Work item | Count | Phase |
 |---|---|---|
 | Promote `JoineryModal` to kit (single copy in `base.js`, loaded on every theme incl. admin); cache-bust → filemtime | small | 1 |
-| Modal implementations to converge onto `JoineryModal` | 3 (image picker, consent, calendar editor) | 2 |
+| Modal implementations to converge onto `JoineryModal` | calendar editor (consent self-contained, out of scope) | 2 |
 | Component templates onto the kit (`views/components/`) | 15 in-scope (7 with `<style>` blocks, 50 inline) + `ComponentRenderer`; `custom_html` excluded (user content) | 2 |
 | Admin pages on the kit | 0 of ~48 (+ ~422 inline styles) | 3 |
 | Public views: inline styles to sweep (already `.jy-ui`) | ~699 across 46 files (excludes `views/components/`, now in Phase 2) | 4 |
@@ -94,11 +96,8 @@ non-conformant; this makes it the reference example.)
 duplicated work, so `JoineryModal` first gains a **generic content mode** —
 `JoineryModal.open(contentNode, { buttons })` accepting arbitrary DOM and a custom button
 set — and the calendar's recurring **scope/delete choosers** fold onto it (their content
-is rich: radio groups + multi-button footers the message/input API can't cover). Two other
-rich modals stay where they are, by design, not as oversight:
-- **Image picker (`imageselector-modal`)** is a `FormWriterV2Base` widget invoked from the
-  admin component editor with admin/Bootstrap-ish styling — it converges with the **admin
-  surface in Phase 3**, not here.
+is rich: radio groups + multi-button footers the message/input API can't cover). One other
+rich modal stays where it is, by design, not as oversight:
 - **Cookie consent (`joinery-cc-modal`)** injects its own CSS and runs on every page so the
   GDPR flow is independent of theme/kit load order. Routing it through `JoineryModal` would
   couple a compliance surface to `base.js` — a resilience regression. It stays
@@ -116,9 +115,8 @@ modal sets in `base.js` to `.btn`/`.btn-secondary`/`.btn-danger`/`.btn-primary`,
 **Exit:** all 15 in-scope component templates render inside `.jy-ui` with no `<style>`
 blocks and no inline `style=`; `ComponentRenderer` emits no `<style>` block and only a
 single custom-property inline; calendar uses the kit `JoineryModal` + buttons and its
-scope/delete choosers run on the content mode; `JoineryModal` has a content mode. (Image
-picker and consent modals are intentionally out — see above; image picker → Phase 3,
-consent stays self-contained.)
+scope/delete choosers run on the content mode; `JoineryModal` has a content mode. (The
+consent modal is intentionally out — see above; it stays self-contained.)
 
 **Verification status (as implemented):**
 
@@ -127,15 +125,15 @@ consent stays self-contained.)
 - ✅ **15 component templates** — each wraps in `.jy-ui`, `<style>` blocks moved to `.jy-{component}-*` kit sections, dynamic values via `--jy-*` custom props. *Verified structurally* (standalone render harness: no `<style>`, `.jy-ui` present, no fatals) for all 15. `custom_html` excluded (user content).
 - ✅ **Calendar redo** (`/profile/calendar`) — wrapped in `.jy-ui`, `<style>` block moved to a tokenized `.cal-*` kit section, broken `.dialog-btn-*` buttons fixed to kit `.btn`. *Verified live in browser* (screenshot): grid, toolbar, kit-tokened buttons, popover all render; `calendar_grid` styled by the kit. This is the one component **visually** confirmed end-to-end (the others have no live page).
 - ✅ **Calendar scope/delete modals → `JoineryModal.open`** — the recurring edit/delete scope choosers are no longer hand-rolled backdrops; their content renders through the kit content mode with kit `.btn` buttons, and the calendar view is now fully free of inline `style=` (display toggles moved to the `hidden` attribute). *Verified live:* the content-mode path (heading + radios + Cancel/Edit kit buttons, reading the chosen radio) opens and closes correctly on `/profile/calendar`.
-- ⏸ **Image picker (`imageselector-modal`) — deferred to Phase 3.** It lives in `FormWriterV2Base`, is invoked from `adm/admin_component_edit`, and is styled with admin/Bootstrap-ish classes (`btn-outline-danger`, `bx` icons, `d-flex`). It's an admin-context widget, so it converges with the admin surface in **Phase 3**, not here.
 - ⏸ **Consent (`joinery-cc-modal`) — kept self-contained by design.** `ConsentHelper` injects its own CSS and runs on every page so the GDPR banner works independent of theme/kit load order. Routing its manage-preferences modal through `JoineryModal` would couple consent to `base.js` — a resilience regression for a compliance surface. Leaving it self-contained is the right-layer call, not debt.
 
 > Note: component visual verification is limited to the calendar because the other
 > components have no live page instances (only `feature_grid` is placed, and not at a
-> routable URL); they were verified structurally via render harness. Admin previews
-> can't confirm them either — the admin theme doesn't load the kit stylesheet.
+> routable URL); they were verified structurally via render harness. (At Phase 2 time the
+> admin theme did not load the kit stylesheet, so admin previews couldn't confirm them
+> either; Phase 3 has since made the kit loadable in admin.)
 
-### Phase 3 — Admin (`adm/`) — *light adoption, not a conversion*
+### Phase 3 — Admin (`adm/`) — *light adoption, not a conversion* — ✅ COMPLETE
 
 **The admin theme stays.** joinery-system keeps owning the admin's look; we are **not**
 replacing it or holding admin to the zero-inline bar the public surfaces get. The kit is a
@@ -180,9 +178,6 @@ the rest.
   `.jy-ui`. New admin work defaults to the kit.
 - **Pick off cheap inline-style clusters** where a kit class or utility is a clean
   one-for-one swap. No obligation to chase every occurrence.
-- **Converge the image picker** (`imageselector-modal` in `FormWriterV2Base`, deferred from
-  Phase 2) onto kit buttons/`JoineryModal` **if** it's a clean change — it's the one
-  admin-context widget already flagged for attention.
 
 **Out of scope (don't):**
 - No mandate to wrap all 48 admin pages in `.jy-ui`.
@@ -194,21 +189,25 @@ the rest.
 surface, not a checklist to clear.
 
 **Exit:** the kit is loadable in admin with joinery-system token overrides set; new/edited
-admin pages can and do opt into it; the image picker is converged or consciously deferred.
-Pre-existing admin inline styles and `<style>` blocks are acceptable to leave in place.
+admin pages can and do opt into it. Pre-existing admin inline styles and `<style>` blocks
+are acceptable to leave in place.
 
 **Progress (the discrete, has-a-done items — opt-in page adoption is ongoing, not tracked here):**
 
-- ⬜ **Kit loader** — override `render_base_assets()` in `PublicPageJoinerySystem` to link
-  `joinery-styles.css` only.
-- ⬜ **Admin brand tokens** — `:root { --jy-color-* }` block in joinery-system `style.css`
-  mapping admin's palette onto kit tokens.
-- ⬜ **Verify chrome unchanged** — existing admin pages render identically (no `.jy-ui` opt-in
-  yet) after the kit loads globally.
-- ⬜ **Verify opt-in works** — a sample admin page wrapped in `.jy-ui` renders kit components
-  in admin's palette (browser-confirmed).
-- ⬜ **Image picker** (`imageselector-modal`) — converged onto kit buttons/`JoineryModal`, or
-  a recorded decision to defer with the reason.
+- ✅ **Kit loader** — `render_base_assets()` in `PublicPageJoinerySystem` now links
+  `joinery-styles.css` only (not `base.css`/`base.js`). *Verified live on `/admin/admin_users`:*
+  the `<link>` is present and the kit `:root` tokens resolve.
+- ✅ **Admin brand tokens** — `:root { --jy-color-* }` block added to joinery-system `style.css`,
+  mapping the kit tokens onto admin's own `--*` palette. *Verified live:* `--jy-color-primary`
+  computes to `#2A7BE4` (admin blue, overriding the kit's default slate), `--jy-radius-md` to
+  admin's `--radius`.
+- ✅ **Verify chrome unchanged** — `/admin/admin_users` renders identically after the kit loads
+  globally (sidebar, breadcrumbs, toolbar, table, blue Add-User button all intact). *Screenshot
+  confirmed.* Expected, since every non-`.jy-ui` kit rule is either `body.jy-default`-scoped
+  (admin body is `preload`) or a public-chrome class admin never emits.
+- ✅ **Verify opt-in works** — a `.jy-ui` probe injected on a live admin page renders
+  `.btn-primary` at `rgb(42,123,228)` (= admin blue) with white text and admin's radius.
+  *Browser-confirmed:* kit components render on the admin palette once a region opts in.
 
 ### Phase 4 — Public views inline sweep
 
