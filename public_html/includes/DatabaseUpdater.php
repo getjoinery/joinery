@@ -887,7 +887,7 @@ class DatabaseUpdater {
      * @param PDO $dblink Database connection
      * @return array Array with 'has_duplicates' boolean and 'duplicates' array
      */
-    private function checkForDuplicateUniqueConstraintValues($table_name, $columns, $dblink) {
+    private function checkForDuplicateUniqueConstraintValues($table_name, $columns, $dblink, $predicate = null) {
         $result = [
             'has_duplicates' => false,
             'duplicates' => []
@@ -907,6 +907,13 @@ class DatabaseUpdater {
             }
             $group_clause = implode(', ', $group_columns);
             $where_clause = implode(' AND ', $not_null_clauses);
+
+            // Scope the check to a partial predicate when one is present, so a
+            // partial UNIQUE index ("unique among active rows") is validated only
+            // against the rows it actually constrains.
+            if ($predicate !== null && trim($predicate) !== '') {
+                $where_clause .= " AND (" . $predicate . ")";
+            }
 
             // Concatenated representation for display
             $concat_columns = [];
@@ -1101,10 +1108,385 @@ class DatabaseUpdater {
 
         return $constraints;
     }
-    
+
+    // ===================================================================
+    // Declarative index management
+    //
+    // Parallels the unique-constraint machinery above. A developer declares
+    // an index on a data class — field-level `'index' => true` /
+    // `'index_with' => [...]` for plain btree, or the table-level
+    // `$index_specifications` array for method overrides, partial predicates,
+    // expression columns, and scoped-unique indexes. This step creates the
+    // missing ones and (cleanup mode only) drops the ones it manages that are
+    // no longer declared.
+    //
+    // The deterministic index name is a COMPLETE fingerprint of the index
+    // definition (columns + order, method, predicate, uniqueness). Any change
+    // to a definition therefore yields a different name and is handled as
+    // create-new + drop-old — there is deliberately no in-place recreate path.
+    // ===================================================================
+
+    /**
+     * Reconcile declarative indexes for the given model classes.
+     *
+     * Create missing when cleanup||upgrade; drop obsolete only when cleanup —
+     * identical flag gating to manageUniqueConstraints().
+     */
+    public function manageIndexes($classes) {
+        $results = [
+            'success' => true,
+            'indexes_added' => [],
+            'indexes_removed' => [],
+            'warnings' => [],
+            'errors' => [],
+            'messages' => []
+        ];
+
+        try {
+            $dblink = $this->dbconnector->get_db_link();
+
+            foreach ($classes as $class) {
+                $table = $class::$tablename;
+
+                if ($this->cleanup || $this->upgrade) {
+                    $this->addMissingIndexes($class, $table, $dblink, $results);
+                }
+
+                if ($this->cleanup) {
+                    $this->removeObsoleteIndexes($class, $table, $dblink, $results);
+                }
+            }
+        } catch (Exception $e) {
+            $results['success'] = false;
+            $results['errors'][] = "Index management error: " . $e->getMessage();
+        }
+
+        return $results;
+    }
+
+    /**
+     * Create any expected index that does not already exist.
+     */
+    private function addMissingIndexes($class, $table, $dblink, &$results) {
+        foreach ($this->getExpectedIndexes($class) as $idx) {
+            // The fingerprinted name is the primary idempotency guard.
+            if ($this->indexExists($idx['name'], $dblink)) {
+                if ($this->verbose) {
+                    $results['messages'][] = "Index already exists: {$idx['name']}";
+                }
+                continue;
+            }
+
+            // Structural dedupe — only for plain btree indexes (no predicate, no
+            // expression columns). Suppresses creation when an equivalent index
+            // already exists under a different (e.g. hand-made) name. Partial and
+            // expression indexes are deduped by fingerprinted name only.
+            if (!$idx['is_expression'] && $idx['where'] === null && $idx['method'] === 'btree') {
+                $existing = $this->findExistingIndexByColumns($table, $idx['columns'], $idx['unique'], $dblink);
+                if ($existing) {
+                    if ($this->verbose) {
+                        $results['messages'][] = "Equivalent index already exists under different name: $existing";
+                    }
+                    continue;
+                }
+            }
+
+            // Unique indexes: skip (never fail) if the data can't satisfy them,
+            // scoped by the partial predicate when present.
+            if ($idx['unique']) {
+                $dup = $this->checkForDuplicateUniqueConstraintValues($table, $idx['columns'], $dblink, $idx['where']);
+                if ($dup['has_duplicates']) {
+                    $results['warnings'][] = "Unique index skipped for {$idx['name']} due to duplicate values";
+                    continue;
+                }
+            }
+
+            $unique_kw = $idx['unique'] ? 'UNIQUE ' : '';
+            $cols_sql = implode(', ', $idx['columns']);
+            $where_sql = ($idx['where'] !== null) ? ' WHERE ' . $idx['where'] : '';
+            $sql = "CREATE {$unique_kw}INDEX {$idx['name']} ON {$table} USING {$idx['method']} ({$cols_sql}){$where_sql}";
+
+            if ($this->executeIndexSql($sql, $dblink)) {
+                $results['indexes_added'][] = $idx['name'];
+                $results['messages'][] = "Added index: {$idx['name']}";
+            } else {
+                $results['errors'][] = "Failed to create index: {$idx['name']}";
+            }
+        }
+    }
+
+    /**
+     * Drop system-managed indexes that are no longer declared (cleanup only).
+     *
+     * Only considers an index droppable when all three safety filters hold:
+     *   1. Its name carries the reserved _idx / _uidx suffix (we authored it).
+     *   2. It does not back a constraint and is not a primary key.
+     *   3. It is not in the current expected set for the class.
+     */
+    private function removeObsoleteIndexes($class, $table, $dblink, &$results) {
+        $expected_names = array_column($this->getExpectedIndexes($class), 'name');
+
+        foreach ($this->getDroppableManagedIndexes($table, $dblink) as $index_name) {
+            if (in_array($index_name, $expected_names)) {
+                continue;
+            }
+            $sql = "DROP INDEX IF EXISTS " . $index_name;
+            if ($this->executeIndexSql($sql, $dblink)) {
+                $results['indexes_removed'][] = $index_name;
+                $results['messages'][] = "Removed obsolete index: $index_name";
+            } else {
+                $results['errors'][] = "Failed to remove index: $index_name";
+            }
+        }
+    }
+
+    /**
+     * Build the expected index set for a class from both declaration surfaces.
+     *
+     * Returns a list of definition arrays:
+     *   ['name','columns','method','where','unique','is_expression']
+     */
+    private function getExpectedIndexes($class) {
+        $table = $class::$tablename;
+        $expected = [];
+
+        // Field-level shorthand: 'index' => true / 'index_with' => [...]
+        if (isset($class::$field_specifications)) {
+            foreach ($class::$field_specifications as $field => $spec) {
+                if (isset($spec['index']) && $spec['index']) {
+                    $expected[] = $this->buildIndexDefinition($table, [$field], 'btree', null, false);
+                }
+                if (isset($spec['index_with'])) {
+                    $columns = array_merge([$field], $spec['index_with']);
+                    $expected[] = $this->buildIndexDefinition($table, $columns, 'btree', null, false);
+                }
+            }
+        }
+
+        // Table-level block: advanced cases (method/predicate/expression/scoped-unique)
+        if (isset($class::$index_specifications) && is_array($class::$index_specifications)) {
+            foreach ($class::$index_specifications as $entry) {
+                if (empty($entry['columns']) || !is_array($entry['columns'])) {
+                    continue;
+                }
+                $method = isset($entry['method']) ? strtolower($entry['method']) : 'btree';
+                $where  = (isset($entry['where']) && trim($entry['where']) !== '') ? trim($entry['where']) : null;
+                $unique = !empty($entry['unique']);
+                $expected[] = $this->buildIndexDefinition($table, $entry['columns'], $method, $where, $unique);
+            }
+        }
+
+        return $expected;
+    }
+
+    /**
+     * Assemble a single expected-index definition, computing its fingerprint name.
+     */
+    private function buildIndexDefinition($table, $columns, $method, $where, $unique) {
+        $is_expression = false;
+        foreach ($columns as $col) {
+            if ($this->isIndexExpression($col)) {
+                $is_expression = true;
+                break;
+            }
+        }
+
+        return [
+            'name'          => $this->generateIndexName($table, $columns, $method, $where, $unique),
+            'columns'       => $columns,
+            'method'        => $method,
+            'where'         => $where,
+            'unique'        => $unique,
+            'is_expression' => $is_expression,
+        ];
+    }
+
+    /**
+     * A column entry is an expression (not a bare column name) when it contains
+     * anything beyond identifier characters — e.g. LOWER(usr_email).
+     */
+    private function isIndexExpression($col) {
+        return !preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $col);
+    }
+
+    /**
+     * Whitespace-collapse a SQL fragment so names hash stably across reformatting.
+     */
+    private function normalizeIndexFragment($fragment) {
+        return trim(preg_replace('/\s+/', ' ', (string)$fragment));
+    }
+
+    /**
+     * Deterministic, 63-char-safe, fingerprinting index name.
+     *
+     * Plain btree (no predicate, no method override, no expression columns) reuses
+     * generateOptimalConstraintName() with the idx/uidx type token. Anything
+     * carrying a predicate or non-default method folds a short discriminator hash
+     * into the type token (e.g. ..._a1b2_idx). Expression columns never thread
+     * their raw text through the abbreviation path — they derive the whole name
+     * from a sanitized hash token instead.
+     */
+    private function generateIndexName($table, $columns, $method, $where, $unique) {
+        $method = $method ?: 'btree';
+        $base   = $unique ? 'uidx' : 'idx';
+
+        $has_expression = false;
+        foreach ($columns as $col) {
+            if ($this->isIndexExpression($col)) {
+                $has_expression = true;
+                break;
+            }
+        }
+
+        $has_discriminator = ($where !== null && $where !== '') || ($method !== 'btree');
+
+        if (!$has_expression) {
+            if ($has_discriminator) {
+                $disc = substr(md5($method . '|' . $this->normalizeIndexFragment($where)), 0, 4);
+                $type = $disc . '_' . $base;
+            } else {
+                $type = $base;
+            }
+            return $this->generateOptimalConstraintName($table, $columns, $type);
+        }
+
+        // Expression path: hash the full normalized fingerprint, never the raw column.
+        $fingerprint = strtolower($this->normalizeIndexFragment(implode('|', $columns)))
+                     . '|' . $method . '|' . $this->normalizeIndexFragment($where);
+        $hash = substr(md5($fingerprint), 0, 8);
+
+        $name = $table . '_' . $hash . '_' . $base;
+        if (strlen($name) > 63) {
+            $available = 63 - (1 + strlen($hash) + 1 + strlen($base));
+            $name = substr($table, 0, max(1, $available)) . '_' . $hash . '_' . $base;
+        }
+        return $name;
+    }
+
+    /**
+     * Does an index with this exact name exist in the public schema?
+     */
+    private function indexExists($index_name, $dblink) {
+        $sql = "SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = :name";
+        try {
+            $q = $dblink->prepare($sql);
+            $q->bindValue(':name', $index_name, PDO::PARAM_STR);
+            $q->execute();
+            return $q->rowCount() > 0;
+        } catch (PDOException $e) {
+            if ($this->verbose) {
+                echo "Error checking index existence: " . $e->getMessage() . "\n";
+            }
+            return false;
+        }
+    }
+
+    /**
+     * Find a plain btree index matching these columns IN ORDER, method btree,
+     * matching uniqueness, and non-partial / non-expression — under any name.
+     *
+     * Unlike findExistingConstraintByColumns(), this is ORDER-SENSITIVE: an index
+     * on (a, b) is not the index on (b, a). Predicates are never compared here
+     * (partial/expression indexes dedupe by name only), so the match is exact.
+     */
+    private function findExistingIndexByColumns($table, $columns, $unique, $dblink) {
+        $sql = "SELECT ic.relname AS index_name,
+                       (SELECT array_agg(a.attname ORDER BY k.ord)
+                          FROM unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
+                          JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum
+                       ) AS cols
+                FROM pg_index i
+                JOIN pg_class ic ON ic.oid = i.indexrelid
+                JOIN pg_class tc ON tc.oid = i.indrelid
+                JOIN pg_namespace n ON n.oid = tc.relnamespace
+                JOIN pg_am am ON am.oid = ic.relam
+                WHERE tc.relname = :table
+                  AND n.nspname = 'public'
+                  AND i.indpred IS NULL
+                  AND i.indexprs IS NULL
+                  AND am.amname = 'btree'
+                  AND i.indisprimary = false
+                  AND i.indisunique = :unique";
+        try {
+            $q = $dblink->prepare($sql);
+            $q->bindValue(':table', $table, PDO::PARAM_STR);
+            $q->bindValue(':unique', $unique, PDO::PARAM_BOOL);
+            $q->execute();
+
+            while ($row = $q->fetch(PDO::FETCH_ASSOC)) {
+                $existing_columns = explode(',', trim($row['cols'], '{}'));
+                $existing_columns = array_map(function ($c) {
+                    return trim($c, '"');
+                }, $existing_columns);
+
+                // Order-sensitive exact match.
+                if ($existing_columns === array_values($columns)) {
+                    return $row['index_name'];
+                }
+            }
+        } catch (PDOException $e) {
+            if ($this->verbose) {
+                echo "Error finding existing index by columns: " . $e->getMessage() . "\n";
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Enumerate this table's indexes that the system is allowed to drop:
+     * reserved suffix, not backing a constraint, not a primary key.
+     */
+    private function getDroppableManagedIndexes($table, $dblink) {
+        $sql = "SELECT ic.relname AS index_name
+                FROM pg_index i
+                JOIN pg_class ic ON ic.oid = i.indexrelid
+                JOIN pg_class tc ON tc.oid = i.indrelid
+                JOIN pg_namespace n ON n.oid = tc.relnamespace
+                WHERE tc.relname = :table
+                  AND n.nspname = 'public'
+                  AND i.indisprimary = false
+                  AND ic.relname ~ '_(idx|uidx)$'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM pg_constraint c WHERE c.conindid = i.indexrelid
+                  )";
+        try {
+            $q = $dblink->prepare($sql);
+            $q->bindValue(':table', $table, PDO::PARAM_STR);
+            $q->execute();
+            return $q->fetchAll(PDO::FETCH_COLUMN);
+        } catch (PDOException $e) {
+            if ($this->verbose) {
+                echo "Error enumerating managed indexes: " . $e->getMessage() . "\n";
+            }
+            return [];
+        }
+    }
+
+    /**
+     * Execute an index DDL statement. Plain prepare/execute — unlike
+     * executeConstraintSql(), no UNIQUE duplicate pre-check (the caller already
+     * runs a predicate-scoped check for unique indexes).
+     */
+    private function executeIndexSql($sql, $dblink) {
+        try {
+            if ($this->verbose) {
+                echo "Executing: $sql<br>\n";
+            }
+            $q = $dblink->prepare($sql);
+            $q->execute();
+            return true;
+        } catch (PDOException $e) {
+            if ($this->verbose) {
+                echo "Error: " . $e->getMessage() . "<br>\n";
+            }
+            return false;
+        }
+    }
+
     /**
      * Run migrations after table creation
-     * 
+     *
      * @param array $migrations Migrations array
      * @return array Results
      */

@@ -375,6 +375,38 @@ Setting names and defaults are declared, not migrated. Every `update_database` r
 
 The same principle applies to core admin/profile menu rows (declared in `public_html/admin_menus.json`) and plugin menu rows (declared in `plugin.json` under `adminMenu` / `profileMenu`).
 
+### Index Management
+
+`update_database` reconciles ordinary (non-unique) indexes from the data class the same way it reconciles unique constraints. Declare an index and the run creates it; remove the declaration and a cleanup run drops it.
+
+**Two declaration surfaces.** Plain btree indexes — the common FK / filter-column case — are declared inline in `$field_specifications`:
+
+```php
+'ord_usr_user_id' => array('type' => 'int8', 'index' => true),                 // single column
+'cal_subject_type' => array('type' => 'varchar(32)', 'index_with' => array('cal_subject_id')),  // composite, in order
+```
+
+Anything beyond a plain btree goes in a table-level `$index_specifications` array:
+
+```php
+public static $index_specifications = array(
+    array('columns' => array('cal_subject_id'), 'where' => 'cal_delete_time IS NULL'),   // partial
+    array('columns' => array('prd_attributes'), 'method' => 'gin'),                       // method override
+    array('columns' => array('LOWER(usr_email)')),                                        // expression
+    array('columns' => array('usr_email'), 'unique' => true, 'where' => 'usr_delete_time IS NULL'), // partial-unique
+);
+```
+
+Each entry: `columns` (required, array of bare names or SQL expressions), optional `method` (default `btree`), optional `where` (partial predicate, stored verbatim), optional `unique`.
+
+**Division of labour.** Whole-table uniqueness stays with `unique` / `unique_with` (real `UNIQUE` constraints — FK-referenceable, read as constraints). Uniqueness scoped by a predicate, or over an expression, uses an `$index_specifications` entry with `unique => true` — a partial unique index expresses "unique among active rows," which a plain constraint cannot. The two never describe the same index.
+
+**Naming.** Managed indexes get a deterministic, 63-char-safe name that is a complete fingerprint of the definition (columns and order, method, predicate, uniqueness), ending in the reserved suffix `_idx` (plain) or `_uidx` (unique). **Those suffixes are reserved for system-managed indexes — never hand-create an index ending in `_idx` / `_uidx`.** Because the name is a fingerprint, changing a definition produces a different name: the run creates the new index and a cleanup run drops the old one. There is no in-place recreate.
+
+**Flag gating.** Create-missing runs when `cleanup || upgrade`; drop-obsolete runs only when `cleanup` — identical to unique constraints. So in plain `upgrade` mode a changed definition creates the new index immediately but leaves the stale one until the next `cleanup` run; the stale index is redundant, never wrong. A unique index whose data contains duplicates (scoped by its partial predicate when present) is skipped with a warning, never failing the run.
+
+**Drop safety.** The obsolete-drop pass only touches an index when all three hold: its name carries the reserved suffix, it does not back a constraint and is not a primary key, and it is not in the class's declared set. Primary keys, constraint-backing indexes, and hand-made indexes are never dropped.
+
 ### Plugin Tables Excluded
 
 `update_database.php` always runs with `include_plugins => false`. Plugin tables are managed through the plugin activation workflow (`PluginManager::activate()` calls `DatabaseUpdater::runPluginTablesOnly()`), not through the core updater. This is intentional — core can't know about plugins at compile time.

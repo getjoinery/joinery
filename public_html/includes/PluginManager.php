@@ -1173,8 +1173,15 @@ class PluginManager extends AbstractExtensionManager {
                 if (!empty($constraint_result['messages'])) {
                     $table_messages = array_merge($table_messages, $constraint_result['messages']);
                 }
+
+                // Apply declarative indexes (index / index_with / $index_specifications)
+                // on plugin classes, same gating as the core updater.
+                $index_result = $database_updater->manageIndexes($plugin_classes);
+                if (!empty($index_result['messages'])) {
+                    $table_messages = array_merge($table_messages, $index_result['messages']);
+                }
             } catch (Exception $e) {
-                $table_messages[] = "$plugin_name: unique-constraint sync error - " . $e->getMessage();
+                $table_messages[] = "$plugin_name: constraint/index sync error - " . $e->getMessage();
             }
 
             // Run pending migrations
