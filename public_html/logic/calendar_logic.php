@@ -55,6 +55,37 @@ function calendar_logic(array $input): LogicResult {
     }
 
     // -------------------------------------------------------------------------
+    // IMPORT (.ics upload)
+    // -------------------------------------------------------------------------
+    if (isset($_POST['import_entries'])) {
+        require_once(PathHelper::getIncludePath('includes/calendar/IcsImporter.php'));
+
+        $error = null;
+        $tmp   = isset($_FILES['ics_file']['tmp_name']) ? $_FILES['ics_file']['tmp_name'] : '';
+
+        if (empty($_FILES['ics_file']) || $tmp === '' || !is_uploaded_file($tmp)) {
+            $error = 'Choose an .ics file to import.';
+        } elseif ($_FILES['ics_file']['error'] !== UPLOAD_ERR_OK) {
+            $error = 'The file could not be uploaded. Please try again.';
+        } elseif ($_FILES['ics_file']['size'] > 5 * 1024 * 1024) {
+            $error = 'That file is too large (the limit is 5 MB).';
+        } else {
+            $contents = file_get_contents($tmp);
+            if ($contents === false || stripos($contents, 'BEGIN:VCALENDAR') === false) {
+                $error = 'That does not look like a calendar (.ics) file.';
+            } else {
+                $parsed  = IcsImporter::parse($contents);
+                $summary = IcsImporter::import($parsed, $subject, $tz);
+                $session->save_session_item('calendar_import_summary', $summary);
+                return LogicResult::redirect('/profile/calendar?imported=1');
+            }
+        }
+
+        $session->save_session_item('calendar_import_summary', ['error' => $error]);
+        return LogicResult::redirect('/profile/calendar?imported=1');
+    }
+
+    // -------------------------------------------------------------------------
     // SAVE (create / update, scope-aware)
     // -------------------------------------------------------------------------
     if (isset($_POST['save_entry'])) {
@@ -234,6 +265,14 @@ function calendar_logic(array $input): LogicResult {
 
     $page_vars['saved']   = !empty($input['saved']);
     $page_vars['deleted'] = !empty($input['deleted']);
+
+    // Import summary flash (set by the import branch before its redirect).
+    $page_vars['import_summary'] = null;
+    if (!empty($input['imported'])) {
+        $sum = $session->get_saved_item('calendar_import_summary');
+        $page_vars['import_summary'] = (is_array($sum) && !empty($sum)) ? $sum : null;
+        $session->save_session_item('calendar_import_summary', array()); // clear
+    }
 
     return LogicResult::render($page_vars);
 }
