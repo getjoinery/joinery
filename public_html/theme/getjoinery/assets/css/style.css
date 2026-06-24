@@ -1278,42 +1278,5 @@ table.table td { font-size: 0.9rem; color: var(--text-muted); }
     .trust-item { font-size: 0.75rem; padding: 0.35rem 0.75rem; }
 }
 
-/* ===== JoineryModal dialog ===== */
-dialog {
-    position: fixed;
-    inset: 0;
-    margin: auto;
-    padding: 1.5rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: #fff;
-    color: #1c1917;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.18);
-    max-width: 480px;
-    width: calc(100% - 2rem);
-    z-index: 9999;
-}
-dialog::backdrop { background: rgba(0,0,0,0.45); }
-.dialog-message { margin-bottom: 1.25rem; line-height: 1.5; }
-.dialog-input {
-    display: block; width: 100%; padding: 0.375rem 0.625rem;
-    margin-bottom: 1rem; border: 1px solid var(--border);
-    border-radius: var(--radius); font-size: 0.875rem;
-    color: #1c1917; background: #fff; box-sizing: border-box;
-}
-.dialog-input:focus { outline: 2px solid var(--primary); outline-offset: -1px; border-color: var(--primary); }
-.dialog-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
-.dialog-btn-cancel {
-    padding: 0.375rem 0.875rem; border: 1px solid var(--border);
-    border-radius: var(--radius); background: #fff; color: #1c1917;
-    cursor: pointer; font-size: 0.875rem;
-}
-.dialog-btn-cancel:hover { background: #f5f5f4; }
-.dialog-btn-confirm {
-    padding: 0.375rem 0.875rem; border: none;
-    border-radius: var(--radius); color: #fff;
-    cursor: pointer; font-size: 0.875rem;
-}
-.dialog-btn-confirm:hover { opacity: 0.88; }
-.dialog-btn-danger  { background: #dc2626; }
-.dialog-btn-primary { background: var(--primary); }
+/* JoineryModal dialog styling lives in the global kit
+   (/assets/css/joinery-styles.css, scoped under .jy-ui). Do not redefine here. */

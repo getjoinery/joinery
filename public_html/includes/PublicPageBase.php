@@ -577,9 +577,19 @@ abstract class PublicPageBase {
 	 * should override this method with an empty body to prevent conflicts.
 	 */
 	protected function render_base_assets() {
-		echo '<link rel="stylesheet" href="/assets/css/base.css?v=3">' . "\n";
-		echo '<link rel="stylesheet" href="/assets/css/joinery-styles.css?v=1">' . "\n";
-		echo '<script defer src="/assets/js/base.js?v=2"></script>' . "\n";
+		echo '<link rel="stylesheet" href="/assets/css/base.css?v=' . $this->asset_mtime('assets/css/base.css') . '">' . "\n";
+		echo '<link rel="stylesheet" href="/assets/css/joinery-styles.css?v=' . $this->asset_mtime('assets/css/joinery-styles.css') . '">' . "\n";
+		echo '<script defer src="/assets/js/base.js?v=' . $this->asset_mtime('assets/js/base.js') . '"></script>' . "\n";
+	}
+
+	/**
+	 * Cache-bust token for a global asset: the file's modification time, so the
+	 * edge CDN (which keys on the query string) re-fetches whenever the file
+	 * changes. Falls back to '1' if the path can't be resolved.
+	 */
+	protected function asset_mtime($relative_path) {
+		$full = PathHelper::getIncludePath($relative_path);
+		return (is_string($full) && is_file($full)) ? filemtime($full) : '1';
 	}
 
 	protected function render_brand_token_overrides() {

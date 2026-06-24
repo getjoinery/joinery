@@ -1065,3 +1065,63 @@ body.jy-default blockquote {
   .jy-ui .auth-wrap { padding: var(--jy-space-4) var(--jy-space-3); }
   .jy-ui .auth-card { padding: var(--jy-space-5); }
 }
+
+/* ─── Modal dialog (JoineryModal) ───────────────────────────────
+   The native <dialog> is created by JoineryModal in base.js and tagged
+   with the `jy-ui` class, so these scoped rules reach it even though it
+   renders in the top layer outside any page-level .jy-ui wrapper. */
+dialog.jy-ui {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  padding: var(--jy-space-5);
+  border: 1px solid var(--jy-color-border);
+  border-radius: var(--jy-radius-md);
+  background: var(--jy-color-bg);
+  color: var(--jy-color-text);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+  max-width: 480px;
+  width: calc(100% - 2rem);
+  z-index: 2000;
+}
+dialog.jy-ui::backdrop { background: rgba(0, 0, 0, 0.45); }
+.jy-ui .dialog-message { margin-bottom: var(--jy-space-5); line-height: 1.5; }
+.jy-ui .dialog-input {
+  display: block;
+  width: 100%;
+  padding: 0.375rem 0.625rem;
+  margin-bottom: var(--jy-space-4);
+  border: 1px solid var(--jy-color-border);
+  border-radius: var(--jy-radius-sm);
+  font-size: 0.875rem;
+  color: var(--jy-color-text);
+  background: var(--jy-color-bg);
+  box-sizing: border-box;
+}
+.jy-ui .dialog-input:focus {
+  outline: 2px solid var(--jy-color-primary);
+  outline-offset: -1px;
+  border-color: var(--jy-color-primary);
+}
+.jy-ui .dialog-actions { display: flex; justify-content: flex-end; gap: var(--jy-space-2); }
+.jy-ui .dialog-btn-cancel {
+  padding: 0.375rem 0.875rem;
+  border: 1px solid var(--jy-color-border);
+  border-radius: var(--jy-radius-sm);
+  background: var(--jy-color-bg);
+  color: var(--jy-color-text);
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+.jy-ui .dialog-btn-cancel:hover { background: var(--jy-color-surface); }
+.jy-ui .dialog-btn-confirm {
+  padding: 0.375rem 0.875rem;
+  border: none;
+  border-radius: var(--jy-radius-sm);
+  color: var(--jy-color-primary-text);
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+.jy-ui .dialog-btn-confirm:hover { opacity: 0.88; }
+.jy-ui .dialog-btn-danger  { background: var(--jy-color-danger); }
+.jy-ui .dialog-btn-primary { background: var(--jy-color-primary); }
