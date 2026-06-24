@@ -203,10 +203,13 @@ them):
 ## Admin interface
 
 Admin runs the vanilla-HTML5 joinery-system theme and **does not yet use `.jy-ui`**
-(0 adoption). Adopting the kit in admin — wrapping pages in `.jy-ui`, using kit
-components, dropping admin inline styles, and setting joinery-system's brand tokens —
-is the largest single adoption chunk. No framework removal is involved (there is no
-UIkit/Bootstrap in the live admin).
+(0 adoption). Admin keeps its own theme — the kit is not a replacement for it. Admin
+adoption is therefore **light and opt-in** (Phase 3): make the kit loadable in admin with
+joinery-system's brand `--jy-*` token overrides set, then let new and edited admin pages
+draw on the kit, picking off cheap inline-style swaps where they're clean. There is **no**
+mandate to wrap all admin pages in `.jy-ui` or drive admin inline styles to zero — admin is
+internal and already renders fine on its theme, so the payoff of a full sweep is low. No
+framework removal is involved (there is no UIkit/Bootstrap in the live admin).
 
 ## Migration plan
 
@@ -243,8 +246,9 @@ migration narration.
 2. **Namespacing.** ✅ *Decided (revised):* `.jy-ui` **ancestor scope** for kit
    components + `.jy-*` classes for chrome + `--jy-*` tokens. **Not** a per-class
    `.jy-btn` prefix (that would duplicate the existing kit).
-3. **Admin.** ✅ *Decided:* not special — a Layer 2 theme (joinery-system) that
-   adopts the kit; no framework-removal track.
+3. **Admin.** ✅ *Decided:* not special — a Layer 2 theme (joinery-system) that may
+   draw on the kit while keeping its own look. Adoption is **light/opt-in** (no full
+   conversion, no zero-inline mandate); no framework-removal track.
 4. **Dialog buttons.** ✅ *Decided:* no separate `.dialog-btn` family — a dialog
    button is a kit `.btn*` inside a modal; the modal container owns button layout.
 
@@ -261,6 +265,8 @@ migration narration.
 - `includes/PluginManager.php` / `includes/PluginHelper.php` — load active plugins' declared stylesheet (global-when-active), after the kit, before the theme
 - error/404 template(s) — route through `public_header_common()`
 - Platform views/components (calendar first) — wrap in `.jy-ui`, inline-style sweep, `<style>`-block removal into the kit
-- `adm/*` — wrap in `.jy-ui`, adopt kit components, inline-style sweep
+- `includes/PublicPageJoinerySystem.php` — override `render_base_assets()` to link the kit stylesheet (`joinery-styles.css` only; not `base.css`/`base.js`), so admin pages can opt into `.jy-ui`
+- `theme/joinery-system/assets/css/style.css` — add a `:root { --jy-color-* }` brand-token block so kit components render in admin's palette (loads last → wins; keeps admin independent of the global public-theme color settings)
+- `adm/*` — light/opt-in: new/edited pages adopt kit components; cheap inline-style swaps only (no full sweep)
 - `theme/joinery-system`, `theme/getjoinery` — set brand `--jy-*` overrides; retire duplicated component CSS
 - `docs/theme_integration_instructions.md`, `docs/formwriter.md` — extend kit docs / cross-link

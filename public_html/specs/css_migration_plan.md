@@ -135,14 +135,67 @@ consent stays self-contained.)
 > routable URL); they were verified structurally via render harness. Admin previews
 > can't confirm them either — the admin theme doesn't load the kit stylesheet.
 
-### Phase 3 — Admin (`adm/`)
+### Phase 3 — Admin (`adm/`) — *light adoption, not a conversion*
 
-The largest single chunk and entirely un-adopted. Wrap admin pages in `.jy-ui`, use
-kit components, set joinery-system's brand `--jy-*` overrides, and sweep admin inline
-styles. Self-contained and internal, so lower blast radius. Chunk by admin area.
+**The admin theme stays.** joinery-system keeps owning the admin's look; we are **not**
+replacing it or holding admin to the zero-inline bar the public surfaces get. The kit is a
+structural vocabulary plus `--jy-*` tokens, not a skin — so admin can draw on the global
+styles while the theme's token overrides keep its own identity. This phase is opt-in and
+opportunistic, not a full sweep.
 
-**Scope:** ~422 inline across ~48 files; 3 `<style>` blocks.
-**Exit:** admin renders inside `.jy-ui`; no admin inline styles or `<style>` blocks.
+**Why lighter here:** admin is internal, has no public/SEO surface, and already renders
+fine on its own theme. The payoff of forcing every page into `.jy-ui` and eliminating all
+422 inline styles is low relative to the churn. We take the wins that are cheap and leave
+the rest.
+
+**In scope (do):**
+- **Make the kit *available* in admin (the one enabling change).** `PublicPageJoinerySystem`
+  overrides `render_base_assets()` to an empty body, so the kit stylesheet
+  (`assets/css/joinery-styles.css`) never links on admin pages — that single fact is what
+  blocks `.jy-ui` in admin. (The kit *JS* already loads: Phase 1 put `base.js` in the admin
+  footer, so `JoineryModal` already works there; only the CSS is missing.) Fix: override
+  `render_base_assets()` to emit **only** the kit stylesheet link —
+  `<link rel="stylesheet" href="/assets/css/joinery-styles.css?v={asset_mtime}">`. Do **not**
+  load `base.css` (the reset/utility layer the original empty-override comment correctly
+  flagged as conflicting with admin's reset), and do **not** re-add `base.js` (already in the
+  footer). Cascade lands correctly for free: `global_includes_top()` runs
+  `render_base_assets()` → `render_brand_token_overrides()` → then `style.css`, so kit
+  defaults load first, brand-token overrides win next, and admin `style.css` wins last.
+- **Set joinery-system's brand `--jy-*` overrides** so kit components wear admin's palette
+  (its blue `#2A7BE4`) rather than the kit's default slate. The override *plumbing* already
+  exists and already runs in admin (`render_brand_token_overrides`), but it is driven by five
+  **global** settings (`jy_color_primary`, `jy_color_primary_hover`, `jy_color_primary_text`,
+  `jy_color_surface`, `jy_color_bg`) that are currently empty — and being global, setting them
+  would also reskin the public theme. For an admin-*specific* palette, add a small
+  `:root { --jy-color-primary: #2A7BE4; … }` block to joinery-system's own `style.css`
+  (it loads last, so it wins, and admin stays independent of the public site's colors).
+- **No leakage to verify away:** loading the kit globally in admin only adds `:root{--jy-*}`
+  token *definitions* (new variables; admin's own `--primary`/`--muted`/`--radius` are
+  untouched) and `.jy-ui`-scoped component rules (inert until a page opts in). The only other
+  rules in the file are `body.jy-default …` (admin's body is `class="preload"`, never matches)
+  and distinctive public-chrome classes (`.jy-site-header`, `.jy-panel`, `.jy-cl[...]`) admin
+  markup never emits. Existing admin chrome renders identically.
+- **Adopt the kit opportunistically** — when building or substantially editing an admin
+  page, prefer kit components (`.btn`, form classes) and wrap that page's content in
+  `.jy-ui`. New admin work defaults to the kit.
+- **Pick off cheap inline-style clusters** where a kit class or utility is a clean
+  one-for-one swap. No obligation to chase every occurrence.
+- **Converge the image picker** (`imageselector-modal` in `FormWriterV2Base`, deferred from
+  Phase 2) onto kit buttons/`JoineryModal` **if** it's a clean change — it's the one
+  admin-context widget already flagged for attention.
+
+**Out of scope (don't):**
+- No mandate to wrap all 48 admin pages in `.jy-ui`.
+- No requirement to drive admin inline `style=` to zero or remove all 3 `<style>` blocks.
+- No restyling of pages that already work, purely for adoption's sake.
+
+**Scope reference (not a target):** ~422 inline across ~48 files; 3 `<style>` blocks
+(`admin_spec_view.php`, `admin_plugins.php`, `admin_help.php`). These are the *available*
+surface, not a checklist to clear.
+
+**Exit:** the kit is loadable in admin with joinery-system token overrides set; new/edited
+admin pages can and do opt into it; the image picker is converged or consciously deferred.
+Pre-existing admin inline styles and `<style>` blocks are acceptable to leave in place.
 
 ### Phase 4 — Public views inline sweep
 
@@ -190,7 +243,8 @@ Email and user-authored/WYSIWYG areas are excluded (see policy spec, Out of scop
 - **Phase 1 is tiny** (a modal + cache-bust) but unblocks the calendar redo and
   guarantees the kit everywhere.
 - **Phases 2–6** go by reuse and isolation: components (high reuse, calendar in
-  flight) → admin (biggest inline chunk, internal) → public-view sweep → plugins
+  flight) → admin (light, opt-in adoption on its own theme — internal, low payoff for a
+  full sweep) → public-view sweep (where the inline-style payoff actually lands) → plugins
   (modular, one at a time) → theme dedup (needs care to not break chrome).
 - **Phase 7** locks it in.
 
