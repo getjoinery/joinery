@@ -113,22 +113,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // ===== Modal =====
-    document.querySelectorAll('[data-modal]').forEach(trigger => {
-        trigger.addEventListener('click', (e) => {
-            e.preventDefault();
-            const modal = document.getElementById(trigger.dataset.modal);
-            if (modal) modal.classList.add('active');
-        });
-    });
-    document.querySelectorAll('.modal-close, .modal-overlay').forEach(el => {
-        el.addEventListener('click', (e) => {
-            if (e.target === el) {
-                el.closest('.modal-overlay')?.classList.remove('active');
-            }
-        });
-    });
-
     // ===== Smooth scroll for anchor links =====
     document.querySelectorAll('a[href^="#"]').forEach(a => {
         a.addEventListener('click', (e) => {

@@ -67,7 +67,7 @@ class PublicPage extends PublicPageBase {
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/theme/getjoinery/assets/css/style.css?v=9">
+    <link rel="stylesheet" href="/theme/getjoinery/assets/css/style.css?v=<?php echo $this->asset_mtime('theme/getjoinery/assets/css/style.css'); ?>">
 
     <?php
     if ($settings->get_setting('custom_css')) {
@@ -145,7 +145,7 @@ class PublicPage extends PublicPageBase {
 </footer>
 
 <script src="/assets/js/joinery-validate.js"></script>
-<script src="/theme/getjoinery/assets/js/script.js"></script>
+<script src="/theme/getjoinery/assets/js/script.js?v=<?php echo $this->asset_mtime('theme/getjoinery/assets/js/script.js'); ?>"></script>
 
 </body>
 </html>

@@ -27,7 +27,8 @@ directory / per component / per plugin so no single sitting is large.
 
 | Work item | Count | Phase |
 |---|---|---|
-| Kit gaps to fill (modal/dialog; cache-bust → filemtime) | small | 1 |
+| Promote `JoineryModal` to kit (single copy in `base.js`, loaded on every theme incl. admin); cache-bust → filemtime | small | 1 |
+| Modal implementations to converge onto `JoineryModal` | 3 (image picker, consent, calendar editor) | 2 |
 | Components not on the kit (own `<style>` blocks) | 7 core (+ `ComponentRenderer`) | 2 |
 | Admin pages on the kit | 0 of ~48 (+ ~422 inline styles) | 3 |
 | Public views: inline styles to sweep (already `.jy-ui`) | ~749 across 59 files | 4 |
@@ -43,9 +44,20 @@ Ordered: foundation/gaps first, then surfaces by reuse and isolation, then guard
 
 ### Phase 1 — Kit gaps + foundation (low risk)
 
-- **Add a modal/dialog component to the kit** (`.jy-ui`-scoped) — the calendar
-  currently hand-rolls one; this is the main missing piece. Add any missing small
-  utility (e.g. a hidden helper) if not already present.
+- **Promote `JoineryModal` into the kit** (`.jy-ui`-scoped). The system modal —
+  `JoineryModal.confirm/alert/prompt`, a native `<dialog>` API — already exists, but
+  its JS was duplicated into two themes' `script.js` (`joinery-system` + `getjoinery`)
+  and its `.dialog-*` CSS into those themes' `style.css`. It was **not** in the global
+  kit, yet `PublicPageBase` emits `JoineryModal.confirm(...)` for delete confirmations
+  on *any* theme — so on any other theme that call threw `JoineryModal is undefined`.
+  Fix: the modal JS now lives once in the global `base.js`, and its `.dialog-*` CSS in
+  `joinery-styles.css` scoped under `.jy-ui` (the created `<dialog>` carries the `jy-ui`
+  class so the scoped rules reach it in the top layer). **Both** theme JS copies are
+  deleted. The admin theme (`joinery-system`) skips the base *CSS* — it has its own —
+  but now loads the shared `base.js`, so it uses the one `JoineryModal` and keeps its
+  own dialog styling. This is a *promote + dedup*, not a build, and it fixes the
+  cross-theme bug. (The dead generic `[data-modal]`/`.modal-overlay` toggler in
+  `assets/js/script.js` — zero markup used it — has already been removed.)
 - **Cache-bust → `filemtime()`** on the base assets (and getjoinery's hardcoded
   `?v=9`). The edge CDN keys on the query string, so this busts correctly.
 - **Verify the kit loads before the active theme stylesheet**, and that **every page
@@ -53,8 +65,9 @@ Ordered: foundation/gaps first, then surfaces by reuse and isolation, then guard
   paths (`display_404_page()` uses its own template + plain-text fallback); fix any
   that bypass it.
 
-**Exit:** kit has a modal; loads before theme on every page incl. error pages;
-filemtime busting in place. Zero visual change to existing pages.
+**Exit:** `JoineryModal` lives in the global kit (one copy in `base.js`, `.jy-ui`-scoped
+CSS), loaded on every theme — admin included; kit CSS loads before theme on every page
+incl. error pages; filemtime busting in place. Zero visual change to existing pages.
 
 ### Phase 2 — Components (incl. `ComponentRenderer`, calendar first)
 
@@ -67,11 +80,32 @@ injecting a `<style>` block + free-form inline styles — its layout rules becom
 
 **Calendar first, as the worked redo:** wrap `/profile/calendar` content in `.jy-ui`,
 replace its `<style>` block and the theme-only `.dialog-btn` buttons with the kit's
-modal + `.btn`/`.btn-danger`, and drop its inline styles. (Our calendar shipped
+`JoineryModal` + `.btn`/`.btn-danger`, and drop its inline styles. (Our calendar shipped
 non-conformant; this makes it the reference example.)
 
-**Exit:** core components render inside `.jy-ui` with no `<style>` blocks; calendar
-uses the kit modal + buttons.
+**Converge the remaining modal implementations.** Three other modals exist:
+`imageselector-modal` (FormWriter image picker), `joinery-cc-modal` (cookie consent),
+and the calendar's hand-rolled entry editor. Each is **rich content** (grids, toggles,
+multi-button footers), which `JoineryModal`'s message + single-input + confirm/cancel
+API doesn't cover. So this phase first **adds a generic content mode** to `JoineryModal`
+(e.g. `JoineryModal.open(contentNode, { buttons })` accepting arbitrary DOM and a custom
+button set), then folds these in. **Caveat for consent:** `ConsentHelper` injects its own
+inline CSS so the banner renders on every page independent of any theme — it can only
+move onto `JoineryModal` *after* the Phase 1 promotion to the global kit, never while the
+modal is theme-bound.
+
+**Collapse the modal's `.dialog-btn-*` onto kit buttons.** Phase 1 promoted `JoineryModal`
+verbatim — its buttons still use a `.dialog-btn-cancel`/`-confirm`/`-danger`/`-primary`
+family (rules carried into `joinery-styles.css` to preserve the look with zero change).
+This phase retires that family per the contract decision (a dialog button *is* a kit
+`.btn`/`.btn-danger`, no separate `.dialog-btn` family): switch the button classes the
+modal sets in `base.js` to `.btn`/`.btn-secondary`/`.btn-danger`/`.btn-primary`, delete the
+`.dialog-btn-*` rules from `joinery-styles.css`, and drop the admin theme's leftover
+`.dialog-btn-*` CSS. The kit already ships `.jy-ui .btn-danger`, so it's a class swap.
+
+**Exit:** core components render inside `.jy-ui` with no `<style>` blocks; calendar uses
+the kit `JoineryModal` + buttons; `JoineryModal` has a content mode and the image-picker
+and consent modals run on it.
 
 ### Phase 3 — Admin (`adm/`)
 

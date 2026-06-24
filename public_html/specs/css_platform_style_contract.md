@@ -50,8 +50,15 @@ So the "guaranteed cross-theme contract" we set out to build substantially exist
   files (views 749, adm 422, plugins 228, includes 169, theme 67).
 - **In-view `<style>` blocks** (~33), including the 7 core components and the
   `ComponentRenderer` framework, which inject CSS the kit should own.
-- **Gaps in the kit.** No modal/dialog component (the calendar hand-rolls one); the
-  cache-bust on the base assets is a hand-bumped `?v=`, not `filemtime`.
+- **The system modal isn't in the kit.** `JoineryModal` (a native-`<dialog>`
+  confirm/alert/prompt API) exists, but its JS and `.dialog-*` CSS live in two themes
+  (`joinery-system` + `getjoinery`, duplicated) — not in the global kit. Yet
+  `PublicPageBase` calls `JoineryModal.confirm(...)` generically, so on any other theme
+  it throws `JoineryModal is undefined`. It needs promoting into the kit (one copy,
+  `.jy-ui`-scoped). Several other modals (image picker, cookie consent) are hand-rolled
+  separately and should later converge onto it once it gains a generic content mode.
+- **Cache-bust is manual.** The base assets bust with a hand-bumped `?v=`, not
+  `filemtime`.
 - **A few duplications** — getjoinery and joinery-system still define some component
   CSS that the kit now owns.
 
