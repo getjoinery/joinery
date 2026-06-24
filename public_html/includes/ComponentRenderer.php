@@ -25,9 +25,6 @@
 
 class ComponentRenderer {
 
-	/** @var bool Whether the layout CSS has been output on this page */
-	protected static $layout_css_output = false;
-
 	/**
 	 * Output debug message as HTML comment
 	 * Uses Globalvars 'debug' setting to determine visibility
@@ -323,17 +320,19 @@ class ComponentRenderer {
 			return $html;
 		}
 
-		// Build wrapper attributes
+		// Build wrapper attributes. Per-instance values are emitted as --jy-cl-*
+		// custom properties (server-computed); the .jy-cl rules that consume them
+		// live in the kit stylesheet (joinery-styles.css), not a <style> block.
 		$styles = [];
-		$attrs = 'class="component-layout"';
+		$attrs = 'class="jy-cl"';
 
 		if ($has_width) {
 			$attrs .= ' data-maxw';
-			$styles[] = '--cl-max-width: ' . $layout_vars['cl_max_width'];
+			$styles[] = '--jy-cl-max-width: ' . $layout_vars['cl_max_width'];
 		}
 		if ($has_height) {
 			$attrs .= ' data-maxh';
-			$styles[] = '--cl-max-height: ' . $layout_vars['cl_max_height'];
+			$styles[] = '--jy-cl-max-height: ' . $layout_vars['cl_max_height'];
 		}
 		if ($has_margin) {
 			$attrs .= ' data-vmargin="' . htmlspecialchars($layout_vars['cl_vertical_margin']) . '"';
@@ -343,51 +342,7 @@ class ComponentRenderer {
 			$attrs .= ' style="' . implode('; ', $styles) . '"';
 		}
 
-		// Include layout CSS on first use
-		$css = self::get_layout_css();
-
-		return $css . '<div ' . $attrs . '>' . "\n" . $html . '</div>' . "\n";
-	}
-
-	/**
-	 * Get the layout CSS rules (output once per page)
-	 *
-	 * Injects a <style> block on the first render that uses layout wrapping.
-	 * This ensures the CSS is always available regardless of theme.
-	 *
-	 * @return string Style tag HTML or empty string if already output
-	 */
-	protected static function get_layout_css() {
-		if (self::$layout_css_output) {
-			return '';
-		}
-		self::$layout_css_output = true;
-
-		return '<style>
-/* Component Layout Controls */
-.component-layout[data-maxw] .container,
-.component-layout[data-maxw] .container-fluid,
-.component-layout[data-maxw] .container-lg,
-.component-layout[data-maxw] .container-xl {
-	max-width: var(--cl-max-width);
-}
-.component-layout[data-maxw]:not(:has(.container, .container-fluid, .container-lg, .container-xl)) > :first-child {
-	max-width: var(--cl-max-width);
-	margin-left: auto;
-	margin-right: auto;
-}
-.component-layout[data-maxh] > :first-child {
-	max-height: var(--cl-max-height);
-	overflow: hidden;
-}
-/* Vertical Margin Controls */
-.component-layout[data-vmargin="none"] { margin-top: 0; margin-bottom: 0; }
-.component-layout[data-vmargin="sm"] { margin-top: 1rem; margin-bottom: 1rem; }
-.component-layout[data-vmargin="md"] { margin-top: 2rem; margin-bottom: 2rem; }
-.component-layout[data-vmargin="lg"] { margin-top: 3rem; margin-bottom: 3rem; }
-.component-layout[data-vmargin="xl"] { margin-top: 5rem; margin-bottom: 5rem; }
-</style>
-';
+		return '<div ' . $attrs . '>' . "\n" . $html . '</div>' . "\n";
 	}
 
 	/**

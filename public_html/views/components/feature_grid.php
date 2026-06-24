@@ -2,8 +2,10 @@
 /**
  * Feature Grid Component
  *
- * Grid of icon + title + description items.
- * Pure HTML5, no framework dependencies. Uses CSS Grid for layout.
+ * Grid of icon + title + description items. Pure HTML5, CSS Grid layout. Renders
+ * inside the `.jy-ui` kit; structure lives in the `.jy-feature-grid` section in
+ * joinery-styles.css. Per-instance column counts, colors and icon style arrive as
+ * --jy-fg-* custom properties (server-computed).
  *
  * Available variables:
  *   $component_config - Configuration array from pac_config
@@ -22,84 +24,25 @@ $icon_style   = $component_config['icon_style'] ?? 'plain';
 $icon_color   = $component_config['icon_color'] ?? '#333333';
 $bg_color     = $component_config['background_color'] ?? '';
 
-$uid        = 'fg-' . htmlspecialchars($component_slug ?? uniqid());
-$text_align = ($style === 'centered') ? 'center' : 'left';
 $cols_mobile = min(2, $columns);
+$align_mod   = ($style === 'centered') ? '' : ' is-left';
 
-$icon_wrap_style = '';
-if ($icon_style === 'circle') {
-	$icon_wrap_style = 'display: inline-flex; width: 64px; height: 64px; border-radius: 50%; align-items: center; justify-content: center; background-color: ' . htmlspecialchars($icon_color) . '20;';
-} elseif ($icon_style === 'square') {
-	$icon_wrap_style = 'display: inline-flex; width: 64px; height: 64px; border-radius: 8px; align-items: center; justify-content: center; background-color: ' . htmlspecialchars($icon_color) . '20;';
-}
+// Icon wrap shape modifier ('plain' = no wrapper)
+$wrap_mod = '';
+if ($icon_style === 'circle') { $wrap_mod = ' is-circle'; }
+elseif ($icon_style === 'square') { $wrap_mod = ' is-square'; }
+$has_wrap = ($wrap_mod !== '');
+
+// Per-instance values as custom properties (server-computed inline)
+$vars = '--jy-fg-cols: ' . $columns . '; --jy-fg-cols-mobile: ' . $cols_mobile
+	. '; --jy-fg-icon: ' . htmlspecialchars($icon_color) . ';';
+if ($bg_color)  { $vars .= ' --jy-fg-bg: ' . htmlspecialchars($bg_color) . ';'; }
+if ($has_wrap)  { $vars .= ' --jy-fg-icon-bg: ' . htmlspecialchars($icon_color) . '20;'; }
 ?>
-<style>
-.<?php echo $uid; ?> {
-	padding: 3rem 1rem;
-	<?php if ($bg_color): ?>background-color: <?php echo htmlspecialchars($bg_color); ?>;<?php endif; ?>
-}
-.<?php echo $uid; ?>-inner {
-	max-width: 1100px;
-	margin: 0 auto;
-}
-.<?php echo $uid; ?>-header {
-	text-align: center;
-	margin-bottom: 2.5rem;
-}
-.<?php echo $uid; ?>-header h2 {
-	margin: 0 0 0.5rem 0;
-}
-.<?php echo $uid; ?>-header p {
-	margin: 0;
-	color: #666;
-}
-.<?php echo $uid; ?>-grid {
-	display: grid;
-	grid-template-columns: repeat(<?php echo $columns; ?>, 1fr);
-	gap: 2rem;
-}
-.<?php echo $uid; ?>-item {
-	text-align: <?php echo $text_align; ?>;
-	position: relative;
-}
-.<?php echo $uid; ?>-icon {
-	margin-bottom: 0.75rem;
-	<?php if ($text_align === 'center'): ?>display: flex; justify-content: center;<?php endif; ?>
-}
-.<?php echo $uid; ?>-icon i {
-	font-size: 2rem;
-	color: <?php echo htmlspecialchars($icon_color); ?>;
-}
-.<?php echo $uid; ?>-item h3 {
-	margin: 0 0 0.5rem 0;
-	font-size: 1.1rem;
-}
-.<?php echo $uid; ?>-item p {
-	margin: 0;
-	color: #555;
-	font-size: 0.95rem;
-	line-height: 1.6;
-}
-.<?php echo $uid; ?>-item a.item-link {
-	position: absolute;
-	inset: 0;
-}
-@media (max-width: 768px) {
-	.<?php echo $uid; ?>-grid {
-		grid-template-columns: repeat(<?php echo $cols_mobile; ?>, 1fr);
-		gap: 1.5rem;
-	}
-}
-@media (max-width: 480px) {
-	.<?php echo $uid; ?>-grid {
-		grid-template-columns: 1fr;
-	}
-}
-</style>
-<section class="<?php echo $uid; ?>">
-	<div class="<?php echo $uid; ?>-inner">
+<section class="jy-ui jy-feature-grid<?php echo $align_mod; ?>" style="<?php echo $vars; ?>">
+	<div class="jy-feature-grid-inner">
 		<?php if ($heading || $subheading): ?>
-			<div class="<?php echo $uid; ?>-header">
+			<div class="jy-feature-grid-header">
 				<?php if ($heading): ?>
 					<h2><?php echo htmlspecialchars($heading); ?></h2>
 				<?php endif; ?>
@@ -109,13 +52,13 @@ if ($icon_style === 'circle') {
 			</div>
 		<?php endif; ?>
 
-		<div class="<?php echo $uid; ?>-grid">
+		<div class="jy-feature-grid-grid">
 			<?php foreach ($features as $feature): ?>
-				<div class="<?php echo $uid; ?>-item">
+				<div class="jy-feature-grid-item">
 					<?php if (!empty($feature['icon'])): ?>
-						<div class="<?php echo $uid; ?>-icon">
-							<?php if ($icon_wrap_style): ?>
-								<div style="<?php echo $icon_wrap_style; ?>">
+						<div class="jy-feature-grid-icon">
+							<?php if ($has_wrap): ?>
+								<div class="jy-feature-grid-iconwrap<?php echo $wrap_mod; ?>">
 									<i class="<?php echo htmlspecialchars($feature['icon']); ?>"></i>
 								</div>
 							<?php else: ?>

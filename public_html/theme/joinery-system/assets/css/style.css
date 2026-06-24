@@ -1302,6 +1302,7 @@ dialog::backdrop {
     margin-bottom: 1.25rem;
     line-height: 1.5;
 }
+.dialog-content { margin-bottom: 1.25rem; }
 .dialog-input {
     display: block;
     width: 100%;
@@ -1319,29 +1320,10 @@ dialog::backdrop {
     outline-offset: -1px;
     border-color: var(--primary);
 }
+/* JoineryModal buttons are plain .btn / .btn-* (no bespoke dialog-button family;
+   the theme already defines .btn-secondary for the cancel button). */
 .dialog-actions {
     display: flex;
     justify-content: flex-end;
     gap: 0.5rem;
 }
-.dialog-btn-cancel {
-    padding: 0.375rem 0.875rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--white);
-    color: var(--body-color);
-    cursor: pointer;
-    font-size: 0.875rem;
-}
-.dialog-btn-cancel:hover { background: var(--lighter); }
-.dialog-btn-confirm {
-    padding: 0.375rem 0.875rem;
-    border: none;
-    border-radius: var(--radius);
-    color: #fff;
-    cursor: pointer;
-    font-size: 0.875rem;
-}
-.dialog-btn-confirm:hover { opacity: 0.88; }
-.dialog-btn-danger  { background: var(--danger); }
-.dialog-btn-primary { background: var(--primary); }

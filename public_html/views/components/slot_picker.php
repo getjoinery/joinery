@@ -22,7 +22,7 @@ $initial_date = $component_config['initial_date'] ?? gmdate('Y-m-d');
 
 $pid = 'slotpick_' . substr(md5(uniqid('', true)), 0, 8);
 ?>
-<div class="joinery-slotpicker" id="<?php echo $pid; ?>"
+<div class="jy-ui joinery-slotpicker" id="<?php echo $pid; ?>"
      data-slots="<?php echo htmlspecialchars($slots_url); ?>"
      data-field="<?php echo htmlspecialchars($field_name); ?>"
      data-initial="<?php echo htmlspecialchars($initial_date); ?>">
@@ -47,29 +47,6 @@ $pid = 'slotpick_' . substr(md5(uniqid('', true)), 0, 8);
         </div>
     </div>
 </div>
-
-<style>
-.joinery-slotpicker { --sp-accent: #2563eb; font-family: inherit; }
-.slotpick-cols { display: flex; gap: 1.5rem; flex-wrap: wrap; }
-.slotpick-cal { min-width: 270px; }
-.slotpick-calhead { display: flex; align-items: center; justify-content: space-between; margin-bottom: .5rem; }
-.slotpick-month { font-weight: 600; }
-.slotpick-nav { background: #f3f3f3; border: 1px solid #ddd; border-radius: 5px; padding: .25rem .6rem; cursor: pointer; }
-.slotpick-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
-.slotpick-dow { text-align: center; font-size: .7rem; color: #888; padding: .2rem 0; }
-.slotpick-day { aspect-ratio: 1; border: none; background: none; border-radius: 50%; cursor: default; color: #ccc; font: inherit; }
-.slotpick-day.has-slots { background: #eef3ff; color: var(--sp-accent); font-weight: 600; cursor: pointer; }
-.slotpick-day.has-slots:hover { background: #dbe6ff; }
-.slotpick-day.is-selected { background: var(--sp-accent); color: #fff; }
-.slotpick-times { flex: 1; min-width: 220px; }
-.slotpick-tzrow { margin-bottom: .6rem; font-size: .85rem; color: #555; }
-.slotpick-daylabel { font-weight: 600; margin-bottom: .5rem; }
-.slotpick-timelist { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: .4rem; }
-.slotpick-slot { border: 1px solid var(--sp-accent); color: var(--sp-accent); background: #fff; border-radius: 5px; padding: .5rem; cursor: pointer; font: inherit; }
-.slotpick-slot:hover { background: #eef3ff; }
-.slotpick-slot.is-chosen { background: var(--sp-accent); color: #fff; }
-.slotpick-empty { color: #999; font-size: .9rem; }
-</style>
 
 <script>
 (function(){

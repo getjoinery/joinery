@@ -3,6 +3,8 @@
  * Spacer Component
  *
  * Vertical spacing between components. Pure HTML5, no framework dependencies.
+ * Renders inside the `.jy-ui` kit; the height presets live in the `.jy-spacer`
+ * section in joinery-styles.css (selected via .is-{size} modifier).
  *
  * Available variables:
  *   $component_config - Configuration array from pac_config
@@ -13,14 +15,8 @@
  */
 
 $height = $component_config['height'] ?? 'md';
-
-$height_map = [
-	'sm' => '1rem',
-	'md' => '2rem',
-	'lg' => '4rem',
-	'xl' => '6rem',
-];
-
-$height_value = $height_map[$height] ?? $height_map['md'];
+$valid  = ['sm', 'md', 'lg', 'xl'];
+$h      = in_array($height, $valid) ? $height : 'md';
+$mod    = ($h === 'md') ? '' : ' is-' . $h;
 ?>
-<div style="height: <?php echo $height_value; ?>;" aria-hidden="true"></div>
+<div class="jy-ui jy-spacer<?php echo $mod; ?>" aria-hidden="true"></div>

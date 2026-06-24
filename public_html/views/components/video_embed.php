@@ -3,7 +3,9 @@
  * Video Embed Component
  *
  * Responsive YouTube or Vimeo video embed. Pure HTML5, no framework dependencies.
- * Parses video URLs to extract IDs and generates secure iframe embeds.
+ * Parses video URLs to extract IDs and generates secure iframe embeds. Renders
+ * inside the `.jy-ui` kit; styling lives in the `.jy-video` section in
+ * joinery-styles.css. The aspect ratio arrives as the --jy-video-ratio custom property.
  *
  * Available variables:
  *   $component_config - Configuration array from pac_config
@@ -46,24 +48,21 @@ if (!$embed_url) {
 	return; // Nothing to render
 }
 ?>
-<section>
-	<div style="max-width: 1100px; margin: 0 auto; padding: 3rem 1rem;">
-		<?php if ($heading): ?>
-			<h2 style="margin: 0 0 1.5rem 0;"><?php echo htmlspecialchars($heading); ?></h2>
-		<?php endif; ?>
+<section class="jy-ui jy-video" style="--jy-video-ratio: <?php echo $css_ratio; ?>;">
+	<?php if ($heading): ?>
+		<h2><?php echo htmlspecialchars($heading); ?></h2>
+	<?php endif; ?>
 
-		<div style="aspect-ratio: <?php echo $css_ratio; ?>; width: 100%;">
-			<iframe
-				src="<?php echo $embed_url; ?>"
-				style="width: 100%; height: 100%; border: 0;"
-				loading="lazy"
-				allowfullscreen
-				allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-			></iframe>
-		</div>
-
-		<?php if ($caption): ?>
-			<p style="margin: 0.75rem 0 0 0; color: #6c757d; font-size: 0.9rem;"><?php echo htmlspecialchars($caption); ?></p>
-		<?php endif; ?>
+	<div class="jy-video-frame">
+		<iframe
+			src="<?php echo $embed_url; ?>"
+			loading="lazy"
+			allowfullscreen
+			allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+		></iframe>
 	</div>
+
+	<?php if ($caption): ?>
+		<p class="jy-video-caption"><?php echo htmlspecialchars($caption); ?></p>
+	<?php endif; ?>
 </section>

@@ -2,7 +2,10 @@
 /**
  * Text Block Component
  *
- * Heading with rich text content. Pure HTML5, no framework dependencies.
+ * Heading with rich text content. Pure HTML5, no framework dependencies. Renders
+ * inside the `.jy-ui` kit; styling lives in the `.jy-textblock` section in
+ * joinery-styles.css. Background, text colour and alignment arrive as --jy-tb-*
+ * custom properties (server-computed).
  *
  * Available variables:
  *   $component_config - Configuration array from pac_config
@@ -25,23 +28,16 @@ if (!in_array($heading_level, $allowed_levels)) {
 	$heading_level = 'h2';
 }
 
-// Build section style
-$section_style = '';
-if ($background_color) {
-	$section_style .= 'background-color: ' . htmlspecialchars($background_color) . ';';
-}
-if ($text_color) {
-	$section_style .= ' color: ' . htmlspecialchars($text_color) . ';';
-}
-
-// Build content style
-$content_style = 'max-width: 1100px; margin: 0 auto; padding: 3rem 1rem;';
-$content_style .= ' text-align: ' . htmlspecialchars($alignment) . ';';
+// Per-instance values as custom properties (server-computed inline)
+$section_vars = '';
+if ($background_color) { $section_vars .= '--jy-tb-bg: ' . htmlspecialchars($background_color) . ';'; }
+if ($text_color)       { $section_vars .= ' --jy-tb-text: ' . htmlspecialchars($text_color) . ';'; }
+$inner_vars = '--jy-tb-align: ' . htmlspecialchars($alignment) . ';';
 ?>
-<section<?php if ($section_style): ?> style="<?php echo $section_style; ?>"<?php endif; ?>>
-	<div style="<?php echo $content_style; ?>">
+<section class="jy-ui jy-textblock-section"<?php if ($section_vars): ?> style="<?php echo $section_vars; ?>"<?php endif; ?>>
+	<div class="jy-textblock" style="<?php echo $inner_vars; ?>">
 		<?php if ($heading): ?>
-			<<?php echo $heading_level; ?> style="margin: 0 0 1rem 0;"><?php echo htmlspecialchars($heading); ?></<?php echo $heading_level; ?>>
+			<<?php echo $heading_level; ?> class="jy-textblock-heading"><?php echo htmlspecialchars($heading); ?></<?php echo $heading_level; ?>>
 		<?php endif; ?>
 		<?php if ($content): ?>
 			<div><?php echo $content; ?></div>

@@ -2,7 +2,10 @@
 /**
  * CTA Banner Component
  *
- * Full-width call-to-action banner. Pure HTML5, no framework dependencies.
+ * Full-width call-to-action banner. Pure HTML5, no framework dependencies. Renders
+ * inside the `.jy-ui` kit; styling lives in the `.jy-cta-banner` section in
+ * joinery-styles.css. Background and text colour arrive as --jy-cta-* custom
+ * properties (server-computed).
  *
  * Available variables:
  *   $component_config - Configuration array from pac_config
@@ -27,41 +30,37 @@ $show_secondary  = $component_config['secondary_cta']['show'] ?? false;
 $secondary_text  = $component_config['secondary_cta']['text'] ?? '';
 $secondary_link  = $component_config['secondary_cta']['link'] ?? '';
 
+// Background value + optional image modifier
+$image_mod = '';
 switch ($background_type) {
 	case 'color':
-		$bg_style = 'background-color: ' . htmlspecialchars($bg_color) . ';';
+		$bg_value = htmlspecialchars($bg_color);
 		break;
 	case 'image':
-		$bg_style = 'background-image: url(' . htmlspecialchars($bg_image) . '); background-size: cover; background-position: center;';
+		$bg_value = 'url(' . htmlspecialchars($bg_image) . ')';
+		$image_mod = ' has-image';
 		break;
 	default:
-		$bg_style = 'background: linear-gradient(135deg, ' . htmlspecialchars($grad_start) . ' 0%, ' . htmlspecialchars($grad_end) . ' 100%);';
+		$bg_value = 'linear-gradient(135deg, ' . htmlspecialchars($grad_start) . ' 0%, ' . htmlspecialchars($grad_end) . ' 100%)';
 }
 
-$section_style = $bg_style . ' color: ' . htmlspecialchars($text_color) . '; padding: 4rem 1.5rem; text-align: center;';
+$vars = '--jy-cta-bg: ' . $bg_value . '; --jy-cta-text: ' . htmlspecialchars($text_color) . ';';
 ?>
-<section style="<?php echo $section_style; ?>">
-	<div style="max-width: 720px; margin: 0 auto;">
+<section class="jy-ui jy-cta-banner<?php echo $image_mod; ?>" style="<?php echo $vars; ?>">
+	<div class="jy-cta-banner-inner">
 		<?php if ($heading): ?>
-			<h2 style="margin: 0 0 1rem 0; font-size: 2rem; line-height: 1.2;"><?php echo htmlspecialchars($heading); ?></h2>
+			<h2><?php echo htmlspecialchars($heading); ?></h2>
 		<?php endif; ?>
 
 		<?php if ($subheading): ?>
-			<p style="margin: 0 0 2rem 0; opacity: 0.9; font-size: 1.1rem; line-height: 1.6;"><?php echo nl2br(htmlspecialchars($subheading)); ?></p>
+			<p class="jy-cta-banner-sub"><?php echo nl2br(htmlspecialchars($subheading)); ?></p>
 		<?php endif; ?>
 
 		<?php if ($cta_text && $cta_link): ?>
-			<div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
-				<a href="<?php echo htmlspecialchars($cta_link); ?>"
-				   style="display: inline-block; padding: 0.75rem 2rem; background: rgba(255,255,255,0.95); color: #111; text-decoration: none; border-radius: 4px; font-weight: 600;">
-					<?php echo htmlspecialchars($cta_text); ?>
-				</a>
-
+			<div class="jy-cta-banner-actions">
+				<a href="<?php echo htmlspecialchars($cta_link); ?>" class="jy-cta-banner-btn"><?php echo htmlspecialchars($cta_text); ?></a>
 				<?php if ($show_secondary && $secondary_text && $secondary_link): ?>
-					<a href="<?php echo htmlspecialchars($secondary_link); ?>"
-					   style="display: inline-block; padding: 0.75rem 2rem; border: 2px solid rgba(255,255,255,0.7); color: inherit; text-decoration: none; border-radius: 4px; font-weight: 600;">
-						<?php echo htmlspecialchars($secondary_text); ?>
-					</a>
+					<a href="<?php echo htmlspecialchars($secondary_link); ?>" class="jy-cta-banner-btn is-secondary"><?php echo htmlspecialchars($secondary_text); ?></a>
 				<?php endif; ?>
 			</div>
 		<?php endif; ?>

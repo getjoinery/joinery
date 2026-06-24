@@ -71,93 +71,7 @@ $hoptions = ['is_valid_page' => true, 'title' => 'My Calendar', 'breadcrumbs' =>
 $page->public_header($hoptions, NULL);
 echo PublicPage::BeginPage('My Calendar', $hoptions);
 ?>
-<style>
-.cal-wrap { max-width: 980px; margin: 1rem auto; }
-.cal-note { background: #e6f7ec; border: 1px solid #2d7d46; padding: .5rem .8rem; border-radius: 4px; margin-bottom: 1rem; }
-.cal-error { background: #fdecea; border: 1px solid #c0392b; padding: .5rem .8rem; border-radius: 4px; margin-bottom: 1rem; }
-
-/* Full form section */
-.cal-full-form { border: 1px solid #e2e2e2; border-radius: 6px; padding: 1rem 1.25rem; margin-top: 1.5rem; background: #fafafa; }
-.cal-full-form h2 { margin-top: 0; }
-.cal-tz { color: #666; font-size: .85rem; }
-
-/* Import control */
-.cal-import { margin-bottom: 1rem; border: 1px solid #e2e2e2; border-radius: 6px; background: #fafafa; padding: .25rem .75rem; }
-.cal-import > summary { cursor: pointer; padding: .4rem 0; font-size: .9rem; color: #444; }
-.cal-import .form-group { margin-bottom: .6rem; }
-
-/* Recurrence section */
-.cal-recurrence-section { margin-top: .75rem; border-top: 1px solid #e8e8e8; padding-top: .75rem; }
-.cal-rec-desc { font-size: .85rem; color: #555; font-style: italic; margin-top: .25rem; min-height: 1.2em; }
-
-/* Scope modal */
-.cal-scope-backdrop {
-    position: fixed; inset: 0; background: rgba(0,0,0,.45);
-    z-index: 8000; display: flex; align-items: center; justify-content: center;
-}
-.cal-scope-modal {
-    background: #fff; border-radius: 8px;
-    box-shadow: 0 8px 28px rgba(0,0,0,.2); padding: 1.5rem 1.75rem;
-    min-width: 300px; max-width: 420px; width: 90%;
-}
-.cal-scope-modal h3 { margin: 0 0 1rem; font-size: 1.05rem; }
-.cal-scope-options { display: flex; flex-direction: column; gap: .5rem; margin-bottom: 1.25rem; }
-.cal-scope-options label { display: flex; align-items: center; gap: .6rem; font-size: .95rem; cursor: pointer; }
-.cal-scope-options label small { color: #666; display: block; font-size: .82rem; }
-.cal-scope-actions { display: flex; justify-content: flex-end; gap: .5rem; }
-
-/* Floating popover */
-.cal-popup {
-    position: fixed; z-index: 9000; width: 340px;
-    background: #fff; border-radius: 8px;
-    box-shadow: 0 8px 28px rgba(0,0,0,.18), 0 2px 8px rgba(0,0,0,.10);
-    display: none;
-}
-.cal-popup-header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: .6rem .8rem .4rem; border-bottom: 1px solid #eee;
-}
-.cal-popup-title { font-weight: 600; font-size: .9rem; color: #444; }
-.cal-popup-close {
-    background: none; border: none; cursor: pointer;
-    font-size: 1.2rem; color: #888; padding: .1rem .3rem; border-radius: 4px;
-}
-.cal-popup-close:hover { background: #f0f0f0; color: #333; }
-.cal-popup-body { padding: .5rem .8rem; overflow-y: auto; max-height: calc(100vh - 190px); }
-.cal-popup-body .form-group { margin-bottom: .6rem; }
-.cal-popup-footer {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: .6rem .8rem .8rem; border-top: 1px solid #eee; gap: .4rem;
-}
-.cal-popup-more {
-    background: none; border: none; cursor: pointer;
-    color: #555; font: inherit; font-size: .85rem; padding: .3rem .5rem;
-    border-radius: 4px; text-decoration: none;
-}
-.cal-popup-more:hover { background: #f0f0f0; }
-.cal-popup-right { display: flex; gap: .4rem; margin-left: auto; }
-.cal-popup-delete {
-    background: none; border: 1px solid #d9534f; color: #d9534f;
-    border-radius: 4px; padding: .3rem .7rem; cursor: pointer; font: inherit; font-size: .85rem;
-}
-.cal-popup-delete:hover { background: #fdecea; }
-.cal-popup-save {
-    background: #2563eb; color: #fff; border: none;
-    border-radius: 4px; padding: .3rem .9rem; cursor: pointer; font: inherit; font-size: .85rem; font-weight: 600;
-}
-.cal-popup-save:hover { background: #1d4ed8; }
-.cal-popup-error {
-    background: #fdecea; border: 1px solid #c0392b;
-    padding: .3rem .6rem; border-radius: 4px; font-size: .82rem;
-    margin: 0 .8rem .4rem; display: none;
-}
-.cal-pop-times.is-allday { display: none; }
-.cal-pop-time-row { display: flex; gap: .6rem; }
-.cal-pop-time-row .form-group { flex: 1; }
-.cal-pop-time-input { width: 100%; box-sizing: border-box; }
-</style>
-
-<div class="cal-wrap">
+<div class="jy-ui cal-wrap">
 <?php if (!empty($saved)):  ?><div class="cal-note">Entry saved.</div><?php endif; ?>
 <?php if (!empty($deleted)): ?><div class="cal-note">Entry deleted.</div><?php endif; ?>
 <?php if (!empty($errors)):  ?><div class="cal-error"><?php foreach ($errors as $e) { echo htmlspecialchars($e) . '<br>'; } ?></div><?php endif; ?>
@@ -199,38 +113,32 @@ echo ComponentRenderer::render(null, 'calendar_grid', [
 
 <?php if ($show_full_form): ?>
     <?php if ($show_scope_modal): ?>
-    <!-- Scope-choice modal (shown before the edit form for recurring occurrences) -->
-    <div class="cal-scope-backdrop" id="cal-scope-backdrop">
-        <div class="cal-scope-modal">
-            <h3>Edit recurring entry</h3>
-            <div class="cal-scope-options">
-                <label>
-                    <input type="radio" name="scope_choice" value="this" checked>
-                    <span>This occurrence only
-                        <small>Change just <?php echo htmlspecialchars($occurrence_date); ?>; other occurrences stay the same.</small>
-                    </span>
-                </label>
-                <label>
-                    <input type="radio" name="scope_choice" value="future">
-                    <span>This and future occurrences
-                        <small>Start a new series from <?php echo htmlspecialchars($occurrence_date); ?>.</small>
-                    </span>
-                </label>
-                <label>
-                    <input type="radio" name="scope_choice" value="all">
-                    <span>All occurrences
-                        <small>Update every occurrence in this series.</small>
-                    </span>
-                </label>
-            </div>
-            <div class="cal-scope-actions">
-                <button type="button" id="cal-scope-cancel" class="dialog-btn-cancel">Cancel</button>
-                <button type="button" id="cal-scope-ok" class="dialog-btn-confirm dialog-btn-primary">Edit</button>
-            </div>
+    <!-- Scope-choice content (opened in JoineryModal on load for recurring occurrences) -->
+    <div id="cal-scope-content" hidden>
+        <h3 class="cal-scope-heading">Edit recurring entry</h3>
+        <div class="cal-scope-options">
+            <label>
+                <input type="radio" name="scope_choice" value="this" checked>
+                <span>This occurrence only
+                    <small>Change just <?php echo htmlspecialchars($occurrence_date); ?>; other occurrences stay the same.</small>
+                </span>
+            </label>
+            <label>
+                <input type="radio" name="scope_choice" value="future">
+                <span>This and future occurrences
+                    <small>Start a new series from <?php echo htmlspecialchars($occurrence_date); ?>.</small>
+                </span>
+            </label>
+            <label>
+                <input type="radio" name="scope_choice" value="all">
+                <span>All occurrences
+                    <small>Update every occurrence in this series.</small>
+                </span>
+            </label>
         </div>
     </div>
     <!-- form is hidden until scope is chosen -->
-    <div id="cal-full-form-wrap" style="display:none">
+    <div id="cal-full-form-wrap" hidden>
     <?php else: ?>
     <div id="cal-full-form-wrap">
     <?php endif; ?>
@@ -248,7 +156,7 @@ echo ComponentRenderer::render(null, 'calendar_grid', [
         ?>
         </h2>
         <?php if ($is_edit && $cur_rec_desc): ?>
-            <p class="cal-rec-desc" style="font-style:normal;color:#555;"><?php echo htmlspecialchars($cur_rec_desc); ?></p>
+            <p class="cal-rec-desc is-static"><?php echo htmlspecialchars($cur_rec_desc); ?></p>
         <?php endif; ?>
         <p class="cal-tz">Times are in your timezone (<?php echo htmlspecialchars($tz); ?>).</p>
 <?php
@@ -406,30 +314,24 @@ if ($is_edit) {
     </div><!-- #cal-full-form-wrap -->
 
     <?php if (($is_edit && $display_entry->is_recurring_parent()) || $is_occurrence): ?>
-    <!-- Delete-scope modal for recurring entries -->
-    <div id="del-scope-backdrop" class="cal-scope-backdrop" style="display:none">
-        <div class="cal-scope-modal">
-            <h3>Delete recurring entry</h3>
-            <div class="cal-scope-options">
-                <?php if ($is_occurrence): ?>
-                <label>
-                    <input type="radio" name="del_scope_choice" value="this" checked>
-                    <span>This occurrence only</span>
-                </label>
-                <label>
-                    <input type="radio" name="del_scope_choice" value="future">
-                    <span>This and future occurrences</span>
-                </label>
-                <?php endif; ?>
-                <label>
-                    <input type="radio" name="del_scope_choice" value="all" <?php echo !$is_occurrence ? 'checked' : ''; ?>>
-                    <span>All occurrences</span>
-                </label>
-            </div>
-            <div class="cal-scope-actions">
-                <button type="button" id="del-scope-cancel" class="dialog-btn-cancel">Cancel</button>
-                <button type="button" id="del-scope-ok" class="dialog-btn-confirm dialog-btn-danger">Delete</button>
-            </div>
+    <!-- Delete-scope content (opened in JoineryModal from the "delete recurring" button) -->
+    <div id="del-scope-content" hidden>
+        <h3 class="cal-scope-heading">Delete recurring entry</h3>
+        <div class="cal-scope-options">
+            <?php if ($is_occurrence): ?>
+            <label>
+                <input type="radio" name="del_scope_choice" value="this" checked>
+                <span>This occurrence only</span>
+            </label>
+            <label>
+                <input type="radio" name="del_scope_choice" value="future">
+                <span>This and future occurrences</span>
+            </label>
+            <?php endif; ?>
+            <label>
+                <input type="radio" name="del_scope_choice" value="all" <?php echo !$is_occurrence ? 'checked' : ''; ?>>
+                <span>All occurrences</span>
+            </label>
         </div>
     </div>
     <?php endif; ?>
@@ -437,7 +339,7 @@ if ($is_edit) {
 </div><!-- .cal-wrap -->
 
 <!-- Popover (fixed overlay; JS positions it near the clicked cell or chip) -->
-<div id="cal-popup" class="cal-popup" role="dialog" aria-modal="true" aria-label="Calendar entry">
+<div id="cal-popup" class="jy-ui cal-popup" role="dialog" aria-modal="true" aria-label="Calendar entry">
     <div class="cal-popup-header">
         <span class="cal-popup-title" id="cal-popup-title">New entry</span>
         <button type="button" class="cal-popup-close" id="cal-popup-close" aria-label="Close">&#215;</button>
@@ -474,7 +376,7 @@ $popwriter->checkboxinput('entry_blocks', 'Block this time (removes from booking
     <div class="cal-popup-footer">
         <button type="button" class="cal-popup-more" id="cal-popup-more">More options</button>
         <div class="cal-popup-right">
-            <button type="button" class="cal-popup-delete" id="cal-popup-delete" style="display:none">Delete</button>
+            <button type="button" class="cal-popup-delete" id="cal-popup-delete" hidden>Delete</button>
             <button type="submit" class="cal-popup-save">Save</button>
         </div>
     </div>
@@ -488,59 +390,51 @@ $popwriter->checkboxinput('entry_blocks', 'Block this time (removes from booking
     // =========================================================================
     // Scope modal (edit)
     // =========================================================================
-    var scopeBackdrop = document.getElementById('cal-scope-backdrop');
-    var scopeOkBtn    = document.getElementById('cal-scope-ok');
-    var scopeField    = document.getElementById('cal-scope-field');
-    var formWrap      = document.getElementById('cal-full-form-wrap');
+    var scopeContent = document.getElementById('cal-scope-content');
+    var scopeField   = document.getElementById('cal-scope-field');
+    var formWrap     = document.getElementById('cal-full-form-wrap');
 
-    if (scopeBackdrop && scopeOkBtn && scopeField && formWrap) {
-        scopeOkBtn.addEventListener('click', function(){
-            var chosen = document.querySelector('input[name="scope_choice"]:checked');
-            if (!chosen) return;
-            scopeField.value = chosen.value;
-            scopeBackdrop.style.display = 'none';
-            formWrap.style.display = '';
-            // Scroll to the form.
-            var form = document.getElementById('cal-full-form');
-            if (form) { form.scrollIntoView({behavior: 'smooth', block: 'start'}); }
+    if (scopeContent && scopeField && formWrap) {
+        scopeContent.hidden = false;
+        JoineryModal.open(scopeContent, {
+            buttons: [
+                { label: 'Cancel', style: 'secondary', onClick: function(){ window.location.href = '/profile/calendar'; } },
+                { label: 'Edit', style: 'primary', onClick: function(){
+                    var chosen = document.querySelector('input[name="scope_choice"]:checked');
+                    if (!chosen) { return false; }
+                    scopeField.value = chosen.value;
+                    formWrap.hidden = false;
+                    var form = document.getElementById('cal-full-form');
+                    if (form) { form.scrollIntoView({behavior: 'smooth', block: 'start'}); }
+                } }
+            ]
         });
-    }
-
-    var scopeCancelBtn = document.getElementById('cal-scope-cancel');
-    if (scopeCancelBtn) {
-        scopeCancelBtn.addEventListener('click', function(){ window.location.href = '/profile/calendar'; });
     }
 
     // =========================================================================
     // Delete-scope modal (for recurring entries)
     // =========================================================================
-    var delBackdrop  = document.getElementById('del-scope-backdrop');
-    var delOkBtn     = document.getElementById('del-scope-ok');
-    var delCancelBtn = document.getElementById('del-scope-cancel');
-    var delScopeField= document.getElementById('del-scope-field');
-    var delRecBtn    = document.getElementById('btn-delete-rec');
+    var delContent    = document.getElementById('del-scope-content');
+    var delScopeField = document.getElementById('del-scope-field');
+    var delRecBtn     = document.getElementById('btn-delete-rec');
 
-    if (delRecBtn && delBackdrop) {
+    if (delRecBtn && delContent && delScopeField) {
         delRecBtn.addEventListener('click', function(ev){
             ev.preventDefault();
-            delBackdrop.style.display = 'flex';
+            delContent.hidden = false;
+            JoineryModal.open(delContent, {
+                buttons: [
+                    { label: 'Cancel', style: 'secondary' },
+                    { label: 'Delete', style: 'danger', onClick: function(){
+                        var chosen = document.querySelector('input[name="del_scope_choice"]:checked');
+                        if (!chosen) { return false; }
+                        delScopeField.value = chosen.value;
+                        var delForm = document.getElementById('delform');
+                        if (delForm) { delForm.submit(); }
+                    } }
+                ]
+            });
         });
-        if (delCancelBtn) {
-            delCancelBtn.addEventListener('click', function(){
-                delBackdrop.style.display = 'none';
-            });
-        }
-        if (delOkBtn && delScopeField) {
-            delOkBtn.addEventListener('click', function(){
-                var chosen = document.querySelector('input[name="del_scope_choice"]:checked');
-                if (!chosen) return;
-                delScopeField.value = chosen.value;
-                delBackdrop.style.display = 'none';
-                // Submit the delete form.
-                var delForm = document.getElementById('delform');
-                if (delForm) { delForm.submit(); }
-            });
-        }
     }
 
     // The full-form all-day toggle and the entire recurrence section are now
@@ -614,7 +508,7 @@ $popwriter->checkboxinput('entry_blocks', 'Block this time (removes from booking
         setField('entry_start', opts.startTime||''); setField('entry_end', opts.endTime||'');
         setField('entry_blocks', opts.blocksAvail!==false);
         syncAllDay();
-        deleteBtn.style.display = opts.isEdit ? '' : 'none';
+        deleteBtn.hidden = !opts.isEdit;
         positionPopup(rect);
         var ti = form?form.querySelector('[name="entry_title"]'):null;
         if(ti){ ti.focus(); ti.select(); }
