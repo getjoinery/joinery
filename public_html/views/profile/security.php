@@ -14,7 +14,7 @@
 <div class="jy-ui">
 <section class="jy-content-section">
     <div class="jy-container">
-        <div style="max-width: 720px; margin: 0 auto;">
+        <div class="jy-narrow">
 
             <div class="jy-page-header">
                 <div class="jy-page-header-bar">
@@ -31,7 +31,7 @@
 
             <?php echo PublicPage::tab_menu($page_vars['tab_menus'] ?? [], 'Security'); ?>
 
-            <div class="jy-panel" style="margin-top: var(--jy-space-4);">
+            <div class="jy-panel jy-mt-4">
 
                 <?php
                 foreach ($page_vars['display_messages'] ?? [] as $display_message) {
@@ -51,7 +51,7 @@
 
                     <h3>Backup codes</h3>
                     <p>Store these somewhere safe. Each can be used once.</p>
-                    <pre style="background: #f5f5f5; padding: 1em; border-radius: 4px; font-size: 1.1em;"><?php
+                    <pre class="jy-security-codes"><?php
                         foreach ($page_vars['backup_codes'] as $code) {
                             echo htmlspecialchars($code) . "\n";
                         }
@@ -67,7 +67,7 @@
 
                     <h3>Backup codes</h3>
                     <p>Store these somewhere safe. Each can be used once.</p>
-                    <pre style="background: #f5f5f5; padding: 1em; border-radius: 4px; font-size: 1.1em;"><?php
+                    <pre class="jy-security-codes"><?php
                         foreach ($page_vars['backup_codes'] as $code) {
                             echo htmlspecialchars($code) . "\n";
                         }
@@ -85,12 +85,12 @@
 
                     <h3>Backup codes</h3>
                     <p>Generate a fresh set of 10 single-use codes. This invalidates any previous codes.</p>
-                    <form action="/profile/security" method="POST" style="display: inline;">
+                    <form action="/profile/security" method="POST" class="jy-inline">
                         <input type="hidden" name="action" value="regenerate_backup_codes">
                         <button type="submit" class="btn btn-secondary">Regenerate Backup Codes</button>
                     </form>
 
-                    <h3 style="margin-top: var(--jy-space-4);">Disable 2FA</h3>
+                    <h3 class="jy-mt-4">Disable 2FA</h3>
                     <p>Confirm with a current 6-digit code or an 8-character backup code. Disabling will also invalidate any trusted devices.</p>
                     <form action="/profile/security" method="POST" onsubmit="return confirm('Disable two-factor authentication for your account?');">
                         <input type="hidden" name="action" value="disable">
@@ -98,7 +98,7 @@
                         <button type="submit" class="btn btn-danger">Disable 2FA</button>
                     </form>
 
-                    <p style="margin-top: var(--jy-space-4); font-size: 0.9em; color: #666;">
+                    <p class="jy-security-note">
                         <strong>Lost a trusted device?</strong> To revoke trusted-device cookies on other devices,
                         disable and re-enable 2FA — this rotates the device-trust key.
                     </p>
@@ -107,12 +107,12 @@
                     <p>Scan this QR code with your authenticator app
                     (Google Authenticator, Authy, 1Password, etc.):</p>
 
-                    <div style="text-align: center; margin: var(--jy-space-4) 0;">
-                        <img src="<?php echo htmlspecialchars($page_vars['qr_uri']); ?>" alt="2FA setup QR code" style="max-width: 240px;">
+                    <div class="jy-security-qr">
+                        <img src="<?php echo htmlspecialchars($page_vars['qr_uri']); ?>" alt="2FA setup QR code" class="jy-security-qr-img">
                     </div>
 
                     <p>If you can't scan, enter this key manually:</p>
-                    <pre style="background: #f5f5f5; padding: 1em; border-radius: 4px; word-break: break-all;"><?php echo htmlspecialchars($page_vars['secret']); ?></pre>
+                    <pre class="jy-security-secret"><?php echo htmlspecialchars($page_vars['secret']); ?></pre>
 
                     <p>Once added to your app, enter the current 6-digit code to confirm:</p>
                     <form action="/profile/security" method="POST">
@@ -121,7 +121,7 @@
                         <button type="submit" class="btn btn-primary">Confirm and Enable</button>
                     </form>
 
-                    <form action="/profile/security" method="POST" style="margin-top: var(--jy-space-2);">
+                    <form action="/profile/security" method="POST" class="jy-mt-2">
                         <input type="hidden" name="action" value="cancel_enable">
                         <button type="submit" class="btn btn-secondary">Cancel Setup</button>
                     </form>
@@ -139,11 +139,11 @@
             </div>
 
             <?php if (!empty($page_vars['app_sessions']) && count($page_vars['app_sessions'])): ?>
-            <div class="jy-panel" style="margin-top: var(--jy-space-4);">
+            <div class="jy-panel jy-mt-4">
                 <h2>App Sessions</h2>
                 <p>Devices signed in to your account. Revoke a session to sign that device out.</p>
 
-                <table class="jy-table" style="width: 100%;">
+                <table class="jy-table jy-w-full">
                     <thead>
                         <tr>
                             <th>Device</th>
@@ -162,8 +162,8 @@
                                 ? htmlspecialchars(LibraryFunctions::convert_time($app_session->get('apk_last_used_time'), 'UTC',
                                     SessionControl::get_instance()->get_timezone(), 'M j, Y g:i A'))
                                 : 'Never'; ?></td>
-                            <td style="text-align: right;">
-                                <form action="/profile/security" method="POST" style="display: inline;">
+                            <td class="text-end">
+                                <form action="/profile/security" method="POST" class="jy-inline">
                                     <input type="hidden" name="action" value="revoke_app_session">
                                     <input type="hidden" name="apk_api_key_id" value="<?php echo (int)$app_session->key; ?>">
                                     <button type="submit" class="btn btn-danger">Revoke</button>
@@ -174,7 +174,7 @@
                     </tbody>
                 </table>
 
-                <form action="/profile/security" method="POST" style="margin-top: var(--jy-space-2);"
+                <form action="/profile/security" method="POST" class="jy-mt-2"
                       onsubmit="return confirm('Sign out every device signed in to your account?');">
                     <input type="hidden" name="action" value="revoke_all_app_sessions">
                     <button type="submit" class="btn btn-secondary">Revoke All</button>

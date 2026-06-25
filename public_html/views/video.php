@@ -39,12 +39,12 @@
 
 <section class="jy-content-section">
     <div class="jy-container">
-        <div style="max-width: 860px; margin: 0 auto;">
+        <div class="jy-video-wrap">
 
             <!-- Video Player -->
-            <div style="background: #000; border-radius: 8px; overflow: hidden; margin-bottom: 1.5rem; box-shadow: 0 2px 12px rgba(0,0,0,0.2);">
-                <div style="position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden;">
-                    <div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;">
+            <div class="jy-video-player">
+                <div class="jy-video-ratio">
+                    <div class="jy-video-frame">
                         <?php echo $video->get_embed(); ?>
                     </div>
                 </div>
@@ -52,16 +52,16 @@
 
             <!-- Description & Duration -->
             <?php if ($video->get('vid_description') || $video->get('vid_duration')): ?>
-            <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); padding: 1.5rem; margin-bottom: 1.5rem;">
-                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem;">
+            <div class="jy-video-card">
+                <div class="jy-video-desc-row">
                     <?php if ($video->get('vid_description')): ?>
-                    <div style="flex: 1;">
+                    <div class="jy-video-grow">
                         <?php echo $video->get('vid_description'); ?>
                     </div>
                     <?php endif; ?>
                     <?php if ($video->get('vid_duration')): ?>
-                    <div style="flex-shrink: 0;">
-                        <span style="display: inline-block; background: var(--jy-color-text-muted); color: #fff; font-size: 0.8125rem; padding: 0.25rem 0.75rem; border-radius: 4px;">
+                    <div class="jy-noshrink">
+                        <span class="jy-video-duration">
                             &#9201; <?php echo htmlspecialchars($video->get('vid_duration')); ?>
                         </span>
                     </div>
@@ -72,32 +72,32 @@
 
             <!-- Transcript & Tags -->
             <?php if ($video->get('vid_transcript') || $video->get('vid_tags')): ?>
-            <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; align-items: flex-start;">
+            <div class="jy-video-cols">
 
                 <?php if ($video->get('vid_transcript')): ?>
-                <div style="flex: 2; min-width: 240px; background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); overflow: hidden;">
-                    <div style="background: var(--jy-color-surface); padding: 0.875rem 1.25rem; border-bottom: 1px solid var(--jy-color-border);">
-                        <h5 style="margin: 0; font-size: 1rem;">&#128221; Transcript</h5>
+                <div class="jy-video-transcript">
+                    <div class="jy-video-cardhead">
+                        <h5 class="jy-video-cardtitle">&#128221; Transcript</h5>
                     </div>
-                    <div style="padding: 1.25rem;">
+                    <div class="jy-video-cardbody">
                         <?php echo nl2br(htmlspecialchars($video->get('vid_transcript'))); ?>
                     </div>
                 </div>
                 <?php endif; ?>
 
                 <?php if ($video->get('vid_tags')): ?>
-                <div style="flex: 1; min-width: 180px; background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); overflow: hidden;">
-                    <div style="background: var(--jy-color-surface); padding: 0.875rem 1.25rem; border-bottom: 1px solid var(--jy-color-border);">
-                        <h6 style="margin: 0; font-size: 0.9375rem;">&#127991; Tags</h6>
+                <div class="jy-video-tagscard">
+                    <div class="jy-video-cardhead">
+                        <h6 class="jy-video-cardtitle-sm">&#127991; Tags</h6>
                     </div>
-                    <div style="padding: 1.25rem;">
+                    <div class="jy-video-cardbody">
                         <?php
                         $tags = explode(',', $video->get('vid_tags'));
                         foreach ($tags as $tag):
                             $tag = trim($tag);
                             if ($tag):
                         ?>
-                        <span style="display: inline-block; background: var(--jy-color-primary); color: #fff; font-size: 0.8125rem; padding: 0.25rem 0.625rem; border-radius: 4px; margin: 0 0.25rem 0.375rem 0;">
+                        <span class="jy-video-tag">
                             <?php echo htmlspecialchars($tag); ?>
                         </span>
                         <?php endif; endforeach; ?>

@@ -26,7 +26,7 @@ $page->public_header([
 <div class="jy-ui">
 <section class="jy-content-section">
     <div class="jy-container">
-        <div style="max-width: 720px; margin: 0 auto;">
+        <div class="jy-narrow">
 
             <div class="jy-page-header">
                 <div class="jy-page-header-bar">
@@ -65,17 +65,17 @@ $page->public_header([
             <?php if ($payment_system === 'stripe' && $page_vars['stripe_customer_id']): ?>
             <div class="card">
                 <div class="card-header">
-                    <h5 style="margin: 0;">Payment Method</h5>
+                    <h5 class="jy-tight">Payment Method</h5>
                 </div>
                 <div class="card-body">
                     <?php if ($payment_method): ?>
-                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--jy-space-4);">
-                        <div style="display: flex; align-items: center; gap: var(--jy-space-3);">
-                            <span class="badge badge-muted" style="font-weight: 700; letter-spacing: 0.05em;">
+                    <div class="jy-billing-row">
+                        <div class="jy-billing-flex">
+                            <span class="badge badge-muted jy-billing-cardbrand">
                                 <?php echo htmlspecialchars($payment_method['brand'], ENT_QUOTES, 'UTF-8'); ?>
                             </span>
                             <div>
-                                <div style="font-weight: 600;">&bull;&bull;&bull;&bull; <?php echo htmlspecialchars($payment_method['last4'], ENT_QUOTES, 'UTF-8'); ?></div>
+                                <div class="jy-billing-bold">&bull;&bull;&bull;&bull; <?php echo htmlspecialchars($payment_method['last4'], ENT_QUOTES, 'UTF-8'); ?></div>
                                 <div class="muted text-sm">Expires <?php echo $payment_method['exp_month']; ?>/<?php echo $payment_method['exp_year']; ?></div>
                             </div>
                         </div>
@@ -85,7 +85,7 @@ $page->public_header([
                         </form>
                     </div>
                     <?php else: ?>
-                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--jy-space-4);">
+                    <div class="jy-billing-row">
                         <span class="muted">No payment method on file.</span>
                         <form method="POST" action="/profile/billing">
                             <input type="hidden" name="action" value="update_payment_method">
@@ -99,11 +99,11 @@ $page->public_header([
             <?php elseif ($payment_system === 'paypal'): ?>
             <div class="card">
                 <div class="card-header">
-                    <h5 style="margin: 0;">Payment Method</h5>
+                    <h5 class="jy-tight">Payment Method</h5>
                 </div>
                 <div class="card-body">
-                    <div style="display: flex; align-items: center; gap: var(--jy-space-3);">
-                        <span class="badge badge-warning" style="font-weight: 700;">PayPal</span>
+                    <div class="jy-billing-flex">
+                        <span class="badge badge-warning jy-billing-paypal">PayPal</span>
                         <div class="muted">
                             Your subscription is managed through PayPal. To update your payment method, visit
                             <a href="https://www.paypal.com/myaccount/autopay/" target="_blank" rel="noopener">PayPal</a>.
@@ -117,11 +117,11 @@ $page->public_header([
             <?php if ($show_cycle_switcher): ?>
             <div class="card">
                 <div class="card-header">
-                    <h5 style="margin: 0;">Billing Cycle</h5>
+                    <h5 class="jy-tight">Billing Cycle</h5>
                 </div>
                 <div class="card-body">
-                    <div style="margin-bottom: var(--jy-space-4);">
-                        <span style="font-weight: 600;">Current:</span>
+                    <div class="jy-mb-4">
+                        <span class="jy-billing-bold">Current:</span>
                         <?php echo htmlspecialchars($current_version->get('prv_version_name'), ENT_QUOTES, 'UTF-8'); ?>
                         &mdash; $<?php echo number_format($current_version->get('prv_version_price'), 2); ?>/<?php echo htmlspecialchars($current_version->get('prv_price_type'), ENT_QUOTES, 'UTF-8'); ?>
                     </div>
@@ -144,12 +144,12 @@ $page->public_header([
                             }
                         }
                     ?>
-                    <div style="display: flex; justify-content: space-between; align-items: center; padding: var(--jy-space-3) var(--jy-space-4); background: var(--jy-color-surface); border-radius: var(--jy-radius-md); margin-bottom: var(--jy-space-2);">
+                    <div class="jy-billing-cycle-opt">
                         <div>
                             <strong><?php echo htmlspecialchars($alt->get('prv_version_name'), ENT_QUOTES, 'UTF-8'); ?></strong>
                             &mdash; $<?php echo number_format($alt_price, 2); ?>/<?php echo htmlspecialchars($alt_type, ENT_QUOTES, 'UTF-8'); ?>
                             <?php if ($savings_text): ?>
-                            <span style="color: var(--jy-color-success); font-weight: 600; margin-left: var(--jy-space-2);"><?php echo $savings_text; ?></span>
+                            <span class="jy-billing-savings"><?php echo $savings_text; ?></span>
                             <?php endif; ?>
                         </div>
                         <form method="POST" action="/profile/billing" onsubmit="return confirm('Switch to <?php echo htmlspecialchars($alt->get('prv_version_name'), ENT_QUOTES, 'UTF-8'); ?> billing? Your subscription will be updated and prorated.');">
@@ -165,7 +165,7 @@ $page->public_header([
             <?php elseif ($payment_system === 'paypal' && $current_subscription && !$current_subscription->get('odi_subscription_cancelled_time')): ?>
             <div class="card">
                 <div class="card-header">
-                    <h5 style="margin: 0;">Billing Cycle</h5>
+                    <h5 class="jy-tight">Billing Cycle</h5>
                 </div>
                 <div class="card-body muted">
                     To change your billing cycle, please cancel your current subscription and re-subscribe with the new billing option on the <a href="/profile/change-tier">subscription management page</a>.
@@ -177,7 +177,7 @@ $page->public_header([
             <?php if (!empty($invoices)): ?>
             <div class="card">
                 <div class="card-header">
-                    <h5 style="margin: 0;">Billing History</h5>
+                    <h5 class="jy-tight">Billing History</h5>
                 </div>
                 <div class="table-wrapper">
                     <table class="styled-table">
@@ -185,18 +185,18 @@ $page->public_header([
                             <tr>
                                 <th>Date</th>
                                 <th>Description</th>
-                                <th style="text-align: right;">Amount</th>
-                                <th style="text-align: center;">Status</th>
+                                <th class="text-end">Amount</th>
+                                <th class="text-center">Status</th>
                                 <th></th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php foreach ($invoices as $invoice): ?>
                             <tr>
-                                <td style="white-space: nowrap;"><?php echo htmlspecialchars($invoice['date'], ENT_QUOTES, 'UTF-8'); ?></td>
+                                <td class="jy-nowrap"><?php echo htmlspecialchars($invoice['date'], ENT_QUOTES, 'UTF-8'); ?></td>
                                 <td><?php echo htmlspecialchars($invoice['description'], ENT_QUOTES, 'UTF-8'); ?></td>
-                                <td style="text-align: right; font-weight: 600;">$<?php echo htmlspecialchars($invoice['amount'], ENT_QUOTES, 'UTF-8'); ?></td>
-                                <td style="text-align: center;">
+                                <td class="jy-billing-amt">$<?php echo htmlspecialchars($invoice['amount'], ENT_QUOTES, 'UTF-8'); ?></td>
+                                <td class="text-center">
                                     <?php
                                     $status_class = 'badge-muted';
                                     if ($invoice['status'] === 'paid') $status_class = 'badge-success';
@@ -207,7 +207,7 @@ $page->public_header([
                                         <?php echo htmlspecialchars(ucfirst($invoice['status']), ENT_QUOTES, 'UTF-8'); ?>
                                     </span>
                                 </td>
-                                <td style="text-align: center;">
+                                <td class="text-center">
                                     <?php if ($invoice['pdf_url']): ?>
                                     <a href="<?php echo htmlspecialchars($invoice['pdf_url'], ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener" class="text-sm" title="Download PDF">PDF</a>
                                     <?php endif; ?>
@@ -222,16 +222,16 @@ $page->public_header([
 
             <!-- No billing data -->
             <?php if (!$current_subscription && empty($invoices)): ?>
-            <div class="jy-panel" style="padding: var(--jy-space-8); text-align: center;">
-                <div style="font-size: 2.5rem; color: var(--jy-color-text-muted); margin-bottom: var(--jy-space-4);">&#128179;</div>
-                <h4 style="margin-bottom: var(--jy-space-2);">No billing information</h4>
-                <p class="muted" style="margin-bottom: var(--jy-space-5);">You don't have any active subscriptions or past purchases.</p>
+            <div class="jy-panel jy-billing-empty">
+                <div class="jy-billing-empty-icon">&#128179;</div>
+                <h4 class="jy-mb-2">No billing information</h4>
+                <p class="muted jy-mb-5">You don't have any active subscriptions or past purchases.</p>
                 <a href="/products" class="btn btn-primary">Browse Products</a>
             </div>
             <?php endif; ?>
 
             <!-- Navigation -->
-            <div style="margin-top: var(--jy-space-4); display: flex; gap: var(--jy-space-4); flex-wrap: wrap;">
+            <div class="jy-billing-nav">
                 <a href="/profile" class="muted">&larr; Back to Profile</a>
                 <?php if ($current_subscription): ?>
                 <a href="/profile/change-tier">Manage Subscription Plan</a>

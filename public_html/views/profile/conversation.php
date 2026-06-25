@@ -25,23 +25,23 @@ $other_name = $other_user ? htmlspecialchars($other_user->display_name(), ENT_QU
 <div class="jy-ui">
 <section class="jy-content-section">
     <div class="jy-container">
-        <div style="max-width: 720px; margin: 0 auto;">
+        <div class="jy-narrow">
 
 <div class="conversation-page">
 	<!-- Header -->
-	<div class="conversation-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
-		<div style="display:flex;align-items:center;gap:0.75rem;">
-			<a href="/profile/conversations" style="text-decoration:none;color:inherit;font-size:1.2rem;" title="Back to Messages">&larr;</a>
+	<div class="conversation-header">
+		<div class="jy-convo-back-wrap">
+			<a href="/profile/conversations" class="jy-convo-back" title="Back to Messages">&larr;</a>
 			<strong><?php echo $other_name; ?></strong>
 		</div>
 		<?php if (!$is_compose && $conversation): ?>
-		<details class="conversation-more-menu" style="position:relative;">
-			<summary class="btn btn-sm btn-outline" style="cursor:pointer;">More</summary>
-			<div class="conversation-dropdown" style="position:absolute;right:0;top:100%;background:#fff;border:1px solid #ddd;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,0.1);z-index:10;min-width:160px;margin-top:4px;">
-				<button type="button" class="conversation-action-btn" data-action="<?php echo $page_vars['is_muted'] ? 'unmute' : 'mute'; ?>" data-conversation-id="<?php echo (int)$conversation->key; ?>" style="display:block;width:100%;text-align:left;padding:0.5rem 1rem;border:none;background:none;cursor:pointer;">
+		<details class="conversation-more-menu">
+			<summary class="btn btn-sm btn-outline jy-convo-summary">More</summary>
+			<div class="conversation-dropdown">
+				<button type="button" class="conversation-action-btn" data-action="<?php echo $page_vars['is_muted'] ? 'unmute' : 'mute'; ?>" data-conversation-id="<?php echo (int)$conversation->key; ?>">
 					<?php echo $page_vars['is_muted'] ? 'Unmute conversation' : 'Mute conversation'; ?>
 				</button>
-				<button type="button" class="conversation-action-btn" data-action="delete" data-conversation-id="<?php echo (int)$conversation->key; ?>" style="display:block;width:100%;text-align:left;padding:0.5rem 1rem;border:none;background:none;cursor:pointer;color:#c00;">
+				<button type="button" class="conversation-action-btn jy-convo-delete" data-action="delete" data-conversation-id="<?php echo (int)$conversation->key; ?>">
 					Delete conversation
 				</button>
 			</div>
@@ -56,7 +56,7 @@ $other_name = $other_user ? htmlspecialchars($other_user->display_name(), ENT_QU
 			$pager = $page_vars['pager'];
 			if ($pager && $pager->total_pages() > 1 && $pager->is_valid_page('-1')):
 			?>
-			<div style="text-align:center;padding:0.5rem;">
+			<div class="jy-convo-loadmore">
 				<a href="<?php echo htmlspecialchars($pager->get_url('-1'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline">Load older messages</a>
 			</div>
 			<?php endif; ?>
@@ -84,12 +84,12 @@ $other_name = $other_user ? htmlspecialchars($other_user->display_name(), ENT_QU
 			<?php endforeach; ?>
 
 			<?php if ($pager && $pager->total_pages() > 1 && $pager->is_valid_page('+1')): ?>
-			<div style="text-align:center;padding:0.5rem;">
+			<div class="jy-convo-loadmore">
 				<a href="<?php echo htmlspecialchars($pager->get_url('+1'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline">Load newer messages</a>
 			</div>
 			<?php endif; ?>
 		<?php elseif ($is_compose): ?>
-			<p style="text-align:center;color:#888;padding:2rem 0;">Start a conversation with <?php echo $other_name; ?></p>
+			<p class="jy-convo-placeholder">Start a conversation with <?php echo $other_name; ?></p>
 		<?php endif; ?>
 	</div>
 
@@ -99,22 +99,6 @@ $other_name = $other_user ? htmlspecialchars($other_user->display_name(), ENT_QU
 		<button type="button" id="send-btn" class="btn btn-primary">Send</button>
 	</div>
 </div>
-
-<style>
-.conversation-page { display: flex; flex-direction: column; min-height: 400px; }
-.conversation-messages { display: flex; flex-direction: column; gap: 0.75rem; padding: 1rem 0; flex: 1; }
-.message-bubble { max-width: 70%; padding: 0.75rem 1rem; border-radius: 1rem; word-wrap: break-word; }
-.message-bubble.message-mine { align-self: flex-end; background: var(--jy-color-primary); color: #fff; border-bottom-right-radius: 0.25rem; }
-.message-bubble.message-theirs { align-self: flex-start; background: #f0f0f0; color: #333; border-bottom-left-radius: 0.25rem; }
-.message-sender { font-size: 0.8rem; font-weight: 600; margin-bottom: 0.25rem; }
-.message-body { line-height: 1.4; }
-.message-time { font-size: 0.75rem; opacity: 0.7; margin-top: 0.25rem; }
-.message-bubble.message-mine .message-time { text-align: right; }
-.conversation-compose { display: flex; gap: 0.5rem; padding: 1rem 0; border-top: 1px solid #eee; align-items: flex-end; }
-.conversation-compose textarea { flex: 1; resize: none; min-height: 44px; max-height: 120px; padding: 0.5rem 0.75rem; border: 1px solid #ccc; border-radius: 0.5rem; font-family: inherit; font-size: 0.95rem; }
-.conversation-compose textarea:focus { outline: none; border-color: var(--jy-color-primary); }
-.conversation-action-btn:hover { background: #f5f5f5; }
-</style>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -159,7 +143,7 @@ document.addEventListener('DOMContentLoaded', function() {
 				}
 				// Append message to DOM
 				if (data.message_html) {
-					var placeholder = messagesDiv.querySelector('p[style*="color:#888"]');
+					var placeholder = messagesDiv.querySelector('.jy-convo-placeholder');
 					if (placeholder) placeholder.remove();
 					messagesDiv.insertAdjacentHTML('beforeend', data.message_html);
 					messagesDiv.scrollTop = messagesDiv.scrollHeight;

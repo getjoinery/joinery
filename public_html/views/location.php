@@ -41,13 +41,13 @@
 
 <section class="jy-content-section">
     <div class="jy-container">
-        <div style="max-width: 860px; margin: 0 auto;">
+        <div class="jy-loc-wrap">
 
             <!-- Description -->
-            <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); padding: 2rem; margin-bottom: 1.5rem;">
-                <div style="display: flex; gap: 1.5rem; align-items: flex-start;">
-                    <div style="font-size: 2.5rem; color: var(--jy-color-primary); flex-shrink: 0;">&#128205;</div>
-                    <div style="flex: 1;">
+            <div class="jy-loc-card">
+                <div class="jy-loc-desc-row">
+                    <div class="jy-loc-desc-icon">&#128205;</div>
+                    <div class="jy-loc-grow">
                         <?php echo $location->get('loc_description'); ?>
                     </div>
                 </div>
@@ -55,29 +55,29 @@
 
             <!-- Contact Information -->
             <?php if ($location->get('loc_address') || $location->get('loc_phone') || $location->get('loc_email')): ?>
-            <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); overflow: hidden;">
-                <div style="background: var(--jy-color-primary); color: #fff; padding: 1rem 1.5rem;">
-                    <h5 style="margin: 0; color: #fff;">Contact Information</h5>
+            <div class="jy-loc-contact">
+                <div class="jy-loc-contact-head">
+                    <h5 class="jy-loc-contact-title">Contact Information</h5>
                 </div>
-                <div style="padding: 1.5rem; display: flex; flex-wrap: wrap; gap: 1.5rem;">
+                <div class="jy-loc-contact-body">
 
                     <?php if ($location->get('loc_address')): ?>
-                    <div style="flex: 1; min-width: 180px; display: flex; gap: 0.75rem; align-items: flex-start;">
-                        <div style="font-size: 1.25rem; color: var(--jy-color-primary); flex-shrink: 0; margin-top: 0.125rem;">&#128205;</div>
+                    <div class="jy-loc-item">
+                        <div class="jy-loc-item-icon">&#128205;</div>
                         <div>
-                            <h6 style="margin: 0 0 0.25rem;">Address</h6>
-                            <p style="color: var(--jy-color-text-muted); margin: 0;"><?php echo nl2br(htmlspecialchars($location->get('loc_address'))); ?></p>
+                            <h6 class="jy-loc-item-title">Address</h6>
+                            <p class="jy-muted jy-tight"><?php echo nl2br(htmlspecialchars($location->get('loc_address'))); ?></p>
                         </div>
                     </div>
                     <?php endif; ?>
 
                     <?php if ($location->get('loc_phone')): ?>
-                    <div style="flex: 1; min-width: 180px; display: flex; gap: 0.75rem; align-items: flex-start;">
-                        <div style="font-size: 1.25rem; color: var(--jy-color-primary); flex-shrink: 0; margin-top: 0.125rem;">&#128222;</div>
+                    <div class="jy-loc-item">
+                        <div class="jy-loc-item-icon">&#128222;</div>
                         <div>
-                            <h6 style="margin: 0 0 0.25rem;">Phone</h6>
-                            <p style="color: var(--jy-color-text-muted); margin: 0;">
-                                <a href="tel:<?php echo htmlspecialchars($location->get('loc_phone')); ?>" style="color: var(--jy-color-text-muted); text-decoration: none;">
+                            <h6 class="jy-loc-item-title">Phone</h6>
+                            <p class="jy-muted jy-tight">
+                                <a href="tel:<?php echo htmlspecialchars($location->get('loc_phone')); ?>" class="jy-loc-link">
                                     <?php echo htmlspecialchars($location->get('loc_phone')); ?>
                                 </a>
                             </p>
@@ -86,12 +86,12 @@
                     <?php endif; ?>
 
                     <?php if ($location->get('loc_email')): ?>
-                    <div style="flex: 1; min-width: 180px; display: flex; gap: 0.75rem; align-items: flex-start;">
-                        <div style="font-size: 1.25rem; color: var(--jy-color-primary); flex-shrink: 0; margin-top: 0.125rem;">&#9993;</div>
+                    <div class="jy-loc-item">
+                        <div class="jy-loc-item-icon">&#9993;</div>
                         <div>
-                            <h6 style="margin: 0 0 0.25rem;">Email</h6>
-                            <p style="color: var(--jy-color-text-muted); margin: 0;">
-                                <a href="mailto:<?php echo htmlspecialchars($location->get('loc_email')); ?>" style="color: var(--jy-color-text-muted); text-decoration: none;">
+                            <h6 class="jy-loc-item-title">Email</h6>
+                            <p class="jy-muted jy-tight">
+                                <a href="mailto:<?php echo htmlspecialchars($location->get('loc_email')); ?>" class="jy-loc-link">
                                     <?php echo htmlspecialchars($location->get('loc_email')); ?>
                                 </a>
                             </p>

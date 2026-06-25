@@ -63,7 +63,7 @@ $formwriter = $page->getFormWriter('tier_form');
         <?php endif; ?>
 
         <?php if ($page_vars['show_reactivate_button']): ?>
-        <div style="margin-bottom: var(--jy-space-5); text-align: center;">
+        <div class="jy-tier-reactivate">
             <?php $formwriter->begin_form(); ?>
             <input type="hidden" name="action" value="reactivate">
             <button type="submit" class="btn btn-primary">Reactivate Subscription</button>
@@ -72,39 +72,39 @@ $formwriter = $page->getFormWriter('tier_form');
         <?php endif; ?>
 
         <!-- Tier cards -->
-        <div style="display: flex; gap: var(--jy-space-5); flex-wrap: wrap; justify-content: center; margin-bottom: var(--jy-space-6);">
+        <div class="jy-tier-cards">
 
             <?php foreach ($page_vars['tier_display_data'] as $tier_data): ?>
             <?php
             $tier = $tier_data['tier'];
             $is_current = $tier_data['is_current'];
             ?>
-            <div class="card" style="flex: 1; min-width: 240px; max-width: 340px;<?php if($is_current): ?> box-shadow: 0 0 0 3px var(--jy-color-primary), var(--jy-shadow-md);<?php endif; ?>">
-                <div class="card-header" style="<?php echo $is_current ? 'background: var(--jy-color-primary); color: #fff;' : ''; ?>">
-                    <h4 style="margin: 0; <?php echo $is_current ? 'color: #fff;' : ''; ?>"><?php echo htmlspecialchars($tier->get('sbt_display_name')); ?></h4>
+            <div class="card jy-tier-card<?php echo $is_current ? ' is-current' : ''; ?>">
+                <div class="card-header">
+                    <h4 class="jy-tier-name"><?php echo htmlspecialchars($tier->get('sbt_display_name')); ?></h4>
                     <?php if ($is_current): ?>
-                    <p style="margin: var(--jy-space-1) 0 0; font-size: var(--jy-text-sm); color: rgba(255,255,255,0.85);">Your Current Plan</p>
+                    <p class="jy-tier-current-label">Your Current Plan</p>
                     <?php elseif ($tier_data['action_type'] == 'downgrade' || $tier_data['action_type'] == 'downgrade_disabled'): ?>
-                    <p class="muted text-sm" style="margin: var(--jy-space-1) 0 0;">Downgrade</p>
+                    <p class="muted text-sm jy-tier-sub">Downgrade</p>
                     <?php endif; ?>
                 </div>
                 <div class="card-body">
                     <?php if ($tier->get('sbt_description')): ?>
-                    <div class="muted text-sm" style="margin-bottom: var(--jy-space-5);">
+                    <div class="muted text-sm jy-tier-section">
                         <?php echo $tier->get('sbt_description'); ?>
                     </div>
                     <?php endif; ?>
 
                     <?php if (!empty($tier_data['products'])): ?>
-                    <div style="margin-bottom: var(--jy-space-5);">
+                    <div class="jy-tier-section">
                         <?php foreach ($tier_data['products'] as $product): ?>
-                        <div style="border-top: 1px solid var(--jy-color-border); padding-top: var(--jy-space-3); margin-top: var(--jy-space-3);">
-                            <p style="margin: 0 0 var(--jy-space-1); font-weight: 600;"><?php echo htmlspecialchars($product['name']); ?></p>
+                        <div class="jy-tier-product">
+                            <p class="jy-tier-product-name"><?php echo htmlspecialchars($product['name']); ?></p>
                             <?php if ($product['price'] > 0): ?>
-                            <p style="margin: 0; font-size: var(--jy-text-2xl); font-weight: 700;">
+                            <p class="jy-tier-price">
                                 $<?php echo number_format($product['price'], 2); ?>
                                 <?php if ($product['period']): ?>
-                                <span class="muted text-sm" style="font-weight: 400;">/<?php echo htmlspecialchars($product['period']); ?></span>
+                                <span class="muted text-sm jy-tier-period">/<?php echo htmlspecialchars($product['period']); ?></span>
                                 <?php endif; ?>
                             </p>
                             <?php endif; ?>
@@ -114,7 +114,7 @@ $formwriter = $page->getFormWriter('tier_form');
                     <?php endif; ?>
 
                     <?php if ($tier_data['message']): ?>
-                    <p class="muted text-sm" style="margin-bottom: var(--jy-space-3);">
+                    <p class="muted text-sm jy-tier-msg">
                         <?php echo htmlspecialchars($tier_data['message']); ?>
                     </p>
                     <?php endif; ?>
@@ -162,7 +162,7 @@ $formwriter = $page->getFormWriter('tier_form');
         </div>
 
         <?php if ($page_vars['show_cancel_button']): ?>
-        <div style="text-align: center;">
+        <div class="text-center">
             <?php $formwriter->begin_form(); ?>
             <input type="hidden" name="action" value="cancel">
             <button type="submit" class="btn btn-danger" onclick="return confirm('Are you sure you want to cancel your subscription?');">

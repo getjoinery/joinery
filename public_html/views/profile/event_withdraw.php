@@ -14,7 +14,7 @@
 <div class="jy-ui">
 <section class="jy-content-section">
     <div class="jy-container">
-        <div style="max-width: 640px; margin: 0 auto;">
+        <div class="jy-narrow-sm">
 
             <div class="jy-page-header">
                 <div class="jy-page-header-bar">
@@ -53,7 +53,7 @@
                     $formwriter->hiddeninput('confirm', '', ['value' => 1]);
                     $formwriter->hiddeninput('evr_event_registrant_id', '', ['value' => $evr_event_registrant_id]);
 
-                    echo '<div style="display: flex; gap: var(--jy-space-4); align-items: center;">';
+                    echo '<div class="jy-row-center">';
                     $formwriter->submitbutton('btn_submit', 'Confirm Withdrawal', ['class' => 'btn btn-primary']);
                     echo ' <a href="/profile">Cancel, I changed my mind</a>';
                     echo '</div>';

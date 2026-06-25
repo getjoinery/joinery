@@ -46,25 +46,25 @@ $session = $page_vars['session'];
 
         <div class="card">
             <div class="card-header">
-                <h6 style="margin: 0;">Events &amp; Courses</h6>
+                <h6 class="jy-tight">Events &amp; Courses</h6>
             </div>
             <div class="card-body">
                 <?php if (empty($page_vars['event_registrations'])): ?>
-                    <p class="muted" style="margin: 0;">
+                    <p class="muted jy-tight">
                         <?php echo $status_filter == 'all' ? 'You have no event registrations.' : 'No ' . htmlspecialchars($status_filter) . ' events found.'; ?>
                     </p>
                 <?php else: ?>
                     <?php foreach ($page_vars['event_registrations'] as $i => $event): ?>
-                    <div style="<?php echo $i > 0 ? 'border-top: 1px solid var(--jy-color-border);' : ''; ?> padding: var(--jy-space-3) 0; display: flex; justify-content: space-between; align-items: flex-start; gap: var(--jy-space-4); flex-wrap: wrap;">
-                        <div style="flex: 1; min-width: 0;">
-                            <h6 style="margin: 0 0 var(--jy-space-1);">
+                    <div class="jy-pevents-row<?php echo $i > 0 ? ' is-divided' : ''; ?>">
+                        <div class="jy-pevents-main">
+                            <h6 class="jy-pevents-name">
                                 <a href="<?php echo htmlspecialchars($event['event_link']); ?>"><?php echo htmlspecialchars($event['event_name']); ?></a>
                             </h6>
                             <?php if ($event['event_time']): ?>
-                            <p class="muted text-sm" style="margin: 0;"><?php echo $event['event_time']; ?></p>
+                            <p class="muted text-sm jy-tight"><?php echo $event['event_time']; ?></p>
                             <?php endif; ?>
                         </div>
-                        <div style="flex-shrink: 0; display: flex; align-items: center; gap: var(--jy-space-2);">
+                        <div class="jy-pevents-badges">
                             <?php
                             $badge_class = 'badge-success';
                             if ($event['event_status'] == 'Expired' || $event['event_status'] == 'Canceled' || $event['event_status'] == 'Completed') {
@@ -82,7 +82,7 @@ $session = $page_vars['session'];
                 <?php endif; ?>
             </div>
             <?php if ($page_vars['num_events'] > 0): ?>
-            <div class="card-footer muted text-sm" style="display: flex; justify-content: space-between; align-items: center;">
+            <div class="card-footer muted text-sm d-flex justify-content-between align-items-center">
                 <span><?php echo $page_vars['num_events']; ?> event<?php echo $page_vars['num_events'] != 1 ? 's' : ''; ?></span>
                 <?php
                 $pager = $page_vars['pager'];

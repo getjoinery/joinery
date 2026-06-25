@@ -35,7 +35,7 @@ $page->public_header([
         <div class="jy-container">
 
             <div class="grid-filter-wrap">
-                <ul class="grid-filter grid-filter-links" style="position: relative;">
+                <ul class="grid-filter grid-filter-links position-relative">
                     <?php
                     foreach ($page_vars['tab_menus'] as $id => $name) {
                         if ($id == ($_REQUEST['type'] ?? '')) {
@@ -48,13 +48,13 @@ $page->public_header([
                 </ul>
             </div>
 
-            <div style="text-align: right; margin-bottom: 1rem;">
-                <a href="/events/calendar.ics" style="color: var(--jy-color-text-muted); font-size: 0.875rem;">&#128197; Subscribe to Calendar</a>
+            <div class="jy-events-ics-row">
+                <a href="/events/calendar.ics" class="jy-events-ics-link">&#128197; Subscribe to Calendar</a>
             </div>
 
             <!-- Mobile Dropdown for Categories -->
-            <div style="display: none;" class="mobile-category-select">
-                <select class="form-select" onchange="window.location.href=this.value;" style="margin-bottom: 1.5rem;">
+            <div class="mobile-category-select">
+                <select class="form-select jy-events-mobile-select" onchange="window.location.href=this.value;">
                     <?php
                     foreach ($page_vars['tab_menus'] as $id => $name) {
                         $selected = ($id == ($_REQUEST['type'] ?? '')) ? 'selected' : '';
@@ -63,12 +63,6 @@ $page->public_header([
                     ?>
                 </select>
             </div>
-            <style>
-            @media (max-width: 576px) {
-                .mobile-category-select { display: block !important; }
-                .grid-filter-wrap { display: none; }
-            }
-            </style>
 
             <!-- Event Items Grid -->
             <div id="portfolio" class="portfolio row grid-container gutter-30" data-layout="fitRows">
@@ -107,7 +101,7 @@ $page->public_header([
                                     </a>
                                 <?php else: ?>
                                     <a href="<?php echo $event_url; ?>">
-                                        <div style="height: 250px; background: var(--jy-color-surface); display: flex; align-items: center; justify-content: center; font-size: 4rem; color: var(--jy-color-border);">
+                                        <div class="jy-events-placeholder">
                                             &#128197;
                                         </div>
                                     </a>

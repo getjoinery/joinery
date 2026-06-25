@@ -24,9 +24,9 @@
 
         <h3>Set New Password</h3>
 
-        <div class="alert alert-warning" style="margin-bottom: 1.25rem;">
+        <div class="alert alert-warning jy-auth-note">
             <strong>Password Change Required</strong>
-            <p style="margin: 0.5rem 0 0;">For security reasons, you must change your password before continuing. The default password should not be used in production.</p>
+            <p class="jy-auth-subhead">For security reasons, you must change your password before continuing. The default password should not be used in production.</p>
         </div>
 
         <?php
@@ -45,7 +45,7 @@
         ]);
         ?>
 
-        <div style="margin-top: 1.25rem;">
+        <div class="jy-auth-foot-spaced">
             <?php echo $formwriter->submitbutton('btn_submit', 'Change Password', ['class' => 'btn btn-primary']); ?>
         </div>
 

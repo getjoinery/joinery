@@ -39,8 +39,8 @@
 
         <h3>We couldn&rsquo;t complete that connection</h3>
 
-        <div class="alert alert-warning" style="margin-bottom: 1.25rem;">
-            <p style="margin: 0;">This authorization link has expired or is no longer valid. Please return to where you started and try connecting again.</p>
+        <div class="alert alert-warning jy-auth-note">
+            <p class="jy-tight">This authorization link has expired or is no longer valid. Please return to where you started and try connecting again.</p>
         </div>
 
         <div class="auth-footer-text">

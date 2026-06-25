@@ -56,7 +56,7 @@
         ]);
         ?>
 
-        <div style="margin-top: var(--jy-space-4);">
+        <div class="jy-form-actions">
             <?php $formwriter->submitbutton('login-form-submit', 'Login', ['class' => 'btn btn-primary']); ?>
         </div>
         <div class="auth-links">

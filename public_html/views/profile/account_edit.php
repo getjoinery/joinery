@@ -20,7 +20,7 @@
 <div class="jy-ui">
 <section class="jy-content-section">
     <div class="jy-container">
-        <div style="max-width: 720px; margin: 0 auto;">
+        <div class="jy-narrow">
 
             <div class="jy-page-header">
                 <div class="jy-page-header-bar">
@@ -37,7 +37,7 @@
 
             <?php echo PublicPage::tab_menu($page_vars['tab_menus'], 'Edit Account'); ?>
 
-            <div class="jy-panel" style="margin-top: var(--jy-space-4);">
+            <div class="jy-panel jy-form-actions">
 
                 <?php
                 require_once(PathHelper::getIncludePath('includes/PhotoHelper.php'));

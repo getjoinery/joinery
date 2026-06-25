@@ -23,7 +23,7 @@
         <?php if ($page_vars['message']): ?>
 
             <div class="text-center">
-                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#198754" stroke-width="1.5" style="margin-bottom: 1rem;" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#198754" stroke-width="1.5" class="jy-auth-success-icon" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
                 <h3>Password Successfully Reset</h3>
                 <p class="text-muted">Continue to log in with your new password.</p>
                 <a href="/login" class="btn btn-primary">Continue to Login</a>

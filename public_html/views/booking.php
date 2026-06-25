@@ -36,15 +36,15 @@
 
 <section class="jy-content-section">
     <div class="jy-container">
-        <div style="max-width: 640px; margin: 0 auto;">
-            <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); padding: 2.5rem; text-align: center;">
-                <div style="font-size: 3rem; color: #f6c23e; margin-bottom: 1rem;">&#128197;</div>
-                <h4 style="margin-bottom: 1rem;">Booking Temporarily Unavailable</h4>
-                <div class="alert alert-info" style="margin-bottom: 1.5rem; text-align: left;">
+        <div class="jy-narrow-sm">
+            <div class="jy-booking-panel">
+                <div class="jy-booking-icon">&#128197;</div>
+                <h4 class="jy-booking-title">Booking Temporarily Unavailable</h4>
+                <div class="alert alert-info jy-booking-alert">
                     Booking functionality is temporarily disabled while we review our calendar integration.
                 </div>
-                <p style="color: var(--jy-color-text-muted); margin-bottom: 2rem;">We apologize for any inconvenience. Please check back soon or contact us directly for scheduling assistance.</p>
-                <div style="display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap;">
+                <p class="jy-booking-text">We apologize for any inconvenience. Please check back soon or contact us directly for scheduling assistance.</p>
+                <div class="jy-booking-actions">
                     <a href="/contact" class="btn btn-primary">Contact Us</a>
                     <a href="/" class="btn btn-outline">Back to Home</a>
                 </div>
