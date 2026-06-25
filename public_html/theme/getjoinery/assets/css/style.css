@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Get Joinery Marketing Theme — Style Sheet v1.0.0
+   Get Joinery Marketing Theme — Style Sheet v1.1.0
    Warm stone palette with amber accents (Variant M)
    ========================================================================== */
 
@@ -1074,6 +1074,10 @@ p:last-child { margin-bottom: 0; }
 }
 
 /* ---------- Form Styles (FormWriterV2HTML5 classes) ---------- */
+/* Kept (not deduped against the kit): these style FormWriter forms and the
+   dns_filtering profile pages, which render OUTSIDE .jy-ui on this theme. The
+   matching .alert*, .badge, and .text-center rules below stay for the same
+   reason. They can be retired once that content moves inside .jy-ui (Phase 7). */
 .form-group { margin-bottom: 1.25rem; }
 .form-label {
     display: block;
@@ -1126,7 +1130,8 @@ select.form-control { appearance: auto; }
 .alert-danger { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
 
 /* ---------- Tables ---------- */
-.table-wrapper { overflow-x: auto; margin: 1rem 0; }
+/* .table-wrapper is owned by the kit (.jy-ui .table-wrapper). table.table is
+   NOT a kit component, so it stays here as the sole styling for .table. */
 table.table {
     width: 100%;
     border-collapse: collapse;
@@ -1146,13 +1151,8 @@ table.table th {
 table.table td { font-size: 0.9rem; color: var(--text-muted); }
 
 /* ---------- Cards ---------- */
-.card {
-    background: white;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    overflow: hidden;
-}
-.card-body { padding: 1.5rem; }
+/* .card and .card-body are owned by the kit (.jy-ui .card / .card-body) and
+   are not used outside .jy-ui on this theme, so no bare copies are kept here. */
 
 /* ---------- Badge ---------- */
 .badge {

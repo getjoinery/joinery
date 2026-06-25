@@ -83,20 +83,44 @@ All design tokens use the `--jy-` prefix to prevent collision with any other CSS
 
 ### Re-skinning with a Branded Theme
 
-To give a branded theme different colors/typography while keeping all base-view components working, override tokens at `:root` in your theme's CSS:
+To give a branded theme different colors/typography while keeping all base-view
+components working, declare the kit token values in a `brand_tokens` block in your
+theme's `theme.json`:
 
-```css
-/* theme/mybrand/assets/css/style.css */
-:root {
-    --jy-color-primary:       #c0392b;   /* brand red */
-    --jy-color-primary-hover: #a93226;
-    --jy-color-link:          #c0392b;
-    --jy-font-sans:           'Lato', sans-serif;
-    --jy-font-display:        'Montserrat', sans-serif;
+```json
+{
+    "name": "mybrand",
+    "brand_tokens": {
+        "jy_color_primary":       "#c0392b",
+        "jy_color_primary_hover": "#a93226",
+        "jy_color_link":          "#c0392b",
+        "jy_font_sans":           "'Lato', sans-serif",
+        "jy_font_display":        "'Montserrat', sans-serif"
+    }
 }
 ```
 
-Because the kit rules reference `var(--jy-color-primary)`, overriding the variable at `:root` is all that is needed — no CSS selectors to duplicate.
+Each key is the kit custom property with the `--` dropped and dashes written as
+underscores (`jy_color_primary` → `--jy-color-primary`). The platform emits these as
+a `:root` override after the kit loads, so the kit rules — which reference
+`var(--jy-color-primary)` etc. — pick them up with no CSS selectors to duplicate. Any
+`--jy-*` token works (colors, fonts, radii, spacing).
+
+**Why `theme.json` and not a `:root` block in your CSS:** the theme stylesheet loads
+*after* the per-deployment brand override that the admin Settings page emits, so a
+`:root` block in theme CSS would silently win over an operator's admin brand choice.
+Declaring tokens in `theme.json` keeps the admin override authoritative.
+
+**Resolution order** (lowest to highest precedence), per token:
+
+1. **Kit default** — the value in `joinery-styles.css :root`.
+2. **Theme default** — your `theme.json` `brand_tokens` (developer-declared, version-controlled, no database write).
+3. **Admin override** — a non-empty value an operator sets under **Settings → Brand & Appearance** (only the five `jy_color_*` color tokens are admin-exposed).
+
+Nothing is copied into the database, so switching the active theme picks up the new
+theme's brand automatically with no stale rows to reconcile. An empty admin setting
+simply defers to the theme default; the Settings field shows the theme's value as its
+effective default.
 
 ## Prerequisites
 
@@ -1827,7 +1851,7 @@ HTML5 PublicPage.php follows the same structure as Bootstrap themes — the only
 
 `PublicPageBase::global_includes_top()` calls `$this->render_base_assets()` which loads `base.css`, `joinery-styles.css`, and `base.js`. These are safe to load on every page — component rules are scoped to `.jy-ui` and global type rules are scoped to `body.jy-default`, so they do not conflict with branded theme CSS. **Do not override `render_base_assets()` to suppress them.**
 
-Immediately after `render_base_assets()`, `global_includes_top()` calls `render_brand_token_overrides()`, which outputs a `<style id="jy-brand-tokens">` block if the admin has configured any `jy_color_*` settings (Brand & Appearance section in admin settings). This block overrides the `:root` token defaults from `joinery-styles.css` with site-wide brand colors. Themes that want to enforce their own palette ahead of the admin settings should load their own token overrides **after** `global_includes_top()` — source order guarantees they win.
+Immediately after `render_base_assets()`, `global_includes_top()` calls `render_brand_token_overrides()`, which outputs a `<style id="jy-brand-tokens">` block overriding the `:root` token defaults from `joinery-styles.css`. Each token resolves at render time, lowest to highest precedence: kit default → the rendering theme's `theme.json` `brand_tokens` → a non-empty `jy_color_*` admin setting (Brand & Appearance). Declare your palette in `theme.json` `brand_tokens` — see [Re-skinning with a Branded Theme](#re-skinning-with-a-branded-theme). **Do not** override the tokens with a `:root` block in your theme stylesheet: the theme CSS loads *after* this `<style>` block, so it would silently win over an operator's admin brand choice.
 
 **Key pattern — always include:**
 ```php

@@ -596,24 +596,83 @@ abstract class PublicPageBase {
 		return (is_string($full) && is_file($full)) ? filemtime($full) : '1';
 	}
 
+	/**
+	 * The theme whose stylesheet renders THIS page. Defaults to the configured
+	 * public theme (theme_template). A page class that renders with a fixed theme
+	 * regardless of theme_template (e.g. the admin theme) overrides this so its
+	 * brand tokens resolve against the theme actually on screen.
+	 */
+	protected function get_render_theme() {
+		$settings = Globalvars::get_instance();
+		return $settings->get_setting('theme_template', true, true);
+	}
+
+	/**
+	 * Emit brand-token overrides for the kit's :root custom properties.
+	 *
+	 * Resolution per token, lowest to highest precedence:
+	 *   1. kit default (joinery-styles.css :root) — left untouched if nothing overrides it here
+	 *   2. the rendering theme's theme.json "brand_tokens" (developer-declared default)
+	 *   3. a matching stg_settings value, if an admin set one (admin override wins)
+	 *
+	 * Nothing is copied into the database: an empty setting simply defers to the
+	 * theme's declared brand, so switching themes picks up the new brand with no
+	 * stale rows to reconcile. Token keys use the setting-style name
+	 * (jy_color_primary) and map to the CSS property by --{name-with-dashes}.
+	 */
 	protected function render_brand_token_overrides() {
 		$settings = Globalvars::get_instance();
-		$map = [
-			'jy_color_primary'       => '--jy-color-primary',
-			'jy_color_primary_hover' => '--jy-color-primary-hover',
-			'jy_color_primary_text'  => '--jy-color-primary-text',
-			'jy_color_surface'       => '--jy-color-surface',
-			'jy_color_bg'            => '--jy-color-bg',
-		];
-		$overrides = [];
-		foreach ($map as $setting => $token) {
-			$val = $settings->get_setting($setting, false, true);
-			if ($val !== '' && $val !== null && preg_match('/^#[0-9a-fA-F]{3,6}$/', $val)) {
-				$overrides[] = '  ' . $token . ': ' . htmlspecialchars($val, ENT_QUOTES) . ';';
+
+		// Layer 2: brand tokens declared by the rendering theme.
+		$resolved = [];
+		try {
+			$theme = ThemeHelper::getInstance($this->get_render_theme());
+			$declared = $theme->get('brand_tokens', []);
+			if (is_array($declared)) {
+				foreach ($declared as $name => $val) {
+					if (is_string($name)) { $resolved[$name] = $val; }
+				}
 			}
+		} catch (Exception $e) {
+			// No resolvable theme/manifest — fall through to settings only.
 		}
-		if (empty($overrides)) return;
+
+		// Layer 3: admin overrides. Only the settings-backed colour tokens have
+		// stg_settings rows; a non-empty value wins over the theme's declaration.
+		$setting_backed = [
+			'jy_color_primary', 'jy_color_primary_hover', 'jy_color_primary_text',
+			'jy_color_surface', 'jy_color_bg',
+		];
+		foreach ($setting_backed as $name) {
+			$val = $settings->get_setting($name, false, true);
+			if (is_string($val) && $val !== '') { $resolved[$name] = $val; }
+		}
+
+		// Emit, validating each name and value for the CSS context.
+		$overrides = [];
+		foreach ($resolved as $name => $val) {
+			if (!is_string($name) || !preg_match('/^jy_[a-z0-9_]+$/', $name)) { continue; }
+			if (!self::is_safe_css_token_value($val)) { continue; }
+			$prop = '--' . str_replace('_', '-', $name);
+			$overrides[] = '  ' . $prop . ': ' . trim($val) . ';';
+		}
+
+		if (empty($overrides)) { return; }
 		echo '<style id="jy-brand-tokens">:root {' . "\n" . implode("\n", $overrides) . "\n" . '}</style>' . "\n";
+	}
+
+	/**
+	 * Whether a brand-token value is safe to emit inside a <style> declaration.
+	 * Allows only the conservative CSS value charset used by colours, lengths,
+	 * numbers, keywords, var() references, and font stacks — which excludes the
+	 * characters ( ; { } < > \ @ and control chars) that could break out of the
+	 * declaration or inject markup.
+	 */
+	private static function is_safe_css_token_value($val): bool {
+		if (!is_string($val)) { return false; }
+		$val = trim($val);
+		if ($val === '' || strlen($val) > 200) { return false; }
+		return (bool) preg_match('~^[#A-Za-z0-9 ,.\'"()%/-]+$~', $val);
 	}
 
 	public function public_header_common($options=array()) {
