@@ -209,13 +209,37 @@ are acceptable to leave in place.
   `.btn-primary` at `rgb(42,123,228)` (= admin blue) with white text and admin's radius.
   *Browser-confirmed:* kit components render on the admin palette once a region opts in.
 
-### Phase 4 — Public views inline sweep
+### Phase 4 — Public views inline sweep ✅ COMPLETE
 
-The ~49 public views already opt into `.jy-ui`, so this is mostly removing their
+The ~49 public views already opt into `.jy-ui`, so this was mostly removing their
 remaining inline `style=` (≈699, excluding `views/components/` which is swept in Phase 2)
 in favor of kit classes/utilities, plus wrapping any stragglers not yet in `.jy-ui`.
 
-**Exit:** `views/` free of inline styles and `<style>` blocks.
+Each view appends a per-page `.jy-{page}-*` feature section to `assets/css/joinery-styles.css`
+(all rules ancestor-scoped under `.jy-ui`), with original literal values preserved faithfully
+and `.is-*` modifier classes for discrete/conditional variants. JS-coupled display toggles
+were rewritten to the `hidden` attribute or class selectors so behavior is unchanged.
+
+**Exit:** `views/` free of inline styles and `<style>` blocks. *Met:* all 60 views parse;
+the only remaining `style="` is checkout's server-computed `--jy-checkout-progress` custom
+property (a sanctioned exception), and the only remaining `<style>` block is
+`documentation.php` (echoes generated CSS from `MarkdownRenderer::get_css()`, not page styling).
+
+**Progress:**
+
+- ✅ **45 view files converted** — every public + profile view (excluding `views/components/`)
+  renders inside `.jy-ui` with zero hand-authored inline styles and no `<style>` block.
+- ✅ **State-driven where JS touched styling** — checkout's accordion keys all
+  header/badge/body styling off `.checkout-section[data-state]`, so `openSection`/`markCompleted`
+  only set `data-state` and never write inline styles. *Browser-confirmed:* clicking a
+  completed section promotes it to active (primary header, body shown) and demotes the prior
+  active to pending (grey header, body hidden), with `aria-expanded` tracking in lockstep.
+- ✅ **checkout end-to-end verified live** — login modal show/hide, mobile order-summary
+  accordion (`.is-open` → detail shown + chevron rotated 180°), the responsive
+  mobile/desktop summary swap at 768px, and the progress bar all work; full-page screenshot
+  matches the original design (Test Mode banner, completed/active sections, Stripe + PayPal,
+  Order Summary).
+- ✅ **Tree validation** — CSS braces balanced (1015/1015); all views parse (`php -l`).
 
 ### Phase 5 — Plugins
 

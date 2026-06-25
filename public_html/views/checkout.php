@@ -24,12 +24,12 @@
 <div class="jy-ui">
 
 <?php if (StripeHelper::isTestMode()): ?>
-<div style="background: #fff3cd; color: #856404; padding: 0.5rem 1rem; text-align: center; font-size: 0.875rem; border-bottom: 1px solid #ffc107;">
+<div class="jy-checkout-testbar">
     <strong>Test Mode</strong> — Checkout type: <?php echo htmlspecialchars($settings->get_setting('checkout_type'), ENT_QUOTES, 'UTF-8'); ?>
 </div>
 <?php endif; ?>
 
-<section style="padding: 2rem 0;">
+<section class="jy-checkout-wrap">
     <div class="jy-container">
 
     <?php
@@ -37,10 +37,10 @@
     $checkout_messages = $session->get_messages('/checkout');
     if (!empty($checkout_messages)):
         foreach ($checkout_messages as $msg):
-            $alert_class = ($msg->get_message_class() === 'error') ? 'alert-danger' : 'alert-' . $msg->get_message_class();
+            $is_error_msg = ($msg->get_message_class() === 'error');
     ?>
-    <div style="background: <?php echo ($msg->get_message_class() === 'error') ? '#f8d7da' : '#d1ecf1'; ?>; color: <?php echo ($msg->get_message_class() === 'error') ? '#721c24' : '#0c5460'; ?>; padding: 1rem 1.5rem; border-radius: 8px; margin-bottom: 1.5rem; display: flex; align-items: flex-start; gap: 0.75rem;" role="alert">
-        <span style="font-size: 1.25rem; line-height: 1; flex-shrink: 0;"><?php echo ($msg->get_message_class() === 'error') ? '&#9888;' : '&#8505;'; ?></span>
+    <div class="jy-checkout-msg <?php echo $is_error_msg ? 'is-error' : 'is-info'; ?>" role="alert">
+        <span class="jy-checkout-msg-icon"><?php echo $is_error_msg ? '&#9888;' : '&#8505;'; ?></span>
         <div>
             <?php if ($msg->message_title): ?><strong><?php echo htmlspecialchars($msg->message_title, ENT_QUOTES, 'UTF-8'); ?>:</strong> <?php endif; ?>
             <?php echo htmlspecialchars($msg->message, ENT_QUOTES, 'UTF-8'); ?>
@@ -56,16 +56,16 @@
     $coupon_flash = $session->get_pending_coupon_flash();
     if ($coupon_flash):
     ?>
-    <div style="background: #d4edda; color: #155724; padding: 0.875rem 1.25rem; border-radius: 8px; margin-bottom: 1.5rem; border: 1px solid #c3e6cb;" role="status">
+    <div class="jy-checkout-flash" role="status">
         <?php echo $coupon_flash; ?>
     </div>
     <?php endif; ?>
 
     <?php if (empty($cart->items)): ?>
-        <div style="max-width: 500px; margin: 3rem auto; text-align: center;">
-            <div style="font-size: 4rem; color: var(--jy-color-text-muted); margin-bottom: 1rem;">&#128722;</div>
-            <h2 style="margin-bottom: 0.5rem;">Your cart is empty</h2>
-            <p style="color: var(--jy-color-text-muted); margin-bottom: 1.5rem;">Add some items to get started.</p>
+        <div class="jy-checkout-empty">
+            <div class="jy-checkout-empty-icon">&#128722;</div>
+            <h2 class="jy-checkout-empty-h">Your cart is empty</h2>
+            <p class="jy-checkout-empty-p">Add some items to get started.</p>
             <a href="/products" class="btn btn-primary">Browse Products</a>
         </div>
     <?php else:
@@ -89,36 +89,35 @@
         }
         $progress_pct = ($total_sections > 0) ? round(($completed_count / $total_sections) * 100) : 0;
         ?>
-        <div style="margin-bottom: 1.5rem;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-                <span style="font-size: 0.875rem; color: var(--jy-color-text-muted);" aria-current="step">Step <?php echo $active_number; ?> of <?php echo $total_sections; ?></span>
+        <div class="jy-checkout-progress">
+            <div class="jy-checkout-progress-head">
+                <span class="jy-checkout-step-label" aria-current="step">Step <?php echo $active_number; ?> of <?php echo $total_sections; ?></span>
             </div>
-            <div style="height: 4px; background: #e9ecef; border-radius: 2px; overflow: hidden;">
-                <div id="progress-bar" style="height: 100%; background: var(--jy-color-primary); border-radius: 2px; transition: width 0.3s; width: <?php echo $progress_pct; ?>%;"></div>
+            <div class="jy-checkout-track">
+                <div id="progress-bar" class="jy-checkout-bar" style="--jy-checkout-progress: <?php echo $progress_pct; ?>%;"></div>
             </div>
         </div>
 
         <?php $total_discount = 0; ?>
 
-        <!-- Mobile Order Summary (hidden on desktop) -->
-        <div id="mobile-order-summary" style="display: none; margin-bottom: 1rem;">
-            <div onclick="this.querySelector('.mobile-summary-detail').style.display = this.querySelector('.mobile-summary-detail').style.display === 'none' ? 'block' : 'none'; this.querySelector('.chevron').classList.toggle('expanded');"
-                 style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); padding: 0.875rem 1.25rem; cursor: pointer;">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-weight: 600;">Order: <?php
+        <!-- Mobile Order Summary (shown on desktop via media query) -->
+        <div id="mobile-order-summary" class="jy-checkout-mobilesummary">
+            <div class="jy-checkout-mobilecard" onclick="this.classList.toggle('is-open');">
+                <div class="jy-checkout-mobilerow">
+                    <span class="jy-fw-600">Order: <?php
                         $first_item = reset($cart->items);
                         echo htmlspecialchars($first_item[1]->get('pro_name'), ENT_QUOTES, 'UTF-8');
                     ?></span>
-                    <span style="display: flex; align-items: center; gap: 0.5rem;">
-                        <strong style="color: var(--jy-color-primary);"><?php echo $currency_symbol . number_format($cart->get_total() - $total_discount, 2, '.', ','); ?></strong>
-                        <span class="chevron" style="display: inline-block; transition: transform 0.2s; font-size: 0.75rem;">&#9660;</span>
+                    <span class="jy-checkout-mobile-price">
+                        <strong class="jy-checkout-mobile-total"><?php echo $currency_symbol . number_format($cart->get_total() - $total_discount, 2, '.', ','); ?></strong>
+                        <span class="jy-checkout-chevron">&#9660;</span>
                     </span>
                 </div>
-                <div class="mobile-summary-detail" style="display: none; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--jy-color-border);">
+                <div class="jy-checkout-mobiledetail">
                     <?php foreach ($cart->items as $key => $cart_item):
                         list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
                     ?>
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem; font-size: 0.9375rem;">
+                    <div class="jy-checkout-mobile-itemrow">
                         <span><?php echo htmlspecialchars($product->get('pro_name'), ENT_QUOTES, 'UTF-8'); ?></span>
                         <span><?php echo $currency_symbol . number_format($price, 2, '.', ','); ?></span>
                     </div>
@@ -127,58 +126,39 @@
             </div>
         </div>
 
-        <style>
-            @media (max-width: 768px) {
-                #mobile-order-summary { display: block !important; }
-                #order-summary { display: none !important; }
-                .chevron.expanded { transform: rotate(180deg); }
-            }
-            .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
-            .checkout-section:focus-within .section-header { outline: 2px solid var(--jy-color-primary); outline-offset: -2px; }
-        </style>
-
-        <div style="display: flex; gap: 2rem; align-items: flex-start; flex-wrap: wrap;">
+        <div class="jy-checkout-layout">
 
             <!-- Accordion (left) -->
-            <div style="flex: 1; min-width: 320px;" id="checkout-accordion">
-            <div aria-live="polite" id="checkout-status" class="sr-only"></div>
+            <div class="jy-checkout-accordion" id="checkout-accordion">
+            <div aria-live="polite" id="checkout-status" class="jy-sr-only"></div>
             <?php foreach ($sections as $section_key => $section): ?>
-                <fieldset class="checkout-section" data-section="<?php echo $section_key; ?>" data-state="<?php echo $section['state']; ?>"
-                     style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); margin-bottom: 1rem; overflow: hidden; border: none; padding: 0;">
-                    <legend class="sr-only"><?php echo htmlspecialchars($section['title'], ENT_QUOTES, 'UTF-8'); ?></legend>
+                <fieldset class="checkout-section" data-section="<?php echo $section_key; ?>" data-state="<?php echo $section['state']; ?>">
+                    <legend class="jy-sr-only"><?php echo htmlspecialchars($section['title'], ENT_QUOTES, 'UTF-8'); ?></legend>
 
                     <!-- Section Header -->
                     <div class="section-header" role="button" tabindex="0"
                         id="header-<?php echo $section_key; ?>"
                         aria-expanded="<?php echo ($section['state'] == 'active') ? 'true' : 'false'; ?>"
                         aria-controls="body-<?php echo $section_key; ?>"
-                        style="padding: 1rem 1.5rem; display: flex; justify-content: space-between; align-items: center; cursor: pointer;
-                        <?php if ($section['state'] == 'active'): ?>background: var(--jy-color-primary); color: #fff;
-                        <?php elseif ($section['state'] == 'completed'): ?>background: var(--jy-color-surface); border-bottom: 1px solid var(--jy-color-border);
-                        <?php else: ?>background: #f5f5f5; color: #aaa; cursor: default;<?php endif; ?>"
                         <?php if ($section['state'] == 'completed'): ?>onclick="openSection('<?php echo $section_key; ?>')"<?php endif; ?>
                         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();if(this.parentElement.dataset.state==='completed')openSection('<?php echo $section_key; ?>');}">
-                        <div style="display: flex; align-items: center; gap: 0.75rem;">
-                            <span aria-hidden="true" style="display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; font-weight: 700; font-size: 0.875rem;
-                                <?php if ($section['state'] == 'active'): ?>background: rgba(255,255,255,0.2); color: #fff;
-                                <?php elseif ($section['state'] == 'completed'): ?>background: #198754; color: #fff;
-                                <?php else: ?>background: #ddd; color: #999;<?php endif; ?>">
+                        <div class="jy-checkout-headleft">
+                            <span aria-hidden="true" class="section-badge">
                                 <?php if ($section['state'] == 'completed'): ?>&#10003;<?php else: echo $section['number']; endif; ?>
                             </span>
-                            <strong style="font-size: 1.0625rem;"><?php echo htmlspecialchars($section['title'], ENT_QUOTES, 'UTF-8'); ?></strong>
+                            <strong class="jy-checkout-sectitle"><?php echo htmlspecialchars($section['title'], ENT_QUOTES, 'UTF-8'); ?></strong>
                         </div>
                         <?php if ($section['state'] == 'completed' && $section['summary']): ?>
-                        <div style="display: flex; align-items: center; gap: 1rem;">
-                            <span style="font-size: 0.875rem; color: var(--jy-color-text-muted);"><?php echo $section['summary']; ?></span>
-                            <span style="font-size: 0.8125rem; color: var(--jy-color-primary); font-weight: 600;">Edit</span>
+                        <div class="section-summary">
+                            <span class="jy-checkout-sumtext"><?php echo $section['summary']; ?></span>
+                            <span class="jy-checkout-sumedit">Edit</span>
                         </div>
                         <?php endif; ?>
                     </div>
 
                     <!-- Section Body -->
                     <div class="section-body" id="body-<?php echo $section_key; ?>"
-                         role="region" aria-labelledby="header-<?php echo $section_key; ?>"
-                         style="padding: 1.5rem; <?php if ($section['state'] != 'active') echo 'display: none;'; ?>">
+                         role="region" aria-labelledby="header-<?php echo $section_key; ?>">
 
                     <?php if ($section_key == 'billing'): ?>
                         <!-- BILLING USER SECTION -->
@@ -196,79 +176,79 @@
                         <?php if ($logged_in_complete):
                             $display_name = trim($user->get('usr_first_name') . ' ' . $user->get('usr_last_name'));
                         ?>
-                            <div style="display: flex; align-items: center; justify-content: space-between; padding: 0.875rem 1rem; background: var(--jy-color-surface); border-radius: 6px; margin-bottom: 1rem;">
+                            <div class="jy-checkout-userbox">
                                 <div>
-                                    <div style="font-weight: 600;"><?php echo htmlspecialchars($display_name, ENT_QUOTES, 'UTF-8'); ?></div>
-                                    <div style="color: var(--jy-color-text-muted); font-size: 0.9375rem;"><?php echo htmlspecialchars($user->get('usr_email'), ENT_QUOTES, 'UTF-8'); ?></div>
+                                    <div class="jy-checkout-username"><?php echo htmlspecialchars($display_name, ENT_QUOTES, 'UTF-8'); ?></div>
+                                    <div class="jy-checkout-useremail"><?php echo htmlspecialchars($user->get('usr_email'), ENT_QUOTES, 'UTF-8'); ?></div>
                                 </div>
-                                <a href="/logout?redirect=/cart" style="font-size: 0.8125rem; color: var(--jy-color-text-muted); text-decoration: none;">Not you?</a>
+                                <a href="/logout?redirect=/cart" class="jy-checkout-notyou">Not you?</a>
                             </div>
                             <input type="hidden" id="contact_email" value="<?php echo htmlspecialchars($user->get('usr_email'), ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" id="billing_first_name" value="<?php echo htmlspecialchars($user->get('usr_first_name'), ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" id="billing_last_name" value="<?php echo htmlspecialchars($user->get('usr_last_name'), ENT_QUOTES, 'UTF-8'); ?>">
                         <?php elseif ($is_logged_in): ?>
-                            <div style="background: var(--jy-color-surface); padding: 0.875rem 1rem; border-radius: 6px; margin-bottom: 1rem; font-size: 0.9375rem; color: var(--jy-color-text-muted);">
+                            <div class="jy-checkout-signedin">
                                 Signed in as <strong><?php echo htmlspecialchars($user->get('usr_email'), ENT_QUOTES, 'UTF-8'); ?></strong>. Please confirm your name to continue.
                             </div>
                             <input type="hidden" id="contact_email" value="<?php echo htmlspecialchars($user->get('usr_email'), ENT_QUOTES, 'UTF-8'); ?>">
-                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                            <div class="jy-checkout-namegrid">
                                 <div>
-                                    <label for="billing_first_name" style="display: block; font-weight: 600; margin-bottom: 0.25rem; font-size: 0.9375rem;">First Name <span style="color: var(--jy-color-danger);">*</span></label>
+                                    <label for="billing_first_name" class="jy-checkout-label">First Name <span class="jy-checkout-req">*</span></label>
                                     <input type="text" id="billing_first_name" name="billing_first_name"
                                            value="<?php echo htmlspecialchars($cart->billing_user['billing_first_name'] ?? $user->get('usr_first_name') ?? '', ENT_QUOTES, 'UTF-8'); ?>"
-                                           style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--jy-color-border); border-radius: 6px; font-size: 1rem;"
+                                           class="jy-checkout-input"
                                            required autocomplete="given-name">
                                 </div>
                                 <div>
-                                    <label for="billing_last_name" style="display: block; font-weight: 600; margin-bottom: 0.25rem; font-size: 0.9375rem;">Last Name <span style="color: var(--jy-color-danger);">*</span></label>
+                                    <label for="billing_last_name" class="jy-checkout-label">Last Name <span class="jy-checkout-req">*</span></label>
                                     <input type="text" id="billing_last_name" name="billing_last_name"
                                            value="<?php echo htmlspecialchars($cart->billing_user['billing_last_name'] ?? $user->get('usr_last_name') ?? '', ENT_QUOTES, 'UTF-8'); ?>"
-                                           style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--jy-color-border); border-radius: 6px; font-size: 1rem;"
+                                           class="jy-checkout-input"
                                            required autocomplete="family-name">
                                 </div>
                             </div>
                         <?php else: ?>
                             <!-- Email -->
-                            <div style="margin-bottom: 1rem;">
-                                <label for="contact_email" style="display: block; font-weight: 600; margin-bottom: 0.25rem; font-size: 0.9375rem;">Email Address <span style="color: var(--jy-color-danger);">*</span></label>
+                            <div class="jy-checkout-field">
+                                <label for="contact_email" class="jy-checkout-label">Email Address <span class="jy-checkout-req">*</span></label>
                                 <input type="email" id="contact_email" name="billing_email"
                                        value="<?php echo htmlspecialchars($cart->billing_user['billing_email'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
-                                       style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--jy-color-border); border-radius: 6px; font-size: 1rem;"
+                                       class="jy-checkout-input"
                                        required autocomplete="email" placeholder="your@email.com">
-                                <div id="contact_email_exists" style="background: #e8f4fd; padding: 0.75rem 1rem; border-radius: 6px; margin-top: 0.75rem; font-size: 0.9375rem; display: none;">
+                                <div id="contact_email_exists" class="jy-checkout-emailexists" hidden>
                                     Welcome back! <a href="#" onclick="showLoginModal(); return false;">Log in</a> for faster checkout, or continue as guest.
                                 </div>
                             </div>
 
                             <!-- Name -->
-                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                            <div class="jy-checkout-namegrid">
                                 <div>
-                                    <label for="billing_first_name" style="display: block; font-weight: 600; margin-bottom: 0.25rem; font-size: 0.9375rem;">First Name <span style="color: var(--jy-color-danger);">*</span></label>
+                                    <label for="billing_first_name" class="jy-checkout-label">First Name <span class="jy-checkout-req">*</span></label>
                                     <input type="text" id="billing_first_name" name="billing_first_name"
                                            value="<?php echo htmlspecialchars($cart->billing_user['billing_first_name'] ?? $prefill_name['first'], ENT_QUOTES, 'UTF-8'); ?>"
-                                           style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--jy-color-border); border-radius: 6px; font-size: 1rem;"
+                                           class="jy-checkout-input"
                                            required autocomplete="given-name">
                                 </div>
                                 <div>
-                                    <label for="billing_last_name" style="display: block; font-weight: 600; margin-bottom: 0.25rem; font-size: 0.9375rem;">Last Name <span style="color: var(--jy-color-danger);">*</span></label>
+                                    <label for="billing_last_name" class="jy-checkout-label">Last Name <span class="jy-checkout-req">*</span></label>
                                     <input type="text" id="billing_last_name" name="billing_last_name"
                                            value="<?php echo htmlspecialchars($cart->billing_user['billing_last_name'] ?? $prefill_name['last'], ENT_QUOTES, 'UTF-8'); ?>"
-                                           style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--jy-color-border); border-radius: 6px; font-size: 1rem;"
+                                           class="jy-checkout-input"
                                            required autocomplete="family-name">
                                 </div>
                             </div>
                         <?php endif; ?>
 
-                        <div id="billing_errors" style="color: var(--jy-color-danger); font-size: 0.875rem; margin-bottom: 0.75rem; display: none;"></div>
+                        <div id="billing_errors" class="jy-checkout-errors" hidden></div>
 
-                        <div style="margin-top: 1.25rem;">
+                        <div class="jy-checkout-actions">
                             <?php if ($cart->get_total() <= 0): ?>
-                            <button type="button" class="btn btn-primary" onclick="submitBillingAndComplete()" style="width: 100%;">Complete Order</button>
+                            <button type="button" class="btn btn-primary jy-w-full" onclick="submitBillingAndComplete()">Complete Order</button>
                             <?php else: ?>
-                            <button type="button" class="btn btn-primary" onclick="validateAndContinue('billing')" style="width: 100%;">Continue</button>
+                            <button type="button" class="btn btn-primary jy-w-full" onclick="validateAndContinue('billing')">Continue</button>
                             <?php endif; ?>
                             <?php $consent_copy = LibraryFunctions::consent_copy('continuing'); if ($consent_copy): ?>
-                            <p style="font-size: 0.8125rem; color: var(--jy-color-text-muted); text-align: center; margin: 0.75rem 0 0;">
+                            <p class="jy-checkout-consent">
                                 <?php echo $consent_copy; ?>
                             </p>
                             <?php endif; ?>
@@ -284,11 +264,11 @@
                         <?php else: ?>
 
                             <?php if (($settings->get_setting('checkout_type') == 'stripe_checkout' || $settings->get_setting('checkout_type') == 'stripe_regular') && !empty($page_vars['stripe_helper'])): ?>
-                            <div style="margin-bottom: 1.5rem;">
+                            <div class="jy-checkout-pay-stripe">
                                 <?php
                                 $formwriter = $page->getFormWriter('form_stripe');
                                 if ($settings->get_setting('checkout_type') == 'stripe_checkout') {
-                                    echo '<h5 style="margin-bottom: 1rem;">Review & Pay</h5>';
+                                    echo '<h5 class="jy-checkout-payhead">Review & Pay</h5>';
                                     echo $page_vars['stripe_helper']->output_stripe_checkout_form($cart->get_hash());
                                 } else {
                                     echo $page_vars['stripe_helper']->output_stripe_regular_form($formwriter, '');
@@ -299,8 +279,8 @@
 
                             <?php if ($settings->get_setting('use_paypal_checkout') && !empty($page_vars['paypal_helper'])): ?>
                             <?php if ($cart->is_paypal_available()): ?>
-                            <div style="<?php if ($settings->get_setting('checkout_type')): ?>border-top: 1px solid var(--jy-color-border); padding-top: 1.5rem; margin-top: 1.5rem;<?php endif; ?>">
-                                <h5 style="margin-bottom: 1rem;">Pay with PayPal</h5>
+                            <div class="jy-checkout-pay-paypal<?php if ($settings->get_setting('checkout_type')): ?> is-divided<?php endif; ?>">
+                                <h5 class="jy-checkout-payhead">Pay with PayPal</h5>
                                 <?php
                                 if ($cart->get_num_recurring() == 1 && $cart->get_num_non_recurring() == 0) {
                                     echo $page_vars['paypal_helper']->output_paypal_subscription_checkout_code($page_vars['plan_id']);
@@ -310,14 +290,14 @@
                                 ?>
                             </div>
                             <?php else: ?>
-                            <div style="border-top: 1px solid var(--jy-color-border); padding-top: 1.5rem; margin-top: 1.5rem; color: var(--jy-color-text-muted); font-size: 0.875rem;">
+                            <div class="jy-checkout-paypal-unavail">
                                 PayPal is not available for carts containing a mix of subscriptions and other items. You can pay with Stripe, or check out subscriptions separately.
                             </div>
                             <?php endif; ?>
                             <?php endif; ?>
 
-                            <div style="margin-top: 1.5rem; text-align: center; color: var(--jy-color-text-muted); font-size: 0.8125rem;">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -2px;" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                            <div class="jy-checkout-secure">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="jy-checkout-secure-icon" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
                                 Your order is protected by 256-bit SSL encryption
                             </div>
                         <?php endif; ?>
@@ -330,10 +310,10 @@
             </div><!-- /accordion -->
 
             <!-- Order Summary (right) -->
-            <div style="flex: 0 0 340px; min-width: 260px; position: sticky; top: 2rem;" id="order-summary">
-                <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); overflow: hidden;">
-                    <div style="background: var(--jy-color-primary); color: #fff; padding: 1rem 1.5rem;">
-                        <h3 style="margin: 0; color: #fff; font-size: 1.0625rem;">Order Summary</h3>
+            <div class="jy-checkout-summary-col" id="order-summary">
+                <div class="jy-checkout-summary-card">
+                    <div class="jy-checkout-summary-head">
+                        <h3 class="jy-checkout-summary-title">Order Summary</h3>
                     </div>
 
                     <?php
@@ -342,89 +322,88 @@
                         list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
                         if ($discount) $total_discount += $discount;
                     ?>
-                    <div style="padding: 1rem 1.5rem; border-bottom: 1px solid var(--jy-color-border);">
-                        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem;">
-                            <div style="flex: 1; min-width: 0;">
-                                <h6 style="margin: 0 0 0.25rem; font-size: 0.9375rem;">
+                    <div class="jy-checkout-lineitem">
+                        <div class="jy-checkout-lineitem-row">
+                            <div class="jy-flex1min">
+                                <h6 class="jy-checkout-lineitem-name">
                                     <?php echo htmlspecialchars($product->get('pro_name'), ENT_QUOTES, 'UTF-8'); ?>
-                                    <small style="color: var(--jy-color-text-muted);"><?php echo htmlspecialchars($product_version->get('prv_version_name'), ENT_QUOTES, 'UTF-8'); ?></small>
+                                    <small class="jy-muted"><?php echo htmlspecialchars($product_version->get('prv_version_name'), ENT_QUOTES, 'UTF-8'); ?></small>
                                 </h6>
                                 <?php if (!empty($data['full_name_first'])): ?>
-                                <small style="color: var(--jy-color-text-muted);">
+                                <small class="jy-muted">
                                     <?php echo htmlspecialchars($data['full_name_first'] . ' ' . $data['full_name_last'], ENT_QUOTES, 'UTF-8'); ?>
                                 </small>
                                 <?php endif; ?>
                             </div>
-                            <div style="text-align: right; flex-shrink: 0;">
-                                <div style="font-weight: 700; color: var(--jy-color-primary);">
+                            <div class="jy-checkout-lineitem-pricewrap">
+                                <div class="jy-checkout-price">
                                     <?php echo $currency_symbol . number_format($price, 2, '.', ','); ?>
                                     <?php if ($discount): ?>
-                                    <div style="font-size: 0.8125rem; color: #198754;">-<?php echo $currency_symbol . number_format($discount, 2, '.', ','); ?></div>
+                                    <div class="jy-checkout-discount">-<?php echo $currency_symbol . number_format($discount, 2, '.', ','); ?></div>
                                     <?php endif; ?>
                                 </div>
                             </div>
                         </div>
                         <!-- Per-item actions -->
-                        <div style="margin-top: 0.5rem; display: flex; gap: 1rem; font-size: 0.8125rem;">
-                            <a href="<?php echo $product->get_url(); ?>?edit_item=<?php echo $key; ?>" style="color: var(--jy-color-primary); text-decoration: none;">Edit</a>
-                            <a href="/checkout?r=<?php echo $key; ?>" style="color: var(--jy-color-danger); text-decoration: none;">Remove</a>
+                        <div class="jy-checkout-itemactions">
+                            <a href="<?php echo $product->get_url(); ?>?edit_item=<?php echo $key; ?>" class="jy-checkout-link">Edit</a>
+                            <a href="/checkout?r=<?php echo $key; ?>" class="jy-checkout-link-danger">Remove</a>
                         </div>
                     </div>
                     <?php endforeach; ?>
 
                     <?php if ($settings->get_setting('coupons_active')): ?>
-                    <div style="padding: 1rem 1.5rem; border-bottom: 1px solid var(--jy-color-border);">
+                    <div class="jy-checkout-coupon">
                         <?php if (!empty($cart->coupon_codes)): ?>
-                        <div style="margin-bottom: 0.5rem;">
+                        <div class="jy-checkout-coupon-chips">
                             <?php foreach ($cart->coupon_codes as $coupon_code): ?>
-                            <span style="display: inline-flex; align-items: center; gap: 0.25rem; background: #198754; color: #fff; font-size: 0.8125rem; padding: 0.25rem 0.625rem; border-radius: 4px; margin: 0 0.25rem 0.25rem 0;">
+                            <span class="jy-checkout-chip">
                                 <?php echo htmlspecialchars($coupon_code, ENT_QUOTES, 'UTF-8'); ?>
-                                <a href="#" onclick="removeCoupon('<?php echo addslashes($coupon_code); ?>'); return false;" style="color: #fff; text-decoration: none; font-weight: 700; line-height: 1;">&times;</a>
+                                <a href="#" onclick="removeCoupon('<?php echo addslashes($coupon_code); ?>'); return false;" class="jy-checkout-chip-x">&times;</a>
                             </span>
                             <?php endforeach; ?>
                         </div>
                         <?php endif; ?>
                         <?php if (StripeHelper::isTestMode() && !empty($page_vars['all_coupons'])): ?>
-                        <div style="font-size: 0.8125rem; color: var(--jy-color-text-muted); margin-bottom: 0.5rem;">
+                        <div class="jy-checkout-coupon-test">
                             Test:
                             <?php foreach ($page_vars['all_coupons'] as $coupon): ?>
-                            <a href="#" onclick="applyCouponCode('<?php echo addslashes($coupon->get('ccd_code')); ?>'); return false;" style="color: var(--jy-color-primary); margin-left: 0.25rem;">
+                            <a href="#" onclick="applyCouponCode('<?php echo addslashes($coupon->get('ccd_code')); ?>'); return false;" class="jy-checkout-coupon-testlink">
                                 <?php echo htmlspecialchars($coupon->get('ccd_code'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                             <?php endforeach; ?>
                         </div>
                         <?php endif; ?>
-                        <div style="display: flex; gap: 0.5rem;">
-                            <input type="text" id="coupon_code_input" placeholder="Coupon code"
-                                   style="flex: 1; padding: 0.5rem 0.75rem; border: 1px solid var(--jy-color-border); border-radius: 6px; font-size: 0.9375rem;">
-                            <button type="button" class="btn btn-outline" onclick="applyCoupon()" style="font-size: 0.9375rem; padding: 0.5rem 0.875rem;">Apply</button>
+                        <div class="jy-checkout-coupon-row">
+                            <input type="text" id="coupon_code_input" placeholder="Coupon code" class="jy-checkout-coupon-input">
+                            <button type="button" class="btn btn-outline jy-checkout-coupon-apply" onclick="applyCoupon()">Apply</button>
                         </div>
-                        <div id="coupon_error" style="color: var(--jy-color-danger); font-size: 0.8125rem; margin-top: 0.375rem; display: none;"></div>
+                        <div id="coupon_error" class="jy-checkout-coupon-error" hidden></div>
                         <?php if (!empty($page_vars['coupon_error'])): ?>
-                        <div style="color: var(--jy-color-danger); font-size: 0.8125rem; margin-top: 0.375rem;">
+                        <div class="jy-checkout-coupon-error">
                             <?php echo htmlspecialchars($page_vars['coupon_error'], ENT_QUOTES, 'UTF-8'); ?>
                         </div>
                         <?php endif; ?>
                     </div>
                     <?php endif; ?>
 
-                    <div style="background: var(--jy-color-surface); padding: 1rem 1.5rem;">
-                        <dl style="margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 0.375rem 1rem;">
+                    <div class="jy-checkout-totals">
+                        <dl class="jy-checkout-totals-dl">
                             <?php if ($total_discount > 0): ?>
-                            <dt style="font-weight: 400;">Subtotal:</dt>
-                            <dd style="margin: 0; text-align: right;"><?php echo $currency_symbol . number_format($cart->get_total() + $total_discount, 2, '.', ','); ?></dd>
-                            <dt style="color: #198754;">Discount:</dt>
-                            <dd style="margin: 0; text-align: right; color: #198754;">-<?php echo $currency_symbol . number_format($total_discount, 2, '.', ','); ?></dd>
+                            <dt class="jy-checkout-subtotal-dt">Subtotal:</dt>
+                            <dd><?php echo $currency_symbol . number_format($cart->get_total() + $total_discount, 2, '.', ','); ?></dd>
+                            <dt class="jy-checkout-discount-dt">Discount:</dt>
+                            <dd class="jy-checkout-discount-dd">-<?php echo $currency_symbol . number_format($total_discount, 2, '.', ','); ?></dd>
                             <?php endif; ?>
-                            <dt style="font-weight: 700; font-size: 1.0625rem; <?php if ($total_discount > 0): ?>padding-top: 0.75rem; border-top: 1px solid var(--jy-color-border);<?php endif; ?>">Total:</dt>
-                            <dd style="margin: 0; text-align: right; font-weight: 700; font-size: 1.0625rem; color: var(--jy-color-primary); <?php if ($total_discount > 0): ?>padding-top: 0.75rem; border-top: 1px solid var(--jy-color-border);<?php endif; ?>">
+                            <dt class="jy-checkout-total-dt<?php if ($total_discount > 0): ?> is-bordered<?php endif; ?>">Total:</dt>
+                            <dd class="jy-checkout-total-dd<?php if ($total_discount > 0): ?> is-bordered<?php endif; ?>">
                                 <?php echo $currency_symbol . number_format($cart->get_total(), 2, '.', ','); ?>
                             </dd>
                         </dl>
                     </div>
 
-                    <div style="padding: 1rem 1.5rem; text-align: center;">
-                        <a href="/products" style="font-size: 0.875rem; color: var(--jy-color-text-muted); text-decoration: none;">+ Add another item</a>
+                    <div class="jy-checkout-addmore">
+                        <a href="/products" class="jy-checkout-link-muted">+ Add another item</a>
                     </div>
                 </div>
             </div><!-- /order summary -->
@@ -436,22 +415,22 @@
 </section>
 
 <!-- Login Modal -->
-<div id="login-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 9999; align-items: center; justify-content: center;">
-    <div style="background: #fff; border-radius: 12px; padding: 2rem; max-width: 400px; width: 90%; position: relative; box-shadow: 0 8px 32px rgba(0,0,0,0.2);">
-        <button onclick="closeLoginModal()" style="position: absolute; top: 0.75rem; right: 1rem; background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--jy-color-text-muted);">&times;</button>
-        <h3 style="margin: 0 0 1.5rem;">Log In</h3>
-        <div id="login-modal-error" style="color: var(--jy-color-danger); font-size: 0.875rem; margin-bottom: 1rem; display: none;"></div>
-        <div style="margin-bottom: 1rem;">
-            <label for="login_modal_email" style="display: block; font-weight: 600; margin-bottom: 0.25rem;">Email</label>
-            <input type="email" id="login_modal_email" name="email" style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--jy-color-border); border-radius: 6px; font-size: 1rem;" autocomplete="email">
+<div id="login-modal" class="jy-checkout-modal" hidden>
+    <div class="jy-checkout-modal-box">
+        <button onclick="closeLoginModal()" class="jy-checkout-modal-close">&times;</button>
+        <h3 class="jy-checkout-modal-title">Log In</h3>
+        <div id="login-modal-error" class="jy-checkout-modal-error" hidden></div>
+        <div class="jy-checkout-modal-field">
+            <label for="login_modal_email" class="jy-checkout-modal-label">Email</label>
+            <input type="email" id="login_modal_email" name="email" class="jy-checkout-input" autocomplete="email">
         </div>
-        <div style="margin-bottom: 1.5rem;">
-            <label for="login_modal_password" style="display: block; font-weight: 600; margin-bottom: 0.25rem;">Password</label>
-            <input type="password" id="login_modal_password" name="password" style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--jy-color-border); border-radius: 6px; font-size: 1rem;" autocomplete="current-password">
+        <div class="jy-checkout-modal-field is-last">
+            <label for="login_modal_password" class="jy-checkout-modal-label">Password</label>
+            <input type="password" id="login_modal_password" name="password" class="jy-checkout-input" autocomplete="current-password">
         </div>
-        <button onclick="submitLogin()" class="btn btn-primary" style="width: 100%;">Log In</button>
-        <div style="margin-top: 1rem; text-align: center;">
-            <a href="/forgot_password" style="font-size: 0.875rem; color: var(--jy-color-text-muted);">Forgot password?</a>
+        <button onclick="submitLogin()" class="btn btn-primary jy-w-full">Log In</button>
+        <div class="jy-checkout-modal-foot">
+            <a href="/forgot_password" class="jy-checkout-modal-forgot">Forgot password?</a>
         </div>
     </div>
 </div>
@@ -465,10 +444,6 @@
             var header = el.querySelector('.section-header');
             if (el.dataset.section === sectionKey) {
                 el.dataset.state = 'active';
-                body.style.display = 'block';
-                header.style.background = 'var(--jy-color-primary)';
-                header.style.color = '#fff';
-                header.style.cursor = 'pointer';
                 header.setAttribute('aria-expanded', 'true');
                 body.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                 // Focus first input in the section
@@ -479,10 +454,6 @@
                 if (statusEl) statusEl.textContent = header.querySelector('strong').textContent + ' section is now active';
             } else if (el.dataset.state === 'active') {
                 el.dataset.state = 'pending';
-                body.style.display = 'none';
-                header.style.background = '#f5f5f5';
-                header.style.color = '#aaa';
-                header.style.cursor = 'default';
                 header.setAttribute('aria-expanded', 'false');
             }
         });
@@ -493,20 +464,11 @@
         if (!el) return;
         el.dataset.state = 'completed';
         var header = el.querySelector('.section-header');
-        var body = el.querySelector('.section-body');
-        body.style.display = 'none';
-        header.style.background = 'var(--jy-color-surface)';
-        header.style.color = '';
-        header.style.cursor = 'pointer';
         header.onclick = function() { openSection(sectionKey); };
 
         // Update number badge to checkmark
-        var badge = header.querySelector('span');
-        if (badge) {
-            badge.innerHTML = '&#10003;';
-            badge.style.background = '#198754';
-            badge.style.color = '#fff';
-        }
+        var badge = header.querySelector('.section-badge');
+        if (badge) badge.innerHTML = '&#10003;';
 
         // Show summary
         var existing = header.querySelector('.section-summary');
@@ -514,8 +476,7 @@
         if (summary) {
             var sumDiv = document.createElement('div');
             sumDiv.className = 'section-summary';
-            sumDiv.style.cssText = 'display:flex;align-items:center;gap:1rem;';
-            sumDiv.innerHTML = '<span style="font-size:0.875rem;color:var(--jy-color-text-muted);">' + summary + '</span><span style="font-size:0.8125rem;color:var(--jy-color-primary);font-weight:600;">Edit</span>';
+            sumDiv.innerHTML = '<span class="jy-checkout-sumtext">' + summary + '</span><span class="jy-checkout-sumedit">Edit</span>';
             header.appendChild(sumDiv);
         }
         updateProgress();
