@@ -1,12 +1,19 @@
 {
     "name": "getjoinery",
     "display_name": "Get Joinery Marketing",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "Marketing website theme for getjoinery.com — warm stone palette with amber accents",
     "author": "Joinery Team",
     "receives_upgrades": true,
     "included_in_publish": true,
     "cssFramework": "html5",
     "formWriterBase": "FormWriterV2HTML5",
-    "publicPageBase": "PublicPageBase"
+    "publicPageBase": "PublicPageBase",
+    "brand_tokens": {
+        "jy_color_primary": "#b45309",
+        "jy_color_primary_hover": "#d97706",
+        "jy_color_primary_text": "#ffffff",
+        "jy_color_surface": "#f5f5f4",
+        "jy_color_bg": "#fafaf9"
+    }
 }

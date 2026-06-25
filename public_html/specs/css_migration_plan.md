@@ -292,14 +292,65 @@ sheet. Remaining inline `style=` across all plugins is limited to sanctioned run
 properties (`--svm-pct`, `--dnsf-c`) and framework-generated markup (FormWriter, calendar
 component, Stripe/PayPal). Email bodies and CLI output were intentionally left out of scope.
 
-### Phase 6 — Theme dedup
+### Phase 6 — Theme dedup ✅ COMPLETE (getjoinery)
 
-Retire the component CSS that getjoinery and joinery-system still define and the kit
-now owns — **after confirming each rule is unused** (a theme may style `.btn` outside
-`.jy-ui` for its own chrome; keep those). Set their brand `--jy-*` overrides. Sweep
-theme-file inline styles.
+Retire the component CSS a theme still defines that the kit now owns — **after
+confirming each rule is unused outside `.jy-ui`** (a theme may style `.btn` outside
+`.jy-ui` for its own chrome; keep those). Set the theme's brand `--jy-*` overrides.
+Sweep theme-file inline styles.
 
-**Exit:** themes carry chrome + token overrides only; no duplicated kit components.
+**Scope: `getjoinery` (public theme) only.** An inventory settled this:
+
+- **`getjoinery`** wraps content in `.jy-ui` per view (69 views), so the kit's
+  components apply and the theme's bare copies are redundant. It defines 95 bare
+  classes; 20 overlap kit components.
+- **`joinery-system`** (admin theme) is **out of scope**. No admin page (0 of 153)
+  wraps content in `.jy-ui`, so the kit's `.jy-ui`-scoped component rules never apply
+  there — the admin theme's bare component CSS is load-bearing, not duplicated.
+  Deduping it would first require retrofitting `.jy-ui` onto all 153 admin pages, a
+  much larger, higher-risk job with low payoff for an internal interface (see the
+  ordering rationale's note on admin). Left as-is.
+
+**Component dedup outcome.** Per-rule exact-token audit (whole-class match, not `\b`
+substring) against every getjoinery-rendered surface decided each overlap class:
+
+- **Removed** (kit-owned `.jy-ui .X` wins on specificity; no bare usage outside
+  `.jy-ui`, so the bare copy was dead): `.card`, `.card-body`, `.table-wrapper`.
+- **Kept — chrome:** `.btn`, `.btn-primary`, `.btn-sm` (the public nav, outside `.jy-ui`).
+- **Kept — not kit-owned:** `table.table` (the kit doesn't style it; sole styling for `.table`).
+- **Kept — load-bearing outside `.jy-ui`:** `.alert*`, `.badge`, `.form-control`,
+  `.form-group`, `.form-label`, `.form-check`, `.text-center`. The dns_filtering
+  profile pages (change-tier, scheduled_block_edit, devices, activation) and
+  FormWriter forms render outside `.jy-ui` on getjoinery and rely on these. Retiring
+  them is gated on Phase 7 (moving that content inside `.jy-ui`). A comment in
+  `style.css` records why they stay.
+
+So the safe deletion was small (the kit-owned dead rules); the rest is correctly held
+by the "keep rules used outside `.jy-ui`" clause.
+
+**Theme inline-style sweep.** getjoinery chrome templates carry **0** inline styles —
+already clean, nothing to do.
+
+**Brand `--jy-*` overrides — declarative, runtime-resolved (no DB copy).** A theme
+declares its kit-token values in a `brand_tokens` block in `theme.json`; getjoinery
+declares its amber brand there. `PublicPageBase::render_brand_token_overrides()`
+resolves each token at render time, lowest to highest precedence:
+
+1. kit default (`joinery-styles.css :root`),
+2. the **rendering** theme's `theme.json` `brand_tokens` (developer default),
+3. a non-empty `stg_settings` value (admin override; only the five `jy_color_*` colors are admin-exposed).
+
+Nothing is written to the database, so a theme switch picks up the new brand with no
+stale rows. `get_render_theme()` (overridden in `PublicPageJoinerySystem` to return
+`joinery-system`) ensures admin pages resolve against their own theme, not the public
+one — so getjoinery's amber is never emitted onto admin. Values are validated to a safe
+CSS charset before emission. The admin **Settings → Brand & Appearance** fields show
+the active theme's declared value as their effective default. Documented in
+[theme_integration_instructions.md](theme_integration_instructions.md#re-skinning-with-a-branded-theme).
+
+**Exit:** `getjoinery` carries chrome + token overrides (via `theme.json`) only; no
+duplicated kit components beyond those provably load-bearing outside `.jy-ui` (held for
+Phase 7). `joinery-system` unchanged.
 
 ### Phase 7 — Guardrails
 

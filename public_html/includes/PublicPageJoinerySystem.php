@@ -123,6 +123,13 @@ class PublicPageJoinerySystem extends PublicPageBase {
         echo '<link rel="stylesheet" href="/assets/css/joinery-styles.css?v=' . $this->asset_mtime('assets/css/joinery-styles.css') . '">' . "\n";
     }
 
+    // Admin always renders with the joinery-system theme, regardless of the
+    // configured public theme (theme_template), so brand tokens resolve against
+    // joinery-system's theme.json — not the public theme's amber palette.
+    protected function get_render_theme() {
+        return 'joinery-system';
+    }
+
     // =====================================================================
     // Table classes
     // =====================================================================

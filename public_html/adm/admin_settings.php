@@ -485,35 +485,48 @@
 		]);
 
 		echo '<h3>Brand &amp; Appearance</h3>';
-		echo '<p class="text-muted">These override the default UI kit tokens used on login, signup, and other base pages. Leave blank to use the kit default.</p>';
+		echo '<p class="text-muted">Override the UI kit brand colors. Leave blank to use the active theme&rsquo;s declared brand (shown under each field), or the kit default if the theme declares none.</p>';
+
+		// Active public theme's declared brand tokens — surfaced as the effective
+		// default so a blank field still shows what color is actually in use.
+		$theme_brand = [];
+		try {
+			$theme_brand = ThemeHelper::getInstance()->get('brand_tokens', []);
+			if (!is_array($theme_brand)) { $theme_brand = []; }
+		} catch (Throwable $e) { /* no resolvable theme — kit defaults apply */ }
+		$brand_default_note = function ($key) use ($theme_brand) {
+			return (isset($theme_brand[$key]) && is_string($theme_brand[$key]))
+				? ' Theme default: ' . htmlspecialchars($theme_brand[$key]) . '.'
+				: '';
+		};
 
 		$formwriter->colorpicker('jy_color_primary', 'Primary / Button Color', [
 			'value'    => $settings->get_setting('jy_color_primary'),
-			'helptext' => 'Buttons, checkboxes, links, focus rings.',
+			'helptext' => 'Buttons, checkboxes, links, focus rings.' . $brand_default_note('jy_color_primary'),
 			'sort'     => 'frequency',
 		]);
 
 		$formwriter->colorpicker('jy_color_primary_hover', 'Primary Hover Color', [
 			'value'    => $settings->get_setting('jy_color_primary_hover'),
-			'helptext' => 'Button hover state. Typically a darker shade of the primary color.',
+			'helptext' => 'Button hover state. Typically a darker shade of the primary color.' . $brand_default_note('jy_color_primary_hover'),
 			'sort'     => 'frequency',
 		]);
 
 		$formwriter->colorpicker('jy_color_primary_text', 'Primary Button Text Color', [
 			'value'    => $settings->get_setting('jy_color_primary_text'),
-			'helptext' => 'Text on filled primary buttons. Usually white; change for light primaries.',
+			'helptext' => 'Text on filled primary buttons. Usually white; change for light primaries.' . $brand_default_note('jy_color_primary_text'),
 			'sort'     => 'frequency',
 		]);
 
 		$formwriter->colorpicker('jy_color_surface', 'Surface / Card Background', [
 			'value'    => $settings->get_setting('jy_color_surface'),
-			'helptext' => 'Background of auth cards, panels, table rows. White removes the gray tint.',
+			'helptext' => 'Background of auth cards, panels, table rows. White removes the gray tint.' . $brand_default_note('jy_color_surface'),
 			'sort'     => 'frequency',
 		]);
 
 		$formwriter->colorpicker('jy_color_bg', 'Page Background', [
 			'value'    => $settings->get_setting('jy_color_bg'),
-			'helptext' => 'Overall page background behind cards.',
+			'helptext' => 'Overall page background behind cards.' . $brand_default_note('jy_color_bg'),
 			'sort'     => 'frequency',
 		]);
 
