@@ -13,29 +13,29 @@ $page->public_header([
 <div class="jy-ui">
 
 <!-- Hero Section -->
-<section class="jy-content-section section-muted" style="padding: 5rem 0; text-align: center;">
+<section class="jy-content-section section-muted jy-home-hero">
     <div class="jy-container">
-        <h1 style="font-size: 2.5rem; font-weight: 700; margin-bottom: 1.5rem;">
+        <h1 class="jy-home-h1">
             Welcome to <?php echo htmlspecialchars($site_name); ?>
         </h1>
-        <p style="font-size: 1.125rem; color: var(--jy-color-text-muted); margin-bottom: 2rem; max-width: 600px; margin-left: auto; margin-right: auto;">
+        <p class="jy-home-lead">
             Your site has been successfully installed and is ready for configuration.
         </p>
-        <div style="display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap; padding: 0.25rem;">
-            <a href="/login" class="btn btn-primary" style="font-size: 1.0625rem; padding: 0.75rem 2rem;">Sign In</a>
-            <a href="/register" class="btn btn-outline" style="font-size: 1.0625rem; padding: 0.75rem 2rem;">Register</a>
+        <div class="jy-home-cta">
+            <a href="/login" class="btn btn-primary jy-home-btn">Sign In</a>
+            <a href="/register" class="btn btn-outline jy-home-btn">Register</a>
         </div>
     </div>
 </section>
 
 <!-- Features Section -->
-<section class="jy-content-section" style="padding: 4rem 0;">
+<section class="jy-content-section jy-home-section">
     <div class="jy-container">
-        <div style="text-align: center; margin-bottom: 3rem;">
+        <div class="jy-home-sectionhead">
             <h2>Platform Features</h2>
-            <p style="color: var(--jy-color-text-muted);">Everything you need to manage your membership organization</p>
+            <p class="jy-muted">Everything you need to manage your membership organization</p>
         </div>
-        <div class="grid-3" style="gap: 1.5rem;">
+        <div class="grid-3 jy-home-grid">
             <?php
             $features = [
                 ['title' => 'Member Management',     'desc' => 'Manage member profiles, subscriptions, and communications all in one place.'],
@@ -46,9 +46,9 @@ $page->public_header([
                 ['title' => 'Reports &amp; Analytics','desc' => 'Track membership growth, revenue, and engagement with detailed reports.'],
             ];
             foreach ($features as $f): ?>
-            <div style="background: #fff; border: 1px solid var(--jy-color-border); border-radius: 8px; padding: 2rem; text-align: center;">
-                <h5 style="margin-top: 0; margin-bottom: 0.75rem;"><?php echo $f['title']; ?></h5>
-                <p style="color: var(--jy-color-text-muted); margin: 0;"><?php echo $f['desc']; ?></p>
+            <div class="jy-home-feature">
+                <h5 class="jy-home-feature-title"><?php echo $f['title']; ?></h5>
+                <p class="jy-muted jy-tight"><?php echo $f['desc']; ?></p>
             </div>
             <?php endforeach; ?>
         </div>
@@ -58,11 +58,11 @@ $page->public_header([
 <!-- Getting Started Section -->
 <section class="jy-content-section section-muted">
     <div class="jy-container">
-        <div class="grid-2" style="gap: 3rem; align-items: start;">
+        <div class="grid-2 jy-home-gs-grid">
 
             <div>
                 <h2>Getting Started</h2>
-                <p style="color: var(--jy-color-text-muted); margin-bottom: 2rem;">Follow these steps to configure your new Joinery installation:</p>
+                <p class="jy-home-gs-lead">Follow these steps to configure your new Joinery installation:</p>
 
                 <?php
                 $steps = [
@@ -72,38 +72,38 @@ $page->public_header([
                     ['title' => 'Customize This Page',          'desc' => 'Replace this welcome page with your own content in <code>views/index.php</code>.'],
                 ];
                 foreach ($steps as $i => $step): ?>
-                <div style="display: flex; gap: 1rem; margin-bottom: 1.5rem; align-items: flex-start;">
-                    <div style="flex-shrink: 0; width: 32px; height: 32px; background: var(--jy-color-primary); color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.875rem;">
+                <div class="jy-home-step">
+                    <div class="jy-home-step-num">
                         <?php echo $i + 1; ?>
                     </div>
                     <div>
                         <strong><?php echo $step['title']; ?></strong>
-                        <p style="margin: 0.25rem 0 0; color: var(--jy-color-text-muted); font-size: 0.9rem;"><?php echo $step['desc']; ?></p>
+                        <p class="jy-home-step-desc"><?php echo $step['desc']; ?></p>
                     </div>
                 </div>
                 <?php endforeach; ?>
             </div>
 
-            <div style="background: #fff; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.1);">
-                <div style="background: #212529; color: #fff; padding: 1rem 1.5rem; font-weight: 600; border-radius: 8px 8px 0 0;">
+            <div class="jy-home-admin-card">
+                <div class="jy-home-admin-head">
                     Admin Access
                 </div>
-                <div style="padding: 1.5rem;">
+                <div class="jy-home-admin-body">
                     <p>Default administrator login:</p>
-                    <div style="background: var(--jy-color-surface); border-radius: 4px; padding: 1rem; margin-bottom: 1rem;">
-                        <div style="display: flex; margin-bottom: 0.5rem;">
-                            <span style="width: 90px; color: var(--jy-color-text-muted);">Email:</span>
+                    <div class="jy-home-creds">
+                        <div class="jy-home-cred-row">
+                            <span class="jy-home-cred-label">Email:</span>
                             <code>admin@example.com</code>
                         </div>
-                        <div style="display: flex;">
-                            <span style="width: 90px; color: var(--jy-color-text-muted);">Password:</span>
+                        <div class="d-flex">
+                            <span class="jy-home-cred-label">Password:</span>
                             <code>changeme123</code>
                         </div>
                     </div>
-                    <div class="alert alert-info" style="margin-bottom: 1rem;">
+                    <div class="alert alert-info jy-home-alert">
                         You will be prompted to change the default password on first login.
                     </div>
-                    <a href="/admin" class="btn btn-primary" style="width: 100%;">Go to Admin Panel</a>
+                    <a href="/admin" class="btn btn-primary jy-w-full">Go to Admin Panel</a>
                 </div>
             </div>
 
@@ -112,11 +112,11 @@ $page->public_header([
 </section>
 
 <!-- Footer CTA -->
-<section class="jy-content-section jy-section-dark" style="padding: 4rem 0; text-align: center;">
+<section class="jy-content-section jy-section-dark jy-home-cta-section">
     <div class="jy-container">
-        <h3 style="color: #fff; margin-bottom: 1rem;">Ready to get started?</h3>
-        <p style="color: rgba(255,255,255,0.8); margin-bottom: 2rem;">Sign in to begin configuring your membership platform.</p>
-        <a href="/login" class="btn" style="background: #fff; color: var(--jy-color-text); font-size: 1.0625rem; padding: 0.75rem 2.5rem;">Get Started</a>
+        <h3 class="jy-home-cta-title">Ready to get started?</h3>
+        <p class="jy-home-cta-text">Sign in to begin configuring your membership platform.</p>
+        <a href="/login" class="btn jy-home-cta-btn">Get Started</a>
     </div>
 </section>
 

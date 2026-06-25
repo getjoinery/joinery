@@ -37,20 +37,20 @@ $session = $page_vars['session'];
 
         <div class="card">
             <div class="card-header">
-                <h6 style="margin: 0;">Order History</h6>
+                <h6 class="jy-tight">Order History</h6>
             </div>
             <div class="card-body">
                 <?php if (empty($page_vars['orders']) || $page_vars['numorders'] == 0): ?>
-                    <p class="muted" style="margin: 0;">No orders found.</p>
+                    <p class="muted jy-tight">No orders found.</p>
                 <?php else: ?>
                     <?php $i = 0; foreach ($page_vars['orders'] as $order): ?>
-                    <div style="<?php echo $i > 0 ? 'border-top: 1px solid var(--jy-color-border);' : ''; ?> padding: var(--jy-space-3) 0; display: flex; justify-content: space-between; align-items: center; gap: var(--jy-space-4); flex-wrap: wrap;">
+                    <div class="jy-orders-row<?php echo $i > 0 ? ' is-divided' : ''; ?>">
                         <div>
-                            <p style="margin: 0; font-weight: 600;">Order #<?php echo htmlspecialchars($order->key); ?></p>
-                            <p class="muted text-sm" style="margin: 0;">$<?php echo htmlspecialchars($order->get('ord_total_cost')); ?></p>
+                            <p class="jy-orders-num">Order #<?php echo htmlspecialchars($order->key); ?></p>
+                            <p class="muted text-sm jy-tight">$<?php echo htmlspecialchars($order->get('ord_total_cost')); ?></p>
                         </div>
-                        <div style="text-align: right;">
-                            <p class="muted text-sm" style="margin: 0;">
+                        <div class="text-end">
+                            <p class="muted text-sm jy-tight">
                                 <?php echo LibraryFunctions::convert_time($order->get('ord_timestamp'), 'UTC', $session->get_timezone(), 'M j, Y'); ?>
                             </p>
                         </div>
@@ -59,7 +59,7 @@ $session = $page_vars['session'];
                 <?php endif; ?>
             </div>
             <?php if ($page_vars['numorders'] > 0): ?>
-            <div class="card-footer muted text-sm" style="display: flex; justify-content: space-between; align-items: center;">
+            <div class="card-footer muted text-sm d-flex justify-content-between align-items-center">
                 <span><?php echo $page_vars['numorders']; ?> order<?php echo $page_vars['numorders'] != 1 ? 's' : ''; ?></span>
                 <?php
                 $pager = $page_vars['pager'];

@@ -24,7 +24,7 @@
 
 <div class="jy-ui">
 <div class="auth-page">
-    <div class="auth-card" style="max-width: 540px;">
+    <div class="auth-card jy-auth-card-wide">
 
         <div class="auth-logo">
             <a href="/"><?php $page->get_logo(); ?></a>

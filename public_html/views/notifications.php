@@ -36,7 +36,7 @@ function notification_icon_svg($type) {
 <div class="jy-ui">
 <section class="jy-content-section">
     <div class="jy-container">
-        <div style="max-width: 860px; margin: 0 auto;">
+        <div class="jy-narrow-lg">
 
             <div class="jy-page-header">
                 <div class="jy-page-header-bar">
@@ -68,7 +68,7 @@ function notification_icon_svg($type) {
 
 		<?php if ($page_vars['notifications']->count() === 0): ?>
 			<div class="ntf-inbox-empty">
-				<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:0.3;"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+				<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="jy-notif-empty-icon"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
 				<p>No notifications yet.</p>
 			</div>
 		<?php else: ?>
@@ -146,189 +146,6 @@ function notification_icon_svg($type) {
 		<?php endif; ?>
 	</div>
 </div>
-
-<style>
-/* Inbox card */
-.ntf-inbox-card {
-	background: #fff;
-	border-radius: 0.5rem;
-	border: 1px solid #e3e6ed;
-	overflow: hidden;
-}
-.ntf-inbox-header {
-	display: flex;
-	justify-content: space-between;
-	align-items: center;
-	padding: 0.875rem 1.25rem;
-	border-bottom: 1px solid #e3e6ed;
-	background: #f9fafd;
-}
-.ntf-inbox-title {
-	display: flex;
-	align-items: center;
-	gap: 0.5rem;
-	font-weight: 600;
-	font-size: 0.9375rem;
-	color: #344050;
-}
-.ntf-inbox-count {
-	background: var(--jy-color-primary);
-	color: #fff;
-	font-size: 0.75rem;
-	font-weight: 600;
-	padding: 0.125rem 0.5rem;
-	border-radius: 999px;
-	line-height: 1.4;
-}
-.ntf-mark-all-btn {
-	background: none;
-	border: 1px solid #d8dbe0;
-	border-radius: 0.25rem;
-	padding: 0.3rem 0.75rem;
-	font-size: 0.8125rem;
-	color: #5e6e82;
-	cursor: pointer;
-	transition: all 0.15s;
-}
-.ntf-mark-all-btn:hover {
-	background: #f0f2f5;
-	color: #344050;
-	border-color: #c0c4cc;
-}
-
-/* Empty state */
-.ntf-inbox-empty {
-	text-align: center;
-	padding: 3rem 1rem;
-	color: #9da9bb;
-}
-.ntf-inbox-empty p { margin: 0.75rem 0 0; }
-
-/* Notification rows */
-.ntf-inbox-list { }
-.ntf-row {
-	display: flex;
-	align-items: flex-start;
-	padding: 0.75rem 1.25rem;
-	border-bottom: 1px solid #f0f2f5;
-	position: relative;
-	transition: background 0.15s;
-}
-.ntf-row:last-child { border-bottom: none; }
-.ntf-row:hover { background: #f9fafd; }
-.ntf-row-unread { background: #f0f7ff; }
-.ntf-row-unread:hover { background: #e6f0fc; }
-.ntf-row-unread .ntf-row-title { font-weight: 600; }
-
-/* Unread dot */
-.ntf-unread-dot {
-	position: absolute;
-	left: 0.375rem;
-	top: 50%;
-	transform: translateY(-50%);
-	width: 6px;
-	height: 6px;
-	border-radius: 50%;
-	background: var(--jy-color-primary);
-}
-
-/* Icon */
-.ntf-row-icon {
-	flex-shrink: 0;
-	width: 36px;
-	height: 36px;
-	border-radius: 50%;
-	background: #edf2f9;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	margin-right: 0.875rem;
-	color: #5e6e82;
-}
-.ntf-row-unread .ntf-row-icon {
-	background: #dbe8f9;
-	color: var(--jy-color-primary);
-}
-
-/* Content */
-.ntf-row-content {
-	flex: 1;
-	min-width: 0;
-}
-.ntf-row-link {
-	text-decoration: none;
-	color: inherit;
-}
-.ntf-row-link:hover .ntf-row-title { color: var(--jy-color-primary); }
-.ntf-row-title {
-	display: block;
-	font-size: 0.875rem;
-	color: #344050;
-	line-height: 1.4;
-}
-.ntf-row-body {
-	display: block;
-	font-size: 0.8125rem;
-	color: #748194;
-	margin-top: 0.125rem;
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
-}
-
-/* Meta column */
-.ntf-row-meta {
-	flex-shrink: 0;
-	margin-left: 1rem;
-	display: flex;
-	flex-direction: column;
-	align-items: flex-end;
-	gap: 0.375rem;
-}
-.ntf-row-time {
-	font-size: 0.75rem;
-	color: #9da9bb;
-	white-space: nowrap;
-}
-.ntf-row-mark-btn {
-	background: none;
-	border: 1px solid #d8dbe0;
-	border-radius: 50%;
-	width: 26px;
-	height: 26px;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	cursor: pointer;
-	color: #9da9bb;
-	padding: 0;
-	transition: all 0.15s;
-}
-.ntf-row-mark-btn:hover {
-	background: #e8f4e8;
-	border-color: #6bc16b;
-	color: #3a8a3a;
-}
-
-/* Pager */
-.ntf-inbox-pager {
-	display: flex;
-	justify-content: center;
-	align-items: center;
-	gap: 1rem;
-	padding: 0.875rem 1.25rem;
-	border-top: 1px solid #e3e6ed;
-	background: #f9fafd;
-	font-size: 0.8125rem;
-	color: #748194;
-}
-.ntf-inbox-pager a {
-	color: var(--jy-color-primary);
-	text-decoration: none;
-	font-weight: 500;
-}
-.ntf-inbox-pager a:hover { text-decoration: underline; }
-</style>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {

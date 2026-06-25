@@ -25,7 +25,7 @@
 ?>
 <div class="jy-ui">
 
-<div class="jy-container" style="padding: 2rem 1rem;">
+<div class="jy-container jy-post-wrap">
     <div class="row gx-5">
 
         <main class="col-lg-9">
@@ -143,7 +143,7 @@
                         document.querySelectorAll('.commentbutton').forEach(function(btn) {
                             btn.addEventListener('click', function() {
                                 var container = document.getElementById(this.id + 'container');
-                                if (container) container.style.display = container.style.display === 'none' ? 'block' : 'none';
+                                if (container) container.hidden = !container.hidden;
                             });
                         });
                     });
@@ -160,7 +160,7 @@
                                 <button id="comment<?php echo $comment->key; ?>" class="commentbutton btn btn-outline btn-sm">Reply</button>
 
                                 <?php if ($page_vars['settings']->get_setting('comments_unregistered_users') || $page_vars['session']->get_user_id()): ?>
-                                <div id="comment<?php echo $comment->key; ?>container" style="display:none;" class="mt-3 p-3 bg-light" style="border-radius: 4px;">
+                                <div id="comment<?php echo $comment->key; ?>container" hidden class="mt-3 p-3 bg-light jy-radius-4">
                                     <?php
                                     $reply_fw = $page->getFormWriter('form' . $comment->key, ['action' => $_SERVER['REQUEST_URI']]);
                                     $reply_fw->antispam_question_validate([], 'blog');
@@ -206,7 +206,7 @@
                                             if ($reply->get('cmt_comment_id_parent') == $comment->key): ?>
                                             <div class="d-flex align-items-start mt-3 ms-4">
                                                 <img class="rounded-circle me-3" src="/assets/images/blank-avatar.png" width="40" height="40" alt="Avatar">
-                                                <div class="flex-grow-1 bg-light p-3" style="border-radius: 4px;">
+                                                <div class="flex-grow-1 bg-light p-3 jy-radius-4">
                                                     <div class="d-flex justify-content-between mb-1">
                                                         <strong class="small"><?php echo htmlspecialchars($reply->get('cmt_author_name')); ?></strong>
                                                         <small class="text-muted"><?php echo LibraryFunctions::convert_time($reply->get('cmt_created_time'), 'UTC', 'America/New_York'); ?></small>

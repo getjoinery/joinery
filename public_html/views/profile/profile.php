@@ -80,21 +80,21 @@ function dashboard_notification_icon_svg($type) {
         $has_actions = !empty($page_vars['pending_surveys']) || $page_vars['unread_messages'] > 0 || $page_vars['unread_notifications'] > 0;
         if ($has_actions):
         ?>
-        <div class="alert alert-info" style="display: flex; align-items: center; gap: var(--jy-space-5); flex-wrap: wrap;">
+        <div class="alert alert-info jy-profile-actions">
             <svg class="alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-            <div class="alert-body" style="display: flex; align-items: center; gap: var(--jy-space-5); flex-wrap: wrap; flex: 1;">
+            <div class="alert-body jy-profile-actions-body">
                 <?php if (!empty($page_vars['pending_surveys'])): ?>
-                <a href="/survey?survey_id=<?php echo intval($page_vars['pending_surveys'][0]['survey_id']); ?>&amp;event_id=<?php echo intval($page_vars['pending_surveys'][0]['event_id']); ?>" style="text-decoration: none; color: inherit; white-space: nowrap;">
+                <a href="/survey?survey_id=<?php echo intval($page_vars['pending_surveys'][0]['survey_id']); ?>&amp;event_id=<?php echo intval($page_vars['pending_surveys'][0]['event_id']); ?>" class="jy-profile-actionlink">
                     <strong><?php echo count($page_vars['pending_surveys']); ?></strong> survey<?php echo count($page_vars['pending_surveys']) != 1 ? 's' : ''; ?> awaiting feedback
                 </a>
                 <?php endif; ?>
                 <?php if ($page_vars['unread_messages'] > 0): ?>
-                <a href="/profile/conversations" style="text-decoration: none; color: inherit; white-space: nowrap;">
+                <a href="/profile/conversations" class="jy-profile-actionlink">
                     <strong><?php echo $page_vars['unread_messages']; ?></strong> unread message<?php echo $page_vars['unread_messages'] != 1 ? 's' : ''; ?>
                 </a>
                 <?php endif; ?>
                 <?php if ($page_vars['unread_notifications'] > 0): ?>
-                <a href="/notifications" style="text-decoration: none; color: inherit; white-space: nowrap;">
+                <a href="/notifications" class="jy-profile-actionlink">
                     <strong><?php echo $page_vars['unread_notifications']; ?></strong> new notification<?php echo $page_vars['unread_notifications'] != 1 ? 's' : ''; ?>
                 </a>
                 <?php endif; ?>
@@ -102,59 +102,59 @@ function dashboard_notification_icon_svg($type) {
         </div>
         <?php endif; ?>
 
-        <div class="stats-grid" style="margin-bottom: var(--jy-space-5);">
-            <a href="/profile/events" class="card" style="text-decoration: none; color: inherit;">
-                <div class="card-body" style="text-align: center; padding: var(--jy-space-4);">
-                    <div style="font-size: var(--jy-text-2xl); font-weight: 700; color: var(--jy-color-primary);"><?php echo (int)$page_vars['active_event_count']; ?></div>
+        <div class="stats-grid jy-mb-5">
+            <a href="/profile/events" class="card jy-profile-statcard">
+                <div class="card-body jy-profile-statbody">
+                    <div class="jy-profile-statnum"><?php echo (int)$page_vars['active_event_count']; ?></div>
                     <div class="muted text-sm">Upcoming Events</div>
                 </div>
             </a>
             <?php if ($settings->get_setting('messaging_active')): ?>
-            <a href="/profile/conversations" class="card" style="text-decoration: none; color: inherit;">
-                <div class="card-body" style="text-align: center; padding: var(--jy-space-4);">
-                    <div style="font-size: var(--jy-text-2xl); font-weight: 700; color: <?php echo $page_vars['unread_messages'] > 0 ? 'var(--jy-color-danger)' : 'var(--jy-color-primary)'; ?>;"><?php echo (int)$page_vars['unread_messages']; ?></div>
+            <a href="/profile/conversations" class="card jy-profile-statcard">
+                <div class="card-body jy-profile-statbody">
+                    <div class="jy-profile-statnum<?php echo $page_vars['unread_messages'] > 0 ? ' is-alert' : ''; ?>"><?php echo (int)$page_vars['unread_messages']; ?></div>
                     <div class="muted text-sm">Unread Messages</div>
                 </div>
             </a>
             <?php endif; ?>
-            <a href="/notifications" class="card" style="text-decoration: none; color: inherit;">
-                <div class="card-body" style="text-align: center; padding: var(--jy-space-4);">
-                    <div style="font-size: var(--jy-text-2xl); font-weight: 700; color: <?php echo $page_vars['unread_notifications'] > 0 ? 'var(--jy-color-warning)' : 'var(--jy-color-primary)'; ?>;"><?php echo (int)$page_vars['unread_notifications']; ?></div>
+            <a href="/notifications" class="card jy-profile-statcard">
+                <div class="card-body jy-profile-statbody">
+                    <div class="jy-profile-statnum<?php echo $page_vars['unread_notifications'] > 0 ? ' is-warn' : ''; ?>"><?php echo (int)$page_vars['unread_notifications']; ?></div>
                     <div class="muted text-sm">Notifications</div>
                 </div>
             </a>
             <?php if ($settings->get_setting('products_active') && $settings->get_setting('subscriptions_active')): ?>
-            <a href="/profile/subscriptions" class="card" style="text-decoration: none; color: inherit;">
-                <div class="card-body" style="text-align: center; padding: var(--jy-space-4);">
-                    <div style="font-size: var(--jy-text-2xl); font-weight: 700; color: var(--jy-color-primary);"><?php echo (int)$page_vars['active_subscription_count']; ?></div>
+            <a href="/profile/subscriptions" class="card jy-profile-statcard">
+                <div class="card-body jy-profile-statbody">
+                    <div class="jy-profile-statnum"><?php echo (int)$page_vars['active_subscription_count']; ?></div>
                     <div class="muted text-sm">Active Subscriptions</div>
                 </div>
             </a>
             <?php endif; ?>
         </div>
 
-        <div style="display: flex; gap: var(--jy-space-5); flex-wrap: wrap;">
+        <div class="jy-profile-cols">
             <!-- Main content column -->
-            <div style="flex: 2; min-width: 280px;">
+            <div class="jy-profile-main">
 
                 <div class="card">
-                    <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
-                        <h6 style="margin: 0;">Upcoming Events</h6>
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h6 class="jy-tight">Upcoming Events</h6>
                         <a href="/profile/events" class="text-sm">View all</a>
                     </div>
                     <div class="card-body">
                         <?php if (empty($page_vars['event_registrations'])): ?>
-                            <p class="muted" style="margin: 0;">No upcoming events.</p>
+                            <p class="muted jy-tight">No upcoming events.</p>
                         <?php else: ?>
                             <?php foreach ($page_vars['event_registrations'] as $i => $event): ?>
-                            <div style="<?php echo $i > 0 ? 'border-top: 1px solid var(--jy-color-border);' : ''; ?> padding: <?php echo $i > 0 ? 'var(--jy-space-3)' : '0'; ?> 0 var(--jy-space-3); display: flex; justify-content: space-between; align-items: flex-start; gap: var(--jy-space-4); flex-wrap: wrap;">
-                                <div style="flex: 1; min-width: 0;">
-                                    <a href="<?php echo htmlspecialchars($event['event_link']); ?>" style="font-weight: 600;"><?php echo htmlspecialchars($event['event_name']); ?></a>
+                            <div class="jy-profile-evrow<?php echo $i > 0 ? ' is-divided' : ''; ?>">
+                                <div class="jy-flex1min">
+                                    <a href="<?php echo htmlspecialchars($event['event_link']); ?>" class="jy-fw-600"><?php echo htmlspecialchars($event['event_name']); ?></a>
                                     <?php if ($event['event_time']): ?>
-                                    <div class="muted text-sm" style="margin-top: var(--jy-space-1);"><?php echo $event['event_time']; ?></div>
+                                    <div class="muted text-sm jy-mt-1"><?php echo $event['event_time']; ?></div>
                                     <?php endif; ?>
                                 </div>
-                                <div style="flex-shrink: 0;">
+                                <div class="jy-noshrink">
                                     <?php if ($event['event_expires']): ?>
                                         <span class="badge badge-success">Expires <?php echo htmlspecialchars($event['event_expires']); ?></span>
                                     <?php else: ?>
@@ -168,13 +168,13 @@ function dashboard_notification_icon_svg($type) {
                 </div>
 
                 <div class="card">
-                    <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
-                        <h6 style="margin: 0;">Recent Notifications</h6>
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h6 class="jy-tight">Recent Notifications</h6>
                         <a href="/notifications" class="text-sm">View all</a>
                     </div>
                     <div class="card-body">
                         <?php if (count($page_vars['recent_notifications']) == 0): ?>
-                            <p class="muted" style="margin: 0;">No notifications yet.</p>
+                            <p class="muted jy-tight">No notifications yet.</p>
                         <?php else: ?>
                             <?php $ni = 0; foreach ($page_vars['recent_notifications'] as $ntf): ?>
                             <?php
@@ -183,19 +183,19 @@ function dashboard_notification_icon_svg($type) {
                             $ntf_type = $ntf->get('ntf_type');
                             $icon_svg = dashboard_notification_icon_svg($ntf_type);
                             ?>
-                            <div style="<?php echo $ni > 0 ? 'border-top: 1px solid var(--jy-color-border);' : ''; ?> padding: <?php echo $ni > 0 ? 'var(--jy-space-3)' : '0'; ?> 0 var(--jy-space-3); display: flex; align-items: flex-start; gap: var(--jy-space-3);<?php echo $is_unread ? ' border-left: 3px solid var(--jy-color-primary); padding-left: var(--jy-space-3); margin-left: calc(-1 * var(--jy-space-3));' : ''; ?>">
-                                <div class="muted" style="flex-shrink: 0; margin-top: var(--jy-space-1);"><?php echo $icon_svg; ?></div>
-                                <div style="flex: 1; min-width: 0;">
+                            <div class="jy-profile-feedrow<?php echo $ni > 0 ? ' is-divided' : ''; ?><?php echo $is_unread ? ' is-unread' : ''; ?>">
+                                <div class="muted jy-profile-feedicon"><?php echo $icon_svg; ?></div>
+                                <div class="jy-flex1min">
                                     <?php if ($ntf_link): ?>
-                                        <a href="<?php echo htmlspecialchars($ntf_link); ?>" class="text-sm" style="font-weight: <?php echo $is_unread ? '600' : '400'; ?>;"><?php echo htmlspecialchars($ntf->get('ntf_title')); ?></a>
+                                        <a href="<?php echo htmlspecialchars($ntf_link); ?>" class="text-sm jy-profile-feedtitle<?php echo $is_unread ? ' is-unread' : ''; ?>"><?php echo htmlspecialchars($ntf->get('ntf_title')); ?></a>
                                     <?php else: ?>
-                                        <span class="text-sm" style="font-weight: <?php echo $is_unread ? '600' : '400'; ?>;"><?php echo htmlspecialchars($ntf->get('ntf_title')); ?></span>
+                                        <span class="text-sm jy-profile-feedtitle<?php echo $is_unread ? ' is-unread' : ''; ?>"><?php echo htmlspecialchars($ntf->get('ntf_title')); ?></span>
                                     <?php endif; ?>
                                     <?php if ($ntf->get('ntf_body')): ?>
-                                    <div class="muted text-sm" style="margin-top: var(--jy-space-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"><?php echo htmlspecialchars(mb_substr($ntf->get('ntf_body'), 0, 100)); ?></div>
+                                    <div class="muted text-sm jy-profile-feedpreview"><?php echo htmlspecialchars(mb_substr($ntf->get('ntf_body'), 0, 100)); ?></div>
                                     <?php endif; ?>
                                 </div>
-                                <div class="muted text-sm" style="flex-shrink: 0; white-space: nowrap;"><?php echo dashboard_relative_time($ntf->get('ntf_create_time'), $session); ?></div>
+                                <div class="muted text-sm jy-profile-feedtime"><?php echo dashboard_relative_time($ntf->get('ntf_create_time'), $session); ?></div>
                             </div>
                             <?php $ni++; endforeach; ?>
                         <?php endif; ?>
@@ -204,13 +204,13 @@ function dashboard_notification_icon_svg($type) {
 
                 <?php if ($settings->get_setting('messaging_active') && $page_vars['recent_conversations']): ?>
                 <div class="card">
-                    <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
-                        <h6 style="margin: 0;">Recent Messages</h6>
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h6 class="jy-tight">Recent Messages</h6>
                         <a href="/profile/conversations" class="text-sm">View all</a>
                     </div>
                     <div class="card-body">
                         <?php if (count($page_vars['recent_conversations']) == 0): ?>
-                            <p class="muted" style="margin: 0;">No messages yet.</p>
+                            <p class="muted jy-tight">No messages yet.</p>
                         <?php else: ?>
                             <?php $mi = 0; foreach ($page_vars['recent_conversations'] as $cnv): ?>
                             <?php
@@ -221,17 +221,17 @@ function dashboard_notification_icon_svg($type) {
                             $is_unread = $latest_time && (!$last_read || $latest_time > $last_read);
                             $preview = htmlspecialchars(mb_substr(strip_tags($latest_body), 0, 80));
                             ?>
-                            <div style="<?php echo $mi > 0 ? 'border-top: 1px solid var(--jy-color-border);' : ''; ?> padding: <?php echo $mi > 0 ? 'var(--jy-space-3)' : '0'; ?> 0 var(--jy-space-3); display: flex; align-items: flex-start; gap: var(--jy-space-3);<?php echo $is_unread ? ' border-left: 3px solid var(--jy-color-primary); padding-left: var(--jy-space-3); margin-left: calc(-1 * var(--jy-space-3));' : ''; ?>">
-                                <div class="muted" style="flex-shrink: 0; margin-top: var(--jy-space-1);">
+                            <div class="jy-profile-feedrow<?php echo $mi > 0 ? ' is-divided' : ''; ?><?php echo $is_unread ? ' is-unread' : ''; ?>">
+                                <div class="muted jy-profile-feedicon">
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg>
                                 </div>
-                                <div style="flex: 1; min-width: 0;">
-                                    <div style="display: flex; justify-content: space-between; align-items: baseline;">
-                                        <a href="/profile/conversation?id=<?php echo (int)$cnv->key; ?>" class="text-sm" style="font-weight: <?php echo $is_unread ? '600' : '400'; ?>;"><?php echo htmlspecialchars($other_name); ?></a>
-                                        <span class="muted text-sm" style="white-space: nowrap; margin-left: var(--jy-space-2);"><?php echo dashboard_relative_time($latest_time, $session); ?></span>
+                                <div class="jy-flex1min">
+                                    <div class="jy-profile-convhead">
+                                        <a href="/profile/conversation?id=<?php echo (int)$cnv->key; ?>" class="text-sm jy-profile-feedtitle<?php echo $is_unread ? ' is-unread' : ''; ?>"><?php echo htmlspecialchars($other_name); ?></a>
+                                        <span class="muted text-sm jy-profile-convtime"><?php echo dashboard_relative_time($latest_time, $session); ?></span>
                                     </div>
                                     <?php if ($preview): ?>
-                                    <div class="muted text-sm" style="margin-top: var(--jy-space-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"><?php echo $preview; ?></div>
+                                    <div class="muted text-sm jy-profile-feedpreview"><?php echo $preview; ?></div>
                                     <?php endif; ?>
                                 </div>
                             </div>
@@ -243,18 +243,18 @@ function dashboard_notification_icon_svg($type) {
 
                 <?php if ($settings->get_setting('products_active')): ?>
                 <div class="card">
-                    <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
-                        <h6 style="margin: 0;">Recent Orders</h6>
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h6 class="jy-tight">Recent Orders</h6>
                         <a href="/profile/orders" class="text-sm">View all</a>
                     </div>
                     <div class="card-body">
                         <?php if (!$page_vars['orders'] || $page_vars['numorders'] == 0): ?>
-                            <p class="muted" style="margin: 0;">No orders yet.</p>
+                            <p class="muted jy-tight">No orders yet.</p>
                         <?php else: ?>
                             <?php $oi = 0; foreach ($page_vars['orders'] as $order): ?>
-                            <div style="<?php echo $oi > 0 ? 'border-top: 1px solid var(--jy-color-border);' : ''; ?> padding: <?php echo $oi > 0 ? 'var(--jy-space-3)' : '0'; ?> 0 var(--jy-space-3); display: flex; justify-content: space-between; align-items: center; gap: var(--jy-space-4);">
-                                <p style="margin: 0; font-weight: 600;">Order #<?php echo htmlspecialchars($order->key); ?> &mdash; $<?php echo htmlspecialchars($order->get('ord_total_cost')); ?></p>
-                                <p class="muted text-sm" style="margin: 0;"><?php echo LibraryFunctions::convert_time($order->get('ord_timestamp'), 'UTC', $session->get_timezone(), 'M j, Y'); ?></p>
+                            <div class="jy-profile-orderrow<?php echo $oi > 0 ? ' is-divided' : ''; ?>">
+                                <p class="jy-profile-amt">Order #<?php echo htmlspecialchars($order->key); ?> &mdash; $<?php echo htmlspecialchars($order->get('ord_total_cost')); ?></p>
+                                <p class="muted text-sm jy-tight"><?php echo LibraryFunctions::convert_time($order->get('ord_timestamp'), 'UTC', $session->get_timezone(), 'M j, Y'); ?></p>
                             </div>
                             <?php $oi++; endforeach; ?>
                         <?php endif; ?>
@@ -265,26 +265,26 @@ function dashboard_notification_icon_svg($type) {
             </div>
 
             <!-- Sidebar column -->
-            <div style="flex: 1; min-width: 240px;">
+            <div class="jy-profile-aside">
 
                 <div class="card">
-                    <div class="card-body" style="text-align: center; padding: var(--jy-space-5);">
-                        <div style="width: 72px; height: 72px; border-radius: var(--jy-radius-full); background: var(--jy-color-primary); color: #fff; display: flex; align-items: center; justify-content: center; font-size: var(--jy-text-2xl); margin: 0 auto var(--jy-space-4); overflow: hidden;">
+                    <div class="card-body jy-profile-userbody">
+                        <div class="jy-profile-avatar">
                             <?php
                             $pic = $user->get_picture_link('avatar');
                             if ($pic):
                             ?>
-                            <img src="<?php echo htmlspecialchars($pic); ?>" alt="" style="width: 100%; height: 100%; object-fit: cover;">
+                            <img src="<?php echo htmlspecialchars($pic); ?>" alt="" class="jy-profile-avatarimg">
                             <?php else: ?>
                             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg>
                             <?php endif; ?>
                         </div>
-                        <h5 style="margin: 0 0 var(--jy-space-1);"><?php echo htmlspecialchars($user->display_name()); ?></h5>
-                        <p class="muted text-sm" style="margin: 0 0 var(--jy-space-1);"><?php echo htmlspecialchars($user->get('usr_email')); ?></p>
+                        <h5 class="jy-profile-username"><?php echo htmlspecialchars($user->display_name()); ?></h5>
+                        <p class="muted text-sm jy-profile-usermeta"><?php echo htmlspecialchars($user->get('usr_email')); ?></p>
                         <?php if ($page_vars['address']->get_address_string(', ')): ?>
-                        <p class="muted text-sm" style="margin: 0 0 var(--jy-space-4);"><?php echo htmlspecialchars($page_vars['address']->get_address_string(', ')); ?></p>
+                        <p class="muted text-sm jy-profile-useraddr"><?php echo htmlspecialchars($page_vars['address']->get_address_string(', ')); ?></p>
                         <?php else: ?>
-                        <div style="margin-bottom: var(--jy-space-4);"></div>
+                        <div class="jy-mb-4"></div>
                         <?php endif; ?>
                         <a href="/profile/account_edit" class="btn btn-primary btn-block">Edit Account</a>
                     </div>
@@ -293,7 +293,7 @@ function dashboard_notification_icon_svg($type) {
                 <?php if ($settings->get_setting('products_active') && $settings->get_setting('subscriptions_active') && $page_vars['active_subscription_count'] > 0 && $page_vars['subscriptions']): ?>
                 <div class="card">
                     <div class="card-header">
-                        <h6 style="margin: 0;">Subscriptions</h6>
+                        <h6 class="jy-tight">Subscriptions</h6>
                     </div>
                     <div class="card-body">
                         <?php foreach ($page_vars['subscriptions'] as $subscription): ?>
@@ -306,25 +306,25 @@ function dashboard_notification_icon_svg($type) {
                             $sub_badge_class = 'badge-success';
                         }
                         ?>
-                        <div style="display: flex; justify-content: space-between; align-items: center; padding: var(--jy-space-1) 0;">
-                            <span class="text-sm" style="font-weight: 600;">$<?php echo htmlspecialchars($subscription->get('odi_price')); ?>/mo</span>
+                        <div class="jy-profile-subrow">
+                            <span class="text-sm jy-fw-600">$<?php echo htmlspecialchars($subscription->get('odi_price')); ?>/mo</span>
                             <span class="badge <?php echo $sub_badge_class; ?>"><?php echo htmlspecialchars($sub_status); ?></span>
                         </div>
                         <?php endforeach; ?>
-                        <a href="/profile/subscriptions" class="text-sm" style="display: block; margin-top: var(--jy-space-2);">Manage subscriptions</a>
+                        <a href="/profile/subscriptions" class="text-sm jy-profile-managelink">Manage subscriptions</a>
                     </div>
                 </div>
                 <?php endif; ?>
 
                 <div class="card">
                     <div class="card-header">
-                        <h6 style="margin: 0;">Mailing Lists</h6>
+                        <h6 class="jy-tight">Mailing Lists</h6>
                     </div>
                     <div class="card-body text-sm">
                         <?php if (empty($page_vars['user_subscribed_list'])): ?>
-                            <p class="muted" style="margin: 0;">Not subscribed to any lists.</p>
+                            <p class="muted jy-tight">Not subscribed to any lists.</p>
                         <?php else: ?>
-                            <p class="muted" style="margin: 0;"><?php echo htmlspecialchars(implode(', ', $page_vars['user_subscribed_list'])); ?></p>
+                            <p class="muted jy-tight"><?php echo htmlspecialchars(implode(', ', $page_vars['user_subscribed_list'])); ?></p>
                         <?php endif; ?>
                     </div>
                 </div>

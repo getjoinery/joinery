@@ -54,43 +54,43 @@
 
 <section class="jy-content-section">
     <div class="jy-container">
-        <div style="display: flex; gap: 3rem; align-items: flex-start; flex-wrap: wrap;">
+        <div class="jy-product-layout">
 
             <!-- Left: Product Info -->
-            <div style="flex: 1; min-width: 280px;">
+            <div class="jy-product-left">
                 <!-- Image -->
-                <div style="margin-bottom: 1.5rem; text-align: center;">
-                    <div style="width: 100%; max-width: 400px; height: 300px; background: linear-gradient(135deg, #f0f4f8 0%, #dde3ea 100%); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 5rem; color: #b0bac4; margin: 0 auto; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+                <div class="jy-product-imgwrap">
+                    <div class="jy-product-img">
                         &#128722;
                     </div>
                     <?php if ($product->get('pro_on_sale')): ?>
-                    <div style="margin-top: 0.75rem;">
-                        <span style="display: inline-block; background: #dc3545; color: #fff; font-size: 0.8125rem; font-weight: 700; padding: 0.25rem 0.75rem; border-radius: 4px; letter-spacing: 0.05em;">SALE</span>
+                    <div class="jy-product-sale-wrap">
+                        <span class="jy-product-sale">SALE</span>
                     </div>
                     <?php endif; ?>
                 </div>
 
                 <!-- Price -->
                 <?php if ($product->is_sold_out()): ?>
-                    <div class="alert alert-warning" style="margin-bottom: 1.5rem;"><strong>Sold Out</strong></div>
+                    <div class="alert alert-warning jy-product-block"><strong>Sold Out</strong></div>
                 <?php elseif ($product->get_readable_price()): ?>
-                    <div style="font-size: 1.75rem; font-weight: 700; color: var(--jy-color-primary); margin-bottom: 1.25rem;">
+                    <div class="jy-product-price">
                         <?php echo $product->get_readable_price(); ?>
                     </div>
                 <?php endif; ?>
 
                 <!-- Description -->
                 <?php if ($product->get('pro_description')): ?>
-                <div style="margin-bottom: 1.5rem;">
-                    <div style="color: var(--jy-color-text-muted); line-height: 1.6;"><?php echo $product->get('pro_description'); ?></div>
+                <div class="jy-product-block">
+                    <div class="jy-product-desc"><?php echo $product->get('pro_description'); ?></div>
                 </div>
                 <?php endif; ?>
             </div>
 
             <!-- Right: Purchase Form -->
-            <div style="flex: 1; min-width: 320px;">
+            <div class="jy-product-right">
                 <?php if ($edit_item_index !== null): ?>
-                <div class="alert alert-info" style="margin-bottom: 1rem;">
+                <div class="alert alert-info jy-product-alert">
                     Editing item in your cart. <a href="/cart">Cancel and return to checkout</a>
                 </div>
                 <?php endif; ?>
@@ -107,17 +107,17 @@
                     }
                     if ($product->output_product_form($formwriter, $page_vars['user'], null, $product_version->key, $prefill_data)) {
                         $submit_label = ($edit_item_index !== null) ? 'Update Cart' : 'Add to Cart';
-                        echo '<div style="margin-top: 1.5rem;">';
-                        echo $formwriter->submitbutton('btn_submit', $submit_label, ['class' => 'btn btn-primary', 'style' => 'width: 100%; padding: 0.75rem; font-size: 1.0625rem;']);
+                        echo '<div class="jy-product-submit">';
+                        echo $formwriter->submitbutton('btn_submit', $submit_label, ['class' => 'btn btn-primary jy-product-addbtn']);
                         echo '</div>';
                     }
                     echo $formwriter->end_form();
                     $product->output_javascript($formwriter, []);
                 endif; ?>
 
-                <div style="padding-top: 1rem; margin-top: 1rem; border-top: 1px solid var(--jy-color-border);">
+                <div class="jy-product-backwrap">
                     <?php $products_list_on = $settings->get_setting('products_list_items_active') || $settings->get_setting('products_list_events_active'); ?>
-                    <a href="<?= $products_list_on ? '/products' : '/' ?>" style="color: var(--jy-color-text-muted); text-decoration: none; font-size: 0.9375rem;">&#8592; <?= $products_list_on ? 'Back to Products' : 'Back to Home' ?></a>
+                    <a href="<?= $products_list_on ? '/products' : '/' ?>" class="jy-product-back">&#8592; <?= $products_list_on ? 'Back to Products' : 'Back to Home' ?></a>
                 </div>
             </div>
 

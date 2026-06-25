@@ -27,16 +27,22 @@ if (!empty($meta_description)) {
 $page->public_header($header_options);
 ?>
 
+<div class="jy-ui">
+
+<!-- Generated subsystem CSS (markdown renderer + docs viewer layout); not hand-written
+     page styling, so it remains inline rather than moving into the kit stylesheet. -->
 <style>
 	<?php echo MarkdownRenderer::get_css(); ?>
 	<?php echo DocsScanner::get_layout_css(); ?>
 </style>
 
-<section style="padding: 3rem 0;">
+<section class="jy-docs-section">
 	<div class="container">
 		<?php echo DocsScanner::render_viewer($doc_tree, $selected_doc, $rendered_html, $error, $base_url); ?>
 	</div>
 </section>
+
+</div>
 
 <?php
 $page->public_footer(array('track' => true));

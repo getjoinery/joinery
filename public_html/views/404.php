@@ -17,61 +17,61 @@ $page->public_header([
 ?>
 <div class="jy-ui">
 
-<section style="min-height: 75vh; display: flex; align-items: center; padding: 4rem 0;">
+<section class="jy-e404-section">
     <div class="jy-container">
-        <div class="grid-2" style="align-items: center; gap: 3rem;">
+        <div class="grid-2 jy-e404-grid">
 
             <!-- 404 Visual -->
-            <div style="text-align: center;">
-                <div style="font-size: 8rem; font-weight: 900; color: var(--jy-color-primary); opacity: 0.15; line-height: 1;">404</div>
-                <div style="margin-top: -2rem; font-size: 4rem;">&#9888;</div>
+            <div class="jy-e404-visual">
+                <div class="jy-e404-num">404</div>
+                <div class="jy-e404-icon">&#9888;</div>
             </div>
 
             <!-- 404 Content -->
             <div>
                 <?php if ($settings->get_setting('logo_link')): ?>
-                <div style="margin-bottom: 1.5rem;">
-                    <img src="<?php echo htmlspecialchars($settings->get_setting('logo_link')); ?>" alt="Logo" style="max-height: 40px; vertical-align: middle; margin-right: 0.75rem;">
-                    <span style="font-size: 1.25rem; font-weight: 700; color: var(--jy-color-primary);"><?php echo htmlspecialchars($settings->get_setting('site_name')); ?></span>
+                <div class="jy-e404-brand">
+                    <img src="<?php echo htmlspecialchars($settings->get_setting('logo_link')); ?>" alt="Logo" class="jy-e404-logo">
+                    <span class="jy-e404-brandname"><?php echo htmlspecialchars($settings->get_setting('site_name')); ?></span>
                 </div>
                 <?php else: ?>
-                <div style="margin-bottom: 1.5rem;">
-                    <span style="font-size: 1.25rem; font-weight: 700; color: var(--jy-color-primary);"><?php echo htmlspecialchars($settings->get_setting('site_name')); ?></span>
+                <div class="jy-e404-brand">
+                    <span class="jy-e404-brandname"><?php echo htmlspecialchars($settings->get_setting('site_name')); ?></span>
                 </div>
                 <?php endif; ?>
 
-                <h1 style="margin-bottom: 1rem;">Oops! Page Not Found</h1>
-                <p style="font-size: 1.0625rem; color: var(--jy-color-text-muted); margin-bottom: 2rem;">
+                <h1 class="jy-e404-h1">Oops! Page Not Found</h1>
+                <p class="jy-e404-lead">
                     The page you're looking for couldn't be found. It might have been moved, deleted, or the URL might be incorrect.
                 </p>
 
                 <!-- Search -->
-                <form action="/search" method="get" style="margin-bottom: 2rem;">
-                    <div style="display: flex; gap: 0;">
-                        <input type="text" name="q" placeholder="Search our site..." style="flex: 1; padding: 0.75rem 1rem; border: 1px solid var(--jy-color-border); border-right: none; border-radius: 4px 0 0 4px; font-size: 1rem;">
-                        <button type="submit" class="btn btn-primary" style="border-radius: 0 4px 4px 0;">Search</button>
+                <form action="/search" method="get" class="jy-e404-search">
+                    <div class="jy-e404-search-row">
+                        <input type="text" name="q" placeholder="Search our site..." class="jy-e404-search-input">
+                        <button type="submit" class="btn btn-primary jy-e404-search-btn">Search</button>
                     </div>
                 </form>
 
                 <!-- Buttons -->
-                <div style="display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 2rem;">
+                <div class="jy-e404-btns">
                     <a href="/" class="btn btn-primary">&#8962; Go Home</a>
                     <a href="/contact" class="btn btn-outline">Contact Support</a>
                 </div>
 
                 <!-- Helpful Links -->
                 <div>
-                    <h5 style="margin-bottom: 1rem;">You might be looking for:</h5>
-                    <div class="grid-2" style="gap: 0.5rem;">
-                        <ul style="list-style: none; padding: 0; margin: 0;">
-                            <li style="margin-bottom: 0.5rem;"><a href="/blog">&#8250; Blog</a></li>
-                            <li style="margin-bottom: 0.5rem;"><a href="/products">&#8250; Products</a></li>
-                            <li style="margin-bottom: 0.5rem;"><a href="/pricing">&#8250; Pricing</a></li>
+                    <h5 class="jy-e404-links-title">You might be looking for:</h5>
+                    <div class="grid-2 jy-e404-links-grid">
+                        <ul class="jy-e404-list">
+                            <li class="jy-e404-li"><a href="/blog">&#8250; Blog</a></li>
+                            <li class="jy-e404-li"><a href="/products">&#8250; Products</a></li>
+                            <li class="jy-e404-li"><a href="/pricing">&#8250; Pricing</a></li>
                         </ul>
-                        <ul style="list-style: none; padding: 0; margin: 0;">
-                            <li style="margin-bottom: 0.5rem;"><a href="/contact">&#8250; Contact</a></li>
-                            <li style="margin-bottom: 0.5rem;"><a href="/login">&#8250; Login</a></li>
-                            <li style="margin-bottom: 0.5rem;"><a href="/register">&#8250; Register</a></li>
+                        <ul class="jy-e404-list">
+                            <li class="jy-e404-li"><a href="/contact">&#8250; Contact</a></li>
+                            <li class="jy-e404-li"><a href="/login">&#8250; Login</a></li>
+                            <li class="jy-e404-li"><a href="/register">&#8250; Register</a></li>
                         </ul>
                     </div>
                 </div>

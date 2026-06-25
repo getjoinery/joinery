@@ -15,7 +15,7 @@
 <div class="jy-ui">
 <section class="jy-content-section">
     <div class="jy-container">
-        <div style="max-width: 860px; margin: 0 auto;">
+        <div class="jy-narrow-lg">
 
             <div class="jy-page-header">
                 <div class="jy-page-header-bar">
@@ -34,12 +34,12 @@
             </div>
 
             <!-- User summary -->
-            <div class="jy-panel" style="display: flex; justify-content: space-between; align-items: center; gap: var(--jy-space-4); flex-wrap: wrap;">
+            <div class="jy-panel jy-subs-summary">
                 <div>
-                    <h5 style="margin: 0 0 var(--jy-space-1);"><?php echo htmlspecialchars($page_vars['user']->display_name()); ?></h5>
-                    <p class="muted text-sm" style="margin: 0;"><?php echo htmlspecialchars($page_vars['user']->get('usr_email')); ?></p>
+                    <h5 class="jy-subs-name"><?php echo htmlspecialchars($page_vars['user']->display_name()); ?></h5>
+                    <p class="muted text-sm jy-tight"><?php echo htmlspecialchars($page_vars['user']->get('usr_email')); ?></p>
                     <?php if($page_vars['user']->get('usr_timezone')): ?>
-                    <p class="muted text-sm" style="margin: 0;"><?php echo htmlspecialchars($page_vars['user']->get('usr_timezone')); ?></p>
+                    <p class="muted text-sm jy-tight"><?php echo htmlspecialchars($page_vars['user']->get('usr_timezone')); ?></p>
                     <?php endif; ?>
                 </div>
                 <a href="/profile/account_edit" class="btn btn-outline">Edit Profile</a>
@@ -49,11 +49,11 @@
             <?php if($page_vars['settings']->get_setting('products_active') && $page_vars['settings']->get_setting('subscriptions_active')): ?>
             <div class="card">
                 <div class="card-header">
-                    <h5 style="margin: 0;">Your Subscriptions</h5>
+                    <h5 class="jy-tight">Your Subscriptions</h5>
                 </div>
                 <div class="card-body">
                     <?php if(empty($page_vars['active_subscriptions'])): ?>
-                        <p class="muted" style="margin: 0;">No active subscriptions.</p>
+                        <p class="muted jy-tight">No active subscriptions.</p>
                     <?php else: ?>
                         <?php foreach($page_vars['active_subscriptions'] as $subscription): ?>
                         <?php
@@ -62,13 +62,13 @@
                             $action = '';
                         } else {
                             $status = $subscription->get('odi_subscription_status') ?: 'Active';
-                            $action = '<a href="/profile/orders_recurring_action?order_item_id=' . $subscription->key . '" class="btn btn-ghost btn-sm" style="color: var(--jy-color-danger);">Cancel</a>';
+                            $action = '<a href="/profile/orders_recurring_action?order_item_id=' . $subscription->key . '" class="btn btn-ghost btn-sm jy-subs-cancel">Cancel</a>';
                         }
                         ?>
-                        <div style="border-bottom: 1px solid var(--jy-color-border); padding: var(--jy-space-4) 0; display: flex; justify-content: space-between; align-items: center; gap: var(--jy-space-4);">
+                        <div class="jy-subs-row">
                             <div>
-                                <p style="margin: 0; font-weight: 600;">$<?php echo htmlspecialchars($subscription->get('odi_price')); ?>/month</p>
-                                <p class="muted text-sm" style="margin: 0;"><?php echo htmlspecialchars($status); ?></p>
+                                <p class="jy-subs-amt">$<?php echo htmlspecialchars($subscription->get('odi_price')); ?>/month</p>
+                                <p class="muted text-sm jy-tight"><?php echo htmlspecialchars($status); ?></p>
                             </div>
                             <?php if($action): ?>
                             <div><?php echo $action; ?></div>
@@ -78,12 +78,12 @@
                     <?php endif; ?>
 
                     <?php if(!isset($active) || !$active): ?>
-                    <div style="margin-top: var(--jy-space-5);">
+                    <div class="jy-mt-5">
                         <a href="/product/recurring-donation" class="btn btn-primary">Start a New Subscription</a>
                     </div>
                     <?php endif; ?>
 
-                    <div style="margin-top: var(--jy-space-5); padding-top: var(--jy-space-4); border-top: 1px solid var(--jy-color-border); display: flex; gap: var(--jy-space-5); flex-wrap: wrap;">
+                    <div class="jy-subs-links">
                         <a href="/profile/change-tier" class="text-sm">Change Subscription Plan</a>
                         <a href="/profile/billing" class="text-sm">Manage Payment Method</a>
                     </div>
@@ -95,16 +95,16 @@
             <?php if($page_vars['settings']->get_setting('products_active')): ?>
             <div class="card">
                 <div class="card-header">
-                    <h5 style="margin: 0;">Your Orders</h5>
+                    <h5 class="jy-tight">Your Orders</h5>
                 </div>
                 <div class="card-body">
                     <?php if(empty($page_vars['orders'])): ?>
-                        <p class="muted" style="margin: 0;">No orders found.</p>
+                        <p class="muted jy-tight">No orders found.</p>
                     <?php else: ?>
                         <?php foreach($page_vars['orders'] as $order): ?>
-                        <div style="border-bottom: 1px solid var(--jy-color-border); padding: var(--jy-space-3) 0; display: flex; justify-content: space-between; align-items: center; gap: var(--jy-space-4);">
-                            <p style="margin: 0; font-weight: 600;">Order #<?php echo htmlspecialchars($order->key); ?> &mdash; $<?php echo htmlspecialchars($order->get('ord_total_cost')); ?></p>
-                            <p class="muted text-sm" style="margin: 0;"><?php echo LibraryFunctions::convert_time($order->get('ord_timestamp'), 'UTC', $page_vars['session']->get_timezone(), 'M d, Y'); ?></p>
+                        <div class="jy-subs-orderrow">
+                            <p class="jy-subs-amt">Order #<?php echo htmlspecialchars($order->key); ?> &mdash; $<?php echo htmlspecialchars($order->get('ord_total_cost')); ?></p>
+                            <p class="muted text-sm jy-tight"><?php echo LibraryFunctions::convert_time($order->get('ord_timestamp'), 'UTC', $page_vars['session']->get_timezone(), 'M d, Y'); ?></p>
                         </div>
                         <?php endforeach; ?>
                     <?php endif; ?>

@@ -23,7 +23,7 @@
         <?php if (!empty($page_vars['message'])): ?>
 
             <div class="text-center">
-                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#198754" stroke-width="1.5" style="margin-bottom: 1rem;" aria-hidden="true"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#198754" stroke-width="1.5" class="jy-auth-success-icon" aria-hidden="true"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
                 <h3>Check Your Email!</h3>
                 <p class="text-muted">An email has been sent to you. Please click on the included link to reset your password.</p>
                 <a href="/login" class="btn btn-primary">Return to Login</a>
@@ -32,7 +32,7 @@
         <?php else: ?>
 
             <h3>Reset Password</h3>
-            <p class="text-muted" style="margin-bottom: 1.5rem;">Enter your email address and we'll send you a link to reset your password.</p>
+            <p class="text-muted jy-auth-lead">Enter your email address and we'll send you a link to reset your password.</p>
 
             <?php
             $formwriter = $page->getFormWriter('form1', ['action' => '/password-reset-1', 'method' => 'POST']);

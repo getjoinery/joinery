@@ -42,7 +42,7 @@
         ]);
         ?>
 
-        <div style="margin-top: var(--jy-space-4);">
+        <div class="jy-form-actions">
             <?php $formwriter->submitbutton('verify-form-submit', 'Verify', ['class' => 'btn btn-primary']); ?>
         </div>
         <div class="auth-links">
@@ -51,7 +51,7 @@
 
         <?php $formwriter->end_form(); ?>
 
-        <div class="auth-footer-text" style="font-size: 0.9em;">
+        <div class="auth-footer-text jy-auth-hint">
             Lost access to your authenticator?
             Use one of your backup codes, or contact your administrator to reset 2FA.
         </div>

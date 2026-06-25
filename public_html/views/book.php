@@ -18,7 +18,7 @@ $title = ($valid && $type) ? $type->get('bkt_name') : 'Booking';
 $page->public_header(array('is_valid_page' => $valid, 'title' => $title), NULL);
 echo PublicPage::BeginPage($title, array());
 ?>
-<div style="max-width: 820px; margin: 1.5rem auto;">
+<div class="jy-ui jy-book-wrap">
 <?php if (!$valid || !$type): ?>
 	<h1>Booking not found</h1>
 	<p>This booking link isn't available. The link may be inactive or the page may have moved.</p>
@@ -35,13 +35,13 @@ echo PublicPage::BeginPage($title, array());
 	<p>A confirmation email is on its way. Need a change? <a href="<?php echo $manage; ?>">Cancel or reschedule</a>.</p>
 <?php else: ?>
 	<h1><?php echo htmlspecialchars($type->get('bkt_name')); ?></h1>
-	<p style="color:#555;">with <?php echo htmlspecialchars($host->display_name()); ?>
+	<p class="jy-book-meta">with <?php echo htmlspecialchars($host->display_name()); ?>
 		· <?php echo (int)$type->get('bkt_duration_minutes'); ?> min</p>
 	<?php if ($type->get('bkt_description_plain')): ?>
 		<p><?php echo nl2br(htmlspecialchars($type->get('bkt_description_plain'))); ?></p>
 	<?php endif; ?>
 	<?php if (!empty($errors)): ?>
-		<div style="background:#fdecea;border:1px solid #c0392b;padding:.6rem .9rem;border-radius:4px;margin:1rem 0;">
+		<div class="jy-book-errors">
 			<?php foreach ($errors as $e) { echo htmlspecialchars($e) . '<br>'; } ?>
 		</div>
 	<?php endif; ?>
@@ -58,7 +58,7 @@ echo PublicPage::BeginPage($title, array());
 		'field_name' => 'slot_start',
 	]);
 
-	echo '<h3 style="margin-top:1.5rem;">Your details</h3>';
+	echo '<h3 class="jy-book-sectionhead">Your details</h3>';
 	$formwriter->textinput('invitee_name', 'Name', ['value' => $old['name'] ?? '', 'required' => true]);
 	$formwriter->textinput('invitee_email', 'Email', ['value' => $old['email'] ?? '', 'required' => true, 'validation' => 'email']);
 	$formwriter->textbox('invitee_notes', 'Anything you\'d like to share?', ['value' => $old['notes'] ?? '']);
@@ -70,7 +70,7 @@ echo PublicPage::BeginPage($title, array());
 		$sq = new MultiSurveyQuestion(['survey_id' => $type->get('bkt_svy_survey_id'), 'deleted' => false]);
 		$sq->load();
 		if (count($sq)) {
-			echo '<h3 style="margin-top:1.5rem;">A few questions</h3>';
+			echo '<h3 class="jy-book-sectionhead">A few questions</h3>';
 			foreach ($sq as $row) {
 				$q = new Question($row->get('srq_qst_question_id'), TRUE);
 				if ($q->key) { $q->output_question($formwriter); }

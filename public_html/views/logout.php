@@ -17,7 +17,7 @@
 
 	<!-- Content
 	============================================= -->
-	<section id="content">
+	<section id="content" class="jy-ui">
 		<div class="content-wrap py-0">
 
 			<div class="section dark p-0 m-0 h-100 position-absolute"></div>
@@ -29,16 +29,16 @@
 						<div class="text-center">
 							<a href="/">
 								<?php if($settings->get_setting('logo_link')){ ?>
-									<img src="<?php echo $settings->get_setting('logo_link'); ?>" alt="<?php echo $settings->get_setting('site_name'); ?>" style="height: 100px;">
+									<img src="<?php echo $settings->get_setting('logo_link'); ?>" alt="<?php echo $settings->get_setting('site_name'); ?>" class="jy-logout-logo">
 								<?php } else { ?>
 									<h2><?php echo $settings->get_setting('site_name'); ?></h2>
 								<?php } ?>
 							</a>
 						</div>
 
-						<div class="card mx-auto rounded-0 border-0" style="max-width: 400px;">
-							<div class="card-body text-center" style="padding: 40px;">
-								<i class="bi-check-circle" style="font-size: 48px; color: #28a745;"></i>
+						<div class="card mx-auto rounded-0 border-0 jy-logout-card">
+							<div class="card-body text-center jy-logout-card-body">
+								<i class="bi-check-circle jy-logout-icon"></i>
 								<h3 class="mt-3">Logged Out</h3>
 								<p class="text-muted mb-4">You have been successfully signed out.</p>
 								<a class="button button-3d button-black m-0" href="/login">

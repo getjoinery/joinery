@@ -31,7 +31,7 @@
         $terms_link   = $terms_url   !== '' ? '<a href="' . htmlspecialchars($terms_url,   ENT_QUOTES, 'UTF-8') . '" target="_blank" rel="noopener">Terms of Use</a>'   : 'Terms of Use';
         $privacy_link = $privacy_url !== '' ? '<a href="' . htmlspecialchars($privacy_url, ENT_QUOTES, 'UTF-8') . '" target="_blank" rel="noopener">Privacy Policy</a>' : 'Privacy Policy';
         ?>
-        <p style="margin-bottom: 1.25rem;">
+        <p class="jy-auth-note">
             Before continuing, please confirm that you agree to our <?php echo $terms_link; ?> and <?php echo $privacy_link; ?>.
         </p>
 
@@ -44,7 +44,7 @@
         ]);
         ?>
 
-        <div style="margin-top: 1.25rem;">
+        <div class="jy-auth-foot-spaced">
             <?php echo $formwriter->submitbutton('btn_submit', 'Continue', ['class' => 'btn btn-primary']); ?>
         </div>
 

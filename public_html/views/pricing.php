@@ -34,7 +34,7 @@ $page->public_header([
     <div class="jy-container">
 
         <!-- Pricing Cards -->
-        <div class="pricing grid-3" style="gap: 1.5rem; align-items: stretch;">
+        <div class="pricing grid-3 jy-pricing-grid">
             <?php
             $cardIndex = 0;
             foreach ($page_vars['tier_display_data'] as $item):
@@ -44,39 +44,37 @@ $page->public_header([
                 $cardIndex++;
                 $isPopular = ($cardIndex == 2);
             ?>
-            <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); overflow: hidden; display: flex; flex-direction: column; position: relative;
-                        <?php echo $isPopular ? 'border: 2px solid var(--jy-color-primary); box-shadow: 0 4px 20px rgba(0,0,0,0.12);' : ''; ?>">
+            <div class="jy-pricing-card<?php echo $isPopular ? ' is-popular' : ''; ?>">
 
                 <?php if ($isPopular): ?>
-                <div style="background: var(--jy-color-primary); color: #fff; text-align: center; padding: 0.375rem; font-size: 0.8125rem; font-weight: 600; letter-spacing: 0.05em;">
+                <div class="jy-pricing-badge">
                     MOST POPULAR
                 </div>
                 <?php endif; ?>
 
-                <div style="padding: 2rem; text-align: center; border-bottom: 1px solid var(--jy-color-border);">
-                    <div style="width: 64px; height: 64px; background: rgba(26,188,156,0.1); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 1.25rem; font-size: 1.75rem;">
+                <div class="jy-pricing-head">
+                    <div class="jy-pricing-icon">
                         &#11088;
                     </div>
-                    <h3 style="font-size: 1.25rem; margin-bottom: 1rem;"><?php echo htmlspecialchars($product->get('pro_name')); ?></h3>
-                    <div style="font-size: 1.75rem; font-weight: 700; color: var(--jy-color-primary); margin-bottom: 0.25rem;">
+                    <h3 class="jy-pricing-name"><?php echo htmlspecialchars($product->get('pro_name')); ?></h3>
+                    <div class="jy-pricing-price">
                         <?php echo $product->get_readable_price($version->key); ?>
                     </div>
-                    <p style="color: var(--jy-color-text-muted); font-size: 0.875rem; margin: 0;"><?php echo htmlspecialchars($tier->get('sbt_display_name')); ?></p>
+                    <p class="jy-pricing-tier"><?php echo htmlspecialchars($tier->get('sbt_display_name')); ?></p>
                 </div>
 
-                <div style="padding: 1.5rem 2rem; flex: 1; display: flex; flex-direction: column;">
+                <div class="jy-pricing-body">
 
                     <?php if ($product->get('pro_description')): ?>
-                    <p style="color: var(--jy-color-text-muted); font-size: 0.9rem; text-align: center; margin-bottom: 1.25rem;">
+                    <p class="jy-pricing-desc">
                         <?php echo $product->get('pro_description'); ?>
                     </p>
                     <?php endif; ?>
 
-                    <div style="flex: 1; margin-bottom: 1.5rem;"></div>
+                    <div class="jy-pricing-spacer"></div>
 
                     <a href="<?php echo $product->get_url() . '?product_version_id=' . $version->key; ?>"
-                       class="btn <?php echo $isPopular ? 'btn-primary' : 'btn-outline'; ?>"
-                       style="display: block; text-align: center; font-weight: 600;">
+                       class="btn <?php echo $isPopular ? 'btn-primary' : 'btn-outline'; ?> jy-pricing-cta">
                         Choose This Plan &#8250;
                     </a>
                 </div>
@@ -85,29 +83,29 @@ $page->public_header([
         </div>
 
         <!-- Help Box -->
-        <div style="max-width: 640px; margin: 3rem auto 0; background: var(--jy-color-surface); border-radius: 8px; padding: 2.5rem; text-align: center;">
-            <h4 style="margin-bottom: 0.75rem;">Need Help Choosing?</h4>
-            <p style="color: var(--jy-color-text-muted); margin-bottom: 1.5rem;">Not sure which plan is right for you? Our team is here to help you find the perfect solution for your needs.</p>
-            <div style="display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap;">
+        <div class="jy-pricing-help">
+            <h4 class="jy-pricing-help-title">Need Help Choosing?</h4>
+            <p class="jy-pricing-help-text">Not sure which plan is right for you? Our team is here to help you find the perfect solution for your needs.</p>
+            <div class="jy-pricing-help-actions">
                 <a href="/contact" class="btn btn-primary">Contact Us</a>
                 <a href="/products" class="btn btn-outline">View All Products</a>
             </div>
         </div>
 
         <!-- Comparison Table -->
-        <div style="margin-top: 3rem;">
-            <div style="text-align: center; margin-bottom: 1.5rem;">
+        <div class="jy-pricing-compare">
+            <div class="jy-pricing-compare-head">
                 <h3>Compare Plans</h3>
-                <p style="color: var(--jy-color-text-muted);">See what's included in each plan</p>
+                <p class="jy-pricing-compare-sub">See what's included in each plan</p>
             </div>
 
-            <div style="overflow-x: auto;">
-                <table class="styled-table" style="width: 100%;">
+            <div class="jy-pricing-table-wrap">
+                <table class="styled-table jy-pricing-table">
                     <thead>
                         <tr>
-                            <th style="text-align: left;">Features</th>
+                            <th>Features</th>
                             <?php foreach ($page_vars['tier_display_data'] as $item): ?>
-                            <th style="text-align: center;"><?php echo htmlspecialchars($item['product']->get('pro_name')); ?></th>
+                            <th><?php echo htmlspecialchars($item['product']->get('pro_name')); ?></th>
                             <?php endforeach; ?>
                         </tr>
                     </thead>
@@ -115,7 +113,7 @@ $page->public_header([
                         <tr>
                             <td><strong>Basic Access</strong></td>
                             <?php foreach ($page_vars['tier_display_data'] as $item): ?>
-                            <td style="text-align: center; color: #198754; font-weight: 700;">&#10003;</td>
+                            <td class="jy-pricing-cell jy-pricing-yes">&#10003;</td>
                             <?php endforeach; ?>
                         </tr>
                         <tr>
@@ -125,11 +123,11 @@ $page->public_header([
                             foreach ($page_vars['tier_display_data'] as $item):
                                 $supportIndex++;
                             ?>
-                            <td style="text-align: center;">
+                            <td class="jy-pricing-cell">
                                 <?php if ($supportIndex >= 2): ?>
-                                <span style="color: #198754; font-weight: 700;">&#10003;</span>
+                                <span class="jy-pricing-yes">&#10003;</span>
                                 <?php else: ?>
-                                <span style="color: var(--jy-color-text-muted);">&#8212;</span>
+                                <span class="jy-pricing-no">&#8212;</span>
                                 <?php endif; ?>
                             </td>
                             <?php endforeach; ?>
@@ -141,11 +139,11 @@ $page->public_header([
                             foreach ($page_vars['tier_display_data'] as $item):
                                 $analyticsIndex++;
                             ?>
-                            <td style="text-align: center;">
+                            <td class="jy-pricing-cell">
                                 <?php if ($analyticsIndex >= 3): ?>
-                                <span style="color: #198754; font-weight: 700;">&#10003;</span>
+                                <span class="jy-pricing-yes">&#10003;</span>
                                 <?php else: ?>
-                                <span style="color: var(--jy-color-text-muted);">&#8212;</span>
+                                <span class="jy-pricing-no">&#8212;</span>
                                 <?php endif; ?>
                             </td>
                             <?php endforeach; ?>
