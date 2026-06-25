@@ -1939,3 +1939,141 @@ dialog.jy-ui::backdrop { background: rgba(0, 0, 0, 0.45); }
 .jy-ui .jy-profile-useraddr { margin: 0 0 var(--jy-space-4); }
 .jy-ui .jy-profile-subrow { display: flex; justify-content: space-between; align-items: center; padding: var(--jy-space-1) 0; }
 .jy-ui .jy-profile-managelink { display: block; margin-top: var(--jy-space-2); }
+
+/* ============================================================
+   checkout — full purchase flow (accordion, summary, modal)
+   State-driven: section-header / section-badge / section-body
+   styling keys off .checkout-section[data-state]; JS only sets
+   data-state, never inline styles.
+   ============================================================ */
+.jy-ui .jy-checkout-testbar { background: #fff3cd; color: #856404; padding: 0.5rem 1rem; text-align: center; font-size: 0.875rem; border-bottom: 1px solid #ffc107; }
+.jy-ui .jy-checkout-wrap { padding: 2rem 0; }
+
+.jy-ui .jy-checkout-msg { padding: 1rem 1.5rem; border-radius: 8px; margin-bottom: 1.5rem; display: flex; align-items: flex-start; gap: 0.75rem; }
+.jy-ui .jy-checkout-msg.is-error { background: #f8d7da; color: #721c24; }
+.jy-ui .jy-checkout-msg.is-info { background: #d1ecf1; color: #0c5460; }
+.jy-ui .jy-checkout-msg-icon { font-size: 1.25rem; line-height: 1; flex-shrink: 0; }
+.jy-ui .jy-checkout-flash { background: #d4edda; color: #155724; padding: 0.875rem 1.25rem; border-radius: 8px; margin-bottom: 1.5rem; border: 1px solid #c3e6cb; }
+
+.jy-ui .jy-checkout-empty { max-width: 500px; margin: 3rem auto; text-align: center; }
+.jy-ui .jy-checkout-empty-icon { font-size: 4rem; color: var(--jy-color-text-muted); margin-bottom: 1rem; }
+.jy-ui .jy-checkout-empty-h { margin-bottom: 0.5rem; }
+.jy-ui .jy-checkout-empty-p { color: var(--jy-color-text-muted); margin-bottom: 1.5rem; }
+
+.jy-ui .jy-checkout-progress { margin-bottom: 1.5rem; }
+.jy-ui .jy-checkout-progress-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+.jy-ui .jy-checkout-step-label { font-size: 0.875rem; color: var(--jy-color-text-muted); }
+.jy-ui .jy-checkout-track { height: 4px; background: #e9ecef; border-radius: 2px; overflow: hidden; }
+.jy-ui .jy-checkout-bar { height: 100%; background: var(--jy-color-primary); border-radius: 2px; transition: width 0.3s; width: var(--jy-checkout-progress, 0%); }
+
+.jy-ui .jy-checkout-layout { display: flex; gap: 2rem; align-items: flex-start; flex-wrap: wrap; }
+.jy-ui .jy-checkout-accordion { flex: 1; min-width: 320px; }
+
+/* mobile order summary — hidden on desktop, shown under 768px */
+.jy-ui .jy-checkout-mobilesummary { display: none; margin-bottom: 1rem; }
+.jy-ui .jy-checkout-mobilecard { background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); padding: 0.875rem 1.25rem; cursor: pointer; }
+.jy-ui .jy-checkout-mobilerow { display: flex; justify-content: space-between; align-items: center; }
+.jy-ui .jy-checkout-mobile-price { display: flex; align-items: center; gap: 0.5rem; }
+.jy-ui .jy-checkout-mobile-total { color: var(--jy-color-primary); }
+.jy-ui .jy-checkout-chevron { display: inline-block; transition: transform 0.2s; font-size: 0.75rem; }
+.jy-ui .jy-checkout-mobiledetail { display: none; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--jy-color-border); }
+.jy-ui .jy-checkout-mobilecard.is-open .jy-checkout-mobiledetail { display: block; }
+.jy-ui .jy-checkout-mobilecard.is-open .jy-checkout-chevron { transform: rotate(180deg); }
+.jy-ui .jy-checkout-mobile-itemrow { display: flex; justify-content: space-between; margin-bottom: 0.5rem; font-size: 0.9375rem; }
+
+.jy-ui .jy-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+.jy-ui .checkout-section:focus-within .section-header { outline: 2px solid var(--jy-color-primary); outline-offset: -2px; }
+
+/* accordion section shell + state-driven header/badge/body */
+.jy-ui .checkout-section { background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); margin-bottom: 1rem; overflow: hidden; border: none; padding: 0; }
+.jy-ui .checkout-section .section-header { padding: 1rem 1.5rem; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+.jy-ui .checkout-section[data-state="active"]    .section-header { background: var(--jy-color-primary); color: #fff; cursor: pointer; }
+.jy-ui .checkout-section[data-state="completed"] .section-header { background: var(--jy-color-surface); border-bottom: 1px solid var(--jy-color-border); cursor: pointer; }
+.jy-ui .checkout-section[data-state="pending"]   .section-header { background: #f5f5f5; color: #aaa; cursor: default; }
+.jy-ui .jy-checkout-headleft { display: flex; align-items: center; gap: 0.75rem; }
+.jy-ui .section-badge { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; font-weight: 700; font-size: 0.875rem; }
+.jy-ui .checkout-section[data-state="active"]    .section-badge { background: rgba(255,255,255,0.2); color: #fff; }
+.jy-ui .checkout-section[data-state="completed"] .section-badge { background: #198754; color: #fff; }
+.jy-ui .checkout-section[data-state="pending"]   .section-badge { background: #ddd; color: #999; }
+.jy-ui .jy-checkout-sectitle { font-size: 1.0625rem; }
+.jy-ui .section-summary { display: flex; align-items: center; gap: 1rem; }
+.jy-ui .jy-checkout-sumtext { font-size: 0.875rem; color: var(--jy-color-text-muted); }
+.jy-ui .jy-checkout-sumedit { font-size: 0.8125rem; color: var(--jy-color-primary); font-weight: 600; }
+.jy-ui .checkout-section .section-body { padding: 1.5rem; display: none; }
+.jy-ui .checkout-section[data-state="active"] .section-body { display: block; }
+
+/* billing section */
+.jy-ui .jy-checkout-userbox { display: flex; align-items: center; justify-content: space-between; padding: 0.875rem 1rem; background: var(--jy-color-surface); border-radius: 6px; margin-bottom: 1rem; }
+.jy-ui .jy-checkout-username { font-weight: 600; }
+.jy-ui .jy-checkout-useremail { color: var(--jy-color-text-muted); font-size: 0.9375rem; }
+.jy-ui .jy-checkout-notyou { font-size: 0.8125rem; color: var(--jy-color-text-muted); text-decoration: none; }
+.jy-ui .jy-checkout-signedin { background: var(--jy-color-surface); padding: 0.875rem 1rem; border-radius: 6px; margin-bottom: 1rem; font-size: 0.9375rem; color: var(--jy-color-text-muted); }
+.jy-ui .jy-checkout-namegrid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+.jy-ui .jy-checkout-field { margin-bottom: 1rem; }
+.jy-ui .jy-checkout-label { display: block; font-weight: 600; margin-bottom: 0.25rem; font-size: 0.9375rem; }
+.jy-ui .jy-checkout-req { color: var(--jy-color-danger); }
+.jy-ui .jy-checkout-input { width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--jy-color-border); border-radius: 6px; font-size: 1rem; }
+.jy-ui .jy-checkout-emailexists { background: #e8f4fd; padding: 0.75rem 1rem; border-radius: 6px; margin-top: 0.75rem; font-size: 0.9375rem; }
+.jy-ui .jy-checkout-errors { color: var(--jy-color-danger); font-size: 0.875rem; margin-bottom: 0.75rem; }
+.jy-ui .jy-checkout-actions { margin-top: 1.25rem; }
+.jy-ui .jy-checkout-consent { font-size: 0.8125rem; color: var(--jy-color-text-muted); text-align: center; margin: 0.75rem 0 0; }
+
+/* payment section */
+.jy-ui .jy-checkout-pay-stripe { margin-bottom: 1.5rem; }
+.jy-ui .jy-checkout-payhead { margin-bottom: 1rem; }
+.jy-ui .jy-checkout-pay-paypal.is-divided { border-top: 1px solid var(--jy-color-border); padding-top: 1.5rem; margin-top: 1.5rem; }
+.jy-ui .jy-checkout-paypal-unavail { border-top: 1px solid var(--jy-color-border); padding-top: 1.5rem; margin-top: 1.5rem; color: var(--jy-color-text-muted); font-size: 0.875rem; }
+.jy-ui .jy-checkout-secure { margin-top: 1.5rem; text-align: center; color: var(--jy-color-text-muted); font-size: 0.8125rem; }
+.jy-ui .jy-checkout-secure-icon { vertical-align: -2px; }
+
+/* order summary (right column) */
+.jy-ui .jy-checkout-summary-col { flex: 0 0 340px; min-width: 260px; position: sticky; top: 2rem; }
+.jy-ui .jy-checkout-summary-card { background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); overflow: hidden; }
+.jy-ui .jy-checkout-summary-head { background: var(--jy-color-primary); color: #fff; padding: 1rem 1.5rem; }
+.jy-ui .jy-checkout-summary-title { margin: 0; color: #fff; font-size: 1.0625rem; }
+.jy-ui .jy-checkout-lineitem { padding: 1rem 1.5rem; border-bottom: 1px solid var(--jy-color-border); }
+.jy-ui .jy-checkout-lineitem-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+.jy-ui .jy-checkout-lineitem-name { margin: 0 0 0.25rem; font-size: 0.9375rem; }
+.jy-ui .jy-checkout-lineitem-pricewrap { text-align: right; flex-shrink: 0; }
+.jy-ui .jy-checkout-price { font-weight: 700; color: var(--jy-color-primary); }
+.jy-ui .jy-checkout-discount { font-size: 0.8125rem; color: #198754; }
+.jy-ui .jy-checkout-itemactions { margin-top: 0.5rem; display: flex; gap: 1rem; font-size: 0.8125rem; }
+.jy-ui .jy-checkout-link { color: var(--jy-color-primary); text-decoration: none; }
+.jy-ui .jy-checkout-link-danger { color: var(--jy-color-danger); text-decoration: none; }
+.jy-ui .jy-checkout-link-muted { color: var(--jy-color-text-muted); text-decoration: none; }
+.jy-ui .jy-checkout-coupon { padding: 1rem 1.5rem; border-bottom: 1px solid var(--jy-color-border); }
+.jy-ui .jy-checkout-coupon-chips { margin-bottom: 0.5rem; }
+.jy-ui .jy-checkout-chip { display: inline-flex; align-items: center; gap: 0.25rem; background: #198754; color: #fff; font-size: 0.8125rem; padding: 0.25rem 0.625rem; border-radius: 4px; margin: 0 0.25rem 0.25rem 0; }
+.jy-ui .jy-checkout-chip-x { color: #fff; text-decoration: none; font-weight: 700; line-height: 1; }
+.jy-ui .jy-checkout-coupon-test { font-size: 0.8125rem; color: var(--jy-color-text-muted); margin-bottom: 0.5rem; }
+.jy-ui .jy-checkout-coupon-testlink { color: var(--jy-color-primary); margin-left: 0.25rem; }
+.jy-ui .jy-checkout-coupon-row { display: flex; gap: 0.5rem; }
+.jy-ui .jy-checkout-coupon-input { flex: 1; padding: 0.5rem 0.75rem; border: 1px solid var(--jy-color-border); border-radius: 6px; font-size: 0.9375rem; }
+.jy-ui .jy-checkout-coupon-apply { font-size: 0.9375rem; padding: 0.5rem 0.875rem; }
+.jy-ui .jy-checkout-coupon-error { color: var(--jy-color-danger); font-size: 0.8125rem; margin-top: 0.375rem; }
+.jy-ui .jy-checkout-totals { background: var(--jy-color-surface); padding: 1rem 1.5rem; }
+.jy-ui .jy-checkout-totals-dl { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 0.375rem 1rem; }
+.jy-ui .jy-checkout-totals-dl dd { margin: 0; text-align: right; }
+.jy-ui .jy-checkout-subtotal-dt { font-weight: 400; }
+.jy-ui .jy-checkout-discount-dt, .jy-ui .jy-checkout-discount-dd { color: #198754; }
+.jy-ui .jy-checkout-total-dt { font-weight: 700; font-size: 1.0625rem; }
+.jy-ui .jy-checkout-total-dd { font-weight: 700; font-size: 1.0625rem; color: var(--jy-color-primary); }
+.jy-ui .jy-checkout-total-dt.is-bordered, .jy-ui .jy-checkout-total-dd.is-bordered { padding-top: 0.75rem; border-top: 1px solid var(--jy-color-border); }
+.jy-ui .jy-checkout-addmore { padding: 1rem 1.5rem; text-align: center; }
+
+/* login modal */
+.jy-ui .jy-checkout-modal { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 9999; align-items: center; justify-content: center; }
+.jy-ui .jy-checkout-modal-box { background: #fff; border-radius: 12px; padding: 2rem; max-width: 400px; width: 90%; position: relative; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+.jy-ui .jy-checkout-modal-close { position: absolute; top: 0.75rem; right: 1rem; background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--jy-color-text-muted); }
+.jy-ui .jy-checkout-modal-title { margin: 0 0 1.5rem; }
+.jy-ui .jy-checkout-modal-error { color: var(--jy-color-danger); font-size: 0.875rem; margin-bottom: 1rem; }
+.jy-ui .jy-checkout-modal-field { margin-bottom: 1rem; }
+.jy-ui .jy-checkout-modal-field.is-last { margin-bottom: 1.5rem; }
+.jy-ui .jy-checkout-modal-label { display: block; font-weight: 600; margin-bottom: 0.25rem; }
+.jy-ui .jy-checkout-modal-foot { margin-top: 1rem; text-align: center; }
+.jy-ui .jy-checkout-modal-forgot { font-size: 0.875rem; color: var(--jy-color-text-muted); }
+
+@media (max-width: 768px) {
+    .jy-ui .jy-checkout-mobilesummary { display: block; }
+    .jy-ui .jy-checkout-summary-col { display: none; }
+}
