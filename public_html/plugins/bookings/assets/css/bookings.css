@@ -1,0 +1,31 @@
+/* bookings plugin styles.
+   Profile views (.av-*, .bkn-*) opt into .jy-ui; admin form utilities
+   (.bkn-admin-*) are plain (admin theme, not .jy-ui). Values lifted
+   verbatim from former inline styles / <style> block. */
+
+/* --- Availability (/profile/bookings/availability) --- */
+.jy-ui .av-wrap { max-width: 760px; margin: 1.5rem auto; }
+.jy-ui .av-wrap h2 { margin-top: 2rem; }
+.jy-ui .av-row { display: flex; gap: .5rem; align-items: center; margin-bottom: .5rem; flex-wrap: wrap; }
+.jy-ui .av-row select, .jy-ui .av-row input[type=date] { padding: .35rem; }
+.jy-ui .av-remove { background: #c0392b; color: #fff; border: none; border-radius: 4px; padding: .35rem .6rem; cursor: pointer; }
+.jy-ui .av-add { background: #2d7d46; color: #fff; border: none; border-radius: 4px; padding: .45rem .8rem; cursor: pointer; margin-top: .25rem; }
+.jy-ui .av-saved { background: #e6f7ec; border: 1px solid #2d7d46; padding: .6rem .9rem; border-radius: 4px; margin-bottom: 1rem; }
+.jy-ui .av-error { background: #fdecea; border: 1px solid #c0392b; padding: .6rem .9rem; border-radius: 4px; margin-bottom: 1rem; }
+.jy-ui .av-muted { color: #666; }
+.jy-ui .av-ovr-times.is-unavailable { opacity: .4; pointer-events: none; }
+.jy-ui .av-actions { margin-top: 1.5rem; }
+
+/* --- My bookings (/profile/bookings/my) --- */
+.jy-ui .bkn-wrap { max-width: 820px; margin: 1.5rem auto; }
+.jy-ui .bkn-saved { background: #e6f7ec; border: 1px solid #2d7d46; padding: .6rem .9rem; border-radius: 4px; margin-bottom: 1rem; }
+.jy-ui .bkn-card { border: 1px solid #e2e2e2; border-radius: 6px; padding: 1rem; margin-bottom: 1rem; }
+.jy-ui .bkn-with { color: #555; }
+.jy-ui .bkn-cancel-form { margin-top: .6rem; display: flex; gap: .4rem; align-items: flex-end; }
+.jy-ui .bkn-reason-label { font-size: .85rem; }
+.jy-ui .bkn-cancel-btn { background: #c0392b; color: #fff; border: none; border-radius: 4px; padding: .45rem .8rem; cursor: pointer; }
+
+/* --- Admin (/admin/admin_bookings, /admin/admin_booking) --- */
+.bkn-filter-form { margin-bottom: 1rem; }
+.bkn-admin-actions { display: flex; gap: .5rem; flex-wrap: wrap; align-items: flex-end; }
+.bkn-admin-form { display: flex; gap: .4rem; align-items: flex-end; }

@@ -126,14 +126,14 @@ $page->end_box();
 
 if ($run->get('rcr_error')) {
     $page->begin_box(['title' => 'Error']);
-    echo '<pre class="mb-0" style="white-space: pre-wrap;">'
+    echo '<pre class="mb-0 joai-pre-wrap">'
        . htmlspecialchars($run->get('rcr_error')) . '</pre>';
     $page->end_box();
 }
 
 if ($run->get('rcr_output')) {
     $page->begin_box(['title' => 'Output']);
-    echo '<div style="white-space: pre-wrap;">'
+    echo '<div class="joai-pre-wrap">'
        . htmlspecialchars($run->get('rcr_output')) . '</div>';
     $page->end_box();
 }
@@ -147,22 +147,21 @@ if (is_array($tool_calls) && count($tool_calls)) {
     $page->begin_box(['title' => 'Tool call trace (' . count($tool_calls) . ')']);
     foreach ($tool_calls as $i => $call) {
         $err = !empty($call['is_error']);
-        echo '<div class="border-start ps-3 mb-3" style="border-color: '
-           . ($err ? '#dc3545' : '#0d6efd') . ' !important;">';
+        echo '<div class="border-start ps-3 mb-3 joai-toolcall' . ($err ? ' is-error' : '') . '">';
         echo '<strong>' . ($i + 1) . '. ' . htmlspecialchars($call['name'] ?? '(unknown)') . '</strong>';
         if ($err) echo ' <span class="badge bg-danger">error</span>';
         if (isset($call['duration_ms'])) {
             echo ' <span class="text-muted">' . (int)$call['duration_ms'] . 'ms</span>';
         }
         if (isset($call['input'])) {
-            echo '<pre class="mb-1 mt-1" style="font-size:0.85em;">'
+            echo '<pre class="mb-1 mt-1 joai-trace">'
                . htmlspecialchars(json_encode($call['input'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES))
                . '</pre>';
         }
         if (isset($call['output'])) {
             $out = (string)$call['output'];
             if (mb_strlen($out) > 2000) $out = mb_substr($out, 0, 2000) . "\n…(truncated)";
-            echo '<pre class="mb-0" style="font-size:0.85em; white-space: pre-wrap;">'
+            echo '<pre class="mb-0 joai-trace-wrap">'
                . htmlspecialchars($out) . '</pre>';
         }
         echo '</div>';

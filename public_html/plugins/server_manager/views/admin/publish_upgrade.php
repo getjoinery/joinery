@@ -162,7 +162,7 @@ $page->begin_box($pageoptions);
 					</td>
 					<td><small><?php echo nl2br(htmlspecialchars($u->get('upg_release_notes') ?? '')); ?></small></td>
 					<td class="text-end">
-						<form method="post" style="display:inline">
+						<form method="post" class="svm-inline-form">
 							<input type="hidden" name="action" value="delete_upgrade">
 							<input type="hidden" name="upgrade_id" value="<?php echo $u->key; ?>">
 							<button type="button" class="btn btn-sm btn-outline-danger" onclick="var f=this.parentElement; JoineryModal.confirm('Delete upgrade <?php echo htmlspecialchars($version); ?>? This removes both the archive file and the database record.', function(){ f.submit(); })">Delete</button>

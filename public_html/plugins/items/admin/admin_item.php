@@ -74,7 +74,7 @@
 		echo '<strong>Short description:</strong> <p>'.$item->get('itm_short_description').'</p><br />';
 	}
 
-	echo '<iframe src="'.$item->get_url().'" width="100%" height="500" style="border:1px solid black;"></iframe>';
+	echo '<div class="jy-ui"><iframe src="'.$item->get_url().'" class="jy-items-preview"></iframe></div>';
 
 	$page->end_box();		
 	

@@ -395,6 +395,45 @@ class PluginHelper extends ComponentBase {
     }
     
     /**
+     * Build <link> tags for the stylesheets declared by every active plugin.
+     *
+     * A plugin opts a stylesheet into global loading by listing it under the
+     * "styles" key of its plugin.json (paths relative to the plugin root, e.g.
+     * "assets/css/myplugin.css"). Each declared sheet loads on every page while
+     * the plugin is active, cache-busted by file mtime so the CDN/browser
+     * re-fetches after an edit. Sheets are expected to scope their rules
+     * (.jy-ui .jy-{plugin}-* or a distinctive prefix) so global loading is inert
+     * until the markup opts in.
+     *
+     * Emitted after the kit (render_base_assets) and before the theme stylesheet,
+     * so plugin rules sit on the kit tokens and the theme can still override.
+     *
+     * @return string Concatenated <link> tags (empty string if none).
+     */
+    public static function renderActivePluginStyleLinks() {
+        $out = '';
+        foreach (self::getActivePlugins() as $plugin) {
+            $styles = $plugin->get('styles', []);
+            if (!is_array($styles)) {
+                continue;
+            }
+            foreach ($styles as $rel) {
+                $rel = ltrim((string)$rel, '/');
+                if ($rel === '') {
+                    continue;
+                }
+                $full = $plugin->getIncludePath($rel);
+                if (!is_string($full) || !is_file($full)) {
+                    continue;
+                }
+                $url = '/' . $plugin->getBasePath() . '/' . $rel . '?v=' . filemtime($full);
+                $out .= '<link rel="stylesheet" href="' . htmlspecialchars($url, ENT_QUOTES) . '">' . "\n";
+            }
+        }
+        return $out;
+    }
+
+    /**
      * Check if a plugin is active (static convenience method)
      */
     public static function isPluginActive($pluginName) {

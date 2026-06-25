@@ -77,13 +77,6 @@ $agent_class  = $agent_online ? 'success' : 'danger';
 $agent_label  = $agent_online ? 'Online'  : 'Offline';
 ?>
 
-<style>
-	.node-row { cursor: pointer; transition: background-color 0.12s ease; min-height: 58px; }
-	.node-row:hover { background-color: #f8f9fa; }
-	.host-accordion .accordion-button { padding: 0.6rem 1rem; }
-	.host-accordion .accordion-body { padding: 0; }
-</style>
-
 <!-- Agent Status Bar -->
 <div class="card mb-4">
 	<div class="card-body d-flex justify-content-between align-items-center">
@@ -277,7 +270,7 @@ $agent_label  = $agent_online ? 'Online'  : 'Offline';
 					?>
 					<tr>
 						<td><a href="/admin/server_manager/job_detail?job_id=<?php echo $job->key; ?>">#<?php echo $job->key; ?></a></td>
-						<td class="text-truncate" style="max-width:90px" title="<?php echo htmlspecialchars($node_name); ?>"><?php echo htmlspecialchars($node_name); ?></td>
+						<td class="text-truncate svm-w90" title="<?php echo htmlspecialchars($node_name); ?>"><?php echo htmlspecialchars($node_name); ?></td>
 						<td><?php echo htmlspecialchars(str_replace('_', ' ', $job->get('mjb_job_type'))); ?></td>
 						<td><span class="badge bg-<?php echo $status_class; ?>"><?php echo htmlspecialchars($job->get('mjb_status')); ?></span></td>
 						<td><?php echo $job->get('mjb_started_time') ? LibraryFunctions::time_ago_or_time($job->get('mjb_started_time'), 'UTC', $session->get_timezone(), 'M j, g:i A') : '-'; ?></td>
@@ -337,9 +330,9 @@ function render_node_row($node, $db, $session) {
 		data-node-id="<?php echo $node->key; ?>"
 		data-api-refreshable="<?php echo $api_refreshable ? '1' : '0'; ?>"
 		onclick="if(!event.target.closest('form,button,input,a')) window.location=this.dataset.href">
-		<div class="d-flex align-items-center" style="min-width:0;flex:1">
+		<div class="d-flex align-items-center svm-flex1">
 			<span class="badge bg-<?php echo $status_color; ?> me-2 js-status-badge">&bull;</span>
-			<div style="min-width:0">
+			<div class="svm-minw0">
 				<strong><?php echo htmlspecialchars($node->get('mgn_name')); ?></strong>
 				<?php if ($install_state === 'installing'): ?>
 					<span class="badge bg-info ms-1">Installing…</span>

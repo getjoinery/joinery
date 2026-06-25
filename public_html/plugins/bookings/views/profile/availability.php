@@ -50,19 +50,7 @@ $hoptions = array(
 $page->public_header($hoptions, NULL);
 echo PublicPage::BeginPage('Availability', $hoptions);
 ?>
-<style>
-.av-wrap { max-width: 760px; margin: 1.5rem auto; }
-.av-wrap h2 { margin-top: 2rem; }
-.av-row { display: flex; gap: .5rem; align-items: center; margin-bottom: .5rem; flex-wrap: wrap; }
-.av-row select, .av-row input[type=date] { padding: .35rem; }
-.av-remove { background: #c0392b; color: #fff; border: none; border-radius: 4px; padding: .35rem .6rem; cursor: pointer; }
-.av-add { background: #2d7d46; color: #fff; border: none; border-radius: 4px; padding: .45rem .8rem; cursor: pointer; margin-top: .25rem; }
-.av-saved { background: #e6f7ec; border: 1px solid #2d7d46; padding: .6rem .9rem; border-radius: 4px; margin-bottom: 1rem; }
-.av-error { background: #fdecea; border: 1px solid #c0392b; padding: .6rem .9rem; border-radius: 4px; margin-bottom: 1rem; }
-.av-muted { color: #666; }
-.av-ovr-times.is-unavailable { opacity: .4; pointer-events: none; }
-</style>
-
+<div class="jy-ui">
 <div class="av-wrap">
 <?php if (!empty($saved)): ?>
     <div class="av-saved">Availability saved.</div>
@@ -123,7 +111,7 @@ foreach ($overrides as $o) {
     </div>
     <button type="button" class="av-add" onclick="avAddOverride()">+ Add override</button>
 
-    <div style="margin-top:1.5rem;">
+    <div class="av-actions">
 <?php $formwriter->submitbutton('btn_submit', 'Save availability'); ?>
     </div>
 <?php $formwriter->end_form(); ?>
@@ -180,6 +168,7 @@ function avToggleOvr(cb) {
     if (times) { times.classList.toggle('is-unavailable', cb.checked); }
 }
 </script>
+</div>
 
 <?php
 echo PublicPage::EndPage();

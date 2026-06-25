@@ -19,23 +19,10 @@ $page = new PublicPage();
 $page->public_header([]);
 ?>
 
-<style>
-    .joai-wrap { max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
-    .joai-wrap h1 { margin-bottom: 0.5rem; }
-    .joai-card { border: 1px solid #ddd; border-radius: 8px; margin-bottom: 1.5rem;
-                  background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
-    .joai-card-header { padding: 1rem 1.25rem; border-bottom: 1px solid #eee;
-                        display: flex; justify-content: space-between; align-items: center; }
-    .joai-card-header h2 { margin: 0; font-size: 1.25rem; }
-    .joai-card-header .joai-meta { font-size: 0.85rem; color: #666; }
-    .joai-card-body { padding: 1.25rem; }
-    .joai-empty { padding: 1.25rem; color: #888; font-style: italic; }
-    .joai-actions a { font-size: 0.85rem; margin-left: 0.5rem; }
-</style>
-
+<div class="jy-ui">
 <div class="joai-wrap">
     <h1>Joinery AI</h1>
-    <p style="color: #666; margin-bottom: 2rem;">
+    <p class="joai-intro">
         Latest output from your scheduled recipes.
         <span class="joai-actions">
             <a href="/admin/joinery_ai">Manage recipes</a>
@@ -73,7 +60,7 @@ $page->public_header([]);
                         <a href="/admin/joinery_ai/runs?rcp_recipe_id=<?php echo (int)$recipe->key; ?>">History</a>
                     </span>
                     <form id="runform_<?php echo (int)$recipe->key; ?>" method="post"
-                          action="/admin/joinery_ai/run_now" style="display:none;">
+                          action="/admin/joinery_ai/run_now" hidden>
                         <input type="hidden" name="rcp_recipe_id" value="<?php echo (int)$recipe->key; ?>">
                     </form>
                 </span>
@@ -87,6 +74,7 @@ $page->public_header([]);
             </div>
         </div>
     <?php endforeach; endif; ?>
+</div>
 </div>
 
 <?php

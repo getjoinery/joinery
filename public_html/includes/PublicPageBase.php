@@ -556,6 +556,10 @@ abstract class PublicPageBase {
 		}
 
 		$this->render_base_assets();
+		// Active plugins' declared stylesheets — after the kit, before the theme
+		// stylesheet (which loads once this method returns), so plugin rules sit
+		// on the kit tokens and the theme can still override.
+		echo PluginHelper::renderActivePluginStyleLinks();
 		$this->render_brand_token_overrides();
 
 		if($settings->get_setting('custom_css')){

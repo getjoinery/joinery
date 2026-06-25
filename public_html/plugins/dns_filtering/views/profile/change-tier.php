@@ -60,15 +60,15 @@ Price Area
 				<?php endif; ?>
 
 				<?php if (!empty($page_vars['is_paypal']) && $page_vars['has_active_subscription']): ?>
-					<p class="mt-2" style="color: #6c757d;">Your subscription is managed through PayPal. To change your plan, cancel your current subscription and subscribe to a new tier.</p>
+					<p class="mt-2 dnsf-muted">Your subscription is managed through PayPal. To change your plan, cancel your current subscription and subscribe to a new tier.</p>
 				<?php endif; ?>
 
 				<div class="pricing-tabs">
 					<div class="switch-area">
 						<a href="/profile/change-tier?period=month" class="toggler <?php echo (!isset($_GET['period']) || $_GET['period'] == 'month') ? 'toggler--is-active' : ''; ?> ms-0" id="filt-monthly">Monthly</a>
-						<a href="/profile/change-tier?period=<?php echo (isset($_GET['period']) && $_GET['period'] == 'year') ? 'month' : 'year'; ?>" class="toggle" style="pointer-events: auto;">
-							<input type="checkbox" id="switcher" class="check" <?php echo (isset($_GET['period']) && $_GET['period'] == 'year') ? 'checked' : ''; ?> style="pointer-events: none;">
-							<b class="b switch" style="pointer-events: none;"></b>
+						<a href="/profile/change-tier?period=<?php echo (isset($_GET['period']) && $_GET['period'] == 'year') ? 'month' : 'year'; ?>" class="toggle dnsf-events">
+							<input type="checkbox" id="switcher" class="check dnsf-noevents" <?php echo (isset($_GET['period']) && $_GET['period'] == 'year') ? 'checked' : ''; ?>>
+							<b class="b switch dnsf-noevents"></b>
 						</a>
 						<a href="/profile/change-tier?period=year" class="toggler <?php echo (isset($_GET['period']) && $_GET['period'] == 'year') ? 'toggler--is-active' : ''; ?>" id="filt-yearly">Yearly</a>
 					</div>
@@ -82,7 +82,7 @@ Price Area
 					echo $formwriter->begin_form();
 					?>
 					<input type="hidden" name="action" value="reactivate">
-					<button type="submit" class="th-btn" style="background-color: #28a745;">Reactivate Subscription</button>
+					<button type="submit" class="th-btn dnsf-btn-success">Reactivate Subscription</button>
 					<?php echo $formwriter->end_form(); ?>
 				</div>
 			<?php endif; ?>
@@ -100,7 +100,7 @@ Price Area
                             <div class="price-title-wrap">
                                 <h3 class="box-title"><?php echo htmlspecialchars($tier->get('sbt_display_name')); ?></h3>
 								<?php if ($is_current): ?>
-									<p class="subtitle" style="color: #28a745; font-weight: bold;">CURRENT PLAN</p>
+									<p class="subtitle dnsf-current-plan">CURRENT PLAN</p>
 								<?php elseif ($tier_data['action_type'] == 'downgrade' || $tier_data['action_type'] == 'downgrade_disabled'): ?>
 									<p class="subtitle">(Downgrade)</p>
 								<?php endif; ?>
@@ -131,9 +131,9 @@ Price Area
 								<?php endif; ?>
 
 								<?php if ($tier_data['action_type'] == 'current'): ?>
-									<a class="th-btn btn-fw style-radius" style="cursor: not-allowed; opacity: 0.6;"><?php echo htmlspecialchars($tier_data['button_text']); ?></a>
+									<a class="th-btn btn-fw style-radius dnsf-disabled"><?php echo htmlspecialchars($tier_data['button_text']); ?></a>
 								<?php elseif (!empty($page_vars['is_paypal']) && ($tier_data['action_type'] == 'upgrade' || $tier_data['action_type'] == 'downgrade')): ?>
-									<a class="th-btn btn-fw style-radius" style="cursor: not-allowed; opacity: 0.6;"><?php echo htmlspecialchars($tier_data['button_text']); ?></a>
+									<a class="th-btn btn-fw style-radius dnsf-disabled"><?php echo htmlspecialchars($tier_data['button_text']); ?></a>
 								<?php elseif ($tier_data['button_enabled'] && !empty($tier_data['products'])): ?>
 									<?php if (count($tier_data['products']) == 1): ?>
 										<?php // Single product - direct action ?>
@@ -170,7 +170,7 @@ Price Area
 										<?php echo $formwriter->end_form(); ?>
 									<?php endif; ?>
 								<?php else: ?>
-									<a class="th-btn btn-fw style-radius" style="cursor: not-allowed; opacity: 0.6;"><?php echo htmlspecialchars($tier_data['button_text']); ?></a>
+									<a class="th-btn btn-fw style-radius dnsf-disabled"><?php echo htmlspecialchars($tier_data['button_text']); ?></a>
 								<?php endif; ?>
                             </div>
                         </div>
@@ -200,7 +200,7 @@ Cancel Subscription Area
 									echo $formwriter->begin_form();
 									?>
 									<input type="hidden" name="action" value="cancel">
-									<button type="submit" class="th-btn style-radius" style="background-color: #dc3545;"
+									<button type="submit" class="th-btn style-radius dnsf-btn-cancel"
 											onclick="return confirm('Are you sure you want to cancel your subscription?');">
 										<?php echo htmlspecialchars($page_vars['cancel_button_text']); ?>
 									</button>

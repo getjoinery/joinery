@@ -33,10 +33,6 @@ $page->admin_header(array(
 echo AdminPage::tab_menu(inbound_email_admin_tabs(), 'Setup');
 
 // The per-check "Details & how to fix" disclosure reads as a link, not a field.
-echo '<style>'
-	. 'summary.fix-toggle{cursor:pointer;color:#6c757d}'
-	. 'summary.fix-toggle:hover{color:#0d6efd;text-decoration:underline}'
-	. '</style>';
 
 // Session messages
 $display_messages = $session->get_messages('/plugins\/inbound_email\/admin\//');
@@ -68,12 +64,12 @@ $render_fix = function ($fix) use ($address) {
 	}
 	if (!empty($fix['dns_record'])) {
 		$rec = $fix['dns_record'];
-		echo '<table class="table table-sm table-bordered mb-2" style="max-width:760px">';
+		echo '<table class="table table-sm table-bordered mb-2 iem-table-760">';
 		echo '<thead><tr><th>Type</th><th>Name</th><th>Value</th></tr></thead><tbody><tr>';
 		echo '<td>' . htmlspecialchars($rec['type']) . '</td>';
 		echo '<td><code>' . htmlspecialchars($rec['name']) . '</code></td>';
-		echo '<td><input type="text" class="form-control form-control-sm" readonly '
-			. 'style="cursor:pointer;background:#fff" value="' . htmlspecialchars($rec['value'])
+		echo '<td><input type="text" class="form-control form-control-sm iem-copyfield" readonly '
+			. 'value="' . htmlspecialchars($rec['value'])
 			. '" onclick="this.select()"></td>';
 		echo '</tr></tbody></table>';
 	}
@@ -195,7 +191,7 @@ if (!$advanced) {
 	echo $pform->end_form();
 	if ($active_provider_is_webhook && $webhook_url !== '') {
 		echo '<p class="mt-3 mb-0"><strong>Webhook URL.</strong> Configure your provider to POST inbound mail to:<br>';
-		echo '<code style="word-break:break-all">' . htmlspecialchars($webhook_url) . '</code></p>';
+		echo '<code class="iem-code-break">' . htmlspecialchars($webhook_url) . '</code></p>';
 	}
 	$page->end_box();
 
@@ -225,14 +221,14 @@ if (!$advanced) {
 	if (!empty($dns_records) && $focus_domain !== '') {
 		$page->begin_box(array('title' => 'DNS records to publish for ' . $focus_domain));
 		echo '<p class="mb-2">Copy these into your DNS provider for <code>' . htmlspecialchars($focus_domain) . '</code>:</p>';
-		echo '<table class="table table-sm table-bordered" style="max-width:900px">';
+		echo '<table class="table table-sm table-bordered iem-table-900">';
 		echo '<thead><tr><th>Type</th><th>Name</th><th>Value</th><th>Note</th></tr></thead><tbody>';
 		foreach ($dns_records as $rec) {
 			echo '<tr>';
 			echo '<td>' . htmlspecialchars($rec['type']) . '</td>';
 			echo '<td><code>' . htmlspecialchars($rec['name']) . '</code></td>';
-			echo '<td><input type="text" class="form-control form-control-sm" readonly '
-				. 'style="cursor:pointer;background:#fff" value="' . htmlspecialchars($rec['value'])
+			echo '<td><input type="text" class="form-control form-control-sm iem-copyfield" readonly '
+				. 'value="' . htmlspecialchars($rec['value'])
 				. '" onclick="this.select()"></td>';
 			echo '<td class="text-muted small">' . htmlspecialchars($rec['note'] ?? '') . '</td>';
 			echo '</tr>';

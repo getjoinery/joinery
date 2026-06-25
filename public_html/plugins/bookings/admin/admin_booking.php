@@ -56,9 +56,9 @@ if ($type->key && $type->get('bkt_svy_survey_id') && $client->key) {
 }
 
 if ($active) {
-	echo '<hr><div style="display:flex; gap:.5rem; flex-wrap:wrap; align-items:flex-end;">';
+	echo '<hr><div class="bkn-admin-actions">';
 
-	echo '<form method="post" style="display:flex; gap:.4rem; align-items:flex-end;">';
+	echo '<form method="post" class="bkn-admin-form">';
 	echo '<input type="hidden" name="bkn_booking_id" value="' . $booking->key . '">';
 	echo '<label>Cancel reason<br><input type="text" name="cancel_reason" placeholder="Optional"></label>';
 	echo '<button class="btn btn-danger" name="cancel_booking" value="1" type="submit">Cancel booking</button>';

@@ -127,7 +127,7 @@ if ($error) {
 				<button type="button" id="detect_btn" class="btn btn-primary w-100" onclick="detectServers()">Detect</button>
 			</div>
 		</div>
-		<div id="detect_status" class="mt-3" style="display:none"></div>
+		<div id="detect_status" class="mt-3" hidden></div>
 		<div id="detect_results" class="mt-3"></div>
 	</div>
 </div>
@@ -147,7 +147,7 @@ function detectServers() {
 
 	btn.disabled = true;
 	btn.textContent = 'Scanning...';
-	status.style.display = 'block';
+	status.hidden = false;
 	status.innerHTML = '<div class="text-muted"><span class="spinner-border spinner-border-sm me-2"></span>Creating discovery job... The agent will SSH to ' + host + ' and scan for Joinery instances.</div>';
 	results.innerHTML = '';
 

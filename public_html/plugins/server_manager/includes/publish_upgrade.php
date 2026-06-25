@@ -654,20 +654,20 @@
 			$archive_filename = $upgrade->get('upg_name');
 			$archive_path = $full_site_dir.'/static_files/'.$archive_filename;
 			if (!file_exists($archive_path)) {
-				$version_string .= ' <span style="color: red; font-weight: bold;">[ARCHIVE FILE MISSING]</span>';
+				$version_string .= ' <span class="svm-tag-missing">[ARCHIVE FILE MISSING]</span>';
 			} else {
 				// Show file format
 				if (strpos($archive_filename, '.tar.gz') !== false) {
-					$version_string .= ' <span style="color: green;">[tar.gz]</span>';
+					$version_string .= ' <span class="svm-tag-targz">[tar.gz]</span>';
 				} else if (strpos($archive_filename, '.zip') !== false) {
-					$version_string .= ' <span style="color: blue;">[zip - legacy]</span>';
+					$version_string .= ' <span class="svm-tag-zip">[zip - legacy]</span>';
 				}
 			}
 
 			// Add delete link
 			$delete_url = '/admin/server_manager/publish?delete=' . $upgrade->key;
 			$version_label = $upgrade->get('upg_major_version') . '.' . $upgrade->get('upg_minor_version') . '.' . $upgrade->get('upg_patch_version');
-			$version_string .= ' <a href="#" onclick="JoineryModal.confirm(\'Delete version ' . $version_label . '? This will delete both the archive file and database record.\', function(){ window.location=\'' . htmlspecialchars($delete_url, ENT_QUOTES) . '\'; })" style="color: #dc3545; margin-left: 10px;"><i class="fas fa-trash-alt"></i> Delete</a>';
+			$version_string .= ' <a href="#" onclick="JoineryModal.confirm(\'Delete version ' . $version_label . '? This will delete both the archive file and database record.\', function(){ window.location=\'' . htmlspecialchars($delete_url, ENT_QUOTES) . '\'; })" class="svm-delete-link"><i class="fas fa-trash-alt"></i> Delete</a>';
 
 			echo $version_string.'<br />';
 		}

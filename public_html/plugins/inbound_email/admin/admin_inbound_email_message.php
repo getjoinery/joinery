@@ -108,7 +108,7 @@ $has_html = $message->get('iem_body_html') !== '';
 if ($has_html) {
 	echo '<a class="btn btn-sm ' . ($show_html ? 'btn-primary' : 'btn-outline-primary') . '" href="' . $base . '&amp;view=html">HTML (sandboxed)</a> ';
 }
-echo '<form method="post" action="' . $base . '" style="display:inline" onsubmit="return confirm(\'Delete this message?\')">';
+echo '<form method="post" action="' . $base . '" class="iem-inline-form" onsubmit="return confirm(\'Delete this message?\')">';
 echo '<input type="hidden" name="action" value="delete">';
 echo '<button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>';
 echo '</form>';
@@ -121,7 +121,7 @@ if ($show_html && $has_html) {
 	// Use srcdoc + sandbox without allow-scripts: no JS, no top-nav.
 	$html = $message->get('iem_body_html');
 	echo '<iframe sandbox="" srcdoc="' . htmlspecialchars($html, ENT_QUOTES | ENT_HTML5)
-		. '" style="width:100%;min-height:500px;border:1px solid #ccc;background:#fff;"></iframe>';
+		. '" class="iem-msg-iframe"></iframe>';
 	echo '</div></div>';
 } else {
 	echo '<div class="card"><div class="card-body">';
@@ -129,7 +129,7 @@ if ($show_html && $has_html) {
 	if ($plain === '' || $plain === null) {
 		echo '<em class="text-muted">No plain-text body. Use the HTML or Raw view.</em>';
 	} else {
-		echo '<pre style="white-space:pre-wrap;word-break:break-word;">' . htmlspecialchars($plain) . '</pre>';
+		echo '<pre class="iem-msg-plain">' . htmlspecialchars($plain) . '</pre>';
 	}
 	echo '</div></div>';
 }

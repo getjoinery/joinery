@@ -41,20 +41,20 @@ if (!$is_active) {
 			<div class="row justify-content-center">
 				<div class="col-lg-8">
 
-					<div class="job-post style2" style="margin-bottom:20px;">
+					<div class="job-post style2 dnsf-mb20">
 						<div class="job-content">
 							<h3 class="box-title">' . $device_name . '</h3>
-							<p style="color:#888; margin-top:4px; font-size:14px;">Enter a domain to check how your filter handles it, or paste a full page URL to scan all domains that page loads.</p>
+							<p class="dnsf-test-sub">Enter a domain to check how your filter handles it, or paste a full page URL to scan all domains that page loads.</p>
 						</div>
-						<div class="job-post_author" style="flex-wrap:wrap; gap:8px; align-items:center;">
-							<div class="job-wrapp" style="flex:1; min-width:220px;">
-								<input type="text" id="scd-test-input" placeholder="e.g. facebook.com or https://example.com/page" style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:4px; font-size:15px;">
+						<div class="job-post_author dnsf-test-inputrow">
+							<div class="job-wrapp dnsf-test-inputwrap">
+								<input type="text" id="scd-test-input" placeholder="e.g. facebook.com or https://example.com/page" class="dnsf-test-input">
 							</div>
 							<button type="button" id="scd-test-btn" class="th-btn">Test</button>
 						</div>
 					</div>
 
-					<div id="scd-result" style="display:none;"></div>
+					<div id="scd-result" hidden></div>
 
 				</div>
 			</div>
@@ -69,7 +69,7 @@ echo PublicPage::EndPage();
 	var deviceId     = <?php echo $device_id; ?>;
 	var scdCanAddRules = <?php echo $can_add_rules ? 'true' : 'false'; ?>;
 
-	var _svgAttrs = 'xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em;margin-right:4px;"';
+	var _svgAttrs = 'xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="dnsf-icon-mr4"';
 	var _icons = {
 		'xmark-circle':    '<svg ' + _svgAttrs + '><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
 		'rotate':          '<svg ' + _svgAttrs + '><polyline points="23,4 23,10 17,10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>',
@@ -105,7 +105,7 @@ echo PublicPage::EndPage();
 
 		if (!input) {
 			resultDiv.style.display = 'block';
-			resultDiv.innerHTML = '<span style="color:#dc3545;">Please enter a domain or URL.</span>';
+			resultDiv.innerHTML = '<span class="dnsf-danger">Please enter a domain or URL.</span>';
 			return;
 		}
 
@@ -115,37 +115,37 @@ echo PublicPage::EndPage();
 			var domain = cleanDomain(input);
 			if (!domain || domain.indexOf('.') === -1) {
 				resultDiv.style.display = 'block';
-				resultDiv.innerHTML = '<span style="color:#dc3545;">Please enter a valid domain (e.g. facebook.com).</span>';
+				resultDiv.innerHTML = '<span class="dnsf-danger">Please enter a valid domain (e.g. facebook.com).</span>';
 				return;
 			}
 			resultDiv.style.display = 'block';
-			resultDiv.innerHTML = '<span style="color:#6c757d;">Testing...</span>';
+			resultDiv.innerHTML = '<span class="dnsf-muted">Testing...</span>';
 
 			var xhr = new XMLHttpRequest();
 			xhr.open('GET', '/ajax/test_domain?device_id=' + deviceId + '&domain=' + encodeURIComponent(domain));
 			xhr.onload = function () {
-				if (xhr.status !== 200) { resultDiv.innerHTML = '<span style="color:#dc3545;">Request failed. Please try again.</span>'; return; }
-				var data; try { data = JSON.parse(xhr.responseText); } catch (e) { resultDiv.innerHTML = '<span style="color:#dc3545;">Invalid response.</span>'; return; }
-				if (!data.success) { resultDiv.innerHTML = '<span style="color:#dc3545;">' + escHtml(data.message) + '</span>'; return; }
+				if (xhr.status !== 200) { resultDiv.innerHTML = '<span class="dnsf-danger">Request failed. Please try again.</span>'; return; }
+				var data; try { data = JSON.parse(xhr.responseText); } catch (e) { resultDiv.innerHTML = '<span class="dnsf-danger">Invalid response.</span>'; return; }
+				if (!data.success) { resultDiv.innerHTML = '<span class="dnsf-danger">' + escHtml(data.message) + '</span>'; return; }
 				resultDiv.innerHTML = formatDomainResult(data);
 			};
-			xhr.onerror = function () { resultDiv.innerHTML = '<span style="color:#dc3545;">Network error. Please try again.</span>'; };
+			xhr.onerror = function () { resultDiv.innerHTML = '<span class="dnsf-danger">Network error. Please try again.</span>'; };
 			xhr.send();
 
 		} else {
 			resultDiv.style.display = 'block';
-			resultDiv.innerHTML = '<span style="color:#6c757d;">Fetching page\u2026 (this may take a few seconds)</span>';
+			resultDiv.innerHTML = '<span class="dnsf-muted">Fetching page\u2026 (this may take a few seconds)</span>';
 
 			var xhr2 = new XMLHttpRequest();
 			xhr2.open('POST', '/ajax/scan_url');
 			xhr2.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
 			xhr2.onload = function () {
-				if (xhr2.status !== 200) { resultDiv.innerHTML = '<span style="color:#dc3545;">Request failed. Please try again.</span>'; return; }
-				var data; try { data = JSON.parse(xhr2.responseText); } catch (e) { resultDiv.innerHTML = '<span style="color:#dc3545;">Invalid response.</span>'; return; }
-				if (!data.success) { resultDiv.innerHTML = '<span style="color:#dc3545;">' + escHtml(data.message) + '</span>'; return; }
+				if (xhr2.status !== 200) { resultDiv.innerHTML = '<span class="dnsf-danger">Request failed. Please try again.</span>'; return; }
+				var data; try { data = JSON.parse(xhr2.responseText); } catch (e) { resultDiv.innerHTML = '<span class="dnsf-danger">Invalid response.</span>'; return; }
+				if (!data.success) { resultDiv.innerHTML = '<span class="dnsf-danger">' + escHtml(data.message) + '</span>'; return; }
 				resultDiv.innerHTML = formatScanResult(data);
 			};
-			xhr2.onerror = function () { resultDiv.innerHTML = '<span style="color:#dc3545;">Network error. Please try again.</span>'; };
+			xhr2.onerror = function () { resultDiv.innerHTML = '<span class="dnsf-danger">Network error. Please try again.</span>'; };
 			xhr2.send('device_id=' + encodeURIComponent(deviceId) + '&url=' + encodeURIComponent(input));
 		}
 	}
@@ -164,10 +164,10 @@ echo PublicPage::EndPage();
 			iconKey = 'question-circle'; color = '#6c757d'; label = data.result;
 		}
 
-		var html = '<div class="job-post style2" style="padding:16px 20px;">';
-		html += '<div style="font-weight:600; font-size:15px; color:' + color + ';">' + _icons[iconKey] + escHtml(data.domain) + ' &mdash; ' + label + '</div>';
-		if (data.detail)   html += '<div style="font-size:13px; color:#6c757d; margin-top:4px; padding-left:20px;">' + escHtml(data.detail) + '</div>';
-		if (data.profile)  html += '<div style="font-size:13px; color:#6c757d; padding-left:20px;">Active profile: ' + escHtml(data.profile) + '</div>';
+		var html = '<div class="job-post style2 dnsf-result-box">';
+		html += '<div class="dnsf-result-title" style="--dnsf-c:' + color + ';">' + _icons[iconKey] + escHtml(data.domain) + ' &mdash; ' + label + '</div>';
+		if (data.detail)   html += '<div class="dnsf-result-detail">' + escHtml(data.detail) + '</div>';
+		if (data.profile)  html += '<div class="dnsf-result-profile">Active profile: ' + escHtml(data.profile) + '</div>';
 
 		if (scdCanAddRules
 				&& data.reason !== 'custom_block_rule' && data.reason !== 'custom_allow_rule'
@@ -179,13 +179,13 @@ echo PublicPage::EndPage();
 				ruleAction = 0; ruleLabel = 'Block this domain';
 			}
 			if (ruleAction !== undefined) {
-				html += '<div style="margin-top:10px; padding-left:20px;">';
+				html += '<div class="dnsf-result-actions">';
 				html += '<button type="button" class="scd-add-rule-btn th-btn"'
 					  + ' data-domain="' + escHtml(data.domain) + '"'
 					  + ' data-device="' + deviceId + '"'
 					  + ' data-action="' + ruleAction + '">'
 					  + escHtml(ruleLabel) + '</button>';
-				html += '<span class="scd-rule-feedback" style="display:none; font-size:13px; margin-left:8px;"></span>';
+				html += '<span class="scd-rule-feedback dnsf-feedback13"></span>';
 				html += '</div>';
 			}
 		}
@@ -195,16 +195,16 @@ echo PublicPage::EndPage();
 	}
 
 	function renderGroup(label, items, color, collapsed, ruleAction) {
-		var html = '<details' + (collapsed ? '' : ' open') + ' style="margin-bottom:8px;">';
-		html += '<summary style="cursor:pointer; font-weight:600; color:' + color + '; padding:5px 0; user-select:none;">';
-		html += escHtml(label) + ' <span style="font-size:13px; font-weight:400; color:#888;">(' + items.length + ')</span>';
+		var html = '<details' + (collapsed ? '' : ' open') + ' class="dnsf-mb8">';
+		html += '<summary class="dnsf-group-summary" style="--dnsf-c:' + color + ';">';
+		html += escHtml(label) + ' <span class="dnsf-group-count">(' + items.length + ')</span>';
 		html += '</summary>';
-		html += '<div style="padding-left:10px; margin-top:4px;">';
+		html += '<div class="dnsf-group-body">';
 		items.forEach(function (r) {
-			html += '<div style="padding:5px 0; border-bottom:1px solid #f0f0f0; display:flex; align-items:baseline; gap:8px;">';
-			html += '<div style="flex:1;">';
-			html += '<div style="font-size:14px;">' + escHtml(r.domain) + '</div>';
-			if (r.detail) html += '<div style="font-size:12px; color:#888;">' + escHtml(r.detail) + '</div>';
+			html += '<div class="dnsf-scan-row">';
+			html += '<div class="dnsf-flex1">';
+			html += '<div class="dnsf-fs14">' + escHtml(r.domain) + '</div>';
+			if (r.detail) html += '<div class="dnsf-scan-detail">' + escHtml(r.detail) + '</div>';
 			html += '</div>';
 			if (scdCanAddRules && ruleAction !== null && r.result !== 'ERROR'
 					&& r.reason !== 'custom_block_rule' && r.reason !== 'custom_allow_rule') {
@@ -214,7 +214,7 @@ echo PublicPage::EndPage();
 					  + ' data-device="' + deviceId + '"'
 					  + ' data-action="' + ruleAction + '">'
 					  + escHtml(btnLabel) + '</button>';
-				html += '<span class="scd-rule-feedback" style="display:none; font-size:12px;"></span>';
+				html += '<span class="scd-rule-feedback dnsf-feedback12"></span>';
 			}
 			html += '</div>';
 		});
@@ -238,19 +238,19 @@ echo PublicPage::EndPage();
 			}
 		});
 
-		var html = '<div class="job-post style2" style="padding:16px 20px;">';
+		var html = '<div class="job-post style2 dnsf-result-box">';
 
-		html += '<div style="font-weight:600; font-size:16px; margin-bottom:6px;">Scan complete: ' + escHtml(String(data.domains_checked)) + ' domains checked</div>';
+		html += '<div class="dnsf-scan-title">Scan complete: ' + escHtml(String(data.domains_checked)) + ' domains checked</div>';
 
 		if (data.capped) {
-			html += '<div style="font-size:13px; color:#888; margin-bottom:4px;">Showing first ' + escHtml(String(data.domains_checked)) + ' of ' + escHtml(String(data.domains_found)) + ' external domains found on the page.</div>';
+			html += '<div class="dnsf-scan-note">Showing first ' + escHtml(String(data.domains_checked)) + ' of ' + escHtml(String(data.domains_found)) + ' external domains found on the page.</div>';
 		}
 		if (data.truncated) {
-			html += '<div style="font-size:13px; color:#e67e22; margin-bottom:4px;">Time limit reached \u2014 some domains may not have been checked.</div>';
+			html += '<div class="dnsf-scan-warn">Time limit reached \u2014 some domains may not have been checked.</div>';
 		}
 
 		var blockedCount = grouped.BLOCKED.length + grouped.REFUSED.length;
-		html += '<div style="font-size:14px; color:#555; margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid #eee;">';
+		html += '<div class="dnsf-scan-summary">';
 		html += blockedCount + ' blocked &bull; ' + grouped.REWRITTEN.length + ' rewritten &bull; ' + grouped.ALLOWED.length + ' allowed';
 		html += '</div>';
 

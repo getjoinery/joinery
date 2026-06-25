@@ -40,7 +40,7 @@ if(!$tier){
             <div class="error-content">
                 <h2 class="error-title">Choose your plan</h2>
                 <p class="error-text">You haven't chosen your plan yet.</p>
-                <a href="/pricing" class="th-btn"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em;margin-right:0.5rem"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9,22 9,12 15,12 15,22"/></svg>Choose your plan</a>
+                <a href="/pricing" class="th-btn"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="dnsf-icon-mr"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9,22 9,12 15,12 15,22"/></svg>Choose your plan</a>
             </div>
         </div>
     </section>
@@ -53,7 +53,7 @@ else{
                         <div class="job-content">
                             <div class="job-post_date">
 								<h3><?php echo $name; ?></h3>
-                                <div class="icon"><a href="/profile/dns_filtering/devices?showdeleted=1"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Deleted Devices</a></div>
+                                <div class="icon"><a href="/profile/dns_filtering/devices?showdeleted=1"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="dnsf-icon"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Deleted Devices</a></div>
                             </div>
                         </div>
 		<?php	
@@ -66,14 +66,14 @@ else{
 							<div class="job-post style2">
 								<div class="job-content">
 									<div class="job-post_date">
-										<span class="date"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>Deleted</span>
+										<span class="date"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="dnsf-icon"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>Deleted</span>
 									</div>
 									<h3 class="box-title">'.$deleted_device->get_readable_name().'</h3>
 								</div>
 								<div class="job-post_author">
 									<div class="job-wrapp">
 										<div class="job-author">
-											<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+											<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="dnsf-icon"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
 										</div>
 										<div class="author-info">
 											<h3 class="company-name">Deactivation Pin</h3>
@@ -103,10 +103,10 @@ else{
 					elseif($diff < 3600) $seen_ago = floor($diff/60).'m ago';
 					elseif($diff < 86400) $seen_ago = floor($diff/3600).'h ago';
 					else $seen_ago = floor($diff/86400).'d ago';
-					$seen_label = ' &bull; <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><path d="M2 10c0-3.87 3.13-7 7-7"/><path d="M22 10c0-3.87-3.13-7-7-7"/><path d="M5 13c0-2.21 1.79-4 4-4"/><path d="M19 13c0-2.21-1.79-4-4-4"/><circle cx="12" cy="13" r="2"/><line x1="12" y1="15" x2="12" y2="22"/></svg> '.$seen_ago;
+					$seen_label = ' &bull; <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="dnsf-icon"><path d="M2 10c0-3.87 3.13-7 7-7"/><path d="M22 10c0-3.87-3.13-7-7-7"/><path d="M5 13c0-2.21 1.79-4 4-4"/><path d="M19 13c0-2.21-1.79-4-4-4"/><circle cx="12" cy="13" r="2"/><line x1="12" y1="15" x2="12" y2="22"/></svg> '.$seen_ago;
 				}
 				else{
-					$seen_label = ' &bull; <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><line x1="1" y1="1" x2="23" y2="23"/><path d="M2 10c0-3.87 3.13-7 7-7"/><path d="M22 10c0-3.87-3.13-7-7-7"/><path d="M5 13c0-2.21 1.79-4 4-4"/><circle cx="12" cy="13" r="2"/><line x1="12" y1="15" x2="12" y2="22"/></svg> Not yet seen';
+					$seen_label = ' &bull; <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="dnsf-icon"><line x1="1" y1="1" x2="23" y2="23"/><path d="M2 10c0-3.87 3.13-7 7-7"/><path d="M22 10c0-3.87-3.13-7-7-7"/><path d="M5 13c0-2.21 1.79-4 4-4"/><circle cx="12" cy="13" r="2"/><line x1="12" y1="15" x2="12" y2="22"/></svg> Not yet seen';
 				}
 			}
 
@@ -115,15 +115,15 @@ else{
 						<div class="job-post style2">
 							<div class="job-content">
 								<div class="job-post_date">
-									<span class="date"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><polyline points="20,6 9,17 4,12"/></svg>Active'.$seen_label.'</span>
-									<div class="scd-actions-wrap"><button class="scd-actions-btn" aria-expanded="false" aria-label="Device actions"><svg xmlns="http://www.w3.org/2000/svg" width="1.2em" height="1.2em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="vertical-align:-0.125em"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button><div class="scd-actions-menu" role="menu"><a href="/profile/dns_filtering/activation?device_id='.$device->key.'" role="menuitem">Connection Details</a><a href="/profile/dns_filtering/device_edit?device_id='.$device->key.'" role="menuitem">Edit Device</a><a href="/profile/dns_filtering/test?device_id='.$device->key.'" role="menuitem">Test a Domain/Page</a>'.($device->get('sdd_log_queries') ? '<a href="/profile/dns_filtering/querylog?device_id='.$device->key.'" role="menuitem">View Query Log</a>' : '').'</div></div>
+									<span class="date"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="dnsf-icon"><polyline points="20,6 9,17 4,12"/></svg>Active'.$seen_label.'</span>
+									<div class="scd-actions-wrap"><button class="scd-actions-btn" aria-expanded="false" aria-label="Device actions"><svg xmlns="http://www.w3.org/2000/svg" width="1.2em" height="1.2em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="dnsf-icon"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button><div class="scd-actions-menu" role="menu"><a href="/profile/dns_filtering/activation?device_id='.$device->key.'" role="menuitem">Connection Details</a><a href="/profile/dns_filtering/device_edit?device_id='.$device->key.'" role="menuitem">Edit Device</a><a href="/profile/dns_filtering/test?device_id='.$device->key.'" role="menuitem">Test a Domain/Page</a>'.($device->get('sdd_log_queries') ? '<a href="/profile/dns_filtering/querylog?device_id='.$device->key.'" role="menuitem">View Query Log</a>' : '').'</div></div>
 								</div>
 								<h3 class="box-title">'.$device->get_readable_name().'</h3>
 							</div>
 							<div class="job-post_author">
 								<div class="job-wrapp">
 									<div class="job-author">
-										<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+										<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="dnsf-icon"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
 									</div>
 									<div class="author-info">
 										<h3 class="company-name">Always-On Rules</h3>
@@ -142,26 +142,26 @@ else{
 									$block_name = htmlspecialchars($sblock->get('sdb_name') ?: 'Unnamed');
 									$schedule_display = htmlspecialchars($sblock->get_schedule_display());
 									$rule_count = $sblock->count_rules();
-									$active_badge = $sblock->is_active_now() ? ' <span class="badge" style="background:#198754;color:#fff;font-size:11px;padding:2px 6px;border-radius:3px;">Active now</span>' : '';
+									$active_badge = $sblock->is_active_now() ? ' <span class="badge dnsf-badge-active">Active now</span>' : '';
 
 									echo '
 								<br>
 								<div class="job-post_author">
 									<div class="job-wrapp">
 										<div class="job-author">
-											<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg>
+											<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="dnsf-icon"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg>
 										</div>
 										<div class="author-info">
 											<h3 class="company-name">'.$block_name.$active_badge.'</h3>
 											<h5 class="price">'.$schedule_display.' ('.$rule_count.' rules)</h5>
 										</div>
 									</div>
-									<div style="display:flex; gap:6px;">
+									<div class="dnsf-row6">
 										<a class="th-btn style5" href="/profile/dns_filtering/scheduled_block_edit?device_id='.$device->key.'&block_id='.$sblock->key.'">Edit</a>
-										<form method="POST" action="/profile/dns_filtering/scheduled_block_edit" style="display:inline;" onsubmit="return confirm(\'Delete this scheduled filter?\')">
+										<form method="POST" action="/profile/dns_filtering/scheduled_block_edit" class="dnsf-inline" onsubmit="return confirm(\'Delete this scheduled filter?\')">
 											<input type="hidden" name="action" value="delete">
 											<input type="hidden" name="block_id" value="'.$sblock->key.'">
-											<button type="submit" class="th-btn style5" style="background:#dc3545;border-color:#dc3545;">Delete</button>
+											<button type="submit" class="th-btn style5 dnsf-btn-danger">Delete</button>
 										</form>
 									</div>
 								</div>';
@@ -171,7 +171,7 @@ else{
 							$max_blocks = $tier ? $tier->getFeature('scrolldaddy_max_scheduled_blocks', 1) : 1;
 							$block_count = $device_blocks ? count($device_blocks) : 0;
 							$add_block_btn = ($block_count >= $max_blocks)
-								? '<span style="font-size:13px; color:#6c757d;">Upgrade to add more</span>'
+								? '<span class="dnsf-note">Upgrade to add more</span>'
 								: '<a class="th-btn style5" href="/profile/dns_filtering/scheduled_block_edit?device_id='.$device->key.'">Add</a>';
 
 							echo '
@@ -179,7 +179,7 @@ else{
 							<div class="job-post_author">
 								<div class="job-wrapp">
 									<div class="job-author">
-										<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+										<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="dnsf-icon"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
 									</div>
 									<div class="author-info">
 										<h3 class="company-name">Scheduled Filters</h3>
@@ -198,7 +198,7 @@ else{
 						<div class="job-post style2">
 							<div class="job-content">
 								<div class="job-post_date">
-									<a href="/profile/dns_filtering/activation?device_id='.$device->key.'"><span class="date"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>Needs Activation</span></a>
+									<a href="/profile/dns_filtering/activation?device_id='.$device->key.'"><span class="date"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="dnsf-icon"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>Needs Activation</span></a>
 									<div class="icon"><a href="/profile/dns_filtering/device_edit?device_id='.$device->key.'">Edit Device</a></div>
 								</div>
 								<h3 class="box-title">'.$device->get_readable_name().'</h3>
@@ -206,7 +206,7 @@ else{
 							<div class="job-post_author">
 								<div class="job-wrapp">
 									<div class="job-author">
-										<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+										<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="dnsf-icon"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
 									</div>
 									<div class="author-info">
 										<h3 class="company-name">Needs Activation</h3>
@@ -260,15 +260,6 @@ else{
 
 	echo PublicPage::EndPage();
 ?>
-<style>
-.scd-actions-wrap { position: relative; display: inline-block; }
-.scd-actions-btn { background: none; border: none; cursor: pointer; padding: 4px 6px; line-height: 1; border-radius: 4px; color: inherit; }
-.scd-actions-btn:hover { background: rgba(0,0,0,0.07); }
-.scd-actions-menu { display: none; position: absolute; right: 0; top: calc(100% + 4px); min-width: 190px; background: #fff; border: 1px solid #e0e0e0; border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,0.12); z-index: 200; padding: 4px 0; }
-.scd-actions-menu.is-open { display: block; }
-.scd-actions-menu a { display: block; padding: 8px 16px; color: #333; text-decoration: none; font-size: 14px; white-space: nowrap; }
-.scd-actions-menu a:hover { background: #f5f5f5; }
-</style>
 <script>
 (function () {
 	document.addEventListener('click', function (e) {

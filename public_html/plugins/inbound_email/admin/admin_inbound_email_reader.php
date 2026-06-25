@@ -36,13 +36,13 @@ $page->admin_header(
 
 echo AdminPage::tab_menu(inbound_email_admin_tabs(), 'Mailboxes');
 
-// Reader assets — cache-busted by file mtime so CDN/browser caches never serve
-// a stale stylesheet or script after an edit.
+// Reader script — cache-busted by file mtime so CDN/browser caches never serve
+// a stale script after an edit. The stylesheet (mailbox_reader.css) loads via the
+// plugin "styles" declaration in plugin.json, not here.
 $asset_ver = function ($rel) {
 	$path = PathHelper::getIncludePath('plugins/inbound_email/assets/' . $rel);
 	return '/plugins/inbound_email/assets/' . $rel . '?v=' . (is_file($path) ? filemtime($path) : '1');
 };
-echo '<link rel="stylesheet" href="' . htmlspecialchars($asset_ver('mailbox_reader.css')) . '">';
 
 // Config + seed data for the vanilla-JS reader.
 $config = array(

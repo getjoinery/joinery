@@ -42,7 +42,7 @@ $page_vars = process_logic(device_edit_logic(array_merge($_GET, $_POST, $params 
                     <div class="job-content">
                         <div class="job-post_date">
 							<h3><?php echo $name; ?></h3>
-                            <div class="icon"><a href="/profile/dns_filtering/device_delete?device_id=<?php echo $device->key; ?>"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Delete</a></div>
+                            <div class="icon"><a href="/profile/dns_filtering/device_delete?device_id=<?php echo $device->key; ?>"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="dnsf-icon"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Delete</a></div>
                         </div>
                     </div>
 	<?php
@@ -97,9 +97,9 @@ $page_vars = process_logic(device_edit_logic(array_merge($_GET, $_POST, $params 
 				'options' => array('0' => 'Off', '1' => 'On'),
 				'value' => $device->get('sdd_log_queries') ? '1' : '0'
 			]);
-			echo '<p style="font-size:13px; color:#6c757d; margin-top:-8px; margin-bottom:16px;">When on, your device\'s DNS queries are logged on the ScrollDaddy server. Logs include the domain name, query type (A/AAAA), result (blocked/allowed), and timestamp. No IP addresses are stored. You can view and clear your logs at any time.</p>';
+			echo '<p class="dnsf-help-tight">When on, your device\'s DNS queries are logged on the ScrollDaddy server. Logs include the domain name, query type (A/AAAA), result (blocked/allowed), and timestamp. No IP addresses are stored. You can view and clear your logs at any time.</p>';
 		} else {
-			echo '<p style="font-size:13px; color:#6c757d; margin-bottom:16px;"><strong>Query Logging:</strong> Not available on your current plan.</p>';
+			echo '<p class="dnsf-help"><strong>Query Logging:</strong> Not available on your current plan.</p>';
 		}
 	}
 

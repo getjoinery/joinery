@@ -5,6 +5,7 @@
     "author": "System Developer",
     "receives_upgrades": true,
     "included_in_publish": true,
+    "styles": ["assets/css/dns_filtering.css"],
     "requires": {
         "php": ">=8.0",
         "extensions": []

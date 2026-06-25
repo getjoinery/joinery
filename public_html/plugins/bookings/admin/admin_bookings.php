@@ -39,7 +39,7 @@ $page->admin_header(array(
 ));
 
 // Status filter (self-documenting control, no explainer prose).
-echo '<form method="get" style="margin-bottom:1rem;"><label>Status: <select name="status" onchange="this.form.submit()">';
+echo '<form method="get" class="bkn-filter-form"><label>Status: <select name="status" onchange="this.form.submit()">';
 echo '<option value="">All</option>';
 foreach ($status_labels as $val => $label) {
 	$sel = ((string)$status_filter === (string)$val) ? ' selected' : '';

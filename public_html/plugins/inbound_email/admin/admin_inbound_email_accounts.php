@@ -85,54 +85,6 @@ $connect_button = function ($imap) use ($imap_action) {
 	));
 };
 ?>
-<style>
-.iea-acct { max-width: 1000px; }
-.iea-domain {
-	border: 1px solid #d9dde2; border-radius: 8px; margin-bottom: 14px; background: #fff; overflow: hidden;
-}
-.iea-domain-head {
-	display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-	padding: 12px 14px; background: #f7f9fb; border-bottom: 1px solid #eef1f4;
-}
-.iea-domain-name { font-size: 15px; font-weight: 600; color: #111827; }
-.iea-domain-head .iea-spacer { flex: 1; }
-.iea-mailboxes { list-style: none; margin: 0; padding: 0; }
-.iea-mailbox {
-	display: flex; align-items: flex-start; gap: 12px;
-	padding: 11px 14px; border-bottom: 1px solid #f1f3f5;
-}
-.iea-mailbox:last-child { border-bottom: none; }
-.iea-mb-main { min-width: 0; flex: 1; }
-.iea-mb-addr { font-weight: 600; color: #1f2933; font-size: 14px; }
-.iea-mb-route { color: #4b5563; font-size: 13px; margin-top: 3px; }
-.iea-mb-imap { color: #374151; font-size: 12px; margin-top: 5px; }
-.iea-mb-actions { flex: 0 0 auto; display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
-.iea-empty-mb { padding: 11px 14px; color: #9097a1; font-size: 13px; }
-.iea-tag {
-	display: inline-block; font-size: 11px; font-weight: 600; border-radius: 9px;
-	padding: 1px 8px; vertical-align: middle;
-}
-.iea-tag-store { background: #d7e7fb; color: #1e40af; }
-.iea-tag-fwd { background: #e4e7eb; color: #374151; }
-.iea-badge {
-	display: inline-block; font-size: 11px; font-weight: 600; border-radius: 9px; padding: 1px 8px;
-}
-.iea-badge-on { background: #dcfce7; color: #166534; }
-.iea-badge-off { background: #e4e7eb; color: #6b7280; }
-.iea-badge-imapsrc { background: #dcfce7; color: #166534; }
-.iea-badge-conn { background: #dcfce7; color: #166534; }
-.iea-badge-noconn { background: #fde68a; color: #92400e; }
-/* Real warning pill (an anchor) — amber fill + border, and an explicit color at
-   anchor specificity so the theme's a:link blue doesn't bleed through. */
-a.iea-badge-warn, a.iea-badge-warn:link, a.iea-badge-warn:visited {
-	background: #fef3c7; color: #92400e; border: 1px solid #f59e0b; text-decoration: none;
-}
-a.iea-badge-warn:hover { background: #fde68a; color: #92400e; }
-.iea-page-actions { margin: 4px 0 18px; }
-.iea-trash { margin: 8px 0 24px; border: 1px solid #e4e7eb; border-radius: 8px; background: #fff; }
-.iea-trash > summary { cursor: pointer; padding: 10px 14px; color: #6b7280; font-size: 13px; }
-.iea-trash .iea-mailboxes { border-top: 1px solid #eef1f4; }
-</style>
 
 <div class="iea-acct">
 <?php if (empty($tree)): ?>
@@ -206,7 +158,7 @@ a.iea-badge-warn:hover { background: #fde68a; color: #92400e; }
 								   title="<?php echo htmlspecialchars($fetch_task_warning); ?>">&#9888; Auto-fetch</a>
 							<?php endif; ?>
 							<?php if ($imap->get('iia_last_status')): ?>
-								<span style="color:#9097a1;">&middot; <?php echo htmlspecialchars($imap->get('iia_last_status')); ?></span>
+								<span class="iem-imap-status">&middot; <?php echo htmlspecialchars($imap->get('iia_last_status')); ?></span>
 							<?php endif; ?>
 						</div>
 					<?php endif; ?>
