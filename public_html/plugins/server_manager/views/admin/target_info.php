@@ -74,9 +74,9 @@ $page->begin_box([
 	'title' => 'Target Details',
 	'altlinks' => ['Edit' => '/admin/server_manager/targets?bkt_id=' . $target->key],
 ]);
-echo '<table class="table table-sm mb-0" style="max-width:600px">';
+echo '<table class="table table-sm mb-0 svm-mw600">';
 echo '<tbody>';
-echo '<tr><th style="width:40%">Provider</th><td>' . htmlspecialchars($provider_labels[$provider] ?? $provider) . '</td></tr>';
+echo '<tr><th class="svm-w40">Provider</th><td>' . htmlspecialchars($provider_labels[$provider] ?? $provider) . '</td></tr>';
 echo '<tr><th>Bucket</th><td><code>' . htmlspecialchars($target->get('bkt_bucket')) . '</code></td></tr>';
 echo '<tr><th>Path Prefix</th><td><code>' . htmlspecialchars($target->get('bkt_path_prefix') ?: '-') . '</code></td></tr>';
 echo '<tr><th>Status</th><td><span class="badge bg-' . ($target->get('bkt_enabled') ? 'success' : 'secondary') . '">' . ($target->get('bkt_enabled') ? 'Enabled' : 'Disabled') . '</span></td></tr>';

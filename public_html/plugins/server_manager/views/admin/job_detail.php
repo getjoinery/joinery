@@ -199,7 +199,7 @@ $status_class = match($job->get('mjb_status')) {
 <div class="card mb-3">
 	<div class="card-header"><strong>Output</strong></div>
 	<div class="card-body">
-		<pre id="job-output" style="max-height: 600px; overflow-y: auto; background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 4px; font-size: 13px; white-space: pre-wrap;"><?php echo htmlspecialchars($job->get('mjb_output') ?: 'Waiting for output...'); ?></pre>
+		<pre id="job-output" class="svm-logbox"><?php echo htmlspecialchars($job->get('mjb_output') ?: 'Waiting for output...'); ?></pre>
 	</div>
 </div>
 
@@ -224,24 +224,24 @@ if ($commands_data && isset($commands_data['steps'])) {
 	// mjb_current_step is the 0-based index of the running (or last-run) step.
 	$raw_current = intval($job->get('mjb_current_step'));
 	$status = $job->get('mjb_status');
-	$icon_style = 'display:inline-block;width:1.25em;text-align:center;';
+	// (status-icon styling moved to .svm-status-icon)
 	foreach ($commands_data['steps'] as $i => $step) {
 		if ($status === 'completed') {
-			$icon = '<span class="text-success me-2" style="' . $icon_style . '">&#10003;</span>';
+			$icon = '<span class="text-success me-2 svm-status-icon">&#10003;</span>';
 		} elseif ($i < $raw_current) {
-			$icon = '<span class="text-success me-2" style="' . $icon_style . '">&#10003;</span>';
+			$icon = '<span class="text-success me-2 svm-status-icon">&#10003;</span>';
 		} elseif ($i === $raw_current) {
 			if ($status === 'failed') {
-				$icon = '<span class="text-danger me-2" style="' . $icon_style . '">&#10007;</span>';
+				$icon = '<span class="text-danger me-2 svm-status-icon">&#10007;</span>';
 			} elseif ($status === 'running') {
-				$icon = '<span class="text-primary me-2" style="' . $icon_style . '">&#9654;</span>';
+				$icon = '<span class="text-primary me-2 svm-status-icon">&#9654;</span>';
 			} elseif ($status === 'cancelled') {
-				$icon = '<span class="text-secondary me-2" style="' . $icon_style . '">&#9633;</span>';
+				$icon = '<span class="text-secondary me-2 svm-status-icon">&#9633;</span>';
 			} else {
-				$icon = '<span class="text-muted me-2" style="' . $icon_style . '">&#9675;</span>';
+				$icon = '<span class="text-muted me-2 svm-status-icon">&#9675;</span>';
 			}
 		} else {
-			$icon = '<span class="text-muted me-2" style="' . $icon_style . '">&#9675;</span>';
+			$icon = '<span class="text-muted me-2 svm-status-icon">&#9675;</span>';
 		}
 		echo '<li class="list-group-item">' . $icon . htmlspecialchars($step['label']) . ' <small class="text-muted">(' . $step['type'] . ')</small></li>';
 	}

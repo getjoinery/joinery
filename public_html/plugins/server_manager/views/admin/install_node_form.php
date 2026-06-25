@@ -242,7 +242,7 @@ if ($has_known_hosts) {
 }
 
 // SSH detail fields — hidden when a known host is selected
-echo '<div id="ssh_fields" style="' . ($ssh_fields_hidden ? 'display:none' : '') . '">';
+echo '<div id="ssh_fields"' . ($ssh_fields_hidden ? ' hidden' : '') . '>';
 $formwriter->textinput('mgn_host', 'SSH Host', [
 	'placeholder' => '23.239.11.53 or server.example.com',
 ]);
@@ -284,7 +284,7 @@ $formwriter->textinput('domain', 'Domain', [
 echo '<div id="panel_fresh"></div>';
 
 // From-backup panel
-echo '<div id="panel_backup" style="display:none">';
+echo '<div id="panel_backup" hidden>';
 $formwriter->dropinput('source_node_id', 'Source Node', [
 	'options'      => $source_node_options,
 	'empty_option' => false,
@@ -295,7 +295,7 @@ $formwriter->radioinput('backup_source', 'Backup to Use', [
 		'existing' => 'Use existing backup',
 	],
 ]);
-echo '<div id="panel_existing_backup" style="display:none">';
+echo '<div id="panel_existing_backup" hidden>';
 $formwriter->dropinput('db_backup_path', 'DB Backup File', ['options' => [], 'empty_option' => false]);
 $formwriter->dropinput('project_backup_path', 'Project Backup File', ['options' => [], 'empty_option' => false]);
 echo '<small class="text-muted d-block mb-3">Populated from the source node\'s cached backup list. If empty, run "List backups" on the source first, or choose "Take fresh backup now".</small>';
@@ -313,12 +313,12 @@ function applyHostPreset(val) {
 	var dmBare   = document.getElementById("docker_mode_bare-metal");
 
 	if (!val) {
-		if (fields) fields.style.display = "none";
+		if (fields) fields.hidden = true;
 		if (dmBare) { dmBare.disabled = false; dmBare.closest(".form-check").style.opacity = "1"; }
 		return;
 	}
 	if (val === "__custom__") {
-		if (fields) fields.style.display = "";
+		if (fields) fields.hidden = false;
 		if (dmBare) { dmBare.disabled = false; dmBare.closest(".form-check").style.opacity = "1"; }
 		return;
 	}
@@ -347,13 +347,13 @@ function applyHostPreset(val) {
 function toggleModePanel() {
 	var fresh = document.querySelector("input[name=install_mode][value=fresh]");
 	var isFresh = fresh && fresh.checked;
-	document.getElementById("panel_fresh").style.display  = isFresh ? "" : "none";
-	document.getElementById("panel_backup").style.display = isFresh ? "none" : "";
+	document.getElementById("panel_fresh").hidden  = !isFresh;
+	document.getElementById("panel_backup").hidden = isFresh;
 }
 
 function toggleBackupSourcePanel() {
 	var existing = document.querySelector("input[name=backup_source][value=existing]");
-	document.getElementById("panel_existing_backup").style.display = (existing && existing.checked) ? "" : "none";
+	document.getElementById("panel_existing_backup").hidden = !(existing && existing.checked);
 }
 
 function updateBackupOptions() {

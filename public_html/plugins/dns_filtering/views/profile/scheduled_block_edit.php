@@ -105,7 +105,7 @@ $page_vars = process_logic(scheduled_block_edit_logic(array_merge($_GET, $_POST,
 		echo '</div>';
 		echo '</div>';
 
-		echo '<p class="text-muted" id="overnight-hint" style="display:none;"><em>This schedule spans overnight (crosses midnight)</em></p>';
+		echo '<p class="text-muted" id="overnight-hint" hidden><em>This schedule spans overnight (crosses midnight)</em></p>';
 
 		$day_options = array(
 			'mon' => 'Monday', 'tue' => 'Tuesday', 'wed' => 'Wednesday', 'thu' => 'Thursday',
@@ -341,24 +341,24 @@ $page_vars = process_logic(scheduled_block_edit_logic(array_merge($_GET, $_POST,
 
 		if($has_custom_rules){
 			echo '<p class="text-muted">Block or allow specific hostnames — for example <code>youtube.com</code> or <code>reddit.com</code>.</p>';
-			echo '<table class="sd-table" id="domain-rules-table" style="width:100%;"><thead><tr><th>Hostname</th><th>Action</th><th></th></tr></thead><tbody id="domain-rules-rows">';
+			echo '<table class="sd-table dnsf-w-full" id="domain-rules-table"><thead><tr><th>Hostname</th><th>Action</th><th></th></tr></thead><tbody id="domain-rules-rows">';
 			foreach($domain_rules as $rule){
 				$rid = $rule->get('sbr_rule_id');
 				$host = htmlspecialchars($rule->get('sbr_hostname'));
 				$action_label = $rule->get('sbr_action') == 1 ? 'Allow' : 'Block';
-				echo '<tr data-rule-id="'.$rid.'"><td>'.$host.'</td><td>'.$action_label.'</td><td><button type="button" class="th-btn style5 sd-rule-delete" data-rule-id="'.$rid.'" style="background:#dc3545;border-color:#dc3545;">Delete</button></td></tr>';
+				echo '<tr data-rule-id="'.$rid.'"><td>'.$host.'</td><td>'.$action_label.'</td><td><button type="button" class="th-btn style5 sd-rule-delete dnsf-btn-danger" data-rule-id="'.$rid.'">Delete</button></td></tr>';
 			}
 			if(count($domain_rules) == 0){
 				echo '<tr id="domain-rules-empty"><td colspan="3" class="text-muted">No custom rules yet.</td></tr>';
 			}
 			echo '</tbody></table>';
 
-			echo '<div id="domain-rules-add" style="margin-top:16px; display:flex; gap:8px; align-items:flex-end;">';
-			echo '<input type="text" id="sd-new-hostname" class="form-control" placeholder="example.com" style="flex:1;">';
-			echo '<select id="sd-new-action" class="form-control" style="width:auto;"><option value="0">Block</option><option value="1">Allow</option></select>';
+			echo '<div id="domain-rules-add" class="dnsf-rules-add">';
+			echo '<input type="text" id="sd-new-hostname" class="form-control dnsf-flex1" placeholder="example.com">';
+			echo '<select id="sd-new-action" class="form-control dnsf-w-auto"><option value="0">Block</option><option value="1">Allow</option></select>';
 			echo '<button type="button" class="th-btn" id="sd-add-rule">Add</button>';
 			echo '</div>';
-			echo '<p id="sd-rule-error" class="text-danger" style="display:none; margin-top:8px;"></p>';
+			echo '<p id="sd-rule-error" class="text-danger dnsf-mt8" hidden></p>';
 			?>
 			<script>
 			(function(){
@@ -403,7 +403,7 @@ $page_vars = process_logic(scheduled_block_edit_logic(array_merge($_GET, $_POST,
 						if(empty){ empty.remove(); }
 						var tr = document.createElement('tr');
 						tr.setAttribute('data-rule-id', data.rule_id);
-						tr.innerHTML = '<td></td><td>'+(data.action_label)+'</td><td><button type="button" class="th-btn style5 sd-rule-delete" data-rule-id="'+data.rule_id+'" style="background:#dc3545;border-color:#dc3545;">Delete</button></td>';
+						tr.innerHTML = '<td></td><td>'+(data.action_label)+'</td><td><button type="button" class="th-btn style5 sd-rule-delete dnsf-btn-danger" data-rule-id="'+data.rule_id+'">Delete</button></td>';
 						tr.firstChild.textContent = data.hostname;
 						tbody.appendChild(tr);
 						hostInput.value = '';
@@ -451,10 +451,10 @@ $page_vars = process_logic(scheduled_block_edit_logic(array_merge($_GET, $_POST,
 			<?php
 		}
 		else{
-			echo '<div class="alert alert-info" role="alert" style="margin-top:8px;">';
+			echo '<div class="alert alert-info dnsf-mt8" role="alert">';
 			echo '<strong>Custom domain rules</strong> <em>(Premium & Pro)</em><br>';
 			echo 'Block or allow specific websites by domain — like <code>youtube.com</code> or <code>reddit.com</code>.<br>';
-			echo '<a class="th-btn" href="/pricing" style="margin-top:8px;">Upgrade</a>';
+			echo '<a class="th-btn dnsf-mt8" href="/pricing">Upgrade</a>';
 			echo '</div>';
 		}
 	}

@@ -1,0 +1,44 @@
+/* server_manager plugin — admin UI styles. Admin theme (not .jy-ui), so
+   distinctive .svm-* / .node-row / .host-accordion prefixes, unscoped.
+   Values lifted verbatim from former <style> block and inline styles. */
+
+/* --- Dashboard (index) --- */
+.node-row { cursor: pointer; transition: background-color 0.12s ease; min-height: 58px; }
+.node-row:hover { background-color: #f8f9fa; }
+.host-accordion .accordion-button { padding: 0.6rem 1rem; }
+.host-accordion .accordion-body { padding: 0; }
+.svm-w90 { max-width: 90px; }
+
+/* --- Job detail --- */
+.svm-status-icon { display: inline-block; width: 1.25em; text-align: center; }
+.svm-logbox { max-height: 600px; overflow-y: auto; background: #1e1e1e; color: #d4d4d4;
+              padding: 1rem; border-radius: 4px; font-size: 13px; white-space: pre-wrap; }
+
+/* --- Node detail --- */
+.svm-modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+.svm-modal-close { background: none; border: none; font-size: 1.5rem; cursor: pointer; line-height: 1; }
+.svm-inline-form { display: inline; }
+.svm-progress-thin { height: 4px; }
+.svm-progress-bar { width: var(--svm-pct, 0%); }
+.svm-w100 { width: 100px; }
+
+/* --- Target info --- */
+.svm-mw600 { max-width: 600px; }
+
+/* --- Publish/version list (includes/publish_upgrade.php, web mode) --- */
+.svm-tag-missing { color: red; font-weight: bold; }
+.svm-tag-targz { color: green; }
+.svm-tag-zip { color: blue; }
+.svm-delete-link { color: #dc3545; margin-left: 10px; }
+
+/* --- Node detail (additional) --- */
+.svm-relative { position: relative; }
+.svm-dropdown-menu { display: none; position: absolute; right: 0; top: 100%; }
+.svm-fs-075 { font-size: .75rem; }
+.svm-w200 { width: 200px; }
+.svm-m0 { margin: 0; }
+
+/* --- Misc layout utilities (former inline) --- */
+.svm-w40 { width: 40%; }
+.svm-flex1 { min-width: 0; flex: 1; }
+.svm-minw0 { min-width: 0; }

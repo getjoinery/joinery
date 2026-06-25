@@ -1,0 +1,25 @@
+/* joinery_ai plugin styles. Distinctive .joai-* prefix.
+   Public dashboard rules are scoped under .jy-ui (the view opts in);
+   admin run-detail utilities are plain .joai-* (admin theme, not .jy-ui)
+   and carry the exact values lifted from former inline styles. */
+
+/* --- Public dashboard (/joinery_ai) --- */
+.jy-ui .joai-wrap { max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+.jy-ui .joai-wrap h1 { margin-bottom: 0.5rem; }
+.jy-ui .joai-card { border: 1px solid #ddd; border-radius: 8px; margin-bottom: 1.5rem;
+              background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+.jy-ui .joai-card-header { padding: 1rem 1.25rem; border-bottom: 1px solid #eee;
+                    display: flex; justify-content: space-between; align-items: center; }
+.jy-ui .joai-card-header h2 { margin: 0; font-size: 1.25rem; }
+.jy-ui .joai-card-header .joai-meta { font-size: 0.85rem; color: #666; }
+.jy-ui .joai-card-body { padding: 1.25rem; }
+.jy-ui .joai-empty { padding: 1.25rem; color: #888; font-style: italic; }
+.jy-ui .joai-actions a { font-size: 0.85rem; margin-left: 0.5rem; }
+.jy-ui .joai-intro { color: #666; margin-bottom: 2rem; }
+
+/* --- Admin run detail (/admin/joinery_ai/run) --- */
+.joai-pre-wrap { white-space: pre-wrap; }
+.joai-trace { font-size: 0.85em; }
+.joai-trace-wrap { font-size: 0.85em; white-space: pre-wrap; }
+.joai-toolcall { border-color: #0d6efd !important; }
+.joai-toolcall.is-error { border-color: #dc3545 !important; }

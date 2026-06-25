@@ -522,6 +522,31 @@ The `?v={filemtime}` query changes whenever the file changes, so browsers refetc
 and otherwise cache. Always reference your assets by their namespaced `/plugins/{plugin}/assets/…`
 URL — never a relative path.
 
+The inline closure above is for assets that belong to **one page** (a page-specific reader script,
+say). For a plugin's **stylesheet** — the sheet that styles its UI wherever it appears — declare it
+instead (next section); don't echo a `<link>` per page.
+
+#### Plugin Stylesheets (Declarative)
+
+Declare a plugin's stylesheets under the `styles` key in `plugin.json` — an array of paths relative
+to the plugin root. Every declared sheet loads on **every page while the plugin is active**,
+cache-busted by file mtime, emitted **after the `.jy-ui` kit and before the active theme's
+stylesheet**. That position is deliberate: your rules resolve the kit's `--jy-*` design tokens, and
+a theme can still override them.
+
+```json
+{
+  "name": "My Plugin",
+  "styles": ["assets/css/my-plugin.css"]
+}
+```
+
+Because the sheet is global, **scope every rule** so it stays inert until your markup opts in — wrap
+your UI in `.jy-ui` and prefix classes `.jy-{plugin}-*` (e.g. `.jy-ui .jy-myplugin-card { … }`), or
+use a distinctive component prefix. No call site is needed; `PluginHelper::renderActivePluginStyleLinks()`
+emits the `<link>` tags from the head. Changes to `styles` take effect immediately (the manifest is
+read live from disk) — no activation or `update_database` step.
+
 ### Plugin Menus (Declarative)
 
 Plugins declare menu contributions in `plugin.json` under two keys:

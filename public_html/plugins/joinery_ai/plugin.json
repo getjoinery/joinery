@@ -5,6 +5,7 @@
     "author": "Joinery",
     "receives_upgrades": true,
     "included_in_publish": true,
+    "styles": ["assets/css/joinery_ai.css"],
     "adminMenu": [
         {
             "slug": "joinery-ai",

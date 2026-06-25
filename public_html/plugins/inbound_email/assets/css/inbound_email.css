@@ -1,0 +1,66 @@
+/* inbound_email plugin — admin UI styles. Admin pages render in the admin
+   theme (not .jy-ui), so these use distinctive prefixes (.iea-*, .iem-*,
+   .fix-toggle) unscoped. Values lifted verbatim from former <style> blocks
+   and inline styles. (The reader UI lives in mailbox_reader.css.) */
+
+/* --- Setup page: collapsible fix toggles --- */
+summary.fix-toggle { cursor: pointer; color: #6c757d; }
+summary.fix-toggle:hover { color: #0d6efd; text-decoration: underline; }
+
+/* --- Accounts page --- */
+.iea-acct { max-width: 1000px; }
+.iea-domain {
+	border: 1px solid #d9dde2; border-radius: 8px; margin-bottom: 14px; background: #fff; overflow: hidden;
+}
+.iea-domain-head {
+	display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+	padding: 12px 14px; background: #f7f9fb; border-bottom: 1px solid #eef1f4;
+}
+.iea-domain-name { font-size: 15px; font-weight: 600; color: #111827; }
+.iea-domain-head .iea-spacer { flex: 1; }
+.iea-mailboxes { list-style: none; margin: 0; padding: 0; }
+.iea-mailbox {
+	display: flex; align-items: flex-start; gap: 12px;
+	padding: 11px 14px; border-bottom: 1px solid #f1f3f5;
+}
+.iea-mailbox:last-child { border-bottom: none; }
+.iea-mb-main { min-width: 0; flex: 1; }
+.iea-mb-addr { font-weight: 600; color: #1f2933; font-size: 14px; }
+.iea-mb-route { color: #4b5563; font-size: 13px; margin-top: 3px; }
+.iea-mb-imap { color: #374151; font-size: 12px; margin-top: 5px; }
+.iea-mb-actions { flex: 0 0 auto; display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+.iea-empty-mb { padding: 11px 14px; color: #9097a1; font-size: 13px; }
+.iea-tag {
+	display: inline-block; font-size: 11px; font-weight: 600; border-radius: 9px;
+	padding: 1px 8px; vertical-align: middle;
+}
+.iea-tag-store { background: #d7e7fb; color: #1e40af; }
+.iea-tag-fwd { background: #e4e7eb; color: #374151; }
+.iea-badge {
+	display: inline-block; font-size: 11px; font-weight: 600; border-radius: 9px; padding: 1px 8px;
+}
+.iea-badge-on { background: #dcfce7; color: #166534; }
+.iea-badge-off { background: #e4e7eb; color: #6b7280; }
+.iea-badge-imapsrc { background: #dcfce7; color: #166534; }
+.iea-badge-conn { background: #dcfce7; color: #166534; }
+.iea-badge-noconn { background: #fde68a; color: #92400e; }
+/* Real warning pill (an anchor) — amber fill + border, and an explicit color at
+   anchor specificity so the theme's a:link blue doesn't bleed through. */
+a.iea-badge-warn, a.iea-badge-warn:link, a.iea-badge-warn:visited {
+	background: #fef3c7; color: #92400e; border: 1px solid #f59e0b; text-decoration: none;
+}
+a.iea-badge-warn:hover { background: #fde68a; color: #92400e; }
+.iea-page-actions { margin: 4px 0 18px; }
+.iea-trash { margin: 8px 0 24px; border: 1px solid #e4e7eb; border-radius: 8px; background: #fff; }
+.iea-trash > summary { cursor: pointer; padding: 10px 14px; color: #6b7280; font-size: 13px; }
+.iea-trash .iea-mailboxes { border-top: 1px solid #eef1f4; }
+.iem-imap-status { color: #9097a1; }
+
+/* --- Shared admin utilities (former inline styles) --- */
+.iem-inline-form { display: inline; }
+.iem-table-760 { max-width: 760px; }
+.iem-table-900 { max-width: 900px; }
+.iem-copyfield { cursor: pointer; background: #fff; }
+.iem-code-break { word-break: break-all; }
+.iem-msg-iframe { width: 100%; min-height: 500px; border: 1px solid #ccc; background: #fff; }
+.iem-msg-plain { white-space: pre-wrap; word-break: break-word; }

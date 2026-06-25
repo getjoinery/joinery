@@ -5,6 +5,7 @@
     "author": "Joinery",
     "receives_upgrades": true,
     "included_in_publish": true,
+    "styles": ["assets/css/server_manager.css"],
     "adminMenu": [
         {
             "slug": "server-manager",

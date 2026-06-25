@@ -456,7 +456,7 @@ if (!empty($display_messages)) {
 	<li class="nav-item"><a class="nav-link <?php echo $tab === 'api_keys' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=api_keys">API Keys</a></li>
 </ul>
 
-<form id="nodeActionCheckStatus" method="post" action="<?php echo $base_url; ?>" style="display:none">
+<form id="nodeActionCheckStatus" method="post" action="<?php echo $base_url; ?>" hidden>
 	<input type="hidden" name="action" value="check_status">
 </form>
 
@@ -487,7 +487,7 @@ if ($tab === 'overview') {
 		if ($row) {
 			echo ' <a href="/admin/server_manager/job_detail?job_id=' . $row['mjb_id'] . '" class="alert-link">View job #' . $row['mjb_id'] . ' output</a>.';
 		}
-		echo '<div class="mt-2"><form method="post" style="display:inline" id="retry_install_form">';
+		echo '<div class="mt-2"><form method="post" class="svm-inline-form" id="retry_install_form">';
 		echo '<input type="hidden" name="action" value="retry_install">';
 		echo '<button type="button" class="btn btn-sm btn-warning" onclick="JoineryModal.confirm(\'Before retrying: SSH to the target and remove any partial install (e.g. rm -rf /var/www/html/SITENAME, drop the DB). install.sh will refuse if the site directory already exists. Continue?\', function(){ document.getElementById(\'retry_install_form\').submit(); })">Retry Install</button></form></div>';
 		echo '</div>';
@@ -537,9 +537,9 @@ if ($tab === 'overview') {
 	}
 	echo '</div>';
 	?>
-	<div class="btn-group" style="position:relative">
+	<div class="btn-group svm-relative">
 		<button type="button" class="btn btn-sm btn-primary dropdown-toggle" onclick="var m=this.nextElementSibling;m.style.display=m.style.display==='block'?'none':'block'">Actions</button>
-		<ul class="dropdown-menu dropdown-menu-end" style="display:none;position:absolute;right:0;top:100%">
+		<ul class="dropdown-menu dropdown-menu-end svm-dropdown-menu">
 			<li><a class="dropdown-item" href="<?php echo $base_url; ?>&tab=overview&edit=1#connectionSettings">Edit Connection Settings</a></li>
 			<?php if (!$node->get('mgn_delete_time')): ?>
 				<li><hr class="dropdown-divider"></li>
@@ -556,7 +556,7 @@ if ($tab === 'overview') {
 	} elseif (!$status_data) {
 		echo '<small class="text-muted">No status check has been run yet.</small>';
 	}
-	echo '<button type="submit" form="nodeActionCheckStatus" class="btn btn-sm btn-outline-secondary py-0 px-2" style="font-size:.75rem">Check Status</button>';
+	echo '<button type="submit" form="nodeActionCheckStatus" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075">Check Status</button>';
 	echo '</div>';
 
 	// Uptime monitoring status
@@ -605,7 +605,7 @@ if ($tab === 'overview') {
 			echo '<div class="border rounded p-3 h-100">';
 			echo '<div class="text-muted small text-uppercase">Disk</div>';
 			echo '<div class="fs-3 fw-semibold mt-1">' . $pct . '<span class="fs-5 text-muted">%</span></div>';
-			echo '<div class="progress mt-2" style="height:4px"><div class="progress-bar ' . $bar . '" style="width:' . $pct . '%"></div></div>';
+			echo '<div class="progress mt-2 svm-progress-thin"><div class="progress-bar ' . $bar . ' svm-progress-bar" style="--svm-pct:' . $pct . '%"></div></div>';
 			if ($sub) echo '<div class="text-muted small mt-2">' . $sub . '</div>';
 			echo '</div></div>';
 		}
@@ -620,7 +620,7 @@ if ($tab === 'overview') {
 			echo '<div class="border rounded p-3 h-100">';
 			echo '<div class="text-muted small text-uppercase">Memory</div>';
 			echo '<div class="fs-3 fw-semibold mt-1">' . $pct . '<span class="fs-5 text-muted">%</span></div>';
-			echo '<div class="progress mt-2" style="height:4px"><div class="progress-bar ' . $bar . '" style="width:' . $pct . '%"></div></div>';
+			echo '<div class="progress mt-2 svm-progress-thin"><div class="progress-bar ' . $bar . ' svm-progress-bar" style="--svm-pct:' . $pct . '%"></div></div>';
 			echo '<div class="text-muted small mt-2">' . $used . ' / ' . $total . ' MB</div>';
 			echo '</div></div>';
 		}
@@ -811,7 +811,7 @@ if ($tab === 'overview') {
 			echo '<div class="border rounded p-3 mb-3">';
 			echo '<div class="text-muted small text-uppercase mb-2">DNS Check</div>';
 			echo '<table class="table table-sm mb-0">';
-			echo '<tr><th style="width:100px" class="fw-normal text-muted">Domain</th><td><code>' . htmlspecialchars($ssl_card_domain) . '</code></td></tr>';
+			echo '<tr><th class="svm-w100 fw-normal text-muted">Domain</th><td><code>' . htmlspecialchars($ssl_card_domain) . '</code></td></tr>';
 			if ($host_ip) {
 				echo '<tr><th class="fw-normal text-muted">Expected</th><td><code>' . htmlspecialchars($host_ip) . '</code></td></tr>';
 			}
@@ -860,7 +860,7 @@ if ($tab === 'overview') {
 
 	$conn_row = function($label, $value) {
 		echo '<tr>';
-		echo '<th class="text-muted fw-normal" style="width:200px">' . $label . '</th>';
+		echo '<th class="text-muted fw-normal svm-w200">' . $label . '</th>';
 		echo '<td>' . $value . '</td>';
 		echo '</tr>';
 	};
@@ -942,7 +942,7 @@ if ($tab === 'overview') {
 
 	// Connection settings — open when arriving from the Actions menu (?edit=1), otherwise collapsed
 	$edit_open = !empty($_GET['edit']);
-	echo '<div id="connectionSettings" style="display:' . ($edit_open ? 'block' : 'none') . '">';
+	echo '<div id="connectionSettings"' . ($edit_open ? '' : ' hidden') . '>';
 
 	$default_ssh_key = '/home/user1/.ssh/id_ed25519_claude';
 
@@ -1160,7 +1160,7 @@ if ($tab === 'overview') {
 	echo '<button type="button" class="btn btn-sm btn-outline-primary" id="refreshBackupsBtn" onclick="refreshBackupList()">Scan for Backups</button>';
 	echo '</div>';
 
-	echo '<div id="backupScanStatus" style="display:none" class="mb-2"></div>';
+	echo '<div id="backupScanStatus" hidden class="mb-2"></div>';
 
 	echo '<table class="table table-striped table-sm" id="backupFilesTable">';
 	echo '<thead><tr><th>Filename</th><th>Size</th><th>Date</th><th>Location</th><th>Actions</th></tr></thead>';
@@ -1240,9 +1240,9 @@ if ($tab === 'overview') {
 		$fw_restore->hiddeninput('backup_local_path', '', ['id' => 'rm_local_path', 'value' => '']);
 		$fw_restore->hiddeninput('backup_cloud_path', '', ['id' => 'rm_cloud_path', 'value' => '']);
 		?>
-		<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
-			<h5 style="margin:0">Restore from <code id="rm_title"></code></h5>
-			<button type="button" aria-label="Close" onclick="closeRestoreModal();" style="background:none;border:none;font-size:1.5rem;cursor:pointer;line-height:1;">&times;</button>
+		<div class="svm-modal-head">
+			<h5 class="svm-m0">Restore from <code id="rm_title"></code></h5>
+			<button type="button" aria-label="Close" onclick="closeRestoreModal();" class="svm-modal-close">&times;</button>
 		</div>
 		<p class="text-muted small">
 			A pre-restore snapshot of the current database and project files is written to
@@ -1258,7 +1258,7 @@ if ($tab === 'overview') {
 		$fw_restore->checkboxinput('restore_apache', 'Apache config', ['checked' => true, 'id' => 'rm_apache']);
 		echo '</div>';
 		?>
-		<div id="rm_component_error" class="text-danger small mt-2" style="display:none">Select at least one component.</div>
+		<div id="rm_component_error" class="text-danger small mt-2" hidden>Select at least one component.</div>
 		<div class="dialog-actions">
 			<button type="button" class="dialog-btn-cancel" onclick="closeRestoreModal();">Cancel</button>
 			<button type="button" class="dialog-btn-confirm dialog-btn-danger" onclick="submitRestoreModal();">Restore</button>
@@ -1568,14 +1568,14 @@ function deleteBackup(target, filename, localPath, cloudPath) {
 		</div>
 	</div>
 	<div class="mt-2">
-		<form method="post" style="display:inline" id="apply_update_form">
+		<form method="post" class="svm-inline-form" id="apply_update_form">
 			<input type="hidden" name="action" value="apply_update">
 			<button type="button" class="btn btn-sm btn-outline-primary" onclick="JoineryModal.confirm('Apply update to <?php echo $node_name; ?>?', function(){ document.getElementById('apply_update_form').submit(); })">Apply Update</button>
 		</form>
 	</div>
 	<hr>
 	<div class="mt-3">
-		<form method="post" style="display:inline" id="upgrade_all_form">
+		<form method="post" class="svm-inline-form" id="upgrade_all_form">
 			<input type="hidden" name="action" value="apply_update_all_on_host">
 			<button type="button" class="btn btn-sm btn-warning" onclick="JoineryModal.confirm('Queue an upgrade job for every enabled site on host <?php echo htmlspecialchars($node->get('mgn_host')); ?>?', function(){ document.getElementById('upgrade_all_form').submit(); })">Upgrade All Sites on This Host</button>
 		</form>

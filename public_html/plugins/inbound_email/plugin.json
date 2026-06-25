@@ -9,6 +9,7 @@
         "php": ">=8.0"
     },
     "tags": ["email", "inbound", "forwarding", "smtp"],
+    "styles": ["assets/mailbox_reader.css", "assets/css/inbound_email.css"],
     "storage_profiles": ["RawMessageStore"],
     "adminMenu": [
         {

@@ -241,7 +241,7 @@ property (a sanctioned exception), and the only remaining `<style>` block is
   Order Summary).
 - ✅ **Tree validation** — CSS braces balanced (1015/1015); all views parse (`php -l`).
 
-### Phase 5 — Plugins
+### Phase 5 — Plugins ✅ COMPLETE (6 of 6 plugins)
 
 **First build the plugin-CSS mechanism:** a `plugin.json` stylesheet declaration and
 a loader in `PluginManager`/`PluginHelper` that links each active plugin's
@@ -252,6 +252,45 @@ Then convert plugins **one at a time**: wrap in `.jy-ui`, move inline styles +
 
 **Exit:** the mechanism exists; each plugin renders on the kit via its own declared
 sheet; tracked plugin-by-plugin.
+
+**Scoping rule (decided once):** public/profile plugin views render in the public
+theme → wrap in `.jy-ui`, scope `.jy-ui .{prefix}-*`. Admin plugin pages render in the
+admin theme (not `.jy-ui`) → distinctive `.{prefix}-*` prefix, unscoped, so the exact
+inline values move into the sheet without restyling the rest of the page. JS show/hide
+that revealed elements via `el.style.display = ''` is converted to the `hidden`
+attribute + `el.hidden = bool` (a `.hidden` class would block the show). Email bodies,
+CLI output, and framework-generated markup (FormWriter, calendar component, Stripe/PayPal
+iframes) are out of scope.
+
+**Progress:**
+
+- ✅ **Mechanism** — `PluginHelper::renderActivePluginStyleLinks()` + one call in
+  `PublicPageBase::global_includes_top()` after the kit; `styles` array in `plugin.json`.
+  *Verified live:* load order is kit → plugin → theme; sheet appears once; manifest read
+  live from disk (no DB sync). Documented in `plugin_developer_guide.md`.
+- ✅ **items** — iframe border → `assets/css/items.css` (`.jy-items-preview`).
+- ✅ **joinery_ai** — public dashboard `<style>` block + 2 inline → `.joai-*` (public scoped
+  under `.jy-ui`); admin run-detail utilities `.joai-*` (unscoped). *Verified live.*
+- ✅ **bookings** — availability `<style>` block + my-bookings inline → `.av-*` / `.bkn-*`
+  (profile, `.jy-ui`); admin form utilities unscoped. *Verified live.*
+- ✅ **inbound_email** — 2 admin `<style>` blocks + inline → `assets/css/inbound_email.css`
+  (`.iea-*` / `.iem-*` / `.fix-toggle`, unscoped admin); declared alongside `mailbox_reader.css`.
+  *Verified live.*
+- ✅ **server_manager** — dashboard `<style>` block + ~48 inline across 10 files →
+  `.svm-*` / `.node-row` / `.host-accordion` (unscoped admin); progress bars use a
+  server-computed `--svm-pct`; provider/SSH/panel toggles converted to `el.hidden`.
+  *Verified live (dashboard rules + provider toggle).*
+- ✅ **dns_filtering** — 148 inline + the devices `<style>` block across 8 profile views →
+  `assets/css/dns_filtering.css` (`.dnsf-*` / `.scd-*`, unscoped — these ScrollDaddy pages keep
+  their own look, not kit-adopted). Inline `<svg>` icons → `.dnsf-icon*`; querylog result badges →
+  `.dnsf-ql-badge.is-*`; the test page's JS-built result colours use a runtime `--dnsf-c` custom
+  property. *Verified live: sheet loads and every probed rule resolves (icon, danger, dropdown
+  open/closed, badge, --dnsf-c).* (`scan_url_logic.php`'s `<style>` hit was a code comment, not markup.)
+
+**Phase 5 exit met:** the mechanism exists and every active plugin renders via its own declared
+sheet. Remaining inline `style=` across all plugins is limited to sanctioned runtime custom
+properties (`--svm-pct`, `--dnsf-c`) and framework-generated markup (FormWriter, calendar
+component, Stripe/PayPal). Email bodies and CLI output were intentionally left out of scope.
 
 ### Phase 6 — Theme dedup
 

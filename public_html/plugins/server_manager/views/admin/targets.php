@@ -253,9 +253,9 @@ if ($target !== null) {
 		'options'       => $provider_labels,
 		'custom_script' => "
 			var p = this.value;
-			document.getElementById('b2Fields').style.display     = p === 'b2'     ? '' : 'none';
-			document.getElementById('s3Fields').style.display     = p === 's3'     ? '' : 'none';
-			document.getElementById('linodeFields').style.display = p === 'linode' ? '' : 'none';
+			document.getElementById('b2Fields').hidden     = p !== 'b2';
+			document.getElementById('s3Fields').hidden     = p !== 's3';
+			document.getElementById('linodeFields').hidden = p !== 'linode';
 		",
 	]);
 	$formwriter->textinput('bkt_bucket', 'Bucket Name', [
@@ -267,7 +267,7 @@ if ($target !== null) {
 	]);
 
 	// ── B2 Credentials ──
-	echo '<div id="b2Fields" style="' . ($current_provider === 'b2' ? '' : 'display:none') . '">';
+	echo '<div id="b2Fields"' . ($current_provider === 'b2' ? '' : ' hidden') . '>';
 	echo '<p class="fw-semibold text-muted mt-2 mb-1">Backblaze B2 Credentials</p>';
 	$formwriter->textinput('cred_key_id', 'Application Key ID', [
 		'helptext' => 'Create via Backblaze → Account → Application Keys. Must be a scoped key — the master account key will not work with the S3-compatible API.',
@@ -278,7 +278,7 @@ if ($target !== null) {
 	echo '</div>';
 
 	// ── S3 Credentials ──
-	echo '<div id="s3Fields" style="' . ($current_provider === 's3' ? '' : 'display:none') . '">';
+	echo '<div id="s3Fields"' . ($current_provider === 's3' ? '' : ' hidden') . '>';
 	echo '<p class="fw-semibold text-muted mt-2 mb-1">Amazon S3 Credentials</p>';
 	$formwriter->textinput('cred_s3_access_key', 'Access Key');
 	$formwriter->passwordinput('cred_s3_secret_key', 'Secret Key');
@@ -286,7 +286,7 @@ if ($target !== null) {
 	echo '</div>';
 
 	// ── Linode Credentials ──
-	echo '<div id="linodeFields" style="' . ($current_provider === 'linode' ? '' : 'display:none') . '">';
+	echo '<div id="linodeFields"' . ($current_provider === 'linode' ? '' : ' hidden') . '>';
 	echo '<p class="fw-semibold text-muted mt-2 mb-1">Linode Object Storage Credentials</p>';
 	$formwriter->textinput('cred_linode_access_key', 'Access Key');
 	$formwriter->passwordinput('cred_linode_secret_key', 'Secret Key');

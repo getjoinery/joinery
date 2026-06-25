@@ -1,0 +1,108 @@
+/* dns_filtering (ScrollDaddy) plugin styles. Profile views keep their own look,
+   so rules use distinctive .dnsf-* / .scd-* / .sd-* prefixes (unscoped) and carry
+   the exact values lifted from former inline styles and the devices <style> block. */
+
+/* --- Inline SVG icon baseline nudge (used throughout) --- */
+.dnsf-icon { vertical-align: -0.125em; }
+.dnsf-icon-mr { vertical-align: -0.125em; margin-right: 0.5rem; }
+.dnsf-icon-mr4 { vertical-align: -0.125em; margin-right: 4px; }
+
+/* --- Common text/colour/utility (former inline) --- */
+.dnsf-danger { color: #dc3545; }
+.dnsf-muted { color: #6c757d; }
+.dnsf-btn-danger { background: #dc3545; border-color: #dc3545; }
+.dnsf-disabled { cursor: not-allowed; opacity: 0.6; }
+.dnsf-noevents { pointer-events: none; }
+.dnsf-events { pointer-events: auto; }
+.dnsf-hidden { display: none; }
+.dnsf-inline { display: inline; }
+.dnsf-flex1 { flex: 1; }
+.dnsf-w-full { width: 100%; }
+.dnsf-w-auto { width: auto; }
+.dnsf-overflow-x { overflow-x: auto; }
+
+/* --- Devices: row-actions dropdown (former <style> block) --- */
+.scd-actions-wrap { position: relative; display: inline-block; }
+.scd-actions-btn { background: none; border: none; cursor: pointer; padding: 4px 6px; line-height: 1; border-radius: 4px; color: inherit; }
+.scd-actions-btn:hover { background: rgba(0,0,0,0.07); }
+.scd-actions-menu { display: none; position: absolute; right: 0; top: calc(100% + 4px); min-width: 190px; background: #fff; border: 1px solid #e0e0e0; border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,0.12); z-index: 200; padding: 4px 0; }
+.scd-actions-menu.is-open { display: block; }
+.scd-actions-menu a { display: block; padding: 8px 16px; color: #333; text-decoration: none; font-size: 14px; white-space: nowrap; }
+.scd-actions-menu a:hover { background: #f5f5f5; }
+
+/* --- device_edit --- */
+.dnsf-help { font-size: 13px; color: #6c757d; margin-bottom: 16px; }
+.dnsf-help-tight { font-size: 13px; color: #6c757d; margin-top: -8px; margin-bottom: 16px; }
+
+/* --- change-tier --- */
+.dnsf-btn-success { background-color: #28a745; }
+.dnsf-btn-cancel { background-color: #dc3545; }
+.dnsf-current-plan { color: #28a745; font-weight: bold; }
+
+/* --- scheduled_block_edit --- */
+.dnsf-mt8 { margin-top: 8px; }
+.dnsf-rules-add { margin-top: 16px; display: flex; gap: 8px; align-items: flex-end; }
+
+/* --- devices --- */
+.dnsf-badge-active { background: #198754; color: #fff; font-size: 11px; padding: 2px 6px; border-radius: 3px; }
+.dnsf-row6 { display: flex; gap: 6px; }
+.dnsf-note { font-size: 13px; color: #6c757d; }
+
+/* --- querylog --- */
+.dnsf-mb16 { margin-bottom: 16px; }
+.dnsf-ql-warn { background: #fff3cd; border: 1px solid #ffc107; padding: 12px 16px; border-radius: 6px; margin-bottom: 20px; }
+.dnsf-ql-controls { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+.dnsf-ql-form { display: flex; align-items: center; gap: 8px; }
+.dnsf-ql-label { margin: 0; font-size: 14px; white-space: nowrap; }
+.dnsf-ql-select { padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+.dnsf-ql-clear { background: #dc3545; border-color: #dc3545; color: #fff; }
+.dnsf-ql-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.dnsf-ql-headrow { border-bottom: 2px solid #e0e0e0; text-align: left; }
+.dnsf-ql-th { padding: 8px 12px; }
+.dnsf-ql-th-nw { padding: 8px 12px; white-space: nowrap; }
+.dnsf-ql-row { border-bottom: 1px solid #f0f0f0; }
+.dnsf-ql-td { padding: 7px 12px; }
+.dnsf-ql-td-time { padding: 7px 12px; white-space: nowrap; font-size: 13px; color: #555; }
+.dnsf-ql-td-domain { padding: 7px 12px; word-break: break-all; }
+.dnsf-ql-badge { padding: 2px 8px; border-radius: 3px; font-size: 12px; font-weight: 600; }
+.dnsf-ql-badge.is-blocked { background: #dc3545; color: #fff; }
+.dnsf-ql-badge.is-refused { background: #fd7e14; color: #fff; }
+.dnsf-ql-badge.is-forwarded { background: #198754; color: #fff; }
+.dnsf-ql-badge.is-default { background: #6c757d; color: #fff; }
+
+/* --- activation --- */
+.dnsf-c666 { color: #666; }
+.dnsf-mono-sm { word-break: break-all; font-size: 13px; font-family: monospace; }
+.dnsf-steps { padding-left: 16px; font-size: 13px; line-height: 2; }
+.dnsf-mono-box { font-size: 12px; font-family: monospace; word-break: break-all; background: #f5f5f5; padding: 6px 8px; border-radius: 4px; margin-top: 8px; }
+.dnsf-note12 { font-size: 12px; color: #999; margin-top: 8px; }
+.dnsf-note12-t4 { font-size: 12px; color: #999; margin-top: 4px; }
+.dnsf-browser-h { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.dnsf-browser-p { font-size: 12px; margin-bottom: 8px; }
+.dnsf-fs12 { font-size: 12px; }
+
+/* --- test (domain/page tester; many classes used by JS-built markup) --- */
+.dnsf-mb8 { margin-bottom: 8px; }
+.dnsf-mb20 { margin-bottom: 20px; }
+.dnsf-fs14 { font-size: 14px; }
+.dnsf-test-sub { color: #888; margin-top: 4px; font-size: 14px; }
+.dnsf-test-inputrow { flex-wrap: wrap; gap: 8px; align-items: center; }
+.dnsf-test-inputwrap { flex: 1; min-width: 220px; }
+.dnsf-test-input { width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 15px; }
+.dnsf-result-box { padding: 16px 20px; }
+/* --dnsf-c: result colour, set inline by JS per result type (runtime-computed) */
+.dnsf-result-title { font-weight: 600; font-size: 15px; color: var(--dnsf-c); }
+.dnsf-result-detail { font-size: 13px; color: #6c757d; margin-top: 4px; padding-left: 20px; }
+.dnsf-result-profile { font-size: 13px; color: #6c757d; padding-left: 20px; }
+.dnsf-result-actions { margin-top: 10px; padding-left: 20px; }
+.dnsf-feedback13 { display: none; font-size: 13px; margin-left: 8px; }
+.dnsf-feedback12 { display: none; font-size: 12px; }
+.dnsf-group-summary { cursor: pointer; font-weight: 600; padding: 5px 0; user-select: none; color: var(--dnsf-c); }
+.dnsf-group-count { font-size: 13px; font-weight: 400; color: #888; }
+.dnsf-group-body { padding-left: 10px; margin-top: 4px; }
+.dnsf-scan-row { padding: 5px 0; border-bottom: 1px solid #f0f0f0; display: flex; align-items: baseline; gap: 8px; }
+.dnsf-scan-detail { font-size: 12px; color: #888; }
+.dnsf-scan-title { font-weight: 600; font-size: 16px; margin-bottom: 6px; }
+.dnsf-scan-note { font-size: 13px; color: #888; margin-bottom: 4px; }
+.dnsf-scan-warn { font-size: 13px; color: #e67e22; margin-bottom: 4px; }
+.dnsf-scan-summary { font-size: 14px; color: #555; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #eee; }

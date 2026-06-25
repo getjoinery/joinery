@@ -55,31 +55,31 @@ if (!$device->get('sdd_is_active')) {
 	echo '
 	<section class="space">
 		<div class="container">
-			<h2 style="margin-bottom:16px;">Query Log &mdash; ' . $device_name . '</h2>';
+			<h2 class="dnsf-mb16">Query Log &mdash; ' . $device_name . '</h2>';
 
 	if ($fetch_error) {
-		echo '<div style="background:#fff3cd; border:1px solid #ffc107; padding:12px 16px; border-radius:6px; margin-bottom:20px;">Could not retrieve log from the DNS server. Please try again in a moment.</div>';
+		echo '<div class="dnsf-ql-warn">Could not retrieve log from the DNS server. Please try again in a moment.</div>';
 	}
 
 	// Controls row
 	echo '
-		<div style="display:flex; align-items:center; gap:16px; margin-bottom:16px; flex-wrap:wrap;">
-			<form method="GET" action="/profile/dns_filtering/querylog" style="display:flex; align-items:center; gap:8px;">
+		<div class="dnsf-ql-controls">
+			<form method="GET" action="/profile/dns_filtering/querylog" class="dnsf-ql-form">
 				<input type="hidden" name="device_id" value="' . $device_id . '">
-				<label for="scd-lines-select" style="margin:0; font-size:14px; white-space:nowrap;">Show:</label>
-				<select id="scd-lines-select" name="lines" onchange="this.form.submit()" style="padding:4px 8px; border:1px solid #ddd; border-radius:4px; font-size:14px;">
+				<label for="scd-lines-select" class="dnsf-ql-label">Show:</label>
+				<select id="scd-lines-select" name="lines" onchange="this.form.submit()" class="dnsf-ql-select">
 					<option value="100"' . ($lines_requested == 100 ? ' selected' : '') . '>100 entries</option>
 					<option value="250"' . ($lines_requested == 250 ? ' selected' : '') . '>250 entries</option>
 					<option value="500"' . ($lines_requested == 500 ? ' selected' : '') . '>500 entries</option>
 				</select>
 			</form>
-			<button type="button" id="scd-clear-btn" class="th-btn style5" style="background:#dc3545; border-color:#dc3545; color:#fff;">Clear Log</button>
-			<span id="scd-clear-status" style="font-size:13px; color:#6c757d;"></span>
+			<button type="button" id="scd-clear-btn" class="th-btn style5 dnsf-ql-clear">Clear Log</button>
+			<span id="scd-clear-status" class="dnsf-note"></span>
 		</div>';
 
 	if (!$fetch_error && count($lines) === 0) {
 
-		echo '<p style="color:#6c757d;">No queries logged yet. Queries will appear here once the device starts using ScrollDaddy DNS.</p>';
+		echo '<p class="dnsf-muted">No queries logged yet. Queries will appear here once the device starts using ScrollDaddy DNS.</p>';
 
 	} elseif (!$fetch_error && count($lines) > 0) {
 
@@ -107,16 +107,16 @@ if (!$device->get('sdd_is_active')) {
 		$device_tz = $device->get('sdd_timezone') ?: 'UTC';
 
 		echo '
-		<div style="overflow-x:auto;">
-		<table style="width:100%; border-collapse:collapse; font-size:14px;">
+		<div class="dnsf-overflow-x">
+		<table class="dnsf-ql-table">
 			<thead>
-				<tr style="border-bottom:2px solid #e0e0e0; text-align:left;">
-					<th style="padding:8px 12px; white-space:nowrap;">Time</th>
-					<th style="padding:8px 12px;">Domain</th>
-					<th style="padding:8px 12px;">Type</th>
-					<th style="padding:8px 12px;">Result</th>
-					<th style="padding:8px 12px;">Reason</th>
-					<th style="padding:8px 12px;">Cached</th>
+				<tr class="dnsf-ql-headrow">
+					<th class="dnsf-ql-th-nw">Time</th>
+					<th class="dnsf-ql-th">Domain</th>
+					<th class="dnsf-ql-th">Type</th>
+					<th class="dnsf-ql-th">Result</th>
+					<th class="dnsf-ql-th">Reason</th>
+					<th class="dnsf-ql-th">Cached</th>
 				</tr>
 			</thead>
 			<tbody>';
@@ -136,16 +136,16 @@ if (!$device->get('sdd_is_active')) {
 			$result = strtoupper($entry['result']);
 			switch ($result) {
 				case 'BLOCKED':
-					$badge_style = 'background:#dc3545; color:#fff;';
+					$badge_class = 'is-blocked';
 					break;
 				case 'REFUSED':
-					$badge_style = 'background:#fd7e14; color:#fff;';
+					$badge_class = 'is-refused';
 					break;
 				case 'FORWARDED':
-					$badge_style = 'background:#198754; color:#fff;';
+					$badge_class = 'is-forwarded';
 					break;
 				default:
-					$badge_style = 'background:#6c757d; color:#fff;';
+					$badge_class = 'is-default';
 					break;
 			}
 
@@ -179,13 +179,13 @@ if (!$device->get('sdd_is_active')) {
 			$cached_display = ($cached_lower === 'yes' || $cached_lower === '1' || $cached_lower === 'true') ? 'Yes' : 'No';
 
 			echo '
-			<tr style="border-bottom:1px solid #f0f0f0;">
-				<td style="padding:7px 12px; white-space:nowrap; font-size:13px; color:#555;">' . $time_display . '</td>
-				<td style="padding:7px 12px; word-break:break-all;">' . htmlspecialchars($entry['domain']) . '</td>
-				<td style="padding:7px 12px;">' . htmlspecialchars($entry['qtype']) . '</td>
-				<td style="padding:7px 12px;"><span style="' . $badge_style . ' padding:2px 8px; border-radius:3px; font-size:12px; font-weight:600;">' . htmlspecialchars($result) . '</span></td>
-				<td style="padding:7px 12px;">' . $reason_display . '</td>
-				<td style="padding:7px 12px;">' . $cached_display . '</td>
+			<tr class="dnsf-ql-row">
+				<td class="dnsf-ql-td-time">' . $time_display . '</td>
+				<td class="dnsf-ql-td-domain">' . htmlspecialchars($entry['domain']) . '</td>
+				<td class="dnsf-ql-td">' . htmlspecialchars($entry['qtype']) . '</td>
+				<td class="dnsf-ql-td"><span class="dnsf-ql-badge ' . $badge_class . '">' . htmlspecialchars($result) . '</span></td>
+				<td class="dnsf-ql-td">' . $reason_display . '</td>
+				<td class="dnsf-ql-td">' . $cached_display . '</td>
 			</tr>';
 		}
 

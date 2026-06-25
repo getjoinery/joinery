@@ -95,12 +95,12 @@ foreach ($aliases as $alias) {
 	$last_forward = $alias->get('iea_last_forward_time');
 	array_push($rowvalues, $last_forward ? LibraryFunctions::convert_time($last_forward, 'UTC', $session->get_timezone(), 'M j, Y g:i A') : '-');
 
-	$actions = '<form method="post" style="display:inline">'
+	$actions = '<form method="post" class="iem-inline-form">'
 		. '<input type="hidden" name="action" value="toggle_enabled">'
 		. '<input type="hidden" name="iea_inbound_email_alias_id" value="' . $alias->key . '">'
 		. '<button type="submit" class="btn btn-sm btn-outline-secondary">' . ($alias->get('iea_is_enabled') ? 'Disable' : 'Enable') . '</button>'
 		. '</form> '
-		. '<form method="post" style="display:inline" onsubmit="return confirm(\'Delete this alias?\')">'
+		. '<form method="post" class="iem-inline-form" onsubmit="return confirm(\'Delete this alias?\')">'
 		. '<input type="hidden" name="action" value="delete">'
 		. '<input type="hidden" name="iea_inbound_email_alias_id" value="' . $alias->key . '">'
 		. '<button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>'
