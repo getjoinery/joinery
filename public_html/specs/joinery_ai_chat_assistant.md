@@ -169,21 +169,45 @@ is **resolved by convention first, declaration only when needed**:
   columns is invisible to generic reads until the author affirms it is cross-user catalog
   data (`products`, `pages`, public `events`). Kept explicit on purpose — declaring
   "this is public" should be a conscious act.
-- **`$ai_owner_field = '<col>'` (explicit disambiguation):** a model with **two or more**
-  owner columns (e.g. `messages` sender/recipient, `bookings` booked/client,
-  `notifications` recipient/source) is ambiguous and invisible to generic reads until the
-  author picks the owning column (or the OR-form for dual-owner models). Kept explicit
-  because the platform must not guess which user "owns" the row.
+- **`$ai_owner_field` (explicit disambiguation):** a model with **two or more** owner
+  columns (e.g. `messages` sender/recipient, `bookings` booked/client, `notifications`
+  recipient/source) is ambiguous and invisible to generic reads until the author names the
+  owning column(s). Kept explicit because the platform must not guess which user "owns" the
+  row. Two declaration forms:
+  - **Single column** — `$ai_owner_field = 'ntf_usr_user_id';` → `WHERE ntf_usr_user_id =
+    {actingUserId}`. Used when one of several user columns is unambiguously the owner
+    (e.g. a notification's recipient).
+  - **OR-of-columns** — `$ai_owner_field = ['msg_usr_user_id_sender',
+    'msg_usr_user_id_recipient'];` → `WHERE (msg_usr_user_id_sender = {actingUserId} OR
+    msg_usr_user_id_recipient = {actingUserId})`. The row is visible if the acting user
+    matches **any** listed column. This is what unlocks `messages` and `bookings` in v1
+    (Appendix C): a user sees a message they sent *or* received, a booking they made *or*
+    are the client of.
+
+  The resolver accepts a string or a list and builds the single-`=` or parenthesized-OR
+  clause accordingly. An empty list, or a column not in `$field_specifications`, is a
+  fail-closed declaration error (the model stays hidden, and `validate_php_file.php` flags
+  it).
+
+**Read scope and write scope are resolved separately — by design.** Reads use the
+`$ai_owner_field` OR-form above (visible if the user matches *any* owner column). Writes
+go through the model's own `authenticate_write`, which checks the **single** column it was
+written against. For a dual-owner model this means a user can *read* a row they're on
+either side of but can only *write* one matched by the write-side column — writes are
+strictly narrower than reads, never wider. This asymmetry is intentional and safe; the OR
+read-form never widens what `authenticate_write` already allows.
 
 **Every branch is fail-closed.** Inference only fires on an unambiguous single match;
 zero or multiple matches fall through to "invisible until declared," never to "exposed
 unscoped." So forgetting, or adding a new model, can only *hide* data, never leak it.
 
 **Resolved-scope report (auditability).** Because scoping is partly inferred, the
-platform must make the resolved decision visible: `validate_php_file.php` (and a small
-admin readout) lists every `$ai_readable` model with its **resolved** owner-scope —
-`inferred owner: <col>`, `shared`, or `hidden: ambiguous — declare $ai_owner_field`.
-The convenience of inference never costs a one-glance audit of the whole surface.
+platform must make the resolved decision visible: `validate_php_file.php` lists every
+`$ai_readable` model with its **resolved** owner-scope — `inferred owner: <col>`,
+`shared`, or `hidden: ambiguous — declare $ai_owner_field`. The convenience of inference
+never costs a one-glance audit of the whole surface. (A CLI/lint readout is enough for a
+pre-launch, admin-only feature; an in-browser admin readout can follow if it's ever
+wanted, but is not part of this spec.)
 
 The net is that the "decide once" inventory shrinks from *all* models to just the
 *shared* and *ambiguous* ones — the cases that genuinely need a human decision.
@@ -268,14 +292,10 @@ construction, not by remembering.
 `self` action's internal `authenticate_write` calls — how virtually every mutating
 action in the codebase touches data — are *automatically* enforced at ownership level,
 with **no extra declaration**. The developer adds one line (`ai_scope => 'self'`) and
-the ownership checkpoint runs by construction.
-
-  - *Optional belt-and-suspenders:* a `self` action may also declare the model + row it
-    affects (`ai_affects => ['model' => Class, 'key' => 'input_field']`) to make the
-    invoker run that model's `authenticate_write` *before* dispatch. This is only worth
-    it for the rare action whose privileged effect bypasses a normal model write (a raw
-    query, an email, an external API call) — there the owner-scoped session can't help,
-    so the author either declares `ai_affects` or marks the action `admin`.
+the ownership checkpoint runs by construction. The rare action whose privileged effect
+bypasses a normal model write (a raw query, an email, an external API call) — where the
+owner-scoped session can't enforce ownership for you — is marked `admin` instead, putting
+it behind the allow-list and permission gates rather than running unscoped as `self`.
 
 **d. Carried-over gates.** Mutating actions (`ActionRegistry::mutatingActionNames()` /
 descriptor `mutates: true`) pass the confirmation gate (§5) on interactive surfaces,
@@ -401,7 +421,8 @@ column is inferred as the owner automatically (§2). The "decide once" pass ther
 only has to tag the cases convention can't resolve:
 
 - **Shared** (zero owner columns) → `$ai_shared_readable = true`.
-- **Ambiguous** (two+ owner columns) → `$ai_owner_field = '<col>'`.
+- **Ambiguous** (two+ owner columns) → `$ai_owner_field` = a single `'<col>'`, or a list
+  of columns for the OR-form (`messages`, `bookings`) — see §2.
 
 Everything else resolves by convention. Until a shared/ambiguous model is tagged it is
 invisible to the generic owner-scoped tools (fail-closed). The full resolved map is
@@ -497,12 +518,12 @@ state always existed (no "previously", no migration narration).
   - **Rewrite `### Write side` / `### Default-deny posture`** to describe the
     unconditional permission cap (pure-ownership branch) instead of staff-floor reliance.
   - **Add** the single-rule statement and the **`ai_scope` action contract** (`self` /
-    `admin` / absent ⇒ uncallable; the injected-identity lint; optional `ai_affects`; the
-    allowed-actions **and** real-permission gates on `admin`).
+    `admin` / absent ⇒ uncallable; the injected-identity lint; the allowed-actions **and**
+    real-permission gates on `admin`).
   - **Add** `ToolContext` / `AgentLoop` to `## Tool architecture`.
 - `docs/logic_architecture.md` — add `ai_scope` to the **`_logic_descriptor()` key
   reference** (the canonical home for descriptor keys): allowed values, the fail-closed
-  default when absent, the rejected identity-bearing-input rule, and `ai_affects`.
+  default when absent, and the rejected identity-bearing-input rule.
 - `docs/example_class.php` — in the **AI surface block** (`$ai_readable` /
   `$ai_description` / `$ai_writable_fields` / `$ai_untrusted_fields`) add annotated
   `$ai_shared_readable` and `$ai_owner_field` with the inference rule (one owner column ⇒
@@ -574,7 +595,8 @@ actions** — the half of the boundary that can land without the model inventory
    the caller's real permission, gated by allowed-actions list **and** real permission;
    absent ⇒ not agent-callable); `ActionInvoker` enforces it; `DescriptorValidator` /
    `validate_php_file.php` reject a descriptor whose `input` declares an identity-bearing
-   field; optional `ai_affects` pre-dispatch check for side-effecting `self` actions.
+   field. (A side-effecting action that bypasses a model write is marked `admin`, not
+   `self` — there's no separate per-action affect declaration.)
 4. **Shared agent loop** — extract `AgentLoop` from `RecipeRunner` (behavior-preserving
    delegation), including the dormant `pending_action` / confirmation hook for
    `requiresConfirmation()` contexts.
@@ -585,10 +607,11 @@ actions** — the half of the boundary that can land without the model inventory
    generator so generated code is born compliant.
 
 *Exit criteria:* existing recipes pass (regression on status/tokens/output), with any
-cross-owner recipe work migrated to `ai_scope=admin` actions; unit tests confirm the
-capped-write pure-ownership behavior and the `ai_scope` gating (self owner-scoped; admin
-requires allow-list + permission; absent uncallable); the rewritten docs and scaffold
-output match the implemented behavior.
+cross-owner recipe **writes** migrated to `ai_scope=admin` actions (cross-owner *reads*
+still work here — read-scoping doesn't land until Phase 2, which completes that half of
+the migration); unit tests confirm the capped-write pure-ownership behavior and the
+`ai_scope` gating (self owner-scoped; admin requires allow-list + permission; absent
+uncallable); the rewritten docs and scaffold output match the implemented behavior.
 
 ### Phase 2 — The read scoping boundary (+ inventory)
 
@@ -603,7 +626,7 @@ testable through a constructed owner-scoped context harness.
    only the **shared** (`$ai_shared_readable`) and **ambiguous** (`$ai_owner_field`)
    models; confirm the whole surface (Appendix A).
 9. **Resolved-scope report** — per-model `inferred`/`shared`/`hidden` readout in
-   `validate_php_file.php` plus a small admin page.
+   `validate_php_file.php` (CLI/lint only; no admin page in v1).
 10. **Docs** — the Phase 2 set in
     [Documentation & scaffolding updates](#documentation--scaffolding-updates): extend
     `overview.md`'s "Opting a model into AI reads" with the owner-column convention and
