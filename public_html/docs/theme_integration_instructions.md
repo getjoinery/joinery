@@ -52,6 +52,19 @@ Theme-specific views (homepage, blog, events) that manage their own full-width H
 
 The default theme's `body`, `h1–h6`, `a`, `p`, `code`, and `blockquote` resets are scoped to `body.jy-default`. The default theme's `PublicPage.php` outputs `<body class="jy-default">`; all other themes leave the body classless, so the type rules are completely inert for them. **Branded themes do not need to do anything special** — isolation is automatic.
 
+### Platform Styling Policy
+
+Platform code styles through the kit, not ad-hoc CSS. Two rules apply to all platform PHP (views, components, admin pages, plugin views):
+
+1. **No inline `style="..."` attributes.** Use a `.jy-ui` kit class instead.
+2. **No inline `<style>` blocks.** Put CSS in the kit (`joinery-styles.css`) or a theme stylesheet.
+
+**Exception — server-computed values.** When a value genuinely must be computed at render time (e.g. a progress-bar width, or the brand-token override block), add a `jy-allow-style` marker comment **on the same line** as the style and the policy check will skip it.
+
+The PHP file validator (`maintenance_scripts/dev_tools/validate_php_file.php`) reports these as **advisories** under its STYLE POLICY section on every file it checks — run it after editing any view or component. The advisories do not fail the run; they exist to keep ad-hoc styling from creeping back in once a page renders through the kit.
+
+> User-authored / WYSIWYG content and email templates are out of scope — they are not platform code.
+
 ### `--jy-*` Token Vocabulary
 
 All design tokens use the `--jy-` prefix to prevent collision with any other CSS variable:

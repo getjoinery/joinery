@@ -172,6 +172,9 @@ class MethodExistenceTest {
         // Check code patterns
         $this->checkCodePatterns();
 
+        // Check CSS-kit style policy
+        $this->checkStylePolicy();
+
         // Summary
         $this->printSummary();
     }
@@ -1122,6 +1125,50 @@ class MethodExistenceTest {
         }
 
         echo sprintf("\n🚫 Total pattern violations: %d\n\n", $blacklisted);
+    }
+
+    /**
+     * Check for platform CSS-kit style-policy violations.
+     *
+     * Platform code styles through the .jy-ui kit, not ad-hoc CSS:
+     *   - no inline style="..." attributes
+     *   - no inline <style> blocks
+     * Server-computed exceptions (e.g. a progress-bar width or the brand-token
+     * block) are allowed when the line carries a jy-allow-style marker comment.
+     * These are advisory and do not change the exit status.
+     */
+    private function checkStylePolicy() {
+        echo "STYLE POLICY ANALYSIS\n";
+        echo str_repeat("-", 80) . "\n";
+
+        $lines = explode("\n", file_get_contents($this->file_path));
+        $checks = [
+            '~\bstyle\s*=\s*["\']~i' => "Inline style attribute — use a .jy-ui kit class instead",
+            '~<style[\s>]~i'         => "Inline <style> block — move CSS into the kit or a stylesheet",
+        ];
+
+        $issues = [];
+        foreach ($lines as $i => $line) {
+            if (stripos($line, 'jy-allow-style') !== false) {
+                continue; // explicit escape hatch for intentional, server-computed CSS
+            }
+            foreach ($checks as $pattern => $reason) {
+                if (preg_match($pattern, $line)) {
+                    $issues[] = sprintf("  ⚠️  Line %4d: %s", $i + 1, $reason);
+                }
+            }
+        }
+
+        if (!empty($issues)) {
+            echo "Advisories (add a jy-allow-style comment to a line to silence an intentional, server-computed case):\n";
+            foreach ($issues as $issue) {
+                echo $issue . "\n";
+            }
+        } else {
+            echo "✓ No style-policy advisories\n";
+        }
+
+        echo sprintf("\n⚠️  Total style-policy advisories: %d\n\n", count($issues));
     }
 
     /**
