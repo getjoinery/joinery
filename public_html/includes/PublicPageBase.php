@@ -658,7 +658,7 @@ abstract class PublicPageBase {
 		}
 
 		if (empty($overrides)) { return; }
-		echo '<style id="jy-brand-tokens">:root {' . "\n" . implode("\n", $overrides) . "\n" . '}</style>' . "\n";
+		echo '<style id="jy-brand-tokens">:root {' . "\n" . implode("\n", $overrides) . "\n" . '}</style>' . "\n"; // jy-allow-style: server-computed brand tokens, validated above
 	}
 
 	/**

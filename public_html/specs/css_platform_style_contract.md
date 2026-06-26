@@ -217,7 +217,7 @@ An **adoption plan**, not an authoring one: bring the surfaces that don't yet us
 kit (admin, components, plugins) onto it, sweep inline styles, and fill the kit gaps
 (modal). Sequenced with the existing bare-class CSS kept as the transitional layer
 until a final cleanup. Full phased sequence, scope counts, and guardrails:
-**[css_migration_plan.md](css_migration_plan.md)**. No phase touches the database.
+**[css_migration_plan.md](implemented/css_migration_plan.md)**. No phase touches the database.
 
 ## Verification
 

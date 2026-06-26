@@ -4,7 +4,7 @@
 the light, opt-in admin adoption: kit is loadable + brand tokens set + verified; ongoing
 per-page opt-in continues as the default for admin work.)
 **Version:** 2.1
-**Policy:** Implements [css_platform_style_contract.md](css_platform_style_contract.md). Read it first — the platform already ships the `.jy-ui` kit (tokens + `.jy-ui`-scoped components + `.jy-*` chrome), loaded on every page by `render_base_assets()`. This document is *how we finish adopting it* across the surfaces that don't use it yet.
+**Policy:** Implements [css_platform_style_contract.md](../css_platform_style_contract.md). Read it first — the platform already ships the `.jy-ui` kit (tokens + `.jy-ui`-scoped components + `.jy-*` chrome), loaded on every page by `render_base_assets()`. This document is *how we finish adopting it* across the surfaces that don't use it yet.
 
 ## What this is (and isn't)
 
@@ -352,17 +352,33 @@ the active theme's declared value as their effective default. Documented in
 duplicated kit components beyond those provably load-bearing outside `.jy-ui` (held for
 Phase 7). `joinery-system` unchanged.
 
-### Phase 7 — Guardrails
+### Phase 7 — Guardrails ✅ COMPLETE
 
-Install a dev/test check so adoption can't regress:
+Keep adoption from regressing by stating the policy in docs and adding a
+per-file check to the validator that already runs after every edit.
 
-- no `style="` in platform code (short listed exception for server-computed values);
-- no `<style>` block in platform views/components;
-- platform content regions render inside `.jy-ui`.
+Scope was deliberately kept light:
+
+- **Policy in docs.** `docs/theme_integration_instructions.md` gains a "Platform
+  Styling Policy" subsection in the `.jy-ui` kit section: no inline `style="`,
+  no inline `<style>` block, server-computed exception via a same-line
+  `jy-allow-style` marker, WYSIWYG/email out of scope.
+- **Validator check.** `maintenance_scripts/dev_tools/validate_php_file.php`
+  gains a `checkStylePolicy()` pass: two regexes (inline `style=`, `<style>`
+  block) reported as **advisories** under a STYLE POLICY section. Advisory only —
+  it does not change exit status (matching the existing code-pattern check). The
+  `jy-allow-style` same-line comment silences intentional, server-computed cases.
+
+The third originally-planned rule — *platform content regions render inside
+`.jy-ui`* — was **dropped**: it is a runtime DOM-ancestry invariant that can't be
+judged from one file's text, so it doesn't fit a per-file static check, and a
+separate repo-wide renderer test wasn't worth the weight.
 
 Email and user-authored/WYSIWYG areas are excluded (see policy spec, Out of scope).
 
-**Exit:** the rules are enforced; the kit is the single styling path for platform code.
+**Exit:** the policy is documented and the validator flags inline-style/`<style>`
+regressions on every file it checks; the kit is the single styling path for
+platform content.
 
 ## Ordering rationale
 
@@ -376,4 +392,4 @@ Email and user-authored/WYSIWYG areas are excluded (see policy spec, Out of scop
 
 ## Files
 
-See the policy spec's Files section: [css_platform_style_contract.md](css_platform_style_contract.md#files).
+See the policy spec's Files section: [css_platform_style_contract.md](../css_platform_style_contract.md#files).
