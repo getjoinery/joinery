@@ -8,6 +8,7 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelRegistry.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ActionRegistry.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/TaintGate.php'));
+    require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderFactory.php'));
 
     $session = SessionControl::get_instance();
     $session->check_permission(10);
@@ -34,7 +35,7 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
         $recipe->set('rcp_schedule_frequency', 'weekly');
         $recipe->set('rcp_schedule_day_of_week', 1);
         $recipe->set('rcp_schedule_time', $default_utc_time);
-        $recipe->set('rcp_model', $settings->get_setting('joinery_ai_default_model') ?: 'claude-haiku-4-5');
+        $recipe->set('rcp_model', joinery_ai_default_recipe_model($settings));
         $recipe->set('rcp_delivery_dashboard', true);
         $recipe->set('rcp_enabled', true);
         $recipe->set('rcp_max_iterations', 5);
@@ -179,4 +180,31 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
     ];
 
     return LogicResult::render($page_vars);
+}
+
+/**
+ * The model a new recipe should default to. The provider is a global setting
+ * and a recipe's rcp_model is only meaningful to whichever provider is active,
+ * so the default is resolved against the active provider: honor the configured
+ * joinery_ai_default_model when that provider can serve it, otherwise fall back
+ * to the provider's own default. When the local provider is active and a local
+ * model is configured, that means new recipes default to the local model.
+ */
+function joinery_ai_default_recipe_model(Globalvars $settings): string {
+    $configured = $settings->get_setting('joinery_ai_default_model') ?: 'claude-haiku-4-5';
+
+    try {
+        $provider = LlmProviderFactory::build();
+        // If the active provider can serve the configured default, keep it.
+        // Otherwise prefer the provider's own default (e.g. the local model).
+        if (isset($provider->models()[$configured])) {
+            return $configured;
+        }
+        $provider_default = $provider->defaultModel();
+        return $provider_default !== '' ? $provider_default : $configured;
+    } catch (LlmProviderException $e) {
+        // Provider is misconfigured (e.g. local selected with no model set).
+        // Keep the configured default; the edit form flags it as unavailable.
+        return $configured;
+    }
 }
