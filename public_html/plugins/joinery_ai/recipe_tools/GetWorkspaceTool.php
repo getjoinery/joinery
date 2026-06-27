@@ -30,7 +30,7 @@ class GetWorkspaceTool implements RecipeToolInterface {
         ];
     }
 
-    public function execute(array $input, RecipeRunContext $ctx) {
+    public function execute(array $input, ToolContext $ctx) {
         $value = (string)$ctx->recipe->get('rcp_workspace');
         if ($value === '') {
             return '(workspace is empty)';
@@ -39,7 +39,7 @@ class GetWorkspaceTool implements RecipeToolInterface {
         // why: workspace content is past LLM output, structurally untrusted
         // even though the recipe itself wrote it. Using the same nonce as
         // $ai_untrusted_fields so the LLM only learns one contract.
-        $nonce = $ctx->untrusted_input_nonce;
+        $nonce = $ctx->untrustedNonce();
         return "<<UNTRUSTED_$nonce>>$value<</UNTRUSTED_$nonce>>";
     }
 

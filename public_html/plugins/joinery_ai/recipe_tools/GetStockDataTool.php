@@ -50,7 +50,7 @@ class GetStockDataTool implements RecipeToolInterface {
         ];
     }
 
-    public function execute(array $input, RecipeRunContext $ctx) {
+    public function execute(array $input, ToolContext $ctx) {
         $symbol = trim((string)($input['symbol'] ?? ''));
         if ($symbol === '') {
             return ['content' => 'get_stock_data error: symbol is required.', 'is_error' => true];

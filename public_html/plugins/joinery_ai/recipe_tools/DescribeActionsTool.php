@@ -38,18 +38,13 @@ class DescribeActionsTool implements RecipeToolInterface {
         ];
     }
 
-    public function execute(array $input, RecipeRunContext $ctx) {
+    public function execute(array $input, ToolContext $ctx) {
         $filter = (string)($input['filter'] ?? 'all');
 
-        $allowed = $ctx->recipe->get('rcp_allowed_actions');
-        if (is_string($allowed)) {
-            $decoded = json_decode($allowed, true);
-            $allowed = is_array($decoded) ? $decoded : [];
-        }
-        if (!is_array($allowed)) $allowed = [];
+        $allowed = $ctx->allowedActions();
 
         if (empty($allowed)) {
-            return 'No actions are allowed for this recipe.';
+            return 'No actions are in scope here.';
         }
 
         $registry = ActionRegistry::all();

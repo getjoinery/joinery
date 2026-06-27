@@ -38,7 +38,7 @@ class DeleteModelTool implements RecipeToolInterface {
         ];
     }
 
-    public function execute(array $input, RecipeRunContext $ctx) {
+    public function execute(array $input, ToolContext $ctx) {
         $model = (string)($input['model'] ?? '');
         $key   = $input['key'] ?? null;
         if ($model === '') return self::error($model, 'invalid_input', "Missing 'model' parameter.");

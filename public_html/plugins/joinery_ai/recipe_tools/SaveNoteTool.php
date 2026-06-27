@@ -50,7 +50,7 @@ class SaveNoteTool implements RecipeToolInterface {
         ];
     }
 
-    public function execute(array $input, RecipeRunContext $ctx) {
+    public function execute(array $input, ToolContext $ctx) {
         $title = trim((string)($input['title'] ?? ''));
         $content = (string)($input['content'] ?? '');
         $tags = $input['tags'] ?? null;
@@ -68,7 +68,7 @@ class SaveNoteTool implements RecipeToolInterface {
             return ['content' => 'save_note error: tags must be an array of strings.', 'is_error' => true];
         }
 
-        $note = RecipeNote::FindOrNewByTitle($ctx->owner_user_id, $title);
+        $note = RecipeNote::FindOrNewByTitle($ctx->actingUserId(), $title);
         $is_update = (bool)$note->key;
 
         $note->set('rcn_content', $content);

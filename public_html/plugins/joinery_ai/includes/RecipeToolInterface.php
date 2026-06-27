@@ -1,4 +1,6 @@
 <?php
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ToolContext.php'));
+
 /**
  * Contract for recipe tools.
  *
@@ -32,6 +34,6 @@ interface RecipeToolInterface {
      *   ['content' => string, 'is_error' => bool]
      * The runner wraps the return value into a tool_result block.
      */
-    public function execute(array $input, RecipeRunContext $ctx);
+    public function execute(array $input, ToolContext $ctx);
 
 }

@@ -47,7 +47,7 @@ class WebSearchTool implements RecipeToolInterface {
         ];
     }
 
-    public function execute(array $input, RecipeRunContext $ctx) {
+    public function execute(array $input, ToolContext $ctx) {
         $query = trim($input['query'] ?? '');
         if ($query === '') {
             return ['content' => 'web_search error: empty query.', 'is_error' => true];

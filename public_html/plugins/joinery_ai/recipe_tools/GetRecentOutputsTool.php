@@ -45,7 +45,7 @@ class GetRecentOutputsTool implements RecipeToolInterface {
         ];
     }
 
-    public function execute(array $input, RecipeRunContext $ctx) {
+    public function execute(array $input, ToolContext $ctx) {
         $name = trim((string)($input['recipe_name'] ?? ''));
         $limit = (int)($input['limit'] ?? 3);
         if ($limit < 1) $limit = 1;
@@ -55,7 +55,7 @@ class GetRecentOutputsTool implements RecipeToolInterface {
         if ($name === '') {
             $target_recipe = $ctx->recipe;
         } else {
-            $matches = new MultiRecipe(['name' => $name, 'owner_user_id' => $ctx->owner_user_id]);
+            $matches = new MultiRecipe(['name' => $name, 'owner_user_id' => $ctx->actingUserId()]);
             $matches->load();
             if (!count($matches)) {
                 return [
@@ -79,7 +79,7 @@ class GetRecentOutputsTool implements RecipeToolInterface {
         }
 
         $session = SessionControl::get_instance();
-        $tz = $ctx->owner_timezone;
+        $tz = $ctx->ownerTimezone();
 
         $lines = ["Recent runs of recipe '" . $target_recipe->get('rcp_name') . "':", ''];
         foreach ($runs as $i => $run) {

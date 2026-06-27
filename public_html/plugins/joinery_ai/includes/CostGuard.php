@@ -25,8 +25,36 @@ class CapExceededException extends Exception {
  * 80% soft alert: when usage on either cap crosses 80% during a check, send
  * a one-shot email to the recipe owner. Tracked via a stg_settings row
  * keyed to the calendar month (e.g. joinery_ai_alert_2026_04_recipe_42).
+ *
+ * The plugin-wide ceiling is the one cost concern shared across surfaces, so
+ * it is also exposed standalone via enforceGlobalCap() — no Recipe, no owner
+ * email — for the interactive chat to call before each turn. Its month total
+ * (globalUsedThisMonth) unions recipe-run and chat-message token usage so the
+ * cap is meaningful regardless of which surface spent the tokens. The
+ * per-recipe caps and the 80% soft-alert emails stay recipe-only and live in
+ * check($recipe).
  */
 class CostGuard {
+
+    /**
+     * Enforce only the plugin-wide monthly ceiling, without a Recipe. Throws
+     * CapExceededException('global_monthly', …) when this month's combined
+     * recipe + chat token usage is at or above the cap; returns silently
+     * otherwise (and when the cap is unset/zero). No soft-alert email — the
+     * interactive caller surfaces the throw to the admin inline.
+     */
+    public static function enforceGlobalCap(): void {
+        $cap = (int)Globalvars::get_instance()->get_setting('joinery_ai_global_monthly_token_cap');
+        if ($cap <= 0) return;
+        $used = self::globalUsedThisMonth();
+        if ($used >= $cap) {
+            throw new CapExceededException(
+                'global_monthly',
+                "monthly_token_cap reached: $used >= $cap. "
+                    . 'Joinery AI plugin total for this month (' . self::pct($used, $cap) . '%).'
+            );
+        }
+    }
 
     /**
      * Throws CapExceededException if either cap is at or above 100%. Returns
@@ -51,11 +79,11 @@ class CostGuard {
             );
         }
 
-        // Global cap across all recipes.
+        // Global cap across the whole plugin (recipes + chat).
         $settings = Globalvars::get_instance();
         $global_cap = (int)$settings->get_setting('joinery_ai_global_monthly_token_cap');
         if ($global_cap > 0) {
-            $global_used = self::tokensUsedSince($month_start, null);
+            $global_used = self::globalUsedThisMonth();
             self::evaluateCap(
                 $recipe, $global_used, $global_cap, $month,
                 'global_monthly',
@@ -85,6 +113,36 @@ class CostGuard {
         if ($used >= (int)($cap * 0.8) && !self::alertAlreadySent($alert_setting_key)) {
             self::sendSoftAlert($recipe, $context_msg, $alert_setting_key);
         }
+    }
+
+    /**
+     * Plugin-wide token usage for the current UTC calendar month, summing
+     * BOTH surfaces: recipe runs (rcr_recipe_runs) and chat assistant turns
+     * (aim_conversation_messages). Either table may not exist yet on a fresh
+     * install, so each SUM is guarded independently — a missing table
+     * contributes zero rather than fataling the cap check.
+     */
+    private static function globalUsedThisMonth(): int {
+        $month_start = gmdate('Y-m-01 00:00:00');
+        $db = DbConnector::get_instance()->get_db_link();
+
+        $recipe_used = self::tokensUsedSince($month_start, null);
+
+        $chat_used = 0;
+        try {
+            $q = $db->prepare(
+                "SELECT COALESCE(SUM(aim_input_tokens) + SUM(aim_output_tokens), 0)
+                 FROM aim_conversation_messages
+                 WHERE aim_create_time >= ?
+                   AND aim_delete_time IS NULL"
+            );
+            $q->execute([$month_start]);
+            $chat_used = (int)$q->fetchColumn();
+        } catch (Throwable $e) {
+            error_log('[joinery_ai CostGuard] chat token sum skipped: ' . $e->getMessage());
+        }
+
+        return $recipe_used + $chat_used;
     }
 
     private static function tokensUsedSince(string $since_utc, ?int $recipe_id): int {

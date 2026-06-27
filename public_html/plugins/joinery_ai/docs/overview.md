@@ -1,6 +1,11 @@
 # Joinery AI Plugin
 
-The `joinery_ai` plugin runs LLM-driven recipes against the platform: scheduled or on-demand prompts that call Claude with a curated set of tools and persist the results. It is **admin-only** in the current state — recipes are configured by admins through the admin UI, and the recipe runner executes with the recipe owner's identity.
+The `joinery_ai` plugin runs LLM-driven work against the platform through two **admin-only** surfaces over one shared engine:
+
+- **Recipes** — scheduled or on-demand prompts that call the model with a curated tool set and persist the results, executing with the recipe owner's identity.
+- **Chat** (`/admin/joinery_ai/chat`) — an interactive assistant that runs the same tool loop a turn at a time, executing as the acting admin, with consequential mutations held for a live confirmation.
+
+Both surfaces drive the same `AgentLoop` over the same tools; what differs is reached through the run **context** (`ToolContext`).
 
 This doc covers what plugin authors and model authors need to know. For original design rationale, see [`specs/implemented/joinery_ai.md`](../../../specs/implemented/joinery_ai.md), [`specs/implemented/joinery_ai_autodiscovery.md`](../../../specs/implemented/joinery_ai_autodiscovery.md), and [`specs/implemented/joinery_ai_write_tools.md`](../../../specs/implemented/joinery_ai_write_tools.md).
 
@@ -12,9 +17,17 @@ plugins/joinery_ai/
     recipes_class.php          # Recipe model — prompt, schedule, allowed tools, owner
     recipe_runs_class.php      # RecipeRun model — per-execution log with tool-call trace
     recipe_notes_class.php     # RecipeNote model — agent ↔ human feedback channel
+    ai_conversations_class.php          # AiConversation model — one chat thread
+    ai_conversation_messages_class.php  # AiConversationMessage model — one chat turn
   includes/
-    RecipeRunner.php           # Tool-use loop driver
-    RecipeRunContext.php       # Per-run context passed to every tool's execute()
+    AgentLoop.php              # Bounded tool-use loop shared by both surfaces
+    ToolContext.php            # Interface both run contexts implement
+    RecipeRunner.php           # Recipe surface: assembles a run, drives AgentLoop
+    RecipeRunContext.php       # Recipe run context (ToolContext) passed to execute()
+    ChatRunner.php             # Chat surface: builds a turn, drives AgentLoop
+    ChatTurnContext.php        # Chat turn context (ToolContext)
+    ChatRender.php             # Transcript markup shared by view + AJAX endpoints
+    RiskHeuristic.php          # Inline-vs-confirm classifier for mutating calls
     RecipeToolInterface.php    # Tool contract
     RecipeToolRegistry.php     # Auto-discovers tools across plugins
     llm/
@@ -97,7 +110,7 @@ interface RecipeToolInterface {
     public static function name(): string;        // snake_case identifier
     public static function description(): string; // shown to the LLM
     public static function inputSchema(): array;  // JSON Schema for input
-    public function execute(array $input, RecipeRunContext $ctx);
+    public function execute(array $input, ToolContext $ctx);
 }
 ```
 
@@ -105,13 +118,34 @@ interface RecipeToolInterface {
 
 `execute()` returns either a string (becomes `tool_result.content`) or `['content' => string, 'is_error' => bool]` for explicit error reporting.
 
-**`AgentLoop`** (`includes/AgentLoop.php`) is the bounded tool-use loop shared by every AI surface: build params → `provider->createMessage()` → dispatch tool calls → feed results back, up to the per-turn iteration cap or token budget. `RecipeRunner` assembles the recipe's provider, system prompt, and tool allow-list, hands them to `AgentLoop`, and maps the returned result onto the run's terminal status. Surface-specific behavior is reached through the context rather than baked into the loop:
+Tools type-hint **`ToolContext`** (`includes/ToolContext.php`), the surface-independent contract both run contexts implement. It exposes identity (`actingUserId()`, `ownerTimezone()`), the per-run/per-turn untrusted-input nonce (`untrustedNonce()`), the capability allowlists (`allowedModels()`, `allowedActions()`), and the continuation/confirmation/audit hooks below. Recipe-only concepts (the `Recipe` row, the workspace) stay off the interface — the three workspace/recent-output tools reach the concrete `RecipeRunContext` directly and are never listed in a chat conversation's tools.
 
-- **`shouldContinue()`** — a per-iteration guard. For a recipe that's the mid-run kill flag and the hard wall-clock timeout; it returns a stop reason or null.
-- **`beginToolCall()` / `finishToolCall()`** — the durable per-call audit. The recipe context flushes a started-but-not-completed entry to `rcr_tool_calls` before each call (so the dispatcher reaper can name the last call a hung run started) and updates it after.
-- **`requiresConfirmation()`** — when true, a mutating call that the `RiskHeuristic` flags is held for a live human sign-off (returned as a `pending_action`) instead of running. Recipes answer **false** — they're signed off at save time by the taint gate — so this hook is inert for recipe runs and the loop executes every call.
+**`AgentLoop`** (`includes/AgentLoop.php`) is the bounded tool-use loop shared by every AI surface: build params → `provider->createMessage()` → dispatch tool calls → feed results back, up to the per-turn iteration cap or token budget. `RecipeRunner` (recipes) and `ChatRunner` (chat) each assemble the provider, system prompt, and tool allow-list, hand them to `AgentLoop`, and map the returned result onto their own bookkeeping. Surface-specific behavior is reached through the context rather than baked into the loop:
 
-`RecipeRunContext` carries `$recipe`, `$run`, `$owner_user_id`, `$owner_timezone`, the per-run untrusted-input nonce, and the hooks above (`appendToolCall()` remains for one-shot trace notes).
+- **`shouldContinue()`** — a per-iteration guard. For a recipe that's the mid-run kill flag and the hard wall-clock timeout; for a chat turn it's a per-turn wall clock. Returns a stop reason or null.
+- **`beginToolCall()` / `finishToolCall()`** — the durable per-call audit. The recipe context flushes a started-but-not-completed entry to `rcr_tool_calls` before each call (so the dispatcher reaper can name the last call a hung run started) and updates it after; the chat context accumulates the trace in memory and the endpoint saves it on the assistant message (`aim_tool_calls`), where there is no hang-and-reap path.
+- **`requiresConfirmation()`** — when true, a mutating call that the `RiskHeuristic` flags is held for a live human sign-off (returned as a `pending_action`) instead of running. Recipes answer **false** — they're signed off at save time by the taint gate — so this hook is inert for recipe runs and the loop executes every call. Chat answers **true** (see [Chat](#chat) below).
+
+`RecipeRunContext` additionally carries `$recipe` and `$run`; `ChatTurnContext` carries the `AiConversation`. `appendToolCall()` remains on both for one-shot trace notes.
+
+## Chat
+
+The interactive surface lives at `/admin/joinery_ai/chat` (permission 5). It is a two-pane page — conversation list + transcript/composer — built with plain `joai-chat-*` markup (the admin theme is not the `.jy-ui` kit). A turn runs over the same `AgentLoop` as a recipe; the differences are all in `ChatTurnContext`:
+
+- **`requiresConfirmation()` is true.** A mutating tool call the `RiskHeuristic` classifies `CONFIRM` is not executed — the loop ends the turn in a `pending_action` carrying a plain-language description, and the UI shows a Confirm/Cancel card. Inline-verdict calls (a self-owned create/update, an `auto` action) run without a card. See [Action exposure](#action-exposure-ai_agent) and the spec's risk-heuristic section.
+- **Per-turn wall clock**, not a kill flag — a chat turn is one synchronous request.
+- **In-memory trace** flushed to `aim_tool_calls` on the assistant message by the endpoint.
+
+**Data model.** `AiConversation` (`aic_conversations`) is one thread — owner, model, the `aic_allowed_tools` / `aic_allowed_models` / `aic_allowed_actions` scope, and running token totals. `AiConversationMessage` (`aim_conversation_messages`) is one turn; assistant rows carry the tool trace, token counts, and any `aim_pending_action`. (Named `Ai*` because core messaging already owns `Conversation` / `Message`.) Neither is `$ai_readable`.
+
+**Engine.** `ChatRunner` builds the system prompt + history and drives the loop:
+
+- `runTurn()` — the user just sent a message (already persisted): build history, run `AgentLoop`, hand back the result + the turn's context.
+- `resumeTurn()` — the admin confirmed or cancelled a pending call: replay the transcript (minus the trailing pending-bearing assistant row), synthesize a self-consistent `tool_use`/`tool_result` pair (execute the approved call via `AgentLoop::executeApproved()`, or feed a "declined" result), then continue the loop. The endpoint updates the pending assistant message **in place**, so there is exactly one assistant row per user message and the transcript stays strictly alternating and replayable.
+
+Two AJAX endpoints back the page: `chat_send.php` (append the user message, run the turn, persist the reply) and `chat_confirm.php` (resolve a pending action). New conversations are seeded with the default tool set (`joinery_ai_chat_default_tools`, or the built-in read+gated-write set), all readable models, and every agent-callable action; the admin narrows scope per conversation.
+
+**Settings:** `joinery_ai_chat_enabled`, `joinery_ai_chat_max_iterations` (loop cap per turn), `joinery_ai_chat_max_tokens` (output budget per turn), `joinery_ai_chat_default_tools`.
 
 ## Generic reads: `query_model` + per-recipe model allowlist
 
@@ -282,6 +316,8 @@ Both can coexist — a recipe can use `query_model` for ad-hoc reads and `GetMyN
 `CostGuard` is initialized per run from plugin settings (`max_input_tokens_per_run`, `max_output_tokens_per_run`, `max_dollars_per_run`). Each provider response includes usage metrics in the canonical usage block; the guard accumulates them and raises if the next call would exceed any ceiling. The runner catches the exception, marks the run as `error`, and persists the partial trace.
 
 For recipes that are expected to be expensive, raise the ceilings on the recipe row. For recipes that should be cheap, lower them.
+
+The one cost concern shared across surfaces is the **plugin-wide monthly ceiling** (`joinery_ai_global_monthly_token_cap`). `CostGuard::enforceGlobalCap()` checks it without a `Recipe` — both `RecipeRunner` (via `check($recipe)`) and each chat turn call it, and its month total unions recipe-run and chat-message tokens, so the cap is meaningful regardless of which surface spent them. The per-recipe caps and the 80% owner-alert emails stay recipe-only in `check($recipe)`.
 
 ## Tracing & debugging
 

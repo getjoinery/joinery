@@ -49,7 +49,7 @@ class FetchUrlTool implements RecipeToolInterface {
         ];
     }
 
-    public function execute(array $input, RecipeRunContext $ctx) {
+    public function execute(array $input, ToolContext $ctx) {
         $url = trim((string)($input['url'] ?? ''));
         if ($url === '') {
             return ['content' => 'fetch_url error: empty URL.', 'is_error' => true];
