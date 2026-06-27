@@ -612,18 +612,35 @@ class RecipeRunner {
         $id   = $tool_use['id']   ?? '';
         $input = $tool_use['input'] ?? [];
         $started = microtime(true);
-        $started_time = gmdate('Y-m-d H:i:s.u');
 
-        // Persist a "started but not completed" entry before the call. The
-        // dispatcher reaper saves any in-flight state from the DB, so when
-        // a tool hangs and the run is reaped, the audit row identifies the
-        // last call that started — that's the offender.
-        self::recordToolCallStart($ctx, $name, $input, $started_time);
+        // Record a "started but not completed" entry before the call (the
+        // context flushes it to the DB so the dispatcher reaper can name the
+        // last call that started if the run hangs). The completion fields are
+        // filled in and handed back through finishToolCall() once the call
+        // returns.
+        $entry = [
+            'name'           => $name,
+            'input'          => $input,
+            'started_time'   => gmdate('Y-m-d H:i:s.u'),
+            'completed_time' => null,
+            'is_error'       => false,
+            'output'         => null,
+            'duration_ms'    => null,
+        ];
+        $ctx->beginToolCall($entry);
+
+        $finish = function (string $content, bool $is_error) use (&$entry, $ctx, $started): void {
+            $entry['completed_time'] = gmdate('Y-m-d H:i:s.u');
+            $entry['is_error']       = $is_error;
+            $entry['output']         = $content;
+            $entry['duration_ms']    = (int)((microtime(true) - $started) * 1000);
+            $ctx->finishToolCall($entry);
+        };
 
         $tool = RecipeToolRegistry::get($name);
         if ($tool === null) {
             $msg = "Tool '$name' is not available to this recipe.";
-            self::recordToolCallEnd($ctx, $name, $input, $started_time, $msg, true, 0);
+            $finish($msg, true);
             return ['type' => 'tool_result', 'tool_use_id' => $id, 'content' => $msg, 'is_error' => true];
         }
 
@@ -631,8 +648,7 @@ class RecipeRunner {
             $result = $tool->execute(is_array($input) ? $input : [], $ctx);
         } catch (Exception $e) {
             $msg = get_class($e) . ': ' . $e->getMessage();
-            self::recordToolCallEnd($ctx, $name, $input, $started_time, $msg, true,
-                (int)((microtime(true) - $started) * 1000));
+            $finish($msg, true);
             return ['type' => 'tool_result', 'tool_use_id' => $id, 'content' => $msg, 'is_error' => true];
         }
 
@@ -645,75 +661,11 @@ class RecipeRunner {
             $content = (string)$result;
         }
 
-        self::recordToolCallEnd($ctx, $name, $input, $started_time, $content, $is_error,
-            (int)((microtime(true) - $started) * 1000));
+        $finish($content, $is_error);
 
         $block = ['type' => 'tool_result', 'tool_use_id' => $id, 'content' => $content];
         if ($is_error) $block['is_error'] = true;
         return $block;
-    }
-
-    /**
-     * Persist a started-but-not-completed audit entry directly to the DB.
-     * Updates the run row's rcr_tool_calls JSON column. Best-effort — DB
-     * failure during audit logging logs a warning and proceeds; the
-     * action's effect on the touched models is the source of truth.
-     */
-    private static function recordToolCallStart(RecipeRunContext $ctx, string $name, $input, string $started_time): void {
-        $entry = [
-            'name'         => $name,
-            'input'        => $input,
-            'started_time' => $started_time,
-            'completed_time' => null,
-            'is_error'     => false,
-            'output'       => null,
-            'duration_ms'  => null,
-        ];
-        $ctx->appendToolCall($entry);
-        try {
-            $db = DbConnector::get_instance()->get_db_link();
-            $q = $db->prepare("UPDATE rcr_recipe_runs SET rcr_tool_calls = ? WHERE rcr_run_id = ?");
-            $q->execute([
-                json_encode($ctx->run->get('rcr_tool_calls'), JSON_UNESCAPED_SLASHES),
-                (int)$ctx->run->key,
-            ]);
-        } catch (Throwable $e) {
-            error_log('[joinery_ai] recordToolCallStart failed: ' . $e->getMessage());
-        }
-    }
-
-    private static function recordToolCallEnd(RecipeRunContext $ctx, string $name, $input,
-            string $started_time, string $content, bool $is_error, int $duration_ms): void {
-        $entries = $ctx->run->get('rcr_tool_calls');
-        if (is_string($entries)) {
-            $decoded = json_decode($entries, true);
-            $entries = is_array($decoded) ? $decoded : [];
-        } elseif (!is_array($entries)) {
-            $entries = [];
-        }
-        // Update the matching started-but-not-completed entry. Match by
-        // started_time which is high-resolution enough to be unique
-        // within a run.
-        for ($i = count($entries) - 1; $i >= 0; $i--) {
-            if (($entries[$i]['name'] ?? '') !== $name) continue;
-            if (($entries[$i]['started_time'] ?? '') !== $started_time) continue;
-            $entries[$i]['completed_time'] = gmdate('Y-m-d H:i:s.u');
-            $entries[$i]['is_error'] = $is_error;
-            $entries[$i]['output'] = $content;
-            $entries[$i]['duration_ms'] = $duration_ms;
-            break;
-        }
-        $ctx->run->set('rcr_tool_calls', $entries);
-        try {
-            $db = DbConnector::get_instance()->get_db_link();
-            $q = $db->prepare("UPDATE rcr_recipe_runs SET rcr_tool_calls = ? WHERE rcr_run_id = ?");
-            $q->execute([
-                json_encode($entries, JSON_UNESCAPED_SLASHES),
-                (int)$ctx->run->key,
-            ]);
-        } catch (Throwable $e) {
-            error_log('[joinery_ai] recordToolCallEnd failed: ' . $e->getMessage());
-        }
     }
 
     private static function finishSuccess(RecipeRun $run, Recipe $recipe, string $text,
