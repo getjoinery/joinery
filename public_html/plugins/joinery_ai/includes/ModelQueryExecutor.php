@@ -53,17 +53,12 @@ class ModelQueryExecutor {
         array $sort,
         ?int $limit,
         ?array $output_fields,
-        RecipeRunContext $ctx
+        ToolContext $ctx
     ): array {
-        $allowed = $ctx->recipe->get('rcp_allowed_models');
-        if (is_string($allowed)) {
-            $decoded = json_decode($allowed, true);
-            $allowed = is_array($decoded) ? $decoded : [];
-        }
-        if (!is_array($allowed)) $allowed = [];
+        $allowed = $ctx->allowedModels();
         if (!in_array($class, $allowed, true)) {
             throw new InvalidArgumentException(
-                "Model '$class' is not allowed for this recipe. Allowed models: "
+                "Model '$class' is not in scope here. Allowed models: "
                 . (empty($allowed) ? '(none)' : implode(', ', $allowed))
             );
         }
@@ -158,7 +153,7 @@ class ModelQueryExecutor {
      * values are wrapped as the serialized blob whole — recipes needing
      * finer granularity can opt the field out.
      */
-    private static function wrapUntrustedFields(array $rows, array $info, array $select_fields, RecipeRunContext $ctx): array {
+    private static function wrapUntrustedFields(array $rows, array $info, array $select_fields, ToolContext $ctx): array {
         $untrusted = isset($info['untrusted_fields']) && is_array($info['untrusted_fields'])
             ? $info['untrusted_fields'] : [];
         if (empty($untrusted)) return $rows;
@@ -166,7 +161,7 @@ class ModelQueryExecutor {
         $effective = array_values(array_intersect($untrusted, $select_fields));
         if (empty($effective)) return $rows;
 
-        $nonce = $ctx->untrusted_input_nonce;
+        $nonce = $ctx->untrustedNonce();
         $open  = "<<UNTRUSTED_$nonce>>";
         $close = "<</UNTRUSTED_$nonce>>";
 

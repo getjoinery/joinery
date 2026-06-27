@@ -24,7 +24,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
  */
 class ActionInvoker {
 
-    public static function invoke(string $name, array $input, RecipeRunContext $ctx): array {
+    public static function invoke(string $name, array $input, ToolContext $ctx): array {
         self::checkAllowlist($name, $ctx);
 
         $info = ActionRegistry::get($name);
@@ -57,16 +57,11 @@ class ActionInvoker {
         return self::envelope($name, $result);
     }
 
-    private static function checkAllowlist(string $name, RecipeRunContext $ctx): void {
-        $allowed = $ctx->recipe->get('rcp_allowed_actions');
-        if (is_string($allowed)) {
-            $decoded = json_decode($allowed, true);
-            $allowed = is_array($decoded) ? $decoded : [];
-        }
-        if (!is_array($allowed)) $allowed = [];
+    private static function checkAllowlist(string $name, ToolContext $ctx): void {
+        $allowed = $ctx->allowedActions();
         if (!in_array($name, $allowed, true)) {
             throw new InvalidArgumentException(
-                "Action '$name' is not allowed for this recipe. Allowed actions: "
+                "Action '$name' is not in scope here. Allowed actions: "
                 . (empty($allowed) ? '(none)' : implode(', ', $allowed))
             );
         }

@@ -14,9 +14,10 @@
             "permission": 10,
             "order": 16,
             "items": [
-                { "slug": "joinery-ai-recipes", "title": "Recipes", "url": "/admin/joinery_ai", "order": 1 },
-                { "slug": "joinery-ai-runs", "title": "Run History", "url": "/admin/joinery_ai/runs", "order": 2 },
-                { "slug": "joinery-ai-notes", "title": "Notes", "url": "/admin/joinery_ai/notes", "order": 3 }
+                { "slug": "joinery-ai-chat", "title": "Chat", "url": "/admin/joinery_ai/chat", "order": 1 },
+                { "slug": "joinery-ai-recipes", "title": "Recipes", "url": "/admin/joinery_ai", "order": 2 },
+                { "slug": "joinery-ai-runs", "title": "Run History", "url": "/admin/joinery_ai/runs", "order": 3 },
+                { "slug": "joinery-ai-notes", "title": "Notes", "url": "/admin/joinery_ai/notes", "order": 4 }
             ]
         }
     ],
@@ -34,6 +35,10 @@
         { "name": "joinery_ai_failure_email_throttle_seconds", "default": "86400" },
         { "name": "joinery_ai_workspace_max_chars", "default": "8000" },
         { "name": "joinery_ai_max_concurrent_workers", "default": "3" },
-        { "name": "joinery_ai_global_monthly_token_cap", "default": "1000000" }
+        { "name": "joinery_ai_global_monthly_token_cap", "default": "1000000" },
+        { "name": "joinery_ai_chat_enabled", "default": "1" },
+        { "name": "joinery_ai_chat_max_iterations", "default": "8" },
+        { "name": "joinery_ai_chat_max_tokens", "default": "4000" },
+        { "name": "joinery_ai_chat_default_tools", "default": "" }
     ]
 }

@@ -45,7 +45,7 @@ class CreateModelTool implements RecipeToolInterface {
         ];
     }
 
-    public function execute(array $input, RecipeRunContext $ctx) {
+    public function execute(array $input, ToolContext $ctx) {
         $model = (string)($input['model'] ?? '');
         if ($model === '') {
             return self::error($model, 'invalid_input', "Missing 'model' parameter.");

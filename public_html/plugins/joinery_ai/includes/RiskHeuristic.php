@@ -1,4 +1,5 @@
 <?php
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ToolContext.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ActionRegistry.php'));
 
 /**
@@ -48,7 +49,7 @@ class RiskHeuristic {
      * inline; deletes, writes beyond the actor, and actions confirm (actions
      * unless their descriptor marks them 'auto').
      */
-    public static function classify(array $tool_use, RecipeRunContext $context): string {
+    public static function classify(array $tool_use, ToolContext $context): string {
         $name = $tool_use['name'] ?? '';
         $input = isset($tool_use['input']) && is_array($tool_use['input']) ? $tool_use['input'] : [];
 
@@ -77,7 +78,7 @@ class RiskHeuristic {
      * A generic write is inline only when it targets a row the acting user
      * owns, inferred from the lone *_usr_user_id / *_owner_user_id column.
      */
-    private static function classifyWrite(string $tool, array $input, RecipeRunContext $context): string {
+    private static function classifyWrite(string $tool, array $input, ToolContext $context): string {
         $model = (string)($input['model'] ?? '');
         if ($model === '') return self::CONFIRM;
 

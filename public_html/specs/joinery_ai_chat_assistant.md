@@ -269,7 +269,12 @@ action. AI chat needs all of those, so reuse would mean nullable columns and
 own prefixes, **`aic` / `aim`** — note core messaging already owns the `cnv` prefix,
 so the AI conversation table cannot use it.
 
-### `Conversation` — `aic_conversations` (prefix `aic`)
+The same collision exists at the **class** level: core already owns `Conversation`
+(and `Message`), so the AI classes are named **`AiConversation`** and
+**`AiConversationMessage`** (with `MultiAiConversation` / `MultiAiConversationMessage`).
+Neither is `$ai_readable` — the chat does not query its own transcript tables.
+
+### `AiConversation` — `aic_conversations` (prefix `aic`)
 
 | Column | Type | Notes |
 |---|---|---|
@@ -280,22 +285,22 @@ so the AI conversation table cannot use it.
 | `aic_allowed_tools` | jsonb | tool names the assistant may use |
 | `aic_allowed_models` | jsonb | models in scope for `query_model` |
 | `aic_allowed_actions` | jsonb | actions in scope for `invoke_action` |
-| `aic_total_input_tokens` | int8 | running total |
-| `aic_total_output_tokens` | int8 | running total |
+| `aic_total_input_tokens` | int8 | running total, incremented each turn |
+| `aic_total_output_tokens` | int8 | running total, incremented each turn |
 | `aic_create_time` | timestamp(6) | `now()` |
 | `aic_update_time` | timestamp(6) | bumped each turn (thread ordering) |
 | `aic_delete_time` | timestamp(6) | soft delete |
 
-`authenticate_write` mirrors `Recipe` (permission 5 floor; owner-or-staff via
-SystemBase). `MultiConversation` filters by owner + not-deleted, ordered by
+`authenticate_write` mirrors `Recipe` but at a permission-5 floor (owner-or-staff via
+SystemBase). `MultiAiConversation` filters by owner + not-deleted, ordered by
 `aic_update_time DESC`.
 
-### `ConversationMessage` — `aim_conversation_messages` (prefix `aim`)
+### `AiConversationMessage` — `aim_conversation_messages` (prefix `aim`)
 
 | Column | Type | Notes |
 |---|---|---|
 | `aim_message_id` | int8 serial | pk |
-| `aim_conversation_id` | int8 | fk → `aic_conversations` |
+| `aim_aic_conversation_id` | int8 | fk → `aic_conversations` (carries the parent prefix per the `{prefix}_{source_prefix}_{entity}_id` convention so the deletion system auto-detects the cascade) |
 | `aim_role` | varchar(20) | `user` \| `assistant` |
 | `aim_content` | text | message text |
 | `aim_tool_calls` | jsonb | per-turn tool trace (assistant rows) |
@@ -363,12 +368,22 @@ conversation between users.
 
 ## Cost governance
 
-Each turn respects the existing global cap (`joinery_ai_global_monthly_token_cap`) via
-the same `CostGuard` the recipes use; per-conversation totals accumulate on
-`aic_total_*`. `CostGuard` is generalized to check the global cap without a `Recipe`
-(the chat passes the conversation's running totals). Local turns cost $0
-(`OpenAiCompatibleProvider::estimateCost()` returns 0) but tokens are still tracked
-for visibility and to keep the cap meaningful if the provider is switched to Anthropic.
+Each turn respects the existing plugin-wide monthly ceiling
+(`joinery_ai_global_monthly_token_cap`). `CostGuard` stays **recipe-only** — its
+per-recipe caps and 80% owner-alert emails have no chat analog worth building. The one
+genuinely shared concern, the global ceiling, is extracted into a small static
+(`CostGuard::enforceGlobalCap()` — SUM this month's tokens, compare to the setting,
+throw `CapExceededException`) that both surfaces call. Extracting it forces the monthly
+SUM to **union both `rcr_recipe_runs` and the chat message table** in one place, so the
+cap is meaningful across surfaces rather than silently ignoring chat tokens (the old
+recipe-only SUM read `rcr_recipe_runs` alone). Per-recipe caps and alerts continue to
+go through `CostGuard::check($recipe)` unchanged.
+
+Local turns cost $0 (`OpenAiCompatibleProvider::estimateCost()` returns 0) but tokens
+are recorded on each message row (`aim_*_tokens`) and rolled up onto the conversation
+(`aic_total_*`, incremented each turn) from day one — cheap to maintain, and it keeps a
+continuous per-conversation history so switching the provider to Anthropic later
+surfaces real spend without a backfill gap.
 
 ## Settings (declared in `plugin.json`)
 
@@ -481,15 +496,37 @@ pending); the dormant hook is a no-op for recipes.
 
 5. **Data classes** — `Conversation` + `ConversationMessage` (+ Multi); sync filesystem.
 6. **Shared context type** — now that a second surface exists, extract a `ToolContext`
-   interface from the contract the two contexts share (identity accessors,
-   `requiresConfirmation()`, untrusted nonce, begin/finish hooks); `RecipeRunContext`
-   declares it; change the executor type-hints (`ModelQueryExecutor`,
-   `ModelWriteExecutor`, `ActionInvoker`, `RecipeToolInterface::execute()`) from
-   `RecipeRunContext` to the interface — the mechanical four-file touch deferred from
-   Phase 1.
+   interface from the contract the two contexts share: identity (`actingUserId`,
+   `ownerTimezone`), the untrusted `untrustedNonce`, the capability allowlists
+   (`allowedModels` / `allowedActions` — needed because the executors read the
+   recipe's `rcp_allowed_*` and the chat's `aic_allowed_*` through the same code),
+   `requiresConfirmation()`, `shouldContinue()`, and the begin/finish/append audit
+   hooks. `RecipeRunContext implements ToolContext` (adding the accessor methods over
+   its existing public properties). Re-hint `ModelQueryExecutor`, `ModelWriteExecutor`,
+   `ActionInvoker`, `RecipeToolInterface::execute()`, `AgentLoop`, `RiskHeuristic`, and
+   **every recipe tool** from `RecipeRunContext` to the interface — PHP signature
+   compatibility means the type appears on each of the 14 tool `execute()` methods, so
+   the "four-file touch" is in practice an ~18-file mechanical sweep. The four
+   allowlist-reading sites (`ModelQueryExecutor`, `ModelWriteExecutor`, `ActionInvoker`,
+   `DescribeActionsTool`) switch their inline `$ctx->recipe->get('rcp_allowed_*')`
+   decode for `$ctx->allowedModels()` / `allowedActions()`. The three recipe-only tools
+   (`GetWorkspaceTool`, `SetWorkspaceTool`, `GetRecentOutputsTool`) still reach
+   `$ctx->recipe` at runtime and are simply never listed in a chat conversation's tools.
 7. **Turn handlers** — `ChatTurnContext implements ToolContext` (`requiresConfirmation
-   = true`, `appendToolCall()` → `aim_tool_calls`); send endpoint + confirm endpoint on
-   `AgentLoop`; generalize `CostGuard` to the conversation totals.
+   = true`, per-turn wall clock in `shouldContinue()`, the tool trace accumulated in
+   memory and handed to the endpoint via `toolCalls()` → `aim_tool_calls`, since chat
+   has no hang-and-reap path). A `ChatRunner` engine (the chat counterpart to
+   `RecipeRunner`) builds the system prompt + history and drives `AgentLoop`, with two
+   entry points: `runTurn()` for a fresh user message and `resumeTurn()` for a
+   confirm/cancel decision. `resumeTurn()` replays the transcript and synthesizes a
+   self-consistent `tool_use`/`tool_result` pair (executing the approved call via
+   `AgentLoop::executeApproved()`, or feeding a "declined" result) so the API sees a
+   valid exchange — one assistant row per turn is preserved by updating the pending
+   message in place. Send + confirm AJAX endpoints (`views/admin/chat_send.php`,
+   `chat_confirm.php`). Extract `CostGuard::enforceGlobalCap()` (the plugin-wide
+   ceiling, the only shared cost concern) and union the chat message table into its
+   monthly SUM — `CostGuard::check($recipe)` and the per-recipe caps/alerts stay
+   recipe-only.
 8. **Surface** — views + page logic + composer + confirmation cards; wire
    `/admin/joinery_ai/chat` and a nav entry; settings in `plugin.json` (default model
    reuses the active-provider resolution already added for new-recipe defaults).

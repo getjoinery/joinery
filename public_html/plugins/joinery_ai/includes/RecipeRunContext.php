@@ -1,4 +1,5 @@
 <?php
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ToolContext.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_class.php'));
 
@@ -8,7 +9,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_cla
  * data and append to the run's tool-call trace without reaching for a
  * global session.
  */
-class RecipeRunContext {
+class RecipeRunContext implements ToolContext {
 
     /** @var Recipe */
     public $recipe;
@@ -52,6 +53,33 @@ class RecipeRunContext {
      *  SessionControl-reading logic files, the risk heuristic's owner check). */
     public function actingUserId(): int {
         return $this->owner_user_id;
+    }
+
+    public function ownerTimezone(): string {
+        return $this->owner_timezone;
+    }
+
+    public function untrustedNonce(): string {
+        return $this->untrusted_input_nonce;
+    }
+
+    /** Models in scope for this recipe (decoded rcp_allowed_models). */
+    public function allowedModels(): array {
+        return self::decodeJsonArray($this->recipe->get('rcp_allowed_models'));
+    }
+
+    /** Actions in scope for this recipe (decoded rcp_allowed_actions). */
+    public function allowedActions(): array {
+        return self::decodeJsonArray($this->recipe->get('rcp_allowed_actions'));
+    }
+
+    /** Decode a jsonb column that may arrive as a JSON string or an array. */
+    private static function decodeJsonArray($value): array {
+        if (is_string($value)) {
+            $decoded = json_decode($value, true);
+            return is_array($decoded) ? $decoded : [];
+        }
+        return is_array($value) ? $value : [];
     }
 
     /**

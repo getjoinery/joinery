@@ -44,7 +44,7 @@ class InvokeActionTool implements RecipeToolInterface {
         ];
     }
 
-    public function execute(array $input, RecipeRunContext $ctx) {
+    public function execute(array $input, ToolContext $ctx) {
         $name = (string)($input['name'] ?? '');
         if ($name === '') {
             return self::error($name, 'invalid_input', "Missing 'name' parameter.");

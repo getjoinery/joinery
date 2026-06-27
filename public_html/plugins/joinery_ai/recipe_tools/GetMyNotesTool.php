@@ -51,7 +51,7 @@ class GetMyNotesTool implements RecipeToolInterface {
         ];
     }
 
-    public function execute(array $input, RecipeRunContext $ctx) {
+    public function execute(array $input, ToolContext $ctx) {
         $search = trim((string)($input['search'] ?? ''));
         $limit = (int)($input['limit'] ?? self::DEFAULT_LIMIT);
         if ($limit < 1) $limit = 1;
@@ -66,7 +66,7 @@ class GetMyNotesTool implements RecipeToolInterface {
                     ORDER BY COALESCE(rcn_update_time, rcn_create_time) DESC
                     LIMIT ?";
             $q = $db->prepare($sql);
-            $q->execute([$ctx->owner_user_id, $limit]);
+            $q->execute([$ctx->actingUserId(), $limit]);
         } else {
             $like = '%' . $search . '%';
             $sql = "SELECT rcn_note_id, rcn_title, rcn_content, rcn_tags, rcn_update_time
@@ -77,7 +77,7 @@ class GetMyNotesTool implements RecipeToolInterface {
                     ORDER BY COALESCE(rcn_update_time, rcn_create_time) DESC
                     LIMIT ?";
             $q = $db->prepare($sql);
-            $q->execute([$ctx->owner_user_id, $like, $like, $limit]);
+            $q->execute([$ctx->actingUserId(), $like, $like, $limit]);
         }
 
         $rows = $q->fetchAll(PDO::FETCH_ASSOC);
@@ -87,7 +87,7 @@ class GetMyNotesTool implements RecipeToolInterface {
                 : "No notes match '$search'.";
         }
 
-        $tz = $ctx->owner_timezone;
+        $tz = $ctx->ownerTimezone();
         $lines = [count($rows) === 1 ? '1 note:' : count($rows) . ' notes:', ''];
         foreach ($rows as $r) {
             $title = $r['rcn_title'];

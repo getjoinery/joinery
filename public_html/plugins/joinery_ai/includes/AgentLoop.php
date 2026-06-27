@@ -1,5 +1,5 @@
 <?php
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunContext.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ToolContext.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeToolRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RiskHeuristic.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderInterface.php'));
@@ -41,7 +41,7 @@ class AgentLoop {
         array $system,
         array $messages,
         array $allowed_tools,
-        RecipeRunContext $context,
+        ToolContext $context,
         int $max_iterations,
         int $token_budget
     ): array {
@@ -70,9 +70,15 @@ class AgentLoop {
                 $detail = $halt['detail'] ?? '';
                 break;
             }
-            if ($in + $out >= $token_budget) {
+            // Budget caps *generated* (output) tokens per turn — its documented
+            // meaning ("max output tokens per turn"). Counting input here would
+            // conflate the budget with the size of the (cached) system prompt:
+            // a large model-schema catalog would exhaust the budget before the
+            // model could reply at all. Input/total cost is bounded separately
+            // by the per-call cap and the monthly CostGuard ceilings.
+            if ($out >= $token_budget) {
                 $stop_reason = 'token_budget';
-                $detail = 'token budget exhausted';
+                $detail = 'output token budget exhausted';
                 break;
             }
 
@@ -188,8 +194,18 @@ class AgentLoop {
         ];
     }
 
+    /**
+     * Execute a single tool call that an interactive surface has approved
+     * out-of-band (the chat confirmation flow), through the same audited path
+     * the loop uses. Returns the tool_result block (its tool_use_id echoes
+     * $tool_use['id']) for the caller to feed back into a resumed run.
+     */
+    public static function executeApproved(array $tool_use, ToolContext $ctx): array {
+        return self::executeToolUse($tool_use, $ctx);
+    }
+
     /** Plain-language summary of a held call, for the confirmation card. */
-    private static function describePending(array $tool_use): string {
+    public static function describePending(array $tool_use): string {
         $name = $tool_use['name'] ?? '';
         $input = isset($tool_use['input']) && is_array($tool_use['input']) ? $tool_use['input'] : [];
         if ($name === 'invoke_action') {
@@ -213,7 +229,7 @@ class AgentLoop {
         return $content;
     }
 
-    private static function executeToolUse(array $tool_use, RecipeRunContext $ctx): array {
+    private static function executeToolUse(array $tool_use, ToolContext $ctx): array {
         $name = $tool_use['name'] ?? '';
         $id   = $tool_use['id']   ?? '';
         $input = $tool_use['input'] ?? [];

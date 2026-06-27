@@ -42,7 +42,7 @@ class SetWorkspaceTool implements RecipeToolInterface {
         ];
     }
 
-    public function execute(array $input, RecipeRunContext $ctx) {
+    public function execute(array $input, ToolContext $ctx) {
         if (!array_key_exists('content', $input)) {
             return ['content' => 'set_workspace error: missing required field "content".', 'is_error' => true];
         }

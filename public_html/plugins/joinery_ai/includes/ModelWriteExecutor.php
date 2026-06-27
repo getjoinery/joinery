@@ -34,7 +34,7 @@ class ModelWriteExecutor {
      *  this subset when the write surface is just the model tools. */
     const MODEL_WRITE_TOOL_NAMES = ['create_model', 'update_model', 'delete_model'];
 
-    public static function create(string $class, array $fields, RecipeRunContext $ctx): array {
+    public static function create(string $class, array $fields, ToolContext $ctx): array {
         self::checkAllowlist($class, $ctx);
         $info = self::checkOptIn($class);
 
@@ -59,7 +59,7 @@ class ModelWriteExecutor {
         ];
     }
 
-    public static function update(string $class, $key, array $fields, RecipeRunContext $ctx): array {
+    public static function update(string $class, $key, array $fields, ToolContext $ctx): array {
         self::checkAllowlist($class, $ctx);
         $info = self::checkOptIn($class);
 
@@ -83,7 +83,7 @@ class ModelWriteExecutor {
         ];
     }
 
-    public static function delete(string $class, $key, RecipeRunContext $ctx): array {
+    public static function delete(string $class, $key, ToolContext $ctx): array {
         self::checkAllowlist($class, $ctx);
         // Delete uses opt-in (writable_fields non-empty) but skips field-allowlist
         // since soft_delete() touches delete_time only.
@@ -110,16 +110,11 @@ class ModelWriteExecutor {
 
     // --- helpers ---
 
-    private static function checkAllowlist(string $class, RecipeRunContext $ctx): void {
-        $allowed = $ctx->recipe->get('rcp_allowed_models');
-        if (is_string($allowed)) {
-            $decoded = json_decode($allowed, true);
-            $allowed = is_array($decoded) ? $decoded : [];
-        }
-        if (!is_array($allowed)) $allowed = [];
+    private static function checkAllowlist(string $class, ToolContext $ctx): void {
+        $allowed = $ctx->allowedModels();
         if (!in_array($class, $allowed, true)) {
             throw new InvalidArgumentException(
-                "Model '$class' is not allowed for this recipe. Allowed models: "
+                "Model '$class' is not in scope here. Allowed models: "
                 . (empty($allowed) ? '(none)' : implode(', ', $allowed))
             );
         }
@@ -163,10 +158,10 @@ class ModelWriteExecutor {
         return ['obj' => $obj, 'fields_set' => $fields_set];
     }
 
-    private static function authenticate(SystemBase $obj, RecipeRunContext $ctx): void {
+    private static function authenticate(SystemBase $obj, ToolContext $ctx): void {
         $session = SessionControl::get_instance();
         $obj->authenticate_write([
-            'current_user_id'         => $ctx->owner_user_id,
+            'current_user_id'         => $ctx->actingUserId(),
             'current_user_permission' => (int)$session->get_permission(),
         ]);
     }
