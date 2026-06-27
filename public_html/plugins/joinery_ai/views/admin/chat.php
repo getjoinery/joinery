@@ -59,9 +59,18 @@ $page->admin_header([
             <span class="joai-chat-status-model" id="joai-status-model">
                 <?php echo htmlspecialchars((string)$active_model, ENT_QUOTES, 'UTF-8'); ?>
             </span>
-            <span class="joai-chat-status-tools">
-                <?php echo $web_enabled ? 'web search on' : 'web search off'; ?>
-            </span>
+            <label class="joai-chat-toggle">
+                <input type="checkbox" id="joai-toggle-data" data-capability="data_access"
+                       <?php echo $data_access ? 'checked' : ''; ?>>
+                Data access
+            </label>
+            <label class="joai-chat-toggle<?php echo $brave_key_set ? '' : ' is-disabled'; ?>"
+                   <?php echo $brave_key_set ? '' : 'title="Set the Brave Search API key in settings to enable web search."'; ?>>
+                <input type="checkbox" id="joai-toggle-web" data-capability="web_search"
+                       <?php echo $web_search ? 'checked' : ''; ?>
+                       <?php echo $brave_key_set ? '' : 'disabled'; ?>>
+                Web search
+            </label>
         </div>
 
         <div class="joai-chat-transcript" id="joai-transcript">
@@ -104,10 +113,31 @@ $page->admin_header([
     var thinking = document.getElementById('joai-thinking');
     var threads = document.getElementById('joai-threads');
     var newChatBtn = document.getElementById('joai-new-chat');
+    var dataToggle = document.getElementById('joai-toggle-data');
+    var webToggle = document.getElementById('joai-toggle-web');
     var currentConversationId = <?php echo $selected_id ? $selected_id : 'null'; ?>;
 
     function scrollToBottom() { transcript.scrollTop = transcript.scrollHeight; }
     scrollToBottom();
+
+    // Capability toggles. On an existing chat, persist immediately; on a new
+    // chat (no id yet) the state rides along with the first send.
+    function wireToggle(el) {
+        if (!el) return;
+        el.addEventListener('change', function () {
+            if (!currentConversationId) return;
+            var body = new FormData();
+            body.append('conversation_id', currentConversationId);
+            body.append('capability', el.getAttribute('data-capability'));
+            body.append('enabled', el.checked ? '1' : '0');
+            fetch('/admin/joinery_ai/chat_set_capabilities', { method: 'POST', body: body })
+                .then(function (r) { return r.json(); })
+                .then(function (data) { if (!data.success) { alert(data.message || 'Could not update.'); el.checked = !el.checked; } })
+                .catch(function () { el.checked = !el.checked; });
+        });
+    }
+    wireToggle(dataToggle);
+    wireToggle(webToggle);
 
     function clearBlankNotice() {
         var blank = document.getElementById('joai-blank');
@@ -139,7 +169,13 @@ $page->admin_header([
 
         var body = new FormData();
         body.append('message', message);
-        if (currentConversationId) body.append('conversation_id', currentConversationId);
+        if (currentConversationId) {
+            body.append('conversation_id', currentConversationId);
+        } else {
+            // New conversation — seed its capability flags from the toggles.
+            if (dataToggle && dataToggle.checked) body.append('data_access', '1');
+            if (webToggle && webToggle.checked) body.append('web_search', '1');
+        }
 
         fetch('/admin/joinery_ai/chat_send', { method: 'POST', body: body })
             .then(function (r) { return r.json(); })
@@ -215,6 +251,9 @@ $page->admin_header([
         transcript.innerHTML = '<p class="joai-chat-empty" id="joai-blank">Start a new conversation below.</p>';
         document.querySelectorAll('.joai-chat-list-item.is-active')
             .forEach(function (a) { a.classList.remove('is-active'); });
+        // New chats default to a plain assistant — reset the toggles to off.
+        if (dataToggle) dataToggle.checked = false;
+        if (webToggle) webToggle.checked = false;
         history.replaceState(null, '', '/admin/joinery_ai/chat');
         input.focus();
     });

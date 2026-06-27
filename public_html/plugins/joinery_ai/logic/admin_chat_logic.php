@@ -57,7 +57,9 @@ function admin_joinery_ai_chat_logic(array $input): LogicResult {
         'selected'       => $selected,
         'messages'       => $messages,
         'active_model'   => $active_model,
-        'web_enabled'    => (string)$settings->get_setting('joinery_ai_brave_search_api_key') !== '',
+        'data_access'    => $selected ? (bool)$selected->get('aic_data_access') : false,
+        'web_search'     => $selected ? (bool)$selected->get('aic_web_search') : false,
+        'brave_key_set'  => (string)$settings->get_setting('joinery_ai_brave_search_api_key') !== '',
         'chat_enabled'   => (bool)$settings->get_setting('joinery_ai_chat_enabled'),
     ]);
 }

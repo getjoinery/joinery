@@ -25,17 +25,17 @@ class AiConversation extends SystemBase {
         'aic_owner_user_id'      => array('type'=>'int4', 'required'=>true),
         'aic_title'              => array('type'=>'varchar(255)'),
         'aic_model'              => array('type'=>'varchar(100)'),
-        'aic_allowed_tools'      => array('type'=>'jsonb'),
-        'aic_allowed_models'     => array('type'=>'jsonb'),
-        'aic_allowed_actions'    => array('type'=>'jsonb'),
+        // Per-chat capability toggles (both default off → a plain conversational
+        // assistant). Data access gates the site-data tool group + model scope;
+        // web search gates the web tool group. See the chat-capabilities spec.
+        'aic_data_access'        => array('type'=>'bool', 'default'=>false),
+        'aic_web_search'         => array('type'=>'bool', 'default'=>false),
         'aic_total_input_tokens' => array('type'=>'int8', 'default'=>0),
         'aic_total_output_tokens'=> array('type'=>'int8', 'default'=>0),
         'aic_create_time'        => array('type'=>'timestamp(6)', 'default'=>'now()'),
         'aic_update_time'        => array('type'=>'timestamp(6)'),
         'aic_delete_time'        => array('type'=>'timestamp(6)'),
     );
-
-    public static $json_vars = array('aic_allowed_tools', 'aic_allowed_models', 'aic_allowed_actions');
 
     function authenticate_write($data) {
         if ($data['current_user_permission'] < 5) {

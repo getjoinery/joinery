@@ -7,6 +7,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AgentLoop.p
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/CostGuard.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelSchemaBuilder.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AiPromptBuilder.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ActionRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/TaintGate.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
@@ -332,12 +333,11 @@ class RecipeRunner {
         if (!is_array($tools)) $tools = [];
         $tools = array_values(array_filter(array_map('strval', $tools), 'strlen'));
 
-        // query_model is implied by the model allowlist, not chosen as a
-        // tool checkbox. Strip any stale entry from rcp_allowed_tools, then
-        // add it back iff the recipe has at least one allowed model. Without
-        // models, exposing query_model would just produce a tool that errors
-        // on every call — confusing for the LLM, no upside.
-        $tools = array_values(array_filter($tools, fn($t) => $t !== 'query_model'));
+        // query_model and describe_models are implied by the model allowlist,
+        // not chosen as tool checkboxes. Strip any stale entries, then add them
+        // back iff the recipe has at least one allowed model. Without models,
+        // exposing them would just produce tools that error on every call.
+        $tools = array_values(array_filter($tools, fn($t) => $t !== 'query_model' && $t !== 'describe_models'));
 
         $models = $recipe->get('rcp_allowed_models');
         if (is_string($models)) {
@@ -346,6 +346,7 @@ class RecipeRunner {
         }
         if (is_array($models) && !empty($models)) {
             $tools[] = 'query_model';
+            $tools[] = 'describe_models';
         }
 
         return $tools;
@@ -458,43 +459,14 @@ class RecipeRunner {
     }
 
     /**
-     * Render the allowed-models schema section. Returns '' if the recipe
-     * has no allowed models — query_model will then refuse every call,
-     * which is the intended behavior.
+     * Render the allowed-models catalog (names + descriptions). Full field
+     * schemas are fetched on demand via describe_models, so this stays small
+     * regardless of how many fields the models have. '' if the recipe has no
+     * allowed models — query_model / describe_models are then withheld.
      */
     private static function buildModelsBlock(Recipe $recipe): string {
-        $allowed = $recipe->get('rcp_allowed_models');
-        if (is_string($allowed)) {
-            $decoded = json_decode($allowed, true);
-            $allowed = is_array($decoded) ? $decoded : [];
-        }
-        if (!is_array($allowed) || empty($allowed)) return '';
-
-        $registry = ModelRegistry::all();
-        $sections = [];
-        foreach ($allowed as $class) {
-            if (!isset($registry[$class])) continue;
-            $schema = ModelSchemaBuilder::build($class);
-            $section = "### " . $schema['class'];
-            if (!empty($schema['description'])) {
-                $section .= " — " . $schema['description'];
-            }
-            $section .= "\nFields:\n";
-            foreach ($schema['fields'] as $field => $spec) {
-                $type = $spec['type'] ?? 'string';
-                if (isset($spec['format'])) $type .= " (" . $spec['format'] . ")";
-                $section .= "  - $field: $type\n";
-            }
-            $sections[] = $section;
-        }
-
-        if (empty($sections)) return '';
-
-        return "## Available data models\n\n"
-             . "Use query_model to read these. Field names below match the "
-             . "database exactly — do not abbreviate or alias them. Models "
-             . "not listed here cannot be queried.\n\n"
-             . implode("\n", $sections);
+        $allowed = self::decodeJsonArray($recipe->get('rcp_allowed_models'));
+        return AiPromptBuilder::modelCatalogBlock($allowed);
     }
 
     private static function finishSuccess(RecipeRun $run, Recipe $recipe, string $text,

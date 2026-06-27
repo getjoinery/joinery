@@ -1,5 +1,7 @@
 <?php
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ToolContext.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelRegistry.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ActionRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
 
 /**
@@ -61,12 +63,16 @@ class ChatTurnContext implements ToolContext {
         return $this->nonce;
     }
 
+    /** Data access on → every readable model in scope; off → none. */
     public function allowedModels(): array {
-        return self::decodeJsonArray($this->conversation->get('aic_allowed_models'));
+        if (!$this->conversation->get('aic_data_access')) return [];
+        return array_keys(ModelRegistry::all());
     }
 
+    /** Data access on → every agent-callable action in scope; off → none. */
     public function allowedActions(): array {
-        return self::decodeJsonArray($this->conversation->get('aic_allowed_actions'));
+        if (!$this->conversation->get('aic_data_access')) return [];
+        return ActionRegistry::agentCallableActionNames();
     }
 
     /** The interactive confirmation boundary: mutating calls the risk
@@ -109,14 +115,6 @@ class ChatTurnContext implements ToolContext {
      *  assistant message (aim_tool_calls). */
     public function toolCalls(): array {
         return $this->tool_calls;
-    }
-
-    private static function decodeJsonArray($value): array {
-        if (is_string($value)) {
-            $decoded = json_decode($value, true);
-            return is_array($decoded) ? $decoded : [];
-        }
-        return is_array($value) ? $value : [];
     }
 
     private static function resolveTimezone(int $user_id): string {

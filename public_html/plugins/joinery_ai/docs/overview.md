@@ -39,10 +39,12 @@ plugins/joinery_ai/
     CostGuard.php              # Per-run token/dollar ceilings
     UrlSafetyValidator.php     # SSRF guard for fetch_url tool
     ModelRegistry.php          # Generic reads: finds models with $ai_readable
-    ModelSchemaBuilder.php     # Generic reads: field_specifications -> system-prompt schema block
+    ModelSchemaBuilder.php     # Generic reads: field_specifications -> field schema
+    AiPromptBuilder.php        # Shared prompt assembly: model name catalog + schema sections
     ModelQueryExecutor.php     # Generic reads: read security boundary
   recipe_tools/                # Each PHP file declares one RecipeToolInterface class
     QueryModelTool.php         # query_model — generic reads
+    DescribeModelsTool.php     # describe_models — lazy schema discovery
     GetMyNotesTool.php
     SaveNoteTool.php
     GetWorkspaceTool.php
@@ -136,16 +138,23 @@ The interactive surface lives at `/admin/joinery_ai/chat` (permission 5). It is 
 - **Per-turn wall clock**, not a kill flag — a chat turn is one synchronous request.
 - **In-memory trace** flushed to `aim_tool_calls` on the assistant message by the endpoint.
 
-**Data model.** `AiConversation` (`aic_conversations`) is one thread — owner, model, the `aic_allowed_tools` / `aic_allowed_models` / `aic_allowed_actions` scope, and running token totals. `AiConversationMessage` (`aim_conversation_messages`) is one turn; assistant rows carry the tool trace, token counts, and any `aim_pending_action`. (Named `Ai*` because core messaging already owns `Conversation` / `Message`.) Neither is `$ai_readable`.
+**Capability toggles.** A new conversation is a plain conversational assistant. Two independent per-chat switches (status strip) turn capabilities on, **both default off**:
+
+- **Data access** (`aic_data_access`) — the site-data tool group (`query_model`, `describe_models`, `create_model`, `update_model`, `delete_model`, `invoke_action`, `describe_actions`, `get_my_notes`, `save_note`) plus model scope (all `$ai_readable` models). Off → none of those tools exist and **no model information enters the prompt**. (Writes still pass the confirmation boundary regardless — this gates tool *availability*, not whether writes confirm.)
+- **Web search** (`aic_web_search`) — the web group (`web_search`, `fetch_url`, `get_stock_data`). `web_search` additionally needs the global `joinery_ai_brave_search_api_key`; the toggle is disabled in the UI when the key is unset.
+
+`ChatRunner::resolveAllowedTools()` derives the effective tool list from the two flags; `ChatTurnContext::allowedModels()` / `allowedActions()` return all readable models / all agent-callable actions when Data access is on, `[]` when off. New chats carry their initial toggle state on the first `chat_send`; existing chats persist a flip via `chat_set_capabilities.php`.
+
+**Data model.** `AiConversation` (`aic_conversations`) is one thread — owner, model, the two capability flags (`aic_data_access`, `aic_web_search`), and running token totals. `AiConversationMessage` (`aim_conversation_messages`) is one turn; assistant rows carry the tool trace, token counts, and any `aim_pending_action`. (Named `Ai*` because core messaging already owns `Conversation` / `Message`.) Neither is `$ai_readable`.
 
 **Engine.** `ChatRunner` builds the system prompt + history and drives the loop:
 
 - `runTurn()` — the user just sent a message (already persisted): build history, run `AgentLoop`, hand back the result + the turn's context.
 - `resumeTurn()` — the admin confirmed or cancelled a pending call: replay the transcript (minus the trailing pending-bearing assistant row), synthesize a self-consistent `tool_use`/`tool_result` pair (execute the approved call via `AgentLoop::executeApproved()`, or feed a "declined" result), then continue the loop. The endpoint updates the pending assistant message **in place**, so there is exactly one assistant row per user message and the transcript stays strictly alternating and replayable.
 
-Two AJAX endpoints back the page: `chat_send.php` (append the user message, run the turn, persist the reply) and `chat_confirm.php` (resolve a pending action). New conversations are seeded with the default tool set (`joinery_ai_chat_default_tools`, or the built-in read+gated-write set), all readable models, and every agent-callable action; the admin narrows scope per conversation.
+Three AJAX endpoints back the page: `chat_send.php` (append the user message, run the turn, persist the reply), `chat_confirm.php` (resolve a pending action), and `chat_set_capabilities.php` (flip a toggle on an existing chat).
 
-**Settings:** `joinery_ai_chat_enabled`, `joinery_ai_chat_max_iterations` (loop cap per turn), `joinery_ai_chat_max_tokens` (output budget per turn), `joinery_ai_chat_default_tools`.
+**Settings:** `joinery_ai_chat_enabled`, `joinery_ai_chat_max_iterations` (loop cap per turn), `joinery_ai_chat_max_tokens` (output budget per turn).
 
 ## Generic reads: `query_model` + per-recipe model allowlist
 
@@ -158,9 +167,11 @@ A recipe gets read access in two layers:
 1. **Model author opts the class in globally** with `public static $ai_readable = true` — this is the ceiling.
 2. **Recipe author picks the subset the recipe should see** by checking boxes in the **Allowed Models** section of the recipe edit page. The selection is stored in `rcp_allowed_models` (JSON array of class names).
 
-`query_model` rejects any class not in `rcp_allowed_models`, even if it's globally `$ai_readable`. The recipe runner injects the field schemas of the chosen models directly into the system prompt at run start, so the LLM opens every run already knowing exactly what it can query — no discovery round-trip. The schema block sits in the cached prefix, so repeat runs of the same recipe pay near-zero input tokens for the catalog.
+`query_model` rejects any class not in the in-scope allowlist, even if it's globally `$ai_readable`.
 
-`query_model` itself is **never a user-facing checkbox**. The runner derives it from `rcp_allowed_models`: any non-empty allowlist auto-grants the tool, and an empty allowlist withholds it (so the LLM never sees a tool that would error on every call). The Allowed Tools section in the edit UI only lists hand-written tools.
+**Lazy discovery.** The prompt does **not** preload every in-scope model's full field schema. It carries only a one-line **catalog** — each model's class name + `$ai_description` — and the model fetches a specific model's fields on demand with the `describe_models` tool. This keeps the fixed per-turn cost proportional to the model *count*, not the total field count (a chat or recipe with the whole catalog in scope no longer pays thousands of schema tokens every turn). `AiPromptBuilder` renders both the catalog (`modelCatalogBlock`) and, for `describe_models`, a single model's schema (`schemaSection`); the catalog sits in the cached prefix.
+
+`query_model` and `describe_models` are **never user-facing checkboxes**. Both runners derive them from model scope: a non-empty allowlist auto-grants both, an empty one withholds both (so the LLM never sees a tool that would error on every call). For recipes, scope is `rcp_allowed_models` (the Allowed Models checkboxes); for chat, it's all readable models when Data access is on. The Allowed Tools section in the recipe edit UI only lists hand-written tools.
 
 ### Opting a model into AI reads
 
@@ -183,9 +194,11 @@ class UserNote extends SystemBase {
 
 `ModelRegistry` auto-discovers it on next request. No registration step. The model then shows up as a checkbox in every recipe's **Allowed Models** section.
 
-### What the system-prompt schema block looks like
+### What reaches the prompt: catalog now, schema on demand
 
-For each model in `rcp_allowed_models`, the recipe runner emits a section listing `class`, `description`, and each visible field with a PostgreSQL → JSON-Schema-flavoured type (`int4` → integer, `varchar` → string, `timestamp` → string with `date-time` format, `jsonb` → object, etc.). Field names match the database exactly.
+The cached prefix carries a **catalog** — one `- ClassName — description` line per in-scope model — plus an instruction to call `describe_models(["ClassName"])` before querying. When the model calls `describe_models` with names, it gets each model's full schema: `class`, `description`, and every visible field with a PostgreSQL → JSON-Schema-flavoured type (`int4` → integer, `varchar` → string, `timestamp` → string with `date-time` format, `jsonb` → object, etc.). Field names match the database exactly. `describe_models` with no argument returns the catalog (the same list, for re-discovery). `$ai_description` is what the model sees in the catalog, so write it as a useful one-liner.
+
+The field-visibility filtering below applies wherever a model's fields surface — `describe_models` output, `query_model` filter inputs, and result rows.
 
 Fields are filtered through two layers before exposure:
 
