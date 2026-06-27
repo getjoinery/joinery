@@ -324,6 +324,21 @@ Opt the model into auto-discovery when:
 
 Both can coexist — a recipe can use `query_model` for ad-hoc reads and `GetMyNotesTool` for the polished notes view.
 
+### Reading web pages (`fetch_url`)
+
+`fetch_url` returns a page as readable content, and the model chooses how with an optional `mode`:
+
+- **`reader`** *(default)* — the main article only, converted to Markdown. Headings, lists, tables, and link text survive; navigation, footers, sidebars, cookie banners, ads, scripts, and styles are removed; images are dropped. This is the token-cheap view and the right choice for an article.
+- **`full`** — the whole page flattened to plain text. For pages that are not a single article — search results, link hubs, directory/index pages, dashboards — where main-content detection would discard what's wanted.
+
+Reader mode escalates automatically through three tiers, gated on a small content floor; the model never picks a tier and is told in a one-line note when a fallback fired:
+
+1. **Visible DOM walk** — main-content extraction over PHP's `DOMDocument`. The common case.
+2. **Embedded-data harvest** — for JavaScript-rendered pages whose visible body is empty, the page's own shipped data is read (JSON-LD `articleBody`/`headline`, then OpenGraph/`<meta>`). This reads the JSON already in the HTML; it does **not** execute JavaScript, so a page that fetches its body over the network after load and embeds nothing is the remaining gap.
+3. **Full strip** — the same flatten as `mode: "full"`, for anything the first two miss.
+
+Extraction is pure string/DOM work on already-downloaded bytes — the SSRF guard, IP pinning, redirect re-validation, and size/time caps run first and are untouched. The HTML is parsed with `LIBXML_NONET` so the parser can never fetch an external DTD or entity. **Reader mode is a structure filter, not a trust filter:** its output is exactly as untrusted as the raw page and still flows through the chat assistant's untrusted-content handling. Non-HTML responses (JSON, plain text, CSV) bypass extraction in both modes.
+
 ## Cost protection
 
 `CostGuard` is initialized per run from plugin settings (`max_input_tokens_per_run`, `max_output_tokens_per_run`, `max_dollars_per_run`). Each provider response includes usage metrics in the canonical usage block; the guard accumulates them and raises if the next call would exceed any ceiling. The runner catches the exception, marks the run as `error`, and persists the partial trace.

@@ -1,12 +1,14 @@
 # Joinery AI — Interactive Chat Assistant (full-platform agent)
 
-**Status:** Active — awaiting implementation
+**Status:** Implemented (Phases 1–2)
 **Plugin:** `joinery_ai`
 **Last Updated:** 2026-06-27
-**Delivery:** three phases — (1) shared agent core + action opt-in + the confirmation
-hook (no UI), (2) the chat interface with live tiered confirmation, (3) member
-read-scoping (deferred until the chat is opened to non-admins). See
-[Phased delivery](#phased-delivery).
+**Delivery:** two phases — (1) shared agent core + action opt-in + the confirmation
+hook (no UI), (2) the chat interface with live tiered confirmation. See
+[Phased delivery](#phased-delivery). Member read-scoping (opening the chat to
+non-admins) is split into its own deferred spec,
+[`joinery_ai_chat_member_access.md`](../joinery_ai_chat_member_access.md); the
+asynchronous-turn follow-on is [`joinery_ai_chat_async.md`](../joinery_ai_chat_async.md).
 
 ## Goal
 
@@ -77,15 +79,16 @@ nothing later is structural:
   existed to constrain the *admin* case; members need none of it.
 - The one thing members *will* need is **owner-scoped reads** (a member must not read
   another member's rows, and a write-confirmation can't help a read). That is the
-  only deferred piece — [Phase 3](#phase-3--member-read-scoping-deferred) — and it
+  only deferred piece — split into
+  [`joinery_ai_chat_member_access.md`](../joinery_ai_chat_member_access.md) — and it
   is purely additive and member-gated: it keys off the acting identity, so it bolts
-  onto the context seam without touching the admin path shipped now.
+  onto the context seam without touching the admin path shipped here.
 
 **The seam that keeps the door open:** reads and writes already resolve identity
-through the run **context** (`RecipeRunContext` today, a shared `ToolContext`
-interface once the chat lands in Phase 2), never through a global "assume admin." As
-long as the scope decision is a property of the context, member read-scoping later is
-"implement the method for a member context," not "rethread the executors."
+through the run **context** (the shared `ToolContext` interface), never through a
+global "assume admin." As long as the scope decision is a property of the context,
+member read-scoping later is "implement the method for a member context," not
+"rethread the executors."
 
 ---
 
@@ -131,7 +134,7 @@ writes beyond the actor, and actions **confirm** (actions unless marked `auto`).
 has zero or 2+ owner columns the ownership is ambiguous → **confirm**. Worst case is
 one extra confirmation card, never a missed sign-off and never a leak. This is why
 the heuristic needs *none* of the fail-closed inventory work that real read-scoping
-([Phase 3](#phase-3--member-read-scoping-deferred)) requires.
+([the member-access spec](../joinery_ai_chat_member_access.md)) requires.
 
 ### 3. Action exposure — one default-deny opt-in
 
@@ -161,15 +164,16 @@ function event_register_logic_descriptor(): array {
 
 This is the *only* authority concept. There is no `self`/`admin` split, no
 identity-injection lint, no per-action permission floor. An admin is trusted; a
-member (later) is contained by `authenticate_write` on writes and by Phase-3 scoping
-on reads — neither needs an action-level authority tag.
+member (later) is contained by `authenticate_write` on writes and by member-access
+read-scoping — neither needs an action-level authority tag.
 
 ### 4. Reads
 
-Unscoped at launch (admins are trusted and already have full access). Per-conversation
-and per-recipe **allowlists** still bound *which* models are in scope for
+Unscoped at launch (admins are trusted and already have full access). The
+per-conversation **Data access** toggle still bounds *whether* models are in scope for
 `query_model` — that's a capability switch, not a security cap. Owner-scoped reads
-for non-admins land in [Phase 3](#phase-3--member-read-scoping-deferred).
+for non-admins land in
+[the member-access spec](../joinery_ai_chat_member_access.md).
 
 ### 5. Injection & exfiltration containment
 
@@ -185,8 +189,9 @@ the model's summary or an outbound `fetch_url`. For an **admin-only** launch thi
 acceptable — the admin already has the data, and the untrusted-wrapping plus the
 admin reading the final summary are the mitigations. Optionally restricting
 `fetch_url` while untrusted content is in context is a future hardening, not part of
-this spec. When the chat opens to members (Phase 3), owner-scoped reads close the
-exfiltration-of-*others'*-data path as a side effect.
+this spec. When the chat opens to members
+([member-access spec](../joinery_ai_chat_member_access.md)), owner-scoped reads close
+the exfiltration-of-*others'*-data path as a side effect.
 
 ### What this model deliberately does NOT do
 
@@ -195,7 +200,8 @@ exfiltration-of-*others'*-data path as a side effect.
 - **No `self`/`admin` authority mode.** Replaced by the single `ai_agent` opt-in plus
   the risk heuristic.
 - **No fail-closed model inventory for launch.** The owner convention is used only as
-  a soft confirmation hint; the rigorous classification is deferred to Phase 3.
+  a soft confirmation hint; the rigorous classification is deferred to the
+  [member-access spec](../joinery_ai_chat_member_access.md).
 
 ---
 
@@ -319,7 +325,7 @@ turn; tool exchanges live in `aim_tool_calls`.
 
 A new conversation is a plain conversational assistant; capabilities are opt-in per
 chat via two toggles, **both default off** (see
-[`joinery_ai_chat_capabilities.md`](implemented/joinery_ai_chat_capabilities.md) for the full
+[`joinery_ai_chat_capabilities.md`](joinery_ai_chat_capabilities.md) for the full
 design):
 
 - **Data access** → the site-data tool group: `query_model`, `describe_models`,
@@ -419,7 +425,8 @@ though the end state always existed (no "previously", no migration narration).
   exfiltration firewall** — reads run inline, so injected content could route data
   outward (a public-content write, an outbound call, the reply itself); the mitigation
   is the untrusted-text wrapping plus the admin reviewing output, and this is an
-  accepted residual for an admin-only tool. (Closes for member reads in Phase 3.)
+  accepted residual for an admin-only tool. (Closes for member reads — see the
+  member-access spec.)
 - `docs/logic_architecture.md` — add `ai_agent` to the **`_logic_descriptor()` key
   reference**: allowed values, the fail-closed default when absent, and how it pairs
   with `mutates` to drive the chat confirmation.
@@ -431,12 +438,8 @@ though the end state always existed (no "previously", no migration narration).
 - Add the chat page to the docs index — that index lives in the `agf_agent_files`-managed
   CLAUDE.md, edited via `/admin/admin_agent_files`, **never** on disk.
 
-**Phase 3 — member read-scoping (when it lands):**
-- `plugins/joinery_ai/docs/overview.md` — document owner-scoped reads for non-admin
-  callers, the owner-column convention, and the resolved-scope report.
-- `docs/example_class.php` — add `$ai_owner_field` to the AI surface block with its
-  three states (unset = infer; column/list = name the owner; `false` = ownerless,
-  members read all).
+(Member read-scoping docs — `$ai_owner_field`, owner-scoped reads, the resolved-scope
+report — ship with the [member-access spec](../joinery_ai_chat_member_access.md).)
 
 ### Scaffolding reference files (`includes/scaffold/`)
 
@@ -451,15 +454,17 @@ though the end state always existed (no "previously", no migration narration).
   secure defaults (public callable-with-confirmation, admin opt-in) cover the cases.
   `tests/scaffold/scaffold_ai_agent_test.php` confirms the emitted descriptors carry
   the right exposure (public active `confirm`, admin commented only).
-- **Phase 3:** `templates/data_class.tpl.php` emits `$ai_owner_field` from the
-  manifest (column, list, or `false`); `docs/scaffolding.md` documents the key.
+
+(The `$ai_owner_field` scaffold emission ships with the
+[member-access spec](../joinery_ai_chat_member_access.md).)
 
 ---
 
 ## Phased delivery
 
-Three phases. The user-facing chat goes live in Phase 2; the only deferred boundary
-(member read-scoping) is honestly tagged to the product decision that needs it.
+Two phases. The user-facing chat goes live in Phase 2; the only deferred boundary
+(member read-scoping) is split into its own spec, tagged to the product decision
+that needs it ([`joinery_ai_chat_member_access.md`](../joinery_ai_chat_member_access.md)).
 
 ### Phase 1 — Foundation: shared agent core + action opt-in (no UI)
 
@@ -540,30 +545,8 @@ pending); the dormant hook is a no-op for recipes.
 inline-verdict self-write runs without a card; reload mid-confirmation preserves the
 pending action; injection can't cause a silent write); end-to-end multi-device.
 
-### Phase 3 — Member read-scoping (deferred)
-
-Only built when the product decision is made to open the chat to **non-admin
-members**. Purely additive and member-gated — it does not change the admin path.
-
-10. **Owner-column resolver** — for member callers, resolve a model's owner via
-    `$ai_owner_field`: **unset** ⇒ infer a single `*_usr_user_id`/`*_owner_user_id`
-    column (fail-closed/hidden on zero or 2+ matches); a **column name or list** ⇒ use
-    it (list = OR-match, e.g. `messages` sender-or-recipient); **`false`** ⇒ ownerless,
-    members read all rows.
-11. **Read owner-scope filter** — `ModelQueryExecutor` appends `WHERE {owner} =
-    actingUser` **when the acting context is a non-admin member**; admins read
-    unscoped as today.
-12. **Model-classification inventory** — set `$ai_owner_field` only on the models the
-    convention can't resolve: ownerless catalog (`= false`) and ambiguous multi-owner
-    (`= 'col'` or a list); convention infers the rest
-    ([Appendix A](#appendix-a--model-classification-inventory-deferred-to-phase-3)).
-13. **Resolved-scope report** — per-model `inferred`/`ownerless`/`hidden` readout in
-    `validate_php_file.php`.
-14. **Docs** — the Phase 3 set above.
-
-*Exit criteria:* as a member, `query_model` returns only their rows; an ambiguous or
-unclassified model is hidden; an `$ai_owner_field = false` model returns catalog;
-admins still read unscoped; the resolved-scope report matches Appendix A.
+Member read-scoping (the would-be Phase 3) is its own deferred spec:
+[`joinery_ai_chat_member_access.md`](../joinery_ai_chat_member_access.md).
 
 ## Testing
 
@@ -590,74 +573,5 @@ admins still read unscoped; the resolved-scope report matches Appendix A.
 - **End-to-end:** a thread reopened on a second device shows full history and any
   pending confirmation.
 
-**Phase 3** (when built)
-- **Read scoping:** as a member, `query_model` on an owner-scoped model returns only
-  that user's rows; an ambiguous/unclassified model is hidden; an
-  `$ai_owner_field = false` model returns catalog; an admin reads unscoped.
-- **Owner-column inference:** a single-`*_usr_user_id` model resolves with no
-  declaration; a two-owner model resolves to `hidden` until `$ai_owner_field` names
-  the column(s); the resolved-scope report lists each model's outcome.
-
----
-
-## Appendix A — Model-classification inventory (deferred to Phase 3)
-
-Reference for the member read-scoping work. All `$ai_readable` models, classified for
-owner-scoping; not needed until the chat is opened to non-admins. (At launch, reads
-are unscoped for the trusted admin caller, and the owner convention is used only as a
-soft confirmation hint — see [the risk heuristic](#2-the-risk-heuristic-chat--confirm-what-is-bigger-than-you).)
-
-- **A — Owner-scoped (single owner column):** inferred automatically from the lone
-  `*_usr_user_id`/`*_owner_user_id` column — no declaration needed. Reads filter
-  `WHERE <col> = actingUserId`.
-- **B — Ownerless catalog/config:** set `$ai_owner_field = false`. Members read all
-  rows; not user-owned data.
-- **C — Complex ownership (dual-user / polymorphic / join):** does not fit a flat
-  column. The dual-user cases take `$ai_owner_field = [...]` (OR-match); polymorphic /
-  join cases stay hidden until a richer scope form lands.
-- **D — Admin-only / excluded:** sensitive or pure admin config; never owner-scoped to
-  a member.
-
-### A — Owner-scoped (21) → inferred owner column
-
-`address` (`usa_usr_user_id`), `comments` (`cmt_usr_user_id`),
-`conversation_participants` (`cnp_usr_user_id`), `event_registrants`
-(`evr_usr_user_id`), `files` (`fil_usr_user_id`), `mailing_list_registrants`
-(`mlr_usr_user_id`), `notifications` (`ntf_usr_user_id`), `order_items`
-(`odi_usr_user_id`), `orders` (`ord_usr_user_id`), `phone_number` (`phn_usr_user_id`),
-`posts` (`pst_usr_user_id`), `product_details` (`prd_usr_user_id`), `reactions`
-(`rct_usr_user_id`), `survey_answers` (`sva_usr_user_id`), `videos` (`vid_usr_user_id`),
-`items` (`itm_usr_user_id`), `item_relations` (`itr_usr_user_id`), `devices`
-(`sdd_usr_user_id`), `recipe_notes` (`rcn_owner_user_id`), `recipes`
-(`rcp_owner_user_id`), `users` (`usr_user_id` — the pk itself).
-
-### B — Ownerless catalog/config (19) → `$ai_owner_field = false`
-
-`pages`, `page_contents`, `products`, `product_groups`, `product_requirements`,
-`product_requirement_instances`, `events`, `event_types`, `event_sessions`,
-`event_session_files`, `locations`, `mailing_lists`, `subscription_tiers`, `questions`,
-`question_options`, `surveys`, `survey_questions`, `seo_page_metadata`,
-`item_relation_types`. (No per-user ownership — catalog, configuration, or public
-content.)
-
-### C — Complex ownership (8) — deferred within Phase 3
-
-| Model | Why it doesn't fit a flat column | Extended scope needed |
-|---|---|---|
-| `messages` | dual: `msg_usr_user_id_sender` **OR** `msg_usr_user_id_recipient` | OR-of-columns |
-| `bookings` | dual: `bkn_usr_user_id_booked` **OR** `bkn_usr_user_id_client` | OR-of-columns |
-| `calendar_entry` | polymorphic subject (`cal_subject_type`/`cal_subject_id`) | subject = ('user', me) |
-| `schedule` | polymorphic subject (`sch_subject_type`/`sch_subject_id`) | subject = ('user', me) |
-| `entity_photos` | polymorphic entity (`eph_entity_type`/`eph_entity_id`) | entity = ('user', me) |
-| `conversations` | owned via `conversation_participants` join | join scope |
-| `groups` | membership via `group_members`; only a creator col on the row | join scope |
-| `group_members` | polymorphic member (`grm_foreign_key_id` + `grm_grp_group_id`) | member = me |
-
-When Phase 3 ships, the trivial **OR-of-columns** form unlocks `messages` and
-`bookings` (the two highest-value conversational targets) alongside bucket A; the
-polymorphic/join cases follow with a richer scope declaration.
-
-### D — Admin-only / never owner-scoped (2)
-
-`agent_files` (system-internal agent instructions — sensitive), `coupon_codes`
-(affiliate/marketing config — admin surface).
+Member read-scoping tests live with the
+[member-access spec](../joinery_ai_chat_member_access.md).

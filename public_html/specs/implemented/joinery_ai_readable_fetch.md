@@ -1,6 +1,6 @@
 # Joinery AI — Reader-Mode Page Fetching
 
-**Status:** Active — awaiting implementation
+**Status:** Implemented
 **Plugin:** `joinery_ai`
 **Last Updated:** 2026-06-26
 **Touches:** `fetch_url` recipe tool (shared by recipes and the forthcoming
