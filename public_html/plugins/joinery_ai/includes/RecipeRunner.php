@@ -3,7 +3,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.p
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderFactory.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunContext.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeToolRegistry.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AgentLoop.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/CostGuard.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelSchemaBuilder.php'));
@@ -23,25 +23,12 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
  */
 class RecipeRunner {
 
-    /** Max output tokens per individual API call. The run-wide budget is
-     *  enforced separately via $recipe->rcp_max_tokens. */
-    const PER_CALL_MAX_TOKENS = 4096;
-
-    /** Hard wall-clock timeout per run (sync mode only). Phase 5 raises this
-     *  via async workers. */
-    const WALL_CLOCK_SECONDS = 90;
-
-    /** Abort the run if this many consecutive tool calls return is_error. */
-    const CONSECUTIVE_TOOL_ERROR_LIMIT = 3;
-
     /** Active provider for the current run — set in run(), read by
      *  recordTokens() for cost estimation. The runner is static and
      *  single-run-at-a-time, so a static member is sufficient. */
     private static $active_provider = null;
 
     public static function run(RecipeRun $run): void {
-        $started = microtime(true);
-
         try {
             $recipe = self::loadRecipe($run);
             $ctx = new RecipeRunContext($recipe, $run);
@@ -89,134 +76,23 @@ class RecipeRunner {
             $run->set('rcr_workspace_before', (string)$recipe->get('rcp_workspace'));
             $run->save();
 
-            $provider = self::buildProvider();
+            // The recipe's pinned model selects the provider (claude-* →
+            // Anthropic, else local). A recipe that pins no model follows the
+            // global-default provider and that provider's default model.
+            $model_pref = (string)$recipe->get('rcp_model');
+            $provider = LlmProviderFactory::forModel($model_pref);
             self::$active_provider = $provider;
             $allowed_tools = self::resolveAllowedTools($recipe);
-            $tool_schemas = RecipeToolRegistry::schemasFor($allowed_tools);
-            $unknown = RecipeToolRegistry::unknown($allowed_tools);
-            foreach ($unknown as $name) {
-                $ctx->appendToolCall([
-                    'name' => $name,
-                    'note' => 'tool not found in registry; ignored',
-                    'is_error' => true,
-                ]);
-            }
-
+            $model = $model_pref !== '' ? $model_pref : $provider->defaultModel();
             $system = self::buildSystemPrompt($recipe, $ctx);
             $messages = [['role' => 'user', 'content' => 'Run the recipe now.']];
-
             $max_iterations = max(1, (int)$recipe->get('rcp_max_iterations'));
             $token_budget   = max(1000, (int)$recipe->get('rcp_max_tokens'));
-            $tokens_input = 0;
-            $tokens_output = 0;
-            $tokens_cache_write = 0;
-            $tokens_cache_read = 0;
-            $consecutive_tool_errors = 0;
-            $final_text = '';
 
-            for ($iter = 0; $iter < $max_iterations; $iter++) {
-                // Mid-run kill flag — admin clicked Stop on a runaway recipe.
-                // One round-trip read against the run row already in memory.
-                if (self::isKillRequested($run)) {
-                    self::finishCancelled($run, $recipe,
-                        $tokens_input, $tokens_output, $tokens_cache_write, $tokens_cache_read);
-                    return;
-                }
-                if (microtime(true) - $started > self::WALL_CLOCK_SECONDS) {
-                    self::finishTimeout($run, $recipe, 'wall-clock timeout',
-                        $tokens_input, $tokens_output, $tokens_cache_write, $tokens_cache_read);
-                    return;
-                }
-                if ($tokens_input + $tokens_output >= $token_budget) {
-                    self::finishTimeout($run, $recipe, 'token budget exhausted',
-                        $tokens_input, $tokens_output, $tokens_cache_write, $tokens_cache_read);
-                    return;
-                }
+            $result = AgentLoop::run($provider, $model, $system, $messages,
+                $allowed_tools, $ctx, $max_iterations, $token_budget);
 
-                $params = [
-                    'model'      => $recipe->get('rcp_model') ?: $provider->defaultModel(),
-                    'max_tokens' => self::PER_CALL_MAX_TOKENS,
-                    'system'     => $system,
-                    'messages'   => $messages,
-                ];
-                if (!empty($tool_schemas)) {
-                    $params['tools'] = $tool_schemas;
-                }
-
-                $response = $provider->createMessage($params);
-
-                $usage = $response['usage'] ?? [];
-                $tokens_input        += (int)($usage['input_tokens'] ?? 0);
-                $tokens_output       += (int)($usage['output_tokens'] ?? 0);
-                $tokens_cache_write  += (int)($usage['cache_creation_input_tokens'] ?? 0);
-                $tokens_cache_read   += (int)($usage['cache_read_input_tokens'] ?? 0);
-
-                $stop_reason = $response['stop_reason'] ?? '';
-                $content     = $response['content'] ?? [];
-
-                $tool_uses = [];
-                $iter_text = '';
-                foreach ($content as $block) {
-                    if (($block['type'] ?? '') === 'text') {
-                        $iter_text .= ($block['text'] ?? '');
-                    } elseif (($block['type'] ?? '') === 'tool_use') {
-                        $tool_uses[] = $block;
-                    }
-                }
-
-                if ($stop_reason === 'end_turn' || empty($tool_uses)) {
-                    $final_text = $iter_text;
-                    break;
-                }
-
-                if ($stop_reason === 'refusal') {
-                    self::finishFailed($run, $recipe,
-                        'Model refused: ' . ($iter_text ?: '(no message)'),
-                        $tokens_input, $tokens_output, $tokens_cache_write, $tokens_cache_read);
-                    return;
-                }
-
-                // Append assistant turn, then build a user turn of tool_result
-                // blocks for the next iteration. Normalize tool_use.input so an
-                // empty {} from the API doesn't round-trip as a JSON [] (PHP
-                // assoc-decode collapses {} into [] which json_encode emits as
-                // an array — Anthropic then rejects with "Input should be an
-                // object").
-                $messages[] = ['role' => 'assistant', 'content' => self::normalizeAssistantContent($content)];
-
-                $tool_result_blocks = [];
-                $iter_had_error = false;
-                foreach ($tool_uses as $tu) {
-                    $result_block = self::executeToolUse($tu, $ctx);
-                    $tool_result_blocks[] = $result_block;
-                    if (!empty($result_block['is_error'])) $iter_had_error = true;
-                }
-
-                if ($iter_had_error) {
-                    $consecutive_tool_errors++;
-                    if ($consecutive_tool_errors >= self::CONSECUTIVE_TOOL_ERROR_LIMIT) {
-                        self::finishFailed($run, $recipe,
-                            'consecutive_tool_failures: aborting after ' . $consecutive_tool_errors
-                                . ' iterations of tool errors',
-                            $tokens_input, $tokens_output, $tokens_cache_write, $tokens_cache_read);
-                        return;
-                    }
-                } else {
-                    $consecutive_tool_errors = 0;
-                }
-
-                $messages[] = ['role' => 'user', 'content' => $tool_result_blocks];
-            }
-
-            if ($final_text === '') {
-                self::finishIncomplete($run, $recipe, 'iteration budget exhausted at '
-                    . $max_iterations . ' iterations',
-                    $tokens_input, $tokens_output, $tokens_cache_write, $tokens_cache_read);
-                return;
-            }
-
-            self::finishSuccess($run, $recipe, $final_text,
-                $tokens_input, $tokens_output, $tokens_cache_write, $tokens_cache_read);
+            self::finishFromResult($run, $recipe, $result, $max_iterations);
 
         } catch (LlmProviderException $e) {
             $code = self::classifyProviderError($e);
@@ -229,6 +105,48 @@ class RecipeRunner {
             $run->set('rcr_error', $e->getMessage());
             $run->set('rcr_completed_time', gmdate('Y-m-d H:i:s'));
             $run->save();
+        }
+    }
+
+    /**
+     * Map the shared AgentLoop result onto the recipe's terminal states.
+     * The recipe context never returns a pending_action (it doesn't require
+     * confirmation), so that branch is defensive only.
+     */
+    private static function finishFromResult(RecipeRun $run, Recipe $recipe, array $result, int $max_iterations): void {
+        $in = (int)$result['input_tokens'];
+        $out = (int)$result['output_tokens'];
+        $cw = (int)$result['cache_write_tokens'];
+        $cr = (int)$result['cache_read_tokens'];
+
+        switch ($result['stop_reason']) {
+            case 'end_turn':
+            case 'max_iterations':
+                if ($result['assistant_text'] !== '') {
+                    self::finishSuccess($run, $recipe, $result['assistant_text'], $in, $out, $cw, $cr);
+                } else {
+                    self::finishIncomplete($run, $recipe,
+                        'iteration budget exhausted at ' . $max_iterations . ' iterations',
+                        $in, $out, $cw, $cr);
+                }
+                break;
+            case 'cancelled':
+                self::finishCancelled($run, $recipe, $in, $out, $cw, $cr);
+                break;
+            case 'wall_clock':
+                self::finishTimeout($run, $recipe, 'wall-clock timeout', $in, $out, $cw, $cr);
+                break;
+            case 'token_budget':
+                self::finishTimeout($run, $recipe, 'token budget exhausted', $in, $out, $cw, $cr);
+                break;
+            case 'refusal':
+            case 'tool_errors':
+                self::finishFailed($run, $recipe, $result['detail'], $in, $out, $cw, $cr);
+                break;
+            default:
+                self::finishFailed($run, $recipe,
+                    'unexpected loop stop: ' . $result['stop_reason'], $in, $out, $cw, $cr);
+                break;
         }
     }
 
@@ -359,19 +277,6 @@ class RecipeRunner {
     }
 
     /**
-     * Has the admin requested cancellation of this run? Re-reads the row's
-     * kill flag from the database (rather than the in-memory copy) — the
-     * Stop button updates the DB directly, so we can't trust the in-memory
-     * row to reflect it.
-     */
-    private static function isKillRequested(RecipeRun $run): bool {
-        $db = DbConnector::get_instance()->get_db_link();
-        $q = $db->prepare("SELECT rcr_kill_requested FROM rcr_recipe_runs WHERE rcr_run_id = ?");
-        $q->execute([(int)$run->key]);
-        return (bool)$q->fetchColumn();
-    }
-
-    /**
      * Map a provider error to a stable error code so the admin can tell config
      * from infrastructure. Providers throw LlmProviderException with the
      * upstream message embedded; we string-match on the body because the
@@ -416,10 +321,6 @@ class RecipeRunner {
         $r = new Recipe($rid, true);
         if (!$r->key) throw new Exception("Recipe $rid not found.");
         return $r;
-    }
-
-    private static function buildProvider(): LlmProviderInterface {
-        return LlmProviderFactory::build();
     }
 
     private static function resolveAllowedTools(Recipe $recipe): array {
@@ -594,78 +495,6 @@ class RecipeRunner {
              . "database exactly — do not abbreviate or alias them. Models "
              . "not listed here cannot be queried.\n\n"
              . implode("\n", $sections);
-    }
-
-    private static function normalizeAssistantContent(array $content): array {
-        foreach ($content as &$block) {
-            if (($block['type'] ?? '') === 'tool_use') {
-                if (!isset($block['input']) || (is_array($block['input']) && empty($block['input']))) {
-                    $block['input'] = new stdClass();
-                }
-            }
-        }
-        return $content;
-    }
-
-    private static function executeToolUse(array $tool_use, RecipeRunContext $ctx): array {
-        $name = $tool_use['name'] ?? '';
-        $id   = $tool_use['id']   ?? '';
-        $input = $tool_use['input'] ?? [];
-        $started = microtime(true);
-
-        // Record a "started but not completed" entry before the call (the
-        // context flushes it to the DB so the dispatcher reaper can name the
-        // last call that started if the run hangs). The completion fields are
-        // filled in and handed back through finishToolCall() once the call
-        // returns.
-        $entry = [
-            'name'           => $name,
-            'input'          => $input,
-            'started_time'   => gmdate('Y-m-d H:i:s.u'),
-            'completed_time' => null,
-            'is_error'       => false,
-            'output'         => null,
-            'duration_ms'    => null,
-        ];
-        $ctx->beginToolCall($entry);
-
-        $finish = function (string $content, bool $is_error) use (&$entry, $ctx, $started): void {
-            $entry['completed_time'] = gmdate('Y-m-d H:i:s.u');
-            $entry['is_error']       = $is_error;
-            $entry['output']         = $content;
-            $entry['duration_ms']    = (int)((microtime(true) - $started) * 1000);
-            $ctx->finishToolCall($entry);
-        };
-
-        $tool = RecipeToolRegistry::get($name);
-        if ($tool === null) {
-            $msg = "Tool '$name' is not available to this recipe.";
-            $finish($msg, true);
-            return ['type' => 'tool_result', 'tool_use_id' => $id, 'content' => $msg, 'is_error' => true];
-        }
-
-        try {
-            $result = $tool->execute(is_array($input) ? $input : [], $ctx);
-        } catch (Exception $e) {
-            $msg = get_class($e) . ': ' . $e->getMessage();
-            $finish($msg, true);
-            return ['type' => 'tool_result', 'tool_use_id' => $id, 'content' => $msg, 'is_error' => true];
-        }
-
-        $is_error = false;
-        $content = '';
-        if (is_array($result)) {
-            $is_error = !empty($result['is_error']);
-            $content  = (string)($result['content'] ?? '');
-        } else {
-            $content = (string)$result;
-        }
-
-        $finish($content, $is_error);
-
-        $block = ['type' => 'tool_result', 'tool_use_id' => $id, 'content' => $content];
-        if ($is_error) $block['is_error'] = true;
-        return $block;
     }
 
     private static function finishSuccess(RecipeRun $run, Recipe $recipe, string $text,

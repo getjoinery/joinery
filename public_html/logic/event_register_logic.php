@@ -31,6 +31,7 @@ function event_register_logic_descriptor(): array {
 		'description'      => 'Register the current user for an event.',
 		'requires_session' => true,
 		'mutates'          => true,
+		'ai_agent'         => 'confirm',
 		'input'            => [
 			'evt_event_id' => ['type' => 'int', 'required' => true, 'label' => 'Event ID'],
 			'instance_date' => ['type' => 'date', 'required' => false, 'label' => 'Instance date (recurring events)'],

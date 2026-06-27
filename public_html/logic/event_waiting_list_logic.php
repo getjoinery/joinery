@@ -129,6 +129,7 @@ function event_waiting_list_logic_descriptor(): array {
 		'description'      => 'Add the current user (or a guest) to an event\'s waiting list.',
 		'requires_session' => false,
 		'mutates'          => true,
+		'ai_agent'         => 'confirm',
 		'input'            => [
 			'event_id' => ['type' => 'int', 'required' => true, 'label' => 'Event ID'],
 			'usr_first_name' => ['type' => 'string', 'required' => false, 'label' => 'First name (guests)'],

@@ -162,6 +162,7 @@ function account_edit_logic_descriptor(): array {
 		'description'      => 'Update the current user\'s profile fields.',
 		'requires_session' => true,
 		'mutates'          => true,
+		'ai_agent'         => 'confirm',
 		'input'            => [
 			'usr_first_name' => ['type' => 'string', 'required' => true, 'label' => 'First name'],
 			'usr_last_name' => ['type' => 'string', 'required' => true, 'label' => 'Last name'],

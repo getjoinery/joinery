@@ -45,6 +45,9 @@ function admin_<?= $entity_snake ?>_edit_logic_descriptor(): array {
 		'description'      => 'Create or update a <?= $title ?> (admin).',
 		'requires_session' => true,
 		'mutates'          => true,
+		// Admin edit actions are not exposed to the AI agent by default.
+		// Uncomment to make this callable in chat (confirmed before it runs):
+		// 'ai_agent'         => 'confirm',
 		'input'            => array(
 			'edit_primary_key_value' => array('type' => 'int', 'required' => false, 'label' => '<?= $title ?> ID (omit to create)'),
 <?php foreach ($descriptor_inputs as $di): ?>

@@ -116,13 +116,15 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
         $model_list = array_values(array_filter($model_list, fn($m) => isset($live_models[$m])));
         $recipe->set('rcp_allowed_models', $model_list);
 
-        // Allowed actions — same pattern. Strip stale entries against the
-        // live action registry.
+        // Allowed actions — same pattern. Strip entries that aren't live AND
+        // agent-exposed; a non-exposed action would only be refused at invoke
+        // time, so it has no business on the allow-list.
         $actions_post = $input['rcp_allowed_actions'] ?? [];
         if (!is_array($actions_post)) $actions_post = [];
         $action_list = array_values(array_filter(array_map('strval', $actions_post), 'strlen'));
         $live_actions = ActionRegistry::all();
-        $action_list = array_values(array_filter($action_list, fn($a) => isset($live_actions[$a])));
+        $action_list = array_values(array_filter($action_list, fn($a) =>
+            isset($live_actions[$a]) && ActionRegistry::isAgentCallable($live_actions[$a]['descriptor'])));
         $recipe->set('rcp_allowed_actions', $action_list);
 
         // Tainted-writes opt-in. The save-time gate below verifies this is

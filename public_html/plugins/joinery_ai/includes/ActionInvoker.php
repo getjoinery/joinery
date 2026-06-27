@@ -13,8 +13,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
  *      Refuses any name not on the list, regardless of whether the
  *      underlying descriptor has mutates: true.
  *   2. Action registered — descriptor and _logic() both exist.
- *   3. Input validation/coercion via the descriptor's input schema.
- *   4. Call _logic() and coerce the LogicResult into the response envelope.
+ *   3. Agent-exposed — the descriptor declares ai_agent (default-deny). An
+ *      action that does not opt in is never callable, even if allowlisted.
+ *   4. Input validation/coercion via the descriptor's input schema.
+ *   5. Call _logic() and coerce the LogicResult into the response envelope.
  *
  * The full validation gauntlet (cross-record invariants, hooks, external
  * effects) runs by construction inside _logic() — that's the entire reason
@@ -33,6 +35,14 @@ class ActionInvoker {
 
         $descriptor = $info['descriptor'];
         $logic_fn = $info['logic_function'];
+
+        if (!ActionRegistry::isAgentCallable($descriptor)) {
+            throw new InvalidArgumentException(
+                "Action '$name' is not exposed to the AI agent. Add "
+                . "'ai_agent' => 'confirm' (or 'auto') to its "
+                . "{$name}_logic_descriptor() to make it callable."
+            );
+        }
 
         $coerced = DescriptorValidator::coerce($descriptor, $input);
 

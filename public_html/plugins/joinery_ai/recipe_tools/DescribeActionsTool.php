@@ -57,6 +57,10 @@ class DescribeActionsTool implements RecipeToolInterface {
         foreach ($allowed as $name) {
             if (!isset($registry[$name])) continue;
             $d = $registry[$name]['descriptor'];
+            // Default-deny: never advertise an action that isn't agent-exposed,
+            // even if it slipped onto the allow-list — invoke_action would
+            // refuse it anyway.
+            if (!ActionRegistry::isAgentCallable($d)) continue;
             $mutates = !empty($d['mutates']);
             if ($filter === 'mutates_only' && !$mutates) continue;
             if ($filter === 'reads_only' && $mutates) continue;

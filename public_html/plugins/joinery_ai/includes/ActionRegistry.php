@@ -48,6 +48,38 @@ class ActionRegistry {
         return $out;
     }
 
+    /** The valid values of a descriptor's ai_agent key. */
+    const AI_AGENT_TIERS = ['confirm', 'auto'];
+
+    /**
+     * Is this action exposed to the AI agent? Default-deny: an action is
+     * callable only if its descriptor explicitly declares ai_agent as one of
+     * AI_AGENT_TIERS. A descriptor with no ai_agent key (a stray *_logic.php
+     * that happens to define a descriptor) is never silently callable.
+     */
+    public static function isAgentCallable(array $descriptor): bool {
+        return in_array($descriptor['ai_agent'] ?? null, self::AI_AGENT_TIERS, true);
+    }
+
+    /**
+     * The confirmation tier for an agent-callable action: 'confirm' (a
+     * mutating call is held for human sign-off in chat) or 'auto' (runs
+     * inline). Returns null for an action that isn't agent-callable at all.
+     */
+    public static function agentTier(array $descriptor): ?string {
+        $tier = $descriptor['ai_agent'] ?? null;
+        return in_array($tier, self::AI_AGENT_TIERS, true) ? $tier : null;
+    }
+
+    /** Names of every agent-callable action. */
+    public static function agentCallableActionNames(): array {
+        $out = [];
+        foreach (self::all() as $name => $info) {
+            if (self::isAgentCallable($info['descriptor'])) $out[] = $name;
+        }
+        return $out;
+    }
+
     private static function scan(): void {
         self::$actions = [];
 

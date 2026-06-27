@@ -88,6 +88,7 @@ function phone_numbers_edit_logic_descriptor(): array {
 		'description'      => 'Create or update the current user\'s phone number.',
 		'requires_session' => true,
 		'mutates'          => true,
+		'ai_agent'         => 'confirm',
 		'input'            => [
 			'edit_primary_key_value' => ['type' => 'int', 'required' => false, 'label' => 'Phone number ID (omit to create)'],
 			'phn_cco_country_code_id' => ['type' => 'string', 'required' => false, 'label' => 'Country code'],

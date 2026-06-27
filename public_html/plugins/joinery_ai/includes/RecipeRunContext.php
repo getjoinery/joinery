@@ -32,12 +32,53 @@ class RecipeRunContext {
      */
     public $untrusted_input_nonce;
 
+    /** Hard wall-clock timeout for a recipe run (sync mode). */
+    const WALL_CLOCK_SECONDS = 90;
+
+    /** Monotonic clock captured when the context is built; the wall-clock
+     *  guard in shouldContinue() measures elapsed time from here. */
+    public $loop_started_at;
+
     public function __construct(Recipe $recipe, RecipeRun $run) {
         $this->recipe = $recipe;
         $this->run = $run;
         $this->owner_user_id = (int)$recipe->get('rcp_owner_user_id');
         $this->owner_timezone = self::resolveTimezone($this->owner_user_id);
         $this->untrusted_input_nonce = bin2hex(random_bytes(4));
+        $this->loop_started_at = microtime(true);
+    }
+
+    /** The user whose identity the loop acts under (owner-or-staff writes,
+     *  SessionControl-reading logic files, the risk heuristic's owner check). */
+    public function actingUserId(): int {
+        return $this->owner_user_id;
+    }
+
+    /**
+     * Per-iteration continuation guard consulted by AgentLoop. Returns a
+     * {stop_reason, detail} pair to halt the turn, or null to continue. Recipe
+     * guards: the admin's mid-run Stop (kill flag) and the hard wall clock.
+     */
+    public function shouldContinue(): ?array {
+        if ($this->isKillRequested()) {
+            return ['stop_reason' => 'cancelled', 'detail' => 'cancelled by admin'];
+        }
+        if (microtime(true) - $this->loop_started_at > self::WALL_CLOCK_SECONDS) {
+            return ['stop_reason' => 'wall_clock', 'detail' => 'wall-clock timeout'];
+        }
+        return null;
+    }
+
+    /**
+     * Has the admin requested cancellation of this run? Re-reads the row's
+     * kill flag from the database (rather than the in-memory copy) — the Stop
+     * button updates the DB directly, so the in-memory row can't be trusted.
+     */
+    private function isKillRequested(): bool {
+        $db = DbConnector::get_instance()->get_db_link();
+        $q = $db->prepare("SELECT rcr_kill_requested FROM rcr_recipe_runs WHERE rcr_run_id = ?");
+        $q->execute([(int)$this->run->key]);
+        return (bool)$q->fetchColumn();
     }
 
     /**
