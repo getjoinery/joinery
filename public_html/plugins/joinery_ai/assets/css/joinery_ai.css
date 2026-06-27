@@ -70,3 +70,10 @@
 .joai-btn:disabled { opacity: 0.6; cursor: default; }
 .joai-btn-primary { background: #0d6efd; border-color: #0d6efd; color: #fff; }
 .joai-btn-primary:hover { background: #0b5ed7; }
+
+/* chat capability toggles in the status strip */
+.joai-chat-toggle { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.8rem;
+                    color: #444; cursor: pointer; user-select: none; }
+.joai-chat-toggle input { margin: 0; cursor: pointer; }
+.joai-chat-toggle.is-disabled { color: #aaa; cursor: not-allowed; }
+.joai-chat-toggle.is-disabled input { cursor: not-allowed; }

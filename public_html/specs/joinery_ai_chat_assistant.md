@@ -282,9 +282,8 @@ Neither is `$ai_readable` — the chat does not query its own transcript tables.
 | `aic_owner_user_id` | int4 | the acting user |
 | `aic_title` | varchar(255) | auto-derived from first user message; editable |
 | `aic_model` | varchar(100) | model id (defaults via active provider, like recipes) |
-| `aic_allowed_tools` | jsonb | tool names the assistant may use |
-| `aic_allowed_models` | jsonb | models in scope for `query_model` |
-| `aic_allowed_actions` | jsonb | actions in scope for `invoke_action` |
+| `aic_data_access` | bool | capability toggle — site-data tools + model scope (default off) |
+| `aic_web_search` | bool | capability toggle — web tool group (default off) |
 | `aic_total_input_tokens` | int8 | running total, incremented each turn |
 | `aic_total_output_tokens` | int8 | running total, incremented each turn |
 | `aic_create_time` | timestamp(6) | `now()` |
@@ -318,18 +317,23 @@ turn; tool exchanges live in `aim_tool_calls`.
 
 ## Tool access
 
-Default `aic_allowed_tools` for a new conversation is the **full set** — reads inline,
-writes via the gate:
+A new conversation is a plain conversational assistant; capabilities are opt-in per
+chat via two toggles, **both default off** (see
+[`joinery_ai_chat_capabilities.md`](implemented/joinery_ai_chat_capabilities.md) for the full
+design):
 
-- Read/inline: `web_search` (needs `joinery_ai_brave_search_api_key`), `fetch_url`,
-  `get_stock_data`, `query_model`, `get_my_notes`, `save_note`, `describe_actions`.
-- Write/gated: `invoke_action` (only actions whose descriptor declares `ai_agent`, and
-  only those on the conversation's allowed-actions list; confirmation per the risk
+- **Data access** → the site-data tool group: `query_model`, `describe_models`,
+  `get_my_notes`, `save_note`, `describe_actions`, and the gated writers
+  `invoke_action` (only `ai_agent`-exposed actions; confirmation per the risk
   heuristic) and `create_model` / `update_model` / `delete_model` (confirmation per the
-  risk heuristic).
+  risk heuristic). Turning it on also brings every `$ai_readable` model into scope; off
+  means no model information enters the prompt at all.
+- **Web search** → `web_search` (needs `joinery_ai_brave_search_api_key`), `fetch_url`,
+  `get_stock_data`.
 
-Per-conversation allowlists (`aic_allowed_*`) let the user widen/narrow which models
-and actions are in scope; the defaults are conservative.
+The effective tool list is derived from the two flags at turn time — there is no stored
+allowlist. Model schemas load lazily via `describe_models` (the prompt carries only a
+name catalog).
 
 ---
 
@@ -390,8 +394,8 @@ surfaces real spend without a backfill gap.
 - `joinery_ai_chat_enabled` (default `true`).
 - `joinery_ai_chat_max_iterations` (default `8`) — tool-loop ceiling per turn.
 - `joinery_ai_chat_max_tokens` (default `4000`) — max output tokens per turn.
-- `joinery_ai_chat_default_tools` (default the read set + `invoke_action`,
-  `describe_actions`) — seeds new conversations.
+
+(Per-chat capabilities are conversation columns, not settings — see the capabilities spec.)
 
 ---
 

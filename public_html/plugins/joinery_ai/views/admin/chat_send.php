@@ -50,12 +50,13 @@ if ($conversation_id > 0) {
         chat_send_fail('Conversation not found.');
     }
 } else {
+    // New conversation — seed capability flags from the composer toggles
+    // (both default off if not sent).
     $conversation = new AiConversation(NULL);
     $conversation->set('aic_owner_user_id', $uid);
     $conversation->set('aic_model', ChatRunner::defaultModel());
-    $conversation->set('aic_allowed_tools', ChatRunner::defaultAllowedTools());
-    $conversation->set('aic_allowed_models', ChatRunner::defaultAllowedModels());
-    $conversation->set('aic_allowed_actions', ChatRunner::defaultAllowedActions());
+    $conversation->set('aic_data_access', !empty($_POST['data_access']) ? 't' : 'f');
+    $conversation->set('aic_web_search', !empty($_POST['web_search']) ? 't' : 'f');
     $conversation->set('aic_title', chat_derive_title($message));
     $conversation->prepare();
     $conversation->save();
