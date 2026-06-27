@@ -43,6 +43,7 @@ function terms_accept_logic_descriptor(): array {
 		'description'      => 'Capture acceptance of the Terms of Use and Privacy Policy.',
 		'requires_session' => true,
 		'mutates'          => true,
+		'ai_agent'         => 'confirm',
 		'input'            => [
 			'accept_terms' => ['type' => 'checkbox', 'required' => true, 'label' => 'I agree to the Terms of Use and Privacy Policy'],
 		],

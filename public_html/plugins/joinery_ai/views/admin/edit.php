@@ -135,21 +135,22 @@ $settings = Globalvars::get_instance();
 
 // Model options come from the active provider, so switching provider re-skins
 // the dropdown without touching this view. If the recipe's stored model isn't
-// offered by the active provider (provider switched after authoring), append it
+// served by a configured provider (its provider isn't set up), append it
 // flagged so the value is preserved and the mismatch is visible rather than
 // silently overwritten on save.
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderFactory.php'));
 try {
-    $model_options = LlmProviderFactory::build()->models();
+    // The model selects the provider, so offer every model from every
+    // configured provider — not just the global-default one.
+    $model_options = LlmProviderFactory::allModels();
 } catch (LlmProviderException $e) {
-    // Provider isn't configured yet (e.g. local selected with no model, or no
-    // API key). Don't crash the edit page — fall back to no preset options; the
-    // stored model is still preserved below.
+    // No provider configured yet. Don't crash the edit page — fall back to no
+    // preset options; the stored model is still preserved below.
     $model_options = [];
 }
 $stored_model = (string)$recipe->get('rcp_model');
 if ($stored_model !== '' && !isset($model_options[$stored_model])) {
-    $model_options[$stored_model] = "$stored_model — unavailable under current provider";
+    $model_options[$stored_model] = "$stored_model — unavailable (its provider isn't configured)";
 }
 
 $formwriter->dropinput('rcp_model', 'Model', [
@@ -300,9 +301,16 @@ if (empty($action_map)) {
     echo '<p class="text-muted">No actions registered. Add a '
        . '<code>{action}_logic_descriptor()</code> function to a logic file to expose it.</p>';
 } else {
+    $hidden_actions = 0;
     foreach ($action_map as $action_name => $info) {
-        $checked = in_array($action_name, $selected_actions, true) ? ' checked' : '';
         $d = $info['descriptor'];
+        // Only agent-exposed actions (descriptor declares ai_agent) are
+        // selectable — anything else would be refused at invoke time.
+        if (!ActionRegistry::isAgentCallable($d)) {
+            $hidden_actions++;
+            continue;
+        }
+        $checked = in_array($action_name, $selected_actions, true) ? ' checked' : '';
         $desc = htmlspecialchars($d['description'] ?? '');
         $mutates = !empty($d['mutates']);
         echo '<div class="form-check">';
@@ -324,6 +332,12 @@ if (empty($action_map)) {
                . '</code></small>';
         }
         echo '</label></div>';
+    }
+    if ($hidden_actions > 0) {
+        echo '<p class="text-muted small mt-2 mb-0">' . (int)$hidden_actions
+           . ' registered action' . ($hidden_actions === 1 ? '' : 's')
+           . ' not shown — not exposed to the AI agent. Add '
+           . '<code>ai_agent</code> to the descriptor to make one selectable.</p>';
     }
 }
 $stale_actions = array_values(array_diff($selected_actions, array_keys($action_map)));

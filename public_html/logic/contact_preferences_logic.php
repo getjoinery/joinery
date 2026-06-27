@@ -117,6 +117,7 @@ function contact_preferences_logic_descriptor(): array {
 		'description'      => 'Update the user\'s mailing list subscriptions.',
 		'requires_session' => true,
 		'mutates'          => true,
+		'ai_agent'         => 'confirm',
 		'input'            => [
 			'new_list_subscribes' => ['type' => 'string', 'required' => false, 'label' => 'Mailing list IDs to subscribe to (array)'],
 		],

@@ -211,6 +211,7 @@ function register_logic_descriptor(): array {
 		'description'      => 'Create a new user account.',
 		'requires_session' => false,
 		'mutates'          => true,
+		'ai_agent'         => 'confirm',
 		'input'            => [
 			'usr_email' => ['type' => 'email', 'required' => true, 'label' => 'Email address'],
 			'usr_first_name' => ['type' => 'string', 'required' => true, 'label' => 'First name'],

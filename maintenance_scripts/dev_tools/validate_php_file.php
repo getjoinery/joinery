@@ -175,6 +175,9 @@ class MethodExistenceTest {
         // Check CSS-kit style policy
         $this->checkStylePolicy();
 
+        // Check AI action descriptor contract
+        $this->checkDescriptorContract();
+
         // Summary
         $this->printSummary();
     }
@@ -1169,6 +1172,60 @@ class MethodExistenceTest {
         }
 
         echo sprintf("\n⚠️  Total style-policy advisories: %d\n\n", count($issues));
+    }
+
+    /**
+     * AI action descriptor contract. A *_logic_descriptor() function exposes
+     * its action to the AI agent only if it declares an 'ai_agent' key
+     * ('confirm' or 'auto') — default-deny. Surface the state of each
+     * descriptor so a developer who means an action to be agent-callable
+     * knows to opt it in; absent is a valid choice (keeps the action private).
+     * Advisory only — does not change exit status.
+     */
+    private function checkDescriptorContract() {
+        echo "ACTION DESCRIPTOR CONTRACT\n";
+        echo str_repeat("-", 80) . "\n";
+
+        $content = file_get_contents($this->file_path);
+        if (!preg_match_all('/function\s+([a-zA-Z0-9_]+_logic_descriptor)\s*\(/', $content, $m)) {
+            echo "✓ No action descriptors in this file\n\n";
+            return;
+        }
+
+        $issues = [];
+        foreach ($m[1] as $fn) {
+            if (!function_exists($fn)) continue;
+            try {
+                $d = call_user_func($fn);
+            } catch (Throwable $e) {
+                continue;
+            }
+            if (!is_array($d)) continue;
+
+            $action = substr($fn, 0, -strlen('_logic_descriptor'));
+            $ai_agent = $d['ai_agent'] ?? null;
+            $mutates = !empty($d['mutates']);
+
+            if ($ai_agent === null) {
+                $issues[] = sprintf("  ⚠️  %s%s: no 'ai_agent' key — NOT callable by the AI agent. "
+                    . "Add 'ai_agent' => 'confirm' (or 'auto') to expose it, or leave as-is to keep it private.",
+                    $action, $mutates ? ' (mutating)' : '');
+            } elseif (!in_array($ai_agent, ['confirm', 'auto'], true)) {
+                $issues[] = sprintf("  ✗ %s: invalid ai_agent '%s' — must be 'confirm' or 'auto'.",
+                    $action, is_scalar($ai_agent) ? (string)$ai_agent : gettype($ai_agent));
+            }
+        }
+
+        if (!empty($issues)) {
+            echo "Advisories:\n";
+            foreach ($issues as $issue) {
+                echo $issue . "\n";
+            }
+        } else {
+            echo "✓ All action descriptors declare a valid ai_agent tier\n";
+        }
+
+        echo sprintf("\n⚠️  Total descriptor advisories: %d\n\n", count($issues));
     }
 
     /**

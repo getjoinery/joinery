@@ -710,6 +710,7 @@ function change_tier_logic_descriptor(): array {
 		'description'      => 'Change the current user\'s subscription tier. action=upgrade or downgrade requires product_id; cancel and reactivate do not.',
 		'requires_session' => true,
 		'mutates'          => true,
+		'ai_agent'         => 'confirm',
 		'input'            => [
 			'action' => ['type' => 'select', 'required' => true, 'label' => 'Action', 'options' => ['upgrade', 'downgrade', 'cancel', 'reactivate']],
 			'product_id' => ['type' => 'int', 'required' => false, 'label' => 'Product ID (upgrade / downgrade)'],

@@ -226,7 +226,7 @@ reached through the context, so neither surface drags the other's bookkeeping:
   Each surface decides what that means —
   `RecipeRunContext` persists immediately to `rcr_tool_calls` (preserving the reaper
   trace); `ChatTurnContext` accumulates in memory and saves with the message
-  (`cms_tool_calls`), where there is no hang-and-reap path.
+  (`aim_tool_calls`), where there is no hang-and-reap path.
 - **Continuation hooks.** Recipe-only loop guards (kill-flag re-read, wall-clock
   timeout) are exposed as an optional `ctx` "should-continue" check; the shared
   consecutive-tool-error abort stays in `AgentLoop`. A chat turn supplies its own
@@ -260,51 +260,60 @@ model and the UI simple.
 Two new data classes in `plugins/joinery_ai/data/`, auto-schema'd (no migration),
 soft-deleted, owner-scoped at the row level, permission-5 to use (any admin).
 
-### `Conversation` — `cnv_conversations` (prefix `cnv`)
+These are **distinct from the platform's human-to-human messaging tables** and must
+not reuse them: core messaging (`cnv_conversations` / `cnp_conversation_participants`
+/ `msg_messages`) is plain text with sender/recipient auth and many-participant
+grouping — no role, no tool-call trace, no token counts, no model id, no pending
+action. AI chat needs all of those, so reuse would mean nullable columns and
+`if (ai)…else…` branching polluting both systems. The AI tables therefore take their
+own prefixes, **`aic` / `aim`** — note core messaging already owns the `cnv` prefix,
+so the AI conversation table cannot use it.
+
+### `Conversation` — `aic_conversations` (prefix `aic`)
 
 | Column | Type | Notes |
 |---|---|---|
-| `cnv_conversation_id` | int8 serial | pk |
-| `cnv_owner_user_id` | int4 | the acting user |
-| `cnv_title` | varchar(255) | auto-derived from first user message; editable |
-| `cnv_model` | varchar(100) | model id (defaults via active provider, like recipes) |
-| `cnv_allowed_tools` | jsonb | tool names the assistant may use |
-| `cnv_allowed_models` | jsonb | models in scope for `query_model` |
-| `cnv_allowed_actions` | jsonb | actions in scope for `invoke_action` |
-| `cnv_total_input_tokens` | int8 | running total |
-| `cnv_total_output_tokens` | int8 | running total |
-| `cnv_create_time` | timestamp(6) | `now()` |
-| `cnv_update_time` | timestamp(6) | bumped each turn (thread ordering) |
-| `cnv_delete_time` | timestamp(6) | soft delete |
+| `aic_conversation_id` | int8 serial | pk |
+| `aic_owner_user_id` | int4 | the acting user |
+| `aic_title` | varchar(255) | auto-derived from first user message; editable |
+| `aic_model` | varchar(100) | model id (defaults via active provider, like recipes) |
+| `aic_allowed_tools` | jsonb | tool names the assistant may use |
+| `aic_allowed_models` | jsonb | models in scope for `query_model` |
+| `aic_allowed_actions` | jsonb | actions in scope for `invoke_action` |
+| `aic_total_input_tokens` | int8 | running total |
+| `aic_total_output_tokens` | int8 | running total |
+| `aic_create_time` | timestamp(6) | `now()` |
+| `aic_update_time` | timestamp(6) | bumped each turn (thread ordering) |
+| `aic_delete_time` | timestamp(6) | soft delete |
 
 `authenticate_write` mirrors `Recipe` (permission 5 floor; owner-or-staff via
 SystemBase). `MultiConversation` filters by owner + not-deleted, ordered by
-`cnv_update_time DESC`.
+`aic_update_time DESC`.
 
-### `ConversationMessage` — `cms_conversation_messages` (prefix `cms`)
+### `ConversationMessage` — `aim_conversation_messages` (prefix `aim`)
 
 | Column | Type | Notes |
 |---|---|---|
-| `cms_message_id` | int8 serial | pk |
-| `cms_conversation_id` | int8 | fk → `cnv_conversations` |
-| `cms_role` | varchar(20) | `user` \| `assistant` |
-| `cms_content` | text | message text |
-| `cms_tool_calls` | jsonb | per-turn tool trace (assistant rows) |
-| `cms_pending_action` | jsonb | proposed-but-unconfirmed mutating call, or null |
-| `cms_input_tokens` | int4 | assistant rows |
-| `cms_output_tokens` | int4 | assistant rows |
-| `cms_create_time` | timestamp(6) | `now()` — orders the transcript |
-| `cms_delete_time` | timestamp(6) | soft delete |
+| `aim_message_id` | int8 serial | pk |
+| `aim_conversation_id` | int8 | fk → `aic_conversations` |
+| `aim_role` | varchar(20) | `user` \| `assistant` |
+| `aim_content` | text | message text |
+| `aim_tool_calls` | jsonb | per-turn tool trace (assistant rows) |
+| `aim_pending_action` | jsonb | proposed-but-unconfirmed mutating call, or null |
+| `aim_input_tokens` | int4 | assistant rows |
+| `aim_output_tokens` | int4 | assistant rows |
+| `aim_create_time` | timestamp(6) | `now()` — orders the transcript |
+| `aim_delete_time` | timestamp(6) | soft delete |
 
 Deletion: deleting a `Conversation` cascades a soft delete to its messages
 (`$foreign_key_actions` on the message class). The system prompt is regenerated per
-turn; tool exchanges live in `cms_tool_calls`.
+turn; tool exchanges live in `aim_tool_calls`.
 
 ---
 
 ## Tool access
 
-Default `cnv_allowed_tools` for a new conversation is the **full set** — reads inline,
+Default `aic_allowed_tools` for a new conversation is the **full set** — reads inline,
 writes via the gate:
 
 - Read/inline: `web_search` (needs `joinery_ai_brave_search_api_key`), `fetch_url`,
@@ -314,7 +323,7 @@ writes via the gate:
   heuristic) and `create_model` / `update_model` / `delete_model` (confirmation per the
   risk heuristic).
 
-Per-conversation allowlists (`cnv_allowed_*`) let the user widen/narrow which models
+Per-conversation allowlists (`aic_allowed_*`) let the user widen/narrow which models
 and actions are in scope; the defaults are conservative.
 
 ---
@@ -329,14 +338,20 @@ no second server. Gated at **permission 5** (any admin).
   Two-pane: left = conversation list (newest first) + "New chat"; right = transcript
   + composer + inline confirmation cards. A status strip shows the active model and
   whether web tools are on. Built with the `.jy-ui` kit (no inline styles).
+  **Borrow the existing message-thread pattern** rather than reinventing it: the
+  human-messaging views (`views/profile/conversation.php` / `conversations.php`)
+  already implement the two-pane list, message bubbles (`.message-bubble`,
+  `.message-mine` / `.message-theirs`), the composer, and AJAX send-without-reload.
+  The chat reuses that structure and adds assistant-role bubbles and the confirmation
+  card; only the genuinely new affordances are built from scratch.
 - **Page logic:** `plugins/joinery_ai/logic/admin_chat_logic.php` — loads the owner's
   conversations and the selected conversation's messages. Wrapped with `process_logic`.
 - **Send endpoint (AJAX):** appends the user message, builds the message array from
   history, runs `AgentLoop` with a `ChatTurnContext`, persists the assistant message
-  (+ trace, + any `cms_pending_action`, + token totals), returns the turn as JSON.
-  New conversations derive `cnv_title` from the first user message.
+  (+ trace, + any `aim_pending_action`, + token totals), returns the turn as JSON.
+  New conversations derive `aic_title` from the first user message.
 - **Confirm endpoint (AJAX):** takes a conversation + the pending action, verifies it
-  matches `cms_pending_action`, re-enters `AgentLoop` to execute the approved call and
+  matches `aim_pending_action`, re-enters `AgentLoop` to execute the approved call and
   continue. Cancel feeds a "user declined" tool result back so the model adapts.
 - **Forms** use FormWriter (`FormWriterV2HTML5`); the composer is a real form.
 
@@ -350,7 +365,7 @@ conversation between users.
 
 Each turn respects the existing global cap (`joinery_ai_global_monthly_token_cap`) via
 the same `CostGuard` the recipes use; per-conversation totals accumulate on
-`cnv_total_*`. `CostGuard` is generalized to check the global cap without a `Recipe`
+`aic_total_*`. `CostGuard` is generalized to check the global cap without a `Recipe`
 (the chat passes the conversation's running totals). Local turns cost $0
 (`OpenAiCompatibleProvider::estimateCost()` returns 0) but tokens are still tracked
 for visibility and to keep the cap meaningful if the provider is switched to Anthropic.
@@ -408,11 +423,15 @@ though the end state always existed (no "previously", no migration narration).
 
 - **Phase 1:** `templates/public_edit_logic.tpl.php` emits `'ai_agent' => 'confirm'`
   in the descriptor (a user editing their own record is the canonical callable
-  action). `templates/admin_edit_logic.tpl.php` emits **no** `ai_agent` by default
-  (admin edit pages aren't agent-callable until a developer opts in); include a
-  commented `// 'ai_agent' => 'confirm',` line. `ScaffoldGenerator.php` accepts and
-  validates a per-surface `ai_agent` manifest key. `tests/scaffold/` confirms emitted
-  descriptors carry it.
+  action). `templates/admin_edit_logic.tpl.php` emits **no** active `ai_agent`
+  (admin edit pages aren't agent-callable until a developer opts in); it carries a
+  commented `// 'ai_agent' => 'confirm',` line. These are fixed template defaults —
+  **no `ai_agent` manifest key.** Scaffold output is a starting point a developer
+  edits anyway, and switching `confirm`→`auto` is a one-line change in the generated
+  code, so a manifest key plus its validation isn't worth the surface area; the
+  secure defaults (public callable-with-confirmation, admin opt-in) cover the cases.
+  `tests/scaffold/scaffold_ai_agent_test.php` confirms the emitted descriptors carry
+  the right exposure (public active `confirm`, admin commented only).
 - **Phase 3:** `templates/data_class.tpl.php` emits `$ai_owner_field` from the
   manifest (column, list, or `false`); `docs/scaffolding.md` documents the key.
 
@@ -469,7 +488,7 @@ pending); the dormant hook is a no-op for recipes.
    `RecipeRunContext` to the interface — the mechanical four-file touch deferred from
    Phase 1.
 7. **Turn handlers** — `ChatTurnContext implements ToolContext` (`requiresConfirmation
-   = true`, `appendToolCall()` → `cms_tool_calls`); send endpoint + confirm endpoint on
+   = true`, `appendToolCall()` → `aim_tool_calls`); send endpoint + confirm endpoint on
    `AgentLoop`; generalize `CostGuard` to the conversation totals.
 8. **Surface** — views + page logic + composer + confirmation cards; wire
    `/admin/joinery_ai/chat` and a nav entry; settings in `plugin.json` (default model

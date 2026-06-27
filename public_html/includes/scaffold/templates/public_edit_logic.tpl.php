@@ -53,6 +53,7 @@ function <?= $entity_snake ?>_edit_logic_descriptor(): array {
 		'description'      => 'Create or update a <?= $title ?>.',
 		'requires_session' => <?= ($public_permission !== null) ? 'true' : 'false' ?>,
 		'mutates'          => true,
+		'ai_agent'         => 'confirm',
 		'input'            => array(
 			'edit_primary_key_value' => array('type' => 'int', 'required' => false, 'label' => '<?= $title ?> ID (omit to create)'),
 <?php foreach ($descriptor_inputs as $di): ?>

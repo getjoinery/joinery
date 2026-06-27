@@ -34,6 +34,7 @@ function cart_clear_logic_descriptor(): array {
 		'description'      => 'Clear all items from the current user\'s cart.',
 		'requires_session' => true,
 		'mutates'          => true,
+		'ai_agent'         => 'confirm',
 		'input'            => [
 		],
 	];

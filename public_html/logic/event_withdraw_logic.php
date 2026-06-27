@@ -86,6 +86,7 @@ function event_withdraw_logic_descriptor(): array {
 		'description'      => 'Withdraw the current user from an event registration.',
 		'requires_session' => true,
 		'mutates'          => true,
+		'ai_agent'         => 'confirm',
 		'input'            => [
 			'evr_event_registrant_id' => ['type' => 'int', 'required' => true, 'label' => 'Event registrant ID'],
 			'confirm' => ['type' => 'bool', 'required' => true, 'label' => 'Confirmation flag'],

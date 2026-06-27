@@ -80,7 +80,7 @@ The runner is decoupled from any specific model vendor through a provider bounda
 - **`AnthropicProvider`** — the canonical IR is the Anthropic block shape, so this provider is a near-passthrough: it posts the request body as-is and returns the decoded response. Carries the cost table (`COST_PER_MTOKEN`) and the Claude model list. `AnthropicException` is kept as a subclass of `LlmProviderException` for backward compatibility, and `AnthropicClient` remains a class alias.
 - **`OpenAiCompatibleProvider`** — one provider for every OpenAI-compatible local runtime (Ollama, llama.cpp server, vLLM, LM Studio), all of which expose `/v1/chat/completions` with tool-calling. It does the real translation: canonical → OpenAI request and OpenAI response → canonical. Malformed tool arguments from small models decode to `{}` (the tool's own validation then yields a normal `is_error` result) rather than crashing the run; inline `<think>…</think>` reasoning is stripped from final text; local inference is free, so `estimateCost()` returns `0.0`. There is no local prompt caching, so `cache_control` is ignored and the full system prompt is re-sent each call.
 
-**Factory + settings.** `LlmProviderFactory::build()` reads `joinery_ai_llm_provider` (`anthropic` | `local`) and constructs the matching provider, throwing `LlmProviderException` with a configuration-specific message if the active provider's required setting is empty. Provider is a **global** setting, not per-recipe; a recipe's `rcp_model` is reinterpreted by whichever provider is active. The recipe-edit model dropdown is built from the active provider's `models()`, and a recipe whose stored `rcp_model` isn't offered by the active provider keeps the value, flagged as unavailable.
+**Factory + routing.** The model selects the provider. `LlmProviderFactory::forModel($model)` returns the provider that serves that model id — a `claude-*` id → `AnthropicProvider`, any other non-empty id → the local `OpenAiCompatibleProvider` — so a recipe pinned to a model always runs on that model's own provider. A recipe that pins no model follows `LlmProviderFactory::build()`, which reads the `joinery_ai_llm_provider` setting (`anthropic` | `local`) for the global-default provider. Either entry point throws `LlmProviderException` with a configuration-specific message if the resolved provider's required setting is empty. The recipe-edit model dropdown is built from `LlmProviderFactory::allModels()` — every model offered by every configured provider — and a recipe whose stored `rcp_model` belongs to a provider that isn't configured keeps the value, flagged as unavailable.
 
 Local settings: `joinery_ai_local_base_url` (default `http://localhost:11434/v1`), `joinery_ai_local_model` (must be set before the local provider runs), `joinery_ai_local_api_key` (optional; Ollama ignores it), `joinery_ai_local_timeout_seconds` (default `300` — local CPU generation is slow).
 
@@ -105,7 +105,13 @@ interface RecipeToolInterface {
 
 `execute()` returns either a string (becomes `tool_result.content`) or `['content' => string, 'is_error' => bool]` for explicit error reporting.
 
-`RecipeRunContext` carries `$recipe`, `$run`, `$owner_user_id`, `$owner_timezone`, plus `appendToolCall()` for trace entries.
+**`AgentLoop`** (`includes/AgentLoop.php`) is the bounded tool-use loop shared by every AI surface: build params → `provider->createMessage()` → dispatch tool calls → feed results back, up to the per-turn iteration cap or token budget. `RecipeRunner` assembles the recipe's provider, system prompt, and tool allow-list, hands them to `AgentLoop`, and maps the returned result onto the run's terminal status. Surface-specific behavior is reached through the context rather than baked into the loop:
+
+- **`shouldContinue()`** — a per-iteration guard. For a recipe that's the mid-run kill flag and the hard wall-clock timeout; it returns a stop reason or null.
+- **`beginToolCall()` / `finishToolCall()`** — the durable per-call audit. The recipe context flushes a started-but-not-completed entry to `rcr_tool_calls` before each call (so the dispatcher reaper can name the last call a hung run started) and updates it after.
+- **`requiresConfirmation()`** — when true, a mutating call that the `RiskHeuristic` flags is held for a live human sign-off (returned as a `pending_action`) instead of running. Recipes answer **false** — they're signed off at save time by the taint gate — so this hook is inert for recipe runs and the loop executes every call.
+
+`RecipeRunContext` carries `$recipe`, `$run`, `$owner_user_id`, `$owner_timezone`, the per-run untrusted-input nonce, and the hooks above (`appendToolCall()` remains for one-shot trace notes).
 
 ## Generic reads: `query_model` + per-recipe model allowlist
 
@@ -200,6 +206,16 @@ If admin-only ever changes (end-user recipes), owner-scoping returns as new work
 See [`specs/implemented/joinery_ai_write_tools.md`](../../../specs/implemented/joinery_ai_write_tools.md) (Path 1) for the gauntlet test that decides when a model qualifies for direct writes.
 
 Any write that needs cross-record invariants (capacity, payment effects, hooks, external system calls) belongs in a logic file with a write-capable descriptor — see [`specs/implemented/joinery_ai_write_tools.md`](../../../specs/implemented/joinery_ai_write_tools.md) (Path 2).
+
+### Action exposure (`ai_agent`)
+
+A logic file becomes an AI-callable action by declaring a `*_logic_descriptor()` (see [Logic File Architecture](../../../docs/logic_architecture.md)). Exposure is **default-deny**: the action is reachable through `invoke_action` only if its descriptor declares an `ai_agent` key. `ActionInvoker` refuses any action without it — even one named on a recipe's allow-list.
+
+- **absent** — not agent-callable. A logic file that merely happens to define a descriptor is never silently exposed.
+- **`'confirm'`** — callable; a mutating call is held for a live human sign-off when the calling surface requires confirmation. The recipe surface does not (its sign-off is the save-time taint gate), so a recipe runs it directly. The right default for anything that writes or has side effects.
+- **`'auto'`** — callable and runs inline with no confirmation; the author's explicit assertion that the action is low-risk.
+
+`ActionRegistry::isAgentCallable()` / `agentTier()` expose this contract: the recipe edit page lists only agent-callable actions, the write-tool save path drops any non-exposed action from the allow-list, and `validate_php_file.php` surfaces a descriptor that omits the key (absent is a valid "keep it private" choice, so it's advisory). Which tier a mutating call lands in on an interactive surface is decided by `RiskHeuristic`.
 
 ## Adding a new hand-written tool
 

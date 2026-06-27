@@ -98,6 +98,7 @@ function address_edit_logic_descriptor(): array {
 		'description'      => 'Create or update the current user\'s address.',
 		'requires_session' => true,
 		'mutates'          => true,
+		'ai_agent'         => 'confirm',
 		'input'            => [
 			'edit_primary_key_value' => ['type' => 'int', 'required' => false, 'label' => 'Address ID (omit to create)'],
 			'usa_cco_country_code_id' => ['type' => 'string', 'required' => false, 'label' => 'Country'],
