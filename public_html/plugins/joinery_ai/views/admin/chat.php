@@ -120,6 +120,35 @@ $page->admin_header([
     function scrollToBottom() { transcript.scrollTop = transcript.scrollHeight; }
     scrollToBottom();
 
+    // A turn now runs off the request: the send/confirm endpoints return a poll
+    // handle (message_id + status:"running") and finish the turn in the
+    // background, so we poll until the assistant row is complete or failed.
+    var POLL_INTERVAL_MS = 2000;
+    var POLL_GIVE_UP_MS = 3600 * 1000; // beyond the server-side stale ceiling
+
+    function pollMessage(messageId, onComplete, onFailed) {
+        var startedAt = Date.now();
+        function tick() {
+            fetch('/admin/joinery_ai/chat_poll?message_id=' + encodeURIComponent(messageId))
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (!data.success) { onFailed(data.message || 'Could not load the reply.'); return; }
+                    if (data.status === 'complete') { onComplete(data.assistant_html); return; }
+                    if (data.status === 'failed') { onFailed(data.error || 'The assistant could not complete this turn.'); return; }
+                    if (Date.now() - startedAt > POLL_GIVE_UP_MS) {
+                        onFailed('This is taking longer than expected. It may still finish — reload to check.');
+                        return;
+                    }
+                    setTimeout(tick, POLL_INTERVAL_MS);
+                })
+                .catch(function () {
+                    if (Date.now() - startedAt > POLL_GIVE_UP_MS) { onFailed('Lost connection while waiting for the reply.'); return; }
+                    setTimeout(tick, POLL_INTERVAL_MS);
+                });
+        }
+        setTimeout(tick, POLL_INTERVAL_MS);
+    }
+
     // Capability toggles. On an existing chat, persist immediately; on a new
     // chat (no id yet) the state rides along with the first send.
     function wireToggle(el) {
@@ -180,22 +209,34 @@ $page->admin_header([
         fetch('/admin/joinery_ai/chat_send', { method: 'POST', body: body })
             .then(function (r) { return r.json(); })
             .then(function (data) {
-                setBusy(false);
-                if (!data.success) { alert(data.message || 'Send failed.'); return; }
+                if (!data.success) { setBusy(false); alert(data.message || 'Send failed.'); return; }
 
                 if (data.is_new) {
                     currentConversationId = data.conversation_id;
                     addThread(data.conversation_id, data.title);
                     history.replaceState(null, '', '/admin/joinery_ai/chat?aic_conversation_id=' + data.conversation_id);
                 }
-                transcript.insertAdjacentHTML('beforeend', data.assistant_html);
-                scrollToBottom();
-                input.focus();
+
+                // Non-fpm fallback may finish the turn inline.
+                if (data.status === 'complete') { appendReply(data.assistant_html); return; }
+                if (data.status === 'failed') { setBusy(false); alert(data.error || 'Send failed.'); return; }
+
+                // Async: keep the "Thinking…" indicator up and poll for the reply.
+                pollMessage(data.message_id,
+                    function (html) { appendReply(html); },
+                    function (err) { setBusy(false); alert(err || 'Send failed.'); });
             })
             .catch(function () {
                 setBusy(false);
                 alert('Send failed.');
             });
+    }
+
+    function appendReply(html) {
+        setBusy(false);
+        transcript.insertAdjacentHTML('beforeend', html);
+        scrollToBottom();
+        input.focus();
     }
 
     function addThread(id, title) {
@@ -234,17 +275,29 @@ $page->admin_header([
         fetch('/admin/joinery_ai/chat_confirm', { method: 'POST', body: body })
             .then(function (r) { return r.json(); })
             .then(function (data) {
-                setBusy(false);
-                if (!data.success) { alert(data.message || 'Action failed.'); return; }
-                var bubble = transcript.querySelector('.joai-chat-msg[data-message-id="' + data.message_id + '"]');
-                if (bubble) bubble.outerHTML = data.assistant_html;
-                scrollToBottom();
+                if (!data.success) { setBusy(false); alert(data.message || 'Action failed.'); return; }
+
+                // Non-fpm fallback may finish the resume inline.
+                if (data.status === 'complete') { replaceBubble(data.message_id, data.assistant_html); return; }
+                if (data.status === 'failed') { setBusy(false); alert(data.error || 'Action failed.'); return; }
+
+                // Async: poll until the same assistant row is finalized.
+                pollMessage(data.message_id,
+                    function (html) { replaceBubble(messageId, html); },
+                    function (err) { setBusy(false); alert(err || 'Action failed.'); });
             })
             .catch(function () {
                 setBusy(false);
                 alert('Action failed.');
             });
     });
+
+    function replaceBubble(messageId, html) {
+        setBusy(false);
+        var bubble = transcript.querySelector('.joai-chat-msg[data-message-id="' + messageId + '"]');
+        if (bubble) bubble.outerHTML = html;
+        scrollToBottom();
+    }
 
     newChatBtn.addEventListener('click', function () {
         currentConversationId = null;

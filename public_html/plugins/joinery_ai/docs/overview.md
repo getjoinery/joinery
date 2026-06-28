@@ -135,7 +135,7 @@ Tools type-hint **`ToolContext`** (`includes/ToolContext.php`), the surface-inde
 The interactive surface lives at `/admin/joinery_ai/chat` (permission 5). It is a two-pane page — conversation list + transcript/composer — built with plain `joai-chat-*` markup (the admin theme is not the `.jy-ui` kit). A turn runs over the same `AgentLoop` as a recipe; the differences are all in `ChatTurnContext`:
 
 - **`requiresConfirmation()` is true.** A mutating tool call the `RiskHeuristic` classifies `CONFIRM` is not executed — the loop ends the turn in a `pending_action` carrying a plain-language description, and the UI shows a Confirm/Cancel card. Inline-verdict calls (a self-owned create/update, an `auto` action) run without a card. See [Action exposure](#action-exposure-ai_agent) and the spec's risk-heuristic section.
-- **Per-turn wall clock**, not a kill flag — a chat turn is one synchronous request.
+- **The turn runs off the request** (see [Asynchronous turns](#asynchronous-turns)) — a slow local model never trips a proxy timeout.
 - **In-memory trace** flushed to `aim_tool_calls` on the assistant message by the endpoint.
 
 **Capability toggles.** A new conversation is a plain conversational assistant. Two independent per-chat switches (status strip) turn capabilities on, **both default off**:
@@ -145,16 +145,28 @@ The interactive surface lives at `/admin/joinery_ai/chat` (permission 5). It is 
 
 `ChatRunner::resolveAllowedTools()` derives the effective tool list from the two flags; `ChatTurnContext::allowedModels()` / `allowedActions()` return all readable models / all agent-callable actions when Data access is on, `[]` when off. New chats carry their initial toggle state on the first `chat_send`; existing chats persist a flip via `chat_set_capabilities.php`.
 
-**Data model.** `AiConversation` (`aic_conversations`) is one thread — owner, model, the two capability flags (`aic_data_access`, `aic_web_search`), and running token totals. `AiConversationMessage` (`aim_conversation_messages`) is one turn; assistant rows carry the tool trace, token counts, and any `aim_pending_action`. (Named `Ai*` because core messaging already owns `Conversation` / `Message`.) Neither is `$ai_readable`.
+**Data model.** `AiConversation` (`aic_conversations`) is one thread — owner, model, the two capability flags (`aic_data_access`, `aic_web_search`), and running token totals. `AiConversationMessage` (`aim_conversation_messages`) is one turn; assistant rows carry the tool trace, token counts, any `aim_pending_action`, and the turn lifecycle (`aim_status` = `running` → `complete` | `failed`, with `aim_error` on failure). (Named `Ai*` because core messaging already owns `Conversation` / `Message`.) Neither is `$ai_readable`.
 
 **Engine.** `ChatRunner` builds the system prompt + history and drives the loop:
 
 - `runTurn()` — the user just sent a message (already persisted): build history, run `AgentLoop`, hand back the result + the turn's context.
 - `resumeTurn()` — the admin confirmed or cancelled a pending call: replay the transcript (minus the trailing pending-bearing assistant row), synthesize a self-consistent `tool_use`/`tool_result` pair (execute the approved call via `AgentLoop::executeApproved()`, or feed a "declined" result), then continue the loop. The endpoint updates the pending assistant message **in place**, so there is exactly one assistant row per user message and the transcript stays strictly alternating and replayable.
 
-Three AJAX endpoints back the page: `chat_send.php` (append the user message, run the turn, persist the reply), `chat_confirm.php` (resolve a pending action), and `chat_set_capabilities.php` (flip a toggle on an existing chat).
+Four AJAX endpoints back the page: `chat_send.php` (append the user message + an assistant placeholder, run the turn, finalize the placeholder), `chat_confirm.php` (resolve a pending action), `chat_poll.php` (deliver a finished turn to the page), and `chat_set_capabilities.php` (flip a toggle on an existing chat).
 
 **Settings:** `joinery_ai_chat_enabled`, `joinery_ai_chat_max_iterations` (loop cap per turn), `joinery_ai_chat_max_tokens` (output budget per turn).
+
+### Asynchronous turns
+
+A chat turn can run for minutes on a slow local model. Rather than hold the browser connection open for the whole turn — which trips the front proxy's idle ceiling — the turn runs **after the response is sent, in the same fpm process**:
+
+1. `chat_send` inserts the user message (`complete`) and an assistant placeholder (`running`), returns a poll handle (`{message_id, status: "running"}`), then calls `fastcgi_finish_request()` to release the browser and keeps executing.
+2. It runs `ChatRunner::runTurn()` and writes the result onto the placeholder — content, trace, pending action, token totals — setting `aim_status = complete` (or `failed` + `aim_error`).
+3. The page polls `chat_poll.php?message_id=N` (owner-scoped) every ~2s; on `complete` it renders the bubble via `ChatRender::assistantBubble`, on `failed` it shows the error. `chat_confirm` resumes the same way, finalizing the pending row in place.
+
+Because the turn runs in the authenticated web process, no identity re-setup is needed and `fastcgi_finish_request` releases the connection but not the worker — **each in-flight turn occupies one fpm child for its duration**, so a multi-admin deployment should keep `pm.max_children` above expected concurrent turns plus normal traffic. `ChatAsync` owns the three async pieces: `detach()` (the `fastcgi_finish_request` + `ignore_user_abort` + `set_time_limit(0)` sequence), `staleCeilingSeconds()` (worst-case turn time, derived as `chat max_iterations × the provider HTTP timeout` plus margin, since `AgentLoop` bounds a turn by iterations and token budget, **not** elapsed time), and `sweepMessage()` (reaps a row left `running` past that ceiling — its worker died — to `failed`, run on poll). On a non-fpm SAPI `fastcgi_finish_request` is absent, so the endpoints run the turn synchronously and return the finished bubble in the same response (the page renders it without polling).
+
+Live token streaming (SSE) is intentionally **not** used. The blocker is php-fpm's stock `output_buffering = 4096`: sub-4096 writes sit buffered until the script ends, and the setting is `PHP_INI_PERDIR` (not settable at runtime, and a per-endpoint `.user.ini` does not apply under the front controller). Streaming would require `output_buffering = 0` site-wide; it is a possible later upgrade gated on that deploy setting, and is not needed to fix the timeout.
 
 ## Generic reads: `query_model` + per-recipe model allowlist
 

@@ -3,11 +3,15 @@
  * Joinery AI — chat send endpoint (AJAX, JSON).
  * URL: /admin/joinery_ai/chat_send  (POST)
  *
- * Appends the user's message, runs one AgentLoop turn with a ChatTurnContext,
- * persists the assistant reply (+ trace, + any pending action, + token totals),
- * and returns the rendered turn as JSON. A new conversation is created when no
- * conversation_id is supplied, seeded with the default tool/model/action scope
- * and a title derived from the first message.
+ * Appends the user's message and an assistant placeholder, returns a poll
+ * handle immediately, then runs one AgentLoop turn AFTER the response is sent
+ * (fastcgi_finish_request) and finalizes the placeholder row in place. The page
+ * polls chat_poll until the assistant row is complete or failed. A new
+ * conversation is created when no conversation_id is supplied, seeded with the
+ * default tool/model/action scope and a title derived from the first message.
+ *
+ * On a non-fpm SAPI (no fastcgi_finish_request) the turn runs synchronously
+ * before responding and the reply rides back in this response — see ChatAsync.
  */
 header('Content-Type: application/json');
 
@@ -16,6 +20,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRunner.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRender.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatAsync.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/CostGuard.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderException.php'));
 
@@ -76,7 +81,7 @@ try {
 // valid, alternating history.
 chat_clear_dangling_pending($conversation);
 
-// Persist the user's message.
+// Persist the user's message (complete on insert).
 $user_msg = new AiConversationMessage(NULL);
 $user_msg->set('aim_aic_conversation_id', (int)$conversation->key);
 $user_msg->set('aim_role', AiConversationMessage::ROLE_USER);
@@ -85,57 +90,102 @@ $user_msg->prepare();
 $user_msg->save();
 $user_msg->load();
 
-// Run the turn.
-try {
-    $turn = ChatRunner::runTurn($conversation, $uid);
-} catch (LlmProviderException $e) {
-    error_log('[joinery_ai chat] provider error: ' . $e->getMessage());
-    chat_send_fail('The AI provider returned an error. Check the provider settings and try again.');
-} catch (Throwable $e) {
-    error_log('[joinery_ai chat] turn failed: ' . $e->getMessage());
-    chat_send_fail('The assistant could not complete this turn.');
-}
-
-$result = $turn['result'];
-$ctx    = $turn['context'];
-
-// Persist the assistant message.
+// Create the assistant placeholder the page will poll. It is RUNNING until the
+// turn (below) finalizes it.
 $assistant_msg = new AiConversationMessage(NULL);
 $assistant_msg->set('aim_aic_conversation_id', (int)$conversation->key);
 $assistant_msg->set('aim_role', AiConversationMessage::ROLE_ASSISTANT);
-$assistant_msg->set('aim_content', ChatRunner::resolveAssistantText($result));
-$assistant_msg->set('aim_tool_calls', $ctx->toolCalls());
-if (!empty($result['pending_action'])) {
-    $assistant_msg->set('aim_pending_action', $result['pending_action']);
-}
-$assistant_msg->set('aim_input_tokens', (int)$result['input_tokens']);
-$assistant_msg->set('aim_output_tokens', (int)$result['output_tokens']);
+$assistant_msg->set('aim_content', '');
+$assistant_msg->set('aim_status', AiConversationMessage::STATUS_RUNNING);
 $assistant_msg->prepare();
 $assistant_msg->save();
 $assistant_msg->load();
 
-// Roll up token totals + bump the thread's update time.
-$conversation->set('aic_total_input_tokens',
-    (int)$conversation->get('aic_total_input_tokens') + (int)$result['input_tokens']);
-$conversation->set('aic_total_output_tokens',
-    (int)$conversation->get('aic_total_output_tokens') + (int)$result['output_tokens']);
-$conversation->set('aic_update_time', gmdate('Y-m-d H:i:s'));
-$conversation->save();
-
 $tz = $session->get_timezone();
 $user_time = LibraryFunctions::convert_time($user_msg->get('aim_create_time'), 'UTC', $tz, 'g:i A');
 
-echo json_encode([
+// Common fields for the immediate response.
+$payload = [
     'success'         => true,
     'conversation_id' => (int)$conversation->key,
+    'message_id'      => (int)$assistant_msg->key,
     'is_new'          => $is_new,
     'title'           => $conversation->get('aic_title'),
     'user_html'       => ChatRender::userBubble($message, $user_time),
-    'assistant_html'  => ChatRender::assistantBubble($assistant_msg, $tz),
-    'has_pending'     => !empty($result['pending_action']),
-    'stop_reason'     => $result['stop_reason'],
-]);
+];
+
+if (ChatAsync::canDetach()) {
+    // Tell the page to start polling, release the browser, then run the turn.
+    $payload['status'] = AiConversationMessage::STATUS_RUNNING;
+    echo json_encode($payload);
+    ChatAsync::detach();
+    chat_run_and_finalize($conversation, $uid, $assistant_msg);
+    exit;
+}
+
+// Non-fpm fallback: run synchronously, then return the finished turn so the page
+// can render it without polling.
+chat_run_and_finalize($conversation, $uid, $assistant_msg);
+$assistant_msg->load();
+if ($assistant_msg->get('aim_status') === AiConversationMessage::STATUS_FAILED) {
+    $payload['status'] = AiConversationMessage::STATUS_FAILED;
+    $payload['error']  = (string)$assistant_msg->get('aim_error');
+} else {
+    $payload['status']         = AiConversationMessage::STATUS_COMPLETE;
+    $payload['assistant_html'] = ChatRender::assistantBubble($assistant_msg, $tz);
+}
+echo json_encode($payload);
 exit;
+
+// --- turn execution (runs after the response is sent under fpm) ---
+
+/**
+ * Run one turn and write the result onto the pre-created placeholder row, then
+ * roll up the conversation token totals. Any failure marks the row FAILED with
+ * an error the poller surfaces. Never echoes — the response is already sent.
+ */
+function chat_run_and_finalize(AiConversation $conversation, int $uid,
+        AiConversationMessage $assistant_msg): void {
+    try {
+        $turn = ChatRunner::runTurn($conversation, $uid);
+    } catch (LlmProviderException $e) {
+        error_log('[joinery_ai chat] provider error: ' . $e->getMessage());
+        chat_mark_failed($assistant_msg,
+            'The AI provider returned an error. Check the provider settings and try again.');
+        return;
+    } catch (Throwable $e) {
+        error_log('[joinery_ai chat] turn failed: ' . $e->getMessage());
+        chat_mark_failed($assistant_msg, 'The assistant could not complete this turn.');
+        return;
+    }
+
+    $result = $turn['result'];
+    $ctx    = $turn['context'];
+
+    $assistant_msg->set('aim_content', ChatRunner::resolveAssistantText($result));
+    $assistant_msg->set('aim_tool_calls', $ctx->toolCalls());
+    if (!empty($result['pending_action'])) {
+        $assistant_msg->set('aim_pending_action', $result['pending_action']);
+    }
+    $assistant_msg->set('aim_input_tokens', (int)$result['input_tokens']);
+    $assistant_msg->set('aim_output_tokens', (int)$result['output_tokens']);
+    $assistant_msg->set('aim_status', AiConversationMessage::STATUS_COMPLETE);
+    $assistant_msg->save();
+
+    // Roll up token totals + bump the thread's update time.
+    $conversation->set('aic_total_input_tokens',
+        (int)$conversation->get('aic_total_input_tokens') + (int)$result['input_tokens']);
+    $conversation->set('aic_total_output_tokens',
+        (int)$conversation->get('aic_total_output_tokens') + (int)$result['output_tokens']);
+    $conversation->set('aic_update_time', gmdate('Y-m-d H:i:s'));
+    $conversation->save();
+}
+
+function chat_mark_failed(AiConversationMessage $assistant_msg, string $error): void {
+    $assistant_msg->set('aim_status', AiConversationMessage::STATUS_FAILED);
+    $assistant_msg->set('aim_error', $error);
+    $assistant_msg->save();
+}
 
 // --- helpers ---
 
