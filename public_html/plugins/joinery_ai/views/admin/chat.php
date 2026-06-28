@@ -19,6 +19,15 @@ extract($page_vars);
 $tz = $session->get_timezone();
 $selected_id = $selected ? (int)$selected->key : 0;
 
+if (!function_exists('joai_pin_svg')) {
+    // Small thumbtack marker shown beside pinned threads (no emoji; inline SVG
+    // matches the admin theme's icon approach).
+    function joai_pin_svg(): string {
+        return '<svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" aria-hidden="true">'
+             . '<path d="M16 3v2h-1v6l2 2v2h-4v6l-1 1-1-1v-6H7v-2l2-2V5H8V3z"/></svg>';
+    }
+}
+
 $page = new AdminPage();
 $page->admin_header([
     'menu-id' => 'joinery-ai-chat',
@@ -44,12 +53,22 @@ $page->admin_header([
                 $title = trim((string)$c->get('aic_title'));
                 if ($title === '') $title = 'Untitled';
                 $active = $cid === $selected_id ? ' is-active' : '';
+                $pinned = (bool)$c->get('aic_pinned');
             ?>
-                <a class="joai-chat-list-item<?php echo $active; ?>"
-                   data-conversation-id="<?php echo $cid; ?>"
-                   href="/admin/joinery_ai/chat?aic_conversation_id=<?php echo $cid; ?>">
-                    <?php echo htmlspecialchars($title, ENT_QUOTES, 'UTF-8'); ?>
-                </a>
+                <div class="joai-chat-item<?php echo $pinned ? ' is-pinned' : ''; ?>"
+                     data-conversation-id="<?php echo $cid; ?>" data-pinned="<?php echo $pinned ? '1' : '0'; ?>">
+                    <a class="joai-chat-list-item<?php echo $active; ?>"
+                       href="/admin/joinery_ai/chat?aic_conversation_id=<?php echo $cid; ?>">
+                        <span class="joai-chat-pin" aria-hidden="true"><?php echo joai_pin_svg(); ?></span>
+                        <span class="joai-chat-item-title"><?php echo htmlspecialchars($title, ENT_QUOTES, 'UTF-8'); ?></span>
+                    </a>
+                    <button type="button" class="joai-chat-item-menu-btn" aria-label="Thread actions" aria-haspopup="true" aria-expanded="false">&#8942;</button>
+                    <div class="joai-chat-item-menu" role="menu" hidden>
+                        <button type="button" role="menuitem" data-action="pin"><?php echo $pinned ? 'Unpin' : 'Pin'; ?></button>
+                        <button type="button" role="menuitem" data-action="rename">Rename</button>
+                        <button type="button" role="menuitem" data-action="delete" class="joai-chat-menu-danger">Delete</button>
+                    </div>
+                </div>
             <?php endforeach; ?>
         </nav>
     </aside>
@@ -338,18 +357,193 @@ $page->admin_header([
         input.focus();
     }
 
+    var PIN_SVG = '<svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" aria-hidden="true">'
+        + '<path d="M16 3v2h-1v6l2 2v2h-4v6l-1 1-1-1v-6H7v-2l2-2V5H8V3z"/></svg>';
+
+    function buildThreadItem(id, title, pinned) {
+        var item = document.createElement('div');
+        item.className = 'joai-chat-item' + (pinned ? ' is-pinned' : '');
+        item.setAttribute('data-conversation-id', id);
+        item.setAttribute('data-pinned', pinned ? '1' : '0');
+
+        var a = document.createElement('a');
+        a.className = 'joai-chat-list-item';
+        a.href = '/admin/joinery_ai/chat?aic_conversation_id=' + id;
+        a.innerHTML = '<span class="joai-chat-pin" aria-hidden="true">' + PIN_SVG + '</span>'
+            + '<span class="joai-chat-item-title"></span>';
+        a.querySelector('.joai-chat-item-title').textContent = title || 'Untitled';
+
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'joai-chat-item-menu-btn';
+        btn.setAttribute('aria-label', 'Thread actions');
+        btn.setAttribute('aria-haspopup', 'true');
+        btn.setAttribute('aria-expanded', 'false');
+        btn.innerHTML = '&#8942;';
+
+        var menu = document.createElement('div');
+        menu.className = 'joai-chat-item-menu';
+        menu.setAttribute('role', 'menu');
+        menu.hidden = true;
+        menu.innerHTML =
+            '<button type="button" role="menuitem" data-action="pin">' + (pinned ? 'Unpin' : 'Pin') + '</button>'
+            + '<button type="button" role="menuitem" data-action="rename">Rename</button>'
+            + '<button type="button" role="menuitem" data-action="delete" class="joai-chat-menu-danger">Delete</button>';
+
+        item.appendChild(a);
+        item.appendChild(btn);
+        item.appendChild(menu);
+        return item;
+    }
+
     function addThread(id, title) {
         var noThreads = document.getElementById('joai-no-threads');
         if (noThreads) noThreads.remove();
         document.querySelectorAll('.joai-chat-list-item.is-active')
             .forEach(function (a) { a.classList.remove('is-active'); });
-        var a = document.createElement('a');
-        a.className = 'joai-chat-list-item is-active';
-        a.setAttribute('data-conversation-id', id);
-        a.href = '/admin/joinery_ai/chat?aic_conversation_id=' + id;
-        a.textContent = title || 'Untitled';
-        threads.insertBefore(a, threads.firstChild);
+        var item = buildThreadItem(id, title, false);
+        item.querySelector('.joai-chat-list-item').classList.add('is-active');
+        threads.insertBefore(item, threads.firstChild);
+        resortThreads();
     }
+
+    // Stable re-sort: pinned items first, original order preserved within each group.
+    function resortThreads() {
+        var items = Array.prototype.slice.call(threads.querySelectorAll('.joai-chat-item'));
+        items.sort(function (a, b) {
+            return (b.getAttribute('data-pinned') === '1' ? 1 : 0)
+                 - (a.getAttribute('data-pinned') === '1' ? 1 : 0);
+        });
+        items.forEach(function (it) { threads.appendChild(it); });
+    }
+
+    // ----- Thread actions menu (pin / rename / delete) -----
+    function closeAllMenus() {
+        threads.querySelectorAll('.joai-chat-item-menu').forEach(function (m) { m.hidden = true; });
+        threads.querySelectorAll('.joai-chat-item-menu-btn').forEach(function (b) {
+            b.setAttribute('aria-expanded', 'false');
+        });
+    }
+    document.addEventListener('click', function (e) {
+        if (!e.target.closest('.joai-chat-item-menu') && !e.target.closest('.joai-chat-item-menu-btn')) {
+            closeAllMenus();
+        }
+    });
+
+    function threadAction(id, action, value) {
+        var body = new FormData();
+        body.append('conversation_id', id);
+        body.append('action', action);
+        if (value !== undefined) body.append('value', value);
+        return fetch('/admin/joinery_ai/chat_thread_action', { method: 'POST', body: body })
+            .then(function (r) { return r.json(); });
+    }
+
+    function startRename(item) {
+        var link = item.querySelector('.joai-chat-list-item');
+        var titleSpan = item.querySelector('.joai-chat-item-title');
+        if (item.querySelector('.joai-chat-rename')) return; // already editing
+        var current = titleSpan.textContent;
+
+        var edit = document.createElement('input');
+        edit.type = 'text';
+        edit.className = 'joai-chat-rename';
+        edit.maxLength = 255;
+        edit.value = current;
+        link.style.display = 'none';
+        item.insertBefore(edit, link);
+        edit.focus();
+        edit.select();
+
+        var done = false;
+        function finish(commit) {
+            if (done) return; done = true;
+            var next = edit.value.trim();
+            edit.remove();
+            link.style.display = '';
+            if (!commit || next === '' || next === current) return;
+            titleSpan.textContent = next; // optimistic
+            threadAction(item.getAttribute('data-conversation-id'), 'rename', next)
+                .then(function (data) {
+                    if (!data.success) { titleSpan.textContent = current; alert(data.message || 'Rename failed.'); }
+                })
+                .catch(function () { titleSpan.textContent = current; });
+        }
+        edit.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+            else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+        });
+        edit.addEventListener('blur', function () { finish(true); });
+    }
+
+    function doDelete(item) {
+        var id = item.getAttribute('data-conversation-id');
+        var title = item.querySelector('.joai-chat-item-title').textContent;
+        JoineryModal.confirm(
+            'Delete the conversation "' + title + '"? This cannot be undone.',
+            function () {
+                threadAction(id, 'delete')
+                    .then(function (data) {
+                        if (!data.success) { alert(data.message || 'Delete failed.'); return; }
+                        var wasActive = String(currentConversationId) === String(id);
+                        item.remove();
+                        if (!threads.querySelector('.joai-chat-item')) {
+                            threads.innerHTML = '<p class="joai-chat-empty" id="joai-no-threads">No conversations yet.</p>';
+                        }
+                        if (wasActive) resetToNewChat();
+                    })
+                    .catch(function () { alert('Delete failed.'); });
+            },
+            { confirmLabel: 'Delete', confirmStyle: 'danger' }
+        );
+    }
+
+    function doPin(item) {
+        var id = item.getAttribute('data-conversation-id');
+        var nowPinned = item.getAttribute('data-pinned') !== '1';
+        threadAction(id, 'pin', nowPinned ? '1' : '0')
+            .then(function (data) {
+                if (!data.success) { alert(data.message || 'Could not update.'); return; }
+                item.setAttribute('data-pinned', nowPinned ? '1' : '0');
+                item.classList.toggle('is-pinned', nowPinned);
+                var pinBtn = item.querySelector('[data-action="pin"]');
+                if (pinBtn) pinBtn.textContent = nowPinned ? 'Unpin' : 'Pin';
+                resortThreads();
+            })
+            .catch(function () { alert('Could not update.'); });
+    }
+
+    threads.addEventListener('click', function (e) {
+        var trigger = e.target.closest('.joai-chat-item-menu-btn');
+        if (trigger) {
+            e.preventDefault();
+            var menu = trigger.parentNode.querySelector('.joai-chat-item-menu');
+            var isOpen = !menu.hidden;
+            closeAllMenus();
+            if (!isOpen) {
+                menu.hidden = false;
+                trigger.setAttribute('aria-expanded', 'true');
+                // Flip the menu above the trigger if it would spill past the
+                // bottom of the scrollable thread list.
+                menu.classList.remove('open-up');
+                var scroll = trigger.closest('.joai-chat-list');
+                if (scroll && menu.getBoundingClientRect().bottom > scroll.getBoundingClientRect().bottom) {
+                    menu.classList.add('open-up');
+                }
+            }
+            return;
+        }
+        var actionBtn = e.target.closest('.joai-chat-item-menu [data-action]');
+        if (actionBtn) {
+            e.preventDefault();
+            var item = actionBtn.closest('.joai-chat-item');
+            closeAllMenus();
+            var action = actionBtn.getAttribute('data-action');
+            if (action === 'pin') doPin(item);
+            else if (action === 'rename') startRename(item);
+            else if (action === 'delete') doDelete(item);
+        }
+    });
 
     // Confirm / cancel a pending action (event-delegated — bubbles arrive dynamically).
     transcript.addEventListener('click', function (e) {
@@ -397,7 +591,7 @@ $page->admin_header([
         scrollToBottom();
     }
 
-    newChatBtn.addEventListener('click', function () {
+    function resetToNewChat() {
         currentConversationId = null;
         transcript.innerHTML = '<p class="joai-chat-empty" id="joai-blank">Start a new conversation below.</p>';
         document.querySelectorAll('.joai-chat-list-item.is-active')
@@ -413,7 +607,9 @@ $page->admin_header([
         });
         history.replaceState(null, '', '/admin/joinery_ai/chat');
         input.focus();
-    });
+    }
+
+    newChatBtn.addEventListener('click', resetToNewChat);
 
     sendBtn.addEventListener('click', send);
     input.addEventListener('keydown', function (e) {

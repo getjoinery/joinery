@@ -30,11 +30,38 @@
                   border: 1px solid #ddd; border-radius: 8px; background: #fff; padding: 0.75rem; overflow-y: auto; }
 .joai-chat-newbtn { width: 100%; }
 .joai-chat-threads { display: flex; flex-direction: column; gap: 0.25rem; }
-.joai-chat-list-item { display: block; padding: 0.5rem 0.6rem; border-radius: 6px; color: #222;
-                       text-decoration: none; font-size: 0.9rem; white-space: nowrap; overflow: hidden;
-                       text-overflow: ellipsis; }
+.joai-chat-item { position: relative; }
+.joai-chat-list-item { display: flex; align-items: center; gap: 0.35rem;
+                       padding: 0.5rem 1.7rem 0.5rem 0.6rem; border-radius: 6px; color: #222;
+                       text-decoration: none; font-size: 0.9rem; }
 .joai-chat-list-item:hover { background: #f1f3f5; }
 .joai-chat-list-item.is-active { background: #e7f1ff; font-weight: 600; }
+.joai-chat-item-title { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.joai-chat-pin { display: none; flex: 0 0 auto; color: #6c757d; line-height: 0; }
+.joai-chat-item.is-pinned .joai-chat-pin { display: inline-flex; }
+
+/* Three-dots trigger: hidden until row hover or menu open. */
+.joai-chat-item-menu-btn { position: absolute; top: 50%; right: 0.2rem; transform: translateY(-50%);
+                           border: 0; background: transparent; color: #888; cursor: pointer;
+                           font-size: 1.15rem; line-height: 1; padding: 0.05rem 0.35rem; border-radius: 4px;
+                           opacity: 0; }
+.joai-chat-item:hover .joai-chat-item-menu-btn,
+.joai-chat-item-menu-btn[aria-expanded="true"] { opacity: 1; }
+.joai-chat-item-menu-btn:hover { background: rgba(0,0,0,0.08); color: #333; }
+
+.joai-chat-item-menu { position: absolute; top: 100%; right: 0.2rem; z-index: 30; min-width: 130px;
+                       background: #fff; border: 1px solid #ddd; border-radius: 6px;
+                       box-shadow: 0 4px 14px rgba(0,0,0,0.14); padding: 0.25rem; }
+.joai-chat-item-menu.open-up { top: auto; bottom: 100%; }
+.joai-chat-item-menu button { display: block; width: 100%; text-align: left; border: 0;
+                              background: transparent; padding: 0.4rem 0.6rem; border-radius: 4px;
+                              font: inherit; font-size: 0.85rem; color: #222; cursor: pointer; }
+.joai-chat-item-menu button:hover { background: #f1f3f5; }
+.joai-chat-menu-danger { color: #dc3545; }
+.joai-chat-menu-danger:hover { background: #fdecea; }
+
+.joai-chat-rename { width: 100%; box-sizing: border-box; padding: 0.45rem 0.5rem; font: inherit;
+                    font-size: 0.9rem; border: 1px solid #0d6efd; border-radius: 6px; }
 .joai-chat-main { flex: 1 1 auto; display: flex; flex-direction: column; border: 1px solid #ddd;
                   border-radius: 8px; background: #fff; overflow: hidden; }
 .joai-chat-status { display: flex; gap: 1rem; padding: 0.5rem 1rem; border-bottom: 1px solid #eee;

@@ -25,6 +25,9 @@ class AiConversation extends SystemBase {
         'aic_owner_user_id'      => array('type'=>'int4', 'required'=>true),
         'aic_title'              => array('type'=>'varchar(255)'),
         'aic_model'              => array('type'=>'varchar(100)'),
+        // Pinned threads sort above the rest in the chat list. Non-nullable so the
+        // ORDER BY aic_pinned DESC is clean (NULL would sort ahead of true).
+        'aic_pinned'             => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
         // Per-chat capability toggles (both default off → a plain conversational
         // assistant). Data access gates the site-data tool group + model scope;
         // web search gates the web tool group. See the chat-capabilities spec.
