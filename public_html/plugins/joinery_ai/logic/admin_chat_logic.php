@@ -15,7 +15,7 @@ function admin_joinery_ai_chat_logic(array $input): LogicResult {
 
     $conversations = new MultiAiConversation(
         ['owner_user_id' => $uid, 'deleted' => false],
-        ['aic_update_time' => 'DESC']
+        ['aic_pinned' => 'DESC', 'aic_update_time' => 'DESC']
     );
     $conversations->load();
 
