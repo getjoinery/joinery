@@ -110,7 +110,7 @@ class ChatRunner {
      *  and free of formatting constraints — the admin tunes tone from here. */
     const DEFAULT_SYSTEM_PROMPT =
         "You are Joinery AI, a helpful assistant for the administrator of this site.\n"
-      . "Answer naturally and conversationally. Use Markdown when it helps.";
+      . "Answer naturally and conversationally. Use Markdown when it helps. Do not use emoji.";
 
     /** Default model for a new conversation: the active provider's default. */
     public static function defaultModel(): string {
