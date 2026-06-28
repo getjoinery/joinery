@@ -3,12 +3,13 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProv
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderException.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/AnthropicProvider.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/OpenAiCompatibleProvider.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/FireworksProvider.php'));
 
 /**
  * Builds an LLM provider. The model id is authoritative: a model implies its
- * vendor (claude-* → Anthropic, anything else → the local OpenAI-compatible
- * host), so a recipe pinned to a model always runs on that model's provider
- * regardless of the global setting. The global setting
+ * vendor (claude-* → Anthropic, accounts/fireworks/* → Fireworks, anything else
+ * → the local OpenAI-compatible host), so a recipe pinned to a model always runs
+ * on that model's provider regardless of the global setting. The global setting
  * (joinery_ai_llm_provider) is only the default for callers that have no model
  * to route by — e.g. a recipe that pins no model and follows the default.
  */
@@ -16,8 +17,8 @@ class LlmProviderFactory {
 
     /**
      * Provider for a specific model id. Empty model → the global-default
-     * provider (build()). A claude-* id → Anthropic; any other non-empty id is
-     * assumed served by the local host.
+     * provider (build()). A claude-* id → Anthropic; an accounts/fireworks/* id →
+     * Fireworks; any other non-empty id is assumed served by the local host.
      *
      * @throws LlmProviderException if the resolved provider's required setting is empty.
      */
@@ -26,7 +27,9 @@ class LlmProviderFactory {
         if ($model === '') {
             return self::build();
         }
-        return preg_match('/^claude/i', $model) ? self::anthropic() : self::local();
+        if (preg_match('/^claude/i', $model)) return self::anthropic();
+        if (FireworksProvider::owns($model)) return self::fireworks();
+        return self::local();
     }
 
     /**
@@ -37,7 +40,9 @@ class LlmProviderFactory {
      */
     public static function build(): LlmProviderInterface {
         $provider = Globalvars::get_instance()->get_setting('joinery_ai_llm_provider') ?: 'anthropic';
-        return $provider === 'local' ? self::local() : self::anthropic();
+        if ($provider === 'local')     return self::local();
+        if ($provider === 'fireworks') return self::fireworks();
+        return self::anthropic();
     }
 
     /**
@@ -56,6 +61,11 @@ class LlmProviderFactory {
                 $out[$id] = $label;
             }
         }
+        if ((string)$settings->get_setting('joinery_ai_fireworks_api_key') !== '') {
+            foreach (self::fireworks()->models() as $id => $label) {
+                $out[$id] = $label;
+            }
+        }
         if ((string)$settings->get_setting('joinery_ai_local_model') !== '') {
             foreach (self::local()->models() as $id => $label) {
                 $out[$id] = $label;
@@ -67,6 +77,19 @@ class LlmProviderFactory {
     private static function anthropic(): LlmProviderInterface {
         $key = (string)Globalvars::get_instance()->get_setting('joinery_ai_anthropic_api_key');
         return new AnthropicProvider($key);
+    }
+
+    private static function fireworks(): LlmProviderInterface {
+        $settings = Globalvars::get_instance();
+        $key  = (string)$settings->get_setting('joinery_ai_fireworks_api_key');
+        $base = $settings->get_setting('joinery_ai_fireworks_base_url') ?: FireworksProvider::DEFAULT_BASE_URL;
+        if ($key === '') {
+            throw new LlmProviderException(
+                'A Fireworks model is in use but joinery_ai_fireworks_api_key is empty. '
+                . 'Set it on the Joinery AI settings page.'
+            );
+        }
+        return new FireworksProvider($key, $base);
     }
 
     private static function local(): LlmProviderInterface {

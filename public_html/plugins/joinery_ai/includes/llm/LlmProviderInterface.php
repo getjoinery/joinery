@@ -45,6 +45,14 @@ interface LlmProviderInterface {
     /** Model used when a recipe has no explicit rcp_model. */
     public function defaultModel(): string;
 
-    /** Stable identifier ('anthropic', 'local') for logging/diagnostics. */
+    /** Stable identifier ('anthropic', 'local', 'fireworks') for logging/diagnostics. */
     public function id(): string;
+
+    /**
+     * Whether traffic to this provider stays private. True for on-device hosts
+     * (local Ollama) and vetted no-train remotes (Fireworks); false for general
+     * cloud providers (Anthropic). The chat UI uses this to warn — only — before
+     * sending sensitive-looking text to a non-private model. It is never a gate.
+     */
+    public function isPrivate(): bool;
 }

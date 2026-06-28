@@ -28,9 +28,13 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProv
  */
 class AgentLoop {
 
-    /** Max output tokens per individual API call. The turn-wide budget is
-     *  enforced separately via the $token_budget argument. */
-    const PER_CALL_MAX_TOKENS = 4096;
+    /** Max output tokens per individual API call — the hard ceiling on one model
+     *  response. Sized to hold a reasoning pass plus a full answer (reasoning
+     *  models spend output tokens thinking before they answer). Within every
+     *  offered model's output limit (Claude Haiku/Sonnet 64K, Opus 128K;
+     *  Fireworks models well above). The turn-wide budget is enforced separately
+     *  via the $token_budget argument. */
+    const PER_CALL_MAX_TOKENS = 16000;
 
     /** Abort the turn if this many consecutive iterations return a tool error. */
     const CONSECUTIVE_TOOL_ERROR_LIMIT = 3;

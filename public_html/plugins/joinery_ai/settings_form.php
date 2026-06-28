@@ -13,16 +13,22 @@ $formwriter->dropinput('joinery_ai_llm_provider', 'LLM Provider', [
     'value' => $settings->get_setting('joinery_ai_llm_provider') ?: 'anthropic',
     'options' => [
         'anthropic' => 'Anthropic (cloud)',
+        'fireworks' => 'Fireworks (cloud · no-train, private)',
         'local'     => 'Local / self-hosted (OpenAI-compatible)',
     ],
     'visibility_rules' => [
         'local' => ['show' => [
             'joinery_ai_local_base_url', 'joinery_ai_local_model',
             'joinery_ai_local_api_key', 'joinery_ai_local_timeout_seconds',
+        ], 'hide' => ['joinery_ai_fireworks_base_url']],
+        'fireworks' => ['show' => ['joinery_ai_fireworks_base_url'], 'hide' => [
+            'joinery_ai_local_base_url', 'joinery_ai_local_model',
+            'joinery_ai_local_api_key', 'joinery_ai_local_timeout_seconds',
         ]],
         'anthropic' => ['hide' => [
             'joinery_ai_local_base_url', 'joinery_ai_local_model',
             'joinery_ai_local_api_key', 'joinery_ai_local_timeout_seconds',
+            'joinery_ai_fireworks_base_url',
         ]],
     ],
     'helptext' => 'Which backend drives recipes. The recipe model is reinterpreted '
@@ -53,6 +59,12 @@ $formwriter->numberinput('joinery_ai_local_timeout_seconds', 'Local Timeout (s)'
     'min' => 1,
     'helptext' => 'Per-call HTTP timeout. CPU-only local generation is slow — keep this high.',
 ]);
+
+$formwriter->textinput('joinery_ai_fireworks_base_url', 'Fireworks Base URL', [
+    'value' => $settings->get_setting('joinery_ai_fireworks_base_url'),
+    'placeholder' => 'https://api.fireworks.ai/inference/v1',
+    'helptext' => 'OpenAI-compatible Fireworks endpoint. The default is correct for the public API.',
+]);
 ?>
 
 <h4>API keys</h4>
@@ -62,6 +74,13 @@ $formwriter->passwordinput('joinery_ai_anthropic_api_key', 'Anthropic API Key', 
     'value' => $settings->get_setting('joinery_ai_anthropic_api_key'),
     'placeholder' => 'sk-ant-...',
     'helptext' => 'Required when the provider is Anthropic. Get one from console.anthropic.com.',
+]);
+
+$formwriter->passwordinput('joinery_ai_fireworks_api_key', 'Fireworks API Key', [
+    'value' => $settings->get_setting('joinery_ai_fireworks_api_key'),
+    'placeholder' => 'fw_...',
+    'helptext' => 'Required to use Fireworks models. Get one from fireworks.ai. '
+                . 'Fireworks does not train on open-model traffic.',
 ]);
 
 $formwriter->passwordinput('joinery_ai_brave_search_api_key', 'Brave Search API Key', [

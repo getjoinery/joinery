@@ -24,12 +24,19 @@ class LlmProviderException extends Exception {
             return 'api_network_error';
         }
         if (strpos($msg, '4xx') !== false) {
+            // Auth: Anthropic says "authentication_error / invalid x-api-key";
+            // Fireworks/OpenAI-style say "unauthorized" / "the api key ... invalid".
             if (strpos($msg, 'authentication') !== false || strpos($msg, 'auth_error') !== false
-                || strpos($msg, 'invalid x-api-key') !== false || strpos($msg, '401') !== false
+                || strpos($msg, 'invalid x-api-key') !== false || strpos($msg, 'unauthorized') !== false
+                || strpos($msg, 'api key') !== false || strpos($msg, '401') !== false
                 || strpos($msg, '403') !== false) {
                 return 'api_auth_failed';
             }
+            // Quota / rate limit: "rate_limit" (Anthropic) and "rate limit" / "too
+            // many requests" (OpenAI-style), plus quota/credit exhaustion.
             if (strpos($msg, 'quota') !== false || strpos($msg, 'rate_limit') !== false
+                || strpos($msg, 'rate limit') !== false || strpos($msg, 'too many requests') !== false
+                || strpos($msg, 'insufficient') !== false
                 || strpos($msg, '429') !== false || strpos($msg, '402') !== false) {
                 return 'api_quota_exceeded';
             }
