@@ -1,6 +1,8 @@
 # Joinery AI — Chat turn actions (stop / regenerate / edit-and-resend)
 
-**Status:** Active — awaiting implementation
+**Status:** Deferred — Tier 2. The lightweight per-turn actions (copy / delete)
+shipped first; see `joinery_ai_chat_turn_copy_delete.md`. This spec (stop /
+regenerate / edit-and-resend) is on hold until that work is requested.
 **Plugin:** `joinery_ai`
 **Touches:** `AiConversationMessage` (one column), `ChatTurnContext`, `AgentLoop`
 (read one new halt signal), `ChatRunner`, the chat endpoints, the chat composer

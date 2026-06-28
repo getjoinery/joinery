@@ -12,11 +12,25 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation
  */
 class ChatRender {
 
-    /** A user-authored bubble. */
-    public static function userBubble(string $text, string $time): string {
-        return '<div class="joai-chat-msg joai-chat-mine">'
-             . '<div class="joai-chat-body">' . nl2br(htmlspecialchars($text, ENT_QUOTES, 'UTF-8')) . '</div>'
+    /** A user-authored bubble. A message id enables the per-turn actions
+     *  (copy / delete); the optimistic bubble built client-side on send omits it
+     *  until the page reloads with the persisted row. */
+    public static function userBubble(string $text, string $time, int $message_id = 0): string {
+        $raw = htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
+        $id_attr = $message_id ? ' data-message-id="' . $message_id . '"' : '';
+        return '<div class="joai-chat-msg joai-chat-mine"' . $id_attr . ' data-raw="' . $raw . '">'
+             . '<div class="joai-chat-body">' . nl2br($raw) . '</div>'
+             . ($message_id ? self::actionsHtml() : '')
              . '<div class="joai-chat-time">' . htmlspecialchars($time, ENT_QUOTES, 'UTF-8') . '</div>'
+             . '</div>';
+    }
+
+    /** Per-turn action toolbar (copy / delete). Shared by both bubble kinds; the
+     *  raw text to copy rides on the bubble's data-raw attribute. */
+    public static function actionsHtml(): string {
+        return '<div class="joai-chat-actions">'
+             . '<button type="button" class="joai-chat-action" data-action="copy" aria-label="Copy message">Copy</button>'
+             . '<button type="button" class="joai-chat-action joai-chat-action-danger" data-action="delete" aria-label="Delete message">Delete</button>'
              . '</div>';
     }
 
@@ -46,10 +60,12 @@ class ChatRender {
             );
         }
 
-        return '<div class="joai-chat-msg joai-chat-assistant" data-message-id="' . (int)$msg->key . '">'
+        return '<div class="joai-chat-msg joai-chat-assistant" data-message-id="' . (int)$msg->key . '"'
+             . ' data-raw="' . htmlspecialchars($body_md, ENT_QUOTES, 'UTF-8') . '">'
              . '<div class="joai-chat-body">' . $body_html . '</div>'
              . $trace
              . $card
+             . self::actionsHtml()
              . '<div class="joai-chat-time">' . htmlspecialchars($time, ENT_QUOTES, 'UTF-8') . '</div>'
              . '</div>';
     }
