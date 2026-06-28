@@ -24,6 +24,13 @@ class AiConversationMessage extends SystemBase {
     const ROLE_USER      = 'user';
     const ROLE_ASSISTANT = 'assistant';
 
+    // Turn lifecycle for asynchronous chat. A user row is COMPLETE on insert;
+    // an assistant placeholder is RUNNING until the in-process turn finishes it
+    // (COMPLETE) or it errors / is reaped (FAILED). See ChatAsync.
+    const STATUS_RUNNING  = 'running';
+    const STATUS_COMPLETE = 'complete';
+    const STATUS_FAILED   = 'failed';
+
     protected static $foreign_key_actions = [
         'aim_aic_conversation_id' => ['action' => 'cascade'],
     ];
@@ -37,6 +44,8 @@ class AiConversationMessage extends SystemBase {
         'aim_pending_action'      => array('type'=>'jsonb'),
         'aim_input_tokens'        => array('type'=>'int4', 'default'=>0),
         'aim_output_tokens'       => array('type'=>'int4', 'default'=>0),
+        'aim_status'              => array('type'=>'varchar(20)', 'default'=>'complete'),
+        'aim_error'               => array('type'=>'text'),
         'aim_create_time'         => array('type'=>'timestamp(6)', 'default'=>'now()'),
         'aim_delete_time'         => array('type'=>'timestamp(6)'),
     );
@@ -64,6 +73,10 @@ class MultiAiConversationMessage extends SystemMultiBase {
 
         if (isset($this->options['role'])) {
             $filters['aim_role'] = [$this->options['role'], PDO::PARAM_STR];
+        }
+
+        if (isset($this->options['status'])) {
+            $filters['aim_status'] = [$this->options['status'], PDO::PARAM_STR];
         }
 
         if (isset($this->options['deleted'])) {
