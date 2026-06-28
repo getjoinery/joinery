@@ -84,6 +84,7 @@ $page->admin_header([
             <select id="joai-model" class="joai-chat-control" data-field="model" title="Model (provider follows the model)">
                 <?php foreach ($model_options as $mid => $mlabel): ?>
                     <option value="<?php echo htmlspecialchars((string)$mid, ENT_QUOTES, 'UTF-8'); ?>"
+                        data-private="<?php echo !empty($model_privacy[$mid]) ? '1' : '0'; ?>"
                         <?php echo $mid === $active_model ? 'selected' : ''; ?>>
                         <?php echo htmlspecialchars((string)$mlabel, ENT_QUOTES, 'UTF-8'); ?>
                     </option>
@@ -159,6 +160,12 @@ $page->admin_header([
 
         <div class="joai-chat-thinking" id="joai-thinking" hidden>Working…</div>
 
+        <div class="joai-chat-sensitive-notice" id="joai-sensitive-notice" role="status" hidden
+             style="margin:0 0 8px;padding:8px 12px;border:1px solid #e0a800;background:#fff8e1;color:#6b5200;border-radius:6px;font-size:13px;line-height:1.4;">
+            ⚠ This message looks like it may contain personal data, and the selected model isn't private — your
+            text will be processed off-device. Switch to a local or private model to keep it on-device.
+        </div>
+
         <div class="joai-chat-composer">
             <textarea id="joai-input" rows="2" maxlength="8000"
                       placeholder="Ask Joinery AI to look something up or make a change…"
@@ -182,6 +189,8 @@ $page->admin_header([
     var newChatBtn = document.getElementById('joai-new-chat');
     var dataToggle = document.getElementById('joai-toggle-data');
     var webToggle = document.getElementById('joai-toggle-web');
+    var modelSelect = document.getElementById('joai-model');
+    var sensitiveNotice = document.getElementById('joai-sensitive-notice');
     var currentConversationId = <?php echo $selected_id ? $selected_id : 'null'; ?>;
 
     function scrollToBottom() { transcript.scrollTop = transcript.scrollHeight; }
@@ -293,6 +302,56 @@ $page->admin_header([
         if (busy) scrollToBottom();
     }
 
+    // ----- Sensitivity notice -----
+    // A passive, real-time warning: while composing, if the text looks like it
+    // carries personal data AND the selected model's provider isn't private, show
+    // a banner. It never blocks sending and needs no confirmation; it shows/hides
+    // as the text and model change. Recipes are unaffected (this is chat-only).
+    function luhnValid(num) {
+        var sum = 0, alt = false;
+        for (var i = num.length - 1; i >= 0; i--) {
+            var d = parseInt(num.charAt(i), 10);
+            if (alt) { d *= 2; if (d > 9) d -= 9; }
+            sum += d; alt = !alt;
+        }
+        return sum % 10 === 0;
+    }
+    function cardPresent(text) {
+        var matches = text.match(/\b(?:\d[ -]?){13,16}\b/g);
+        if (!matches) return false;
+        for (var i = 0; i < matches.length; i++) {
+            var digits = matches[i].replace(/[ -]/g, '');
+            if (digits.length >= 13 && digits.length <= 16 && luhnValid(digits)) return true;
+        }
+        return false;
+    }
+    function looksSensitive(text) {
+        if (!text) return false;
+        // Strong signals — any one is enough.
+        if (/\b\d{3}-\d{2}-\d{4}\b/.test(text)) return true;          // SSN
+        if (/^\s*(from|to|subject|date)\s*:/im.test(text)) return true; // pasted email headers
+        if (cardPresent(text)) return true;                          // credit card
+        // Weak signals — require two together.
+        var weak = 0;
+        if (/[\w.+-]+@[\w-]+\.[\w.-]+/.test(text)) weak++;          // email address
+        if (/(\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/.test(text)) weak++; // phone
+        if (/\b\d{1,6}\s+([A-Za-z0-9.'-]+\s+){1,4}(st|street|ave|avenue|rd|road|blvd|boulevard|dr|drive|ln|lane|ct|court|way|pl|place)\b/i.test(text)) weak++; // street address
+        return weak >= 2;
+    }
+    function selectedModelPrivate() {
+        if (!modelSelect) return true; // no selector -> don't nag
+        var opt = modelSelect.selectedOptions[0];
+        return !opt || opt.getAttribute('data-private') === '1';
+    }
+    function updateSensitivityNotice() {
+        if (!sensitiveNotice) return;
+        var show = !selectedModelPrivate() && looksSensitive(input.value);
+        sensitiveNotice.hidden = !show;
+    }
+    if (input) input.addEventListener('input', updateSensitivityNotice);
+    if (modelSelect) modelSelect.addEventListener('change', updateSensitivityNotice);
+    updateSensitivityNotice();
+
     function send() {
         var message = input.value.trim();
         if (!message) return;
@@ -307,6 +366,7 @@ $page->admin_header([
         transcript.appendChild(mine);
 
         input.value = '';
+        updateSensitivityNotice();
         setBusy(true);
 
         var body = new FormData();

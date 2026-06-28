@@ -9,24 +9,27 @@ use GuzzleHttp\Exception\ServerException;     // 5xx
 use GuzzleHttp\Exception\ConnectException;    // network / connection refused
 
 /**
- * One provider for every OpenAI-compatible local runtime — Ollama, llama.cpp
- * server, vLLM, LM Studio — all of which expose /v1/chat/completions with
- * tool-calling. Choosing the OpenAI-compatible endpoint over Ollama's native
- * /api/chat buys portability across every common local runtime for one class.
+ * One provider for every OpenAI-compatible runtime — Ollama, llama.cpp server,
+ * vLLM, LM Studio — all of which expose /v1/chat/completions with tool-calling.
+ * Choosing the OpenAI-compatible endpoint over Ollama's native /api/chat buys
+ * portability across every common runtime for one class.
  *
  * This provider does the real translation: the runner speaks the canonical
  * (Anthropic-flavoured) block shape; this class converts canonical -> OpenAI
  * request and OpenAI response -> canonical, entirely inside the adapter. The
  * runner never sees the OpenAI wire format.
  *
- * Local inference is free, so estimateCost() always returns 0.0. No prompt
- * caching exists locally; cache_control on system blocks is ignored and every
- * call re-sends the full system prompt.
+ * The base class targets a local host: inference is free (estimateCost() returns
+ * 0.0), the provider is private (isPrivate() is true), and the thinking knob is
+ * expressed via qwen's /think token. Remote OpenAI-compatible services (e.g.
+ * Fireworks) subclass this, reusing all the wire translation and overriding the
+ * vendor-specific seams — id(), models(), estimateCost(), isPrivate(),
+ * systemThinkingSuffix(), applyReasoning(), unreachableMessage().
  */
 class OpenAiCompatibleProvider implements LlmProviderInterface {
 
     /** @var string Base URL of the OpenAI-compatible server, e.g. http://localhost:11434/v1 */
-    private $base_url;
+    protected $base_url;
 
     /** @var string Model id served by the host. */
     private $model;
@@ -61,6 +64,11 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
 
     public function id(): string {
         return 'local';
+    }
+
+    /** Local inference runs on-device — private. Remote subclasses override. */
+    public function isPrivate(): bool {
+        return true;
     }
 
     public function defaultModel(): string {
@@ -110,22 +118,22 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
             ]);
             return $this->consumeStream($response->getBody(), $onTextDelta);
         } catch (ConnectException $e) {
-            // Connection refused / DNS / timeout — the local server isn't reachable.
-            throw new LlmProviderException(
-                "Local model server not reachable at {$this->base_url} — is Ollama running? "
-                . '(connection error)', 0, $e);
+            // Connection refused / DNS / timeout — the server isn't reachable.
+            // Keep "not reachable" in the message so classify() reads it as a
+            // network error.
+            throw new LlmProviderException($this->unreachableMessage(), 0, $e);
         } catch (ClientException $e) {
             $resp = $e->hasResponse() ? (string)$e->getResponse()->getBody() : '';
-            throw new LlmProviderException('Local model 4xx: ' . ($this->extractError($resp) ?: $e->getMessage()),
+            throw new LlmProviderException($this->providerLabel() . ' 4xx: ' . ($this->extractError($resp) ?: $e->getMessage()),
                 $e->getCode(), $e);
         } catch (ServerException $e) {
             $resp = $e->hasResponse() ? (string)$e->getResponse()->getBody() : '';
-            throw new LlmProviderException('Local model 5xx: ' . ($this->extractError($resp) ?: $e->getMessage()),
+            throw new LlmProviderException($this->providerLabel() . ' 5xx: ' . ($this->extractError($resp) ?: $e->getMessage()),
                 $e->getCode(), $e);
         } catch (LlmProviderException $e) {
             throw $e;
         } catch (Exception $e) {
-            throw new LlmProviderException('Local model call failed: ' . $e->getMessage(), 0, $e);
+            throw new LlmProviderException($this->providerLabel() . ' call failed: ' . $e->getMessage(), 0, $e);
         }
     }
 
@@ -144,7 +152,7 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
         $text = '';
         $tool_calls = [];   // index => ['id'=>,'name'=>,'args'=>'']
         $finish = 'stop';
-        $usage = ['prompt_tokens' => 0, 'completion_tokens' => 0];
+        $usage = ['prompt_tokens' => 0, 'completion_tokens' => 0, 'cached_tokens' => 0];
         $think = ['in' => false, 'carry' => '']; // <think> filter state
 
         $buffer = '';
@@ -180,6 +188,9 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
                 if (isset($chunk['usage']) && is_array($chunk['usage'])) {
                     $usage['prompt_tokens']     = (int)($chunk['usage']['prompt_tokens'] ?? $usage['prompt_tokens']);
                     $usage['completion_tokens'] = (int)($chunk['usage']['completion_tokens'] ?? $usage['completion_tokens']);
+                    // Standard OpenAI cached-prompt count (Fireworks sends it; Ollama
+                    // doesn't). prompt_tokens already includes these.
+                    $usage['cached_tokens'] = (int)($chunk['usage']['prompt_tokens_details']['cached_tokens'] ?? $usage['cached_tokens']);
                 }
             }
         }
@@ -205,7 +216,7 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
                 'input_tokens'                => $usage['prompt_tokens'],
                 'output_tokens'               => $usage['completion_tokens'],
                 'cache_creation_input_tokens' => 0,
-                'cache_read_input_tokens'     => 0,
+                'cache_read_input_tokens'     => $usage['cached_tokens'],
             ],
         ];
     }
@@ -268,13 +279,16 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
         $messages = [];
 
         // System: array of text blocks (cache_control ignored) -> one system
-        // message prepended. The thinking level is expressed to qwen3 via a
-        // /think or /no_think control token appended to the system text — the
-        // method Ollama-hosted qwen3 honors reliably. 'off' (the default) maps to
-        // /no_think, which skips the reasoning pass entirely.
-        $think = $params['thinking']['level'] ?? 'off';
-        $think_token = ($think === 'off') ? '/no_think' : '/think';
-        $system_text = trim($this->flattenSystem($params['system'] ?? []) . "\n" . $think_token);
+        // message prepended. A provider may append a control suffix to the system
+        // text; the local host expresses the thinking level via qwen's /think or
+        // /no_think token (see systemThinkingSuffix()). Remote subclasses that use
+        // a native reasoning parameter return no suffix.
+        $level = $params['thinking']['level'] ?? 'off';
+        $system_text = $this->flattenSystem($params['system'] ?? []);
+        $suffix = $this->systemThinkingSuffix($level);
+        if ($suffix !== '') {
+            $system_text = trim($system_text . "\n" . $suffix);
+        }
         $messages[] = ['role' => 'system', 'content' => $system_text];
 
         foreach (($params['messages'] ?? []) as $msg) {
@@ -313,7 +327,44 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
             }, $params['tools']);
         }
 
+        $this->applyReasoning($request, $level);
+
         return $request;
+    }
+
+    /**
+     * Control suffix appended to the system message for the thinking level. The
+     * local host (qwen) honors a /think or /no_think token; 'off' (the default)
+     * maps to /no_think, which skips the reasoning pass entirely. Subclasses that
+     * use a native reasoning parameter return '' (no suffix).
+     */
+    protected function systemThinkingSuffix(string $level): string {
+        return ($level === 'off') ? '/no_think' : '/think';
+    }
+
+    /**
+     * Apply a native reasoning control to the request body. The local host uses
+     * the system-text suffix instead, so this is a no-op; remote subclasses that
+     * support reasoning_effort override it.
+     */
+    protected function applyReasoning(array &$request, string $level): void {
+        // no-op for the local host; see systemThinkingSuffix()
+    }
+
+    /**
+     * Human label for this provider in raw error messages — keeps recipe Run
+     * History and logs accurate ("Local model" vs "Fireworks"). The 4xx/5xx
+     * tokens that classify() keys on are added separately, so overriding this is
+     * safe.
+     */
+    protected function providerLabel(): string {
+        return 'Local model';
+    }
+
+    /** Message for an unreachable server; keep "not reachable" for classify(). */
+    protected function unreachableMessage(): string {
+        return "Local model server not reachable at {$this->base_url} — is Ollama running? "
+            . '(connection error)';
     }
 
     /** Concatenate canonical system text blocks into a single string. */

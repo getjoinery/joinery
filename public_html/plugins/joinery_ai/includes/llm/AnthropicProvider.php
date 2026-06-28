@@ -79,6 +79,11 @@ class AnthropicProvider implements LlmProviderInterface {
         return 'anthropic';
     }
 
+    /** General cloud provider — not classified private; triggers the chat warning. */
+    public function isPrivate(): bool {
+        return false;
+    }
+
     public function models(): array {
         return self::MODELS;
     }

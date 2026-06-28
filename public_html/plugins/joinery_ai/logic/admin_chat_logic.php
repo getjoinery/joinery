@@ -53,6 +53,20 @@ function admin_joinery_ai_chat_logic(array $input): LogicResult {
         $active_model = ChatRunner::defaultModel();
     }
 
+    // Per-model privacy, sourced from each model's provider. The chat composer
+    // uses this to warn (only) before sending sensitive-looking text to a
+    // non-private model. Every model here belongs to a configured provider, so
+    // forModel() resolves without throwing; treat any surprise as non-private.
+    $models = LlmProviderFactory::allModels();
+    $model_privacy = [];
+    foreach ($models as $mid => $_label) {
+        try {
+            $model_privacy[(string)$mid] = LlmProviderFactory::forModel((string)$mid)->isPrivate();
+        } catch (Throwable $e) {
+            $model_privacy[(string)$mid] = false;
+        }
+    }
+
     // Per-chat model controls. For an existing chat, show its own stored value
     // (blank = "inherit the default"); for a new chat, all blank. The resolved
     // defaults drive the placeholder text so the inherited value is visible.
@@ -72,7 +86,8 @@ function admin_joinery_ai_chat_logic(array $input): LogicResult {
         'selected'       => $selected,
         'messages'       => $messages,
         'active_model'   => $active_model,
-        'models'         => LlmProviderFactory::allModels(),
+        'models'         => $models,
+        'model_privacy'  => $model_privacy,
         'data_access'    => $selected ? (bool)$selected->get('aic_data_access') : false,
         'web_search'     => $selected ? (bool)$selected->get('aic_web_search') : false,
         'temperature'    => $g('aic_temperature'),
