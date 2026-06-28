@@ -59,6 +59,11 @@ if ($status === AiConversationMessage::STATUS_COMPLETE) {
     $response['assistant_html'] = ChatRender::assistantBubble($msg, $session->get_timezone());
 } elseif ($status === AiConversationMessage::STATUS_FAILED) {
     $response['error'] = (string)$msg->get('aim_error') ?: 'The assistant could not complete this turn.';
+} else {
+    // Still running — hand back the answer text written so far so the page can
+    // show it as it streams. Plain text (not markdown): partial markdown renders
+    // badly; the final swap to assistant_html does the markdown pass.
+    $response['partial_text'] = (string)$msg->get('aim_content');
 }
 
 echo json_encode($response);

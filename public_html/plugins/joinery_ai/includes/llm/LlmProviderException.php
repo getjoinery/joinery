@@ -1,10 +1,65 @@
 <?php
 
 /**
- * Base exception for every LLM provider. The recipe runner catches this type
- * (never a provider-specific subclass) so error handling is provider-agnostic.
+ * Base exception for every LLM provider. Both surfaces catch this type (never a
+ * provider-specific subclass) so error handling is provider-agnostic.
  *
  * AnthropicException extends this for backward compatibility with any in-plugin
  * references; new providers throw LlmProviderException directly.
  */
-class LlmProviderException extends Exception {}
+class LlmProviderException extends Exception {
+
+    /**
+     * Classify a provider failure into a stable code from its message. Shared by
+     * RecipeRunner (records [code] on the run) and the chat endpoints (maps to a
+     * user-facing message) so both surfaces read failures the same way. Codes:
+     * api_network_error, api_auth_failed, api_quota_exceeded,
+     * api_request_invalid, api_server_error.
+     */
+    public static function classify(Throwable $e): string {
+        $msg = strtolower($e->getMessage());
+
+        // Local provider: connection refused to the configured base URL.
+        if (strpos($msg, 'not reachable') !== false) {
+            return 'api_network_error';
+        }
+        if (strpos($msg, '4xx') !== false) {
+            if (strpos($msg, 'authentication') !== false || strpos($msg, 'auth_error') !== false
+                || strpos($msg, 'invalid x-api-key') !== false || strpos($msg, '401') !== false
+                || strpos($msg, '403') !== false) {
+                return 'api_auth_failed';
+            }
+            if (strpos($msg, 'quota') !== false || strpos($msg, 'rate_limit') !== false
+                || strpos($msg, '429') !== false || strpos($msg, '402') !== false) {
+                return 'api_quota_exceeded';
+            }
+            return 'api_request_invalid';
+        }
+        if (strpos($msg, '5xx') !== false || strpos($msg, 'overloaded') !== false) {
+            return 'api_server_error';
+        }
+        if (strpos($msg, 'transport') !== false || strpos($msg, 'curl') !== false
+            || strpos($msg, 'network') !== false || strpos($msg, 'timeout') !== false
+            || strpos($msg, 'connection') !== false) {
+            return 'api_network_error';
+        }
+        return 'api_server_error';
+    }
+
+    /** A user-facing message for a classify() code (for the chat surface). */
+    public static function friendlyMessage(string $code): string {
+        switch ($code) {
+            case 'api_network_error':
+                return 'Could not reach the AI provider. Check the provider settings (or that the local model server is running) and try again.';
+            case 'api_auth_failed':
+                return 'The AI provider rejected the credentials. Check the API key in settings.';
+            case 'api_quota_exceeded':
+                return 'The AI provider is rate-limited or out of quota. Wait a moment and try again.';
+            case 'api_request_invalid':
+                return 'The AI provider rejected the request. Try again or pick a different model.';
+            case 'api_server_error':
+            default:
+                return 'The AI provider returned an error. Try again in a moment.';
+        }
+    }
+}

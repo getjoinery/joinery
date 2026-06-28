@@ -147,11 +147,10 @@ exit;
 function chat_run_and_finalize(AiConversation $conversation, int $uid,
         AiConversationMessage $assistant_msg): void {
     try {
-        $turn = ChatRunner::runTurn($conversation, $uid);
+        $turn = ChatRunner::runTurn($conversation, $uid, ChatAsync::streamSink($assistant_msg));
     } catch (LlmProviderException $e) {
         error_log('[joinery_ai chat] provider error: ' . $e->getMessage());
-        chat_mark_failed($assistant_msg,
-            'The AI provider returned an error. Check the provider settings and try again.');
+        chat_mark_failed($assistant_msg, LlmProviderException::friendlyMessage(LlmProviderException::classify($e)));
         return;
     } catch (Throwable $e) {
         error_log('[joinery_ai chat] turn failed: ' . $e->getMessage());

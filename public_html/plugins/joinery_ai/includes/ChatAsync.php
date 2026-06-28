@@ -35,11 +35,49 @@ class ChatAsync {
         if (function_exists('fastcgi_finish_request')) {
             fastcgi_finish_request();
         }
+        // Release the PHP session lock before the long turn. fastcgi_finish_request
+        // closes the connection but NOT the session, and PHP serializes requests
+        // on the same session file — so without this every chat_poll for this
+        // conversation would block on session_start() until the turn ends, and no
+        // partial text would ever be observed. The turn only reads identity from
+        // the session ($_SESSION stays readable in memory), so closing it is safe.
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
         // The client is gone; don't let its disconnect abort the turn, and lift
         // PHP's own execution limit (on Linux fpm this counts CPU time, not the
         // model's I/O wait, but lifting it removes all doubt).
         ignore_user_abort(true);
         set_time_limit(0);
+    }
+
+    /** Flush the partial answer onto the row at most this often / this many new
+     *  chars — bounds DB writes while keeping the poll feeling live. */
+    const STREAM_FLUSH_SECONDS = 0.4;
+    const STREAM_FLUSH_CHARS = 80;
+
+    /**
+     * A throttled text sink for streamed answer deltas. Accumulates fragments and
+     * writes the growing answer onto $msg->aim_content so the poll endpoint can
+     * return it; the row stays RUNNING and finalize later overwrites the content
+     * with the resolved text. $seed pre-loads the buffer (e.g. a resume's lead
+     * text) so partials read continuously. Returns a callable(string $delta).
+     */
+    public static function streamSink(AiConversationMessage $msg, string $seed = ''): callable {
+        $buffer  = $seed;
+        $pending = 0;
+        $last    = microtime(true);
+        return function (string $delta) use ($msg, &$buffer, &$pending, &$last): void {
+            $buffer  .= $delta;
+            $pending += strlen($delta);
+            $now = microtime(true);
+            if ($pending >= self::STREAM_FLUSH_CHARS || ($now - $last) >= self::STREAM_FLUSH_SECONDS) {
+                $msg->set('aim_content', $buffer);
+                $msg->save();
+                $pending = 0;
+                $last = $now;
+            }
+        };
     }
 
     /**

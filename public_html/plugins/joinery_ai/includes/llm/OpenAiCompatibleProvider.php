@@ -44,11 +44,15 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
      * @param int         $timeout   per-call HTTP timeout (local generation is slow)
      * @param Client|null $http      injectable for tests
      */
+    /** @var int Inactivity (between-token) timeout for the streamed read. */
+    private $read_timeout;
+
     public function __construct(string $base_url, string $model, string $api_key = '',
             int $timeout = 300, ?Client $http = null) {
         $this->base_url = rtrim($base_url, '/');
         $this->model    = $model;
         $this->api_key  = $api_key;
+        $this->read_timeout = $timeout;
         $this->http = $http ?: new Client([
             'timeout'         => $timeout,
             'connect_timeout' => 10,
@@ -80,12 +84,14 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
 
     /**
      * Translate the canonical request to an OpenAI chat-completions request,
-     * post it, and translate the response back to canonical. Throws
+     * stream it, and translate the response back to canonical. Answer-text
+     * deltas fire $onTextDelta as they arrive; inline <think>…</think> reasoning
+     * is filtered out of both the stream and the final text. Throws
      * LlmProviderException on transport/HTTP failure; a connection refused to
      * the configured base URL is surfaced with a local-specific message so the
-     * runner can classify it as api_network_error.
+     * caller can classify it as api_network_error.
      */
-    public function createMessage(array $params): array {
+    public function createMessageStreamed(array $params, callable $onTextDelta): array {
         $body = $this->toOpenAiRequest($params);
         $url = $this->base_url . '/chat/completions';
 
@@ -96,15 +102,13 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
 
         try {
             $response = $this->http->post($url, [
-                'headers' => $headers,
-                'json'    => $body,
+                'headers'      => $headers,
+                'json'         => $body,
+                'stream'       => true,
+                'timeout'      => 0,                  // local generation can run long
+                'read_timeout' => $this->read_timeout, // bound inactivity instead
             ]);
-            $raw = (string)$response->getBody();
-            $decoded = json_decode($raw, true);
-            if (!is_array($decoded)) {
-                throw new LlmProviderException('Local model returned non-JSON: ' . substr($raw, 0, 200));
-            }
-            return $this->toCanonicalResponse($decoded);
+            return $this->consumeStream($response->getBody(), $onTextDelta);
         } catch (ConnectException $e) {
             // Connection refused / DNS / timeout — the local server isn't reachable.
             throw new LlmProviderException(
@@ -123,6 +127,139 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
         } catch (Exception $e) {
             throw new LlmProviderException('Local model call failed: ' . $e->getMessage(), 0, $e);
         }
+    }
+
+    /** Blocking convenience: stream with a no-op sink and return the full result. */
+    public function createMessage(array $params): array {
+        return $this->createMessageStreamed($params, static function (string $d): void {});
+    }
+
+    /**
+     * Read the OpenAI-compatible SSE stream and assemble the canonical response.
+     * Each `data:` line is a chat-completion chunk; `data: [DONE]` ends it. Text
+     * deltas pass through the think-filter before reaching $onTextDelta and the
+     * accumulated answer; tool-call argument fragments accumulate per index.
+     */
+    private function consumeStream($body, callable $onTextDelta): array {
+        $text = '';
+        $tool_calls = [];   // index => ['id'=>,'name'=>,'args'=>'']
+        $finish = 'stop';
+        $usage = ['prompt_tokens' => 0, 'completion_tokens' => 0];
+        $think = ['in' => false, 'carry' => '']; // <think> filter state
+
+        $buffer = '';
+        while (!$body->eof()) {
+            $buffer .= $body->read(8192);
+            while (($pos = strpos($buffer, "\n")) !== false) {
+                $line = rtrim(substr($buffer, 0, $pos), "\r");
+                $buffer = substr($buffer, $pos + 1);
+                if (strncmp($line, 'data:', 5) !== 0) continue; // skip blanks / comments
+                $payload = ltrim(substr($line, 5));
+                if ($payload === '' || $payload === '[DONE]') continue;
+
+                $chunk = json_decode($payload, true);
+                if (!is_array($chunk)) continue;
+
+                $choice = $chunk['choices'][0] ?? null;
+                if (is_array($choice)) {
+                    $delta = $choice['delta'] ?? [];
+                    if (isset($delta['content']) && is_string($delta['content']) && $delta['content'] !== '') {
+                        $clean = $this->thinkPush($think, $delta['content']);
+                        if ($clean !== '') { $text .= $clean; $onTextDelta($clean); }
+                    }
+                    foreach (($delta['tool_calls'] ?? []) as $tc) {
+                        $idx = (int)($tc['index'] ?? 0);
+                        if (!isset($tool_calls[$idx])) $tool_calls[$idx] = ['id' => '', 'name' => '', 'args' => ''];
+                        if (isset($tc['id'])) $tool_calls[$idx]['id'] = (string)$tc['id'];
+                        $fn = $tc['function'] ?? [];
+                        if (isset($fn['name']))      $tool_calls[$idx]['name'] .= (string)$fn['name'];
+                        if (isset($fn['arguments'])) $tool_calls[$idx]['args'] .= (string)$fn['arguments'];
+                    }
+                    if (!empty($choice['finish_reason'])) $finish = (string)$choice['finish_reason'];
+                }
+                if (isset($chunk['usage']) && is_array($chunk['usage'])) {
+                    $usage['prompt_tokens']     = (int)($chunk['usage']['prompt_tokens'] ?? $usage['prompt_tokens']);
+                    $usage['completion_tokens'] = (int)($chunk['usage']['completion_tokens'] ?? $usage['completion_tokens']);
+                }
+            }
+        }
+        $tail = $this->thinkFlush($think);
+        if ($tail !== '') { $text .= $tail; $onTextDelta($tail); }
+
+        // Assemble canonical content: a text block (if any) then tool_use blocks.
+        $content = [];
+        $text = trim($text);
+        if ($text !== '') $content[] = ['type' => 'text', 'text' => $text];
+
+        ksort($tool_calls);
+        foreach ($tool_calls as $tc) {
+            $input = json_decode($tc['args'] === '' ? '{}' : $tc['args'], true);
+            if (!is_array($input)) $input = [];
+            $content[] = ['type' => 'tool_use', 'id' => $tc['id'], 'name' => $tc['name'], 'input' => $input];
+        }
+
+        return [
+            'stop_reason' => $this->mapStopReason($finish, $content),
+            'content'     => $content,
+            'usage'       => [
+                'input_tokens'                => $usage['prompt_tokens'],
+                'output_tokens'               => $usage['completion_tokens'],
+                'cache_creation_input_tokens' => 0,
+                'cache_read_input_tokens'     => 0,
+            ],
+        ];
+    }
+
+    /**
+     * Streaming <think> filter. Feeds $piece through a state machine and returns
+     * only the answer text outside <think>…</think>, holding back any partial
+     * tag that straddles a chunk boundary in $state['carry'].
+     */
+    private function thinkPush(array &$state, string $piece): string {
+        $state['carry'] .= $piece;
+        $out = '';
+        while (true) {
+            if (!$state['in']) {
+                $p = strpos($state['carry'], '<think>');
+                if ($p !== false) {
+                    $out .= substr($state['carry'], 0, $p);
+                    $state['carry'] = substr($state['carry'], $p + 7);
+                    $state['in'] = true;
+                    continue;
+                }
+                $keep = $this->partialTagSuffix($state['carry'], '<think>');
+                $emit = strlen($state['carry']) - $keep;
+                $out .= substr($state['carry'], 0, $emit);
+                $state['carry'] = substr($state['carry'], $emit);
+                break;
+            }
+            $p = strpos($state['carry'], '</think>');
+            if ($p !== false) {
+                $state['carry'] = substr($state['carry'], $p + 8);
+                $state['in'] = false;
+                continue;
+            }
+            $keep = $this->partialTagSuffix($state['carry'], '</think>');
+            $state['carry'] = substr($state['carry'], strlen($state['carry']) - $keep);
+            break;
+        }
+        return $out;
+    }
+
+    /** Flush the filter at stream end: any leftover outside a think block is answer text. */
+    private function thinkFlush(array &$state): string {
+        $out = $state['in'] ? '' : $state['carry'];
+        $state['carry'] = '';
+        return $out;
+    }
+
+    /** Longest k (1..len-1) where the suffix of $s equals the prefix of $tag. */
+    private function partialTagSuffix(string $s, string $tag): int {
+        $max = min(strlen($s), strlen($tag) - 1);
+        for ($k = $max; $k > 0; $k--) {
+            if (substr($s, -$k) === substr($tag, 0, $k)) return $k;
+        }
+        return 0;
     }
 
     // --- canonical -> OpenAI -----------------------------------------------
@@ -151,10 +288,11 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
         }
 
         $request = [
-            'model'      => $params['model'] ?? $this->model,
-            'messages'   => $messages,
-            'max_tokens' => (int)($params['max_tokens'] ?? 4096),
-            'stream'     => false,
+            'model'         => $params['model'] ?? $this->model,
+            'messages'      => $messages,
+            'max_tokens'    => (int)($params['max_tokens'] ?? 4096),
+            'stream'        => true,
+            'stream_options' => ['include_usage' => true], // final chunk carries usage
         ];
 
         if (!empty($params['tools'])) {
@@ -272,49 +410,6 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
 
     // --- OpenAI -> canonical -----------------------------------------------
 
-    private function toCanonicalResponse(array $resp): array {
-        $choice  = $resp['choices'][0] ?? [];
-        $message = $choice['message'] ?? [];
-        $finish  = $choice['finish_reason'] ?? 'stop';
-
-        $content = [];
-
-        // Final text. Strip <think>…</think> reasoning leakage; never use a
-        // separate reasoning channel as the answer.
-        $text = $this->stripReasoning((string)($message['content'] ?? ''));
-        if ($text !== '') {
-            $content[] = ['type' => 'text', 'text' => $text];
-        }
-
-        foreach (($message['tool_calls'] ?? []) as $tc) {
-            $fn = $tc['function'] ?? [];
-            // Malformed arguments must not crash the run: decode failure -> {}.
-            // The tool's own input validation then produces a normal is_error
-            // tool_result.
-            $input = json_decode($fn['arguments'] ?? '', true);
-            if (!is_array($input)) $input = [];
-            $content[] = [
-                'type'  => 'tool_use',
-                'id'    => $tc['id'] ?? '',
-                'name'  => $fn['name'] ?? '',
-                'input' => $input,
-            ];
-        }
-
-        $usage = $resp['usage'] ?? [];
-
-        return [
-            'stop_reason' => $this->mapStopReason($finish, $content),
-            'content'     => $content,
-            'usage'       => [
-                'input_tokens'                => (int)($usage['prompt_tokens'] ?? 0),
-                'output_tokens'               => (int)($usage['completion_tokens'] ?? 0),
-                'cache_creation_input_tokens' => 0,
-                'cache_read_input_tokens'     => 0,
-            ],
-        ];
-    }
-
     /**
      * Map OpenAI finish_reason to a canonical stop_reason. "length" maps to
      * end_turn so the runner treats whatever partial text exists as the answer.
@@ -327,12 +422,6 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
         }
         if ($finish === 'tool_calls') return 'tool_use';
         return 'end_turn'; // stop, length, or anything else
-    }
-
-    /** Remove <think>…</think> blocks some reasoning models emit inline. */
-    private function stripReasoning(string $text): string {
-        $cleaned = preg_replace('#<think>.*?</think>#is', '', $text);
-        return trim($cleaned === null ? $text : $cleaned);
     }
 
     private function extractError(string $body): ?string {

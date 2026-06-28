@@ -90,7 +90,7 @@ $page->admin_header([
             <?php endif; ?>
         </div>
 
-        <div class="joai-chat-thinking" id="joai-thinking" hidden>Thinking…</div>
+        <div class="joai-chat-thinking" id="joai-thinking" hidden>Working…</div>
 
         <div class="joai-chat-composer">
             <textarea id="joai-input" rows="2" maxlength="8000"
@@ -120,13 +120,14 @@ $page->admin_header([
     function scrollToBottom() { transcript.scrollTop = transcript.scrollHeight; }
     scrollToBottom();
 
-    // A turn now runs off the request: the send/confirm endpoints return a poll
+    // A turn runs off the request: the send/confirm endpoints return a poll
     // handle (message_id + status:"running") and finish the turn in the
-    // background, so we poll until the assistant row is complete or failed.
-    var POLL_INTERVAL_MS = 2000;
-    var POLL_GIVE_UP_MS = 3600 * 1000; // beyond the server-side stale ceiling
+    // background. We poll until the assistant row is complete or failed, and
+    // while it runs we show the answer text as it streams (partial_text).
+    var POLL_INTERVAL_MS = 600;          // brisk while a turn is active
+    var POLL_GIVE_UP_MS = 3600 * 1000;   // beyond the server-side stale ceiling
 
-    function pollMessage(messageId, onComplete, onFailed) {
+    function pollMessage(messageId, onPartial, onComplete, onFailed) {
         var startedAt = Date.now();
         function tick() {
             fetch('/admin/joinery_ai/chat_poll?message_id=' + encodeURIComponent(messageId))
@@ -135,6 +136,7 @@ $page->admin_header([
                     if (!data.success) { onFailed(data.message || 'Could not load the reply.'); return; }
                     if (data.status === 'complete') { onComplete(data.assistant_html); return; }
                     if (data.status === 'failed') { onFailed(data.error || 'The assistant could not complete this turn.'); return; }
+                    if (typeof data.partial_text === 'string') onPartial(data.partial_text);
                     if (Date.now() - startedAt > POLL_GIVE_UP_MS) {
                         onFailed('This is taking longer than expected. It may still finish — reload to check.');
                         return;
@@ -147,6 +149,31 @@ $page->admin_header([
                 });
         }
         setTimeout(tick, POLL_INTERVAL_MS);
+    }
+
+    // A live assistant bubble that streamed partial text fills, then the final
+    // server-rendered (markdown) bubble replaces. Reuses an existing bubble with
+    // the same id (the confirm flow reuses the pending bubble).
+    function ensureLiveBubble(messageId) {
+        var el = transcript.querySelector('.joai-chat-msg[data-message-id="' + messageId + '"]');
+        if (!el) {
+            el = document.createElement('div');
+            el.setAttribute('data-message-id', messageId);
+            transcript.appendChild(el);
+        }
+        el.className = 'joai-chat-msg joai-chat-assistant joai-chat-streaming';
+        el.innerHTML = '<div class="joai-chat-body"></div>';
+        scrollToBottom();
+        return el;
+    }
+
+    // Show a live bubble for messageId and stream into it until the turn lands.
+    function streamInto(messageId) {
+        var body = ensureLiveBubble(messageId).querySelector('.joai-chat-body');
+        pollMessage(messageId,
+            function (text) { body.textContent = text; scrollToBottom(); },
+            function (html) { replaceBubble(messageId, html); },
+            function (err) { setBusy(false); alert(err || 'The turn could not be completed.'); });
     }
 
     // Capability toggles. On an existing chat, persist immediately; on a new
@@ -221,10 +248,9 @@ $page->admin_header([
                 if (data.status === 'complete') { appendReply(data.assistant_html); return; }
                 if (data.status === 'failed') { setBusy(false); alert(data.error || 'Send failed.'); return; }
 
-                // Async: keep the "Thinking…" indicator up and poll for the reply.
-                pollMessage(data.message_id,
-                    function (html) { appendReply(html); },
-                    function (err) { setBusy(false); alert(err || 'Send failed.'); });
+                // Async: stream the reply into a live bubble, then swap in the
+                // final markdown bubble on completion.
+                streamInto(data.message_id);
             })
             .catch(function () {
                 setBusy(false);
@@ -281,10 +307,9 @@ $page->admin_header([
                 if (data.status === 'complete') { replaceBubble(data.message_id, data.assistant_html); return; }
                 if (data.status === 'failed') { setBusy(false); alert(data.error || 'Action failed.'); return; }
 
-                // Async: poll until the same assistant row is finalized.
-                pollMessage(data.message_id,
-                    function (html) { replaceBubble(messageId, html); },
-                    function (err) { setBusy(false); alert(err || 'Action failed.'); });
+                // Async: reuse the pending bubble as the live bubble, stream the
+                // resumed reply into it, then swap in the final markdown bubble.
+                streamInto(data.message_id);
             })
             .catch(function () {
                 setBusy(false);
