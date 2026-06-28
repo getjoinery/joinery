@@ -43,6 +43,9 @@ class ChatTurnContext implements ToolContext {
     /** @var array  accumulated tool-call trace entries for this turn */
     private $tool_calls = [];
 
+    /** @var callable|null  live sink for streamed answer text (set by the endpoint) */
+    private $stream_sink = null;
+
     public function __construct(AiConversation $conversation, int $acting_user_id) {
         $this->conversation = $conversation;
         $this->acting_user_id = $acting_user_id;
@@ -109,6 +112,19 @@ class ChatTurnContext implements ToolContext {
 
     public function appendToolCall(array $entry): void {
         $this->tool_calls[] = $entry;
+    }
+
+    /** Install the live text sink (a throttled writer onto the assistant row).
+     *  Until set, emitText is a no-op — e.g. the non-fpm synchronous path. */
+    public function setStreamSink(callable $sink): void {
+        $this->stream_sink = $sink;
+    }
+
+    /** Forward a streamed answer-text fragment to the live sink, if any. */
+    public function emitText(string $delta): void {
+        if ($this->stream_sink !== null) {
+            ($this->stream_sink)($delta);
+        }
     }
 
     /** The accumulated per-turn trace, for the endpoint to store on the

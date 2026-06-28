@@ -59,4 +59,9 @@ interface ToolContext {
     /** Append a one-shot trace entry with no start/end lifecycle. */
     public function appendToolCall(array $entry): void;
 
+    /** Sink for streamed assistant answer text. The AgentLoop hands the provider
+     *  this method so each text fragment arrives as it is generated. Chat
+     *  forwards it to a live sink (partial-row writer); recipes no-op it. */
+    public function emitText(string $delta): void;
+
 }

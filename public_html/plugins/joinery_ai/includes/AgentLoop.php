@@ -92,7 +92,10 @@ class AgentLoop {
                 $params['tools'] = $tool_schemas;
             }
 
-            $response = $provider->createMessage($params);
+            // One provider call path: always stream. The context's emitText is
+            // the sink — chat forwards it to the live partial-row writer; recipes
+            // no-op it, so this is transparent to the autonomous surface.
+            $response = $provider->createMessageStreamed($params, [$context, 'emitText']);
 
             $usage = $response['usage'] ?? [];
             $in += (int)($usage['input_tokens'] ?? 0);

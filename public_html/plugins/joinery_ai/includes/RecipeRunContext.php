@@ -167,6 +167,10 @@ class RecipeRunContext implements ToolContext {
         $this->run->set('rcr_tool_calls', $existing);
     }
 
+    /** Recipes produce a one-shot report, not a live transcript — streamed text
+     *  has nowhere to go, so this is a no-op. */
+    public function emitText(string $delta): void {}
+
     /** Decode the run's rcr_tool_calls column to an array (handles the
      *  JSON-string or already-array cases). */
     private function currentToolCalls(): array {

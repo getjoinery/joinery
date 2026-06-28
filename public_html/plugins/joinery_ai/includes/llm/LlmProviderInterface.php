@@ -15,12 +15,24 @@
 interface LlmProviderInterface {
 
     /**
-     * $params is the canonical request: model, max_tokens, system (array of
-     * text blocks), messages (canonical content blocks), tools (optional,
-     * Anthropic tool-schema shape). Returns the canonical response array:
+     * Stream one message. $params is the canonical request: model, max_tokens,
+     * system (array of text blocks), messages (canonical content blocks), tools
+     * (optional, Anthropic tool-schema shape). $onTextDelta is invoked with each
+     * fragment of assistant answer text as it arrives (reasoning/think output is
+     * never emitted). Returns the same canonical response array a blocking call
+     * would, assembled from the stream:
      *   { stop_reason, content: [...blocks], usage: {input_tokens,
      *     output_tokens, cache_creation_input_tokens, cache_read_input_tokens} }
      * Throws LlmProviderException on failure.
+     *
+     * This is the one provider call path; the AgentLoop always uses it and passes
+     * the turn's ToolContext::emitText as the sink (a no-op for recipes).
+     */
+    public function createMessageStreamed(array $params, callable $onTextDelta): array;
+
+    /**
+     * Blocking convenience over createMessageStreamed (no-op delta sink). Kept
+     * for callers that don't want incremental text; behaves identically.
      */
     public function createMessage(array $params): array;
 

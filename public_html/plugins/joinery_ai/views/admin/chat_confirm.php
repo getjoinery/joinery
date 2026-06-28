@@ -115,10 +115,12 @@ exit;
 function chat_resume_and_finalize(AiConversation $conversation, int $uid,
         AiConversationMessage $msg, array $pending, string $lead_text, string $decision): void {
     try {
-        $turn = ChatRunner::resumeTurn($conversation, $uid, $pending, $lead_text, $decision);
+        $seed = $lead_text !== '' ? $lead_text . "\n\n" : '';
+        $sink = ChatAsync::streamSink($msg, $seed);
+        $turn = ChatRunner::resumeTurn($conversation, $uid, $pending, $lead_text, $decision, $sink);
     } catch (LlmProviderException $e) {
         error_log('[joinery_ai chat] resume provider error: ' . $e->getMessage());
-        chat_confirm_mark_failed($msg, 'The AI provider returned an error. Try again.');
+        chat_confirm_mark_failed($msg, LlmProviderException::friendlyMessage(LlmProviderException::classify($e)));
         return;
     } catch (Throwable $e) {
         error_log('[joinery_ai chat] resume failed: ' . $e->getMessage());
