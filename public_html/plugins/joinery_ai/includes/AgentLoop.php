@@ -35,6 +35,30 @@ class AgentLoop {
     /** Abort the turn if this many consecutive iterations return a tool error. */
     const CONSECUTIVE_TOOL_ERROR_LIMIT = 3;
 
+    // --- model-control resolution (shared by ChatRunner and RecipeRunner) ---
+    // Every knob resolves most-specific-wins: the row's own value, else the
+    // plugin-setting default, else a floor. Kept here so both surfaces resolve
+    // identically and a scheduled run is steered like an interactive chat.
+
+    /** row → setting → null. Empty/NULL at both levels yields null (provider default). */
+    public static function resolveFloat($row_value, $setting_value): ?float {
+        $v = ($row_value === null || $row_value === '') ? $setting_value : $row_value;
+        return ($v === null || $v === '') ? null : (float)$v;
+    }
+
+    /** row → setting → floor, as an int with a hard minimum. */
+    public static function resolveInt($row_value, $setting_value, int $floor): int {
+        $v = ($row_value === null || $row_value === '') ? $setting_value : $row_value;
+        return max($floor, (int)$v);
+    }
+
+    /** row → setting → 'off', validated against the level ladder. */
+    public static function resolveThinkingLevel($row_value, $setting_value): string {
+        $v = ($row_value === null || $row_value === '') ? $setting_value : $row_value;
+        $v = strtolower((string)$v);
+        return in_array($v, ['off', 'low', 'medium', 'high'], true) ? $v : 'off';
+    }
+
     public static function run(
         LlmProviderInterface $provider,
         string $model,
@@ -43,7 +67,10 @@ class AgentLoop {
         array $allowed_tools,
         ToolContext $context,
         int $max_iterations,
-        int $token_budget
+        int $token_budget,
+        ?float $temperature = null,
+        ?float $top_p = null,
+        string $thinking_level = 'off'
     ): array {
         $tool_schemas = RecipeToolRegistry::schemasFor($allowed_tools);
         foreach (RecipeToolRegistry::unknown($allowed_tools) as $unknown_name) {
@@ -91,6 +118,15 @@ class AgentLoop {
             if (!empty($tool_schemas)) {
                 $params['tools'] = $tool_schemas;
             }
+            // Model-control knobs, set once and forwarded per provider. Omitted
+            // keys mean "use the provider/server default" — so the default path
+            // is unchanged. See the chat-model-control spec.
+            if ($temperature !== null) $params['temperature'] = $temperature;
+            if ($top_p !== null)       $params['top_p'] = $top_p;
+            // Always pass the thinking level (including 'off') so each provider can
+            // act on it — notably the local provider maps 'off' to qwen3's
+            // /no_think, the snappy default that skips the reasoning pass.
+            $params['thinking'] = ['level' => $thinking_level];
 
             // One provider call path: always stream. The context's emitText is
             // the sink — chat forwards it to the live partial-row writer; recipes

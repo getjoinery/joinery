@@ -105,6 +105,13 @@ class ChatRunner {
      *  the Brave key — see resolveAllowedTools). */
     const WEB_TOOLS = ['web_search', 'fetch_url', 'get_stock_data'];
 
+    /** Shipped default for the editable voice block, used when the
+     *  joinery_ai_chat_system_prompt setting is blank. Deliberately tool-agnostic
+     *  and free of formatting constraints — the admin tunes tone from here. */
+    const DEFAULT_SYSTEM_PROMPT =
+        "You are Joinery AI, a helpful assistant for the administrator of this site.\n"
+      . "Answer naturally and conversationally. Use Markdown when it helps.";
+
     /** Default model for a new conversation: the active provider's default. */
     public static function defaultModel(): string {
         try {
@@ -157,10 +164,20 @@ class ChatRunner {
         $system = self::buildSystemPrompt($conversation, $ctx);
         $allowed_tools = self::resolveAllowedTools($conversation);
         $max_iterations = max(1, (int)$settings->get_setting('joinery_ai_chat_max_iterations'));
-        $token_budget   = max(1000, (int)$settings->get_setting('joinery_ai_chat_max_tokens'));
+
+        // Per-chat model controls: row value → plugin-setting default → floor.
+        $token_budget = AgentLoop::resolveInt($conversation->get('aic_max_tokens'),
+            $settings->get_setting('joinery_ai_chat_max_tokens'), 1000);
+        $temperature  = AgentLoop::resolveFloat($conversation->get('aic_temperature'),
+            $settings->get_setting('joinery_ai_default_temperature'));
+        $top_p        = AgentLoop::resolveFloat($conversation->get('aic_top_p'),
+            $settings->get_setting('joinery_ai_default_top_p'));
+        $thinking     = AgentLoop::resolveThinkingLevel($conversation->get('aic_thinking_level'),
+            $settings->get_setting('joinery_ai_default_thinking_level'));
 
         $result = AgentLoop::run($provider, $model, $system, $messages,
-            $allowed_tools, $ctx, $max_iterations, $token_budget);
+            $allowed_tools, $ctx, $max_iterations, $token_budget,
+            $temperature, $top_p, $thinking);
 
         return ['result' => $result, 'context' => $ctx, 'model' => $model];
     }
@@ -249,34 +266,47 @@ class ChatRunner {
     }
 
     /**
-     * System prompt as cached text blocks. Mirrors the recipe runner's shape
-     * (cached prefix of preamble + model schemas, with the rotating untrusted
-     * nonce block placed after the cache breakpoint) but speaks as an
-     * interactive assistant rather than a one-shot report writer.
+     * System prompt as cached text blocks: an admin-editable voice block on top,
+     * then system-managed scaffolding that the voice block can never remove —
+     * date/time (always), tool rules (only when the turn has tools), the model
+     * catalog (Data access on), and the untrusted-input contract placed after the
+     * cache breakpoint. Mirrors the recipe runner's caching shape.
      */
     private static function buildSystemPrompt(AiConversation $conversation, ChatTurnContext $ctx): array {
         $today_local = LibraryFunctions::convert_time(
             gmdate('Y-m-d H:i:s'), 'UTC', $ctx->ownerTimezone(), 'l, F j, Y g:i A T'
         );
-        $uid = $ctx->actingUserId();
 
-        $preamble = "You are Joinery AI, an interactive assistant inside the Joinery admin "
-                  . "interface. You help an administrator inspect and manage their site by "
-                  . "calling the tools available to you, then replying conversationally. Use "
-                  . "Markdown. Be concise.\n\n"
-                  . "Current date/time (admin timezone): $today_local\n"
-                  . "Acting admin user_id: $uid (permission 5+, admin reach)\n"
-                  . "Use this user_id when a write tool needs an owner / created_by / "
-                  . "updated_by column.\n\n"
-                  . "Some tools change data. When you propose a consequential change you may "
-                  . "be asked to confirm it with the admin before it runs; propose the single "
-                  . "most useful action and explain what it will do.";
+        // 1. Editable voice block: per-chat instructions → global setting →
+        //    shipped default (most-specific-wins).
+        $voice = trim((string)$conversation->get('aic_instructions'));
+        if ($voice === '') $voice = trim((string)Globalvars::get_instance()->get_setting('joinery_ai_chat_system_prompt'));
+        if ($voice === '') $voice = self::DEFAULT_SYSTEM_PROMPT;
 
+        // 2. Date/time — always present.
+        $text = $voice . "\n\nCurrent date/time (admin timezone): $today_local\n";
+
+        // 3. Tool rules — only when the turn actually exposes tools, so a plain
+        //    chat isn't framed as an admin-tooling session.
+        if (!empty(self::resolveAllowedTools($conversation))) {
+            $text .= "\nYou can inspect and manage this site by calling the tools "
+                   . "available to you, then replying conversationally.\n";
+            if ($conversation->get('aic_data_access')) {
+                $uid = $ctx->actingUserId();
+                $text .= "Acting admin user_id: $uid (permission 5+, admin reach). "
+                       . "Use this user_id when a write tool needs an owner / created_by / "
+                       . "updated_by column.\n";
+            }
+            $text .= "Some tools change data. When you propose a consequential change you "
+                   . "may be asked to confirm it with the admin before it runs; propose the "
+                   . "single most useful action and explain what it will do.\n";
+        }
+
+        // 4. Model catalog — when Data access is on.
         $models_block = AiPromptBuilder::modelCatalogBlock($ctx->allowedModels());
-
-        $text = $preamble . "\n";
         if ($models_block !== '') $text .= "\n" . $models_block . "\n";
 
+        // 5. Untrusted-input contract after the cache breakpoint (security).
         $untrusted = AiPromptBuilder::untrustedInputBlock($ctx->allowedModels(), $ctx->untrustedNonce());
         return AiPromptBuilder::systemBlocks($text, $untrusted);
     }

@@ -1,16 +1,23 @@
 <?php
 /**
- * Joinery AI — set a chat's capability toggle (AJAX, JSON).
+ * Joinery AI — set a per-chat control (AJAX, JSON).
  * URL: /admin/joinery_ai/chat_set_capabilities  (POST)
  *
- * Flips one per-conversation capability (data_access or web_search) on an
- * existing chat. New chats carry their initial toggle state on the first
- * chat_send instead. Takes effect on the conversation's next turn.
+ * Writes one per-conversation control on an existing chat: the capability
+ * toggles (data_access / web_search) and the model controls (model, temperature,
+ * top_p, max_tokens, instructions, thinking_level). New chats carry their initial
+ * state on the first chat_send instead. Takes effect on the conversation's next
+ * turn.
+ *
+ * Two request shapes are accepted:
+ *   - legacy toggle: { capability: data_access|web_search, enabled: 0|1 }
+ *   - generic field: { field: <name>, value: <raw> }
  */
 header('Content-Type: application/json');
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderFactory.php'));
 
 function chat_cap_fail(string $msg): void {
     echo json_encode(['success' => false, 'message' => $msg]);
@@ -24,14 +31,15 @@ if (!$session->is_logged_in() || $session->get_permission() < 5) {
 $uid = (int)$session->get_user_id();
 
 $conversation_id = (int)LibraryFunctions::fetch_variable_local($_POST, 'conversation_id', 0);
-$capability      = (string)LibraryFunctions::fetch_variable_local($_POST, 'capability', '');
-$enabled         = !empty($_POST['enabled']);
 
-$column_map = [
-    'data_access' => 'aic_data_access',
-    'web_search'  => 'aic_web_search',
-];
-if (!isset($column_map[$capability])) chat_cap_fail('Unknown capability.');
+// Legacy toggle shape maps onto the generic field/value path.
+$field = (string)LibraryFunctions::fetch_variable_local($_POST, 'field', '');
+$value = LibraryFunctions::fetch_variable_local($_POST, 'value', '');
+$capability = (string)LibraryFunctions::fetch_variable_local($_POST, 'capability', '');
+if ($capability !== '') {
+    $field = $capability;
+    $value = !empty($_POST['enabled']) ? '1' : '0';
+}
 
 $conversation = new AiConversation($conversation_id, true);
 if (!$conversation->key
@@ -40,12 +48,17 @@ if (!$conversation->key
     chat_cap_fail('Conversation not found.');
 }
 
-$conversation->set($column_map[$capability], $enabled ? 't' : 'f');
+// Validate the field and compute the column + stored value. chat_field_value()
+// is shared with chat_send (new-chat seeding) so both validate identically.
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatControls.php'));
+try {
+    [$column, $stored] = ChatControls::validate($field, $value);
+} catch (InvalidArgumentException $e) {
+    chat_cap_fail($e->getMessage());
+}
+
+$conversation->set($column, $stored);
 $conversation->save();
 
-echo json_encode([
-    'success'    => true,
-    'capability' => $capability,
-    'enabled'    => $enabled,
-]);
+echo json_encode(['success' => true, 'field' => $field]);
 exit;

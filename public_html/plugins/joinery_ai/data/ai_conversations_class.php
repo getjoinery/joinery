@@ -30,6 +30,13 @@ class AiConversation extends SystemBase {
         // web search gates the web tool group. See the chat-capabilities spec.
         'aic_data_access'        => array('type'=>'bool', 'default'=>false),
         'aic_web_search'         => array('type'=>'bool', 'default'=>false),
+        // Per-chat model controls (NULL = fall back to the plugin-setting default,
+        // then the provider/floor). See the chat-model-control spec.
+        'aic_temperature'        => array('type'=>'numeric(3,2)'),   // NULL = use setting
+        'aic_top_p'              => array('type'=>'numeric(3,2)'),   // NULL = use setting
+        'aic_max_tokens'         => array('type'=>'int4'),          // NULL = use setting
+        'aic_instructions'       => array('type'=>'text'),          // per-chat voice block override
+        'aic_thinking_level'     => array('type'=>'varchar(10)', 'default'=>'off'),
         'aic_total_input_tokens' => array('type'=>'int8', 'default'=>0),
         'aic_total_output_tokens'=> array('type'=>'int8', 'default'=>0),
         'aic_create_time'        => array('type'=>'timestamp(6)', 'default'=>'now()'),

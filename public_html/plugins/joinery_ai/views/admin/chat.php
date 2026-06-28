@@ -56,9 +56,21 @@ $page->admin_header([
 
     <section class="joai-chat-main">
         <div class="joai-chat-status">
-            <span class="joai-chat-status-model" id="joai-status-model">
-                <?php echo htmlspecialchars((string)$active_model, ENT_QUOTES, 'UTF-8'); ?>
-            </span>
+            <?php
+            $model_options = $models;
+            if ($active_model !== '' && !array_key_exists($active_model, $model_options)) {
+                $model_options = [$active_model => $active_model . ' (unavailable)'] + $model_options;
+            }
+            ?>
+            <select id="joai-model" class="joai-chat-control" data-field="model" title="Model (provider follows the model)">
+                <?php foreach ($model_options as $mid => $mlabel): ?>
+                    <option value="<?php echo htmlspecialchars((string)$mid, ENT_QUOTES, 'UTF-8'); ?>"
+                        <?php echo $mid === $active_model ? 'selected' : ''; ?>>
+                        <?php echo htmlspecialchars((string)$mlabel, ENT_QUOTES, 'UTF-8'); ?>
+                    </option>
+                <?php endforeach; ?>
+            </select>
+
             <label class="joai-chat-toggle">
                 <input type="checkbox" id="joai-toggle-data" data-capability="data_access"
                        <?php echo $data_access ? 'checked' : ''; ?>>
@@ -71,6 +83,42 @@ $page->admin_header([
                        <?php echo $brave_key_set ? '' : 'disabled'; ?>>
                 Web search
             </label>
+
+            <label class="joai-chat-thinklabel">Thinking
+                <select id="joai-thinking-level" class="joai-chat-control" data-field="thinking_level">
+                    <?php foreach (['off'=>'Off','low'=>'Low','medium'=>'Medium','high'=>'High'] as $lv => $lbl): ?>
+                        <option value="<?php echo $lv; ?>" <?php echo $lv === $thinking_level ? 'selected' : ''; ?>><?php echo $lbl; ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+
+            <details class="joai-chat-settings">
+                <summary>⚙ Settings</summary>
+                <div class="joai-chat-settings-body">
+                    <label>Temperature
+                        <input type="number" id="joai-temperature" class="joai-chat-control" data-field="temperature"
+                               step="0.1" min="0" max="2"
+                               value="<?php echo htmlspecialchars($temperature, ENT_QUOTES, 'UTF-8'); ?>"
+                               placeholder="<?php echo htmlspecialchars($def_temperature !== '' ? $def_temperature : 'default', ENT_QUOTES, 'UTF-8'); ?>">
+                    </label>
+                    <label>Top-p
+                        <input type="number" id="joai-top-p" class="joai-chat-control" data-field="top_p"
+                               step="0.05" min="0" max="1"
+                               value="<?php echo htmlspecialchars($top_p, ENT_QUOTES, 'UTF-8'); ?>"
+                               placeholder="<?php echo htmlspecialchars($def_top_p !== '' ? $def_top_p : 'default', ENT_QUOTES, 'UTF-8'); ?>">
+                    </label>
+                    <label>Max tokens
+                        <input type="number" id="joai-max-tokens" class="joai-chat-control" data-field="max_tokens"
+                               step="100" min="1000"
+                               value="<?php echo htmlspecialchars($max_tokens, ENT_QUOTES, 'UTF-8'); ?>"
+                               placeholder="<?php echo htmlspecialchars($def_max_tokens !== '' ? $def_max_tokens : 'default', ENT_QUOTES, 'UTF-8'); ?>">
+                    </label>
+                    <label class="joai-chat-settings-instr">Instructions
+                        <textarea id="joai-instructions" class="joai-chat-control" data-field="instructions" rows="3"
+                                  placeholder="Standing instructions for this chat (blank = use the default voice)."><?php echo htmlspecialchars($instructions, ENT_QUOTES, 'UTF-8'); ?></textarea>
+                    </label>
+                </div>
+            </details>
         </div>
 
         <div class="joai-chat-transcript" id="joai-transcript">
@@ -195,6 +243,25 @@ $page->admin_header([
     wireToggle(dataToggle);
     wireToggle(webToggle);
 
+    // Model controls (model, thinking level, temperature, top_p, max tokens,
+    // instructions). On an existing chat each persists immediately; on a new chat
+    // their values ride the first send. Same endpoint, generic {field, value}.
+    var controls = Array.prototype.slice.call(document.querySelectorAll('.joai-chat-control'));
+    function wireField(el) {
+        el.addEventListener('change', function () {
+            if (!currentConversationId) return; // new chat: seeded on first send
+            var body = new FormData();
+            body.append('conversation_id', currentConversationId);
+            body.append('field', el.getAttribute('data-field'));
+            body.append('value', el.value);
+            fetch('/admin/joinery_ai/chat_set_capabilities', { method: 'POST', body: body })
+                .then(function (r) { return r.json(); })
+                .then(function (data) { if (!data.success) alert(data.message || 'Could not update.'); })
+                .catch(function () {});
+        });
+    }
+    controls.forEach(wireField);
+
     function clearBlankNotice() {
         var blank = document.getElementById('joai-blank');
         if (blank) blank.remove();
@@ -228,9 +295,15 @@ $page->admin_header([
         if (currentConversationId) {
             body.append('conversation_id', currentConversationId);
         } else {
-            // New conversation — seed its capability flags from the toggles.
+            // New conversation — seed capability flags + model controls from the
+            // panel so the first turn already honors them.
             if (dataToggle && dataToggle.checked) body.append('data_access', '1');
             if (webToggle && webToggle.checked) body.append('web_search', '1');
+            controls.forEach(function (el) {
+                var f = el.getAttribute('data-field');
+                if (f === 'model' || f === 'thinking_level') body.append(f, el.value);
+                else if (el.value !== '') body.append(f, el.value);
+            });
         }
 
         fetch('/admin/joinery_ai/chat_send', { method: 'POST', body: body })
@@ -329,9 +402,15 @@ $page->admin_header([
         transcript.innerHTML = '<p class="joai-chat-empty" id="joai-blank">Start a new conversation below.</p>';
         document.querySelectorAll('.joai-chat-list-item.is-active')
             .forEach(function (a) { a.classList.remove('is-active'); });
-        // New chats default to a plain assistant — reset the toggles to off.
+        // New chats default to a plain assistant — reset the toggles to off and
+        // clear per-chat overrides (numeric/instructions blank = inherit the
+        // defaults). Model and thinking selects keep their current choice.
         if (dataToggle) dataToggle.checked = false;
         if (webToggle) webToggle.checked = false;
+        controls.forEach(function (el) {
+            var f = el.getAttribute('data-field');
+            if (f === 'temperature' || f === 'top_p' || f === 'max_tokens' || f === 'instructions') el.value = '';
+        });
         history.replaceState(null, '', '/admin/joinery_ai/chat');
         input.focus();
     });

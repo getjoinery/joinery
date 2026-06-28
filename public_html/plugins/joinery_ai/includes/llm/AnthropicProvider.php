@@ -99,6 +99,25 @@ class AnthropicProvider implements LlmProviderInterface {
      */
     public function createMessageStreamed(array $params, callable $onTextDelta): array {
         $params['stream'] = true;
+
+        // Translate the canonical thinking knob (['level'=>off|low|medium|high])
+        // to Anthropic's extended-thinking field. temperature/top_p are canonical
+        // Anthropic params and pass through as-is — except extended thinking
+        // requires default sampling, so they're dropped when thinking is enabled.
+        if (isset($params['thinking'])) {
+            $level = $params['thinking']['level'] ?? 'off';
+            unset($params['thinking']);
+            $budget = ['low' => 1024, 'medium' => 4096, 'high' => 12000][$level] ?? 0;
+            if ($budget > 0) {
+                $params['thinking'] = ['type' => 'enabled', 'budget_tokens' => $budget];
+                // Anthropic requires max_tokens > budget_tokens; leave room for the
+                // reasoning budget plus a real answer.
+                $need = $budget + 4096;
+                if ((int)($params['max_tokens'] ?? 0) < $need) $params['max_tokens'] = $need;
+                unset($params['temperature'], $params['top_p']);
+            }
+        }
+
         $headers = [
             'x-api-key'         => $this->api_key,
             'anthropic-version' => self::API_VERSION,

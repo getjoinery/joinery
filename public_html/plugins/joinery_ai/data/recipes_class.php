@@ -27,6 +27,11 @@ class Recipe extends SystemBase {
         'rcp_allowed_actions'     => array('type'=>'jsonb'),
         'rcp_allow_tainted_writes'=> array('type'=>'bool', 'default'=>false),
         'rcp_model'               => array('type'=>'varchar(100)', 'default'=>'claude-haiku-4-5'),
+        // Model controls (NULL temperature/top_p = fall back to the plugin-setting
+        // default). See the chat-model-control spec.
+        'rcp_temperature'         => array('type'=>'numeric(3,2)'),
+        'rcp_top_p'               => array('type'=>'numeric(3,2)'),
+        'rcp_thinking_level'      => array('type'=>'varchar(10)', 'default'=>'off'),
         'rcp_delivery_email'      => array('type'=>'varchar(255)'),
         'rcp_delivery_dashboard'  => array('type'=>'bool', 'default'=>true),
         'rcp_enabled'             => array('type'=>'bool', 'default'=>true),
