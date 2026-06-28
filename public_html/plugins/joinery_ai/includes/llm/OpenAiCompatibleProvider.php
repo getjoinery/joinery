@@ -268,11 +268,14 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
         $messages = [];
 
         // System: array of text blocks (cache_control ignored) -> one system
-        // message prepended.
-        $system_text = $this->flattenSystem($params['system'] ?? []);
-        if ($system_text !== '') {
-            $messages[] = ['role' => 'system', 'content' => $system_text];
-        }
+        // message prepended. The thinking level is expressed to qwen3 via a
+        // /think or /no_think control token appended to the system text — the
+        // method Ollama-hosted qwen3 honors reliably. 'off' (the default) maps to
+        // /no_think, which skips the reasoning pass entirely.
+        $think = $params['thinking']['level'] ?? 'off';
+        $think_token = ($think === 'off') ? '/no_think' : '/think';
+        $system_text = trim($this->flattenSystem($params['system'] ?? []) . "\n" . $think_token);
+        $messages[] = ['role' => 'system', 'content' => $system_text];
 
         foreach (($params['messages'] ?? []) as $msg) {
             $role = $msg['role'] ?? 'user';
@@ -294,6 +297,8 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
             'stream'        => true,
             'stream_options' => ['include_usage' => true], // final chunk carries usage
         ];
+        if (isset($params['temperature'])) $request['temperature'] = (float)$params['temperature'];
+        if (isset($params['top_p']))       $request['top_p'] = (float)$params['top_p'];
 
         if (!empty($params['tools'])) {
             $request['tools'] = array_map(function ($t) {

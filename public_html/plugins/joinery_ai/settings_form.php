@@ -116,3 +116,16 @@ $formwriter->numberinput('joinery_ai_failure_email_throttle_seconds', 'Failure E
                 . '(Used by the email-delivery layer — Phase 7.)',
 ]);
 ?>
+
+<h4>Chat</h4>
+
+<?php
+$formwriter->textbox('joinery_ai_chat_system_prompt', 'Chat System Prompt', [
+    'value' => $settings->get_setting('joinery_ai_chat_system_prompt'),
+    'rows' => 6,
+    'placeholder' => "You are Joinery AI, a helpful assistant for the administrator of this site.\nAnswer naturally and conversationally. Use Markdown when it helps.",
+    'helptext' => 'Sets the chat assistant\'s voice. Leave blank to use the default. '
+                . 'The date/time, tool rules, and safety instructions are always added '
+                . 'automatically and cannot be removed here.',
+]);
+?>

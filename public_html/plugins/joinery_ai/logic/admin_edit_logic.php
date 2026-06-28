@@ -60,16 +60,21 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
             'rcp_schedule_frequency',
             'rcp_schedule_day_of_week',
             'rcp_model',
+            'rcp_temperature',
+            'rcp_top_p',
+            'rcp_thinking_level',
             'rcp_delivery_email',
             'rcp_max_iterations',
             'rcp_max_tokens',
             'rcp_monthly_token_cap',
             'rcp_workspace',
         ];
+        // Numeric controls store NULL when blank (→ fall back to the setting default).
+        $null_when_blank = ['rcp_schedule_day_of_week', 'rcp_temperature', 'rcp_top_p'];
         foreach ($simple_fields as $f) {
             if (array_key_exists($f, $input)) {
                 $value = $input[$f];
-                if ($f === 'rcp_schedule_day_of_week' && $value === '') {
+                if (in_array($f, $null_when_blank, true) && $value === '') {
                     $value = null;
                 }
                 $recipe->set($f, $value);

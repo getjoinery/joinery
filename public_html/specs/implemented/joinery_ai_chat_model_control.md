@@ -7,6 +7,17 @@
 the recipe-edit form, `chat_set_capabilities`, plugin settings.
 **Consolidates:** the standalone thinking-level spec
 (`joinery_ai_thinking_level.md`), folded in as the **Thinking level** knob below.
+**Builds on:** the implemented editable system prompt
+(`specs/implemented/joinery_ai_chat_system_prompt.md`) — the per-chat
+**Instructions** knob below extends that global setting rather than duplicating it.
+
+**Why this matters (the temperature finding).** A wire capture of Chatbox hitting
+the *same* qwen3 on the *same* box showed it sends `temperature: 0.2`, `top_p:
+0.2`, and an almost-empty system prompt. We send *no* sampling params, so Ollama
+falls back to `temperature 0.8` — which is exactly what produces diffuse,
+"generic-to-the-point-of-useless" replies. Sampling control (with **low factory
+defaults**) is the dominant quality lever this spec lands; everything else is the
+rest of the mature-client control surface.
 
 ## Goal
 
@@ -38,10 +49,17 @@ rather than re-solving plumbing per knob.
 | Knob | What it does (plain) | Chat column | Recipe column | Canonical param | Resolution |
 |---|---|---|---|---|---|
 | **Model** | Which model answers — and, implicitly, which provider | `aic_model` *(exists)* | `rcp_model` *(exists)* | `model` *(exists)* | row → provider default |
-| **Temperature** | How creative vs. deterministic the wording is | `aic_temperature` | `rcp_temperature` | `temperature` *(new)* | row → setting → provider default (omit) |
+| **Temperature** | How creative vs. deterministic the wording is | `aic_temperature` | `rcp_temperature` | `temperature` *(new)* | row → setting `joinery_ai_default_temperature` (**default 0.3**) → provider default |
+| **Top-p** | Nucleus-sampling cutoff — narrows the token pool alongside temperature | `aic_top_p` | `rcp_top_p` | `top_p` *(new)* | row → setting `joinery_ai_default_top_p` (default empty = provider default) → omit |
 | **Max tokens** | The longest a single turn may run before it's cut off | `aic_max_tokens` | `rcp_max_tokens` *(exists)* | per-turn `$token_budget` *(exists)* | row → setting `joinery_ai_chat_max_tokens` |
-| **Instructions** | Standing instructions for this chat (persona / context) | `aic_instructions` | `rcp_prompt` *(exists)* | appended `system` block *(exists shape)* | row value or none |
+| **Instructions** | Standing instructions for this chat (persona / context) | `aic_instructions` | `rcp_prompt` *(exists)* | voice block *(implemented)* | row → setting `joinery_ai_chat_system_prompt` → `DEFAULT_SYSTEM_PROMPT` |
 | **Thinking level** | How hard the model reasons before answering: off / low / medium / high | `aic_thinking_level` | `rcp_thinking_level` | `thinking` *(new)* | row → setting `joinery_ai_default_thinking_level` → `off` |
+
+**Temperature / top-p factory defaults.** Per the capture finding, the temperature
+setting ships at **0.3** (not empty) so the out-of-box experience is focused
+rather than the diffuse 0.8 provider default — the whole point of this work. Top-p
+ships empty (provider default) since over-narrowing it can hurt general chat;
+setting both to 0.2 exactly mirrors Chatbox for anyone who wants that.
 
 **Why these columns and not a single JSON blob:** each knob has its own type,
 its own validation, and its own resolution default; flat columns let
@@ -90,13 +108,17 @@ permission ≥ 5). New chats keep seeding their initial state on the first
 ## Canonical request additions
 
 `AgentLoop::run()` assembles `['model','max_tokens','system','messages','tools']`
-today (`AgentLoop.php:85`). Two additive keys; everything else is reuse:
+today. (Note: the provider call is now `createMessageStreamed($params,
+$onTextDelta)` — the single streamed path — not `createMessage()`; `$params` is
+assembled identically, so these additions are unaffected by that refactor.) Three
+additive keys; everything else is reuse:
 
 - **`temperature`** — `AgentLoop::run()` gains `?float $temperature = null`; when
-  non-null it sets `$params['temperature']`. Null omits the key (no behavior
-  change for the default path). Both providers already pass `$params` straight to
-  their wire payload, so each just forwards `temperature` when present
-  (Anthropic and the OpenAI-compatible host both accept it natively).
+  non-null it sets `$params['temperature']`. Null omits the key. The
+  OpenAI-compatible provider forwards it in `toOpenAiRequest()` (which today omits
+  it); Anthropic forwards it in its request body. Both accept it natively.
+- **`top_p`** — same shape: `AgentLoop::run()` gains `?float $top_p = null`; set
+  `$params['top_p']` only when non-null. Both providers forward it natively.
 - **`thinking`** — `AgentLoop::run()` gains `string $thinking_level = 'off'`; when
   not `off` it sets `$params['thinking'] = ['level' => $thinking_level]`. Provider
   translation is detailed under **Thinking level** below.
@@ -108,14 +130,25 @@ today (`AgentLoop.php:85`). Two additive keys; everything else is reuse:
 "Chat max tokens" limit the `stopReasonNote()` text already refers to
 (`ChatRunner.php:131`).
 
-**Instructions** needs no new canonical key either: `ChatRunner::buildSystemPrompt()`
-already composes the `system` array. The per-chat instructions become **one
-additional system block appended after** the built-in scaffolding — never a
-replacement for it. The tool framing, untrusted-input markers, and model-schema
-blocks stay authoritative; the operator's text is layered on as standing
-guidance. (Recipes already work this way: `rcp_prompt` is appended as
-"## Recipe instructions" in `RecipeRunner::buildSystemPrompt()`.) Replacing the
-scaffolding would strip the safety framing, so augment is the only correct layer.
+**Instructions** needs no new canonical key, and it **reuses the already-implemented
+voice block** rather than adding a parallel mechanism. `ChatRunner::buildSystemPrompt()`
+already puts an editable **voice block** at the top of the system prompt, resolved
+from the `joinery_ai_chat_system_prompt` setting (blank → `DEFAULT_SYSTEM_PROMPT`),
+with the safety scaffolding (date/time always; tool rules; model catalog; the
+untrusted-input contract after the cache breakpoint) appended by the builder
+regardless. This knob just adds a **per-conversation override at the front of that
+resolution**:
+
+> `aic_instructions` (row) → `joinery_ai_chat_system_prompt` (global setting) →
+> `ChatRunner::DEFAULT_SYSTEM_PROMPT` (floor)
+
+So a chat with its own instructions uses them as the voice block; otherwise it
+falls back to the global default, then the shipped constant. The scaffolding is
+still always appended after, and the untrusted-input contract still sits last —
+so this can't strip the safety framing (the row value occupies the voice slot,
+not the whole prompt). Recipes keep their existing `rcp_prompt` ("## Recipe
+instructions") as the task body — a different role from the chat voice block, left
+as-is.
 
 ## Model picker (the one that's purely UI)
 
@@ -149,9 +182,9 @@ guided controls, no explainer prose):
   Thinking `<select>` (Off / Low / Medium / High). These are the per-turn,
   glance-and-change controls.
 - **"⚙ Settings" disclosure (collapsed by default):** Temperature (number or
-  slider, 0–2), Max tokens (number, blank = use the default), and Instructions
-  (textarea). These are set-once-and-forget, so they don't earn permanent strip
-  space.
+  slider, 0–2), Top-p (number 0–1, blank = default), Max tokens (number, blank =
+  use the default), and Instructions (textarea, blank = the global voice block).
+  These are set-once-and-forget, so they don't earn permanent strip space.
 - Every control persists through the same endpoint on change (existing chat) or
   rides the first `chat_send` (new chat). The four labels of the thinking ladder
   and the model labels are self-describing; helptext stays minimal.
@@ -191,7 +224,7 @@ levels are best-effort — a provider that only supports on/off collapses
 
 ### Provider translation
 
-Each provider owns its mapping inside `createMessage()`, reading
+Each provider owns its mapping inside `createMessageStreamed()`, reading
 `$params['thinking']`:
 
 - **`AnthropicProvider`** — emit the `thinking` request field
@@ -226,9 +259,10 @@ On `AiConversation` (`aic_conversations`), beside `aic_data_access` /
 `aic_web_search`:
 
 ```php
-'aic_temperature'    => array('type'=>'numeric(3,2)'),            // NULL = provider default
+'aic_temperature'    => array('type'=>'numeric(3,2)'),            // NULL = use the setting
+'aic_top_p'          => array('type'=>'numeric(3,2)'),            // NULL = use the setting
 'aic_max_tokens'     => array('type'=>'int4'),                    // NULL = use the setting
-'aic_instructions'   => array('type'=>'text'),                    // appended system block
+'aic_instructions'   => array('type'=>'text'),                    // per-chat voice block override
 'aic_thinking_level' => array('type'=>'varchar(10)', 'default'=>'off'),
 ```
 
@@ -236,14 +270,23 @@ On `Recipe` (`rcp_recipes`), beside `rcp_model` / `rcp_max_tokens`:
 
 ```php
 'rcp_temperature'    => array('type'=>'numeric(3,2)'),
+'rcp_top_p'          => array('type'=>'numeric(3,2)'),
 'rcp_thinking_level' => array('type'=>'varchar(10)', 'default'=>'off'),
 ```
 
 Plugin settings in `plugin.json` (factory defaults, seeded automatically — no
-migration): `joinery_ai_default_thinking_level` (default `off`) and
-`joinery_ai_default_temperature` (default empty = provider default). The existing
-`joinery_ai_chat_max_tokens` stays the max-tokens default. `update_database` adds
-the columns from the field specs.
+migration):
+
+- `joinery_ai_default_temperature` — **default `0.3`** (not empty: the focused
+  out-of-box behavior is the point of this work).
+- `joinery_ai_default_top_p` — default empty (= provider default; lower it only
+  to mirror Chatbox's 0.2).
+- `joinery_ai_default_thinking_level` — default `off`.
+- `joinery_ai_chat_system_prompt` — **already declared/implemented**; the global
+  voice-block default the per-chat `aic_instructions` overrides.
+
+The existing `joinery_ai_chat_max_tokens` stays the max-tokens default.
+`update_database` (plus plugin sync) adds the columns from the field specs.
 
 ## What does NOT change
 
@@ -287,20 +330,27 @@ the columns from the field specs.
 
 ## Implementation outline
 
-1. Add the four columns to `AiConversation` and the two to `Recipe`; add
-   `joinery_ai_default_thinking_level` and `joinery_ai_default_temperature` to
-   `plugin.json`. Run `update_database` / plugin sync.
-2. `AgentLoop::run()`: add `?float $temperature = null` and
-   `string $thinking_level = 'off'`; set `$params['temperature']` /
-   `$params['thinking']` only when present/non-`off`.
-3. `AnthropicProvider` / `OpenAiCompatibleProvider` `createMessage()`: forward
-   `temperature`; translate `thinking` (Anthropic budget field + `max_tokens`
-   headroom; Ollama native switch or `/think`÷`/no_think`).
+1. Add the five columns to `AiConversation` (`aic_temperature`, `aic_top_p`,
+   `aic_max_tokens`, `aic_instructions`, `aic_thinking_level`) and the three to
+   `Recipe` (`rcp_temperature`, `rcp_top_p`, `rcp_thinking_level`); add
+   `joinery_ai_default_temperature` (0.3), `joinery_ai_default_top_p`, and
+   `joinery_ai_default_thinking_level` to `plugin.json`. Run `update_database` /
+   plugin sync.
+2. `AgentLoop::run()`: add `?float $temperature = null`, `?float $top_p = null`,
+   and `string $thinking_level = 'off'`; set `$params['temperature']` /
+   `$params['top_p']` / `$params['thinking']` only when present/non-`off`.
+3. `AnthropicProvider` / `OpenAiCompatibleProvider` `createMessageStreamed()`:
+   forward `temperature` and `top_p` (the OpenAI provider adds them in
+   `toOpenAiRequest()`, which omits them today); translate `thinking` (Anthropic
+   budget field + `max_tokens` headroom; Ollama native switch or
+   `/think`÷`/no_think`).
 4. `ChatRunner::drive()` and `RecipeRunner`: resolve each knob (row → setting →
-   floor) and pass `temperature`, `thinking_level`, the overridden
-   `$token_budget`, and the appended instructions block to `AgentLoop::run()`.
+   floor) and pass `temperature`, `top_p`, `thinking_level`, and the overridden
+   `$token_budget` to `AgentLoop::run()`. For the voice block,
+   `buildSystemPrompt()` resolves `aic_instructions` → `joinery_ai_chat_system_prompt`
+   → `DEFAULT_SYSTEM_PROMPT` (extend the existing resolution).
 5. Generalize `chat_set_capabilities.php` to validate and write `model`,
-   `temperature`, `max_tokens`, `instructions`, `thinking_level` (plus the
+   `temperature`, `top_p`, `max_tokens`, `instructions`, `thinking_level` (plus the
    existing bools); extend `chat_send` to seed the same fields on a new chat.
 6. Chat UI: model `<select>` + thinking `<select>` in the status strip; a
    "⚙ Settings" disclosure with temperature / max tokens / instructions; wire

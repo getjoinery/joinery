@@ -158,6 +158,28 @@ $formwriter->dropinput('rcp_model', 'Model', [
     'options' => $model_options,
 ]);
 
+$rcp_temp = $recipe->get('rcp_temperature');
+$formwriter->numberinput('rcp_temperature', 'Temperature', [
+    'value' => ($rcp_temp === null ? '' : $rcp_temp),
+    'min' => 0, 'max' => 2, 'step' => '0.1',
+    'placeholder' => $settings->get_setting('joinery_ai_default_temperature'),
+    'helptext' => 'How creative vs. focused the wording is. Blank = the global default.',
+]);
+
+$rcp_top_p = $recipe->get('rcp_top_p');
+$formwriter->numberinput('rcp_top_p', 'Top-p', [
+    'value' => ($rcp_top_p === null ? '' : $rcp_top_p),
+    'min' => 0, 'max' => 1, 'step' => '0.05',
+    'placeholder' => ($settings->get_setting('joinery_ai_default_top_p') ?: 'default'),
+    'helptext' => 'Nucleus-sampling cutoff. Blank = the global default.',
+]);
+
+$formwriter->dropinput('rcp_thinking_level', 'Thinking Level', [
+    'value' => (string)$recipe->get('rcp_thinking_level') ?: 'off',
+    'options' => ['off' => 'Off', 'low' => 'Low', 'medium' => 'Medium', 'high' => 'High'],
+    'helptext' => 'How hard the model reasons before answering. Off skips the reasoning pass (fastest).',
+]);
+
 // Allowed tools — checkboxes against the live tool registry. Drop-in tools
 // from any plugin's recipe_tools/ directory show up automatically.
 $selected_tools = $recipe->get('rcp_allowed_tools');

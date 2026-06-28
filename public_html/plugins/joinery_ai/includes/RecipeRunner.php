@@ -90,8 +90,19 @@ class RecipeRunner {
             $max_iterations = max(1, (int)$recipe->get('rcp_max_iterations'));
             $token_budget   = max(1000, (int)$recipe->get('rcp_max_tokens'));
 
+            // Model controls: recipe row → plugin-setting default → floor, the same
+            // resolution chat uses, so a scheduled run and a chat are steered alike.
+            $settings    = Globalvars::get_instance();
+            $temperature = AgentLoop::resolveFloat($recipe->get('rcp_temperature'),
+                $settings->get_setting('joinery_ai_default_temperature'));
+            $top_p       = AgentLoop::resolveFloat($recipe->get('rcp_top_p'),
+                $settings->get_setting('joinery_ai_default_top_p'));
+            $thinking    = AgentLoop::resolveThinkingLevel($recipe->get('rcp_thinking_level'),
+                $settings->get_setting('joinery_ai_default_thinking_level'));
+
             $result = AgentLoop::run($provider, $model, $system, $messages,
-                $allowed_tools, $ctx, $max_iterations, $token_budget);
+                $allowed_tools, $ctx, $max_iterations, $token_budget,
+                $temperature, $top_p, $thinking);
 
             self::finishFromResult($run, $recipe, $result, $max_iterations);
 
