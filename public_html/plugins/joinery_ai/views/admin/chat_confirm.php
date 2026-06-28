@@ -100,7 +100,9 @@ if ($msg->get('aim_status') === AiConversationMessage::STATUS_FAILED) {
     $payload['error']  = (string)$msg->get('aim_error');
 } else {
     $payload['status']         = AiConversationMessage::STATUS_COMPLETE;
-    $payload['assistant_html'] = ChatRender::assistantBubble($msg, $tz);
+    $payload['assistant_html'] = ChatRender::assistantBubble(
+        $msg, $tz, ChatRender::conversationModel($conversation));
+    $payload['conversation_usage'] = ChatRender::conversationUsagePayload($conversation);
 }
 echo json_encode($payload);
 exit;

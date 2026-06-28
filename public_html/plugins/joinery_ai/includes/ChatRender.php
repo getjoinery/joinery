@@ -1,5 +1,6 @@
 <?php
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
 
 /**
@@ -25,6 +26,67 @@ class ChatRender {
              . '</div>';
     }
 
+    /** Effective model for a conversation: its pinned model, else the plugin
+     *  default. Used to price token usage (a thread has one model). */
+    public static function conversationModel(AiConversation $conversation): string {
+        $model = trim((string)$conversation->get('aic_model'));
+        if ($model !== '') return $model;
+        return (string)Globalvars::get_instance()->get_setting('joinery_ai_default_model');
+    }
+
+    /** Estimated USD for an input/output token pair under a model's provider
+     *  pricing. Local/unknown models price at 0. Best-effort: never throws. */
+    public static function estimateCost(string $model, int $in, int $out): float {
+        if ($model === '' || ($in === 0 && $out === 0)) return 0.0;
+        try {
+            require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderFactory.php'));
+            $provider = LlmProviderFactory::forModel($model);
+            return (float)$provider->estimateCost($model, ['input_tokens' => $in, 'output_tokens' => $out]);
+        } catch (Throwable $e) {
+            return 0.0;
+        }
+    }
+
+    /** Compact dollar label: blank for $0 (free/local), else ~$0.0123 — the
+     *  leading ~ signals it is an estimate (cache tiers aren't broken out). */
+    public static function formatCost(float $usd): string {
+        if ($usd <= 0) return '';
+        return $usd < 0.01 ? '~$' . number_format($usd, 4) : '~$' . number_format($usd, 2);
+    }
+
+    /** The conversation-total label for the bar under the composer. Reads as
+     *  cumulative consumption ("used") so it's never mistaken for a limit. */
+    public static function conversationUsageLabel(int $in, int $out, float $usd): string {
+        $label = number_format($in + $out) . ' tokens used';
+        $cost = self::formatCost($usd);
+        if ($cost !== '') $label .= ' · ' . $cost;
+        return $label;
+    }
+
+    /** Fresh conversation-total payload (one preformatted label) for completion
+     *  responses, so the page can update the bar without a reload. */
+    public static function conversationUsagePayload(AiConversation $conversation): array {
+        $in  = (int)$conversation->get('aic_total_input_tokens');
+        $out = (int)$conversation->get('aic_total_output_tokens');
+        $usd = self::estimateCost(self::conversationModel($conversation), $in, $out);
+        return ['label' => self::conversationUsageLabel($in, $out, $usd)];
+    }
+
+    /** Per-turn token + cost line shown at the bottom of an assistant reply.
+     *  "context" is everything fed to the model this turn (system prompt, history,
+     *  and any tool/web results across the tool loop — often far larger than the
+     *  reply); "reply" is the generated output the Max-reply-length cap governs. */
+    public static function turnUsageHtml(int $in, int $out, float $usd): string {
+        if ($in === 0 && $out === 0) return '';
+        $cost = self::formatCost($usd);
+        $cost_html = $cost !== ''
+            ? ' · <span class="joai-chat-usage-cost">' . htmlspecialchars($cost, ENT_QUOTES, 'UTF-8') . '</span>'
+            : '';
+        return '<div class="joai-chat-usage" title="Context fed to the model this turn, then the reply it generated, with estimated cost">'
+             . number_format($in) . ' context · ' . number_format($out) . ' reply'
+             . $cost_html . '</div>';
+    }
+
     /** Per-turn action toolbar (copy / delete). Shared by both bubble kinds; the
      *  raw text to copy rides on the bubble's data-raw attribute. */
     public static function actionsHtml(): string {
@@ -39,7 +101,7 @@ class ChatRender {
      * collapsible tool trace, and — when the row still carries a pending
      * action — the confirmation card.
      */
-    public static function assistantBubble(AiConversationMessage $msg, string $tz): string {
+    public static function assistantBubble(AiConversationMessage $msg, string $tz, string $model = ''): string {
         $time = LibraryFunctions::convert_time(
             $msg->get('aim_create_time'), 'UTC', $tz, 'g:i A'
         );
@@ -48,6 +110,10 @@ class ChatRender {
         $body_html = self::renderMarkdown($body_md);
 
         $trace = self::traceHtml($msg->get('aim_tool_calls'));
+
+        $in  = (int)$msg->get('aim_input_tokens');
+        $out = (int)$msg->get('aim_output_tokens');
+        $usage = self::turnUsageHtml($in, $out, self::estimateCost($model, $in, $out));
 
         $pending = $msg->get('aim_pending_action');
         if (is_string($pending)) $pending = json_decode($pending, true);
@@ -66,6 +132,7 @@ class ChatRender {
              . $trace
              . $card
              . self::actionsHtml()
+             . $usage
              . '<div class="joai-chat-time">' . htmlspecialchars($time, ENT_QUOTES, 'UTF-8') . '</div>'
              . '</div>';
     }
