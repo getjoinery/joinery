@@ -56,7 +56,9 @@ $status = (string)$msg->get('aim_status');
 $response = ['success' => true, 'status' => $status];
 
 if ($status === AiConversationMessage::STATUS_COMPLETE) {
-    $response['assistant_html'] = ChatRender::assistantBubble($msg, $session->get_timezone());
+    $model = ChatRender::conversationModel($conversation);
+    $response['assistant_html'] = ChatRender::assistantBubble($msg, $session->get_timezone(), $model);
+    $response['conversation_usage'] = ChatRender::conversationUsagePayload($conversation);
 } elseif ($status === AiConversationMessage::STATUS_FAILED) {
     $response['error'] = (string)$msg->get('aim_error') ?: 'The assistant could not complete this turn.';
 } else {

@@ -18,6 +18,8 @@ extract($page_vars);
 
 $tz = $session->get_timezone();
 $selected_id = $selected ? (int)$selected->key : 0;
+// Effective model for the selected thread, used to price token usage.
+$conv_model = $selected ? ChatRender::conversationModel($selected) : '';
 
 if (!function_exists('joai_pin_svg')) {
     // Small thumbtack marker shown beside pinned threads (no emoji; inline SVG
@@ -115,19 +117,22 @@ $page->admin_header([
             <details class="joai-chat-settings">
                 <summary>⚙ Settings</summary>
                 <div class="joai-chat-settings-body">
-                    <label>Temperature
-                        <input type="number" id="joai-temperature" class="joai-chat-control" data-field="temperature"
-                               step="0.1" min="0" max="2"
-                               value="<?php echo htmlspecialchars($temperature, ENT_QUOTES, 'UTF-8'); ?>"
-                               placeholder="<?php echo htmlspecialchars($def_temperature !== '' ? $def_temperature : 'default', ENT_QUOTES, 'UTF-8'); ?>">
-                    </label>
-                    <label>Top-p
-                        <input type="number" id="joai-top-p" class="joai-chat-control" data-field="top_p"
-                               step="0.05" min="0" max="1"
-                               value="<?php echo htmlspecialchars($top_p, ENT_QUOTES, 'UTF-8'); ?>"
-                               placeholder="<?php echo htmlspecialchars($def_top_p !== '' ? $def_top_p : 'default', ENT_QUOTES, 'UTF-8'); ?>">
-                    </label>
-                    <label>Max tokens
+                    <div class="joai-chat-settings-title">Model settings</div>
+                    <div class="joai-chat-settings-row">
+                        <label>Temperature
+                            <input type="number" id="joai-temperature" class="joai-chat-control" data-field="temperature"
+                                   step="0.1" min="0" max="2"
+                                   value="<?php echo htmlspecialchars($temperature, ENT_QUOTES, 'UTF-8'); ?>"
+                                   placeholder="<?php echo htmlspecialchars($def_temperature !== '' ? $def_temperature : 'default', ENT_QUOTES, 'UTF-8'); ?>">
+                        </label>
+                        <label>Top-p
+                            <input type="number" id="joai-top-p" class="joai-chat-control" data-field="top_p"
+                                   step="0.05" min="0" max="1"
+                                   value="<?php echo htmlspecialchars($top_p, ENT_QUOTES, 'UTF-8'); ?>"
+                                   placeholder="<?php echo htmlspecialchars($def_top_p !== '' ? $def_top_p : 'default', ENT_QUOTES, 'UTF-8'); ?>">
+                        </label>
+                    </div>
+                    <label>Max reply length (tokens)
                         <input type="number" id="joai-max-tokens" class="joai-chat-control" data-field="max_tokens"
                                step="100" min="1000"
                                value="<?php echo htmlspecialchars($max_tokens, ENT_QUOTES, 'UTF-8'); ?>"
@@ -147,7 +152,7 @@ $page->admin_header([
             <?php else: ?>
                 <?php foreach ($messages as $m): ?>
                     <?php if ($m->get('aim_role') === AiConversationMessage::ROLE_ASSISTANT): ?>
-                        <?php echo ChatRender::assistantBubble($m, $tz); ?>
+                        <?php echo ChatRender::assistantBubble($m, $tz, $conv_model); ?>
                     <?php else: ?>
                         <?php
                         $t = LibraryFunctions::convert_time($m->get('aim_create_time'), 'UTC', $tz, 'g:i A');
@@ -176,6 +181,21 @@ $page->admin_header([
         <?php if (!$chat_enabled): ?>
             <p class="joai-chat-empty">Chat is currently disabled in settings.</p>
         <?php endif; ?>
+
+        <div class="joai-chat-meta" id="joai-chat-meta"<?php echo $selected ? '' : ' hidden'; ?>>
+            <span class="joai-chat-meta-usage" title="Estimated tokens and cost for this conversation">
+                <span id="joai-usage-value"><?php
+                    if ($selected) {
+                        $ci = (int)$selected->get('aic_total_input_tokens');
+                        $co = (int)$selected->get('aic_total_output_tokens');
+                        echo htmlspecialchars(
+                            ChatRender::conversationUsageLabel($ci, $co, ChatRender::estimateCost($conv_model, $ci, $co)),
+                            ENT_QUOTES, 'UTF-8'
+                        );
+                    }
+                ?></span>
+            </span>
+        </div>
     </section>
 </div>
 
@@ -216,7 +236,7 @@ $page->admin_header([
                 .then(function (r) { return r.json(); })
                 .then(function (data) {
                     if (!data.success) { onFailed(data.message || 'Could not load the reply.'); return; }
-                    if (data.status === 'complete') { onComplete(data.assistant_html); return; }
+                    if (data.status === 'complete') { onComplete(data.assistant_html, data.conversation_usage); return; }
                     if (data.status === 'failed') { onFailed(data.error || 'The assistant could not complete this turn.'); return; }
                     if (typeof data.partial_text === 'string') onPartial(data.partial_text);
                     if (Date.now() - startedAt > POLL_GIVE_UP_MS) {
@@ -254,7 +274,7 @@ $page->admin_header([
         var body = ensureLiveBubble(messageId).querySelector('.joai-chat-body');
         pollMessage(messageId,
             function (text) { body.textContent = text; scrollToBottom(); },
-            function (html) { replaceBubble(messageId, html); },
+            function (html, usage) { replaceBubble(messageId, html); updateUsage(usage); },
             function (err) { setBusy(false); alert(err || 'The turn could not be completed.'); });
     }
 
@@ -306,6 +326,17 @@ $page->admin_header([
         input.disabled = busy;
         thinking.hidden = !busy;
         if (busy) scrollToBottom();
+    }
+
+    // Conversation token/cost bar under the composer. The server is the source of
+    // truth (it rolls per-turn tokens into the thread total), so each completed
+    // turn hands back a fresh preformatted label and we just set it.
+    var usageMeta = document.getElementById('joai-chat-meta');
+    var usageValue = document.getElementById('joai-usage-value');
+    function updateUsage(usage) {
+        if (!usage || !usageValue) return;
+        if (typeof usage.label === 'string') usageValue.textContent = usage.label;
+        if (usageMeta) usageMeta.hidden = false;
     }
 
     // ----- Sensitivity notice -----
@@ -403,7 +434,7 @@ $page->admin_header([
                 }
 
                 // Non-fpm fallback may finish the turn inline.
-                if (data.status === 'complete') { appendReply(data.assistant_html); return; }
+                if (data.status === 'complete') { appendReply(data.assistant_html); updateUsage(data.conversation_usage); return; }
                 if (data.status === 'failed') { setBusy(false); alert(data.error || 'Send failed.'); return; }
 
                 // Async: stream the reply into a live bubble, then swap in the
@@ -704,7 +735,7 @@ $page->admin_header([
                 if (!data.success) { setBusy(false); alert(data.message || 'Action failed.'); return; }
 
                 // Non-fpm fallback may finish the resume inline.
-                if (data.status === 'complete') { replaceBubble(data.message_id, data.assistant_html); return; }
+                if (data.status === 'complete') { replaceBubble(data.message_id, data.assistant_html); updateUsage(data.conversation_usage); return; }
                 if (data.status === 'failed') { setBusy(false); alert(data.error || 'Action failed.'); return; }
 
                 // Async: reuse the pending bubble as the live bubble, stream the
@@ -727,6 +758,9 @@ $page->admin_header([
     function resetToNewChat() {
         currentConversationId = null;
         transcript.innerHTML = '<p class="joai-chat-empty" id="joai-blank">Start a new conversation below.</p>';
+        // A fresh thread has no usage yet — clear and hide the bar until a turn lands.
+        if (usageValue) usageValue.textContent = '';
+        if (usageMeta) usageMeta.hidden = true;
         document.querySelectorAll('.joai-chat-list-item.is-active')
             .forEach(function (a) { a.classList.remove('is-active'); });
         // New chats reset to the configured defaults: model + thinking back to
@@ -746,6 +780,16 @@ $page->admin_header([
     }
 
     newChatBtn.addEventListener('click', resetToNewChat);
+
+    // Close the settings panel when clicking outside it (popover behavior).
+    var settingsPanel = document.querySelector('.joai-chat-settings');
+    if (settingsPanel) {
+        document.addEventListener('click', function (e) {
+            if (settingsPanel.open && !e.target.closest('.joai-chat-settings')) {
+                settingsPanel.open = false;
+            }
+        });
+    }
 
     sendBtn.addEventListener('click', send);
     input.addEventListener('keydown', function (e) {
