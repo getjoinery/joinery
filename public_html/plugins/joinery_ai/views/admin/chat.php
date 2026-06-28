@@ -151,7 +151,7 @@ $page->admin_header([
                     <?php else: ?>
                         <?php
                         $t = LibraryFunctions::convert_time($m->get('aim_create_time'), 'UTC', $tz, 'g:i A');
-                        echo ChatRender::userBubble((string)$m->get('aim_content'), $t);
+                        echo ChatRender::userBubble((string)$m->get('aim_content'), $t, (int)$m->key);
                         ?>
                     <?php endif; ?>
                 <?php endforeach; ?>
@@ -609,6 +609,73 @@ $page->admin_header([
             else if (action === 'rename') startRename(item);
             else if (action === 'delete') doDelete(item);
         }
+    });
+
+    // ----- Per-turn actions (copy / delete) -----
+    // Event-delegated so it works for bubbles rendered on load and ones swapped
+    // in after a turn completes.
+    function fallbackCopy(text) {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); } catch (err) {}
+        ta.remove();
+    }
+    function copyTurn(bubble, btn) {
+        var text = bubble.getAttribute('data-raw') || '';
+        var prev = btn.textContent;
+        function flash() {
+            btn.textContent = 'Copied';
+            setTimeout(function () { btn.textContent = prev; }, 1200);
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(flash, function () { fallbackCopy(text); flash(); });
+        } else {
+            fallbackCopy(text);
+            flash();
+        }
+    }
+    function deleteTurn(bubble) {
+        var id = bubble.getAttribute('data-message-id');
+        if (!id) return;
+        // Deleting a query (your bubble) takes its reply with it; deleting a
+        // standalone reply removes just that one.
+        var isUser = bubble.classList.contains('joai-chat-mine');
+        var prompt = isUser
+            ? 'Delete this message and the reply to it? This cannot be undone.'
+            : 'Delete this message? This cannot be undone.';
+        JoineryModal.confirm(
+            prompt,
+            function () {
+                var body = new FormData();
+                body.append('message_id', id);
+                body.append('action', 'delete');
+                fetch('/admin/joinery_ai/chat_turn_action', { method: 'POST', body: body })
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        if (!data.success) { alert(data.message || 'Delete failed.'); return; }
+                        var ids = (data.deleted_ids && data.deleted_ids.length) ? data.deleted_ids : [id];
+                        ids.forEach(function (mid) {
+                            var el = transcript.querySelector('.joai-chat-msg[data-message-id="' + mid + '"]');
+                            if (el) el.remove();
+                        });
+                    })
+                    .catch(function () { alert('Delete failed.'); });
+            },
+            { confirmLabel: 'Delete', confirmStyle: 'danger' }
+        );
+    }
+    transcript.addEventListener('click', function (e) {
+        var actionBtn = e.target.closest('.joai-chat-action');
+        if (!actionBtn) return;
+        var bubble = actionBtn.closest('.joai-chat-msg');
+        if (!bubble) return;
+        var action = actionBtn.getAttribute('data-action');
+        if (action === 'copy') copyTurn(bubble, actionBtn);
+        else if (action === 'delete') deleteTurn(bubble);
     });
 
     // Confirm / cancel a pending action (event-delegated — bubbles arrive dynamically).

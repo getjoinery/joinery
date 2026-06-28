@@ -107,6 +107,19 @@
 .joai-chat-body table { border-collapse: collapse; margin: 0 0 0.7rem; font-size: 0.9em; }
 .joai-chat-body th, .joai-chat-body td { border: 1px solid #ddd; padding: 0.3rem 0.5rem; text-align: left; }
 .joai-chat-time { font-size: 0.72rem; color: #999; margin-top: 0.3rem; }
+/* Per-turn actions (copy / delete) — reveal on hover or keyboard focus of a turn. */
+.joai-chat-actions { display: flex; gap: 0.3rem; margin-top: 0.35rem; opacity: 0; transition: opacity 0.12s; }
+.joai-chat-msg:hover .joai-chat-actions,
+.joai-chat-msg:focus-within .joai-chat-actions { opacity: 1; }
+.joai-chat-action { background: none; border: 0; padding: 0.1rem 0.4rem; font-size: 0.72rem;
+                    color: #888; cursor: pointer; border-radius: 4px; line-height: 1.4; }
+.joai-chat-action:hover { background: rgba(0,0,0,0.06); color: #222; }
+.joai-chat-action-danger:hover { background: #fdecea; color: #c0392b; }
+/* On the blue user bubble the toolbar sits right-aligned in light ink. */
+.joai-chat-mine .joai-chat-actions { justify-content: flex-end; }
+.joai-chat-mine .joai-chat-action { color: rgba(255,255,255,0.85); }
+.joai-chat-mine .joai-chat-action:hover { background: rgba(255,255,255,0.2); color: #fff; }
+.joai-chat-mine .joai-chat-action-danger:hover { background: rgba(255,255,255,0.25); color: #fff; }
 .joai-chat-trace { font-size: 0.78rem; color: #666; margin-top: 0.4rem; }
 .joai-chat-trace ul { margin: 0.3rem 0 0; padding-left: 1.1rem; }
 .joai-chat-tool-error { color: #dc3545; }
