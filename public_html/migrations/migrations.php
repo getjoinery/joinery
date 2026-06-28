@@ -843,3 +843,16 @@
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
 
+	// ========== Default chat thinking level off → medium (v134) ==========
+	// The chat composer now defaults new conversations to medium reasoning.
+	// Move the existing default only where it still holds the old 'off' value,
+	// so a deployment that deliberately set something else is left alone. Fresh
+	// installs get 'medium' from the plugin.json declared default (seed); the
+	// new joinery_ai_default_web_search setting is also seeded, no migration.
+	$migration = array();
+	$migration['database_version'] = '134';
+	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'joinery_ai_default_thinking_level' AND stg_value <> 'off'";
+	$migration['migration_sql'] = "UPDATE stg_settings SET stg_value = 'medium' WHERE stg_name = 'joinery_ai_default_thinking_level' AND stg_value = 'off'";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+

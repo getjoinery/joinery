@@ -1,6 +1,6 @@
 {
     "name": "Joinery AI",
-    "version": "0.1.8",
+    "version": "0.1.9",
     "description": "Scheduled LLM recipes that gather information, write to a workspace, and deliver results to a dashboard or email.",
     "author": "Joinery",
     "receives_upgrades": true,
@@ -44,6 +44,7 @@
         { "name": "joinery_ai_chat_system_prompt", "default": "" },
         { "name": "joinery_ai_default_temperature", "default": "0.3" },
         { "name": "joinery_ai_default_top_p", "default": "" },
-        { "name": "joinery_ai_default_thinking_level", "default": "off" }
+        { "name": "joinery_ai_default_thinking_level", "default": "medium" },
+        { "name": "joinery_ai_default_web_search", "default": "1" }
     ]
 }

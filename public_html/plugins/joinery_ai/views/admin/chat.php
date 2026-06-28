@@ -190,8 +190,14 @@ $page->admin_header([
     var dataToggle = document.getElementById('joai-toggle-data');
     var webToggle = document.getElementById('joai-toggle-web');
     var modelSelect = document.getElementById('joai-model');
+    var thinkingSelect = document.getElementById('joai-thinking-level');
     var sensitiveNotice = document.getElementById('joai-sensitive-notice');
     var currentConversationId = <?php echo $selected_id ? $selected_id : 'null'; ?>;
+
+    // New-chat defaults the composer resets to.
+    var DEFAULT_MODEL = <?php echo json_encode($default_model); ?>;
+    var DEFAULT_THINKING = <?php echo json_encode($default_thinking_level); ?>;
+    var DEFAULT_WEB = <?php echo $default_web_search ? 'true' : 'false'; ?>;
 
     function scrollToBottom() { transcript.scrollTop = transcript.scrollHeight; }
     scrollToBottom();
@@ -656,11 +662,14 @@ $page->admin_header([
         transcript.innerHTML = '<p class="joai-chat-empty" id="joai-blank">Start a new conversation below.</p>';
         document.querySelectorAll('.joai-chat-list-item.is-active')
             .forEach(function (a) { a.classList.remove('is-active'); });
-        // New chats default to a plain assistant — reset the toggles to off and
-        // clear per-chat overrides (numeric/instructions blank = inherit the
-        // defaults). Model and thinking selects keep their current choice.
+        // New chats reset to the configured defaults: model + thinking back to
+        // their defaults, web search on (when a search key is set), data access
+        // off, and per-chat numeric/instruction overrides cleared (blank =
+        // inherit the default).
         if (dataToggle) dataToggle.checked = false;
-        if (webToggle) webToggle.checked = false;
+        if (webToggle && !webToggle.disabled) webToggle.checked = DEFAULT_WEB;
+        if (modelSelect) modelSelect.value = DEFAULT_MODEL;
+        if (thinkingSelect) thinkingSelect.value = DEFAULT_THINKING;
         controls.forEach(function (el) {
             var f = el.getAttribute('data-field');
             if (f === 'temperature' || f === 'top_p' || f === 'max_tokens' || f === 'instructions') el.value = '';

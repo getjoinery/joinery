@@ -75,10 +75,18 @@ function admin_joinery_ai_chat_logic(array $input): LogicResult {
         $v = $selected->get($col);
         return ($v === null) ? '' : (string)$v;
     };
+    $default_thinking_level = (string)$settings->get_setting('joinery_ai_default_thinking_level') ?: 'off';
     $thinking_level = $selected ? (string)$selected->get('aic_thinking_level') : '';
     if ($thinking_level === '') {
-        $thinking_level = (string)$settings->get_setting('joinery_ai_default_thinking_level') ?: 'off';
+        $thinking_level = $default_thinking_level;
     }
+
+    // New-chat defaults the composer resets to. Model resolves to the active
+    // provider's default; web search defaults on when a search key is configured.
+    $brave_key_set = (string)$settings->get_setting('joinery_ai_brave_search_api_key') !== '';
+    $default_model = ChatRunner::defaultModel();
+    $default_web_search = $brave_key_set
+        && (string)$settings->get_setting('joinery_ai_default_web_search') === '1';
 
     return LogicResult::render([
         'session'        => $session,
@@ -89,16 +97,19 @@ function admin_joinery_ai_chat_logic(array $input): LogicResult {
         'models'         => $models,
         'model_privacy'  => $model_privacy,
         'data_access'    => $selected ? (bool)$selected->get('aic_data_access') : false,
-        'web_search'     => $selected ? (bool)$selected->get('aic_web_search') : false,
+        'web_search'     => $selected ? (bool)$selected->get('aic_web_search') : $default_web_search,
         'temperature'    => $g('aic_temperature'),
         'top_p'          => $g('aic_top_p'),
         'max_tokens'     => $g('aic_max_tokens'),
         'instructions'   => $g('aic_instructions'),
         'thinking_level' => $thinking_level,
+        'default_model'  => $default_model,
+        'default_thinking_level' => $default_thinking_level,
+        'default_web_search'     => $default_web_search,
         'def_temperature'=> (string)$settings->get_setting('joinery_ai_default_temperature'),
         'def_top_p'      => (string)$settings->get_setting('joinery_ai_default_top_p'),
         'def_max_tokens' => (string)$settings->get_setting('joinery_ai_chat_max_tokens'),
-        'brave_key_set'  => (string)$settings->get_setting('joinery_ai_brave_search_api_key') !== '',
+        'brave_key_set'  => $brave_key_set,
         'chat_enabled'   => (bool)$settings->get_setting('joinery_ai_chat_enabled'),
     ]);
 }
