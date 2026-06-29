@@ -65,6 +65,18 @@ The PHP file validator (`maintenance_scripts/dev_tools/validate_php_file.php`) r
 
 > User-authored / WYSIWYG content and email templates are out of scope — they are not platform code.
 
+### Modal Dialogs (`JoineryModal`)
+
+`JoineryModal` is a kit component, not a per-theme utility. It lives in the global `base.js` (with `.jy-ui`-scoped styling in `joinery-styles.css`) and loads on **every** theme, so confirmations, alerts, and prompts work the same everywhere — never reach for `window.confirm()` or a framework modal:
+
+```js
+JoineryModal.confirm('Delete this record?', function () { submitAction(); });
+JoineryModal.alert('Settings saved successfully.');
+JoineryModal.prompt('Enter the item name to confirm:', function (value) { /* … */ });
+```
+
+Its buttons are plain kit buttons (`.btn` / `.btn-*`) — there is no separate dialog-button family. For arbitrary content with custom actions, use the generic content mode, `open(content, { buttons })`. The full options surface (`confirmLabel`, `confirmStyle`, `placeholder`, …) and PHP-rendered action-link patterns are documented once in [admin_pages.md → Modal Dialogs](admin_pages.md#modal-dialogs-joinerymodal); the API is identical on public themes.
+
 ### `--jy-*` Token Vocabulary
 
 All design tokens use the `--jy-` prefix to prevent collision with any other CSS variable:

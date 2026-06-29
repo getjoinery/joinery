@@ -33,6 +33,8 @@ FormWriter is a PHP class system that generates HTML forms with:
 - **Field visibility logic** - Show/hide fields dynamically with smooth transitions
 - **Accessibility features** - Proper labels, ARIA attributes, error messaging
 
+**Styling through the `.jy-ui` kit.** FormWriter emits bare kit classes — `.btn` / `.btn-primary` on buttons, `.form-control` / `.form-group` / `.form-label` on fields — exactly what the platform CSS kit styles under a `.jy-ui` ancestor. So there is nothing to configure: render a form **inside a `.jy-ui` scope** and the kit styles it on every theme; outside that scope a branded theme's own form CSS applies, so nothing breaks before a page adopts the kit. See [Default Theme CSS Kit & `.jy-ui` Namespace](theme_integration_instructions.md#default-theme-css-kit--jy-ui-namespace) for the scoping rules and the no-inline-`style=` policy.
+
 ### Available Classes
 
 - **`FormWriterV2HTML5`** - The HTML renderer. Emits semantic HTML5 markup and is used by every theme.

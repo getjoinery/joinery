@@ -456,7 +456,7 @@ if (!empty($display_messages)) {
 
 ### Modal Dialogs (JoineryModal)
 
-The joinery-system admin theme ships `JoineryModal`, a vanilla-JS utility built on the native `<dialog>` element. Use it for confirmations and notifications — never `window.confirm()` or Bootstrap modals.
+`JoineryModal` is a global kit component — a vanilla-JS utility built on the native `<dialog>` element, shipped in the kit's `base.js` and loaded on every theme (not just admin). Use it for confirmations and notifications — never `window.confirm()` or Bootstrap modals.
 
 ```js
 // Confirmation (two buttons, danger-styled by default)
