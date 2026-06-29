@@ -192,6 +192,16 @@ Because the turn runs in the authenticated web process, no identity re-setup is 
 
 Streaming is delivered over the poll channel, not a held-open connection: partial text is written to the row and the page picks it up on its next poll. Granularity is the poll interval, not per token. True token-by-token SSE straight to the browser is a possible later upgrade — it would require defeating php-fpm's stock `output_buffering = 4096` and holding the connection open for the turn — but is deliberately avoided so streaming costs nothing at the web-server/CDN layer and builds on the same detach-and-poll path.
 
+### Managing conversations
+
+The thread pane supports the usual housekeeping over the caller's own conversations, all owner-scoped (the conversation must belong to the acting user and not be deleted):
+
+- **Rename / Pin / Delete** — the per-thread kebab (⋮) menu. Rename edits `aic_title` inline; Pin toggles `aic_pinned` (pinned threads sort first via `aic_pinned DESC, aic_update_time DESC`, with a thumbtack glyph); Delete soft-deletes the thread (hides it from the list). All three POST to `chat_thread_action`.
+- **Search** — a debounced box atop the pane re-queries `chat_list` (GET `search`) and re-renders the list. `MultiAiConversation`'s `search` option matches the term against the title (`aic_title ILIKE`) **or** any non-deleted message body in the thread (an `EXISTS` subquery on `aim_content ILIKE`). The term is bound, never concatenated; `%`/`_`/`\` are escaped so they match literally rather than as wildcards.
+- **Export** — the kebab menu's Export item fetches `chat_export` (GET `conversation_id`), which returns the thread assembled in two flavors (`ChatExport::assemble`): **Markdown** (role-labeled turns with the stored source markdown intact) and **plain text** (the same, rendered down by `ChatExport::toPlainText` — emphasis stripped, headings/fences/inline markup removed, `[text](url)` flattened to `text (url)` — for pasting into social media, which doesn't render Markdown). The dialog offers a format choice with Copy (to clipboard) and Download (`.md` / `.txt`, built client-side as a Blob).
+
+Each chat endpoint exists as a full file under `views/admin/` plus a one-line `views/profile/` stub that re-includes it, so the same owner-scoped implementation backs both the admin and member surfaces.
+
 ## Generic reads: `query_model` + per-recipe model allowlist
 
 A single generic tool lets opted-in data models become readable by recipes without writing a per-model PHP class:

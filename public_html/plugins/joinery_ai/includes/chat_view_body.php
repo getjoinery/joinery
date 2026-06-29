@@ -35,6 +35,8 @@ if (!function_exists('joai_pin_svg')) {
 
     <aside class="joai-chat-list">
         <button type="button" id="joai-new-chat" class="joai-btn joai-btn-primary joai-chat-newbtn">+ New chat</button>
+        <input type="search" id="joai-thread-search" class="joai-chat-search"
+               placeholder="Search conversations" aria-label="Search conversations" autocomplete="off">
         <nav class="joai-chat-threads" id="joai-threads">
             <?php if (!count($conversations)): ?>
                 <p class="joai-chat-empty" id="joai-no-threads">No conversations yet.</p>
@@ -57,6 +59,7 @@ if (!function_exists('joai_pin_svg')) {
                     <div class="joai-chat-item-menu" role="menu" hidden>
                         <button type="button" role="menuitem" data-action="pin"><?php echo $pinned ? 'Unpin' : 'Pin'; ?></button>
                         <button type="button" role="menuitem" data-action="rename">Rename</button>
+                        <button type="button" role="menuitem" data-action="export">Export</button>
                         <button type="button" role="menuitem" data-action="delete" class="joai-chat-menu-danger">Delete</button>
                     </div>
                 </div>
@@ -571,6 +574,7 @@ if (!function_exists('joai_pin_svg')) {
         menu.innerHTML =
             '<button type="button" role="menuitem" data-action="pin">' + (pinned ? 'Unpin' : 'Pin') + '</button>'
             + '<button type="button" role="menuitem" data-action="rename">Rename</button>'
+            + '<button type="button" role="menuitem" data-action="export">Export</button>'
             + '<button type="button" role="menuitem" data-action="delete" class="joai-chat-menu-danger">Delete</button>';
 
         item.appendChild(a);
@@ -696,6 +700,112 @@ if (!function_exists('joai_pin_svg')) {
             .catch(function () { alert('Could not update.'); });
     }
 
+    // ----- Export a thread (Markdown or plain text; Copy or Download) -----
+    function slugifyTitle(title) {
+        var s = (title || 'conversation').toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+        return s || 'conversation';
+    }
+    function downloadText(filename, text) {
+        var blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    }
+    function openExportDialog(data) {
+        var slug = slugifyTitle(data.title);
+        var wrap = document.createElement('div');
+        wrap.className = 'joai-export';
+        wrap.innerHTML =
+            '<p class="joai-export-title"></p>'
+            + '<fieldset class="joai-export-formats">'
+            + '<label><input type="radio" name="joai-export-format" value="markdown" checked>'
+            + ' Markdown <span class="joai-export-hint">source — paste where Markdown renders</span></label>'
+            + '<label><input type="radio" name="joai-export-format" value="text">'
+            + ' Plain text <span class="joai-export-hint">paste-ready for social media</span></label>'
+            + '</fieldset>';
+        wrap.querySelector('.joai-export-title').textContent =
+            'Export “' + (data.title || 'Untitled') + '”';
+
+        function chosen() {
+            var sel = wrap.querySelector('input[name="joai-export-format"]:checked');
+            var fmt = sel ? sel.value : 'markdown';
+            return fmt === 'text'
+                ? { content: data.text, ext: 'txt' }
+                : { content: data.markdown, ext: 'md' };
+        }
+
+        JoineryModal.open(wrap, {
+            buttons: [
+                { label: 'Cancel', style: 'secondary' },
+                { label: 'Download', style: 'secondary', onClick: function () {
+                    var c = chosen();
+                    downloadText(slug + '.' + c.ext, c.content);
+                } },
+                // Copy runs synchronously off this click (content is already in
+                // memory), so the clipboard write keeps the user-activation.
+                { label: 'Copy', style: 'primary', onClick: function () {
+                    var c = chosen();
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(c.content).catch(function () { fallbackCopy(c.content); });
+                    } else {
+                        fallbackCopy(c.content);
+                    }
+                } }
+            ]
+        });
+    }
+    function doExport(item) {
+        var id = item.getAttribute('data-conversation-id');
+        fetch(JOAI_BASE + 'chat_export?conversation_id=' + encodeURIComponent(id))
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (!data.success) { alert(data.message || 'Export failed.'); return; }
+                openExportDialog(data);
+            })
+            .catch(function () { alert('Export failed.'); });
+    }
+
+    // ----- Thread search (debounced; title + message-content match) -----
+    var threadSearch = document.getElementById('joai-thread-search');
+    function renderThreadList(list) {
+        threads.innerHTML = '';
+        if (!list.length) {
+            threads.innerHTML = '<p class="joai-chat-empty" id="joai-no-threads">No conversations found.</p>';
+            return;
+        }
+        list.forEach(function (c) {
+            var item = buildThreadItem(c.id, c.title, c.pinned);
+            if (String(c.id) === String(currentConversationId)) {
+                item.querySelector('.joai-chat-list-item').classList.add('is-active');
+            }
+            threads.appendChild(item);
+        });
+    }
+    if (threadSearch) {
+        var searchTimer = null;
+        var searchSeq = 0;
+        threadSearch.addEventListener('input', function () {
+            var term = threadSearch.value.trim();
+            if (searchTimer) clearTimeout(searchTimer);
+            searchTimer = setTimeout(function () {
+                var seq = ++searchSeq;
+                fetch(JOAI_BASE + 'chat_list?search=' + encodeURIComponent(term))
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        if (seq !== searchSeq) return; // a newer query superseded this one
+                        if (data && data.success) renderThreadList(data.conversations || []);
+                    })
+                    .catch(function () {});
+            }, 250);
+        });
+    }
+
     threads.addEventListener('click', function (e) {
         var trigger = e.target.closest('.joai-chat-item-menu-btn');
         if (trigger) {
@@ -724,6 +834,7 @@ if (!function_exists('joai_pin_svg')) {
             var action = actionBtn.getAttribute('data-action');
             if (action === 'pin') doPin(item);
             else if (action === 'rename') startRename(item);
+            else if (action === 'export') doExport(item);
             else if (action === 'delete') doDelete(item);
         }
     });
