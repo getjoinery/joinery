@@ -761,6 +761,22 @@ abstract class PublicPageBase {
 						alert("Error switching theme: " + error.message);
 					});
 				};
+
+				// Tap-to-toggle admin bar dropdowns. Desktop keeps its hover behaviour
+				// (unchanged); this only adds a click path so the theme switcher and
+				// "+ New" menus are reachable on touch devices where hover does not fire.
+				document.querySelectorAll("#joinery-admin-bar .joinery-admin-bar-dropdown > span").forEach(function(trigger){
+					trigger.addEventListener("click", function(e){
+						e.stopPropagation();
+						var dd = trigger.parentElement;
+						var wasOpen = dd.classList.contains("open");
+						document.querySelectorAll("#joinery-admin-bar .joinery-admin-bar-dropdown.open").forEach(function(o){ o.classList.remove("open"); });
+						if (!wasOpen) dd.classList.add("open");
+					});
+				});
+				document.addEventListener("click", function(){
+					document.querySelectorAll("#joinery-admin-bar .joinery-admin-bar-dropdown.open").forEach(function(o){ o.classList.remove("open"); });
+				});
 			});
 			</script>';
 		}
@@ -914,6 +930,9 @@ abstract class PublicPageBase {
 	function tableheader($headers, $options=array(), $pager=NULL){
 		// Store options for use in endtable
 		$this->current_table_options = $options;
+		// Store headers so disprow() can stamp each cell with its column label,
+		// which the stacked-card mobile layout renders as "Header: value" pairs.
+		$this->current_table_headers = array_values($headers);
 
 		// Signal to renderBoxOpen that this box contains a table (affects card-body padding)
 		if (property_exists($this, '_is_table_box')) {
@@ -1029,11 +1048,21 @@ abstract class PublicPageBase {
 	function disprow($dataarray){
 		echo '<tr>';
 
+		// Column headers captured in tableheader(), used as per-cell labels for the
+		// stacked-card mobile layout. The data-label attribute and cell-primary class
+		// are inert at desktop width (no CSS consumes them there) and on themes that
+		// lack the mobile card styles — they only take effect below 767px.
+		$headers = isset($this->current_table_headers) ? $this->current_table_headers : array();
+		$i = 0;
 		foreach ($dataarray as $value) {
 			if ($value == "") {
 				$value = "&nbsp";
 			}
-			printf('<td>%s</td>', $value);
+			$label = isset($headers[$i]) ? trim(strip_tags((string)$headers[$i])) : '';
+			$attr  = $label !== '' ? ' data-label="' . htmlspecialchars($label, ENT_QUOTES) . '"' : '';
+			$cls   = $i === 0 ? ' class="cell-primary"' : '';
+			printf('<td%s%s>%s</td>', $cls, $attr, $value);
+			$i++;
 		}
 		echo "</tr>\n";
 	}
@@ -1429,11 +1458,32 @@ abstract class PublicPageBase {
 				margin-left: 5px !important;
 			}
 			
+			/* Tap-to-toggle support (added by admin bar JS on touch / mobile) */
+			.joinery-admin-bar-dropdown.open .joinery-admin-bar-dropdown-content {
+				display: block !important;
+			}
+
 			/* Responsive adjustments */
 			@media screen and (max-width: 768px) {
 				.joinery-admin-bar-template {
 					display: none !important;
 				}
+			}
+			@media screen and (max-width: 767px) {
+				/* On admin pages the admin topbar already provides navigation, so the
+				   admin bar is redundant clutter on a phone — drop it and reclaim the
+				   32px offsets it reserves. Public pages (no .admin-layout) keep it. */
+				body:has(.admin-layout) #joinery-admin-bar { display: none !important; }
+				body.joinery-admin-bar-active:has(.admin-layout) { margin-top: 0 !important; }
+				body.joinery-admin-bar-active:has(.admin-layout) .sidebar {
+					top: 0 !important;
+					height: 100vh !important;
+				}
+				body.joinery-admin-bar-active:has(.admin-layout) .topbar { top: 0 !important; }
+
+				/* On public pages, slim the bar so it fits one line instead of wrapping */
+				#joinery-admin-bar .joinery-admin-bar-site-name,
+				#joinery-admin-bar .joinery-admin-bar-user { display: none !important; }
 			}
 		</style>
 		<?php

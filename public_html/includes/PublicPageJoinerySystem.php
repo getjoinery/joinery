@@ -135,7 +135,10 @@ class PublicPageJoinerySystem extends PublicPageBase {
     // =====================================================================
     protected function getTableClasses() {
         return [
-            'wrapper' => 'table-responsive',
+            // jy-card-table opts core-rendered tables into the mobile stacked-card
+            // layout (disprow stamps each cell with data-label). Hand-rolled plugin
+            // tables use a plain table-responsive wrapper and keep horizontal scroll.
+            'wrapper' => 'table-responsive jy-card-table',
             'table'   => 'table mb-0',
             'header'  => '',
         ];
@@ -271,7 +274,7 @@ class PublicPageJoinerySystem extends PublicPageBase {
         }
         if ($this->_box_has_toolbar) {
             // Open right-side flex container — closed by renderToolbar
-            echo '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:0.5rem;margin-left:auto;">';
+            echo '<div class="card-header-actions" style="display:flex;align-items:center;flex-wrap:wrap;gap:0.5rem;margin-left:auto;">';
         } else {
             // No toolbar/buttons coming — close card-header and open card-body for content
             echo '</div>';

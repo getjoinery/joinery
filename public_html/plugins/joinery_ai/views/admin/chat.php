@@ -75,7 +75,12 @@ $page->admin_header([
         </nav>
     </aside>
 
+    <div class="joai-chat-list-backdrop" id="joai-list-backdrop" hidden></div>
+
     <section class="joai-chat-main">
+        <button type="button" class="joai-chat-list-toggle" id="joai-list-toggle" aria-expanded="false">
+            <span aria-hidden="true">&#9776;</span> Conversations
+        </button>
         <div class="joai-chat-status">
             <?php
             $model_options = $models;
@@ -213,6 +218,28 @@ $page->admin_header([
     var thinkingSelect = document.getElementById('joai-thinking-level');
     var sensitiveNotice = document.getElementById('joai-sensitive-notice');
     var currentConversationId = <?php echo $selected_id ? $selected_id : 'null'; ?>;
+
+    // Mobile: the thread list is an off-canvas drawer below 767px. Tapping the
+    // "Conversations" toggle slides it in over the chat pane; tapping the
+    // backdrop, a thread, or "+ New chat" closes it again.
+    var chatWrap = document.querySelector('.joai-chat-wrap');
+    var listToggle = document.getElementById('joai-list-toggle');
+    var listBackdrop = document.getElementById('joai-list-backdrop');
+    function setListOpen(open) {
+        if (!chatWrap) return;
+        chatWrap.classList.toggle('list-open', open);
+        if (listBackdrop) listBackdrop.hidden = !open;
+        if (listToggle) listToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+    if (listToggle) {
+        listToggle.addEventListener('click', function () {
+            setListOpen(!chatWrap.classList.contains('list-open'));
+        });
+    }
+    if (listBackdrop) listBackdrop.addEventListener('click', function () { setListOpen(false); });
+    // "+ New chat" resets the composer via AJAX (no reload), so close the drawer
+    // to reveal the fresh chat. Thread links navigate, closing the drawer anyway.
+    if (newChatBtn) newChatBtn.addEventListener('click', function () { setListOpen(false); });
 
     // New-chat defaults the composer resets to.
     var DEFAULT_MODEL = <?php echo json_encode($default_model); ?>;

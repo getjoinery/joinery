@@ -1190,6 +1190,10 @@ select.form-control {
     }
     .main-content {
         margin-left: 0;
+        /* Flex children default to min-width:auto, which refuses to shrink below
+           content min-content and pushes the page wider than the viewport. Once the
+           sidebar is collapsed the content area must be free to shrink to the screen. */
+        min-width: 0;
     }
     .sidebar-open .sidebar {
         transform: translateX(0);
@@ -1206,6 +1210,89 @@ select.form-control {
 @media (max-width: 480px) {
     .stats-grid { grid-template-columns: 1fr; }
     .topbar-nav .nav-item.hide-mobile { display: none; }
+}
+
+/* ===== Mobile: stacked-card tables + list control reflow ===== */
+@media (max-width: 767px) {
+    /* List control bar (title + sort/filter/search) stacks instead of overflowing */
+    .card-header { flex-direction: column; align-items: stretch; gap: 0.75rem; }
+    .card-header-actions {
+        margin-left: 0 !important;
+        width: 100%;
+    }
+    .card-header-actions form { flex-wrap: wrap; }
+    .card-header-actions input[type="text"] {
+        width: auto !important;
+        flex: 1 1 140px;
+        min-width: 0;
+    }
+
+    /* Shared flex-row components that otherwise run off a narrow screen: the
+       settings/section tabs and alert callouts wrap instead of overflowing. */
+    .nav-tabs { flex-wrap: wrap; }
+    .nav-tabs .nav-link { white-space: normal; }
+    .alert { flex-wrap: wrap; }
+
+    /* Hand-rolled tables (plugin admin pages not using the core renderer) scroll
+       horizontally within themselves instead of widening the page. Core-rendered
+       tables are excluded — they card up via the .jy-card-table rules below. */
+    .page-body table.table:not(.jy-card-table > table) {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    /* Stacked-card table layout. Each row becomes a card; each cell prints its
+       column header (stamped as data-label by disprow) beside the value.
+       Scoped to :has(td[data-label]) so ONLY tables rendered through the core
+       renderer card up — hand-rolled plugin tables (no data-label) keep their
+       wrapper's horizontal scroll untouched. .table-scroll force-opts out. */
+    .jy-card-table { overflow-x: visible; }
+    .jy-card-table > table.table { display: block; }
+    .jy-card-table > table.table thead { display: none; }
+    .jy-card-table > table.table tbody,
+    .jy-card-table > table.table tr,
+    .jy-card-table > table.table td { display: block; width: auto; }
+    .jy-card-table > table.table tr {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        margin: 0.75rem;
+        padding: 0.5rem 0.875rem;
+        background: var(--white);
+    }
+    .jy-card-table > table.table tbody tr:last-child td { border-bottom: none; }
+    .jy-card-table > table.table tbody tr:hover td { background: transparent; }
+    .jy-card-table > table.table td {
+        border: none;
+        padding: 0.35rem 0;
+        text-align: right;
+        overflow-wrap: anywhere;
+    }
+    /* Float label left, value flows right and wraps beneath long unbreakable
+       values (e.g. emails) instead of forcing the card wider than the viewport. */
+    .jy-card-table > table.table td[data-label]::before {
+        content: attr(data-label);
+        float: left;
+        margin-right: 1rem;
+        font-weight: 600;
+        font-size: 0.7rem;
+        line-height: 1.6;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        text-align: left;
+    }
+    /* First column renders as the card heading rather than a label/value line */
+    .jy-card-table > table.table td.cell-primary {
+        display: block;
+        text-align: left;
+        font-size: 0.9375rem;
+        font-weight: 600;
+        margin-bottom: 0.25rem;
+        padding-bottom: 0.4rem;
+        border-bottom: 1px solid var(--border-light);
+    }
+    .jy-card-table > table.table td.cell-primary::before { display: none; }
 }
 
 /* ===== Bootstrap Compatibility Utilities ===== */
