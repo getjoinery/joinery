@@ -29,6 +29,9 @@
 .joai-chat-list { flex: 0 0 240px; display: flex; flex-direction: column; gap: 0.5rem;
                   border: 1px solid #ddd; border-radius: 8px; background: #fff; padding: 0.75rem; overflow-y: auto; }
 .joai-chat-newbtn { width: 100%; }
+.joai-chat-search { width: 100%; box-sizing: border-box; padding: 0.4rem 0.6rem; font: inherit;
+                    font-size: 0.85rem; border: 1px solid #ddd; border-radius: 6px; }
+.joai-chat-search:focus { outline: none; border-color: #0d6efd; box-shadow: 0 0 0 2px rgba(13,110,253,0.15); }
 .joai-chat-threads { display: flex; flex-direction: column; gap: 0.25rem; }
 .joai-chat-item { position: relative; }
 .joai-chat-list-item { display: flex; align-items: center; gap: 0.35rem;
@@ -62,6 +65,12 @@
 
 .joai-chat-rename { width: 100%; box-sizing: border-box; padding: 0.45rem 0.5rem; font: inherit;
                     font-size: 0.9rem; border: 1px solid #0d6efd; border-radius: 6px; }
+
+/* Export dialog (rendered inside the system JoineryModal). */
+.joai-export-title { margin: 0 0 0.75rem; font-weight: 600; font-size: 1rem; }
+.joai-export-formats { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.6rem; }
+.joai-export-formats label { display: flex; align-items: baseline; gap: 0.4rem; font-size: 0.9rem; cursor: pointer; }
+.joai-export-hint { color: #6c757d; font-size: 0.8rem; }
 .joai-chat-main { flex: 1 1 auto; display: flex; flex-direction: column; border: 1px solid #ddd;
                   border-radius: 8px; background: #fff; overflow: hidden; }
 /* Control strip above the transcript: a single line summarizing the active

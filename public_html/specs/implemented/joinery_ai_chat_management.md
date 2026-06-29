@@ -1,6 +1,6 @@
 # Joinery AI — Chat management & render polish
 
-**Status:** Active — awaiting implementation
+**Status:** Implemented (search + export; per-code-block copy and syntax highlighting deferred — see Out of scope)
 **Plugin:** `joinery_ai`
 **Touches:** `AiConversation` (one column) + `MultiAiConversation` (list query),
 `ChatRender` (one data attribute), the chat left pane + transcript JS and CSS, a
