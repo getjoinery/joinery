@@ -197,3 +197,23 @@ select.joai-chat-control { cursor: pointer; }
 .joai-chat-toggle input { margin: 0; cursor: pointer; }
 .joai-chat-toggle.is-disabled { color: #aaa; cursor: not-allowed; }
 .joai-chat-toggle.is-disabled input { cursor: not-allowed; }
+
+/* --- Mobile: collapse the thread list into a drawer so the chat pane gets the
+   full width. The list slides in over the chat when the toggle is tapped. --- */
+.joai-chat-list-toggle { display: none; align-items: center; gap: 0.4rem; width: 100%;
+    padding: 0.55rem 0.85rem; border: 0; border-bottom: 1px solid #e6e8eb; background: #f7f8fa;
+    color: #0d6efd; font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
+
+@media (max-width: 767px) {
+    .joai-chat-wrap { position: relative; gap: 0; height: calc(100vh - 175px); min-height: 360px; }
+    .joai-chat-list { position: absolute; top: 0; left: 0; bottom: 0; z-index: 40; width: 82%;
+        max-width: 290px; transition: transform 0.22s ease;
+        /* The wrap is inset from the viewport by the page/card padding, so clear the
+           element's own width plus an extra margin to push it fully off-screen. */
+        transform: translateX(calc(-100% - 4rem)); }
+    .joai-chat-wrap.list-open .joai-chat-list { transform: translateX(0);
+        box-shadow: 4px 0 18px rgba(0,0,0,0.18); }
+    .joai-chat-list-backdrop { position: absolute; inset: 0; z-index: 35; background: rgba(0,0,0,0.4); }
+    .joai-chat-main { width: 100%; min-width: 0; }
+    .joai-chat-list-toggle { display: flex; }
+}

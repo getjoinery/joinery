@@ -176,6 +176,25 @@ $page->admin_footer();
 ?>
 ```
 
+### Mobile rendering of list tables
+
+Tables rendered through `tableheader()` / `disprow()` adapt to phone-width screens
+automatically. Below 767px each row collapses into a stacked card: the first column
+becomes the card heading and every other column prints its header beside its value.
+This works because `tableheader()` records the header labels and `disprow()` stamps
+each cell with a `data-label` attribute and marks the first cell `cell-primary`. The
+attributes are inert at desktop width, so the normal columnar table is unchanged.
+
+Pass header strings that read well as standalone labels (e.g. `Email`, `Signup
+Date`) — they double as the per-cell labels on mobile. Keep the most identifying
+column first so it heads the card.
+
+The card layout is opt-in via the `jy-card-table` wrapper class that the admin theme
+adds around core-rendered tables. Hand-rolled `<table class="table">` markup in a
+plugin admin page is **not** carded; instead it scrolls horizontally within itself on
+mobile, so it never widens the page. Prefer `tableheader()`/`disprow()` for list data
+to get the card layout.
+
 ### `process_logic()` Behaviour
 
 1. Calls the logic function.

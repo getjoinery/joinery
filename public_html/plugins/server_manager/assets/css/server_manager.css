@@ -42,3 +42,9 @@
 .svm-w40 { width: 40%; }
 .svm-flex1 { min-width: 0; flex: 1; }
 .svm-minw0 { min-width: 0; }
+
+/* --- Mobile: keep the host-accordion header rows from running off a phone --- */
+@media (max-width: 767px) {
+    .host-accordion .accordion-button,
+    .host-accordion .accordion-button .d-flex { flex-wrap: wrap; }
+}
