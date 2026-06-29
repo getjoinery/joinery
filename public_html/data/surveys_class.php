@@ -24,6 +24,7 @@ class Survey extends SystemBase {	public static $prefix = 'svy';
 
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
+	public static $ai_owner_field     = false; // ownerless catalog — members read all rows
 	public static $ai_description     = 'Admin-curated surveys.';
 	public static $ai_excluded_fields = [];
 

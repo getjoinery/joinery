@@ -51,6 +51,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
+	public static $ai_owner_field     = 'usr_user_id'; // a member reads only their own user row (the pk)
 	public static $ai_description     = 'Platform users — admin records, customers, members. Includes contact info, account status, and admin flags.';
 	// Relevance/noise trims for the AI surface only. True secrets live in
 	// $api_unreadable_fields (the shared floor); they are merged in automatically by

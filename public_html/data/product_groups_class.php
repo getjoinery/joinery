@@ -22,6 +22,7 @@ class ProductGroup extends SystemBase {	public static $prefix = 'prg';
 
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
+	public static $ai_owner_field     = false; // ownerless catalog — members read all rows
 	public static $ai_description     = 'Bundle groupings for products (e.g. choose-one menus). prg_max_items caps how many items in the group a buyer may select.';
 	public static $ai_excluded_fields = [];
 

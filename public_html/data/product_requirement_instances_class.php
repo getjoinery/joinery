@@ -20,6 +20,7 @@ class ProductRequirementInstance extends SystemBase {	public static $prefix = 'p
 
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
+	public static $ai_owner_field     = false; // ownerless catalog — members read all rows
 	public static $ai_description     = 'Per-product instances of checkout requirement definitions.';
 	public static $ai_excluded_fields = [];
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value

@@ -55,6 +55,7 @@ class Event extends SystemBase {	public static $prefix = 'evt';
 
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
+	public static $ai_owner_field     = false; // ownerless catalog — members read all rows
 	public static $ai_description     = 'Events on the platform (workshops, meetups, classes, etc.). Recurring or one-off.';
 	public static $ai_excluded_fields = ['evt_private_info'];
 	public static $url_namespace = 'event';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM

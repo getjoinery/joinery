@@ -60,6 +60,7 @@ class EventSession extends SystemBase {
 
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
+	public static $ai_owner_field     = false; // ownerless catalog — members read all rows
 	public static $ai_description     = 'Sessions within an event (e.g. day 1, day 2 of a multi-day workshop). Each session has its own start/end time, content, and tier gating.';
 	public static $ai_excluded_fields = [];
 

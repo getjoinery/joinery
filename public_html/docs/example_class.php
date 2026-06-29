@@ -92,6 +92,19 @@ class Example extends SystemBase
     // recipes reading from.
     public static $ai_readable        = true;
     public static $ai_description     = 'Example records used to demonstrate the data-model template.';
+    // Member read-scope: how a NON-admin member's reads are contained to their own
+    // rows (admins always read cross-user). Omit and the resolver infers the owner
+    // column — the lone *_usr_user_id / *_owner_user_id column. States:
+    //   omitted        infer the single owner column; zero or 2+ candidates ⇒ the
+    //                  model is hidden from members (ambiguous ownership is never guessed).
+    //   'exm_usr_user_id'  name the owner column (e.g. a primary key the convention
+    //                      can't infer, or to disambiguate two candidates).
+    //   ['col_a','col_b']  OR-match — a member sees a row if they own via any column
+    //                      (e.g. messages = sender-or-recipient).
+    //   false          ownerless catalog/config — members read every row.
+    // Run `php plugins/joinery_ai/cli/owner_scope_report.php` to see how every model
+    // resolves and catch an accidentally-exposed or accidentally-hidden table.
+    public static $ai_owner_field     = false;              // e.g. 'exm_usr_user_id', or ['col_a','col_b']
     // Relevance/noise trims ONLY. Genuine secrets belong in $api_unreadable_fields
     // (the shared read floor) — ModelSchemaBuilder merges that in automatically,
     // so never re-list secrets here. Use this for noisy-but-not-secret columns

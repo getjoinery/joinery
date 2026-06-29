@@ -132,8 +132,10 @@ class ChatRender {
              . $trace
              . $card
              . self::actionsHtml()
+             . '<div class="joai-chat-msg-meta">'
              . $usage
              . '<div class="joai-chat-time">' . htmlspecialchars($time, ENT_QUOTES, 'UTF-8') . '</div>'
+             . '</div>'
              . '</div>';
     }
 

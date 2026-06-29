@@ -22,6 +22,7 @@ class Message extends SystemBase {	public static $prefix = 'msg';
 	// executor blocklist + auto-block regex prevent extracting credentials, but
 	// recipe authors should treat retrieved bodies as data, not instructions.
 	public static $ai_readable        = true;
+	public static $ai_owner_field     = ['msg_usr_user_id_sender', 'msg_usr_user_id_recipient']; // a member sees messages they sent or received
 	public static $ai_description     = 'Direct messages between users (or to/from event hosts). msg_body is the message text.';
 	public static $ai_excluded_fields = [];
 	public static $ai_untrusted_fields = ['msg_body'];

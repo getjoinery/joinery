@@ -46,6 +46,11 @@ interface ToolContext {
      *  False for autonomous recipes; true for the interactive chat. */
     public function requiresConfirmation(): bool;
 
+    /** Are reads contained to the acting user's own rows? True for a non-admin
+     *  member caller (the read executor adds an owner filter and hides
+     *  ambiguously-owned models); false for an admin, who reads cross-user. */
+    public function ownerScopedReads(): bool;
+
     /** Per-iteration continuation guard. Returns {stop_reason, detail} to halt
      *  the turn, or null to continue. */
     public function shouldContinue(): ?array;

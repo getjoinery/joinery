@@ -11,6 +11,7 @@ class SeoPageMetadata extends SystemBase {
 	public static $pkey_column = 'spm_seo_page_metadata_id';
 
 	public static $ai_readable    = true;
+	public static $ai_owner_field = false; // ownerless catalog — members read all rows
 	public static $ai_description = 'SEO and social-card overrides keyed by canonical request path.';
 
 	public static $field_specifications = array(

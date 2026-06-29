@@ -32,6 +32,7 @@ class PageContent extends SystemBase {
 
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
+	public static $ai_owner_field     = false; // ownerless catalog — members read all rows
 	public static $ai_description     = 'Component blocks rendered on public pages.';
 	public static $ai_excluded_fields = [];
 

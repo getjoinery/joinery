@@ -130,7 +130,7 @@ interface RecipeToolInterface {
 
 `execute()` returns either a string (becomes `tool_result.content`) or `['content' => string, 'is_error' => bool]` for explicit error reporting.
 
-Tools type-hint **`ToolContext`** (`includes/ToolContext.php`), the surface-independent contract both run contexts implement. It exposes identity (`actingUserId()`, `ownerTimezone()`), the per-run/per-turn untrusted-input nonce (`untrustedNonce()`), the capability allowlists (`allowedModels()`, `allowedActions()`), and the continuation/confirmation/audit hooks below. Recipe-only concepts (the `Recipe` row, the workspace) stay off the interface — the three workspace/recent-output tools reach the concrete `RecipeRunContext` directly and are never listed in a chat conversation's tools.
+Tools type-hint **`ToolContext`** (`includes/ToolContext.php`), the surface-independent contract both run contexts implement. It exposes identity (`actingUserId()`, `ownerTimezone()`), the read-scope flag (`ownerScopedReads()` — true for a non-admin member, who reads only their own rows), the per-run/per-turn untrusted-input nonce (`untrustedNonce()`), the capability allowlists (`allowedModels()`, `allowedActions()`), and the continuation/confirmation/audit hooks below. Recipe-only concepts (the `Recipe` row, the workspace) stay off the interface — the three workspace/recent-output tools reach the concrete `RecipeRunContext` directly and are never listed in a chat conversation's tools.
 
 **`AgentLoop`** (`includes/AgentLoop.php`) is the bounded tool-use loop shared by every AI surface: build params → `provider->createMessageStreamed($params, [$context, 'emitText'])` → dispatch tool calls → feed results back, up to the per-turn iteration cap or token budget. `run()` also accepts the resolved `temperature`, `top_p`, and `thinking_level`; it folds `temperature`/`top_p` into `$params` only when set and always passes `thinking` (so each provider can act on `off`), then each provider translates them to its own wire format. `RecipeRunner` (recipes) and `ChatRunner` (chat) each assemble the provider, system prompt, and tool allow-list, hand them to `AgentLoop`, and map the returned result onto their own bookkeeping. The two surfaces share one prompt assembly too: `AiPromptBuilder::untrustedInputBlock()` and `systemBlocks()` build the untrusted-input contract and the cached-prefix/untrusted layout for both, and `LlmProviderException::classify()` maps a failure to a stable code for both. Surface-specific behavior is reached through the context rather than baked into the loop:
 
@@ -265,11 +265,31 @@ This is **probabilistic, not structural** — the LLM still sees the text. Anthr
 
 System-prompt impact: the untrusted-input block is a separate text item *after* the cached prefix, so the rotating nonce never busts the cache. If no model in the recipe's allowlist has untrusted fields, the block is omitted entirely.
 
-### No owner-scoping
+### Owner-scoped reads (member vs. admin)
 
-Joinery AI is admin-only by design. Admins can already see every row in the database through the admin UI, and admin recipes legitimately need cross-user views ("show me all unpaid orders", "find users at risk of churn"). Owner-scoping would break those use cases, so `ModelQueryExecutor` does **not** inject any owner filter.
+Reads are scoped by **who is asking**, a property of the run context (`ToolContext::ownerScopedReads()`):
 
-If admin-only ever changes (end-user recipes), owner-scoping returns as new work — there is no inert metadata waiting to be flipped on. The defenses today are model opt-in (`$ai_readable`), the shared unreadable floor (`SystemBase::is_unreadable_field()` — the credential auto-block regex plus per-model `$api_unreadable_fields`, the same floor the REST read surface honors), per-model `$ai_excluded_fields` for relevance/noise trims on top of that floor, and per-field `$ai_untrusted_fields` markers (see below).
+- **Admins read cross-user.** An admin already sees every row through the admin UI, and admin recipes legitimately need cross-user views ("show me all unpaid orders", "find users at risk of churn"). For an admin caller `ModelQueryExecutor` injects no owner filter.
+- **A non-admin member reads only their own rows.** For a member caller the executor appends an owner `WHERE` clause from the model's resolved owner column(s), and a model whose ownership can't be resolved is refused outright (it is also absent from a member's `allowedModels()`). This closes the exfiltration-of-others'-data path — a member's reads can never cross into another member's rows, and a read has no confirmation step that could catch it after the fact.
+
+How a model's owner column is resolved (`OwnerScopeResolver`, surfaced in `ModelRegistry`'s `owner_scope` metadata) is driven by an optional `$ai_owner_field` on the class:
+
+| `$ai_owner_field` | member read-scope |
+|---|---|
+| *unset* | infer the lone `*_usr_user_id` / `*_owner_user_id` column. Zero or 2+ candidates ⇒ **hidden** (ambiguous ownership is never guessed). |
+| `'col'` | scope `WHERE col = me` — for a primary key the convention can't infer, or to disambiguate. |
+| `['a', 'b']` | OR-match — a member sees a row if they own it via any column (e.g. `messages` = sender-or-recipient). |
+| `false` | ownerless catalog/config (`products`, `pages`, …) — members read every row. |
+
+`agent_files` and `coupon_codes` resolve to **hidden** and stay admin-only; the polymorphic/join models (`conversations`, `groups`, `schedule`, …) are hidden until a richer scope form lands. Run the resolved-scope report to see how every model classifies and catch an accidentally-exposed or accidentally-hidden table:
+
+```bash
+php plugins/joinery_ai/cli/owner_scope_report.php
+```
+
+The other read defenses apply to **every** caller regardless of scope: model opt-in (`$ai_readable`), the shared unreadable floor (`SystemBase::is_unreadable_field()` — the credential auto-block regex plus per-model `$api_unreadable_fields`, the same floor the REST read surface honors), per-model `$ai_excluded_fields` for relevance/noise trims on top of that floor, and per-field `$ai_untrusted_fields` markers (see below).
+
+Both chat and recipes are currently admin-gated, so the member fence governs the member-facing surface the moment one opens; recipes run with admin reach (`RecipeRunContext::ownerScopedReads()` is false), since a recipe is authored and taint-gated by an admin.
 
 ### Default-deny posture
 

@@ -27,10 +27,14 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelSchema
  *      prompt injection — paired system-prompt language tells the LLM to
  *      treat content between the markers as data, not instructions.
  *
- * Owner-scoping is not enforced. Joinery AI is admin-only by design;
- * admins legitimately need cross-user views ("show me all unpaid orders"),
- * which forced owner-scoping would break. The defenses are model opt-in,
- * the auto-block regex, and per-model $ai_excluded_fields.
+ * Owner-scoping is caller-dependent. An admin reads cross-user — admins
+ * legitimately need views like "show me all unpaid orders," which a forced
+ * owner filter would break. A non-admin member ($ctx->ownerScopedReads())
+ * reads only their own rows: an owner WHERE clause is appended from the
+ * model's resolved owner column(s) (OwnerScopeResolver), and a model whose
+ * ownership can't be resolved is refused outright (it is also absent from a
+ * member's allowedModels()). The other defenses — model opt-in, the auto-block
+ * regex, per-model $ai_excluded_fields — apply to every caller.
  *
  * Operator vocabulary on filter keys:
  *   field           -> field = value
@@ -79,6 +83,28 @@ class ModelQueryExecutor {
 
         $where_parts = [];
         $params = [];
+
+        // Member fence: a non-admin reads only their own rows. Resolve the
+        // model's owner column(s) and OR-match them against the acting user.
+        // A model that can't be contained (ambiguous/undeclared ownership) is
+        // refused — defense in depth behind allowedModels(), which already
+        // drops it from a member's scope. Admins skip this entirely.
+        if ($ctx->ownerScopedReads()) {
+            $scope = $info['owner_scope'] ?? ['mode' => 'hidden'];
+            if ($scope['mode'] === 'hidden') {
+                throw new InvalidArgumentException("Model '$class' is not available.");
+            }
+            if ($scope['mode'] === 'owner') {
+                $uid = $ctx->actingUserId();
+                $or = [];
+                foreach ($scope['columns'] as $col) {
+                    $or[] = "$col = ?";
+                    $params[] = $uid;
+                }
+                $where_parts[] = count($or) > 1 ? '(' . implode(' OR ', $or) . ')' : $or[0];
+            }
+            // mode 'all' (ownerless catalog) adds no clause — members read all rows.
+        }
 
         foreach ($filters as $key => $value) {
             [$base_field, $op] = self::parseFilterKey((string)$key);
