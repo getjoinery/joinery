@@ -22,6 +22,7 @@ class Location extends SystemBase {	public static $prefix = 'loc';
 
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
+	public static $ai_owner_field     = false; // ownerless catalog — members read all rows
 	public static $ai_description     = 'Venues where events take place.';
 	public static $ai_excluded_fields = [];
 	public static $url_namespace = 'location';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM

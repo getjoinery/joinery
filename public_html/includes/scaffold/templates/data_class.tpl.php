@@ -33,6 +33,9 @@ class <?= $entity ?> extends SystemBase {
 	// AI model surface (joinery_ai) — plugins/joinery_ai/docs/overview.md
 	public static $ai_readable = <?= !empty($ai['readable']) ? 'true' : 'false' ?>;
 	public static $ai_description = <?= ScaffoldGenerator::phpScalar($ai['description'] ?? '') ?>;
+<?php if (array_key_exists('owner_field', $ai)): ?>
+	public static $ai_owner_field = <?= is_array($ai['owner_field']) ? ScaffoldGenerator::phpList($ai['owner_field']) : ScaffoldGenerator::phpScalar($ai['owner_field']) ?>;
+<?php endif; ?>
 <?php if (!empty($ai['writable_fields'])): ?>
 	public static $ai_writable_fields = <?= ScaffoldGenerator::phpList($ai['writable_fields']) ?>;
 <?php endif; ?>

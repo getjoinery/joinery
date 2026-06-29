@@ -77,6 +77,7 @@ A JSON file — the same format as every other declarative manifest in the platf
   "ai": {
     "readable": false,
     "description": "",
+    "owner_field": false,
     "writable_fields": [],
     "untrusted_fields": [],
     "excluded_fields": []
@@ -175,6 +176,17 @@ Fields with no descriptor type are emitted as a `// TODO:` stub right after the 
 ### Authorization
 
 When `owner_field` is **omitted**, or set to the standard `{prefix}_usr_user_id`, the generator emits no custom auth — SystemBase's default owner-or-staff scope applies. Only a **non-standard** owner column produces an `authenticate_read()/write()` pair: a working owner-check against that column, flagged with a `// TODO: confirm this row-scope rule is correct` comment for you to harden (the polymorphic-owner case uses this path). See [docs/api.md](api.md) for the row-scope model.
+
+### AI member read-scope (`ai.owner_field`)
+
+Separate from the top-level `owner_field` (which governs SystemBase auth), `ai.owner_field` controls how a **non-admin member's** AI reads are contained when the chat assistant is open to members — admins always read cross-user. Emitted as `$ai_owner_field` only when present in the manifest:
+
+- **omitted** — the resolver infers the owner column (the lone `*_usr_user_id` / `*_owner_user_id` column). Zero or 2+ candidates ⇒ the model is hidden from members (ambiguous ownership is never guessed).
+- **a column** (`"prd_usr_user_id"`) — name the owner column when it can't be inferred (e.g. a primary key) or to disambiguate two candidates.
+- **a list** (`["msg_usr_user_id_sender", "msg_usr_user_id_recipient"]`) — OR-match; a member sees a row if they own it via any column.
+- **`false`** — ownerless catalog/config; members read every row.
+
+Run `php plugins/joinery_ai/cli/owner_scope_report.php` after generating to confirm the model resolves the way you intend. See [plugins/joinery_ai/docs/overview.md](../plugins/joinery_ai/docs/overview.md) for the full read-scope model.
 
 ---
 

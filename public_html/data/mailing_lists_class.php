@@ -32,6 +32,7 @@ class MailingList extends SystemBase {	public static $prefix = 'mlt';
 
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
+	public static $ai_owner_field     = false; // ownerless catalog — members read all rows
 	public static $ai_description     = 'Mailing lists users can subscribe to. Pair with MailingListRegistrant for membership.';
 	public static $ai_excluded_fields = ['mlt_provider_list_id'];
 

@@ -162,7 +162,7 @@ class ChatRunner {
         $model = $model_pref !== '' ? $model_pref : $provider->defaultModel();
 
         $system = self::buildSystemPrompt($conversation, $ctx);
-        $allowed_tools = self::resolveAllowedTools($conversation);
+        $allowed_tools = self::resolveAllowedTools($conversation, $ctx);
         $max_iterations = max(1, (int)$settings->get_setting('joinery_ai_chat_max_iterations'));
 
         // Per-chat model controls: row value → plugin-setting default → floor.
@@ -250,10 +250,17 @@ class ChatRunner {
      * web_search additionally needs the global Brave key; it's withheld if the
      * key is unset even when Web search is toggled on.
      */
-    private static function resolveAllowedTools(AiConversation $conversation): array {
+    private static function resolveAllowedTools(AiConversation $conversation, ToolContext $ctx): array {
         $tools = [];
         if ($conversation->get('aic_data_access')) {
-            $tools = array_merge($tools, self::DATA_TOOLS);
+            $data = self::DATA_TOOLS;
+            // No actions in scope (a member caller, or no agent-callable actions
+            // configured) → don't advertise the action tools the turn can't use.
+            if (empty($ctx->allowedActions())) {
+                $data = array_values(array_filter($data,
+                    fn($t) => $t !== 'invoke_action' && $t !== 'describe_actions'));
+            }
+            $tools = array_merge($tools, $data);
         }
         if ($conversation->get('aic_web_search')) {
             $web = self::WEB_TOOLS;
@@ -288,14 +295,20 @@ class ChatRunner {
 
         // 3. Tool rules — only when the turn actually exposes tools, so a plain
         //    chat isn't framed as an admin-tooling session.
-        if (!empty(self::resolveAllowedTools($conversation))) {
+        if (!empty(self::resolveAllowedTools($conversation, $ctx))) {
             $text .= "\nYou can inspect and manage this site by calling the tools "
                    . "available to you, then replying conversationally.\n";
             if ($conversation->get('aic_data_access')) {
                 $uid = $ctx->actingUserId();
-                $text .= "Acting admin user_id: $uid (permission 5+, admin reach). "
-                       . "Use this user_id when a write tool needs an owner / created_by / "
-                       . "updated_by column.\n";
+                if ($ctx->ownerScopedReads()) {
+                    $text .= "Acting user_id: $uid. Reads return only this user's own rows, and "
+                           . "writes are confined to their own records. Use this user_id when a "
+                           . "write tool needs an owner / created_by / updated_by column.\n";
+                } else {
+                    $text .= "Acting admin user_id: $uid (permission 5+, admin reach). "
+                           . "Use this user_id when a write tool needs an owner / created_by / "
+                           . "updated_by column.\n";
+                }
             }
             $text .= "Some tools change data. When you propose a consequential change you "
                    . "may be asked to confirm it with the admin before it runs; propose the "

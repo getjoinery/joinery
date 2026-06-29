@@ -17,6 +17,7 @@
  * for the recipe edit page.
  */
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelSchemaBuilder.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/OwnerScopeResolver.php'));
 
 class ModelRegistry {
 
@@ -29,8 +30,9 @@ class ModelRegistry {
     /**
      * Return [class_name => metadata] for every model with $ai_readable = true.
      * Metadata: { class, description, excluded_fields, untrusted_fields,
-     * writable_fields }. writable_fields is the post-strip allowlist (or []
-     * if the model isn't write-opted-in).
+     * writable_fields, owner_scope }. writable_fields is the post-strip
+     * allowlist (or [] if the model isn't write-opted-in). owner_scope is the
+     * member-read containment (OwnerScopeResolver::resolve()).
      */
     public static function all(): array {
         if (self::$models === null) self::scan();
@@ -186,6 +188,9 @@ class ModelRegistry {
             'excluded_fields'  => $excluded,
             'untrusted_fields' => $untrusted,
             'writable_fields'  => $writable_clean,
+            // How a non-admin member's reads are contained to their own rows
+            // (consulted only when ToolContext::ownerScopedReads() is true).
+            'owner_scope'      => OwnerScopeResolver::resolve($class),
         ];
     }
 

@@ -25,11 +25,19 @@ class ChatTurnContext implements ToolContext {
      *  indicator meanwhile. */
     const PER_TURN_SECONDS = 240;
 
+    /** Permission floor for unscoped (cross-user) reads. At or above this the
+     *  caller is an admin and reads everyone's rows; below it the caller is a
+     *  member and reads only their own. Matches the 5 = admin convention. */
+    const ADMIN_PERMISSION = 5;
+
     /** @var AiConversation */
     private $conversation;
 
     /** @var int */
     private $acting_user_id;
+
+    /** @var int  the acting user's permission level, from their user row */
+    private $acting_permission;
 
     /** @var string */
     private $owner_timezone;
@@ -49,6 +57,7 @@ class ChatTurnContext implements ToolContext {
     public function __construct(AiConversation $conversation, int $acting_user_id) {
         $this->conversation = $conversation;
         $this->acting_user_id = $acting_user_id;
+        $this->acting_permission = self::resolvePermission($acting_user_id);
         $this->owner_timezone = self::resolveTimezone($acting_user_id);
         $this->nonce = bin2hex(random_bytes(4));
         $this->turn_started_at = microtime(true);
@@ -66,15 +75,30 @@ class ChatTurnContext implements ToolContext {
         return $this->nonce;
     }
 
-    /** Data access on → every readable model in scope; off → none. */
+    /** Data access on → every readable model in scope; off → none. For a member
+     *  caller (owner-scoped), models with ambiguous or undeclared ownership are
+     *  dropped — a member never sees a model the read fence can't contain. */
     public function allowedModels(): array {
         if (!$this->conversation->get('aic_data_access')) return [];
-        return array_keys(ModelRegistry::all());
+        $models = ModelRegistry::all();
+        if (!$this->ownerScopedReads()) {
+            return array_keys($models);
+        }
+        $out = [];
+        foreach ($models as $name => $info) {
+            if (($info['owner_scope']['mode'] ?? 'hidden') !== 'hidden') $out[] = $name;
+        }
+        return $out;
     }
 
-    /** Data access on → every agent-callable action in scope; off → none. */
+    /** Data access on → every agent-callable action in scope; off → none.
+     *  Actions are withheld from a non-admin member: `invoke_action` runs
+     *  arbitrary registered actions with no per-action member-authorization yet,
+     *  so a member's data-access chat gets owner-scoped model reads/writes but
+     *  not the action surface (admins are unaffected). */
     public function allowedActions(): array {
         if (!$this->conversation->get('aic_data_access')) return [];
+        if ($this->ownerScopedReads()) return [];
         return ActionRegistry::agentCallableActionNames();
     }
 
@@ -82,6 +106,12 @@ class ChatTurnContext implements ToolContext {
      *  heuristic flags are held for the admin's live sign-off. */
     public function requiresConfirmation(): bool {
         return true;
+    }
+
+    /** A non-admin member's reads are contained to their own rows; an admin
+     *  reads cross-user, exactly as the admin-only chat always has. */
+    public function ownerScopedReads(): bool {
+        return $this->acting_permission < self::ADMIN_PERMISSION;
     }
 
     /** Per-turn continuation guard: a hard wall clock. No kill flag — a chat
@@ -141,6 +171,17 @@ class ChatTurnContext implements ToolContext {
         $user = new User($user_id, true);
         $tz = $user->get('usr_timezone');
         return $tz ?: 'UTC';
+    }
+
+    /** The acting user's permission, read from their user row. A missing or
+     *  anonymous user resolves to 0 — the most contained (member) scope, so an
+     *  unresolved identity fails closed rather than reading cross-user. */
+    private static function resolvePermission(int $user_id): int {
+        if ($user_id <= 0) return 0;
+        require_once(PathHelper::getIncludePath('data/users_class.php'));
+        $user = new User($user_id, true);
+        if (!$user->key) return 0;
+        return (int)$user->get('usr_permission');
     }
 
 }

@@ -121,6 +121,16 @@ class RecipeRunContext implements ToolContext {
     }
 
     /**
+     * Recipes read cross-user, unchanged from the admin-only launch: a recipe
+     * is authored and taint-gated by an admin, who already has full read reach.
+     * The day a member-owned recipe surface lands, this flips to a permission
+     * check on the recipe owner — the same fence the chat context applies.
+     */
+    public function ownerScopedReads(): bool {
+        return false;
+    }
+
+    /**
      * Record a tool call that has started but not completed, then flush it
      * immediately to the run row. The dispatcher reaper reads rcr_tool_calls
      * from the DB, so a hung run that never returns still names the last call

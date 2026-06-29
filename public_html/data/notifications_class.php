@@ -38,6 +38,7 @@ class Notification extends SystemBase {
 
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
+	public static $ai_owner_field     = 'ntf_usr_user_id'; // recipient (not ntf_source_usr_user_id, the actor)
 	public static $ai_description     = 'Notifications addressed to the user.';
 	public static $ai_excluded_fields = [];
 

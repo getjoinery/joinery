@@ -26,7 +26,10 @@ function chat_turn_fail(string $msg): void {
 }
 
 $session = SessionControl::get_instance();
-if (!$session->is_logged_in() || $session->get_permission() < 5) {
+// Any logged-in user. The /admin/* route is permission-gated (5), so this file
+// stays admin-only at its /admin URL; it also backs /profile/joinery_ai/ for
+// members, whose reads are owner-scoped and whose action surface is withheld.
+if (!$session->is_logged_in()) {
     chat_turn_fail('Not authorized.');
 }
 $uid = (int)$session->get_user_id();

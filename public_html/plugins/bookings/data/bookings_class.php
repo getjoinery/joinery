@@ -19,6 +19,7 @@ class Booking extends SystemBase {
 	public static $pkey_column = 'bkn_booking_id';
 
 	public static $ai_readable        = true;
+	public static $ai_owner_field     = ['bkn_usr_user_id_booked', 'bkn_usr_user_id_client']; // a member sees bookings where they are host or client
 	public static $ai_description     = 'Time-slot bookings: appointments booked against a booking type.';
 	public static $ai_excluded_fields = ['bkn_action_token'];
 	public static $ai_untrusted_fields = ['bkn_notes', 'bkn_cancel_reason'];
