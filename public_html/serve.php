@@ -379,22 +379,73 @@ $routes = [
 
             require_once(PathHelper::getIncludePath('data/files_class.php'));
 
-            // Cloud-stored files: bytes live in the bucket. Honor pre-migration
-            // /uploads/<filename> URLs by 302-redirecting to the bucket URL.
-            // Browser caches the redirect for 24h, so subsequent hits skip PHP.
+            // Cloud-stored files: bytes live in a bucket.
+            //  - PUBLIC files honor /uploads/<filename> URLs by 302-redirecting
+            //    to the world-readable bucket URL (browser caches the redirect
+            //    24h, so subsequent hits skip PHP).
+            //  - PRIVATE files are NEVER 302'd: the bucket URL is forbidden and
+            //    exposing it is itself the leak. They are streamed through PHP
+            //    from the verified-private bucket, gated by the same is_viewable()
+            //    check the local path uses — the bytes never bypass the gate.
             $file_obj = File::get_by_name($basename);
             if ($file_obj && $file_obj->get('fil_storage_driver') === 'cloud') {
                 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
-                $driver = CloudStorageDriverFactory::default();
-                if ($driver) {
-                    // Determine size_key from the URL path: '/uploads/<size>/<file>' or '/uploads/<file>'.
-                    $size_key = (count($subpath_parts) > 1) ? $subpath_parts[0] : 'original';
-                    $url = $driver->url($file_obj->remote_key_for($size_key));
-                    header('Cache-Control: public, max-age=86400');
-                    header('Location: ' . $url, true, 302);
-                    return true;
+                // Determine size_key from the URL path: '/uploads/<size>/<file>' or '/uploads/<file>'.
+                $size_key = (count($subpath_parts) > 1) ? $subpath_parts[0] : 'original';
+
+                if ($file_obj->is_public()) {
+                    $driver = CloudStorageDriverFactory::default();
+                    if ($driver) {
+                        $url = $driver->url($file_obj->remote_key_for($size_key));
+                        header('Cache-Control: public, max-age=86400');
+                        header('Location: ' . $url, true, 302);
+                        return true;
+                    }
+                    // Fall through to local check if driver isn't available.
+                } else {
+                    // Private cloud file: gate first (404, never 403, to avoid
+                    // confirming existence — same as the local restricted path).
+                    if (!$file_obj->is_viewable($session)) {
+                        require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+                        LibraryFunctions::display_404_page();
+                        return true;
+                    }
+                    $driver = CloudStorageDriverFactory::forVisibilityWithFallback('private');
+                    if ($driver) {
+                        $tmp = tempnam(sys_get_temp_dir(), 'fil_priv_');
+                        $got = false;
+                        if ($tmp !== false) {
+                            try {
+                                $driver->get($file_obj->remote_key_for($size_key), $tmp);
+                                $got = true;
+                            } catch (Exception $e) {
+                                error_log('Private cloud serve: GET failed for fil=' . $file_obj->key . ' — ' . $e->getMessage());
+                            }
+                        }
+                        if ($got) {
+                            $content_type = $file_obj->get('fil_type') ?: 'application/octet-stream';
+                            header('Content-Type: ' . $content_type);
+                            header('X-Content-Type-Options: nosniff');
+                            header('Cache-Control: private, max-age=0, no-store');
+                            // Inline for images (render in <img>); attachment for
+                            // everything else — the hardened download posture.
+                            if (strpos($content_type, 'image/') !== 0) {
+                                header('Content-Disposition: attachment; filename="' . basename($file_obj->get('fil_name')) . '"');
+                            }
+                            if (($len = @filesize($tmp)) !== false) {
+                                header('Content-Length: ' . $len);
+                            }
+                            readfile($tmp);
+                            @unlink($tmp);
+                            return true;
+                        }
+                        if ($tmp !== false) { @unlink($tmp); }
+                        require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+                        LibraryFunctions::display_404_page();
+                        return true;
+                    }
+                    // Private driver unconfigured: fall through to local check (degraded).
                 }
-                // Fall through to local check if driver isn't available.
             }
 
             // Check both directories for the file

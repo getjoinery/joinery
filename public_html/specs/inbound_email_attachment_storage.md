@@ -2,7 +2,7 @@
 
 **Status:** Draft — design in progress
 **Plugin:** `inbound_email` (with core `File`)
-**Depends on:** `specs/file_private_storage.md` — attachments are stored as
+**Depends on:** `specs/implemented/file_private_storage.md` — attachments are stored as
 **private `File` objects**, which requires `File` to offload to and serve from the
 verified-private store. That capability must land first.
 **Consumed by:** `specs/inbound_email_encryption_at_rest.md` and
@@ -58,7 +58,7 @@ storage — so the raw's attachment bodies go away.
 ## What already exists (and is reused)
 
 - **Private `File`** — bytes, per-row storage driver, bucket offload, and the
-  permission-gated stream, from `file_private_storage.md`. Attachments are its
+  permission-gated stream, from `implemented/file_private_storage.md`. Attachments are its
   first real email consumer.
 - **The manifest** — `InboundMessageAttachment` (`ima_` rows): filename,
   content-type, size, MIME part, encoding, content-id, inline flag, with a
@@ -143,8 +143,8 @@ path; it does not touch it.
 `RawMessageStore` exists to store and bucket-offload the **whole raw RFC822 blob** —
 its entire purpose was carrying the message including its attachment bytes. Under the
 lean-record model, **new push mail no longer calls `RawMessageStore::write()`**: there
-is no retained raw, so the store (and its `OffloadInboundRawToCloud` /
-`PullInboundRawBackToLocal` tasks) has nothing to write or drain for new mail.
+is no retained raw, so the store has nothing to write or drain for new mail (the shared
+`CloudOffloadRun` tick simply finds no raw rows to offload for it).
 
 That leaves a deliberate fork to settle **when this is built, not now**:
 

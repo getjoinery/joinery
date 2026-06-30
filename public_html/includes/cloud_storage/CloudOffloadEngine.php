@@ -2,15 +2,20 @@
 /**
  * CloudOffloadEngine — the one shared offload orchestration.
  *
- * The relocated bodies of CloudStorageSync / CloudStorageReverseSync, made
- * table-agnostic and visibility-blind: it resolves its driver from
+ * The shared per-row offload logic, table-agnostic and visibility-blind: it
+ * resolves its driver from
  * forVisibility($profile->visibility()) and reaches every consumer-specific
  * detail through the StorageProfile seam. The per-row logic — bounded batch,
  * per-row advisory lock, the PUT→reload→flip→delete ordering invariant, the
  * failure-count cap — is preserved exactly from the standalone tasks; only
  * $file-> became $profile-> of the same shape.
  *
- * @version 1.0
+ * When two stores share one table (the public and private File profiles share
+ * fil_files), the reverse/drain path scopes its cloud rows to one store via the
+ * profile's optional reverseEligibilityWhere() ownership gate, probed with
+ * method_exists() — the same capability-probe style used for putMany().
+ *
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/cloud_storage/StorageProfile.php'));
@@ -70,7 +75,7 @@ class CloudOffloadEngine {
 				elseif ($result === 'skipped') $skipped++;
 				else                           $failed++;
 			} catch (Exception $e) {
-				error_log($profile->forwardTaskClass() . ' row ' . $id . ' fatal: ' . $e->getMessage());
+				error_log('CloudOffload forward ' . $profile->visibility() . '/' . get_class($profile) . ' row ' . $id . ' fatal: ' . $e->getMessage());
 				$failed++;
 			} finally {
 				self::_unlock($dblink, $id);
@@ -172,9 +177,17 @@ class CloudOffloadEngine {
 	public static function reverseBatch(StorageProfile $profile, ?CloudStorageDriver $driver = null): array {
 		$dblink = DbConnector::get_instance()->get_db_link();
 
-		// Total remaining cloud rows; if zero, deactivate self and exit.
+		// Ownership gate: when several stores share one table (the public and
+		// private File profiles share fil_files), each store's reverse/drain
+		// must touch only the cloud rows that physically live in ITS bucket.
+		// A profile that owns its table outright omits the method → no gate.
+		$own = (method_exists($profile, 'reverseEligibilityWhere'))
+			? trim($profile->reverseEligibilityWhere()) : '';
+		$own_sql = $own !== '' ? " AND ($own)" : '';
+
+		// Total remaining cloud rows for THIS store; if zero, deactivate and exit.
 		$count_q = $dblink->query(
-			"SELECT COUNT(*) AS c FROM {$profile->table()} WHERE {$profile->driverColumn()} = 'cloud'");
+			"SELECT COUNT(*) AS c FROM {$profile->table()} WHERE {$profile->driverColumn()} = 'cloud'{$own_sql}");
 		$remaining = (int)$count_q->fetch(PDO::FETCH_ASSOC)['c'];
 		if ($remaining === 0) {
 			return ['status' => 'success', 'message' => 'No cloud rows remain; task deactivated.', 'deactivate' => true];
@@ -197,7 +210,7 @@ class CloudOffloadEngine {
 
 		$batch_q = $dblink->prepare(
 			"SELECT {$profile->pkeyColumn()} FROM {$profile->table()}
-			 WHERE {$profile->driverColumn()} = 'cloud'
+			 WHERE {$profile->driverColumn()} = 'cloud'{$own_sql}
 			   AND COALESCE({$profile->failedCountColumn()}, 0) < :cap
 			 ORDER BY {$profile->pkeyColumn()} ASC
 			 LIMIT :lim");
@@ -222,7 +235,7 @@ class CloudOffloadEngine {
 				elseif ($result === 'skipped') $skipped++;
 				else                           $failed++;
 			} catch (Exception $e) {
-				error_log($profile->reverseTaskClass() . ' row ' . $id . ' fatal: ' . $e->getMessage());
+				error_log('CloudOffload reverse ' . $profile->visibility() . '/' . get_class($profile) . ' row ' . $id . ' fatal: ' . $e->getMessage());
 				$failed++;
 			} finally {
 				self::_unlock($dblink, $id);

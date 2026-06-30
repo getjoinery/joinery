@@ -7,7 +7,7 @@ scoped calendar or safely create entries today. That prerequisite (the
 scoping) must land before the scheduling half of this spec. The triage/categorize
 half has no such dependency and can proceed independently. **Reading attachments**
 additionally assumes `inbound_email_attachment_storage.md` (attachments stored as
-discrete `File` objects) and its prerequisite `file_private_storage.md`.
+discrete `File` objects) and its prerequisite `implemented/file_private_storage.md`.
 **Plugin:** `joinery_ai` (reads `inbound_email`, writes the calendar/events surface)
 **Touches:** the **AI exposure surface** of `InboundEmailMessage` (read +
 untrusted-field declaration + a small writable category field), the calendar/event

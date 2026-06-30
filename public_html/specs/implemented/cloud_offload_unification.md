@@ -1,5 +1,15 @@
 # Unified cloud offload — one engine + lifecycle, with public/private as a storage dimension
 
+> **Partially superseded (as-built).** The engine, lifecycle, `StorageProfile` seam,
+> visibility/stores, privacy gate, and binding-immutability guard are unchanged. But the
+> **task model described below is outdated**: the per-store forward/reverse scheduled-task
+> pairs and the forward/reverse mutual-exclusion guard (Guard 2) were later replaced by a
+> single platform task, `CloudOffloadRun`, that drives every store by mode
+> (offload / drain / idle). A new consumer adds a `StorageProfile` and zero tasks. The
+> authoritative as-built record is the *Implementation note — single-task offload model*
+> section of `specs/implemented/file_private_storage.md`. (This banner is the only edit to
+> this otherwise-frozen spec.)
+
 ## Overview
 
 The cloud-storage feature abstracted the **driver** (`CloudStorageDriver`:

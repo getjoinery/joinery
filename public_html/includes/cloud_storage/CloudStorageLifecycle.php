@@ -5,25 +5,30 @@
  * The relocated admin save/test/activate/health helpers, parameterized by
  * store (visibility) and profile. The storage layer holds the per-visibility
  * setting bindings, so the lifecycle resolves them from a visibility string.
- * It owns the two guards this refactor adds:
+ * It owns the binding-immutability guard:
  *
  *   Guard 1 (binding immutability): the (endpoint, bucket) identity of a store
  *   is immutable while that store holds any 'cloud' row — to switch, disable +
  *   pull back to local first. Access-key rotation (same binding) stays allowed.
- *
- *   Guard 2 (forward/reverse mutual exclusion): activating the forward task
- *   deactivates the reverse task and vice versa, so a row can never ping-pong.
  *
  * testConnection branches on visibility for the read-policy assertion:
  *   public  → anonymous read must WORK.
  *   private → anonymous read must be DENIED (the privacy hard-gate). The probe
  *             is the sole sanctioned url() call on a private store.
  *
- * Store enable/disable is applied per visibility (activateForwardForVisibility
- * etc.): a store's Save lights up offload for EVERY profile of that visibility,
- * resolved from the registry, so consumers are never enumerated by callers.
+ * Offload is driven by ONE scheduled task (CloudOffloadRun) for the whole
+ * platform. A store's direction each tick is its MODE — offload / drain / idle —
+ * derived from the store's enabled latch + draining flag (modeForVisibility()).
+ * runOffloadTick() walks every declared profile (the registry) and dispatches
+ * by mode, so a new consumer adds a StorageProfile and zero tasks. There is no
+ * forward/reverse mutual-exclusion to enforce: a store has one mode per tick.
  *
- * @version 1.1
+ * When two profiles share a table (the public and private File profiles share
+ * fil_files), the binding-immutability count and health cloud-side counts scope
+ * each store to its own rows via the profile's optional reverseEligibilityWhere()
+ * ownership gate.
+ *
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('includes/cloud_storage/StorageProfile.php'));
@@ -202,14 +207,23 @@ class CloudStorageLifecycle {
 		return ['ok' => true];
 	}
 
-	/** Sum of 'cloud' rows across every profile of a visibility. */
+	/**
+	 * Sum of 'cloud' rows across every profile of a visibility. When several
+	 * profiles share a table (the public and private File profiles share
+	 * fil_files), each is scoped to the cloud rows physically in ITS bucket via
+	 * the optional reverseEligibilityWhere() ownership gate — so guard 1 counts
+	 * a store's own offloaded objects, not the other store's.
+	 */
 	public static function cloudRowCount(string $visibility): int {
 		$dblink = DbConnector::get_instance()->get_db_link();
 		$total = 0;
 		foreach (StorageProfileRegistry::forVisibility($visibility) as $profile) {
+			$own = (method_exists($profile, 'reverseEligibilityWhere'))
+				? trim($profile->reverseEligibilityWhere()) : '';
+			$own_sql = $own !== '' ? " AND ($own)" : '';
 			try {
 				$q = $dblink->query(
-					"SELECT COUNT(*) AS c FROM {$profile->table()} WHERE {$profile->driverColumn()} = 'cloud'");
+					"SELECT COUNT(*) AS c FROM {$profile->table()} WHERE {$profile->driverColumn()} = 'cloud'{$own_sql}");
 				$total += (int)$q->fetch(PDO::FETCH_ASSOC)['c'];
 			} catch (Exception $e) { /* table may not exist yet */ }
 		}
@@ -296,48 +310,100 @@ class CloudStorageLifecycle {
 	}
 
 	// ====================================================================
-	// Guard 2 — forward/reverse mutual exclusion, applied per store.
-	// ====================================================================
-	public static function activateForward(StorageProfile $profile): void {
-		self::_activate_task($profile->forwardTaskClass());
-		self::_deactivate_task($profile->reverseTaskClass());
-	}
-
-	public static function activateReverse(StorageProfile $profile): void {
-		self::_activate_task($profile->reverseTaskClass());
-		self::_deactivate_task($profile->forwardTaskClass());
-	}
-
-	/** Pause: stop new migrations (forward off); existing cloud rows keep serving. */
-	public static function deactivate(StorageProfile $profile): void {
-		self::_deactivate_task($profile->forwardTaskClass());
-	}
-
-	// --------------------------------------------------------------------
-	// Store-level activation — drive every profile of a visibility.
+	// Offload modes + the single offload tick.
 	//
-	// A store's enable/disable is a property of the STORE, not of one
-	// consumer: enabling the private store must start offload for every
-	// private-visibility profile (mail today, more later), not just a named
-	// one. These resolve the set from the registry so a caller never has to
-	// enumerate profiles, and a newly-declared consumer is picked up for free.
-	// --------------------------------------------------------------------
-	public static function activateForwardForVisibility(string $visibility): void {
-		foreach (StorageProfileRegistry::forVisibility($visibility) as $profile) {
-			self::activateForward($profile);
-		}
+	// One scheduled task (CloudOffloadRun) drives every store. Each store's
+	// direction for a tick is its MODE, derived from store-level settings:
+	//
+	//   offload — store enabled: push eligible local rows up to the bucket.
+	//   drain   — store disabled with the draining flag set (Disable-and-Pull):
+	//             pull cloud rows back to local until none remain.
+	//   idle    — store disabled, not draining (paused / never configured):
+	//             do nothing; existing cloud rows keep serving.
+	//
+	// A row can never ping-pong between local and cloud: a store has exactly one
+	// mode per tick, so the old forward/reverse mutual-exclusion is structural
+	// now rather than an enforced guard.
+	// ====================================================================
+
+	const TICK_TASK = 'CloudOffloadRun';
+
+	/** Setting holding a store's draining flag. */
+	private static function _draining_setting(string $visibility): string {
+		return $visibility === 'private' ? 'cloud_storage_private_draining' : 'cloud_storage_draining';
 	}
 
-	public static function activateReverseForVisibility(string $visibility): void {
-		foreach (StorageProfileRegistry::forVisibility($visibility) as $profile) {
-			self::activateReverse($profile);
+	/** A store's current offload mode: 'offload' | 'drain' | 'idle'. */
+	public static function modeForVisibility(string $visibility): string {
+		$s = Globalvars::get_instance();
+		if ($s->get_setting(self::_enabled_setting($visibility))) {
+			return 'offload';
 		}
+		if ($s->get_setting(self::_draining_setting($visibility))) {
+			return 'drain';
+		}
+		return 'idle';
 	}
 
-	public static function deactivateForVisibility(string $visibility): void {
-		foreach (StorageProfileRegistry::forVisibility($visibility) as $profile) {
-			self::deactivate($profile);
+	/** Ensure the single offload tick task exists and is active. */
+	public static function ensureTickActive(): void {
+		self::_activate_task(self::TICK_TASK);
+	}
+
+	/** Begin draining a store back to local (Disable-and-Pull-Back). */
+	public static function startDrain(string $visibility, $session): void {
+		self::_write_settings([self::_draining_setting($visibility) => '1'], $session);
+		CloudStorageDriverFactory::reset();
+		self::ensureTickActive();
+	}
+
+	/** Stop draining a store (drain finished, or store re-enabled). */
+	public static function stopDrain(string $visibility, $session): void {
+		self::_write_settings([self::_draining_setting($visibility) => '0'], $session);
+		CloudStorageDriverFactory::reset();
+	}
+
+	/**
+	 * The single offload tick: drive every declared store by its mode. Offload
+	 * stores push local→cloud; draining stores pull cloud→local and, once their
+	 * cloud rows reach zero, clear their draining flag. Self-deactivates when no
+	 * store is offloading or draining, so an idle platform runs nothing.
+	 */
+	public static function runOffloadTick(): array {
+		$msgs = [];
+		$had_error = false;
+		foreach (StorageProfileRegistry::all() as $profile) {
+			$mode = self::modeForVisibility($profile->visibility());
+			if ($mode === 'offload') {
+				$r = CloudOffloadEngine::syncBatch($profile);
+			} elseif ($mode === 'drain') {
+				$r = CloudOffloadEngine::reverseBatch($profile);
+			} else {
+				continue;
+			}
+			if (($r['status'] ?? '') === 'error') $had_error = true;
+			$msgs[] = $profile->visibility() . '/' . get_class($profile) . ': ' . ($r['message'] ?? '');
 		}
+
+		// A store finishes draining when no cloud rows remain across its profiles.
+		$still_active = false;
+		foreach (['public', 'private'] as $visibility) {
+			$mode = self::modeForVisibility($visibility);
+			if ($mode === 'drain' && self::cloudRowCount($visibility) === 0) {
+				self::stopDrain($visibility, null);
+				$mode = 'idle';
+			}
+			if ($mode !== 'idle') $still_active = true;
+		}
+
+		$out = [
+			'status'  => $had_error ? 'error' : 'success',
+			'message' => $msgs ? implode('; ', $msgs) : 'no store offloading or draining',
+		];
+		if (!$still_active) {
+			$out['deactivate'] = true; // nothing to do → scheduler deactivates this task
+		}
+		return $out;
 	}
 
 	private static function _activate_task(string $task_class): void {
@@ -407,26 +473,42 @@ class CloudStorageLifecycle {
 			}
 		}
 
-		// Forward task status.
+		// Offload task status. One CloudOffloadRun tick drives every store, so
+		// both the sync line and (when this store is draining) the pull-back box
+		// read the same task row. reverse_task is populated only while THIS
+		// store's mode is 'drain', preserving the admin view's per-store display.
 		$h['sync_task'] = null;
+		$h['reverse_task'] = null;
+		$tick = null;
 		try {
-			$multi = new MultiScheduledTask(['task_class' => $profile->forwardTaskClass(), 'deleted' => false]);
+			$multi = new MultiScheduledTask(['task_class' => self::TICK_TASK, 'deleted' => false]);
 			$multi->load();
-			foreach ($multi as $task) {
-				$h['sync_task'] = [
-					'is_active'    => (bool)$task->get('sct_is_active'),
-					'last_run'     => $task->get('sct_last_run_time'),
-					'last_status'  => $task->get('sct_last_run_status'),
-					'last_message' => $task->get('sct_last_run_message'),
-				];
-			}
+			foreach ($multi as $task) { $tick = $task; }
 		} catch (Exception $e) { /* table might not exist yet */ }
+		if ($tick) {
+			$status = [
+				'is_active'    => (bool)$tick->get('sct_is_active'),
+				'last_run'     => $tick->get('sct_last_run_time'),
+				'last_status'  => $tick->get('sct_last_run_status'),
+				'last_message' => $tick->get('sct_last_run_message'),
+			];
+			$h['sync_task'] = $status;
+			if (self::modeForVisibility($profile->visibility()) === 'drain') {
+				$h['reverse_task'] = $status;
+			}
+		}
 
 		// Counts: pending (eligible local) / cloud / stuck / migrated this week.
 		$dblink = DbConnector::get_instance()->get_db_link();
 		$h['counts'] = ['pending' => 0, 'cloud' => 0, 'stuck' => 0, 'migrated_this_week' => 0];
 		$gate = trim($profile->eligibilityWhere());
 		$gate_sql = $gate !== '' ? " AND ($gate)" : '';
+		// Cloud-side counts are scoped to this store's own rows when the table is
+		// shared (public/private File profiles share fil_files), so a store's
+		// health reflects only the objects in its bucket.
+		$own = (method_exists($profile, 'reverseEligibilityWhere'))
+			? trim($profile->reverseEligibilityWhere()) : '';
+		$own_sql = $own !== '' ? " AND ($own)" : '';
 		$drv = $profile->driverColumn();
 		$failed = $profile->failedCountColumn();
 		$last_attempt = $profile->lastAttemptColumn();
@@ -435,9 +517,9 @@ class CloudStorageLifecycle {
 				SELECT
 				  COUNT(*) FILTER (WHERE ($drv IS NULL OR $drv = 'local')
 				                   AND COALESCE($failed, 0) < " . CloudOffloadEngine::FAILED_COUNT_CAP . "$gate_sql) AS pending,
-				  COUNT(*) FILTER (WHERE $drv = 'cloud') AS cloud,
+				  COUNT(*) FILTER (WHERE $drv = 'cloud'$own_sql) AS cloud,
 				  COUNT(*) FILTER (WHERE COALESCE($failed, 0) >= " . CloudOffloadEngine::FAILED_COUNT_CAP . ") AS stuck,
-				  COUNT(*) FILTER (WHERE $drv = 'cloud'
+				  COUNT(*) FILTER (WHERE $drv = 'cloud'$own_sql
 				                   AND $last_attempt > now() - interval '7 days') AS migrated_this_week
 				FROM {$profile->table()}")->fetch(PDO::FETCH_ASSOC);
 			if ($row) {
@@ -472,22 +554,6 @@ class CloudStorageLifecycle {
 				}
 			} catch (Exception $e) { /* swallow */ }
 		}
-
-		// Reverse task status (only shown when active).
-		$h['reverse_task'] = null;
-		try {
-			$multi = new MultiScheduledTask(['task_class' => $profile->reverseTaskClass(), 'deleted' => false]);
-			$multi->load();
-			foreach ($multi as $task) {
-				if ($task->get('sct_is_active')) {
-					$h['reverse_task'] = [
-						'last_run'     => $task->get('sct_last_run_time'),
-						'last_status'  => $task->get('sct_last_run_status'),
-						'last_message' => $task->get('sct_last_run_message'),
-					];
-				}
-			}
-		} catch (Exception $e) { /* swallow */ }
 
 		return $h;
 	}

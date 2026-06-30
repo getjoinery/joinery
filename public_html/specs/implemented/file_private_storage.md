@@ -1,6 +1,9 @@
 # File — private-store offload + gated serving
 
-**Status:** Draft — design in progress
+**Status:** Implemented. (This file in `specs/implemented/` was edited post-implementation
+— an explicit exception to the "never modify implemented specs" rule — to record an
+as-built deviation from the offload task model; see *Implementation note — single-task
+offload model* below.)
 **Layer:** core (`File` / `fil_files`, the cloud-storage offload layer, `serve.php`
 file route)
 **Depends on:** `specs/implemented/cloud_offload_unification.md` — the
@@ -175,6 +178,44 @@ correctness, not the email case.
   signed URLs could cut the per-hit cost later (out of scope) without weakening the
   gate.
 - **Temp files are unlinked** after streaming; a failed stream cleans up.
+
+## Implementation note — single-task offload model (as built)
+
+While implementing this spec, the offload layer's task model was consolidated, so the
+as-built behaviour differs from what `cloud_offload_unification.md` describes. That spec
+gave **each store its own forward + reverse scheduled-task pair** and an enforced
+forward/reverse mutual-exclusion guard. Adding the private `File` store would have made
+that six tasks (public files, private files, inbound-mail raw × 2), growing by two per
+future consumer.
+
+Instead, all stores are now driven by **one platform task, `CloudOffloadRun`**. Each tick
+it walks every declared `StorageProfile` (the registry) and runs each store in its current
+**mode**:
+
+- **offload** — store enabled: push eligible local rows → bucket.
+- **drain** — store disabled with its draining flag set (Disable-and-Pull): pull cloud rows
+  → local until none remain, then clear the flag.
+- **idle** — store disabled, not draining (paused / unconfigured): do nothing; existing
+  cloud rows keep serving.
+
+The mode is derived per store (`CloudStorageLifecycle::modeForVisibility()`) from the
+store's enabled latch plus a new draining flag (`cloud_storage_draining` /
+`cloud_storage_private_draining`). The tick self-deactivates when no store is offloading or
+draining. Consequences:
+
+- A new offload consumer adds a `StorageProfile` and **zero** tasks.
+- The forward/reverse mutual-exclusion guard is gone — it is now **structural** (a store
+  has exactly one mode per tick, so a row can never ping-pong).
+- **Three modes are deliberate, not redundant.** The tick has only two *actions* (push /
+  pull); idle is the store at rest. The third state exists so "turn it off" can mean either
+  **pause** (stop offloading, keep serving from the bucket — the safe off-switch for a
+  disk-constrained VPS) or **drain** (evacuate back to local). Collapsing them would make
+  the only off-button the one a low-disk box can't afford.
+
+The private `File` store rides this tick like any other; it has no dedicated task. Migration
+`migrate_offload_single_task.php` removes the obsolete per-store task rows and re-activates
+`CloudOffloadRun` where a store is in use. `cloud_offload_unification.md` itself was left
+unchanged (frozen); this note is the authoritative as-built record.
 
 ## Out of scope
 

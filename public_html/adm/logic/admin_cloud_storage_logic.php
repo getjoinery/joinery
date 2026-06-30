@@ -9,11 +9,12 @@
  * independently (a private-bucket failure never blocks the public Save, and
  * vice versa). Pause and "Disable and Pull Files Back to Local" act on the
  * public store; the private store has its own "Disable and Pull Back" that
- * drains its cloud objects to local. Activation is store-level: enabling a store
- * starts offload for every profile of that visibility (public files; private
- * inbound-mail raw), resolved from the registry — never a single named profile.
+ * drains its cloud objects to local. Offload itself runs through one platform
+ * task (CloudOffloadRun): enabling a store sets it to offload mode and ensures
+ * that task is active; the tick drives every store of every visibility from the
+ * registry, so the admin never names a profile or a per-store task.
  *
- * @version 2.1
+ * @version 2.2
  */
 
 require_once(__DIR__ . '/../../includes/PathHelper.php');
@@ -62,7 +63,8 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 					if ($test_results['ok']) {
 						$persist = CloudStorageLifecycle::persistSettings($opts, 'public', $session);
 						if ($persist['ok']) {
-							CloudStorageLifecycle::activateForwardForVisibility('public');
+							CloudStorageLifecycle::stopDrain('public', $session); // enabling cancels any in-progress drain
+							CloudStorageLifecycle::ensureTickActive();
 							$public_ok = true;
 						} else {
 							$errors[] = $persist['message'];
@@ -94,9 +96,11 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 					if ($private_test_results['ok']) {
 						$ppersist = CloudStorageLifecycle::persistSettings($private_opts, 'private', $session);
 						if ($ppersist['ok']) {
-							// Gate passed + settings latched: start offload for every
-							// private-visibility consumer (inbound-mail raw today).
-							CloudStorageLifecycle::activateForwardForVisibility('private');
+							// Gate passed + latch set: the single offload tick now
+							// offloads every private-visibility store (private files,
+							// inbound-mail raw) on its next run.
+							CloudStorageLifecycle::stopDrain('private', $session); // enabling cancels any in-progress drain
+							CloudStorageLifecycle::ensureTickActive();
 							$private_ok = true;
 						} else {
 							$private_errors[] = $ppersist['message'];
@@ -114,7 +118,7 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 						$private_errors[] = $pmutable['message'];
 					} else {
 						CloudStorageLifecycle::setEnabled('private', false, $session, ['cloud_storage_private_bucket' => '']);
-						CloudStorageLifecycle::deactivateForVisibility('private'); // stop forward; guard 1 already ensured no cloud rows remain
+						CloudStorageLifecycle::stopDrain('private', $session); // guard 1 already ensured no cloud rows remain; tick self-deactivates when idle
 						$private_ok = true;
 					}
 				}
@@ -139,8 +143,11 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 			// otherwise fall through and render diagnostics inline
 		}
 		elseif ($action === 'pause') {
+			// Pause: stop offloading new files; keep existing cloud files serving
+			// (idle mode, not drain). The tick self-deactivates if nothing else
+			// is offloading or draining.
 			CloudStorageLifecycle::setEnabled('public', false, $session);
-			CloudStorageLifecycle::deactivateForVisibility('public');
+			CloudStorageLifecycle::stopDrain('public', $session);
 			$session->save_message(new DisplayMessage(
 				'Cloud storage paused. Existing cloud-stored files continue to serve from the bucket.',
 				'Paused', '/\/admin\/admin_cloud_storage/',
@@ -150,8 +157,11 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 			return LogicResult::redirect('/admin/admin_cloud_storage');
 		}
 		elseif ($action === 'disable_and_pull') {
+			// Disable the latch and set the draining flag; the offload tick pulls
+			// public cloud files back to local until none remain, then clears the
+			// flag itself.
 			CloudStorageLifecycle::setEnabled('public', false, $session);
-			CloudStorageLifecycle::activateReverseForVisibility('public');   // guard 2: deactivates forward
+			CloudStorageLifecycle::startDrain('public', $session);
 			$session->save_message(new DisplayMessage(
 				'Pull-back started. Bucket-stored files will be returned to local disk over the next several cron ticks.',
 				'Pull-back queued', '/\/admin\/admin_cloud_storage/',
@@ -162,11 +172,12 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 		}
 		elseif ($action === 'disable_and_pull_private') {
 			// Disable the private store's latch (forVisibility('private') goes null)
-			// but KEEP the bucket binding so the reverse engine can still read — it
-			// falls back to the unlatched binding to drain. The bucket is cleared
-			// later by a Save with an empty field, once guard 1 sees zero cloud rows.
+			// but KEEP the bucket binding so the tick's drain can still read — it
+			// resolves the driver with-fallback to the unlatched binding. The
+			// bucket is cleared later by a Save with an empty field, once guard 1
+			// sees zero cloud rows.
 			CloudStorageLifecycle::setEnabled('private', false, $session);
-			CloudStorageLifecycle::activateReverseForVisibility('private');   // guard 2: deactivates forward
+			CloudStorageLifecycle::startDrain('private', $session);
 			$session->save_message(new DisplayMessage(
 				'Private-store pull-back started. Offloaded inbound-mail raw will return to local disk over the next several cron ticks; clear the private bucket field and Save once it reaches zero to fully remove it.',
 				'Pull-back queued', '/\/admin\/admin_cloud_storage/',

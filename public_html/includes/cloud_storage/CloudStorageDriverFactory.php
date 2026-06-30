@@ -12,7 +12,7 @@
  * private bucket name), usable only once the privacy gate has latched
  * cloud_storage_private_enabled true.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriver.php'));
@@ -100,6 +100,18 @@ class CloudStorageDriverFactory {
 			error_log('CloudStorageDriverFactory: failed to construct unlatched ' . $visibility . ' driver — ' . $e->getMessage());
 			return null;
 		}
+	}
+
+	/**
+	 * The driver to use for request-time byte I/O (read / write / delete /
+	 * pull-back) against a store: the latched driver when the store is enabled,
+	 * otherwise the unlatched binding so I/O still works while the store is
+	 * paused or mid-drain. This is the resolver every consumer should use for
+	 * touching bytes — forVisibility() alone would go null during a drain and
+	 * silently break reads. Null only when the store is entirely unconfigured.
+	 */
+	public static function forVisibilityWithFallback(string $visibility): ?CloudStorageDriver {
+		return self::forVisibility($visibility) ?? self::forVisibilityUnlatched($visibility);
 	}
 
 	/**

@@ -31,7 +31,7 @@ Upload arrives → UploadHandler → File row created (fil_storage_driver='local
                                     Cron tick (every 15 min)
                                                      │
                                                      ▼
-                            CloudStorageSync iterates eligible rows:
+                            CloudOffloadRun (offload mode) iterates eligible rows:
                               - public per is_public()
                               - fil_storage_driver = 'local'
                               - fil_sync_failed_count < 5
@@ -62,7 +62,7 @@ do the work for every consumer:
   `forVisibility($profile->visibility())`.
 - **`CloudStorageLifecycle`** — the admin save/test/activate/health flow,
   parameterized by store (visibility) and profile. It holds the per-visibility
-  setting bindings and the two integrity guards (below).
+  setting bindings, the binding-immutability guard, and the offload modes (below).
 - **`StorageProfile`** — the per-consumer seam. It declares the table, the
   pkey/driver/failed-count/last-attempt columns, the visibility, an
   `eligibilityWhere()` SQL gate, and the per-row object enumeration
@@ -71,8 +71,12 @@ do the work for every consumer:
   pull-back none exist yet). `FileStorageProfile` is the public-files adapter
   over the existing `File` methods.
 
-The `CloudStorageSync` / `CloudStorageReverseSync` scheduled tasks are thin
-shims: each `run()` is one engine call with a `FileStorageProfile`.
+A single scheduled task — **`CloudOffloadRun`** — drives offload for the whole
+platform. Each tick it walks every declared `StorageProfile` (the registry) and
+runs each store in its current **mode**: `offload` pushes local → cloud,
+`drain` pulls cloud → local, `idle` is skipped. A new offload consumer therefore
+adds a `StorageProfile` and **zero** tasks. The task self-deactivates when no
+store is offloading or draining. (See *Offload modes* below.)
 
 ### Visibility — the two stores
 
@@ -117,9 +121,23 @@ The `(endpoint, bucket)` identity of a store is **immutable while that store
 holds any `cloud` row** (summed across every profile of that visibility). A Save
 that would change the bucket or endpoint of a store with offloaded objects is
 rejected: pull them back to local first (Disable and Pull Files Back to Local).
-Access-key rotation — same `(endpoint, bucket)` — stays allowed. Activating the
-forward task deactivates the reverse task and vice versa, so a row can never
-ping-pong between stores.
+Access-key rotation — same `(endpoint, bucket)` — stays allowed.
+
+### Offload modes
+
+A store's direction each tick is its **mode**, derived from store-level settings
+(`CloudStorageLifecycle::modeForVisibility()`):
+
+| Mode | When | Tick action |
+|------|------|-------------|
+| `offload` | store enabled latch on | push eligible local rows → bucket |
+| `drain` | disabled + draining flag set (Disable-and-Pull) | pull cloud rows → local until none remain, then clear the flag |
+| `idle` | disabled, not draining (paused / unconfigured) | nothing; existing cloud rows keep serving |
+
+A store has exactly one mode per tick, so a row can never ping-pong between local
+and cloud — the old forward/reverse mutual-exclusion is **structural** now, not an
+enforced guard. Enabling a store sets it to offload mode and activates
+`CloudOffloadRun`; pause sets idle; Disable-and-Pull sets the draining flag.
 
 ### Declarative profile registry
 
@@ -158,6 +176,43 @@ config: request-time byte I/O (upload/ingest/serve) stays the consumer's own
 code — a private consumer's gated read calls
 `CloudStorageDriverFactory::forVisibility('private')->get()` and streams behind
 its own permission check.
+
+**Sharing a table between two stores.** A profile may also implement an optional
+`reverseEligibilityWhere(): string` — a SQL fragment naming which `cloud` rows of
+its table physically live in **its** bucket. It is needed only when more than one
+profile shares a table (the public and private `File` profiles both live on
+`fil_files`); the engine and the binding-immutability count probe it via
+`method_exists()`, so a profile that owns its table outright simply omits it. The
+forward offload is already partitioned by `eligibilityWhere()`; this gate
+partitions the reverse/drain and the cloud-row count.
+
+### Private files
+
+Any file that carries a restriction — `fil_min_permission`, `fil_grp_group_id`,
+`fil_evt_event_id`, or `fil_tier_min_level` — is private (the inverse of
+`File::is_public()`). Two `File` profiles share the `fil_files` table:
+`FileStorageProfile` (`visibility = public`) drains world-readable files to the
+public bucket; `FilePrivateStorageProfile` (`visibility = private`) drains
+restricted files to the verified-private bucket. So a group doc, event handout,
+tier-gated download, or email attachment offloads to the bucket like any public
+upload instead of pinning to local disk — draining a small VPS that would
+otherwise fill with private uploads.
+
+Serving stays gated: a private file's `get_url()` returns the local
+`/uploads/...` path (never a bucket URL), and `serve.php` runs
+`File::is_viewable()` before streaming the bytes from the private bucket through
+PHP. No new column — the store a `cloud` row belongs to is derived from
+`is_public()`.
+
+Because both profiles live on `fil_files`, each declares a
+`reverseEligibilityWhere()` ownership gate (`public` = `is_public()`; `private` =
+its complement, including soft-deleted rows, which are kept in the private bucket
+and never served) so the reverse/drain path and the binding-immutability count
+touch only the cloud rows in their own bucket. Enabling or draining a store acts
+on every profile of that visibility, so the private `File` store and the
+inbound-mail raw store light up together. No per-store task is involved — the
+single `CloudOffloadRun` tick drives the private `File` profile by mode like
+every other store.
 
 ## Bucket Layout
 
@@ -206,23 +261,23 @@ Stored in `stg_settings`:
 
 1. Runs a three-step Test Connection diagnostic against the pasted
    credentials before persisting anything.
-2. On pass, saves settings, sets `cloud_storage_enabled = true`,
-   activates the `CloudStorageSync` task with `frequency = every_run`.
+2. On pass, saves settings, sets `cloud_storage_enabled = true` (offload
+   mode), and activates the `CloudOffloadRun` task with `frequency = every_run`.
 3. On fail, displays per-step diagnostic output with remediation; nothing
    is persisted.
 
 When enabled, two additional buttons appear:
 
-- **Pause Cloud Storage** — disables the feature and deactivates the
-  sync task. Existing cloud-stored files keep serving from the bucket.
-  Click Save to re-enable.
-- **Disable and Pull Files Back to Local** — same as Pause, *plus*
-  activates `CloudStorageReverseSync` to pull all bucket-stored files
-  back. Confirmation dialog shows the count of files and free local
-  disk space.
+- **Pause Cloud Storage** — disables the feature (idle mode): stops offloading
+  new files; existing cloud-stored files keep serving from the bucket. Click
+  Save to re-enable.
+- **Disable and Pull Files Back to Local** — disables the feature and sets the
+  store's draining flag, so `CloudOffloadRun` pulls all bucket-stored files back
+  to local (and clears the flag when done). Confirmation dialog shows the count
+  of files and free local disk space.
 
 The page also renders a live status block at the top: cron heartbeat,
-driver ping, sync task status, file counts, and any "stuck" rows
+driver ping, offload task status, file counts, and any "stuck" rows
 (failed 5+ times). Stuck rows have a per-row "Retry" button.
 
 ### Test Connection Steps
@@ -269,10 +324,10 @@ bucket hostname:
 
 ### Forward (local → bucket)
 
-The `CloudStorageSync` task **is** the forward migration. When cloud
-storage is first enabled, the batch query naturally selects every public
-local file and the task drains them across cron ticks until the queue is
-empty. There is no separate migration task.
+The `CloudOffloadRun` tick in **offload mode is** the forward migration. When
+cloud storage is first enabled, the batch query naturally selects every public
+local file and the tick drains them across cron ticks until the queue is empty.
+There is no separate migration task.
 
 Migration starts on the next regular cron tick (within 15 minutes). To
 start sooner, click "Run Now" on the Scheduled Tasks admin page.
@@ -284,8 +339,9 @@ a row is excluded from the batch query and surfaces in the admin UI as
 
 ### Reverse (bucket → local)
 
-`CloudStorageReverseSync` is activated only by the "Disable and Pull
-Files Back to Local" button. Per-row, three phases:
+A store's **drain mode** is entered only by the "Disable and Pull Files Back to
+Local" button (which sets the store's draining flag). `CloudOffloadRun` then pulls
+that store's cloud rows back. Per-row, three phases:
 
 1. Pull bytes to a temp dir.
 2. Place files into the correct local dir (re-evaluated against
@@ -299,50 +355,71 @@ Self-deactivates when no more `'cloud'` rows remain.
 
 ## Permission Changes (cross-storage)
 
-When a file's `is_public()` flips, the file moves between local and bucket.
+When a file's `is_public()` flips, its bytes must end up in the store that
+matches the new visibility — public bytes in the public bucket, restricted bytes
+in the verified-private bucket — so a restricted file is never reachable by a
+world-readable URL.
 
-### Public → private (cloud → local)
+### A cloud-stored file whose visibility flips
 
-Synchronous from the admin's request, three explicit phases:
+`File::save()` / `soft_delete()` / `undelete()` capture the row's persisted
+(pre-change) visibility, then `move_to_correct_directory()` compares it to the
+new one. On a flip the bytes are pulled back to local **from the store that still
+holds them** (`_pull_back_from_cloud_to_local($source_visibility)`), three
+explicit phases:
 
-1. **Pull all bytes to a temp dir.** Failure: drop temps, leave bucket
-   and DB unchanged, throw.
+1. **Pull all bytes to a temp dir.** Failure: drop temps, leave bucket and DB
+   unchanged, throw.
 2. **Delete from bucket** with brief retries. Any failure: re-PUT
    successfully-deleted keys from temps (best-effort), drop temps, throw.
-3. **Copy temps to restricted local dir, commit DB row.** Failure:
-   re-PUT all temps to bucket so the row's `'cloud'` flag stays
-   truthful, log `CLOUD_STORAGE_PARTIAL_FLIP`. If re-PUT also fails,
-   the row is genuinely broken; log marker is the breadcrumb.
+3. **Copy temps to restricted local dir, commit DB row to `'local'`.** Failure:
+   re-PUT all temps to bucket so the row's `'cloud'` flag stays truthful, log
+   `CLOUD_STORAGE_PARTIAL_FLIP`. If re-PUT also fails, the row is genuinely
+   broken; the log marker is the breadcrumb.
 
-Invariants: bucket is authoritative until DB commit; temps live until
-DB commit so they remain rollback material.
+The row is now `'local'`; the next offload tick re-evaluates eligibility and
+pushes it to the **now-correct** store via the matching profile. Bytes touch
+local disk briefly during the flip — simpler and safer than a bucket-to-bucket
+transfer. Invariants: bucket is authoritative until DB commit; temps live until
+DB commit so they remain rollback material. Peak local disk during a flip ≈ 2×
+total file size.
 
-Peak local disk during a flip ≈ 2× total file size (temp + restricted-dir
-copy, briefly during phase 3).
+### A local file whose visibility flips
 
-### Private → public (local → bucket)
-
-The synchronous path doesn't push to the bucket. The row stays at
-`'local'`; the next sync task tick picks it up. Avoids blocking the
-user's request on bucket I/O.
+The directory move (`static_files/uploads/` ⇄ restricted `uploads/`) happens in
+the save path; the row stays `'local'` and the next tick offloads it to the
+store matching its new visibility. No request blocks on bucket I/O.
 
 ## URL Generation
 
-`File::get_url($size_key, $format)` dispatches on the row's flag:
+`File::get_url($size_key, $format)` dispatches on the row's flag and visibility:
 
-- `fil_storage_driver = 'local'` — existing `/uploads/...` URL,
-  served by the fast path or auth route.
-- `fil_storage_driver = 'cloud'` — `driver->url(<remote_key>)`, the
-  public CDN/bucket URL. Browser hits the bucket directly; PHP is not
-  in the loop.
+- `fil_storage_driver = 'local'` — the `/uploads/...` URL, served by the fast
+  path (public) or the auth route (restricted).
+- `fil_storage_driver = 'cloud'` **and public** — `driver->url(<remote_key>)`,
+  the world-readable CDN/bucket URL. The browser hits the bucket directly; PHP is
+  not in the loop.
+- `fil_storage_driver = 'cloud'` **and restricted** — the local `/uploads/...`
+  path, **never** a bucket URL. `serve.php` resolves the bytes from the private
+  bucket behind the permission gate (below). The "never `url()`" rule, enforced
+  at the model.
 
-### Backwards-compatible /uploads/* redirect
+### /uploads/* serving
 
-Pre-migration `/uploads/<filename>` URLs (in sent emails, search index
-caches, RSS feeds, embedded HTML) keep working: `serve.php`'s `/uploads/*`
-route checks `fil_storage_driver` and 302-redirects cloud rows to the
-bucket URL with `Cache-Control: public, max-age=86400`. After the first
-hit the browser caches the redirect; subsequent hits skip PHP entirely.
+`serve.php`'s `/uploads/*` route resolves the `File` and dispatches:
+
+- **Public cloud row** — 302-redirect to the bucket URL with
+  `Cache-Control: public, max-age=86400`. After the first hit the browser caches
+  the redirect; subsequent hits skip PHP. Pre-existing `/uploads/<filename>` URLs
+  (in sent emails, search caches, RSS feeds, embedded HTML) keep working this way.
+- **Private cloud row** — `is_viewable($session)` first (fail ⇒ 404, never 403,
+  so existence isn't confirmed); then the bytes are pulled from the
+  verified-private bucket to a temp file and streamed through PHP with
+  `X-Content-Type-Options: nosniff`, `Cache-Control: private`, and — for
+  non-images — `Content-Disposition: attachment`. Never a 302: the bucket URL is
+  never exposed and the gate runs on every request.
+- **Local row** — `is_viewable($session)` then `serveStaticFile()` (restricted),
+  or the fast-path static file (public).
 
 ## Bucket Policy / Setup
 
@@ -410,7 +487,7 @@ hit the browser caches the redirect; subsequent hits skip PHP entirely.
 | Mode | Behavior | Recovery |
 |------|----------|----------|
 | Sync push fails | `fil_sync_failed_count` increments; next cron tick retries. After 5 failures the row is excluded and surfaces as "stuck". | Click Retry on the stuck-files list. |
-| Credentials become invalid | Driver health-check goes red; sync task fails every row. New uploads keep landing locally. | Save again with fixed creds. |
+| Credentials become invalid | Driver health-check goes red; the offload tick fails every row. New uploads keep landing locally. | Save again with fixed creds. |
 | Bucket runs out of quota / billing failure | Sync task fails; uploads continue locally. | Resolve at the provider; sync resumes. |
 | `permanent_delete` bucket-delete fails | Logged as `CLOUD_STORAGE_ORPHAN`; row is still deleted. | Manual cleanup via `aws s3 rm` or equivalent. |
 | Public→private flip phase 3 fails | Logged as `CLOUD_STORAGE_PARTIAL_FLIP`. | Manual recovery: flip the row to `'local'` and re-upload. |
@@ -425,18 +502,18 @@ hit the browser caches the redirect; subsequent hits skip PHP entirely.
 | `includes/cloud_storage/CloudStorageDriverFactory.php` | `default()`/`forVisibility()` return a configured driver or `null`; `forVisibilityUnlatched()` builds from the raw binding for pull-back; `bindingFor()` is the per-visibility setting map; `fromOptions()` builds from explicit settings. |
 | `includes/cloud_storage/StorageProfile.php` | The per-consumer seam interface. |
 | `includes/cloud_storage/StorageProfileRegistry.php` | Reads `storage_profiles.json` + every plugin's `plugin.json` `storage_profiles` (on disk, active or not); instantiates and groups by visibility. |
-| `storage_profiles.json` | Core profile manifest (declares `FileStorageProfile`). |
-| `includes/cloud_storage/CloudOffloadEngine.php` | Table-agnostic forward/reverse batch + per-row logic. |
-| `includes/cloud_storage/CloudStorageLifecycle.php` | Shared admin save/test/activate/health + the two guards + per-visibility bindings + the privacy gate verdict. |
+| `storage_profiles.json` | Core profile manifest (declares `FileStorageProfile` + `FilePrivateStorageProfile`). |
+| `includes/cloud_storage/CloudOffloadEngine.php` | Table-agnostic forward/reverse batch + per-row logic; reverse/count honour the optional `reverseEligibilityWhere()` ownership gate for shared tables. |
+| `includes/cloud_storage/CloudStorageLifecycle.php` | Shared admin save/test/health + the binding-immutability guard + per-visibility bindings + the privacy gate verdict; owns the offload modes (`modeForVisibility`, `startDrain`/`stopDrain`, `ensureTickActive`) and the `runOffloadTick()` orchestration; cloud-row counts scoped per store via the ownership gate. |
 | `includes/cloud_storage/FileStorageProfile.php` | Public-files adapter over the existing `File` methods (`visibility=public`). |
-| `data/files_class.php` | Cloud-aware methods: `get_url()`, `permanent_delete()`, `delete_resized()`, `resize()`, `move_to_correct_directory()` (incl. three-phase pull-back). |
-| `tasks/CloudStorageSync.php` | Forward sync shim → `CloudOffloadEngine::syncBatch(new FileStorageProfile())`. |
-| `tasks/CloudStorageReverseSync.php` | Pull-back shim → `CloudOffloadEngine::reverseBatch(...)`; self-deactivates when no `'cloud'` rows remain. |
+| `includes/cloud_storage/FilePrivateStorageProfile.php` | Restricted-files adapter (`visibility=private`); extends `FileStorageProfile`, overriding visibility, eligibility, and the ownership gate. |
+| `data/files_class.php` | Visibility-aware cloud methods: `get_url()` (private → local gated path, never a bucket URL), `permanent_delete()`, `delete_resized()`, `resize()`, `move_to_correct_directory()` (visibility-flip pull-back via `_pull_back_from_cloud_to_local()`). |
+| `tasks/CloudOffloadRun.php` | The one offload task for the whole platform. Calls `CloudStorageLifecycle::runOffloadTick()`, which drives every store by mode (offload/drain/idle); self-deactivates when nothing is offloading or draining. |
 | `adm/admin_cloud_storage.php` | Admin UI. Save = test + persist + activate; carries the private-bucket field + privacy-gate results. |
 | `adm/logic/admin_cloud_storage_logic.php` | Thin caller over `CloudStorageLifecycle`, per store; Save/Pause/Disable-and-Pull/Retry handlers. |
-| `serve.php` | `/uploads/*` route extended to 302-redirect cloud rows. |
+| `serve.php` | `/uploads/*` route: 302-redirects public cloud rows; gate-streams private cloud rows through PHP after `is_viewable()`. |
 | `includes/UploadHandler.php` | `get_unique_filename()` consults `fil_files` so dedup works after locals are deleted. |
-| `utils/process_scheduled_tasks.php` | Per-task advisory locking (prereq for the sync task — prevents tick-overlap races). |
+| `utils/process_scheduled_tasks.php` | Per-task advisory locking (prereq for the offload tick — prevents tick-overlap races). |
 
 ## Out of Scope (v1)
 
@@ -446,7 +523,5 @@ hit the browser caches the redirect; subsequent hits skip PHP entirely.
 - Resize-on-demand (variants still generated upfront).
 - Automatic CDN setup (customer responsibility, documented above).
 - Egress monitoring or alerts based on actual bytes served.
-- Storing public-files' private/permissioned variants in any bucket. The
-  public-files consumer keeps permissioned files on local disk. (The platform's
-  verified-private store exists for *other* consumers that declare
-  `visibility = private`; the public-files profile never uses it.)
+- Signed-URL serving for private files — server-side streaming only; presigned
+  URLs are a later egress optimization, additive to the driver.

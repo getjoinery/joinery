@@ -4,7 +4,7 @@
 **Version:** 1.1
 **Builds on:** `specs/inbound_email_attachment_storage.md` (attachments are
 discrete private `File` objects, not bytes inside a raw blob) and
-`specs/file_private_storage.md` (private `File` offload + gated serving). This spec
+`specs/implemented/file_private_storage.md` (private `File` offload + gated serving). This spec
 assumes both are in place: there is **no attachment-laden raw to seal** — content
 columns are sealed in the row and each attachment is sealed as a `File`.
 **Supersedes:** `specs/implemented/inbound_email_fulltext_search.md` (the plaintext
@@ -207,7 +207,7 @@ body and **must run before sealing**. Required order:
 - Opening a thread decrypts only its messages. Reply-quoting (`MailboxSender`)
   decrypts the quoted body in-session.
 - **Downloading an attachment** decrypts in-session inside the gated `File` stream
-  (`file_private_storage.md`): after `is_viewable()` passes, the sealed bytes are
+  (`implemented/file_private_storage.md`): after `is_viewable()` passes, the sealed bytes are
   fetched and decrypted under the message DEK, then streamed. Forwarding
   (`MailboxSender` re-attach) decrypts each attachment `File` in-session the same
   way. Attachments are therefore only retrievable inside an authenticated session,
@@ -296,6 +296,6 @@ be detected as already-sealed for an idempotent backfill.
 - Confirm the production Docker base carries `libsqlite3` + FTS5.
 - Decide sealed-index storage form (file vs row) against real index size once attachment-
   excluded text volume is measured.
-- Confirm the gated `File` stream (`file_private_storage.md`) can carry an
+- Confirm the gated `File` stream (`implemented/file_private_storage.md`) can carry an
   email-supplied decrypt hook that resolves the owning message's DEK at serve time,
   keeping `File` crypto-agnostic while still decrypting sealed attachments in-session.

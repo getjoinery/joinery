@@ -106,9 +106,8 @@ return array(
 );
 ```
 
-This is the right pattern for one-shot drain tasks (e.g.
-`CloudStorageReverseSync` deactivates itself once every cloud-stored
-file has been pulled back). The runner reads the flag, sets
+This is the right pattern for self-limiting tasks (e.g. `CloudOffloadRun`
+deactivates itself once no store is offloading or draining). The runner reads the flag, sets
 `sct_is_active = false` on the task row, and saves — so the row is not
 re-evaluated on subsequent ticks until something explicitly reactivates
 it.
