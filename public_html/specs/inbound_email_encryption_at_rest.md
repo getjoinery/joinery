@@ -1,7 +1,12 @@
 # Inbound Email — Encryption at Rest (Sealed Bodies + Sealed Search Index)
 
 **Status:** Draft / awaiting implementation
-**Version:** 1.0
+**Version:** 1.1
+**Builds on:** `specs/inbound_email_attachment_storage.md` (attachments are
+discrete private `File` objects, not bytes inside a raw blob) and
+`specs/file_private_storage.md` (private `File` offload + gated serving). This spec
+assumes both are in place: there is **no attachment-laden raw to seal** — content
+columns are sealed in the row and each attachment is sealed as a `File`.
 **Supersedes:** `specs/implemented/inbound_email_fulltext_search.md` (the plaintext
 `to_tsvector` GIN index it built is removed by this spec — see *Integration Points*).
 
@@ -21,7 +26,7 @@ mail on behalf of other users or run server-side processing over the archive.
 **Defends against (the reason for the design):**
 
 - **Stolen database / leaked backup / SQL-injection read** — body, subject, sender,
-  raw MIME, attachments, and the search index are all ciphertext at rest.
+  attachment files, and the search index are all ciphertext at rest.
 - **Offline box compromise** — an attacker who gains code execution or filesystem
   access *while no session is active* finds no key capable of decryption. Inbound
   mail is sealed to a **public** key; the matching private key is never on disk in
@@ -122,8 +127,15 @@ keeps the asymmetric op to once per message rather than once per field.
 |---|---|
 | `iem_body_plain`, `iem_body_html` | message row (columns hold ciphertext blobs) |
 | `iem_subject`, `iem_sender` | message row |
-| Raw MIME (incl. all attachment bytes) | `RawMessageStore` — sealed before write to disk/bucket |
-| `ima_filename` | attachment row |
+| Attachment file **bytes** | each attachment `File` — sealed in its private store (disk/bucket) before write |
+| `ima_filename` (and the `File`'s display name) | attachment / file row |
+
+There is **no retained raw-MIME blob** (the lean-record model strips attachment
+bodies out of the raw at ingest — see `inbound_email_attachment_storage.md`), so the
+old "seal the whole raw via `RawMessageStore`" step is gone. Instead the small text
+columns are sealed in the row and each attachment is sealed as its own `File`. This
+is the concrete "keep big binaries out of the encrypted database" win: the sealed
+DB payload is just text; the heavy bytes are sealed objects in the file store.
 
 **Cleartext (operational metadata the server needs while the user is logged out — to
 receive, dedupe, thread, sort, page, and list):**
@@ -144,9 +156,9 @@ subject — see `MailboxService::GROUP_KEY_SQL`).
 ## Search Architecture
 
 **Index source (built in-session from decrypted fields):** body plain + body html +
-subject + sender + attachment filenames. **Attachment content and raw MIME are never
-indexed.** Consequence to surface in UI expectations: search does not find text inside
-a PDF/Word attachment — only the email's own text and the attachment's filename.
+subject + sender + attachment filenames. **Attachment content is never indexed.**
+Consequence to surface in UI expectations: search does not find text inside a
+PDF/Word attachment — only the email's own text and the attachment's filename.
 
 **Engine:** SQLite **FTS5**. Chosen after confirming the SQLite engine is already
 installed on the box (`libsqlite3-0`, with FTS5 compiled in — symbols present) and only
@@ -178,9 +190,14 @@ body and **must run before sealing**. Required order:
 
 1. Receive + parse the message.
 2. Run filters/rules on the parsed plaintext.
-3. Generate the per-message DEK; encrypt content fields; seal the DEK to the public key.
-4. Seal the raw MIME and write it via `RawMessageStore`.
-5. Persist the row with ciphertext content fields + cleartext metadata.
+3. **Split attachments out** to private `File` objects (per
+   `inbound_email_attachment_storage.md`) — this is the same ingest moment, and it
+   must happen while the plaintext bytes are still in hand.
+4. Generate the per-message DEK; encrypt the content columns; encrypt each
+   attachment `File`'s bytes under the **same** per-message DEK; seal the DEK to the
+   public key.
+5. Persist the **lean record**: ciphertext content columns + cleartext metadata +
+   the manifest linking the (now-sealed) attachment `File`s. **No raw blob is stored.**
 
 ## Read / Render Flow
 
@@ -189,6 +206,12 @@ body and **must run before sealing**. Required order:
   preview substring. Previews therefore only render inside an authenticated session.
 - Opening a thread decrypts only its messages. Reply-quoting (`MailboxSender`)
   decrypts the quoted body in-session.
+- **Downloading an attachment** decrypts in-session inside the gated `File` stream
+  (`file_private_storage.md`): after `is_viewable()` passes, the sealed bytes are
+  fetched and decrypted under the message DEK, then streamed. Forwarding
+  (`MailboxSender` re-attach) decrypts each attachment `File` in-session the same
+  way. Attachments are therefore only retrievable inside an authenticated session,
+  exactly like bodies.
 
 ## Integration Points That Change
 
@@ -203,13 +226,16 @@ body and **must run before sealing**. Required order:
 - **`inbound_email_filter_class`** — unchanged logic, but the ingest pipeline must call
   it before sealing (see above). Filtering over *stored* messages is no longer possible
   without the key.
-- **`MailboxSender`** — quoted-body construction decrypts in-session.
+- **`MailboxSender`** — quoted-body construction decrypts in-session; forward
+  re-attach reads each attachment `File`, decrypting under the message DEK in-session.
 
 ## New Code
 
 - **Sealing helper** — a sibling to `SecretBox` (which stays symmetric-only). Wraps
   `crypto_box_seal` / `crypto_box_seal_open` plus the per-message DEK envelope. Keeps
-  the asymmetric-at-ingest contract in one tested place.
+  the asymmetric-at-ingest contract in one tested place. The same helper encrypts and
+  decrypts attachment `File` bytes under the message DEK, so the gated `File` stream
+  has one tested path to open them in-session.
 - **Index manager** — owns the `/dev/shm` lifecycle: decrypt-on-login, incremental
   fold via the high-water mark, query, re-seal-on-logout, wipe.
 
@@ -222,6 +248,11 @@ body and **must run before sealing**. Required order:
   on the user/mailbox-owner record.
 - The sealed FTS index blob: stored as a file (sealed) or a row; decide during
   implementation based on size.
+- Attachment `File`s hold ciphertext bytes in their private store. No per-file key
+  column is needed: an attachment is encrypted under its **message's** DEK, so the
+  gated stream resolves the owning message (via the manifest) and unwraps
+  `iem_sealed_key` to decrypt. The general `File` stream calls an email-supplied
+  decrypt hook; `File` itself stays crypto-agnostic.
 
 Schema/data-type changes go through `update_database` / plugin sync, never hand-written
 DDL.
@@ -265,3 +296,6 @@ be detected as already-sealed for an idempotent backfill.
 - Confirm the production Docker base carries `libsqlite3` + FTS5.
 - Decide sealed-index storage form (file vs row) against real index size once attachment-
   excluded text volume is measured.
+- Confirm the gated `File` stream (`file_private_storage.md`) can carry an
+  email-supplied decrypt hook that resolves the owning message's DEK at serve time,
+  keeping `File` crypto-agnostic while still decrypting sealed attachments in-session.
