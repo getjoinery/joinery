@@ -1,21 +1,22 @@
 <?php
 /**
- * Guards test — the two latent bugs this refactor fixes.
+ * Guards / offload-mode test.
  *
  * Guard 1 (binding immutability): with ≥1 'cloud' row, a Save that changes
  * (endpoint, bucket) is rejected; same binding + rotated key is allowed; with
  * 0 cloud rows a change is allowed.
  *
- * Guard 2 (forward/reverse mutual exclusion): activating the forward task
- * deactivates the reverse task, and vice versa.
+ * Offload mode dispatch: one CloudOffloadRun tick drives every store by its
+ * MODE, derived from the store's enabled latch + draining flag. A store has
+ * exactly one mode per tick (offload / drain / idle), so a row can never
+ * ping-pong — the old forward/reverse mutual-exclusion is now structural.
  *
- * Stored bindings are overridden only in the Globalvars in-memory cache (this
- * process; never persisted). Guard 2 runs against throwaway task classes so no
- * live scheduled task is touched.
+ * Stored settings are overridden only in the Globalvars in-memory cache (this
+ * process; never persisted), so no live settings or scheduled tasks are touched.
  *
  * Run: php tests/integration/cloud_storage_guards_test.php
  *
- * @version 1.0
+ * @version 2.0
  */
 
 require_once(__DIR__ . '/../../includes/PathHelper.php');
@@ -42,40 +43,13 @@ function set_setting_mem($key, $value) {
 	$ref->setValue($gv, $arr);
 }
 
-/** Minimal profile whose only meaningful methods are the task class names. */
-class GuardMockProfile implements StorageProfile {
-	public $fwd; public $rev;
-	public function __construct($fwd, $rev) { $this->fwd = $fwd; $this->rev = $rev; }
-	public function forwardTaskClass(): string { return $this->fwd; }
-	public function reverseTaskClass(): string { return $this->rev; }
-	public function table(): string { return 'fil_files'; }
-	public function pkeyColumn(): string { return 'fil_file_id'; }
-	public function driverColumn(): string { return 'fil_storage_driver'; }
-	public function failedCountColumn(): string { return 'fil_sync_failed_count'; }
-	public function lastAttemptColumn(): string { return 'fil_sync_last_attempt'; }
-	public function visibility(): string { return 'public'; }
-	public function eligibilityWhere(): string { return ''; }
-	public function rowExists(int $id): bool { return false; }
-	public function isEligibleRow(int $id): bool { return false; }
-	public function itemsForRow(int $id): ?array { return null; }
-	public function reverseItemsForRow(int $id): array { return []; }
-}
-
 $dblink = DbConnector::get_instance()->get_db_link();
 $cloud_fixture_id = null;
-$created_task_classes = [];
-
-function task_active($task_class) {
-	$m = new MultiScheduledTask(['task_class' => $task_class, 'deleted' => false]);
-	$m->load();
-	foreach ($m as $t) { return (bool)$t->get('sct_is_active'); }
-	return null; // not present
-}
 
 try {
 	echo "=== Guard 1 — binding immutability ===\n";
 
-	// 0 cloud rows (private store has no profile in spec A) → change allowed.
+	// 0 cloud rows for the private store → change allowed.
 	set_setting_mem('cloud_storage_endpoint', 'ep1.example.com');
 	set_setting_mem('cloud_storage_private_bucket', 'priv-alpha');
 	$r = CloudStorageLifecycle::assertBindingMutable(['endpoint' => 'ep1.example.com', 'bucket' => 'priv-beta'], 'private');
@@ -85,7 +59,7 @@ try {
 	$r = CloudStorageLifecycle::assertBindingMutable(['endpoint' => 'ep1.example.com', 'bucket' => 'priv-alpha'], 'private');
 	ok('private: same (endpoint,bucket) ⇒ allowed (key rotation)', $r['ok'] === true);
 
-	// Now a public store WITH a cloud row.
+	// Now a public store WITH a cloud row (no restrictions ⇒ public-owned).
 	set_setting_mem('cloud_storage_bucket', 'pub-A');
 	$f = new File(NULL);
 	$f->set('fil_name', '_guardtest_' . bin2hex(random_bytes(5)) . '.bin');
@@ -106,29 +80,44 @@ try {
 	$r = CloudStorageLifecycle::assertBindingMutable(['endpoint' => 'ep1.example.com', 'bucket' => 'pub-A'], 'public');
 	ok('public: cloud rows + same binding ⇒ allowed (key rotation)', $r['ok'] === true);
 
-	echo "\n=== Guard 2 — forward/reverse mutual exclusion ===\n";
-	$sfx = bin2hex(random_bytes(3));
-	$fwd = 'GuardMockFwd_' . $sfx;
-	$rev = 'GuardMockRev_' . $sfx;
-	$created_task_classes = [$fwd, $rev];
-	$mock = new GuardMockProfile($fwd, $rev);
+	echo "\n=== Offload mode dispatch (modeForVisibility) ===\n";
 
-	CloudStorageLifecycle::activateReverse($mock);
-	ok('activateReverse: reverse active', task_active($rev) === true);
-	ok('activateReverse: forward NOT active', task_active($fwd) !== true);
+	// Enabled latch on ⇒ offload (takes precedence over any draining flag).
+	set_setting_mem('cloud_storage_enabled', '1');
+	set_setting_mem('cloud_storage_draining', '1');
+	ok('public: enabled ⇒ offload (precedence over draining)', CloudStorageLifecycle::modeForVisibility('public') === 'offload');
 
-	CloudStorageLifecycle::activateForward($mock);
-	ok('activateForward: forward active', task_active($fwd) === true);
-	ok('activateForward: reverse deactivated', task_active($rev) === false);
+	// Disabled + draining ⇒ drain.
+	set_setting_mem('cloud_storage_enabled', '0');
+	set_setting_mem('cloud_storage_draining', '1');
+	ok('public: disabled + draining ⇒ drain', CloudStorageLifecycle::modeForVisibility('public') === 'drain');
+
+	// Disabled + not draining ⇒ idle (paused: keep serving, do nothing).
+	set_setting_mem('cloud_storage_enabled', '0');
+	set_setting_mem('cloud_storage_draining', '0');
+	ok('public: disabled + not draining ⇒ idle', CloudStorageLifecycle::modeForVisibility('public') === 'idle');
+
+	// The private store reads its own latch/flag, independently.
+	set_setting_mem('cloud_storage_private_enabled', '0');
+	set_setting_mem('cloud_storage_private_draining', '1');
+	ok('private: own draining flag ⇒ drain (independent of public)', CloudStorageLifecycle::modeForVisibility('private') === 'drain');
+
+	set_setting_mem('cloud_storage_private_enabled', '1');
+	ok('private: own enabled latch ⇒ offload', CloudStorageLifecycle::modeForVisibility('private') === 'offload');
+
+	// With every store idle, the tick is a no-op that asks to self-deactivate.
+	set_setting_mem('cloud_storage_enabled', '0');
+	set_setting_mem('cloud_storage_draining', '0');
+	set_setting_mem('cloud_storage_private_enabled', '0');
+	set_setting_mem('cloud_storage_private_draining', '0');
+	$tick = CloudStorageLifecycle::runOffloadTick();
+	ok('runOffloadTick: all stores idle ⇒ deactivate signal', !empty($tick['deactivate']));
+	ok('runOffloadTick: status success when idle', ($tick['status'] ?? '') === 'success');
 
 } finally {
 	if ($cloud_fixture_id) {
 		$d = $dblink->prepare("DELETE FROM fil_files WHERE fil_file_id = ?");
 		$d->execute([$cloud_fixture_id]);
-	}
-	foreach ($created_task_classes as $tc) {
-		$d = $dblink->prepare("DELETE FROM sct_scheduled_tasks WHERE sct_task_class = ?");
-		$d->execute([$tc]);
 	}
 }
 

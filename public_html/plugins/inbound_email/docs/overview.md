@@ -588,10 +588,10 @@ URL or presigned link. Inbound mail configures none of that itself: it declares
 engine, and the admin lifecycle from the cloud-storage layer (see
 [Cloud Storage](../../../docs/cloud_storage.md)). Until a private store is configured
 and gated, mail simply stays `local` on disk forever — the feature degrades cleanly to
-local-only. Offload runs through two scheduler-tracked task shims,
-`OffloadInboundRawToCloud` (forward) and `PullInboundRawBackToLocal` (reverse), each a
-one-line call into the shared engine; `RawMessageStore` is declared under
-`storage_profiles` in `plugin.json`. Because the plugin owns a `private` profile,
+local-only. Offload runs through the platform's single `CloudOffloadRun` tick, which
+drives every store (including this one) by mode — the plugin contributes no task of its
+own; `RawMessageStore` is declared under `storage_profiles` in `plugin.json`. Because the
+plugin owns a `private` profile,
 **uninstalling** it requires the mail store drained back to local first (the
 offload layer's drain-before-uninstall rule); deactivation alone is safe.
 

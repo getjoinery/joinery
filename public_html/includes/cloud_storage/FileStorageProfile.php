@@ -4,11 +4,10 @@
  *
  * A thin adapter over the existing File model methods (get_filesystem_path,
  * remote_key_for, is_public, is_image). No File code moves here; this profile
- * only re-expresses those methods through the StorageProfile seam so the
- * unified engine + lifecycle can drive the public-files offload exactly as the
- * standalone CloudStorageSync / CloudStorageReverseSync tasks did.
+ * only re-expresses those methods through the StorageProfile seam so the shared
+ * offload engine + lifecycle can drive the public-files offload.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/cloud_storage/StorageProfile.php'));
@@ -25,14 +24,10 @@ class FileStorageProfile implements StorageProfile {
 
 	public function visibility(): string { return 'public'; }
 
-	public function forwardTaskClass(): string { return 'CloudStorageSync'; }
-	public function reverseTaskClass(): string { return 'CloudStorageReverseSync'; }
-
 	/**
 	 * The is_public() permission gates, mirrored as SQL so the batch query
-	 * lines up with isEligibleRow(). Verbatim from the original CloudStorageSync
-	 * eligibility query (minus the generic driver/failed-count/limit clauses the
-	 * engine owns).
+	 * lines up with isEligibleRow() (minus the generic driver/failed-count/limit
+	 * clauses the engine owns).
 	 */
 	public function eligibilityWhere(): string {
 		return "fil_delete_time IS NULL
@@ -40,6 +35,21 @@ class FileStorageProfile implements StorageProfile {
 			AND (fil_grp_group_id IS NULL OR fil_grp_group_id = 0)
 			AND (fil_evt_event_id IS NULL OR fil_evt_event_id = 0)
 			AND (fil_tier_min_level IS NULL OR fil_tier_min_level = 0)";
+	}
+
+	/**
+	 * Ownership gate: which 'cloud' rows of fil_files physically live in THIS
+	 * (public) store. fil_files is shared by the public and private File
+	 * profiles, so the reverse/drain path and the binding-immutability count
+	 * must scope cloud rows to one store. The public store holds cloud files
+	 * that are world-readable, which is exactly the public eligibility
+	 * predicate — so for the public store the forward and ownership gates
+	 * coincide. (Consumed via method_exists() by CloudOffloadEngine::reverseBatch
+	 * and CloudStorageLifecycle::cloudRowCount; profiles that own their table
+	 * outright simply omit it.)
+	 */
+	public function reverseEligibilityWhere(): string {
+		return $this->eligibilityWhere();
 	}
 
 	public function rowExists(int $id): bool {

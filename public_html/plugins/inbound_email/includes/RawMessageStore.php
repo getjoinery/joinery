@@ -29,7 +29,7 @@
  * outside the web root; the cloud tier is the verified-private bucket reached
  * only through the shared driver's server-side get() — never a public URL.
  *
- * @version 1.0
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/cloud_storage/StorageProfile.php'));
@@ -52,9 +52,6 @@ class RawMessageStore implements StorageProfile {
 	public function lastAttemptColumn(): string { return 'iem_raw_sync_last_attempt'; }
 
 	public function visibility(): string { return 'private'; }
-
-	public function forwardTaskClass(): string { return 'OffloadInboundRawToCloud'; }
-	public function reverseTaskClass(): string { return 'PullInboundRawBackToLocal'; }
 
 	/**
 	 * No extra gate: any 'local' row is offload-eligible. The engine's batch
@@ -255,17 +252,12 @@ class RawMessageStore implements StorageProfile {
 	// =====================================================================
 
 	/**
-	 * The private-store driver for reads/deletes. Falls back to the unlatched
-	 * binding so a still-cloud row stays readable during a disable/drain window
-	 * (the same resolver the engine's reverse path uses) — not a band-aid: the
-	 * binding is valid and the bytes are private either way.
+	 * The private-store driver for reads/deletes. Uses the with-fallback
+	 * resolver so a still-cloud row stays readable during a disable/drain window
+	 * — not a band-aid: the binding is valid and the bytes are private either way.
 	 */
 	private static function privateDriver() {
-		$driver = CloudStorageDriverFactory::forVisibility('private');
-		if (!$driver) {
-			$driver = CloudStorageDriverFactory::forVisibilityUnlatched('private');
-		}
-		return $driver;
+		return CloudStorageDriverFactory::forVisibilityWithFallback('private');
 	}
 
 	private function _driverFlag(int $id): ?string {

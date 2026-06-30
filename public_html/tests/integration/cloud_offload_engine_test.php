@@ -73,8 +73,6 @@ class EngMockProfile implements StorageProfile {
 	public function lastAttemptColumn(): string { return 'last_attempt'; }
 	public function visibility(): string { return 'public'; }
 	public function eligibilityWhere(): string { return 'eligible = true'; }
-	public function forwardTaskClass(): string { return 'MockForward'; }
-	public function reverseTaskClass(): string { return 'MockReverse'; }
 	private function _row($id) {
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare("SELECT * FROM {$this->table} WHERE id = ?");

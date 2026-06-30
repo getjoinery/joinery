@@ -1,5 +1,0 @@
-{
-    "name": "Pull Inbound Raw Back to Local",
-    "description": "Pulls cloud-stored inbound-mail raw .eml objects back to local disk and clears the bucket objects. Activated only when an admin disables the private store and pulls files back. Self-deactivates when no more cloud rows remain.",
-    "default_frequency": "every_run"
-}

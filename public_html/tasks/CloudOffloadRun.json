@@ -1,0 +1,5 @@
+{
+    "name": "Cloud Offload",
+    "description": "Drives cloud-storage offload for every store: pushes eligible local files/objects to their bucket, and pulls them back to local when a store is being drained. One task for all stores (public files, private files, inbound-mail raw); activated when any store is enabled or drained, self-deactivates when idle.",
+    "default_frequency": "every_run"
+}

@@ -91,8 +91,6 @@ class LiveProfile implements StorageProfile {
 	public function lastAttemptColumn(): string { return 'last_attempt'; }
 	public function visibility(): string { return 'public'; }
 	public function eligibilityWhere(): string { return 'eligible = true'; }
-	public function forwardTaskClass(): string { return 'LiveForward'; }
-	public function reverseTaskClass(): string { return 'LiveReverse'; }
 	private function _row($id) { $db = DbConnector::get_instance()->get_db_link(); $q = $db->prepare("SELECT * FROM {$this->table} WHERE id=?"); $q->execute([$id]); return $q->fetch(PDO::FETCH_ASSOC); }
 	public function rowExists(int $id): bool { return (bool)$this->_row($id); }
 	public function isEligibleRow(int $id): bool {
@@ -287,9 +285,7 @@ try {
 		. "  public function rowExists(int \$id): bool { return false; }\n"
 		. "  public function isEligibleRow(int \$id): bool { return false; }\n"
 		. "  public function itemsForRow(int \$id): ?array { return null; }\n"
-		. "  public function reverseItemsForRow(int \$id): array { return []; }\n"
-		. "  public function forwardTaskClass(): string { return 'TmpFwd'; }\n"
-		. "  public function reverseTaskClass(): string { return 'TmpRev'; }\n}\n";
+		. "  public function reverseItemsForRow(int \$id): array { return []; }\n}\n";
 	file_put_contents($temp_plugin_dir . '/includes/' . $cls . '.php', $class_src);
 	@chmod($temp_plugin_dir, 0777); @chmod($temp_plugin_dir . '/includes', 0777);
 	@chmod($temp_plugin_dir . '/plugin.json', 0666); @chmod($temp_plugin_dir . '/includes/' . $cls . '.php', 0666);

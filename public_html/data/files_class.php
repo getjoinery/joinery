@@ -196,14 +196,20 @@ public static function get_by_name($name, $search_deleted = false) {
 	 *
 	 * @throws FileException on duplicate filenames or move failures
 	 */
-	function move_to_correct_directory() {
-		// Cloud-stored row that just became private: must pull bytes back
-		// to the restricted local dir so authenticate_read() can gate them.
-		// (The bucket is public-readable, so leaving private bytes there
-		// would expose them.) Three-phase rollback per spec §6.
+	function move_to_correct_directory($old_visibility = null) {
+		// Cloud-stored row: the bytes already live in a bucket. Keep the
+		// security invariant true — a file's bytes must sit in the store that
+		// matches its CURRENT visibility (public bytes in the public bucket,
+		// restricted bytes in the verified-private bucket). A visibility flip
+		// after offload (old_visibility != current) leaves the bytes in the
+		// wrong bucket, so pull them back to local from the store that still
+		// holds them; the next offload tick re-places them in the now-correct
+		// store. No flip → bytes are correctly placed, nothing to do.
 		if ($this->get('fil_storage_driver') === 'cloud') {
-			if (!$this->is_public()) {
-				$this->_pull_back_from_cloud_to_private();
+			$new_visibility = $this->_cloud_visibility();
+			$source = $old_visibility ?: $new_visibility;
+			if ($source !== $new_visibility) {
+				$this->_pull_back_from_cloud_to_local($source);
 			}
 			return;
 		}
@@ -301,11 +307,32 @@ public static function get_by_name($name, $search_deleted = false) {
 	}
 
 	/**
+	 * For an already-offloaded ('cloud') row, the visibility currently recorded
+	 * in the database — i.e. which bucket physically holds the bytes right now,
+	 * captured BEFORE a save/delete changes the in-memory permission fields.
+	 * Returns 'public'/'private', or null when the row isn't cloud-stored (no
+	 * bucket relocation is possible) or isn't persisted yet. Lets the post-change
+	 * move_to_correct_directory() detect a visibility flip and pull from the
+	 * right store.
+	 */
+	private function _offloaded_visibility() {
+		if (!$this->key || $this->get('fil_storage_driver') !== 'cloud') {
+			return null;
+		}
+		$persisted = new File($this->key, true);
+		if (!$persisted->key) {
+			return null;
+		}
+		return $persisted->is_public() ? 'public' : 'private';
+	}
+
+	/**
 	 * Save the file record and move to the correct directory based on permissions.
 	 */
 	function save($debug = false) {
+		$old_visibility = $this->_offloaded_visibility();
 		$result = parent::save($debug);
-		$this->move_to_correct_directory();
+		$this->move_to_correct_directory($old_visibility);
 		return $result;
 	}
 
@@ -314,8 +341,9 @@ public static function get_by_name($name, $search_deleted = false) {
 	 * should not be publicly accessible.
 	 */
 	function soft_delete() {
+		$old_visibility = $this->_offloaded_visibility();
 		$result = parent::soft_delete();
-		$this->move_to_correct_directory();
+		$this->move_to_correct_directory($old_visibility);
 		return $result;
 	}
 
@@ -323,8 +351,9 @@ public static function get_by_name($name, $search_deleted = false) {
 	 * Undelete and re-evaluate which directory the file belongs in.
 	 */
 	function undelete() {
+		$old_visibility = $this->_offloaded_visibility();
 		$result = parent::undelete();
-		$this->move_to_correct_directory();
+		$this->move_to_correct_directory($old_visibility);
 		return $result;
 	}
 
@@ -337,18 +366,26 @@ public static function get_by_name($name, $search_deleted = false) {
 	 */
 	function get_url($size_key='original', $format='short') {
 
-		// Cloud-stored files: bucket URL goes directly to the browser, no PHP
-		// in the loop. Stable and cacheable. Note: $format=='short' is treated
-		// as 'full' here because the bucket lives on a different domain.
+		// Cloud-stored files. PUBLIC files: the world-readable bucket URL goes
+		// straight to the browser, no PHP in the loop — stable and cacheable.
+		// ($format=='short' is treated as 'full' because the bucket is a
+		// different domain.) PRIVATE files must NEVER expose a bucket URL — they
+		// fall through to the local /uploads/* pattern, which serve.php
+		// gate-streams from the verified-private bucket after is_viewable().
 		if ($this->get('fil_storage_driver') === 'cloud') {
-			require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
-			$driver = CloudStorageDriverFactory::default();
-			if ($driver) {
-				return $driver->url($this->remote_key_for($size_key));
+			if ($this->is_public()) {
+				require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
+				$driver = CloudStorageDriverFactory::default();
+				if ($driver) {
+					return $driver->url($this->remote_key_for($size_key));
+				}
+				// Falls through to the local URL pattern if cloud is unconfigured.
+				// /uploads/* will then 302-redirect once cloud is reconfigured —
+				// or 404 if the bucket bytes are gone.
 			}
-			// Falls through to the local URL pattern if cloud is unconfigured.
-			// /uploads/* will then 302-redirect once cloud is reconfigured —
-			// or 404 if the bucket bytes are gone.
+			// Private (or public-but-unconfigured): fall through to the local
+			// /uploads/* URL, which routes through serve.php (gated stream for
+			// private cloud bytes; the "never url()" rule).
 		}
 
 		$settings = Globalvars::get_instance();
@@ -400,14 +437,35 @@ public static function get_by_name($name, $search_deleted = false) {
 	}
 
 	/**
+	 * The visibility of this file's bytes for store resolution: 'public' when
+	 * the file has no restrictions, 'private' otherwise. Mirrors is_public(),
+	 * the single source of truth for which bucket a 'cloud' row belongs to.
+	 */
+	private function _cloud_visibility() {
+		return $this->is_public() ? 'public' : 'private';
+	}
+
+	/**
+	 * The cloud driver for the store matching this file's visibility (public →
+	 * public bucket, restricted → verified-private bucket). Falls back to the
+	 * unlatched binding so deletes/resizes still resolve a driver while a store
+	 * is mid-disable/drain. Null when that store is unconfigured. For a public
+	 * file this is exactly the legacy default() path (forVisibility('public')
+	 * === default()), so the public-files behaviour is unchanged.
+	 */
+	private function _cloud_driver() {
+		require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
+		return CloudStorageDriverFactory::forVisibilityWithFallback($this->_cloud_visibility());
+	}
+
+	/**
 	 * Delete original + every variant from the bucket. Best-effort: failures
 	 * are logged with CLOUD_STORAGE_ORPHAN so the admin can clean up manually,
 	 * then the row is deleted anyway. The orphan consumes a few KB-MB until
 	 * cleared with `aws s3 rm` or equivalent.
 	 */
 	private function _permanent_delete_cloud() {
-		require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
-		$driver = CloudStorageDriverFactory::default();
+		$driver = $this->_cloud_driver();
 		if (!$driver) {
 			error_log('CLOUD_STORAGE_ORPHAN: bucket=unknown keys=' . $this->remote_key_for('original') . ' (driver unconfigured)');
 			return;
@@ -455,8 +513,7 @@ public static function get_by_name($name, $search_deleted = false) {
 		$sizes = ImageSizeRegistry::get_sizes();
 
 		if ($this->get('fil_storage_driver') === 'cloud') {
-			require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
-			$driver = CloudStorageDriverFactory::default();
+			$driver = $this->_cloud_driver();
 			if (!$driver) {
 				return false;
 			}
@@ -541,8 +598,7 @@ public static function get_by_name($name, $search_deleted = false) {
 	 * a new variant (§7).
 	 */
 	private function _resize_cloud($size_key, $sizes) {
-		require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
-		$driver = CloudStorageDriverFactory::default();
+		$driver = $this->_cloud_driver();
 		if (!$driver) {
 			throw new FileException('Cannot re-resize cloud file: cloud storage driver not configured.');
 		}
@@ -676,9 +732,17 @@ public static function get_by_name($name, $search_deleted = false) {
 	/**
 	 * Pull bucket bytes back to the restricted local directory and flip the
 	 * row to fil_storage_driver='local'. Called from move_to_correct_directory()
-	 * when a cloud-stored row's permissions tighten so it's no longer public.
+	 * on a visibility flip, so the bytes land back on disk and the next offload
+	 * tick re-places them in the now-correct store.
 	 *
-	 * Three explicit phases with strict ordering (spec §6):
+	 * $source_visibility names the store the bytes are physically in (the row's
+	 * visibility BEFORE the flip), so the driver is resolved against the right
+	 * bucket — 'public' (default behaviour) or 'private'. Bytes always land in
+	 * the restricted dir; for a private→public flip the next public offload tick
+	 * moves them to the public bucket, and in the meantime is_viewable() returns
+	 * true for a now-public file, so serving is correct throughout.
+	 *
+	 * Three explicit phases with strict ordering:
 	 *
 	 *   Phase 1: pull every key (original + variants) to a temp dir. Failure
 	 *            → drop temps, leave bucket+DB unchanged, throw.
@@ -692,11 +756,13 @@ public static function get_by_name($name, $search_deleted = false) {
 	 * Invariants: bucket is authoritative until DB commit; temps live until
 	 * DB commit so they remain rollback material.
 	 */
-	private function _pull_back_from_cloud_to_private() {
+	private function _pull_back_from_cloud_to_local(string $source_visibility) {
 		require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
-		$driver = CloudStorageDriverFactory::default();
+		// Resolve the driver for the store that physically holds the bytes,
+		// working even mid-disable/drain (forVisibilityWithFallback).
+		$driver = CloudStorageDriverFactory::forVisibilityWithFallback($source_visibility);
 		if (!$driver) {
-			throw new FileException('Cannot pull file back from cloud: driver not configured.');
+			throw new FileException('Cannot pull file back from cloud: ' . $source_visibility . ' driver not configured.');
 		}
 
 		$filename = $this->get('fil_name');

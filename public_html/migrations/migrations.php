@@ -856,3 +856,11 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
+	// Collapse the per-store offload task pairs into one CloudOffloadRun tick.
+	// Hash-tracked (runs once) and idempotent, so no test gate is needed.
+	$migration['database_version'] = '135';
+	$migration['test'] = NULL;
+	$migration['migration_sql'] = NULL;
+	$migration['migration_file'] = 'migrate_offload_single_task.php';
+	$migrations[] = $migration;
+

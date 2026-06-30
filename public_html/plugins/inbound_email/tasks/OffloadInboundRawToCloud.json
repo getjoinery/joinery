@@ -1,5 +1,0 @@
-{
-    "name": "Offload Inbound Raw to Cloud",
-    "description": "Pushes local inbound-mail raw .eml files to the verified-private cloud store and flips each row's storage driver to cloud. Activated by the cloud-storage admin when the private store is enabled; the shared offload engine does the work.",
-    "default_frequency": "every_run"
-}

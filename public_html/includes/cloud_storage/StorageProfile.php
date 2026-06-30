@@ -75,9 +75,4 @@ interface StorageProfile {
 	 * yet). local_path is the final on-disk destination.
 	 */
 	public function reverseItemsForRow(int $id): array;
-
-	// --- task identity (per consumer, for scheduler tracking) --------------
-
-	public function forwardTaskClass(): string;
-	public function reverseTaskClass(): string;
 }
