@@ -147,8 +147,7 @@ class MailboxService {
 			// live in the Spam view) — specs/inbound_email_spam_filtering.md.
 			$sql = "SELECT iem_iea_inbound_email_alias_id AS alias_id,
 						COUNT(*) AS total,
-						COUNT(*) FILTER (WHERE iem_is_read = false) AS unread,
-						BOOL_OR(iem_is_starred) AS any_starred
+						COUNT(*) FILTER (WHERE iem_is_read = false) AS unread
 					FROM iem_inbound_email_messages
 					WHERE iem_delete_time IS NULL
 					AND iem_spam_verdict IS DISTINCT FROM 'spam'
@@ -186,7 +185,6 @@ class MailboxService {
 					'domain'      => $domain,
 					'unread'      => $row ? intval($row['unread']) : 0,
 					'total'       => $row ? intval($row['total']) : 0,
-					'any_starred' => $row ? (bool)$this->pgBool($row['any_starred']) : false,
 				);
 				// Tracked membership folders for the reader's folder rail + the move/
 				// labels control; the \All coverage view is excluded (the mailbox root
