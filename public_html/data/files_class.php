@@ -55,6 +55,7 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	    'fil_grp_group_id' => array('type'=>'int4'),
 	    'fil_evt_event_id' => array('type'=>'int4'),
 	    'fil_tier_min_level' => array('type'=>'int4', 'is_nullable'=>true),
+	    'fil_private' => array('type'=>'bool', 'is_nullable'=>false, 'default'=>'false'),
 	    'fil_storage_driver' => array('type'=>'varchar(32)', 'is_nullable'=>false, 'default'=>"'local'"),
 	    'fil_sync_failed_count' => array('type'=>'int4', 'is_nullable'=>false, 'default'=>'0'),
 	    'fil_sync_last_attempt' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
@@ -123,8 +124,21 @@ public static function get_by_name($name, $search_deleted = false) {
 	 *
 	 * @return bool
 	 */
+	/**
+	 * Is this file owner-or-admin private? Interprets the fil_private column
+	 * robustly across representations: PDO may hand back a native bool, a pg
+	 * 't'/'f' string, and a not-yet-reloaded new row carries the declared string
+	 * default 'false' (which is truthy in PHP) — so test membership of the "true"
+	 * set rather than raw truthiness. Only genuine true values count as private.
+	 */
+	private function _is_private() {
+		$v = $this->get('fil_private');
+		return ($v === true || $v === 't' || $v === 'true' || $v === '1' || $v === 1);
+	}
+
 	function is_public() {
 		if ($this->get('fil_delete_time')) return false;
+		if ($this->_is_private()) return false;
 		if ($this->get('fil_min_permission')) return false;
 		if ($this->get('fil_grp_group_id')) return false;
 		if ($this->get('fil_evt_event_id')) return false;
@@ -892,23 +906,18 @@ public static function get_by_name($name, $search_deleted = false) {
 		$drop_temps();
 	}
 
-	function authenticate_write($data) {
-		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
-			// If the user's ID doesn't match, we have to make
-			// sure they have admin access, otherwise denied.
-			if ($data['current_user_permission'] < 5) {
-				throw new SystemAuthenticationError(
-					'Current user does not have permission to edit this entry in '. static::$tablename);
-			}
-		}
-	}
+	// authenticate_write() is inherited from SystemBase — it applies the shared
+	// owner-or-admin rule (is_owner_or_admin), the same rule is_viewable() uses for
+	// private files. No File-specific override is needed.
 
 	/**
 	 * Content-visibility gate for the file-serving path (serve.php) — NOT API row
-	 * authorization. Returns bool: may this session view the file, given its
-	 * min-permission, group membership, event registration, and tier gating? A
-	 * separate question from authenticate_read (API ownership), so it carries its
-	 * own honest name and takes the session object directly.
+	 * authorization. Returns bool: may this session view the file? For a private
+	 * file (fil_private) the rule is owner-or-admin — the identical rule
+	 * authenticate_read uses for the record, via the shared is_owner_or_admin()
+	 * helper. Otherwise the four restriction columns apply (min-permission, group
+	 * membership, event registration, tier gating). fil_private is an alternative
+	 * to those columns, not combined with them.
 	 */
 	function is_viewable($session){
 		if(!$session){
@@ -917,6 +926,10 @@ public static function get_by_name($name, $search_deleted = false) {
 
 		if($this->get('fil_delete_time')){
 			return false;
+		}
+
+		if ($this->_is_private()) {
+			return $this->is_owner_or_admin($session->get_user_id(), $session->get_permission());
 		}
 
 		if($this->get('fil_min_permission')){

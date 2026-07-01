@@ -1599,21 +1599,32 @@ abstract class SystemBase {
 	 * (posts, pages) overrides authenticate_read to a no-op: you override to *open*,
 	 * never to close. The contract is throw-to-deny.
 	 */
-	function authenticate_read($data) {
+	/**
+	 * The platform ownership rule, shared by the record gates
+	 * (authenticate_read / authenticate_write) and the File serving gate
+	 * (File::is_viewable): a request is allowed when the session user owns this
+	 * row (the conventional {prefix}_usr_user_id column matches) or is staff
+	 * (permission >= 5). Models with no owner column fall to staff-only. One rule,
+	 * one place — the record gate and the serving gate can never drift apart.
+	 *
+	 * @return bool true when allowed
+	 */
+	protected function is_owner_or_admin($user_id, $permission) {
 		$owner_col = static::$prefix . '_usr_user_id';
 		$owner_matches = array_key_exists($owner_col, static::$field_specifications)
-			&& $this->get($owner_col) == $data['current_user_id'];
-		if (!$owner_matches && (int)$data['current_user_permission'] < 5) {
+			&& $this->get($owner_col) == $user_id;
+		return $owner_matches || (int)$permission >= 5;
+	}
+
+	function authenticate_read($data) {
+		if (!$this->is_owner_or_admin($data['current_user_id'], $data['current_user_permission'])) {
 			throw new SystemAuthenticationError(
 				'Current user does not have permission to view this entry in ' . static::$tablename);
 		}
 	}
 
 	function authenticate_write($data) {
-		$owner_col = static::$prefix . '_usr_user_id';
-		$owner_matches = array_key_exists($owner_col, static::$field_specifications)
-			&& $this->get($owner_col) == $data['current_user_id'];
-		if (!$owner_matches && (int)$data['current_user_permission'] < 5) {
+		if (!$this->is_owner_or_admin($data['current_user_id'], $data['current_user_permission'])) {
 			throw new SystemAuthenticationError(
 				'Current user does not have permission to edit this entry in ' . static::$tablename);
 		}
