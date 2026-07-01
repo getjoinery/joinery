@@ -22,7 +22,7 @@ use PHPMailer\PHPMailer\SMTP;
  * SMTP send (global, connected-account, per-mailbox) is "new SmtpMailer($config),
  * applyMessage($m), send()".
  *
- * @version 2.0
+ * @version 2.1
  */
 class SmtpMailer extends PHPMailer {
     // Only encoding is truly universal
@@ -155,7 +155,17 @@ class SmtpMailer extends PHPMailer {
             $this->addCustomHeader($name, $value);
         }
         foreach ($message->getAttachments() as $attachment) {
-            if (isset($attachment['data'])) {
+            if (!empty($attachment['cid'])) {
+                // Inline (embedded) image: render in the body via its cid: reference.
+                // PHPMailer takes an arbitrary Content-ID, so the bare token maps exactly.
+                $this->addStringEmbeddedImage(
+                    $attachment['data'],
+                    $attachment['cid'],
+                    $attachment['name'],
+                    PHPMailer::ENCODING_BASE64,
+                    $attachment['type'] ?? 'application/octet-stream'
+                );
+            } elseif (isset($attachment['data'])) {
                 $this->addStringAttachment(
                     $attachment['data'],
                     $attachment['name'],

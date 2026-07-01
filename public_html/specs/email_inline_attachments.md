@@ -1,6 +1,6 @@
 # Inline (embedded) attachments for outgoing email
 
-**Status:** Draft — design in progress
+**Status:** Implemented — code landed and tested (kept in `specs/` while its consumer spec `inbound_email_attachment_storage.md`, which references this path, is still in flight)
 **Layer:** core email — `includes/EmailMessage.php` and the transports in
 `includes/email_providers/` (+ `includes/SmtpMailer.php`)
 **Depends on:** nothing — this is a foundational email-layer capability.

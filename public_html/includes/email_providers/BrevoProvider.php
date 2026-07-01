@@ -252,6 +252,12 @@ class BrevoProvider implements EmailServiceProvider {
                     'content' => base64_encode(file_get_contents($a['path'])),
                 ];
             } elseif (isset($a['data'])) {
+                if (!empty($a['cid'])) {
+                    // The Brevo API has no Content-ID field, so an inline part cannot
+                    // embed — degrade it to a regular downloadable attachment. Declared
+                    // provider limitation, logged once so the fallback is visible.
+                    error_log('[BrevoProvider] Inline attachment degraded to regular attachment (no Content-ID support): cid=' . $a['cid']);
+                }
                 $attachments[] = [
                     'name' => $a['name'] ?: 'attachment',
                     'content' => base64_encode($a['data']),
