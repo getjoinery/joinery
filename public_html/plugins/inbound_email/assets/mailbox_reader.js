@@ -83,10 +83,10 @@
 		list.innerHTML = '';
 
 		state.mailboxes.forEach(function (m) {
-			list.appendChild(mailboxItem(m.address, m.alias_id, m.unread, m.any_starred, m.folders));
+			list.appendChild(mailboxItem(m.address, m.alias_id, m.unread, m.folders));
 		});
 		if (state.allAccess && data.unmatched && data.unmatched.total > 0) {
-			var li = mailboxItem('Unmatched', 'unmatched', data.unmatched.unread, false, []);
+			var li = mailboxItem('Unmatched', 'unmatched', data.unmatched.unread, []);
 			li.title = 'Unrouted mail that matched no mailbox';
 			list.appendChild(li);
 		}
@@ -96,13 +96,12 @@
 		renderFolderRail();
 	}
 
-	function mailboxItem(label, aliasId, unread, anyStarred, folders) {
+	function mailboxItem(label, aliasId, unread, folders) {
 		var li = el('li', 'mbx-mailbox');
 		li.dataset.alias = (aliasId == null ? '' : String(aliasId));
 		li._folders = folders || [];
 		var addr = el('span', 'mbx-mailbox-addr', label);
 		li.appendChild(addr);
-		if (anyStarred) li.appendChild(el('span', 'mbx-star-dot', '★'));
 		var badge = el('span', 'mbx-badge' + (unread ? '' : ' zero'), String(unread || 0));
 		li.appendChild(badge);
 		li.addEventListener('click', function () { selectMailbox(aliasId, label); });
@@ -192,8 +191,19 @@
 		});
 	}
 
+	// Remember the last-opened mailbox so a page refresh returns to it instead of
+	// snapping to whatever sorts first (the rail order shifts as unread changes).
+	var LAST_MAILBOX_KEY = 'mbx.lastAlias';
+	function rememberMailbox(aliasId) {
+		try { window.localStorage.setItem(LAST_MAILBOX_KEY, String(aliasId)); } catch (e) {}
+	}
+	function recallMailbox() {
+		try { return window.localStorage.getItem(LAST_MAILBOX_KEY); } catch (e) { return null; }
+	}
+
 	function selectMailbox(aliasId, label) {
 		closeThread();                    // leave any open conversation → show the list
+		rememberMailbox(aliasId);
 		state.aliasId = aliasId;
 		state.folderId = null;            // reset to the folder-unfiltered view
 		state.inboxView = true;           // default to the Inbox (non-archived) view
@@ -916,7 +926,21 @@
 		renderMailboxes(seed);
 
 		if (seed.mailboxes && seed.mailboxes.length) {
-			selectMailbox(seed.mailboxes[0].alias_id, seed.mailboxes[0].address);
+			// Reopen the last-viewed mailbox if it's still available; else the first.
+			var want = recallMailbox();
+			var pick = null;
+			if (want != null) {
+				pick = seed.mailboxes.filter(function (m) {
+					return String(m.alias_id) === want;
+				})[0];
+				if (!pick && want === 'unmatched' && seed.all_access && seed.unmatched) {
+					selectMailbox('unmatched', 'Unmatched');
+					pick = true;
+				}
+			}
+			if (pick === true) { /* already selected the Unmatched view above */ }
+			else if (pick) { selectMailbox(pick.alias_id, pick.address); }
+			else { selectMailbox(seed.mailboxes[0].alias_id, seed.mailboxes[0].address); }
 		} else {
 			$('#mbx-threads').appendChild(emptyRow(seed.all_access
 				? 'No mailboxes yet.'

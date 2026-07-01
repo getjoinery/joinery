@@ -72,7 +72,6 @@
 	padding: 1px 6px;
 }
 .mbx-badge.zero { display: none; }
-.mbx-star-dot { color: #f5b400; font-size: 12px; }
 
 .mbx-filters { display: flex; gap: 4px; margin-bottom: 10px; }
 .mbx-filter {
