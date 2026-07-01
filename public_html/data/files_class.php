@@ -1026,10 +1026,6 @@ class MultiFile extends SystemMultiBase {
 			$filters['fil_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
 		}
 
-		if (isset($this->options['source'])) {
-			$filters['fil_source'] = [$this->options['source'], PDO::PARAM_INT];
-		}
-
 		if (isset($this->options['picture'])) {
 			if ($this->options['picture']) {
 				$filters['fil_type'] = "LIKE 'image/%'";
