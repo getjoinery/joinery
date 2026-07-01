@@ -9,7 +9,7 @@ verified-private store; and
 `specs/file_private_owner_admin.md` — each attachment is an **owner-or-admin private
 `File`** (`fil_private`), so `is_viewable()` admits the mailbox owner and admins and no
 one else; and
-`specs/email_inline_attachments.md` — forwarding a message re-embeds its inline
+`specs/implemented/email_inline_attachments.md` — forwarding a message re-embeds its inline
 images, which needs `EmailMessage` to carry inline (Content-ID) attachments. All three
 capabilities must land first.
 
