@@ -306,6 +306,44 @@
 }
 .mbx-collapsed .mbx-message-body { display: none; }
 
+/* ---- Attachment chips (Gmail-style, below the content area) ---- */
+.mbx-attachments {
+	padding: 4px 12px 14px;
+	border-top: 1px solid #f1f3f5;
+}
+.mbx-collapsed .mbx-attachments { display: none; }
+.mbx-attachments-label {
+	font-size: 12px; color: #6b7280; font-weight: 600;
+	margin: 8px 0 6px;
+}
+.mbx-attachment-grid {
+	display: flex; flex-wrap: wrap; gap: 8px;
+}
+.mbx-attachment {
+	display: flex; align-items: center; gap: 10px;
+	max-width: 260px;
+	border: 1px solid #d7dee6; border-radius: 8px;
+	padding: 8px 12px 8px 10px;
+	background: #fbfcfd; text-decoration: none;
+	color: #1f2933; transition: background .12s, border-color .12s, box-shadow .12s;
+}
+.mbx-attachment:hover {
+	background: #eef4fd; border-color: #a9c6f2;
+	box-shadow: 0 1px 3px rgba(16,24,40,.10);
+}
+.mbx-attachment-icon {
+	flex: 0 0 auto; width: 30px; height: 30px;
+	object-fit: contain;
+	display: inline-flex; align-items: center; justify-content: center;
+}
+.mbx-attachment-icon--generic svg { width: 26px; height: 26px; }
+.mbx-attachment-meta { min-width: 0; }
+.mbx-attachment-name {
+	font-size: 13px; font-weight: 600;
+	white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mbx-attachment-size { font-size: 11px; color: #6b7280; margin-top: 1px; }
+
 /* Outbound (sent) messages read as the right-hand side of the dialog. */
 .mbx-message.mbx-outbound { border-color: #cfe0fb; }
 .mbx-message.mbx-outbound .mbx-message-head { background: #eef5ff; }

@@ -18,11 +18,14 @@
  * and returns an error the reader shows inline; the draft stays in the compose
  * panel for "fix and Send again" (spec §10).
  *
- * Forward re-attach dispatches on the source's iem_raw_storage_driver: 'remote'
- * fetches parts from the IMAP source; every other driver re-attaches from the
- * stored raw via InboundEmailMessage::getRawMessage() (specs/inbound_raw_message_storage.md).
+ * Forward re-attach is ONE manifest-driven loop dispatching each row on where its
+ * bytes live (specs/implemented/inbound_email_attachment_storage.md): a file-backed row
+ * (ima_fil_file_id) reads its private File; a 'remote' row fetches the part from
+ * the IMAP source; a legacy raw row extracts it from the stored raw. Inline (cid:)
+ * parts are re-embedded with their Content-ID via EmailMessage::attachInlineData()
+ * so forwarded inline images still render.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
@@ -294,97 +297,112 @@ class MailboxSender {
 	 * A reference-backed original no longer in the source mailbox fails the forward
 	 * (§10) rather than sending empty.
 	 */
+	/**
+	 * Re-attach the source message's original parts to a forward: ONE
+	 * manifest-driven loop dispatching each row on WHERE its bytes live
+	 * (specs/implemented/inbound_email_attachment_storage.md):
+	 *   - ima_fil_file_id set   → read the private File (push mail, lean record);
+	 *   - else 'remote'         → fetch the part from the IMAP source on demand;
+	 *   - else (legacy raw row) → extract the part from the stored raw.
+	 * An inline (cid:) part is re-embedded with its original Content-ID via
+	 * attachInlineData() so the forwarded HTML body's cid: references still resolve
+	 * in the recipient's client; every other part attaches normally. The whole
+	 * message is rebuilt fresh (forwarding re-signs DKIM/SRS), so byte-exact replay
+	 * was never on the wire. Returns the total bytes re-attached.
+	 */
 	private function attachOriginal(EmailMessage $email, InboundEmailMessage $source): int {
-		$driver = (string)$source->get('iem_raw_storage_driver') ?: 'inline';
-		if ($driver === 'remote') {
-			return $this->attachFromImap($email, $source, intval($source->get('iem_iia_inbound_imap_account_id')));
-		}
-		$raw = $source->getRawMessage();
-		if ($raw !== null && trim($raw) !== '') {
-			return $this->attachFromRaw($email, $raw);
-		}
-		return 0; // nothing stored to re-attach
-	}
-
-	private function attachFromImap(EmailMessage $email, InboundEmailMessage $source, int $account_id): int {
-		require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/ImapIngestor.php'));
-
-		$account = new InboundImapAccount($account_id, TRUE);
-		if (!$account->key) {
-			throw new MailboxSenderException('The source mailbox for this message no longer exists, so it cannot be forwarded.');
-		}
-
 		$manifest = new MultiInboundMessageAttachment(array(
 			'message_id' => intval($source->key),
-			'is_inline'  => false,
 		));
 		$manifest->load();
 		if (!count($manifest)) {
-			return 0; // no attachments to carry
+			return 0; // nothing to carry
 		}
 
-		$ingestor = new ImapIngestor($account);
-		$uid = intval($source->get('iem_imap_uid'));
-		$uidvalidity = $source->get('iem_imap_uidvalidity') !== null ? intval($source->get('iem_imap_uidvalidity')) : null;
-		$folder = (string)$source->get('iem_imap_folder');
-		$mid = $source->get('iem_message_id_header');
-
+		$ingestor = null; // opened lazily for the first 'remote' row, reused, closed below
 		$total = 0;
-		foreach ($manifest as $att) {
-			$res = $ingestor->fetchPart((string)$att->get('ima_mime_part'), $uid, $uidvalidity, $folder, $mid);
-			if (empty($res['ok'])) {
-				$ingestor->close();
-				throw new MailboxSenderException(
-					$res['message'] ?? 'The original message is no longer available in the source mailbox.');
+		try {
+			foreach ($manifest as $att) {
+				$bytes = $this->readOriginalPartBytes($att, $source, $ingestor);
+				if ($bytes === null) {
+					throw new MailboxSenderException('An original attachment is no longer available, so this message cannot be forwarded.');
+				}
+
+				$total += strlen($bytes);
+				if ($total > self::MAX_TOTAL_BYTES) {
+					throw new MailboxSenderException('The forwarded attachments exceed the size limit.');
+				}
+
+				$filename = $att->get('ima_filename') ?: 'attachment';
+				$type = (string)$att->get('ima_content_type') ?: 'application/octet-stream';
+				$cid  = trim((string)$att->get('ima_content_id'));
+
+				if ($this->isInlineRow($att) && $cid !== '') {
+					$email->attachInlineData($bytes, $cid, $filename, $type);
+				} else {
+					$email->attachData($bytes, $filename, $type);
+				}
 			}
-			$bytes = (string)$res['content'];
-			$total += strlen($bytes);
-			if ($total > self::MAX_TOTAL_BYTES) {
+		} finally {
+			if ($ingestor !== null) {
 				$ingestor->close();
-				throw new MailboxSenderException('The forwarded attachments exceed the size limit.');
 			}
-			$email->attachData($bytes,
-				$att->get('ima_filename') ?: 'attachment',
-				(string)$att->get('ima_content_type') ?: 'application/octet-stream');
 		}
-		$ingestor->close();
+
 		return $total;
 	}
 
-	private function attachFromRaw(EmailMessage $email, string $raw): int {
-		require_once(PathHelper::getComposerAutoloadPath());
-
-		try {
-			$part = Horde_Mime_Part::parseMessage($raw);
-		} catch (Throwable $e) {
-			error_log('MailboxSender: raw MIME parse failed: ' . $e->getMessage());
-			return 0;
+	/**
+	 * Fetch one original part's bytes by where they live (see attachOriginal).
+	 * Returns null when the bytes are gone (deleted File, IMAP miss, missing raw
+	 * section), which attachOriginal turns into a user-facing forward failure.
+	 * $ingestor is opened on the first 'remote' row and reused for the rest.
+	 */
+	private function readOriginalPartBytes(InboundMessageAttachment $att, InboundEmailMessage $source, &$ingestor): ?string {
+		$fil_id = intval($att->get('ima_fil_file_id'));
+		if ($fil_id > 0) {
+			require_once(PathHelper::getIncludePath('data/files_class.php'));
+			$file = new File($fil_id, TRUE);
+			if (!$file->key || $file->get('fil_delete_time')) {
+				return null;
+			}
+			return $file->read_bytes('original');
 		}
 
-		$total = 0;
-		foreach ($part->partIterator() as $p) {
-			if ($p->getPrimaryType() === 'multipart') {
-				continue;
+		$driver = (string)$source->get('iem_raw_storage_driver') ?: 'inline';
+		if ($driver === 'remote') {
+			if ($ingestor === null) {
+				$ingestor = $this->openImapIngestor($source);
 			}
-			$type = strtolower((string)$p->getType());
-			$name = $p->getName();
-			$disp = $p->getDisposition();
-			$isBodyText = ($type === 'text/plain' || $type === 'text/html')
-				&& $disp !== 'attachment' && ($name === null || $name === '');
-			if ($isBodyText) {
-				continue;
-			}
-			$bytes = (string)$p->getContents();
-			if ($bytes === '') {
-				continue;
-			}
-			$total += strlen($bytes);
-			if ($total > self::MAX_TOTAL_BYTES) {
-				throw new MailboxSenderException('The forwarded attachments exceed the size limit.');
-			}
-			$email->attachData($bytes, $name ?: 'attachment', $type ?: 'application/octet-stream');
+			$res = $ingestor->fetchPart(
+				(string)$att->get('ima_mime_part'),
+				intval($source->get('iem_imap_uid')),
+				$source->get('iem_imap_uidvalidity') !== null ? intval($source->get('iem_imap_uidvalidity')) : null,
+				(string)$source->get('iem_imap_folder'),
+				$source->get('iem_message_id_header')
+			);
+			return empty($res['ok']) ? null : (string)$res['content'];
 		}
-		return $total;
+
+		// Legacy raw row (inline/local/cloud stored raw): extract the one part.
+		$part = $source->getRawMimePart((string)$att->get('ima_mime_part'));
+		return $part === null ? null : (string)$part['content'];
+	}
+
+	/** Open (and validate) the IMAP ingestor for a 'remote' source message. */
+	private function openImapIngestor(InboundEmailMessage $source): ImapIngestor {
+		require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/ImapIngestor.php'));
+		$account = new InboundImapAccount(intval($source->get('iem_iia_inbound_imap_account_id')), TRUE);
+		if (!$account->key) {
+			throw new MailboxSenderException('The source mailbox for this message no longer exists, so it cannot be forwarded.');
+		}
+		return new ImapIngestor($account);
+	}
+
+	/** Robust truthiness for the ima_is_inline bool across PDO representations. */
+	private function isInlineRow(InboundMessageAttachment $att): bool {
+		$v = $att->get('ima_is_inline');
+		return ($v === true || $v === 't' || $v === 'true' || $v === '1' || $v === 1);
 	}
 
 	/** Attach validated uploads. $runningTotal carries any forwarded-original bytes. */

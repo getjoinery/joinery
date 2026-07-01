@@ -23,7 +23,7 @@
  * declaration is kept so the cascade registers automatically if core widens the
  * detector later.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -66,6 +66,22 @@ class InboundEmailMailboxGrant extends SystemBase {
 		$ids = array();
 		foreach ($grants as $g) {
 			$ids[] = intval($g->get('ieg_iea_inbound_email_alias_id'));
+		}
+		return $ids;
+	}
+
+	/**
+	 * Return the user ids granted access to an alias (the mailbox's members).
+	 *
+	 * @param int $alias_id
+	 * @return int[] user ids (may be empty)
+	 */
+	static function user_ids_for_alias(int $alias_id): array {
+		$grants = new MultiInboundEmailMailboxGrant(array('alias_id' => $alias_id));
+		$grants->load();
+		$ids = array();
+		foreach ($grants as $g) {
+			$ids[] = intval($g->get('ieg_usr_user_id'));
 		}
 		return $ids;
 	}
