@@ -2,23 +2,25 @@
 /**
  * Logic for the per-attachment download endpoint.
  *
- * Given an attachment id: load the manifest row + its message, enforce the SAME
- * mailbox-grant + permission check the reader uses (an attachment is exactly as
- * private as its message), then retrieve the part and stream it pass-through. The
- * bytes are never persisted on the platform.
+ * Given an attachment id: load the manifest row + its message, authorize, retrieve
+ * the bytes, and stream them pass-through with the original filename.
  *
- * Retrieval dispatches on the message's iem_raw_storage_driver:
- *   - 'remote' (IMAP-backed): fetch the single MIME part on demand via ImapIngestor
- *     (Message-ID fallback if UIDVALIDITY changed).
- *   - 'inline'/'local'/'cloud' (stored raw, push transports): MIME-parse the stored
- *     raw and extract the one part via InboundEmailMessage::getRawMimePart().
- * Dispatch is unified on the driver flag — account_id is no longer a dispatch signal
- * (it is purely the 'remote' locator), so the path is transport-blind.
+ * Retrieval dispatches on where the bytes live (specs/implemented/inbound_email_attachment_storage.md):
+ *   - file-backed (ima_fil_file_id set, push mail): the bytes are a private File.
+ *     Authorize with File::is_viewable() — owner-or-admin via fil_private, NOT the
+ *     mailbox grant — and stream the File's bytes. Attachment access is gated
+ *     independently of mailbox read access (and can be coarser for a shared mailbox).
+ *   - section-pointer / IMAP rows (no ima_fil_file_id): enforce the SAME mailbox-grant
+ *     check the reader uses, then dispatch on iem_raw_storage_driver —
+ *       · 'remote': fetch the single MIME part on demand via ImapIngestor
+ *         (Message-ID fallback if UIDVALIDITY changed);
+ *       · 'inline'/'local'/'cloud': MIME-parse the stored raw and extract the one
+ *         part via InboundEmailMessage::getRawMimePart().
  *
  * On success this streams and exit()s. On any failure it returns a LogicResult so
  * the view can render an honest message.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -50,58 +52,82 @@ function admin_inbound_email_attachment_logic(array $input): LogicResult {
 		return _attachment_error($session, $settings, 'The message for this attachment no longer exists.', $reader_url);
 	}
 
-	// Grant check — identical to the reader: an attachment is as private as its
-	// message. A NULL-alias (catch-all/unmatched) message is superadmin-only.
-	$viewer = MailboxViewer::fromSession($session);
-	$alias_id = intval($message->get('iem_iea_inbound_email_alias_id'));
-	$allowed = $alias_id > 0 ? $viewer->canAccess($alias_id) : $viewer->isAllAccess();
-	if (!$allowed) {
-		return _attachment_error($session, $settings, 'You do not have access to this mailbox.', $reader_url);
-	}
+	$fil_id = intval($att->get('ima_fil_file_id'));
 
-	// Retrieve the part by the message's raw-storage driver.
-	$driver = (string)$message->get('iem_raw_storage_driver') ?: 'inline';
-
-	if ($driver === 'remote') {
-		// IMAP on-demand single-part fetch.
-		$account_id = intval($message->get('iem_iia_inbound_imap_account_id'));
-		if ($account_id <= 0) {
-			return _attachment_error($session, $settings,
-				'The source mailbox for this message is no longer available.', $reader_url);
+	if ($fil_id > 0) {
+		// File-backed (push mail, lean record): the bytes are a private File.
+		// Authorize with File::is_viewable() — owner-or-admin via fil_private, the
+		// same algorithm serve.php's /uploads/* path uses — NOT the mailbox grant.
+		// (Mailbox read access governs the reader, enforced separately; the
+		// attachment File is gated independently and can be coarser for a shared
+		// mailbox — any admin. See specs/implemented/inbound_email_attachment_storage.md.)
+		require_once(PathHelper::getIncludePath('data/files_class.php'));
+		$file = new File($fil_id, TRUE);
+		if (!$file->key || $file->get('fil_delete_time')) {
+			return _attachment_error($session, $settings, 'This attachment is no longer available.', $reader_url);
 		}
-
-		require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_imap_account_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/ImapIngestor.php'));
-
-		$account = new InboundImapAccount($account_id, TRUE);
-		if (!$account->key) {
-			return _attachment_error($session, $settings,
-				'The source IMAP account for this message no longer exists.', $reader_url);
+		if (!$file->is_viewable($session)) {
+			return _attachment_error($session, $settings, 'You do not have access to this attachment.', $reader_url);
 		}
-
-		$ingestor = new ImapIngestor($account);
-		$result = $ingestor->fetchPart(
-			(string)$att->get('ima_mime_part'),
-			intval($message->get('iem_imap_uid')),
-			$message->get('iem_imap_uidvalidity') !== null ? intval($message->get('iem_imap_uidvalidity')) : null,
-			(string)$message->get('iem_imap_folder'),
-			$message->get('iem_message_id_header')
-		);
-		$ingestor->close();
-
-		if (empty($result['ok'])) {
-			return _attachment_error($session, $settings,
-				$result['message'] ?? 'This attachment is no longer available in the source mailbox.', $reader_url);
+		$content = $file->read_bytes('original');
+		if ($content === null) {
+			return _attachment_error($session, $settings, 'This attachment is no longer available.', $reader_url);
 		}
-		$content = (string)$result['content'];
 	} else {
-		// Stored raw (inline / local / cloud): MIME-parse and extract the one part.
-		$part = $message->getRawMimePart((string)$att->get('ima_mime_part'));
-		if ($part === null) {
-			return _attachment_error($session, $settings,
-				'This attachment is no longer available.', $reader_url);
+		// Section-pointer / IMAP rows: grant check — identical to the reader (an
+		// attachment is as private as its message). A NULL-alias (catch-all/
+		// unmatched) message is superadmin-only.
+		$viewer = MailboxViewer::fromSession($session);
+		$alias_id = intval($message->get('iem_iea_inbound_email_alias_id'));
+		$allowed = $alias_id > 0 ? $viewer->canAccess($alias_id) : $viewer->isAllAccess();
+		if (!$allowed) {
+			return _attachment_error($session, $settings, 'You do not have access to this mailbox.', $reader_url);
 		}
-		$content = (string)$part['content'];
+
+		// Retrieve the part by the message's raw-storage driver.
+		$driver = (string)$message->get('iem_raw_storage_driver') ?: 'inline';
+
+		if ($driver === 'remote') {
+			// IMAP on-demand single-part fetch.
+			$account_id = intval($message->get('iem_iia_inbound_imap_account_id'));
+			if ($account_id <= 0) {
+				return _attachment_error($session, $settings,
+					'The source mailbox for this message is no longer available.', $reader_url);
+			}
+
+			require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_imap_account_class.php'));
+			require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/ImapIngestor.php'));
+
+			$account = new InboundImapAccount($account_id, TRUE);
+			if (!$account->key) {
+				return _attachment_error($session, $settings,
+					'The source IMAP account for this message no longer exists.', $reader_url);
+			}
+
+			$ingestor = new ImapIngestor($account);
+			$result = $ingestor->fetchPart(
+				(string)$att->get('ima_mime_part'),
+				intval($message->get('iem_imap_uid')),
+				$message->get('iem_imap_uidvalidity') !== null ? intval($message->get('iem_imap_uidvalidity')) : null,
+				(string)$message->get('iem_imap_folder'),
+				$message->get('iem_message_id_header')
+			);
+			$ingestor->close();
+
+			if (empty($result['ok'])) {
+				return _attachment_error($session, $settings,
+					$result['message'] ?? 'This attachment is no longer available in the source mailbox.', $reader_url);
+			}
+			$content = (string)$result['content'];
+		} else {
+			// Stored raw (inline / local / cloud): MIME-parse and extract the one part.
+			$part = $message->getRawMimePart((string)$att->get('ima_mime_part'));
+			if ($part === null) {
+				return _attachment_error($session, $settings,
+					'This attachment is no longer available.', $reader_url);
+			}
+			$content = (string)$part['content'];
+		}
 	}
 
 	// Stream pass-through. Sanitize the filename for the header (strip CR/LF and

@@ -599,7 +599,86 @@
 		}
 
 		wrap.appendChild(body);
+
+		// Gmail-style attachment chips below the content area.
+		if (m.attachments && m.attachments.length) {
+			wrap.appendChild(attachmentsBlock(m.attachments));
+		}
+
 		return wrap;
+	}
+
+	// A row of download chips (icon + name + size) for a message's attachments.
+	function attachmentsBlock(atts) {
+		var box = el('div', 'mbx-attachments');
+		box.appendChild(el('div', 'mbx-attachments-label',
+			atts.length + (atts.length === 1 ? ' attachment' : ' attachments')));
+
+		var grid = el('div', 'mbx-attachment-grid');
+		atts.forEach(function (a) {
+			var name = a.filename || 'attachment';
+			var size = fmtBytes(a.size_bytes);
+			var chip = el('a', 'mbx-attachment');
+			chip.href = '/plugins/inbound_email/admin/admin_inbound_email_attachment?ima_inbound_message_attachment_id='
+				+ encodeURIComponent(a.id);
+			chip.target = '_blank';
+			chip.rel = 'noopener';
+			chip.title = name + ' (' + size + ')';
+
+			chip.appendChild(fileIcon(a.content_type, name));
+			var meta = el('div', 'mbx-attachment-meta');
+			meta.appendChild(el('div', 'mbx-attachment-name', name));
+			meta.appendChild(el('div', 'mbx-attachment-size', size));
+			chip.appendChild(meta);
+			grid.appendChild(chip);
+		});
+		box.appendChild(grid);
+		return box;
+	}
+
+	// Human-readable byte size.
+	function fmtBytes(n) {
+		n = Number(n) || 0;
+		if (n < 1024) return n + ' B';
+		if (n < 1024 * 1024) return Math.round(n / 1024) + ' KB';
+		return (n / (1024 * 1024)).toFixed(1) + ' MB';
+	}
+
+	// A file-type icon element, using the SAME image assets the admin Files page
+	// uses (pdf / Word / Excel), an image placeholder for pictures, and a neutral
+	// document glyph for types the Files page doesn't special-case.
+	function fileIcon(type, name) {
+		type = (type || '').toLowerCase();
+		var lname = (name || '').toLowerCase();
+		function ends(suf) { return lname.length >= suf.length && lname.slice(-suf.length) === suf; }
+
+		var src = null;
+		if (type.indexOf('image/') === 0) {
+			src = '/assets/images/image_placeholder.png';
+		} else if (type.indexOf('application/pdf') !== -1 || ends('.pdf')) {
+			src = '/assets/images/pdf_icon_80px.png';
+		} else if (type.indexOf('msword') !== -1 || type.indexOf('wordprocessingml.document') !== -1 ||
+			ends('.doc') || ends('.docx')) {
+			src = '/assets/images/microsoft_word_icon_80px.png';
+		} else if (type.indexOf('spreadsheetml') !== -1 || type.indexOf('ms-excel') !== -1 ||
+			ends('.xls') || ends('.xlsx')) {
+			src = '/assets/images/excel_icon_80px.png';
+		}
+
+		if (src) {
+			var img = el('img', 'mbx-attachment-icon');
+			img.src = src;
+			img.alt = '';
+			img.loading = 'lazy';
+			return img;
+		}
+
+		// Neutral document glyph (inline SVG so it always renders).
+		var span = el('span', 'mbx-attachment-icon mbx-attachment-icon--generic');
+		span.innerHTML = '<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">'
+			+ '<path fill="#9aa5b1" d="M6 2h8l6 6v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>'
+			+ '<path fill="#e4e7eb" d="M14 2l6 6h-6z"/></svg>';
+		return span;
 	}
 
 	// Gmail-style per-message kebab (⋮) menu — currently holds the raw / .eml

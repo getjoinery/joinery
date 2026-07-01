@@ -54,7 +54,7 @@
  * its numeric score for display/tuning only (never disposition); iem_learned_verdict
  * tracks what the LearnSpamFeedback task has taught rspamd's Bayes classifier.
  *
- * @version 1.7
+ * @version 1.8
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -213,12 +213,41 @@ class InboundEmailMessage extends SystemBase {
 	}
 
 	/**
-	 * Hard delete: reclaim the stored raw object (local file or private-store
-	 * object) before the row goes. Soft delete leaves the object in place (the
-	 * row is recoverable). The ima_ manifest cascades via $foreign_key_actions.
-	 * This is the single reclaim path — no separate orphan sweep.
+	 * Hard delete: reclaim the message's attachment bytes before the row goes.
+	 * Under the lean-record model those bytes are file-backed attachment Files
+	 * (specs/implemented/inbound_email_attachment_storage.md); on the fallback path they are
+	 * inside the stored raw object (local file or private-store object). Both are
+	 * reclaimed here — the single reclaim path, no separate orphan sweep. Soft
+	 * delete leaves everything in place (the row is recoverable). The ima_
+	 * manifest itself cascades via $foreign_key_actions.
 	 */
 	function permanent_delete($debug = false) {
+		// File-backed attachments: delete each linked File (bytes live only there).
+		// Collect BEFORE the manifest rows cascade away in parent::permanent_delete().
+		try {
+			require_once(PathHelper::getIncludePath('data/files_class.php'));
+			require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_message_attachment_class.php'));
+			$manifest = new MultiInboundMessageAttachment(array('message_id' => intval($this->key), 'file_backed' => true));
+			$manifest->load();
+			foreach ($manifest as $att) {
+				$fil_id = intval($att->get('ima_fil_file_id'));
+				if ($fil_id > 0) {
+					$file = new File($fil_id, TRUE);
+					if ($file->key) {
+						try { $file->permanent_delete(); }
+						catch (Throwable $e) {
+							error_log('InboundEmailMessage: attachment File reclaim on purge failed (fil=' . $fil_id
+								. ', id=' . $this->key . '): ' . $e->getMessage());
+						}
+					}
+				}
+			}
+		} catch (Throwable $e) {
+			error_log('InboundEmailMessage: attachment File reclaim enumeration failed (id=' . $this->key
+				. '): ' . $e->getMessage());
+		}
+
+		// Fallback path: reclaim the stored raw object if one was persisted.
 		$driver = (string)$this->get('iem_raw_storage_driver');
 		$key    = (string)$this->get('iem_raw_storage_key');
 		if ($driver === 'local' || $driver === 'cloud') {

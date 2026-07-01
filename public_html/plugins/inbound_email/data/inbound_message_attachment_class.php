@@ -15,7 +15,16 @@
  * MIME parser over their stored raw and reusing the same endpoint + reader UI — no
  * new schema.
  *
- * @version 1.0
+ * ATTACHMENT BYTES (specs/implemented/inbound_email_attachment_storage.md). For push mail
+ * (Postfix/Mailgun, stored-raw transports) each non-text part is extracted at
+ * ingest into a private File and linked here via ima_fil_file_id — the bytes
+ * live in exactly one place (the File), not inside a retained raw. A row with
+ * ima_fil_file_id set is file-backed: serve / forward read the File. A row
+ * without it is a section-pointer into a stored raw (legacy/fallback) or an
+ * IMAP ('remote') part fetched on demand via ima_mime_part. Presence of
+ * ima_fil_file_id — not the transport — is what dispatch keys on.
+ *
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -41,6 +50,9 @@ class InboundMessageAttachment extends SystemBase {
 		'ima_encoding'      => array('type'=>'varchar(40)'),
 		'ima_content_id'    => array('type'=>'varchar(255)'),
 		'ima_is_inline'     => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+		// Set ⇒ the bytes are a private File (push mail); absent ⇒ section-pointer
+		// into a stored raw (legacy/fallback) or an IMAP on-demand part.
+		'ima_fil_file_id'   => array('type'=>'int8', 'is_nullable'=>true),
 		'ima_create_time'   => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
 
@@ -76,6 +88,11 @@ class MultiInboundMessageAttachment extends SystemMultiBase {
 		// HTML body) — what the reader's attachment list shows.
 		if (isset($this->options['is_inline'])) {
 			$filters['ima_is_inline'] = $this->options['is_inline'] ? '= true' : '= false';
+		}
+
+		// File-backed (bytes stored as a private File) vs. section-pointer rows.
+		if (isset($this->options['file_backed'])) {
+			$filters['ima_fil_file_id'] = $this->options['file_backed'] ? 'IS NOT NULL' : 'IS NULL';
 		}
 
 		return $this->_get_resultsv2('ima_inbound_message_attachments', $filters, $this->order_by, $only_count, $debug);

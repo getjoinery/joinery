@@ -2,7 +2,7 @@
 
 **Status:** Draft / awaiting implementation
 **Version:** 1.1
-**Builds on:** `specs/inbound_email_attachment_storage.md` (attachments are
+**Builds on:** `specs/implemented/inbound_email_attachment_storage.md` (attachments are
 discrete private `File` objects, not bytes inside a raw blob) and
 `specs/implemented/file_private_storage.md` (private `File` offload + gated serving). This spec
 assumes both are in place: there is **no attachment-laden raw to seal** — content

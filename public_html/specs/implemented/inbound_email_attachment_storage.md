@@ -1,6 +1,6 @@
 # Inbound email — attachments as files (lean-record storage)
 
-**Status:** Draft — design in progress
+**Status:** Implemented — code landed and tested; Gmail-style attachment chips added to the reader.
 **Plugin:** `inbound_email` (with core `File`)
 **Depends on:**
 `specs/implemented/file_private_storage.md` — attachments are stored as

@@ -33,13 +33,19 @@
  * (UNIQUE on iem_message_id_header, iem_recipient) is shared with the push path,
  * so re-fetching a message stores nothing new. See specs/inbound_imap_provider.md.
  *
- * The raw RFC822 of a stored push message does NOT live in the database. storeMessage
- * inserts the row with an empty iem_raw_message, writes the raw to the local store via
- * RawMessageStore (descriptor: driver='local' + key), and writes the ima_ attachment
- * manifest by MIME-parsing the raw — giving push mail the same per-attachment list +
- * download IMAP has. A local-write failure falls back to an inline write. The shared
- * CloudOffloadEngine later offloads 'local' rows to the verified-private store. See
- * specs/inbound_raw_message_storage.md.
+ * A stored push message is a LEAN RECORD (specs/implemented/inbound_email_attachment_storage.md):
+ * headers + decoded text bodies + the ima_ manifest, with each non-text MIME part
+ * extracted at ingest into a private File (linked by ima_fil_file_id). The bytes live
+ * in exactly one place — the File — so nothing is stored twice; the offload drain and
+ * per-attachment encryption come for free from the File machinery. On the happy path
+ * NO raw is retained (iem_raw_storage_driver stays 'inline' with an empty body). The
+ * extraction is all-or-nothing per message: if any File write fails (disk full), the
+ * message's Files are rolled back and it FALLS BACK to persisting the whole raw via
+ * RawMessageStore (descriptor: driver='local' + key) with a section-pointer manifest —
+ * today's storage shape — and a local-write failure falls back again to an inline
+ * write. Ingest never aborts. The degradation chain is lean record → raw-to-disk →
+ * inline-in-DB. IMAP ('remote') mail is untouched — its parts stay on the server and
+ * are fetched on demand. See specs/inbound_raw_message_storage.md.
  *
  * Spam disposition (specs/inbound_email_spam_filtering.md): classifySpam() turns the
  * already-resolved auth verdicts into a 'ham'/'spam' verdict (primary rule: DMARC
@@ -60,7 +66,7 @@
  * paths alike, never IMAP-polled mail. forwardStoredMessage() relays a copy for a filter's
  * "Forward to" action, reusing the alias-forward envelope rebuild + relay.
  *
- * @version 1.15
+ * @version 1.16
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -70,6 +76,9 @@ require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_emai
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_log_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_message_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_message_attachment_class.php'));
+require_once(PathHelper::getIncludePath('data/files_class.php'));
+require_once(PathHelper::getIncludePath('data/users_class.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_mailbox_grant_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/RawMessageStore.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/AuthenticationResults.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/SRSRewriter.php'));
@@ -392,9 +401,9 @@ class InboundEmailRouter {
 			throw $e;
 		}
 
-		// Row inserted (we now have the serial id): write the raw to the local
-		// store, stamp the descriptor, and write the attachment manifest.
-		$this->persistRawAndManifest(intval($msg->key), $raw_email);
+		// Row inserted (we now have the serial id): split attachments into private
+		// Files and store the lean record (or fall back to raw storage on failure).
+		$this->persistRawAndManifest(intval($msg->key), $raw_email, $alias);
 
 		// Inbound filters (specs/implemented/inbound_email_filters.md). storeMessage
 		// is the single local-only post-persist point, reached by every locally-
@@ -414,24 +423,178 @@ class InboundEmailRouter {
 	}
 
 	/**
-	 * Move the raw RFC822 off-row and record the attachment manifest for a
-	 * freshly-inserted push message.
+	 * Store a freshly-inserted push message as a LEAN RECORD: split every
+	 * non-text MIME part into a private File and link it from the manifest,
+	 * retaining NO raw (specs/implemented/inbound_email_attachment_storage.md).
 	 *
-	 *  1. RawMessageStore::write() → LOCAL file, then UPDATE the descriptor
-	 *     (driver='local', key). Ingest never blocks on bucket I/O; the shared
-	 *     engine offloads to the private store later.
-	 *  2. Write the ima_ manifest by MIME-parsing the raw — the same row shape
-	 *     ImapIngestor::writeManifest() produces from BODYSTRUCTURE, so push mail
-	 *     gets the same per-attachment list + download as IMAP mail.
-	 *  3. On a local-write failure, fall back to an inline write (raw in
-	 *     iem_raw_message) and log a loud marker — the one place a new 'inline'
-	 *     write still happens.
+	 * All-or-nothing per message:
+	 *  - Happy path — every part extracts to a File: the manifest links each and
+	 *    the raw is not persisted (iem_raw_storage_driver stays 'inline', body
+	 *    empty; getRawMessage() then returns null).
+	 *  - Failure path — any File write fails (disk full, the pressure this design
+	 *    relieves): roll back this message's Files + manifest rows, then fall back
+	 *    to today's raw storage — RawMessageStore::write() the raw with a
+	 *    section-pointer manifest, and if that fails too, an inline write.
 	 *
-	 * Manifest and storage are independent: the manifest is written regardless
-	 * of which tier the raw landed on. Neither failure aborts ingest (the
-	 * message is already stored and its bodies extracted).
+	 * Ingest never aborts; a message always lands in whichever shape succeeded.
+	 * The fallback is logged (a distinct marker) so an operator sees disk pressure.
 	 */
-	private function persistRawAndManifest(int $message_id, string $raw_email) {
+	private function persistRawAndManifest(int $message_id, string $raw_email, $alias = null) {
+		try {
+			$this->extractAttachmentsToFiles($message_id, $raw_email, $alias);
+			return; // lean record: Files written, manifest linked, no raw retained
+		} catch (\Throwable $e) {
+			// extractAttachmentsToFiles() rolled back its own Files + manifest rows.
+			error_log('INBOUND_ATTACHMENT_EXTRACTION_FAILED message_id=' . $message_id
+				. ' (falling back to raw storage): ' . $e->getMessage());
+		}
+
+		// Fallback: persist the whole raw and write a section-pointer manifest —
+		// the pre-lean storage shape, still fully supported by download/forward.
+		$this->persistRawFallback($message_id, $raw_email);
+		try {
+			$this->writeManifestFromRaw($message_id, $raw_email);
+		} catch (\Throwable $e) {
+			error_log('InboundEmailRouter: attachment manifest write failed for message ' . $message_id . ': ' . $e->getMessage());
+		}
+	}
+
+	/**
+	 * The lean-record split. MIME-parse the raw, and for each non-text part mint
+	 * a private File (owner-or-admin via fil_private) and a manifest row linking
+	 * it. Throws on any failure AFTER rolling back every File + manifest row it
+	 * created for this message, so the caller's fallback starts from a clean slate.
+	 *
+	 * Files are created first (the failure-prone step — disk I/O); the manifest
+	 * rows are written only once every File exists, so a partial File failure
+	 * never leaves dangling links.
+	 */
+	private function extractAttachmentsToFiles(int $message_id, string $raw_email, $alias) {
+		$owner_id = $this->attachmentOwnerId($alias);
+		$parts    = $this->enumerateNonTextParts($raw_email);
+
+		$created_files = array(); // File[] — for rollback
+		$rows = array();          // pending ima_ row arrays
+
+		try {
+			// Phase 1: mint a private File per part (all-or-nothing).
+			foreach ($parts as $part) {
+				$bytes = (string)$part->getContents();
+				$cid   = $part->getContentId();
+				$disp  = $part->getDisposition();
+				$isInline = ($disp === 'inline') || ($cid !== null && $cid !== '' && $disp !== 'attachment');
+				$name = $part->getName() ? substr($part->getName(), 0, 500) : null;
+				$type = (string)$part->getType() ?: 'application/octet-stream';
+
+				// No resize()/variants — email attachments are served as their
+				// original; skipping resize is exactly the small-VPS relief.
+				$file = File::createFromBytes(
+					$bytes,
+					$name !== null ? $name : 'attachment',
+					$type,
+					$owner_id,
+					array('fil_private' => true)
+				);
+				$created_files[] = $file;
+
+				$rows[] = array(
+					'ima_iem_inbound_email_message_id' => $message_id,
+					'ima_filename'     => $name,
+					'ima_content_type' => substr($type, 0, 255),
+					'ima_size_bytes'   => strlen($bytes),
+					'ima_mime_part'    => substr((string)$part->getMimeId(), 0, 40),
+					'ima_encoding'     => substr($this->partTransferEncoding($part), 0, 40),
+					'ima_content_id'   => $cid ? substr(trim($cid, '<>'), 0, 255) : null,
+					'ima_is_inline'    => $isInline,
+					'ima_fil_file_id'  => intval($file->key),
+				);
+			}
+
+			// Phase 2: write the manifest rows now every File exists.
+			foreach ($rows as $row) {
+				InboundMessageAttachment::CreateEntry($row);
+			}
+		} catch (\Throwable $e) {
+			foreach ($created_files as $f) {
+				try { $f->permanent_delete(); } catch (\Throwable $ignore) {}
+			}
+			$this->deleteManifestRows($message_id);
+			throw $e;
+		}
+	}
+
+	/**
+	 * The user who owns a message's attachment Files. With fil_private the owner
+	 * IS the access subject (plus admins), so this decides who — besides admins —
+	 * can see them:
+	 *  - a single-grantee alias (an individual mailbox) → that user, so a
+	 *    permission-0 owner sees their own attachments;
+	 *  - a shared alias (several grantees) or an ownerless catch-all/NULL alias →
+	 *    User::USER_SYSTEM, which matches no human, so only admins see them
+	 *    (the accepted shared-mailbox tradeoff; see the spec's Access model).
+	 */
+	private function attachmentOwnerId($alias): int {
+		if ($alias && $alias->key) {
+			$grantees = InboundEmailMailboxGrant::user_ids_for_alias(intval($alias->key));
+			if (count($grantees) === 1) {
+				return intval($grantees[0]);
+			}
+		}
+		return User::USER_SYSTEM;
+	}
+
+	/**
+	 * The non-text MIME parts of a raw message (attachments AND inline cid:
+	 * parts), mirroring ImapIngestor::writeManifest()'s enumeration: the first
+	 * inline text/plain and text/html parts are the bodies (skipped), every other
+	 * non-multipart part is returned. Shared by the lean-record split and the
+	 * fallback manifest writer so both see exactly the same part set.
+	 *
+	 * @return Horde_Mime_Part[]
+	 */
+	private function enumerateNonTextParts(string $raw_email): array {
+		require_once(PathHelper::getComposerAutoloadPath());
+
+		$message = Horde_Mime_Part::parseMessage($raw_email);
+
+		$bodyPlainId = null; $bodyHtmlId = null; $parts = array();
+		foreach ($message->partIterator() as $part) {
+			if ($part->getPrimaryType() === 'multipart') { continue; }
+			$id   = (string)$part->getMimeId();
+			$type = strtolower((string)$part->getType());
+			$name = $part->getName();
+			$disp = $part->getDisposition();
+			$isInlineText = ($type === 'text/plain' || $type === 'text/html')
+				&& $disp !== 'attachment' && ($name === null || $name === '');
+			if ($isInlineText && $type === 'text/plain' && $bodyPlainId === null) { $bodyPlainId = $id; continue; }
+			if ($isInlineText && $type === 'text/html'  && $bodyHtmlId  === null) { $bodyHtmlId  = $id; continue; }
+			$parts[] = $part;
+		}
+
+		return $parts;
+	}
+
+	/** Hard-delete every manifest row for a message (rollback of a failed split). */
+	private function deleteManifestRows(int $message_id) {
+		try {
+			$rows = new MultiInboundMessageAttachment(array('message_id' => $message_id));
+			$rows->load();
+			foreach ($rows as $row) {
+				try { $row->permanent_delete(); } catch (\Throwable $ignore) {}
+			}
+		} catch (\Throwable $e) {
+			error_log('InboundEmailRouter: manifest rollback failed for message ' . $message_id . ': ' . $e->getMessage());
+		}
+	}
+
+	/**
+	 * Persist the whole raw off-row (the fallback when attachment extraction
+	 * fails): RawMessageStore::write() → LOCAL file + descriptor (driver='local',
+	 * key); the shared engine offloads to the private store later. A local-write
+	 * failure keeps the raw inline (iem_raw_message) so nothing is lost — the one
+	 * place a new 'inline' write still happens.
+	 */
+	private function persistRawFallback(int $message_id, string $raw_email) {
 		$db = DbConnector::get_instance()->get_db_link();
 
 		try {
@@ -454,40 +617,16 @@ class InboundEmailRouter {
 				error_log('INBOUND_RAW_INLINE_FALLBACK_FAILED message_id=' . $message_id . ': ' . $e2->getMessage());
 			}
 		}
-
-		try {
-			$this->writeManifestFromRaw($message_id, $raw_email);
-		} catch (\Throwable $e) {
-			error_log('InboundEmailRouter: attachment manifest write failed for message ' . $message_id . ': ' . $e->getMessage());
-		}
 	}
 
 	/**
-	 * Write one ima_ manifest row per non-text MIME part by parsing the raw,
-	 * mirroring ImapIngestor::writeManifest() (which reads BODYSTRUCTURE). The
-	 * first inline text/plain and text/html parts are the bodies (skipped);
-	 * everything else non-multipart is a manifest entry. The MIME-section ids
-	 * (getMimeId) match what getRawMimePart() resolves, since both parse the
-	 * same raw with the same Horde method.
+	 * Write one ima_ section-pointer manifest row per non-text MIME part (the
+	 * fallback path — bytes stay inside the stored raw, ima_fil_file_id is null).
+	 * The MIME-section ids (getMimeId) match what getRawMimePart() resolves, since
+	 * both parse the same raw with the same Horde method.
 	 */
 	private function writeManifestFromRaw(int $message_id, string $raw_email) {
-		require_once(PathHelper::getComposerAutoloadPath());
-
-		$message = Horde_Mime_Part::parseMessage($raw_email);
-
-		$bodyPlainId = null; $bodyHtmlId = null; $parts = array();
-		foreach ($message->partIterator() as $part) {
-			if ($part->getPrimaryType() === 'multipart') { continue; }
-			$id   = (string)$part->getMimeId();
-			$type = strtolower((string)$part->getType());
-			$name = $part->getName();
-			$disp = $part->getDisposition();
-			$isInlineText = ($type === 'text/plain' || $type === 'text/html')
-				&& $disp !== 'attachment' && ($name === null || $name === '');
-			if ($isInlineText && $type === 'text/plain' && $bodyPlainId === null) { $bodyPlainId = $id; continue; }
-			if ($isInlineText && $type === 'text/html'  && $bodyHtmlId  === null) { $bodyHtmlId  = $id; continue; }
-			$parts[] = $part;
-		}
+		$parts = $this->enumerateNonTextParts($raw_email);
 
 		foreach ($parts as $part) {
 			$cid  = $part->getContentId();

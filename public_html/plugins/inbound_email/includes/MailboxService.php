@@ -33,7 +33,7 @@
  * archived rows (iem_is_archived); All Mail shows them. setArchived() is the manual
  * Archive / Move-to-Inbox action, symmetric with a filter's archive action.
  *
- * @version 1.5
+ * @version 1.6
  */
 
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/MailboxViewer.php'));
@@ -603,8 +603,13 @@ class MailboxService {
 				ORDER BY iem_received_time ASC, iem_inbound_email_message_id ASC";
 		$rows = $db->query($sql)->fetchAll(PDO::FETCH_ASSOC);
 
+		// Per-message attachment list for the reader (non-inline parts only — inline
+		// cid: parts belong to the HTML body). One query for the whole thread.
+		$att_by_msg = $this->attachmentsForMessages($ids);
+
 		$out = array();
 		foreach ($rows as $r) {
+			$mid = intval($r['iem_inbound_email_message_id']);
 			$out[] = array(
 				'id'                => intval($r['iem_inbound_email_message_id']),
 				'alias_id'          => $r['iem_iea_inbound_email_alias_id'] !== null
@@ -628,9 +633,47 @@ class MailboxService {
 				'direction'         => $r['iem_direction'] ?: 'inbound',
 				'body_plain'        => $r['iem_body_plain'],
 				'body_html'         => $r['iem_body_html'],
+				'attachments'       => $att_by_msg[$mid] ?? array(),
 			);
 		}
 		return $out;
+	}
+
+	/**
+	 * The non-inline attachment manifest for a set of messages, grouped by message
+	 * id — what the reader lists below each message. Each entry carries what a
+	 * download chip needs: the manifest id (the download endpoint's key), filename,
+	 * content type, and size. Inline (cid:) parts are excluded (they belong to the
+	 * HTML body). Bytes are never loaded here — the chip links to the gated
+	 * per-attachment download endpoint.
+	 *
+	 * @param int[] $message_ids
+	 * @return array<int, array<int, array>>  message_id => [ {id, filename, content_type, size_bytes}, ... ]
+	 */
+	private function attachmentsForMessages(array $message_ids): array {
+		if (!count($message_ids)) {
+			return array();
+		}
+		$in = implode(',', array_map('intval', $message_ids));
+		$db = $this->db();
+		$sql = "SELECT ima_inbound_message_attachment_id, ima_iem_inbound_email_message_id,
+					ima_filename, ima_content_type, ima_size_bytes
+				FROM ima_inbound_message_attachments
+				WHERE ima_iem_inbound_email_message_id IN ($in) AND ima_is_inline = false
+				ORDER BY ima_inbound_message_attachment_id ASC";
+		$rows = $db->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+
+		$by_msg = array();
+		foreach ($rows as $r) {
+			$mid = intval($r['ima_iem_inbound_email_message_id']);
+			$by_msg[$mid][] = array(
+				'id'           => intval($r['ima_inbound_message_attachment_id']),
+				'filename'     => $r['ima_filename'] ?: 'attachment',
+				'content_type' => $r['ima_content_type'] ?: 'application/octet-stream',
+				'size_bytes'   => intval($r['ima_size_bytes']),
+			);
+		}
+		return $by_msg;
 	}
 
 	/**

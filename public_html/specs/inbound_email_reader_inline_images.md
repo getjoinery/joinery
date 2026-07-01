@@ -2,7 +2,7 @@
 
 **Status:** Draft — design in progress
 **Plugin:** `inbound_email`
-**Depends on:** `specs/inbound_email_attachment_storage.md` — inline parts are stored as
+**Depends on:** `specs/implemented/inbound_email_attachment_storage.md` — inline parts are stored as
 `File` objects on the manifest (`ima_fil_file_id`, `ima_content_id`, `ima_is_inline`),
 gated by `fil_private` (owner-or-admin). That extraction must land first; this
 spec only *renders* what it stored.

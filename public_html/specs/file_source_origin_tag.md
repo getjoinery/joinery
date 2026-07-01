@@ -4,7 +4,7 @@
 **Layer:** core file model — `data/files_class.php` (`File` + `MultiFile`), the two
 core file-creation sites, and the core files browser (`adm/admin_files.php`)
 **Depends on:** nothing — this is a foundational file-layer capability.
-**Consumed by:** `specs/inbound_email_attachment_storage.md` (so the files browser can
+**Consumed by:** `specs/implemented/inbound_email_attachment_storage.md` (so the files browser can
 separate — or exclude — email attachments without the core browser knowing the
 inbound-email tables exist). Likely future consumers: any subsystem that wants its
 files distinguishable in the browser (reports, imports, generated exports).

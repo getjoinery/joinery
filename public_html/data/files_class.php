@@ -89,6 +89,107 @@ public static function get_by_name($name, $search_deleted = false) {
 		return new File($r->fil_file_id, TRUE);
 	}
 	
+	/**
+	 * Mint a File from in-memory bytes — a generated, received, or fetched blob
+	 * that never passed through a $_FILES upload. General-purpose: any caller
+	 * that holds the content directly rather than an uploaded temp file (inbound
+	 * email attachments are the first consumer). Writes the bytes into upload_dir
+	 * under a collision-free on-disk name, keeps $filename as the display title,
+	 * applies the given restriction columns, saves (save() relocates a public
+	 * file to the fast-serve dir; a restricted one stays in upload_dir), and
+	 * returns the loaded File. No image variants are generated — a caller that
+	 * wants them calls resize() itself.
+	 *
+	 * @param string $bytes        the file content
+	 * @param string $filename     original/display name, e.g. "invoice.pdf" (kept as fil_title)
+	 * @param string $content_type MIME type (stored in fil_type)
+	 * @param int    $owner_id     fil_usr_user_id — the honest owner
+	 * @param array  $restrictions extra columns to set at creation, e.g. ['fil_private' => true]
+	 * @return File the saved, reloaded File
+	 * @throws FileException when the bytes cannot be written to disk
+	 */
+	public static function createFromBytes($bytes, $filename, $content_type, $owner_id, array $restrictions = array()) {
+		$settings = Globalvars::get_instance();
+		$upload_dir = $settings->get_setting('upload_dir');
+
+		if (!is_dir($upload_dir)) {
+			@mkdir($upload_dir, 0777, true);
+		}
+
+		// Collision-free on-disk name: a random token inserted before the
+		// extension, then sanitized — the same scheme the $_FILES upload flow
+		// uses, so two files sharing a display name never share a fil_name.
+		$base = ($filename !== null && $filename !== '') ? $filename : 'attachment';
+		if (strpos($base, '.') === false) {
+			$base .= '.bin';
+		}
+		$rand_string = '_' . LibraryFunctions::random_string(8) . '.';
+		$dotpos = strrpos($base, '.');
+		$new_name = substr($base, 0, $dotpos) . $rand_string . substr($base, $dotpos + 1);
+		$new_name = str_replace(' ', '_', $new_name);
+		$new_name = preg_replace('/[^A-Za-z0-9\.\-\_]/', '', $new_name);
+		$new_name = preg_replace('/_+/', '_', $new_name);
+
+		$target = $upload_dir . '/' . $new_name;
+		if (file_put_contents($target, $bytes) === false) {
+			throw new FileException('createFromBytes: unable to write bytes to ' . $target);
+		}
+		@chmod($target, 0666);
+
+		$file = new File(NULL);
+		$file->set('fil_name', $new_name);
+		$file->set('fil_title', substr((string)$filename, 0, 255));
+		$file->set('fil_type', substr((string)$content_type, 0, 128));
+		$file->set('fil_usr_user_id', $owner_id);
+		foreach ($restrictions as $col => $val) {
+			$file->set($col, $val);
+		}
+		$file->save();
+		$file->load();
+		return $file;
+	}
+
+	/**
+	 * Return this file's raw bytes, resolving local disk or cloud storage. For
+	 * server-side consumers that need the content directly (attachment
+	 * download/forward, AI triage) rather than a URL. Returns null when the bytes
+	 * cannot be read (missing on disk, cloud outage, unconfigured driver). This
+	 * does NOT authorize — a caller serving to a user gates with is_viewable()
+	 * first.
+	 *
+	 * @param string $size_key 'original' or an ImageSizeRegistry variant key
+	 * @return string|null
+	 */
+	function read_bytes($size_key = 'original') {
+		if ($this->get('fil_storage_driver') === 'cloud') {
+			$driver = $this->_cloud_driver();
+			if (!$driver) {
+				return null;
+			}
+			$tmp = tempnam(sys_get_temp_dir(), 'fil_read_');
+			if ($tmp === false) {
+				return null;
+			}
+			try {
+				$driver->get($this->remote_key_for($size_key), $tmp);
+				$bytes = file_get_contents($tmp);
+				@unlink($tmp);
+				return $bytes === false ? null : $bytes;
+			} catch (Exception $e) {
+				@unlink($tmp);
+				error_log('File::read_bytes cloud GET failed fil=' . $this->key . ': ' . $e->getMessage());
+				return null;
+			}
+		}
+
+		$path = $this->get_filesystem_path($size_key);
+		if (!file_exists($path)) {
+			return null;
+		}
+		$bytes = file_get_contents($path);
+		return $bytes === false ? null : $bytes;
+	}
+
 	function get_name() {
 		if($this->get('fil_title')){
 			return $this->get('fil_title');
@@ -96,7 +197,7 @@ public static function get_by_name($name, $search_deleted = false) {
 		else{
 			return $this->get('fil_name');
 		}
-	}	
+	}
 	
 	function is_image(){
 		if (strpos($this->get('fil_type'), 'image/') !== false) {

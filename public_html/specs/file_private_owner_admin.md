@@ -5,7 +5,7 @@
 **Depends on:** `specs/implemented/file_private_storage.md` — these files are private files
 (private store + gated serving). That machinery exists; this spec adds the *who-can-view*
 rule for them.
-**Consumed by:** `specs/inbound_email_attachment_storage.md` — inbound attachments are
+**Consumed by:** `specs/implemented/inbound_email_attachment_storage.md` — inbound attachments are
 owner-or-admin private files. Likely future consumers: any per-user private file (private
 uploads, generated personal documents) that should be viewable by its owner and admins.
 
