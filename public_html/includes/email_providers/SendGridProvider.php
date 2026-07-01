@@ -268,7 +268,14 @@ class SendGridProvider implements EmailServiceProvider, InboundEmailProvider {
                 $sg_attachment = new \SendGrid\Mail\Attachment();
                 $sg_attachment->setContent(base64_encode($attachment['data']));
                 $sg_attachment->setFilename($attachment['name'] ?: 'attachment');
-                $sg_attachment->setDisposition('attachment');
+                if (!empty($attachment['cid'])) {
+                    // Inline (embedded) image: disposition inline + Content-ID so the
+                    // body's cid: reference resolves in the recipient's client.
+                    $sg_attachment->setDisposition('inline');
+                    $sg_attachment->setContentID($attachment['cid']);
+                } else {
+                    $sg_attachment->setDisposition('attachment');
+                }
                 if (!empty($attachment['type'])) {
                     $sg_attachment->setType($attachment['type']);
                 }

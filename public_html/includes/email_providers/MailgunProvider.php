@@ -8,7 +8,7 @@
  * relay raw MIME through the same mailgun_api_key, with no separate SMTP
  * credential.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getComposerAutoloadPath());
@@ -240,8 +240,14 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Raw
         }
 
         $files = array();
+        $inline = array();
         foreach ($message->getAttachments() as $attachment) {
-            if (isset($attachment['data'])) {
+            if (isset($attachment['data']) && !empty($attachment['cid'])) {
+                // Inline (embedded) image: Mailgun references an inline part by its
+                // filename, so the on-wire filename IS the cid the body points at
+                // (cid:<cid>). Sent in the separate 'inline' field.
+                $inline[] = array('fileContent' => $attachment['data'], 'filename' => $attachment['cid']);
+            } elseif (isset($attachment['data'])) {
                 $files[] = array('fileContent' => $attachment['data'], 'filename' => $attachment['name']);
             } elseif (isset($attachment['path'])) {
                 $files[] = array('filePath' => $attachment['path'], 'filename' => $attachment['name']);
@@ -249,6 +255,9 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Raw
         }
         if (!empty($files)) {
             $payload['attachment'] = $files;
+        }
+        if (!empty($inline)) {
+            $payload['inline'] = $inline;
         }
     }
 

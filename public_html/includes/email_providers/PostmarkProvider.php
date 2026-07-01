@@ -278,11 +278,17 @@ class PostmarkProvider implements EmailServiceProvider {
                     'ContentType' => mime_content_type($a['path']) ?: 'application/octet-stream',
                 ];
             } elseif (isset($a['data'])) {
-                $out[] = [
+                $row = [
                     'Name' => $a['name'] ?: 'attachment',
                     'Content' => base64_encode($a['data']),
                     'ContentType' => $a['type'] ?: 'application/octet-stream',
                 ];
+                if (!empty($a['cid'])) {
+                    // Inline (embedded) image: Postmark marks a part inline by giving
+                    // it a cid:-prefixed ContentID, which the body references as cid:<id>.
+                    $row['ContentID'] = 'cid:' . $a['cid'];
+                }
+                $out[] = $row;
             }
         }
         return $out ?: null;

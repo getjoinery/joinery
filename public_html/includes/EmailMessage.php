@@ -164,6 +164,33 @@ class EmailMessage {
     }
 
     /**
+     * Attach in-memory bytes as an INLINE (embedded) part — the image renders in
+     * the HTML body via a cid: reference rather than being listed as a downloadable
+     * file. Use for a logo, a forwarded inline picture, a chart in a report: the
+     * body references cid:$cid and this part supplies the bytes for it.
+     *
+     * $cid is a BARE Content-ID token (no angle brackets, e.g. "logo123"); the body
+     * writes cid:logo123. Each transport maps this to its native inline mechanism
+     * (PHPMailer addStringEmbeddedImage; SendGrid/Postmark/Mailjet Content-ID;
+     * Mailgun inline-with-filename). Transports whose API cannot carry a Content-ID
+     * (Resend, Brevo) degrade to a regular attachment and log a marker.
+     *
+     * Inline entries carry the same data/name/type as attachData() plus 'cid' and
+     * 'inline' => true, so a transport that ignores inline still sends the bytes.
+     */
+    public function attachInlineData($data, $cid, $fileName, $contentType = 'application/octet-stream') {
+        $this->attachments[] = [
+            'data'   => $data,
+            'name'   => $fileName ?: 'attachment',
+            'type'   => $contentType ?: 'application/octet-stream',
+            'cid'    => $cid,
+            'inline' => true,
+        ];
+
+        return $this;
+    }
+
+    /**
      * Pin the outgoing Message-ID (RFC angle-bracketed form, e.g. <id@domain>).
      * When set, transports stamp this exact value instead of auto-generating one,
      * so a stored copy can be reconciled to the sent message by Message-ID.

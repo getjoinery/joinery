@@ -46,6 +46,7 @@ $message = EmailMessage::create('user@example.com', 'Subject', 'Body content')
 - `text($content)` - Set plain text body
 - `attach($path, $name)` - Add an on-disk attachment by file path
 - `attachData($bytes, $name, $contentType)` - Add an in-memory attachment (generated/fetched content, no file needed)
+- `attachInlineData($bytes, $cid, $name, $contentType)` - Add an in-memory **inline (embedded)** image, rendered in the HTML body via a `cid:` reference (see [Inline / embedded images](#inline--embedded-images))
 - `header($name, $value)` - Add custom header
 - `messageId($id)` - Pin the outgoing Message-ID (angle-bracketed) instead of letting the transport auto-generate one
 
@@ -404,6 +405,49 @@ $message = EmailMessage::create('user@example.com', 'Subject', 'Body')
     ->attachment('/path/to/file.pdf', 'document.pdf')
     ->replyTo('support@example.com');
 ```
+
+### Inline / embedded images
+
+An HTML email shows an image two ways: link to it over the web, or **embed the bytes
+inside the message** and reference them from the body with `cid:<id>` (a Content-ID).
+Embedding is what makes a logo, chart, or a forwarded inline picture appear in the
+recipient's client with no network fetch and no login — the right choice for outgoing
+mail, whose recipient is external and unauthenticated (a hosted `/uploads/*` URL would
+give them a broken image or an auth wall).
+
+Add one with `attachInlineData()`; the body references it by the same bare id:
+
+```php
+$message = (new EmailMessage())
+    ->to('user@example.com')
+    ->subject('Welcome')
+    ->html('<p>Hello!</p><img src="cid:logo">')
+    ->attachInlineData($logoBytes, 'logo', 'logo.png', 'image/png');
+```
+
+The Content-ID is a **bare token** — pass `logo`, not `<logo>`; the body writes
+`cid:logo`. A regular `attach()` / `attachData()` entry (no `cid`) is unchanged and goes
+out as a normal downloadable attachment.
+
+**Per-transport support.** Each transport maps inline to its native mechanism. The SMTP
+path (PHPMailer's embedded-image support) covers the SMTP, connected-account, and SES
+transports from one place.
+
+| Transport | Inline support |
+|---|---|
+| SMTP / ConnectedMailbox / SES | Yes (PHPMailer embedded image) |
+| SendGrid | Yes (`inline` disposition + Content-ID) |
+| Postmark | Yes (`cid:`-prefixed ContentID) |
+| Mailjet | Yes (`InlinedAttachments` + ContentID) |
+| Mailgun | Yes (`inline` part, filename = the cid) |
+| Resend | **Degrades** — no Content-ID field in the API |
+| Brevo | **Degrades** — no Content-ID field in the API |
+
+**Degrade rule.** A transport whose API cannot carry a Content-ID (Resend, Brevo) sends
+the inline part as a **regular attachment** and logs a distinct marker
+(`[<Provider>Provider] Inline attachment degraded ...`). The message still sends; the
+image appears as a downloadable attachment rather than embedded. This is an honest
+provider limitation, declared up front — no consumer should assume universal embedding.
 
 ### Template Variable Integration
 

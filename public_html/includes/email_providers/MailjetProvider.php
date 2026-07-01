@@ -268,6 +268,7 @@ class MailjetProvider implements EmailServiceProvider {
         }
 
         $attachments = [];
+        $inlined = [];
         foreach ($message->getAttachments() as $a) {
             if (!empty($a['path']) && is_readable($a['path'])) {
                 $attachments[] = [
@@ -276,15 +277,30 @@ class MailjetProvider implements EmailServiceProvider {
                     'Base64Content' => base64_encode(file_get_contents($a['path'])),
                 ];
             } elseif (isset($a['data'])) {
-                $attachments[] = [
-                    'ContentType' => $a['type'] ?: 'application/octet-stream',
-                    'Filename' => $a['name'] ?: 'attachment',
-                    'Base64Content' => base64_encode($a['data']),
-                ];
+                if (!empty($a['cid'])) {
+                    // Inline (embedded) image: Mailjet v3.1 carries inline parts in a
+                    // separate InlinedAttachments array keyed by ContentID (bare token),
+                    // which the body references as cid:<id>.
+                    $inlined[] = [
+                        'ContentType' => $a['type'] ?: 'application/octet-stream',
+                        'Filename' => $a['name'] ?: 'attachment',
+                        'ContentID' => $a['cid'],
+                        'Base64Content' => base64_encode($a['data']),
+                    ];
+                } else {
+                    $attachments[] = [
+                        'ContentType' => $a['type'] ?: 'application/octet-stream',
+                        'Filename' => $a['name'] ?: 'attachment',
+                        'Base64Content' => base64_encode($a['data']),
+                    ];
+                }
             }
         }
         if (!empty($attachments)) {
             $msg['Attachments'] = $attachments;
+        }
+        if (!empty($inlined)) {
+            $msg['InlinedAttachments'] = $inlined;
         }
 
         return $msg;
