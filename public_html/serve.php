@@ -1,6 +1,7 @@
 <?php
 // serve.php - Hybrid routing system with RouteHelper
 // Core dependencies (PathHelper, Globalvars, SessionControl) are loaded by RouteHelper after static route check
+// @version 1.1.0
 
 // RouteHelper handles all routing and dependency loading
 require_once(__DIR__ . '/includes/RouteHelper.php');
@@ -388,10 +389,21 @@ $routes = [
             //    from the verified-private bucket, gated by the same is_viewable()
             //    check the local path uses — the bytes never bypass the gate.
             $file_obj = File::get_by_name($basename);
+
+            // Size key from the URL path: '/uploads/<size>/<file>' or '/uploads/<file>'.
+            $size_key = (count($subpath_parts) > 1) ? $subpath_parts[0] : 'original';
+
+            // Signed request? A valid, unexpired signature authorizes on its
+            // own — minting is the authorization statement (see
+            // docs/file_signed_urls.md). Anything less falls through to the
+            // normal is_viewable() gate, never an error of its own.
+            $signed_ok = false;
+            if ($file_obj && isset($_GET['expires'], $_GET['sig'])) {
+                $signed_ok = $file_obj->verify_signed_request($size_key, $_GET['expires'], $_GET['sig']);
+            }
+
             if ($file_obj && $file_obj->get('fil_storage_driver') === 'cloud') {
                 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
-                // Determine size_key from the URL path: '/uploads/<size>/<file>' or '/uploads/<file>'.
-                $size_key = (count($subpath_parts) > 1) ? $subpath_parts[0] : 'original';
 
                 if ($file_obj->is_public()) {
                     $driver = CloudStorageDriverFactory::default();
@@ -405,7 +417,7 @@ $routes = [
                 } else {
                     // Private cloud file: gate first (404, never 403, to avoid
                     // confirming existence — same as the local restricted path).
-                    if (!$file_obj->is_viewable($session)) {
+                    if (!$signed_ok && !$file_obj->is_viewable($session)) {
                         require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
                         LibraryFunctions::display_404_page();
                         return true;
@@ -461,7 +473,24 @@ $routes = [
                     $file_obj = File::get_by_name($basename);
                 }
 
-                if($file_obj && $file_obj->is_viewable($session)){
+                if($file_obj && ($signed_ok || $file_obj->is_viewable($session))){
+                    if ($signed_ok) {
+                        // Signed grant: the response must not outlive it, so
+                        // stream with no-store instead of the cached static
+                        // path (same posture as the private-cloud branch).
+                        $content_type = $file_obj->get('fil_type') ?: 'application/octet-stream';
+                        header('Content-Type: ' . $content_type);
+                        header('X-Content-Type-Options: nosniff');
+                        header('Cache-Control: private, no-store');
+                        if (strpos($content_type, 'image/') !== 0) {
+                            header('Content-Disposition: attachment; filename="' . basename($file_obj->get('fil_name')) . '"');
+                        }
+                        if (($len = @filesize($file)) !== false) {
+                            header('Content-Length: ' . $len);
+                        }
+                        readfile($file);
+                        return true;
+                    }
                     RouteHelper::serveStaticFile($file, 43200);
                     return true;
                 } else {
