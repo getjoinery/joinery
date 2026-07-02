@@ -512,6 +512,14 @@
             "icon": "user"
         },
         {
+            "slug": "core-calendar",
+            "title": "Calendar",
+            "url": "/profile/calendar",
+            "order": 55,
+            "permission": 1,
+            "icon": "calendar"
+        },
+        {
             "slug": "core-orders",
             "title": "Orders",
             "url": "/profile#orders",
