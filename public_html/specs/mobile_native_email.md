@@ -15,7 +15,7 @@ would duplicate the API contract and screen list and let them drift.
 
 ## Dependencies
 
-- `specs/file_signed_urls.md` — the core signed-URL file-serving
+- `specs/implemented/file_signed_urls.md` — the core signed-URL file-serving
   capability this spec's attachment transport consumes.
 - `specs/inbound_email_profile_mailbox.md` — the member grant surface, the
   grant-authorized attachment rule, and the web page that remains the
@@ -56,7 +56,7 @@ fetches with web cookies, and streaming binary through the action API is the
 wrong shape. Instead, the `thread` payload carries **short-lived signed
 URLs**: for each attachment, and for each inline `cid:` image (the HTML body
 is returned with `cid:` references rewritten to those URLs). The signing
-capability is the core one from `specs/file_signed_urls.md`
+capability is the core one from `specs/implemented/file_signed_urls.md`
 (`File::mintSignedUrl()` — minting *is* the authorization statement): the
 thread action mints only after the viewer-scope check that gated the thread
 fetch, and the serving path validates signature + expiry with no session at

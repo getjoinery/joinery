@@ -13,6 +13,12 @@ require_once(PathHelper::getIncludePath('data/event_sessions_class.php'));
 
 class FileException extends SystemBaseException {}
 
+/**
+ * File — uploaded file records: storage (local/cloud), visibility, resizing,
+ * serving gates, and signed URLs (docs/file_signed_urls.md).
+ *
+ * @version 1.1.0
+ */
 class File extends SystemBase {	public static $prefix = 'fil';
 	public static $tablename = 'fil_files';
 	public static $pkey_column = 'fil_file_id';
@@ -522,6 +528,143 @@ public static function get_by_name($name, $search_deleted = false) {
 		} else {
 			return $file_path;
 		}
+	}
+
+	// ------------------------------------------------------------------
+	// Signed URLs — short-lived, self-authorizing links to private files
+	// (docs/file_signed_urls.md).
+	//
+	// Minting IS the authorization statement: only code that has already
+	// verified the viewer may access this file calls mintSignedUrl(). The
+	// /uploads route in serve.php checks the signature before the normal
+	// is_viewable() gate; an invalid or expired signature simply falls
+	// through to that gate — a signed miss is never its own error.
+	// ------------------------------------------------------------------
+
+	const SIGNING_KEY_SETTING = 'file_signed_url_key';
+
+	/** @var string|null|false Per-request signing key cache (false = checked, absent). */
+	private static $signing_key = null;
+
+	/**
+	 * Mint a short-lived signed URL for this file.
+	 *
+	 * The signature covers (file id, size key, expiry), so a thumbnail URL
+	 * cannot fetch the original and the expiry cannot be extended. The URL
+	 * is always the local /uploads pattern so it routes through serve.php's
+	 * gate — never a bucket URL.
+	 *
+	 * @param string $size_key 'original' or an ImageSizeRegistry variant key
+	 * @param int    $ttl_seconds Lifetime — keep short (default 5 minutes)
+	 * @param string $format 'short' for relative URL, 'full' for absolute
+	 * @return string /uploads/... URL with expires and sig query parameters
+	 */
+	function mintSignedUrl($size_key = 'original', $ttl_seconds = 300, $format = 'short') {
+		$expires = time() + max(1, (int)$ttl_seconds);
+		$sig = hash_hmac('sha256', $this->_signed_url_payload($size_key, $expires), self::_get_signing_key(true));
+
+		$settings = Globalvars::get_instance();
+		$upload_web_dir = $settings->get_setting('upload_web_dir');
+		if ($size_key === 'original') {
+			$path = $upload_web_dir . '/' . $this->get('fil_name');
+		} else {
+			$path = $upload_web_dir . '/' . $size_key . '/' . $this->get('fil_name');
+		}
+		if ($path[0] !== '/') {
+			$path = '/' . $path;
+		}
+		$url = $path . '?expires=' . $expires . '&sig=' . $sig;
+		return ($format == 'full') ? LibraryFunctions::get_absolute_url($url) : $url;
+	}
+
+	/**
+	 * Verify a signed /uploads request: true only for a well-formed,
+	 * unexpired signature over this exact file + size key (constant-time
+	 * compare). False for everything else — the caller then applies the
+	 * normal is_viewable() gate.
+	 *
+	 * @param string $size_key Size key derived from the URL path
+	 * @param mixed  $expires 'expires' query parameter
+	 * @param mixed  $sig 'sig' query parameter
+	 * @return bool
+	 */
+	function verify_signed_request($size_key, $expires, $sig) {
+		if (!$this->key || !is_string($sig) || $sig === '' || !ctype_digit((string)$expires)) {
+			return false;
+		}
+		if ((int)$expires < time()) {
+			return false;
+		}
+		$key = self::_get_signing_key(false);
+		if ($key === null) {
+			return false; // No key provisioned — nothing was ever minted.
+		}
+		$expected = hash_hmac('sha256', $this->_signed_url_payload($size_key, (int)$expires), $key);
+		return hash_equals($expected, $sig);
+	}
+
+	private function _signed_url_payload($size_key, $expires) {
+		return $this->key . ':' . $size_key . ':' . $expires;
+	}
+
+	/**
+	 * The dedicated file-URL signing key: 32 random bytes, generated on
+	 * first mint, stored SecretBox-encrypted in stg_settings. Deliberately
+	 * separate from secret_box_key (key separation): deleting the row
+	 * rotates the key, invalidating all outstanding signed URLs and
+	 * nothing else.
+	 *
+	 * @param bool $create Generate and persist the key if absent
+	 * @return string|null Raw 32-byte key, or null when absent and !$create
+	 */
+	private static function _get_signing_key($create = false) {
+		if (is_string(self::$signing_key)) {
+			return self::$signing_key;
+		}
+		if (self::$signing_key === false && !$create) {
+			return null;
+		}
+
+		require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
+		$dblink = DbConnector::get_instance()->get_db_link();
+
+		$read = function() use ($dblink) {
+			$q = $dblink->prepare('SELECT stg_value FROM stg_settings WHERE stg_name = ?');
+			$q->execute(array(self::SIGNING_KEY_SETTING));
+			$blob = $q->fetchColumn();
+			return ($blob === false || $blob === '') ? null : (string)$blob;
+		};
+
+		$blob = $read();
+		if ($blob === null) {
+			if (!$create) {
+				self::$signing_key = false;
+				return null;
+			}
+			// Race-safe first-mint provisioning: ON CONFLICT no-op, then
+			// re-read so a concurrent winner's key is the one we use.
+			$box = new SecretBox();
+			$new_blob = $box->encrypt(base64_encode(random_bytes(32)));
+			$ins = $dblink->prepare(
+				"INSERT INTO stg_settings
+					(stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name)
+				 VALUES (?, ?, 1, NOW(), NOW(), 'files')
+				 ON CONFLICT (stg_name) DO NOTHING"
+			);
+			$ins->execute(array(self::SIGNING_KEY_SETTING, $new_blob));
+			$blob = $read();
+			if ($blob === null) {
+				throw new FileException('Signed URL key could not be provisioned.');
+			}
+		}
+
+		$box = isset($box) ? $box : new SecretBox();
+		$key = base64_decode($box->decrypt($blob), true);
+		if ($key === false || strlen($key) !== 32) {
+			throw new FileException('Signed URL key is malformed.');
+		}
+		self::$signing_key = $key;
+		return $key;
 	}
 
 	function permanent_delete($debug=false){
