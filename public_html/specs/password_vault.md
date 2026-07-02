@@ -3,7 +3,8 @@
 ## Status: active — design
 
 The fourth leg of the self-hosted Proton-suite replacement, alongside mail (built),
-calendar (`specs/scheduling_system.md`), and drive. This is the **vault / password
+calendar (built — `specs/implemented/scheduling_system.md`), and drive
+(`specs/drive_core.md`). This is the **vault / password
 manager** — the piece flagged as "genuinely difficult and scary," now scoped down to
 something tractable by fixing one decision up front: it is **client-side
 zero-knowledge**, end of discussion.
@@ -41,8 +42,10 @@ nothing, and secrets stored before the compromise are not exposed by the dump it
 This residual risk is the reason mature competitors (Proton Pass, Bitwarden, 1Password)
 ship browser extensions and native apps, whose code is not re-fetched from the server
 on every unlock. The mitigation path here is the same — an extension/native client is
-**Phase 4 hardening**, with Subresource Integrity as a partial interim measure. It is
-a known limitation, documented, not a v1 blocker.
+**Phase 4 hardening**. Nothing served from the same origin can close this gap
+(Subresource Integrity included — the hash lives in HTML the same server serves), so
+the risk is fully open until Phase 4 ships. It is a known limitation, documented, not
+a v1 blocker.
 
 ### Out of scope
 
@@ -62,8 +65,18 @@ Standard wrapped-key design (the Bitwarden/1Password shape), all client-side:
    indirection lets the master password change without re-encrypting every entry —
    only the wrapped DEK is re-wrapped.
 4. **Per-entry encryption.** Each entry is one AES-GCM blob over a JSON record
-   (`{title, username, password, url, notes, totp_seed, …}`) with its own random IV.
-   Field contents are inside the blob; the server sees an opaque ciphertext.
+   (`{type, title, username, password, url, notes, totp_seed, …}`) with its own random
+   IV. Field contents are inside the blob — including the coarse `type`
+   (login/note/card): the list renders only after client-side decryption, so a
+   cleartext type column would never be read, only leak. The server sees an opaque
+   ciphertext.
+
+   **Blob format (everywhere).** Every encrypted value — wrapped DEK, recovery-wrapped
+   DEK, each entry — is one self-contained string: `base64(IV ‖ ciphertext)`. The
+   client prepends the fresh 12-byte IV before encoding and splits it back off after
+   decoding. One `encrypt() → blob` / `blob → decrypt()` contract, no side-channel IV
+   columns, and the reusable crypto module (see build-generally notes) exposes exactly
+   that.
 5. **Unlock.** Distinct from Joinery login. After login, the user enters the master
    password; the browser derives the KEK, unwraps the DEK, and holds it in memory
    (a non-extractable `CryptoKey` where the platform allows) for the session, with an
@@ -102,17 +115,36 @@ A self-contained **plugin** (`/plugins/vault/`), since it is an isolable module 
 its own admin/profile surface. Two data classes following the active-record
 `$field_specifications` convention:
 
-- **`VaultKeyring`** (`vlk_vault_keyring`), one row per user: `vlk_usr_user_id` (FK),
+- **`VaultKeyring`** (`vlk_vault_keyring`), one row per user (`vlk_usr_user_id`
+  unique — a duplicate keyring with a second wrapped DEK would strand entries
+  unreadably, so the DB enforces the invariant): `vlk_usr_user_id` (FK),
   `vlk_kdf` (`argon2id`), `vlk_kdf_salt`, `vlk_kdf_params` (JSON: memory, iterations,
   parallelism), `vlk_wrapped_dek` (master-wrapped), `vlk_wrapped_dek_recovery`
   (nullable until a recovery key is generated), timestamps. Holds **only** crypto
   material the server cannot use without the master password.
 - **`VaultEntry`** (`vle_vault_entries`): `vle_usr_user_id` (FK), `vle_ciphertext`
-  (base64 AES-GCM blob), `vle_iv`, created/updated timestamps. The row carries no
-  searchable plaintext — title, username, URL, etc. all live inside the blob.
+  (a blob in the standard format above), created/updated timestamps. The row carries
+  no searchable plaintext — title, username, URL, etc. all live inside the blob.
+
+**Deletion.** Both classes declare `$foreign_key_actions` cascade on their user FK, so
+deleting a user removes their keyring and entries. Entries also get `vle_delete_time`
+for soft delete — trash/restore in the UI, permanent purge via the platform deletion
+system — because accidentally deleting a login is exactly the mistake that should be
+recoverable, and trashed ciphertext is no less protected than live ciphertext. The
+keyring is hard-delete only; without its user it is meaningless.
 
 Both tables created automatically by `update_database` from the specs; no schema
 migrations.
+
+### Server surface
+
+The server side is a set of `_logic_api()` actions in `plugins/vault/logic/` — get
+keyring, save keyring, list entries, save entry, delete entry — called from the vault
+page's JavaScript over `/api/v1` with the browser-session credential, per the platform
+API rule (`docs/api.md`). No `/ajax/` endpoints, no page-postback forms. The server
+treats every payload as opaque: it stores and returns base64 blobs and never inspects,
+validates, or logs their contents. The same actions are reachable by the native-app
+transport, which is exactly the surface a Phase 4 native client needs.
 
 ## Work
 
@@ -138,9 +170,11 @@ Client-side password generator; TOTP seed storage with in-browser code generatio
 ### Phase 4 — Hardening (addresses the served-JS residual risk)
 
 Browser extension (and/or native client) so unlock code is not re-fetched from the
-server per use, with autofill as the headline UX win. Subresource Integrity on the
-vault JS as a partial interim measure. This is where the one honest limitation above
-gets closed; it is intentionally last.
+server per use, with autofill as the headline UX win. Note the existing iOS app shell
+does **not** qualify: it renders server-served web views, so vault JS inside it is
+still fetched from Joinery per load. A Phase 4 client counts only if the unlock/crypto
+code ships in the installed artifact (native crypto or bundled JS). This is where the
+one honest limitation above gets closed; it is intentionally last.
 
 ## Build-generally notes
 
@@ -164,7 +198,5 @@ contrast in `docs/secret_box.md` clarifying when to use each.
 - **KDF: Argon2id-WASM (recommended) vs PBKDF2-native.** Settle the vanilla-JS
   dependency exception with the WASM choice; pin and integrity-check the lib.
 - Auto-lock idle timeout default.
-- Whether a coarse entry `type` (login/note/card, for list icons) is stored in clear
-  as low-sensitivity metadata or kept inside the encrypted blob.
 - Argon2id parameter tuning (memory/iterations/parallelism) for an acceptable
   in-browser unlock latency on typical hardware.

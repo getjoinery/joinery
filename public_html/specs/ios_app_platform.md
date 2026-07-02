@@ -210,8 +210,9 @@ Login screen, Keychain storage, the generic form renderer, settings screen,
 426 gate.
 
 **Gate:** XCUITest in the Simulator — log in/out; complete both
-password-reset steps natively (on dev, use a `*@inbox.dev.getjoinery.com`
-account so the reset email is readable from `iem_inbound_email_messages`);
+password-reset steps natively (on dev, give the fixture account an address
+on the live inbound domain — a store-mode alias under `dev.getjoinery.com`
+— so the reset email is readable from `iem_inbound_email_messages`);
 a server-side form-definition change appears in the app without a rebuild;
 invalid-credential, rate-limit, and 426 paths render correctly.
 
