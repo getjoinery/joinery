@@ -6,10 +6,15 @@
  * you and what may you do," plus the credential-lifecycle decisions the
  * /auth/* endpoints delegate here.
  *
- *   authenticate()      — resolve + validate an API key from request headers and
- *                         load its user, returning the authenticated principal
- *                         (or exiting 4xx). This is the chain every authenticated
- *                         request runs through.
+ *   authenticate()      — resolve + validate the request's credential and load
+ *                         its user, returning the authenticated principal (or
+ *                         exiting 4xx). Two credential kinds: API key headers
+ *                         (primary — always win when present), or a logged-in
+ *                         web session cookie + X-Joinery-Csrf header (the
+ *                         browser-session credential, letting page JS call the
+ *                         same /api/v1 actions apps use). A browser-session
+ *                         principal has api_entry === null and carries the same
+ *                         full capability a freshly minted session key gets.
  *   authorize()         — decide whether a principal may invoke an endpoint,
  *                         against a small contract (capability + machine-key +
  *                         user floor). Called by the CRUD verbs, the logic
@@ -33,7 +38,12 @@
  * The user role axis (usr_permission) is a simple floor (e.g. management = 10).
  * See specs/implemented/api_auth_gate_unification.md for the equivalence table.
  *
- * @version 1.0.0
+ * @version 1.1.0
+ * @changelog 1.1.0 - Browser-session credential: a logged-in web session cookie
+ *   plus a matching X-Joinery-Csrf header authenticates as that user when no
+ *   key headers are present. Keys take precedence; the management API's
+ *   machine-key gate rejects browser sessions unchanged (null is not a machine
+ *   key). The session lock is released immediately after identity is read.
  */
 
 require_once(PathHelper::getIncludePath('data/api_keys_class.php'));
@@ -66,7 +76,10 @@ class ApiAuth {
 		$secret_key = isset($headers['secret_key']) ? $headers['secret_key'] : null;
 
 		if (!$public_key || !$secret_key) {
-			self::auth_failure(400, 'Missing public/secret key headers', 'Public/secret keys not present');
+			// No key headers — the request may instead carry the browser-session
+			// credential (web session cookie + X-Joinery-Csrf header). Keys always
+			// take precedence when present; this path only runs keyless.
+			return self::authenticateBrowserSession($headers);
 		}
 
 		try {
@@ -141,6 +154,74 @@ class ApiAuth {
 	}
 
 	/**
+	 * Authenticate a keyless request from its web session: session cookie plus
+	 * an X-Joinery-Csrf header matching the session's API CSRF token (minted at
+	 * page render — see SessionControl::get_api_csrf_token()). On success the
+	 * principal has api_entry === null; identity and permission come from the
+	 * session exactly as web pages see them (so login-as and the IP-change
+	 * guard behave identically to the web surface).
+	 *
+	 * The API only ever READS session state: the session file lock is released
+	 * via session_write_close() as soon as identity is read, so parallel page
+	 * JS calls are not serialized and nothing an action does can mutate the
+	 * web session ($_SESSION writes after close are per-request memory only).
+	 *
+	 * Failure shapes: a request with no session cookie fails exactly as a
+	 * keyless request always has (400, no oracle for whether sessions are
+	 * accepted); a logged-in session with a missing/wrong token is 403.
+	 *
+	 * @param array $headers Lowercased-underscore header map (x_joinery_csrf).
+	 * @return array Same principal shape as authenticate(), api_entry = null.
+	 */
+	private static function authenticateBrowserSession(array $headers) {
+		// No session cookie → plain anonymous keyless request; fail as always.
+		if (empty($_COOKIE[session_name()])) {
+			self::auth_failure(400, 'Missing public/secret key headers', 'Public/secret keys not present');
+		}
+
+		// Starting the session is safe here: this branch is only reached with
+		// no key headers, so key-authenticated requests stay session-free.
+		$session = SessionControl::get_instance();
+		$user_id = $session->get_user_id();
+		$session_token = $session->get_raw('api_csrf_token');
+		$session_permission = $session->get_permission();
+		session_write_close();
+
+		if (!$user_id) {
+			// Stale/anonymous session cookie — same shape as no credential at all.
+			self::auth_failure(400, 'Browser session not logged in', 'Public/secret keys not present');
+		}
+
+		$csrf_header = isset($headers['x_joinery_csrf']) ? (string) $headers['x_joinery_csrf'] : '';
+		if (!$session_token || $csrf_header === '' || !hash_equals($session_token, $csrf_header)) {
+			self::auth_failure(403, 'Browser session CSRF token missing or invalid', 'Invalid or missing X-Joinery-Csrf token');
+		}
+
+		try {
+			$api_user = new User($user_id, TRUE);
+		} catch (Exception $e) {
+			self::auth_failure(400, 'Unable to find the session user', 'Unable to find the api user');
+		}
+
+		if (!$api_user->key || $api_user->get('usr_delete_time')) {
+			self::auth_failure(400, 'Session user has been deleted', 'API user has been deleted');
+		}
+
+		RequestLogger::set_api_key_type('browser');
+
+		return array(
+			'api_entry' => null,
+			'api_user'  => $api_user,
+			'auth_data' => array(
+				'current_user_id'         => $api_user->key,
+				// Session permission, not usr_permission: mirrors what web pages
+				// enforce (admin login-as elevation, IP-change guard zeroing).
+				'current_user_permission' => $session_permission,
+			),
+		);
+	}
+
+	/**
 	 * Log an authentication failure to the api_auth feature (feeding the
 	 * failed-auth rate limiter) and exit via api_error(). Always exits.
 	 */
@@ -182,7 +263,10 @@ class ApiAuth {
 		// Capability gate (apk_permission). Null = this surface does not gate on it.
 		$capability = isset($auth['capability']) ? $auth['capability'] : null;
 		if ($capability !== null) {
-			$permission = (int) $api_entry->get('apk_permission');
+			// A browser-session principal has no key row; it carries the same
+			// full capability (4) a freshly minted session key gets — the
+			// credential IS the user, so the user's role is the real limit.
+			$permission = $api_entry ? (int) $api_entry->get('apk_permission') : 4;
 			$blocked =
 				($capability === self::CAP_READ   && $permission == 2) ||
 				($capability === self::CAP_WRITE  && $permission < 2)  ||
@@ -232,13 +316,14 @@ class ApiAuth {
 
 	/**
 	 * Revoke a presented session key (logout). Machine keys are revoked from the
-	 * admin page, never by themselves.
+	 * admin page, never by themselves. A browser-session principal has no key to
+	 * revoke — browsers sign out on the website (/logout).
 	 *
-	 * @return bool true if revoked; false if the key is a machine key (the
-	 *              endpoint maps this to 403).
+	 * @return bool true if revoked; false if there is no revocable key (machine
+	 *              key or browser session — the endpoint maps this to 403).
 	 */
 	public static function revokeSessionKey($api_entry) {
-		if (!$api_entry->is_session()) {
+		if (!$api_entry || !$api_entry->is_session()) {
 			return false;
 		}
 		$api_entry->soft_delete();
