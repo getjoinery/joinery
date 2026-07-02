@@ -126,6 +126,30 @@ try {
 		'action executed AS the session user (DB shows the new first name)',
 		'got: ' . $member->get('usr_first_name'));
 
+	section('1b. Idempotency-Key replays for browser sessions (user-scoped)');
+	require_once(PathHelper::getIncludePath('data/api_idempotency_keys_class.php'));
+	$idem_key = 'brw-idem-' . $run_id;
+	$idem_body = array('usr_first_name' => 'IdemBrw', 'usr_last_name' => 'Member',
+		'usr_timezone' => 'America/New_York');
+	$idem_headers = array_merge(csrf_header($member_token), array('Idempotency-Key: ' . $idem_key));
+	$r1 = cookie_request('POST', '/api/v1/action/account_edit', $member_jar, $idem_headers, $idem_body);
+	check($r1['status'] === 200, 'first request with Idempotency-Key executes', $r1['raw']);
+	$member->load();
+	check($member->get('usr_first_name') === 'IdemBrw', 'first request reached the DB');
+	// Mutate out-of-band; the retry must replay, not re-execute over this.
+	$member->set('usr_first_name', 'MutatedBrw');
+	$member->save();
+	$r2 = cookie_request('POST', '/api/v1/action/account_edit', $member_jar, $idem_headers, $idem_body);
+	check($r2['status'] === 200 && $r2['raw'] === $r1['raw'],
+		'retry replays the stored response verbatim', $r2['raw']);
+	$member->load();
+	check($member->get('usr_first_name') === 'MutatedBrw', 'retry did NOT re-execute (DB untouched)');
+	$aik_rows = new MultiApiIdempotencyKey(array('credential_scope' => 'user:' . $member->key));
+	$aik_rows->load();
+	foreach ($aik_rows as $aik) {
+		harness_register_row(ApiIdempotencyKey::$tablename, ApiIdempotencyKey::$pkey_column, $aik->key);
+	}
+
 	section('2. Missing or wrong token is refused despite a valid cookie');
 	$r = cookie_request('GET', '/api/v1/auth/session', $member_jar);
 	check($r['status'] === 403, 'no X-Joinery-Csrf header → 403', 'status ' . $r['status'] . ' ' . $r['raw']);

@@ -2,8 +2,13 @@
 /**
  * API v1 Endpoint
  *
- * @version 2.9
- * @changelog 2.9 - Contract freeze (specs/api_contract_and_idempotency.md § Change 1):
+ * @version 2.10
+ * @changelog 2.10 - Idempotent writes (specs/implemented/api_contract_and_idempotency.md
+ *   § Change 2): authenticated action requests may carry an Idempotency-Key
+ *   header — dedup/replay/conflict handled in ApiLogicEndpoint against the
+ *   aik_api_idempotency_keys table; header added to the CORS allow-list.
+ *   Requests without the header are unchanged.
+ * @changelog 2.9 - Contract freeze (specs/implemented/api_contract_and_idempotency.md § Change 1):
  *   error envelope always carries an object `data` (was '' from api_error), the
  *   `error` string is the message itself (dropped the 'Error: ' prefix), and
  *   collection pagination fields (num_results, page, numperpage) are integers.
@@ -233,7 +238,7 @@ if ($allowed_origins && isset($_SERVER['HTTP_ORIGIN'])) {
 	if (in_array($origin, $allowed_list)) {
 		header("Access-Control-Allow-Origin: " . $origin);
 		header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE");
-		header("Access-Control-Allow-Headers: public_key, secret_key, public-key, secret-key, client-app, client-version, Content-Type");
+		header("Access-Control-Allow-Headers: public_key, secret_key, public-key, secret-key, client-app, client-version, Idempotency-Key, Content-Type");
 		header("Access-Control-Max-Age: 86400");
 	}
 }
