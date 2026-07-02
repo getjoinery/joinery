@@ -2,7 +2,10 @@
 /**
  * API v1 Endpoint
  *
- * @version 2.10
+ * @version 2.11
+ * @changelog 2.11 - App platform endpoints (/api/v1/app/*, ApiAppEndpoint) and
+ *   auth/web_session (ApiAuthEndpoint): the navigation routing table and the
+ *   web-session bridge consumed by native apps. See docs/mobile_apps.md.
  * @changelog 2.10 - Idempotent writes (specs/implemented/api_contract_and_idempotency.md
  *   § Change 2): authenticated action requests may carry an Idempotency-Key
  *   header — dedup/replay/conflict handled in ApiLogicEndpoint against the
@@ -377,9 +380,17 @@ if (strtolower($url_segments[2] ?? '') === 'form') {
 	// dispatchFormAuthenticated() always exits.
 }
 
-// Key-authenticated auth endpoints (session/logout) — login exited pre-auth.
+// Key-authenticated auth endpoints (session/logout/web_session) — login exited pre-auth.
 if (strtolower($url_segments[2] ?? '') === 'auth') {
 	ApiAuthEndpoint::dispatchAuthenticated($url_segments, $api_entry, $api_user);
+	// dispatchAuthenticated() always exits.
+}
+
+// App platform endpoints (/api/v1/app/*): the navigation routing table native
+// apps render as their tab bar and More list. Session-key clients only.
+if (strtolower($url_segments[2] ?? '') === 'app') {
+	require_once(PathHelper::getIncludePath('includes/ApiAppEndpoint.php'));
+	ApiAppEndpoint::dispatchAuthenticated($url_segments, $api_entry, $api_user, $headers);
 	// dispatchAuthenticated() always exits.
 }
 

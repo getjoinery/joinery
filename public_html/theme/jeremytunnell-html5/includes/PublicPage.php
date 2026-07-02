@@ -97,6 +97,7 @@ class PublicPage extends PublicPageBase {
 <body>
 
     <!-- Header -->
+    <?php if ($this->show_site_chrome()): ?>
     <header class="site-header">
         <div class="header-inner">
             <div class="site-branding">
@@ -117,6 +118,7 @@ class PublicPage extends PublicPageBase {
 
     <!-- Cover -->
     <div class="site-cover"></div>
+    <?php endif; ?>
 
     <!-- Main content -->
     <div class="typology-wrap">
@@ -140,6 +142,7 @@ class PublicPage extends PublicPageBase {
     </div><!-- .typology-wrap -->
 
     <!-- Footer -->
+    <?php if ($this->show_site_chrome()): ?>
     <footer class="site-footer">
         <div class="footer-inner">
             <div class="footer-bottom">
@@ -194,6 +197,7 @@ class PublicPage extends PublicPageBase {
             <p>You can reach Jeremy at <?php echo htmlspecialchars($settings->get_setting('defaultemail', true, true) ?: 'jeremy.tunnell@gmail.com'); ?></p>
         </div>
     </div>
+    <?php endif; ?>
 
     <script>
         const toggle = document.getElementById('sidebarToggle');
@@ -205,7 +209,7 @@ class PublicPage extends PublicPageBase {
         if (toggle) toggle.addEventListener('click', openSidebar);
         if (overlay) overlay.addEventListener('click', closeSidebar);
         if (close) close.addEventListener('click', closeSidebar);
-        document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSidebar(); });
+        document.addEventListener('keydown', e => { if (e.key === 'Escape' && overlay) closeSidebar(); });
     </script>
 
 </body>

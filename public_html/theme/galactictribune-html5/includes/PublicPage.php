@@ -100,6 +100,7 @@ class PublicPage extends PublicPageBase {
         <body class="h-full">
         <div class="min-h-full">
 
+        <?php if ($this->show_site_chrome()): ?>
         <div class="bg-gray-50">
           <div class="relative bg-white z-10">
             <div class="max-w-7xl mx-auto px-4 sm:px-6">
@@ -259,6 +260,7 @@ class PublicPage extends PublicPageBase {
             </div>
           </div>
         </div>
+        <?php endif; ?>
 
         <div class="py-10 relative">
           <div class="max-w-7xl mx-auto sm:px-6 lg:px-8"><main class="lg:col-span-9 xl:col-span-6">
@@ -288,6 +290,7 @@ class PublicPage extends PublicPageBase {
           </main>
         </div>
         </div>
+        <?php if ($this->show_site_chrome()): ?>
         <footer class="bg-white">
           <div class="max-w-7xl mx-auto py-12 px-4 overflow-hidden sm:px-6 lg:px-8">
             <div class="flex justify-center space-x-2 text-gray-700">
@@ -297,6 +300,7 @@ class PublicPage extends PublicPageBase {
             </p>
           </div>
         </footer>
+        <?php endif; ?>
         </div>
         </body>
         </html>

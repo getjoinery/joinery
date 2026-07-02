@@ -88,6 +88,7 @@ class PublicPage extends PublicPageBase {
 <body>
 
     <!-- Navbar -->
+    <?php if ($this->show_site_chrome()): ?>
     <div class="nav-area">
         <div class="navbar-area">
             <!-- Mobile -->
@@ -150,6 +151,7 @@ class PublicPage extends PublicPageBase {
             </div>
         </div>
     </div>
+    <?php endif; ?>
 
 	<?php
 	}
@@ -163,6 +165,7 @@ class PublicPage extends PublicPageBase {
 	?>
 
     <!-- Footer Top -->
+    <?php if ($this->show_site_chrome()): ?>
     <footer class="footer-top-area">
         <div class="container">
             <div class="row">
@@ -240,6 +243,7 @@ class PublicPage extends PublicPageBase {
     </footer>
 
     <div class="go-top">&#8679;</div>
+    <?php endif; ?>
 
     <script src="/assets/js/joinery-validate.js"></script>
     <script src="/theme/phillyzouk-html5/assets/js/script.js"></script>

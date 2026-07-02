@@ -22,6 +22,7 @@ api/apiv1.php
        /action/*, /form/*    → ApiLogicEndpoint → ApiAuth::authorize([capability]) → run logic / build form
        /management/*         → ManagementApiRouter → ApiAuth::authorize([machine + superadmin])
        /auth/*               → ApiAuthEndpoint (thin shell) → ApiAuth::attemptLogin / revokeSessionKey
+       /app/*                → ApiAppEndpoint → app navigation routing table (session keys only)
 ```
 
 The whole security boundary lives in **one class, `ApiAuth`** (`includes/ApiAuth.php`):
@@ -192,6 +193,20 @@ Returns the user summary: user id, name, email, permission, subscription tier, a
 ### `POST /api/v1/auth/logout` — session-key-authenticated
 
 Revokes the presented key (soft delete) and nothing else. Machine keys get 403 here — they are revoked from the admin page, not by themselves. Browser sessions also get 403 — they sign out on the website (`/logout`), which ends the web session and with it the API access.
+
+### `POST /api/v1/auth/web_session` — session-key-authenticated
+
+The web-session bridge for native app webviews: derives a web session from the presented session key so the app never shows a web login page. Body: `{"target": "/profile/calendar"}` — a same-origin relative path (default `/`). Returns a single-use bridge URL with a 60-second TTL:
+
+```json
+{ "data": { "bridge_url": "/app_bridge?token=…", "expires_in": 60 } }
+```
+
+The webview loads `bridge_url`; the server validates the token, starts an **app-context** web session for the key's user, and 302s to the target. Bridged sessions render without site chrome and live only as long as the originating key — revoking the key (logout, App Sessions page, password change) ends them too. Machine keys and browser sessions get 403. Full flow: `docs/mobile_apps.md`.
+
+## App Endpoints
+
+`GET /api/v1/app/navigation` — session-key-authenticated. The user's profile menu as a routing table for a native app's tab bar and More list: filtered entries (permission, visibility, setting gates; shell-owned auth entries excluded), each with a version-safe `destination` (`{type: "web", url}` today; `{type: "native", screen, fallback_url}` once a surface goes native), plus the `tabs` slug list pinned for the requesting `client_app` (from the `app_navigation` setting). Machine keys and browser sessions get 403. Response shape and semantics: `docs/mobile_apps.md`.
 
 ## Client Versioning
 

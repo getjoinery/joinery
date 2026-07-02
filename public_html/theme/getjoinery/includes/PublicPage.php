@@ -77,6 +77,7 @@ class PublicPage extends PublicPageBase {
 </head>
 <body>
 
+<?php if ($this->show_site_chrome()): ?>
 <nav class="site-nav">
     <div class="container">
         <a href="/" class="nav-logo">Joinery</a>
@@ -106,6 +107,7 @@ class PublicPage extends PublicPageBase {
         </button>
     </div>
 </nav>
+<?php endif; ?>
 
     <?php
     }
@@ -116,6 +118,7 @@ class PublicPage extends PublicPageBase {
         $session->clear_clearable_messages();
     ?>
 
+<?php if ($this->show_site_chrome()): ?>
 <footer class="site-footer">
     <div class="container">
         <div class="footer-links">
@@ -143,6 +146,7 @@ class PublicPage extends PublicPageBase {
         </div>
     </div>
 </footer>
+<?php endif; ?>
 
 <script src="/assets/js/joinery-validate.js"></script>
 <script src="/theme/getjoinery/assets/js/script.js?v=<?php echo $this->asset_mtime('theme/getjoinery/assets/js/script.js'); ?>"></script>
