@@ -25,7 +25,12 @@
  * actions via the theme chain; {plugin}/{action} names resolve to a plugin's
  * logic directory).
  *
- * @version 1.0.0
+ * @version 1.1.0
+ * @changelog 1.1.0 - Idempotent writes (specs/implemented/api_contract_and_idempotency.md
+ *   § Change 2): an authenticated action request carrying an Idempotency-Key
+ *   header executes once — a retry with the same key and body replays the
+ *   stored response; the same key with a different body or action is a 409.
+ *   Sessionless actions and requests without the header are unchanged.
  * @changelog 1.0.0 - Merge of the former ApiActionEndpoint and ApiFormEndpoint:
  *   one class for an action's POST (execute) and GET (form definition) faces,
  *   sharing the dispatch skeleton, requires_session resolution, and ApiAuth.
@@ -112,7 +117,7 @@ class ApiLogicEndpoint {
 		// the same way regardless.
 		$acting_user = self::requiresSession($meta) ? $api_user : NULL;
 
-		self::executeAction($action_label, $logic_function, $acting_user);
+		self::executeAction($action_label, $logic_function, $acting_user, $api_entry);
 	}
 
 	/**
@@ -121,9 +126,17 @@ class ApiLogicEndpoint {
 	 * @param string $action_label Full action name for logs ('{plugin}/{action}' or '{action}')
 	 * @param string $logic_function
 	 * @param User|null $api_user Acting user for session simulation (null = sessionless)
+	 * @param ApiKey|null $api_entry Presented key, when one was (browser sessions: null)
 	 */
-	protected static function executeAction($action_label, $logic_function, $api_user) {
+	protected static function executeAction($action_label, $logic_function, $api_user, $api_entry = NULL) {
 		$user_id = $api_user ? $api_user->key : NULL;
+		$raw_input = file_get_contents('php://input');
+
+		// Idempotency (docs/api.md § Contract): a replay or conflict exits here,
+		// before session simulation and before any side effect. Returns the
+		// in-flight row to finalize after the action runs, or null when the
+		// request carries no Idempotency-Key (or no credential to scope it to).
+		$idem_record = self::idempotencyBegin($action_label, $api_user, $api_entry, $raw_input);
 
 		// Set up session simulation if needed
 		$session = SessionControl::get_instance();
@@ -133,7 +146,6 @@ class ApiLogicEndpoint {
 
 		// Build parameters from JSON request body or form data
 		$get_params = $_GET;
-		$raw_input = file_get_contents('php://input');
 		$json_params = json_decode($raw_input, true);
 		$post_params = is_array($json_params) ? $json_params : $_POST;
 
@@ -184,10 +196,144 @@ class ApiLogicEndpoint {
 			]);
 		}
 
+		$response_json = json_encode($translated['response']);
+
+		// Store the outcome (success or 422 alike) so a retry with the same
+		// Idempotency-Key replays instead of re-executing.
+		if ($idem_record !== null) {
+			self::idempotencyFinalize($idem_record, $translated['status_code'], $response_json);
+		}
+
 		header("Content-Type: application/json");
 		http_response_code($translated['status_code']);
-		echo json_encode($translated['response']) . PHP_EOL;
+		echo $response_json . PHP_EOL;
 		exit;
+	}
+
+	// ====================================================================
+	// Idempotent writes (specs/implemented/api_contract_and_idempotency.md § Change 2)
+	// ====================================================================
+
+	/**
+	 * The Idempotency-Key header value, or '' when absent. Read directly from
+	 * getallheaders() with the same normalization apiv1.php applies (HTTP
+	 * header names are case-insensitive; CGI transports collapse - and _).
+	 */
+	protected static function idempotencyKeyHeader() {
+		foreach (getallheaders() as $name => $value) {
+			if (str_replace('-', '_', strtolower($name)) === 'idempotency_key') {
+				return trim((string) $value);
+			}
+		}
+		return '';
+	}
+
+	/**
+	 * Resolve an Idempotency-Key request against the stored outcomes. Four
+	 * possible results:
+	 *
+	 *   - no header, or no credential to scope to (sessionless) → null; the
+	 *     action runs exactly as it always has.
+	 *   - first sighting of the key → claim it (insert an in-flight row) and
+	 *     return the row for idempotencyFinalize().
+	 *   - key already finalized with the same action + body → replay the
+	 *     stored response verbatim and EXIT.
+	 *   - key seen with a different action or body, or the original is still
+	 *     in flight → 409 ActionError and EXIT. An in-flight row older than
+	 *     5 minutes is treated as an abandoned original (the request died
+	 *     before storing its outcome) and is taken over instead of blocking
+	 *     the client until the purge.
+	 *
+	 * Claiming is insert-first against the (key_hash, credential_scope)
+	 * unique pair, so two concurrent originals cannot both execute — the
+	 * loser of the race re-reads the winner's row and resolves against it.
+	 */
+	protected static function idempotencyBegin($action_label, $api_user, $api_entry, $raw_input) {
+		$raw_key = self::idempotencyKeyHeader();
+		if ($raw_key === '') {
+			return null;
+		}
+
+		require_once(PathHelper::getIncludePath('data/api_idempotency_keys_class.php'));
+		$scope = ApiIdempotencyKey::credential_scope($api_entry, $api_user);
+		if ($scope === null) {
+			return null;
+		}
+
+		$user_id = $api_user ? $api_user->key : NULL;
+		$key_hash = hash('sha256', $raw_key);
+		$body_hash = hash('sha256', (string) $raw_input);
+
+		$row = ApiIdempotencyKey::find($key_hash, $scope);
+		if ($row === null) {
+			$row = new ApiIdempotencyKey(NULL);
+			$row->set('aik_key_hash', $key_hash);
+			$row->set('aik_credential_scope', $scope);
+			$row->set('aik_action', $action_label);
+			$row->set('aik_body_hash', $body_hash);
+			try {
+				$row->save();
+				return $row;
+			} catch (Exception $e) {
+				// Lost the unique race — a concurrent original claimed the key.
+				$row = ApiIdempotencyKey::find($key_hash, $scope);
+				if ($row === null) {
+					throw $e; // not the race: a genuine storage failure
+				}
+			}
+		}
+
+		if ($row->get('aik_action') !== $action_label || $row->get('aik_body_hash') !== $body_hash) {
+			RequestLogger::log('api', 'action ' . $action_label, false, [
+				'user_id' => $user_id,
+				'status_code' => 409,
+				'error_type' => 'ActionError',
+				'note' => 'Idempotency-Key reused with a different request'
+			]);
+			api_error('This Idempotency-Key was already used with a different request', 'ActionError', 409);
+		}
+
+		$stored_status = $row->get('aik_response_status');
+		if ($stored_status === null || $stored_status === '') {
+			$stale_cutoff = LibraryFunctions::time_shift(gmdate('Y-m-d H:i:s'), '-5 minutes', 'Y-m-d H:i:s');
+			if ($row->get('aik_create_time') > $stale_cutoff) {
+				RequestLogger::log('api', 'action ' . $action_label, false, [
+					'user_id' => $user_id,
+					'status_code' => 409,
+					'error_type' => 'ActionError',
+					'note' => 'Idempotency-Key original still in progress'
+				]);
+				api_error('The original request with this Idempotency-Key is still in progress', 'ActionError', 409);
+			}
+			return $row; // abandoned original: take over and execute
+		}
+
+		// Replay the stored outcome verbatim.
+		$stored_status = (int) $stored_status;
+		RequestLogger::log('api', 'action ' . $action_label, $stored_status < 400, [
+			'user_id' => $user_id,
+			'status_code' => $stored_status,
+			'note' => 'idempotent replay'
+		]);
+		header("Content-Type: application/json");
+		http_response_code($stored_status);
+		echo $row->get('aik_response_body') . PHP_EOL;
+		exit;
+	}
+
+	/**
+	 * Store the outcome on the claimed row. A storage failure must not cost
+	 * the client its response (the action has already run), so it is logged
+	 * and swallowed — the key simply loses replay protection.
+	 */
+	protected static function idempotencyFinalize($idem_record, $status_code, $response_json) {
+		try {
+			$idem_record->set('aik_response_status', (int) $status_code);
+			$idem_record->set('aik_response_body', $response_json);
+			$idem_record->save();
+		} catch (Exception $e) {
+			error_log('ApiLogicEndpoint: failed to store idempotency outcome: ' . $e->getMessage());
+		}
 	}
 
 	// ====================================================================

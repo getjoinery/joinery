@@ -1,0 +1,9 @@
+{
+    "name": "Purge Idempotency Keys",
+    "description": "Deletes stored API idempotency outcomes older than the retry-dedup window (default 24 hours)",
+    "default_frequency": "daily",
+    "default_time": "03:45:00",
+    "config_fields": {
+        "hours_to_keep": {"type": "number", "label": "Hours to Keep", "required": false}
+    }
+}

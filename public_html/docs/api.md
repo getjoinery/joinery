@@ -79,6 +79,19 @@ Timestamps are strings in **UTC**, formatted `YYYY-MM-DD HH:MM:SS` — space sep
 - Booleans are JSON `true`/`false` and counts are JSON numbers — not `"1"`/`"0"` strings. Payload-building code casts at the boundary.
 - Strings are plain text, not HTML. (A few legacy page-oriented action payloads still carry HTML fragments — see the caveat below — but no new payload may.)
 
+### Idempotent writes
+
+A mutating action request may carry an `Idempotency-Key` header (hyphen form, like the client headers) — any string unique per logical operation; a UUIDv4 is the obvious choice. The server guarantees the action **executes at most once per key**:
+
+- The first request with a key executes normally; its response (status + body) is stored for 24 hours.
+- A retry with the same key and same body receives the stored response verbatim, without re-executing — safe to fire blindly after a timeout or lost response.
+- The same key with a different body or different action is a client bug and gets **409** `ActionError`; so does a retry that arrives while the original is still executing.
+- No header → no idempotency behavior; the request is processed exactly as always.
+
+Keys are scoped per credential (API key, or user for browser sessions), so key strings never collide across callers, and both credential types behave identically. Sessionless actions (`register`, password resets) have no credential to scope to and ignore the header. The replayed body is a snapshot of the original outcome — a retried `cart` add returns the cart as it looked at execution time. Client convention: attach the header in the networking layer for every mutating action call, generating a fresh key per logical operation and reusing it only for retries of that operation.
+
+Stored outcomes live in `aik_api_idempotency_keys` (the raw key is never stored, only its SHA-256) and are purged past the 24-hour window by the **Purge Idempotency Keys** scheduled task.
+
 ### What is *not* contract
 
 An action's `data` is contract only where its keys are documented (in this file or the owning plugin's docs). Several actions serve web pages first and return their page variables — live PHP objects that JSON-serialize as `{"key": N}` husks. Those husks, and any undocumented key, carry no compatibility promise; each action's payload becomes contract when it is documented as an API surface. The management namespace (`/api/v1/management/*`) is an internal control plane consumed only by server_manager and is versioned with it, not with app clients.
@@ -639,11 +652,12 @@ POST /api/v1/action/{action_name}
 Content-Type: application/json
 public_key: {key}
 secret_key: {key}
+Idempotency-Key: {uuid}          (optional — see Contract § Idempotent writes)
 
 { "field": "value", ... }
 ```
 
-Sessioned actions require API key write permission (level 2+) and run under session simulation as the key's user.
+Sessioned actions require API key write permission (level 2+) and run under session simulation as the key's user. With an `Idempotency-Key`, the action executes at most once per key — retries replay the stored response ([Contract § Idempotent writes](#idempotent-writes)).
 
 ### Plugin Actions
 
@@ -879,6 +893,7 @@ The management API is permanently read-only. Mutating operations (backups, resto
 |--------|-----------|---------|
 | 404 | ActionError | Unknown action name or action not available via API |
 | 405 | ActionError | Wrong HTTP method (actions require POST) |
+| 409 | ActionError | `Idempotency-Key` reused with a different body/action, or its original request is still in progress |
 | 422 | ActionError | Business logic error (e.g., feature disabled, invalid state) |
 | 422 | ValidationError | Input validation failed — check `validation_errors` for field-level detail |
 

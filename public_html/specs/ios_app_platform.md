@@ -191,7 +191,7 @@ Testable with curl and a browser — no Xcode dependency.
 its `data` payload in `docs/api.md`, promoting it into the § Contract
 surface. Most core actions currently return page variables whose framework
 objects serialize as `{"key": N}` husks (see
-`specs/api_contract_and_idempotency.md` § Change 1 audit output) — each
+`specs/implemented/api_contract_and_idempotency.md` § Change 1 audit output) — each
 such action gets a real client-facing payload here, the way the
 dns_filtering actions did for ScrollDaddy. Where the web page wants the
 same data, the payload is designed once and the page consumes it too.
@@ -241,7 +241,7 @@ reachable and chrome-less; App Store review passes.
   (implemented) and
   `specs/profile_menu_single_source.md` land before Phase 1 here (the
   navigation endpoint reads the same menu accessor);
-  `specs/api_contract_and_idempotency.md`'s contract audit completes
+  `specs/implemented/api_contract_and_idempotency.md`'s contract audit completes
   before Phase 4's store submission, and app clients send
   `Idempotency-Key` on mutating calls.
 - `specs/inbound_email_profile_mailbox.md` — the user-facing mailbox at
