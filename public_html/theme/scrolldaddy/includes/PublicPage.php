@@ -278,6 +278,7 @@ Career Area
 	<!--==============================
     Mobile Menu
   ============================== -->
+    <?php if ($this->show_site_chrome()): ?>
     <div class="th-menu-wrapper">
         <div class="th-menu-area text-center">
             <button class="th-menu-toggle"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
@@ -412,11 +413,12 @@ Career Area
             </div>
         </div>
     </header>
-<?php	
-		
-		
-		
-		
+    <?php endif; ?>
+<?php
+
+
+
+
 		/*
 		?>
 
@@ -438,9 +440,10 @@ Career Area
 		$session = SessionControl::get_instance();
 		$session->clear_clearable_messages();
 		$settings = Globalvars::get_instance();
-		
-	
+
+
 	?>
+	<?php if ($this->show_site_chrome()): ?>
 	   <footer class="footer-wrapper footer-layout1">
         <div class="container">
 			<?php
@@ -556,6 +559,7 @@ Career Area
             </path>
         </svg>
     </div>
+    <?php endif; ?>
 
     <!--==============================
     All Js File

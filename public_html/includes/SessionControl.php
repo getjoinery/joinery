@@ -858,7 +858,93 @@ class SessionControl{
 	private $_api_original_session = null;
 	private $_api_context = false;
 
+	/**
+	 * Mark this web session app-context: it was started by the web-session
+	 * bridge (/app_bridge) from a native app's API session key, so pages render
+	 * without site chrome (PublicPageBase::show_site_chrome()) and the session
+	 * lives only as long as its originating key (validate_app_context()).
+	 *
+	 * @param int $api_key_id The originating apk_api_keys id
+	 * @param string $client_app The app's client_app identifier
+	 */
+	public function mark_app_context($api_key_id, $client_app = '') {
+		$_SESSION['app_context'] = array(
+			'api_key_id' => (int)$api_key_id,
+			'client_app' => (string)$client_app,
+			'checked_time' => time(),
+		);
+	}
+
+	/**
+	 * Whether this web session was bridged from a native app's session key.
+	 */
+	public function is_app_session() {
+		return !empty($_SESSION['app_context']);
+	}
+
+	/**
+	 * The app-context record (api_key_id, client_app, checked_time), or NULL
+	 * for ordinary web sessions.
+	 */
+	public function get_app_context() {
+		return $_SESSION['app_context'] ?? NULL;
+	}
+
+	/**
+	 * Lifetime coupling for bridged sessions: an app-context web session is
+	 * valid only while its originating API key is. Revoking the key — app
+	 * logout, the App Sessions page, or a password change — ends this session
+	 * at its next check. Checked at most once per request, throttled to
+	 * app_bridge_key_check_seconds (default 60) between database loads.
+	 */
+	private function validate_app_context() {
+		$this->_app_context_checked = true;
+
+		$raw = Globalvars::get_instance()->get_setting('app_bridge_key_check_seconds', false, true);
+		$interval = ($raw === null || $raw === '') ? 60 : (int)$raw;
+
+		$last = (int)($_SESSION['app_context']['checked_time'] ?? 0);
+		if ($interval > 0 && (time() - $last) < $interval) {
+			return;
+		}
+		$_SESSION['app_context']['checked_time'] = time();
+
+		$alive = false;
+		try {
+			require_once(PathHelper::getIncludePath('data/api_keys_class.php'));
+			$api_key = new ApiKey($_SESSION['app_context']['api_key_id'], TRUE);
+			$alive = !$api_key->get('apk_delete_time')
+				&& $api_key->get('apk_is_active')
+				&& (!$api_key->get('apk_expires_time')
+					|| gmdate('Y-m-d H:i:s') <= $api_key->get('apk_expires_time'));
+		} catch (Exception $e) {
+			// Row gone = revoked and purged
+			$alive = false;
+		}
+
+		if (!$alive) {
+			$this->logout();
+		}
+	}
+
+	private $_app_context_checked = false;
+
+	/**
+	 * Bridged sessions die with their originating API key — run the coupling
+	 * check before answering any identity question (get_user_id,
+	 * is_logged_in, check_permission), so no caller can act on a stale
+	 * logged-in answer. The flag makes this once per request and lets
+	 * logout()'s own identity calls pass through.
+	 */
+	private function ensure_app_context_valid() {
+		if (!$this->_app_context_checked && !empty($_SESSION['app_context'])) {
+			$this->validate_app_context();
+		}
+	}
+
 	function get_user_id($initial_user=FALSE) {
+		$this->ensure_app_context_valid();
+
 		if ($initial_user && $this->get_initial_user_id() !== NULL) {
 			return $this->get_initial_user_id();
 		}
@@ -930,6 +1016,7 @@ class SessionControl{
 
 
 	function is_logged_in(){
+		$this->ensure_app_context_valid();
 		if(isset($_SESSION['loggedin'])){
 			return true;
 		}
@@ -997,6 +1084,8 @@ class SessionControl{
 	}
 
 	function check_permission($level, $msgtext=NULL){
+		$this->ensure_app_context_valid();
+
 		//IF NOT LOGGED IN OR IF IP ADDRESS HAS CHANGED FOR LOGGED IN USER, REDIRECT TO LOGIN SCREEN
 		$ipchange = FALSE;
 		$client_ip = $this->_get_client_ip();

@@ -114,6 +114,21 @@ abstract class PublicPageBase {
 	}
 
 	/**
+	 * Whether to render the site chrome — header, navigation, and footer.
+	 * False for app-context web sessions (started by the /app_bridge webview
+	 * bridge): the native shell supplies titles and navigation, so pages show
+	 * content only. Every theme wraps its chrome markup in this check:
+	 *
+	 *   <?php if ($this->show_site_chrome()): ?> …nav/footer… <?php endif; ?>
+	 *
+	 * Scripts, stylesheets, and content stay outside the check — only the
+	 * visual chrome is conditional. See docs/mobile_apps.md.
+	 */
+	public function show_site_chrome() {
+		return !SessionControl::get_instance()->is_app_session();
+	}
+
+	/**
 	 * Whether a user-menu item belongs in the admin launcher (9-dots / nine-dots dropdown).
 	 * Includes the home and profile shortcuts plus every core admin item.
 	 */
@@ -727,6 +742,13 @@ abstract class PublicPageBase {
 			header('Referrer-Policy: strict-origin-when-cross-origin');
 		}
 
+		// App display mode: tag the body so page CSS can adapt to chrome-less
+		// rendering (the jy-app-mode hook). Themes omit the chrome server-side
+		// via show_site_chrome(); this class is the styling hook.
+		if (!$this->show_site_chrome()) {
+			echo '<script>document.addEventListener("DOMContentLoaded",function(){document.body.classList.add("jy-app-mode");});</script>' . "\n";
+		}
+
 		// Auto-inject admin bar CSS in head
 		if ($this->should_show_admin_bar()) {
 			$this->render_admin_bar_css();
@@ -1284,6 +1306,10 @@ abstract class PublicPageBase {
 	 */
 	protected function should_show_admin_bar() {
 		$session = SessionControl::get_instance();
+		// The admin bar is site chrome — never shown inside app webviews.
+		if ($session->is_app_session()) {
+			return false;
+		}
 		if ($session->get_permission() < 10) {
 			return false;
 		}

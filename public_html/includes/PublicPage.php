@@ -111,6 +111,7 @@ class PublicPage extends PublicPageBase {
 
         if ($this->_noheader) {
 ?>
+<?php if ($this->show_site_chrome()): ?>
 <header class="jy-site-header header-light" style="border-bottom: 1px solid var(--jy-color-border);">
     <div class="jy-header-inner" style="justify-content: center; position: relative;">
         <a href="/" class="jy-logo" style="position: absolute; left: 1.5rem;" onclick="return confirm('Leave checkout? Your cart will be saved.');">
@@ -122,11 +123,13 @@ class PublicPage extends PublicPageBase {
         </div>
     </div>
 </header>
+<?php endif; ?>
 
 <main class="jy-main-content">
 <?php
         } else {
 ?>
+<?php if ($this->show_site_chrome()): ?>
 <header class="jy-site-header header-light">
     <div class="jy-header-inner">
         <a href="/" class="jy-logo">
@@ -163,6 +166,7 @@ class PublicPage extends PublicPageBase {
         </div>
     </div>
 </header>
+<?php endif; ?>
 
 <main class="jy-main-content">
 <?php
@@ -184,6 +188,7 @@ class PublicPage extends PublicPageBase {
 ?>
 </main>
 
+<?php if ($this->show_site_chrome()): ?>
 <footer class="jy-site-footer">
     <div class="jy-container">
         <div class="jy-footer-bottom">
@@ -191,6 +196,7 @@ class PublicPage extends PublicPageBase {
         </div>
     </div>
 </footer>
+<?php endif; ?>
 <?php
             }
         }

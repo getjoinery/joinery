@@ -4,9 +4,12 @@
  *
  * Serves /api/v1/auth/*: per-user session-key provisioning and lifecycle.
  *
- *   POST /api/v1/auth/login    — unauthenticated; email + password → session key pair
- *   GET  /api/v1/auth/session  — key-authenticated (either type); user/tier summary
- *   POST /api/v1/auth/logout   — session-key-authenticated; revokes the presented key
+ *   POST /api/v1/auth/login        — unauthenticated; email + password → session key pair
+ *   GET  /api/v1/auth/session      — key-authenticated (either type); user/tier summary
+ *   POST /api/v1/auth/logout       — session-key-authenticated; revokes the presented key
+ *   POST /api/v1/auth/web_session  — session-key-authenticated; mints a single-use
+ *                                    bridge URL that starts an app-context web session
+ *                                    (docs/mobile_apps.md)
  *
  * Dispatched from api/apiv1.php in two places, mirroring ApiLogicEndpoint:
  * dispatchPreAuth() before the key-header requirement (login is the
@@ -15,11 +18,13 @@
  * Uses the api_error()/api_success() helpers defined in apiv1.php.
  *
  * This is a thin HTTP shell: the credential decisions (verify-and-mint on login,
- * revoke on logout) live in ApiAuth::attemptLogin()/revokeSessionKey(). This
+ * revoke on logout, bridge-token minting) live in ApiAuth/AppBridgeToken. This
  * class owns only the transport concerns — method checks, request parsing,
  * request logging, and response shaping (user_summary).
  *
- * @version 1.2.0
+ * @version 1.3.0
+ * @changelog 1.3.0 - auth/web_session: mints an AppBridgeToken for session keys
+ *   so the app webview can derive a web session from the API credential.
  * @changelog 1.2.0 - Browser-session principals (api_entry === null) get a
  *   dedicated 403 on logout pointing at the website /logout; /auth/session
  *   works for them unchanged.
@@ -45,19 +50,23 @@ class ApiAuthEndpoint {
 			// handle_login() always exits.
 		}
 
-		if (!in_array($endpoint, array('session', 'logout'))) {
+		if (!in_array($endpoint, array('session', 'logout', 'web_session'))) {
 			api_error('Unknown auth endpoint: ' . $endpoint, 'ActionError', 404);
 		}
 	}
 
 	/**
-	 * Post-authentication dispatch for session/logout. Always exits.
+	 * Post-authentication dispatch for session/logout/web_session. Always exits.
 	 */
 	public static function dispatchAuthenticated($url_segments, $api_entry, $api_user) {
 		$endpoint = strtolower($url_segments[3] ?? '');
 
 		if ($endpoint === 'session') {
 			self::handle_session($api_user);
+		}
+
+		if ($endpoint === 'web_session') {
+			self::handle_web_session($api_entry, $api_user);
 		}
 
 		self::handle_logout($api_entry, $api_user);
@@ -176,6 +185,85 @@ class ApiAuthEndpoint {
 		]);
 
 		api_success(new stdClass(), 'Session revoked');
+	}
+
+	/**
+	 * POST /api/v1/auth/web_session — mint a single-use bridge URL so the
+	 * app's webview can start a web session derived from this session key.
+	 * The webview loads the returned URL; /app_bridge validates the token,
+	 * starts an app-context web session for the key's user, and 302s to the
+	 * target. Session keys only: browser sessions already ARE a web session,
+	 * and machine keys are integration credentials, not devices. Always exits.
+	 */
+	protected static function handle_web_session($api_entry, $api_user) {
+		if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+			api_error('Web session endpoint must use POST method', 'ActionError', 405);
+		}
+
+		if ($api_entry === null || !$api_entry->is_session()) {
+			RequestLogger::log('api_auth', 'auth/web_session', false, [
+				'user_id' => $api_user->key,
+				'status_code' => 403,
+				'error_type' => 'AuthenticationError',
+				'note' => $api_entry === null ? 'Browser session on web_session' : 'Machine key on web_session'
+			]);
+			api_error('The web-session bridge serves app session keys only', 'AuthenticationError', 403);
+		}
+
+		$params = self::request_params();
+		$target = $params['target'] ?? '/';
+
+		if (!self::is_valid_bridge_target($target)) {
+			api_error('Target must be a same-origin relative path (e.g. /profile/calendar)', 'ActionError', 400);
+		}
+
+		// client_app is recorded onto the bridged session for per-app behavior
+		// (same normalization as the version handshake in apiv1.php).
+		$client_app = '';
+		foreach (getallheaders() as $header_name => $header_value) {
+			if (str_replace('-', '_', strtolower($header_name)) === 'client_app') {
+				$client_app = trim($header_value);
+			}
+		}
+
+		require_once(PathHelper::getIncludePath('data/app_bridge_tokens_class.php'));
+		$mint = AppBridgeToken::Mint($api_entry, $target, $client_app);
+
+		// The token plaintext is never logged — it appears only in this response.
+		RequestLogger::log('api_auth', 'auth/web_session', true, [
+			'user_id' => $api_user->key,
+			'status_code' => 200
+		]);
+
+		api_success(array(
+			'bridge_url' => '/app_bridge?token=' . $mint['token'],
+			'expires_in' => AppBridgeToken::TTL_SECONDS,
+		), 'Bridge token minted');
+	}
+
+	/**
+	 * Whether a bridge target is a safe same-origin relative path: rooted at
+	 * '/', no scheme or host (rejects absolute and protocol-relative URLs),
+	 * no backslashes or raw control characters/spaces.
+	 */
+	protected static function is_valid_bridge_target($target) {
+		if (!is_string($target) || $target === '' || strlen($target) > 512) {
+			return false;
+		}
+		if ($target[0] !== '/') {
+			return false;
+		}
+		if (isset($target[1]) && ($target[1] === '/' || $target[1] === '\\')) {
+			return false;
+		}
+		if (strpos($target, '\\') !== false || preg_match('/[\x00-\x20]/', $target)) {
+			return false;
+		}
+		$parts = parse_url($target);
+		if ($parts === false || isset($parts['scheme']) || isset($parts['host'])) {
+			return false;
+		}
+		return true;
 	}
 
 	/**
