@@ -2,7 +2,11 @@
 /**
  * API v1 Endpoint
  *
- * @version 2.7
+ * @version 2.8
+ * @changelog 2.8 - Browser-session credential: keyless requests carrying a
+ *   logged-in web session cookie + X-Joinery-Csrf header authenticate as that
+ *   user (ApiAuth::authenticateBrowserSession). Key headers take precedence;
+ *   anonymous keyless requests fail exactly as before.
  * @changelog 2.7 - Authentication chain extracted to ApiAuth::authenticate();
  *   the front controller now resolves the principal in one call. Authorization
  *   (former ApiAuthGate) folded into ApiAuth::authorize(); CRUD verbs call it
@@ -330,10 +334,13 @@ $readable_classes = array_values(array_filter($classes, fn($c) => api_flag($c, '
 $writable_classes = array_values(array_filter($classes, fn($c) => api_flag($c, 'api_writable')));
 
 $source_ip = $_SERVER['REMOTE_ADDR'];
-// Authentication: resolve + validate the key and load its user, or exit 4xx.
-// The full chain (key lookup, status/expiry/IP checks, secret verify, user load,
-// failure logging that feeds the api_auth rate limiter, key-type stamping, and
-// usage tracking) lives in ApiAuth::authenticate().
+// Authentication: resolve + validate the credential and load its user, or exit
+// 4xx. Key headers are the primary credential (full chain: key lookup,
+// status/expiry/IP checks, secret verify, user load, failure logging that feeds
+// the api_auth rate limiter, key-type stamping, usage tracking). Keyless
+// requests may instead authenticate as a logged-in browser session (web session
+// cookie + X-Joinery-Csrf header); those principals have api_entry === null.
+// Both live in ApiAuth::authenticate().
 $principal = ApiAuth::authenticate($headers, $source_ip);
 $api_entry = $principal['api_entry'];
 $api_user  = $principal['api_user'];

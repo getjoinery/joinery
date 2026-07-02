@@ -32,8 +32,8 @@ client headers):
   rejected as a client error.
 - Keys expire (24h) via a scheduled task purge (`docs/scheduled_tasks.md`
   patterns). No header → today's behavior, unchanged.
-- Both credential types (API keys and the browser-session credential from
-  `specs/api_browser_session_credential.md`, once it exists) get the same
+- Both credential types (API keys and the browser-session credential —
+  `specs/implemented/api_browser_session_credential.md`) get the same
   behavior.
 
 ## Sequencing

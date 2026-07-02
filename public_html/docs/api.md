@@ -36,26 +36,46 @@ The handler classes around it are **dispatch, not auth**: `ApiLogicEndpoint` run
 
 ## Authentication
 
-All authenticated API requests use the same two custom headers:
+Key-authenticated requests use the same two custom headers:
 
 ```
 public_key: {your_public_key}
 secret_key: {your_secret_key}
 ```
 
-There is one auth story with **two key types**, distinguished by `apk_type` in the shared `apk_api_keys` table. The request path is identical for both — only provisioning and secret hashing differ.
+There is one auth story with **three credentials**: two key types, distinguished by `apk_type` in the shared `apk_api_keys` table, plus the browser session for page JavaScript. Key headers always take precedence — the browser-session path only runs when a request carries no key headers.
 
-| | Machine keys (`machine`) | Session keys (`session`) |
-|---|---|---|
-| Provisioned by | An administrator via **Admin > API Keys** | The user, via `POST /api/v1/auth/login` |
-| Identity | The user account the admin attached | The user who logged in |
-| Secret hashing | Slow hash (phpass) — appropriate for admin-chosen secrets | SHA-256 — the secret is a random 256-bit value, so a slow KDF buys nothing and would cost on every request |
-| Permission | Chosen by the admin (1–4) | Always 4; per-record authorization (owner-or-staff by default — see [Per-record authorization](#per-record-authorization)) is the effective gate |
-| Expiry | Optional, set by the admin | Always set, from the `api_session_key_lifetime_days` setting (default 365) |
-| Revocation | Admin API Keys page | `auth/logout`, the profile **App Sessions** page, the admin API Keys page (type filter), and automatically on password change |
-| Management API | Allowed (with superadmin owner) | **Never** |
+| | Machine keys (`machine`) | Session keys (`session`) | Browser session |
+|---|---|---|---|
+| Sent as | Key headers | Key headers | Web session cookie + `X-Joinery-Csrf` header |
+| Provisioned by | An administrator via **Admin > API Keys** | The user, via `POST /api/v1/auth/login` | Logging in on the website; the page emits the CSRF token as a `<meta name="joinery-api-csrf">` tag |
+| Identity | The user account the admin attached | The user who logged in | The web session's user, exactly as pages see it (login-as included) |
+| Secret hashing | Slow hash (phpass) — appropriate for admin-chosen secrets | SHA-256 — the secret is a random 256-bit value, so a slow KDF buys nothing and would cost on every request | n/a — the token is compared constant-time against the session's stored value |
+| Permission | Chosen by the admin (1–4) | Always 4; per-record authorization (owner-or-staff by default — see [Per-record authorization](#per-record-authorization)) is the effective gate | Same as a session key: full capability (4); the user's role and per-record authorization are the effective gates |
+| Expiry | Optional, set by the admin | Always set, from the `api_session_key_lifetime_days` setting (default 365) | The web session's lifetime |
+| Revocation | Admin API Keys page | `auth/logout`, the profile **App Sessions** page, the admin API Keys page (type filter), and automatically on password change | Website `/logout` (the API `auth/logout` refuses browser sessions) |
+| Management API | Allowed (with superadmin owner) | **Never** | **Never** |
 
 A password change revokes **all** of the user's session keys (the lost-phone path); machine keys owned by the same user are untouched. Session keys are not IP-restricted — devices roam networks by design; the App Sessions view's device label and last-used time are the compensating visibility.
+
+### Browser sessions (page JavaScript)
+
+Page JavaScript calls `/api/v1` with the web session it already has — no key provisioning. The server prints a session-wide CSRF token into every page for signed-in users; JS reads it and sends it back as a header:
+
+```js
+const csrf = document.querySelector('meta[name="joinery-api-csrf"]').content;
+const r = await fetch('/api/v1/action/contact_preferences', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': csrf },
+    body: JSON.stringify({ ... }),
+});
+```
+
+The cookie proves who the user is; the header proves the call came from our own page (an attacker's page cannot read the meta tag). Missing or wrong token → 403 even with a valid cookie. The token is session-wide and distinct from FormWriter's per-form CSRF tokens.
+
+Mechanics worth knowing: the API only ever *reads* the session (the session lock is released as soon as identity is resolved, so parallel page JS calls do not serialize, and nothing an action does can mutate the web session); browser-session requests carry no `client_app` headers, so client version minimums never apply to them; requests without any credential fail exactly as key-less requests always have.
+
+**Forward rule:** new features expose their logic as API actions (`_logic_api()` opt-in) and page JavaScript calls `/api/v1` with this credential. `/ajax/` is legacy — no new endpoints there; existing ones migrate opportunistically when touched.
 
 ### Key Properties
 
@@ -103,13 +123,13 @@ Success returns the key pair — **the only time the secret plaintext is ever re
 
 Store the two strings and send them as the standard key headers on every subsequent request. Failed logins return 401 `AuthenticationError` (identical response for unknown email, deleted user, and wrong password) and count toward the failed-auth rate limit.
 
-### `GET /api/v1/auth/session` — key-authenticated (either type)
+### `GET /api/v1/auth/session` — any credential
 
 Returns the user summary: user id, name, email, permission, subscription tier, and tier feature flags. The "who am I / what may I do" call on app launch.
 
 ### `POST /api/v1/auth/logout` — session-key-authenticated
 
-Revokes the presented key (soft delete) and nothing else. Machine keys get 403 here — they are revoked from the admin page, not by themselves.
+Revokes the presented key (soft delete) and nothing else. Machine keys get 403 here — they are revoked from the admin page, not by themselves. Browser sessions also get 403 — they sign out on the website (`/logout`), which ends the web session and with it the API access.
 
 ## Client Versioning
 
@@ -528,6 +548,8 @@ https://example.com,https://app.example.com
 ```
 
 Preflight `OPTIONS` requests are handled automatically when CORS is configured.
+
+The `X-Joinery-Csrf` header is deliberately absent from the CORS allow-list: the browser-session credential is same-origin by design (the token comes from a meta tag only same-origin pages can read). Cross-origin callers use API keys.
 
 ## Security Headers
 

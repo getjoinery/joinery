@@ -227,7 +227,8 @@ reachable and chrome-less; App Store review passes.
 
 ## Dependencies
 
-- Core pre-work specs: `specs/api_browser_session_credential.md` and
+- Core pre-work specs: `specs/api_browser_session_credential.md`
+  (implemented) and
   `specs/profile_menu_single_source.md` land before Phase 1 here (the
   navigation endpoint reads the same menu accessor);
   `specs/api_contract_and_idempotency.md`'s contract audit completes

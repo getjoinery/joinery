@@ -6,7 +6,11 @@
  *   - Management boundary (LOAD-BEARING): a session key owned by a
  *     permission-10 user gets 403 on management/* endpoints; a machine key
  *     owned by the same user still works. This test is the enforcement
- *     mechanism for the single-table design — never delete it.
+ *     mechanism for the single-table design — never delete it. The third
+ *     credential's side of this boundary — a permission-10 BROWSER SESSION
+ *     also gets 403 on management/* — is enforced by
+ *     browser_session_test.php § 4 (it needs the web-login machinery that
+ *     lives there); treat that case as equally load-bearing.
  *   - Model: CreateSessionKey row shape; SHA-256 verify path; machine-key
  *     verify path unchanged; expiry honored.
  *   - Login happy path returns a working pair; wrong password counts toward

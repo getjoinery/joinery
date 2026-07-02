@@ -785,6 +785,26 @@ class SessionControl{
 	}
 
 	/**
+	 * The session-wide CSRF token that authenticates this browser session to
+	 * /api/v1 (sent as the X-Joinery-Csrf header; validated by ApiAuth).
+	 * Minted once per session on first request and stable thereafter — it
+	 * survives session_regenerate_id() because session data carries over.
+	 * Separate from FormWriter's per-form tokens, which are unchanged.
+	 *
+	 * Mint from page-render context only (PublicPageBase emits it as a meta
+	 * tag). ApiAuth validates by reading the raw session value — it never
+	 * mints, so an API request cannot create a token for itself.
+	 *
+	 * @return string 64-char hex token
+	 */
+	public function get_api_csrf_token() {
+		if (empty($_SESSION['api_csrf_token'])) {
+			$_SESSION['api_csrf_token'] = bin2hex(random_bytes(32));
+		}
+		return $_SESSION['api_csrf_token'];
+	}
+
+	/**
 	 * API session simulation — sets session variables for the given user
 	 * so that logic functions see a logged-in user during API calls.
 	 * Stores original session state for restoration via clear_api_user().

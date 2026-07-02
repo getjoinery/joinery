@@ -19,7 +19,10 @@
  * class owns only the transport concerns — method checks, request parsing,
  * request logging, and response shaping (user_summary).
  *
- * @version 1.1.0
+ * @version 1.2.0
+ * @changelog 1.2.0 - Browser-session principals (api_entry === null) get a
+ *   dedicated 403 on logout pointing at the website /logout; /auth/session
+ *   works for them unchanged.
  * @changelog 1.1.0 - Credential decisions delegated to ApiAuth; this class is
  *   now a thin transport shell over ApiAuth::attemptLogin()/revokeSessionKey().
  */
@@ -142,6 +145,18 @@ class ApiAuthEndpoint {
 	protected static function handle_logout($api_entry, $api_user) {
 		if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 			api_error('Logout must use POST method', 'ActionError', 405);
+		}
+
+		// Browser-session principals have no key to revoke — signing out is a
+		// website concern (/logout ends the web session and its API access).
+		if ($api_entry === null) {
+			RequestLogger::log('api_auth', 'auth/logout', false, [
+				'user_id' => $api_user->key,
+				'status_code' => 403,
+				'error_type' => 'AuthenticationError',
+				'note' => 'Browser session on logout'
+			]);
+			api_error('Browser sessions sign out on the website (/logout), not via the API', 'AuthenticationError', 403);
 		}
 
 		require_once(PathHelper::getIncludePath('includes/ApiAuth.php'));

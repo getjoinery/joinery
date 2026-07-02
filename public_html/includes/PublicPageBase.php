@@ -555,6 +555,16 @@ abstract class PublicPageBase {
 			SeoPageMetadata::lazy_auto_create($canonical_path, $options);
 		}
 
+		// API CSRF token for signed-in users: page JS reads this meta tag and
+		// sends it as the X-Joinery-Csrf header to authenticate /api/v1 calls
+		// with the browser session (see ApiAuth). Session-wide token, distinct
+		// from FormWriter's per-form tokens.
+		$session = SessionControl::get_instance();
+		if ($session->is_logged_in()) {
+			echo '<meta name="joinery-api-csrf" content="'
+				. htmlspecialchars($session->get_api_csrf_token(), ENT_QUOTES, 'UTF-8') . '" />' . "\n";
+		}
+
 		$this->render_base_assets();
 		// Active plugins' declared stylesheets — after the kit, before the theme
 		// stylesheet (which loads once this method returns), so plugin rules sit
