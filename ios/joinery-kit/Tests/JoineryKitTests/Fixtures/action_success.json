@@ -1,0 +1,39 @@
+{
+    "status": 200,
+    "body": {
+        "api_version": "1.0",
+        "success_message": "Action 'account_edit' completed successfully.",
+        "data": {
+            "settings": [],
+            "display_messages": [],
+            "tab_menus": {
+                "Edit Account": "\/profile\/account_edit",
+                "Change Password": "\/profile\/password_edit",
+                "Edit Address": "\/profile\/address_edit",
+                "Edit Phone Number": "\/profile\/phone_numbers_edit",
+                "Change Contact Preferences": "\/profile\/contact_preferences",
+                "Security": "\/profile\/security"
+            },
+            "user": {
+                "key": "4705"
+            },
+            "user_photos": {
+                "api_owner_scope": null,
+                "loaded": true,
+                "options": {
+                    "entity_type": "user",
+                    "entity_id": "4705",
+                    "deleted": false
+                },
+                "order_by": {
+                    "eph_sort_order": "ASC"
+                },
+                "limit": 0,
+                "offset": 0,
+                "operation": "AND",
+                "write_lock": false,
+                "loadable": true
+            }
+        }
+    }
+}

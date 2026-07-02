@@ -7,8 +7,13 @@
  * reads from this table; tests query it instead of the Mailgun-stored
  * legacy iem_inbound_emails table.
  *
- * The unique_with constraint on (iem_message_id_header, iem_recipient)
- * is the dedup mechanism — see InboundEmailRouter::storeMessage().
+ * The unique_with constraint on (iem_message_id_header, iem_recipient,
+ * iem_direction) is the dedup mechanism — see InboundEmailRouter::
+ * storeMessage(). Direction is part of the key because mail between two
+ * hosted mailboxes produces two legitimate rows for the same Message-ID +
+ * address: the sender's outbound (Sent) copy and the recipient's inbound
+ * copy. Sent-folder reconciliation (outbound vs outbound) and inbound
+ * redelivery (inbound vs inbound) still dedup.
  *
  * Threading + state columns (iem_thread_key, iem_is_read, iem_is_starred,
  * iem_read_time) power the Gmail-style Mailbox Reader. Because each inbound
@@ -92,7 +97,7 @@ class InboundEmailMessage extends SystemBase {
 		'iem_raw_storage_key'       => array('type'=>'varchar(500)'),                     // tier-invariant relative key (local/cloud); null for inline/remote
 		'iem_raw_sync_failed_count' => array('type'=>'int4', 'default'=>0),               // offload retry counter (engine failure cap)
 		'iem_raw_sync_last_attempt' => array('type'=>'timestamp(6)'),                     // offload breadcrumb
-		'iem_message_id_header'   => array('type'=>'varchar(255)', 'unique_with'=>array('iem_recipient')),
+		'iem_message_id_header'   => array('type'=>'varchar(255)', 'unique_with'=>array('iem_recipient', 'iem_direction')),
 		'iem_thread_key'          => array('type'=>'varchar(255)'), // indexed via migration iem_001 (no declarative non-unique index support)
 		'iem_direction'           => array('type'=>'varchar(10)', 'default'=>'inbound', 'is_nullable'=>false), // inbound | outbound (reply/forward sent from the reader)
 		'iem_is_read'             => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),

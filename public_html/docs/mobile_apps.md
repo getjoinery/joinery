@@ -137,6 +137,85 @@ byte-identically outside app mode.
 | `api_min_client_versions` | `{}` | Per-app minimum client versions (HTTP 426 gate, `docs/api.md` § Client Versioning) |
 | `api_session_key_lifetime_days` | `365` | Session key expiry |
 
+## JoineryKit (iOS client core)
+
+The native iOS core is **JoineryKit**, a standalone Swift package with no
+brand knowledge — every branded app is a thin target that injects a
+`JoineryConfig` and mounts `JoineryAppRoot`. The source lives in this repo
+at `{repo root}/ios/` (outside `public_html`, so it is never web-served or
+packaged into node upgrades): `ios/joinery-kit` is the package,
+`ios/joinery-member-ios` the reference app (XcodeGen `project.yml`,
+regenerate with `xcodegen generate`). Builds run on the Mac mini
+(`ssh macmini`) against a synced build area at `~/dev/joinery-ios` — the
+gate runners rsync `ios/` there before building; the repo checkout on the
+dev box is the single source of truth.
+
+What the kit provides:
+
+- **APIClient** — the one HTTP chokepoint: key headers, `client-app` /
+  `client-version` headers (hyphen form), automatic `Idempotency-Key` on
+  action submits, and error-envelope mapping onto a typed `JoineryAPIError`.
+  API JSON is parsed with an order-preserving parser (`JSONValue`) because
+  form `options` order is meaningful and Foundation's decoders lose it.
+- **SessionController + KeychainStore** — login (`auth/login` with a
+  `device_label`), Keychain-only secret storage, launch bootstrap via
+  `auth/session`, logout (`auth/logout`), and global handling of two
+  cross-cutting signals: any 426 flips the app into the blocking
+  `UpgradeRequiredView`, and a 401 on an authenticated call (key revoked —
+  App Sessions page or password change) signs the app out.
+- **Generic form renderer** — `FormScreen` fetches
+  `GET /api/v1/form/{action}`, renders every schema-v1 field type
+  (`docs/formwriter.md` § JSON Output Mode) including `visibility_rules`
+  with web-identical trigger semantics, submits to
+  `POST /api/v1/action/{action}`, and maps 422 field errors back onto
+  controls. A definition with an unknown field type or a newer
+  `schema_version` renders a per-form "update the app or use the website"
+  fallback, so old binaries survive new server-side field types.
+- **Navigation shell** — `NavigationShell` renders the signed-in surface
+  from `GET /api/v1/app/navigation`: server-pinned entries fill the tab bar
+  (at most four; the last slot is always More), everything else plus the
+  native Settings screen lands in the More list. Destinations resolve
+  version-safely (`NavDestination`): `web` renders in the authenticated
+  webview; `native` renders the named screen when the build recognizes it
+  and its `fallback_url` otherwise. Server icon names map onto SF Symbols
+  with a neutral fallback. The shell refreshes the user summary and the
+  navigation table on every foreground, so menu changes appear and a
+  session revoked from the web signs the app out without a relaunch.
+- **Webview component** — `WebScreen` is how every web destination renders,
+  implementing the whole webview contract in one place
+  (`WebSessionCoordinator` + `WebScreen`): first use mints a bridge URL
+  (`POST /api/v1/auth/web_session`) and drives the webview through it; the
+  bridged session lives in the shared persistent cookie store, so later
+  screens and later launches load their targets directly. A `/login`
+  redirect (bridged session gone) or an expired bridge token (410) triggers
+  one silent re-bridge back to the intended path; a dead API key makes the
+  re-bridge mint 401, which signs out the whole app. Link policy: same-origin
+  navigations stay in-webview, off-site links and non-web schemes leave the
+  app (Safari, Mail), subframes are untouched. The native bar shows the page
+  title and a history-back chevron; pull-to-refresh, file uploads (WKWebView
+  native pickers), downloads (share-sheet hand-off), JS alert/confirm/prompt
+  as native panels, and loading/error/offline-retry states are built in.
+  The webview stays inside the safe area — extending under the native tab
+  bar would leave fixed-bottom web UI (cookie consent, sticky action bars)
+  visible but untappable behind it.
+  Sign-out clears the site's cookies from the shared store (the
+  `SessionController.onSignOut` hook).
+- **Native screens** — `LoginView`, the two-step native password-reset flow
+  (`password_reset_1`, code entry from the emailed link, `password_reset_2`
+  with the code round-tripped via query context), `SettingsView` (user/tier
+  summary from `auth/session`, the account forms, the App Sessions page as a
+  webview destination, sign out), and `UpgradeRequiredView`.
+
+Brand configuration surface (`JoineryConfig`): `baseURL`, `clientApp`,
+`clientVersion`, `appName`, `appStoreURL`, `registrationEnabled` (off by
+default — enabling in-app registration triggers Apple's account-deletion
+requirement), `accentColor`.
+
+Control accessibility identifiers are stable API for UI tests: form controls
+use their server field names, and screens use prefixed ids
+(`login_*`, `settings_*`, `form_*`, `reset_*`, `upgrade_*`, `nav_*`,
+`web_*`, and `more_{slug}` for More-list rows).
+
 ## Standing up a new branded app
 
 1. Pick a `client_app` identifier (e.g. `joinery-member-ios`); the app sends
@@ -145,13 +224,45 @@ byte-identically outside app mode.
    `default`).
 3. Optionally set its minimum version in `api_min_client_versions` once
    shipped.
-4. The client work (JoineryKit Swift package, app targets) lives outside this
-   codebase — see `specs/ios_app_platform.md` for the platform architecture
-   and phases.
+4. Create `ios/<app-name>` in this repo with an XcodeGen `project.yml`
+   depending on the local `../joinery-kit` package, and a single app source
+   file that builds a `JoineryConfig` and mounts
+   `JoineryAppRoot(config:keychainService:)` — see
+   `ios/joinery-member-ios` for the reference shape.
 
 ## Tests
 
-`tests/functional/api/app_platform_test.php` — navigation filtering and tab
-pinning, bridge minting and target validation, single-use and expiry, app
-display mode, and lifetime coupling (key revocation and password change).
-Runs against dev with curl; see the harness header for usage.
+- `tests/functional/api/app_platform_test.php` — server platform: navigation
+  filtering and tab pinning, bridge minting and target validation,
+  single-use and expiry, app display mode, and lifetime coupling (key
+  revocation and password change). Runs against dev with curl; see the
+  harness header for usage.
+- JoineryKit unit tests — on the mini (after syncing `ios/` to the build
+  area): `cd dev/joinery-ios/joinery-kit && xcodebuild test -scheme
+  JoineryKit -destination "platform=iOS Simulator,name=iPhone 16"` (JSON
+  parser, form definition parsing against captured live fixtures,
+  visibility engine, submission bodies, error mapping).
+- `tests/functional/ios/phase2_gate.sh` — the native-core gate: drives the
+  JoineryMember XCUITest suites in the Simulator against dev, orchestrating
+  server state per suite (probe field for the no-rebuild form-change proof,
+  reset-code extraction from `iem_inbound_email_messages` with outbound mail
+  flipped to localhost SMTP for that leg so the locally-hosted fixture inbox
+  receives in seconds, 426 via `api_min_client_versions`, failed-auth rate
+  limit last — it leaves the runner's IP inside the 15-minute failed-auth
+  window). The fixture account (`appdev.phase2@dev.getjoinery.com`, a
+  store-mode alias on the live inbound domain) has its credentials in
+  `~/.joinery_app_test_creds` on the dev box; the reset suite rotates the
+  password every run.
+- `tests/functional/ios/phase3_gate.sh` — the navigation + webview gate:
+  Phase 2 auth/form suites as regression, tab bar + More from the
+  navigation endpoint, calendar usable in-app, orders and conversations in
+  the webview, mailbox read + reply (fixtures via `phase3_fixtures.php`:
+  mailbox grant for the fixture user plus the `phase3.sender` store alias
+  the reply lands on — arrival verified in `iem_inbound_email_messages`
+  with outbound flipped to localhost SMTP for the leg), a plugin
+  profileMenu entry appearing with no rebuild (`menu_probe.php` syncs a
+  probe entry through `PluginManager::syncMenus`, prune removes it), an
+  off-site probe link on `/profile` opening Safari, and — last, because it
+  revokes every session key for the fixture user — Revoke All on the App
+  Sessions page signing out the webview and native layers in one gesture
+  (`app_bridge_key_check_seconds=0` for that leg).

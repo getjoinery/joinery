@@ -81,6 +81,12 @@ Standard wrapped-key design (the Bitwarden/1Password shape), all client-side:
    password; the browser derives the KEK, unwraps the DEK, and holds it in memory
    (a non-extractable `CryptoKey` where the platform allows) for the session, with an
    idle **auto-lock** that zeroes it.
+   **Auto-lock: 15 minutes idle, fixed in v1** (the Bitwarden default; 1Password uses
+   10). Short enough for an unattended machine, long enough not to punish a long
+   master password into being shortened. Closing the tab or browser is already an
+   implicit lock — the DEK exists only in that tab's memory — and an explicit lock
+   control just drops the key reference. A user-configurable timeout is Phase 3
+   quality-of-life, not v1.
 6. **Recovery.** A high-entropy recovery key, shown once and stored offline by the
    user, independently wraps the DEK (`wrapped_DEK_recovery = AES-GCM(recovery_key,
    DEK)`). Forget the master password → unwrap via recovery key → set a new master.
@@ -99,15 +105,36 @@ The platform already standardizes on **Argon2id** server-side
 AES-GCM natively but **not** Argon2, so matching that choice client-side requires
 vendoring an Argon2 WASM library.
 
-- **Recommended — Argon2id (WASM).** Memory-hard; the strongest available defense for
-  the exact case this vault is built around (offline brute-force of the master
-  password against a stolen wrapped key). Consistent with the server-side choice.
-  Catch: a new client-side dependency, which is a deliberate exception to the
-  vanilla-JS-by-default rule — justified because a crypto primitive is not a UI
-  framework, but it must be a reviewed, pinned, integrity-checked dependency.
-- **Fallback — PBKDF2-HMAC-SHA256 (WebCrypto, zero deps).** No new dependency, but
-  not memory-hard; needs a high iteration count (OWASP-current) and is weaker against
-  GPU/ASIC cracking. Acceptable only if vendoring the WASM lib is rejected.
+**Decided: Argon2id via a vendored copy of `argon2-browser`** (the reference Argon2 C
+code compiled to WASM). Memory-hard; the strongest available defense for the exact
+case this vault is built around (offline brute-force of the master password against a
+stolen wrapped key), and consistent with the server-side choice. The library is what
+Bitwarden ships for its Argon2 KDF option and what KeeWeb uses — this exact
+derive-vault-keys-in-a-browser role, production-tested for years.
+
+This is a deliberate one-off exception to the vanilla-JS-by-default rule — a crypto
+primitive, not a UI framework. Terms of the exception: the pinned `.wasm` and its JS
+loader are **vendored into `plugins/vault/assets/`** (no CDN, no runtime npm — served
+like any other plugin asset), with the upstream version and file hashes recorded in
+the plugin so any later change to the binary shows up as a git diff. That vendoring-
+time check is the supply-chain control that works here (runtime SRI does not, per the
+threat model above). Upstream moves slowly; that is acceptable for a frozen algorithm
+(Argon2 is unchanged since RFC 9106), and the vendored copy means upstream abandonment
+cannot break us.
+
+PBKDF2-HMAC-SHA256 (WebCrypto-native, zero deps) was considered and rejected: it gives
+up memory-hardness against GPU/ASIC cracking of a stolen wrapped key — the exact
+attack this vault is designed around.
+
+**Parameters: 64 MiB memory, 3 iterations, 4 lanes** — the RFC 9106 second
+recommendation and Bitwarden's default. OWASP's lower floor (19 MiB, t=2) is
+calibrated for high-volume server logins; an unlock happens at most every 15 minutes
+and can afford ~0.5–1.5 s of derivation on ordinary hardware. The WASM build is
+single-threaded, so the 4 lanes run serially — unlock is somewhat slower, the
+attacker's job no easier; Bitwarden ships the same configuration. Because the
+parameters are stored per-user in `vlk_kdf_params`, raising them later only requires
+re-deriving and re-wrapping the DEK at next unlock (entries untouched) — the
+client-side mirror of the server's `password_needs_rehash` upgrade path.
 
 ## Data model
 
@@ -165,7 +192,8 @@ forgot-master-password → re-establish flow.
 
 Client-side password generator; TOTP seed storage with in-browser code generation
 (turns the vault into an authenticator too); encrypted import/export
-(Bitwarden/1Password/CSV in, encrypted backup out).
+(Bitwarden/1Password/CSV in, encrypted backup out); user-configurable auto-lock
+timeout.
 
 ### Phase 4 — Hardening (addresses the served-JS residual risk)
 
@@ -193,10 +221,8 @@ add `plugins/vault/docs/overview.md` documenting the zero-knowledge model, the t
 model (including the served-JS limitation), and the recovery flow — and a one-line
 contrast in `docs/secret_box.md` clarifying when to use each.
 
-## Open decisions (resolve at implementation)
+## Open decisions
 
-- **KDF: Argon2id-WASM (recommended) vs PBKDF2-native.** Settle the vanilla-JS
-  dependency exception with the WASM choice; pin and integrity-check the lib.
-- Auto-lock idle timeout default.
-- Argon2id parameter tuning (memory/iterations/parallelism) for an acceptable
-  in-browser unlock latency on typical hardware.
+None — the KDF (Argon2id via vendored `argon2-browser`), its parameters (64 MiB /
+t=3 / p=4), and the auto-lock default (15 minutes, fixed in v1) are all settled above.
+The spec is ready to implement.

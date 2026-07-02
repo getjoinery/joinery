@@ -1,0 +1,9 @@
+{
+    "status": 422,
+    "body": {
+        "api_version": "1.0",
+        "errortype": "ActionError",
+        "error": "Database UPDATE failed on table 'usr_users' for record: {\"usr_user_id\":4705} - SQLSTATE[22001]: String data, right truncated: 7 ERROR:  value too long for type character varying(32)",
+        "data": []
+    }
+}

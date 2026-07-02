@@ -1,0 +1,36 @@
+# Joinery member app — the reference brand target on JoineryKit.
+# Regenerate the Xcode project with:
+#   ~/dev/.tools/xcodegen/xcodegen/bin/xcodegen generate
+name: JoineryMember
+options:
+  bundleIdPrefix: com.getjoinery
+settings:
+  base:
+    GENERATE_INFOPLIST_FILE: YES
+packages:
+  JoineryKit:
+    path: ../joinery-kit
+targets:
+  JoineryMember:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources: [Sources]
+    dependencies:
+      - package: JoineryKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.getjoinery.member
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Joinery
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: J634NTDX3D
+  JoineryMemberUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources: [UITests]
+    dependencies:
+      - target: JoineryMember

@@ -1,0 +1,123 @@
+{
+    "api_version": "1.0",
+    "success_message": "",
+    "data": {
+        "tabs": [
+            "core-profile",
+            "core-calendar",
+            "inbound-email-mailbox"
+        ],
+        "entries": [
+            {
+                "slug": "core-home",
+                "title": "Home",
+                "icon": "home",
+                "order": 10,
+                "destination": {
+                    "type": "web",
+                    "url": "\/"
+                }
+            },
+            {
+                "slug": "core-profile",
+                "title": "My Profile",
+                "icon": "user",
+                "order": 50,
+                "destination": {
+                    "type": "web",
+                    "url": "\/profile"
+                }
+            },
+            {
+                "slug": "core-calendar",
+                "title": "Calendar",
+                "icon": "calendar",
+                "order": 55,
+                "destination": {
+                    "type": "web",
+                    "url": "\/profile\/calendar"
+                }
+            },
+            {
+                "slug": "inbound-email-mailbox",
+                "title": "Email",
+                "icon": "envelope",
+                "order": 58,
+                "destination": {
+                    "type": "web",
+                    "url": "\/profile\/inbound_email\/mailbox"
+                }
+            },
+            {
+                "slug": "core-orders",
+                "title": "Orders",
+                "icon": "shopping-bag",
+                "order": 60,
+                "destination": {
+                    "type": "web",
+                    "url": "\/profile#orders"
+                }
+            },
+            {
+                "slug": "core-subscriptions",
+                "title": "Subscriptions",
+                "icon": "refresh",
+                "order": 70,
+                "destination": {
+                    "type": "web",
+                    "url": "\/profile\/subscriptions"
+                }
+            },
+            {
+                "slug": "joinery-ai-member-chat",
+                "title": "AI Chat",
+                "icon": "robot",
+                "order": 72,
+                "destination": {
+                    "type": "web",
+                    "url": "\/profile\/joinery_ai\/chat"
+                }
+            },
+            {
+                "slug": "dns-filtering",
+                "title": "Filtering",
+                "icon": "shield",
+                "order": 75,
+                "destination": {
+                    "type": "web",
+                    "url": "\/profile\/dns_filtering"
+                }
+            },
+            {
+                "slug": "dns-filtering-devices",
+                "title": "Devices",
+                "icon": "devices",
+                "order": 76,
+                "destination": {
+                    "type": "web",
+                    "url": "\/profile\/dns_filtering\/devices"
+                }
+            },
+            {
+                "slug": "core-events",
+                "title": "My Events",
+                "icon": "calendar",
+                "order": 80,
+                "destination": {
+                    "type": "web",
+                    "url": "\/profile#events"
+                }
+            },
+            {
+                "slug": "core-event-sessions",
+                "title": "Event Sessions",
+                "icon": "clock",
+                "order": 90,
+                "destination": {
+                    "type": "web",
+                    "url": "\/profile\/event_sessions"
+                }
+            }
+        ]
+    }
+}
