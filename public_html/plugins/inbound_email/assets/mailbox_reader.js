@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.5
+ * No framework. @version 2.6
  *
  * Two-pane layout: the main pane swaps between the conversation list and an
  * opened conversation (toggled by the `reading` class on #mbx-reader); a back
@@ -587,7 +587,9 @@
 
 		var right = el('div', 'mbx-message-right');
 		right.appendChild(el('span', 'mbx-message-time', fmtTime(m.received_time)));
-		right.appendChild(kebabMenu(m));
+		// The kebab holds only detail-page deep links; the member mount has no
+		// detail page (messageDetailBase null), so it renders no kebab at all.
+		if (CFG.messageDetailBase) right.appendChild(kebabMenu(m));
 		head.appendChild(right);
 
 		head.addEventListener('click', function () { wrap.classList.toggle('mbx-collapsed'); });
@@ -629,7 +631,7 @@
 			var name = a.filename || 'attachment';
 			var size = fmtBytes(a.size_bytes);
 			var chip = el('a', 'mbx-attachment');
-			chip.href = '/plugins/inbound_email/admin/admin_inbound_email_attachment?ima_inbound_message_attachment_id='
+			chip.href = CFG.attachmentUrlBase + '?ima_inbound_message_attachment_id='
 				+ encodeURIComponent(a.id);
 			chip.target = '_blank';
 			chip.rel = 'noopener';

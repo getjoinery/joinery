@@ -7,9 +7,9 @@
  * Targets are either ids[] (message ids) OR a thread_key (expanded server-side
  * via messageIdsInThread, optionally narrowed by alias_id). Every mutation
  * re-checks scope in SQL, so a crafted id/thread for an un-granted mailbox
- * affects nothing. Staff-only.
+ * affects nothing. Signed-in; MailboxViewer scopes every mutation.
  *
- * @version 1.2
+ * @version 1.3
  */
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/MailboxService.php'));
@@ -17,7 +17,7 @@ require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/MailboxS
 header('Content-Type: application/json');
 
 $session = SessionControl::get_instance();
-if ($session->get_permission() < 5) {
+if (!$session->get_user_id()) {
 	http_response_code(403);
 	echo json_encode(array('error' => 'forbidden'));
 	exit();

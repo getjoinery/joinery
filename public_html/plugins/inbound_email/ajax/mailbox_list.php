@@ -4,9 +4,10 @@
  *
  * GET. Params: alias_id (optional; omit/blank = all accessible), q,
  * unread_only, starred_only, spam, page. Returns the scoped conversation
- * list grouped by thread, latest-first. Staff-only.
+ * list grouped by thread, latest-first. Signed-in; every row is scoped by
+ * MailboxViewer.
  *
- * @version 1.3
+ * @version 1.4
  */
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/MailboxService.php'));
@@ -14,7 +15,7 @@ require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/MailboxS
 header('Content-Type: application/json');
 
 $session = SessionControl::get_instance();
-if ($session->get_permission() < 5) {
+if (!$session->get_user_id()) {
 	http_response_code(403);
 	echo json_encode(array('error' => 'forbidden'));
 	exit();

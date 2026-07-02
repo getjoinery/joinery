@@ -240,7 +240,10 @@ class MailboxReaderTest {
 		// getThread on an un-granted thread is empty.
 		$svc = new MailboxService($beth);
 		$this->ok(count($svc->getThread(null, '<o1@x>')) === 0, 'getThread on un-granted thread is empty');
-		$this->ok($beth->canCompose() === false, 'canCompose is false (read-only)');
+		// A grant means full access — read and send-as — so a viewer with any
+		// accessible mailbox may compose.
+		$this->ok($beth->canCompose() === true, 'canCompose true with accessible mailboxes');
+		$this->ok(MailboxViewer::forUser(-1, 1)->canCompose() === false, 'canCompose false with none');
 	}
 
 	// ---- list / grouping ----

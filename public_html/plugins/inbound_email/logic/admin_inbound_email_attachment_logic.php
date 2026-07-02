@@ -20,7 +20,11 @@
  * On success this streams and exit()s. On any failure it returns a LogicResult so
  * the view can render an honest message.
  *
- * @version 1.2
+ * Retrieval + streaming are shared with the member endpoint
+ * (includes/attachment_retrieval.php); only the authorization posture here
+ * is admin-specific.
+ *
+ * @version 1.3
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -52,15 +56,17 @@ function admin_inbound_email_attachment_logic(array $input): LogicResult {
 		return _attachment_error($session, $settings, 'The message for this attachment no longer exists.', $reader_url);
 	}
 
+	require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/attachment_retrieval.php'));
+
 	$fil_id = intval($att->get('ima_fil_file_id'));
 
 	if ($fil_id > 0) {
-		// File-backed (push mail, lean record): the bytes are a private File.
-		// Authorize with File::is_viewable() — owner-or-admin via fil_private, the
-		// same algorithm serve.php's /uploads/* path uses — NOT the mailbox grant.
-		// (Mailbox read access governs the reader, enforced separately; the
-		// attachment File is gated independently and can be coarser for a shared
-		// mailbox — any admin. See specs/implemented/inbound_email_attachment_storage.md.)
+		// File-backed (push mail, lean record): authorize with File::is_viewable()
+		// — owner-or-admin via fil_private, the same algorithm serve.php's
+		// /uploads/* path uses — NOT the mailbox grant. (Mailbox read access
+		// governs the reader, enforced separately; the attachment File is gated
+		// independently and can be coarser for a shared mailbox — any admin.
+		// See specs/implemented/inbound_email_attachment_storage.md.)
 		require_once(PathHelper::getIncludePath('data/files_class.php'));
 		$file = new File($fil_id, TRUE);
 		if (!$file->key || $file->get('fil_delete_time')) {
@@ -68,10 +74,6 @@ function admin_inbound_email_attachment_logic(array $input): LogicResult {
 		}
 		if (!$file->is_viewable($session)) {
 			return _attachment_error($session, $settings, 'You do not have access to this attachment.', $reader_url);
-		}
-		$content = $file->read_bytes('original');
-		if ($content === null) {
-			return _attachment_error($session, $settings, 'This attachment is no longer available.', $reader_url);
 		}
 	} else {
 		// Section-pointer / IMAP rows: grant check — identical to the reader (an
@@ -83,79 +85,14 @@ function admin_inbound_email_attachment_logic(array $input): LogicResult {
 		if (!$allowed) {
 			return _attachment_error($session, $settings, 'You do not have access to this mailbox.', $reader_url);
 		}
-
-		// Retrieve the part by the message's raw-storage driver.
-		$driver = (string)$message->get('iem_raw_storage_driver') ?: 'inline';
-
-		if ($driver === 'remote') {
-			// IMAP on-demand single-part fetch.
-			$account_id = intval($message->get('iem_iia_inbound_imap_account_id'));
-			if ($account_id <= 0) {
-				return _attachment_error($session, $settings,
-					'The source mailbox for this message is no longer available.', $reader_url);
-			}
-
-			require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_imap_account_class.php'));
-			require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/ImapIngestor.php'));
-
-			$account = new InboundImapAccount($account_id, TRUE);
-			if (!$account->key) {
-				return _attachment_error($session, $settings,
-					'The source IMAP account for this message no longer exists.', $reader_url);
-			}
-
-			$ingestor = new ImapIngestor($account);
-			$result = $ingestor->fetchPart(
-				(string)$att->get('ima_mime_part'),
-				intval($message->get('iem_imap_uid')),
-				$message->get('iem_imap_uidvalidity') !== null ? intval($message->get('iem_imap_uidvalidity')) : null,
-				(string)$message->get('iem_imap_folder'),
-				$message->get('iem_message_id_header')
-			);
-			$ingestor->close();
-
-			if (empty($result['ok'])) {
-				return _attachment_error($session, $settings,
-					$result['message'] ?? 'This attachment is no longer available in the source mailbox.', $reader_url);
-			}
-			$content = (string)$result['content'];
-		} else {
-			// Stored raw (inline / local / cloud): MIME-parse and extract the one part.
-			$part = $message->getRawMimePart((string)$att->get('ima_mime_part'));
-			if ($part === null) {
-				return _attachment_error($session, $settings,
-					'This attachment is no longer available.', $reader_url);
-			}
-			$content = (string)$part['content'];
-		}
 	}
 
-	// Stream pass-through. Sanitize the filename for the header (strip CR/LF and
-	// path separators) to prevent header injection; serve with nosniff +
-	// attachment disposition so attacker-controlled bytes are never rendered inline.
-	$filename = _attachment_safe_filename((string)$att->get('ima_filename'));
-	$content_type = (string)$att->get('ima_content_type') ?: 'application/octet-stream';
-	// Never let a text/html attachment be treated as renderable in our origin.
-	if (stripos($content_type, 'text/html') !== false) {
-		$content_type = 'application/octet-stream';
+	$result = inbound_email_retrieve_attachment_bytes($att, $message);
+	if (!$result['ok']) {
+		return _attachment_error($session, $settings, $result['error'], $reader_url);
 	}
 
-	header('Content-Type: ' . $content_type);
-	header('Content-Disposition: attachment; filename="' . $filename . '"');
-	header('X-Content-Type-Options: nosniff');
-	header('Content-Length: ' . strlen($content));
-	echo $content;
-	exit();
-}
-
-/** Strip CR/LF and path separators; fall back to a safe default. */
-function _attachment_safe_filename(string $name): string {
-	$name = str_replace(array("\r", "\n", '"', '\\', '/'), '', $name);
-	$name = trim($name);
-	if ($name === '') {
-		$name = 'attachment';
-	}
-	return substr($name, 0, 255);
+	inbound_email_stream_attachment($att, $result['content']);
 }
 
 function _attachment_error($session, $settings, string $message, string $reader_url): LogicResult {
