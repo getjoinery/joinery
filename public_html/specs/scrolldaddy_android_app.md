@@ -1,36 +1,39 @@
 # ScrollDaddy Android App — Feasibility & Spec
 
-The Android counterpart to `specs/scrolldaddy_ios_app.md`: identical features —
-reusable Joinery account module, filter management, automatic local DNS
-configuration with safe revert, and connection-level hard blocking — delivered
-in the same four phases with a test gate after each.
+The Android counterpart to `specs/scrolldaddy_ios_app.md`: sign in, manage
+the subscription, edit filters, apply the DNS configuration to the device
+automatically with safe revert, and hard-block selected sites at the
+connection level.
 
-**Server side.** None needed. The platform-neutral API surface both apps
-consume is in place: session-key auth, server-driven account forms, and the
-full `dns_filtering/` action surface including the hard-block hostname list
-(`docs/api.md`, `plugins/dns_filtering/docs/overview.md` § API Surface).
-Every phase is pure client work; in-app billing — server and client — is
-its own spec, `specs/mobile_app_billing.md`, consumed post-launch.
+**This app is a consumer of the Joinery Android app platform**
+(`specs/android_app_platform.md`). Everything account- and shell-shaped —
+native login, password reset, account forms, server-driven navigation,
+settings, authenticated webviews of `/profile` pages, the 426 upgrade gate —
+comes from `joinery-android` and the platform's server pieces, and is
+specified there. This spec covers only what is ScrollDaddy-specific: the
+VpnService DNS layer, the native filter editor, branding, and billing
+phasing. The DNS layer is brand-neutral (a future NetworkSentry app reuses
+everything but the branding).
 
 ## Feasibility findings — where Android differs from iOS
 
-Android is the *easier* platform for every part. The differences:
+Android is the *easier* platform for every DNS part. The differences:
 
-### Parts 3 & 4 collapse into one mechanism
+### Standard and strict mode collapse into one mechanism
 
 Android's `VpnService` is the standard, Play-Store-accepted way to filter
-traffic locally (Blokada, AdGuard, NextDNS all use it), and it covers both the
-DNS part and the hard-blocking part:
+traffic locally (Blokada, AdGuard, NextDNS all use it), and it covers both
+the DNS part and the hard-blocking part:
 
 - **Standard mode** — the tunnel claims only DNS traffic (routes just the
   tunnel's virtual DNS address) and forwards queries to the ScrollDaddy DoH
-  resolver with the device UID. Equivalent to iOS Part 3, same server-side
-  policy, no resolver changes.
+  resolver with the device UID. Equivalent to iOS's `NEDNSSettingsManager`
+  path, same server-side policy, no resolver changes.
 - **Strict mode** — the tunnel claims all traffic and additionally drops
   connections by TLS SNI / destination IP from the synced hard-block list,
   stripping HTTPS/SVCB records in-tunnel so Encrypted Client Hello can't hide
-  the SNI. Equivalent to iOS Part 4 — but it's a mode switch inside one
-  service, not a second mechanism.
+  the SNI. Equivalent to iOS's packet tunnel — but it's a mode switch inside
+  one service, not a second mechanism.
 
 **Consent is a single in-app dialog** (the system VPN prompt) — no trip to
 Settings at all, which beats iOS's one-time Settings step.
@@ -61,72 +64,74 @@ filtering (Android requirement); OEM battery managers can kill background
 services — onboarding requests a battery-optimization exemption and the
 service auto-restarts (`START_STICKY`, boot receiver when always-on isn't set).
 
-### Part 1 — same module shape as JoineryKit
+### Filter management — server side complete, app work only
 
-A reusable **`joinery-android`** Kotlin library over the platform's
-session-key auth: API client with injected base URL + branding, key storage
-in Keystore-backed `EncryptedSharedPreferences`, a native Compose login
-screen, and subscription status. At launch the module is login-only —
-accounts are created on the website, and "Forgot password?" opens the
-website's reset page. The post-launch account-management phase adds **one
-generic server-driven form renderer** (schema in `docs/formwriter.md` §
-JSON output mode) driving register, forgot/reset password, account edit,
-and contact preferences from server JSON definitions, plus the billing
-entry point. Like JoineryKit, it sends the `client-app`/`client-version`
-headers on every request and renders any 426 `UpgradeRequired` response as
-a blocking upgrade screen with a Play Store deep link (see `docs/api.md`).
-Same reuse target as JoineryKit: any app on any Joinery deployment.
-
-Decision: native Kotlin + Compose, no Kotlin Multiplatform sharing with the
-iOS packages. The reusable boundary between the platforms is the server API,
-not shared client code — KMP would couple the two codebases for little gain at
-this app size.
-
-### Part 2 — pure client work
-
-The same `dns_filtering/` API actions the iOS app consumes; Compose screens
+The same `dns_filtering/` API actions the iOS app consumes
+(`plugins/dns_filtering/docs/overview.md` § API Surface); Compose screens
 mirroring the iOS editor, same server-driven tier gates, same "Allow = no
 row" submit semantics living server-side in the shared logic functions.
 
-### Billing — same constraint, Google flavor
-
-Google Play requires **Play Billing** for digital subscriptions, with the same
-15–30% cut and the same launch strategy:
-
-1. **At launch — login-only.** Accounts are created on the website (free or
-   paid); the app signs in, displays status, and every tier gets its full
-   function. No in-app purchase and no in-app registration — which also
-   means Play's account-deletion-in-app policy (triggered by in-app account
-   creation) does not apply.
-2. **Later phase — in-app account management.** Registration, password
-   reset, account edit, and contact preferences via the generic
-   server-driven form renderer (the endpoints exist; this is client work).
-   In-app account deletion ships in the same phase, per Play policy.
-3. **Later phase — Play Billing.** In-app subscribe/change via Google, per
-   `specs/mobile_app_billing.md` (which also covers the Android-only
-   F-Droid/direct-APK escape hatch). Independent of the account-management
-   phase and of Phase 4.
+The platform's webview layer also means the existing
+`/profile/dns_filtering/*` pages are usable in-app from day one, which is
+what lets the Play Store release ship before the native editor (see phases).
 
 ## Architecture
 
+One ScrollDaddy-specific module plus the app shell, on top of
+`joinery-android` (from `specs/android_app_platform.md`). Repo:
+`~/dev/scrolldaddy-android` on the Mac mini (toolchain and SSH workflow per
+the platform spec).
+
 | Layer | Module | Reusable for | Contents |
 |---|---|---|---|
-| Account | **`joinery-android`** | any app on any Joinery deployment | API client, session-key auth + Keystore storage, native login screen, subscription status. Post-launch: generic server-driven form renderer, billing entry point |
-| DNS filtering | **`dnsfilter-android`** | any ScrollDaddy-style deployment | Device registration, block editor screens, tier-gate rendering, the `VpnService` (standard + strict modes), protection-level control |
-| Brand | **ScrollDaddy app module** | — | Application ID, theme, deployment base URL, Play Store assets |
+| Core | **`joinery-android`** | any app on any Joinery deployment | Specified and delivered by `specs/android_app_platform.md` |
+| DNS filtering | **`dnsfilter-android`** | any ScrollDaddy-style deployment (e.g. NetworkSentry) | Device registration, native block editor screens (always-on + scheduled), category/service/custom-rule screens with server-driven tier gates, the `VpnService` (standard + strict modes), protection-level control |
+| Brand | **ScrollDaddy app module** | — | Application ID, theme, deployment base URL, `client_app` id (`scrolldaddy-android`), Play Store assets |
 
-Repo: `~/dev/scrolldaddy-android` on the Mac mini (Android Studio CLI tools +
-Gradle + emulator run fine on Apple Silicon; the SSH workflow from
-`specs/mac_mini_ios_development_access.md` carries over — `./gradlew build`,
-`adb`, headless emulator, screenshots via `adb exec-out screencap`).
+Design rules carried over from the web product:
+
+- **Tier gating is server-enforced.** The client renders locked/upsell states
+  from the feature flags in API responses; the server rejects gated writes
+  regardless.
+- **"Allow" on the always-on block means "no row"** — the app submits the
+  same semantics as the web editor; the API actions reuse the existing logic
+  functions precisely so this invariant lives in one place.
+
+## Server-side work
+
+None beyond the platform's pieces (delivered by `specs/ios_app_platform.md`,
+consumed via `specs/android_app_platform.md`). The ScrollDaddy surface is in
+place: the full `dns_filtering/` action surface including the hard-block
+hostname list in device responses. In-app billing — server and client — is
+its own spec, `specs/mobile_app_billing.md`, consumed post-launch.
+
+## Billing strategy — same constraint, Google flavor
+
+Google Play requires **Play Billing** for digital subscriptions, with the
+same launch strategy as iOS:
+
+1. **At launch — login-only.** Accounts are created on the website (free or
+   paid); the app signs in (`joinery-android`'s registration toggle stays
+   off), displays status, and every tier gets its full function (the
+   free-tier floor stays intact). No in-app purchase and no in-app
+   registration — which also means Play's account-deletion-in-app policy
+   (triggered by in-app account creation) does not apply.
+2. **Later phase — registration on.** Flipping the platform's registration
+   toggle triggers Play's account-deletion policy, so in-app deletion ships
+   in the same release.
+3. **Later phase — Play Billing.** In-app subscribe/change via Google, per
+   `specs/mobile_app_billing.md` (which also covers the Android-only
+   F-Droid/direct-APK escape hatch). Independent of the registration phase
+   and of strict mode.
 
 ## App flows
 
-**Onboarding:** sign up on the website, download the app, log in → app
-registers the phone as a device (server returns UID) → one tap on the system
-VPN consent dialog → "Protected" status (verified by resolving a test
-hostname through the tunnel) → always-on block editor. After signup: zero
-copy/paste, zero Settings visits.
+**Onboarding:** sign up on the website, download the app, log in
+(`joinery-android` login screen) → app registers the phone as a device
+(server returns UID) → one tap on the system VPN consent dialog →
+"Protected" status (verified by resolving a test hostname through the
+tunnel) → always-on block editor. After signup: zero copy/paste, zero
+Settings visits.
 
 **Daily use:** identical to iOS — categories, services, custom rules,
 scheduled blocks, per tier.
@@ -142,33 +147,51 @@ uninstall clears it.
 
 ## Delivery phases & test gates
 
-Same four phases and ordering as the iOS spec, sequential with accumulating
-regression suites. A difference in Android's favor: **the emulator supports
-VpnService**, so all four gates run in the emulator; physical-device passes
-are added where OEM behavior matters.
+**Phase 0 (dependency): the Android platform ships first** —
+`joinery-android` and its gates per `specs/android_app_platform.md` (which
+itself depends on the server pieces from `specs/ios_app_platform.md`).
 
-### Phase 1 — Account (`joinery-android`)
+The ScrollDaddy phases are strictly sequential after that; each gate re-runs
+earlier suites as regression. A difference in Android's favor: **the emulator
+supports VpnService**, so every gate runs in the emulator; physical-device
+passes are added where OEM behavior matters.
 
-**Gate:** Compose UI test suite in the emulator against `dev.getjoinery.com` —
-login/logout with a website-created account, session-key revocation on
-password change, error and rate-limit rendering.
+### Phase 1 — Branded shell (webview filters)
 
-### Phase 2 — Filters
+The ScrollDaddy app module on `joinery-android`: branding, base URL,
+navigation tabs pinned for ScrollDaddy (server-side `app_navigation` entry
+for `scrolldaddy-android`), with the filter editor served as webviews of the
+existing `/profile/dns_filtering/*` pages. Full product function, no
+DNS-specific native code yet.
 
-**Gate:** emulator — app edits visible in the web editor and vice versa; tier
-gates server-rejected and rendered locked; resolver picks up an app-made
-change within its reload window.
+**Gate:** Compose UI tests in the emulator — log in with a website-created
+account; edit a block in the in-app webview and see it in the web editor and
+vice versa; tier gates render locked; platform regression suite passes under
+ScrollDaddy branding.
 
-### Phase 3 — Automatic DNS (first Play Store release)
+### Phase 2 — Automatic DNS (first Play Store release)
 
-Standard-mode VpnService, onboarding, status verification, disable flow,
-account-exists billing. Play submission closes the phase.
+`dnsfilter-android`'s device registration and standard-mode VpnService:
+one-tap consent onboarding, protected-status verification, disable flow.
+Billing: login-only model. Play submission closes this phase.
 
 **Gate:** emulator for the functional suite (onboarding to "Protected" with
 zero copy/paste; blocked category fails to resolve; disable/uninstall restore
 normal DNS), plus a **physical-device pass** for what the emulator can't
 prove: Doze/battery-manager survival overnight, foreground-service behavior,
 reboot recovery. Then closed testing track, then review.
+
+### Phase 3 — Native filter editor
+
+`dnsfilter-android`'s Compose editor screens — always-on editor, scheduled
+blocks, custom rules, server-driven tier gates — flipping the navigation
+routes from the webview pages to native, one route at a time (the platform's
+version-skew rule keeps older shipped versions on the webviews).
+
+**Gate:** emulator — edits made natively appear in the web editor and vice
+versa; tier gates server-rejected and rendered locked; "Allow = no row"
+semantics verified at the database level; resolver picks up an app-made
+change within its reload window.
 
 ### Phase 4 — Strict mode (may ship later)
 
@@ -194,24 +217,22 @@ norms on a physical device.
 1. A user with a website-created account can log in, enable filtering, and
    confirm a blocked category fails to resolve — with no further website
    visits after signup.
-2. The login screen's "Forgot password?" link opens the website's reset
-   page, and the app signs in with the new password afterward (session keys
-   from the old password are revoked).
-3. Filter edits in the app are visible in the web editor and vice versa.
-4. Disabling in-app and uninstalling both restore normal DNS immediately.
-5. Tier gates server-rejected and rendered locked; hard-block flags rejected
+2. Filter edits in the app are visible in the web editor and vice versa
+   (single source of truth; resolver picks changes up within its ~60s reload).
+3. Disabling in-app and uninstalling both restore normal DNS immediately.
+4. Tier gates server-rejected and rendered locked; hard-block flags rejected
    without `scrolldaddy_custom_rules`.
-6. Strict mode: hard-blocked site fails under DNS bypass; fallback on disable
+5. Strict mode: hard-blocked site fails under DNS bypass; fallback on disable
    is standard protection, not unprotected.
-7. Filtering survives an overnight Doze cycle and a reboot (with always-on
+6. Filtering survives an overnight Doze cycle and a reboot (with always-on
    enabled) on at least one aggressive-OEM physical device.
-8. `joinery-android` builds standalone with no ScrollDaddy imports and works
-   against a second Joinery deployment unchanged.
+7. `dnsfilter-android` builds with no ScrollDaddy imports and works against a
+   second ScrollDaddy-style deployment unchanged (branding aside).
 
 ## Documentation deliverables (on implementation)
 
-- `docs/mobile_apps.md` — Android section: `joinery-android` integration
-  guide alongside JoineryKit.
 - `plugins/dns_filtering/docs/overview.md` — the Android app as a config
   delivery channel; Private DNS (DoT SNI subdomain) as a supported manual
   path.
+- `docs/mobile_apps.md` (owned by the platform specs) — add ScrollDaddy
+  Android as a consuming app with its `dnsfilter-android` layer.
