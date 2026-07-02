@@ -1,4 +1,12 @@
 <?php
+/**
+ * ScrollDaddy theme page renderer. The mobile menu and the desktop Account
+ * dropdown render the seeded profile menu store via get_menu_data() —
+ * themes style the markup but do not own the list
+ * (docs/plugin_developer_guide.md § Plugin Menus).
+ *
+ * @version 1.1.0
+ */
 require_once(PathHelper::getIncludePath('includes/PublicPageBase.php'));
 
 class PublicPage extends PublicPageBase {
@@ -156,22 +164,8 @@ Career Area
 		$_head_inject = ob_get_clean();
 
 
-		$profile_menu = array();
-		$logged_out_menu = array();
-		if ($session->get_user_id()){ 
-			$profile_menu['My Profile'] = '/profile/profile';
-			if($_SESSION['permission'] >= 5){ 
-				$profile_menu['Admin'] = '/admin/admin_users';
-			}
-			$profile_menu['Settings'] = '/profile/account_edit';
-			$profile_menu['Sign out'] = '/logout';
-		}
-		else{ 		
-			$logged_out_menu['Sign in'] = '/login';			
-			if($settings->get_setting('register_active')){
-				//$logged_out_menu['Sign up'] = '/register';	
-			}
-		}	
+		$menu_data = $this->get_menu_data();
+		$user_menu_items = $menu_data['user_menu']['items'];
 
 		$cart = $session->get_shopping_cart();
 		if($numitems = $cart->count_items()){
@@ -296,17 +290,9 @@ Career Area
 			<ul>
  		<?php
 		
-			if($session->get_user_id()){
-				echo '<li><a href="/profile/dns_filtering/devices">Devices</a></li>';
-				echo '<li><a href="/profile">Settings</a></li>';
-				echo '<li><a href="/logout">Log out</a></li>';
+			foreach($user_menu_items as $item){
+				echo '<li><a href="' . htmlspecialchars($item['link']) . '">' . htmlspecialchars($item['label']) . '</a></li>';
 			}
-			else{
-				if($settings->get_setting('register_active')){
-					echo '<li><a href="/pricing">Sign up</a></li>';
-				}
-				echo '<li><a href="/login">Log in</a></li>';
-			}	
 			$cart = $session->get_shopping_cart();
 			if($cart->count_items()){
 				echo '<li><a href="/cart">Cart</a></li>';
@@ -387,7 +373,11 @@ Career Area
 											}
 										}
 										if($session->get_user_id()){
-											echo '<li><a href="/profile/dns_filtering/devices">My Devices</a></li>';
+											echo '<li class="menu-item-has-children"><a href="/profile">Account</a><ul class="sub-menu">';
+											foreach($user_menu_items as $item){
+												echo '<li><a href="' . htmlspecialchars($item['link']) . '">' . htmlspecialchars($item['label']) . '</a></li>';
+											}
+											echo '</ul></li>';
 										}
 										?>
                                    

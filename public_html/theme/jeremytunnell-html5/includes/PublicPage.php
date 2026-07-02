@@ -1,4 +1,11 @@
 <?php
+/**
+ * Jeremy Tunnell theme page renderer. The sidebar account menu renders the
+ * seeded profile menu store via get_menu_data() — themes style the markup
+ * but do not own the list (docs/plugin_developer_guide.md § Plugin Menus).
+ *
+ * @version 1.1.0
+ */
 require_once(PathHelper::getIncludePath('includes/PublicPageBase.php'));
 require_once(PathHelper::getIncludePath('includes/Pager.php'));
 
@@ -172,19 +179,14 @@ class PublicPage extends PublicPageBase {
 
         <!-- User menu -->
         <div class="sidebar-contact">
-<?php if ($session->is_logged_in()): ?>
-            <h4><?php echo htmlspecialchars($menu_data['user_menu']['display_name'] ?? 'Account'); ?></h4>
+            <h4><?php echo $session->is_logged_in() ? htmlspecialchars($menu_data['user_menu']['display_name'] ?? 'Account') : 'Account'; ?></h4>
             <ul style="list-style: none; padding: 0;">
-                <li><a href="/profile">Profile</a></li>
-<?php if ($menu_data['user_menu']['permission_level'] >= 5): ?>
-                <li><a href="/admin/admin_users">Admin</a></li>
-<?php endif; ?>
-                <li><a href="/logout">Sign out</a></li>
+<?php
+	foreach($menu_data['user_menu']['items'] as $item) {
+		echo '                <li><a href="' . htmlspecialchars($item['link']) . '">' . htmlspecialchars($item['label']) . '</a></li>' . "\n";
+	}
+?>
             </ul>
-<?php else: ?>
-            <h4>Account</h4>
-            <p><a href="/login">Login</a></p>
-<?php endif; ?>
         </div>
 
         <div class="sidebar-contact">
