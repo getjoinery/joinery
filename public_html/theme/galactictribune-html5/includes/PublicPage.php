@@ -1,4 +1,12 @@
 <?php
+/**
+ * Galactic Tribune theme page renderer. The account dropdown and mobile
+ * account links render the seeded profile menu store via get_menu_data() —
+ * themes style the markup but do not own the list
+ * (docs/plugin_developer_guide.md § Plugin Menus).
+ *
+ * @version 1.1.0
+ */
 require_once(PathHelper::getIncludePath('includes/PublicPageBase.php'));
 
 class PublicPage extends PublicPageBase {
@@ -149,23 +157,29 @@ class PublicPage extends PublicPageBase {
                 </nav>
 
                 <div class="hidden md:flex items-center justify-end space-x-8 md:flex-1 lg:w-0">
-                  <?php if ($menu_data['user_menu']['is_logged_in']): ?>
-                    <span class="text-base font-medium text-gray-500">
-                      Welcome, <?php echo htmlspecialchars($menu_data['user_menu']['display_name']); ?>
-                    </span>
-                    <a href="/logout" class="whitespace-nowrap text-base font-medium text-gray-500 hover:text-gray-900">
-                      Sign out
-                    </a>
-                  <?php else: ?>
-                    <a href="/login" class="whitespace-nowrap text-base font-medium text-gray-500 hover:text-gray-900">
-                      Sign in
-                    </a>
-                    <?php if ($menu_data['site_info']['register_enabled']): ?>
-                      <a href="/register" class="whitespace-nowrap text-base font-medium text-gray-500 hover:text-gray-900">
-                        Sign up
-                      </a>
-                    <?php endif; ?>
-                  <?php endif; ?>
+                  <div class="relative">
+                    <button type="button" class="js-clickable-menu text-base font-medium text-gray-500 hover:text-gray-900 group inline-flex items-center" aria-expanded="false">
+                      <span><?php echo $menu_data['user_menu']['is_logged_in'] ? 'Welcome, ' . htmlspecialchars($menu_data['user_menu']['display_name']) : 'Account'; ?></span>
+                      <svg class="ml-2 h-5 w-5 text-gray-400 group-hover:text-gray-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                        <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
+                      </svg>
+                    </button>
+                    <div class="js-clicked-menu invisible absolute z-10 -ml-4 mt-3 transform px-2 w-screen max-w-md sm:px-0 lg:ml-0 lg:left-1/2 lg:-translate-x-1/2">
+                      <div class="rounded-lg shadow-lg ring-1 ring-black ring-opacity-5 overflow-hidden">
+                        <div class="relative grid gap-6 bg-white px-5 py-6 sm:gap-8 sm:p-8">
+                          <?php foreach ($menu_data['user_menu']['items'] as $item): ?>
+                            <a href="<?php echo htmlspecialchars($item['link']); ?>" class="-m-3 p-3 flex items-start rounded-lg hover:bg-gray-50">
+                              <div class="ml-4">
+                                <p class="text-base font-medium text-gray-900">
+                                  <?php echo htmlspecialchars($item['label']); ?>
+                                </p>
+                              </div>
+                            </a>
+                          <?php endforeach; ?>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -229,24 +243,16 @@ class PublicPage extends PublicPageBase {
                   <div class="grid grid-cols-2 gap-y-4 gap-x-8">
                   </div>
                   <div>
-                    <?php if (!$menu_data['user_menu']['is_logged_in']): ?>
-                      <p class="mt-6 text-center text-base font-medium text-gray-500">
-                        Existing user?
-                        <a href="/login" class="text-blue-600 hover:text-blue-500">Sign in</a>
-                      </p>
-                      <?php if ($menu_data['site_info']['register_enabled']): ?>
-                        <p class="mt-2 text-center text-base font-medium text-gray-500">
-                          New user?
-                          <a href="/register" class="text-blue-600 hover:text-blue-500">Sign up</a>
-                        </p>
-                      <?php endif; ?>
-                    <?php else: ?>
+                    <?php if ($menu_data['user_menu']['is_logged_in']): ?>
                       <p class="mt-6 text-center text-base font-medium text-gray-500">
                         Welcome, <?php echo htmlspecialchars($menu_data['user_menu']['display_name']); ?>
-                        <br>
-                        <a href="/logout" class="text-blue-600 hover:text-blue-500">Sign out</a>
                       </p>
                     <?php endif; ?>
+                    <?php foreach ($menu_data['user_menu']['items'] as $item): ?>
+                      <p class="mt-2 text-center text-base font-medium text-gray-500">
+                        <a href="<?php echo htmlspecialchars($item['link']); ?>" class="text-blue-600 hover:text-blue-500"><?php echo htmlspecialchars($item['label']); ?></a>
+                      </p>
+                    <?php endforeach; ?>
                   </div>
                 </div>
               </div>

@@ -122,8 +122,9 @@ client-agnostic — a future Android app reuses them unchanged.
   per app; everything else lands in the More list). Factory default in
   `settings.json`.
 
-Note: some themes hardcode their web profile-menu rendering; the seeded menu
-store is canonical for apps. Reconciling theme rendering is not this spec.
+Note: every web theme renders the seeded menu store
+(`specs/implemented/profile_menu_single_source.md`), so the store is
+canonical for web and apps alike.
 
 ### 2. Web-session bridge
 
@@ -239,7 +240,7 @@ reachable and chrome-less; App Store review passes.
 
 - Core pre-work specs: `specs/api_browser_session_credential.md`
   (implemented) and
-  `specs/profile_menu_single_source.md` land before Phase 1 here (the
+  `specs/implemented/profile_menu_single_source.md` land before Phase 1 here (the
   navigation endpoint reads the same menu accessor);
   `specs/implemented/api_contract_and_idempotency.md`'s contract audit completes
   before Phase 4's store submission, and app clients send

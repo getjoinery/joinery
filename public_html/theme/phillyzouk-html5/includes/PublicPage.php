@@ -1,4 +1,11 @@
 <?php
+/**
+ * Phillyzouk theme page renderer. The account dropdown renders the seeded
+ * profile menu store via get_menu_data() — themes style the markup but do
+ * not own the list (docs/plugin_developer_guide.md § Plugin Menus).
+ *
+ * @version 1.1.0
+ */
 require_once(PathHelper::getIncludePath('includes/PublicPageBase.php'));
 require_once(PathHelper::getIncludePath('includes/Pager.php'));
 
@@ -127,25 +134,16 @@ class PublicPage extends PublicPageBase {
 ?>
                         </ul>
                         <div class="others-option">
-<?php if ($session->is_logged_in()): ?>
                             <div class="follow">
-                                <?php echo htmlspecialchars($menu_data['user_menu']['display_name'] ?? 'Account'); ?> &#9660;
+                                <?php echo $session->is_logged_in() ? htmlspecialchars($menu_data['user_menu']['display_name'] ?? 'Account') : 'Account'; ?> &#9660;
                                 <ul>
-                                    <li><a href="/profile">Profile</a></li>
-<?php if ($menu_data['user_menu']['permission_level'] >= 5): ?>
-                                    <li><a href="/admin/admin_users">Admin</a></li>
-<?php endif; ?>
-                                    <li><a href="/logout">Sign out</a></li>
+<?php
+	foreach($menu_data['user_menu']['items'] as $item) {
+		echo '<li><a href="' . htmlspecialchars($item['link']) . '">' . htmlspecialchars($item['label']) . '</a></li>';
+	}
+?>
                                 </ul>
                             </div>
-<?php else: ?>
-                            <div class="follow">
-                                Account &#9660;
-                                <ul>
-                                    <li><a href="/login">Login</a></li>
-                                </ul>
-                            </div>
-<?php endif; ?>
                         </div>
                     </div>
                 </div>

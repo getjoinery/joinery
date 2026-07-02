@@ -552,9 +552,11 @@ read live from disk) — no activation or `update_database` step.
 Plugins declare menu contributions in `plugin.json` under two keys:
 
 - `adminMenu` — items in the admin sidebar (`/admin/*`).
-- `profileMenu` — items in the user dropdown shown by themes (logged-in avatar menu, logged-out auth links, etc.).
+- `profileMenu` — items in the member profile menu (logged-in avatar menu, logged-out auth links, etc.).
 
 Both keys are synced into the same `amu_admin_menus` table, distinguished by an `amu_location` column (`admin_sidebar` vs `user_dropdown`). The system automatically creates menu rows on activation, updates them on sync, and removes them on deactivation/uninstall. This is the only supported way to register plugin menus — do not INSERT into `amu_admin_menus` from migrations.
+
+A `profileMenu` entry is the single way onto the member menu, everywhere: every theme renders the seeded store via `PublicPageBase::get_menu_data()` (`$menu_data['user_menu']['items']`, each item `{label, link, icon, slug}`), and the mobile apps' navigation endpoint reads the same store. Themes style the markup but never hardcode member menu entries — adding one entry in a manifest surfaces it on all web themes and in every shipped app with no theme edits or app release.
 
 **Locations:**
 

@@ -1,24 +1,50 @@
 {
     "name": "DNS Filtering",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "Self-hosted DNS filtering service with per-device filtering profiles",
     "author": "System Developer",
     "receives_upgrades": true,
     "included_in_publish": true,
-    "styles": ["assets/css/dns_filtering.css"],
+    "styles": [
+        "assets/css/dns_filtering.css"
+    ],
     "requires": {
         "php": ">=8.0",
         "extensions": []
     },
     "settings": [
-        { "name": "dns_filtering_dns_host", "default": "" },
-        { "name": "dns_filtering_dns_internal_url", "default": "" },
-        { "name": "dns_filtering_dns_api_key", "default": "" },
-        { "name": "dns_filtering_dns_server_ip", "default": "" },
-        { "name": "dns_filtering_dns_secondary_internal_url", "default": "" },
-        { "name": "dns_filtering_dns_secondary_api_key", "default": "" },
-        { "name": "dns_filtering_dns_secondary_server_ip", "default": "" },
-        { "name": "dns_filtering_blocklist_version", "default": "" }
+        {
+            "name": "dns_filtering_dns_host",
+            "default": ""
+        },
+        {
+            "name": "dns_filtering_dns_internal_url",
+            "default": ""
+        },
+        {
+            "name": "dns_filtering_dns_api_key",
+            "default": ""
+        },
+        {
+            "name": "dns_filtering_dns_server_ip",
+            "default": ""
+        },
+        {
+            "name": "dns_filtering_dns_secondary_internal_url",
+            "default": ""
+        },
+        {
+            "name": "dns_filtering_dns_secondary_api_key",
+            "default": ""
+        },
+        {
+            "name": "dns_filtering_dns_secondary_server_ip",
+            "default": ""
+        },
+        {
+            "name": "dns_filtering_blocklist_version",
+            "default": ""
+        }
     ],
     "profileMenu": [
         {
@@ -29,6 +55,15 @@
             "visibility": "in",
             "permission": 1,
             "order": 75
+        },
+        {
+            "slug": "dns-filtering-devices",
+            "title": "Devices",
+            "url": "/profile/dns_filtering/devices",
+            "icon": "devices",
+            "visibility": "in",
+            "permission": 1,
+            "order": 76
         }
     ]
 }
