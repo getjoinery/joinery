@@ -1,11 +1,13 @@
 {
     "name": "Joinery AI",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "description": "Scheduled LLM recipes that gather information, write to a workspace, and deliver results to a dashboard or email.",
     "author": "Joinery",
     "receives_upgrades": true,
     "included_in_publish": true,
-    "styles": ["assets/css/joinery_ai.css"],
+    "styles": [
+        "assets/css/joinery_ai.css"
+    ],
     "profileMenu": [
         {
             "slug": "joinery-ai-member-chat",
@@ -13,7 +15,7 @@
             "url": "/profile/joinery_ai/chat",
             "icon": "robot",
             "visibility": "in",
-            "permission": 1,
+            "permission": 0,
             "order": 72
         }
     ],
@@ -25,37 +27,129 @@
             "permission": 10,
             "order": 16,
             "items": [
-                { "slug": "joinery-ai-chat", "title": "Chat", "url": "/admin/joinery_ai/chat", "order": 1 },
-                { "slug": "joinery-ai-recipes", "title": "Recipes", "url": "/admin/joinery_ai", "order": 2 },
-                { "slug": "joinery-ai-runs", "title": "Run History", "url": "/admin/joinery_ai/runs", "order": 3 },
-                { "slug": "joinery-ai-notes", "title": "Notes", "url": "/admin/joinery_ai/notes", "order": 4 }
+                {
+                    "slug": "joinery-ai-chat",
+                    "title": "Chat",
+                    "url": "/admin/joinery_ai/chat",
+                    "order": 1
+                },
+                {
+                    "slug": "joinery-ai-recipes",
+                    "title": "Recipes",
+                    "url": "/admin/joinery_ai",
+                    "order": 2
+                },
+                {
+                    "slug": "joinery-ai-runs",
+                    "title": "Run History",
+                    "url": "/admin/joinery_ai/runs",
+                    "order": 3
+                },
+                {
+                    "slug": "joinery-ai-notes",
+                    "title": "Notes",
+                    "url": "/admin/joinery_ai/notes",
+                    "order": 4
+                }
             ]
         }
     ],
     "settings": [
-        { "name": "joinery_ai_llm_provider", "default": "anthropic" },
-        { "name": "joinery_ai_anthropic_api_key", "default": "" },
-        { "name": "joinery_ai_local_base_url", "default": "http://localhost:11434/v1" },
-        { "name": "joinery_ai_local_model", "default": "" },
-        { "name": "joinery_ai_local_api_key", "default": "" },
-        { "name": "joinery_ai_local_timeout_seconds", "default": "300" },
-        { "name": "joinery_ai_fireworks_api_key", "default": "" },
-        { "name": "joinery_ai_fireworks_base_url", "default": "https://api.fireworks.ai/inference/v1" },
-        { "name": "joinery_ai_brave_search_api_key", "default": "" },
-        { "name": "joinery_ai_market_data_provider", "default": "finnhub" },
-        { "name": "joinery_ai_market_data_api_key", "default": "" },
-        { "name": "joinery_ai_default_model", "default": "claude-haiku-4-5" },
-        { "name": "joinery_ai_failure_email_throttle_seconds", "default": "86400" },
-        { "name": "joinery_ai_workspace_max_chars", "default": "8000" },
-        { "name": "joinery_ai_max_concurrent_workers", "default": "3" },
-        { "name": "joinery_ai_global_monthly_token_cap", "default": "25000000" },
-        { "name": "joinery_ai_chat_enabled", "default": "1" },
-        { "name": "joinery_ai_chat_max_iterations", "default": "12" },
-        { "name": "joinery_ai_chat_max_tokens", "default": "32000" },
-        { "name": "joinery_ai_chat_system_prompt", "default": "" },
-        { "name": "joinery_ai_default_temperature", "default": "0.3" },
-        { "name": "joinery_ai_default_top_p", "default": "" },
-        { "name": "joinery_ai_default_thinking_level", "default": "medium" },
-        { "name": "joinery_ai_default_web_search", "default": "1" }
+        {
+            "name": "joinery_ai_llm_provider",
+            "default": "anthropic"
+        },
+        {
+            "name": "joinery_ai_anthropic_api_key",
+            "default": ""
+        },
+        {
+            "name": "joinery_ai_local_base_url",
+            "default": "http://localhost:11434/v1"
+        },
+        {
+            "name": "joinery_ai_local_model",
+            "default": ""
+        },
+        {
+            "name": "joinery_ai_local_api_key",
+            "default": ""
+        },
+        {
+            "name": "joinery_ai_local_timeout_seconds",
+            "default": "300"
+        },
+        {
+            "name": "joinery_ai_fireworks_api_key",
+            "default": ""
+        },
+        {
+            "name": "joinery_ai_fireworks_base_url",
+            "default": "https://api.fireworks.ai/inference/v1"
+        },
+        {
+            "name": "joinery_ai_brave_search_api_key",
+            "default": ""
+        },
+        {
+            "name": "joinery_ai_market_data_provider",
+            "default": "finnhub"
+        },
+        {
+            "name": "joinery_ai_market_data_api_key",
+            "default": ""
+        },
+        {
+            "name": "joinery_ai_default_model",
+            "default": "claude-haiku-4-5"
+        },
+        {
+            "name": "joinery_ai_failure_email_throttle_seconds",
+            "default": "86400"
+        },
+        {
+            "name": "joinery_ai_workspace_max_chars",
+            "default": "8000"
+        },
+        {
+            "name": "joinery_ai_max_concurrent_workers",
+            "default": "3"
+        },
+        {
+            "name": "joinery_ai_global_monthly_token_cap",
+            "default": "25000000"
+        },
+        {
+            "name": "joinery_ai_chat_enabled",
+            "default": "1"
+        },
+        {
+            "name": "joinery_ai_chat_max_iterations",
+            "default": "12"
+        },
+        {
+            "name": "joinery_ai_chat_max_tokens",
+            "default": "32000"
+        },
+        {
+            "name": "joinery_ai_chat_system_prompt",
+            "default": ""
+        },
+        {
+            "name": "joinery_ai_default_temperature",
+            "default": "0.3"
+        },
+        {
+            "name": "joinery_ai_default_top_p",
+            "default": ""
+        },
+        {
+            "name": "joinery_ai_default_thinking_level",
+            "default": "medium"
+        },
+        {
+            "name": "joinery_ai_default_web_search",
+            "default": "1"
+        }
     ]
 }

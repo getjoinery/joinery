@@ -864,3 +864,20 @@
 	$migration['migration_file'] = 'migrate_offload_single_task.php';
 	$migrations[] = $migration;
 
+	// ========== Member menu entries: min_permission 1 → 0 (v136) ==========
+	// Members are permission 0 (usr_permission zero_on_create), and the user
+	// dropdown filters on amu_min_permission <= permission — so entries seeded
+	// at permission 1 were invisible to every real member. Signed-in-ness is
+	// the visibility='in' field's job; permission gates only staff tiers.
+	// admin_menus.json now declares 0, but core seeding is insert-only, so
+	// existing rows move here. Scoped to the known core slugs; idempotent.
+	$migration = array();
+	$migration['database_version'] = '136';
+	$migration['test'] = NULL;
+	$migration['migration_sql'] = "UPDATE amu_admin_menus SET amu_min_permission = 0
+		WHERE amu_location = 'user_dropdown' AND amu_min_permission = 1
+		AND amu_slug IN ('core-profile','core-calendar','core-orders','core-subscriptions',
+			'core-events','core-event-sessions','core-signout')";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+

@@ -557,15 +557,17 @@ file-backed rows, `ima_fil_file_id` pointing at its `File`. Dispatch everywhere 
 | no `ima_fil_file_id`, driver `remote` | the IMAP source | fetch the part on demand (`ImapIngestor::fetchPart`) |
 | no `ima_fil_file_id`, stored raw | inside the raw (legacy / fallback row) | `getRawMimePart($section)` |
 
-**Attachment access is owner-or-admin.** Each attachment `File` carries `fil_private`,
-so `File::is_viewable()` admits the file's owner or any admin (≥ 5) — the same one
-algorithm serve.php's `/uploads/*` path uses. The owner is the **single grantee** of the
-message's alias (an individual mailbox — so a permission-0 owner sees their own
-attachments); a shared alias (several grantees) or an ownerless catch-all is owned by
-`User::USER_SYSTEM`, which matches no human, so only admins see those attachments. This
-is independent of mailbox-level read access (`MailboxViewer`, which governs *email*
-reading): a non-admin teammate can read a shared mailbox's emails but not its
-attachments, so **team mailboxes require admin members**. No image variants are
+**Attachment access has two doors, one rule each.** The member download endpoint
+(`/profile/inbound_email/attachment`) authorizes by **mailbox grant** for both
+backings: the viewer may access the alias of the attachment's message
+(`MailboxViewer`; a NULL-alias catch-all message is superadmin-only) — an
+attachment is exactly as private as its message, so every grantee of a mailbox,
+including permission-0 members and shared-mailbox teammates, downloads its
+attachments. The admin endpoint keeps the File-level posture for file-backed
+rows: each attachment `File` carries `fil_private`, so `File::is_viewable()`
+admits the file's owner (the single grantee of an individual mailbox; a shared
+or catch-all alias is owned by `User::USER_SYSTEM`) or any admin (≥ 5) — the
+same algorithm serve.php's `/uploads/*` path uses. No image variants are
 generated — attachments are served as their original.
 
 **Ingest is all-or-nothing per message.** Every non-text part is minted as a `File` via
@@ -577,10 +579,12 @@ record → raw-to-disk → inline-in-DB**; ingest never aborts, and the fallback
 distinct `INBOUND_ATTACHMENT_EXTRACTION_FAILED` marker so an operator sees disk pressure.
 
 **Download** streams the bytes by where they live (see the table): a file-backed row
-authorizes with `File::is_viewable()` and streams the `File`'s bytes with the original
-`ima_filename`, attachment disposition, and `nosniff`; `remote` fetches the one part from
-IMAP; a legacy/fallback row extracts it from the stored raw. The whole `.eml` is never
-reassembled.
+reads its `File`; `remote` fetches the one part from IMAP; a legacy/fallback row
+extracts it from the stored raw. Retrieval and streaming (original `ima_filename`,
+attachment disposition, `nosniff`) are the shared helpers in
+`includes/attachment_retrieval.php`, used by both download endpoints — each endpoint
+gates first with its own authorization posture, then retrieves. The whole `.eml` is
+never reassembled.
 
 **Forward** re-attaches the original's parts in one manifest-driven loop dispatching per
 row: a file-backed row reads its `File`, `remote` fetches from IMAP, a legacy raw row
@@ -638,14 +642,31 @@ row is recoverable).
 
 ## Mailbox Reader
 
-The **Mailboxes** tab is a two-pane Gmail-style reader over the stored messages:
+The Mailbox Reader is a two-pane Gmail-style reader over the stored messages:
 a left rail (mailbox switcher + filters + search) and a single main pane that
 shows either the conversation list or an opened conversation full-width (a back
 arrow or Esc returns to the list). It supports threading, read/unread, star, and
-search. It is `admin_inbound_email_reader.php`, a vanilla-JS client
-(`assets/mailbox_reader.js` + `.css`, cache-busted by file mtime) talking to four
-scoped AJAX endpoints. The single-message detail page is kept for raw MIME /
-`.eml` download and deep links.
+search. It is a vanilla-JS client (`assets/mailbox_reader.js` + `.css`,
+cache-busted by file mtime) talking to five scoped AJAX endpoints.
+
+The reader has **two mounts** of one shared UI
+(`includes/mailbox_reader_mount.php`):
+
+- **Admin** — the **Mailboxes** tab (`admin_inbound_email_reader.php`), staff
+  chrome, with attachment downloads at the admin endpoint and kebab deep links
+  to the single-message detail page (raw MIME / `.eml` download).
+- **Member** — `/profile/inbound_email/mailbox`
+  (`views/profile/mailbox.php` + `logic/profile_mailbox_logic.php`), theme
+  chrome, for any signed-in member; what they see is their granted mailboxes.
+  A member with no grants gets a short "no mailboxes are assigned to your
+  account" state. Attachment chips point at the member endpoint; there are no
+  detail-page deep links (`messageDetailBase` null hides the kebab). The
+  plugin's `profileMenu` declares the "Email" entry that puts the page in the
+  member menu on every theme and in the apps' navigation.
+
+The mounts differ only in chrome and endpoint URLs (handed to the JS via
+`window.MAILBOX_READER`); the endpoints themselves scope every read and write
+via `MailboxViewer`.
 
 ### Mailbox-per-address model
 
@@ -710,13 +731,15 @@ independent of the session.
 
 ### Permissions
 
-The reader, its endpoints, and grant management are **permission-5 (staff)**;
-grants partition which mailboxes each staff member sees. Permission-10 superadmins
-are all-access. The grant table, per-row state, and the viewer/scope seam are keyed
-on the user generically, and each endpoint gates on `get_permission() < 5` in
-`ajax/mailbox_*.php`. Reply/Reply-All/Forward (below) are staff-and-superadmin,
-gated by the same mailbox grant that governs reading; `MailboxViewer::canCompose()`
-is the seam that authorizes composing.
+The endpoints (`ajax/mailbox_*.php`) require a **signed-in session** — any
+member — and `MailboxViewer` is the sole authority on which mailboxes a viewer
+touches: grants partition mailboxes per user, and permission-10 superadmins are
+all-access (every mailbox plus "All mail"/"Unmatched"). The admin page itself
+stays permission-5, and grant management (the alias editor) is admin-only.
+Reply/Reply-All/Forward are gated by `MailboxViewer::canCompose()` — a grant
+means full access to the mailbox, reading it and sending as it, so any viewer
+with at least one accessible mailbox may compose; per-alias send scope is
+enforced inside `MailboxSender`.
 
 ### Endpoints
 
@@ -740,11 +763,11 @@ labelled "Sent").
 
 - **Compose UI.** A single `FormWriter` form is rendered once in the reader
   (hidden) and the reader's JS shows it, populates To/Cc/Subject and the quoted
-  context, and submits it by `fetch` so the page never reloads. The panel is
-  admin-only, so the form is rendered with `csrf => false` (FormWriter's
-  single-use, 2-hour token would break a second compose in a long-lived reader);
-  the endpoint validates the reader's persistent `mailbox_reader_csrf` token
-  instead, as the other reader actions do.
+  context, and submits it by `fetch` so the page never reloads. The form is
+  rendered with `csrf => false` (FormWriter's single-use, 2-hour token would
+  break a second compose in a long-lived reader); the endpoint validates the
+  reader's persistent `mailbox_reader_csrf` token instead, as the other reader
+  actions do.
 - **Identity & transport.** `mailbox_send.php` resolves the mailbox to a
   transport with `resolveOutboundTransport()` and sends through the one
   `EmailSender` pipeline. An **IMAP-source** mailbox (a connected account) sends

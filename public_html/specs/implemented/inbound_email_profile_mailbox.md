@@ -63,20 +63,32 @@ path never consults it) gets aligned rather than left drifting: it returns
 
 ## Attachments (the one real gap)
 
-Message attachments are stored as **private Files**, and private-file
-serving authorizes **owner-or-admin** (`data/files_class.php`,
-`is_owner_or_admin`). A granted member is neither, so today they could see
-an attachment chip but not download it. The fix keeps authority in one
-place: the file-serving path for mailbox attachments authorizes via
-`MailboxViewer` — serve the file when the viewer can access the alias of
-the message the attachment belongs to (the `ima_inbound_message_attachments`
-row links file → message → alias). Design the hook so the File model asks
-the owning plugin, rather than the file server growing inbound-email
-knowledge.
+Attachment chips link to the admin download endpoint
+(`admin_inbound_email_attachment`), which is staff-gated and, for
+file-backed rows, authorizes with the private-File owner-or-admin rule — a
+granted member fails both. Attachments also come in two backings:
+file-backed (bytes are a private File) and raw-backed (bytes are extracted
+from stored raw MIME, or single-part-fetched live from the source IMAP
+account), so no File-level mechanism can cover them all.
 
-The same rule governs inline (cid) images in message bodies — verify they
-render for a granted member, since they flow through the same private-file
-gate.
+The fix is a member download endpoint,
+`/profile/inbound_email/attachment`, that authorizes **both** backings the
+same way: the viewer may access the alias of the attachment's message
+(`MailboxViewer`; NULL-alias messages stay superadmin-only). After the
+grant check, file-backed rows read bytes via `File::read_bytes()` (which
+deliberately does not authorize — the caller gates) and raw-backed rows
+retrieve exactly as the admin endpoint does. The retrieval half is
+extracted into a shared include so the two endpoints differ only in their
+authorization posture. The reader's chip URL becomes a config value so
+each mount points at its own endpoint. (Signed URLs —
+`docs/file_signed_urls.md` — are the transport the native app consumes
+later for file-backed attachments, `specs/mobile_native_email.md`; a
+sessioned web page doesn't need them.)
+
+Inline (cid) images in inbound bodies are not rewritten by the reader for
+any viewer today — there is no inline manifest and no cid resolution. The
+member page inherits that parity; inbound cid rendering is its own future
+item, not part of this spec.
 
 ## Tests
 

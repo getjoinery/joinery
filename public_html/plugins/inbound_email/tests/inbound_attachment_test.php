@@ -28,6 +28,7 @@ require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_mess
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_mailbox_grant_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/MailboxViewer.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/logic/admin_inbound_email_attachment_logic.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/attachment_retrieval.php'));
 
 class InboundAttachmentTest {
 	private $pass = 0;
@@ -166,10 +167,10 @@ class InboundAttachmentTest {
 	}
 
 	private function testFilenameSanitization() {
-		$this->ok(_attachment_safe_filename("a\r\nb.pdf") === 'ab.pdf', 'CR/LF stripped from filename');
-		$this->ok(_attachment_safe_filename('../../etc/passwd') === '....etcpasswd', 'path separators stripped');
-		$this->ok(_attachment_safe_filename('') === 'attachment', 'empty filename falls back to "attachment"');
-		$this->ok(strpos(_attachment_safe_filename('quote"name.txt'), '"') === false, 'double-quote stripped');
+		$this->ok(inbound_email_attachment_safe_filename("a\r\nb.pdf") === 'ab.pdf', 'CR/LF stripped from filename');
+		$this->ok(inbound_email_attachment_safe_filename('../../etc/passwd') === '....etcpasswd', 'path separators stripped');
+		$this->ok(inbound_email_attachment_safe_filename('') === 'attachment', 'empty filename falls back to "attachment"');
+		$this->ok(strpos(inbound_email_attachment_safe_filename('quote"name.txt'), '"') === false, 'double-quote stripped');
 	}
 
 	private function testGrantParity() {

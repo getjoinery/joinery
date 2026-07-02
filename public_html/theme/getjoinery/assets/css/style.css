@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Get Joinery Marketing Theme — Style Sheet v1.1.0
+   Get Joinery Marketing Theme — Style Sheet v1.2.0
    Warm stone palette with amber accents (Variant M)
    ========================================================================== */
 
@@ -1038,7 +1038,7 @@ p:last-child { margin-bottom: 0; }
 
 /* ---------- Content Wrapper (BeginPage/EndPage for base views) ---------- */
 .content-wrapper {
-    max-width: 900px;
+    max-width: var(--max-width);
     margin: 0 auto;
     padding: 3rem 2rem;
 }

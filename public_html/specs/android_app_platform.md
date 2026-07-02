@@ -144,7 +144,7 @@ with bridging, chrome-less rendering, link policy, and silent re-bridge.
 
 **Gate:** emulator — the calendar is usable in-app; orders and conversations
 load; a mailbox-granted user reads and replies to mail (depends on
-`specs/inbound_email_profile_mailbox.md`); a new plugin `profileMenu` entry
+`specs/implemented/inbound_email_profile_mailbox.md`); a new plugin `profileMenu` entry
 appears without a release; revoking the app's session from the web signs out
 both layers; external links leave the app; system back behaves correctly
 across webview history and shell navigation.
@@ -162,7 +162,7 @@ reachable and chrome-less; Play review passes.
 
 - `specs/ios_app_platform.md` — the server pieces (navigation endpoint,
   web-session bridge, app display mode) and the platform design they encode.
-- `specs/inbound_email_profile_mailbox.md` — email in the app for granted
+- `specs/implemented/inbound_email_profile_mailbox.md` — email in the app for granted
   users.
 
 ## Consumers

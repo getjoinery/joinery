@@ -5,9 +5,9 @@
  * GET. Params: thread_key (required), alias_id (optional). Returns every
  * in-scope message in the thread, chronological, each WITH its plain/HTML body
  * for client-side sandboxed rendering. Empty array if the thread is outside
- * scope. Staff-only.
+ * scope. Signed-in; MailboxViewer scopes the thread expansion.
  *
- * @version 1.0
+ * @version 1.1
  */
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/MailboxService.php'));
@@ -15,7 +15,7 @@ require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/MailboxS
 header('Content-Type: application/json');
 
 $session = SessionControl::get_instance();
-if ($session->get_permission() < 5) {
+if (!$session->get_user_id()) {
 	http_response_code(403);
 	echo json_encode(array('error' => 'forbidden'));
 	exit();

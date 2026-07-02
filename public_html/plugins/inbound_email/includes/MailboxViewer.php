@@ -14,11 +14,10 @@
  *     (the ieg grant table).
  *
  * Audience-to-query translation lives ONLY in scopeAliasIds(); no other part of
- * the reader decides visibility. This is the single seam a future member-mount
- * reuses unchanged — opening the reader to non-admin members is purely relaxing
- * the endpoint permission gate, with no change here.
+ * the reader decides visibility. Both reader mounts — the admin page and the
+ * member page at /profile/inbound_email/mailbox — sit on this one seam.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_mailbox_grant_class.php'));
@@ -140,9 +139,13 @@ final class MailboxViewer {
 		return $this->accessibleAliasIds();
 	}
 
-	/** Reader is read-only in v1; compose/reply is a deferred seam. */
+	/**
+	 * A grant means full access to the mailbox — reading it and sending as
+	 * it (the scoping MailboxSender enforces per-alias). So a viewer may
+	 * compose exactly when they can access at least one mailbox.
+	 */
 	public function canCompose(): bool {
-		return false;
+		return count($this->accessibleAliasIds()) > 0;
 	}
 
 	public function getUserId(): int {

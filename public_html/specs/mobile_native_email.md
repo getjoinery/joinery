@@ -17,7 +17,7 @@ would duplicate the API contract and screen list and let them drift.
 
 - `specs/implemented/file_signed_urls.md` — the core signed-URL file-serving
   capability this spec's attachment transport consumes.
-- `specs/inbound_email_profile_mailbox.md` — the member grant surface, the
+- `specs/implemented/inbound_email_profile_mailbox.md` — the member grant surface, the
   grant-authorized attachment rule, and the web page that remains the
   fallback destination.
 - `specs/ios_app_platform.md` / `specs/android_app_platform.md` — the
@@ -61,7 +61,7 @@ capability is the core one from `specs/implemented/file_signed_urls.md`
 thread action mints only after the viewer-scope check that gated the thread
 fetch, and the serving path validates signature + expiry with no session at
 all. This slots in beside the grant-authorized serving rule from
-`specs/inbound_email_profile_mailbox.md` — same authority (message → alias →
+`specs/implemented/inbound_email_profile_mailbox.md` — same authority (message → alias →
 viewer scope), different transport for API clients.
 
 ## Client work — same screens, two languages

@@ -508,7 +508,7 @@
             "title": "My Profile",
             "url": "/profile",
             "order": 50,
-            "permission": 1,
+            "permission": 0,
             "icon": "user"
         },
         {
@@ -516,7 +516,7 @@
             "title": "Calendar",
             "url": "/profile/calendar",
             "order": 55,
-            "permission": 1,
+            "permission": 0,
             "icon": "calendar"
         },
         {
@@ -524,7 +524,7 @@
             "title": "Orders",
             "url": "/profile#orders",
             "order": 60,
-            "permission": 1,
+            "permission": 0,
             "icon": "shopping-bag"
         },
         {
@@ -532,7 +532,7 @@
             "title": "Subscriptions",
             "url": "/profile/subscriptions",
             "order": 70,
-            "permission": 1,
+            "permission": 0,
             "icon": "refresh"
         },
         {
@@ -540,7 +540,7 @@
             "title": "My Events",
             "url": "/profile#events",
             "order": 80,
-            "permission": 1,
+            "permission": 0,
             "icon": "calendar"
         },
         {
@@ -548,7 +548,7 @@
             "title": "Event Sessions",
             "url": "/profile/event_sessions",
             "order": 90,
-            "permission": 1,
+            "permission": 0,
             "icon": "clock"
         },
         {
@@ -596,7 +596,7 @@
             "title": "Sign out",
             "url": "/logout",
             "order": 200,
-            "permission": 1,
+            "permission": 0,
             "icon": "sign-out"
         }
     ]

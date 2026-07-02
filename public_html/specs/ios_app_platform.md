@@ -222,7 +222,7 @@ with bridging, chrome-less rendering, link policy, and silent re-bridge.
 
 **Gate:** XCUITest in the Simulator — the calendar is usable in-app; orders
 and conversations load; a mailbox-granted user reads and replies to mail
-(depends on `specs/inbound_email_profile_mailbox.md`); adding a plugin
+(depends on `specs/implemented/inbound_email_profile_mailbox.md`); adding a plugin
 `profileMenu` entry appears in the app without a release; revoking the app's
 session from the web signs out both the native and webview layers; external
 links open Safari.
@@ -245,7 +245,7 @@ reachable and chrome-less; App Store review passes.
   `specs/implemented/api_contract_and_idempotency.md`'s contract audit completes
   before Phase 4's store submission, and app clients send
   `Idempotency-Key` on mutating calls.
-- `specs/inbound_email_profile_mailbox.md` — the user-facing mailbox at
+- `specs/implemented/inbound_email_profile_mailbox.md` — the user-facing mailbox at
   `/profile` that puts email in the app for granted users.
 - `specs/mac_mini_ios_development_access.md` — the development environment.
 
