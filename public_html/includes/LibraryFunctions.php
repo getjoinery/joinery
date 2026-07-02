@@ -21,6 +21,27 @@ class LibraryFunctions {
 	}
 
 	/**
+	 * Normalize a timestamp for an API payload: UTC, 'Y-m-d H:i:s', seconds
+	 * precision (the API contract format — see docs/api.md § Contract).
+	 * Accepts a DateTime, a raw DB string (with or without fractional
+	 * seconds), or null/''. Returns the contract string, or null for empty
+	 * and unparseable input (never a fabricated date).
+	 */
+	public static function api_timestamp($value) {
+		if ($value instanceof DateTime) {
+			return $value->format('Y-m-d H:i:s');
+		}
+		if ($value === null || $value === '') {
+			return null;
+		}
+		// Raw DB values are already UTC 'Y-m-d H:i:s[.uuuuuu]' — trim, don't parse.
+		if (is_string($value) && preg_match('/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(\.\d+)?$/', $value, $m)) {
+			return $m[1];
+		}
+		return null;
+	}
+
+	/**
 	 * Returns the installed Joinery release version in major.minor.patch form.
 	 *
 	 * Authoritative source is `public_html/VERSION` (baked into the release tarball by

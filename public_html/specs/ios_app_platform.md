@@ -186,6 +186,16 @@ App Store validation (no Network Extension entitlements in this spec).
 The navigation endpoint, the web-session bridge, and app display mode.
 Testable with curl and a browser — no Xcode dependency.
 
+**Action payload promotion.** For every action the app calls natively
+(beyond auth and forms, which are already contract), design and document
+its `data` payload in `docs/api.md`, promoting it into the § Contract
+surface. Most core actions currently return page variables whose framework
+objects serialize as `{"key": N}` husks (see
+`specs/api_contract_and_idempotency.md` § Change 1 audit output) — each
+such action gets a real client-facing payload here, the way the
+dns_filtering actions did for ScrollDaddy. Where the web page wants the
+same data, the payload is designed once and the page consumes it too.
+
 **Gate:** functional tests in `/tests/functional/api/` — navigation entries
 filtered by permission/visibility/settingActivate and per-app tab pinning;
 bridge tokens single-use and expiring; key revocation and password change

@@ -696,6 +696,15 @@ abstract class SystemBase {
 				$out[$field] = $full[$field];
 			}
 		}
+		// API contract: timestamps leave the server as UTC 'Y-m-d H:i:s' strings,
+		// never as serialized DateTime objects (export_as_array() upgrades
+		// timestamp columns to DateTime for internal callers). Recursive so the
+		// floor's format guarantee holds through derived embeds too.
+		array_walk_recursive($out, function (&$value) {
+			if ($value instanceof DateTime) {
+				$value = $value->format('Y-m-d H:i:s');
+			}
+		});
 		return $out;
 	}
 
