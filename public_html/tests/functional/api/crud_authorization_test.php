@@ -30,6 +30,10 @@
  *     real model (User); the AI write surface strips the shared unwritable
  *     floor (synthetic probe — no production model declares $ai_writable_fields
  *     yet, so the write-strip is verified mechanically).
+ *   - Contract envelope (docs/api.md § Contract): success/error envelope keys,
+ *     bare error message (no prefix), object error data, integer pagination
+ *     fields, and timestamps as UTC 'Y-m-d H:i:s' strings (never serialized
+ *     DateTime objects), including through derived embeds.
  *
  * USAGE (CLI only):
  *   php tests/functional/api/crud_authorization_test.php [base_url] [origin_ip]
@@ -111,6 +115,17 @@ class FailClosedProbe extends SystemBase {
 	}
 }
 
+// Recursively true if any value anywhere is a serialized PHP DateTime
+// (an array carrying 'date' + 'timezone_type') — the shape the contract bans.
+function has_datetime_blob($data) {
+	if (!is_array($data)) return false;
+	if (array_key_exists('date', $data) && array_key_exists('timezone_type', $data)) return true;
+	foreach ($data as $v) {
+		if (is_array($v) && has_datetime_blob($v)) return true;
+	}
+	return false;
+}
+
 // Recursively true if any array key anywhere matches the credential pattern.
 function has_credential_key($data) {
 	if (!is_array($data)) return false;
@@ -183,6 +198,40 @@ try {
 	$writable = array_filter($probe_set, fn($c) => (bool)$c::$api_writable);
 	check(in_array('ApiReadOnlyProbe', $readable) && !in_array('ApiReadOnlyProbe', $writable),
 		'exposure filter gates the read-only resource per-verb (readable, not writable)');
+
+	// ------------------------------------------------------------------
+	section('Contract envelope (docs/api.md § Contract)');
+	// Success envelope: fixed keys, object data, contract timestamps.
+	$r = api_request('GET', '/api/v1/User/' . $user_a->key, $ha);
+	check(($r['json']['api_version'] ?? '') === '1.0', 'success envelope carries api_version 1.0');
+	check(is_string($r['json']['success_message'] ?? null), 'success envelope carries success_message string');
+	$data = $r['json']['data'] ?? null;
+	check(is_array($data) && !empty($data), 'single-resource data is an object');
+	check(!has_datetime_blob($data), 'no serialized DateTime object anywhere in the export (incl. embeds)');
+	$ts_ok = true; $ts_seen = 0;
+	foreach ($data as $k => $v) {
+		if (preg_match('/_(time|date)$/', $k) && $v !== null) {
+			$ts_seen++;
+			if (!is_string($v) || !preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $v)) $ts_ok = false;
+		}
+	}
+	check($ts_ok && $ts_seen > 0, 'timestamps are UTC Y-m-d H:i:s strings (' . $ts_seen . ' checked)');
+
+	// Collection envelope: integer pagination fields.
+	$r = api_request('GET', '/api/v1/Addresss?numperpage=50&page=0', $ha);
+	check(is_int($r['json']['num_results'] ?? null), 'collection num_results is an integer');
+	check(is_int($r['json']['page'] ?? null), 'collection page is an integer');
+	check(is_int($r['json']['numperpage'] ?? null), 'collection numperpage is an integer');
+	check(is_array($r['json']['data'] ?? null), 'collection data is an array');
+
+	// Error envelope: fixed keys, bare message, object data.
+	$r = api_request('GET', '/api/v1/Setting/1', $ha);
+	check(($r['json']['api_version'] ?? '') === '1.0', 'error envelope carries api_version 1.0');
+	check(is_string($r['json']['errortype'] ?? null) && ($r['json']['errortype'] ?? '') !== '',
+		'error envelope carries errortype');
+	$err = $r['json']['error'] ?? '';
+	check(is_string($err) && strpos($err, 'Error: ') !== 0, 'error string is the bare message (no prefix)');
+	check(is_array($r['json']['data'] ?? null), 'error data is an object, not a string');
 
 	// ------------------------------------------------------------------
 	section('Layer 2 — per-record row scope (deny-by-default owner-or-staff)');

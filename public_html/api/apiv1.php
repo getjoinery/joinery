@@ -2,7 +2,12 @@
 /**
  * API v1 Endpoint
  *
- * @version 2.8
+ * @version 2.9
+ * @changelog 2.9 - Contract freeze (specs/api_contract_and_idempotency.md § Change 1):
+ *   error envelope always carries an object `data` (was '' from api_error), the
+ *   `error` string is the message itself (dropped the 'Error: ' prefix), and
+ *   collection pagination fields (num_results, page, numperpage) are integers.
+ *   The pinned contract lives in docs/api.md § Contract.
  * @changelog 2.8 - Browser-session credential: keyless requests carrying a
  *   logged-in web session cookie + X-Joinery-Csrf header authenticate as that
  *   user (ApiAuth::authenticateBrowserSession). Key headers take precedence;
@@ -40,8 +45,8 @@ function api_error($message, $error_type = 'TransactionError', $status_code = 40
 	echo json_encode(array(
 		'api_version' => '1.0',
 		'errortype' => $error_type,
-		'error' => 'Error: ' . $message,
-		'data' => ''
+		'error' => $message,
+		'data' => new stdClass()
 	)) . PHP_EOL;
 	exit;
 }
@@ -582,9 +587,9 @@ if (in_array($operation, $classes)) {
 	$response = array(
 		'api_version' => '1.0',
 		'success_message' => '',
-		'num_results' => $numobjects,
-		'page' => $page,
-		'numperpage' => $numperpage,
+		'num_results' => (int) $numobjects,
+		'page' => (int) $page,
+		'numperpage' => (int) $numperpage,
 		'data' => $response_array
 	);
 

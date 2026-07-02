@@ -34,6 +34,55 @@ The whole security boundary lives in **one class, `ApiAuth`** (`includes/ApiAuth
 
 The handler classes around it are **dispatch, not auth**: `ApiLogicEndpoint` runs an action's two faces (POST execute, GET form definition), and `ManagementApiRouter` resolves control-plane handler files. They *consume* the principal and *call* `authorize()` — they don't make auth decisions themselves. See [Two authorization axes](#two-authorization-axes) for the `apk_permission`/`usr_permission` distinction and the declarative `auth` block.
 
+## Contract
+
+This section pins what clients — including store-shipped app binaries — may rely on. Everything here is frozen for `/api/v1`; a change to any of it goes through the client-version handshake (426 `UpgradeRequired`), never silently.
+
+### Response envelope
+
+Every response is a JSON object carrying `api_version: "1.0"` (the only exception is `management/backups/fetch`, which streams binary). Success and error envelopes are distinguished by their keys:
+
+**Success:**
+
+| Key | Type | Present |
+|-----|------|---------|
+| `api_version` | string `"1.0"` | always |
+| `success_message` | string (may be `""`) | always |
+| `data` | object, or array for collection reads | always |
+| `redirect` | string path | actions only, when the web flow would have redirected |
+| `num_results`, `page`, `numperpage` | integer | collection reads only |
+
+**Error (HTTP status ≥ 400):**
+
+| Key | Type | Present |
+|-----|------|---------|
+| `api_version` | string `"1.0"` | always |
+| `errortype` | string from the vocabulary below | always |
+| `error` | string — the human-readable message itself, no prefix or decoration | always |
+| `data` | object (usually empty; may carry action-specific detail) | always |
+| `validation_errors` | object: field name → message | `ValidationError` only |
+
+The `errortype` vocabulary is closed: `AuthenticationError`, `TransactionError`, `ActionError`, `ValidationError`, `SecurityError`, `UpgradeRequired`, `RateLimitError`, `NotFound`. Clients branch on `errortype` plus HTTP status (tables under [Error Handling](#error-handling)); the `error` string is for display and logs, never for matching.
+
+### Pagination
+
+Collection reads accept `page` (0-based), `numperpage`, `sort` (column name), `sdirection` (`ASC`/`DESC`) as query parameters and respond with integer `num_results` (total rows matching the query, after owner-scoping), `page`, and `numperpage` alongside the `data` array. There is no cursor form; `num_results` with `page * numperpage` is the whole model.
+
+### Timestamps
+
+Timestamps are strings in **UTC**, formatted `YYYY-MM-DD HH:MM:SS` — space separator, seconds precision, no fractional seconds, no timezone suffix. Clients parse them as UTC. An unset timestamp is `null`, never `""` or a zero date. Producing code uses `LibraryFunctions::api_timestamp()` (payloads assembled by hand) or inherits the format from `export_for_api()` (CRUD reads).
+
+### Naming and types
+
+- All payload keys are `snake_case`.
+- CRUD `data` keys are the model's column names (prefixed, e.g. `usr_first_name`) plus the model's declared `$api_derived_fields`; action `data` keys are friendly names documented per action.
+- Booleans are JSON `true`/`false` and counts are JSON numbers — not `"1"`/`"0"` strings. Payload-building code casts at the boundary.
+- Strings are plain text, not HTML. (A few legacy page-oriented action payloads still carry HTML fragments — see the caveat below — but no new payload may.)
+
+### What is *not* contract
+
+An action's `data` is contract only where its keys are documented (in this file or the owning plugin's docs). Several actions serve web pages first and return their page variables — live PHP objects that JSON-serialize as `{"key": N}` husks. Those husks, and any undocumented key, carry no compatibility promise; each action's payload becomes contract when it is documented as an API surface. The management namespace (`/api/v1/management/*`) is an internal control plane consumed only by server_manager and is versioned with it, not with app clients.
+
 ## Authentication
 
 Key-authenticated requests use the same two custom headers:
@@ -505,8 +554,8 @@ Common models include: `User`, `Product`, `Event`, `EventRegistrant`, `EventSess
 {
     "api_version": "1.0",
     "errortype": "AuthenticationError",
-    "error": "Error: description of what went wrong",
-    "data": ""
+    "error": "Description of what went wrong",
+    "data": {}
 }
 ```
 
@@ -803,6 +852,8 @@ function my_thing_handler_api() {
 `$request` is an associative array: `method`, `path`, `query` (`$_GET`), `body` (decoded JSON for non-GET), `headers`. Handlers should use `$request` rather than touching `$_GET`/`$_POST` directly. For streaming endpoints (`backups/fetch`), write bytes yourself and return `null` — the router will not append an envelope.
 
 Nested paths mirror subdirectories: `includes/management_api/backups/list_handler.php` → `GET /api/v1/management/backups/list` → function `backups_list_handler()`.
+
+**Key naming.** Handlers currently differ on names for shared concepts (`version` vs `system_version` vs `joinery_version`; `db_list` vs `databases`). Because the dashboard reads nodes that upgrade on their own schedules, a key rename requires the server_manager reader to accept both names until every node is current — so renames are never worth a standalone change. When you modify a handler for other reasons, align its keys with its siblings and update the server_manager readers in the same change.
 
 ### Writes? Not here.
 
