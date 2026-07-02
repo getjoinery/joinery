@@ -1,0 +1,18 @@
+{
+    "api_version": "1.0",
+    "success_message": "Login successful",
+    "data": {
+        "public_key": "REDACTED",
+        "secret_key": "REDACTED",
+        "expires_time": "2027-07-02 21:06:35",
+        "user": {
+            "user_id": 4705,
+            "first_name": "AppDev",
+            "last_name": "PhaseTwo",
+            "display_name": "AppDev PhaseTwo",
+            "email": "appdev.phase2@inbox.dev.getjoinery.com",
+            "permission": 0,
+            "tier": null
+        }
+    }
+}

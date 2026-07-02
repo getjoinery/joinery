@@ -849,8 +849,13 @@ class InboundEmailRouter {
 		$current_key = null;
 		foreach (explode("\n", $header_block) as $line) {
 			if (preg_match('/^\s+/', $line) && $current_key !== null) {
-				// Continuation line
-				$headers[$current_key] .= ' ' . trim($line);
+				// Continuation line — when the header repeated (Received:)
+				// the value is an array; the fold belongs to its last entry.
+				if (is_array($headers[$current_key])) {
+					$headers[$current_key][count($headers[$current_key]) - 1] .= ' ' . trim($line);
+				} else {
+					$headers[$current_key] .= ' ' . trim($line);
+				}
 			} elseif (preg_match('/^([^:]+):\s*(.*)$/', $line, $m)) {
 				$current_key = strtolower(trim($m[1]));
 				if (isset($headers[$current_key])) {

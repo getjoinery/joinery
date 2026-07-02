@@ -531,10 +531,13 @@ captured.
 6. The retention task handles cleanup — no manual DELETE needed.
 
 Dedup is enforced at the DB layer by a UNIQUE constraint on
-`(iem_message_id_header, iem_recipient)`. A retry with the same Message-ID
-header succeeds silently (no duplicate row). Messages with no Message-ID
-header are always inserted (NULLs are distinct in Postgres unique
-constraints).
+`(iem_message_id_header, iem_recipient, iem_direction)`. A retry with the
+same Message-ID header succeeds silently (no duplicate row). Direction is
+part of the key because mail between two hosted mailboxes legitimately
+produces two rows for the same Message-ID and address — the sender's
+outbound (Sent) copy and the recipient's inbound copy. Messages with no
+Message-ID header are always inserted (NULLs are distinct in Postgres
+unique constraints).
 
 ## Attachment & message storage
 

@@ -1,0 +1,9 @@
+{
+    "status": 422,
+    "body": {
+        "api_version": "1.0",
+        "errortype": "ActionError",
+        "error": "Required field \"usr_timezone\" must be set.",
+        "data": []
+    }
+}
