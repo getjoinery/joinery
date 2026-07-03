@@ -50,6 +50,18 @@ final class ChatScreenshotUITests: XCTestCase {
             _ = anyMessage.waitForExistence(timeout: 20)
             sleep(3)
             attach(app, "2-chat-thread")
+
+            // Settings sheet (gear): model, capabilities, reasoning, sampling.
+            let gear = app.buttons["chat_settings"]
+            if gear.waitForExistence(timeout: 5) {
+                gear.tap()
+                _ = app.buttons["chat_set_model"].firstMatch.waitForExistence(timeout: 15)
+                sleep(2)
+                attach(app, "4-chat-settings")
+                app.buttons["chat_settings_done"].tap()
+                sleep(1)
+            }
+
             app.navigationBars.buttons.firstMatch.tap()   // back to the list
             _ = app.collectionViews["chat_list"].firstMatch.waitForExistence(timeout: 10)
             sleep(1)

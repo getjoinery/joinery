@@ -7,6 +7,12 @@ options:
 settings:
   base:
     GENERATE_INFOPLIST_FILE: YES
+    # Apple's recommended project settings, set here so xcodegen always emits
+    # them (Xcode's "update to recommended settings" nag stops). Both are safe
+    # for this app: no custom run-script phases for the sandbox to guard, and no
+    # asset catalog for the symbol extensions to generate.
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
 packages:
   JoineryKit:
     path: ../joinery-kit
