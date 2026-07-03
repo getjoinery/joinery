@@ -34,23 +34,43 @@ public struct ChatAPI: Sendable {
         return payload
     }
 
-    /// Send a message. Omit `conversationID` to start a new conversation;
-    /// `enableDataAccess` seeds a new chat so the assistant can read (and, with
-    /// confirmation, write) the owner's data — there's no controls UI yet.
-    public func send(message: String, conversationID: Int?, enableDataAccess: Bool) async throws -> ChatSendResult {
+    /// Send a message. Omit `conversationID` to start a new conversation, in
+    /// which case `seed` carries the control fields the new chat is created with.
+    public func send(message: String, conversationID: Int?, seed: [String: String] = [:]) async throws -> ChatSendResult {
         var body: [(key: String, value: JSONValue)] = [
             (key: "message", value: .string(message)),
         ]
         if let conversationID {
             body.append((key: "conversation_id", value: .number(Double(conversationID))))
-        } else if enableDataAccess {
-            body.append((key: "data_access", value: .bool(true)))
+        } else {
+            for (key, value) in seed.sorted(by: { $0.key < $1.key }) {
+                body.append((key: key, value: .string(value)))
+            }
         }
         let envelope = try await client.submitAction("joinery_ai/chat_send", body: .object(body))
         guard let result = ChatSendResult(data: envelope["data"]) else {
             throw JoineryAPIError.malformedResponse
         }
         return result
+    }
+
+    /// The model catalog and default control values for the settings sheet.
+    public func controls() async throws -> ChatControlsMeta {
+        let envelope = try await client.submitAction("joinery_ai/chat_controls", body: .object([]))
+        guard let meta = ChatControlsMeta(data: envelope["data"]) else {
+            throw JoineryAPIError.malformedResponse
+        }
+        return meta
+    }
+
+    /// Set one control on an existing conversation (string-valued; booleans as
+    /// "1"/"0"). Validated server-side against ChatControls.
+    public func setControl(conversationID: Int, field: String, value: String) async throws {
+        _ = try await client.submitAction("joinery_ai/chat_set_capabilities", body: .object([
+            (key: "conversation_id", value: .number(Double(conversationID))),
+            (key: "field", value: .string(field)),
+            (key: "value", value: .string(value)),
+        ]))
     }
 
     /// One poll tick for a running turn.

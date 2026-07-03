@@ -19,12 +19,14 @@ public enum ChatRole: String, Sendable {
 
 /// A conversation as it appears in the list (id/title/pinned) and, when loaded
 /// on its own, the extra header fields (model, running usage label).
-public struct ChatConversation: Identifiable, Equatable, Hashable, Sendable {
+public struct ChatConversation: Identifiable, Equatable, Sendable {
     public let id: Int
     public var title: String
     public var pinned: Bool
     public var model: String?
     public var usageLabel: String?
+    /// Present only on a full thread load (`chat_thread`), not list rows.
+    public var controls: ChatControlValues?
 
     public init(id: Int, title: String, pinned: Bool, model: String? = nil, usageLabel: String? = nil) {
         self.id = id
@@ -41,6 +43,121 @@ public struct ChatConversation: Identifiable, Equatable, Hashable, Sendable {
         pinned = data["pinned"]?.boolValue ?? false
         model = data["model"]?.stringValue
         usageLabel = data["usage_label"]?.stringValue
+        controls = data["controls"].map { ChatControlValues(data: $0) }
+    }
+}
+
+/// The per-chat control values. Numeric fields are text ("" = inherit the
+/// plugin-setting default); the picker/toggle fields carry concrete values.
+public struct ChatControlValues: Equatable, Sendable {
+    public var model: String
+    public var dataAccess: Bool
+    public var webSearch: Bool
+    public var thinkingLevel: String   // off | low | medium | high
+    public var temperature: String
+    public var topP: String
+    public var maxTokens: String
+    public var instructions: String
+
+    init(data: JSONValue?) {
+        model = data?["model"]?.stringValue ?? ""
+        dataAccess = data?["data_access"]?.boolValue ?? false
+        webSearch = data?["web_search"]?.boolValue ?? false
+        thinkingLevel = data?["thinking_level"]?.stringValue ?? "off"
+        temperature = Self.numberString(data?["temperature"])
+        topP = Self.numberString(data?["top_p"])
+        maxTokens = Self.numberString(data?["max_tokens"])
+        instructions = data?["instructions"]?.stringValue ?? ""
+    }
+
+    /// A new chat's starting controls: the server defaults, with data access on
+    /// so the native assistant is useful out of the box.
+    init(defaults: ChatControlDefaults) {
+        model = defaults.model
+        dataAccess = true
+        webSearch = defaults.webSearch
+        thinkingLevel = defaults.thinkingLevel
+        temperature = defaults.temperature
+        topP = defaults.topP
+        maxTokens = defaults.maxTokens
+        instructions = ""
+    }
+
+    /// The seed fields sent on a new chat's first message (string-valued;
+    /// `ChatControls::seedNewConversation` validates each).
+    var seedFields: [String: String] {
+        var fields: [String: String] = [
+            "data_access": dataAccess ? "1" : "0",
+            "web_search": webSearch ? "1" : "0",
+            "thinking_level": thinkingLevel,
+        ]
+        if !model.isEmpty { fields["model"] = model }
+        if !temperature.isEmpty { fields["temperature"] = temperature }
+        if !topP.isEmpty { fields["top_p"] = topP }
+        if !maxTokens.isEmpty { fields["max_tokens"] = maxTokens }
+        if !instructions.isEmpty { fields["instructions"] = instructions }
+        return fields
+    }
+
+    private static func numberString(_ value: JSONValue?) -> String {
+        guard let value, !value.isNull, let d = value.doubleValue else { return "" }
+        return d == d.rounded() ? String(Int(d)) : String(d)
+    }
+}
+
+/// One selectable model in the catalog.
+public struct ChatModelOption: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let label: String
+    public let isPrivate: Bool
+
+    init?(data: JSONValue) {
+        guard let id = data["id"]?.stringValue, !id.isEmpty else { return nil }
+        self.id = id
+        label = data["label"]?.stringValue ?? id
+        isPrivate = data["private"]?.boolValue ?? false
+    }
+}
+
+/// Resolved default control values, shown as placeholders / new-chat seeds.
+public struct ChatControlDefaults: Equatable, Sendable {
+    public let model: String
+    public let thinkingLevel: String
+    public let temperature: String
+    public let topP: String
+    public let maxTokens: String
+    public let webSearch: Bool
+
+    init(data: JSONValue?) {
+        model = data?["model"]?.stringValue ?? ""
+        thinkingLevel = data?["thinking_level"]?.stringValue ?? "off"
+        temperature = data?["temperature"]?.stringValue ?? ""
+        topP = data?["top_p"]?.stringValue ?? ""
+        maxTokens = data?["max_tokens"]?.stringValue ?? ""
+        webSearch = data?["web_search"]?.boolValue ?? false
+    }
+}
+
+/// Chat control metadata: the model catalog plus the defaults.
+public struct ChatControlsMeta: Sendable {
+    public let models: [ChatModelOption]
+    public let webSearchAvailable: Bool
+    public let defaults: ChatControlDefaults
+
+    init?(data: JSONValue?) {
+        guard let data else { return nil }
+        models = (data["models"]?.arrayValue ?? []).compactMap { ChatModelOption(data: $0) }
+        webSearchAvailable = data["web_search_available"]?.boolValue ?? false
+        defaults = ChatControlDefaults(data: data["defaults"])
+    }
+
+    /// The catalog label for a model id, falling back to the id.
+    public func label(for modelID: String) -> String {
+        models.first { $0.id == modelID }?.label ?? modelID
+    }
+
+    public func isPrivate(_ modelID: String) -> Bool {
+        models.first { $0.id == modelID }?.isPrivate ?? false
     }
 }
 

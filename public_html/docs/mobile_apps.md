@@ -339,19 +339,24 @@ conversation opened natively and one opened on the web are the same thread:
   inline Confirm / Cancel card resolved through `chat_confirm`. Turn delete
   and a lightweight block-markdown renderer (headings, bullets, rules, inline
   emphasis) round it out.
+- **Settings sheet** (`ChatSettingsSheet`, gear toolbar button) — the per-chat
+  controls: a model picker (catalog from `chat_controls`, with a not-private
+  warning), Data access / Web search toggles, a thinking-level picker, and the
+  sampling fields (temperature, top-p, max tokens) plus custom instructions.
+  Picker and toggle edits persist immediately via `chat_set_capabilities`; a
+  new chat carries its control values as seed fields on the first `chat_send`.
+  A new chat defaults Data access on so the assistant is useful out of the box;
+  the rest take the server's new-chat defaults.
 
 Accessibility ids (`chat_*`) are the stable UI-test API: `chat_loading`,
 `chat_error`, `chat_retry`, `chat_list`, `chat_empty`, `chat_new`,
 `chat_thread_loading`, `chat_thread_empty`, `chat_transcript`,
 `chat_user_message`, `chat_assistant_message`, `chat_typing`,
 `chat_confirm_card`, `chat_confirm_yes`, `chat_confirm_no`, `chat_composer`,
-`chat_send`.
+`chat_send`, `chat_settings`, `chat_set_model`, `chat_set_data_access`,
+`chat_set_web_search`, `chat_set_thinking`, `chat_settings_done`.
 
-Not in the module yet (the web chat remains for them): the per-chat model
-controls (model, temperature, thinking level, custom instructions, web-search
-/ data-access toggles) and thread export. A new native chat sends
-`data_access: true` so the assistant can read (and, with confirmation, write)
-the owner's data; the other controls take their web new-chat defaults.
+Not in the module yet (the web chat remains for it): thread export.
 
 ## joinery-android (Android client core)
 
@@ -390,10 +395,38 @@ What the library provides:
   A definition with an unknown field type or a newer `schema_version` renders a
   per-form "update the app or use the website" fallback, so old binaries survive
   new server-side field types.
+- **Navigation shell** — `NavigationShell` renders the signed-in surface from
+  `GET /api/v1/app/navigation`: server-pinned entries fill the bottom bar (at
+  most four; the last slot is always More), everything else plus the native
+  Settings screen lands in the More list. Destinations resolve version-safely
+  (`NavDestination`): `web` renders in the authenticated webview; `native`
+  renders the named screen when the build recognizes it and its `fallback_url`
+  otherwise. Screen names resolve against the library's own screens first
+  (`settings`), then `NativeScreenRegistry` — the table layered modules add
+  their screens to at app launch. Server icon names map onto Material icons with
+  a neutral fallback. The shell refreshes the user summary and the navigation
+  table on every foreground, so menu changes appear and a session revoked from
+  the web signs the app out without a relaunch.
+- **Webview component** — `WebScreen` is how every web destination renders,
+  implementing the whole webview contract in one place (`WebSessionCoordinator`
+  + `WebScreen`): first use mints a bridge URL (`POST /api/v1/auth/web_session`)
+  and drives the WebView through it; the bridged session lives in the
+  process-wide WebView cookie store, so later screens and later launches load
+  their targets directly. A `/login` redirect (bridged session gone) or an
+  expired bridge token (410) triggers one silent re-bridge back to the intended
+  path; a dead API key makes the re-bridge mint 401, which signs out the whole
+  app. Link policy: same-origin navigations stay in-webview, off-site links open
+  in Custom Tabs and non-web schemes (mailto, tel) leave the app, subframes are
+  untouched. The native app bar shows the page title; system back walks webview
+  history before the shell's navigation. Pull-to-refresh, file uploads (SAF
+  picker), downloads (DownloadManager, carrying the bridged cookie), and
+  loading/error/offline-retry states are built in. Sign-out clears the site's
+  cookies and web storage (the `SessionController.onSignOut` hook).
 - **Native screens** — `LoginScreen`, the two-step native password-reset flow
   (`password_reset_1`, code entry from the emailed link, `password_reset_2` with
   the code round-tripped via query context), `SettingsScreen` (user/tier summary
-  from `auth/session`, the account forms, sign out), and `UpgradeRequiredScreen`.
+  from `auth/session`, the account forms, the App Sessions page as a webview
+  destination, sign out), and `UpgradeRequiredScreen`.
 
 Brand configuration surface (`JoineryConfig`): `baseUrl`, `clientApp`,
 `clientVersion`, `appName`, `playStoreUrl`, `registrationEnabled` (off by
@@ -402,7 +435,8 @@ account-deletion requirement), `accentColor`.
 
 Compose `testTag` values equal the server field names for form controls and use
 prefixed ids for screens (`login_*`, `settings_*`, `form_*`, `reset_*`,
-`upgrade_*`, `root_*`) — the stable addressing for the Compose UI-test suite.
+`upgrade_*`, `root_*`, `nav_*`, `web_*`, and `more_{slug}` for More-list rows) —
+the stable addressing for the Compose UI-test suite.
 
 ## Standing up a new branded app
 

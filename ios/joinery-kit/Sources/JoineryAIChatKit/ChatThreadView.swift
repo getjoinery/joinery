@@ -6,6 +6,7 @@ import JoineryKit
 /// that proposes an action shows a Confirm / Cancel card.
 struct ChatThreadView: View {
     @StateObject private var store: ChatThreadStore
+    @State private var showSettings = false
 
     init(api: ChatAPI, conversationID: Int?, title: String) {
         _store = StateObject(wrappedValue: ChatThreadStore(api: api, conversationID: conversationID, title: title))
@@ -16,6 +17,19 @@ struct ChatThreadView: View {
             .navigationTitle(store.title)
             .navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .bottom) { composer }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .accessibilityIdentifier("chat_settings")
+                }
+            }
+            .sheet(isPresented: $showSettings) {
+                ChatSettingsSheet(store: store)
+            }
             .task {
                 if case .loading = store.phase { await store.load() }
             }

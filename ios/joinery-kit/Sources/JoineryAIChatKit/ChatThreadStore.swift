@@ -27,8 +27,19 @@ public final class ChatThreadStore: ObservableObject {
     @Published public var composerText: String = ""
     @Published public private(set) var isSending = false
 
+    /// The per-chat controls (model, capabilities, reasoning, sampling) driving
+    /// the settings sheet; seeded onto a new chat's first send.
+    @Published public private(set) var controls = ChatControlValues(data: nil)
+    /// The model catalog + defaults, loaded lazily when settings first opens.
+    @Published public private(set) var meta: ChatControlsMeta?
+
     public let api: ChatAPI
     private var pollTask: Task<Void, Never>?
+
+    /// True for a new chat whose controls haven't been seeded from the server
+    /// defaults yet — the first meta load overwrites them; a later load leaves
+    /// any user edits alone.
+    private var controlsNeedDefaults: Bool
 
     public init(api: ChatAPI, conversationID: Int?, title: String = "New chat") {
         self.api = api
@@ -36,6 +47,7 @@ public final class ChatThreadStore: ObservableObject {
         self.title = title
         // A brand-new chat has nothing to load — it's ready for the first send.
         phase = conversationID == nil ? .loaded : .loading
+        controlsNeedDefaults = conversationID == nil
     }
 
     deinit { pollTask?.cancel() }
@@ -56,6 +68,7 @@ public final class ChatThreadStore: ObservableObject {
             let payload = try await api.thread(conversationID: conversationID)
             title = payload.conversation.title
             usageLabel = payload.conversation.usageLabel ?? ""
+            if let loaded = payload.conversation.controls { controls = loaded }
             messages = payload.messages
             phase = .loaded
             // A turn already in flight (opened mid-generation) keeps streaming.
@@ -74,14 +87,16 @@ public final class ChatThreadStore: ObservableObject {
         composerText = ""
         defer { isSending = false }
         do {
+            let isNew = conversationID == nil
             let result = try await api.send(
                 message: text,
                 conversationID: conversationID,
-                enableDataAccess: conversationID == nil
+                seed: isNew ? controls.seedFields : [:]
             )
-            if conversationID == nil {
+            if isNew {
                 conversationID = result.conversationID
                 title = result.title
+                controlsNeedDefaults = false   // controls are now the created chat's
             }
             if let userMessage = result.userMessage {
                 messages.append(userMessage)
@@ -112,6 +127,32 @@ public final class ChatThreadStore: ObservableObject {
         } catch {
             // Leave the row; a reload will reconcile.
         }
+    }
+
+    // MARK: Controls
+
+    /// Fetch the model catalog + defaults (once). For a not-yet-created chat,
+    /// seed its controls from the defaults so the sheet shows real values.
+    public func loadMeta() async {
+        guard meta == nil else { return }
+        do {
+            let loaded = try await api.controls()
+            meta = loaded
+            if controlsNeedDefaults {
+                controls = ChatControlValues(defaults: loaded.defaults)
+                controlsNeedDefaults = false
+            }
+        } catch {
+            // Leave meta nil; the sheet shows a spinner and the caller can retry.
+        }
+    }
+
+    /// Update one control. Applied locally immediately; on an existing chat it
+    /// also persists server-side (a new chat carries it on the first send).
+    public func setControl(field: String, value: String, apply: (inout ChatControlValues) -> Void) {
+        apply(&controls)
+        guard let conversationID else { return }
+        Task { try? await api.setControl(conversationID: conversationID, field: field, value: value) }
     }
 
     // MARK: Turn delivery

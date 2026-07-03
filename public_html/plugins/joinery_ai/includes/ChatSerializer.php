@@ -23,11 +23,32 @@ class ChatSerializer {
     }
 
     /** Full conversation header for a thread load: the summary plus the
-     *  effective model and the running usage label the composer bar shows. */
+     *  effective model, the running usage label the composer bar shows, and the
+     *  per-chat control values (blank/null numerics = inherit the default). */
     public static function conversationDetail(AiConversation $c): array {
         return self::conversationSummary($c) + [
             'model'       => ChatRender::conversationModel($c),
             'usage_label' => self::usageLabel($c),
+            'controls'    => self::controls($c),
+        ];
+    }
+
+    /** The stored per-chat controls. Numerics are null when unset (the chat
+     *  inherits the plugin-setting default at run time). */
+    public static function controls(AiConversation $c): array {
+        $numOrNull = function ($v) {
+            return ($v === null || $v === '') ? null : (float)$v;
+        };
+        $maxTokens = $c->get('aic_max_tokens');
+        return [
+            'model'          => (string)$c->get('aic_model'),
+            'data_access'    => (bool)$c->get('aic_data_access'),
+            'web_search'     => (bool)$c->get('aic_web_search'),
+            'thinking_level' => (string)$c->get('aic_thinking_level'),
+            'temperature'    => $numOrNull($c->get('aic_temperature')),
+            'top_p'          => $numOrNull($c->get('aic_top_p')),
+            'max_tokens'     => ($maxTokens === null || $maxTokens === '') ? null : (int)$maxTokens,
+            'instructions'   => (string)$c->get('aic_instructions'),
         ];
     }
 
