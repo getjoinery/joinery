@@ -20,7 +20,7 @@ would duplicate the API contract and screen list and let them drift.
 - `specs/implemented/inbound_email_profile_mailbox.md` — the member grant surface, the
   grant-authorized attachment rule, and the web page that remains the
   fallback destination.
-- `specs/ios_app_platform.md` / `specs/android_app_platform.md` — the
+- `specs/implemented/ios_app_platform.md` / `specs/android_app_platform.md` — the
   navigation routing table (native screen + `fallback_url`) and the kits
   these modules plug into.
 

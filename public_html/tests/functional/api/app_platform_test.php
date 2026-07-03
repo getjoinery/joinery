@@ -1,6 +1,6 @@
 <?php
 /**
- * App platform functional suite (Phase 1 of specs/ios_app_platform.md):
+ * App platform functional suite (Phase 1 of specs/implemented/ios_app_platform.md):
  *
  *   - GET /api/v1/app/navigation — entry filtering (shell slugs, permission),
  *     destination shape, per-app tab pinning from the app_navigation setting,

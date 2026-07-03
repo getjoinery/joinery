@@ -1,6 +1,6 @@
 # Joinery Android App Platform — Spec
 
-The Android counterpart to `specs/ios_app_platform.md`: a reusable foundation
+The Android counterpart to `specs/implemented/ios_app_platform.md`: a reusable foundation
 for shipping branded Android apps on any Joinery deployment. The core
 experience is fully native — login, password reset, account forms,
 navigation, settings — and every `/profile` page (calendar, mailbox, orders,
@@ -18,7 +18,7 @@ foundation.
 **None.** The three server pieces the platform needs — the navigation
 endpoint (`GET /api/v1/app/navigation`), the web-session bridge
 (`POST /api/v1/auth/web_session`), and app display mode — are specified and
-delivered by `specs/ios_app_platform.md`, and are client-agnostic by design.
+delivered by `specs/implemented/ios_app_platform.md`, and are client-agnostic by design.
 This spec is pure client work against them, plus the endpoints that already
 exist (session-key auth, actions, form JSON — `docs/api.md`).
 
@@ -123,7 +123,7 @@ Every phase runs in the emulator against `dev.getjoinery.com`; a physical
 device is needed only for final Play validation.
 
 **Phase 0 (dependency):** the server platform from
-`specs/ios_app_platform.md` Phase 1 (navigation endpoint, bridge, app mode)
+`specs/implemented/ios_app_platform.md` Phase 1 (navigation endpoint, bridge, app mode)
 has shipped through its own gate.
 
 ### Phase 1 — `joinery-android` native core
@@ -160,7 +160,7 @@ reachable and chrome-less; Play review passes.
 
 ## Dependencies
 
-- `specs/ios_app_platform.md` — the server pieces (navigation endpoint,
+- `specs/implemented/ios_app_platform.md` — the server pieces (navigation endpoint,
   web-session bridge, app display mode) and the platform design they encode.
 - `specs/implemented/inbound_email_profile_mailbox.md` — email in the app for granted
   users.

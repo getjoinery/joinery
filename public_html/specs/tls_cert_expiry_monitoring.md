@@ -140,37 +140,71 @@ remediation). Each node is then checked as itself. This is a general
 correctness fix for any node behind round-robin DNS, load balancing, or a
 shared hostname — not DNS-specific.
 
-### 3. Certificate-expiry monitoring, cert-manager-agnostic (new capability)
+### 3. Certificate-expiry alerting for self-renewed nodes (new capability)
 
-The core addition. Read the **served certificate over the wire** rather than
-inspecting any cert manager's on-disk files:
+**A fleet probe reshaped this from the original design — read this before
+implementing.** Probing every managed node's origin over the wire
+(`mgn_host:443`, correct SNI) revealed two distinct node classes:
 
-- On each node's uptime tick, open a TLS connection to the node's
-  `mgn_host:443` with SNI set to the health/site hostname, read the peer
-  certificate's `notAfter`, and compute days remaining.
-- Store `mgn_ssl_expiry_ts` (and derived days-remaining) on the node row.
-- When days-remaining drops below a threshold (**default 21 days**, a new
-  plugin setting `server_manager_cert_expiry_warn_days`), send a **warning**
-  email through the existing recipient chain. Model the send like the up/down
-  state machine: alert once on crossing the threshold, re-alert on a coarse
-  cadence (e.g. every 3 days) while still under it, and clear when a fresh
-  cert pushes the date back out — so a stuck renewal keeps nagging without
-  spamming every 15 minutes.
+- **Directly-exposed, self-renewed nodes** — the two ScrollDaddy DNS servers.
+  Public DNS points straight at `mgn_host`; the probe returns exactly the cert
+  we renew (`CN=dns.scrolldaddy.app`, Let's Encrypt). This is the class that
+  caused the outage, and it has **no expiry monitoring or alerting today** —
+  the existing certbot-file detection looks under `/etc/letsencrypt/live/`,
+  where Caddy stores nothing, so `mgn_ssl_state` for both DNS nodes is empty.
+- **Cloudflare-fronted nodes** — every other production site. Public DNS
+  points at Cloudflare; the user-facing cert is Cloudflare's edge cert, which
+  Cloudflare auto-renews. Probing their origin `mgn_host:443` returns the host
+  Apache **default-vhost fallback cert** (`CN=orgs.getjoinery.com`) for seven
+  different domains — because the origin has no per-domain cert for them at
+  all. Monitoring that origin cert's expiry would be monitoring the wrong,
+  shared cert.
 
-Why over-the-wire, not file inspection:
+The design consequence: **cert-expiry alerting applies only to self-renewed,
+directly-exposed nodes** — the ones where our renewer is the single point of
+failure. Today that set is exactly the two DNS servers; any future
+directly-exposed node joins it automatically. Cloudflare-fronted edge certs
+are explicitly out of scope (Cloudflare renews them; that's not our failure
+surface).
 
-- **Works for every cert manager** — Caddy, certbot, a load balancer, a
-  future ACME client — because it reads what clients actually receive. It
-  would have caught this outage; the current certbot-file detection
-  structurally could not.
+**The mechanism already half-exists.** `check_status` jobs already parse an
+LE cert's expiry into `mgn_last_status_data.ssl_expiry_ts`, and the node
+detail SSL tile already renders a "Expires …" warning badge under 30 days
+(`node_detail.php:731`). What's missing is (a) it only refreshes on a manual
+`check_status` job, not continuously; (b) it never fires an **alert**, just a
+passive badge nobody watches; (c) it's blank for the Caddy/DNS nodes. So the
+work is to **feed and alert on the field that already exists**, not build a
+parallel one.
+
+**Change:**
+
+- On each uptime tick, for a node that is directly-exposed (its
+  `mgn_host` appears in the public A records for its hostname — the
+  non-Cloudflare case), open a TLS connection to `mgn_host:443` with SNI =
+  the site hostname (`stream_socket_client` + `openssl_x509_parse`), read the
+  peer cert `notAfter`, and **verify the cert's SAN actually covers the
+  hostname**. The SAN check is the guard that makes this safe: a
+  Cloudflare-fronted origin returns the fallback cert (SAN mismatch) → treated
+  as "no monitorable self-renewed cert here" → skipped, never alerted on.
+- Write the observed expiry into the existing `ssl_expiry_ts` in
+  `mgn_last_status_data` so the existing badge stays the single display.
+- When days-remaining drops below a threshold (**default 21 days**, new plugin
+  setting `server_manager_cert_expiry_warn_days`), send a **warning** email
+  through the existing recipient chain. Track the alert with one timestamp
+  (below): alert once on crossing the threshold, re-alert on a coarse cadence
+  (every 3 days) while still under it, and clear when a fresh cert pushes the
+  date back out — so a stuck renewal nags without spamming every 15 minutes.
+
+Why over-the-wire for this class:
+
+- **Cert-manager-agnostic where it matters.** Reads what clients receive, so
+  it works for Caddy (the DNS nodes) exactly as for certbot — the current
+  file-based detection structurally cannot see the Caddy cert, which is why
+  this outage was invisible.
 - **One signal catches all renewal failures.** A healthy auto-renewer keeps
   the served cert 30–90 days out; if it slips under the threshold and stays
-  there, renewal is broken — regardless of cause. No need to special-case
-  tokens, rate limits, or ACME accounts.
-- **Generalizes the existing SSL tracking.** This supersedes the
-  certbot-file-only path for expiry purposes; `mgn_ssl_state` can continue to
-  reflect certbot presence where relevant, but expiry/alerting comes from the
-  wire probe for all nodes uniformly.
+  there, renewal is broken — token, rate-limit, ACME account, or otherwise.
+  No per-cause special-casing.
 
 ### 4. Optional defense-in-depth (not required for the fix)
 
@@ -187,52 +221,59 @@ Why over-the-wire, not file inspection:
    number catches every way renewal can break. Enumerating failure modes and
    guarding each is the band-aid; watching the served cert is the cause-level
    fix.
-2. **Read what the client reads.** Over-the-wire cert inspection is immune to
-   which cert manager, which storage path, which server. It is the only probe
-   that generalizes across the whole fleet.
-3. **Reuse the existing rails.** Scheduled task, node model, and alert
-   recipient chain already exist and already work. The new work is a check
-   method plus a couple of columns — not a monitoring subsystem.
+2. **Read what the client reads — for the certs we renew.** Over-the-wire
+   inspection is immune to which cert manager or storage path, so it sees the
+   Caddy cert the file-based check can't. It is *not* universal, though: for
+   Cloudflare-fronted origins it returns a shared fallback cert, so a SAN-match
+   guard scopes it to self-renewed, directly-exposed nodes.
+3. **Reuse the existing rails.** Scheduled task, node model, alert recipient
+   chain, `ssl_expiry_ts` field, and the expiry badge all already exist. The
+   new work is a probe on the tick plus an alert — not a monitoring subsystem,
+   and not a parallel expiry field.
 4. **Alerting that ships on.** Defaults enabled, with a real recipient
    configured, or it protects nothing.
 
 ## Data model changes
 
-Add to `mgn_managed_nodes` (via `$field_specifications`, auto-applied — no
-migration):
+Expiry itself reuses the existing `mgn_last_status_data.ssl_expiry_ts` — no
+new expiry column. Only alert bookkeeping is new. Add to `mgn_managed_nodes`
+(via `$field_specifications`, auto-applied — no migration):
 
 | Column | Type | Purpose |
 |---|---|---|
-| `mgn_ssl_expiry_ts` | timestamp, nullable | notAfter of the served cert, from the wire probe |
-| `mgn_ssl_expiry_alerted_ts` | timestamp, nullable | Last time a warning was sent for the current expiry, for re-alert cadence + clear-on-renew |
+| `mgn_cert_alerted_ts` | timestamp, nullable | Last time a cert-expiry warning was sent, for re-alert cadence; cleared when a fresh cert pushes the date back past threshold |
 
 New plugin setting (declared in `plugin.json`, seeded automatically):
 
 | Setting | Default | Purpose |
 |---|---|---|
-| `server_manager_cert_expiry_warn_days` | `21` | Warn when served cert has fewer days remaining |
+| `server_manager_cert_expiry_warn_days` | `21` | Warn when a self-renewed node's served cert has fewer days remaining |
 
 ## UI
 
-- **Node detail → Overview:** one line under the existing uptime status —
-  "Cert expires in N days (YYYY-MM-DD)", styled warning under threshold. No
-  explainer prose; the number is self-explanatory.
-- **Dashboard node cards:** an expiring cert (under threshold) contributes a
-  yellow health dot, consistent with the existing disk/load warning colors.
+The node detail SSL tile already shows an "Expires …" badge (warning under 30
+days). No new UI is required for expiry display; the only change is that the
+uptime tick now keeps it fresh for directly-exposed nodes (including the Caddy
+DNS nodes, currently blank). Optionally, tighten the badge's warning threshold
+to read from `server_manager_cert_expiry_warn_days` so the badge and the alert
+agree.
 
 ## Rollout & verification
 
-1. Apply schema + setting (Sync with Filesystem / `update_database`).
+1. Apply schema (one column) + setting (Sync with Filesystem / `update_database`).
 2. Enable `mgn_uptime_enabled` on DNS + production nodes; set the alert email.
-3. Verify the wire probe records `mgn_ssl_expiry_ts` for both DNS nodes
-   (Caddy certs — the case the old detection missed) and for a certbot node.
+   *(Done for the two DNS nodes on 2026-07-02; both verified `up`.)*
+3. Verify the tick records `ssl_expiry_ts` for both DNS nodes (Caddy certs —
+   the case the old detection missed) and **verify a Cloudflare-fronted node is
+   correctly skipped** (SAN mismatch on the origin fallback cert → no expiry
+   written, no alert).
 4. **Failure-path test:** temporarily set `server_manager_cert_expiry_warn_days`
-   above the current days-remaining and confirm exactly one warning email
-   arrives, that it re-alerts on cadence, and that it clears when the
+   above the DNS cert's current days-remaining and confirm exactly one warning
+   email arrives, that it re-alerts on cadence, and that it clears when the
    threshold is restored.
 5. **Multi-node test:** stop Caddy on the secondary only; confirm the
-   per-node (IP-pinned) check flags the secondary down while the primary
-   stays up — proving the shared-hostname blind spot is closed.
+   per-node (IP-pinned) check flags the secondary down while the primary stays
+   up — proving the shared-hostname blind spot is closed.
 
 ## Docs to update
 

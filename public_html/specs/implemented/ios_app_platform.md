@@ -40,10 +40,11 @@ app on the same foundation.
 | Brand | **App target** (one per app) | — | Bundle ID, deployment base URL, `client_app` id, colors/logo, feature toggles (e.g. registration), App Store assets |
 
 Development happens on the Mac mini per
-`specs/mac_mini_ios_development_access.md`. JoineryKit lives in its own repo
-(`~/dev/joinery-kit`); each app is its own repo (`~/dev/<app-name>`)
-consuming JoineryKit as a local Swift package dependency. Reference app repo:
-`~/dev/joinery-member-ios`.
+`specs/mac_mini_ios_development_access.md`. iOS source lives in the main
+joinery repo under `{repo root}/ios/` — `ios/joinery-kit` (the Swift
+package) and `ios/joinery-member-ios` (the reference app, consuming
+JoineryKit as a local package dependency). The mini's `~/dev/joinery-ios`
+is a disposable rsync'd build area.
 
 ## Native core (client work, endpoints already exist)
 
@@ -178,9 +179,10 @@ back navigation.
 ## Delivery phases & test gates
 
 Strictly sequential; each later gate re-runs earlier suites as regression.
-Phases 1 is pure server work; Phases 2–3 run in the iOS Simulator against
-`dev.getjoinery.com`; Phase 4 needs a physical iPhone only for final
-App Store validation (no Network Extension entitlements in this spec).
+Phase 1 is pure server work; Phases 2–3 run in the iOS Simulator against
+`dev.getjoinery.com` (no Network Extension entitlements in this spec).
+App Store publication of the reference app is its own spec:
+`specs/ios_member_app_release.md`.
 
 ### Phase 1 — Server platform
 
@@ -228,23 +230,13 @@ and conversations load; a mailbox-granted user reads and replies to mail
 session from the web signs out both the native and webview layers; external
 links open Safari.
 
-### Phase 4 — Reference app ships
-
-Joinery member app branding, App Store assets, TestFlight, review.
-Login-only (registration toggle off), so Apple's account-deletion
-requirement is not triggered.
-
-**Gate:** on a physical iPhone — install → sign in → every navigation entry
-reachable and chrome-less; App Store review passes.
-
 ## Dependencies
 
 - Core pre-work specs: `specs/api_browser_session_credential.md`
   (implemented) and
   `specs/implemented/profile_menu_single_source.md` land before Phase 1 here (the
   navigation endpoint reads the same menu accessor);
-  `specs/implemented/api_contract_and_idempotency.md`'s contract audit completes
-  before Phase 4's store submission, and app clients send
+  `specs/implemented/api_contract_and_idempotency.md` — app clients send
   `Idempotency-Key` on mutating calls.
 - `specs/implemented/inbound_email_profile_mailbox.md` — the user-facing mailbox at
   `/profile` that puts email in the app for granted users.
@@ -252,7 +244,8 @@ reachable and chrome-less; App Store review passes.
 
 ## Consumers
 
-- **Joinery member app** — the reference app, delivered by this spec.
+- **Joinery member app** — the reference app; the client is delivered by
+  this spec, its App Store release by `specs/ios_member_app_release.md`.
 - **ScrollDaddy iOS** (`specs/scrolldaddy_ios_app.md`) — adds the DNS
   filtering and Network Extension layers on top of this platform.
 - **Android platform** (`specs/android_app_platform.md`) — the server pieces

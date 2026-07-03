@@ -99,7 +99,7 @@ Design rules carried over from the web product:
 
 ## Server-side work
 
-None beyond the platform's pieces (delivered by `specs/ios_app_platform.md`,
+None beyond the platform's pieces (delivered by `specs/implemented/ios_app_platform.md`,
 consumed via `specs/android_app_platform.md`). The ScrollDaddy surface is in
 place: the full `dns_filtering/` action surface including the hard-block
 hostname list in device responses. In-app billing — server and client — is
@@ -149,7 +149,7 @@ uninstall clears it.
 
 **Phase 0 (dependency): the Android platform ships first** —
 `joinery-android` and its gates per `specs/android_app_platform.md` (which
-itself depends on the server pieces from `specs/ios_app_platform.md`).
+itself depends on the server pieces from `specs/implemented/ios_app_platform.md`).
 
 The ScrollDaddy phases are strictly sequential after that; each gate re-runs
 earlier suites as regression. A difference in Android's favor: **the emulator

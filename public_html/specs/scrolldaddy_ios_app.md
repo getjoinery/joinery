@@ -7,7 +7,7 @@ no copy/paste — and hard-block selected sites at the connection level so they
 won't load in any browser or app, even past DNS.
 
 **This app is a consumer of the Joinery iOS app platform**
-(`specs/ios_app_platform.md`). Everything account- and shell-shaped — native
+(`specs/implemented/ios_app_platform.md`). Everything account- and shell-shaped — native
 login, password reset, account forms, server-driven navigation, settings,
 authenticated webviews of `/profile` pages, the 426 upgrade gate — comes from
 JoineryKit and the platform's server pieces, and is specified there. This
@@ -119,12 +119,12 @@ what lets the App Store release ship before the native editor (see phases).
 ## Architecture
 
 Two ScrollDaddy-specific Swift packages plus the app shell, on top of
-JoineryKit (from `specs/ios_app_platform.md`), developed on the Mac mini per
+JoineryKit (from `specs/implemented/ios_app_platform.md`), developed on the Mac mini per
 `specs/mac_mini_ios_development_access.md` (repo: `~/dev/scrolldaddy-ios`):
 
 | Layer | Package | Reusable for | Contents |
 |---|---|---|---|
-| Core | **JoineryKit** | any app on any Joinery deployment | Specified and delivered by `specs/ios_app_platform.md` |
+| Core | **JoineryKit** | any app on any Joinery deployment | Specified and delivered by `specs/implemented/ios_app_platform.md` |
 | DNS filtering | **DNSFilterKit** | any ScrollDaddy-style deployment (e.g. NetworkSentry) | Device list/registration, native block editor (always-on + scheduled), category/service/custom-rule screens with server-driven tier gates, `NEDNSSettingsManager` activation flow, protection-mode control |
 | Hard blocking | **Packet tunnel extension** (app extension target, shared via DNSFilterKit) | same as DNSFilterKit | `NEPacketTunnelProvider`: in-tunnel DNS forwarding to the deployment's DoH resolver, SNI/IP connection blocking from the synced hard-block list |
 | Brand | **ScrollDaddy app target** | — | Bundle ID, branding/theme, deployment base URL, `client_app` id (`scrolldaddy-ios`), App Store assets |
@@ -143,7 +143,7 @@ Design rules carried over from the web product:
 ## Server-side work
 
 None beyond the platform spec's three pieces (navigation endpoint,
-web-session bridge, app display mode — `specs/ios_app_platform.md`). The
+web-session bridge, app display mode — `specs/implemented/ios_app_platform.md`). The
 ScrollDaddy-specific surface is in place: the full `dns_filtering/` action
 surface including the `sbr_hard_block` column and the merged hard-block
 hostname list in device responses (`docs/api.md`,
@@ -202,7 +202,7 @@ DNS with no residue.
 ## Delivery phases & test gates
 
 **Phase 0 (dependency): the platform ships first** — JoineryKit and the
-server pieces per `specs/ios_app_platform.md`, through its own gates.
+server pieces per `specs/implemented/ios_app_platform.md`, through its own gates.
 
 The ScrollDaddy phases are strictly sequential after that; each gate re-runs
 earlier suites as regression. Phase 1 runs in the iOS Simulator against
