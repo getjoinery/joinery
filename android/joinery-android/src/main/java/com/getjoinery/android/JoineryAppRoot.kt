@@ -17,9 +17,8 @@ import androidx.compose.ui.platform.testTag
  * [SessionController] and switches between launch, login, upgrade, and the
  * signed-in surface.
  *
- * Phase 1: the signed-in surface is the native Settings screen. Phase 2
- * replaces it with the server-driven navigation shell (tab bar + More + the
- * authenticated webview).
+ * The signed-in surface is the server-driven navigation shell (bottom bar +
+ * More + the authenticated webview), fed by `GET /api/v1/app/navigation`.
  */
 @Composable
 fun JoineryAppRoot(config: JoineryConfig, storeFileName: String) {
@@ -39,7 +38,7 @@ fun JoineryAppRoot(config: JoineryConfig, storeFileName: String) {
                 is SessionController.State.UpgradeRequired ->
                     UpgradeRequiredScreen(config, state.message)
                 is SessionController.State.LoggedIn ->
-                    SettingsScreen(session, state.user)
+                    NavigationShell(session, state.user)
             }
         }
     }

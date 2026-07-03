@@ -54,6 +54,11 @@ dependencies {
     implementation "androidx.compose.material3:material3"
     implementation "androidx.compose.material:material-icons-extended"
 
+    // Authenticated webview: pull-to-refresh wrapper for the WebView, and Custom
+    // Tabs for off-site links leaving the app.
+    implementation "androidx.swiperefreshlayout:swiperefreshlayout:1.1.0"
+    implementation "androidx.browser:browser:1.8.0"
+
     // Keystore-backed EncryptedSharedPreferences — secrets never touch plain prefs.
     implementation "androidx.security:security-crypto:1.1.0-alpha06"
     implementation "com.squareup.okhttp3:okhttp:4.12.0"
