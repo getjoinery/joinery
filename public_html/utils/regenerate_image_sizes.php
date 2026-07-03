@@ -94,8 +94,8 @@ while ($offset < $total) {
 		output("[{$processed}/{$total}] Processing: {$file_name}", $is_cli);
 
 		// resize() is driver-aware — it handles both local and cloud-stored
-		// rows internally. No path probing needed; if bytes are missing,
-		// the driver / Imagick surfaces an exception we count.
+		// rows internally. No path probing needed; if bytes are missing or
+		// undecodable, the driver / GD surfaces an exception we count.
 		try {
 			$file->resize('all');
 		} catch (Exception $e) {

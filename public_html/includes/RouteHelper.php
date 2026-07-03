@@ -158,7 +158,17 @@ class RouteHelper {
         // Set content type
         $content_type = self::getMimeType($file_path);
         header("Content-type: $content_type");
-        
+
+        // Never let the browser sniff a served asset into a more dangerous type,
+        // and never render a script-capable document (SVG/HTML/XML) inline from
+        // our origin — that is stored XSS. Force those to download; raster
+        // images, CSS, JS, fonts and PDFs still serve inline as before.
+        header('X-Content-Type-Options: nosniff');
+        $dangerous_inline = array('image/svg+xml', 'text/html', 'text/xml', 'application/xml');
+        if (in_array($content_type, $dangerous_inline, true)) {
+            header('Content-Disposition: attachment; filename="' . basename($file_path) . '"');
+        }
+
         // Serve file
         readfile($file_path);
         return true;

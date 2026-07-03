@@ -43,6 +43,15 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	const SOURCE_EMAIL_ATTACHMENT = 'email_attachment';  // inbound-email attachment
 	const SOURCE_AI_CHAT_UPLOAD   = 'ai_chat_upload';    // file uploaded into a joinery_ai chat
 
+	// MIME types safe to render inline in the browser. Only raster image
+	// formats that cannot carry executable script belong here. SVG is
+	// deliberately excluded: it is XML and can embed <script>, so an inline
+	// SVG served from our origin is stored XSS. Everything not on this list is
+	// served as a download (Content-Disposition: attachment). See is_inline_safe_type().
+	const INLINE_SAFE_TYPES = array(
+		'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif',
+	);
+
 		/**
 	 * Field specifications define database column properties and validation rules
 	 * 
@@ -153,10 +162,17 @@ public static function get_by_name($name, $search_deleted = false) {
 		}
 		@chmod($target, 0666);
 
+		// Trust the file's magic bytes over the caller-supplied content type,
+		// which is spoofable (multipart Content-Type, email part header). This is
+		// what keeps a .png that is really an SVG from being stored as an inline
+		// image. Fall back to the supplied type only when finfo can't decide.
+		$detected = self::detect_mime_bytes($bytes);
+		$stored_type = ($detected !== null) ? $detected : (string)$content_type;
+
 		$file = new File(NULL);
 		$file->set('fil_name', $new_name);
 		$file->set('fil_title', substr((string)$filename, 0, 255));
-		$file->set('fil_type', substr((string)$content_type, 0, 128));
+		$file->set('fil_type', substr($stored_type, 0, 128));
 		$file->set('fil_usr_user_id', $owner_id);
 		foreach ($restrictions as $col => $val) {
 			$file->set($col, $val);
@@ -223,6 +239,67 @@ public static function get_by_name($name, $search_deleted = false) {
 		else{
 			return false;
 		}
+	}
+
+	/**
+	 * Is this MIME type safe to render inline in a browser? True only for the
+	 * raster image allowlist (INLINE_SAFE_TYPES). Any other type — SVG, HTML,
+	 * PDF, office docs, unknown — must be served as a download. The decision is
+	 * an allowlist, not "starts with image/", because image/svg+xml is a
+	 * script-bearing image. Tolerates a trailing ";charset=" parameter.
+	 *
+	 * @param string $mime
+	 * @return bool
+	 */
+	public static function is_inline_safe_type($mime) {
+		$mime = strtolower(trim((string)$mime));
+		$semi = strpos($mime, ';');
+		if ($semi !== false) {
+			$mime = trim(substr($mime, 0, $semi));
+		}
+		return in_array($mime, self::INLINE_SAFE_TYPES, true);
+	}
+
+	/**
+	 * Detect a file's real MIME type from its magic bytes, never from the
+	 * client-supplied extension or Content-Type (both spoofable). Returns null
+	 * when finfo is unavailable or cannot determine a type, so callers can fall
+	 * back to a client value only as a last resort.
+	 *
+	 * @param string $path filesystem path to the stored bytes
+	 * @return string|null detected MIME type, or null if undetectable
+	 */
+	public static function detect_mime_file($path) {
+		if (!function_exists('finfo_open') || !is_readable($path)) {
+			return null;
+		}
+		$finfo = finfo_open(FILEINFO_MIME_TYPE);
+		if ($finfo === false) {
+			return null;
+		}
+		$mime = finfo_file($finfo, $path);
+		finfo_close($finfo);
+		return ($mime === false || $mime === '') ? null : $mime;
+	}
+
+	/**
+	 * Magic-byte MIME detection from an in-memory byte string. Same contract as
+	 * detect_mime_file() for callers that hold the bytes rather than a path.
+	 *
+	 * @param string $bytes
+	 * @return string|null detected MIME type, or null if undetectable
+	 */
+	public static function detect_mime_bytes($bytes) {
+		if (!function_exists('finfo_open')) {
+			return null;
+		}
+		$finfo = finfo_open(FILEINFO_MIME_TYPE);
+		if ($finfo === false) {
+			return null;
+		}
+		$mime = finfo_buffer($finfo, (string)$bytes);
+		finfo_close($finfo);
+		return ($mime === false || $mime === '') ? null : $mime;
 	}
 
 	/**
@@ -925,56 +1002,129 @@ public static function get_by_name($name, $search_deleted = false) {
 	 */
 	private function generate_resized($old_path, $new_path, $width, $height, $crop, $quality = 85) {
 		try {
-			$img = new Imagick($old_path);
-			$img->setImageCompressionQuality($quality);
+			// Resizing runs on user-supplied bytes, so it uses GD, not
+			// ImageMagick: GD's decoder set is just the raster codecs
+			// (jpeg/png/gif/webp/avif) with no coders or delegates, so a
+			// malformed upload can't reach the Ghostscript/MVG/MSL surface that
+			// makes ImageMagick a native-RCE risk. All platform image formats
+			// are covered by GD.
+			$info = @getimagesize($old_path);
+			if ($info === false) {
+				error_log('File resize: unreadable image ' . basename($old_path));
+				return;
+			}
+			$type  = $info[2];   // IMAGETYPE_* constant, from the real bytes
+			$src_w = $info[0];
+			$src_h = $info[1];
+			if ($src_w < 1 || $src_h < 1) {
+				return;
+			}
 
-			$geo = $img->getImageGeometry();
-			$src_w = $geo['width'];
-			$src_h = $geo['height'];
+			$src = self::gd_read($old_path, $type);
+			if (!$src) {
+				error_log('File resize: unsupported image type (' . $type . ') for ' . basename($old_path));
+				return;
+			}
+
+			// Default source rectangle is the whole image; cropping narrows it.
+			$sx = 0; $sy = 0; $sw = $src_w; $sh = $src_h;
 
 			if ($crop && $width > 0 && $height > 0) {
-				// Center crop to target aspect ratio
+				// Center-crop the source to the target aspect ratio (identical
+				// geometry to the previous Imagick path), then downscale-fit.
 				if (($src_w / $width) < ($src_h / $height)) {
-					$img->cropImage(
-						$src_w,
-						floor($height * $src_w / $width),
-						0,
-						(($src_h - ($height * $src_w / $width)) / 2)
-					);
+					$sw = $src_w;
+					$sh = (int)floor($height * $src_w / $width);
+					$sx = 0;
+					$sy = (int)(($src_h - $sh) / 2);
 				} else {
-					$img->cropImage(
-						ceil($width * $src_h / $height),
-						$src_h,
-						(($src_w - ($width * $src_h / $height)) / 2),
-						0
-					);
-				}
-
-				// Only downscale after crop, never upscale
-				$cropped = $img->getImageGeometry();
-				if ($cropped['width'] > $width || $cropped['height'] > $height) {
-					$img->thumbnailImage($width, $height, true);
-				}
-			} else {
-				// Aspect-fit resize — only downscale, never upscale
-				if ($width > 0 && $height > 0) {
-					if ($src_w > $width || $src_h > $height) {
-						$img->thumbnailImage($width, $height, true);
-					}
-				} elseif ($width > 0) {
-					if ($src_w > $width) {
-						$img->thumbnailImage($width, 0, false);
-					}
-				} elseif ($height > 0) {
-					if ($src_h > $height) {
-						$img->thumbnailImage(0, $height, false);
-					}
+					$sw = (int)ceil($width * $src_h / $height);
+					$sh = $src_h;
+					$sx = (int)(($src_w - $sw) / 2);
+					$sy = 0;
 				}
 			}
 
-			$img->writeImage($new_path);
-		} catch (Exception $e) {
+			// Downscale-only fit: never upscale (factor capped at 1.0). This
+			// reproduces Imagick's thumbnailImage(bestfit) across the crop,
+			// both-dimension, width-only and height-only cases.
+			$f = 1.0;
+			if ($width > 0 && $height > 0) {
+				$f = min($width / $sw, $height / $sh);
+			} elseif ($width > 0) {
+				$f = $width / $sw;
+			} elseif ($height > 0) {
+				$f = $height / $sh;
+			}
+			if ($f > 1.0) { $f = 1.0; }
+			$dw = max(1, (int)round($sw * $f));
+			$dh = max(1, (int)round($sh * $f));
+
+			$dst = imagecreatetruecolor($dw, $dh);
+			self::gd_preserve_alpha($dst, $type);
+			imagecopyresampled($dst, $src, 0, 0, $sx, $sy, $dw, $dh, $sw, $sh);
+
+			if ($type === IMAGETYPE_GIF) {
+				// GIF carries transparency as a single palette index, not an
+				// alpha channel: reduce to a palette, and re-mark a transparent
+				// index only when the source actually had one (so an opaque GIF
+				// doesn't get a real color wrongly turned transparent).
+				$src_transparent = imagecolortransparent($src);
+				imagetruecolortopalette($dst, false, 255);
+				if ($src_transparent >= 0) {
+					imagecolortransparent($dst, imagecolorclosestalpha($dst, 0, 0, 0, 127));
+				}
+			}
+
+			self::gd_write($dst, $new_path, $type, $quality);
+
+			imagedestroy($src);
+			imagedestroy($dst);
+		} catch (\Throwable $e) {
 			error_log('File resize generation failed for ' . basename($new_path) . ': ' . $e->getMessage());
+		}
+	}
+
+	/**
+	 * Decode an image with the GD reader matching its detected IMAGETYPE.
+	 * Returns a GD image resource, or false for a type GD cannot read.
+	 */
+	private static function gd_read($path, $type) {
+		switch ($type) {
+			case IMAGETYPE_JPEG: return @imagecreatefromjpeg($path);
+			case IMAGETYPE_PNG:  return @imagecreatefrompng($path);
+			case IMAGETYPE_GIF:  return @imagecreatefromgif($path);
+			case IMAGETYPE_WEBP: return function_exists('imagecreatefromwebp') ? @imagecreatefromwebp($path) : false;
+			case IMAGETYPE_AVIF: return function_exists('imagecreatefromavif') ? @imagecreatefromavif($path) : false;
+			default:             return false;
+		}
+	}
+
+	/**
+	 * Configure a destination canvas so alpha survives the resample for formats
+	 * that carry transparency (png/gif/webp/avif). No-op cost for jpeg.
+	 */
+	private static function gd_preserve_alpha($dst, $type) {
+		if ($type === IMAGETYPE_JPEG) {
+			return;
+		}
+		imagealphablending($dst, false);
+		imagesavealpha($dst, true);
+		$transparent = imagecolorallocatealpha($dst, 0, 0, 0, 127);
+		imagefill($dst, 0, 0, $transparent);
+	}
+
+	/**
+	 * Encode a GD canvas to $path in the same format as the source type.
+	 * $quality applies to the lossy encoders; png/gif ignore it.
+	 */
+	private static function gd_write($img, $path, $type, $quality) {
+		switch ($type) {
+			case IMAGETYPE_JPEG: imagejpeg($img, $path, $quality); break;
+			case IMAGETYPE_PNG:  imagepng($img, $path); break;   // lossless; zlib default
+			case IMAGETYPE_GIF:  imagegif($img, $path); break;
+			case IMAGETYPE_WEBP: if (function_exists('imagewebp')) { imagewebp($img, $path, $quality); } break;
+			case IMAGETYPE_AVIF: if (function_exists('imageavif')) { imageavif($img, $path, $quality); } break;
 		}
 	}
 

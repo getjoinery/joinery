@@ -439,9 +439,11 @@ $routes = [
                             header('Content-Type: ' . $content_type);
                             header('X-Content-Type-Options: nosniff');
                             header('Cache-Control: private, max-age=0, no-store');
-                            // Inline for images (render in <img>); attachment for
-                            // everything else — the hardened download posture.
-                            if (strpos($content_type, 'image/') !== 0) {
+                            // Inline only for raster images the browser can render
+                            // in <img> without executing script; everything else —
+                            // including image/svg+xml — is forced to download. See
+                            // File::is_inline_safe_type().
+                            if (!File::is_inline_safe_type($content_type)) {
                                 header('Content-Disposition: attachment; filename="' . basename($file_obj->get('fil_name')) . '"');
                             }
                             if (($len = @filesize($tmp)) !== false) {
@@ -482,7 +484,9 @@ $routes = [
                         header('Content-Type: ' . $content_type);
                         header('X-Content-Type-Options: nosniff');
                         header('Cache-Control: private, no-store');
-                        if (strpos($content_type, 'image/') !== 0) {
+                        // Inline only for raster images (File::is_inline_safe_type);
+                        // image/svg+xml and all else download rather than render.
+                        if (!File::is_inline_safe_type($content_type)) {
                             header('Content-Disposition: attachment; filename="' . basename($file_obj->get('fil_name')) . '"');
                         }
                         if (($len = @filesize($file)) !== false) {

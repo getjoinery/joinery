@@ -51,7 +51,7 @@ ufw allow 5432
 ufw allow https
 
 # Install essential packages
-apt install -y fail2ban apache2 postgresql zip unzip php-pear php-fpm php-dev php-zip php-curl php-xmlrpc php-gd php-mbstring php-xml libapache2-mod-php php-curl php-json php-imagick php-dom php-pgsql php-cli composer
+apt install -y fail2ban apache2 postgresql zip unzip php-pear php-fpm php-dev php-zip php-curl php-xmlrpc php-gd php-mbstring php-xml libapache2-mod-php php-curl php-json php-dom php-pgsql php-cli composer
 
 # Enable mod_rewrite
 a2enmod rewrite
