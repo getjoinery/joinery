@@ -1,0 +1,30 @@
+{
+    "api_version": "1.0",
+    "success_message": "Form definition for 'contact_preferences'",
+    "data": {
+        "schema_version": 1,
+        "form": {
+            "name": "contact_preferences",
+            "submit_to": "\/api\/v1\/action\/contact_preferences",
+            "submit_label": "Submit"
+        },
+        "fields": [
+            {
+                "type": "checkbox_list",
+                "name": "new_list_subscribes",
+                "label": "Check the box to subscribe:",
+                "options": {
+                    "1": "Integral Zen Newsletter - News and updates about upcoming online and in-person retreats.",
+                    "2": "Integral Zen Newslettera - News and updates about upcoming online and in-person retreats.",
+                    "3": "Weekly Digest Test - Test mailing list for weekly events digest"
+                },
+                "list_type": "checkbox"
+            },
+            {
+                "type": "hidden",
+                "name": "zone",
+                "value": "optional"
+            }
+        ]
+    }
+}
