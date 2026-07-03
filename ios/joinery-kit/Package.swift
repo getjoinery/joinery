@@ -4,7 +4,9 @@
 // a layered module any Joinery app adds for native email.
 // JoineryCalendarKit — the native personal-calendar surface (month grid,
 // agenda, entry editor), same layering pattern as mail.
-// Version: 0.3.0 (navigation shell + webviews + native mail + native calendar)
+// JoineryAIChatKit — the native AI chat surface (conversation list + threaded
+// chat with the assistant, send-then-poll streaming), same layering as mail.
+// Version: 0.4.0 (navigation shell + webviews + native mail + calendar + AI chat)
 import PackageDescription
 
 let package = Package(
@@ -16,6 +18,7 @@ let package = Package(
         .library(name: "JoineryKit", targets: ["JoineryKit"]),
         .library(name: "JoineryMailKit", targets: ["JoineryMailKit"]),
         .library(name: "JoineryCalendarKit", targets: ["JoineryCalendarKit"]),
+        .library(name: "JoineryAIChatKit", targets: ["JoineryAIChatKit"]),
     ],
     targets: [
         .target(
@@ -31,6 +34,11 @@ let package = Package(
             name: "JoineryCalendarKit",
             dependencies: ["JoineryKit"],
             path: "Sources/JoineryCalendarKit"
+        ),
+        .target(
+            name: "JoineryAIChatKit",
+            dependencies: ["JoineryKit"],
+            path: "Sources/JoineryAIChatKit"
         ),
         .testTarget(
             name: "JoineryKitTests",
@@ -52,6 +60,14 @@ let package = Package(
             name: "JoineryCalendarKitTests",
             dependencies: ["JoineryCalendarKit"],
             path: "Tests/JoineryCalendarKitTests",
+            resources: [
+                .copy("Fixtures"),
+            ]
+        ),
+        .testTarget(
+            name: "JoineryAIChatKitTests",
+            dependencies: ["JoineryAIChatKit"],
+            path: "Tests/JoineryAIChatKitTests",
             resources: [
                 .copy("Fixtures"),
             ]

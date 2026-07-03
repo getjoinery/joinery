@@ -68,6 +68,14 @@ public struct LoginView: View {
                     }
                 }
             }
+            // Cap the form to a readable column on large screens (iPad,
+            // Split View) and center it; iPhone widths are below the cap so
+            // they stay full-width. The grouped background is extended to fill
+            // so the centered form doesn't read as a floating card.
+            .scrollContentBackground(.hidden)
+            .frame(maxWidth: 520)
+            .frame(maxWidth: .infinity)
+            .background(Color(.systemGroupedBackground))
             .navigationDestination(isPresented: $showReset) {
                 PasswordResetFlow(client: session.client) {
                     showReset = false

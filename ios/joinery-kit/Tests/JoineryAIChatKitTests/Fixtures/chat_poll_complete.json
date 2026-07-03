@@ -1,0 +1,19 @@
+{
+  "api_version": "1.0",
+  "success_message": "Action 'joinery_ai/chat_poll' completed successfully.",
+  "data": {
+    "status": "complete",
+    "message": {
+      "id": 86,
+      "role": "assistant",
+      "content": "SPAWN OK",
+      "status": "complete",
+      "error": "",
+      "created_time": "2026-07-03 15:26:03.500000",
+      "pending_action": null,
+      "tool_calls": [],
+      "usage": { "input_tokens": 540, "output_tokens": 3, "cost_label": "" }
+    },
+    "usage_label": "543 tokens used"
+  }
+}

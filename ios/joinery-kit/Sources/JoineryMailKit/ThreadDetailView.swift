@@ -175,7 +175,7 @@ struct ThreadDetailView: View {
             isLoading = false
             loadFailure = nil
             if markRead, thread.messages.contains(where: { !$0.isRead }) {
-                try? await store.api.threadAction("mark_read", threadKey: summary.threadKey, aliasID: store.selectedAlias)
+                _ = try? await store.api.threadAction("mark_read", threadKey: summary.threadKey, aliasID: store.selectedAlias)
                 store.patch(summary.threadKey) { $0.unreadCount = 0 }
             }
         } catch {
