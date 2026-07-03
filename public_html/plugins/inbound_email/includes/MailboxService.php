@@ -33,7 +33,11 @@
  * archived rows (iem_is_archived); All Mail shows them. setArchived() is the manual
  * Archive / Move-to-Inbox action, symmetric with a filter's archive action.
  *
- * @version 1.6
+ * Native clients (specs/mobile_native_email.md): withSignedTransport() enriches a
+ * getThread() payload with short-lived signed URLs (docs/file_signed_urls.md) so
+ * sessionless API clients can fetch attachments and render inline cid: images.
+ *
+ * @version 1.7
  */
 
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/MailboxViewer.php'));
@@ -672,6 +676,71 @@ class MailboxService {
 			);
 		}
 		return $by_msg;
+	}
+
+	/**
+	 * Enrich a getThread() payload for sessionless clients (the native mail
+	 * screens): every file-backed attachment gains a short-lived signed
+	 * download URL ('url', absolute), and each HTML body has its cid:
+	 * references rewritten to signed URLs for that message's inline
+	 * file-backed parts. Minting is the authorization statement — this runs
+	 * only on a payload getThread() already scope-checked. Attachments whose
+	 * bytes are not a private File (IMAP on-demand / raw-section parts) get
+	 * url=null; they stream only through the sessioned member endpoint.
+	 *
+	 * @param array $messages getThread() rows
+	 * @param int   $ttl_seconds Signed-URL lifetime
+	 * @return array The same rows, enriched
+	 */
+	public function withSignedTransport(array $messages, int $ttl_seconds = 900): array {
+		$ids = array();
+		foreach ($messages as $m) {
+			$ids[] = intval($m['id']);
+		}
+		if (!count($ids)) {
+			return $messages;
+		}
+		require_once(PathHelper::getIncludePath('data/files_class.php'));
+
+		// One query for every part in the thread, inline included (getThread()'s
+		// manifest lists non-inline only; cid rewriting needs the inline rows).
+		$in = implode(',', array_map('intval', $ids));
+		$sql = "SELECT ima_inbound_message_attachment_id, ima_iem_inbound_email_message_id,
+					ima_content_id, ima_is_inline, ima_fil_file_id
+				FROM ima_inbound_message_attachments
+				WHERE ima_iem_inbound_email_message_id IN ($in) AND ima_fil_file_id IS NOT NULL";
+		$rows = $this->db()->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+
+		$signed_by_att = array();   // attachment id => signed url
+		$cids_by_msg = array();     // message id => [content id => signed url]
+		foreach ($rows as $r) {
+			$file = new File(intval($r['ima_fil_file_id']), TRUE);
+			if (!$file->key || $file->get('fil_delete_time')) {
+				continue;
+			}
+			$url = $file->mintSignedUrl('original', $ttl_seconds, 'full');
+			$att_id = intval($r['ima_inbound_message_attachment_id']);
+			$signed_by_att[$att_id] = $url;
+			$cid = trim((string)$r['ima_content_id'], " \t<>");
+			if ($this->pgBool($r['ima_is_inline']) && $cid !== '') {
+				$cids_by_msg[intval($r['ima_iem_inbound_email_message_id'])][$cid] = $url;
+			}
+		}
+
+		foreach ($messages as &$m) {
+			foreach ($m['attachments'] as &$att) {
+				$att['url'] = $signed_by_att[intval($att['id'])] ?? null;
+			}
+			unset($att);
+			$mid = intval($m['id']);
+			if (!empty($cids_by_msg[$mid]) && (string)$m['body_html'] !== '') {
+				foreach ($cids_by_msg[$mid] as $cid => $url) {
+					$m['body_html'] = str_ireplace('cid:' . $cid, $url, $m['body_html']);
+				}
+			}
+		}
+		unset($m);
+		return $messages;
 	}
 
 	/**

@@ -66,7 +66,7 @@
  * paths alike, never IMAP-polled mail. forwardStoredMessage() relays a copy for a filter's
  * "Forward to" action, reusing the alias-forward envelope rebuild + relay.
  *
- * @version 1.16
+ * @version 1.17
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -1511,15 +1511,54 @@ class InboundEmailRouter {
 	/**
 	 * Split a raw MIME message into best-effort plain and html bodies.
 	 *
-	 * Handles multipart/alternative and multipart/mixed (one level deep),
-	 * decodes quoted-printable and base64 transfer encodings, and converts
-	 * each part to UTF-8 from its declared charset. The original
-	 * raw_email is always preserved separately (iem_raw_message), so
-	 * imperfect decoding never loses data.
+	 * Primary path: a full Horde_Mime_Part walk using the SAME inline-text
+	 * rule as enumerateNonTextParts() — the bodies are the first inline
+	 * text/plain and text/html parts at ANY nesting depth, so the standard
+	 * Gmail shape (mixed → related → alternative) resolves correctly and the
+	 * body/attachment enumerations can never disagree about which parts are
+	 * the bodies. Falls back to the legacy hand-rolled splitter if the MIME
+	 * parse throws. The original raw_email is always preserved separately
+	 * (iem_raw_message), so imperfect decoding never loses data.
 	 *
 	 * Returns ['plain' => string, 'html' => string].
 	 */
 	public function extractBodies($raw_email, $parsed) {
+		try {
+			require_once(PathHelper::getComposerAutoloadPath());
+			$message = Horde_Mime_Part::parseMessage($raw_email);
+
+			$result = ['plain' => '', 'html' => ''];
+			foreach ($message->partIterator() as $part) {
+				if ($part->getPrimaryType() === 'multipart') { continue; }
+				$type = strtolower((string)$part->getType());
+				$name = $part->getName();
+				$disp = $part->getDisposition();
+				$isInlineText = ($type === 'text/plain' || $type === 'text/html')
+					&& $disp !== 'attachment' && ($name === null || $name === '');
+				if (!$isInlineText) { continue; }
+				$text = $this->toUtf8((string)$part->getContents(), $part->getCharset());
+				if ($type === 'text/html' && $result['html'] === '') {
+					$result['html'] = $text;
+				} elseif ($type === 'text/plain' && $result['plain'] === '') {
+					$result['plain'] = $text;
+				}
+				if ($result['plain'] !== '' && $result['html'] !== '') { break; }
+			}
+			return $result;
+		} catch (\Throwable $e) {
+			error_log('InboundEmailRouter: MIME body walk failed, using legacy splitter: ' . $e->getMessage());
+		}
+
+		return $this->extractBodiesLegacy($raw_email, $parsed);
+	}
+
+	/**
+	 * Legacy hand-rolled body splitter (multipart handled two levels deep) —
+	 * the fallback when the Horde MIME parse fails on a malformed message.
+	 *
+	 * Returns ['plain' => string, 'html' => string].
+	 */
+	protected function extractBodiesLegacy($raw_email, $parsed) {
 		$result = ['plain' => '', 'html' => ''];
 
 		$headers = $parsed['headers'] ?? [];

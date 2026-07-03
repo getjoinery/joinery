@@ -1,0 +1,41 @@
+<?php
+/**
+ * API action: inbound_email/mailboxes — the viewer's granted mailboxes.
+ *
+ * POST /api/v1/action/inbound_email/mailboxes (session key). Returns the
+ * accessible mailboxes with unread/total counts and folder rails, plus
+ * can_compose — the switcher data the native mail screens boot from
+ * (specs/mobile_native_email.md). Same shape as the web reader's switcher
+ * feed: MailboxService::listMailboxes() is the single source.
+ *
+ * @version 1.0.0
+ */
+
+require_once(__DIR__ . '/../../../includes/PathHelper.php');
+
+function mailboxes_logic(array $input): LogicResult {
+	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+	require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/MailboxService.php'));
+
+	$session = SessionControl::get_instance();
+	if (!$session->get_user_id()) {
+		return LogicResult::error('Sign in required.');
+	}
+
+	$viewer = MailboxViewer::fromSession($session);
+	$service = new MailboxService($viewer);
+
+	$payload = $service->listMailboxes();
+	$payload['can_compose'] = $viewer->canCompose();
+
+	return LogicResult::render($payload);
+}
+
+function mailboxes_logic_api() {
+	return [
+		'requires_session' => true,
+		'description' => 'List the granted mailboxes with unread counts, folder rails, and compose capability',
+	];
+}
+
+?>

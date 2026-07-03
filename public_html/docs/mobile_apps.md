@@ -59,6 +59,14 @@ Response shape:
   recognizes `screen`, otherwise loads `fallback_url`. Promoting a surface to
   native is a destination change — old app versions keep working through the
   fallback.
+
+  A menu entry names its native screen with a `nativeScreen` key on the
+  entry in `admin_menus.json` or the plugin's `plugin.json` `profileMenu`
+  (stored as `amu_native_screen` by the menu sync). A non-empty value flips
+  that entry's destination to `{type: "native"}` with the entry's URL as the
+  fallback. The worked example is email: the inbound_email plugin declares
+  `"nativeScreen": "mailbox"`, apps with JoineryMailKit render the native
+  mail screens, and every other client keeps the web reader.
 - **`tabs`** — the slugs pinned to this app's tab bar, in order; everything
   else belongs in the More list. Configured by the `app_navigation` setting: a
   JSON map of `client_app` (the client header value) → ordered slug list, with
@@ -177,10 +185,14 @@ What the kit provides:
   native Settings screen lands in the More list. Destinations resolve
   version-safely (`NavDestination`): `web` renders in the authenticated
   webview; `native` renders the named screen when the build recognizes it
-  and its `fallback_url` otherwise. Server icon names map onto SF Symbols
-  with a neutral fallback. The shell refreshes the user summary and the
-  navigation table on every foreground, so menu changes appear and a
-  session revoked from the web signs the app out without a relaunch.
+  and its `fallback_url` otherwise. Screen names resolve against the kit's
+  own screens first (`settings`), then `NativeScreenRegistry` — the table
+  layered modules add their screens to at app launch
+  (`JoineryMail.registerScreens()` registers `mailbox`). Server icon names
+  map onto SF Symbols with a neutral fallback. The shell refreshes the user
+  summary and the navigation table on every foreground, so menu changes
+  appear and a session revoked from the web signs the app out without a
+  relaunch.
 - **Webview component** — `WebScreen` is how every web destination renders,
   implementing the whole webview contract in one place
   (`WebSessionCoordinator` + `WebScreen`): first use mints a bridge URL
@@ -214,7 +226,44 @@ requirement), `accentColor`.
 Control accessibility identifiers are stable API for UI tests: form controls
 use their server field names, and screens use prefixed ids
 (`login_*`, `settings_*`, `form_*`, `reset_*`, `upgrade_*`, `nav_*`,
-`web_*`, and `more_{slug}` for More-list rows).
+`web_*`, `mail_*`, and `more_{slug}` for More-list rows).
+
+## JoineryMailKit (native mail module)
+
+**JoineryMailKit** is the first native content surface — the same package
+repo, second product (`ios/joinery-kit/Sources/JoineryMailKit`, depends on
+JoineryKit). An app adds the product and calls `JoineryMail.registerScreens()`
+in its init; the server's `mailbox` navigation destination then renders these
+screens, and builds without the module keep the web reader via the fallback
+URL.
+
+The screens consume the `inbound_email/*` actions
+(`plugins/inbound_email/docs/overview.md` § API Surface) — the same
+`MailboxService` brain as the web reader, so every read/star/archive/spam
+change is immediately visible in both:
+
+- **Mailbox screen** (`MailboxScreen` + `MailboxStore`) — Gmail-style thread
+  list: colored-initial avatars, bold unread rows, star toggles, snippet
+  lines; views (Inbox / Starred / All Mail / Spam) and a mailbox switcher in
+  the toolbar menu; server-side search (`.searchable`, submit-to-search);
+  swipe actions (archive full-swipe, read/unread toggle); pull-to-refresh
+  and page-on-scroll (50/page).
+- **Thread view** (`ThreadDetailView` + `MessageCardView`) — subject header,
+  message cards with older messages collapsed; opening marks the thread read
+  (the reader's explicit `mark_read`); HTML bodies render in a sandboxed
+  `WKWebView` (content JavaScript off, link taps open externally, height
+  self-measured); plain bodies render as native text; inline images arrive
+  as signed URLs already rewritten server-side; attachment chips download
+  via their signed URL into the share sheet. Toolbar: archive, mark unread,
+  spam/not-spam, delete.
+- **Compose** (`ComposeSheet`) — reply / reply-all / forward with To/Cc/
+  Subject and body. Deliberately lean: the server quotes the original,
+  normalizes the subject, applies threading headers, and resolves the
+  sending identity. JSON transport — compose uploads are not carried;
+  forwards re-attach the original's attachments server-side.
+
+Not in the module (the web reader remains for them): labels/move and
+create-folder, filter management, spam settings, compose file uploads.
 
 ## Standing up a new branded app
 
@@ -237,11 +286,12 @@ use their server field names, and screens use prefixed ids
   single-use and expiry, app display mode, and lifetime coupling (key
   revocation and password change). Runs against dev with curl; see the
   harness header for usage.
-- JoineryKit unit tests — on the mini (after syncing `ios/` to the build
-  area): `cd dev/joinery-ios/joinery-kit && xcodebuild test -scheme
-  JoineryKit -destination "platform=iOS Simulator,name=iPhone 16"` (JSON
-  parser, form definition parsing against captured live fixtures,
-  visibility engine, submission bodies, error mapping).
+- JoineryKit + JoineryMailKit unit tests — on the mini (after syncing
+  `ios/` to the build area): `cd dev/joinery-ios/joinery-kit && xcodebuild
+  test -scheme JoineryKit-Package -destination "platform=iOS
+  Simulator,name=iPhone 16"` (JSON parser, form definition and navigation
+  parsing, visibility engine, submission bodies, error mapping, and mail
+  payload parsing — all against captured live fixtures).
 - `tests/functional/ios/phase2_gate.sh` — the native-core gate: drives the
   JoineryMember XCUITest suites in the Simulator against dev, orchestrating
   server state per suite (probe field for the no-rebuild form-change proof,
@@ -256,7 +306,8 @@ use their server field names, and screens use prefixed ids
 - `tests/functional/ios/phase3_gate.sh` — the navigation + webview gate:
   Phase 2 auth/form suites as regression, tab bar + More from the
   navigation endpoint, calendar usable in-app, orders and conversations in
-  the webview, mailbox read + reply (fixtures via `phase3_fixtures.php`:
+  the webview, mailbox read + reply on the native mail screens (fixtures via
+  `phase3_fixtures.php`:
   mailbox grant for the fixture user plus the `phase3.sender` store alias
   the reply lands on — arrival verified in `iem_inbound_email_messages`
   with outbound flipped to localhost SMTP for the leg), a plugin

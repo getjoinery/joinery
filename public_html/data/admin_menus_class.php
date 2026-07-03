@@ -44,6 +44,12 @@ class AdminMenu extends SystemBase {	public static $prefix = 'amu';
 	    'amu_min_permission' => array('type'=>'int4', 'required'=>true),
 	    'amu_disable' => array('type'=>'int2', 'default'=>0),
 	    'amu_icon' => array('type'=>'varchar(16)'),
+	    // App platform (docs/mobile_apps.md): a non-empty value flips this
+	    // entry's app-navigation destination to {type: native, screen,
+	    // fallback_url} — clients that know the screen render it natively,
+	    // older builds keep loading the web page. Declared as nativeScreen in
+	    // admin_menus.json / plugin.json menu entries.
+	    'amu_native_screen' => array('type'=>'varchar(32)'),
 	    'amu_setting_activate' => array('type'=>'varchar(64)'),
 	    'amu_location' => array('type'=>'varchar(32)', 'default'=>'admin_sidebar', 'is_nullable'=>false),
 	    'amu_visibility' => array('type'=>'varchar(8)', 'default'=>'in', 'is_nullable'=>false),

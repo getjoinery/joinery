@@ -795,6 +795,45 @@ labelled "Sent").
   row immediately — no poll needed. A failed send stores **no** row and surfaces
   the error inline; the draft stays in the panel to fix and resend.
 
+## API Surface
+
+The mailbox is exposed to API clients (the native mobile mail screens,
+`docs/mobile_apps.md`) as five actions under the plugin namespace,
+`POST /api/v1/action/inbound_email/{action}`, session-key authenticated:
+
+| Action | Purpose |
+|---|---|
+| `mailboxes` | The viewer's granted mailboxes with unread/total counts and folder rails, plus `can_compose` |
+| `thread_list` | Paged threads for a mailbox view — params `alias_id`, `q`, `unread_only`, `starred_only`, `spam`, `inbox`, `folder_id`, `page`; same row shapes as the web reader's list endpoint |
+| `thread` | One full thread: messages with plain/HTML bodies, attachment manifest, and the thread's folder ids |
+| `thread_action` | The reader's full mutation set: `mark_read`/`mark_unread`, `star`/`unstar`, `archive`/`unarchive`, `delete`, `mark_spam`/`mark_not_spam`, `set_membership`, `create_folder` — targets `ids[]` or a `thread_key` |
+| `send` | Reply / reply-all / forward as the mailbox (JSON transport — no uploads; forwards re-attach the original's parts server-side) |
+
+Each action is a `logic/{action}_logic.php` with an `_logic_api()` opt-in that
+builds a `MailboxViewer` for the key's user and goes through
+`MailboxService` / `MailboxSender` — the same shared brain the web AJAX
+endpoints wrap, so scoping, threading, view semantics, and send side effects
+live in exactly one place. There is no authorization logic in the actions
+themselves: viewer scope is the single authority, and out-of-scope ids
+silently affect nothing (same guarantee as the AJAX layer).
+
+**Signed URL transport.** Sessionless clients can't fetch attachments with
+web cookies, so the `thread` action enriches its payload via
+`MailboxService::withSignedTransport()`: every file-backed attachment carries
+a short-lived signed download URL (`docs/file_signed_urls.md`), and each HTML
+body has its inline `cid:` references rewritten to signed URLs for that
+message's inline file-backed parts. Minting happens only after the
+viewer-scope check that gated the thread fetch; the serving path validates
+signature + expiry with no session at all. Attachments whose bytes are not a
+private File (IMAP on-demand / raw-section parts) carry `url: null` and
+stream only through the sessioned member endpoint.
+
+**The app route flip.** The plugin's `profileMenu` entry declares
+`"nativeScreen": "mailbox"`, so the app navigation endpoint serves the Email
+entry as `{type: "native", screen: "mailbox", fallback_url:
+"/profile/inbound_email/mailbox"}` — clients with the native mail module
+render these actions' screens; older builds keep loading the web reader.
+
 ## Spam filtering
 
 Spam is a **first-class verdict on the message**, `iem_spam_verdict` (`ham` /
