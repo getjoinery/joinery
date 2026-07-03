@@ -31,6 +31,9 @@
 	else if($filter == 'images'){
 		$search_criteria['picture'] = true;
 	}
+	else if($filter == 'no_email'){
+		$search_criteria['source_not'] = File::SOURCE_EMAIL_ATTACHMENT;
+	}
 	else{
 		//nothing
 	}
@@ -62,7 +65,7 @@
 	$title= 'Files';
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 	$table_options = array(
-		'filteroptions'=>array("All files"=>"all", "Files only"=>"files", "Images only"=>"images"),
+		'filteroptions'=>array("All files"=>"all", "Files only"=>"files", "Images only"=>"images", "Exclude email attachments"=>"no_email"),
 		'altlinks' => $altlinks,
 		'title' => $title,
 		//'search_on' => TRUE

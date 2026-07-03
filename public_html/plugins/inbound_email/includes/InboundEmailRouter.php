@@ -493,7 +493,7 @@ class InboundEmailRouter {
 					$name !== null ? $name : 'attachment',
 					$type,
 					$owner_id,
-					array('fil_private' => true)
+					array('fil_private' => true, 'fil_source' => File::SOURCE_EMAIL_ATTACHMENT)
 				);
 				$created_files[] = $file;
 

@@ -203,6 +203,7 @@ function admin_file_upload_process_logic(array $input): LogicResult {
 			$file->set('fil_title', $thisfile->name);
 			$file->set('fil_type', substr($thisfile->type,0,128));
 			$file->set('fil_usr_user_id', $session->get_user_id());
+			$file->set('fil_source', File::SOURCE_USER_UPLOAD);
 
 		}
 		$file->save();

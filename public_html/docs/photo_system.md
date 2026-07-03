@@ -68,6 +68,23 @@ See `specs/implemented/fast_serve_uploads.md` for the full specification.
 
 ---
 
+## File Origin (`fil_source`)
+
+Every `File` row carries an optional `fil_source` tag — a short string naming **where the file came from**, stamped by whatever code created it. It is a categorization label only: it has no bearing on access, which flows entirely through `is_viewable()` / `fil_private`.
+
+The value is opaque to `File` — it stores and filters on the string but attaches no behavior to any value. Each source key has a `File::SOURCE_*` constant; a new file-creation site adds its own.
+
+| Source key | Constant | Set at |
+|-----------|----------|--------|
+| `user_upload` | `File::SOURCE_USER_UPLOAD` | general admin/user upload (`admin_file_upload_process_logic.php`) |
+| `entity_photo` | `File::SOURCE_ENTITY_PHOTO` | avatar / event / location / gallery photo (`entity_photos_ajax.php`) |
+| `email_attachment` | `File::SOURCE_EMAIL_ATTACHMENT` | inbound-email attachment (`InboundEmailRouter.php`) |
+| `ai_chat_upload` | `File::SOURCE_AI_CHAT_UPLOAD` | file uploaded into a joinery_ai chat |
+
+`NULL` means "unspecified / legacy." New file-creation sites should stamp a source. Filter a `MultiFile` collection with the `source` option (exact match) or `source_not` (everything except one source — legacy `NULL` files are always kept). The admin files browser (`/admin/admin_files`) exposes an **Exclude email attachments** scope built on `source_not`.
+
+---
+
 ## EntityPhoto Data Model
 
 **Table:** `eph_entity_photos`
