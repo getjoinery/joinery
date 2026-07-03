@@ -399,18 +399,21 @@ class DatabaseUpdater {
                     $null_count = $null_result['null_count'];
 
                     if ($null_count > 0) {
-                        // Try to backfill from the declared default (already an SQL
-                        // fragment in the spec, e.g. "'local'" or "0"). Only attempt
-                        // the backfill if a default is declared — otherwise we have
-                        // no safe value to write.
+                        // Try to backfill from the declared default. Spec defaults
+                        // are plain PHP values ('local', false, 0, 'now()') because
+                        // SystemBase::save() applies them to new rows directly;
+                        // this backfill is the one SQL consumer, so the SQL
+                        // rendering happens here. Only attempt the backfill if a
+                        // default is declared — otherwise we have no safe value.
                         $declared_default = $field_specs['default'] ?? null;
                         if ($declared_default !== null && $declared_default !== '') {
-                            $backfill_sql = "UPDATE {$table_name} SET {$field_name} = {$declared_default} WHERE {$field_name} IS NULL";
+                            $sql_default = $this->defaultToSqlLiteral($declared_default);
+                            $backfill_sql = "UPDATE {$table_name} SET {$field_name} = {$sql_default} WHERE {$field_name} IS NULL";
                             try {
                                 $backfill_q = $dblink->prepare($backfill_sql);
                                 $backfill_q->execute();
                                 $backfilled = $backfill_q->rowCount();
-                                $results['messages'][] = "Backfilled {$backfilled} NULL row(s) in {$table_name}.{$field_name} with default {$declared_default} before adding NOT NULL constraint";
+                                $results['messages'][] = "Backfilled {$backfilled} NULL row(s) in {$table_name}.{$field_name} with default {$sql_default} before adding NOT NULL constraint";
                             } catch (PDOException $e) {
                                 $results['warnings'][] = "Cannot add NOT NULL constraint to {$table_name}.{$field_name}: column contains {$null_count} NULL values; backfill from declared default failed: " . $e->getMessage();
                                 return;
@@ -586,6 +589,29 @@ class DatabaseUpdater {
         return $results;
     }
     
+    /**
+     * Render a field-spec default (a plain PHP value: 'local', false, 0,
+     * 'now()') as an SQL literal for the NULL backfill. Spec defaults are
+     * PHP-form because SystemBase::save() applies them to new rows verbatim —
+     * an SQL-quoted spec value would be stored WITH its quote characters and
+     * never match equality filters. Bare SQL function calls (now(),
+     * CURRENT_TIMESTAMP) pass through unquoted; strings are single-quoted
+     * with '' escaping; booleans and numbers render as SQL literals.
+     */
+    private function defaultToSqlLiteral($value) {
+        if (is_bool($value)) {
+            return $value ? 'true' : 'false';
+        }
+        if (is_int($value) || is_float($value)) {
+            return (string)$value;
+        }
+        $str = (string)$value;
+        if (preg_match('/^[A-Za-z_]+\(\)$/', $str) || strtoupper($str) === 'CURRENT_TIMESTAMP') {
+            return $str;
+        }
+        return "'" . str_replace("'", "''", $str) . "'";
+    }
+
     /**
      * Add a missing column to a table
      * Adds columns as nullable initially - NOT NULL constraints handled by processAdvancedColumnOperations()

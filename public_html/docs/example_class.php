@@ -141,7 +141,15 @@ class Example extends SystemBase
     //
     // Runtime behavior properties (do NOT affect database schema):
     // 'required' => true           - Field must be non-null and non-empty string
-    // 'default' => mixed           - Default value for new records only
+    // 'default' => mixed           - Default value for new records only.
+    //                                A plain PHP value: 'pending', false, 0,
+    //                                'now()'. Never SQL-quote it ("'pending'")
+    //                                — SystemBase::save() applies it to the
+    //                                row verbatim, so the quotes would be
+    //                                stored in the column. Bare SQL functions
+    //                                ('now()') are fine: Postgres accepts the
+    //                                string as time input, and the schema
+    //                                backfill renders them unquoted.
     // 'zero_on_create' => true     - Set to 0 when creating if NULL
     // 'unique' => true             - Single field unique constraint
     // 'unique_with' => array(...)  - Multi-field unique constraint

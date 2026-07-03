@@ -2,7 +2,7 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the control plane.
  *
- * @version 1.3
+ * @version 1.3.1
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -25,7 +25,7 @@ class ManagedNode extends SystemBase {
 		'mgn_name'                => array('type'=>'varchar(100)', 'required'=>true, 'is_nullable'=>false),
 		'mgn_slug'                => array('type'=>'varchar(50)', 'required'=>true, 'is_nullable'=>false, 'unique'=>true),
 		'mgn_host'                => array('type'=>'varchar(255)', 'required'=>true, 'is_nullable'=>false),
-		'mgn_ssh_user'            => array('type'=>'varchar(50)', 'is_nullable'=>false, 'default'=>"'root'"),
+		'mgn_ssh_user'            => array('type'=>'varchar(50)', 'is_nullable'=>false, 'default'=>'root'),
 		'mgn_ssh_key_path'        => array('type'=>'varchar(500)'),
 		'mgn_ssh_port'            => array('type'=>'int4', 'default'=>'22'),
 		'mgn_container_name'      => array('type'=>'varchar(100)'),
@@ -49,7 +49,7 @@ class ManagedNode extends SystemBase {
 		'mgn_install_state'       => array('type'=>'varchar(20)'),
 		'mgn_notes'               => array('type'=>'text'),
 		'mgn_uptime_enabled'              => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),
-		'mgn_uptime_check_type'           => array('type'=>'varchar(20)', 'default'=>"'api'", 'is_nullable'=>false),
+		'mgn_uptime_check_type'           => array('type'=>'varchar(20)', 'default'=>'api', 'is_nullable'=>false),
 		'mgn_uptime_last_status'          => array('type'=>'varchar(20)'),
 		'mgn_uptime_consecutive_failures' => array('type'=>'int4', 'default'=>'0', 'is_nullable'=>false),
 		'mgn_uptime_down_since'           => array('type'=>'timestamp(6)'),

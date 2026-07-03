@@ -414,15 +414,22 @@ store matching its new visibility. No request blocks on bucket I/O.
   (in sent emails, search caches, RSS feeds, embedded HTML) keep working this way.
 - **Private cloud row** — `is_viewable($session)` first (fail ⇒ 404, never 403,
   so existence isn't confirmed); then the bytes are pulled from the
-  verified-private bucket to a temp file and streamed through PHP with
-  `X-Content-Type-Options: nosniff`, `Cache-Control: private`, and
-  `Content-Disposition: attachment` for everything except the inline-safe raster
-  allowlist (`File::is_inline_safe_type()`: png/jpeg/gif/webp/avif). Any other
-  type — including `image/svg+xml` — is served as a download, so a script-bearing
-  SVG can never render inline from our origin. Never a 302: the bucket URL is
-  never exposed and the gate runs on every request.
-- **Local row** — `is_viewable($session)` then `serveStaticFile()` (restricted),
-  or the fast-path static file (public).
+  verified-private bucket to a temp file and streamed via
+  `File::serve_from_path()`. Never a 302: the bucket URL is never exposed and
+  the gate runs on every request.
+- **Local row** — `is_viewable($session)`, then `File::serve_from_path()` with
+  a cacheable posture (`public` for unrestricted rows, `private` for gated
+  ones). Public rows are normally served earlier by the pre-boot fast path
+  (`RouteHelper`), which cannot load the `File` model and applies its own
+  conservative header backstop.
+
+Every gated or signed stream goes through `File::serve_from_path()`, which owns
+the serve-back header set: the stored magic-byte-detected `Content-Type`,
+`X-Content-Type-Options: nosniff`, the caller's `Cache-Control` posture, and
+`Content-Disposition: attachment` for everything except the inline-safe raster
+allowlist (`File::is_inline_safe_type()`: png/jpeg/gif/webp/avif). Any other
+type — including `image/svg+xml` — is served as a download, so a script-bearing
+SVG can never render inline from our origin.
 
 ## Bucket Policy / Setup
 

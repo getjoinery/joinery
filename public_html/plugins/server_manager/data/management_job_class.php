@@ -20,7 +20,7 @@ class ManagementJob extends SystemBase {
 		'mjb_id'                => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'mjb_mgn_node_id'      => array('type'=>'int8'),
 		'mjb_job_type'          => array('type'=>'varchar(50)', 'required'=>true, 'is_nullable'=>false),
-		'mjb_status'            => array('type'=>'varchar(20)', 'is_nullable'=>false, 'default'=>"'pending'"),
+		'mjb_status'            => array('type'=>'varchar(20)', 'is_nullable'=>false, 'default'=>'pending'),
 		'mjb_commands'          => array('type'=>'jsonb', 'is_nullable'=>false),
 		'mjb_parameters'        => array('type'=>'jsonb'),
 		'mjb_output'            => array('type'=>'text'),

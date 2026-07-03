@@ -1,7 +1,7 @@
 <?php
 // serve.php - Hybrid routing system with RouteHelper
 // Core dependencies (PathHelper, Globalvars, SessionControl) are loaded by RouteHelper after static route check
-// @version 1.1.0
+// @version 1.2.0
 
 // RouteHelper handles all routing and dependency loading
 require_once(__DIR__ . '/includes/RouteHelper.php');
@@ -435,21 +435,7 @@ $routes = [
                             }
                         }
                         if ($got) {
-                            $content_type = $file_obj->get('fil_type') ?: 'application/octet-stream';
-                            header('Content-Type: ' . $content_type);
-                            header('X-Content-Type-Options: nosniff');
-                            header('Cache-Control: private, max-age=0, no-store');
-                            // Inline only for raster images the browser can render
-                            // in <img> without executing script; everything else —
-                            // including image/svg+xml — is forced to download. See
-                            // File::is_inline_safe_type().
-                            if (!File::is_inline_safe_type($content_type)) {
-                                header('Content-Disposition: attachment; filename="' . basename($file_obj->get('fil_name')) . '"');
-                            }
-                            if (($len = @filesize($tmp)) !== false) {
-                                header('Content-Length: ' . $len);
-                            }
-                            readfile($tmp);
+                            $file_obj->serve_from_path($tmp, 'private, max-age=0, no-store');
                             @unlink($tmp);
                             return true;
                         }
@@ -478,24 +464,16 @@ $routes = [
                 if($file_obj && ($signed_ok || $file_obj->is_viewable($session))){
                     if ($signed_ok) {
                         // Signed grant: the response must not outlive it, so
-                        // stream with no-store instead of the cached static
-                        // path (same posture as the private-cloud branch).
-                        $content_type = $file_obj->get('fil_type') ?: 'application/octet-stream';
-                        header('Content-Type: ' . $content_type);
-                        header('X-Content-Type-Options: nosniff');
-                        header('Cache-Control: private, no-store');
-                        // Inline only for raster images (File::is_inline_safe_type);
-                        // image/svg+xml and all else download rather than render.
-                        if (!File::is_inline_safe_type($content_type)) {
-                            header('Content-Disposition: attachment; filename="' . basename($file_obj->get('fil_name')) . '"');
-                        }
-                        if (($len = @filesize($file)) !== false) {
-                            header('Content-Length: ' . $len);
-                        }
-                        readfile($file);
+                        // stream with no-store instead of a cacheable posture
+                        // (same as the private-cloud branch).
+                        $file_obj->serve_from_path($file, 'private, no-store');
                         return true;
                     }
-                    RouteHelper::serveStaticFile($file, 43200);
+                    // Gated (or not-yet-offloaded) local file: File owns the
+                    // serve-back headers; permission-restricted bytes must not
+                    // land in shared caches.
+                    $cache_control = $file_obj->is_public() ? 'public, max-age=43200' : 'private, max-age=43200';
+                    $file_obj->serve_from_path($file, $cache_control);
                     return true;
                 } else {
                     require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));

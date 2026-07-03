@@ -881,3 +881,20 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
+	// ========== Repair SQL-quoted fil_storage_driver values (v137) ==========
+	// Field-spec defaults are plain PHP values, but fil_storage_driver's spec
+	// was written SQL-quoted ("'local'"), and SystemBase::save() applies the
+	// spec default to new rows verbatim — so every row created without an
+	// explicit driver (File::createFromBytes: inbound-email attachments, AI
+	// uploads) stored the literal six-character string 'local' INCLUDING the
+	// quote characters. Those rows never match the cloud-offload eligibility
+	// predicate (driver IS NULL OR driver = 'local'), so they silently never
+	// offload. The spec is fixed to plain form; this repairs rows already
+	// written. Idempotent; hash-tracked.
+	$migration = array();
+	$migration['database_version'] = '137';
+	$migration['test'] = NULL;
+	$migration['migration_sql'] = "UPDATE fil_files SET fil_storage_driver = 'local' WHERE fil_storage_driver = '''local'''";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+

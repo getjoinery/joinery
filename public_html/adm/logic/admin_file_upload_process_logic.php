@@ -179,16 +179,12 @@ function admin_file_upload_process_logic(array $input): LogicResult {
 				return LogicResult::error('Unable to save resized image.  Check file permissions.');
 			}
 
-			// Store the type detected from the file's magic bytes, not the
-			// client-supplied multipart Content-Type (spoofable). Falls back to
-			// the client value only if finfo can't determine a type.
-			$detected_type = File::detect_mime_file($upload_dir.'/'.$new_name);
-			$stored_type = ($detected_type !== null) ? $detected_type : (string)$thisfile->type;
-
+			// The client Content-Type is only a fallback: File::save() detects
+			// the real type from the file's magic bytes on insert and that wins.
 			$file =	new File(NULL);
 			$file->set('fil_name', $new_name);
 			$file->set('fil_title', $thisfile->name);
-			$file->set('fil_type', substr($stored_type,0,128));
+			$file->set('fil_type', substr((string)$thisfile->type,0,128));
 			$file->set('fil_usr_user_id', $session->get_user_id());
 			$file->set('fil_source', File::SOURCE_USER_UPLOAD);
 

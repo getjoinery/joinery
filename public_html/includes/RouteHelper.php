@@ -161,8 +161,12 @@ class RouteHelper {
 
         // Never let the browser sniff a served asset into a more dangerous type,
         // and never render a script-capable document (SVG/HTML/XML) inline from
-        // our origin — that is stored XSS. Force those to download; raster
-        // images, CSS, JS, fonts and PDFs still serve inline as before.
+        // our origin — that is stored XSS. This function serves first-party
+        // theme/plugin assets and the pre-boot fast path for public uploads,
+        // where the File model is deliberately not loaded; every gated or
+        // signed uploaded-file stream goes through File::serve_from_path(),
+        // whose inline allowlist is the authority. Raster images, CSS, JS,
+        // fonts and PDFs serve inline here.
         header('X-Content-Type-Options: nosniff');
         $dangerous_inline = array('image/svg+xml', 'text/html', 'text/xml', 'application/xml');
         if (in_array($content_type, $dangerous_inline, true)) {

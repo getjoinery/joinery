@@ -11,15 +11,22 @@ building the feature itself.
 The review found three live, pre-existing holes the feature would have inherited; all are
 fixed platform-wide and merged, independent of this spec:
 - **Serve-back SVG XSS (§7)** — inline serving switched from a blocklist to an allowlist
-  (`File::is_inline_safe_type()`); SVG and all non-raster types now download. Also fixed the
-  public path (`RouteHelper::serveStaticFile`).
-- **No magic-byte MIME detection (§8)** — `File::detect_mime_file/bytes()` now set `fil_type`
-  from finfo at ingest (`createFromBytes` + admin upload + inbound email), so a spoofed type
-  can't bypass the serve-back allowlist.
+  (`File::is_inline_safe_type()`); SVG and all non-raster types now download. The whole
+  header set is owned by `File::serve_from_path()`, which every gated/signed stream calls.
+  Also fixed the public path (`RouteHelper::serveStaticFile`).
+- **No magic-byte MIME detection (§8)** — `File::save()` now detects `fil_type` from the
+  stored bytes' magic numbers on every insert, so a spoofed type can't bypass the serve-back
+  allowlist. Enforced inside the model, not per ingest path — every upload door, present and
+  future, complies by construction.
 - **ImageMagick on uploaded bytes (§2)** — image handling consolidated onto **GD**
   (`File::generate_resized` + `UploadHandler`); ImageMagick fully retired from first-party
   code and provisioning. Closes the Ghostscript-delegate RCE surface and makes per-node
   `policy.xml` hardening unnecessary.
+- **Model affordances (§3, §5)** — the `File` model itself now embodies the review's rules:
+  `File::is_image()` and the Multi `picture` filter key on the raster allowlist (never
+  `LIKE 'image/%'`, so `image/svg+xml` is a plain file — no size variants, no thumbnail),
+  and `File::is_owned_by($user_id)` provides the strict, sessionless ownership check §5
+  specifies (no admin bypass, no shared-visibility bypass, deleted ⇒ false).
 
 Everything else below (the encoder, ingress, recipe taint-gate change, DoS subprocess, IDOR
 checks, extraction) is **design-decided but unbuilt** — it lands with the feature.
@@ -389,7 +396,9 @@ Decisions:
   never "starts with `image/`" or "contains xml." Every finfo guise of an SVG
   (`image/svg+xml`, `text/xml`, `application/xml`) falls through to reject; the only processor
   it can reach is the inert `DOMDocument`+`LIBXML_NONET` HTML path, iff finfo calls it
-  `text/html`.
+  `text/html`. The `File` model already follows the same rule: `is_image()` and the Multi
+  `picture` filter are keyed to the raster allowlist, so an SVG is never a "picture"
+  anywhere in the platform.
 
 ### 4. Zip-bomb / resource exhaustion (DoS) *(verified: the assumed caps do NOT exist — real controls specified below)*
 
@@ -427,23 +436,23 @@ thresholds. It makes the parent worker simpler and safer, not more fragile.
 ### 5. IDOR on the file reference
 
 The client posts a file id to attach — a malicious client could post *someone else's*
-`fil_file_id`. This needs **two different checks in two contexts**, and it is a trap to
-use `is_viewable()` for either: `is_viewable()` returns owner-**or-admin** for private
-files (`files_class.php:1263-1265`) and also passes group/event/tier-shared files the
-user does not own (`:1277-1299`), so "viewable" is strictly broader than "owned"; and it
-requires a `$session` and throws without one (`:1255-1257`), which the detached send-side
-worker does not have. Use **plain ownership equality** instead:
+`fil_file_id`. The model provides the correct affordance: **`File::is_owned_by($user_id)`**
+— strict ownership equality plus not-deleted, sessionless, **no admin bypass and no
+group/event/tier sharing**. It exists precisely because `is_viewable()` is a trap here:
+"viewable" is strictly broader than "owned" (owner-**or-admin** for private files, plus
+shared files the user does not own), and it requires a `$session` and throws without one,
+which the detached send-side worker does not have.
 
-- **Attach time** (browser request; session + CSRF present). Require the file to be owned
-  by the composer *and* the composer to own the target:
-  `File.fil_usr_user_id === session user id` **and**
-  `aic_owner_user_id` / `rcp_owner_user_id === session user id`. Not `is_viewable()`.
-- **Send time** (detached CLI worker; **no session**). Reload the `File` and require, by
-  direct column comparison, `fil_usr_user_id === the run owner`
-  (`aic_owner_user_id` for chat, `rcp_owner_user_id` for recipes) **and**
-  `fil_delete_time IS NULL`, before `read_bytes()`. No session, no `is_viewable()` — this
-  re-derivation is what catches a file reassigned, deleted, or swapped between attach and
-  run (TOCTOU).
+Two checks in two contexts, both through `is_owned_by()`:
+
+- **Attach time** (browser request; session + CSRF present). Require
+  `$file->is_owned_by($session_user_id)` **and** the composer to own the target
+  (`aic_owner_user_id` / `rcp_owner_user_id === session user id`).
+- **Send time** (detached CLI worker; **no session**). Reload the `File` and require
+  `$file->is_owned_by($run_owner_id)` (`aic_owner_user_id` for chat,
+  `rcp_owner_user_id` for recipes) before `read_bytes()`. This re-derivation is what
+  catches a file reassigned, deleted, or swapped between attach and run (TOCTOU) —
+  the not-deleted condition is inside `is_owned_by()`.
 
 Never trust a client-supplied id, and never trust the attachment-link row alone at send
 time — re-check the underlying `File`'s owner against the run owner.
@@ -466,15 +475,24 @@ because the declared type is already `image/svg+xml`. The public path
 (`RouteHelper::serveStaticFile`) set neither `nosniff` nor a disposition.
 
 Fixed (platform-wide, independent of this feature):
-- The inline decision is now an **allowlist**, not a blocklist:
+- The inline decision is an **allowlist**, not a blocklist:
   `File::is_inline_safe_type()` returns true only for `INLINE_SAFE_TYPES`
   (`image/png|jpeg|gif|webp|avif`). Everything else — SVG, HTML, PDF, office, unknown —
-  is served `Content-Disposition: attachment`. Both `serve.php` private/signed branches
-  use it.
-- `RouteHelper::serveStaticFile()` now always sends `X-Content-Type-Options: nosniff`
-  and forces `attachment` for the script-capable-as-document types
-  (`image/svg+xml`, `text/html`, `text/xml`, `application/xml`); CSS/JS/fonts/raster/PDF
-  still serve inline.
+  is served `Content-Disposition: attachment`.
+- The full header set (stored `Content-Type`, `nosniff`, allowlist disposition,
+  caller-chosen `Cache-Control`) is owned by **one model method,
+  `File::serve_from_path()`** — every gated or signed stream in `serve.php`
+  (private-cloud, signed, gated-local) calls it, so a serving branch cannot
+  half-apply the policy. Gated local files also stream `Cache-Control: private`
+  so permission-restricted bytes never land in shared caches.
+- The one path that can't use the model — `RouteHelper::serveStaticFile()`, which
+  serves first-party assets and the pre-boot public-upload fast path before the
+  app boots — always sends `X-Content-Type-Options: nosniff` and forces
+  `attachment` for the script-capable-as-document types
+  (`image/svg+xml`, `text/html`, `text/xml`, `application/xml`);
+  CSS/JS/fonts/raster/PDF still serve inline there. That divergence is by design
+  (assets must render inline; no `File` row is in hand), and it still upholds the
+  security invariant: no script-capable document ever renders inline from our origin.
 
 No backfill needed for already-stored rows — the platform is pre-launch
 ([[project_no_production_users]]); the serve-time allowlist protects them regardless, and
@@ -483,13 +501,18 @@ new uploads store a detected type (§8).
 ### 8. Type spoofing & cost abuse *(detection now at the storage layer)*
 
 A `.png` that is really a PDF (or an SVG, or an `.exe`) must route by **detected** MIME,
-not the client's extension/Content-Type, or it bypasses the type gate. This is now
-enforced at ingest, platform-wide: `File::createFromBytes()` and the admin upload path
-store the type from `File::detect_mime_file()` / `detect_mime_bytes()` (finfo magic
-bytes), falling back to the client value only when finfo can't decide. The AI encoder
-(§1) still detects independently before routing to vision/extract, but the stored
-`fil_type` is now trustworthy for the serve-back allowlist (§7). Inbound-email
-attachments inherit this via `createFromBytes`.
+not the client's extension/Content-Type, or it bypasses the type gate. This is enforced
+**inside the model, at the one chokepoint every ingest path shares**: `File::save()` runs
+finfo magic-byte detection (`File::detect_mime_file()`) on every insert and stores the
+detected type as `fil_type`; the caller-supplied value survives only when the bytes
+aren't on disk yet or finfo can't decide. Enforcement was deliberately moved out of the
+individual upload paths — a per-call-site version was audited and found already missing
+one door (the entity-photos endpoint stored the client's claimed type verbatim), which is
+the failure mode of caller-discipline invariants. The AI encoder (§1) still detects
+independently before routing to vision/extract, but the stored `fil_type` is trustworthy
+for the serve-back allowlist (§7). Every creation path — `createFromBytes` (and inbound
+email through it), admin upload, entity photos, anything written later — inherits the
+guarantee by construction.
 
 Cost abuse is unchanged: uploads inflate tokens (vision PDFs especially); per-file size
 caps, per-message count caps (Decision D), and the text-first default shrink the blast
