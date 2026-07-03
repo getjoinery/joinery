@@ -29,7 +29,7 @@ class BackupTarget extends SystemBase {
 		'bkt_name'            => array('type'=>'varchar(100)', 'required'=>true, 'is_nullable'=>false),
 		'bkt_provider'        => array('type'=>'varchar(30)', 'required'=>true, 'is_nullable'=>false),
 		'bkt_bucket'          => array('type'=>'varchar(255)'),
-		'bkt_path_prefix'     => array('type'=>'varchar(255)', 'default'=>"'joinery-backups'"),
+		'bkt_path_prefix'     => array('type'=>'varchar(255)', 'default'=>'joinery-backups'),
 		'bkt_credentials'     => array('type'=>'jsonb'),
 		'bkt_enabled'         => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),
 		'bkt_create_time'     => array('type'=>'timestamp(6)', 'default'=>'now()'),

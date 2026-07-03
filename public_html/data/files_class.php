@@ -17,7 +17,7 @@ class FileException extends SystemBaseException {}
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
- * @version 1.2.0
+ * @version 1.3.0
  */
 class File extends SystemBase {	public static $prefix = 'fil';
 	public static $tablename = 'fil_files';
@@ -81,7 +81,7 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	    'fil_evt_event_id' => array('type'=>'int4'),
 	    'fil_tier_min_level' => array('type'=>'int4', 'is_nullable'=>true),
 	    'fil_private' => array('type'=>'bool', 'is_nullable'=>false, 'default'=>'false'),
-	    'fil_storage_driver' => array('type'=>'varchar(32)', 'is_nullable'=>false, 'default'=>"'local'"),
+	    'fil_storage_driver' => array('type'=>'varchar(32)', 'is_nullable'=>false, 'default'=>'local'),
 	    'fil_sync_failed_count' => array('type'=>'int4', 'is_nullable'=>false, 'default'=>'0'),
 	    'fil_sync_last_attempt' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	    'fil_source' => array('type'=>'varchar(64)', 'is_nullable'=>true),
@@ -162,17 +162,12 @@ public static function get_by_name($name, $search_deleted = false) {
 		}
 		@chmod($target, 0666);
 
-		// Trust the file's magic bytes over the caller-supplied content type,
-		// which is spoofable (multipart Content-Type, email part header). This is
-		// what keeps a .png that is really an SVG from being stored as an inline
-		// image. Fall back to the supplied type only when finfo can't decide.
-		$detected = self::detect_mime_bytes($bytes);
-		$stored_type = ($detected !== null) ? $detected : (string)$content_type;
-
+		// The caller's content type is only a fallback: save() detects the real
+		// type from the written bytes' magic numbers on insert and that wins.
 		$file = new File(NULL);
 		$file->set('fil_name', $new_name);
 		$file->set('fil_title', substr((string)$filename, 0, 255));
-		$file->set('fil_type', substr($stored_type, 0, 128));
+		$file->set('fil_type', substr((string)$content_type, 0, 128));
 		$file->set('fil_usr_user_id', $owner_id);
 		foreach ($restrictions as $col => $val) {
 			$file->set($col, $val);
@@ -232,13 +227,16 @@ public static function get_by_name($name, $search_deleted = false) {
 		}
 	}
 	
+	/**
+	 * Is this a raster image the platform decodes and resizes (GD)? Keyed to
+	 * the same allowlist as inline serving — never "starts with image/",
+	 * because image/svg+xml is an image type GD cannot decode and the browser
+	 * must not render inline. SVG and other exotic image/* types are plain
+	 * files here: no size variants, no thumbnail. If resizable-set and
+	 * inline-safe-set ever need to diverge, split the constant then.
+	 */
 	function is_image(){
-		if (strpos($this->get('fil_type'), 'image/') !== false) {
-			return true;
-		}
-		else{
-			return false;
-		}
+		return self::is_inline_safe_type($this->get('fil_type'));
 	}
 
 	/**
@@ -258,6 +256,42 @@ public static function get_by_name($name, $search_deleted = false) {
 			$mime = trim(substr($mime, 0, $semi));
 		}
 		return in_array($mime, self::INLINE_SAFE_TYPES, true);
+	}
+
+	/**
+	 * Stream this file's bytes to the browser with the headers every
+	 * uploaded-file response must carry: the stored (magic-byte-detected)
+	 * Content-Type, X-Content-Type-Options: nosniff, and inline rendering
+	 * only for INLINE_SAFE_TYPES — everything else (SVG, HTML, PDF, office,
+	 * unknown) is forced to download. Owning the whole header set here means
+	 * a serving branch cannot half-apply the policy. The one uploaded-bytes
+	 * path that doesn't come through here is RouteHelper's pre-boot fast
+	 * serve for public files, which cannot load this model and carries its
+	 * own conservative backstop (see RouteHelper::serveStaticFile).
+	 *
+	 * This does NOT authorize — the caller gates (is_viewable(), signed URL)
+	 * before serving.
+	 *
+	 * @param string $path          on-disk bytes to stream: a local file, or a
+	 *                              downloaded tmp copy of a cloud object (the
+	 *                              caller still unlinks its tmp file)
+	 * @param string $cache_control Cache-Control header value — the caller's
+	 *                              only serving decision ('private, no-store'
+	 *                              for gated/signed streams; 'public,
+	 *                              max-age=...' for public bytes)
+	 */
+	function serve_from_path($path, $cache_control) {
+		$content_type = $this->get('fil_type') ?: 'application/octet-stream';
+		header('Content-Type: ' . $content_type);
+		header('X-Content-Type-Options: nosniff');
+		header('Cache-Control: ' . $cache_control);
+		if (!self::is_inline_safe_type($content_type)) {
+			header('Content-Disposition: attachment; filename="' . basename($this->get('fil_name')) . '"');
+		}
+		if (($len = @filesize($path)) !== false) {
+			header('Content-Length: ' . $len);
+		}
+		readfile($path);
 	}
 
 	/**
@@ -536,10 +570,39 @@ public static function get_by_name($name, $search_deleted = false) {
 	}
 
 	/**
-	 * Save the file record and move to the correct directory based on permissions.
+	 * A File row is born with an honest fil_type. On insert, the type is
+	 * detected from the stored bytes' magic numbers and that detection wins
+	 * over whatever the caller set — the caller's value is client-supplied
+	 * (multipart Content-Type, email part header, extension guess) and
+	 * spoofable, while the serve-back inline allowlist trusts fil_type. The
+	 * caller's value survives only when the bytes aren't on local disk yet or
+	 * finfo can't decide.
+	 */
+	private function apply_detected_type() {
+		if (!$this->get('fil_name') || $this->get('fil_storage_driver') === 'cloud') {
+			return;
+		}
+		$path = $this->get_filesystem_path('original');
+		if (!file_exists($path)) {
+			return;
+		}
+		$detected = self::detect_mime_file($path);
+		if ($detected !== null) {
+			$this->set('fil_type', substr($detected, 0, 128));
+		}
+	}
+
+	/**
+	 * Save the file record and move to the correct directory based on
+	 * permissions. Insert-time saves run magic-byte type detection here, in
+	 * save(), so every ingest path — present and future — stores an honest
+	 * fil_type by construction rather than by caller discipline.
 	 */
 	function save($debug = false) {
 		$old_visibility = $this->_offloaded_visibility();
+		if (!$this->key) {
+			$this->apply_detected_type();
+		}
 		$result = parent::save($debug);
 		$this->move_to_correct_directory($old_visibility);
 		return $result;
@@ -1316,13 +1379,39 @@ public static function get_by_name($name, $search_deleted = false) {
 	// private files. No File-specific override is needed.
 
 	/**
+	 * Strict ownership: does exactly this user own this file, and is it not
+	 * deleted? This is the check for "the user is handing the system their OWN
+	 * file" (attaching to an AI chat/recipe, consuming in a detached worker).
+	 * It is deliberately narrower than is_viewable(): no admin bypass, no
+	 * group/event/tier sharing — those mean "may view", not "owns" — and it
+	 * needs no session, so it works in detached CLI workers and re-derives
+	 * cleanly at send time (TOCTOU: a file reassigned, deleted, or swapped
+	 * after attach fails here).
+	 *
+	 * @param int $user_id the owner to require (e.g. a run's owner id)
+	 * @return bool
+	 */
+	function is_owned_by($user_id) {
+		$user_id = (int)$user_id;
+		if ($user_id <= 0 || !$this->key) {
+			return false;
+		}
+		if ($this->get('fil_delete_time')) {
+			return false;
+		}
+		return (int)$this->get('fil_usr_user_id') === $user_id;
+	}
+
+	/**
 	 * Content-visibility gate for the file-serving path (serve.php) — NOT API row
 	 * authorization. Returns bool: may this session view the file? For a private
 	 * file (fil_private) the rule is owner-or-admin — the identical rule
 	 * authenticate_read uses for the record, via the shared is_owner_or_admin()
 	 * helper. Otherwise the four restriction columns apply (min-permission, group
 	 * membership, event registration, tier gating). fil_private is an alternative
-	 * to those columns, not combined with them.
+	 * to those columns, not combined with them. For "does the user OWN this
+	 * file" — attachment/consumption checks — use is_owned_by() instead;
+	 * "viewable" is strictly broader than "owned".
 	 */
 	function is_viewable($session){
 		if(!$session){
@@ -1431,11 +1520,15 @@ class MultiFile extends SystemMultiBase {
 			$filters['fil_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
 		}
 
+		// 'picture' mirrors File::is_image(): the raster allowlist, not
+		// LIKE 'image/%' (which would sweep in image/svg+xml — a file with no
+		// size variants). Constant values only; nothing user-supplied.
 		if (isset($this->options['picture'])) {
+			$in_list = "('" . implode("','", File::INLINE_SAFE_TYPES) . "')";
 			if ($this->options['picture']) {
-				$filters['fil_type'] = "LIKE 'image/%'";
+				$filters['fil_type'] = "IN " . $in_list;
 			} else {
-				$filters['fil_type'] = "NOT LIKE 'image%'";
+				$filters['(fil_type'] = "NOT IN " . $in_list . " OR fil_type IS NULL)";
 			}
 		}
 

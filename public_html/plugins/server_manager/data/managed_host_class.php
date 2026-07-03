@@ -19,7 +19,7 @@ class ManagedHost extends SystemBase {
 		'mgh_slug'                 => array('type'=>'varchar(50)', 'required'=>true, 'is_nullable'=>false, 'unique'=>true),
 		'mgh_name'                 => array('type'=>'varchar(100)', 'required'=>true, 'is_nullable'=>false),
 		'mgh_host'                 => array('type'=>'varchar(255)', 'required'=>true, 'is_nullable'=>false),
-		'mgh_ssh_user'             => array('type'=>'varchar(50)', 'is_nullable'=>false, 'default'=>"'root'"),
+		'mgh_ssh_user'             => array('type'=>'varchar(50)', 'is_nullable'=>false, 'default'=>'root'),
 		'mgh_ssh_key_path'         => array('type'=>'varchar(500)'),
 		'mgh_ssh_port'             => array('type'=>'int4', 'default'=>'22'),
 		'mgh_max_sites'            => array('type'=>'int4', 'default'=>'50'),

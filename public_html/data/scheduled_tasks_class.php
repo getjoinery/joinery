@@ -5,7 +5,7 @@
  * Data model for the scheduled tasks system. Rows are created when
  * an admin activates a discovered task, not via migrations.
  *
- * @version 1.3
+ * @version 1.3.1
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -22,9 +22,9 @@ class ScheduledTask extends SystemBase {
 		'sct_name'                 => array('type'=>'varchar(255)', 'is_nullable'=>false),
 		'sct_task_class'           => array('type'=>'varchar(255)', 'is_nullable'=>false),
 		'sct_is_active'            => array('type'=>'bool', 'is_nullable'=>false, 'default'=>true),
-		'sct_frequency'            => array('type'=>'varchar(20)', 'is_nullable'=>false, 'default'=>"'daily'"),
+		'sct_frequency'            => array('type'=>'varchar(20)', 'is_nullable'=>false, 'default'=>'daily'),
 		'sct_schedule_day_of_week' => array('type'=>'int4', 'is_nullable'=>true),
-		'sct_schedule_time'        => array('type'=>'time', 'is_nullable'=>false, 'default'=>"'09:00:00'"),
+		'sct_schedule_time'        => array('type'=>'time', 'is_nullable'=>false, 'default'=>'09:00:00'),
 		'sct_task_config'          => array('type'=>'jsonb', 'is_nullable'=>true),
 		'sct_last_run_time'        => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 		'sct_last_run_status'      => array('type'=>'varchar(50)', 'is_nullable'=>true),
