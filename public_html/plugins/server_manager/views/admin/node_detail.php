@@ -6,7 +6,7 @@
  * Consolidated node management page with tabs:
  * Overview, Backups, Database, Updates, Jobs
  *
- * @version 1.4
+ * @version 1.5
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -578,6 +578,24 @@ if ($tab === 'overview') {
 	}
 	echo '</small></div>';
 
+	// TLS certificate expiry — populated by the uptime tick for self-renewed,
+	// directly-exposed nodes (e.g. the Caddy DNS servers the SSL tile can't see).
+	$cert_expiry = $node->get('mgn_cert_expiry_ts');
+	if ($cert_expiry) {
+		$cert_warn_days = (int)Globalvars::get_instance()->get_setting('server_manager_cert_expiry_warn_days');
+		if ($cert_warn_days <= 0) { $cert_warn_days = 21; }
+		$cert_expiry_ts   = strtotime($cert_expiry . ' UTC');
+		$cert_days_left   = (int)floor(($cert_expiry_ts - time()) / 86400);
+		$cert_expiry_disp = LibraryFunctions::convert_time($cert_expiry, 'UTC', $session->get_timezone(), 'M j, Y');
+		echo '<div class="mt-1 ps-3"><small>';
+		if ($cert_days_left < $cert_warn_days) {
+			echo '<span class="text-danger"><strong>TLS cert: expires ' . htmlspecialchars($cert_expiry_disp) . ' (' . $cert_days_left . ' days)</strong></span>';
+		} else {
+			echo '<span class="text-muted">TLS cert: expires ' . htmlspecialchars($cert_expiry_disp) . ' (' . $cert_days_left . ' days)</span>';
+		}
+		echo '</small></div>';
+	}
+
 	echo '</div>';
 
 	// ── System Health panel ──
@@ -760,13 +778,18 @@ if ($tab === 'overview') {
 	}
 
 	// ── SSL Setup card ──
+	// Skipped when the wire probe (mgn_cert_expiry_ts) has already proven a
+	// SAN-matching cert is being kept current by a renewer other than certbot
+	// (e.g. Caddy on the DNS nodes) — the "TLS cert: expires..." line above
+	// already covers that case, and this card's "Provision SSL" button runs
+	// certbot's Apache plugin, which doesn't apply to those nodes at all.
 	$ssl_card_state  = $node->get('mgn_ssl_state');
 	$ssl_card_domain = parse_url($node->get('mgn_site_url') ?: '', PHP_URL_HOST);
 	$is_fqdn = $ssl_card_domain
 		&& !filter_var($ssl_card_domain, FILTER_VALIDATE_IP)
 		&& $ssl_card_domain !== 'localhost';
 
-	if ($is_fqdn && $ssl_card_state !== 'active' && $install_state !== 'installing') {
+	if ($is_fqdn && $ssl_card_state !== 'active' && $install_state !== 'installing' && !$node->get('mgn_cert_expiry_ts')) {
 		$host_ip     = $node->get('mgn_host');
 		require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
 		try {

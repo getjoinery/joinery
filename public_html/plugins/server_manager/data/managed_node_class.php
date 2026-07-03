@@ -2,7 +2,7 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the control plane.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -53,6 +53,8 @@ class ManagedNode extends SystemBase {
 		'mgn_uptime_last_status'          => array('type'=>'varchar(20)'),
 		'mgn_uptime_consecutive_failures' => array('type'=>'int4', 'default'=>'0', 'is_nullable'=>false),
 		'mgn_uptime_down_since'           => array('type'=>'timestamp(6)'),
+		'mgn_cert_expiry_ts'              => array('type'=>'timestamp(6)'),
+		'mgn_cert_alerted_ts'             => array('type'=>'timestamp(6)'),
 		'mgn_create_time'         => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'mgn_update_time'         => array('type'=>'timestamp(6)'),
 		'mgn_delete_time'         => array('type'=>'timestamp(6)'),
