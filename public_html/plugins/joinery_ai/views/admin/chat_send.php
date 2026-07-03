@@ -22,6 +22,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRunner.
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRender.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatAsync.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatControls.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatTurn.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/CostGuard.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderException.php'));
 
@@ -66,7 +67,7 @@ if ($conversation_id > 0) {
     $conversation->set('aic_owner_user_id', $uid);
     $conversation->set('aic_model', ChatRunner::defaultModel());
     ChatControls::seedNewConversation($conversation, $_POST);
-    $conversation->set('aic_title', chat_derive_title($message));
+    $conversation->set('aic_title', ChatTurn::deriveTitle($message));
     $conversation->prepare();
     $conversation->save();
     $conversation->load();
@@ -83,7 +84,7 @@ try {
 // If a prior turn left an unconfirmed proposal, sending a new message abandons
 // it — record that and clear the pending action so the transcript stays a
 // valid, alternating history.
-chat_clear_dangling_pending($conversation);
+ChatTurn::clearDanglingPending($conversation);
 
 // Persist the user's message (complete on insert).
 $user_msg = new AiConversationMessage(NULL);
@@ -123,13 +124,13 @@ if (ChatAsync::canDetach()) {
     $payload['status'] = AiConversationMessage::STATUS_RUNNING;
     echo json_encode($payload);
     ChatAsync::detach();
-    chat_run_and_finalize($conversation, $uid, $assistant_msg);
+    ChatTurn::runAndFinalize($conversation, $uid, $assistant_msg);
     exit;
 }
 
 // Non-fpm fallback: run synchronously, then return the finished turn so the page
 // can render it without polling.
-chat_run_and_finalize($conversation, $uid, $assistant_msg);
+ChatTurn::runAndFinalize($conversation, $uid, $assistant_msg);
 $assistant_msg->load();
 if ($assistant_msg->get('aim_status') === AiConversationMessage::STATUS_FAILED) {
     $payload['status'] = AiConversationMessage::STATUS_FAILED;
@@ -142,80 +143,3 @@ if ($assistant_msg->get('aim_status') === AiConversationMessage::STATUS_FAILED) 
 }
 echo json_encode($payload);
 exit;
-
-// --- turn execution (runs after the response is sent under fpm) ---
-
-/**
- * Run one turn and write the result onto the pre-created placeholder row, then
- * roll up the conversation token totals. Any failure marks the row FAILED with
- * an error the poller surfaces. Never echoes — the response is already sent.
- */
-function chat_run_and_finalize(AiConversation $conversation, int $uid,
-        AiConversationMessage $assistant_msg): void {
-    try {
-        $turn = ChatRunner::runTurn($conversation, $uid, ChatAsync::streamSink($assistant_msg));
-    } catch (LlmProviderException $e) {
-        error_log('[joinery_ai chat] provider error: ' . $e->getMessage());
-        chat_mark_failed($assistant_msg, LlmProviderException::friendlyMessage(LlmProviderException::classify($e)));
-        return;
-    } catch (Throwable $e) {
-        error_log('[joinery_ai chat] turn failed: ' . $e->getMessage());
-        chat_mark_failed($assistant_msg, 'The assistant could not complete this turn.');
-        return;
-    }
-
-    $result = $turn['result'];
-    $ctx    = $turn['context'];
-
-    $assistant_msg->set('aim_content', ChatRunner::resolveAssistantText($result));
-    $assistant_msg->set('aim_tool_calls', $ctx->toolCalls());
-    if (!empty($result['pending_action'])) {
-        $assistant_msg->set('aim_pending_action', $result['pending_action']);
-    }
-    $assistant_msg->set('aim_input_tokens', (int)$result['input_tokens']);
-    $assistant_msg->set('aim_output_tokens', (int)$result['output_tokens']);
-    $assistant_msg->set('aim_status', AiConversationMessage::STATUS_COMPLETE);
-    $assistant_msg->save();
-
-    // Roll up token totals + bump the thread's update time.
-    $conversation->set('aic_total_input_tokens',
-        (int)$conversation->get('aic_total_input_tokens') + (int)$result['input_tokens']);
-    $conversation->set('aic_total_output_tokens',
-        (int)$conversation->get('aic_total_output_tokens') + (int)$result['output_tokens']);
-    $conversation->set('aic_update_time', gmdate('Y-m-d H:i:s'));
-    $conversation->save();
-}
-
-function chat_mark_failed(AiConversationMessage $assistant_msg, string $error): void {
-    $assistant_msg->set('aim_status', AiConversationMessage::STATUS_FAILED);
-    $assistant_msg->set('aim_error', $error);
-    $assistant_msg->save();
-}
-
-// --- helpers ---
-
-function chat_derive_title(string $message): string {
-    $t = trim(preg_replace('/\s+/', ' ', $message));
-    if (mb_strlen($t) > 60) $t = mb_substr($t, 0, 57) . '…';
-    return $t !== '' ? $t : 'New chat';
-}
-
-function chat_clear_dangling_pending(AiConversation $conversation): void {
-    $rows = new MultiAiConversationMessage(
-        ['conversation_id' => (int)$conversation->key,
-         'role' => AiConversationMessage::ROLE_ASSISTANT, 'deleted' => false],
-        ['aim_message_id' => 'DESC'], 1, 0
-    );
-    $rows->load();
-    if (!count($rows)) return;
-    $last = $rows->get(0);
-    $pending = $last->get('aim_pending_action');
-    if (is_string($pending)) $pending = json_decode($pending, true);
-    if (empty($pending)) return;
-
-    $txt = (string)$last->get('aim_content');
-    $note = '_(Proposed an action; you continued without confirming, so it was not run.)_';
-    $last->set('aim_content', $txt !== '' ? $txt . "\n\n" . $note : $note);
-    $last->set('aim_pending_action', null);
-    $last->save();
-}

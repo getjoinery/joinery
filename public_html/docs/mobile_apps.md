@@ -64,11 +64,12 @@ Response shape:
   entry in `admin_menus.json` or the plugin's `plugin.json` `profileMenu`
   (stored as `amu_native_screen` by the menu sync). A non-empty value flips
   that entry's destination to `{type: "native"}` with the entry's URL as the
-  fallback. Two worked examples: the inbound_email plugin's mailbox entry
-  declares `"nativeScreen": "mailbox"` (rendered by JoineryMailKit), and the
-  core `core-calendar` entry in `admin_menus.json` declares
-  `"nativeScreen": "calendar"` (rendered by JoineryCalendarKit); every other
-  client keeps the web page.
+  fallback. Worked examples: the inbound_email plugin's mailbox entry
+  declares `"nativeScreen": "mailbox"` (rendered by JoineryMailKit), the core
+  `core-calendar` entry in `admin_menus.json` declares `"nativeScreen":
+  "calendar"` (rendered by JoineryCalendarKit), and the joinery_ai plugin's AI
+  Chat entry declares `"nativeScreen": "ai_chat"` (rendered by
+  JoineryAIChatKit); every other client keeps the web page.
 - **`tabs`** — the slugs pinned to this app's tab bar, in order; everything
   else belongs in the More list. Configured by the `app_navigation` setting: a
   JSON map of `client_app` (the client header value) → ordered slug list, with
@@ -310,6 +311,99 @@ the same convention.)
 Not in the module (the web calendar remains for them): `.ics` import and
 the quick-entry popover's time-prefix parsing.
 
+## JoineryAIChatKit (native AI chat module)
+
+**JoineryAIChatKit** is the native AI-assistant surface — same package repo,
+fourth product (`ios/joinery-kit/Sources/JoineryAIChatKit`, depends on
+JoineryKit). An app adds the product and calls
+`JoineryAIChat.registerScreens()` in its init; the server's `ai_chat`
+navigation destination then renders these screens, and builds without the
+module keep the web chat via the fallback URL.
+
+The screens consume the `joinery_ai/chat_*` actions
+(`plugins/joinery_ai/docs/overview.md` § Chat API surface) — the same
+conversation store and turn engine as the web chat, so a
+conversation opened natively and one opened on the web are the same thread:
+
+- **Conversation list** (`ChatScreen` + `ChatListStore`) — the caller's
+  conversations pinned-first then newest, with server-side search, swipe and
+  context-menu pin / rename / delete, and a compose button that opens a new
+  chat. Reaching the native screen is proof the server flipped the entry to
+  `{type: "native", screen: "ai_chat"}`; an older build loads the web chat.
+- **Thread + composer** (`ChatThreadView` + `ChatThreadStore`) — the turns in
+  a scroll (user bubbles right, assistant markdown left), a bottom composer,
+  and per-turn / conversation token-cost labels. A running turn streams via
+  the same send-then-poll transport the web reader uses: `chat_send` returns a
+  poll handle, the store polls `chat_poll` (~600ms) folding partial text into
+  the row until it settles. A turn that proposes a mutating action shows an
+  inline Confirm / Cancel card resolved through `chat_confirm`. Turn delete
+  and a lightweight block-markdown renderer (headings, bullets, rules, inline
+  emphasis) round it out.
+
+Accessibility ids (`chat_*`) are the stable UI-test API: `chat_loading`,
+`chat_error`, `chat_retry`, `chat_list`, `chat_empty`, `chat_new`,
+`chat_thread_loading`, `chat_thread_empty`, `chat_transcript`,
+`chat_user_message`, `chat_assistant_message`, `chat_typing`,
+`chat_confirm_card`, `chat_confirm_yes`, `chat_confirm_no`, `chat_composer`,
+`chat_send`.
+
+Not in the module yet (the web chat remains for them): the per-chat model
+controls (model, temperature, thinking level, custom instructions, web-search
+/ data-access toggles) and thread export. A new native chat sends
+`data_access: true` so the assistant can read (and, with confirmation, write)
+the owner's data; the other controls take their web new-chat defaults.
+
+## joinery-android (Android client core)
+
+The native Android core is **joinery-android**, a Kotlin + Jetpack Compose
+library with no brand knowledge — every branded app is a thin module that
+injects a `JoineryConfig` and mounts `JoineryAppRoot`. It is the Android
+counterpart to JoineryKit against the same client-agnostic server surface
+(navigation endpoint, web-session bridge, app display mode); the reusable
+boundary between the platforms is that server API, not shared client code.
+The source lives in this repo at `{repo root}/android/` (outside
+`public_html`, so it is never web-served or packaged into node upgrades):
+`android/joinery-android` is the library module, `android/joinery-member-android`
+the reference app. Builds run on the Mac mini (`ssh macmini`) against a synced
+build area at `~/dev/joinery-android` — `./gradlew`/`gradle` with the SDK from
+`~/.android-env`, headless emulator, screenshots via
+`adb exec-out screencap`; the repo checkout on the dev box is the single
+source of truth.
+
+What the library provides:
+
+- **ApiClient** — the one HTTP chokepoint (OkHttp): key headers, `client-app` /
+  `client-version` headers (hyphen form), automatic `Idempotency-Key` on action
+  submits, and error-envelope mapping onto a typed `JoineryApiError`. API JSON is
+  parsed with an order-preserving parser (`JsonValue`) because form `options`
+  order is meaningful and stock decoders lose it.
+- **SessionController + EncryptedCredentialStore** — login (`auth/login` with a
+  `device_label`), Keystore-backed `EncryptedSharedPreferences` secret storage
+  (never plain SharedPreferences or files), launch bootstrap via `auth/session`,
+  logout (`auth/logout`), and the two cross-cutting signals: any 426 flips the
+  app into the blocking upgrade screen, and a 401 on an authenticated call (key
+  revoked — App Sessions page or password change) signs the app out.
+- **Generic form renderer** — `FormScreen` fetches `GET /api/v1/form/{action}`,
+  renders every schema-v1 field type (`docs/formwriter.md` § JSON Output Mode)
+  including `visibility_rules` with web-identical trigger semantics, submits to
+  `POST /api/v1/action/{action}`, and maps 422 field errors back onto controls.
+  A definition with an unknown field type or a newer `schema_version` renders a
+  per-form "update the app or use the website" fallback, so old binaries survive
+  new server-side field types.
+- **Native screens** — `LoginScreen`, the two-step native password-reset flow
+  (`password_reset_1`, code entry from the emailed link, `password_reset_2` with
+  the code round-tripped via query context), `SettingsScreen` (user/tier summary
+  from `auth/session`, the account forms, sign out), and `UpgradeRequiredScreen`.
+
+Brand configuration surface (`JoineryConfig`): `baseUrl`, `clientApp`,
+`clientVersion`, `appName`, `playStoreUrl`, `registrationEnabled` (off by
+default — enabling in-app registration triggers Google Play's
+account-deletion requirement), `accentColor`.
+
+Compose `testTag` values equal the server field names for form controls and use
+prefixed ids for screens (`login_*`, `settings_*`, `form_*`, `reset_*`,
+`upgrade_*`, `root_*`) — the stable addressing for the Compose UI-test suite.
+
 ## Standing up a new branded app
 
 1. Pick a `client_app` identifier (e.g. `joinery-member-ios`); the app sends
@@ -318,11 +412,15 @@ the quick-entry popover's time-prefix parsing.
    `default`).
 3. Optionally set its minimum version in `api_min_client_versions` once
    shipped.
-4. Create `ios/<app-name>` in this repo with an XcodeGen `project.yml`
+4. **iOS:** create `ios/<app-name>` in this repo with an XcodeGen `project.yml`
    depending on the local `../joinery-kit` package, and a single app source
    file that builds a `JoineryConfig` and mounts
    `JoineryAppRoot(config:keychainService:)` — see
    `ios/joinery-member-ios` for the reference shape.
+5. **Android:** add an application module under `android/<app-name>` depending
+   on `:joinery-android`, with a `MainActivity` that builds a `JoineryConfig`
+   and calls `JoineryAppRoot(config, storeFileName)` in `setContent` — see
+   `android/joinery-member-android` for the reference shape.
 
 ## Tests
 

@@ -1,0 +1,22 @@
+{
+  "api_version": "1.0",
+  "success_message": "Action 'joinery_ai/chat_send' completed successfully.",
+  "data": {
+    "conversation_id": 44,
+    "message_id": 86,
+    "is_new": true,
+    "title": "Reply with exactly: SPAWN OK",
+    "status": "running",
+    "user_message": {
+      "id": 85,
+      "role": "user",
+      "content": "Reply with exactly: SPAWN OK",
+      "status": "complete",
+      "error": "",
+      "created_time": "2026-07-03 15:26:00.100000",
+      "pending_action": null,
+      "tool_calls": [],
+      "usage": { "input_tokens": 0, "output_tokens": 0, "cost_label": "" }
+    }
+  }
+}

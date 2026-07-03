@@ -23,6 +23,8 @@ targets:
         product: JoineryMailKit
       - package: JoineryKit
         product: JoineryCalendarKit
+      - package: JoineryKit
+        product: JoineryAIChatKit
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.getjoinery.member
@@ -30,6 +32,9 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_CFBundleDisplayName: Joinery
+        # iPad supports all four orientations so the app is eligible for
+        # Split View / Slide Over multitasking (no UIRequiresFullScreen opt-out).
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: J634NTDX3D
   JoineryMemberUITests:

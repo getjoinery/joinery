@@ -22,6 +22,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRunner.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRender.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatAsync.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatTurn.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/CostGuard.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderException.php'));
 
@@ -91,12 +92,12 @@ if (ChatAsync::canDetach()) {
     $payload['status'] = AiConversationMessage::STATUS_RUNNING;
     echo json_encode($payload);
     ChatAsync::detach();
-    chat_resume_and_finalize($conversation, $uid, $msg, $pending, $lead_text, $decision);
+    ChatTurn::resumeAndFinalize($conversation, $uid, $msg, $pending, $lead_text, $decision);
     exit;
 }
 
 // Non-fpm fallback: resume synchronously, return the finished bubble.
-chat_resume_and_finalize($conversation, $uid, $msg, $pending, $lead_text, $decision);
+ChatTurn::resumeAndFinalize($conversation, $uid, $msg, $pending, $lead_text, $decision);
 $msg->load();
 if ($msg->get('aim_status') === AiConversationMessage::STATUS_FAILED) {
     $payload['status'] = AiConversationMessage::STATUS_FAILED;
@@ -109,65 +110,3 @@ if ($msg->get('aim_status') === AiConversationMessage::STATUS_FAILED) {
 }
 echo json_encode($payload);
 exit;
-
-// --- resume execution (runs after the response is sent under fpm) ---
-
-/**
- * Continue the turn from the confirmation decision and fold the resumed reply
- * into the same assistant row (one assistant message per turn). Any failure
- * marks the row FAILED with an error the poller surfaces. Never echoes.
- */
-function chat_resume_and_finalize(AiConversation $conversation, int $uid,
-        AiConversationMessage $msg, array $pending, string $lead_text, string $decision): void {
-    try {
-        $seed = $lead_text !== '' ? $lead_text . "\n\n" : '';
-        $sink = ChatAsync::streamSink($msg, $seed);
-        $turn = ChatRunner::resumeTurn($conversation, $uid, $pending, $lead_text, $decision, $sink);
-    } catch (LlmProviderException $e) {
-        error_log('[joinery_ai chat] resume provider error: ' . $e->getMessage());
-        chat_confirm_mark_failed($msg, LlmProviderException::friendlyMessage(LlmProviderException::classify($e)));
-        return;
-    } catch (Throwable $e) {
-        error_log('[joinery_ai chat] resume failed: ' . $e->getMessage());
-        chat_confirm_mark_failed($msg, 'The action could not be completed.');
-        return;
-    }
-
-    $result = $turn['result'];
-    $ctx    = $turn['context'];
-
-    $resumed_text = ChatRunner::resolveAssistantText($result);
-    $combined = trim($lead_text . (($lead_text !== '' && $resumed_text !== '') ? "\n\n" : '') . $resumed_text);
-    if ($combined === '') $combined = ($decision === 'confirm') ? 'Done.' : 'Okay, I won’t do that.';
-
-    $merged_trace = array_merge(chat_decode_trace($msg->get('aim_tool_calls')), $ctx->toolCalls());
-
-    $msg->set('aim_content', $combined);
-    $msg->set('aim_tool_calls', $merged_trace);
-    $msg->set('aim_pending_action', !empty($result['pending_action']) ? $result['pending_action'] : null);
-    $msg->set('aim_input_tokens', (int)$msg->get('aim_input_tokens') + (int)$result['input_tokens']);
-    $msg->set('aim_output_tokens', (int)$msg->get('aim_output_tokens') + (int)$result['output_tokens']);
-    $msg->set('aim_status', AiConversationMessage::STATUS_COMPLETE);
-    $msg->save();
-
-    $conversation->set('aic_total_input_tokens',
-        (int)$conversation->get('aic_total_input_tokens') + (int)$result['input_tokens']);
-    $conversation->set('aic_total_output_tokens',
-        (int)$conversation->get('aic_total_output_tokens') + (int)$result['output_tokens']);
-    $conversation->set('aic_update_time', gmdate('Y-m-d H:i:s'));
-    $conversation->save();
-}
-
-function chat_confirm_mark_failed(AiConversationMessage $msg, string $error): void {
-    $msg->set('aim_status', AiConversationMessage::STATUS_FAILED);
-    $msg->set('aim_error', $error);
-    $msg->save();
-}
-
-function chat_decode_trace($value): array {
-    if (is_string($value)) {
-        $decoded = json_decode($value, true);
-        return is_array($decoded) ? $decoded : [];
-    }
-    return is_array($value) ? $value : [];
-}

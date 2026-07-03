@@ -202,6 +202,19 @@ The thread pane supports the usual housekeeping over the caller's own conversati
 
 Each chat endpoint exists as a full file under `views/admin/` plus a one-line `views/profile/` stub that re-includes it, so the same owner-scoped implementation backs both the admin and member surfaces.
 
+### Chat API surface
+
+Native app clients speak the same chat over `/api/v1` actions (owner-scoped, member-accessible with the session key or the browser-session bridge), returning structured JSON turns rather than the page's HTML bubbles. `ChatSerializer` renders a conversation and its turns as data; `ChatTurn` holds the run / resume-and-finalize sequence both the web endpoints and these actions call, so a thread is identical whichever surface touched it last.
+
+- `joinery_ai/chat_list` `{search?}` → `{conversations: [{id, title, pinned}]}`.
+- `joinery_ai/chat_thread` `{conversation_id}` → `{conversation: {id, title, pinned, model, usage_label}, messages: [turn]}`, where a turn is `{id, role, content (markdown), status, error, created_time (UTC), pending_action: {description} | null, tool_calls: [{name, is_error, duration_ms}], usage: {input_tokens, output_tokens, cost_label}}`.
+- `joinery_ai/chat_send` `{message, conversation_id?, data_access?, …seed fields}` → a poll handle `{conversation_id, message_id, is_new, title, status: "running", user_message}` (omitting `conversation_id` creates the conversation, seeded through `ChatControls`).
+- `joinery_ai/chat_poll` `{message_id}` → `{status}` plus `partial_text` while running, `{message, usage_label}` on complete, or `error` on failed.
+- `joinery_ai/chat_confirm` `{conversation_id, message_id, decision}` → resumes the pending row, polled like a send.
+- `joinery_ai/chat_turn_action` `{message_id, action: "delete"}` → `{deleted_ids}`; `joinery_ai/chat_thread_action` `{conversation_id, action: "pin" | "rename" | "delete", value?}`.
+
+**Async via a detached worker.** An `_logic_api()` action returns a value the framework serializes and flushes; it cannot hold the request open the way the web page's in-process `fastcgi_finish_request` detach does. So `chat_send` / `chat_confirm` persist the placeholder, return the poll handle, and spawn a CLI worker (`ChatWorkerSpawner` → `cli/run_chat_turn.php`) that runs the turn to completion — the same detached-worker model recipe runs use, decoupled from the fpm request lifecycle. The client polls `chat_poll` for the result exactly as the web page polls its endpoint. `ChatWorkerSpawner` resolves an absolute CLI-php path: php-fpm's `clear_env` defaults on, leaving the request environment without a `PATH`, so a bare `php` can't be found.
+
 ## Generic reads: `query_model` + per-recipe model allowlist
 
 A single generic tool lets opted-in data models become readable by recipes without writing a per-model PHP class:
