@@ -99,28 +99,9 @@ function admin_file_upload_process_logic(array $input): LogicResult {
 		'min_height' => 1,
 		// Set the following option to false to enable resumable uploads:
 		'discard_aborted_uploads' => true,
-		// Set to 0 to use the GD library to scale and orient images,
-		// set to 1 to use imagick (if installed, falls back to GD),
-		// set to 2 to use the ImageMagick convert binary directly:
-		'image_library' => 1,
-		// Uncomment the following to define an array of resource limits
-		// for imagick:
-		/*
-		'imagick_resource_limits' => array(
-			imagick::RESOURCETYPE_MAP => 32,
-			imagick::RESOURCETYPE_MEMORY => 32
-		),
-		*/
-		// Command or path for to the ImageMagick convert binary:
-		'convert_bin' => 'convert',
-		// Uncomment the following to add parameters in front of each
-		// ImageMagick convert call (the limit constraints seem only
-		// to have an effect if put in front):
-		/*
-		'convert_params' => '-limit memory 32MiB -limit map 32MiB',
-		*/
-		// Command or path for to the ImageMagick identify binary:
-		'identify_bin' => 'identify',
+		// Image handling is GD-only; this option no longer selects an engine
+		// (imagick / ImageMagick-convert were retired). See UploadHandler.
+		'image_library' => 0,
 		'image_versions' => array(
 			// The empty image version key defines options for the original image.
 			// Keep in mind: these image manipulations are inherited by all other image versions from this point onwards.
@@ -198,10 +179,16 @@ function admin_file_upload_process_logic(array $input): LogicResult {
 				return LogicResult::error('Unable to save resized image.  Check file permissions.');
 			}
 
+			// Store the type detected from the file's magic bytes, not the
+			// client-supplied multipart Content-Type (spoofable). Falls back to
+			// the client value only if finfo can't determine a type.
+			$detected_type = File::detect_mime_file($upload_dir.'/'.$new_name);
+			$stored_type = ($detected_type !== null) ? $detected_type : (string)$thisfile->type;
+
 			$file =	new File(NULL);
 			$file->set('fil_name', $new_name);
 			$file->set('fil_title', $thisfile->name);
-			$file->set('fil_type', substr($thisfile->type,0,128));
+			$file->set('fil_type', substr($stored_type,0,128));
 			$file->set('fil_usr_user_id', $session->get_user_id());
 			$file->set('fil_source', File::SOURCE_USER_UPLOAD);
 

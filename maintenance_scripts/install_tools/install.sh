@@ -1406,7 +1406,6 @@ do_server_setup() {
         php8.3-xml \
         php8.3-curl \
         php8.3-gd \
-        php8.3-imagick \
         php8.3-dev \
         php8.3-imap \
         php8.3-mbstring \
