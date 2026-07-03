@@ -173,8 +173,8 @@ detail SSL tile already renders a "Expires …" warning badge under 30 days
 (`node_detail.php:731`). What's missing is (a) it only refreshes on a manual
 `check_status` job, not continuously; (b) it never fires an **alert**, just a
 passive badge nobody watches; (c) it's blank for the Caddy/DNS nodes. So the
-work is to **feed and alert on the field that already exists**, not build a
-parallel one.
+work is to **add continuous refresh + alerting**, not build a new monitoring
+subsystem.
 
 **Change:**
 
@@ -186,14 +186,20 @@ parallel one.
   hostname**. The SAN check is the guard that makes this safe: a
   Cloudflare-fronted origin returns the fallback cert (SAN mismatch) → treated
   as "no monitorable self-renewed cert here" → skipped, never alerted on.
-- Write the observed expiry into the existing `ssl_expiry_ts` in
-  `mgn_last_status_data` so the existing badge stays the single display.
+- Store the observed expiry in a dedicated `mgn_cert_expiry_ts` column — **not**
+  the existing `ssl_expiry_ts` inside `mgn_last_status_data`. Reusing that JSON
+  was the original plan, but it is rewritten wholesale by `check_status` jobs
+  (which rebuild the blob and only include `ssl_expiry_ts` when they find a
+  certbot cert on disk). Two writers with different key sets would clobber each
+  other, so the wire probe gets its own column. The overview surfaces it on its
+  own line (see UI) since the SSL tile doesn't render for these nodes anyway.
 - When days-remaining drops below a threshold (**default 21 days**, new plugin
   setting `server_manager_cert_expiry_warn_days`), send a **warning** email
   through the existing recipient chain. Track the alert with one timestamp
-  (below): alert once on crossing the threshold, re-alert on a coarse cadence
-  (every 3 days) while still under it, and clear when a fresh cert pushes the
-  date back out — so a stuck renewal nags without spamming every 15 minutes.
+  (`mgn_cert_alerted_ts`): alert once on crossing the threshold, re-alert on a
+  coarse cadence (every 3 days) while still under it, and clear when a fresh
+  cert pushes the date back out — so a stuck renewal nags without spamming
+  every 15 minutes.
 
 Why over-the-wire for this class:
 
@@ -226,21 +232,24 @@ Why over-the-wire for this class:
    Caddy cert the file-based check can't. It is *not* universal, though: for
    Cloudflare-fronted origins it returns a shared fallback cert, so a SAN-match
    guard scopes it to self-renewed, directly-exposed nodes.
-3. **Reuse the existing rails.** Scheduled task, node model, alert recipient
-   chain, `ssl_expiry_ts` field, and the expiry badge all already exist. The
-   new work is a probe on the tick plus an alert — not a monitoring subsystem,
-   and not a parallel expiry field.
+3. **Reuse the existing rails.** Scheduled task, node model, and alert
+   recipient chain all already exist. The new work is a probe on the tick plus
+   an alert — not a monitoring subsystem. (Expiry lands in a dedicated column
+   rather than the shared `ssl_expiry_ts` JSON only because `check_status`
+   rewrites that blob wholesale and the two writers would clobber each other.)
 4. **Alerting that ships on.** Defaults enabled, with a real recipient
    configured, or it protects nothing.
 
 ## Data model changes
 
-Expiry itself reuses the existing `mgn_last_status_data.ssl_expiry_ts` — no
-new expiry column. Only alert bookkeeping is new. Add to `mgn_managed_nodes`
-(via `$field_specifications`, auto-applied — no migration):
+Add to `mgn_managed_nodes` (via `$field_specifications`, auto-applied — no
+migration). Two columns: the observed expiry and the alert bookkeeping. (Expiry
+gets its own column rather than reusing `mgn_last_status_data.ssl_expiry_ts`
+because `check_status` rewrites that JSON wholesale — see the fix-#3 note.)
 
 | Column | Type | Purpose |
 |---|---|---|
+| `mgn_cert_expiry_ts` | timestamp, nullable | `notAfter` of the served cert, from the wire probe |
 | `mgn_cert_alerted_ts` | timestamp, nullable | Last time a cert-expiry warning was sent, for re-alert cadence; cleared when a fresh cert pushes the date back past threshold |
 
 New plugin setting (declared in `plugin.json`, seeded automatically):
@@ -251,16 +260,15 @@ New plugin setting (declared in `plugin.json`, seeded automatically):
 
 ## UI
 
-The node detail SSL tile already shows an "Expires …" badge (warning under 30
-days). No new UI is required for expiry display; the only change is that the
-uptime tick now keeps it fresh for directly-exposed nodes (including the Caddy
-DNS nodes, currently blank). Optionally, tighten the badge's warning threshold
-to read from `server_manager_cert_expiry_warn_days` so the badge and the alert
-agree.
+The node detail overview shows a "TLS cert: expires … (N days)" line
+(warning-styled under threshold) whenever `mgn_cert_expiry_ts` is set. This is a
+new line rather than reuse of the existing SSL tile, because that tile only
+renders when `mgn_ssl_state` (certbot provisioning) is populated — which it
+never is for the Caddy DNS nodes, exactly the class this feature exists for.
 
 ## Rollout & verification
 
-1. Apply schema (one column) + setting (Sync with Filesystem / `update_database`).
+1. Apply schema (two columns) + setting (Sync with Filesystem / `update_database`).
 2. Enable `mgn_uptime_enabled` on DNS + production nodes; set the alert email.
    *(Done for the two DNS nodes on 2026-07-02; both verified `up`.)*
 3. Verify the tick records `ssl_expiry_ts` for both DNS nodes (Caddy certs —
