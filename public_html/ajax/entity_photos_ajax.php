@@ -92,6 +92,7 @@ switch ($action) {
 		$file->set('fil_title', pathinfo($uploaded_file['name'], PATHINFO_FILENAME));
 		$file->set('fil_type', $uploaded_file['type']);
 		$file->set('fil_usr_user_id', $session->get_user_id());
+		$file->set('fil_source', File::SOURCE_ENTITY_PHOTO);
 		$file->save();
 
 		// Generate resized versions

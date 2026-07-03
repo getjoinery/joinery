@@ -17,7 +17,7 @@ class FileException extends SystemBaseException {}
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
- * @version 1.1.0
+ * @version 1.2.0
  */
 class File extends SystemBase {	public static $prefix = 'fil';
 	public static $tablename = 'fil_files';
@@ -32,6 +32,16 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	protected static $foreign_key_actions = [
 		'fil_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
 	];
+
+	// Origin tags for fil_source: a short, self-describing key saying where a file
+	// came from, stamped by whatever code created it. Opaque to File — it stores and
+	// filters on the string but attaches no behavior to any value. NULL means
+	// "unspecified / legacy." Subsystems that create files stamp one of these; a new
+	// creation site adds its own constant here.
+	const SOURCE_USER_UPLOAD      = 'user_upload';       // deliberate admin/user file upload
+	const SOURCE_ENTITY_PHOTO     = 'entity_photo';      // avatar / event / location / gallery photo
+	const SOURCE_EMAIL_ATTACHMENT = 'email_attachment';  // inbound-email attachment
+	const SOURCE_AI_CHAT_UPLOAD   = 'ai_chat_upload';    // file uploaded into a joinery_ai chat
 
 		/**
 	 * Field specifications define database column properties and validation rules
@@ -65,6 +75,7 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	    'fil_storage_driver' => array('type'=>'varchar(32)', 'is_nullable'=>false, 'default'=>"'local'"),
 	    'fil_sync_failed_count' => array('type'=>'int4', 'is_nullable'=>false, 'default'=>'0'),
 	    'fil_sync_last_attempt' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
+	    'fil_source' => array('type'=>'varchar(64)', 'is_nullable'=>true),
 	);
 
 public static function get_by_name($name, $search_deleted = false) {
@@ -1280,6 +1291,20 @@ class MultiFile extends SystemMultiBase {
 
 		if (isset($this->options['filename_like'])) {
 			$filters['fil_name'] = 'ILIKE \'%'.$this->options['filename_like'].'%\'';
+		}
+
+		// Origin filter: match exactly one source.
+		if (isset($this->options['source'])) {
+			$filters['fil_source'] = [$this->options['source'], PDO::PARAM_STR];
+		}
+
+		// Origin exclude: everything except one source. NULL (legacy/unspecified)
+		// files must survive an exclude, so the OR is parenthesized as its own group
+		// (split-parenthesis filter form) to keep precedence against other AND filters.
+		if (isset($this->options['source_not'])) {
+			$dblink = DbConnector::get_instance()->get_db_link();
+			$filters['(fil_source'] = "!= " . $dblink->quote($this->options['source_not']) .
+			                          " OR fil_source IS NULL)";
 		}
 
 		return $this->_get_resultsv2('fil_files', $filters, $this->order_by, $only_count, $debug);

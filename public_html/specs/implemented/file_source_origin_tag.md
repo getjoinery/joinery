@@ -1,6 +1,6 @@
 # File origin tag (`fil_source`) — generic file categorization
 
-**Status:** Draft — design in progress
+**Status:** Implemented
 **Layer:** core file model — `data/files_class.php` (`File` + `MultiFile`), the two
 core file-creation sites, and the core files browser (`adm/admin_files.php`)
 **Depends on:** nothing — this is a foundational file-layer capability.
