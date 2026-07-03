@@ -55,6 +55,7 @@ class NativeCalendarItemSource implements CalendarItemSource {
                 'visibility'          => $visibility,
                 'source'              => self::getKey(),
                 'source_key'          => 'native:cal-' . $entry->key,
+                'entry_id'            => (int)$entry->key,
             ]);
         }
 

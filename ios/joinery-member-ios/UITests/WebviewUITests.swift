@@ -1,8 +1,8 @@
 import XCTest
 
 /// Gate: member pages render inside the app through the bridged webview —
-/// the calendar is usable, orders and conversations load, and in-webview
-/// same-origin navigation stays in the app.
+/// orders and conversations load, and in-webview same-origin navigation
+/// stays in the app.
 final class WebviewUITests: XCTestCase {
 
     override func setUp() {
@@ -15,29 +15,6 @@ final class WebviewUITests: XCTestCase {
         app.signIn(email: TestEnv.email, password: TestEnv.password)
         app.expectSignedIn()
         return app
-    }
-
-    private func monthTitle(offset: Int) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "MMMM yyyy"
-        let date = Calendar.current.date(byAdding: .month, value: offset, to: Date())!
-        return formatter.string(from: date)
-    }
-
-    func testCalendarIsUsableInApp() {
-        let app = signedInApp()
-        app.tabBars.buttons["Calendar"].tap()
-
-        // The bridged page renders: current month title in the grid toolbar.
-        let webView = app.webViews.firstMatch
-        app.expect(webView.staticTexts[monthTitle(offset: 0)], timeout: 30, "current month title")
-
-        // Usable, not just visible: month navigation works in-webview.
-        webView.buttons["Next"].tap()
-        app.expect(webView.staticTexts[monthTitle(offset: 1)], timeout: 15, "next month after tapping Next")
-        webView.buttons["Today"].tap()
-        app.expect(webView.staticTexts[monthTitle(offset: 0)], timeout: 15, "back to current month")
     }
 
     func testOrdersLoads() {

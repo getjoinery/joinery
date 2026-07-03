@@ -21,6 +21,8 @@ targets:
         product: JoineryKit
       - package: JoineryKit
         product: JoineryMailKit
+      - package: JoineryKit
+        product: JoineryCalendarKit
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.getjoinery.member

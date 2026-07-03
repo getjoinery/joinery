@@ -21,7 +21,7 @@ Consequences: `CalendarItemSource` is a read-only contract (no write methods); t
 
 ## The calendar item
 
-`CalendarItem` (`includes/calendar/CalendarItem.php`) is the unit on the timeline — a value object, not necessarily a stored row. Fields: `start_utc`/`end_utc` (UTC instants), `all_day`, `type` (`event`/`booking`/`external`/`personal`), `title` (owner-visible only), `url` (owner-visible only), `blocks_availability`, `visibility` (`details`/`busy`), `source`, `source_key` (stable id `{source}:{record-id}` for redraw/diff, ICS UID, click-to-edit).
+`CalendarItem` (`includes/calendar/CalendarItem.php`) is the unit on the timeline — a value object, not necessarily a stored row. Fields: `start_utc`/`end_utc` (UTC instants), `all_day`, `type` (`event`/`booking`/`external`/`personal`), `title` (owner-visible only), `url` (owner-visible only), `blocks_availability`, `visibility` (`details`/`busy`), `source`, `source_key` (stable id `{source}:{record-id}` for redraw/diff, ICS UID, click-to-edit), and — on native entries only — the edit coordinates `entry_id` (the `cal_entries` row; the parent for a recurring occurrence) and `occurrence_date` (set only on virtual occurrences), so a consumer opens the right editor without parsing the `url`. At `busy` visibility the projection boundary strips `title`, `url`, and both edit coordinates.
 
 > **Note:** the stored native-entry model is `CalendarEntry` (`data/calendar_entry_class.php`, table `cal_entries`), which is distinct from the `CalendarItem` value object. `NativeCalendarItemSource` reads `CalendarEntry` rows and emits `CalendarItem` value objects.
 
@@ -55,6 +55,30 @@ There is exactly one upstream contract — items. "Busy time" is a derived view:
 ## Native entries and the personal calendar page
 
 `/profile/calendar` renders the `calendar_grid` component against the owner's aggregated item feed (`/ajax/calendar_feed`, `details` visibility). Native entries are created and edited there: click a day to start a new entry, click a native chip to edit it. A "blocking" entry removes its time from booking availability via the busy projection. Times are entered in the owner's timezone and stored as UTC.
+
+## API surface (native apps and page JS)
+
+Four core actions expose the personal calendar over `/api/v1` (session
+credential; ownership enforced server-side — a foreign or missing entry is
+always "Entry not found", no existence oracle). They share the exact write
+path with the web form: the `_calendar_set_fields` / `_calendar_set_recurrence`
+/ scope-split helpers in `logic/calendar_logic.php`.
+
+| Action | Purpose |
+|---|---|
+| `calendar_feed` | Aggregated items over a UTC range (`start`, `end`; defaults −7d…+45d) at `details` visibility: `{items: [CalendarItem::toArray()...], timezone}`. |
+| `calendar_entry` | One native entry shaped for an editor (`entry_id`): wall-clock `date`/`start_time`/`end_time` + `timezone`, flags, `is_recurring_parent`, `recurrence_description`, and the stored `recurrence` fields. |
+| `calendar_entry_save` | Create/update: `date`, `title`, `all_day`, `blocks`, `start_time`/`end_time` (`HH:MM[:SS]`), optional `timezone` (IANA; defaults to the profile zone), optional `recurrence` object (`type`, `interval`, `days_of_week`, `week_of_month`, `ends: never\|date\|count` with `end_date`/`count`). With `entry_id` + `occurrence_date` it is a scope-aware recurring edit (`scope: this\|future\|all`, defaulting to the safe `this`). |
+| `calendar_entry_delete` | Delete: standalone entries soft-delete; recurring parents take `scope` (`all` default; `this`/`future` require `occurrence_date`). |
+
+The wall-clock → UTC conversion happens server-side in the declared
+`timezone`, so clients never do timezone math; "ends after N occurrences" is
+converted to a stored end date by the same `nth_occurrence_date()` engine as
+the web form. `/ajax/calendar_feed` and `/ajax/calendar_entry_quick_save`
+remain the web grid's endpoints.
+
+The native iOS surface consuming these actions is **JoineryCalendarKit** —
+see [Mobile Apps](mobile_apps.md#joinerycalendarkit-native-calendar-module).
 
 ## Recurring native entries
 

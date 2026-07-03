@@ -517,7 +517,8 @@
             "url": "/profile/calendar",
             "order": 55,
             "permission": 0,
-            "icon": "calendar"
+            "icon": "calendar",
+            "nativeScreen": "calendar"
         },
         {
             "slug": "core-orders",
