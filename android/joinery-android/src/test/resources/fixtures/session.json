@@ -1,0 +1,13 @@
+{
+    "api_version": "1.0",
+    "success_message": "",
+    "data": {
+        "user_id": 4705,
+        "first_name": "AppDev",
+        "last_name": "PhaseTwo",
+        "display_name": "AppDev PhaseTwo",
+        "email": "appdev.phase2@inbox.dev.getjoinery.com",
+        "permission": 0,
+        "tier": null
+    }
+}

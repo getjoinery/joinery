@@ -1,0 +1,27 @@
+// Joinery Android workspace: the reusable core library (joinery-android) plus
+// the reference brand app (joinery-member-android). Mirrors ios/ — one repo,
+// core package + one thin per-app module that injects a JoineryConfig.
+pluginManagement {
+    repositories {
+        google {
+            content {
+                includeGroupByRegex("com\\.android.*")
+                includeGroupByRegex("com\\.google.*")
+                includeGroupByRegex("androidx.*")
+            }
+        }
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = "joinery-android-workspace"
+include ":joinery-android"
+include ":joinery-member-android"
