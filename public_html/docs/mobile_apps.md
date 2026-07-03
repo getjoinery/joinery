@@ -64,9 +64,11 @@ Response shape:
   entry in `admin_menus.json` or the plugin's `plugin.json` `profileMenu`
   (stored as `amu_native_screen` by the menu sync). A non-empty value flips
   that entry's destination to `{type: "native"}` with the entry's URL as the
-  fallback. The worked example is email: the inbound_email plugin declares
-  `"nativeScreen": "mailbox"`, apps with JoineryMailKit render the native
-  mail screens, and every other client keeps the web reader.
+  fallback. Two worked examples: the inbound_email plugin's mailbox entry
+  declares `"nativeScreen": "mailbox"` (rendered by JoineryMailKit), and the
+  core `core-calendar` entry in `admin_menus.json` declares
+  `"nativeScreen": "calendar"` (rendered by JoineryCalendarKit); every other
+  client keeps the web page.
 - **`tabs`** — the slugs pinned to this app's tab bar, in order; everything
   else belongs in the More list. Configured by the `app_navigation` setting: a
   JSON map of `client_app` (the client header value) → ordered slug list, with
@@ -265,6 +267,49 @@ change is immediately visible in both:
 Not in the module (the web reader remains for them): labels/move and
 create-folder, filter management, spam settings, compose file uploads.
 
+## JoineryCalendarKit (native calendar module)
+
+**JoineryCalendarKit** is the native personal-calendar surface — same
+package repo, third product (`ios/joinery-kit/Sources/JoineryCalendarKit`,
+depends on JoineryKit). An app adds the product and calls
+`JoineryCalendar.registerScreens()` in its init; the server's `calendar`
+navigation destination then renders these screens.
+
+The screens consume the core calendar actions (`docs/calendar.md` § API
+surface) — the same aggregation and write path as `/profile/calendar`, so
+every entry is immediately visible on both:
+
+- **Calendar screen** (`CalendarScreen` + `CalendarStore`) — a month grid
+  (leading-blank cells honoring the device's first weekday, colored event
+  dots per day, today ring, selected-day fill) over a selected-day agenda;
+  chevrons and horizontal swipe change months, "Today" returns; each month
+  fetches its window padded a week per side. Items group onto local days in
+  the device timezone (`CalDisplay.dayKeys`), all-day items first.
+- **Agenda rows** — native entries open the entry editor; projected items
+  (events, bookings) show their type chip and push their web page in the
+  authenticated webview (`WebScreen`) — the calendar never edits what it
+  doesn't own.
+- **Entry editor** (`EntryEditorSheet`) — title, date, all-day or timed,
+  block-availability toggle, and the full recurrence surface (frequency,
+  interval, weekly day chips, monthly same-day / ordinal-weekday, ends
+  never / on date / after N). Recurring edits and deletes ask for scope
+  (this / future / all) exactly like the web modals; a "this occurrence
+  only" save sends no recurrence (the series keeps its own). Wall-clock
+  values go up with the entry's stored timezone on edit, the device zone on
+  create; the server does all timezone math.
+
+Accessibility ids (`cal_*`) are the stable UI-test API: `cal_loading`,
+`cal_error`, `cal_retry`, `cal_grid`, `cal_month_title`, `cal_prev_month`,
+`cal_next_month`, `cal_today`, `cal_add`, `cal_agenda`, `cal_selected_day`,
+`cal_agenda_empty`, and in the editor `cal_entry_title`, `cal_entry_date`,
+`cal_entry_allday`, `cal_entry_start`, `cal_entry_end`, `cal_entry_blocks`,
+`cal_entry_repeats`, `cal_entry_save`, `cal_entry_cancel`,
+`cal_entry_delete`, `cal_entry_error`. (JoineryMailKit's `mail_*` ids follow
+the same convention.)
+
+Not in the module (the web calendar remains for them): `.ics` import and
+the quick-entry popover's time-prefix parsing.
+
 ## Standing up a new branded app
 
 1. Pick a `client_app` identifier (e.g. `joinery-member-ios`); the app sends
@@ -286,12 +331,13 @@ create-folder, filter management, spam settings, compose file uploads.
   single-use and expiry, app display mode, and lifetime coupling (key
   revocation and password change). Runs against dev with curl; see the
   harness header for usage.
-- JoineryKit + JoineryMailKit unit tests — on the mini (after syncing
-  `ios/` to the build area): `cd dev/joinery-ios/joinery-kit && xcodebuild
-  test -scheme JoineryKit-Package -destination "platform=iOS
+- JoineryKit + JoineryMailKit + JoineryCalendarKit unit tests — on the mini
+  (after syncing `ios/` to the build area): `cd dev/joinery-ios/joinery-kit
+  && xcodebuild test -scheme JoineryKit-Package -destination "platform=iOS
   Simulator,name=iPhone 16"` (JSON parser, form definition and navigation
-  parsing, visibility engine, submission bodies, error mapping, and mail
-  payload parsing — all against captured live fixtures).
+  parsing, visibility engine, submission bodies, error mapping, mail payload
+  parsing, and calendar payload parsing + month math — all against captured
+  live fixtures).
 - `tests/functional/ios/phase2_gate.sh` — the native-core gate: drives the
   JoineryMember XCUITest suites in the Simulator against dev, orchestrating
   server state per suite (probe field for the no-rebuild form-change proof,
@@ -305,7 +351,9 @@ create-folder, filter management, spam settings, compose file uploads.
   password every run.
 - `tests/functional/ios/phase3_gate.sh` — the navigation + webview gate:
   Phase 2 auth/form suites as regression, tab bar + More from the
-  navigation endpoint, calendar usable in-app, orders and conversations in
+  navigation endpoint, an entry create/delete round-trip on the native
+  calendar screens (the soft-deleted row verified in `cal_entries`), orders
+  and conversations in
   the webview, mailbox read + reply on the native mail screens (fixtures via
   `phase3_fixtures.php`:
   mailbox grant for the fixture user plus the `phase3.sender` store alias

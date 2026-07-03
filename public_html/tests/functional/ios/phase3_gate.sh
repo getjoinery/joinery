@@ -6,8 +6,9 @@
 # server-side state each leg needs:
 #   1. Regression: Phase 2 auth + account-form suites under the new shell
 #   2. Navigation: tab bar + More list from /api/v1/app/navigation
-#   3. Webviews: calendar usable, orders load, conversations via in-webview
-#      navigation
+#   3. Calendar: native month grid + entry create/delete round-trip, the
+#      soft-deleted row verified in cal_entries; then the remaining webview
+#      legs (orders load, conversations via in-webview navigation)
 #   4. Mailbox: grant + seeded message (local SMTP), read + reply in-app,
 #      reply arrival verified in iem_inbound_email_messages
 #   5. Menu probe: plugin profileMenu entry synced server-side appears with
@@ -21,7 +22,7 @@
 # {repo root}/ios/ (synced to the mini build area ~/dev/joinery-ios before
 # building).
 #
-# Version: 1.1.0
+# Version: 1.2.0
 
 set -u
 cd "$(dirname "$0")"
@@ -172,9 +173,23 @@ run_suite "Regression: account form submit" "JoineryMemberUITests/AccountFormUIT
 run_suite "Navigation shell (tabs + More from server)" \
     "JoineryMemberUITests/NavigationShellUITests/testTabsAndMoreRenderFromServerNavigation"
 
-# ---- 3. webviews ----------------------------------------------------------------
+# ---- 3. calendar (native) + remaining webviews -------------------------------------
 
-run_suite "Webview: calendar usable in-app" "JoineryMemberUITests/WebviewUITests/testCalendarIsUsableInApp"
+CAL_TITLE="NativeCal Probe $(date +%s)"
+run_suite "Calendar: native grid + entry CRUD" "JoineryMemberUITests/CalendarUITests" \
+    "TEST_RUNNER_JOINERY_CAL_TITLE='$CAL_TITLE'"
+
+# Server-side proof the round-trip hit cal_entries: the entry was created,
+# then soft-deleted by the in-app delete.
+CAL_ROW=$($PSQL "SELECT cal_calendar_entry_id FROM cal_entries
+                 WHERE cal_title = '$CAL_TITLE' AND cal_delete_time IS NOT NULL LIMIT 1")
+if [ -n "$CAL_ROW" ]; then
+    PASS_COUNT=$((PASS_COUNT+1))
+    echo "-- Calendar entry round-trip (server-side): PASS (cal id $CAL_ROW)"
+else
+    record_fail "calendar-entry-roundtrip (no soft-deleted row for probe title)"
+fi
+
 run_suite "Webview: orders load" "JoineryMemberUITests/WebviewUITests/testOrdersLoads"
 run_suite "Webview: conversations via in-webview navigation" \
     "JoineryMemberUITests/WebviewUITests/testConversationsLoadViaInWebviewNavigation"

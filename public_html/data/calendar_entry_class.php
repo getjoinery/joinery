@@ -418,6 +418,8 @@ class CalendarEntry extends SystemBase {
 				'visibility'          => $visibility,
 				'source'              => 'native',
 				'source_key'          => 'native:cal-' . $parent_id . '-' . $date,
+				'entry_id'            => (int)$parent_id,
+				'occurrence_date'     => $date,
 			]);
 		}
 

@@ -34,6 +34,13 @@ class CalendarItem {
     public $source = null;              // CalendarItemSource key that produced it
     public $source_key = null;          // stable id per item: "{source}:{record-id}"
 
+    // Native-entry edit coordinates (owner-visible only). Set by the native
+    // source so consumers can open the right editor without parsing the url:
+    // entry_id is the cal_entries row (the parent for a recurring occurrence),
+    // occurrence_date (Y-m-d) is present only on virtual occurrences.
+    public $entry_id = null;
+    public $occurrence_date = null;
+
     /** Default colour per type; a source may override via the `color` key. */
     private $color = null;
 
@@ -72,6 +79,8 @@ class CalendarItem {
             $copy = clone $this;
             $copy->title = null;
             $copy->url = null;
+            $copy->entry_id = null;
+            $copy->occurrence_date = null;
             $copy->visibility = self::VIS_BUSY;
             return $copy;
         }
@@ -90,6 +99,8 @@ class CalendarItem {
             'type'                => $this->type,
             'source_key'          => $this->source_key,
             'blocks_availability' => $this->blocks_availability,
+            'entry_id'            => $this->entry_id,
+            'occurrence_date'     => $this->occurrence_date,
         ];
     }
 }

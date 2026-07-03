@@ -1,6 +1,7 @@
 import SwiftUI
 import JoineryKit
 import JoineryMailKit
+import JoineryCalendarKit
 
 /// The Joinery member app: pure brand shell. All behavior lives in
 /// JoineryKit and its layered modules; this target supplies configuration
@@ -11,8 +12,10 @@ struct JoineryMemberApp: App {
 
     init() {
         // Native modules register their navigation screens; the server's
-        // routing table lights them up (screen "mailbox" → JoineryMailKit).
+        // routing table lights them up (screen "mailbox" → JoineryMailKit,
+        // screen "calendar" → JoineryCalendarKit).
         JoineryMail.registerScreens()
+        JoineryCalendar.registerScreens()
 
         // Deterministic UI-test startup: wipe stored credentials so every
         // test run begins signed out.
