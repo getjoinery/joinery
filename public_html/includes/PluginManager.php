@@ -1492,6 +1492,9 @@ class PluginManager extends AbstractExtensionManager {
                 'parent_slug' => null,
                 'location' => 'user_dropdown',
                 'visibility' => $item['visibility'] ?? 'in',
+                // App platform: names the native screen apps render for this
+                // entry (web page stays the fallback for older builds).
+                'nativeScreen' => $item['nativeScreen'] ?? null,
             ];
         }
 
@@ -1530,6 +1533,7 @@ class PluginManager extends AbstractExtensionManager {
             $icon = $entry['icon'];
             $setting_activate = $entry['settingActivate'];
             $disabled = (!empty($entry['disabled'])) ? 1 : 0;
+            $native_screen = $entry['nativeScreen'] ?? null;
 
             if ($existing_id !== false) {
                 if (!$overwrite) continue;
@@ -1541,6 +1545,7 @@ class PluginManager extends AbstractExtensionManager {
                         amu_order = ?,
                         amu_min_permission = ?,
                         amu_icon = ?,
+                        amu_native_screen = ?,
                         amu_setting_activate = ?,
                         amu_disable = ?,
                         amu_location = ?,
@@ -1554,6 +1559,7 @@ class PluginManager extends AbstractExtensionManager {
                     $entry['order'],
                     $permission,
                     $icon,
+                    $native_screen,
                     $setting_activate,
                     $disabled,
                     $entry['location'],
@@ -1563,8 +1569,8 @@ class PluginManager extends AbstractExtensionManager {
             } else {
                 $q = $dblink->prepare(
                     "INSERT INTO amu_admin_menus
-                        (amu_menudisplay, amu_slug, amu_defaultpage, amu_parent_menu_id, amu_order, amu_min_permission, amu_icon, amu_setting_activate, amu_disable, amu_location, amu_visibility)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                        (amu_menudisplay, amu_slug, amu_defaultpage, amu_parent_menu_id, amu_order, amu_min_permission, amu_icon, amu_native_screen, amu_setting_activate, amu_disable, amu_location, amu_visibility)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 );
                 $q->execute([
                     $entry['title'],
@@ -1574,6 +1580,7 @@ class PluginManager extends AbstractExtensionManager {
                     $entry['order'],
                     $permission,
                     $icon,
+                    $native_screen,
                     $setting_activate,
                     $disabled,
                     $entry['location'],

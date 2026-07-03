@@ -114,8 +114,9 @@ public struct NavigationShell: View {
     }
 
     /// Version-safe destination resolution: web renders in the webview;
-    /// native renders the named screen when this build knows it, else its
-    /// fallback URL (spec § Navigation endpoint).
+    /// native renders the named screen when this build knows it — the kit's
+    /// own screens first, then the app-registered NativeScreenRegistry —
+    /// else its fallback URL (spec § Navigation endpoint).
     @ViewBuilder
     private func destinationView(for entry: NavEntry) -> some View {
         switch entry.destination {
@@ -126,7 +127,12 @@ public struct NavigationShell: View {
             case "settings":
                 SettingsView(session: session, user: user, web: web)
             default:
-                if fallbackURL.isEmpty {
+                if let registered = NativeScreenRegistry.view(
+                    for: screen,
+                    context: NativeScreenContext(session: session, user: user, web: web)
+                ) {
+                    registered
+                } else if fallbackURL.isEmpty {
                     Text("Update the app to use \(entry.title).")
                         .foregroundStyle(.secondary)
                         .padding()

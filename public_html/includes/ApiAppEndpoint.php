@@ -15,7 +15,7 @@
  * user_dropdown location) — the same accessor every web theme renders — so a
  * new plugin profileMenu entry appears in shipped apps with no release.
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 
 class ApiAppEndpoint {
@@ -82,12 +82,21 @@ class ApiAppEndpoint {
 			$url = ($defaultpage !== '' && $defaultpage[0] === '/')
 				? $defaultpage : '/admin/' . $defaultpage;
 
+			// An entry that names a native screen (amu_native_screen, declared
+			// as nativeScreen in its menu source) flips to a native destination;
+			// the web page rides along as the fallback for clients that don't
+			// know the screen (the version-skew rule).
+			$native_screen = trim((string)$item->get('amu_native_screen'));
+			$destination = ($native_screen !== '')
+				? array('type' => 'native', 'screen' => $native_screen, 'fallback_url' => $url)
+				: array('type' => 'web', 'url' => $url);
+
 			$entries[] = array(
 				'slug' => $slug,
 				'title' => $item->get('amu_menudisplay'),
 				'icon' => $item->get('amu_icon'),
 				'order' => (int)$item->get('amu_order'),
-				'destination' => array('type' => 'web', 'url' => $url),
+				'destination' => $destination,
 			);
 		}
 

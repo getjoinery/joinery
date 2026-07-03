@@ -1,13 +1,19 @@
 import SwiftUI
 import JoineryKit
+import JoineryMailKit
 
 /// The Joinery member app: pure brand shell. All behavior lives in
-/// JoineryKit; this target supplies configuration only.
+/// JoineryKit and its layered modules; this target supplies configuration
+/// and module registration only.
 @main
 struct JoineryMemberApp: App {
     private static let keychainService = "com.getjoinery.member"
 
     init() {
+        // Native modules register their navigation screens; the server's
+        // routing table lights them up (screen "mailbox" → JoineryMailKit).
+        JoineryMail.registerScreens()
+
         // Deterministic UI-test startup: wipe stored credentials so every
         // test run begins signed out.
         if ProcessInfo.processInfo.arguments.contains("--reset-auth") {

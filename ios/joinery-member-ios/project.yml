@@ -18,6 +18,9 @@ targets:
     sources: [Sources]
     dependencies:
       - package: JoineryKit
+        product: JoineryKit
+      - package: JoineryKit
+        product: JoineryMailKit
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.getjoinery.member
