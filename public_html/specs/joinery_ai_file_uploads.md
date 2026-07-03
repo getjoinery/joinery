@@ -5,7 +5,9 @@ transport), C (recipe attach-point: chat ships first, recipe attachments land wi
 taint-gate change, not before), D (limits: image-handling posture settled, numeric caps
 tunable), E (privacy: inherit `isPrivate()` as-is) are all decided. The eight-point threat
 model below is worked through; §1's tool-authority crux is resolved (§1a). What remains is
-building the feature itself.
+building the feature itself — v1 scope is **chat only, images + PDF + plaintext family**
+(Decision A+B phasing), and the must-verify list for the build is in
+**Implementation notes** near the end.
 
 **Prerequisite platform hardening — LANDED IN CODE (not part of the feature build):**
 The review found three live, pre-existing holes the feature would have inherited; all are
@@ -101,6 +103,23 @@ diagrams) or when the user asks the model to *look* at it. Both
 `ChatRunner::buildHistoryMessages()` and `RecipeRunner::run()` call this one encoder,
 so the block shape can never drift between surfaces.
 
+**Per-chat override — original files (`aic_attachment_mode`).** The user can flip a
+chat from the extract-text default to **original mode**, where a file is sent whole
+whenever the model has a native door for it: every PDF goes as a `document` block
+(layout, tables, and charts survive; the model sees the real pages), and HTML goes as
+raw markup in an inert text block instead of stripped visible text. Types with no
+native door are unaffected — docx/xlsx are still extracted (no provider ingests them
+natively), csv/txt/md/json extraction *is* the full content, and images are always
+sent whole in both modes. The mode is one more input to the same encoder — the
+routing table's "default transport" column is what it varies; nothing else about the
+pipeline changes. Stored per conversation (`aic_attachment_mode`: `extract` default /
+`original`), edited in the existing per-chat settings sheet alongside model and
+temperature. The mode is **read at send time and applies to the whole history that
+turn** — `buildHistoryMessages()` rebuilds every turn, so flipping the mode re-routes
+all of the chat's attachments on the next send, exactly like changing the model or
+temperature; nothing is frozen per-attachment. The trade is explicit: original mode
+buys fidelity at per-page vision cost, which is exactly why extract stays the default.
+
 **Extraction tooling** (pure-PHP Composer — no per-node system packages):
 `smalot/pdfparser` for PDF text; PhpOffice (`PhpWord`/`PhpSpreadsheet`) for docx/xlsx;
 native for csv/txt/md/json; tag-strip for html; scanned-PDF OCR (Tesseract) deferred.
@@ -119,16 +138,21 @@ and runs with XML entity resolution disabled under size/time/memory caps (Securi
   Fireworks inherits the fix (it only overrides vendor seams). PDFs as documents are
   not universally supported here — but the encoder routes PDFs to extracted **text**
   by default (§1), so this path mainly carries images; a non-vision model is refused
-  at ingress per §3.
+  at ingress per §3, and an original-mode PDF (§1) is refused the same way when the
+  model lacks the `document` flag — this path never needs a document translation.
 
 ### 3. Per-model vision capability (net-new metadata)
 
 No vision/capability flag exists anywhere today (provider `MODELS` consts carry only
-pricing). Add a `vision` flag to each model entry (`AnthropicProvider::MODELS`
-`:53-57`, `FireworksProvider::MODELS` `:42-46`; local model configurable). When the
-selected model lacks it, the ingress path rejects the upload with a clear message
-("The current model can't read images — switch to a Claude model") rather than
-sending a block the model will ignore or error on.
+pricing). Add two flags to each model entry (`AnthropicProvider::MODELS`
+`:53-57`, `FireworksProvider::MODELS` `:42-46`; local model configurable): `vision`
+(accepts image blocks) and `document` (accepts native PDF `document` blocks —
+Anthropic only today). When the selected model lacks the needed flag, the ingress
+path rejects the upload with a clear message ("The current model can't read images —
+switch to a Claude model") rather than sending a block the model will ignore or error
+on. The `document` flag gates two cases the same way: a scanned PDF's vision fallback,
+and every PDF in an original-mode chat (§1) — an explicit mode choice fails loudly,
+never silently downgrades back to extraction.
 
 ### 4. Untrusted content
 
@@ -167,7 +191,9 @@ Recipes have **no run-time user input** — the user turn is the hardcoded liter
 So recipe uploads need a new attach-point (see Decision C). Whichever we pick, the
 send-side change is one line: replace the hardcoded seed message with a block array
 built by the **same encoder** — the recipe's text instruction plus its attachment
-blocks. No provider or loop change beyond the shared core.
+blocks. No provider or loop change beyond the shared core. The extract-vs-original
+mode (§1) carries over as a per-recipe field (`rcp_attachment_mode`) when this phase
+lands — same values, same encoder input, same `document` capability gate.
 
 ---
 
@@ -183,10 +209,17 @@ we have a safe extractor or a vision path for it. Formats with neither door
 (`.zip`, `.mp4`, `.exe`) are rejected at ingress — accepting them would only surface
 an error.
 
-Open sub-point (phasing): ship **images + PDF + plaintext family first**, with
-docx/xlsx as a fast follow (they add the PhpOffice dependency and the ZIP/XXE parser
-surface — Security §2–3), or land all extractors at once. Recommend the phased order —
-it exercises the whole shared core and the highest-value types first.
+Text-first is the **default**, not a ceiling: a per-chat `aic_attachment_mode`
+setting lets the user send original files instead where a native door exists (PDF as
+`document` block, HTML as raw markup — §1). It changes only which door the encoder
+picks, gated by the model's `document` capability (§3); the accepted-type set and
+ingress rejection are identical in both modes.
+
+**Phasing — decided:** ship **images + PDF + plaintext family first** (v1);
+docx/xlsx are a fast follow in their own pass (they add the PhpOffice dependency and
+the ZIP/XXE parser surface — Security §2–3, including the install-time XXE assertion
+test). The phased order exercises the whole shared core and the highest-value types
+first, and keeps the office-parser surface out of the initial change.
 
 ### Decision C — Where a recipe file attaches *(resolved: C1 + C4 phasing)*
 
@@ -240,11 +273,12 @@ Everything the feature touches, decided once:
 
 | Site | Change |
 |---|---|
-| `includes/AiAttachment.php` (new) | `File`/bytes → canonical block(s); type+size policy; untrusted framing |
+| `includes/AiAttachment.php` (new) | `File`/bytes → canonical block(s); type+size policy; untrusted framing; extract-vs-original routing per `aic_attachment_mode` |
 | `AnthropicProvider.php` | none (passthrough verified `:139`) |
 | `OpenAiCompatibleProvider::appendCanonicalBlocks()` `:391-438` | add `image` → `image_url` translation; Fireworks inherits |
-| `AnthropicProvider::MODELS` `:53-57`, `FireworksProvider::MODELS` `:42-46` | add `vision` capability flag; local model configurable |
-| model validation (`ChatControls.php:45`, `chat_controls_logic.php:22`) | gate uploads on selected model's `vision` flag |
+| `AnthropicProvider::MODELS` `:53-57`, `FireworksProvider::MODELS` `:42-46` | add `vision` + `document` capability flags; local model configurable |
+| model validation (`ChatControls.php:45`, `chat_controls_logic.php:22`) | gate uploads on selected model's `vision`/`document` flags |
+| `data/ai_conversations_class.php` + per-chat settings sheet | `aic_attachment_mode` column (`extract` default / `original`), edited alongside model/temperature |
 | `AiPromptBuilder::untrustedInputBlock()` | frame uploaded content as untrusted (reused) |
 | `data/ai_conversation_messages_class.php` | attachment-link storage with `in_context` bit (compactor-aligned) |
 | `ChatRunner::buildHistoryMessages()` `:213-219` + `normalizeAlternating()` `:231` | emit + tolerate block-array content |
@@ -381,9 +415,10 @@ Decisions:
 - **HTML text extraction uses `DOMDocument` + `LIBXML_NONET`, dropping `<script>`/`<style>`/
   `<head>` and taking visible text — never `strip_tags()`.** `strip_tags()` keeps the CSS/JS
   *bodies* as garbage; on a representative page it produced ~6.7 KB of noise vs `DOMDocument`'s
-  328 bytes of clean content. It is the worst-of-both "halfway" option. A future "upload full
-  HTML" mode (raw markup passed through as an inert text block, under the untrusted-input
-  framing) is a product toggle, not a security path, and carries no extra parser risk.
+  328 bytes of clean content. It is the worst-of-both "halfway" option. Original mode
+  (`aic_attachment_mode`, §1) passes the raw markup through as an inert text block under the
+  untrusted-input framing — a routing choice, not a security path: the bytes are never parsed
+  at all, so it carries no extra parser risk.
 - **PhpOffice: pin a known-good version and rely on its built-in XXE scanner + libxml
   default-off; do not hand-roll a redundant per-parse entity lockdown** (that would be a
   band-aid fighting the library's own guard). Add **one install-time assertion test** that
@@ -516,7 +551,53 @@ guarantee by construction.
 
 Cost abuse is unchanged: uploads inflate tokens (vision PDFs especially); per-file size
 caps, per-message count caps (Decision D), and the text-first default shrink the blast
-radius, and `CostGuard` / monthly token caps remain the economic backstop.
+radius, and `CostGuard` / monthly token caps remain the economic backstop. Original mode
+(§1) raises per-file cost by design — the same caps and `CostGuard` bound it, and it is
+the chat owner's own spend either way.
+
+## Implementation notes — the invariants the platform cannot enforce for you
+
+Most of this spec's security posture is enforced by construction (`File::save()`
+detection, `serve_from_path()` headers, `is_owned_by()` semantics) — an implementation
+cannot accidentally undo it. The following is the short list that **is** caller
+discipline, and it is where review attention goes. Treat each as a requirement, not a
+suggestion:
+
+1. **Ownership is checked twice, and only via `is_owned_by()`.** Attach time:
+   `$file->is_owned_by($session_user_id)` **and** the conversation is owned by the same
+   user. Send time (detached worker, **no session** — `is_viewable()` throws there):
+   reload the `File`, require `is_owned_by($run_owner_id)` before `read_bytes()`. Do
+   not trust the attachment-link row alone at send time; do not substitute
+   `is_viewable()` or `is_owner_or_admin()` at either site (§5 explains why they are
+   traps, not alternatives).
+2. **Every attachment block goes through the one encoder, and the encoder always
+   emits the untrusted-input framing.** No call site builds an image/document/text
+   attachment block by hand — if a second place constructs blocks, that is the defect,
+   independent of whether its output looks correct.
+3. **Extraction runs only in the `timeout` + `memory_limit` subprocess** (§4). Do not
+   "simplify" to `ini_set('memory_limit')` in the worker — an in-process memory fatal
+   is uncatchable and kills the worker's cleanup path; the subprocess is what makes the
+   cap safe. The parent must handle exit codes 124 (timeout) and 137 (OOM/kill) by
+   marking the attachment un-extractable and continuing the turn.
+4. **Capability gating happens at ingress, with a user-facing message** (§3). A
+   missing `vision`/`document` flag rejects the upload at `chat_send`; it never
+   silently drops the block, silently downgrades original mode to extraction, or lets
+   the provider return a confusing API error.
+5. **Type decisions key on detected MIME only.** The encoder routes on magic-byte
+   detection (stored `fil_type` is detection-backed per §8); the client's filename,
+   extension, and claimed Content-Type are display metadata. No `strpos('image/')`,
+   no extension maps.
+6. **Platform conventions apply to the new pieces.** The attachment-link table is a
+   normal data class: schema lives in `$field_specifications` (never a migration),
+   with a deletion strategy (`$foreign_key_actions` — deleting a conversation or a
+   message must not orphan links or leak `File` rows). `aic_attachment_mode` is a
+   field-spec addition with a plain-value default (`'extract'`). The composer UI is
+   vanilla JS in the existing theme; the settings-sheet field follows the existing
+   sheet's pattern. `smalot/pdfparser` arrives via Composer under the existing
+   `composerAutoLoad` setting, not a system package.
+
+When the build is done, verify each item above against the diff explicitly — they are
+exactly the points a plausible-looking implementation gets wrong.
 
 ## Out of scope (v1)
 
