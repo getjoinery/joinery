@@ -10,7 +10,7 @@ screens, flip one navigation route.
 the server-side mailbox API is written once and consumed by both apps, and
 the screen inventory and UX model are identical on both. Only the rendering
 language differs (Swift vs Kotlin — the platforms share no client code by
-prior decision, `specs/android_app_platform.md`). Splitting per platform
+prior decision, `specs/implemented/android_app_platform.md`). Splitting per platform
 would duplicate the API contract and screen list and let them drift.
 
 ## Dependencies
@@ -20,7 +20,7 @@ would duplicate the API contract and screen list and let them drift.
 - `specs/implemented/inbound_email_profile_mailbox.md` — the member grant surface, the
   grant-authorized attachment rule, and the web page that remains the
   fallback destination.
-- `specs/implemented/ios_app_platform.md` / `specs/android_app_platform.md` — the
+- `specs/implemented/ios_app_platform.md` / `specs/implemented/android_app_platform.md` — the
   navigation routing table (native screen + `fallback_url`) and the kits
   these modules plug into.
 

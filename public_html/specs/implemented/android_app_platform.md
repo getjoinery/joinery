@@ -119,8 +119,10 @@ upgrade screen with a Play Store deep link. Minimums per app in the
 ## Delivery phases & test gates
 
 Strictly sequential; each later gate re-runs earlier suites as regression.
-Every phase runs in the emulator against `dev.getjoinery.com`; a physical
-device is needed only for final Play validation.
+Every phase runs in the emulator against `dev.getjoinery.com`. Shipping the
+reference app to Google Play — branding, store assets, signing, closed
+testing, and the physical-device review gate — is its own spec,
+`specs/android_member_app_release.md`.
 
 **Phase 0 (dependency):** the server platform from
 `specs/implemented/ios_app_platform.md` Phase 1 (navigation endpoint, bridge, app mode)
@@ -149,15 +151,6 @@ appears without a release; revoking the app's session from the web signs out
 both layers; external links leave the app; system back behaves correctly
 across webview history and shell navigation.
 
-### Phase 3 — Reference app ships
-
-Joinery member app branding, Play Store assets, closed testing track,
-review. Login-only (registration toggle off), so Play's account-deletion
-policy is not triggered.
-
-**Gate:** on a physical device — install → sign in → every navigation entry
-reachable and chrome-less; Play review passes.
-
 ## Dependencies
 
 - `specs/implemented/ios_app_platform.md` — the server pieces (navigation endpoint,
@@ -167,8 +160,9 @@ reachable and chrome-less; Play review passes.
 
 ## Consumers
 
-- **Joinery member app for Android** — the reference app, delivered by this
-  spec.
+- **Joinery member app for Android** — the reference app; the platform is
+  built and gate-tested here, and its Play Store release is
+  `specs/android_member_app_release.md`.
 - **ScrollDaddy Android** (`specs/scrolldaddy_android_app.md`) — adds the
   VpnService DNS-filtering layer on this platform.
 

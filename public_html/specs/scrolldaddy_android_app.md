@@ -6,7 +6,7 @@ automatically with safe revert, and hard-block selected sites at the
 connection level.
 
 **This app is a consumer of the Joinery Android app platform**
-(`specs/android_app_platform.md`). Everything account- and shell-shaped —
+(`specs/implemented/android_app_platform.md`). Everything account- and shell-shaped —
 native login, password reset, account forms, server-driven navigation,
 settings, authenticated webviews of `/profile` pages, the 426 upgrade gate —
 comes from `joinery-android` and the platform's server pieces, and is
@@ -78,13 +78,13 @@ what lets the Play Store release ship before the native editor (see phases).
 ## Architecture
 
 One ScrollDaddy-specific module plus the app shell, on top of
-`joinery-android` (from `specs/android_app_platform.md`). Repo:
+`joinery-android` (from `specs/implemented/android_app_platform.md`). Repo:
 `~/dev/scrolldaddy-android` on the Mac mini (toolchain and SSH workflow per
 the platform spec).
 
 | Layer | Module | Reusable for | Contents |
 |---|---|---|---|
-| Core | **`joinery-android`** | any app on any Joinery deployment | Specified and delivered by `specs/android_app_platform.md` |
+| Core | **`joinery-android`** | any app on any Joinery deployment | Specified and delivered by `specs/implemented/android_app_platform.md` |
 | DNS filtering | **`dnsfilter-android`** | any ScrollDaddy-style deployment (e.g. NetworkSentry) | Device registration, native block editor screens (always-on + scheduled), category/service/custom-rule screens with server-driven tier gates, the `VpnService` (standard + strict modes), protection-level control |
 | Brand | **ScrollDaddy app module** | — | Application ID, theme, deployment base URL, `client_app` id (`scrolldaddy-android`), Play Store assets |
 
@@ -100,7 +100,7 @@ Design rules carried over from the web product:
 ## Server-side work
 
 None beyond the platform's pieces (delivered by `specs/implemented/ios_app_platform.md`,
-consumed via `specs/android_app_platform.md`). The ScrollDaddy surface is in
+consumed via `specs/implemented/android_app_platform.md`). The ScrollDaddy surface is in
 place: the full `dns_filtering/` action surface including the hard-block
 hostname list in device responses. In-app billing — server and client — is
 its own spec, `specs/mobile_app_billing.md`, consumed post-launch.
@@ -148,7 +148,7 @@ uninstall clears it.
 ## Delivery phases & test gates
 
 **Phase 0 (dependency): the Android platform ships first** —
-`joinery-android` and its gates per `specs/android_app_platform.md` (which
+`joinery-android` and its gates per `specs/implemented/android_app_platform.md` (which
 itself depends on the server pieces from `specs/implemented/ios_app_platform.md`).
 
 The ScrollDaddy phases are strictly sequential after that; each gate re-runs
