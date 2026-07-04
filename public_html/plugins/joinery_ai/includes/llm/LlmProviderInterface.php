@@ -55,4 +55,15 @@ interface LlmProviderInterface {
      * sending sensitive-looking text to a non-private model. It is never a gate.
      */
     public function isPrivate(): bool;
+
+    /**
+     * What attachment block kinds this model can consume, as
+     *   ['vision' => bool, 'document' => bool]
+     * where 'vision' means it accepts image blocks and 'document' means it accepts
+     * native PDF `document` blocks (Anthropic only today). A model missing the
+     * needed flag rejects the upload at ingress with a clear message rather than
+     * sending a block the model will ignore or error on — the file-upload spec's
+     * fail-loud rule. Unknown models return both false (the safe side).
+     */
+    public function modelCapabilities(string $model): array;
 }

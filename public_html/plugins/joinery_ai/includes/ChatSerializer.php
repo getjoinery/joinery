@@ -1,6 +1,7 @@
 <?php
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_message_attachments_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRender.php'));
 
 /**
@@ -83,6 +84,7 @@ class ChatSerializer {
             'error'          => (string)$msg->get('aim_error'),
             'created_time'   => (string)$msg->get('aim_create_time'),
             'pending_action' => $pending_out,
+            'attachments'    => AiMessageAttachment::displayListForMessage((int)$msg->key),
             'tool_calls'     => self::toolCalls($msg->get('aim_tool_calls')),
             'usage'          => [
                 'input_tokens'  => $in,

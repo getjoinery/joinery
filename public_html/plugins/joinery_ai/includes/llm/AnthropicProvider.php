@@ -56,6 +56,17 @@ class AnthropicProvider implements LlmProviderInterface {
         'claude-haiku-4-5'  => 'Claude Haiku 4.5 ($1/$5 per Mtok)',
     ];
 
+    /**
+     * Attachment capability per model: 'vision' accepts image blocks, 'document'
+     * accepts native PDF `document` blocks. Every current Claude model does both.
+     * See modelCapabilities() and the file-upload spec §3.
+     */
+    const MODEL_CAPABILITIES = [
+        'claude-opus-4-7'   => ['vision' => true, 'document' => true],
+        'claude-sonnet-4-6' => ['vision' => true, 'document' => true],
+        'claude-haiku-4-5'  => ['vision' => true, 'document' => true],
+    ];
+
     /** @var string */
     private $api_key;
 
@@ -82,6 +93,11 @@ class AnthropicProvider implements LlmProviderInterface {
     /** General cloud provider — not classified private; triggers the chat warning. */
     public function isPrivate(): bool {
         return false;
+    }
+
+    /** Image + native-PDF capable across the catalog; unknown ids fall to false. */
+    public function modelCapabilities(string $model): array {
+        return self::MODEL_CAPABILITIES[$model] ?? ['vision' => false, 'document' => false];
     }
 
     public function models(): array {

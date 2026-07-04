@@ -24,6 +24,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatAsync.p
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatControls.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatTurn.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/CostGuard.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatAttachmentIngest.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderException.php'));
 
 function chat_send_fail(string $msg): void {
@@ -47,10 +48,13 @@ if (!(string)Globalvars::get_instance()->get_setting('joinery_ai_chat_enabled'))
 $message = trim((string)LibraryFunctions::fetch_variable_local($_POST, 'message', ''));
 $conversation_id = (int)LibraryFunctions::fetch_variable_local($_POST, 'conversation_id', 0);
 
-if ($message === '') chat_send_fail('Message cannot be empty.');
+$has_uploads = ChatAttachmentIngest::hasUploads();
+if ($message === '' && !$has_uploads) chat_send_fail('Message cannot be empty.');
 if (mb_strlen($message) > 8000) chat_send_fail('Message is too long.');
 
-// Load (and authorize) or create the conversation.
+// Load (and authorize) or build the conversation. A NEW conversation is built in
+// memory but NOT saved until attachments validate, so a rejected upload never
+// leaves an empty thread behind.
 $is_new = false;
 if ($conversation_id > 0) {
     $conversation = new AiConversation($conversation_id, true);
@@ -67,11 +71,22 @@ if ($conversation_id > 0) {
     $conversation->set('aic_owner_user_id', $uid);
     $conversation->set('aic_model', ChatRunner::defaultModel());
     ChatControls::seedNewConversation($conversation, $_POST);
-    $conversation->set('aic_title', ChatTurn::deriveTitle($message));
+    $title_seed = $message !== '' ? $message : 'New chat';
+    $conversation->set('aic_title', ChatTurn::deriveTitle($title_seed));
+    $is_new = true;
+}
+
+// Validate uploads against the conversation's model + attachment mode BEFORE
+// persisting anything (fail-loud on type/size/capability). Held in memory for
+// the commit after the user message exists.
+$attach = ChatAttachmentIngest::prepare($conversation);
+if (!$attach['ok']) chat_send_fail($attach['error']);
+$prepared_attachments = $attach['prepared'];
+
+if ($is_new) {
     $conversation->prepare();
     $conversation->save();
     $conversation->load();
-    $is_new = true;
 }
 
 // Plugin-wide monthly ceiling (recipes + chat). Fail before spending tokens.
@@ -86,7 +101,8 @@ try {
 // valid, alternating history.
 ChatTurn::clearDanglingPending($conversation);
 
-// Persist the user's message (complete on insert).
+// Persist the user's message (complete on insert; content may be empty when the
+// turn is attachments-only).
 $user_msg = new AiConversationMessage(NULL);
 $user_msg->set('aim_aic_conversation_id', (int)$conversation->key);
 $user_msg->set('aim_role', AiConversationMessage::ROLE_USER);
@@ -94,6 +110,10 @@ $user_msg->set('aim_content', $message);
 $user_msg->prepare();
 $user_msg->save();
 $user_msg->load();
+
+// Store + link the validated attachments to this message (private File rows,
+// text extracted once in the subprocess).
+ChatAttachmentIngest::commit($prepared_attachments, (int)$user_msg->key, $uid);
 
 // Create the assistant placeholder the page will poll. It is RUNNING until the
 // turn (below) finalizes it.
@@ -116,7 +136,7 @@ $payload = [
     'message_id'      => (int)$assistant_msg->key,
     'is_new'          => $is_new,
     'title'           => $conversation->get('aic_title'),
-    'user_html'       => ChatRender::userBubble($message, $user_time),
+    'user_html'       => ChatRender::userBubble($message, $user_time, (int)$user_msg->key),
 ];
 
 if (ChatAsync::canDetach()) {

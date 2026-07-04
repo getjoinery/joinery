@@ -19,7 +19,8 @@
         "getbrevo/brevo-php": "^2.0",
         "resend/resend-php": "^0.10",
         "mailjet/mailjet-apiv3-php": "^1.5",
-        "bytestream/horde-imap-client": "^2.34"
+        "bytestream/horde-imap-client": "^2.34",
+        "smalot/pdfparser": "^2.0"
     },
     "config": {
         "allow-plugins": {

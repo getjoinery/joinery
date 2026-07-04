@@ -11,7 +11,10 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
  * The FK column follows the {prefix}_{source_prefix}_{entity}_id convention
  * (aim_aic_conversation_id → aic_conversations) so the deletion system
  * auto-detects the parent and cascades when a conversation is permanently
- * deleted. Not $ai_readable.
+ * deleted. Deleting a conversation loads each message via permanent_delete (not a
+ * flat cascade) so the recursion reaches each message's own children —
+ * attachment-link rows, which in turn clean up their uploaded File bytes. Not
+ * $ai_readable.
  */
 class AiConversationMessageException extends SystemBaseException {}
 
@@ -32,7 +35,7 @@ class AiConversationMessage extends SystemBase {
     const STATUS_FAILED   = 'failed';
 
     protected static $foreign_key_actions = [
-        'aim_aic_conversation_id' => ['action' => 'cascade'],
+        'aim_aic_conversation_id' => ['action' => 'permanent_delete'],
     ];
 
     public static $field_specifications = array(
@@ -57,6 +60,33 @@ class AiConversationMessage extends SystemBase {
             throw new SystemAuthenticationError(
                 'Joinery AI chat messages require permission level 5 to write.');
         }
+    }
+
+    /**
+     * Permanently delete this message and clean up its attachment links (which in
+     * turn delete the uploaded File bytes). The deletion-rule auto-detector can't
+     * reach the attachment table from a message FK — the pattern
+     * {prefix}_{src}_{entity}_id would resolve `aia_aim_message_id` to the
+     * non-existent `aim_messages`, not `aim_conversation_messages` — so this edge
+     * is handled explicitly here rather than by an auto-registered rule. Reached
+     * both on a direct message delete and when a conversation is deleted (its
+     * aic→aim rule is `permanent_delete`, which loads each message and calls this).
+     *
+     * A link's permanent_delete() is let to propagate rather than caught here: if
+     * it fails, this message must NOT be deleted out from under a still-live
+     * attachment link (that would leave the link referencing a deleted message
+     * with no way to ever be cleaned up). The whole cascade runs inside one
+     * transaction (SystemBase::permanent_delete()), so an uncaught failure rolls
+     * everything back instead of committing a partial delete.
+     */
+    public function permanent_delete($debug = false) {
+        require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_message_attachments_class.php'));
+        $links = new MultiAiMessageAttachment(['message_id' => (int)$this->key], []);
+        $links->load();
+        foreach ($links as $link) {
+            $link->permanent_delete($debug);
+        }
+        return parent::permanent_delete($debug);
     }
 
 }

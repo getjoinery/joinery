@@ -71,6 +71,19 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
         return true;
     }
 
+    /**
+     * The local host's vision support is host-dependent (a multimodal model like
+     * llava/qwen-vl accepts images; a text-only one does not), so it is declared
+     * by the joinery_ai_local_vision setting rather than assumed. Native PDF
+     * `document` blocks are not part of the OpenAI-compatible wire shape, so
+     * 'document' is always false here — an original-mode PDF is refused for a
+     * local model, exactly like a scanned-PDF vision fallback.
+     */
+    public function modelCapabilities(string $model): array {
+        $vision = (string)Globalvars::get_instance()->get_setting('joinery_ai_local_vision') === '1';
+        return ['vision' => $vision, 'document' => false];
+    }
+
     public function defaultModel(): string {
         return $this->model;
     }
@@ -392,11 +405,24 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
         $text_parts = [];
         $tool_calls = [];
         $tool_results = [];
+        $image_parts = [];   // OpenAI multimodal image_url parts (user role only)
 
         foreach ($blocks as $block) {
             $type = $block['type'] ?? '';
             if ($type === 'text') {
                 $text_parts[] = (string)($block['text'] ?? '');
+            } elseif ($type === 'image') {
+                // Canonical image block -> OpenAI image_url data URI. base64 sources
+                // are what the attachment encoder emits; any other source shape is
+                // skipped (this wire format has no URL-fetch or file-id door).
+                $src = $block['source'] ?? [];
+                if (is_array($src) && ($src['type'] ?? '') === 'base64'
+                        && ($src['media_type'] ?? '') !== '' && ($src['data'] ?? '') !== '') {
+                    $image_parts[] = [
+                        'type'      => 'image_url',
+                        'image_url' => ['url' => 'data:' . $src['media_type'] . ';base64,' . $src['data']],
+                    ];
+                }
             } elseif ($type === 'tool_use') {
                 $tool_calls[] = [
                     'id'       => $block['id'] ?? '',
@@ -423,9 +449,17 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
             return;
         }
 
-        // user role: emit any plain text, then each tool_result as a tool message.
+        // user role: emit any plain text (+ inline images), then each tool_result
+        // as a tool message. With images present, OpenAI requires the array
+        // content shape mixing text and image_url parts; without them, a plain
+        // string is sent as before.
         $text = implode('', $text_parts);
-        if ($text !== '') {
+        if ($image_parts) {
+            $parts = [];
+            if ($text !== '') $parts[] = ['type' => 'text', 'text' => $text];
+            foreach ($image_parts as $ip) $parts[] = $ip;
+            $messages[] = ['role' => 'user', 'content' => $parts];
+        } elseif ($text !== '') {
             $messages[] = ['role' => 'user', 'content' => $text];
         }
         foreach ($tool_results as $tr) {

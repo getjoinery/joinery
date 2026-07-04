@@ -123,6 +123,15 @@ if (!function_exists('joai_pin_svg')) {
                         </select>
                     </label>
 
+                    <label>Attachments
+                        <select id="joai-attachment-mode" class="joai-chat-control" data-field="attachment_mode"
+                                title="How uploaded files are sent to the model">
+                            <?php foreach (['extract'=>'Extract text (cheaper)','original'=>'Send original files'] as $am => $amlbl): ?>
+                                <option value="<?php echo $am; ?>" <?php echo $am === $attachment_mode ? 'selected' : ''; ?>><?php echo $amlbl; ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+
                     <div class="joai-chat-settings-title">Advanced</div>
                     <div class="joai-chat-settings-row">
                         <label>Temperature
@@ -183,7 +192,18 @@ if (!function_exists('joai_pin_svg')) {
             text will be processed off-device. Switch to a local or private model to keep it on-device.
         </div>
 
+        <div class="joai-chat-attach-strip" id="joai-attach-strip" hidden></div>
+
+        <div class="joai-chat-send-notice" id="joai-send-notice" role="alert" hidden
+             style="margin:0 0 8px;padding:8px 12px;border:1px solid #e0a800;background:#fff8e1;color:#6b5200;border-radius:6px;font-size:13px;line-height:1.4;"></div>
+
         <div class="joai-chat-composer">
+            <input type="file" id="joai-file-input" class="joai-chat-file-input" multiple
+                   accept="<?php echo htmlspecialchars($attach_accept_types, ENT_QUOTES, 'UTF-8'); ?>"
+                   <?php echo $chat_enabled ? '' : 'disabled'; ?>>
+            <button type="button" id="joai-attach-btn" class="joai-btn joai-chat-attach-btn"
+                    title="Attach files (images, PDF, text)" aria-label="Attach files"
+                    <?php echo $chat_enabled ? '' : 'disabled'; ?>><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></button>
             <textarea id="joai-input" rows="2" maxlength="8000"
                       placeholder="Ask Joinery AI to look something up or make a change…"
                       <?php echo $chat_enabled ? '' : 'disabled'; ?>></textarea>
@@ -283,6 +303,12 @@ if (!function_exists('joai_pin_svg')) {
     var DEFAULT_MODEL = <?php echo json_encode($default_model); ?>;
     var DEFAULT_THINKING = <?php echo json_encode($default_thinking_level); ?>;
     var DEFAULT_WEB = <?php echo $default_web_search ? 'true' : 'false'; ?>;
+    var DEFAULT_ATTACH_MODE = <?php echo json_encode($default_attachment_mode); ?>;
+
+    // Attachment composer config: how many files a message accepts. Type/size and
+    // model-capability policy are enforced authoritatively server-side (ingress
+    // fails loud), so the client only bounds the count and previews selections.
+    var ATTACH_MAX_FILES = <?php echo (int)$attach_max_files; ?>;
 
     function scrollToBottom() { transcript.scrollTop = transcript.scrollHeight; }
     scrollToBottom();
@@ -381,9 +407,100 @@ if (!function_exists('joai_pin_svg')) {
     }
     controls.forEach(wireField);
 
+    // --- File attachments ---------------------------------------------------
+    // Files chosen in the composer, held client-side until send() posts them as
+    // multipart `attachments[]`. The strip shows a removable chip per file.
+    var fileInput = document.getElementById('joai-file-input');
+    var attachBtn = document.getElementById('joai-attach-btn');
+    var attachStrip = document.getElementById('joai-attach-strip');
+    var pendingFiles = [];
+
+    function renderAttachStrip() {
+        if (!attachStrip) return;
+        if (!pendingFiles.length) { attachStrip.hidden = true; attachStrip.innerHTML = ''; return; }
+        attachStrip.hidden = false;
+        attachStrip.innerHTML = '';
+        pendingFiles.forEach(function (file, idx) {
+            var chip = document.createElement('span');
+            chip.className = 'joai-chat-attach joai-chat-attach-pending';
+            var name = document.createElement('span');
+            name.className = 'joai-chat-attach-name';
+            name.textContent = file.name;
+            chip.appendChild(name);
+            var rm = document.createElement('button');
+            rm.type = 'button';
+            rm.className = 'joai-chat-attach-remove';
+            rm.setAttribute('aria-label', 'Remove ' + file.name);
+            rm.textContent = '×';
+            rm.addEventListener('click', function () {
+                pendingFiles.splice(idx, 1);
+                renderAttachStrip();
+            });
+            chip.appendChild(rm);
+            attachStrip.appendChild(chip);
+        });
+    }
+
+    function addFiles(list) {
+        for (var i = 0; i < list.length; i++) {
+            if (pendingFiles.length >= ATTACH_MAX_FILES) {
+                alert('Up to ' + ATTACH_MAX_FILES + ' files per message.');
+                break;
+            }
+            pendingFiles.push(list[i]);
+        }
+        renderAttachStrip();
+    }
+
+    if (attachBtn && fileInput) {
+        attachBtn.addEventListener('click', function () { fileInput.click(); });
+        fileInput.addEventListener('change', function () {
+            if (fileInput.files && fileInput.files.length) addFiles(fileInput.files);
+            fileInput.value = ''; // allow re-selecting the same file
+        });
+    }
+
+    // Drag-and-drop onto the composer area.
+    var composer = document.querySelector('.joai-chat-composer');
+    if (composer) {
+        ['dragenter', 'dragover'].forEach(function (ev) {
+            composer.addEventListener(ev, function (e) {
+                e.preventDefault(); composer.classList.add('joai-chat-dragover');
+            });
+        });
+        ['dragleave', 'drop'].forEach(function (ev) {
+            composer.addEventListener(ev, function (e) {
+                e.preventDefault(); composer.classList.remove('joai-chat-dragover');
+            });
+        });
+        composer.addEventListener('drop', function (e) {
+            if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+                addFiles(e.dataTransfer.files);
+            }
+        });
+    }
+
+    function clearPendingFiles() {
+        pendingFiles = [];
+        renderAttachStrip();
+    }
+
     function clearBlankNotice() {
         var blank = document.getElementById('joai-blank');
         if (blank) blank.remove();
+    }
+
+    // Inline amber note above the composer for a rejected send (e.g. an attachment
+    // the current model can't read) — replaces a blocking popup.
+    function showSendNotice(msg) {
+        var n = document.getElementById('joai-send-notice');
+        if (!n) return;
+        n.textContent = '⚠ ' + (msg || 'Send failed.');
+        n.hidden = false;
+    }
+    function hideSendNotice() {
+        var n = document.getElementById('joai-send-notice');
+        if (n) { n.hidden = true; n.textContent = ''; }
     }
 
     function setBusy(busy) {
@@ -480,23 +597,46 @@ if (!function_exists('joai_pin_svg')) {
 
     function send() {
         var message = input.value.trim();
-        if (!message) return;
+        var files = pendingFiles.slice();
+        // A turn needs either text or at least one attachment.
+        if (!message && !files.length) return;
         clearBlankNotice();
+        hideSendNotice();
 
         // Optimistically show the user's message (server returns canonical HTML
-        // on the next load; here we just echo the text in a mine bubble).
+        // on the next load; here we echo the text + any attachment names).
         var mine = document.createElement('div');
         mine.className = 'joai-chat-msg joai-chat-mine';
-        mine.innerHTML = '<div class="joai-chat-body"></div>';
-        mine.querySelector('.joai-chat-body').textContent = message;
+        if (message) {
+            var mbody = document.createElement('div');
+            mbody.className = 'joai-chat-body';
+            mbody.textContent = message;
+            mine.appendChild(mbody);
+        }
+        if (files.length) {
+            var strip = document.createElement('div');
+            strip.className = 'joai-chat-attachments';
+            files.forEach(function (f) {
+                var chip = document.createElement('span');
+                chip.className = 'joai-chat-attach joai-chat-attach-file';
+                var nm = document.createElement('span');
+                nm.className = 'joai-chat-attach-name';
+                nm.textContent = f.name;
+                chip.appendChild(nm);
+                strip.appendChild(chip);
+            });
+            mine.appendChild(strip);
+        }
         transcript.appendChild(mine);
 
         input.value = '';
+        clearPendingFiles();
         updateSensitivityNotice();
         setBusy(true);
 
         var body = new FormData();
         body.append('message', message);
+        files.forEach(function (f) { body.append('attachments[]', f, f.name); });
         if (currentConversationId) {
             body.append('conversation_id', currentConversationId);
         } else {
@@ -506,15 +646,28 @@ if (!function_exists('joai_pin_svg')) {
             if (webToggle && webToggle.checked) body.append('web_search', '1');
             controls.forEach(function (el) {
                 var f = el.getAttribute('data-field');
-                if (f === 'model' || f === 'thinking_level') body.append(f, el.value);
+                if (f === 'model' || f === 'thinking_level' || f === 'attachment_mode') body.append(f, el.value);
                 else if (el.value !== '') body.append(f, el.value);
             });
+        }
+
+        // Roll the optimistic echo back and surface an inline amber note (not a
+        // popup) when the send is rejected — e.g. an attachment the current model
+        // can't read. Restores the typed message and pending files to fix + resend.
+        function rejectSend(msg) {
+            setBusy(false);
+            if (mine && mine.parentNode) mine.parentNode.removeChild(mine);
+            input.value = message;
+            pendingFiles = files.slice();
+            renderAttachStrip();
+            updateSensitivityNotice();
+            showSendNotice(msg);
         }
 
         fetch(JOAI_BASE + 'chat_send', { method: 'POST', body: body })
             .then(function (r) { return r.json(); })
             .then(function (data) {
-                if (!data.success) { setBusy(false); alert(data.message || 'Send failed.'); return; }
+                if (!data.success) { rejectSend(data.message); return; }
 
                 if (data.is_new) {
                     currentConversationId = data.conversation_id;
@@ -531,8 +684,7 @@ if (!function_exists('joai_pin_svg')) {
                 streamInto(data.message_id);
             })
             .catch(function () {
-                setBusy(false);
-                alert('Send failed.');
+                rejectSend('Send failed — please check your connection and try again.');
             });
     }
 
@@ -971,7 +1123,9 @@ if (!function_exists('joai_pin_svg')) {
         controls.forEach(function (el) {
             var f = el.getAttribute('data-field');
             if (f === 'temperature' || f === 'top_p' || f === 'max_tokens' || f === 'instructions') el.value = '';
+            if (f === 'attachment_mode') el.value = DEFAULT_ATTACH_MODE;
         });
+        clearPendingFiles();
         updateSettingsSummary();
         history.replaceState(null, '', JOAI_BASE + 'chat');
         input.focus();
