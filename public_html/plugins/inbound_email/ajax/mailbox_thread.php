@@ -5,9 +5,12 @@
  * GET. Params: thread_key (required), alias_id (optional). Returns every
  * in-scope message in the thread, chronological, each WITH its plain/HTML body
  * for client-side sandboxed rendering. Empty array if the thread is outside
- * scope. Signed-in; MailboxViewer scopes the thread expansion.
+ * scope. Signed-in; MailboxViewer scopes the thread expansion. Inline cid:
+ * images are resolved to short-lived signed URLs before the body is returned
+ * (the sandboxed reader iframe sends no cookies, so the URL must authorize
+ * itself).
  *
- * @version 1.1
+ * @version 1.3
  */
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/MailboxService.php'));
@@ -32,8 +35,11 @@ if ($thread_key === '') {
 
 $alias_id = MailboxService::parseAliasParam($_GET['alias_id'] ?? null);
 
+$messages = $service->getThread($alias_id, $thread_key);
+$messages = MailboxService::resolveInlineImages($messages);
+
 echo json_encode(array(
-	'messages' => $service->getThread($alias_id, $thread_key),
+	'messages' => $messages,
 	// Folder ids this thread currently belongs to — pre-checks the move/labels control.
 	'folders'  => $service->threadFolderIds($alias_id, $thread_key),
 ));

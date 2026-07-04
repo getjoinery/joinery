@@ -1,6 +1,6 @@
 # Inbound email — inline images in the message reader
 
-**Status:** Draft — design in progress
+**Status:** Implemented — code landed and browser-tested end-to-end (admin single-message reader only).
 **Plugin:** `inbound_email`
 **Depends on:** `specs/implemented/inbound_email_attachment_storage.md` — inline parts are stored as
 `File` objects on the manifest (`ima_fil_file_id`, `ima_content_id`, `ima_is_inline`),

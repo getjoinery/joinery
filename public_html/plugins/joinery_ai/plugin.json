@@ -1,6 +1,6 @@
 {
     "name": "Joinery AI",
-    "version": "0.4.1",
+    "version": "0.5.1",
     "description": "Scheduled LLM recipes that gather information, write to a workspace, and deliver results to a dashboard or email.",
     "author": "Joinery",
     "receives_upgrades": true,
@@ -51,6 +51,12 @@
                     "title": "Notes",
                     "url": "/admin/joinery_ai/notes",
                     "order": 4
+                },
+                {
+                    "slug": "joinery-ai-deleted",
+                    "title": "Deleted Chats",
+                    "url": "/admin/joinery_ai/deleted_conversations",
+                    "order": 5
                 }
             ]
         }

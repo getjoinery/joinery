@@ -1,6 +1,6 @@
 # Joinery AI — Permanent delete for conversations (and their uploaded files)
 
-**Status:** Draft — not yet implemented.
+**Status:** Implemented — A3 (manual admin purge, no automatic retention timer). Scope: conversation-level deletes only; per-turn message purge is a follow-on (see Decision C).
 **Plugin:** `joinery_ai`
 **Depends on:** `specs/implemented/joinery_ai_chat_management.md` (the existing
 soft-delete `delete` action), `specs/implemented/joinery_ai_chat_turn_copy_delete.md`
