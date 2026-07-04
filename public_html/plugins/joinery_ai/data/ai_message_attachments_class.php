@@ -123,6 +123,39 @@ class AiMessageAttachment extends SystemBase {
         }
         return $out;
     }
+
+    /**
+     * The in-context attachments across a whole conversation, as
+     * [['file_id'=>int,'name'=>string], …] in attach order. Scopes a
+     * view_attachment ref lookup to the conversation the model is in — a ref
+     * outside this set is not addressable, so the tool cannot reach a file from
+     * another chat. Read-only.
+     */
+    public static function conversationRefs(int $conversation_id): array {
+        require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AiAttachment.php'));
+        if ($conversation_id <= 0) return [];
+        $sql = 'SELECT a.aia_fil_file_id AS file_id '
+             . 'FROM aia_message_attachments a '
+             . 'JOIN aim_conversation_messages m ON m.aim_message_id = a.aia_aim_message_id '
+             . 'WHERE m.aim_aic_conversation_id = ? '
+             . 'AND a.aia_delete_time IS NULL AND a.aia_in_context IS TRUE '
+             . 'AND m.aim_delete_time IS NULL '
+             . 'ORDER BY a.aia_attachment_id ASC';
+        try {
+            $q = DbConnector::get_instance()->get_db_link()->prepare($sql);
+            $q->execute([$conversation_id]);
+            $ids = $q->fetchAll(PDO::FETCH_COLUMN);
+        } catch (Throwable $e) {
+            return [];
+        }
+        $out = [];
+        foreach ($ids as $fid) {
+            $file = new File((int)$fid, true);
+            if (!$file->key) continue;
+            $out[] = ['file_id' => (int)$file->key, 'name' => AiAttachment::displayName($file)];
+        }
+        return $out;
+    }
 }
 
 class MultiAiMessageAttachment extends SystemMultiBase {

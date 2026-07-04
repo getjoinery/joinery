@@ -126,7 +126,7 @@ if (!function_exists('joai_pin_svg')) {
                     <label>Attachments
                         <select id="joai-attachment-mode" class="joai-chat-control" data-field="attachment_mode"
                                 title="How uploaded files are sent to the model">
-                            <?php foreach (['extract'=>'Extract text (cheaper)','original'=>'Send original files'] as $am => $amlbl): ?>
+                            <?php foreach (['extract'=>'Text only','on_demand'=>'Full file when needed','original'=>'Always full file'] as $am => $amlbl): ?>
                                 <option value="<?php echo $am; ?>" <?php echo $am === $attachment_mode ? 'selected' : ''; ?>><?php echo $amlbl; ?></option>
                             <?php endforeach; ?>
                         </select>

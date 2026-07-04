@@ -73,7 +73,7 @@ class ChatControls {
 
             case 'attachment_mode':
                 $v = strtolower(trim((string)$value));
-                if (!in_array($v, ['extract', 'original'], true)) {
+                if (!in_array($v, ['extract', 'on_demand', 'original'], true)) {
                     throw new InvalidArgumentException('Invalid attachment mode.');
                 }
                 return [$col, $v];

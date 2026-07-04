@@ -317,20 +317,51 @@ class AgentLoop {
             return ['type' => 'tool_result', 'tool_use_id' => $id, 'content' => $msg, 'is_error' => true];
         }
 
+        // A tool result is normally text, but a tool may return content BLOCKS
+        // (an image/document, e.g. view_attachment handing back a full PDF) by
+        // setting content to an array. Those pass through to the tool_result
+        // verbatim; the audit trail stores a short text summary, never the blob.
         $is_error = false;
-        $content = '';
+        $result_content = '';                 // string or block-array → tool_result
+        $audit = '';                          // always a string → trace/output
         if (is_array($result)) {
             $is_error = !empty($result['is_error']);
-            $content  = (string)($result['content'] ?? '');
+            $rc = $result['content'] ?? '';
+            if (is_array($rc)) {
+                $result_content = $rc;
+                $audit = self::summarizeBlocks($rc);
+            } else {
+                $result_content = (string)$rc;
+                $audit = $result_content;
+            }
         } else {
-            $content = (string)$result;
+            $result_content = (string)$result;
+            $audit = $result_content;
         }
 
-        $finish($content, $is_error);
+        $finish($audit, $is_error);
 
-        $block = ['type' => 'tool_result', 'tool_use_id' => $id, 'content' => $content];
+        $block = ['type' => 'tool_result', 'tool_use_id' => $id, 'content' => $result_content];
         if ($is_error) $block['is_error'] = true;
         return $block;
+    }
+
+    /** A one-line text summary of a tool's returned content blocks, for the audit
+     *  trail (which stores text, not a base64 payload). */
+    private static function summarizeBlocks(array $blocks): string {
+        $parts = [];
+        foreach ($blocks as $b) {
+            $t = $b['type'] ?? '?';
+            if ($t === 'text') {
+                $parts[] = 'text(' . mb_strlen((string)($b['text'] ?? '')) . ' chars)';
+            } elseif ($t === 'image' || $t === 'document') {
+                $mt = $b['source']['media_type'] ?? '';
+                $parts[] = $t . ($mt !== '' ? "($mt)" : '');
+            } else {
+                $parts[] = (string)$t;
+            }
+        }
+        return '[returned content blocks: ' . implode(', ', $parts) . ']';
     }
 
 }

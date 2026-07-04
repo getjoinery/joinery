@@ -1,6 +1,6 @@
 {
     "name": "Joinery AI",
-    "version": "0.4.0",
+    "version": "0.4.1",
     "description": "Scheduled LLM recipes that gather information, write to a workspace, and deliver results to a dashboard or email.",
     "author": "Joinery",
     "receives_upgrades": true,
