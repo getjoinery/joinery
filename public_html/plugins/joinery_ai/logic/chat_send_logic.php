@@ -105,8 +105,10 @@ function chat_send_logic(array $input): LogicResult {
     $user_msg->save();
     $user_msg->load();
 
-    // Store + link the validated attachments to this message.
-    ChatAttachmentIngest::commit($prepared_attachments, (int)$user_msg->key, $uid);
+    // Store + link the validated attachments to this message. A file whose stored
+    // type drifts from the validated one is dropped and reported so the response
+    // can warn, rather than the model silently receiving nothing.
+    $attach_failures = ChatAttachmentIngest::commit($prepared_attachments, (int)$user_msg->key, $uid);
 
     $model_label = ChatRender::conversationModel($conversation);
 
@@ -127,6 +129,9 @@ function chat_send_logic(array $input): LogicResult {
         'title'           => (string)$conversation->get('aic_title'),
         'user_message'    => ChatSerializer::message($user_msg, $model_label),
     ];
+
+    $attach_warning = ChatAttachmentIngest::failureWarning($attach_failures);
+    if ($attach_warning !== '') $payload['attachment_warning'] = $attach_warning;
 
     // Run the turn in a detached CLI worker and hand back the poll handle now;
     // the client polls chat_poll until the placeholder row is complete/failed.

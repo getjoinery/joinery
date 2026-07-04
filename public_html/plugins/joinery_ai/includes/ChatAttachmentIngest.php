@@ -70,14 +70,35 @@ class ChatAttachmentIngest {
                     . 'a Claude model, or upload a text-based file.'];
             }
 
+            // The resolved, validated MIME is the single type authority from here
+            // on: it is what commit() hands to storage and what the send side must
+            // agree with. client_type is kept only for reference/logging.
             $prepared[] = [
                 'bytes'       => $bytes,
                 'name'        => $u['name'],
                 'client_type' => (string)$u['client_type'],
+                'mime'        => $mime,
+                'category'    => $category,
                 'extract'     => $extract,
             ];
         }
         return ['ok' => true, 'prepared' => $prepared];
+    }
+
+    /**
+     * User-facing warning naming attachments that were accepted at upload but
+     * could not be stored/sent (a server-side type error caught at commit). Both
+     * send surfaces attach this to their response so the failure is visible rather
+     * than discovered from the model's reply. Empty string when nothing failed.
+     */
+    public static function failureWarning(array $names): string {
+        $names = array_values(array_filter(array_map('strval', $names), function ($n) { return $n !== ''; }));
+        if (empty($names)) return '';
+        $list = implode(', ', $names);
+        if (count($names) === 1) {
+            return 'Couldn’t send “' . $list . '” to the model — a server-side type error. Please retry.';
+        }
+        return 'Couldn’t send these attachments to the model — a server-side type error: ' . $list . '. Please retry.';
     }
 
     /**
@@ -93,20 +114,46 @@ class ChatAttachmentIngest {
     /**
      * Store each validated upload as a private File (fil_source = ai_chat_upload),
      * extract its text once in the isolated subprocess, and write an
-     * attachment-link row to $message_id owned by $uid. Best-effort per file: a
-     * single storage failure is logged and skipped, not fatal to the turn.
+     * attachment-link row to $message_id owned by $uid.
+     *
+     * Enforces "accepted means sendable": the type the File persists must route to
+     * the same category prepare() validated. A file that fails to store, or whose
+     * stored type drifts from the validated one, is dropped (row permanently
+     * removed) and reported — never left as a half-stored attachment the send side
+     * silently omits.
+     *
+     * @return string[] display names that could NOT be stored (empty = all stored)
      */
-    public static function commit(array $prepared, int $message_id, int $uid): void {
+    public static function commit(array $prepared, int $message_id, int $uid): array {
+        $failures = [];
         foreach ($prepared as $p) {
+            $label = (string)$p['name'];
             try {
-                $file = File::createFromBytes($p['bytes'], $p['name'], $p['client_type'], $uid, [
+                $file = File::createFromBytes($p['bytes'], $p['name'], $p['mime'], $uid, [
                     'fil_private' => true,
                     'fil_source'  => File::SOURCE_AI_CHAT_UPLOAD,
                 ]);
             } catch (Throwable $e) {
                 error_log('[joinery_ai chat] attachment store failed: ' . $e->getMessage());
+                $failures[] = $label;
                 continue;
             }
+
+            // Invariant: the persisted fil_type must map to the category prepare()
+            // validated. A mismatch is cross-layer type drift (finfo re-detecting
+            // differently at save time than at ingress) — the exact bug class this
+            // two-phase design exists to prevent. Fail loud here: drop the row
+            // rather than let the send side degrade it to an "omitted" note later.
+            $stored_category = AiAttachment::categoryForMime($file->get('fil_type'));
+            if ($stored_category === null || $stored_category !== ($p['category'] ?? null)) {
+                error_log('[joinery_ai chat] attachment type drift for "' . $label . '": validated '
+                    . var_export($p['category'] ?? null, true) . ' but stored fil_type='
+                    . var_export($file->get('fil_type'), true) . ' (file ' . $file->key . ') — dropping');
+                $file->permanent_delete();
+                $failures[] = $label;
+                continue;
+            }
+
             // Extraction already ran once in prepare() on the same bytes; reuse it.
             $extract = $p['extract'] ?? ['status' => AiAttachment::EXTRACT_SKIPPED, 'text' => ''];
 
@@ -118,6 +165,7 @@ class ChatAttachmentIngest {
             $link->prepare();
             $link->save();
         }
+        return $failures;
     }
 
     /**
