@@ -9,7 +9,7 @@
  * optionally narrowed by alias_id), plus folder_id/present for
  * set_membership and name for create_folder. Every mutation re-checks scope
  * in SQL — same guarantees as the web reader's action endpoint, same
- * MailboxService brain (specs/mobile_native_email.md).
+ * MailboxService brain (specs/implemented/mobile_native_email_server_api_and_ios.md).
  *
  * @version 1.0.0
  */
