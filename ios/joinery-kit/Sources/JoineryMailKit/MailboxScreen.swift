@@ -18,6 +18,7 @@ public enum JoineryMail {
 /// search, swipe triage, paging, and pull-to-refresh.
 public struct MailboxScreen: View {
     @StateObject private var store: MailboxStore
+    @State private var newCompose: ComposeRequest?
 
     public init(client: APIClient) {
         _store = StateObject(wrappedValue: MailboxStore(api: MailAPI(client: client)))
@@ -30,6 +31,12 @@ public struct MailboxScreen: View {
             .toolbar { toolbarContent }
             .task {
                 if case .loading = store.phase { await store.initialLoad() }
+            }
+            .sheet(item: $newCompose) { request in
+                ComposeSheet(api: store.api, request: request,
+                             mailboxes: store.home?.mailboxes ?? [], preselectedAlias: store.selectedAlias) {
+                    Task { await store.reload(refreshMailboxes: true) }
+                }
             }
     }
 
@@ -171,6 +178,15 @@ public struct MailboxScreen: View {
                 Image(systemName: "line.3.horizontal.decrease.circle")
             }
             .accessibilityIdentifier("mail_view_menu")
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            Button {
+                newCompose = .new
+            } label: {
+                Image(systemName: "square.and.pencil")
+            }
+            .accessibilityIdentifier("mail_new_message")
+            .disabled(store.home?.canCompose != true)
         }
     }
 

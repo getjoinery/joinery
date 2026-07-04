@@ -250,7 +250,9 @@ change is immediately visible in both:
   lines; views (Inbox / Starred / All Mail / Spam) and a mailbox switcher in
   the toolbar menu; server-side search (`.searchable`, submit-to-search);
   swipe actions (archive full-swipe, read/unread toggle); pull-to-refresh
-  and page-on-scroll (50/page).
+  and page-on-scroll (50/page). A toolbar compose button
+  (`square.and.pencil`, disabled unless `can_compose`) opens `ComposeSheet`
+  in new-message mode.
 - **Thread view** (`ThreadDetailView` + `MessageCardView`) — subject header,
   message cards with older messages collapsed; opening marks the thread read
   (the reader's explicit `mark_read`); HTML bodies render in a sandboxed
@@ -259,14 +261,28 @@ change is immediately visible in both:
   as signed URLs already rewritten server-side; attachment chips download
   via their signed URL into the share sheet. Toolbar: archive, mark unread,
   spam/not-spam, delete.
-- **Compose** (`ComposeSheet`) — reply / reply-all / forward with To/Cc/
-  Subject and body. Deliberately lean: the server quotes the original,
-  normalizes the subject, applies threading headers, and resolves the
-  sending identity. JSON transport — compose uploads are not carried;
-  forwards re-attach the original's attachments server-side.
+- **Compose** (`ComposeSheet`) — reply / reply-all / forward / new message
+  with To/Cc/Subject and body. Deliberately lean: for reply/forward the
+  server quotes the original, normalizes the subject, applies threading
+  headers, and resolves the sending identity from the source message; for a
+  new message there is no source, so the sheet shows a From `Picker` over
+  the granted mailboxes (`MailboxStore.home.mailboxes`, preselecting
+  `selectedAlias`) and the server takes the picked `alias_id` as the
+  identity instead, with no quoted-original footer text. An attach menu
+  offers Photo Library (HEIC transcoded to JPEG) and Files (any type, no
+  allowlist — matching the server's policy); picked files show as removable
+  chips. An attachments-only send goes out as `multipart/form-data` to
+  `inbound_email/send` (`APIClient.submitMultipart`, field
+  `attachments[]`), otherwise the plain JSON action — the same
+  `ChatAPI.send()` shape the AI chat composer uses. Client-side preflight
+  mirrors the server's caps (10 files, 10 MB per file, 25 MB total) but the
+  server is the authority; a rejected send keeps the draft and attachments in
+  the sheet. Forwards still re-attach the original's attachments
+  server-side; a sent copy with new uploads shows them in the thread view
+  once the manifest persists — no separate rendering path.
 
 Not in the module (the web reader remains for them): labels/move and
-create-folder, filter management, spam settings, compose file uploads.
+create-folder, filter management, spam settings.
 
 ## JoineryCalendarKit (native calendar module)
 

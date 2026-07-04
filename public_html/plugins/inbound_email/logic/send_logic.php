@@ -3,15 +3,23 @@
  * API action: inbound_email/send — reply / reply-all / forward AS the mailbox.
  *
  * POST /api/v1/action/inbound_email/send (session key). Params: mode
- * (reply|reply_all|forward), source_id, to, cc, subject, body. Same brain as
- * the web reader's send endpoint — MailboxSender resolves the sending
- * identity, quotes the original server-side, applies threading headers, and
- * stores the outbound copy. Per-alias scope is enforced inside MailboxSender
- * (the source message's mailbox must be in the viewer's grants). JSON-only
- * transport, so uploads don't ride along here; forwards still re-attach the
- * original's attachments server-side (specs/mobile_native_email.md).
+ * (reply|reply_all|forward|new), source_id (reply/reply_all/forward) or
+ * alias_id (new), to, cc, subject, body, plus an optional multipart
+ * `attachments[]`. Same brain as the web reader's send endpoint —
+ * MailboxSender resolves the sending identity, quotes the original
+ * server-side (reply/forward only), applies threading headers, attaches
+ * uploads, and stores the outbound copy (with an attachment manifest so the
+ * sent copy shows what was attached). Per-alias scope is enforced inside
+ * MailboxSender: a reply/forward's source message must be in the viewer's
+ * grants; a new message's alias_id must itself be a grant
+ * (specs/implemented/inbound_email_new_message_compose.md). A multipart
+ * POST leaves php://input empty, so the dispatcher falls back to $_POST and
+ * PHP fills $_FILES natively — no ApiLogicEndpoint change needed
+ * (joinery_ai/chat_send is the shipped precedent). Forwards still re-attach
+ * the original's attachments server-side regardless of transport
+ * (specs/implemented/inbound_email_compose_attachments.md).
  *
- * @version 1.0.0
+ * @version 1.2.0
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -34,6 +42,7 @@ function send_logic(array $input): LogicResult {
 	$params = array(
 		'mode'      => $input['mode'] ?? '',
 		'source_id' => $input['source_id'] ?? 0,
+		'alias_id'  => $input['alias_id'] ?? 0,
 		'to'        => $input['to'] ?? '',
 		'cc'        => $input['cc'] ?? '',
 		'subject'   => $input['subject'] ?? '',
@@ -41,9 +50,10 @@ function send_logic(array $input): LogicResult {
 	);
 
 	$sender = new MailboxSender($viewer);
+	$files = MailboxSender::collectUploads();
 
 	try {
-		$result = $sender->send($params);
+		$result = $sender->send($params, $files);
 	} catch (MailboxSenderException $e) {
 		return LogicResult::error($e->getMessage());
 	} catch (Throwable $e) {

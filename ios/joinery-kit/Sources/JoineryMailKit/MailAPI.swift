@@ -108,25 +108,56 @@ public struct MailAPI: Sendable {
         case reply
         case replyAll = "reply_all"
         case forward
+        case new
     }
 
-    /// Send as the mailbox. The server quotes the original, normalizes the
-    /// subject, applies threading headers, and stores the outbound copy.
+    /// Send as the mailbox. For reply/reply-all/forward the server quotes the
+    /// original, normalizes the subject, and applies threading headers; for a
+    /// new message (`sourceID` nil, `aliasID` set) it sends exactly as entered
+    /// and starts a fresh conversation. Either way the outbound copy is stored
+    /// (with an attachment manifest, so the sent copy shows what was
+    /// attached). When `attachments` is non-empty the call goes out as
+    /// multipart so the files reach the server's `$_FILES['attachments']`;
+    /// otherwise it's a plain JSON action — the exact `ChatAPI.send()` shape.
     public func send(
         mode: ComposeMode,
-        sourceID: Int,
+        sourceID: Int? = nil,
+        aliasID: Int? = nil,
         to: String,
         cc: String,
         subject: String,
-        body: String
+        body: String,
+        attachments: [MailOutgoingAttachment] = []
     ) async throws {
-        _ = try await client.submitAction("inbound_email/send", body: .object([
-            (key: "mode", value: .string(mode.rawValue)),
-            (key: "source_id", value: .number(Double(sourceID))),
-            (key: "to", value: .string(to)),
-            (key: "cc", value: .string(cc)),
-            (key: "subject", value: .string(subject)),
-            (key: "body", value: .string(body)),
-        ]))
+        if attachments.isEmpty {
+            var fields: [(key: String, value: JSONValue)] = [
+                (key: "mode", value: .string(mode.rawValue)),
+            ]
+            if let sourceID { fields.append((key: "source_id", value: .number(Double(sourceID)))) }
+            if let aliasID { fields.append((key: "alias_id", value: .number(Double(aliasID)))) }
+            fields.append(contentsOf: [
+                (key: "to", value: .string(to)),
+                (key: "cc", value: .string(cc)),
+                (key: "subject", value: .string(subject)),
+                (key: "body", value: .string(body)),
+            ])
+            _ = try await client.submitAction("inbound_email/send", body: .object(fields))
+        } else {
+            var textFields: [(key: String, value: String)] = [
+                (key: "mode", value: mode.rawValue),
+            ]
+            if let sourceID { textFields.append((key: "source_id", value: String(sourceID))) }
+            if let aliasID { textFields.append((key: "alias_id", value: String(aliasID))) }
+            textFields.append(contentsOf: [
+                (key: "to", value: to),
+                (key: "cc", value: cc),
+                (key: "subject", value: subject),
+                (key: "body", value: body),
+            ])
+            let files = attachments.map {
+                MultipartFile(field: "attachments[]", filename: $0.filename, mimeType: $0.mimeType, data: $0.data)
+            }
+            _ = try await client.submitMultipart("inbound_email/send", fields: textFields, files: files)
+        }
     }
 }

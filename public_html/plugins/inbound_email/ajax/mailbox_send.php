@@ -1,19 +1,23 @@
 <?php
 /**
- * Mailbox Reader AJAX — send a Reply / Reply-All / Forward AS the mailbox.
+ * Mailbox Reader AJAX — send a Reply / Reply-All / Forward AS the mailbox, or
+ * (mode=new) a New Message starting a fresh conversation.
  *
  * POST (multipart, for attachment uploads). Signed-in + MailboxViewer::canCompose()
  * (a grant means full access to the mailbox: reading it and sending as it);
- * per-alias scope is enforced inside MailboxSender — the source message's
- * mailbox must be accessible to the viewer and is also the sending identity.
+ * per-alias scope is enforced inside MailboxSender — a reply/forward's source
+ * message must be accessible to the viewer (and is also the sending identity);
+ * a new message's `alias_id` must itself be one of the viewer's grants.
  * CSRF: the reader's persistent mailbox_reader_csrf token (validated, not
  * consumed) — the same token the single-button actions use.
  *
  * On success stores the sent copy as an outbound row and returns its id; on
  * failure returns the user-facing error so the reader shows it inline and keeps
- * the draft (no row is stored).
+ * the draft (no row is stored). Accepted uploads persist onto the outbound
+ * manifest (MailboxSender::persistOutboundUploads()) so the sent copy shows
+ * what was attached.
  *
- * @version 1.1
+ * @version 1.3
  */
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/MailboxViewer.php'));
@@ -45,27 +49,14 @@ if (empty($_SESSION['mailbox_reader_csrf'])
 $params = array(
 	'mode'      => $_POST['mode'] ?? '',
 	'source_id' => $_POST['source_id'] ?? 0,
+	'alias_id'  => $_POST['alias_id'] ?? 0,
 	'to'        => $_POST['to'] ?? '',
 	'cc'        => $_POST['cc'] ?? '',
 	'subject'   => $_POST['subject'] ?? '',
 	'body'      => $_POST['body'] ?? '',
 );
 
-// Normalize the multi-file upload field into a flat list of entries.
-$files = array();
-if (isset($_FILES['attachments']) && is_array($_FILES['attachments']['name'])) {
-	$f = $_FILES['attachments'];
-	$n = count($f['name']);
-	for ($i = 0; $i < $n; $i++) {
-		$files[] = array(
-			'name'     => $f['name'][$i] ?? '',
-			'type'     => $f['type'][$i] ?? '',
-			'tmp_name' => $f['tmp_name'][$i] ?? '',
-			'size'     => $f['size'][$i] ?? 0,
-			'error'    => $f['error'][$i] ?? UPLOAD_ERR_NO_FILE,
-		);
-	}
-}
+$files = MailboxSender::collectUploads();
 
 $viewer = MailboxViewer::fromSession($session);
 if (!$viewer->canCompose()) {

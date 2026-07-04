@@ -7,8 +7,23 @@
  * in chrome (admin vs theme page) and in the URLs they hand the reader —
  * the endpoints themselves scope every read and write via MailboxViewer.
  *
- * @version 1.0.0
+ * Compose attachment UX matches the AI chat composer (paperclip button, pending
+ * chips with remove, drag-and-drop onto the open panel) — see
+ * specs/implemented/inbound_email_compose_attachments.md. The caps advertised
+ * in window.MAILBOX_READER (max_files/max_file_bytes/max_total_bytes) are read
+ * from MailboxSender's constants so the client-side preflight can never drift
+ * from the server's real policy.
+ *
+ * A "New message" button in the list header opens the same compose panel in
+ * `new` mode (no source thread): the reader JS shows a From selector (the
+ * `alias_id` dropinput below, hidden and populated from the already-loaded
+ * mailbox list for reply/forward modes) and clears the recipient/subject/body
+ * fields. See specs/implemented/inbound_email_new_message_compose.md.
+ *
+ * @version 1.2.0
  */
+
+require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/MailboxSender.php'));
 
 /**
  * Render the reader.
@@ -43,6 +58,9 @@ function inbound_email_render_mailbox_reader($page, array $opts): void {
 		'messageDetailBase' => $opts['message_detail_base'] ?? null,
 		'attachmentUrlBase' => (string)$opts['attachment_url_base'],
 		'initialMailboxes'  => $opts['initial_mailboxes'],
+		'maxFiles'          => MailboxSender::MAX_UPLOAD_FILES,
+		'maxFileBytes'      => MailboxSender::MAX_UPLOAD_BYTES,
+		'maxTotalBytes'     => MailboxSender::MAX_TOTAL_BYTES,
 	);
 	echo '<script>window.MAILBOX_READER = ' . json_encode($config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ';</script>';
 	?>
@@ -87,20 +105,42 @@ function inbound_email_render_mailbox_reader($page, array $opts): void {
 			// and FormWriter's client validator does a native (full-page) submit when
 			// it passes — which would break the SPA. Validation is the reader JS (To
 			// non-empty) plus full server-side validation in MailboxSender.
+			?>
+			<div class="mbx-from-row" id="mbx-from-row" hidden>
+			<?php
+			// Options filled client-side from state.mailboxes (the switcher data
+			// already loaded at init) — reply/reply_all/forward keep their implicit
+			// identity and never show this; new-message mode always shows it, even
+			// with a single grant, as a plain statement of the sending address.
+			$compose->dropinput('alias_id', 'From', array('id' => 'mbx_alias_id', 'options' => array()));
+			?>
+			</div>
+			<?php
 			$compose->textinput('to', 'To', array('id' => 'mbx_to',
 				'helptext' => 'Separate multiple addresses with commas.'));
 			$compose->textinput('cc', 'Cc', array('id' => 'mbx_cc', 'placeholder' => 'Optional'));
 			$compose->textinput('subject', 'Subject', array('id' => 'mbx_subject'));
 			$compose->textarea('body', 'Message', array('id' => 'mbx_body', 'rows' => 10));
-			$compose->fileinput('attachments[]', 'Attachments', array('id' => 'mbx_attachments', 'multiple' => true));
-			$compose->submitbutton('mbx_send', 'Send');
+			?>
+			<div class="mbx-attach-strip" id="mbx-attach-strip" hidden></div>
+			<div class="mbx-compose-actions">
+				<input type="file" id="mbx-file-input" class="mbx-file-input" multiple>
+				<button type="button" id="mbx-attach-btn" class="mbx-iconbtn mbx-attach-btn" title="Attach files" aria-label="Attach files">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+				</button>
+				<?php $compose->submitbutton('mbx_send', 'Send'); ?>
+			</div>
+			<?php
 			$compose->end_form();
 			?>
 		</div>
 		<div class="mbx-list-view" id="mbx-list-view">
 			<div class="mbx-list-header">
 				<span id="mbx-list-title" class="mbx-list-title">All mail</span>
-				<button type="button" id="mbx-refresh" class="mbx-iconbtn" title="Refresh">&#8635;</button>
+				<div class="mbx-list-header-actions">
+					<button type="button" id="mbx-new-message" class="mbx-new-btn" hidden>+ New message</button>
+					<button type="button" id="mbx-refresh" class="mbx-iconbtn" title="Refresh">&#8635;</button>
+				</div>
 			</div>
 			<ul id="mbx-threads" class="mbx-threads"></ul>
 			<div class="mbx-list-footer">

@@ -47,7 +47,8 @@ struct ThreadDetailView: View {
         .toolbar { toolbarContent }
         .safeAreaInset(edge: .bottom) { replyBar }
         .sheet(item: $compose) { request in
-            ComposeSheet(api: store.api, request: request) {
+            ComposeSheet(api: store.api, request: request,
+                         mailboxes: store.home?.mailboxes ?? [], preselectedAlias: store.selectedAlias) {
                 Task { await load(markRead: false) }
             }
         }
@@ -200,9 +201,25 @@ struct ThreadDetailView: View {
     }
 }
 
-/// A compose invocation: what mode, quoting which message.
+/// A compose invocation: what mode, and (for reply/reply-all/forward) which
+/// message it responds to. New-message compose has no source to quote — the
+/// sending identity comes from a From picker over the granted mailboxes
+/// instead (specs/implemented/inbound_email_new_message_compose.md).
 struct ComposeRequest: Identifiable {
     let mode: MailAPI.ComposeMode
-    let source: MailMessage
-    var id: String { "\(mode.rawValue)-\(source.id)" }
+    let source: MailMessage?
+    var id: String { source.map { "\(mode.rawValue)-\($0.id)" } ?? mode.rawValue }
+
+    init(mode: MailAPI.ComposeMode, source: MailMessage) {
+        self.mode = mode
+        self.source = source
+    }
+
+    /// New-message compose: no source to reply to or quote.
+    static let new = ComposeRequest(mode: .new)
+
+    private init(mode: MailAPI.ComposeMode) {
+        self.mode = mode
+        self.source = nil
+    }
 }

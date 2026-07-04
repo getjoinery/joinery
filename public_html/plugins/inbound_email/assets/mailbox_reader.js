@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.6
+ * No framework. @version 2.8
  *
  * Two-pane layout: the main pane swaps between the conversation list and an
  * opened conversation (toggled by the `reading` class on #mbx-reader); a back
@@ -94,6 +94,11 @@
 		// Highlight current selection + render the active mailbox's folder rail.
 		highlightMailbox();
 		renderFolderRail();
+
+		// New message is only ever composable when the viewer has at least one
+		// accessible mailbox to send as (canCompose, mirrored client-side).
+		var newBtn = $('#mbx-new-message');
+		if (newBtn) newBtn.hidden = !state.mailboxes.length;
 	}
 
 	function mailboxItem(label, aliasId, unread, folders) {
@@ -732,6 +737,73 @@
 		});
 	}
 
+	// ---- compose attachments (AI chat pattern: paperclip, chips, drag-and-drop) ----
+	// Held client-side (not the form's own file input) so a chip can be removed;
+	// submitCompose() builds the FormData manually from this array.
+	var pendingFiles = [];
+
+	function fmtBytes2(n) {
+		n = Number(n) || 0;
+		if (n < 1024) return n + ' B';
+		if (n < 1024 * 1024) return Math.round(n / 1024) + ' KB';
+		return (n / (1024 * 1024)).toFixed(1) + ' MB';
+	}
+
+	function renderAttachStrip() {
+		var strip = $('#mbx-attach-strip');
+		if (!strip) return;
+		if (!pendingFiles.length) { strip.hidden = true; strip.innerHTML = ''; return; }
+		strip.hidden = false;
+		strip.innerHTML = '';
+		pendingFiles.forEach(function (file, idx) {
+			var chip = el('span', 'mbx-attach-chip');
+			chip.appendChild(el('span', 'mbx-attach-chip-name', file.name));
+			chip.appendChild(el('span', 'mbx-attach-chip-size', fmtBytes2(file.size)));
+			var rm = el('button', 'mbx-attach-chip-remove', '×');
+			rm.type = 'button';
+			rm.setAttribute('aria-label', 'Remove ' + file.name);
+			rm.addEventListener('click', function () {
+				pendingFiles.splice(idx, 1);
+				renderAttachStrip();
+			});
+			chip.appendChild(rm);
+			strip.appendChild(chip);
+		});
+	}
+
+	// Client-side preflight only (fast, friendly message); the server is the
+	// authority and re-validates every file and the running total.
+	function addFiles(list) {
+		var maxFiles = CFG.maxFiles || 10;
+		var maxFileBytes = CFG.maxFileBytes || 10485760;
+		var maxTotalBytes = CFG.maxTotalBytes || 26214400;
+		var total = pendingFiles.reduce(function (sum, f) { return sum + f.size; }, 0);
+
+		for (var i = 0; i < list.length; i++) {
+			var f = list[i];
+			if (pendingFiles.length >= maxFiles) {
+				showComposeError('Up to ' + maxFiles + ' files per message.');
+				break;
+			}
+			if (f.size > maxFileBytes) {
+				showComposeError('"' + f.name + '" exceeds the ' + fmtBytes2(maxFileBytes) + ' per-file limit.');
+				continue;
+			}
+			if (total + f.size > maxTotalBytes) {
+				showComposeError('The attachments exceed the ' + fmtBytes2(maxTotalBytes) + ' total size limit.');
+				break;
+			}
+			total += f.size;
+			pendingFiles.push(f);
+		}
+		renderAttachStrip();
+	}
+
+	function clearPendingFiles() {
+		pendingFiles = [];
+		renderAttachStrip();
+	}
+
 	// ---- compose (reply / reply all / forward) ----
 
 	// Pull the email out of a "Name <email>" display string (or a bare address).
@@ -773,6 +845,11 @@
 		$('#mbx-compose-title').textContent = titles[mode] || 'Reply';
 		hideComposeError();
 
+		// Reply / reply-all / forward keep their implicit sending identity (the
+		// source message's mailbox) and never show the From selector.
+		var fromRow = document.getElementById('mbx-from-row');
+		if (fromRow) fromRow.hidden = true;
+
 		document.getElementById('mbx_mode').value = mode;
 		document.getElementById('mbx_source_id').value = source.id;
 
@@ -801,8 +878,56 @@
 		document.getElementById('mbx_subject').value = subj;
 
 		document.getElementById('mbx_body').value = '';
-		var files = document.getElementById('mbx_attachments');
-		if (files) files.value = '';
+		clearPendingFiles();
+
+		var chips = document.querySelector('.mbx-reply-actions');
+		if (chips) chips.hidden = true;
+		var compose = $('#mbx-compose');
+		compose.hidden = false;
+		compose.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+		document.getElementById('mbx_to').focus();
+	}
+
+	// Fill the From select from the already-loaded mailbox list (no new fetch),
+	// preselecting the given alias when it's one of the options, else the first.
+	function populateFromSelect(preselectAliasId) {
+		var sel = document.getElementById('mbx_alias_id');
+		if (!sel) return;
+		sel.innerHTML = '';
+		state.mailboxes.forEach(function (m) {
+			var opt = document.createElement('option');
+			opt.value = String(m.alias_id);
+			opt.textContent = m.address;
+			sel.appendChild(opt);
+		});
+		var want = preselectAliasId != null ? String(preselectAliasId) : null;
+		var hasWant = want !== null && state.mailboxes.some(function (m) { return String(m.alias_id) === want; });
+		if (hasWant) {
+			sel.value = want;
+		} else if (state.mailboxes.length) {
+			sel.value = String(state.mailboxes[0].alias_id);
+		}
+	}
+
+	// New message: no source thread/message, so identity comes from the From
+	// selector — always shown in this mode (even with a single grant, as a plain
+	// statement of the sending address, per the new-message compose spec).
+	function openComposeNew() {
+		$('#mbx-compose-title').textContent = 'New message';
+		hideComposeError();
+
+		document.getElementById('mbx_mode').value = 'new';
+		document.getElementById('mbx_source_id').value = '';
+
+		populateFromSelect(state.aliasId);
+		var fromRow = document.getElementById('mbx-from-row');
+		if (fromRow) fromRow.hidden = false;
+
+		document.getElementById('mbx_to').value = '';
+		document.getElementById('mbx_cc').value = '';
+		document.getElementById('mbx_subject').value = '';
+		document.getElementById('mbx_body').value = '';
+		clearPendingFiles();
 
 		var chips = document.querySelector('.mbx-reply-actions');
 		if (chips) chips.hidden = true;
@@ -839,7 +964,6 @@
 
 	function submitCompose(e) {
 		e.preventDefault();
-		var form = e.target;
 		hideComposeError();
 
 		var to = document.getElementById('mbx_to').value.trim();
@@ -848,18 +972,36 @@
 		var btn = document.getElementById('mbx_send');
 		if (btn) btn.disabled = true;
 
+		// Built manually (not new FormData(form)) so a removed chip is honored —
+		// the form fields first, then the kept File objects as attachments[].
+		var body = new FormData();
+		body.append('mode', document.getElementById('mbx_mode').value);
+		body.append('source_id', document.getElementById('mbx_source_id').value);
+		var aliasSel = document.getElementById('mbx_alias_id');
+		body.append('alias_id', aliasSel ? aliasSel.value : '');
+		body.append('_csrf_token', document.getElementById('mbx_csrf').value);
+		body.append('to', to);
+		body.append('cc', document.getElementById('mbx_cc').value);
+		body.append('subject', document.getElementById('mbx_subject').value);
+		body.append('body', document.getElementById('mbx_body').value);
+		pendingFiles.forEach(function (f) { body.append('attachments[]', f, f.name); });
+
 		fetch(CFG.sendUrl, {
 			method: 'POST',
 			credentials: 'same-origin',
 			headers: { 'X-CSRF-Token': CFG.csrf || '' },
-			body: new FormData(form)
+			body: body
 		}).then(function (r) { return r.json(); }).then(function (data) {
 			if (btn) btn.disabled = false;
 			if (data && data.ok) {
 				closeCompose();
-				// Re-open the thread so the new outbound row renders in the dialog.
 				if (state.threadKey != null) {
+					// Re-open the thread so the new outbound row renders in the dialog.
 					reopenCurrentThread();
+				} else {
+					// New message: no thread was open — refresh the list so the new
+					// conversation appears without a manual reload.
+					loadThreads(true);
 				}
 				refreshMailboxes();
 			} else {
@@ -905,11 +1047,44 @@
 		$('#mbx-refresh').addEventListener('click', function () { refreshMailboxes(); loadThreads(true); });
 		$('#mbx-more').addEventListener('click', function () { state.page += 1; loadThreads(false); });
 
+		var newMsgBtn = $('#mbx-new-message');
+		if (newMsgBtn) newMsgBtn.addEventListener('click', openComposeNew);
+
 		// Compose: discard button + fetch-intercepted submit.
 		var closeBtn = $('#mbx-compose-close');
 		if (closeBtn) closeBtn.addEventListener('click', closeCompose);
 		var composeForm = document.getElementById('mbx_compose_form');
 		if (composeForm) composeForm.addEventListener('submit', submitCompose);
+
+		// Compose attachments: paperclip → hidden input; change → add; drag-and-drop
+		// onto the open compose panel also adds files.
+		var attachBtn = $('#mbx-attach-btn');
+		var fileInput = $('#mbx-file-input');
+		if (attachBtn && fileInput) {
+			attachBtn.addEventListener('click', function () { fileInput.click(); });
+			fileInput.addEventListener('change', function () {
+				if (fileInput.files && fileInput.files.length) addFiles(fileInput.files);
+				fileInput.value = ''; // allow re-selecting the same file
+			});
+		}
+		var composePanel = $('#mbx-compose');
+		if (composePanel) {
+			['dragenter', 'dragover'].forEach(function (ev) {
+				composePanel.addEventListener(ev, function (e) {
+					e.preventDefault(); composePanel.classList.add('mbx-compose-dragover');
+				});
+			});
+			['dragleave', 'drop'].forEach(function (ev) {
+				composePanel.addEventListener(ev, function (e) {
+					e.preventDefault(); composePanel.classList.remove('mbx-compose-dragover');
+				});
+			});
+			composePanel.addEventListener('drop', function (e) {
+				if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+					addFiles(e.dataTransfer.files);
+				}
+			});
+		}
 
 		// A click anywhere else closes any open kebab (⋮) menu or Move/Labels panel.
 		document.addEventListener('click', function () { closeAllKebabs(); closeAllFolderPanels(); });
