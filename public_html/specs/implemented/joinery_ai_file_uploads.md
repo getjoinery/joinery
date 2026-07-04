@@ -1,13 +1,15 @@
 # Joinery AI — File uploads (chat + recipes)
 
-**Status:** Draft — **security review complete; all decisions resolved.** A+B (types &
-transport), C (recipe attach-point: chat ships first, recipe attachments land with the
-taint-gate change, not before), D (limits: image-handling posture settled, numeric caps
-tunable), E (privacy: inherit `isPrivate()` as-is) are all decided. The eight-point threat
-model below is worked through; §1's tool-authority crux is resolved (§1a). What remains is
-building the feature itself — v1 scope is **chat only, images + PDF + plaintext family**
-(Decision A+B phasing), and the must-verify list for the build is in
-**Implementation notes** near the end.
+**Status:** **IMPLEMENTED.** Chat uploads shipped; the on-demand full-file escalation tool
+(`view_attachment`, the follow-on below) shipped; recipe uploads **rejected** (not built).
+A+B (types & transport), C (**recipe uploads rejected — recipes are unattended; a recipe's
+file need is a tool reusing the shared encoder, not an upload surface — see Decision C**), D
+(limits: image-handling posture settled, numeric caps tunable), E (privacy: inherit
+`isPrivate()` as-is) are all decided. The eight-point threat model below is worked through;
+§1's tool-authority crux is resolved (§1a, moot for the rejected recipe surface). Shipped
+scope is **chat only, images + PDF + plaintext family** (Decision A+B phasing), with the
+three-value **Attachments** mode (Text only / Full file when needed / Always full file). The
+must-verify list is in **Implementation notes** near the end.
 
 **Prerequisite platform hardening — LANDED IN CODE (not part of the feature build):**
 The review found three live, pre-existing holes the feature would have inherited; all are
@@ -30,8 +32,9 @@ fixed platform-wide and merged, independent of this spec:
   and `File::is_owned_by($user_id)` provides the strict, sessionless ownership check §5
   specifies (no admin bypass, no shared-visibility bypass, deleted ⇒ false).
 
-Everything else below (the encoder, ingress, recipe taint-gate change, DoS subprocess, IDOR
-checks, extraction) is **design-decided but unbuilt** — it lands with the feature.
+Everything else below (the encoder, ingress, DoS subprocess, IDOR checks, extraction)
+shipped with the chat feature. The recipe taint-gate change is **not** built — it was a
+prerequisite only for recipe uploads, which are rejected (Decision C).
 **Plugin:** `joinery_ai`
 **Depends on:** `specs/implemented/joinery_ai_llm_providers.md` (canonical-IR provider
 boundary), `specs/implemented/file_source_origin_tag.md` (`fil_source` tag),
@@ -42,16 +45,20 @@ forward rule dictates the chat storage model (each upload is its own box).
 ## Goal
 
 Let a user hand the AI a file — a screenshot, a photo, a PDF, a spreadsheet — and
-have the model actually read it, in **both** surfaces the platform already has:
-the interactive **chat**, and the scheduled **recipes**. Do it once, in shared
-plumbing, so a second surface never means a second implementation.
+have the model actually read it in the interactive **chat**. Do it once, in shared
+plumbing (the `AiAttachment` encoder), so any future consumer reuses it rather than
+reimplementing. The scheduled **recipes** surface was considered and **rejected**: a
+recipe is unattended and has no one to attach a file, and its real file need is a tool
+that reads an existing file through the same encoder, not an upload surface — see
+Decision C.
 
 ## In plain terms
 
 Today the AI can only read text you type. This adds the ability to attach a file so
-the model can see it. In chat, you drop a file into the composer and ask about it. In
-a recipe, you attach a reference file to the recipe once (say, a portfolio PDF or a
-baseline spreadsheet) and every scheduled run gets to consult it.
+the model can see it. In chat, you drop a file into the composer and ask about it.
+Recipes don't get an upload box: a recipe runs unattended, so there's no one to attach
+anything — a recipe that needs to consult a file reads an existing one through a tool
+instead (see Decision C).
 
 Under the hood there is one hard fact that makes this cheap: the AI runtime already
 speaks in **content blocks** (the Anthropic message shape) as its internal format,
@@ -184,16 +191,20 @@ so the visual compactor drops in later with no rework.
   instead of a plain string; `normalizeAlternating()` (`:231`) learns to concatenate
   array content, not just strings.
 
-## Surface B — Recipe uploads
+## Surface B — Recipe uploads *(REJECTED — see Decision C)*
 
-Recipes have **no run-time user input** — the user turn is the hardcoded literal
-`'Run the recipe now.'` (`RecipeRunner.php:89`), and triggers pass only a recipe id.
-So recipe uploads need a new attach-point (see Decision C). Whichever we pick, the
-send-side change is one line: replace the hardcoded seed message with a block array
-built by the **same encoder** — the recipe's text instruction plus its attachment
-blocks. No provider or loop change beyond the shared core. The extract-vs-original
-mode (§1) carries over as a per-recipe field (`rcp_attachment_mode`) when this phase
-lands — same values, same encoder input, same `document` capability gate.
+**This surface is not being built.** Recipes have **no run-time user input** — the user
+turn is the hardcoded literal `'Run the recipe now.'` (`RecipeRunner.php:89`), and triggers
+pass only a recipe id — so there is no point at which a user attaches a file. A recipe that
+needs to read a file does so through a **tool** that fetches an existing `File` and runs it
+through the shared `AiAttachment` encoder (the `view_attachment` follow-on is the chat
+instance of exactly that tool), not through an upload attach-point. The analysis below is
+kept only as the record of why an upload surface was declined.
+
+~~Recipe uploads need a new attach-point (see Decision C). Whichever we pick, the send-side
+change is one line: replace the hardcoded seed message with a block array built by the same
+encoder — the recipe's text instruction plus its attachment blocks. The extract-vs-original
+mode (§1) would carry over as a per-recipe field (`rcp_attachment_mode`).~~
 
 ---
 
@@ -221,23 +232,35 @@ the ZIP/XXE parser surface — Security §2–3, including the install-time XXE 
 test). The phased order exercises the whole shared core and the highest-value types
 first, and keeps the office-parser surface out of the initial change.
 
-### Decision C — Where a recipe file attaches *(resolved: C1 + C4 phasing)*
+### Decision C — Where a recipe file attaches *(REJECTED — recipes get no upload surface)*
 
-**Decided:** ship chat uploads first (**C4 phasing**); recipe attachments land later as
-**C1** (on the recipe definition), gated on the §1 taint-gate change. Chat delivers most
-of the value and exercises the whole shared core; recipe uploads are held until an
-attachment is a recognized untrusted source in `TaintGate` (§1 "Resolved"), because
-without that a recipe upload can drive an unattended write. The options considered:
+**Rejected.** Recipe uploads will not be built — not deferred, not phased. A recipe is
+unattended automation: it's spawned by the scheduler or a trigger with no user present at
+run time, and its user turn is a hardcoded literal. There is no moment for a person to
+attach a file, so the upload UX has nothing to attach *to*. The one genuine need — letting
+a recipe **consult** a file — is not an upload at all; it is a **tool** (the C3 /
+`view_attachment` shape) that fetches an owner's existing `File` and encodes it through the
+same `AiAttachment` encoder the chat path already uses. That delivers file *content* to a
+recipe without a parallel ingress surface, and it keeps the recipe/chat unification intact.
+If that need ever materializes, build the tool; do not resurrect the attach-point.
 
-- **C1 — On the recipe definition *(chosen for the recipe phase)*.** A `rcp_*` attachment
-  link; every run consults the same reference file(s). Matches recipes being static config
-  ("here's my portfolio, track it weekly"). Edit-form UI + swap the seed message.
+Consequence: the §1a taint-gate prerequisite is **moot** — it existed only to make an
+unattended recipe *upload* safe, and there is no such upload. The recipe rows in the
+integration inventory (below) are dropped.
+
+The options considered, all now declined:
+
+- **C1 — On the recipe definition.** A `rcp_*` attachment link; every run consults the same
+  reference file(s). Rejected with the surface — a tool serves the same "consult my
+  portfolio" story without the ingress plumbing or the taint-gate change it forced.
 - **C2 — Per run (at manual "Run Now").** Adds a run-input concept the system lacks;
-  scheduled runs can't supply per-run files anyway, so it's a narrow, larger build.
-- **C3 — A `read_file` tool.** The LLM pulls an owner-uploaded file on demand. Fits the
-  tool model but tool-result media is awkward and puts the choice in the model's hands.
-- **C4 — Defer recipes to a later phase *(chosen for phasing)*.** Ship chat uploads first;
-  recipes reuse the finished encoder later.
+  scheduled runs can't supply per-run files anyway. Rejected.
+- **C3 — A `read_file` / `view_attachment` tool.** The recipe pulls an owner file on demand
+  through the shared encoder. **This is the sanctioned path if the need arises** — it is not
+  part of this feature, but it is the correct future shape (see the `view_attachment`
+  follow-on, which is already the chat instance of exactly this tool).
+- **C4 — Defer recipes to a later phase.** Rejected: "later" implied it was still coming.
+  It isn't; a recipe's file need is a tool, not an upload.
 
 ### Decision D — Limits *(image-handling posture settled; numeric caps still tunable)*
 
@@ -284,10 +307,10 @@ Everything the feature touches, decided once:
 | `ChatRunner::buildHistoryMessages()` `:213-219` + `normalizeAlternating()` `:231` | emit + tolerate block-array content |
 | `includes/chat_view_body.php` `:186-192`, `send()` `:481-537` | composer file input; append to `FormData` |
 | `logic/chat_send_logic.php` `:36-39,:76-82` | accept, store (`File`, `fil_source`), link the upload |
-| `data/recipes_class.php` (+ edit view/logic) | recipe attach-point per Decision C (C1) |
-| `includes/TaintGate.php:30-57` | **(recipe phase, prerequisite)** add "recipe has ≥1 attachment" as a third untrusted-source term so upload+write-tool forces `rcp_allow_tainted_writes` (Security §1a) |
-| `RecipeRunner.php:88-89` | seed message → block array via the shared encoder |
-| `File` | `SOURCE_AI_CHAT_UPLOAD` exists; add `SOURCE_AI_RECIPE_ATTACHMENT` if C1/C2 |
+| `data/recipes_class.php` (+ edit view/logic) | ~~recipe attach-point~~ — **dropped (Decision C: recipe uploads rejected)** |
+| `includes/TaintGate.php:30-57` | ~~add "recipe has ≥1 attachment" untrusted-source term~~ — **dropped; prerequisite only for the rejected recipe surface (Security §1a)** |
+| `RecipeRunner.php:88-89` | ~~seed message → block array~~ — **dropped; recipes keep the literal seed message** |
+| `File` | `SOURCE_AI_CHAT_UPLOAD` exists; ~~`SOURCE_AI_RECIPE_ATTACHMENT`~~ not needed |
 
 ## Security
 
@@ -324,7 +347,13 @@ confirmation, or raise the owner scope. Image-borne injection (instructions rend
 inside a screenshot) is real and unsanitizable — the tool boundary, not text-scrubbing,
 is what contains it.
 
-#### 1a. Resolved — recipe attachments must feed the taint gate
+#### 1a. Moot — recipe attachments would have had to feed the taint gate
+
+**This section is retained as analysis only; it is not a work item.** It described the
+prerequisite that would have gated recipe uploads — but recipe uploads are rejected
+(Decision C), so nothing here is built. It matters again only if a recipe file surface is
+ever reconsidered; a future `view_attachment`-style tool for recipes must re-derive this
+boundary rather than assume it.
 
 The chat vs. recipe asymmetry is the sharp edge, and the code review found the taint
 gate does **not** currently close it. `TaintGate::evaluate()` (`TaintGate.php:30-57`) is
@@ -610,7 +639,10 @@ exactly the points a plausible-looking implementation gets wrong.
 
 ## Follow-on: LLM-requested full document (escalation tool)
 
-**Status within this spec:** design — depends on the base upload feature shipping first.
+**Status within this spec:** **IMPLEMENTED.** Shipped as the `on_demand` attachment mode
+plus the `view_attachment(ref)` tool. Delivery is the normal tool round-trip with the full
+document returned inside the `tool_result` (Decision F, verified live). Ref resolution is by
+`File` id, scoped to the conversation, ownership re-checked.
 
 ### The problem
 
@@ -628,16 +660,38 @@ full fidelity exactly when it's needed.
 
 ### The tool
 
-A read tool (`RecipeToolInterface`), chat-surface only for v1:
+A read tool (`RecipeToolInterface`), chat-surface only:
 
-- `view_attachment(name)` — the model names an attachment it was shown (the framed
-  block already labels each upload); the tool resolves that label to the
-  conversation's attachment-link row, re-checks File ownership against the turn owner
-  (Security §5), and returns the **full original** as tool-result content.
+- `view_attachment(ref)` — the model passes the stable **ref** of an attachment it was
+  shown; the tool resolves that ref to the conversation's attachment-link row, re-checks
+  File ownership against the turn owner (Security §5), and returns the **full original**
+  through the shared `AiAttachment` encoder in original-mode routing — the exact code that
+  already produces the full `document`/`image` block for a chat in `original` mode.
 
-Input schema: `{ name: string }` (the attachment label/filename). The tool surfaces
-the available attachment labels in its description/error so the model can only pick a
-real one — it never passes an arbitrary file id.
+**Resolve by ref, never by filename (same-name disambiguation).** Each attachment is
+labeled in the original call with a stable ref and its display name —
+`Attachment [ref 642] — report.pdf`. The ref is the `File` id; the filename is
+**display-only**, so two uploads sharing a name resolve unambiguously to distinct refs.
+Input schema: `{ ref: int }`. The tool surfaces the available `[ref → name]` pairs in its
+description and errors, so the model can only pick a real one; a ref outside this
+conversation's own attachment set (or not owned by the turn owner) simply errors — the
+lookup is conversation-scoped, so a ref is not a free-form file accessor. If a bare name is
+ever passed and matches more than one attachment, the tool errors with the candidate refs
+rather than guessing.
+
+### Setting — a third `aic_attachment_mode` value
+
+Gated per chat, reusing the existing mode field: `extract` (default — stripped text, tool
+**not** offered) | **`on_demand`** (stripped text by default **plus** the `view_attachment`
+tool) | `original` (always full — tool redundant, **not** offered). `on_demand` is the new
+middle posture: cheap by default, full only when the model asks. Edited in the same
+settings sheet as the existing two values; the tool is registered for a turn only when the
+chat is `on_demand` *and* the model is document-capable (below).
+
+**Stored values vs. dropdown labels.** The stored values stay `extract` / `on_demand` /
+`original`; the settings-sheet dropdown shows user-facing labels so the control is
+self-documenting with no explainer prose: **Text only** (`extract`) / **Full file when
+needed** (`on_demand`) / **Always full file** (`original`).
 
 ### Capability constraint
 
@@ -647,26 +701,29 @@ document/vision-capable model (Claude). On a text-only model there is no door:
 switch to a Claude model"), never a degraded stand-in (same principle as ingress).
 Images are already sent in full, so the tool is a clarification no-op for them.
 
-### Decision F — In-turn delivery mechanism (to resolve)
+### Decision F — Delivery mechanism *(RESOLVED — verified against the live API)*
 
-The agent loop builds message history once per turn and only *appends* tool-result
-blocks as it iterates (`AgentLoop`); it does not re-read attachments from the DB
-mid-turn. Getting the original into the *current* turn therefore requires one of:
+**Resolved.** This is an ordinary tool call, so the agent loop already delivers the
+"additional turn" for free — it appends the `tool_result` as a user turn and runs the model
+again (`AgentLoop`), with the full document in context on that next iteration. No mid-turn
+history rebuild and no loop-contract surgery; the earlier F2/F3 fallbacks are dropped.
 
-- **F1 — Return the original in the tool result *(recommended, pending verification)*.**
-  The `tool_result` content carries the document/image block. Anthropic tool-results
-  accept image blocks; PDF `document` blocks in a tool result need verification. If
-  accepted, this is the clean in-turn answer with no loop change.
-- **F2 — Escalate + rebuild.** The tool flips the attachment to original and signals
-  the loop to rebuild history before the next model call within the same turn. Works
-  regardless of tool-result content support, but touches the loop's message contract.
-- **F3 — Next-turn escalation (fallback).** The tool flips the attachment's mode; the
-  original arrives on the next user message. Simplest, but the model can't act on the
-  full doc in the same breath — poor UX. Only if F1/F2 prove costly.
+**Block shape — verified live.** A check against `claude-sonnet-4-6` (`anthropic-version:
+2023-06-01`, no beta header) confirmed **both** candidate shapes return HTTP 200 *and* the
+model actually read the PDF's contents (it summarized the test document from the tool
+result):
 
-Recommendation: **F1**, verifying Anthropic tool-result document support first; fall
-back to **F2** — never rendering PDF pages to images, which reintroduces the
-poppler/system dependency the base feature deliberately avoided.
+- **D-in-result *(chosen)* — the `document` block sits inside the `tool_result` content**
+  (`{type:'tool_result', tool_use_id, content:[{type:'document', source:{base64 pdf}}]}`).
+  Accepted; the model read the PDF straight from the tool result. This is the design.
+- **D-beside-result — text `tool_result` + a sibling `document` block in the same user
+  turn.** Also accepted; retained only as a noted fallback, not needed.
+
+The only loop change is letting a tool return **content blocks** — today a tool result is a
+string (`RecipeToolInterface::execute` returns string or `['content'=>string]`, and the loop
+assembles a text `tool_result`); widen both to carry a block array, then the tool emits the
+`document`/`image` block straight from the shared encoder. Never render PDF pages to images
+(reintroduces the poppler/system dependency the base feature deliberately avoided).
 
 ### Security
 
@@ -681,9 +738,11 @@ poppler/system dependency the base feature deliberately avoided.
 
 ### Scope
 
-Chat only for v1. Recipes configure their attachments up front (Decision C), so
-on-demand escalation is less pressing there; it can extend to recipes later through the
-same tool, since both surfaces share the loop and tool registry.
+Chat only. Recipes have no attachments (Decision C rejected the recipe upload surface),
+so there is nothing for this tool to *escalate* there. But a tool of exactly this shape —
+resolve an owner's `File`, re-check ownership, return it through the shared encoder — is
+the sanctioned way a recipe would read a file at all, should that need ever arise, since
+both surfaces share the loop and tool registry.
 
 ## Docs
 

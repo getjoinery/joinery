@@ -31,8 +31,12 @@ interface RecipeToolInterface {
      * Execute the tool with $input (validated against inputSchema by caller)
      * and the run context. Return either a string (becomes tool_result text)
      * or an array with shape:
-     *   ['content' => string, 'is_error' => bool]
-     * The runner wraps the return value into a tool_result block.
+     *   ['content' => string|array, 'is_error' => bool]
+     * `content` is normally a string. A tool that must hand back binary media
+     * (e.g. view_attachment returning a full PDF) sets `content` to an array of
+     * canonical content blocks (text/image/document); the runner passes those
+     * through to the tool_result verbatim and records only a text summary in the
+     * audit trail. The runner wraps the return value into a tool_result block.
      */
     public function execute(array $input, ToolContext $ctx);
 

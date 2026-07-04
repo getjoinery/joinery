@@ -67,6 +67,26 @@ class ChatTurnContext implements ToolContext {
         return $this->acting_user_id;
     }
 
+    // --- chat-only accessors ------------------------------------------------
+    // Surface-specific data a chat-only tool (view_attachment) reaches through
+    // the concrete context, exactly as recipe-only tools reach RecipeRunContext.
+    // Not on the ToolContext interface — RecipeRunContext has no conversation.
+
+    /** The conversation this turn runs in — scopes an attachment ref lookup. */
+    public function conversationId(): int {
+        return (int)$this->conversation->key;
+    }
+
+    /** The conversation owner, for the send-time File ownership re-check (§5). */
+    public function conversationOwnerId(): int {
+        return (int)$this->conversation->get('aic_owner_user_id');
+    }
+
+    /** The chat's selected model (may be '' → caller resolves the default). */
+    public function conversationModel(): string {
+        return (string)$this->conversation->get('aic_model');
+    }
+
     public function ownerTimezone(): string {
         return $this->owner_timezone;
     }

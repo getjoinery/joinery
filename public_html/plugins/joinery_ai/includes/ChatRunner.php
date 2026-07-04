@@ -356,6 +356,19 @@ class ChatRunner {
             }
             $tools = array_merge($tools, $web);
         }
+
+        // On-demand attachment escalation: when the chat sends stripped text by
+        // default but the model may pull a specific file's full original, offer
+        // view_attachment — but only when the model can actually consume the full
+        // version (document-capable) and there is at least one attachment to
+        // fetch. Independent of Data access / Web search.
+        if ($conversation->get('aic_attachment_mode') === AiAttachment::MODE_ON_DEMAND) {
+            $model = (string)$conversation->get('aic_model') ?: self::defaultModel();
+            $caps = LlmProviderFactory::capabilitiesForModel($model);
+            if (!empty($caps['document']) && self::conversationHasAttachments((int)$conversation->key)) {
+                $tools[] = 'view_attachment';
+            }
+        }
         return $tools;
     }
 

@@ -22,9 +22,13 @@ class AiAttachmentException extends Exception {}
 
 class AiAttachment {
 
-    /** Per-chat attachment modes (mirrors aic_attachment_mode). */
-    const MODE_EXTRACT  = 'extract';
-    const MODE_ORIGINAL = 'original';
+    /** Per-chat attachment modes (mirrors aic_attachment_mode). `on_demand`
+     *  routes exactly like `extract` for the initial send (cheap text-first) but
+     *  offers the `view_attachment` tool so the model can pull a specific file's
+     *  full original when the text isn't enough. */
+    const MODE_EXTRACT   = 'extract';
+    const MODE_ON_DEMAND = 'on_demand';
+    const MODE_ORIGINAL  = 'original';
 
     /**
      * Detected MIME -> routing category. This is the whole accepted set for v1
@@ -291,6 +295,13 @@ class AiAttachment {
         $mime = self::normalizeMime($file->get('fil_type'));
         $category = self::categoryForMime($mime);
         $label = self::displayName($file);
+        // In on-demand mode a non-image attachment is sent as cheap text, but the
+        // model can pull its full original via view_attachment(ref); surface the
+        // ref (the File id) in the label so it knows what to pass. Images are
+        // already sent whole — nothing to escalate — so they carry no ref.
+        if ($mode === self::MODE_ON_DEMAND && $category !== null && $category !== 'image') {
+            $label .= ' [ref ' . (int)$file->key . ']';
+        }
         if ($category === null) {
             // Invariant violation: ingress rejects unsupported types before a row
             // exists, and commit() drops any file whose stored type drifts from the
