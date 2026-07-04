@@ -63,8 +63,18 @@ public final class APIClient: @unchecked Sendable {
         request.httpMethod = method
         request.timeoutInterval = 30
 
-        // Custom headers use hyphen form — proxy/FPM stacks drop
-        // underscore header names (docs/api.md).
+        applyStandardHeaders(to: &request, authenticated: authenticated, idempotencyKey: idempotencyKey)
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = body.encodedData()
+        }
+        return try await perform(request, authenticated: authenticated)
+    }
+
+    /// The headers every request carries — hyphen form because proxy/FPM stacks
+    /// drop underscore header names (docs/api.md). Session-key headers ride only
+    /// on authenticated calls; their absence surfaces as the 401 that follows.
+    private func applyStandardHeaders(to request: inout URLRequest, authenticated: Bool, idempotencyKey: String?) {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(config.clientApp, forHTTPHeaderField: "client-app")
         request.setValue(config.clientVersion, forHTTPHeaderField: "client-version")
@@ -75,11 +85,11 @@ public final class APIClient: @unchecked Sendable {
         if let idempotencyKey {
             request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
         }
-        if let body {
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = body.encodedData()
-        }
+    }
 
+    /// Run a fully-built request and map the response into the success envelope
+    /// or a typed error. Shared by the JSON and multipart submit paths.
+    private func perform(_ request: URLRequest, authenticated: Bool) async throws -> JSONValue {
         let data: Data
         let response: URLResponse
         do {
@@ -135,6 +145,64 @@ public final class APIClient: @unchecked Sendable {
         )
     }
 
+    /// Submit an action as `multipart/form-data`: `POST /api/v1/action/{action}`,
+    /// with `fields` as text parts and `files` as file parts — for uploads the
+    /// JSON body can't carry (chat attachments). The action pipeline reads the
+    /// text parts as `$_POST` and the file parts as `$_FILES`. Mutating, so an
+    /// idempotency key is generated unless supplied; server-side it hashes over
+    /// the (empty) raw body, so a multipart send dedupes retries by key alone.
+    @discardableResult
+    public func submitMultipart(
+        _ action: String,
+        fields: [(key: String, value: String)],
+        files: [MultipartFile],
+        authenticated: Bool = true,
+        idempotencyKey: String? = nil
+    ) async throws -> JSONValue {
+        var components = URLComponents(url: config.baseURL, resolvingAgainstBaseURL: false)!
+        components.path = "/api/v1/action/\(action)"
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "POST"
+        // Uploads can be several MB — allow more headroom than a JSON call.
+        request.timeoutInterval = 60
+        applyStandardHeaders(to: &request, authenticated: authenticated,
+                             idempotencyKey: idempotencyKey ?? UUID().uuidString)
+
+        let boundary = "JoineryBoundary-\(UUID().uuidString)"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Self.multipartBody(boundary: boundary, fields: fields, files: files)
+        return try await perform(request, authenticated: authenticated)
+    }
+
+    /// Assemble a `multipart/form-data` body: text field parts first, then file
+    /// parts. Filenames are sanitized so a quote or newline can't break the part
+    /// header. Internal so the encoder can be unit-tested directly.
+    static func multipartBody(
+        boundary: String,
+        fields: [(key: String, value: String)],
+        files: [MultipartFile]
+    ) -> Data {
+        var body = Data()
+        for field in fields {
+            body.appendString("--\(boundary)\r\n")
+            body.appendString("Content-Disposition: form-data; name=\"\(field.key)\"\r\n\r\n")
+            body.appendString("\(field.value)\r\n")
+        }
+        for file in files {
+            let safeName = file.filename
+                .replacingOccurrences(of: "\"", with: "'")
+                .replacingOccurrences(of: "\r", with: " ")
+                .replacingOccurrences(of: "\n", with: " ")
+            body.appendString("--\(boundary)\r\n")
+            body.appendString("Content-Disposition: form-data; name=\"\(file.field)\"; filename=\"\(safeName)\"\r\n")
+            body.appendString("Content-Type: \(file.mimeType)\r\n\r\n")
+            body.append(file.data)
+            body.appendString("\r\n")
+        }
+        body.appendString("--\(boundary)--\r\n")
+        return body
+    }
+
     // MARK: Error mapping
 
     // Internal (not private) so unit tests can exercise the mapping table.
@@ -169,5 +237,28 @@ public final class APIClient: @unchecked Sendable {
             return .validation(message: message, fieldErrors: fields)
         }
         return .server(errortype: errortype, message: message, status: status)
+    }
+}
+
+/// One file part for a `multipart/form-data` action submit.
+public struct MultipartFile: Sendable {
+    /// The form field name, e.g. `attachments[]` (PHP folds the `[]` suffix into
+    /// an `$_FILES['attachments']` array so several files share one field).
+    public let field: String
+    public let filename: String
+    public let mimeType: String
+    public let data: Data
+
+    public init(field: String, filename: String, mimeType: String, data: Data) {
+        self.field = field
+        self.filename = filename
+        self.mimeType = mimeType
+        self.data = data
+    }
+}
+
+private extension Data {
+    mutating func appendString(_ string: String) {
+        append(Data(string.utf8))
     }
 }

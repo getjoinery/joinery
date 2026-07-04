@@ -6,7 +6,7 @@
 // agenda, entry editor), same layering pattern as mail.
 // JoineryAIChatKit — the native AI chat surface (conversation list + threaded
 // chat with the assistant, send-then-poll streaming), same layering as mail.
-// Version: 0.4.0 (navigation shell + webviews + native mail + calendar + AI chat)
+// Version: 0.4.1 (navigation shell + webviews + native mail + calendar + AI chat + chat attachments)
 import PackageDescription
 
 let package = Package(
