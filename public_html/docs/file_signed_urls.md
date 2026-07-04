@@ -21,8 +21,11 @@ $url = $file->mintSignedUrl($size_key, $ttl_seconds, $format);
 ```
 
 - `$size_key` — `'original'` (default) or an ImageSizeRegistry variant key.
-- `$ttl_seconds` — keep short; default 300 (5 minutes). Consumers re-fetch
-  their parent resource for fresh links rather than holding long-lived ones.
+- `$ttl_seconds` — keep short; default 300 (5 minutes). Consumers that
+  re-fetch their parent resource for fresh links use the default; a consumer
+  that mints once per page open and sits idle (the web mail readers'
+  inline images) uses a longer TTL — 3600 — and accepts that a link
+  outliving it renders broken until the page is reopened.
 - `$format` — `'short'` (relative, default) or `'full'` (absolute).
 
 The signature is HMAC-SHA256 over (file id, size key, expiry), so a

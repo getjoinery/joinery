@@ -202,6 +202,12 @@ The thread pane supports the usual housekeeping over the caller's own conversati
 
 Each chat endpoint exists as a full file under `views/admin/` plus a one-line `views/profile/` stub that re-includes it, so the same owner-scoped implementation backs both the admin and member surfaces.
 
+### Permanently deleting conversations
+
+The thread-level `delete` action only soft-deletes (`aic_delete_time = now()`) — the conversation, its messages, attachment links, and any uploaded `File` bytes all stay in the database and in storage until a superadmin purges them. There is no automatic retention timer.
+
+A superadmin purge tool lives at `/admin/joinery_ai/deleted_conversations` (permission 10): it lists every soft-deleted conversation across all owners with a per-row **Purge** link (a dry-run preview + confirm, via `AiConversation::permanent_delete_dry_run()` / `permanent_delete()`) and a bulk **Empty Trash** action that purges all of them. `AiConversation::permanent_delete()` cascades through `AiConversationMessage::permanent_delete()` → `AiMessageAttachment::permanent_delete()` → the underlying `File`, so purging a conversation reclaims the uploaded-file bytes it references. Per-turn soft-deleted messages inside otherwise-live conversations are not covered by this tool — only conversation-level deletes are purgeable today.
+
 ### Chat API surface
 
 Native app clients speak the same chat over `/api/v1` actions (owner-scoped, member-accessible with the session key or the browser-session bridge), returning structured JSON turns rather than the page's HTML bubbles. `ChatSerializer` renders a conversation and its turns as data; `ChatTurn` holds the run / resume-and-finalize sequence both the web endpoints and these actions call, so a thread is identical whichever surface touched it last.

@@ -7,8 +7,11 @@
  * attacker-controlled. Attachments are listed from the per-message manifest and
  * each links to the per-attachment download endpoint (bytes fetched on demand;
  * never stored). There is no raw/.eml view — retired for every transport.
+ * Inline cid: images are already resolved to short-lived signed URLs by the
+ * logic layer before the body reaches this view (the sandboxed iframe sends
+ * no cookies, so the URLs must authorize themselves).
  *
- * @version 1.3
+ * @version 1.5
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -104,7 +107,7 @@ if (!empty($attachments) && count($attachments)) {
 $base = '/plugins/inbound_email/admin/admin_inbound_email_message?iem_inbound_email_message_id=' . intval($message->key);
 echo '<div class="mb-3">';
 echo '<a class="btn btn-sm ' . (!$show_html ? 'btn-primary' : 'btn-outline-primary') . '" href="' . $base . '">Plain text</a> ';
-$has_html = $message->get('iem_body_html') !== '';
+$has_html = $body_html !== '' && $body_html !== null;
 if ($has_html) {
 	echo '<a class="btn btn-sm ' . ($show_html ? 'btn-primary' : 'btn-outline-primary') . '" href="' . $base . '&amp;view=html">HTML (sandboxed)</a> ';
 }
@@ -119,8 +122,8 @@ if ($show_html && $has_html) {
 	echo '<div class="alert alert-warning mb-3"><strong>Sandboxed HTML.</strong> '
 		. 'Stored mail is fully attacker-controlled — links and scripts are disabled inside this frame.</div>';
 	// Use srcdoc + sandbox without allow-scripts: no JS, no top-nav.
-	$html = $message->get('iem_body_html');
-	echo '<iframe sandbox="" srcdoc="' . htmlspecialchars($html, ENT_QUOTES | ENT_HTML5)
+	// (body_html has cid: inline-image references already rewritten to signed URLs.)
+	echo '<iframe sandbox="" srcdoc="' . htmlspecialchars($body_html, ENT_QUOTES | ENT_HTML5)
 		. '" class="iem-msg-iframe"></iframe>';
 	echo '</div></div>';
 } else {

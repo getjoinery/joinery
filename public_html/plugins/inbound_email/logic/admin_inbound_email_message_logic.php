@@ -5,9 +5,11 @@
  * Handles soft-delete and loads the message + its attachment manifest for
  * display. Soft-deleted messages are not accessible. There is no raw/.eml
  * download (retired for every transport) — the user-facing surface is the body
- * plus the clickable per-attachment list.
+ * plus the clickable per-attachment list. Inline images: cid: references in
+ * the HTML body are rewritten to short-lived signed URLs by the shared
+ * MailboxService::resolveInlineImages(), scoped to this message only.
  *
- * @version 1.2
+ * @version 1.4
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -73,6 +75,18 @@ function admin_inbound_email_message_logic(array $input): LogicResult {
 	);
 	$attachments->load();
 
+	// Inline images: rewrite cid: references in the HTML body to short-lived
+	// signed URLs (shared resolver — the permission-5 gate above is the
+	// authorization statement for the mint).
+	$body_html = $message->get('iem_body_html');
+	if ($body_html !== '' && $body_html !== null) {
+		require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/MailboxService.php'));
+		$resolved = MailboxService::resolveInlineImages(array(
+			array('id' => $message->key, 'body_html' => $body_html),
+		));
+		$body_html = $resolved[0]['body_html'];
+	}
+
 	return LogicResult::render(array(
 		'session' => $session,
 		'settings' => $settings,
@@ -80,6 +94,7 @@ function admin_inbound_email_message_logic(array $input): LogicResult {
 		'domain_name' => $domain_name,
 		'alias_name' => $alias_name,
 		'attachments' => $attachments,
+		'body_html' => $body_html,
 	));
 }
 ?>

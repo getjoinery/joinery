@@ -597,6 +597,26 @@ references still resolve in the recipient's client; every other part attaches no
 The message is rebuilt fresh (forwarding re-signs DKIM/SRS), so byte-exact replay was
 never on the wire.
 
+**Inline images in the readers.** `MailboxService::resolveInlineImages()` — the
+single `cid:` rewrite implementation, shared by the Mailbox Reader thread
+endpoint (`ajax/mailbox_thread.php`), the single-message detail page
+(`admin_inbound_email_message.php`), and the native transport
+(`withSignedTransport()`) — resolves each `cid:<id>` reference in an HTML body
+to a short-lived **signed URL** (`docs/file_signed_urls.md`, 1-hour TTL for the
+web readers) for the manifest row whose `ima_content_id` matches `<id>` **in
+that message only** — a Content-ID can never reach another message's parts.
+Signed URLs are required, not optional: the body renders inside a `sandbox=""`
+`srcdoc` iframe whose opaque origin attaches no cookies to subresource
+requests, and mailbox visibility is a grant decision (`MailboxViewer`) that
+`File::is_viewable()`'s owner-or-admin rule cannot express — so a session-gated
+`/uploads` URL can never authorize inline images for any reader. Minting is the
+authorization statement: the resolver runs only on messages the caller has
+already scope-checked (the viewer's grant scope, or the admin permission gate).
+A link that outlives its TTL renders broken until the message is reopened,
+which mints fresh ones. Unmatched `cid:` references are left as-is (broken).
+This applies to file-backed inline parts; a purely on-demand IMAP (`remote`)
+inline part is not resolved here.
+
 ### Raw storage (fallback, legacy, and IMAP)
 
 When a message is stored as a raw (the extraction fallback, or a legacy row), the heavy

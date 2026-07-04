@@ -823,7 +823,7 @@ if (!function_exists('joai_pin_svg')) {
         var id = item.getAttribute('data-conversation-id');
         var title = item.querySelector('.joai-chat-item-title').textContent;
         JoineryModal.confirm(
-            'Delete the conversation "' + title + '"? This cannot be undone.',
+            'Delete the conversation "' + title + '"? It will be removed from your list.',
             function () {
                 threadAction(id, 'delete')
                     .then(function (data) {
@@ -1029,8 +1029,8 @@ if (!function_exists('joai_pin_svg')) {
         // standalone reply removes just that one.
         var isUser = bubble.classList.contains('joai-chat-mine');
         var prompt = isUser
-            ? 'Delete this message and the reply to it? This cannot be undone.'
-            : 'Delete this message? This cannot be undone.';
+            ? 'Delete this message and the reply to it? It will be removed from the conversation.'
+            : 'Delete this message? It will be removed from the conversation.';
         JoineryModal.confirm(
             prompt,
             function () {
