@@ -772,17 +772,19 @@ enforced inside `MailboxSender`.
 | `/ajax/mailbox_list` | GET | thread list (`alias_id`, filters, `page`) |
 | `/ajax/mailbox_thread` | GET | messages in a `thread_key` (with bodies) |
 | `/ajax/mailbox_action` | POST | mark read/unread, star/unstar, delete — CSRF-protected, accepts `ids[]` or a `thread_key` expanded server-side |
-| `/ajax/mailbox_send` | POST (multipart) | send a reply / reply-all / forward AS the mailbox; stores the sent copy |
+| `/ajax/mailbox_send` | POST (multipart) | send a reply / reply-all / forward / new message AS the mailbox; stores the sent copy |
 
 HTML bodies stay sandboxed (`<iframe sandbox="">`, no `allow-scripts`) exactly as
 the detail page does — stored mail is fully attacker-controlled.
 
-### Reply / Forward
+### Reply / Forward / New Message
 
 From an open conversation, **Reply**, **Reply All**, and **Forward** compose a
 message sent **as that mailbox**, threaded into the conversation, with the sent
 copy stored so the thread reads as a back-and-forth dialog (outbound messages are
-labelled "Sent").
+labelled "Sent"). A **New message** button (the reader's list header, and the
+mailbox screen's toolbar on iOS) starts a conversation from scratch instead —
+see "New message" below for what differs.
 
 - **Compose UI.** A single `FormWriter` form is rendered once in the reader
   (hidden) and the reader's JS shows it, populates To/Cc/Subject and the quoted
@@ -809,11 +811,50 @@ labelled "Sent").
   `Horde_Mime`. If a reference-backed original is no longer in the source mailbox,
   the forward fails with a clear message rather than sending an empty body.
   User-uploaded attachments ride along in every mode.
+- **Uploading new attachments.** The web reader's compose panel has a paperclip
+  button, removable pending-file chips, and drag-and-drop onto the open compose
+  panel — the same UX as the Joinery AI chat composer. `POST
+  /api/v1/action/inbound_email/send` accepts the identical multipart
+  `attachments[]` field (a multipart POST leaves `php://input` empty, so the
+  dispatcher falls back to `$_POST` and PHP fills `$_FILES` natively — no
+  transport change needed), and the iOS reply/forward sheet attaches from
+  Photo Library or Files the same way. Every surface enforces the same caps
+  (`MailboxSender::MAX_UPLOAD_FILES` / `MAX_UPLOAD_BYTES` / `MAX_TOTAL_BYTES` —
+  10 files, 10 MB per file, 25 MB total including any re-attached forward
+  originals); a cap breach fails the whole send so a partially-attached email
+  never goes out. On success each upload persists as a private `File`
+  (`fil_source = email_attachment`, owned by the sending user) with an `ima_`
+  manifest row on the new outbound message, so the sent copy shows what was
+  attached in every reader (web, admin, iOS) with no separate rendering path.
+  Downloads authorize the same way as any other mail attachment: via the
+  message's mailbox grant, not `File` ownership.
 - **The stored copy.** Each successful send is persisted as an
   `iem_direction = 'outbound'` row (sender = mailbox address, recipient = the
   To/Cc list, `iem_is_read = true`) so the conversation renders from the local
   row immediately — no poll needed. A failed send stores **no** row and surfaces
   the error inline; the draft stays in the panel to fix and resend.
+
+### New message
+
+A fourth compose mode, `mode=new` (`MailboxSender::MODE_NEW`), starts a
+conversation with no source message to reply to or quote:
+
+- **Identity.** `alias_id` (not `source_id`) picks the sending mailbox,
+  gated by the same `MailboxViewer::canAccess()` grant every other mode
+  uses — a grant means full access: read the mailbox and send as it. The
+  web reader's From selector and the iOS From picker are both populated
+  from the viewer's already-loaded mailbox list (no extra fetch) and
+  always show, even with a single grant, as a plain statement of the
+  sending address rather than a control to hunt for.
+- **Subject and body.** Sent exactly as entered — no Re:/Fwd: prefix, no
+  fallback subject, and no quote block (there's nothing to quote).
+- **Threading.** No `In-Reply-To`/`References` headers go out. The stored
+  row's `iem_thread_key` is the new message's own Message-ID — the same
+  "singleton thread" rule inbound ingest uses for a first-contact message
+  — so when the recipient replies, their `In-Reply-To` resolves back to
+  that key and the reply files into this same conversation, not a new one.
+- **Uploads.** `attachUploads()` runs in every mode, so a new message can
+  carry attachments with no extra work.
 
 ## API Surface
 
@@ -827,7 +868,7 @@ The mailbox is exposed to API clients (the native mobile mail screens,
 | `thread_list` | Paged threads for a mailbox view — params `alias_id`, `q`, `unread_only`, `starred_only`, `spam`, `inbox`, `folder_id`, `page`; same row shapes as the web reader's list endpoint |
 | `thread` | One full thread: messages with plain/HTML bodies, attachment manifest, and the thread's folder ids |
 | `thread_action` | The reader's full mutation set: `mark_read`/`mark_unread`, `star`/`unstar`, `archive`/`unarchive`, `delete`, `mark_spam`/`mark_not_spam`, `set_membership`, `create_folder` — targets `ids[]` or a `thread_key` |
-| `send` | Reply / reply-all / forward as the mailbox (JSON transport — no uploads; forwards re-attach the original's parts server-side) |
+| `send` | Reply / reply-all / forward / new message as the mailbox — `source_id` (reply/reply_all/forward) or `alias_id` (new); accepts a plain JSON body or, with attachments, multipart `attachments[]`; forwards re-attach the original's parts server-side |
 
 Each action is a `logic/{action}_logic.php` with an `_logic_api()` opt-in that
 builds a `MailboxViewer` for the key's user and goes through

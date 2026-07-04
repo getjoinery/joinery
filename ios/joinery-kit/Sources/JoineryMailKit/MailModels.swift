@@ -107,6 +107,25 @@ public struct MailAttachment: Identifiable, Equatable, Sendable {
     }
 }
 
+/// A file the user picked to attach to a reply/forward. Carried as a multipart
+/// part; the server re-detects the type and enforces the size/count caps and is
+/// the sole authority — the client only pre-filters the picker. Duplicated from
+/// `JoineryAIChatKit.ChatOutgoingAttachment` rather than shared across modules
+/// (kept small and mail-specific on purpose).
+public struct MailOutgoingAttachment: Identifiable, Equatable, Sendable {
+    public let id: UUID
+    public let filename: String
+    public let mimeType: String
+    public let data: Data
+
+    public init(id: UUID = UUID(), filename: String, mimeType: String, data: Data) {
+        self.id = id
+        self.filename = filename
+        self.mimeType = mimeType
+        self.data = data
+    }
+}
+
 /// One message of `inbound_email/thread`.
 public struct MailMessage: Identifiable, Equatable, Sendable {
     public let id: Int

@@ -674,6 +674,14 @@ Idempotency-Key: {uuid}          (optional — see Contract § Idempotent writes
 
 Sessioned actions require API key write permission (level 2+) and run under session simulation as the key's user. With an `Idempotency-Key`, the action executes at most once per key — retries replay the stored response ([Contract § Idempotent writes](#idempotent-writes)).
 
+**File uploads.** An action that needs to accept files (rather than JSON-only
+fields) is posted as `multipart/form-data` instead — no `ApiLogicEndpoint`
+change is required: a multipart POST leaves the raw body empty, so the
+dispatcher falls back to `$_POST` for the text fields and PHP fills `$_FILES`
+natively for the file parts. Two shipped actions take this transport:
+`joinery_ai/chat_send` (field `attachments[]`, chat file uploads) and
+`inbound_email/send` (field `attachments[]`, compose attachments).
+
 ### Plugin Actions
 
 Plugin actions are addressed as `{plugin}/{action}`, where `{plugin}` is the plugin directory name:

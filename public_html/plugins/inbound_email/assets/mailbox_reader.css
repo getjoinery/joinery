@@ -1,7 +1,7 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.1
+ * Vanilla CSS, no framework. @version 2.3
  */
 
 .mbx-reader {
@@ -125,6 +125,14 @@
 	border-bottom: 1px solid #eef1f4;
 }
 .mbx-list-title { font-weight: 600; font-size: 14px; color: #111827; }
+.mbx-list-header-actions { display: flex; align-items: center; gap: 6px; }
+.mbx-new-btn {
+	border: 1px solid #2563eb; background: #2563eb; color: #fff;
+	border-radius: 16px; padding: 6px 14px; cursor: pointer;
+	font-size: 12px; font-weight: 600;
+}
+.mbx-new-btn:hover { background: #1d4ed8; }
+.mbx-new-btn[hidden] { display: none; }
 .mbx-iconbtn {
 	border: none; background: none; cursor: pointer;
 	font-size: 16px; color: #6b7280; padding: 2px 6px; border-radius: 4px;
@@ -394,6 +402,7 @@
 .mbx-compose label.form-label { display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px; }
 .mbx-compose input[type="text"],
 .mbx-compose input[type="file"],
+.mbx-compose select,
 .mbx-compose textarea {
 	width: 100%;
 	border: 1px solid #cfd6dd;
@@ -409,6 +418,43 @@
 }
 .mbx-compose button[type="submit"]:hover { background: #1d4ed8; }
 .mbx-compose button[type="submit"]:disabled { opacity: .6; cursor: default; }
+
+/* ---- Compose attachments: pending chips + paperclip + drag-and-drop ---- */
+.mbx-attach-strip {
+	display: flex; flex-wrap: wrap; gap: 6px;
+	padding: 0 16px 10px;
+}
+.mbx-attach-chip {
+	display: inline-flex; align-items: center; gap: 6px;
+	max-width: 220px;
+	background: #eef1f4; border-radius: 14px;
+	padding: 4px 6px 4px 10px; font-size: 12px; color: #1f2933;
+}
+.mbx-attach-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mbx-attach-chip-size { color: #6b7280; flex: 0 0 auto; }
+.mbx-attach-chip-remove {
+	border: none; background: none; cursor: pointer; font-size: 13px;
+	color: #6b7280; line-height: 1; padding: 2px 4px; border-radius: 50%;
+}
+.mbx-attach-chip-remove:hover { color: #b42318; background: #fff; }
+
+.mbx-compose-actions {
+	display: flex; align-items: center; gap: 8px;
+	padding: 0 16px 16px;
+}
+.mbx-file-input { display: none; }
+.mbx-attach-btn {
+	flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+	width: 32px; height: 32px; color: #6b7280;
+}
+.mbx-attach-btn svg { width: 20px; height: 20px; display: block; }
+.mbx-attach-btn:hover { background: #eef1f4; color: #111827; }
+.mbx-compose-actions button[type="submit"] { margin-left: auto; }
+
+/* Drag-and-drop affordance while a file is dragged over the open compose panel. */
+.mbx-compose.mbx-compose-dragover {
+	outline: 2px dashed #2563eb; outline-offset: -4px;
+}
 
 /* ---- Responsive: rail moves above the main pane on narrow screens ---- */
 @media (max-width: 760px) {

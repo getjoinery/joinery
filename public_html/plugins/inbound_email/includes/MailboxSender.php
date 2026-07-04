@@ -25,13 +25,31 @@
  * parts are re-embedded with their Content-ID via EmailMessage::attachInlineData()
  * so forwarded inline images still render.
  *
- * @version 1.2
+ * User uploads (not forwarded originals) persist on the SENT copy: after the
+ * transport send succeeds, each accepted upload is stored as a private File
+ * (fil_source = email_attachment, owned by the sending user) with an ima_
+ * manifest row on the new outbound message — the same manifest/serving
+ * plumbing that already renders and downloads inbound attachments, so the
+ * sent copy shows what went out with no new rendering code
+ * (specs/implemented/inbound_email_compose_attachments.md).
+ *
+ * A fourth mode, `new` (MODE_NEW), starts a conversation from scratch: there
+ * is no source message, so identity comes directly from `alias_id` (still
+ * gated by the same viewer->canAccess() grant), the subject is sent as
+ * entered with no Re:/Fwd: prefix, the body carries no quote block, and no
+ * reply threading headers are set. The stored row's thread key is the new
+ * message's own Message-ID — the same "singleton thread" rule inbound
+ * ingest uses — so a recipient's reply threads back into this conversation
+ * (specs/implemented/inbound_email_new_message_compose.md).
+ *
+ * @version 1.4
  */
 
 require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
 require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 require_once(PathHelper::getIncludePath('includes/OutboundTransport.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('data/files_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/MailboxViewer.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_message_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_alias_class.php'));
@@ -47,6 +65,7 @@ class MailboxSender {
 	const MODE_REPLY      = 'reply';
 	const MODE_REPLY_ALL  = 'reply_all';
 	const MODE_FORWARD    = 'forward';
+	const MODE_NEW        = 'new';
 
 	/** Upload caps (server-side enforcement, §10). */
 	const MAX_UPLOAD_FILES = 10;
@@ -69,20 +88,38 @@ class MailboxSender {
 	 * Throws MailboxSenderException with a user-facing message on any failure
 	 * (validation, transport, original-no-longer-available, send failure).
 	 *
-	 * @param array $params  mode, source_id, to, cc, subject, body
+	 * @param array $params  mode, source_id (reply/reply_all/forward) or
+	 *                       alias_id (new), to, cc, subject, body
 	 * @param array $files   normalized upload entries (name,type,tmp_name,size,error)
 	 */
 	public function send(array $params, array $files = array()): array {
 		$mode = (string)($params['mode'] ?? '');
-		if (!in_array($mode, array(self::MODE_REPLY, self::MODE_REPLY_ALL, self::MODE_FORWARD), true)) {
+		if (!in_array($mode, array(self::MODE_REPLY, self::MODE_REPLY_ALL, self::MODE_FORWARD, self::MODE_NEW), true)) {
 			throw new MailboxSenderException('Unknown compose action.');
 		}
 
-		$source = $this->loadSourceInScope(intval($params['source_id'] ?? 0));
-		$alias_id = intval($source->get('iem_iea_inbound_email_alias_id'));
-		$alias = new InboundEmailAlias($alias_id, TRUE);
-		if (!$alias->key || $alias->get('iea_delete_time')) {
-			throw new MailboxSenderException('The mailbox for this conversation no longer exists.');
+		if ($mode === self::MODE_NEW) {
+			// No source message: identity comes straight from the selected mailbox,
+			// gated by the same "a grant means full access" rule as every other mode.
+			$source = null;
+			$alias_id = intval($params['alias_id'] ?? 0);
+			if ($alias_id <= 0) {
+				throw new MailboxSenderException('Choose a mailbox to send as.');
+			}
+			if (!$this->viewer->canAccess($alias_id)) {
+				throw new MailboxSenderException('You do not have access to this mailbox.');
+			}
+			$alias = new InboundEmailAlias($alias_id, TRUE);
+			if (!$alias->key || $alias->get('iea_delete_time')) {
+				throw new MailboxSenderException('The selected mailbox no longer exists.');
+			}
+		} else {
+			$source = $this->loadSourceInScope(intval($params['source_id'] ?? 0));
+			$alias_id = intval($source->get('iem_iea_inbound_email_alias_id'));
+			$alias = new InboundEmailAlias($alias_id, TRUE);
+			if (!$alias->key || $alias->get('iea_delete_time')) {
+				throw new MailboxSenderException('The mailbox for this conversation no longer exists.');
+			}
 		}
 		$alias_address = strtolower($alias->get_full_address());
 
@@ -102,7 +139,8 @@ class MailboxSender {
 			throw new MailboxSenderException('Add at least one recipient.');
 		}
 
-		$subject = $this->normalizeSubject((string)($params['subject'] ?? ''), $mode, (string)$source->get('iem_subject'));
+		$subject = $this->normalizeSubject((string)($params['subject'] ?? ''), $mode,
+			$source !== null ? (string)$source->get('iem_subject') : '');
 		$message_id = $this->generateMessageId($from_address);
 
 		$email = new EmailMessage();
@@ -115,8 +153,10 @@ class MailboxSender {
 
 		// Threading: replies are In-Reply-To/References the original; a forward
 		// starts a fresh external thread (no reply headers) but still files into
-		// this conversation locally (§5).
-		if ($mode !== self::MODE_FORWARD) {
+		// this conversation locally (§5). A new message has no original to thread
+		// from — the recipient's reply threads back via its own Message-ID (§6 of
+		// the new-message spec, resolveThreadKey()/storeOutboundRow() below).
+		if ($mode !== self::MODE_FORWARD && $mode !== self::MODE_NEW) {
 			$this->applyThreadingHeaders($email, $source);
 		}
 
@@ -126,7 +166,7 @@ class MailboxSender {
 		if ($mode === self::MODE_FORWARD) {
 			$total += $this->attachOriginal($email, $source);
 		}
-		$this->attachUploads($email, $files, $total);
+		$accepted = $this->attachUploads($email, $files, $total);
 
 		// One pipeline, synchronous (no retry-queue): success/failure is shown now.
 		try {
@@ -161,6 +201,9 @@ class MailboxSender {
 
 		$outbound_id = $this->storeOutboundRow($source, $alias, $mode, $from_address,
 			array_merge($to, $cc), $subject, $email, $message_id);
+		if ($accepted) {
+			$this->persistOutboundUploads($outbound_id, $accepted);
+		}
 
 		return array('ok' => true, 'outbound_id' => $outbound_id);
 	}
@@ -199,9 +242,16 @@ class MailboxSender {
 
 	// ── message building ───────────────────────────────────────────────────
 
-	/** Add Re:/Fwd: only when the (possibly user-edited) subject lacks it. */
+	/**
+	 * Add Re:/Fwd: only when the (possibly user-edited) subject lacks it. A new
+	 * message is sent exactly as entered — no prefix, no fallback to a source
+	 * subject (there is none), empty allowed.
+	 */
 	private function normalizeSubject(string $subject, string $mode, string $original): string {
 		$subject = trim($subject);
+		if ($mode === self::MODE_NEW) {
+			return $subject;
+		}
 		if ($subject === '') {
 			$subject = trim($original);
 		}
@@ -211,9 +261,16 @@ class MailboxSender {
 		return preg_match('/^\s*re\s*:/i', $subject) ? $subject : 'Re: ' . $subject;
 	}
 
-	/** Build the outgoing HTML body: the user's note + a quoted/forwarded original. */
-	private function buildBody(string $mode, string $userText, InboundEmailMessage $source): string {
+	/**
+	 * Build the outgoing HTML body: the user's note + a quoted/forwarded
+	 * original. A new message ($source === null) carries only the user's text
+	 * — there is nothing to quote.
+	 */
+	private function buildBody(string $mode, string $userText, ?InboundEmailMessage $source): string {
 		$userHtml = $this->textToHtml($userText);
+		if ($mode === self::MODE_NEW) {
+			return '<div>' . $userHtml . '</div>';
+		}
 		$origHtml = trim((string)$source->get('iem_body_html'));
 		$origPlain = trim((string)$source->get('iem_body_plain'));
 		$quoted = $origHtml !== '' ? $origHtml : ($origPlain !== '' ? $this->textToHtml($origPlain) : '');
@@ -405,9 +462,16 @@ class MailboxSender {
 		return ($v === true || $v === 't' || $v === 'true' || $v === '1' || $v === 1);
 	}
 
-	/** Attach validated uploads. $runningTotal carries any forwarded-original bytes. */
-	private function attachUploads(EmailMessage $email, array $files, int $runningTotal): void {
+	/**
+	 * Attach validated uploads. $runningTotal carries any forwarded-original bytes.
+	 * Returns the accepted uploads (bytes + display name) so the caller can persist
+	 * them onto the outbound manifest once the send succeeds.
+	 *
+	 * @return array<int, array{bytes:string, name:string}>
+	 */
+	private function attachUploads(EmailMessage $email, array $files, int $runningTotal): array {
 		$count = 0;
+		$accepted = array();
 		foreach ($files as $f) {
 			if (($f['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
 				continue;
@@ -434,16 +498,92 @@ class MailboxSender {
 			if ($bytes === false) {
 				throw new MailboxSenderException('An attachment could not be read.');
 			}
-			$email->attachData($bytes,
-				$this->safeFilename((string)($f['name'] ?? 'attachment')),
-				(string)($f['type'] ?? 'application/octet-stream'));
+			$name = $this->safeFilename((string)($f['name'] ?? 'attachment'));
+			$email->attachData($bytes, $name, (string)($f['type'] ?? 'application/octet-stream'));
+			$accepted[] = array('bytes' => $bytes, 'name' => $name);
 		}
+		return $accepted;
 	}
 
 	private function safeFilename(string $name): string {
 		$name = str_replace(array("\r", "\n", '"', '\\', '/'), '', $name);
 		$name = trim($name);
 		return $name !== '' ? substr($name, 0, 255) : 'attachment';
+	}
+
+	/**
+	 * Persist each accepted upload as a private File plus an ima_ manifest row on
+	 * the just-created outbound message — the same manifest/serving plumbing that
+	 * already renders and downloads inbound attachments, so the sent copy shows
+	 * what went out with no new rendering code. Ownership is the sending session
+	 * user (we know exactly who uploaded, unlike inbound mail's grant-based guess);
+	 * serving still authorizes via mailbox grants, not File ownership.
+	 *
+	 * Never throws: the message is already on the wire, so a storage failure here
+	 * only degrades the sent copy to showing no attachments (logged for follow-up).
+	 *
+	 * @param array<int, array{bytes:string, name:string}> $accepted
+	 */
+	private function persistOutboundUploads(int $message_id, array $accepted): void {
+		foreach ($accepted as $a) {
+			try {
+				$mime = File::detect_mime_bytes($a['bytes']) ?: 'application/octet-stream';
+				$file = File::createFromBytes($a['bytes'], $a['name'], $mime, $this->viewer->getUserId(), array(
+					'fil_private' => true,
+					'fil_source'  => File::SOURCE_EMAIL_ATTACHMENT,
+				));
+				InboundMessageAttachment::CreateEntry(array(
+					'ima_iem_inbound_email_message_id' => $message_id,
+					'ima_filename'     => $a['name'],
+					'ima_content_type' => $file->get('fil_type') ?: $mime,
+					'ima_size_bytes'   => strlen($a['bytes']),
+					'ima_is_inline'    => false,
+					'ima_fil_file_id'  => (int)$file->key,
+				));
+			} catch (Throwable $e) {
+				error_log('MailboxSender: failed to persist outbound upload "' . $a['name'] . '" on message '
+					. $message_id . ': ' . $e->getMessage());
+			}
+		}
+	}
+
+	/**
+	 * Normalize the multipart `attachments` upload(s) into a flat list of
+	 * ['name','type','tmp_name','size','error'], tolerating both a single file and
+	 * the array (`attachments[]`) shape. Shared by both send surfaces (the ajax
+	 * endpoint and the API action) so they cannot drift.
+	 */
+	public static function collectUploads(): array {
+		$files = array();
+		if (!isset($_FILES['attachments'])) {
+			return $files;
+		}
+		$f = $_FILES['attachments'];
+		if (is_array($f['name'])) {
+			$n = count($f['name']);
+			for ($i = 0; $i < $n; $i++) {
+				$files[] = array(
+					'name'     => $f['name'][$i] ?? '',
+					'type'     => $f['type'][$i] ?? '',
+					'tmp_name' => $f['tmp_name'][$i] ?? '',
+					'size'     => $f['size'][$i] ?? 0,
+					'error'    => $f['error'][$i] ?? UPLOAD_ERR_NO_FILE,
+				);
+			}
+			return $files;
+		}
+		// Single-file (non-array) shape, e.g. a client that posts one `attachments`
+		// field rather than `attachments[]`.
+		if (($f['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE || ($f['tmp_name'] ?? '') !== '') {
+			$files[] = array(
+				'name'     => $f['name'] ?? '',
+				'type'     => $f['type'] ?? '',
+				'tmp_name' => $f['tmp_name'] ?? '',
+				'size'     => $f['size'] ?? 0,
+				'error'    => $f['error'] ?? UPLOAD_ERR_NO_FILE,
+			);
+		}
+		return $files;
 	}
 
 	// ── Sent / compose interop (§9) ──────────────────────────────────────────
@@ -546,16 +686,22 @@ class MailboxSender {
 	/**
 	 * Persist the sent message as an outbound iem_ row in the same thread. When the
 	 * source was a singleton (no stored thread key), backfill it so both rows group
-	 * together (§6).
+	 * together (§6). A new message ($source === null) has no thread to join: its
+	 * own Message-ID becomes the thread root — the same "singleton thread" rule
+	 * inbound ingest uses — so a recipient's reply resolves back to this row.
 	 */
-	private function storeOutboundRow(InboundEmailMessage $source, InboundEmailAlias $alias,
+	private function storeOutboundRow(?InboundEmailMessage $source, InboundEmailAlias $alias,
 			string $mode, string $from_address, array $recipients, string $subject,
 			EmailMessage $email, string $message_id): int {
 
-		$thread_key = $this->resolveThreadKey($source, $message_id);
+		$thread_key = $source !== null
+			? $this->resolveThreadKey($source, $message_id)
+			: substr($message_id, 0, 255);
 
 		$row = new InboundEmailMessage(NULL);
-		$row->set('iem_ied_inbound_email_domain_id', $source->get('iem_ied_inbound_email_domain_id'));
+		$row->set('iem_ied_inbound_email_domain_id', $source !== null
+			? $source->get('iem_ied_inbound_email_domain_id')
+			: $alias->get('iea_ied_inbound_email_domain_id'));
 		$row->set('iem_iea_inbound_email_alias_id', $alias->key);
 		$row->set('iem_direction', 'outbound');
 		$row->set('iem_sender', substr($from_address, 0, 500));
