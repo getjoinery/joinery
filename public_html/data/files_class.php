@@ -296,12 +296,25 @@ public static function get_by_name($name, $search_deleted = false) {
 
 	/**
 	 * Detect a file's real MIME type from its magic bytes, never from the
-	 * client-supplied extension or Content-Type (both spoofable). Returns null
-	 * when finfo is unavailable or cannot determine a type, so callers can fall
-	 * back to a client value only as a last resort.
+	 * client-supplied extension or Content-Type (both spoofable).
+	 *
+	 * Return contract:
+	 *   - A concrete type string when finfo or the signature table recognizes it.
+	 *   - `application/octet-stream` when the bytes are recognized by NEITHER —
+	 *     the fail-closed "unrecognized binary" answer callers should reject on.
+	 *     This is a real return value, not a stand-in for null.
+	 *   - `null` ONLY when finfo itself is unavailable or the path is unreadable
+	 *     (a broken-server condition, not a property of the file), so callers may
+	 *     fall back to a client-supplied value as a last resort.
+	 *
+	 * libmagic only matches a signature within a limited window from the start of
+	 * the file, so a valid PDF/image whose header sits past that window comes back
+	 * as `application/octet-stream`. When finfo yields that sentinel, a magic-byte
+	 * signature sniff (exactly as trustworthy as finfo — same bytes) covers the
+	 * gap before the fail-closed answer is returned.
 	 *
 	 * @param string $path filesystem path to the stored bytes
-	 * @return string|null detected MIME type, or null if undetectable
+	 * @return string|null detected MIME type, or null if finfo is unavailable
 	 */
 	public static function detect_mime_file($path) {
 		if (!function_exists('finfo_open') || !is_readable($path)) {
@@ -313,15 +326,25 @@ public static function get_by_name($name, $search_deleted = false) {
 		}
 		$mime = finfo_file($finfo, $path);
 		finfo_close($finfo);
-		return ($mime === false || $mime === '') ? null : $mime;
+		if ($mime === false || $mime === '') {
+			return null;   // finfo failed on readable bytes — treat as unavailable
+		}
+		if ($mime === 'application/octet-stream') {
+			$head = @file_get_contents($path, false, null, 0, 4096);
+			$sniff = ($head === false) ? null : self::sniff_signature($head);
+			return $sniff !== null ? $sniff : 'application/octet-stream';
+		}
+		return $mime;
 	}
 
 	/**
 	 * Magic-byte MIME detection from an in-memory byte string. Same contract as
-	 * detect_mime_file() for callers that hold the bytes rather than a path.
+	 * detect_mime_file() — including the signature-sniff fallback for finfo's
+	 * `application/octet-stream` sentinel and the null-only-when-finfo-unavailable
+	 * rule.
 	 *
 	 * @param string $bytes
-	 * @return string|null detected MIME type, or null if undetectable
+	 * @return string|null detected MIME type, or null if finfo is unavailable
 	 */
 	public static function detect_mime_bytes($bytes) {
 		if (!function_exists('finfo_open')) {
@@ -333,7 +356,42 @@ public static function get_by_name($name, $search_deleted = false) {
 		}
 		$mime = finfo_buffer($finfo, (string)$bytes);
 		finfo_close($finfo);
-		return ($mime === false || $mime === '') ? null : $mime;
+		if ($mime === false || $mime === '') {
+			return null;
+		}
+		if ($mime === 'application/octet-stream') {
+			$sniff = self::sniff_signature(substr((string)$bytes, 0, 4096));
+			return $sniff !== null ? $sniff : 'application/octet-stream';
+		}
+		return $mime;
+	}
+
+	/**
+	 * Recognize an accepted binary type from its leading magic bytes, or null when
+	 * no signature matches. This is finfo's safety net for its scan-window blind
+	 * spot: a signature is read from the same bytes finfo reads, so it never trusts
+	 * the client extension/Content-Type. Only types the platform actually accepts
+	 * as binary are listed; anything else (SVG, HTML, office) is deliberately NOT
+	 * sniffed and stays unrecognized.
+	 *
+	 * @param string $head the file's leading bytes (a 4 KB prefix is sufficient)
+	 * @return string|null the detected MIME, or null if no signature matches
+	 */
+	private static function sniff_signature($head) {
+		$head = (string)$head;
+		if ($head === '') return null;
+		if (strpos(substr($head, 0, 4096), '%PDF-') !== false) return 'application/pdf';
+		if (strncmp($head, "\x89PNG\r\n\x1a\n", 8) === 0)        return 'image/png';
+		if (strncmp($head, "\xFF\xD8\xFF", 3) === 0)             return 'image/jpeg';
+		if (strncmp($head, 'GIF87a', 6) === 0
+				|| strncmp($head, 'GIF89a', 6) === 0)            return 'image/gif';
+		if (strncmp($head, 'RIFF', 4) === 0
+				&& substr($head, 8, 4) === 'WEBP')               return 'image/webp';
+		if (substr($head, 4, 4) === 'ftyp') {
+			$brand = substr($head, 8, 4);
+			if ($brand === 'avif' || $brand === 'avis')          return 'image/avif';
+		}
+		return null;
 	}
 
 	/**

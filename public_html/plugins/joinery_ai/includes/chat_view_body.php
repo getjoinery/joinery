@@ -675,6 +675,10 @@ if (!function_exists('joai_pin_svg')) {
                     history.replaceState(null, '', JOAI_BASE + 'chat?aic_conversation_id=' + data.conversation_id);
                 }
 
+                // Message sent, but one or more attachments failed server-side and
+                // won't reach the model — surface it inline (the send itself stands).
+                if (data.attachment_warning) { showSendNotice(data.attachment_warning); }
+
                 // Non-fpm fallback may finish the turn inline.
                 if (data.status === 'complete') { appendReply(data.assistant_html); updateUsage(data.conversation_usage); return; }
                 if (data.status === 'failed') { setBusy(false); alert(data.error || 'Send failed.'); return; }

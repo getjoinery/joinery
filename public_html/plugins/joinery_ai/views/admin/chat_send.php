@@ -112,8 +112,10 @@ $user_msg->save();
 $user_msg->load();
 
 // Store + link the validated attachments to this message (private File rows,
-// text extracted once in the subprocess).
-ChatAttachmentIngest::commit($prepared_attachments, (int)$user_msg->key, $uid);
+// text extracted once in the subprocess). Any file whose stored type drifts from
+// the validated one is dropped and reported, so we can warn instead of letting
+// the model silently receive nothing.
+$attach_failures = ChatAttachmentIngest::commit($prepared_attachments, (int)$user_msg->key, $uid);
 
 // Create the assistant placeholder the page will poll. It is RUNNING until the
 // turn (below) finalizes it.
@@ -138,6 +140,9 @@ $payload = [
     'title'           => $conversation->get('aic_title'),
     'user_html'       => ChatRender::userBubble($message, $user_time, (int)$user_msg->key),
 ];
+
+$attach_warning = ChatAttachmentIngest::failureWarning($attach_failures);
+if ($attach_warning !== '') $payload['attachment_warning'] = $attach_warning;
 
 if (ChatAsync::canDetach()) {
     // Tell the page to start polling, release the browser, then run the turn.

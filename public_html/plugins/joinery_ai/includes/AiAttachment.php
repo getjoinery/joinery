@@ -292,7 +292,17 @@ class AiAttachment {
         $category = self::categoryForMime($mime);
         $label = self::displayName($file);
         if ($category === null) {
-            return [self::note("An unsupported attachment ($label) was omitted.")];
+            // Invariant violation: ingress rejects unsupported types before a row
+            // exists, and commit() drops any file whose stored type drifts from the
+            // validated category. Reaching here means stored state violates that
+            // invariant (a pre-fix row, or detection changing under us) — log it so
+            // it surfaces in monitoring rather than only in the model's reply, and
+            // emit an honest note (never a silent drop) that names a server-side
+            // error rather than blaming the file as "unsupported".
+            error_log('[joinery_ai attach] unroutable stored fil_type='
+                . var_export($file->get('fil_type'), true) . ' for file ' . $file->key
+                . ' (' . $label . ') — invariant violation, attachment not sent');
+            return [self::note("An attachment ($label) could not be included due to a server-side type error.")];
         }
 
         switch ($category) {
