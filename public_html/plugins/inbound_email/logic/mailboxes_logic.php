@@ -5,7 +5,7 @@
  * POST /api/v1/action/inbound_email/mailboxes (session key). Returns the
  * accessible mailboxes with unread/total counts and folder rails, plus
  * can_compose — the switcher data the native mail screens boot from
- * (specs/mobile_native_email.md). Same shape as the web reader's switcher
+ * (specs/implemented/mobile_native_email_server_api_and_ios.md). Same shape as the web reader's switcher
  * feed: MailboxService::listMailboxes() is the single source.
  *
  * @version 1.0.0

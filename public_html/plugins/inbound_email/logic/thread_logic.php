@@ -5,7 +5,7 @@
  * POST /api/v1/action/inbound_email/thread (session key). Params: thread_key
  * (required), alias_id (optional). Returns every in-scope message with its
  * plain/HTML body and attachment manifest, enriched for sessionless clients
- * (specs/mobile_native_email.md): file-backed attachments carry short-lived
+ * (specs/implemented/mobile_native_email_server_api_and_ios.md): file-backed attachments carry short-lived
  * signed download URLs and HTML bodies have inline cid: images rewritten to
  * signed URLs (MailboxService::withSignedTransport()). Also returns the
  * thread's current folder/label ids. Empty messages = out of scope.

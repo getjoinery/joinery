@@ -6,7 +6,7 @@
  * alias_id (omit/blank = all accessible), q, unread_only, starred_only,
  * spam, inbox, folder_id, page. Returns {threads, has_more, page} — the
  * exact shapes the web reader's list endpoint serves; every row is scoped
- * by MailboxViewer (specs/mobile_native_email.md).
+ * by MailboxViewer (specs/implemented/mobile_native_email_server_api_and_ios.md).
  *
  * @version 1.0.0
  */

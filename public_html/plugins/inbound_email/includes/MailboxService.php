@@ -33,7 +33,7 @@
  * archived rows (iem_is_archived); All Mail shows them. setArchived() is the manual
  * Archive / Move-to-Inbox action, symmetric with a filter's archive action.
  *
- * Native clients (specs/mobile_native_email.md): withSignedTransport() enriches a
+ * Native clients (specs/implemented/mobile_native_email_server_api_and_ios.md): withSignedTransport() enriches a
  * getThread() payload with short-lived signed URLs (docs/file_signed_urls.md) so
  * sessionless API clients can fetch attachments and render inline cid: images.
  * Inline cid: rewriting lives in resolveInlineImages() — the one shared
