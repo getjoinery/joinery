@@ -347,13 +347,29 @@ conversation opened natively and one opened on the web are the same thread:
   new chat carries its control values as seed fields on the first `chat_send`.
   A new chat defaults Data access on so the assistant is useful out of the box;
   the rest take the server's new-chat defaults.
+- **Attachments** (`ChatThreadView` picker + `AttachmentsView`) — the composer's
+  attach button offers Photo Library (`PhotosPicker`) and Files
+  (`.fileImporter`, accepting PDF, text, CSV, JSON, Markdown, and images). Picked
+  files show as removable chips and send as `multipart/form-data` to `chat_send`
+  (`APIClient.submitMultipart`, field `attachments[]`); an attachments-only turn
+  needs no message text. HEIC photos transcode to JPEG client-side so the
+  server's byte-detected type lands in its allowed set. The server owns all
+  validation — type, size, and the model's vision/document capability — and is
+  the sole authority: a rejection surfaces its message, and a file dropped at
+  commit for type drift comes back as `attachment_warning`, shown above the
+  composer. Sent and historical attachments render on the user bubble — images
+  as a thumbnail from the signed `image_url` the serializer mints
+  (`File::mintSignedUrl`, 5-minute TTL, so a cookieless native client loads it),
+  everything else as a labeled file chip.
 
 Accessibility ids (`chat_*`) are the stable UI-test API: `chat_loading`,
 `chat_error`, `chat_retry`, `chat_list`, `chat_empty`, `chat_new`,
 `chat_thread_loading`, `chat_thread_empty`, `chat_transcript`,
 `chat_user_message`, `chat_assistant_message`, `chat_typing`,
 `chat_confirm_card`, `chat_confirm_yes`, `chat_confirm_no`, `chat_composer`,
-`chat_send`, `chat_settings`, `chat_set_model`, `chat_set_data_access`,
+`chat_send`, `chat_attach`, `chat_attachment_strip`, `chat_attachment_remove`,
+`chat_attachment_notice`, `chat_attachment_image`, `chat_attachment_chip`,
+`chat_settings`, `chat_set_model`, `chat_set_data_access`,
 `chat_set_web_search`, `chat_set_thinking`, `chat_settings_done`.
 
 Not in the module yet (the web chat remains for it): thread export.

@@ -36,18 +36,40 @@ public struct ChatAPI: Sendable {
 
     /// Send a message. Omit `conversationID` to start a new conversation, in
     /// which case `seed` carries the control fields the new chat is created with.
-    public func send(message: String, conversationID: Int?, seed: [String: String] = [:]) async throws -> ChatSendResult {
-        var body: [(key: String, value: JSONValue)] = [
-            (key: "message", value: .string(message)),
-        ]
-        if let conversationID {
-            body.append((key: "conversation_id", value: .number(Double(conversationID))))
-        } else {
-            for (key, value) in seed.sorted(by: { $0.key < $1.key }) {
-                body.append((key: key, value: .string(value)))
+    /// When `attachments` is non-empty the call goes out as multipart so the
+    /// files reach the server's `$_FILES['attachments']`; otherwise it's a plain
+    /// JSON action.
+    public func send(message: String, conversationID: Int?, seed: [String: String] = [:],
+                     attachments: [ChatOutgoingAttachment] = []) async throws -> ChatSendResult {
+        let envelope: JSONValue
+        if attachments.isEmpty {
+            var body: [(key: String, value: JSONValue)] = [
+                (key: "message", value: .string(message)),
+            ]
+            if let conversationID {
+                body.append((key: "conversation_id", value: .number(Double(conversationID))))
+            } else {
+                for (key, value) in seed.sorted(by: { $0.key < $1.key }) {
+                    body.append((key: key, value: .string(value)))
+                }
             }
+            envelope = try await client.submitAction("joinery_ai/chat_send", body: .object(body))
+        } else {
+            var fields: [(key: String, value: String)] = [
+                (key: "message", value: message),
+            ]
+            if let conversationID {
+                fields.append((key: "conversation_id", value: String(conversationID)))
+            } else {
+                for (key, value) in seed.sorted(by: { $0.key < $1.key }) {
+                    fields.append((key: key, value: value))
+                }
+            }
+            let files = attachments.map {
+                MultipartFile(field: "attachments[]", filename: $0.filename, mimeType: $0.mimeType, data: $0.data)
+            }
+            envelope = try await client.submitMultipart("joinery_ai/chat_send", fields: fields, files: files)
         }
-        let envelope = try await client.submitAction("joinery_ai/chat_send", body: .object(body))
         guard let result = ChatSendResult(data: envelope["data"]) else {
             throw JoineryAPIError.malformedResponse
         }

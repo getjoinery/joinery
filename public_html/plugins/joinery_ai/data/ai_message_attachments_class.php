@@ -94,8 +94,9 @@ class AiMessageAttachment extends SystemBase {
      * (HTML bubble and JSON message). Each entry is
      *   ['file_id','name','category','image_url']
      * where category is AiAttachment's routing category (image|pdf|text|html|file)
-     * and image_url is a gated serve URL for images only (empty otherwise). Cheap
-     * and read-only — safe to call on every render.
+     * and image_url is a short-lived signed serve URL for images only (empty
+     * otherwise) so a cookieless native client can load it directly; a browser
+     * loads the same URL unchanged. Cheap and read-only — safe on every render.
      */
     public static function displayListForMessage($message_id): array {
         require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AiAttachment.php'));
@@ -117,7 +118,7 @@ class AiMessageAttachment extends SystemBase {
                 'file_id'   => (int)$file->key,
                 'name'      => AiAttachment::displayName($file),
                 'category'  => $category,
-                'image_url' => $category === 'image' ? (string)$file->get_url() : '',
+                'image_url' => $category === 'image' ? (string)$file->mintSignedUrl('original', 300) : '',
             ];
         }
         return $out;

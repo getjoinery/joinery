@@ -26,6 +26,12 @@ public final class ChatThreadStore: ObservableObject {
     @Published public private(set) var usageLabel: String = ""
     @Published public var composerText: String = ""
     @Published public private(set) var isSending = false
+    /// Files the user has picked for the next send, shown as removable chips in
+    /// the composer.
+    @Published public private(set) var pendingAttachments: [ChatOutgoingAttachment] = []
+    /// A one-off notice — e.g. a file the server dropped at commit — shown above
+    /// the composer until the next send clears it.
+    @Published public private(set) var attachmentNotice: String = ""
 
     /// The per-chat controls (model, capabilities, reasoning, sampling) driving
     /// the settings sheet; seeded onto a new chat's first send.
@@ -35,6 +41,10 @@ public final class ChatThreadStore: ObservableObject {
 
     public let api: ChatAPI
     private var pollTask: Task<Void, Never>?
+
+    /// Origin for resolving the relative signed image URLs the server returns on
+    /// attachments.
+    public var baseURL: URL { api.client.config.baseURL }
 
     /// True for a new chat whose controls haven't been seeded from the server
     /// defaults yet — the first meta load overwrites them; a later load leaves
@@ -58,7 +68,22 @@ public final class ChatThreadStore: ObservableObject {
     }
 
     public var canSend: Bool {
-        !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSending && !isTurnRunning
+        let hasText = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return (hasText || !pendingAttachments.isEmpty) && !isSending && !isTurnRunning
+    }
+
+    /// Queue a picked file for the next send.
+    public func addAttachment(_ attachment: ChatOutgoingAttachment) {
+        pendingAttachments.append(attachment)
+    }
+
+    /// Drop a queued file before it's sent.
+    public func removeAttachment(_ id: UUID) {
+        pendingAttachments.removeAll { $0.id == id }
+    }
+
+    public func dismissAttachmentNotice() {
+        attachmentNotice = ""
     }
 
     public func load() async {
@@ -82,16 +107,20 @@ public final class ChatThreadStore: ObservableObject {
 
     public func send() async {
         let text = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isSending, !isTurnRunning else { return }
+        let attachments = pendingAttachments
+        guard !text.isEmpty || !attachments.isEmpty, !isSending, !isTurnRunning else { return }
         isSending = true
         composerText = ""
+        pendingAttachments = []
+        attachmentNotice = ""
         defer { isSending = false }
         do {
             let isNew = conversationID == nil
             let result = try await api.send(
                 message: text,
                 conversationID: conversationID,
-                seed: isNew ? controls.seedFields : [:]
+                seed: isNew ? controls.seedFields : [:],
+                attachments: attachments
             )
             if isNew {
                 conversationID = result.conversationID
@@ -101,8 +130,14 @@ public final class ChatThreadStore: ObservableObject {
             if let userMessage = result.userMessage {
                 messages.append(userMessage)
             }
+            if let warning = result.attachmentWarning, !warning.isEmpty {
+                attachmentNotice = warning
+            }
             finishOrPoll(result)
         } catch {
+            // Re-queue the picked files so a transient failure doesn't force the
+            // user back through the picker.
+            pendingAttachments = attachments
             messages.append(.localFailure(error: (error as? JoineryAPIError)?.displayMessage ?? "Could not send your message."))
         }
     }

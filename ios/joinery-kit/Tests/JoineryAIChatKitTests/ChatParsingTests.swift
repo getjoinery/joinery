@@ -86,4 +86,65 @@ final class ChatParsingTests: XCTestCase {
         XCTAssertEqual(ChatStatus("running"), .running)
         XCTAssertEqual(ChatStatus("failed"), .failed)
     }
+
+    // MARK: Attachments
+
+    func testMessageParsesAttachments() throws {
+        let data = JSONValue.object([
+            (key: "id", value: .number(500)),
+            (key: "role", value: .string("user")),
+            (key: "content", value: .string("See attached")),
+            (key: "attachments", value: .array([
+                .object([
+                    (key: "file_id", value: .number(12)),
+                    (key: "name", value: .string("statement.pdf")),
+                    (key: "category", value: .string("pdf")),
+                    (key: "image_url", value: .string("")),
+                ]),
+                .object([
+                    (key: "file_id", value: .number(13)),
+                    (key: "name", value: .string("chart.png")),
+                    (key: "category", value: .string("image")),
+                    (key: "image_url", value: .string("/uploads/chart.png?expires=1&sig=ab")),
+                ]),
+            ])),
+        ])
+        let message = try XCTUnwrap(ChatMessage(data: data))
+        XCTAssertEqual(message.attachments.count, 2)
+        XCTAssertEqual(message.attachments[0].category, "pdf")
+        XCTAssertFalse(message.attachments[0].isImage)          // no image_url → chip
+        XCTAssertTrue(message.attachments[1].isImage)
+        XCTAssertEqual(message.attachments[1].name, "chart.png")
+    }
+
+    func testSendResultParsesAttachmentWarning() {
+        let data = JSONValue.object([
+            (key: "message_id", value: .number(90)),
+            (key: "conversation_id", value: .number(44)),
+            (key: "status", value: .string("running")),
+            (key: "attachment_warning", value: .string("Couldn’t send “x.pdf”.")),
+        ])
+        let result = ChatSendResult(data: data)
+        XCTAssertEqual(result?.attachmentWarning, "Couldn’t send “x.pdf”.")
+    }
+
+    func testMultipartBodyEncodesFieldsAndFiles() {
+        let file = MultipartFile(
+            field: "attachments[]",
+            filename: "a\"b.pdf",                                // embedded quote
+            mimeType: "application/pdf",
+            data: Data([0x25, 0x50, 0x44, 0x46]))               // %PDF
+        let body = APIClient.multipartBody(
+            boundary: "B",
+            fields: [(key: "message", value: "hi")],
+            files: [file])
+        let text = String(decoding: body, as: UTF8.self)
+
+        XCTAssertTrue(text.contains("--B\r\n"))
+        XCTAssertTrue(text.contains("Content-Disposition: form-data; name=\"message\"\r\n\r\nhi\r\n"))
+        XCTAssertTrue(text.contains("name=\"attachments[]\"; filename=\"a'b.pdf\""))  // quote sanitized
+        XCTAssertTrue(text.contains("Content-Type: application/pdf"))
+        XCTAssertTrue(text.contains("%PDF"))
+        XCTAssertTrue(text.hasSuffix("--B--\r\n"))
+    }
 }

@@ -185,6 +185,44 @@ public struct ChatToolCall: Equatable, Sendable {
     }
 }
 
+/// A file attached to a turn, as the server serializes it. `imageURL` is a
+/// short-lived signed URL for image attachments (empty for pdf/text/file); the
+/// view resolves it against the app's base URL and renders a thumbnail. Others
+/// render as a labeled file chip.
+public struct ChatAttachment: Identifiable, Equatable, Sendable {
+    public let id: Int            // the file id
+    public let name: String
+    public let category: String   // image | pdf | text | html | file
+    public let imageURL: String
+
+    public var isImage: Bool { category == "image" && !imageURL.isEmpty }
+
+    init?(data: JSONValue) {
+        guard let id = data["file_id"]?.intValue else { return nil }
+        self.id = id
+        name = data["name"]?.stringValue ?? "attachment"
+        category = data["category"]?.stringValue ?? "file"
+        imageURL = data["image_url"]?.stringValue ?? ""
+    }
+}
+
+/// A file the user picked to send with a message. Carried as a multipart part;
+/// the server validates type, size, and the model's vision/document capability
+/// and is the sole authority — the client only pre-filters the picker.
+public struct ChatOutgoingAttachment: Identifiable, Equatable, Sendable {
+    public let id: UUID
+    public let filename: String
+    public let mimeType: String
+    public let data: Data
+
+    public init(id: UUID = UUID(), filename: String, mimeType: String, data: Data) {
+        self.id = id
+        self.filename = filename
+        self.mimeType = mimeType
+        self.data = data
+    }
+}
+
 /// One turn in a conversation. `content` is raw markdown (assistant) or the
 /// user's text; the view renders it. Mutable so the store can fold streamed
 /// partial text and the final swap into the same row in place.
@@ -198,6 +236,7 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
     public var pendingAction: ChatPendingAction?
     public var toolCalls: [ChatToolCall]
     public var costLabel: String
+    public var attachments: [ChatAttachment]
 
     init?(data: JSONValue?) {
         guard let data, let id = data["id"]?.intValue,
@@ -211,6 +250,7 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
         pendingAction = ChatPendingAction(data: data["pending_action"])
         toolCalls = (data["tool_calls"]?.arrayValue ?? []).map(ChatToolCall.init(data:))
         costLabel = data["usage"]?["cost_label"]?.stringValue ?? ""
+        attachments = (data["attachments"]?.arrayValue ?? []).compactMap(ChatAttachment.init(data:))
     }
 
     private init(id: Int, role: ChatRole, content: String, status: ChatStatus, error: String) {
@@ -223,6 +263,7 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
         self.pendingAction = nil
         self.toolCalls = []
         self.costLabel = ""
+        self.attachments = []
     }
 
     /// The assistant placeholder shown while a detached turn runs; the poll
@@ -263,6 +304,9 @@ public struct ChatSendResult: Sendable {
     public let assistantMessage: ChatMessage?
     public let usageLabel: String?
     public let error: String?
+    /// Present when a file was dropped server-side at commit (type drift); shown
+    /// so a dropped attachment is never silent.
+    public let attachmentWarning: String?
 
     init?(data: JSONValue?) {
         guard let data, let messageID = data["message_id"]?.intValue else { return nil }
@@ -275,6 +319,7 @@ public struct ChatSendResult: Sendable {
         assistantMessage = ChatMessage(data: data["assistant_message"])
         usageLabel = data["usage_label"]?.stringValue
         error = data["error"]?.stringValue
+        attachmentWarning = data["attachment_warning"]?.stringValue
     }
 }
 

@@ -1,4 +1,7 @@
 import SwiftUI
+import PhotosUI
+import UniformTypeIdentifiers
+import UIKit
 import JoineryKit
 
 /// One conversation: the turns in a scroll with a composer pinned to the
@@ -7,6 +10,24 @@ import JoineryKit
 struct ChatThreadView: View {
     @StateObject private var store: ChatThreadStore
     @State private var showSettings = false
+    @State private var showPhotoPicker = false
+    @State private var photoSelection: [PhotosPickerItem] = []
+    @State private var showFileImporter = false
+
+    /// Document types the Files picker accepts — the server's non-image allowed
+    /// set (it re-detects and is the authority; this is a first-pass filter).
+    private static let documentTypes: [UTType] = {
+        var types: [UTType] = [.pdf, .plainText, .commaSeparatedText, .json, .image]
+        if let md = UTType(filenameExtension: "md") { types.append(md) }
+        return types
+    }()
+
+    /// Image UTTypes the server accepts as-is; anything else the Photos picker
+    /// hands back (notably HEIC, the iPhone default) is transcoded to JPEG.
+    private static let directImageTypes: Set<String> = [
+        UTType.png.identifier, UTType.jpeg.identifier, UTType.gif.identifier,
+        UTType.webP.identifier,
+    ]
 
     init(api: ChatAPI, conversationID: Int?, title: String) {
         _store = StateObject(wrappedValue: ChatThreadStore(api: api, conversationID: conversationID, title: title))
@@ -65,7 +86,7 @@ struct ChatThreadView: View {
                         emptyState
                     }
                     ForEach(store.messages) { message in
-                        MessageRow(message: message) { decision in
+                        MessageRow(message: message, baseURL: store.baseURL) { decision in
                             Task { await store.resolve(pending: message.id, decision: decision) }
                         } onDelete: {
                             Task { await store.deleteTurn(message) }
@@ -106,7 +127,14 @@ struct ChatThreadView: View {
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity, alignment: .center)
             }
+            if !store.attachmentNotice.isEmpty {
+                attachmentNoticeBanner
+            }
+            if !store.pendingAttachments.isEmpty {
+                attachmentStrip
+            }
             HStack(alignment: .bottom, spacing: 8) {
+                attachButton
                 TextField("Message", text: $store.composerText, axis: .vertical)
                     .textFieldStyle(.plain)
                     .lineLimit(1...5)
@@ -135,6 +163,131 @@ struct ChatThreadView: View {
             .padding(.vertical, 8)
         }
         .background(.bar)
+        .photosPicker(isPresented: $showPhotoPicker, selection: $photoSelection,
+                      maxSelectionCount: 5, matching: .images)
+        .onChange(of: photoSelection) { items in
+            guard !items.isEmpty else { return }
+            let picked = items
+            photoSelection = []
+            Task { for item in picked { await loadPhoto(item) } }
+        }
+        .fileImporter(isPresented: $showFileImporter,
+                      allowedContentTypes: Self.documentTypes,
+                      allowsMultipleSelection: true) { result in
+            loadFiles(result)
+        }
+    }
+
+    private var attachButton: some View {
+        Menu {
+            Button {
+                showPhotoPicker = true
+            } label: {
+                Label("Photo Library", systemImage: "photo")
+            }
+            Button {
+                showFileImporter = true
+            } label: {
+                Label("Files", systemImage: "doc")
+            }
+        } label: {
+            Image(systemName: "plus.circle.fill")
+                .font(.system(size: 28))
+                .foregroundStyle(.secondary)
+                .frame(width: 32, height: 32)
+        }
+        .disabled(store.isSending || store.isTurnRunning)
+        .accessibilityIdentifier("chat_attach")
+    }
+
+    private var attachmentStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(store.pendingAttachments) { att in
+                    HStack(spacing: 6) {
+                        Image(systemName: attachmentIcon(mimeType: att.mimeType))
+                            .foregroundStyle(.secondary)
+                        Text(att.filename)
+                            .font(.caption)
+                            .lineLimit(1)
+                        Button {
+                            store.removeAttachment(att.id)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .accessibilityIdentifier("chat_attachment_remove")
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(Color(.secondarySystemBackground)))
+                }
+            }
+            .padding(.horizontal, 12)
+        }
+        .accessibilityIdentifier("chat_attachment_strip")
+    }
+
+    private var attachmentNoticeBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            Text(store.attachmentNotice)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            Button {
+                store.dismissAttachmentNotice()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(Color.orange.opacity(0.12))
+        .accessibilityIdentifier("chat_attachment_notice")
+    }
+
+    // MARK: Picking
+
+    /// Load a picked photo. HEIC/other non-server-types are transcoded to JPEG so
+    /// the server's byte-detected type lands in its allowed set.
+    private func loadPhoto(_ item: PhotosPickerItem) async {
+        guard let data = try? await item.loadTransferable(type: Data.self) else { return }
+        let type = item.supportedContentTypes.first
+        if let type, Self.directImageTypes.contains(type.identifier) {
+            let ext = type.preferredFilenameExtension ?? "img"
+            let mime = type.preferredMIMEType ?? "application/octet-stream"
+            store.addAttachment(ChatOutgoingAttachment(
+                filename: "photo.\(ext)", mimeType: mime, data: data))
+        } else if let image = UIImage(data: data), let jpeg = image.jpegData(compressionQuality: 0.9) {
+            store.addAttachment(ChatOutgoingAttachment(
+                filename: "photo.jpg", mimeType: "image/jpeg", data: jpeg))
+        }
+    }
+
+    private func loadFiles(_ result: Result<[URL], Error>) {
+        guard case .success(let urls) = result else { return }
+        for url in urls {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            guard let data = try? Data(contentsOf: url) else { continue }
+            let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType
+                ?? "application/octet-stream"
+            store.addAttachment(ChatOutgoingAttachment(
+                filename: url.lastPathComponent, mimeType: mime, data: data))
+        }
+    }
+
+    private func attachmentIcon(mimeType: String) -> String {
+        if mimeType.hasPrefix("image/") { return "photo" }
+        if mimeType == "application/pdf" { return "doc.richtext" }
+        if mimeType.hasPrefix("text/") || mimeType.contains("json") || mimeType.contains("csv") {
+            return "doc.text"
+        }
+        return "paperclip"
     }
 
     // Grows as the running turn streams, driving the auto-scroll.
@@ -158,6 +311,7 @@ struct ChatThreadView: View {
 /// an optional tool trace, a running indicator, an error, or a confirm card.
 struct MessageRow: View {
     let message: ChatMessage
+    let baseURL: URL
     let onDecision: (String) -> Void
     let onDelete: () -> Void
 
@@ -172,12 +326,19 @@ struct MessageRow: View {
     private var userBubble: some View {
         HStack {
             Spacer(minLength: 40)
-            Text(message.content)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .background(RoundedRectangle(cornerRadius: 18).fill(Color.accentColor))
-                .foregroundStyle(.white)
-                .textSelection(.enabled)
+            VStack(alignment: .trailing, spacing: 6) {
+                if !message.attachments.isEmpty {
+                    AttachmentsView(attachments: message.attachments, baseURL: baseURL)
+                }
+                if !message.content.isEmpty {
+                    Text(message.content)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .background(RoundedRectangle(cornerRadius: 18).fill(Color.accentColor))
+                        .foregroundStyle(.white)
+                        .textSelection(.enabled)
+                }
+            }
         }
         .contextMenu { deleteButton }
         .accessibilityIdentifier("chat_user_message")
@@ -248,6 +409,61 @@ struct MessageRow: View {
     private var deleteButton: some View {
         Button(role: .destructive, action: onDelete) {
             Label("Delete", systemImage: "trash")
+        }
+    }
+}
+
+/// The files on a turn: images as thumbnails loaded from their signed URL,
+/// everything else as a labeled file chip. A thumbnail that fails to load (an
+/// expired signed URL after the 5-minute TTL) falls back to a chip.
+struct AttachmentsView: View {
+    let attachments: [ChatAttachment]
+    let baseURL: URL
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 6) {
+            ForEach(attachments) { att in
+                if att.isImage, let url = URL(string: att.imageURL, relativeTo: baseURL) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().scaledToFill()
+                        case .failure:
+                            fileChip(att)
+                        default:
+                            ProgressView().frame(width: 140, height: 140)
+                        }
+                    }
+                    .frame(maxWidth: 200, maxHeight: 200)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .accessibilityIdentifier("chat_attachment_image")
+                } else {
+                    fileChip(att)
+                }
+            }
+        }
+    }
+
+    private func fileChip(_ att: ChatAttachment) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon(for: att.category))
+                .foregroundStyle(.secondary)
+            Text(att.name)
+                .font(.caption)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(Capsule().fill(Color(.secondarySystemBackground)))
+        .accessibilityIdentifier("chat_attachment_chip")
+    }
+
+    private func icon(for category: String) -> String {
+        switch category {
+        case "image": return "photo"
+        case "pdf": return "doc.richtext"
+        case "text": return "doc.text"
+        default: return "paperclip"
         }
     }
 }
