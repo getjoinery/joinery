@@ -2,6 +2,7 @@
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_message_attachments_class.php'));
 
 /**
  * Renders chat transcript markup. The page view (initial load) and the
@@ -19,11 +20,52 @@ class ChatRender {
     public static function userBubble(string $text, string $time, int $message_id = 0): string {
         $raw = htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
         $id_attr = $message_id ? ' data-message-id="' . $message_id . '"' : '';
+        $attachments = $message_id
+            ? self::attachmentsHtml(AiMessageAttachment::displayListForMessage($message_id)) : '';
+        $body = $raw !== '' ? '<div class="joai-chat-body">' . nl2br($raw) . '</div>' : '';
         return '<div class="joai-chat-msg joai-chat-mine"' . $id_attr . ' data-raw="' . $raw . '">'
-             . '<div class="joai-chat-body">' . nl2br($raw) . '</div>'
+             . $body
+             . $attachments
              . ($message_id ? self::actionsHtml() : '')
              . '<div class="joai-chat-time">' . htmlspecialchars($time, ENT_QUOTES, 'UTF-8') . '</div>'
              . '</div>';
+    }
+
+    /**
+     * Attachment chips/thumbnails for a user bubble, from the display list
+     * (AiMessageAttachment::displayListForMessage). Images render as a small
+     * thumbnail linking to the gated original; other types render as a labeled
+     * file chip. Empty string when there are no attachments.
+     */
+    public static function attachmentsHtml(array $list): string {
+        if (empty($list)) return '';
+        $chips = '';
+        foreach ($list as $a) {
+            $name = htmlspecialchars((string)($a['name'] ?? 'file'), ENT_QUOTES, 'UTF-8');
+            $category = (string)($a['category'] ?? 'file');
+            if ($category === 'image' && !empty($a['image_url'])) {
+                $url = htmlspecialchars((string)$a['image_url'], ENT_QUOTES, 'UTF-8');
+                $chips .= '<a class="joai-chat-attach joai-chat-attach-image" href="' . $url . '" '
+                    . 'target="_blank" rel="noopener" title="' . $name . '">'
+                    . '<img src="' . $url . '" alt="' . $name . '"></a>';
+            } else {
+                $icon = self::attachmentIcon($category);
+                $chips .= '<span class="joai-chat-attach joai-chat-attach-file" title="' . $name . '">'
+                    . '<span class="joai-chat-attach-icon" aria-hidden="true">' . $icon . '</span>'
+                    . '<span class="joai-chat-attach-name">' . $name . '</span></span>';
+            }
+        }
+        return '<div class="joai-chat-attachments">' . $chips . '</div>';
+    }
+
+    /** A short glyph for a non-image attachment category. */
+    private static function attachmentIcon(string $category): string {
+        switch ($category) {
+            case 'pdf':  return '📄';
+            case 'html': return '🌐';
+            case 'text': return '📝';
+            default:     return '📎';
+        }
     }
 
     /** Effective model for a conversation: its pinned model, else the plugin

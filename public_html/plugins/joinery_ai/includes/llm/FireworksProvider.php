@@ -93,6 +93,16 @@ class FireworksProvider extends OpenAiCompatibleProvider {
         return true;
     }
 
+    /**
+     * The curated Fireworks catalog is text-only here: no image or native-PDF
+     * ingest. Uploads to a Fireworks chat are refused at ingress with the
+     * "switch to a Claude model" message. If a vision-capable Fireworks model is
+     * added later, flip its entry here.
+     */
+    public function modelCapabilities(string $model): array {
+        return ['vision' => false, 'document' => false];
+    }
+
     public function models(): array {
         return self::MODELS;
     }

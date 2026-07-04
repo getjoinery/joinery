@@ -189,10 +189,35 @@ select.joai-chat-control { cursor: pointer; }
 .joai-chat-confirm-desc { font-size: 0.9rem; margin-bottom: 0.5rem; color: #5c4a12; }
 .joai-chat-confirm-actions { display: flex; gap: 0.5rem; }
 .joai-chat-thinking { padding: 0 1rem 0.5rem; font-size: 0.82rem; color: #888; font-style: italic; }
-.joai-chat-composer { display: flex; gap: 0.5rem; padding: 0.75rem; border-top: 1px solid #eee; }
+.joai-chat-composer { display: flex; gap: 0.5rem; padding: 0.75rem; border-top: 1px solid #eee;
+                      align-items: flex-end; }
 .joai-chat-composer textarea { flex: 1 1 auto; resize: none; border: 1px solid #ccc; border-radius: 8px;
                                padding: 0.5rem 0.7rem; font: inherit; }
+.joai-chat-composer.joai-chat-dragover { outline: 2px dashed #0d6efd; outline-offset: -4px; }
 .joai-chat-empty { color: #888; font-style: italic; padding: 0.5rem; }
+
+/* Attachments: the file input is hidden (the attach button proxies it); the button
+   centers its upload glyph and matches the composer button height. */
+.joai-chat-file-input { display: none; }
+.joai-chat-attach-btn { flex: 0 0 auto; display: inline-flex; align-items: center;
+                        justify-content: center; line-height: 1; padding: 0.4rem 0.55rem; }
+.joai-chat-attach-btn svg { width: 22px; height: 22px; display: block; }
+
+/* Pending-file strip above the composer, and rendered attachment chips inside a
+   sent user bubble. */
+.joai-chat-attach-strip { display: flex; flex-wrap: wrap; gap: 0.4rem; padding: 0.4rem 0.75rem 0; }
+.joai-chat-attachments { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.4rem; }
+.joai-chat-attach { display: inline-flex; align-items: center; gap: 0.3rem; max-width: 220px;
+                    padding: 0.25rem 0.5rem; border-radius: 6px; background: rgba(0,0,0,0.06);
+                    font-size: 0.78rem; }
+.joai-chat-mine .joai-chat-attach { background: rgba(255,255,255,0.2); color: #fff; }
+.joai-chat-attach-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.joai-chat-attach-icon { flex: 0 0 auto; }
+.joai-chat-attach-image { padding: 0; background: none; }
+.joai-chat-attach-image img { max-width: 120px; max-height: 120px; border-radius: 6px; display: block; }
+.joai-chat-attach-remove { border: none; background: none; cursor: pointer; font-size: 1rem;
+                           line-height: 1; color: inherit; padding: 0 0.1rem; }
+.joai-chat-attach-remove:hover { color: #dc3545; }
 
 /* Conversation meta bar under the composer — the toolbar strip. Holds the
    running token/cost total today; room for more controls later. */

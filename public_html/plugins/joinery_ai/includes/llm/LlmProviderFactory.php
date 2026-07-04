@@ -74,6 +74,20 @@ class LlmProviderFactory {
         return $out;
     }
 
+    /**
+     * Attachment capabilities (['vision'=>bool,'document'=>bool]) for a model id,
+     * resolved through its provider. An empty or unroutable id — or a provider
+     * whose required setting is unset — returns both false, so ingress refuses
+     * the upload rather than guessing capable.
+     */
+    public static function capabilitiesForModel(string $model): array {
+        try {
+            return self::forModel($model)->modelCapabilities(trim($model));
+        } catch (Throwable $e) {
+            return ['vision' => false, 'document' => false];
+        }
+    }
+
     private static function anthropic(): LlmProviderInterface {
         $key = (string)Globalvars::get_instance()->get_setting('joinery_ai_anthropic_api_key');
         return new AnthropicProvider($key);

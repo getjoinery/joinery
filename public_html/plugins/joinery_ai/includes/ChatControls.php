@@ -19,6 +19,7 @@ class ChatControls {
         'max_tokens'     => 'aic_max_tokens',
         'instructions'   => 'aic_instructions',
         'thinking_level' => 'aic_thinking_level',
+        'attachment_mode'=> 'aic_attachment_mode',
     ];
 
     const INSTRUCTIONS_MAX = 8000;
@@ -67,6 +68,13 @@ class ChatControls {
                 $v = strtolower(trim((string)$value));
                 if (!in_array($v, ['off', 'low', 'medium', 'high'], true)) {
                     throw new InvalidArgumentException('Invalid thinking level.');
+                }
+                return [$col, $v];
+
+            case 'attachment_mode':
+                $v = strtolower(trim((string)$value));
+                if (!in_array($v, ['extract', 'original'], true)) {
+                    throw new InvalidArgumentException('Invalid attachment mode.');
                 }
                 return [$col, $v];
         }

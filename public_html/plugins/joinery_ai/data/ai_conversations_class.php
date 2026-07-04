@@ -40,6 +40,11 @@ class AiConversation extends SystemBase {
         'aic_max_tokens'         => array('type'=>'int4'),          // NULL = use setting
         'aic_instructions'       => array('type'=>'text'),          // per-chat voice block override
         'aic_thinking_level'     => array('type'=>'varchar(10)', 'default'=>'off'),
+        // How uploaded files reach the model: 'extract' (default — cheapest door,
+        // text-first) or 'original' (send whole files where a native door exists:
+        // PDF as a document block, HTML as raw markup). Read at send time and
+        // applied to the whole history that turn. See the file-uploads spec §1.
+        'aic_attachment_mode'    => array('type'=>'varchar(10)', 'is_nullable'=>false, 'default'=>'extract'),
         'aic_total_input_tokens' => array('type'=>'int8', 'default'=>0),
         'aic_total_output_tokens'=> array('type'=>'int8', 'default'=>0),
         'aic_create_time'        => array('type'=>'timestamp(6)', 'default'=>'now()'),

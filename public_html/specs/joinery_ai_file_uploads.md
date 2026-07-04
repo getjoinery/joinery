@@ -608,6 +608,83 @@ exactly the points a plausible-looking implementation gets wrong.
 - A "private models only" upload gate (Decision E) beyond documentation.
 - Per-box manual restore of a dropped attachment — that rides on the compactor spec.
 
+## Follow-on: LLM-requested full document (escalation tool)
+
+**Status within this spec:** design — depends on the base upload feature shipping first.
+
+### The problem
+
+Text-first (Decision A+B) is the right default for cost, but extraction is lossy: a
+mangled table, a chart, a scanned signature, a form's layout. When the model receives
+only the extracted text and realizes it needs to *see* the page, it has no recourse
+today — it can only tell the user, who must flip the whole chat to `original` mode and
+resend. The escalation should be the model's to make, per file, on demand.
+
+### In plain terms
+
+Send the cheap text version by default; give the model a tool to pull the full
+original of a specific attachment when the text isn't enough. Low token cost normally,
+full fidelity exactly when it's needed.
+
+### The tool
+
+A read tool (`RecipeToolInterface`), chat-surface only for v1:
+
+- `view_attachment(name)` — the model names an attachment it was shown (the framed
+  block already labels each upload); the tool resolves that label to the
+  conversation's attachment-link row, re-checks File ownership against the turn owner
+  (Security §5), and returns the **full original** as tool-result content.
+
+Input schema: `{ name: string }` (the attachment label/filename). The tool surfaces
+the available attachment labels in its description/error so the model can only pick a
+real one — it never passes an arbitrary file id.
+
+### Capability constraint
+
+The full version of a PDF is the native `document` block — usable only by a
+document/vision-capable model (Claude). On a text-only model there is no door:
+`view_attachment` returns a plain error ("the current model can't read PDFs directly —
+switch to a Claude model"), never a degraded stand-in (same principle as ingress).
+Images are already sent in full, so the tool is a clarification no-op for them.
+
+### Decision F — In-turn delivery mechanism (to resolve)
+
+The agent loop builds message history once per turn and only *appends* tool-result
+blocks as it iterates (`AgentLoop`); it does not re-read attachments from the DB
+mid-turn. Getting the original into the *current* turn therefore requires one of:
+
+- **F1 — Return the original in the tool result *(recommended, pending verification)*.**
+  The `tool_result` content carries the document/image block. Anthropic tool-results
+  accept image blocks; PDF `document` blocks in a tool result need verification. If
+  accepted, this is the clean in-turn answer with no loop change.
+- **F2 — Escalate + rebuild.** The tool flips the attachment to original and signals
+  the loop to rebuild history before the next model call within the same turn. Works
+  regardless of tool-result content support, but touches the loop's message contract.
+- **F3 — Next-turn escalation (fallback).** The tool flips the attachment's mode; the
+  original arrives on the next user message. Simplest, but the model can't act on the
+  full doc in the same breath — poor UX. Only if F1/F2 prove costly.
+
+Recommendation: **F1**, verifying Anthropic tool-result document support first; fall
+back to **F2** — never rendering PDF pages to images, which reintroduces the
+poppler/system dependency the base feature deliberately avoided.
+
+### Security
+
+- **Untrusted framing carries over** — the returned original is wrapped by the same
+  untrusted-input contract: its content is data, not instructions.
+- **Owner- and conversation-scoped** — the tool resolves only attachments on the
+  current conversation's own messages, owned by the turn owner, and re-checks File
+  ownership before reading bytes. The model cannot address files outside the chat.
+- **Cost** — pulling the full document is exactly the expensive path text-first
+  avoids; because it's opt-in per file, the model spends the tokens only when it
+  judged the text insufficient. `CostGuard` stays the backstop.
+
+### Scope
+
+Chat only for v1. Recipes configure their attachments up front (Decision C), so
+on-demand escalation is less pressing there; it can extend to recipes later through the
+same tool, since both surfaces share the loop and tool registry.
+
 ## Docs
 
 On implementation, update `plugins/joinery_ai/docs/overview.md` (current-state voice):

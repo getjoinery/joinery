@@ -58,6 +58,7 @@ function joinery_ai_chat_page_logic(array $input, int $min_permission, string $l
     }
 
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRunner.php'));
+    require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AiAttachment.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderFactory.php'));
 
     $active_model = $selected ? (string)$selected->get('aic_model') : '';
@@ -123,5 +124,13 @@ function joinery_ai_chat_page_logic(array $input, int $min_permission, string $l
         'def_max_tokens' => (string)$settings->get_setting('joinery_ai_chat_max_tokens'),
         'brave_key_set'  => $brave_key_set,
         'chat_enabled'   => (bool)$settings->get_setting('joinery_ai_chat_enabled'),
+        // Attachments: the per-chat send mode (extract vs original) and the
+        // accepted MIME types + count for the composer.
+        'attachment_mode' => $selected
+            ? ((string)$selected->get('aic_attachment_mode') ?: AiAttachment::MODE_EXTRACT)
+            : AiAttachment::MODE_EXTRACT,
+        'default_attachment_mode' => AiAttachment::MODE_EXTRACT,
+        'attach_accept_types'     => implode(',', array_keys(AiAttachment::CATEGORY)),
+        'attach_max_files'        => AiAttachment::maxPerMessage(),
     ]);
 }
