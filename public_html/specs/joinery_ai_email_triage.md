@@ -1,7 +1,15 @@
 # Joinery AI — Inbound email triage (categorize + calendar)
 
 **Status:** Draft — design in progress (picking up tomorrow)
-**Depends on:** `joinery_ai_calendar_ai_surface.md` — the AI cannot read a
+**Depends on:** `joinery_ai_item_pipeline.md` — the triage half is a pipeline
+job (per-item digest → validated verdict → handler), which supersedes this
+draft's bespoke plumbing: the `aie_email_processing` table (§2) is replaced by
+the pipeline's platform processing log, the mailbox binding (§1) is the job's
+`rcp_source_config`, and the label/summary writes become the job's
+`recordVerdict` handler instead of `update_model` + a bespoke action. See the
+sibling `joinery_ai_email_security_scan.md` for the worked example of the same
+pattern on the same messages.
+Also depends on: `joinery_ai_calendar_ai_surface.md` — the AI cannot read a
 scoped calendar or safely create entries today. That prerequisite (the
 `create_calendar_entry` owner-fixed action, and optionally polymorphic read
 scoping) must land before the scheduling half of this spec. The triage/categorize
@@ -109,6 +117,11 @@ either.
 
 ### 2. Per-recipe processing log (idempotency, not a once-per-message limit)
 
+> **Superseded by the pipeline:** this section's reasoning stands (per-recipe,
+> not per-message), but the table is now the platform-owned
+> `aip_recipe_item_log` from `joinery_ai_item_pipeline.md` §5 — do not build
+> `aie_email_processing`. The sketch below is kept for the rationale.
+
 A recipe must not redo work it already did — re-running shouldn't re-summarize the
 same mail or create duplicate calendar events. But a message is **not** limited to
 one pass overall: different recipes legitimately handle the same message for
@@ -158,6 +171,11 @@ message is a one-line **`iem_ai_summary`** gist for the inbox, written via
 'iem_ai_summary' => array('type'=>'varchar(280)'),  // one-line gist for the inbox
 public static $ai_writable_fields = ['iem_ai_summary'];
 ```
+
+On a domain at a protected security level, this column is sealed like the other
+content columns — a gist is the body in miniature — and decrypts in-session with
+the previews (`inbound_email_security_levels.md` § AI Processing of Protected
+Mail). Labels stay cleartext (operational metadata).
 
 It's a shared field (last-writer-wins is fine for a gist). The message has no owner
 column, so message writes — like reads — are constrained to the recipe's configured
@@ -266,9 +284,13 @@ reads untrusted email and writes, the taint gate requires `rcp_allow_tainted_wri
    Triage applies an *existing* label via an `apply_email_label` action — apply-only,
    never creates (§2b). Sub-item **resolved: keep `iem_ai_summary`** as the one new
    AI-writable message field — a shared one-line gist for the inbox.
-6. ~~**Trigger cadence.**~~ **Resolved: scheduled poll** — the recipe runs on its
-   normal schedule and picks up messages it hasn't processed (per-recipe log). An
-   on-arrival trigger can come later; not v1.
+6. ~~**Trigger cadence.**~~ **Resolved: scheduled poll, key-gated** — the recipe
+   runs on its normal schedule and picks up messages it hasn't processed
+   (per-recipe log). On a domain at a protected security level
+   (`inbound_email_security_levels.md` § AI Processing of Protected Mail), a
+   message is digestible only while an unlocked session's key is available; it
+   stays pending in the log until then. An on-arrival trigger can come later;
+   not v1.
 7. ~~**Timezone for ambiguous emails.**~~ **Resolved:** default to the **recipe
    owner's timezone** when the email doesn't state one; a date with no time becomes
    an all-day entry.
@@ -277,6 +299,17 @@ reads untrusted email and writes, the taint gate requires `rcp_allow_tainted_wri
    yet — that waits on the interactive-use taint posture.
 
 ## Implementation outline (provisional)
+
+> **Revisit against `joinery_ai_item_pipeline.md` before implementing.** Recipe
+> A (triage) should be a registered pipeline job (`email_triage`): config = the
+> mailbox alias (+ label vocabulary source), digest = the same
+> `EmailSecurityDigest`-style bounded view (or a lighter variant), verdict =
+> {label choice from the existing vocabulary, one-line summary}, handler =
+> apply the `InboundLabelMember` row + write `iem_ai_summary`. That removes
+> items 2–4 below and the need for `$ai_readable`/`query_model` for the triage
+> half. Recipe B (schedule) likely fits the same shape (verdict = event fields
+> or none; handler = the `create_calendar_entry` door), but resolve that when
+> its calendar prerequisite lands.
 
 1. `InboundEmailMessage`: `$ai_readable`, `$ai_untrusted_fields`, and one
    AI-writable field `iem_ai_summary` (+ `$ai_writable_fields`). No category field.

@@ -13,6 +13,14 @@ signatures, rich-text compose, the member-context panel) has been **carved out**
 individual track — those serve the single-user focus and are not gated on the team
 work below. See "Carved out" at the end.
 
+**Firm constraint — group mailboxes are Standard-level only.** The email
+security levels (`inbound_email_security_levels.md`) above Standard rest on a
+one-operator, one-key model; a shared mailbox would require multi-recipient
+sealing, per-member key ceremonies, and member-revocation re-sealing. That is
+a deliberate non-goal: a domain hosting a group mailbox stays at Standard, and
+this spec's design assumes plaintext-at-rest semantics. If team + encryption
+is ever wanted, it is a new spec, not an extension of this one.
+
 ## Context
 
 The inbound email plugin already owns the hard infrastructure: provider-pluggable

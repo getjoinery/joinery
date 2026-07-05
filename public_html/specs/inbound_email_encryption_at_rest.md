@@ -80,44 +80,94 @@ baseline unless we decide the stronger guarantee is worth the rebuild.
 1. **At ingest** (user may be offline): parse the message, run filters/rules on the
    plaintext, then **seal** all content fields to the user's public key and store the
    ciphertext. No key that can decrypt is present on the box.
-2. **At login**: the passphrase unwraps the private key into session-scoped RAM. The
+2. **At unlock**: an unlocker (passkey PRF assertion, recovery code, or optional
+   passphrase — see *Key Hierarchy*) unwraps the private key into session-scoped
+   RAM, opening an **unlock window** (see *The Unlock Window* below). The
    sealed search index is decrypted to `tmpfs` (`/dev/shm`), and any messages
    received since the last login are folded into it incrementally.
 3. **Search**: queries run against the in-RAM SQLite FTS5 index and return matching
    message ids; the existing thread list query then groups/sorts/pages those ids
    using cleartext operational metadata in PostgreSQL.
 4. **Render**: opening a thread decrypts only the messages displayed.
-5. **At logout / session expiry**: the index is re-sealed, `tmpfs` copies and the
-   in-memory private key are wiped.
+5. **At unlock expiry, logout, or session expiry** (whichever comes first): the
+   index is re-sealed, `tmpfs` copies and the in-memory private key are wiped.
+
+### The Unlock Window (how long "unlocked" lasts)
+
+Being **logged in** and being **unlocked** are two different states. A web
+session can legitimately live for days; if the keys lived as long as the
+session, the "active-session exposure" residual accepted throughout these
+specs would be effectively permanent and the at-rest guarantee hollow. So:
+
+- **Logging in** (password or passkey sign-in) gives the normal session —
+  every non-mail feature, and the mailbox's cleartext surface (thread
+  structure, counts, labels, folders). Sealed content is not readable.
+- **Unlocking** is a separate, deliberate act — one passkey tap (or recovery
+  code / passphrase) — that opens a window in which keys are in RAM and mail
+  is readable, searchable, and (on Fortress domains) sendable.
+- The window closes after a configurable **idle timeout of mailbox activity**
+  (single setting, default 30 minutes; mail actions reset it), and closing it
+  wipes everything unlock created: the unwrapped secret key, the `/dev/shm`
+  index (re-sealed first), and any decrypted state. Logout and session expiry
+  close it too, but they are no longer the only thing that does.
+- **No hard cap on a busy window.** An idle cap bounds a hijacked-session or
+  walked-away-from-desk exposure; a hard cap would only interrupt a user who
+  is demonstrably present, and defends nothing — an attacker already on the
+  box during a window has the key regardless of when the window would end.
+- The passkey is what makes a short window affordable: re-unlocking is a
+  fingerprint tap, not a passphrase retype. A 30-minute idle default with
+  one-tap reopen is a dramatically smaller exposure than a days-long session,
+  at near-zero UX cost.
+
+Everywhere the mail specs say "at login" / "in-session" (the index fold,
+deferred ingest, the key-gated AI poll, session-gated signing), the precise
+meaning is **within an unlock window** — unlock is the event that starts that
+work, and the window is the only time it can run.
 
 ## Key Hierarchy & Cryptography
 
 All primitives are libsodium (`ext-sodium`, bundled with PHP 8.3). Envelope encryption
 keeps the asymmetric op to once per message rather than once per field.
 
-- **Passphrase → KEK.** `sodium_crypto_pwhash` (Argon2id) derives a 32-byte
-  key-encryption-key from the user's passphrase and a stored per-user salt.
+- **Unlockers → KEK wrappings.** The secret key is wrapped once per enrolled
+  unlocker; any single unlocker opens it. Enrolling or removing an unlocker is an
+  in-session act (it needs the unwrapped secret key in hand). Three kinds:
+  - **Passkey (the primary, default UX).** A PRF-capable WebAuthn credential
+    derives a 32-byte KEK inside the authenticator hardware on a touch/face
+    check — nothing to memorize, and the ingredient never rests on the server.
+    Provided by the core passkey service (`specs/passkeys_core.md`, context
+    `mail-kek`). PRF outputs are **per-credential**, so each enrolled passkey
+    holds its own wrapping; revoking a passkey deletes its wrapping.
+  - **Recovery codes (required backup).** A printed list of high-entropy
+    one-time codes generated at setup, each independently wrapping the secret
+    key (a code is key material, not a server-verified check — that is why
+    codes work where TOTP-style 2FA structurally cannot). A used code's
+    wrapping is deleted.
+  - **Passphrase (optional).** `sodium_crypto_pwhash` (Argon2id) derives a
+    32-byte KEK from a memorized passphrase and a stored per-user salt, for
+    operators who want a knowledge factor in addition to possession factors.
 - **User keypair.** An X25519 keypair (`sodium_crypto_box_keypair`). The **public**
   key is stored in cleartext and used at ingest. The **secret** key is wrapped with
-  `crypto_secretbox` under the KEK and stored at rest; it is only ever unwrapped into
-  RAM during a session.
+  `crypto_secretbox` under each unlocker's KEK and stored at rest; it is only ever
+  unwrapped into RAM during a session.
 - **Per-message data key (DEK).** Each message gets a random 32-byte DEK. Content
   fields are encrypted with `crypto_secretbox` under the DEK. The DEK is sealed to the
   user's public key with `sodium_crypto_box_seal` and stored alongside the message.
   - Ingest needs only the public key (seal the DEK).
   - Read needs the secret key: `crypto_box_seal_open(DEK)` → decrypt fields.
-- **Recovery key.** The secret key is wrapped a **second** time under a random 32-byte
-  recovery key shown to the user once at setup for offline storage. Either the
-  passphrase or the recovery key can unwrap the secret key. **Losing both makes all
-  mail permanently unreadable** — state this plainly in the setup UI.
+- **Key loss.** Losing **every** enrolled unlocker — all passkey devices, all
+  unused recovery codes, and the passphrase if set — makes all mail permanently
+  unreadable. State this plainly in the setup UI; the recovery-code step
+  requires explicit acknowledgment before it can be dismissed.
 
 ### Key storage & in-memory rules
 
 - The unwrapped secret key **must never** be written to the disk- or DB-backed session
-  store. Hold it in shared RAM (APCu) keyed to the session id with a TTL, or
-  equivalent process memory — never persisted. Cleared on logout/expiry.
+  store. Hold it in shared RAM (APCu) keyed to the session id with a TTL matching the
+  unlock window's idle timeout, or equivalent process memory — never persisted.
+  Cleared when the unlock window closes (idle expiry, logout, or session expiry).
 - The decrypted FTS index file lives in `/dev/shm` (tmpfs, RAM-backed), never on a
-  persistent disk path. Wiped on logout/expiry.
+  persistent disk path. Re-sealed and wiped when the unlock window closes.
 
 ## What Is Sealed vs. What Stays Cleartext
 
@@ -152,6 +202,25 @@ receive, dedupe, thread, sort, page, and list):**
 content; keeping them cleartext is what lets conversation threading keep working
 server-side without the key (threading already groups on `iem_thread_key`, never on
 subject — see `MailboxService::GROUP_KEY_SQL`).
+
+### Sent mail and drafts seal under the same model
+
+Mail the user writes holds the same secrets as mail the user receives, and both
+are stored in the same message table — so outbound (`iem_direction`) rows and
+drafts seal identically: content fields and attachment bytes under a per-message
+DEK sealed to the public key. No new mechanism, and no new key-availability
+problem either: composing, autosaving a draft, and sending all happen inside an
+unlock window by construction, so the sealing key's public half is all that's
+ever needed and the plaintext is only ever in session RAM.
+
+The cleartext/sealed split follows one rule that covers both directions: **the
+counterparty is sealed; the user's own address is cleartext.** Inbound already
+works this way (`iem_sender` sealed, `iem_recipient` — the user's own alias —
+cleartext for routing). Outbound mirrors it: the recipient addresses seal as
+content; the sending alias stays cleartext. Sent messages fold into the FTS
+index like received ones (the fold is in-window regardless of direction);
+drafts stay out of the index — they are few, in-flux, and always opened
+directly rather than searched for.
 
 ## Search Architecture
 
@@ -213,6 +282,33 @@ body and **must run before sealing**. Required order:
   way. Attachments are therefore only retrievable inside an authenticated session,
   exactly like bodies.
 
+## No Sideways Copies: Admin Surfaces, Logs, and Transcripts
+
+Sealing the content columns is pointless if content dribbles out through
+operational surfaces. One rule, enforced at the boundaries: **message content
+persists nowhere except the sealed columns and sealed attachment `File`s.**
+Everything else stores references and metadata.
+
+- **The inbound email log viewer** logs metadata only — recipient, message-id,
+  verdicts, sizes, routing outcomes — never subject or body fragments. This is
+  a global rule, not a per-level branch: it costs nothing on Standard and
+  removes a whole audit class everywhere.
+- **Error paths redact.** Ingest and send exceptions are caught at the
+  pipeline boundary and logged with the message *reference*, never with raw
+  MIME or field content in the exception text (the Apache error log is
+  verbose, unsealed, and long-lived — treat it as public within the box).
+- **The admin message viewer** shows cleartext metadata always; sealed fields
+  render only inside an unlock window, through the same decrypt path as the
+  mailbox reader. The gate is **key possession, not permission level**: a
+  permission-10 admin without an enrolled unlocker — including one arriving
+  via login-as — sees ciphertext, structurally. There is no admin override,
+  because there is no key to override with.
+- **AI artifacts inherit the rule.** The pipeline processing log stores
+  message references and verdicts, never digest text; content-derived outputs
+  (e.g. `iem_ai_summary`) seal as content per the security-levels spec; any
+  transcript that would embed protected message text is either sealed the
+  same way or not persisted.
+
 ## Integration Points That Change
 
 - **`MailboxService::listThreads()`** — replace the `to_tsvector(...) @@
@@ -272,12 +368,43 @@ one-time in-session backfill pass (it needs the key, so it runs once the owner l
 and sets a passphrase) or simply cleared. A `looksEncrypted()`-style marker lets a row
 be detected as already-sealed for an idempotent backfill.
 
+## Backups
+
+Sealing changes what a backup is worth to an attacker and what it costs the
+user to lose — in opposite directions:
+
+- **A leaked backup no longer exposes mail content.** Bodies, subjects,
+  senders, attachments, and the search index are ciphertext in the database
+  and file store, so backups can be shipped to any offsite target (the
+  server_manager backup targets: B2/S3/etc.) without the backup itself being
+  a second copy of the readable archive. State the honest limit: cleartext
+  operational metadata (who mails you, when, thread shapes, sizes) *is* in a
+  backup; content is not.
+- **A *lost* backup becomes more expensive.** The wrapped-key rows (salt,
+  public key, and the secret key's wrapping per enrolled unlocker) are the
+  one thing whose loss is unrecoverable even with every passkey and recovery
+  code in hand — unlockers open the wrapped blob; they cannot recreate it.
+  Rules: key-material tables are never excluded from backup sets; the private
+  file store (sealed attachment bytes) is backed alongside the database, or
+  attachments outlive nothing; the sealed FTS index is the only exempt
+  artifact (rebuildable from a backlog fold).
+- **Key file export.** Because wrapped key material is ciphertext, useless
+  without an unlocker, the setup ceremony offers it as a small downloadable
+  file alongside the recovery codes — safe to keep on a USB stick or in any
+  cloud drive. A total-loss restore is then: reinstall, import key file (or
+  restore any DB backup), unlock with any enrolled unlocker. Passkeys survive
+  server loss by nature — the PRF ingredient lives in the authenticator
+  hardware, not on the server.
+
 ## Recovery & Key Loss
 
-- Forgot passphrase → unwrap the secret key with the recovery key, then set a new
-  passphrase (re-wrap under the new KEK).
-- Lost passphrase **and** recovery key → mail is unrecoverable. The setup flow must
-  make this consequence explicit before the recovery key is dismissed.
+- Lost/replaced passkey device → unlock with any remaining unlocker (another
+  passkey, a recovery code, the passphrase), then enroll the new device and
+  revoke the old credential's wrapping.
+- Down to the last few recovery codes with no passkey → the mailbox UI warns and
+  prompts to enroll a passkey or regenerate a fresh code list (in-session).
+- All unlockers lost → mail is unrecoverable, by design. The setup flow makes
+  this explicit before the recovery codes can be dismissed.
 
 ## Documentation to Update
 
