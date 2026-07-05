@@ -4,11 +4,23 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+
+/** One file part for a `multipart/form-data` action submit. [field] is the
+ *  form field name, e.g. `attachments[]` (PHP folds the `[]` suffix into an
+ *  `$_FILES['attachments']` array so several files share one field). */
+class MultipartFile(
+    val field: String,
+    val filename: String,
+    val mimeType: String,
+    val data: ByteArray,
+)
 
 /**
  * The one HTTP chokepoint. Every joinery-android request — auth, forms,
@@ -76,9 +88,62 @@ class ApiClient(
         val requestBody = body?.encodedBytes()?.toRequestBody(jsonMediaType)
         builder.method(method, requestBody ?: emptyBodyIfNeeded(method))
 
+        return execute(builder.build(), authenticated, http)
+    }
+
+    /**
+     * Submit an action as `multipart/form-data`: `POST /api/v1/action/{action}`,
+     * with [fields] as text parts and [files] as file parts — for uploads the
+     * JSON body can't carry (mail/chat attachments). The action pipeline reads
+     * the text parts as `$_POST` and the file parts as `$_FILES`. Mutating, so
+     * an idempotency key is generated unless supplied; server-side it hashes
+     * over the (empty) raw body, so a multipart send dedupes retries by key
+     * alone.
+     */
+    suspend fun submitMultipart(
+        action: String,
+        fields: List<Pair<String, String>>,
+        files: List<MultipartFile>,
+        authenticated: Boolean = true,
+        idempotencyKey: String? = null,
+    ): JsonValue {
+        val url = config.baseUrl.toHttpUrl().newBuilder()
+            .encodedPath("/api/v1/action/$action").build()
+
+        val multipart = MultipartBody.Builder().setType(MultipartBody.FORM)
+        fields.forEach { multipart.addFormDataPart(it.first, it.second) }
+        files.forEach { file ->
+            // Sanitized so a quote or newline can't break the part header.
+            val safeName = file.filename
+                .replace("\"", "'").replace("\r", " ").replace("\n", " ")
+            multipart.addFormDataPart(
+                file.field, safeName,
+                file.data.toRequestBody(file.mimeType.toMediaTypeOrNull()),
+            )
+        }
+
+        val builder = Request.Builder()
+            .url(url)
+            .header("Accept", "application/json")
+            .header("client-app", config.clientApp)
+            .header("client-version", config.clientVersion)
+            .header("Idempotency-Key", idempotencyKey ?: java.util.UUID.randomUUID().toString())
+        if (authenticated) {
+            credentials?.let {
+                builder.header("public-key", it.publicKey)
+                builder.header("secret-key", it.secretKey)
+            }
+        }
+        builder.post(multipart.build())
+
+        // Uploads can be several MB — allow more headroom than a JSON call.
+        return execute(builder.build(), authenticated, uploadHttp)
+    }
+
+    private suspend fun execute(request: Request, authenticated: Boolean, client: OkHttpClient): JsonValue {
         val (status, text) = try {
             withContext(Dispatchers.IO) {
-                http.newCall(builder.build()).execute().use { response ->
+                client.newCall(request).execute().use { response ->
                     response.code to (response.body?.string() ?: "")
                 }
             }
@@ -94,6 +159,14 @@ class ApiClient(
 
         if (status >= 400) throw mapError(status, json, authenticated)
         return json
+    }
+
+    private val uploadHttp: OkHttpClient by lazy {
+        http.newBuilder()
+            .writeTimeout(120, TimeUnit.SECONDS)
+            .readTimeout(120, TimeUnit.SECONDS)
+            .callTimeout(120, TimeUnit.SECONDS)
+            .build()
     }
 
     /**

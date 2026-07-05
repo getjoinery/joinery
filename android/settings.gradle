@@ -24,4 +24,7 @@ dependencyResolutionManagement {
 
 rootProject.name = "joinery-android-workspace"
 include ":joinery-android"
+include ":joinery-android-ai-chat"
+include ":joinery-android-calendar"
+include ":joinery-android-mail"
 include ":joinery-member-android"
