@@ -85,17 +85,29 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
     }
 
     public function defaultModel(): string {
-        return $this->model;
+        $ids = $this->modelIds();
+        return $ids[0] ?? '';
     }
 
     /**
-     * The single configured local model, labeled as free. The recipe-edit
-     * dropdown also defensively appends a recipe's own stored model (see
-     * edit.php) so switching providers never silently rewrites it.
+     * Every configured local model, labeled as free. joinery_ai_local_model
+     * may hold a comma-separated list (e.g. a small fast model alongside the
+     * main one); the first entry is the default. The recipe-edit dropdown
+     * also defensively appends a recipe's own stored model (see edit.php) so
+     * switching providers never silently rewrites it.
      */
     public function models(): array {
-        if ($this->model === '') return [];
-        return [$this->model => "{$this->model} (local · free)"];
+        $out = [];
+        foreach ($this->modelIds() as $id) {
+            $out[$id] = "{$id} (local · free)";
+        }
+        return $out;
+    }
+
+    /** joinery_ai_local_model split on commas, trimmed, empties dropped. */
+    private function modelIds(): array {
+        $ids = array_map('trim', explode(',', $this->model));
+        return array_values(array_filter($ids, fn($id) => $id !== ''));
     }
 
     /** Local inference is free. */

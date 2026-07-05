@@ -36,6 +36,14 @@ class AgentLoop {
      *  via the $token_budget argument. */
     const PER_CALL_MAX_TOKENS = 16000;
 
+    /** Same ceiling, but for the local/self-hosted provider. Local models run
+     *  far slower per token than a cloud model and are more prone to never
+     *  emitting a stop token (small models especially), so a runaway call is
+     *  both much more likely and much more expensive to sit through. It also
+     *  keeps a single call's max output well inside a modest local context
+     *  window, leaving room for the system prompt, tool schemas, and history. */
+    const LOCAL_PER_CALL_MAX_TOKENS = 4000;
+
     /** Abort the turn if this many consecutive iterations return a tool error. */
     const CONSECUTIVE_TOOL_ERROR_LIMIT = 3;
 
@@ -124,7 +132,7 @@ class AgentLoop {
 
             $params = [
                 'model'      => $model,
-                'max_tokens' => self::PER_CALL_MAX_TOKENS,
+                'max_tokens' => $provider->id() === 'local' ? self::LOCAL_PER_CALL_MAX_TOKENS : self::PER_CALL_MAX_TOKENS,
                 'system'     => $system,
                 'messages'   => $messages,
             ];

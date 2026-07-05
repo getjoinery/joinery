@@ -45,7 +45,9 @@ $formwriter->textinput('joinery_ai_local_base_url', 'Local Base URL', [
 $formwriter->textinput('joinery_ai_local_model', 'Local Model', [
     'value' => $settings->get_setting('joinery_ai_local_model'),
     'placeholder' => 'qwen3:14b',
-    'helptext' => 'Model id served by the host. Must be set before the local provider runs.',
+    'helptext' => 'Model id(s) served by the host. Must be set before the local provider runs. '
+                . 'Comma-separate multiple ids (e.g. "qwen3.5:9b-nvfp4, qwen3:0.6b") to offer them '
+                . 'all in the chat model dropdown — the first is the default.',
 ]);
 
 $formwriter->passwordinput('joinery_ai_local_api_key', 'Local API Key', [
