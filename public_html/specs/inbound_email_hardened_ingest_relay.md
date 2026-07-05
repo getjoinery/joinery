@@ -1,7 +1,7 @@
 # Inbound Email — Hardened Ingest Relay (Seal at the Edge, Hide the Origin)
 
 **Status:** Draft / awaiting implementation
-**Version:** 1.0
+**Version:** 1.2
 **Builds on:** `specs/inbound_email_encryption_at_rest.md` (user key hierarchy, sealed
 envelopes, login-time index fold) and `specs/inbound_email_outbound_send_protection.md`
 (forwarding subdomain, relay-side SRS).
@@ -46,11 +46,16 @@ how hard it is to take.
   the plaintext moment — mail is ciphertext before Joinery ever holds it. The
   attacker must wait for an active session and win that race. The bank-reset
   attack from a compromised Joinery box is closed.
-- **Relay box:** new mail in its transit window, from compromise until rebuild —
-  and nothing else. No archive, no history, no database, no credentials to
+- **Relay box:** mail in its transit window, from compromise until rebuild —
+  **both directions**: new inbound mail at acceptance, and compose sends
+  passing through as smarthost (DKIM-signed but plaintext SMTP) — and nothing
+  else. No archive, no history, no database, no credentials to
   Joinery (the WireGuard peering is initiated by Joinery and grants access only
-  to the spool), no sending identity key. The relay is rebuilt from its
-  provisioning script in minutes and is treated as disposable.
+  to the spool), no sending identity key. At rest its disk holds sealed blobs
+  plus the spool's cleartext *metadata* (recipient, message-id, references,
+  sizes, verdicts) until Joinery pulls and acks — bounded, but stated. The
+  relay is rebuilt from its provisioning script in minutes and is treated as
+  disposable.
 
 **Explicitly accepted residuals:**
 
@@ -93,8 +98,13 @@ Internet ──SMTP:25──▶ RELAY (public MX IP)          JOINERY (no public
    program instead of the PHP handler: extract the **header-level operational
    metadata** (envelope recipient, `Message-ID`, `In-Reply-To`/`References`
    (thread-key inputs), `Date`, size, the `Authentication-Results` verdict),
-   then seal the **entire raw message** as one blob under a DEK sealed to the
-   user's public key. Cleartext metadata + ciphertext blob go into the spool.
+   then seal the **entire raw message** as one opaque blob with
+   `crypto_box_seal` directly to the recipient's public key. No DEK indirection
+   at this layer: the blob is opened exactly once (at deferred ingest, then
+   re-sealed with the real per-message DEK and row-binding AD per the
+   encryption-at-rest envelope), so a single sealed box to a single recipient is
+   equivalent and is strictly less code on the box whose smallness *is* the
+   security property. Cleartext metadata + ciphertext blob go into the spool.
    Plaintext is never written to the relay's disk.
 4. **Forward-mode aliases** are executed on the relay at receive time (it holds
    the plaintext moment regardless, and forwarding must work while the user is
@@ -165,7 +175,10 @@ Two side effects worth naming:
   fronted, Postfix/opendkim/opendmarc are decommissioned on that deployment's
   main box and port 25 is closed — the machine holding the data no longer
   exposes a mail listener to the internet. The relay doesn't just hide the
-  box; it shrinks it.
+  box; it shrinks it. **rspamd stays**: deferred ingest still scores each
+  message through rspamd's controller interface at parse time — the milter
+  mode is simply unused. Decommissioning it with the MTA stack would silently
+  leave Fortress mail unscored.
 - **Relay compromise now also sees Standard/Private transit mail** — the same
   position any MTA hop occupies, and those levels never promised otherwise.
   The Fortress guarantee is unchanged.
@@ -261,7 +274,11 @@ tunnel up, spool draining) verify the result. The same job type powers a
 **Rebuild relay** button — point it at a fresh VPS and the incident response
 is: click, wait, update DNS. Nothing is lost in a rebuild: unacked mail is
 still queued at senders' MTAs (standard SMTP retry), and acked mail is already
-on Joinery.
+on Joinery. **Rebuild is also routine, not just incident response**: the same
+job is schedulable (e.g. monthly), rebuilding in place on the same VPS and IP
+— no DNS change, senders retrying through the minutes of downtime as above.
+Disposability only defends if it happens; a scheduled rebuild turns "we could
+burn it down" into "persistence on this box has a shelf life."
 
 **What stays manual** (the Setup tab's existing detect-instruct-verify
 boundary): buying the VPS, the MX/A DNS records, and the PTR record at the VPS
@@ -295,13 +312,32 @@ would do the parse/re-seal), which is the same fork already recorded there.
 
 ## Open Items to Confirm During Implementation
 
-- Sealing program form: smallest auditable option (a short compiled Go binary
-  vs. PHP-free script + `age`/libsodium CLI). It must stream, never buffer
-  plaintext to disk, and fsync the sealed spool entry before Postfix gets its
-  exit code.
-- Spool/pull protocol: filesystem spool + rsync-style pull vs. a minimal HTTP
-  endpoint on the WireGuard interface. Pick the dumber one that supports
-  ack-after-durable-store.
+- **Sealing program form — decided: a small Go binary.** The deciding factor is
+  format compatibility: the system is committed to libsodium `crypto_box_seal`
+  to the user's X25519 key, so `age` is out (incompatible format would fork the
+  crypto into age-at-relay / libsodium-in-app). Go over a hand-written C
+  program because it is memory-safe — this program parses untrusted SMTP input
+  on the internet-facing box — ships as one static binary onto a minimal Debian
+  VPS, and Go is already in the provisioning lineage (`server_manager`'s Go
+  agent), not a new toolchain. `golang.org/x/crypto/nacl/box.SealAnonymous` is
+  wire-compatible with libsodium's sealed box. The program does exactly one
+  thing: stream stdin → `SealAnonymous` to the recipient public key (from the
+  synced alias map) → atomic-rename the sealed entry into the spool → fsync →
+  exit code to Postfix only after the fsync. Never buffers plaintext to disk.
+  ⟨VERIFY at build⟩ the Go `SealAnonymous` output opens with PHP
+  `sodium_crypto_box_seal_open` (round-trip test in CI).
+- **Spool/pull protocol — decided: filesystem spool, pulled over SSH/rsync on
+  the WireGuard interface.** The dumber option: no bespoke network daemon on the
+  relay, so its network surface stays exactly Postfix + WireGuard + key-only
+  SSH. The sealing program writes each item as `<spoolid>.seal` + `<spoolid>.meta`
+  (cleartext metadata sidecar) via write-tempfile-then-atomic-rename, so a pull
+  never sees a partial entry. Joinery, over the tunnel, `rsync`s new entries
+  (copy only — **never** `--remove-source-files`, which would delete before
+  durability), writes them durably with an idempotent store keyed on spool id
+  (re-pulling an un-acked-but-stored item is a no-op = dedup), then deletes the
+  remote entries it has durably stored — the delete-after-store **is** the ack.
+  A short poll (~15–30s) under the scheduled-task system; email tolerates the
+  interval, and no long-poll/push machinery is needed.
 - Whether the relay needs its own rate limiting for forward-mode aliases (the
   per-alias/per-domain limits currently enforced in the app).
 - Alias-map sync freshness vs. `reject_unmatched`: a newly created alias must

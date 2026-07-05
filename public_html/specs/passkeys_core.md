@@ -1,7 +1,7 @@
 # Core Passkeys (WebAuthn) — Authentication and Client-Held Key Derivation
 
 **Status:** Draft / awaiting implementation
-**Version:** 1.0
+**Version:** 1.2
 **Consumed by:** `specs/inbound_email_encryption_at_rest.md` (mail unlock — the
 first PRF consumer). Designed as a **core platform capability**, not an email
 feature: any future subsystem can enroll against the same service.
@@ -38,10 +38,16 @@ All core, no plugin. Vanilla JS on the front end per theme rules.
   are strictly validated; attestation is not required (`none`).
 - **WebAuthn library** — use a maintained library rather than hand-rolling
   COSE/CBOR parsing (this is signature-verification code; owning it is a
-  liability). Candidate: `lbuchs/WebAuthn` (self-contained, no dependency
-  tree — fits the platform's grain) vs `web-auth/webauthn-lib` (heavier,
-  more complete). Decide at implementation; the service wraps whichever so
-  consumers never touch the library directly.
+  liability). **Decided: `web-auth/webauthn-lib`.** The deciding feature is
+  PRF-extension support, and only this library has it: it ships a first-class
+  `PseudoRandomFunctionInputExtensionBuilder` with per-credential salt handling
+  and dedicated docs. The leaner alternative, `lbuchs/WebAuthn`, has no PRF
+  support — its source carries only generic extension scaffolding marked
+  "extensions not implemented" — so it cannot produce the derived secret this
+  whole design stands on. The heavier dependency tree is the accepted cost;
+  `web-auth/webauthn-lib` is the pure-PHP library (not the Symfony bundle), so
+  no framework is pulled in. The service wraps it so consumers never touch the
+  library directly.
 - **`data/passkey_credential_class.php`** (`pkc_passkey_credentials`) — one
   row per enrolled credential: user id, credential id, COSE public key, sign
   count, transports, AAGUID, PRF-capable flag, user-facing label ("MacBook
@@ -137,7 +143,10 @@ All core, no plugin. Vanilla JS on the front end per theme rules.
   thief must not be able to enroll their own passkey quietly.
 - Revoking a credential deletes consumers' wrappings for it (service emits a
   revocation hook consumers subscribe to; the mail consumer deletes that
-  credential's KEK wrapping).
+  credential's KEK wrapping). The hook is a veto point: a consumer refuses the
+  revocation when deleting its wrapping would strand its protected key (the
+  mail consumer's unlocker floor — encryption spec § Recovery & Key Loss),
+  and the refusal reason surfaces to the user.
 
 ## Documentation to Update
 
@@ -150,8 +159,6 @@ All core, no plugin. Vanilla JS on the front end per theme rules.
 
 ## Open Items to Confirm During Implementation
 
-- Library choice (`lbuchs/WebAuthn` vs `web-auth/webauthn-lib`) after checking
-  PRF-extension support in each — PRF handling is the deciding feature.
 - Confirm PRF availability on the oldest browsers/devices the operator
   actually uses; decide the minimum supported set.
 - Native-app ceremony details (Android Credential Manager / iOS

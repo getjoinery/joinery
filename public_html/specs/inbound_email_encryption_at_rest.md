@@ -1,7 +1,7 @@
 # Inbound Email — Encryption at Rest (Sealed Bodies + Sealed Search Index)
 
 **Status:** Draft / awaiting implementation
-**Version:** 1.1
+**Version:** 1.3
 **Builds on:** `specs/implemented/inbound_email_attachment_storage.md` (attachments are
 discrete private `File` objects, not bytes inside a raw blob) and
 `specs/implemented/file_private_storage.md` (private `File` offload + gated serving). This spec
@@ -38,7 +38,16 @@ mail on behalf of other users or run server-side processing over the archive.
   key, the decrypted search index, and any opened message bodies live in RAM. An
   attacker who compromises the box *during* an active session can read what is
   decrypted in that window. This is the inherent floor for a server-rendered reader
-  and is the accepted tradeoff, not a bug to be fixed later.
+  and is the accepted tradeoff, not a bug to be fixed later. What is **not**
+  accepted is that exposure outliving the breach — see *Key Rotation* for the
+  ceremony that ends a stolen key's usefulness.
+- **Write-access forgery.** Sealing protects confidentiality, not authenticity:
+  ingest seals to a public key that is deliberately readable on the box, so an
+  attacker with database write access can fabricate a complete fake message
+  exactly as ingest would. AEAD row-binding (see *Key Hierarchy*) kills the
+  cheaper attack — splicing real ciphertexts onto other rows — but wholesale
+  forgery is inherent to receive-while-locked, and is accepted and stated
+  rather than implied away.
 
 ### Alternative: client-side key handling (deferred — recorded, not chosen)
 
@@ -90,7 +99,9 @@ baseline unless we decide the stronger guarantee is worth the rebuild.
    using cleartext operational metadata in PostgreSQL.
 4. **Render**: opening a thread decrypts only the messages displayed.
 5. **At unlock expiry, logout, or session expiry** (whichever comes first): the
-   index is re-sealed, `tmpfs` copies and the in-memory private key are wiped.
+   `tmpfs` working copy and the in-memory private key are wiped. Nothing needs
+   sealing at close — the sealed copy is already current (*seal-after-fold*,
+   see Search Architecture).
 
 ### The Unlock Window (how long "unlocked" lasts)
 
@@ -108,8 +119,16 @@ specs would be effectively permanent and the at-rest guarantee hollow. So:
 - The window closes after a configurable **idle timeout of mailbox activity**
   (single setting, default 30 minutes; mail actions reset it), and closing it
   wipes everything unlock created: the unwrapped secret key, the `/dev/shm`
-  index (re-sealed first), and any decrypted state. Logout and session expiry
+  working copy, and any decrypted state. Logout and session expiry
   close it too, but they are no longer the only thing that does.
+- **Closing is passive by design.** PHP only runs when a request arrives, so
+  expiry must not depend on code executing at the moment the window ends.
+  Seal-after-fold keeps the durable sealed index current at all times; the
+  unwrapped key lives under a TTL that makes it evaporate on schedule; and the
+  scheduled-task cron (already running every 15 minutes) sweeps `/dev/shm` for
+  working copies whose window is gone — catching walk-aways and crashes alike.
+  Worst case, a decrypted working copy lingers in RAM for one cron interval.
+  Nothing critical happens at close; closing is deletion, not a ceremony.
 - **No hard cap on a busy window.** An idle cap bounds a hijacked-session or
   walked-away-from-desk exposure; a hard cap would only interrupt a user who
   is demonstrably present, and defends nothing — an attacker already on the
@@ -130,7 +149,12 @@ All primitives are libsodium (`ext-sodium`, bundled with PHP 8.3). Envelope encr
 keeps the asymmetric op to once per message rather than once per field.
 
 - **Unlockers → KEK wrappings.** The secret key is wrapped once per enrolled
-  unlocker; any single unlocker opens it. Enrolling or removing an unlocker is an
+  unlocker; any single unlocker opens it. That makes the whole system exactly
+  as strong as the **weakest enrolled wrapping** — an offline attacker with a
+  copy of the database attacks whichever one is cheapest, so a hardware-grade
+  passkey buys nothing if a sibling wrapping falls to brute force. The entropy
+  floors below exist for that reason, and the setup UI states the principle
+  plainly. Enrolling or removing an unlocker is an
   in-session act (it needs the unwrapped secret key in hand). Three kinds:
   - **Passkey (the primary, default UX).** A PRF-capable WebAuthn credential
     derives a 32-byte KEK inside the authenticator hardware on a touch/face
@@ -138,20 +162,35 @@ keeps the asymmetric op to once per message rather than once per field.
     Provided by the core passkey service (`specs/passkeys_core.md`, context
     `mail-kek`). PRF outputs are **per-credential**, so each enrolled passkey
     holds its own wrapping; revoking a passkey deletes its wrapping.
-  - **Recovery codes (required backup).** A printed list of high-entropy
-    one-time codes generated at setup, each independently wrapping the secret
-    key (a code is key material, not a server-verified check — that is why
-    codes work where TOTP-style 2FA structurally cannot). A used code's
-    wrapping is deleted.
-  - **Passphrase (optional).** `sodium_crypto_pwhash` (Argon2id) derives a
+  - **Recovery codes (required backup).** A printed list of one-time codes
+    generated at setup, each independently wrapping the secret key (a code is
+    key material, not a server-verified check — that is why codes work where
+    TOTP-style 2FA structurally cannot). Each code carries **≥128 bits of
+    entropy** (26 Crockford-base32 characters, printed in typing-friendly
+    groups); its KEK is derived with a keyed hash (`crypto_generichash` over
+    the code plus a stored per-user salt) — the entropy *is* the defense, so
+    no slow KDF is needed. A used code's wrapping is deleted.
+  - **Passphrase (optional).** `sodium_crypto_pwhash` (Argon2id, at
+    `OPSLIMIT_INTERACTIVE` / `MEMLIMIT_INTERACTIVE` or higher) derives a
     32-byte KEK from a memorized passphrase and a stored per-user salt, for
     operators who want a knowledge factor in addition to possession factors.
+    This is the one unlocker whose strength the user chooses: a short
+    passphrase quietly becomes the weakest wrapping and reduces the whole
+    mailbox to a dictionary attack. The enrollment UI says so — which is
+    exactly why the passphrase is optional and the passkey is the default.
 - **User keypair.** An X25519 keypair (`sodium_crypto_box_keypair`). The **public**
-  key is stored in cleartext and used at ingest. The **secret** key is wrapped with
-  `crypto_secretbox` under each unlocker's KEK and stored at rest; it is only ever
-  unwrapped into RAM during a session.
+  key is stored in cleartext and used at ingest. The **secret** key is wrapped
+  under each unlocker's KEK with the same AEAD (AD: user id + unlocker id) and
+  stored at rest; it is only ever unwrapped into RAM during a session.
 - **Per-message data key (DEK).** Each message gets a random 32-byte DEK. Content
-  fields are encrypted with `crypto_secretbox` under the DEK. The DEK is sealed to the
+  fields are encrypted under the DEK with the AEAD construction
+  (`crypto_aead_xchacha20poly1305_ietf` — same libsodium, same key size as
+  secretbox) with **additional data binding the ciphertext to its row**:
+  message id + field name for content columns, message id + attachment id for
+  attachment bytes, and likewise for the sealed index blob. AD is neither
+  stored nor secret — it must simply *match* at decrypt time, so a ciphertext
+  copied onto another row fails authentication instead of decrypting into a
+  lie. The DEK is sealed to the
   user's public key with `sodium_crypto_box_seal` and stored alongside the message.
   - Ingest needs only the public key (seal the DEK).
   - Read needs the secret key: `crypto_box_seal_open(DEK)` → decrypt fields.
@@ -163,11 +202,35 @@ keeps the asymmetric op to once per message rather than once per field.
 ### Key storage & in-memory rules
 
 - The unwrapped secret key **must never** be written to the disk- or DB-backed session
-  store. Hold it in shared RAM (APCu) keyed to the session id with a TTL matching the
-  unlock window's idle timeout, or equivalent process memory — never persisted.
-  Cleared when the unlock window closes (idle expiry, logout, or session expiry).
-- The decrypted FTS index file lives in `/dev/shm` (tmpfs, RAM-backed), never on a
-  persistent disk path. Re-sealed and wiped when the unlock window closes.
+  store. **Decided mechanism: APCu** — in-process shared memory, keyed to the session
+  id, TTL = the unlock window's idle timeout and re-stored on each key-using request
+  (activity extension). No external daemon, no socket; owned by the FPM master, so it
+  survives `ondemand` worker recycling (the window holds across requests) and clears on
+  master restart. `apcu_delete` on window close (idle expiry, logout, or session
+  expiry). Rejected alternatives: Redis/Memcached (external daemon, Redis persists to
+  disk by default — a direct at-rest hazard — and both enlarge the auditable surface);
+  a tmpfs file holding the raw key (a named filesystem path invites backup/`/proc`/
+  coredump capture — strictly worse than an anonymous SHM slot; tmpfs stays right for
+  the bulk FTS index, which is sealed content-derived data, but not for the bare key).
+- **APCu alone does not satisfy the at-rest invariant — three host facts must hold**,
+  each a provisioner health check:
+  1. **Anonymous mmap.** `apc.mmap_file_mask` must be empty (anonymous `MAP_ANONYMOUS`),
+     not the `/tmp`-file default. A file-backed segment is pageable to a real disk path.
+  2. **Coredumps disabled** on the mail FPM pool (`rlimit_core = 0`; kernel not piping
+     cores anywhere durable) — a crash must not dump the key.
+  3. **Swap disabled or encrypted** (see the swap requirement below).
+  With those three, the honest residue is that `apcu_delete` frees the slot without
+  scrubbing, so key bytes linger in the SHM segment until overwritten — a RAM-residency
+  fact (covered by the cold-boot / physical-RAM boundary this spec family places out of
+  scope), not disk persistence. Any code path in the pool can read the SHM entry while a
+  window is open; that is the already-accepted "compromise during an active window"
+  residual, not a new exposure. (An optional dedicated FPM pool for the unlock code would
+  narrow SHM readership to mail code; noted, not required.) Moving key custody to the
+  browser for the window would remove the server-held copy entirely, but that is the
+  deferred client-side-crypto fork — not adopted piecemeal here.
+- The decrypted FTS index working copy lives in `/dev/shm` (tmpfs, RAM-backed),
+  never on a persistent disk path. Deleted when the unlock window closes; the
+  scheduled-task cron deletes any working copy whose window is gone.
 
 ## What Is Sealed vs. What Stays Cleartext
 
@@ -235,8 +298,17 @@ the ~144KB `php8.3-sqlite3` PHP binding is missing. FTS5 provides a maintained
 tokenizer, Porter stemming, BM25 ranking with per-column weighting, phrase/proximity/
 prefix queries, and snippet generation — none of which we then own and maintain.
 
-**At-rest form:** the FTS5 database is a single file, envelope-encrypted under the
-user's key (its own DEK sealed to the public key), stored as a sealed blob.
+**At-rest form — a disposable cache, not an organ:** the FTS5 database is a
+single file, envelope-encrypted under the user's key (its own DEK sealed to the
+public key), stored as a sealed blob. The blob is purely an accelerator. Ground
+truth is always the sealed message rows plus the from-scratch rebuild path
+(decrypt → tokenize → insert into an in-memory FTS5 db), which must exist in
+full; the cache is **deleted, never repaired**, on any provocation — missing,
+stale, crashed mid-write, corrupt, or key rotation. Measured on the dev box
+(EPYC-class vCPU): a full rebuild costs ~2–3s per 10k messages (~20–30s per
+100k; FTS5 tokenization dominates, the crypto is nearly free). That is why the
+cache is worth persisting for a years-deep archive — and why losing it is
+never an error.
 
 **Incremental maintenance (the sealed append-log model):** a cleartext high-water mark
 records the id of the last message folded into the index. At login, after the index is
@@ -244,6 +316,13 @@ decrypted to `/dev/shm`, the manager selects messages with id > high-water, decr
 their indexable fields, inserts them into FTS5, and advances the mark. Inbound mail
 arriving while logged out is simply sealed and stored; it is folded in at the next
 login. First-ever login pays a one-time full backlog index build.
+
+**Seal-after-fold (the crash-safe rule):** the index is re-sealed and persisted
+immediately after every fold or update, while the key is in hand — never at
+window close. The durable sealed copy is therefore always current, and closing
+the window reduces to deleting the `/dev/shm` working copy, which needs no key
+and no running code at any particular moment. A crash or walked-away session
+loses nothing and leaves only a working copy for the cron sweep to delete.
 
 **Query path:** a search term is run against the in-RAM FTS5 index, returning matching
 message ids. Those ids are passed into the existing `listThreads()` query as an id
@@ -303,6 +382,18 @@ Everything else stores references and metadata.
   permission-10 admin without an enrolled unlocker — including one arriving
   via login-as — sees ciphertext, structurally. There is no admin override,
   because there is no key to override with.
+- **Spam learning is key-gated; scoring is not.** rspamd *scores* each message
+  pre-seal, wherever the pipeline runs — at receive time for Standard/Private,
+  inside deferred ingest at the next unlock for Fortress (relay spec). But
+  *learning* from user feedback (`LearnSpamFeedback`) trains on body tokens,
+  so on protected domains it follows the same key-gated poll as AI processing
+  (levels spec § AI Processing): pending items are cleartext references
+  (verdict + message id), the learn step decrypts in-RAM inside an unlock
+  window and records completion in the processing log. No plaintext
+  side-queue. Consequence, stated plainly: on protected domains the filter
+  learns only while the user is around. Named bounded artifact: rspamd's own
+  Bayes store holds hashed token statistics derived from learned mail — not a
+  body copy, but it exists and lives outside the sealed columns.
 - **AI artifacts inherit the rule.** The pipeline processing log stores
   message references and verdicts, never digest text; content-derived outputs
   (e.g. `iem_ai_summary`) seal as content per the security-levels spec; any
@@ -328,12 +419,14 @@ Everything else stores references and metadata.
 ## New Code
 
 - **Sealing helper** — a sibling to `SecretBox` (which stays symmetric-only). Wraps
-  `crypto_box_seal` / `crypto_box_seal_open` plus the per-message DEK envelope. Keeps
-  the asymmetric-at-ingest contract in one tested place. The same helper encrypts and
-  decrypts attachment `File` bytes under the message DEK, so the gated `File` stream
-  has one tested path to open them in-session.
-- **Index manager** — owns the `/dev/shm` lifecycle: decrypt-on-login, incremental
-  fold via the high-water mark, query, re-seal-on-logout, wipe.
+  `crypto_box_seal` / `crypto_box_seal_open` plus the per-message AEAD envelope
+  and its row-binding AD convention, so the id-plus-field-name discipline lives
+  in one tested place rather than at every call site. The same helper encrypts
+  and decrypts attachment `File` bytes under the message DEK, so the gated
+  `File` stream has one tested path to open them in-session.
+- **Index manager** — owns the `/dev/shm` lifecycle: decrypt-on-unlock,
+  incremental fold via the high-water mark (sealing after every fold), query,
+  wipe-on-close, and the cron sweep that deletes orphaned working copies.
 
 ## Schema Changes (via data-class `$field_specifications`, not migrations)
 
@@ -358,15 +451,38 @@ DDL.
 - Add `php8.3-sqlite3` to provisioning and the Docker images. The SQLite engine
   (`libsqlite3-0`, FTS5 enabled) is already present on dev; **verify the production
   base image carries `libsqlite3` with FTS5** before rollout.
+- **Swap must not silently persist RAM.** tmpfs pages and shared-memory
+  segments are ordinary memory to the kernel: under pressure it pages them out
+  to swap, which is persistent disk — fragments of the unwrapped key or whole
+  pages of the decrypted index could then survive the wipe and the window.
+  A host running encryption at rest must have swap disabled (`swapoff` — the
+  normal state for the target VPS profile) or encrypted swap keyed with an
+  ephemeral random key each boot (`cryptsetup` plain mode over the swap
+  device). Add an `InboundEmailHealth` provisioner check that warns when
+  protected domains exist and unencrypted swap is active. This closes paging;
+  a cold-boot attack on physical RAM stays out of scope, as everywhere in
+  this spec family.
+- **APCu host hardening** (the key-store mechanism — see *Key storage & in-memory
+  rules*). The same `InboundEmailHealth` check verifies, when protected domains exist:
+  `apc.mmap_file_mask` is anonymous (not file-backed), and the mail FPM pool runs with
+  coredumps disabled (`rlimit_core = 0`). Both are what keep the unwrapped key out of a
+  real disk path; without them APCu residency is not equivalent to RAM-only.
 - No Apache/PHP config changes beyond the extension.
 
 ## Pre-Launch / Backfill
 
 The platform has no production users yet, so there is no existing mail to preserve. New
-mail is sealed going forward. Any existing dev-mailbox plaintext can be sealed by a
-one-time in-session backfill pass (it needs the key, so it runs once the owner logs in
-and sets a passphrase) or simply cleared. A `looksEncrypted()`-style marker lets a row
-be detected as already-sealed for an idempotent backfill.
+mail is sealed going forward. Any existing plaintext (dev mail, or a domain being
+raised from Standard) converts via a one-time in-window backfill pass. Its unit of
+work is **converge each message to the lean sealed form**, not just seal the
+columns: seal the content fields, split attachments out to sealed `File`s if the
+raw still carries them, then **destroy the raw** — null `iem_raw_message`, delete
+the raw-message store file. A message is not marked done (`looksEncrypted()`-style
+marker, idempotent) until its raw is gone; otherwise the "sealed" archive keeps a
+complete plaintext copy of every pre-upgrade message. Exemption: rows whose raw
+lives at a *remote* IMAP source — the counterparty provider holds that copy by
+the nature of IMAP sourcing, and IMAP domains cap at Private with that
+disclosure already.
 
 ## Backups
 
@@ -396,13 +512,68 @@ user to lose — in opposite directions:
   server loss by nature — the PRF ingredient lives in the authenticator
   hardware, not on the server.
 
+## Key Rotation — recovering from a suspected compromise
+
+The active-session residual means a breach during an unlock window can
+exfiltrate the unwrapped secret key. Without rotation, that one theft converts
+to permanent read access: every past message and all future arrivals seal to
+the matching public key, and no amount of server rebuilding, password
+rotation, or passkey re-enrollment revokes it. Rotation is the ceremony that
+ends the stolen key's usefulness.
+
+**The ceremony (in-session — it needs the current secret key in hand):**
+
+1. Generate a fresh X25519 keypair.
+2. For every message: `crypto_box_seal_open` its sealed DEK with the old
+   secret key, re-seal the **same** DEK to the new public key. Bodies and
+   attachment bytes are untouched — only the small sealed-key blob changes.
+   One asymmetric op pair per message (thousands per second), so the full
+   archive rotates in seconds-to-minutes.
+3. Re-wrap the new secret key under every enrolled unlocker (each passkey's
+   PRF KEK, the passphrase if set).
+4. Replace the stored public key, so ingest seals new arrivals to the new pair.
+5. Invalidate all recovery codes and generate a fresh printed list (each old
+   code wrapped the old key), and offer a fresh key-file export.
+6. Delete the sealed search-index cache — it seals under the old key and is a
+   disposable cache by rule (see Search Architecture); the next unlock
+   rebuilds it.
+
+**Resumability:** the sealed-DEK column carries a key-generation id, so a
+message is unambiguously old-sealed or new-sealed and an interrupted rotation
+resumes where it stopped instead of stranding half the archive. During a
+rotation both keypairs' wrappings exist; the old keypair's wrappings are
+deleted only after the last message flips.
+
+**The honest limit:** rotation cannot un-leak data. Anything the attacker
+already copied *during* the breach (sealed blobs plus the key to open them,
+or plaintext read in-window) is gone regardless. What rotation protects is
+everything else: mail that arrives after it, and the archive against a
+stolen key being replayed later — including the leaked-backup chain (a backup
+leaked before rotation plus a key stolen after it no longer combine).
+
+**Surface:** a "Rotate encryption keys" action in the mailbox security UI,
+with copy recommending it after any suspected box compromise. It is the same
+machinery the enrollment flows already need (unwrap, re-wrap, re-seal), not a
+new crypto path.
+
 ## Recovery & Key Loss
 
 - Lost/replaced passkey device → unlock with any remaining unlocker (another
   passkey, a recovery code, the passphrase), then enroll the new device and
   revoke the old credential's wrapping.
-- Down to the last few recovery codes with no passkey → the mailbox UI warns and
-  prompts to enroll a passkey or regenerate a fresh code list (in-session).
+- Suspected box compromise → run the key-rotation ceremony (above) as soon as
+  the box is trusted again.
+- **The unlocker floor (structural, not advisory).** A wrapping-delete that
+  would leave fewer than one passkey wrapping *and* fewer than three unused
+  recovery codes is refused at the deletion point — enforced in the wrapping
+  store, not in UI copy — and the refusal names what to enroll or regenerate
+  first. Every flow stays possible in the right order: revoke every passkey
+  once fresh codes exist; burn codes down until the floor forces an in-session
+  regeneration before further revocations. One exemption: *consuming* a code
+  to unlock deletes its wrapping by design and is exempt from the floor check,
+  but still counts toward the forced-regeneration prompt. "Unrecoverable by
+  design" is a guarantee against attackers who stole everything — it must not
+  be reachable through the platform's own delete buttons.
 - All unlockers lost → mail is unrecoverable, by design. The setup flow makes
   this explicit before the recovery codes can be dismissed.
 
@@ -418,8 +589,9 @@ user to lose — in opposite directions:
 
 - Confirm `sodium_crypto_box_seal` / `_open` are available (ext-sodium present per
   `SecretBox`).
-- Confirm APCu (or an equivalent RAM-only store) is available for holding the unwrapped
-  secret key off the persistent session store; choose the mechanism explicitly.
+- Confirm APCu is present and enabled (the decided key-store mechanism) and that the
+  provisioner can enforce its three host facts — anonymous `apc.mmap_file_mask`,
+  coredumps off on the mail FPM pool, swap off/encrypted.
 - Confirm the production Docker base carries `libsqlite3` + FTS5.
 - Decide sealed-index storage form (file vs row) against real index size once attachment-
   excluded text volume is measured.

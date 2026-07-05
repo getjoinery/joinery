@@ -1,7 +1,7 @@
 # Inbound Email — Security Levels (Per-Domain Protection Posture)
 
 **Status:** Draft / awaiting implementation
-**Version:** 1.0
+**Version:** 1.1
 **Unifies:** `specs/inbound_email_encryption_at_rest.md`,
 `specs/inbound_email_outbound_send_protection.md`,
 `specs/inbound_email_hardened_ingest_relay.md`. Those specs define the
@@ -128,23 +128,60 @@ this spec makes the domain's level the branching key).
 
 - **Raising** is a guided, in-session act:
   - Standard → Private: run the ceremony if needed, then the one-time
-    in-session backfill seal from the encryption-at-rest spec (idempotent,
-    `looksEncrypted()`-marked).
+    in-window backfill from the encryption-at-rest spec (idempotent,
+    `looksEncrypted()`-marked) — which converges each message to the lean
+    sealed form *including destroying its plaintext raw* (inline column and
+    store file), not merely sealing the columns.
   - Private → Fortress: DNS cutover checklist + relay enrollment; existing
     sealed mail is already in the right form.
-- **Lowering** is allowed but warned: Fortress → Private reverts DNS and
-  re-enables ambient capability; Private → Standard decrypts the archive
+- **Lowering** is allowed but warned: Fortress → Private reverts the
+  *identity* posture — the SPF/DMARC/DKIM shape and where mail is sealed —
+  and re-enables ambient capability; Private → Standard decrypts the archive
   in-session back to plaintext columns. The confirm gate states what protection
-  is being given up in outcome language.
+  is being given up in outcome language. **A level change never moves the
+  MX**: routing is deployment-wide by the relay spec's fronts-every-domain
+  rule, so a downgraded domain keeps receiving through the relay (its mail
+  simply pass-through-seals to the transport key like any Standard/Private
+  domain). Removing the relay itself is a separate deployment-level
+  decommission with its own checklist — repoint every domain's MX, re-provision
+  the colocated stack, reopen port 25 — never a side effect of one domain's
+  level change.
 - A level change is a domain-editor action gated on an active session (raising
   needs the key for backfill; lowering needs it for decryption — the gate is
   structural, not policy).
+
+## The Locked-State Surface Contract
+
+Logged in but locked is the state a Private/Fortress user sees most often, so
+its behavior is defined once, here, for every surface — not invented per
+screen. The rule: **every surface shows cleartext metadata; every action that
+needs content becomes a one-tap unlock prompt, and the original action
+continues after unlock without re-navigation.**
+
+- **Thread list**: threading, unread counts, labels, folders, times, and sizes
+  render normally; sender, subject, and preview show a neutral sealed
+  placeholder. The mailbox is *navigable but not readable* — the at-rest
+  guarantee made visible.
+- **Search** on a protected mailbox: the box renders; submitting prompts
+  unlock, then runs the query.
+- **Opening a thread, downloading an attachment, composing/replying on a
+  Fortress domain**: the same prompt, then the action proceeds.
+- **Pending-parse (Fortress) messages** show the same placeholder as sealed
+  ones — the user never sees a third state.
+- **Native apps inherit the contract over `/api/v1`**: endpoints return
+  metadata plus a `locked` flag instead of erroring, so clients render the
+  same placeholders rather than failure states, and trigger the native unlock
+  ceremony on content actions.
 
 ## AI Processing of Protected Mail
 
 Recipes that read message content (`joinery_ai_email_triage.md`,
 `joinery_ai_email_security_scan.md`, and any future pipeline job over mail)
-interact with the levels through three rules:
+interact with the levels through three rules. The same key-gated pattern also
+covers the non-AI content reader: spam-feedback learning (`LearnSpamFeedback`
+trains rspamd on body tokens) queues cleartext references and learns in-window
+on protected domains, while ingest-time spam *scoring* is pre-seal and
+unchanged — see the encryption spec § No Sideways Copies.
 
 - **Processing is key-gated, not re-plumbed.** The recipe's scheduled poll and
   per-recipe processing log stay exactly as the triage spec resolved them; the

@@ -1,17 +1,19 @@
 # Inbound Email — Outbound Send Protection (Session-Gated Sending Identity)
 
 **Status:** Draft / awaiting implementation
-**Version:** 1.0
+**Version:** 1.1
 **Builds on:** `specs/inbound_email_encryption_at_rest.md` (the user key hierarchy —
-passphrase-wrapped X25519 keypair, sealing helper, session-scoped key unwrapping —
-is defined there and reused here, not duplicated).
+the multi-unlocker-wrapped X25519 keypair, sealing helper, unlock window, and
+in-window key handling — is defined there and reused here, not duplicated).
+Everywhere this spec says "in-window" it means inside an **unlock window** per
+that spec — never merely logged in.
 
 ## Goal
 
-Make it impossible for a compromised box to send mail **as the user** while the
-user is not logged in. The encryption-at-rest spec protects the *reading* of stored
+Make it impossible for a compromised box to send mail **as the user** while no
+unlock window is open. The encryption-at-rest spec protects the *reading* of stored
 mail; this spec protects the *sending identity*. The two together give the same
-shape of guarantee: while no session is active, the box holds nothing that can
+shape of guarantee: while locked, the box holds nothing that can
 read your mail and nothing that can speak as you.
 
 Sending as the user is arguably the worse compromise: an attacker who can emit
@@ -22,8 +24,8 @@ and destroy trust in the address itself — damage that outlives the incident.
 
 **Defends against:**
 
-- **Logged-out box compromise (including root).** An attacker with full control of
-  the box while no session is active cannot produce a message that receiving mail
+- **Locked box compromise (including root).** An attacker with full control of
+  the box while no unlock window is open cannot produce a message that receiving mail
   servers will accept as coming from the user's address. The enforcement point is
   **other people's mail servers applying the domain's published DMARC policy** —
   infrastructure the attacker does not control. This is what makes the guarantee
@@ -32,11 +34,10 @@ and destroy trust in the address itself — damage that outlives the incident.
 
 **Explicitly accepted residuals:**
 
-- **Active-session exposure.** While the user is logged in, the unwrapped DKIM
-  signing key is in session RAM and an attacker present in that window can send
-  signed mail. This deliberately matches the read-side boundary in the
-  encryption-at-rest spec: logged out, the box can neither read nor speak;
-  logged in, it can do both.
+- **Active-window exposure.** Inside an unlock window the DKIM key can be
+  unwrapped, and an attacker present in that window can send signed mail. This
+  deliberately matches the read-side boundary in the encryption-at-rest spec:
+  locked, the box can neither read nor speak; unlocked, it can do both.
 - **Receivers that ignore DMARC.** A minority of mail servers do not enforce
   `p=reject`. An attacker can still deliver spoofed mail to those; the major
   providers (Gmail, Outlook, Yahoo, Apple) all enforce.
@@ -49,7 +50,7 @@ and destroy trust in the address itself — damage that outlives the incident.
 
 **Open tradeoff — automated sends (may make the strict invariant unrealistic):**
 
-The invariant blocks **all** logged-out sends from the protected domain,
+The invariant blocks **all** locked-state sends from the protected domain,
 including legitimate automated mail: mailing-list signup confirmations,
 notifications, any transactional send using an address at the identity domain.
 If the platform must send those around the clock, the strict form cannot hold
@@ -90,8 +91,8 @@ protects nothing. The complete inventory of resting send capability today:
 A per-domain flag marks a domain as a **protected sending identity**. For a
 protected domain, the invariant is:
 
-> While no session is active, no credential exists on the box that can produce
-> a DMARC-passing message with a `From:` header at this domain.
+> While no unlock window is open, no credential exists on the box that can
+> produce a DMARC-passing message with a `From:` header at this domain.
 
 Non-protected domains (the platform's transactional domain, the forwarding
 subdomain) keep today's ambient behavior.
@@ -107,11 +108,15 @@ subdomain) keep today's ambient behavior.
 - The protected domain is **removed from opendkim's signing table** (opendkim
   keeps verify duty for inbound). `provision_dkim.sh` remains the tool for
   non-protected domains only.
-- Signing moves to the app, at compose time, inside the authenticated session:
+- Signing moves to the app, at compose time, inside an unlock window:
   `MailboxSender` → `EmailSender` → `SmtpMailer` (a PHPMailer subclass —
   PHPMailer signs natively via `DKIM_domain` / `DKIM_selector` /
   `DKIM_private_string`, so the unwrapped key is passed as an in-memory string,
-  never a key file). Provider-API transports (Mailgun/SES payload sends) must
+  never a key file). The sealed key is unwrapped **per send** — or held at most
+  for the window's remainder under the same TTL discipline as the mail secret
+  key — and never outlives the window. Signing is a content action under the
+  levels spec's locked-state contract: compose while locked prompts the same
+  one-tap unlock. Provider-API transports (Mailgun/SES payload sends) must
   either carry the app-produced signature in the raw message or are simply not
   used for protected-domain mail (see closure 3).
 
@@ -153,11 +158,11 @@ compose path. (Providers stay fully usable for the platform's transactional
 domain and the forwarding subdomain.) The Setup tab enforces this by check,
 not by trust: see *Integration Points*.
 
-### What still works while logged out
+### What still works while locked
 
 Receiving, filtering, threading, alias forwarding (with SRS at the forwarding
 subdomain), catch-all forwarding, bounce notifications, and all platform
-transactional mail on non-protected domains. The only thing a logged-out box
+transactional mail on non-protected domains. The only thing a locked box
 cannot do is emit mail as the protected identity — which is exactly the
 capability being removed.
 
@@ -190,11 +195,11 @@ capability being removed.
 
 ## Setup & Key Rotation
 
-- Enabling protection on a domain is an in-session act: generate the keypair,
+- Enabling protection on a domain is an in-window act: generate the keypair,
   seal the private key, show the DNS records to publish (new DKIM selector
   record, tightened SPF, strict DMARC, forwarding-subdomain SPF), and verify
   via the Setup tab before flipping enforcement.
-- Rotation = generate + seal a new key under a new selector in-session, publish
+- Rotation = generate + seal a new key under a new selector in-window, publish
   the new DNS record, retire the old selector. The old on-disk opendkim key for
   the domain is destroyed at cutover.
 
