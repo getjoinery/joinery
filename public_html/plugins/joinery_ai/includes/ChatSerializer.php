@@ -60,10 +60,32 @@ class ChatSerializer {
     }
 
     /**
+     * The live-status extras for a RUNNING assistant row: the runner's current
+     * stage label and the server-computed elapsed seconds, so every client
+     * shows the same truthful "what's happening" line without clock math
+     * against DB timestamp strings (specs/ai_chat_turn_activity.md). Empty
+     * array for any non-running row — callers can merge unconditionally.
+     */
+    public static function runningExtras(AiConversationMessage $msg): array {
+        if ((string)$msg->get('aim_status') !== AiConversationMessage::STATUS_RUNNING) {
+            return [];
+        }
+        $out = [];
+        $activity = (string)$msg->get('aim_activity');
+        if ($activity !== '') $out['activity'] = $activity;
+        $started = strtotime((string)$msg->get('aim_create_time') . ' UTC');
+        if ($started !== false) {
+            $out['running_seconds'] = max(0, time() - $started);
+        }
+        return $out;
+    }
+
+    /**
      * One turn as structured data. `content` is raw markdown (assistant) or the
      * user's text — the client renders it. A non-null `pending_action` carries
      * the confirm-card description; `tool_calls` is the compact per-turn trace;
-     * `usage` is this turn's token/cost line.
+     * `usage` is this turn's token/cost line. A running row additionally
+     * carries the live-status extras (see runningExtras()).
      */
     public static function message(AiConversationMessage $msg, string $model = ''): array {
         $in  = (int)$msg->get('aim_input_tokens');
@@ -92,7 +114,7 @@ class ChatSerializer {
                 'cost_label'    => ($in || $out)
                     ? ChatRender::formatCost(ChatRender::estimateCost($model, $in, $out)) : '',
             ],
-        ];
+        ] + self::runningExtras($msg);
     }
 
     /** Compact per-turn tool trace: name, error flag, duration. */

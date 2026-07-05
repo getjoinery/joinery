@@ -189,20 +189,34 @@ partitions the reverse/drain and the cloud-row count.
 ### Private files
 
 Any file that carries a restriction — `fil_min_permission`, `fil_grp_group_id`,
-`fil_evt_event_id`, or `fil_tier_min_level` — is private (the inverse of
-`File::is_public()`). Two `File` profiles share the `fil_files` table:
-`FileStorageProfile` (`visibility = public`) drains world-readable files to the
-public bucket; `FilePrivateStorageProfile` (`visibility = private`) drains
-restricted files to the verified-private bucket. So a group doc, event handout,
-tier-gated download, or email attachment offloads to the bucket like any public
-upload instead of pinning to local disk — draining a small VPS that would
-otherwise fill with private uploads.
+`fil_evt_event_id`, `fil_tier_min_level`, or `fil_private` — is private (the
+inverse of `File::is_public()`). Two `File` profiles share the `fil_files`
+table: `FileStorageProfile` (`visibility = public`) drains world-readable files
+to the public bucket; `FilePrivateStorageProfile` (`visibility = private`)
+drains restricted files to the verified-private bucket. So a group doc, event
+handout, tier-gated download, or email attachment offloads to the bucket like
+any public upload instead of pinning to local disk — draining a small VPS that
+would otherwise fill with private uploads.
 
 Serving stays gated: a private file's `get_url()` returns the local
 `/uploads/...` path (never a bucket URL), and `serve.php` runs
 `File::is_viewable()` before streaming the bytes from the private bucket through
-PHP. No new column — the store a `cloud` row belongs to is derived from
-`is_public()`.
+PHP. No new column drives placement — the store a `cloud` row belongs to is
+derived from `is_public()`.
+
+`fil_private` is a distinct restriction mode from the other four: it isn't a
+threshold or membership check, it's an **owner-or-admin** rule — only the
+file's owner (`fil_usr_user_id`) or an admin (permission ≥ 5) can view it.
+`File::is_viewable()` and `SystemBase::authenticate_read()`/
+`authenticate_write()` (the record-access gate) share one `is_owner_or_admin()`
+helper, so the rule for opening a record and the rule for streaming its file
+bytes can never drift apart. This is the only restriction mode that can express
+"visible to a specific permission-0 user and nobody else" — a plain
+`fil_min_permission` threshold can't, since any value that admits the owner
+also admits every other user at that level. The trade-off: it's coarse for
+admins (any admin can view any owner-or-admin private file) and it can't
+express sharing among several non-admin users — a consumer needing that would
+require a heavier per-set membership mechanism this platform doesn't build.
 
 Because both profiles live on `fil_files`, each declares a
 `reverseEligibilityWhere()` ownership gate (`public` = `is_public()`; `private` =

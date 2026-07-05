@@ -17,6 +17,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRender.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatAsync.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSerializer.php'));
 
 function chat_poll_fail(string $msg): void {
     echo json_encode(['success' => false, 'message' => $msg]);
@@ -67,8 +68,11 @@ if ($status === AiConversationMessage::STATUS_COMPLETE) {
 } else {
     // Still running — hand back the answer text written so far so the page can
     // show it as it streams. Plain text (not markdown): partial markdown renders
-    // badly; the final swap to assistant_html does the markdown pass.
+    // badly; the final swap to assistant_html does the markdown pass. The
+    // runner's stage label + elapsed seconds ride along so the page can show
+    // what's happening before the first token.
     $response['partial_text'] = (string)$msg->get('aim_content');
+    $response += ChatSerializer::runningExtras($msg);
 }
 
 echo json_encode($response);

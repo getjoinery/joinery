@@ -63,6 +63,15 @@ class AgentLoop {
         return in_array($v, ['off', 'low', 'medium', 'high'], true) ? $v : 'off';
     }
 
+    /** Short display label for a model id, sized for a one-line status
+     *  ("accounts/fireworks/models/glm-5p2" → "glm-5p2"). */
+    public static function modelShortLabel(string $model): string {
+        $label = trim($model);
+        $slash = strrpos($label, '/');
+        if ($slash !== false) $label = substr($label, $slash + 1);
+        return $label !== '' ? $label : 'the model';
+    }
+
     public static function run(
         LlmProviderInterface $provider,
         string $model,
@@ -135,6 +144,8 @@ class AgentLoop {
             // One provider call path: always stream. The context's emitText is
             // the sink — chat forwards it to the live partial-row writer; recipes
             // no-op it, so this is transparent to the autonomous surface.
+            $context->noteActivity('Waiting for ' . self::modelShortLabel($model) . '…'
+                . ($iter > 0 ? ' (step ' . ($iter + 1) . ')' : ''));
             $response = $provider->createMessageStreamed($params, [$context, 'emitText']);
 
             $usage = $response['usage'] ?? [];

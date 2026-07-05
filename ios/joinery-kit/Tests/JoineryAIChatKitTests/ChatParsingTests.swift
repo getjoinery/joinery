@@ -117,6 +117,50 @@ final class ChatParsingTests: XCTestCase {
         XCTAssertEqual(message.attachments[1].name, "chart.png")
     }
 
+    // MARK: Turn activity (specs/ai_chat_turn_activity.md)
+
+    func testPollResultParsesActivityExtras() throws {
+        let data = JSONValue.object([
+            (key: "status", value: .string("running")),
+            (key: "partial_text", value: .string("")),
+            (key: "activity", value: .string("Waiting for glm-5p2…")),
+            (key: "running_seconds", value: .number(160)),
+        ])
+        let result = try XCTUnwrap(ChatPollResult(data: data))
+        XCTAssertEqual(result.activity, "Waiting for glm-5p2…")
+        XCTAssertEqual(result.runningSeconds, 160)
+    }
+
+    func testPollResultToleratesMissingActivity() throws {
+        // Older servers omit the fields — the running tick still parses.
+        let data = JSONValue.object([
+            (key: "status", value: .string("running")),
+            (key: "partial_text", value: .string("Hi")),
+        ])
+        let result = try XCTUnwrap(ChatPollResult(data: data))
+        XCTAssertEqual(result.activity, "")
+        XCTAssertNil(result.runningSeconds)
+    }
+
+    func testRunningMessageParsesActivityExtras() throws {
+        let data = JSONValue.object([
+            (key: "id", value: .number(7)),
+            (key: "role", value: .string("assistant")),
+            (key: "status", value: .string("running")),
+            (key: "activity", value: .string("Running tool: web_search…")),
+            (key: "running_seconds", value: .number(12)),
+        ])
+        let message = try XCTUnwrap(ChatMessage(data: data))
+        XCTAssertEqual(message.activity, "Running tool: web_search…")
+        XCTAssertEqual(message.runningSeconds, 12)
+    }
+
+    func testElapsedFormatting() {
+        XCTAssertEqual(MessageRow.formatElapsed(5), "5s")
+        XCTAssertEqual(MessageRow.formatElapsed(160), "2m 40s")
+        XCTAssertEqual(MessageRow.formatElapsed(-3), "0s")
+    }
+
     func testSendResultParsesAttachmentWarning() {
         let data = JSONValue.object([
             (key: "message_id", value: .number(90)),

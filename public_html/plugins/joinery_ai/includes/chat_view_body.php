@@ -329,7 +329,7 @@ if (!function_exists('joai_pin_svg')) {
                     if (!data.success) { onFailed(data.message || 'Could not load the reply.'); return; }
                     if (data.status === 'complete') { onComplete(data.assistant_html, data.conversation_usage); return; }
                     if (data.status === 'failed') { onFailed(data.error || 'The assistant could not complete this turn.'); return; }
-                    if (typeof data.partial_text === 'string') onPartial(data.partial_text);
+                    if (typeof data.partial_text === 'string') onPartial(data.partial_text, data);
                     if (Date.now() - startedAt > POLL_GIVE_UP_MS) {
                         onFailed('This is taking longer than expected. It may still finish — reload to check.');
                         return;
@@ -355,16 +355,37 @@ if (!function_exists('joai_pin_svg')) {
             transcript.appendChild(el);
         }
         el.className = 'joai-chat-msg joai-chat-assistant joai-chat-streaming';
-        el.innerHTML = '<div class="joai-chat-body"></div>';
+        el.innerHTML = '<div class="joai-chat-body"></div><div class="joai-chat-activity" hidden></div>';
         scrollToBottom();
         return el;
     }
 
+    // "2m 40s" from a seconds count, for the live activity line.
+    function formatElapsed(seconds) {
+        seconds = Math.max(0, Math.floor(seconds));
+        if (seconds < 60) return seconds + 's';
+        return Math.floor(seconds / 60) + 'm ' + (seconds % 60) + 's';
+    }
+
     // Show a live bubble for messageId and stream into it until the turn lands.
+    // While it runs, the runner's stage label + elapsed time render under the
+    // streaming text ("Waiting for glm-5p2… · 2m 40s") so the quiet stretch
+    // before the first token is legible instead of an anonymous indicator.
     function streamInto(messageId) {
-        var body = ensureLiveBubble(messageId).querySelector('.joai-chat-body');
+        var bubble = ensureLiveBubble(messageId);
+        var body = bubble.querySelector('.joai-chat-body');
+        var activityEl = bubble.querySelector('.joai-chat-activity');
         pollMessage(messageId,
-            function (text) { body.textContent = text; scrollToBottom(); },
+            function (text, data) {
+                body.textContent = text;
+                var line = (data && data.activity) ? data.activity : '';
+                if (line && typeof data.running_seconds === 'number') {
+                    line += ' · ' + formatElapsed(data.running_seconds);
+                }
+                activityEl.textContent = line;
+                activityEl.hidden = !line;
+                scrollToBottom();
+            },
             function (html, usage) { replaceBubble(messageId, html); updateUsage(usage); },
             function (err) { setBusy(false); alert(err || 'The turn could not be completed.'); });
     }

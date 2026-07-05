@@ -49,6 +49,7 @@ class StubReadContext implements ToolContext {
     public function finishToolCall(array $entry): void {}
     public function appendToolCall(array $entry): void {}
     public function emitText(string $delta): void {}
+    public function noteActivity(string $label): void {}
 }
 
 /** Find the registered model class whose table matches a prefix table name. */

@@ -366,6 +366,16 @@ struct MessageRow: View {
                 ConfirmCard(description: pending.description, onDecision: onDecision)
             }
 
+            // The runner's live stage line while the turn works ("Waiting for
+            // glm-5p2… · 2m 40s") — the quiet stretch before the first token
+            // is legible instead of an anonymous indicator.
+            if message.status == .running, !message.activity.isEmpty {
+                Text(activityLine)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .accessibilityIdentifier("chat_activity")
+            }
+
             HStack(spacing: 8) {
                 if message.status == .running && !message.content.isEmpty {
                     ProgressView().scaleEffect(0.7)
@@ -410,6 +420,19 @@ struct MessageRow: View {
         Button(role: .destructive, action: onDelete) {
             Label("Delete", systemImage: "trash")
         }
+    }
+
+    /// "Waiting for glm-5p2… · 2m 40s" — the label plus the server-computed
+    /// elapsed time (refreshed on every poll tick).
+    private var activityLine: String {
+        guard let seconds = message.runningSeconds else { return message.activity }
+        return "\(message.activity) · \(Self.formatElapsed(seconds))"
+    }
+
+    static func formatElapsed(_ seconds: Int) -> String {
+        let s = max(0, seconds)
+        if s < 60 { return "\(s)s" }
+        return "\(s / 60)m \(s % 60)s"
     }
 }
 

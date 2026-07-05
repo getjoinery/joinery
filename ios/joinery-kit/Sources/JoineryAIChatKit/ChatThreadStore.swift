@@ -224,6 +224,8 @@ public final class ChatThreadStore: ObservableObject {
                     switch result.status {
                     case .running:
                         if let partial = result.partialText { self.updatePartial(messageID, text: partial) }
+                        self.updateActivity(messageID, activity: result.activity,
+                                            runningSeconds: result.runningSeconds)
                     case .complete:
                         if let message = result.message { self.upsert(message) }
                         if let usage = result.usageLabel { self.usageLabel = usage }
@@ -257,6 +259,14 @@ public final class ChatThreadStore: ObservableObject {
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
         messages[index].content = text
         messages[index].status = .running
+    }
+
+    /// Fold a poll tick's live stage label + elapsed time onto the running row
+    /// (specs/ai_chat_turn_activity.md).
+    private func updateActivity(_ id: Int, activity: String, runningSeconds: Int?) {
+        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+        messages[index].activity = activity
+        messages[index].runningSeconds = runningSeconds
     }
 
     private func setRunning(_ id: Int) {
