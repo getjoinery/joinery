@@ -7,6 +7,9 @@ import androidx.compose.ui.graphics.Color
 import com.getjoinery.android.EncryptedCredentialStore
 import com.getjoinery.android.JoineryAppRoot
 import com.getjoinery.android.JoineryConfig
+import com.getjoinery.aichat.JoineryAIChat
+import com.getjoinery.calendar.JoineryCalendar
+import com.getjoinery.mail.JoineryMail
 
 /**
  * The Joinery member app: pure brand shell. All behavior lives in
@@ -22,6 +25,12 @@ class MainActivity : ComponentActivity() {
         if (intent?.getBooleanExtra(EXTRA_RESET_AUTH, false) == true) {
             EncryptedCredentialStore(this, STORE_FILE).deleteCredentials()
         }
+
+        // Layered native screens this build ships. The server's navigation
+        // entries flip to them by name; unknown names fall back to the web.
+        JoineryMail.registerScreens()
+        JoineryCalendar.registerScreens()
+        JoineryAIChat.registerScreens()
 
         setContent {
             JoineryAppRoot(config = buildConfig(), storeFileName = STORE_FILE)

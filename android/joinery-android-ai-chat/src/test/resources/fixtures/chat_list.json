@@ -1,0 +1,11 @@
+{
+  "api_version": "1.0",
+  "success_message": "Action 'joinery_ai/chat_list' completed successfully.",
+  "data": {
+    "conversations": [
+      { "id": 29, "title": "Dovetail guide", "pinned": true },
+      { "id": 25, "title": "List 6 woodworking joints with a description each.", "pinned": false },
+      { "id": 23, "title": "Explain in 6 sentences how a hand plane works.", "pinned": false }
+    ]
+  }
+}

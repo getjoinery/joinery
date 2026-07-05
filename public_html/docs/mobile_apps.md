@@ -351,7 +351,9 @@ conversation opened natively and one opened on the web are the same thread:
   and per-turn / conversation token-cost labels. A running turn streams via
   the same send-then-poll transport the web reader uses: `chat_send` returns a
   poll handle, the store polls `chat_poll` (~600ms) folding partial text into
-  the row until it settles. A turn that proposes a mutating action shows an
+  the row until it settles; the poll's `activity` + `running_seconds` render
+  as a live status line on the running turn ("Waiting for glm-5p2… · 2m 40s").
+  A turn that proposes a mutating action shows an
   inline Confirm / Cancel card resolved through `chat_confirm`. Turn delete
   and a lightweight block-markdown renderer (headings, bullets, rules, inline
   emphasis) round it out.
@@ -382,7 +384,7 @@ Accessibility ids (`chat_*`) are the stable UI-test API: `chat_loading`,
 `chat_error`, `chat_retry`, `chat_list`, `chat_empty`, `chat_new`,
 `chat_thread_loading`, `chat_thread_empty`, `chat_transcript`,
 `chat_user_message`, `chat_assistant_message`, `chat_typing`,
-`chat_confirm_card`, `chat_confirm_yes`, `chat_confirm_no`, `chat_composer`,
+`chat_activity`, `chat_confirm_card`, `chat_confirm_yes`, `chat_confirm_no`, `chat_composer`,
 `chat_send`, `chat_attach`, `chat_attachment_strip`, `chat_attachment_remove`,
 `chat_attachment_notice`, `chat_attachment_image`, `chat_attachment_chip`,
 `chat_settings`, `chat_set_model`, `chat_set_data_access`,
@@ -470,6 +472,184 @@ prefixed ids for screens (`login_*`, `settings_*`, `form_*`, `reset_*`,
 `upgrade_*`, `root_*`, `nav_*`, `web_*`, and `more_{slug}` for More-list rows) —
 the stable addressing for the Compose UI-test suite.
 
+## joinery-android-mail (native mail module)
+
+**joinery-android-mail** is the Android native mail surface — a second library
+module in the Android workspace (`android/joinery-android-mail`, depends on
+`:joinery-android`), the platform counterpart to JoineryMailKit. An app adds
+the module and calls `JoineryMail.registerScreens()` before mounting the root;
+the server's `mailbox` navigation destination then renders these screens, and
+builds without the module keep the web reader via the fallback URL.
+
+The screens consume the same `inbound_email` API actions as JoineryMailKit
+(`plugins/inbound_email/docs/overview.md` § API Surface) and mirror its UX;
+the platforms share fixtures (the same captured envelopes back both test
+suites) but no client code:
+
+- **Mailbox screen** (`MailboxScreen` + `MailboxStore`) — Gmail-style thread
+  list: colored-initial avatars, bold unread rows, star toggles, snippet
+  lines; a top-bar filter menu with views (Inbox / Starred / All Mail /
+  Spam), a mailbox switcher (when more than one grant), and the mailbox's
+  folder/label rail (`Mailbox.folders` — selecting one scopes the list via
+  `thread_list`'s `folder_id`); a search field (submit-to-search,
+  clear-to-reset); swipe actions (`SwipeToDismissBox`: read/unread toggle
+  and archive); pull-to-refresh, refresh-on-foreground, and page-on-scroll
+  (50/page). A top-bar compose button (disabled unless `can_compose`) opens
+  `ComposeSheet` in new-message mode.
+- **Thread view** (`ThreadDetailScreen` + `MessageCard`) — subject header,
+  message cards with older messages collapsed; opening marks the thread read
+  (the reader's explicit `mark_read`); HTML bodies render in a sandboxed
+  `WebView` (JavaScript off, link taps open externally, height
+  self-measured); plain bodies render as native selectable text; inline
+  images arrive as signed URLs already rewritten server-side; attachment
+  chips download via their signed URL into the system viewer/share sheet
+  (module-declared `FileProvider`, cache-scoped). Top bar: archive, the
+  Move/Labels control, mark unread, spam/not-spam, delete.
+- **Move/Labels picker** (`FolderSheet`, on the open thread) — the web
+  reader's folder control as a bottom sheet, keyed off the thread's own
+  mailbox (resolved from the messages' `alias_id`, so it works in the
+  all-mailboxes list). An exclusive feed gets single-pick "Move to" radio
+  rows (choosing one relocates the thread and closes it); a non-exclusive
+  feed (Gmail) gets "Labels" checkboxes (toggling calls `set_membership`
+  per change). Both end with a create row (`create_folder`, which also
+  files the thread into the new folder). Current membership comes from the
+  `thread` action's `folders` ids.
+- **Compose** (`ComposeSheet`) — reply / reply-all / forward / new message
+  with To/Cc/Subject and body, as a full-screen dialog. Same lean contract
+  as iOS: the server quotes, normalizes the subject, applies threading
+  headers, and resolves the sending identity (source message, or the From
+  dropdown's `alias_id` for a new message). The attach menu offers Photos
+  (`image/*`) and Files (`*/*` — any type, no allowlist, nothing
+  transcoded; the server re-detects types from bytes); picked files show as
+  removable rows. An attachments send goes out as `multipart/form-data` to
+  `inbound_email/send` (`ApiClient.submitMultipart`, field
+  `attachments[]`), otherwise the plain JSON action. Client-side preflight
+  mirrors the server's caps (10 files, 10 MB per file, 25 MB total) but the
+  server is the authority; a rejected send keeps the draft and attachments
+  in the sheet.
+
+Compose `testTag` values (`mail_*`) are the stable UI-test addressing:
+`mail_loading`, `mail_error`, `mail_retry`, `mail_list`, `mail_row`,
+`mail_row_star`, `mail_empty`, `mail_search`, `mail_view_menu`,
+`mail_new_message`, `mail_thread_back`, `mail_thread_subject`,
+`mail_thread_loading`, `mail_thread_menu`, `mail_archive`, `mail_folders`,
+`mail_folder_sheet`, `mail_folder_new`, `mail_folder_create`, `mail_reply`,
+`mail_reply_all`, `mail_forward`, `mail_message_{id}`,
+`mail_attachment_{id}`, and `mail_compose_*` (`from`, `to`, `cc`, `subject`,
+`body`, `attach`, `attachment_remove`, `send`, `cancel`, `error`).
+
+Not in the module (the web reader remains for them): filter management and
+Gmail filter import, spam settings, admin oversight surfaces.
+
+## joinery-android-calendar (native calendar module)
+
+**joinery-android-calendar** is the Android native personal-calendar surface
+(`android/joinery-android-calendar`, depends on `:joinery-android`), the
+platform counterpart to JoineryCalendarKit. An app adds the module and calls
+`JoineryCalendar.registerScreens()` before mounting the root; the server's
+`calendar` navigation destination then renders these screens.
+
+The screens consume the core calendar actions (`docs/calendar.md` § API
+surface) and mirror the iOS module's UX; the fixtures are shared across the
+platforms' test suites but no client code is:
+
+- **Calendar screen** (`CalendarScreen` + `CalendarStore`) — a month grid
+  (leading-blank cells honoring the device's first weekday, colored event
+  dots per day, today ring, selected-day fill) over a selected-day agenda;
+  chevrons and horizontal swipe change months, "Today" returns; each month
+  fetches its window padded a week per side. Items group onto local days in
+  the device timezone (`CalDisplay.dayKeys`), all-day items first. The
+  agenda pull-refreshes.
+- **Agenda rows** — native entries open the entry editor; projected items
+  (events, bookings) show their type chip and push their web page in the
+  authenticated webview (`WebScreen`) — the calendar never edits what it
+  doesn't own.
+- **Entry editor** (`EntryEditorSheet`) — title, date, all-day or timed
+  (platform date/time pickers), availability blocking, and the full
+  recurrence surface: frequency, interval stepper, weekly day chips
+  (turning Repeats on pre-selects the entry date's weekday), monthly
+  by-weekday (week-of-month + weekday), and series end (never / on date /
+  after N). Editing fetches `calendar_entry` and populates all of it; saves
+  go to `calendar_entry_save` with the entry's stored IANA timezone (device
+  zone for new entries). Recurring edits and deletes ask for scope
+  (this / future / all) exactly like the web form — a "this occurrence
+  only" save omits the recurrence payload so the settings stay on the
+  series.
+
+Compose `testTag` values (`cal_*`) are the stable UI-test addressing:
+`cal_loading`, `cal_error`, `cal_retry`, `cal_grid`, `cal_month_title`,
+`cal_prev_month`, `cal_next_month`, `cal_today`, `cal_add`, `cal_agenda`,
+`cal_agenda_row`, `cal_agenda_empty`, `cal_selected_day`, and
+`cal_entry_*` (`title`, `date`, `allday`, `start`, `end`, `blocks`,
+`repeats`, `monthly_weekday`, `ends_date`, `save`, `cancel`, `delete`,
+`error`).
+
+## joinery-android-ai-chat (native AI chat module)
+
+**joinery-android-ai-chat** is the Android native AI-assistant surface
+(`android/joinery-android-ai-chat`, depends on `:joinery-android`), the
+platform counterpart to JoineryAIChatKit. An app adds the module and calls
+`JoineryAIChat.registerScreens()` before mounting the root; the server's
+`ai_chat` navigation destination then renders these screens.
+
+The screens consume the `joinery_ai/chat_*` actions
+(`plugins/joinery_ai/docs/overview.md` § Chat API surface) and mirror the iOS
+module's UX; the fixtures are shared across the platforms' test suites but no
+client code is:
+
+- **Conversation list** (`ChatScreen` + `ChatListStore`) — the caller's
+  conversations pinned-first then newest, with server-side search,
+  pull-to-refresh, a long-press menu for pin / rename / delete, and a
+  compose button that opens a new chat.
+- **Thread + composer** (`ChatThreadView` + `ChatThreadStore`) — the turns
+  in a scroll (user bubbles right, assistant markdown left), a bottom
+  composer, and per-turn / conversation token-cost labels. A running turn
+  streams via the same send-then-poll transport the web reader uses:
+  `chat_send` returns a poll handle, the store polls `chat_poll` (~600ms)
+  folding partial text into the row until it settles; the poll's `activity`
+  + `running_seconds` render as a live status line on the running turn
+  ("Waiting for glm-5p2… · 2m 40s"). A turn that proposes
+  a mutating action shows an inline Confirm / Cancel card resolved through
+  `chat_confirm`. Long-press deletes a turn; a lightweight block-markdown
+  renderer (headings, bullets, rules, inline bold/italic/code) rounds it
+  out.
+- **Settings sheet** (`ChatSettingsSheet`, gear top-bar button) — the
+  per-chat controls: a model picker (catalog from `chat_controls`, with a
+  not-private warning), Data access / Web search toggles, a thinking-level
+  picker, and the sampling fields (temperature, top-p, max tokens) plus
+  custom instructions. Picker and toggle edits persist immediately via
+  `chat_set_capabilities`; a new chat carries its control values as seed
+  fields on the first `chat_send`. A new chat defaults Data access on so
+  the assistant is useful out of the box; the rest take the server's
+  new-chat defaults.
+- **Attachments** (composer attach menu + turn rendering) — Photos
+  (`image/*`) and Files (the server's non-image allowed set: PDF, text,
+  CSV, JSON, Markdown, and images). Picked files show as removable chips
+  and send as `multipart/form-data` to `chat_send`
+  (`ApiClient.submitMultipart`, field `attachments[]`); an attachments-only
+  turn needs no message text. Images whose byte type isn't in the server's
+  allowed set (notably HEIC) transcode to JPEG client-side. The server owns
+  all validation and is the sole authority: a rejection surfaces its
+  message, and a file dropped at commit for type drift comes back as
+  `attachment_warning`, shown above the composer. Sent and historical
+  attachments render on the user bubble — images as a thumbnail from the
+  signed `image_url` the serializer mints (5-minute TTL, so a cookieless
+  native client loads it), everything else as a labeled file chip.
+
+Compose `testTag` values (`chat_*`) are the stable UI-test addressing:
+`chat_loading`, `chat_error`, `chat_retry`, `chat_list`, `chat_row`,
+`chat_empty`, `chat_search`, `chat_new`, `chat_back`, `chat_thread_loading`,
+`chat_thread_error`, `chat_thread_empty`, `chat_transcript`,
+`chat_user_message`, `chat_assistant_message`, `chat_typing`,
+`chat_activity`, `chat_confirm_card`, `chat_confirm_yes`, `chat_confirm_no`, `chat_composer`,
+`chat_send`, `chat_attach`, `chat_attachment_strip`,
+`chat_attachment_remove`, `chat_attachment_notice`, `chat_attachment_image`,
+`chat_attachment_chip`, `chat_settings`, `chat_settings_loading`,
+`chat_set_model`, `chat_set_data_access`, `chat_set_web_search`,
+`chat_set_thinking`, `chat_set_instructions`, `chat_settings_done`.
+
+Not in the module (the web chat remains for it): thread export.
+
 ## Standing up a new branded app
 
 1. Pick a `client_app` identifier (e.g. `joinery-member-ios`); the app sends
@@ -484,9 +664,11 @@ the stable addressing for the Compose UI-test suite.
    `JoineryAppRoot(config:keychainService:)` — see
    `ios/joinery-member-ios` for the reference shape.
 5. **Android:** add an application module under `android/<app-name>` depending
-   on `:joinery-android`, with a `MainActivity` that builds a `JoineryConfig`
-   and calls `JoineryAppRoot(config, storeFileName)` in `setContent` — see
-   `android/joinery-member-android` for the reference shape.
+   on `:joinery-android` (plus any content modules, e.g. `:joinery-android-mail`),
+   with a `MainActivity` that calls each content module's `registerScreens()`,
+   builds a `JoineryConfig`, and calls `JoineryAppRoot(config, storeFileName)`
+   in `setContent` — see `android/joinery-member-android` for the reference
+   shape.
 
 ## Tests
 

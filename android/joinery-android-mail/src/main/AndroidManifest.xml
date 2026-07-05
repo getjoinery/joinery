@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Hands downloaded attachments to the system viewer/share sheet.
+             Authority is per-app via the applicationId placeholder, so two
+             brand apps on one device can't collide. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.joinerymail.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/joinery_mail_paths" />
+        </provider>
+    </application>
+</manifest>
