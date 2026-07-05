@@ -52,8 +52,11 @@ function chat_poll_logic(array $input): LogicResult {
     } elseif ($status === AiConversationMessage::STATUS_FAILED) {
         $out['error'] = (string)$msg->get('aim_error') ?: 'The assistant could not complete this turn.';
     } else {
-        // Still running — the answer text written so far, for a live view.
+        // Still running — the answer text written so far, for a live view,
+        // plus the runner's stage label and elapsed seconds so the client can
+        // show what's happening before the first token.
         $out['partial_text'] = (string)$msg->get('aim_content');
+        $out += ChatSerializer::runningExtras($msg);
     }
 
     return LogicResult::render($out);

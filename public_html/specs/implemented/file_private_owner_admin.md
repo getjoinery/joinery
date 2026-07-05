@@ -1,6 +1,6 @@
 # Owner-or-admin private files — align the serving gate with the ownership model
 
-**Status:** Implemented — code landed, `fil_private` column synced (kept in `specs/` while its consumer specs, which reference this path, are still in flight)
+**Status:** Implemented — code landed, `fil_private` column synced, `docs/cloud_storage.md` updated
 **Layer:** core `File` model (`data/files_class.php`)
 **Depends on:** `specs/implemented/file_private_storage.md` — these files are private files
 (private store + gated serving). That machinery exists; this spec adds the *who-can-view*

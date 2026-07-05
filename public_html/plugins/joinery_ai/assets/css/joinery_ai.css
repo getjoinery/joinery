@@ -135,6 +135,9 @@ select.joai-chat-control { cursor: pointer; }
    so headings and lists have room. A hairline rule separates turns instead. */
 .joai-chat-assistant { align-self: stretch; max-width: 100%; color: #222;
                        padding: 0.25rem 0.25rem 0.75rem; border-bottom: 1px solid #f0f0f0; }
+/* Live turn-activity line under a streaming bubble ("Waiting for glm-5p2...
+   - 2m 40s") - what the runner is doing before/while text arrives. */
+.joai-chat-activity { margin-top: 0.3rem; font-size: 0.8rem; color: #888; }
 /* Markdown typography inside a bubble/body. */
 .joai-chat-body { word-wrap: break-word; overflow-wrap: anywhere; }
 .joai-chat-body > :first-child { margin-top: 0; }

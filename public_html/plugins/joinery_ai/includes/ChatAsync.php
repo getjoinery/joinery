@@ -67,16 +67,40 @@ class ChatAsync {
         $buffer  = $seed;
         $pending = 0;
         $last    = microtime(true);
-        return function (string $delta) use ($msg, &$buffer, &$pending, &$last): void {
+        $stamped_writing = false;
+        return function (string $delta) use ($msg, &$buffer, &$pending, &$last, &$stamped_writing): void {
             $buffer  .= $delta;
             $pending += strlen($delta);
             $now = microtime(true);
             if ($pending >= self::STREAM_FLUSH_CHARS || ($now - $last) >= self::STREAM_FLUSH_SECONDS) {
                 $msg->set('aim_content', $buffer);
+                if (!$stamped_writing) {
+                    // Answer text has started arriving — the stage flips to
+                    // Writing on the same save, costing no extra write.
+                    $msg->set('aim_activity', 'Writing…');
+                    $stamped_writing = true;
+                }
                 $msg->save();
                 $pending = 0;
                 $last = $now;
             }
+        };
+    }
+
+    /**
+     * A stage-label sink for the running row: writes the label onto
+     * aim_activity so the poll endpoints can show a live "what's happening"
+     * line (specs/ai_chat_turn_activity.md). Stage transitions are a handful
+     * of tiny writes per turn — no throttling needed. Skips the write when
+     * the label hasn't changed (e.g. repeated identical stamps).
+     */
+    public static function activityStamper(AiConversationMessage $msg): callable {
+        $current = null;
+        return function (string $label) use ($msg, &$current): void {
+            if ($label === $current) return;
+            $current = $label;
+            $msg->set('aim_activity', $label !== '' ? $label : null);
+            $msg->save();
         };
     }
 
@@ -119,6 +143,7 @@ class ChatAsync {
 
         $msg->set('aim_status', AiConversationMessage::STATUS_FAILED);
         $msg->set('aim_error', 'The turn did not finish (the worker process appears to have stopped).');
+        $msg->set('aim_activity', null);
         $msg->save();
         return true;
     }

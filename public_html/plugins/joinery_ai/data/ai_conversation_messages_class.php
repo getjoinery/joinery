@@ -48,6 +48,11 @@ class AiConversationMessage extends SystemBase {
         'aim_input_tokens'        => array('type'=>'int4', 'default'=>0),
         'aim_output_tokens'       => array('type'=>'int4', 'default'=>0),
         'aim_status'              => array('type'=>'varchar(20)', 'default'=>'complete'),
+        // Live one-line stage label while the row is RUNNING ("Waiting for
+        // {model}…", "Running tool: web_search…"); NULL once the turn
+        // finalizes. The turn runner is the only writer. See
+        // specs/ai_chat_turn_activity.md.
+        'aim_activity'            => array('type'=>'varchar(160)'),
         'aim_error'               => array('type'=>'text'),
         'aim_create_time'         => array('type'=>'timestamp(6)', 'default'=>'now()'),
         'aim_delete_time'         => array('type'=>'timestamp(6)'),

@@ -33,9 +33,10 @@ class ChatRunner {
     // ['result' => <AgentLoop result>, 'context' => ChatTurnContext]
 
     public static function runTurn(AiConversation $conversation, int $acting_user_id,
-            ?callable $onTextDelta = null): array {
+            ?callable $onTextDelta = null, ?callable $onActivity = null): array {
         $ctx = new ChatTurnContext($conversation, $acting_user_id);
         if ($onTextDelta !== null) $ctx->setStreamSink($onTextDelta);
+        if ($onActivity !== null) $ctx->setActivityStamper($onActivity);
         $messages = self::buildHistoryMessages($conversation, null, $ctx);
         return self::drive($conversation, $ctx, $messages);
     }
@@ -48,9 +49,11 @@ class ChatRunner {
      * $decision is 'confirm' or 'cancel'.
      */
     public static function resumeTurn(AiConversation $conversation, int $acting_user_id,
-            array $pending, string $lead_text, string $decision, ?callable $onTextDelta = null): array {
+            array $pending, string $lead_text, string $decision, ?callable $onTextDelta = null,
+            ?callable $onActivity = null): array {
         $ctx = new ChatTurnContext($conversation, $acting_user_id);
         if ($onTextDelta !== null) $ctx->setStreamSink($onTextDelta);
+        if ($onActivity !== null) $ctx->setActivityStamper($onActivity);
 
         // History without the trailing pending-bearing assistant row — its
         // text is folded into the synthesized tool-use turn below.

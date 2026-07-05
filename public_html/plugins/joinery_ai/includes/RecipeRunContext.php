@@ -181,6 +181,10 @@ class RecipeRunContext implements ToolContext {
      *  has nowhere to go, so this is a no-op. */
     public function emitText(string $delta): void {}
 
+    /** No live polling UI on a recipe run — stage labels have nowhere to go.
+     *  (The tool-call audit already records what ran, for the report.) */
+    public function noteActivity(string $label): void {}
+
     /** Decode the run's rcr_tool_calls column to an array (handles the
      *  JSON-string or already-array cases). */
     private function currentToolCalls(): array {

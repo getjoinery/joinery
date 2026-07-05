@@ -21,8 +21,11 @@ class ChatTurn {
      */
     public static function runAndFinalize(AiConversation $conversation, int $uid,
             AiConversationMessage $assistant_msg): void {
+        $stamper = ChatAsync::activityStamper($assistant_msg);
+        $stamper('Starting…');
         try {
-            $turn = ChatRunner::runTurn($conversation, $uid, ChatAsync::streamSink($assistant_msg));
+            $turn = ChatRunner::runTurn($conversation, $uid,
+                ChatAsync::streamSink($assistant_msg), $stamper);
         } catch (LlmProviderException $e) {
             error_log('[joinery_ai chat] provider error: ' . $e->getMessage());
             self::markFailed($assistant_msg,
@@ -45,6 +48,7 @@ class ChatTurn {
         $assistant_msg->set('aim_input_tokens', (int)$result['input_tokens']);
         $assistant_msg->set('aim_output_tokens', (int)$result['output_tokens']);
         $assistant_msg->set('aim_status', AiConversationMessage::STATUS_COMPLETE);
+        $assistant_msg->set('aim_activity', null);
         $assistant_msg->save();
 
         self::rollupUsage($conversation, (int)$result['input_tokens'], (int)$result['output_tokens']);
@@ -57,10 +61,13 @@ class ChatTurn {
      */
     public static function resumeAndFinalize(AiConversation $conversation, int $uid,
             AiConversationMessage $msg, array $pending, string $lead_text, string $decision): void {
+        $stamper = ChatAsync::activityStamper($msg);
+        $stamper('Resuming…');
         try {
             $seed = $lead_text !== '' ? $lead_text . "\n\n" : '';
             $sink = ChatAsync::streamSink($msg, $seed);
-            $turn = ChatRunner::resumeTurn($conversation, $uid, $pending, $lead_text, $decision, $sink);
+            $turn = ChatRunner::resumeTurn($conversation, $uid, $pending, $lead_text, $decision,
+                $sink, $stamper);
         } catch (LlmProviderException $e) {
             error_log('[joinery_ai chat] resume provider error: ' . $e->getMessage());
             self::markFailed($msg,
@@ -88,6 +95,7 @@ class ChatTurn {
         $msg->set('aim_input_tokens', (int)$msg->get('aim_input_tokens') + (int)$result['input_tokens']);
         $msg->set('aim_output_tokens', (int)$msg->get('aim_output_tokens') + (int)$result['output_tokens']);
         $msg->set('aim_status', AiConversationMessage::STATUS_COMPLETE);
+        $msg->set('aim_activity', null);
         $msg->save();
 
         self::rollupUsage($conversation, (int)$result['input_tokens'], (int)$result['output_tokens']);
@@ -106,6 +114,7 @@ class ChatTurn {
     public static function markFailed(AiConversationMessage $msg, string $error): void {
         $msg->set('aim_status', AiConversationMessage::STATUS_FAILED);
         $msg->set('aim_error', $error);
+        $msg->set('aim_activity', null);
         $msg->save();
     }
 

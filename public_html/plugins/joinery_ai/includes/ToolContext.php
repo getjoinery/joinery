@@ -69,4 +69,9 @@ interface ToolContext {
      *  forwards it to a live sink (partial-row writer); recipes no-op it. */
     public function emitText(string $delta): void;
 
+    /** One-line stage label for whatever the loop is doing right now
+     *  ("Waiting for {model}…", "Running tool: {name}…"). Chat forwards it to
+     *  the running row so pollers can show a live status; recipes no-op it. */
+    public function noteActivity(string $label): void;
+
 }

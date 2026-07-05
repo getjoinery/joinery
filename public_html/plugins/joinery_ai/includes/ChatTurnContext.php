@@ -54,6 +54,9 @@ class ChatTurnContext implements ToolContext {
     /** @var callable|null  live sink for streamed answer text (set by the endpoint) */
     private $stream_sink = null;
 
+    /** @var callable|null  live sink for stage labels (set by the endpoint) */
+    private $activity_stamper = null;
+
     public function __construct(AiConversation $conversation, int $acting_user_id) {
         $this->conversation = $conversation;
         $this->acting_user_id = $acting_user_id;
@@ -145,6 +148,12 @@ class ChatTurnContext implements ToolContext {
 
     public function beginToolCall(array $entry): void {
         $this->tool_calls[] = $entry;
+        // A tool run is the longest quiet stretch of a turn — name it while
+        // it executes. The next provider call re-stamps the waiting label.
+        $name = trim((string)($entry['name'] ?? ''));
+        if ($name !== '') {
+            $this->noteActivity("Running tool: {$name}…");
+        }
     }
 
     public function finishToolCall(array $entry): void {
@@ -174,6 +183,20 @@ class ChatTurnContext implements ToolContext {
     public function emitText(string $delta): void {
         if ($this->stream_sink !== null) {
             ($this->stream_sink)($delta);
+        }
+    }
+
+    /** Install the live stage-label sink (a writer onto the assistant row's
+     *  aim_activity). Until set, noteActivity is a no-op — e.g. the
+     *  synchronous fallback path before the row exists. */
+    public function setActivityStamper(callable $stamper): void {
+        $this->activity_stamper = $stamper;
+    }
+
+    /** Forward a stage label to the live stamper, if any. */
+    public function noteActivity(string $label): void {
+        if ($this->activity_stamper !== null) {
+            ($this->activity_stamper)($label);
         }
     }
 

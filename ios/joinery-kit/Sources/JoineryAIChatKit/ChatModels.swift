@@ -237,6 +237,13 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
     public var toolCalls: [ChatToolCall]
     public var costLabel: String
     public var attachments: [ChatAttachment]
+    /// The runner's live stage label while the turn runs ("Waiting for
+    /// glm-5p2…", "Running tool: web_search…"); empty once settled or against
+    /// an older server.
+    public var activity: String
+    /// Server-computed elapsed seconds for a running turn, so a thread opened
+    /// mid-generation shows the true elapsed time.
+    public var runningSeconds: Int?
 
     init?(data: JSONValue?) {
         guard let data, let id = data["id"]?.intValue,
@@ -251,6 +258,8 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
         toolCalls = (data["tool_calls"]?.arrayValue ?? []).map(ChatToolCall.init(data:))
         costLabel = data["usage"]?["cost_label"]?.stringValue ?? ""
         attachments = (data["attachments"]?.arrayValue ?? []).compactMap(ChatAttachment.init(data:))
+        activity = data["activity"]?.stringValue ?? ""
+        runningSeconds = data["running_seconds"]?.intValue
     }
 
     private init(id: Int, role: ChatRole, content: String, status: ChatStatus, error: String) {
@@ -264,6 +273,8 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
         self.toolCalls = []
         self.costLabel = ""
         self.attachments = []
+        self.activity = ""
+        self.runningSeconds = nil
     }
 
     /// The assistant placeholder shown while a detached turn runs; the poll
@@ -324,13 +335,17 @@ public struct ChatSendResult: Sendable {
 }
 
 /// One poll tick: the current status, streamed partial text while running, or
-/// the finished turn / error once settled.
+/// the finished turn / error once settled. While running it also carries the
+/// runner's live stage label and elapsed seconds
+/// (specs/ai_chat_turn_activity.md); both absent against an older server.
 public struct ChatPollResult: Sendable {
     public let status: ChatStatus
     public let partialText: String?
     public let message: ChatMessage?
     public let usageLabel: String?
     public let error: String?
+    public let activity: String
+    public let runningSeconds: Int?
 
     init?(data: JSONValue?) {
         guard let data, let status = data["status"]?.stringValue else { return nil }
@@ -339,5 +354,7 @@ public struct ChatPollResult: Sendable {
         message = ChatMessage(data: data["message"])
         usageLabel = data["usage_label"]?.stringValue
         error = data["error"]?.stringValue
+        activity = data["activity"]?.stringValue ?? ""
+        runningSeconds = data["running_seconds"]?.intValue
     }
 }
