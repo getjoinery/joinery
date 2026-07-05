@@ -1,7 +1,7 @@
 # Inbound Email — Outbound Send Protection (Session-Gated Sending Identity)
 
 **Status:** Draft / awaiting implementation
-**Version:** 1.1
+**Version:** 1.2
 **Builds on:** `specs/inbound_email_encryption_at_rest.md` (the user key hierarchy —
 the multi-unlocker-wrapped X25519 keypair, sealing helper, unlock window, and
 in-window key handling — is defined there and reused here, not duplicated).
@@ -48,21 +48,37 @@ and destroy trust in the address itself — damage that outlives the incident.
   usable; an attacker could send as `anything@fwd.<domain>`. That is not the
   user's correspondence address and is accepted.
 
-**Open tradeoff — automated sends (may make the strict invariant unrealistic):**
+**Resolved — automated sends are a setup choice, not a design fork.**
 
-The invariant blocks **all** locked-state sends from the protected domain,
-including legitimate automated mail: mailing-list signup confirmations,
-notifications, any transactional send using an address at the identity domain.
-If the platform must send those around the clock, the strict form cannot hold
-for the whole domain. The recorded middle ground: protect only the **personal
-correspondence identity** (the bare domain the user writes from) and move
-automated senders to a dedicated subdomain (e.g. `mail.<domain>`) with its own
-ambient DKIM key. Under strict alignment (`adkim=s`/`aspf=s`) that subdomain's
-key cannot sign as the bare domain, so a compromised box can send as
-`list@mail.<domain>` but still not as `user@<domain>`. The human-trust boundary
-then sits between the bare domain and its subdomains — recipients must learn
-that only the bare domain is "really you." Whether that split is acceptable is
-an open product decision; this spec stays parked until it is made.
+Protection always applies to the **bare identity domain** (`user@<domain>`): the
+invariant below holds for it unconditionally. Automated senders that must run
+around the clock (mailing-list confirmations, membership receipts, notifications)
+are not a competing design — they are handled by giving them a **dedicated
+sending subdomain** (e.g. `mail.<domain>`) that is an *ordinary, non-protected
+sending domain* with its own ambient DKIM key, exactly as every non-Fortress
+domain already works. This costs no new sending mechanism: the platform already
+signs ambiently for normal domains (`provision_dkim.sh` + opendkim), and the two
+structural pieces the subdomain needs — strict alignment (`adkim=s`/`aspf=s`) and
+a box-authorized sibling subdomain — are already built by closures 2 and 3 for
+the forwarding subdomain. Under strict alignment the subdomain's key can never
+sign as the bare domain, so a locked box can send as `list@mail.<domain>` but
+never as `user@<domain>`.
+
+The platform therefore offers **both postures from one build**, chosen by the
+operator at setup, not forked in code:
+
+- **All-or-nothing** (no sending subdomain): while locked, nothing can leave as
+  the domain at all. For an identity domain with no around-the-clock automated
+  sending.
+- **Personal identity + automated subdomain**: the bare domain is strictly
+  protected; automated senders live on `mail.<domain>` via the existing
+  non-protected path. The one cost is a human-trust boundary — recipients must
+  learn that only the bare domain is "really you" — surfaced in setup so only
+  operators who opt in ever see it.
+
+The setup ceremony asks once ("does this domain send automated mail?") and, if
+so, guides adding the sending subdomain; the mechanism below is identical either
+way. This spec is no longer parked.
 
 ## The Ambient Send Inventory (what must be removed or gated)
 
