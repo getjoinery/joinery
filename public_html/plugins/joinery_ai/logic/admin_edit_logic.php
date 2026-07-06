@@ -8,6 +8,7 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelRegistry.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ActionRegistry.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/TaintGate.php'));
+    require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobRegistry.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderFactory.php'));
 
     $session = SessionControl::get_instance();
@@ -57,6 +58,8 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
         $simple_fields = [
             'rcp_name',
             'rcp_prompt',
+            'rcp_mode',
+            'rcp_pipeline_job',
             'rcp_schedule_frequency',
             'rcp_schedule_day_of_week',
             'rcp_model',
@@ -132,6 +135,23 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
             isset($live_actions[$a]) && ActionRegistry::isAgentCallable($live_actions[$a]['descriptor'])));
         $recipe->set('rcp_allowed_actions', $action_list);
 
+        // Pipeline source config — only the selected job's own prefixed
+        // fields are read back (see views/admin/edit.php for the
+        // srccfg_{job_id}_{field} naming); other jobs' hidden fields, even if
+        // present in the POST body, are never mistaken for this job's config.
+        $pipeline_job_id = (string)($input['rcp_pipeline_job'] ?? '');
+        $pipeline_job = $pipeline_job_id !== '' ? PipelineJobRegistry::get($pipeline_job_id) : null;
+        $source_config = [];
+        if ($pipeline_job !== null) {
+            foreach ($pipeline_job->configDescriptor()['input'] ?? [] as $field => $spec) {
+                $posted_name = "srccfg_{$pipeline_job_id}_{$field}";
+                if (array_key_exists($posted_name, $input)) {
+                    $source_config[$field] = $input[$posted_name];
+                }
+            }
+        }
+        $recipe->set('rcp_source_config', $source_config);
+
         // Tainted-writes opt-in. The save-time gate below verifies this is
         // set if the recipe is tainted-capable.
         $recipe->set('rcp_allow_tainted_writes', !empty($input['rcp_allow_tainted_writes']));
@@ -147,10 +167,17 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
         // Save-time taint gate. A tainted-capable recipe must explicitly
         // opt in via rcp_allow_tainted_writes. The check fires here so the
         // admin sees the trade-off in plain language at the moment they're
-        // configuring scope, instead of a mid-run failure.
-        $taint_eval = TaintGate::evaluate(
-            $tool_list, $model_list, (string)$recipe->get('rcp_workspace')
-        );
+        // configuring scope, instead of a mid-run failure. Pipeline mode has
+        // no tool/model allow-list surface — tainted-capability instead comes
+        // from the job's own untrustedDigest() declaration.
+        if ((string)$recipe->get('rcp_mode') === Recipe::MODE_PIPELINE) {
+            $taint_eval = TaintGate::evaluate([], [], '',
+                $pipeline_job !== null && $pipeline_job->untrustedDigest());
+        } else {
+            $taint_eval = TaintGate::evaluate(
+                $tool_list, $model_list, (string)$recipe->get('rcp_workspace')
+            );
+        }
         if ($taint_eval['tainted_capable'] && !$recipe->get('rcp_allow_tainted_writes')) {
             return LogicResult::error(
                 'Tainted-write opt-in required: ' . TaintGate::explain($taint_eval),
@@ -160,7 +187,11 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
 
         $recipe->set('rcp_update_time', gmdate('Y-m-d H:i:s'));
 
-        $recipe->prepare();
+        try {
+            $recipe->prepare();
+        } catch (SystemBaseException $e) {
+            return LogicResult::error($e->getMessage(), ['recipe' => $recipe, 'session' => $session]);
+        }
         $recipe->save();
 
         // Disabling a recipe should also halt its in-flight runs. Otherwise

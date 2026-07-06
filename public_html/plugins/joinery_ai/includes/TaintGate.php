@@ -27,7 +27,18 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelWriteE
  */
 class TaintGate {
 
-    public static function evaluate(array $allowed_tools, array $allowed_models, string $workspace): array {
+    /**
+     * $pipeline_untrusted_digest is the pipeline-mode substitute for the
+     * tool/model allow-list surface, which is empty in pipeline mode (there
+     * are no tools or models to check). Pass true when the recipe is in
+     * pipeline mode and its job declares untrustedDigest() — the write path
+     * is then recordVerdict() rather than a checked tool, aimed by config,
+     * never by the model. See specs/joinery_ai_item_pipeline.md § Taint
+     * posture. Both existing (agent-mode) callers are unaffected: the
+     * default preserves prior behavior exactly.
+     */
+    public static function evaluate(array $allowed_tools, array $allowed_models, string $workspace,
+            bool $pipeline_untrusted_digest = false): array {
         $write_tools = array_values(array_intersect(
             array_map('strval', $allowed_tools),
             ModelWriteExecutor::WRITE_TOOL_NAMES
@@ -45,6 +56,11 @@ class TaintGate {
         }
 
         $workspace_present = trim($workspace) !== '';
+
+        if ($pipeline_untrusted_digest) {
+            $write_tools[] = 'record_verdict';
+            $untrusted_models[] = 'pipeline item digest';
+        }
 
         $tainted = !empty($write_tools) && (!empty($untrusted_models) || $workspace_present);
 

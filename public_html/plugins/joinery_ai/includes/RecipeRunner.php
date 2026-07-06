@@ -10,6 +10,8 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelSchema
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AiPromptBuilder.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ActionRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/TaintGate.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobRegistry.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineRunner.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 /**
@@ -83,10 +85,7 @@ class RecipeRunner {
             $model_pref = (string)$recipe->get('rcp_model');
             $provider = LlmProviderFactory::forModel($model_pref);
             self::$active_provider = $provider;
-            $allowed_tools = self::resolveAllowedTools($recipe);
             $model = $model_pref !== '' ? $model_pref : $provider->defaultModel();
-            $system = self::buildSystemPrompt($recipe, $ctx);
-            $messages = [['role' => 'user', 'content' => 'Run the recipe now.']];
             $max_iterations = max(1, (int)$recipe->get('rcp_max_iterations'));
             $token_budget   = max(1000, (int)$recipe->get('rcp_max_tokens'));
 
@@ -100,9 +99,21 @@ class RecipeRunner {
             $thinking    = AgentLoop::resolveThinkingLevel($recipe->get('rcp_thinking_level'),
                 $settings->get_setting('joinery_ai_default_thinking_level'));
 
-            $result = AgentLoop::run($provider, $model, $system, $messages,
-                $allowed_tools, $ctx, $max_iterations, $token_budget,
-                $temperature, $top_p, $thinking);
+            if ((string)$recipe->get('rcp_mode') === Recipe::MODE_PIPELINE) {
+                // PHP drives item selection; the model judges one item per
+                // exchange. No tools, no workspace, no conversation carry-over
+                // — see specs/joinery_ai_item_pipeline.md.
+                $result = PipelineRunner::run($provider, $model, $recipe, $ctx,
+                    $max_iterations, $token_budget, $temperature, $top_p, $thinking);
+            } else {
+                $allowed_tools = self::resolveAllowedTools($recipe);
+                $system = self::buildSystemPrompt($recipe, $ctx);
+                $messages = [['role' => 'user', 'content' => 'Run the recipe now.']];
+
+                $result = AgentLoop::run($provider, $model, $system, $messages,
+                    $allowed_tools, $ctx, $max_iterations, $token_budget,
+                    $temperature, $top_p, $thinking);
+            }
 
             self::finishFromResult($run, $recipe, $result, $max_iterations);
 
@@ -194,17 +205,23 @@ class RecipeRunner {
     /**
      * Re-evaluate the taint gate at run-start to catch drift since save —
      * specifically, models that newly declared $ai_untrusted_fields after
-     * the recipe was last saved. Returns null on success, or a specific
-     * error message if the gate is now triggered without rcp_allow_tainted_writes.
+     * the recipe was last saved (agent mode), or a pipeline job that newly
+     * declares untrustedDigest() (pipeline mode). Returns null on success, or
+     * a specific error message if the gate is now triggered without
+     * rcp_allow_tainted_writes.
      */
     private static function checkTaintDrift(Recipe $recipe): ?string {
         if ($recipe->get('rcp_allow_tainted_writes')) return null;
 
-        $tools = self::decodeJsonArray($recipe->get('rcp_allowed_tools'));
-        $models = self::decodeJsonArray($recipe->get('rcp_allowed_models'));
-        $workspace = (string)$recipe->get('rcp_workspace');
-
-        $eval = TaintGate::evaluate($tools, $models, $workspace);
+        if ((string)$recipe->get('rcp_mode') === Recipe::MODE_PIPELINE) {
+            $job = PipelineJobRegistry::get((string)$recipe->get('rcp_pipeline_job'));
+            $eval = TaintGate::evaluate([], [], '', $job !== null && $job->untrustedDigest());
+        } else {
+            $tools = self::decodeJsonArray($recipe->get('rcp_allowed_tools'));
+            $models = self::decodeJsonArray($recipe->get('rcp_allowed_models'));
+            $workspace = (string)$recipe->get('rcp_workspace');
+            $eval = TaintGate::evaluate($tools, $models, $workspace);
+        }
         if (!$eval['tainted_capable']) return null;
 
         return 'Taint gate triggered at run start: ' . TaintGate::describeDrift($eval);
@@ -213,8 +230,18 @@ class RecipeRunner {
     /**
      * Resolve allow-list entries against live registries. Returns null if
      * everything resolves, or an error message naming the missing entries.
+     * In pipeline mode, the only allow-list entry is the pipeline job itself.
      */
     private static function checkAllowlistStaleness(Recipe $recipe): ?string {
+        if ((string)$recipe->get('rcp_mode') === Recipe::MODE_PIPELINE) {
+            $job_id = (string)$recipe->get('rcp_pipeline_job');
+            if (PipelineJobRegistry::get($job_id) === null) {
+                return "Recipe references a pipeline job that no longer exists: [$job_id]. "
+                     . 'Edit the recipe to select a registered job.';
+            }
+            return null;
+        }
+
         $models = self::decodeJsonArray($recipe->get('rcp_allowed_models'));
         $actions = self::decodeJsonArray($recipe->get('rcp_allowed_actions'));
 

@@ -143,7 +143,32 @@ if (is_string($tool_calls)) {
     $decoded = json_decode($tool_calls, true);
     $tool_calls = is_array($decoded) ? $decoded : null;
 }
-if (is_array($tool_calls) && count($tool_calls)) {
+
+$is_pipeline = (string)$recipe->get('rcp_mode') === Recipe::MODE_PIPELINE;
+
+if ($is_pipeline && is_array($tool_calls) && count($tool_calls)) {
+    // Pipeline mode: rcr_tool_calls holds one record per judged item
+    // (item_key, label, status, verdict|error) rather than a tool-call trace.
+    $page->begin_box(['title' => 'Items processed (' . count($tool_calls) . ')']);
+    foreach ($tool_calls as $i => $item) {
+        $err = ($item['status'] ?? '') === 'error';
+        echo '<div class="border-start ps-3 mb-3 joai-toolcall' . ($err ? ' is-error' : '') . '">';
+        echo '<strong>' . ($i + 1) . '. ' . htmlspecialchars($item['label'] ?? $item['item_key'] ?? '(unknown)') . '</strong>';
+        echo $err ? ' <span class="badge bg-danger">error</span>' : ' <span class="badge bg-success">done</span>';
+        if (isset($item['item_key'])) {
+            echo ' <span class="text-muted small">' . htmlspecialchars((string)$item['item_key']) . '</span>';
+        }
+        if ($err) {
+            echo '<pre class="mb-0 mt-1 joai-trace-wrap">' . htmlspecialchars((string)($item['error'] ?? '')) . '</pre>';
+        } elseif (isset($item['verdict'])) {
+            echo '<pre class="mb-0 mt-1 joai-trace">'
+               . htmlspecialchars(json_encode($item['verdict'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES))
+               . '</pre>';
+        }
+        echo '</div>';
+    }
+    $page->end_box();
+} elseif (is_array($tool_calls) && count($tool_calls)) {
     $page->begin_box(['title' => 'Tool call trace (' . count($tool_calls) . ')']);
     foreach ($tool_calls as $i => $call) {
         $err = !empty($call['is_error']);

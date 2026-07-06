@@ -101,8 +101,10 @@ class RecipeRunContext implements ToolContext {
      * Has the admin requested cancellation of this run? Re-reads the row's
      * kill flag from the database (rather than the in-memory copy) — the Stop
      * button updates the DB directly, so the in-memory row can't be trusted.
+     * Public: PipelineRunner checks this directly per item (its loop has no
+     * wall-clock guard, so it doesn't go through shouldContinue()).
      */
-    private function isKillRequested(): bool {
+    public function isKillRequested(): bool {
         $db = DbConnector::get_instance()->get_db_link();
         $q = $db->prepare("SELECT rcr_kill_requested FROM rcr_recipe_runs WHERE rcr_run_id = ?");
         $q->execute([(int)$this->run->key]);
@@ -175,6 +177,17 @@ class RecipeRunContext implements ToolContext {
         $existing = $this->currentToolCalls();
         $existing[] = $entry;
         $this->run->set('rcr_tool_calls', $existing);
+    }
+
+    /**
+     * Append one already-complete record and persist immediately. Used by
+     * PipelineRunner for per-item records — unlike a tool call, an item's
+     * judgment is a single blocking exchange with no separate start/finish
+     * halves to reconcile.
+     */
+    public function appendAndFlush(array $entry): void {
+        $this->appendToolCall($entry);
+        $this->flushToolCalls();
     }
 
     /** Recipes produce a one-shot report, not a live transcript — streamed text

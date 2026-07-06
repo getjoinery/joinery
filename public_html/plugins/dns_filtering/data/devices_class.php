@@ -145,9 +145,9 @@ class SdDevice extends SystemBase {
 
 		// Save deactivation pin history
 		$device_backup = new SdDeviceBackup(NULL);
-		$device_backup->set('sddb_device_backup_name', $this->get('sdd_device_name'));
-		$device_backup->set('sddb_usr_user_id', $this->get('sdd_usr_user_id'));
-		$device_backup->set('sddb_deactivation_pin', $this->get('sdd_deactivation_pin'));
+		$device_backup->set('sbk_device_backup_name', $this->get('sdd_device_name'));
+		$device_backup->set('sbk_usr_user_id', $this->get('sdd_usr_user_id'));
+		$device_backup->set('sbk_deactivation_pin', $this->get('sdd_deactivation_pin'));
 		$device_backup->save();
 
 		parent::permanent_delete();

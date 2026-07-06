@@ -5,7 +5,7 @@ require_once(PathHelper::getIncludePath('data/calendar_entry_class.php'));
 
 class CalEntryException extends SystemBase {
     public static $prefix = 'cex';
-    public static $tablename = 'cal_entry_exceptions';
+    public static $tablename = 'cex_entry_exceptions';
     public static $pkey_column = 'cex_calendar_entry_exception_id';
 
     public static $field_specifications = array(
@@ -42,6 +42,6 @@ class MultiCalEntryException extends SystemMultiBase {
         if (isset($this->options['exception_date'])) {
             $filters['cex_exception_date'] = [$this->options['exception_date'], PDO::PARAM_STR];
         }
-        return $this->_get_resultsv2('cal_entry_exceptions', $filters, $this->order_by, $only_count, $debug);
+        return $this->_get_resultsv2('cex_entry_exceptions', $filters, $this->order_by, $only_count, $debug);
     }
 }

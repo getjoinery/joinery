@@ -89,9 +89,27 @@ $formwriter->dropinput('rcp_owner_user_id', 'Owner', [
     'options' => $owner_options,
 ]);
 
+// --- Mode ---
+// Agent: the model drives via a tool loop, one conversation per run.
+// Pipeline: PHP drives item selection; the model judges one item per bounded
+// exchange. Switching the dropdown swaps which field group below applies —
+// see the two _group containers further down.
+$formwriter->dropinput('rcp_mode', 'Mode', [
+    'value' => (string)$recipe->get('rcp_mode') ?: Recipe::MODE_AGENT,
+    'options' => [
+        Recipe::MODE_AGENT    => 'Agent — model drives a tool loop',
+        Recipe::MODE_PIPELINE => 'Pipeline — PHP drives, one item judged per exchange',
+    ],
+    'visibility_rules' => [
+        Recipe::MODE_AGENT    => ['show' => ['rcp_agent_fields_group'], 'hide' => ['rcp_pipeline_fields_group']],
+        Recipe::MODE_PIPELINE => ['show' => ['rcp_pipeline_fields_group'], 'hide' => ['rcp_agent_fields_group']],
+    ],
+]);
+
 $formwriter->textarea('rcp_prompt', 'Prompt', [
     'rows' => 12,
     'placeholder' => 'Describe what the recipe should do, what tools to use, what to deliver.',
+    'helptext' => 'Pipeline mode: optional — leave blank to use the selected job\'s built-in instructions.',
 ]);
 
 // --- Schedule ---
@@ -179,6 +197,12 @@ $formwriter->dropinput('rcp_thinking_level', 'Thinking Level', [
     'options' => ['off' => 'Off', 'low' => 'Low', 'medium' => 'Medium', 'high' => 'High'],
     'helptext' => 'How hard the model reasons before answering. Off skips the reasoning pass (fastest).',
 ]);
+
+// --- Agent-mode fields (tools/models/actions/workspace) ---
+// Unused in pipeline mode — a pipeline recipe's only allow-list entry is its
+// job (below); the processing log is its only carried state, so there's no
+// workspace-poisoning surface to configure.
+echo '<div id="rcp_agent_fields_group_container">';
 
 // Allowed tools — checkboxes against the live tool registry. Drop-in tools
 // from any plugin's recipe_tools/ directory show up automatically.
@@ -371,6 +395,77 @@ if (!empty($stale_actions)) {
 }
 echo '</div>';
 
+// Workspace (advanced) — LLM-curated state carried between agent-mode runs.
+$formwriter->textarea('rcp_workspace', 'Workspace (LLM-curated; edit only when debugging)', [
+    'rows' => 8,
+]);
+
+echo '</div>'; // #rcp_agent_fields_group_container
+
+// --- Pipeline-mode fields (job + its config) ---
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobRegistry.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/DescriptorValidator.php'));
+
+echo '<div id="rcp_pipeline_fields_group_container">';
+
+$job_registry = PipelineJobRegistry::all();
+ksort($job_registry);
+$selected_job_id = (string)$recipe->get('rcp_pipeline_job');
+$stored_source_config = Recipe::decodeSourceConfig($recipe);
+
+$job_options = ['' => '— select a job —'];
+$job_visibility_rules = ['' => ['show' => [], 'hide' => []]];
+foreach ($job_registry as $job_id => $job_class) {
+    /** @var PipelineJobInterface $job_instance */
+    $job_instance = new $job_class();
+    $job_options[$job_id] = $job_instance->label();
+    $group = "job_config_{$job_id}_group";
+    $others = array_values(array_diff(
+        array_map(fn($id) => "job_config_{$id}_group", array_keys($job_registry)),
+        [$group]
+    ));
+    $job_visibility_rules[$job_id] = ['show' => [$group], 'hide' => $others];
+    // Also hide this job's group under every OTHER selection (including '').
+    foreach ($job_visibility_rules as $val => &$rule) {
+        if ($val === $job_id) continue;
+        $rule['hide'][] = $group;
+    }
+    unset($rule);
+}
+
+if (empty($job_registry)) {
+    echo '<p class="text-muted">No pipeline jobs registered. Drop a class implementing '
+       . '<code>PipelineJobInterface</code> into <code>plugins/&lt;plugin&gt;/pipeline_jobs/</code>.</p>';
+} else {
+    $formwriter->dropinput('rcp_pipeline_job', 'Job', [
+        'value' => $selected_job_id,
+        'options' => $job_options,
+        'visibility_rules' => $job_visibility_rules,
+    ]);
+
+    // Per-job config fields, field-name-prefixed so two jobs sharing a field
+    // name (e.g. "mailbox_alias") can't collide in $_POST — only the
+    // selected job's prefix is read back on save (admin_edit_logic.php).
+    foreach ($job_registry as $job_id => $job_class) {
+        $job_instance = new $job_class();
+        echo '<div id="job_config_' . htmlspecialchars($job_id) . '_group_container">';
+        $descriptor = $job_instance->configDescriptor();
+        $inputs = $descriptor['input'] ?? $descriptor;
+        $prefixed = ['input' => []];
+        foreach ($inputs as $field => $spec) {
+            if (!is_array($spec)) continue;
+            $spec['value'] = $spec['value']
+                ?? (($job_id === $selected_job_id && array_key_exists($field, $stored_source_config))
+                    ? $stored_source_config[$field] : null);
+            $prefixed['input']["srccfg_{$job_id}_{$field}"] = $spec;
+        }
+        $formwriter->fromDescriptor($prefixed);
+        echo '</div>';
+    }
+}
+
+echo '</div>'; // #rcp_pipeline_fields_group_container
+
 // --- Delivery ---
 $formwriter->textinput('rcp_delivery_email', 'Delivery Email (blank = owner email)');
 
@@ -385,7 +480,10 @@ $formwriter->checkboxinput('rcp_enabled', 'Enabled', [
 ]);
 
 // --- Limits ---
-$formwriter->numberinput('rcp_max_iterations', 'Max Tool-Loop Iterations', ['min' => 1, 'max' => 50]);
+$formwriter->numberinput('rcp_max_iterations', 'Max Tool-Loop Iterations / Batch Size', [
+    'min' => 1, 'max' => 50,
+    'helptext' => 'Agent mode: max tool-loop iterations. Pipeline mode: max items processed per run.',
+]);
 $formwriter->numberinput('rcp_max_tokens', 'Max Tokens Per Run', ['min' => 1000, 'max' => 200000]);
 $formwriter->numberinput('rcp_monthly_token_cap', 'Monthly Token Cap', ['min' => 0]);
 
