@@ -24,7 +24,7 @@
  * Writes and permanently deletes throwaway rows. Run:
  *   php tests/integration/joinery_ai_pipeline_runner_test.php
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../includes/PathHelper.php');
@@ -106,6 +106,8 @@ class FixtureJudgeJob implements PipelineJobInterface {
             'verdict' => ['type' => 'string', 'required' => true, 'enum' => ['keep', 'flag']],
         ]];
     }
+
+    public function validateVerdict(array $verdict): void {}
 
     public function defaultPrompt(): string { return 'Judge the item. Respond keep or flag.'; }
 

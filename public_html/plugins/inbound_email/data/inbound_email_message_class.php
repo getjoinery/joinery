@@ -59,7 +59,7 @@
  * its numeric score for display/tuning only (never disposition); iem_learned_verdict
  * tracks what the LearnSpamFeedback task has taught rspamd's Bayes classifier.
  *
- * @version 1.8
+ * @version 1.9
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -121,6 +121,15 @@ class InboundEmailMessage extends SystemBase {
 		// whenever it diverges from iem_spam_verdict; NULL = never taught.
 		'iem_spam_score'          => array('type'=>'numeric'),
 		'iem_learned_verdict'     => array('type'=>'varchar(10)'),
+		// AI security scan (specs/joinery_ai_email_security_scan.md). A danger
+		// score (0-10) plus the model's verdict/red-flags/summary for mail that
+		// passes the auth/spam filters above but is malicious in content — what
+		// those filters structurally cannot catch. Written ONLY by
+		// EmailSecurityScanJob::recordVerdict() (not $ai_writable_fields); NULL
+		// score/scan/time = not yet scanned by any recipe.
+		'iem_ai_danger_score'     => array('type'=>'int2'),
+		'iem_ai_scan'             => array('type'=>'jsonb'), // {verdict, red_flags, summary, model, recipe_id}
+		'iem_ai_scan_time'        => array('type'=>'timestamp(6)'),
 		'iem_size_bytes'          => array('type'=>'int4'),
 		// IMAP locator (populated only for reference-backed, IMAP-sourced rows;
 		// a non-null iem_iia_inbound_imap_account_id marks the row reference-backed

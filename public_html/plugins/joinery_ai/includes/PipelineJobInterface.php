@@ -73,6 +73,19 @@ interface PipelineJobInterface {
     public function verdictDescriptor(): array;
 
     /**
+     * Extra validation beyond verdictDescriptor()'s schema — a cross-field
+     * consistency rule a type/enum/range check can't express (e.g. "the
+     * verdict field must agree with the score field"). Throw
+     * InvalidArgumentException to reject an otherwise schema-valid verdict;
+     * the runner catches it exactly where it catches a schema failure, so a
+     * rejection gets the same one retry (with this message fed back to the
+     * model) before the item is skipped as an error. No-op
+     * (`function validateVerdict(array $verdict): void {}`) for a job with
+     * no cross-field rule.
+     */
+    public function validateVerdict(array $verdict): void;
+
+    /**
      * The job's built-in instruction prompt, used whenever the recipe's
      * rcp_prompt is empty (the normal case — a non-technical admin never
      * writes or sees a prompt). A non-empty rcp_prompt replaces this

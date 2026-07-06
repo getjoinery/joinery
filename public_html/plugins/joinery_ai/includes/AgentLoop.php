@@ -36,13 +36,16 @@ class AgentLoop {
      *  via the $token_budget argument. */
     const PER_CALL_MAX_TOKENS = 16000;
 
-    /** Same ceiling, but for the local/self-hosted provider. Local models run
-     *  far slower per token than a cloud model and are more prone to never
-     *  emitting a stop token (small models especially), so a runaway call is
-     *  both much more likely and much more expensive to sit through. It also
-     *  keeps a single call's max output well inside a modest local context
-     *  window, leaving room for the system prompt, tool schemas, and history. */
-    const LOCAL_PER_CALL_MAX_TOKENS = 4000;
+    /** Same ceiling, but for the local/self-hosted provider. Kept at parity
+     *  with the cloud ceiling: local reasoning models (qwen3) think before
+     *  answering and cannot be made to stop (the "off" thinking level only
+     *  relocates the reasoning, it does not remove it — see
+     *  OpenAiCompatibleProvider::applyReasoning), so a real analysis task needs
+     *  the reasoning tokens PLUS the answer to fit under this cap. A tighter
+     *  cap truncates mid-reasoning and yields empty/unparseable output. The
+     *  per-run rcp_max_tokens budget and the kill switch bound total cost;
+     *  this only caps a single exchange. */
+    const LOCAL_PER_CALL_MAX_TOKENS = 16000;
 
     /** Abort the turn if this many consecutive iterations return a tool error. */
     const CONSECUTIVE_TOOL_ERROR_LIMIT = 3;

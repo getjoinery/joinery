@@ -1,7 +1,7 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.3
+ * Vanilla CSS, no framework. @version 2.4
  */
 
 .mbx-reader {
@@ -209,6 +209,20 @@
 	padding: 0 6px;
 	margin-left: 6px;
 }
+/* AI security scan badge (specs/joinery_ai_email_security_scan.md) — silent
+   below score 3, since an unremarkable inbox is the common case. */
+.mbx-danger-badge {
+	display: inline-block;
+	border-radius: 9px;
+	font-size: 11px;
+	font-weight: 700;
+	padding: 0 6px;
+	margin-left: 6px;
+	white-space: nowrap;
+}
+.mbx-danger-badge.amber { background: #fef3c7; color: #92400e; }
+.mbx-danger-badge.red   { background: #fee2e2; color: #991b1b; }
+
 .mbx-list-footer { padding: 10px 14px; text-align: center; }
 .mbx-more {
 	border: 1px solid #cfd6dd; background: #fff; border-radius: 5px;
@@ -312,6 +326,24 @@
 	width: 100%; min-height: 360px; border: 1px solid #e4e7eb; background: #fff;
 }
 .mbx-collapsed .mbx-message-body { display: none; }
+
+/* AI security scan banner (specs/joinery_ai_email_security_scan.md). Sits
+   between the head and the body as its own sibling, so a dangerous verdict
+   stays visible even when the message is collapsed (mbx-collapsed only
+   hides .mbx-message-body). */
+.mbx-danger-banner {
+	padding: 10px 12px;
+	font-size: 13px;
+	border-bottom: 1px solid #e4e7eb;
+}
+.mbx-danger-banner-head { font-weight: 700; margin-bottom: 4px; }
+.mbx-danger-banner-flags { margin: 4px 0 0; padding-left: 18px; }
+.mbx-danger-banner.safe {
+	background: #f0fdf4; color: #166534; border-bottom-color: #dcfce7;
+	font-size: 12px; padding: 6px 12px;
+}
+.mbx-danger-banner.suspicious { background: #fffbeb; color: #92400e; }
+.mbx-danger-banner.dangerous  { background: #fef2f2; color: #991b1b; }
 
 /* ---- Attachment chips (Gmail-style, below the content area) ---- */
 .mbx-attachments {
