@@ -2,7 +2,7 @@
 
 The `joinery_ai` plugin runs LLM-driven work against the platform through two **admin-only** surfaces over one shared engine:
 
-- **Recipes** — scheduled or on-demand prompts that call the model with a curated tool set and persist the results, executing with the recipe owner's identity.
+- **Recipes** — scheduled or on-demand LLM work, executing with the recipe owner's identity, in one of two modes: **agent mode** (the model drives a tool loop and writes a final report) or **pipeline mode** (PHP drives item selection; the model judges one item at a time — see [Item pipeline recipes](#item-pipeline-recipes)).
 - **Chat** (`/admin/joinery_ai/chat`) — an interactive assistant that runs the same tool loop a turn at a time, executing as the acting admin, with consequential mutations held for a live confirmation.
 
 Both surfaces drive the same `AgentLoop` over the same tools; what differs is reached through the run **context** (`ToolContext`).
@@ -14,22 +14,28 @@ This doc covers what plugin authors and model authors need to know. For original
 ```
 plugins/joinery_ai/
   data/
-    recipes_class.php          # Recipe model — prompt, schedule, allowed tools, owner
+    recipes_class.php          # Recipe model — prompt, schedule, allowed tools, owner, mode
     recipe_runs_class.php      # RecipeRun model — per-execution log with tool-call trace
     recipe_notes_class.php     # RecipeNote model — agent ↔ human feedback channel
+    aip_recipe_item_log_class.php       # AipRecipeItemLog model — pipeline-mode processing log
     ai_conversations_class.php          # AiConversation model — one chat thread
     ai_conversation_messages_class.php  # AiConversationMessage model — one chat turn
   includes/
-    AgentLoop.php              # Bounded tool-use loop shared by both surfaces
-    ToolContext.php            # Interface both run contexts implement
-    RecipeRunner.php           # Recipe surface: assembles a run, drives AgentLoop
-    RecipeRunContext.php       # Recipe run context (ToolContext) passed to execute()
+    AgentLoop.php              # Bounded tool-use loop shared by agent-mode recipes and chat
+    ToolContext.php            # Interface both agent-mode run contexts implement
+    RecipeRunner.php           # Recipe surface: assembles a run, branches on mode
+    RecipeRunContext.php       # Recipe run context (ToolContext), shared by both modes
+    PipelineJobInterface.php   # Pipeline job contract
+    PipelineJobRegistry.php    # Auto-discovers pipeline jobs across plugins
+    PipelineRunner.php         # Pipeline surface: the one-item-per-exchange loop
     ChatRunner.php             # Chat surface: builds a turn, drives AgentLoop
     ChatTurnContext.php        # Chat turn context (ToolContext)
     ChatRender.php             # Transcript markup shared by view + AJAX endpoints
     RiskHeuristic.php          # Inline-vs-confirm classifier for mutating calls
     RecipeToolInterface.php    # Tool contract
     RecipeToolRegistry.php     # Auto-discovers tools across plugins
+    DescriptorValidator.php    # Coerces/validates input against a descriptor; renders the pipeline output instruction
+    TaintGate.php               # Tainted-write posture for both agent and pipeline mode
     llm/
       LlmProviderInterface.php   # Provider contract (createMessage / cost / models / isPrivate)
       LlmProviderException.php   # Base provider error; AnthropicException extends it
@@ -54,6 +60,7 @@ plugins/joinery_ai/
     FetchUrlTool.php
     WebSearchTool.php
     GetStockDataTool.php
+  pipeline_jobs/                # Each PHP file declares one PipelineJobInterface class
   tasks/
     RecipeDispatcher.php       # Cron entry — picks up scheduled recipes
   cli/
@@ -64,13 +71,15 @@ plugins/joinery_ai/
 
 A recipe is a row in `rcp_recipes` with:
 
-- **prompt** — the system + user message text the LLM sees
+- **mode** (`rcp_mode`) — `agent` (default) or `pipeline`. Selected on the edit form; swaps which of the fields below apply — see [Item pipeline recipes](#item-pipeline-recipes).
+- **prompt** — the system + user message text the LLM sees. In pipeline mode this is optional — blank means the selected job's `defaultPrompt()` runs.
 - **owner** (`rcp_owner_user_id`) — the user the run executes as. `RecipeRunContext::owner_user_id` and `owner_timezone` are derived from this.
-- **allowed tools** (`rcp_allowed_tools`) — JSON array of tool names. Only listed tools are exposed to the LLM. Unknown names are silently skipped (the runner logs them to the trace).
-- **allowed models** (`rcp_allowed_models`) — JSON array of class names. Drives both the schema block in the system prompt and the per-recipe gate in `query_model`. Empty array = no model reads.
+- **allowed tools** (`rcp_allowed_tools`) — JSON array of tool names. Only listed tools are exposed to the LLM. Unknown names are silently skipped (the runner logs them to the trace). Agent mode only.
+- **allowed models** (`rcp_allowed_models`) — JSON array of class names. Drives both the schema block in the system prompt and the per-recipe gate in `query_model`. Empty array = no model reads. Agent mode only.
+- **pipeline job** (`rcp_pipeline_job`) / **source config** (`rcp_source_config`) — which registered job drives the run, and its per-recipe binding config. Pipeline mode only.
 - **schedule** — cron expression, "manual only", or "interactive only".
 
-Recipes are configured at `/admin/joinery_ai` (dashboard) and edited at `/admin/joinery_ai/edit`.
+Recipes are configured at `/admin/joinery_ai` (dashboard) and edited at `/admin/joinery_ai/edit`. `rcp_max_iterations` is the max tool-loop iterations in agent mode and the max items processed per run (batch size) in pipeline mode; `rcp_allowed_actions` and `rcp_workspace` are agent-mode only, same as the tool/model allow-lists.
 
 ## Recipe runs
 
@@ -84,6 +93,76 @@ Each invocation creates an `rcr_recipe_runs` row with:
 `RecipeRunner::run($recipe)` drives the tool-use loop: send the conversation to the active LLM provider, dispatch any `tool_use` blocks back through `RecipeToolRegistry::get($name)->execute($input, $ctx)`, append the `tool_result`, repeat until the model emits a final text response or the cost guard trips.
 
 The `CostGuard` enforces per-run input/output token and dollar ceilings configured in plugin settings; trips raise an exception that the runner logs as `error`.
+
+## Item pipeline recipes
+
+Agent mode hands the model a tool belt and lets it drive — the right shape for open-ended work, where one conversation carries every item the model touches. Pipeline mode is the other shape: a stream of items, judged one at a time, each in a fresh exchange with a fixed output contract. Small models that degrade juggling a fetch/record tool rhythm across many items are reliable when shown one item in isolation with nothing else to decide. `RecipeRunner::run()` branches on `rcp_mode` right where agent mode would call `AgentLoop::run()` — every pre-flight check, the cost guard, token/cost recording, terminal-state mapping, and delivery are shared unchanged between the two modes.
+
+**What a pipeline job author writes** shrinks to four things: how to find the next unhandled item, how to render one item as a bounded digest, what a verdict looks like, and what to do with a valid verdict. Scheduling, budgets, provider selection, retries, the kill switch, run history, and delivery are all inherited from the recipe machinery above.
+
+### The job interface
+
+A pipeline job is a class implementing `PipelineJobInterface`, living in `plugins/{plugin}/pipeline_jobs/` (a sibling of `recipe_tools/`). `PipelineJobRegistry` discovers jobs the same way `RecipeToolRegistry` discovers tools — scanning every plugin's `pipeline_jobs/` directory, keeping classes that implement the interface, first-scan-wins on a duplicate `id()`.
+
+```php
+interface PipelineJobInterface {
+    public function id(): string;
+    public function label(): string;
+    public function configDescriptor(): array;
+    public function validateConfig(array $config, Recipe $recipe): void;
+    public function untrustedDigest(): bool;
+    public function nextItem(array $config, Recipe $recipe): ?array;
+    public function verdictDescriptor(): array;
+    public function defaultPrompt(): string;
+    public function recordVerdict(string $item_key, array $verdict, Recipe $recipe, string $model): void;
+}
+```
+
+- **`configDescriptor()`** — the per-recipe binding config (which mailbox, which alias, …), in `DescriptorValidator` shape. Rendered on the edit form via FormWriter's `fromDescriptor()`; coerced and passed to `validateConfig()` at save time and again at each run.
+- **`untrustedDigest()`** — whether item digests carry attacker-controlled text (an inbound email body, a user-submitted message). Drives the taint posture (below).
+- **`nextItem()`** — the next unhandled item, oldest first, or `null` when the recipe is caught up. Returns `['item_key' => ..., 'digest' => ..., 'label' => ...]`. Must exclude items already in the processing log — `MultiAipRecipeItemLog::notExistsClause()` gives the NOT-EXISTS SQL fragment to splice into the job's own item-source query. The job owns the digest's size cap so it fits the smallest intended model's context.
+- **`verdictDescriptor()`** — the verdict contract, in the same descriptor shape `configDescriptor()` uses. The runner renders this into the model-facing output instruction and validates the model's answer against it, so the prompt half and the validator can't drift apart.
+- **`defaultPrompt()`** — the job's built-in instructions, used whenever the recipe's `rcp_prompt` is empty (the normal case — a non-technical admin creating a pipeline recipe touches only: job, the job's config fields, model, and schedule). A non-empty `rcp_prompt` replaces it entirely as a power-user override.
+- **`recordVerdict()`** — the only write path in pipeline mode. Owner and scope are fixed by the job, never by model output; model output only ever reaches this one validated handler, aimed by config.
+
+### The per-item loop
+
+`PipelineRunner::run()` reuses the provider, model, and model controls (temperature / top-p / thinking) that `RecipeRunner` already resolved identically to agent mode, and builds the system prompt once per run (job instructions + the generated verdict-JSON instruction + the untrusted-input block when the job needs it) — a stable prefix across every item, cacheable on providers that support it.
+
+Per item, up to `rcp_max_iterations` (the batch size in this mode):
+
+1. Check `rcr_kill_requested` — the admin's Stop button ends the run as `cancelled`.
+2. Check the remaining output-token budget — exhausted ends the run as `token_budget` (a `timeout`-family status), same meaning as agent mode's per-turn budget.
+3. Ask the job for `nextItem()`. `null` means caught up — the run ends `success` with a tally of what it did (even a zero-item tally, so a caught-up run is never mistaken for an empty/incomplete one).
+4. Send one exchange: the digest (wrapped in `<<UNTRUSTED_nonce>>…<</UNTRUSTED_nonce>>` when `untrustedDigest()` is true) as the user message, a blocking `provider->createMessage()` call — no tools, no streaming.
+5. Parse the reply: strip any `<think>` remnant, extract the first balanced `{...}` JSON object, `DescriptorValidator::coerce()` it against `verdictDescriptor()`. An invalid verdict gets exactly **one retry** — the same exchange, extended with the model's own bad answer and the specific validator error. Still invalid: log the item `error` and move on — an unparseable verdict skips its item, it never wedges the queue. The processing log entry excludes the item from `nextItem()` going forward; an admin can delete the log row to force a retry.
+6. A valid verdict goes to `job->recordVerdict()`, logs the item `done`, and appends a per-item record to `rcr_tool_calls` (item key, label, verdict or error) — the same column agent mode uses for its tool-call trace, rendered differently for pipeline runs in the run-detail view.
+
+Three consecutive item errors abort the run as a `failed`-family status, same ceiling `AgentLoop` uses for consecutive tool errors. Each item is a fresh exchange with no conversation carry-over from the previous item — the source of both the reliability win on small models and the injection-containment story: an injected item can only corrupt the verdict for the item that carried it.
+
+### The processing log
+
+`aip_recipe_item_log` is the platform's per-(recipe, item) idempotency table — one row per item a recipe has processed, regardless of outcome (`aip_status`: `done` or `error`). It is per-*recipe*, not per-item, because two recipes may legitimately process the same item for different jobs, each tracking its own progress independently. A job is free to *also* stamp its own verdict fields on the item it read, as most jobs do — the log only tracks whether the item has been seen, not what was decided.
+
+### The verdict output instruction
+
+`DescriptorValidator` (already used for AI write-tool input) carries the extra shape a verdict needs: `enum` (allowed values), `min` / `max` (numeric bounds), `max_length` (strings), and a type-`array` field with a nested `items` descriptor and `max_items` — for a verdict field that is itself a list of small objects. `DescriptorValidator::renderOutputInstruction()` turns a `verdictDescriptor()` into the "respond with ONLY this JSON" text the model sees, walking the same fields `coerce()` validates against, so the instruction and the validator never disagree about what a valid verdict looks like.
+
+### Taint posture
+
+A pipeline recipe has no tool or model allow-list — there's nothing there to evaluate — so `TaintGate::evaluate()` takes an additional `$pipeline_untrusted_digest` argument. When the recipe's job declares `untrustedDigest()`, the recipe is tainted-capable exactly as an agent-mode recipe would be with a write tool reading `$ai_untrusted_fields`, and needs the same `rcp_allow_tainted_writes` acknowledgment to save and to run. The structural difference from agent mode is that the acknowledgment covers a much smaller surface: model output can reach exactly one validated handler (`recordVerdict()`), aimed by config, never chosen by the model.
+
+### Pipeline boundaries
+
+Pipeline mode is deliberately narrow. When a recipe idea doesn't fit, here's what to use instead:
+
+- **Comparing items to each other** (find the five most important this week, dedupe similar items, cluster feedback) — the pipeline shows the model exactly one item per exchange; that isolation is the source of its reliability and its injection containment, so it isn't relaxed per-job. Use agent mode with `query_model` for modest cross-item questions.
+- **Looking something up mid-judgment** (check a URL against a blocklist, fetch a sender's order history) — a pipeline exchange has no tools, by design. Enrich the digest instead: the job's PHP can look up anything deterministically and hand it to the model as evidence. A lookup that genuinely depends on what the model concludes mid-thought doesn't fit the pipeline; use agent mode.
+- **Running the instant an item arrives** — recipes poll on a schedule; there is no on-arrival trigger anywhere in the recipe system. Shorten the schedule instead.
+- **Forcing JSON output natively** — the pipeline validates and retries once rather than relying on a provider-specific JSON-forcing feature, because that guarantee doesn't exist uniformly across every local runtime this must run on. Fix the verdict descriptor or the prompt if validation keeps failing.
+- **State between items or runs** — pipeline recipes are stateless on purpose; there is no workspace. State belongs in the data the handler writes — the verdict fields and the processing log are queryable, so "already alerted this sender" is a `nextItem()` or handler-side check in PHP.
+- **Reusing another job's digest or verdict shape** — there's one job interface, not separate pluggable source/presenter/verdict parts. Jobs share code the ordinary way: extract a shared class and have each job delegate to it.
+- **Adding just one more config field** — a job wanting six config fields is two jobs; a config field only the job's author understands should be a constant in the job's code, not a form field. The UX holds only while a pipeline recipe stays job → a couple of config questions → schedule.
 
 ## LLM providers
 
@@ -458,7 +537,7 @@ The one cost concern shared across surfaces is the **plugin-wide monthly ceiling
 
 ## Tracing & debugging
 
-Every tool call appends to `rcr_tool_calls` with `name`, `input`, `output`, `started`, `completed`, `is_error`. The admin run-detail view (`/admin/joinery_ai/run`) renders the trace inline. For ad-hoc debugging, query directly:
+Every tool call appends to `rcr_tool_calls` with `name`, `input`, `output`, `started`, `completed`, `is_error`. The admin run-detail view (`/admin/joinery_ai/run`) renders the trace inline. Pipeline-mode runs reuse the same column for a different record shape — one entry per judged item (`item_key`, `label`, `status`, `verdict` or `error`) — which the run-detail view detects from the recipe's `rcp_mode` and renders as an item list instead of a tool-call trace. For ad-hoc debugging, query directly:
 
 ```sql
 SELECT rcr_tool_calls FROM rcr_recipe_runs WHERE rcr_run_id = ?;

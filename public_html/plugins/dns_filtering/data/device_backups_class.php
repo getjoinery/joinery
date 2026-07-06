@@ -11,9 +11,9 @@ class SdDeviceBackupException extends SystemBaseException {}
 
 class SdDeviceBackup extends SystemBase {
 
-	public static $prefix = 'sddb';
-	public static $tablename = 'sddb_device_backups';
-	public static $pkey_column = 'sddb_device_backup_id';
+	public static $prefix = 'sbk';
+	public static $tablename = 'sbk_device_backups';
+	public static $pkey_column = 'sbk_device_backup_id';
 
 	/**
 	 * Field specifications define database column properties and validation rules
@@ -31,18 +31,18 @@ class SdDeviceBackup extends SystemBase {
 	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-	    'sddb_device_backup_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
-	    'sddb_device_backup_name' => array('type'=>'varchar(64)'),
-	    'sddb_usr_user_id' => array('type'=>'int4'),
-	    'sddb_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
-	    'sddb_delete_time' => array('type'=>'timestamp(6)'),
-	    'sddb_deactivation_pin' => array('type'=>'varchar(10)'),
+	    'sbk_device_backup_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'sbk_device_backup_name' => array('type'=>'varchar(64)'),
+	    'sbk_usr_user_id' => array('type'=>'int4'),
+	    'sbk_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	    'sbk_delete_time' => array('type'=>'timestamp(6)'),
+	    'sbk_deactivation_pin' => array('type'=>'varchar(10)'),
 	);
 
-	public static $field_constraints = array();
+	public static $permanent_delete_actions = array();
 
 	function get_readable_name(){
-		return preg_replace('/^user\d+-/', '', $this->get('sddb_device_backup_name'));
+		return preg_replace('/^user\d+-/', '', $this->get('sbk_device_backup_name'));
 
 	}
 
@@ -54,7 +54,7 @@ class MultiSdDeviceBackup extends SystemMultiBase {
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $sddevice_backup) {
-			$items[$sddevice_backup->key] = '('.$sddevice_backup->key.') '.$sddevice_backup->get('sddb_device_backup_name');
+			$items[$sddevice_backup->key] = '('.$sddevice_backup->key.') '.$sddevice_backup->get('sbk_device_backup_name');
 		}
 		if ($include_new) {
 			$items['Enter New Below'] = 'new';
@@ -67,14 +67,14 @@ class MultiSdDeviceBackup extends SystemMultiBase {
         $filters = [];
 
         if (isset($this->options['user_id'])) {
-            $filters['sddb_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
+            $filters['sbk_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
         }
 
         if (isset($this->options['deleted'])) {
-            $filters['sddb_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
+            $filters['sbk_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
         }
 
-        return $this->_get_resultsv2('sddb_device_backups', $filters, $this->order_by, $only_count, $debug);
+        return $this->_get_resultsv2('sbk_device_backups', $filters, $this->order_by, $only_count, $debug);
     }
 
 }

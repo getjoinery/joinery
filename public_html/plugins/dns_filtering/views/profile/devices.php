@@ -77,7 +77,7 @@ else{
 										</div>
 										<div class="author-info">
 											<h3 class="company-name">Deactivation Pin</h3>
-											<h5 class="price">'.$deleted_device->get('sddb_deactivation_pin').'</h5>
+											<h5 class="price">'.$deleted_device->get('sbk_deactivation_pin').'</h5>
 
 										</div>
 									</div>

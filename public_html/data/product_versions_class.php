@@ -10,7 +10,7 @@ require_once(PathHelper::getIncludePath('includes/Validator.php'));
 
 class ProductVersionException extends SystemBaseException {}
 
-class ProductVersion extends SystemBase {	public static $prefix = 'esf';
+class ProductVersion extends SystemBase {	public static $prefix = 'prv';
 	public static $tablename = 'prv_product_versions';
 	public static $pkey_column = 'prv_product_version_id';
 	
