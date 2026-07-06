@@ -29,6 +29,13 @@ class RecipeNote extends SystemBase {
 
     public static $json_vars = array('rcn_tags');
 
+    // rcn_owner_user_id doesn't fit the {prefix}_{owner_prefix}_..._id
+    // convention (the owning User's own prefix isn't in the column), so it
+    // needs an explicit source table to cascade correctly on user deletion.
+    protected static $foreign_key_actions = [
+        'rcn_owner_user_id' => ['action' => 'cascade', 'source_table' => 'usr_users'],
+    ];
+
     /**
      * Upsert by (owner, title): if a non-deleted note with the same title
      * exists for this owner, return it loaded. Otherwise return a fresh

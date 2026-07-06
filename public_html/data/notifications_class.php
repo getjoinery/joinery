@@ -4,7 +4,7 @@
  *
  * In-app notification system for user-facing events.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 class NotificationException extends SystemBaseException {}
@@ -44,7 +44,10 @@ class Notification extends SystemBase {
 
 	protected static $foreign_key_actions = [
 		'ntf_usr_user_id' => ['action' => 'permanent_delete'],
-		'ntf_source_usr_user_id' => ['action' => 'set_null']
+		// 'source' doesn't fit the {prefix}_{owner_prefix}_..._id convention
+		// (the actor's own prefix isn't the column's first segment), so it
+		// needs an explicit source table.
+		'ntf_source_usr_user_id' => ['action' => 'null', 'source_table' => 'usr_users'],
 	];
 
 	public static $field_specifications = array(

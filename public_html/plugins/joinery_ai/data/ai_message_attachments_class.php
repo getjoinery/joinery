@@ -28,17 +28,18 @@ class AiMessageAttachment extends SystemBase {
     public static $pkey_column = 'aia_attachment_id';
 
     /**
-     * Deleting the underlying File cascades the link row away (the live, correct
-     * fil_files → aia rule). The message → attachment edge is NOT driven from
-     * here: the deletion auto-detector would resolve `aia_aim_message_id` to a
-     * non-existent `aim_messages` table (the real one is `aim_conversation_messages`,
-     * which doesn't fit the {prefix}_{entity}s pattern), so that rule is inert.
-     * Cleanup on message/conversation delete is handled authoritatively by
-     * AiConversationMessage::permanent_delete(), which loads each link and calls
-     * permanent_delete() below (removing the File bytes too).
+     * Deleting the underlying File cascades the link row away.
+     *
+     * The message → attachment edge (aia_aim_message_id) also auto-registers,
+     * but is declared explicitly here for clarity: cleanup on message/
+     * conversation delete is handled authoritatively by
+     * AiConversationMessage::permanent_delete(), which loads each link and
+     * calls permanent_delete() below (removing the File bytes too) before its
+     * own row is deleted - so this cascade never finds a row left to act on.
      */
     protected static $foreign_key_actions = [
         'aia_fil_file_id'    => ['action' => 'cascade'],
+        'aia_aim_message_id' => ['action' => 'cascade'],
     ];
 
     public static $permanent_delete_actions = array();

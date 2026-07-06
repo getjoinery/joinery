@@ -18,21 +18,55 @@ The deletion system manages cascading deletes, foreign key constraints, and refe
 
 ### 1. Foreign Key Auto-Detection
 
-The system automatically detects foreign keys based on column naming:
+The system detects foreign keys based on column naming, then looks up the
+real table — it never guesses a pluralized name:
 
 ```
-Pattern: {prefix}_{source_prefix}_{entity}_id
+Pattern: {prefix}_{source_prefix}_{...}_id
 
 Examples:
 - ord_usr_user_id → references usr_users table
 - odi_pro_product_id → references pro_products table
 - evt_loc_location_id → references loc_locations table
+- aip_rcr_run_id → references rcr_recipe_runs table
+- ieg_iea_inbound_email_alias_id → references iea_inbound_email_aliases table
 ```
 
-The system:
-1. Extracts the entity name (e.g., "user", "product", "location")
-2. Pluralizes it (user → users, category → categories)
-3. Adds the source prefix to build the table name (usr_users, pro_products, loc_locations)
+For a column on a model, the system:
+1. Strips the declaring model's own `{prefix}_`
+2. Takes the first segment of what's left (e.g. `usr`, `pro`, `rcr`, `iea`)
+3. Looks that segment up in a registry of every loaded model's own `$prefix`
+   and real `$tablename` (core and every plugin, built once and cached) — the
+   column only counts as a foreign key if the remainder also contains `_id`
+   and the first segment is a real, registered model prefix
+
+A column whose first segment isn't a registered model prefix (a role name
+like `owner`, a self-reference like `parent`, an external id like
+`stripe_customer`) registers nothing — never a wrong guess. Give it an
+explicit `source_table` (see below) if it does need to cascade.
+
+### Escape Hatch: Columns That Don't Fit the Convention
+
+Some foreign keys don't have their target's prefix as the first segment after
+stripping the owner's own prefix — a role-named column (`rcp_owner_user_id`),
+a self-reference (`agf_candidate_for` → another row in the same table), or a
+suffixed/non-standard name (`mjb_created_by`). Declare the real table
+explicitly in `$foreign_key_actions`:
+
+```php
+protected static $foreign_key_actions = [
+    'rcp_owner_user_id' => ['action' => 'cascade', 'source_table' => 'usr_users'],
+    'agf_candidate_for' => ['action' => 'cascade', 'source_table' => 'agf_agent_files'],
+];
+```
+
+`source_class` (a model class name) works the same way and is resolved to
+that class's `$tablename` at registration time. A declared
+`$foreign_key_actions` key that resolves neither by convention nor by an
+explicit `source_table`/`source_class` produces a warning during
+registration/sync rather than silently registering nothing — see
+`maintenance_scripts/dev_tools/validate_php_file.php`'s model-contract pass
+for the same check at edit time.
 
 ### 2. Deletion Actions
 
@@ -150,8 +184,24 @@ To manually register deletion rules for all active plugins:
 
 ```php
 require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
-PluginHelper::registerAllActiveDeletionRules();
+$warnings = PluginHelper::registerAllActiveDeletionRules();
 ```
+
+Registration is idempotent: re-registering a model replaces that model's
+rules atomically (its existing rows are deleted, then the fresh set is
+inserted), so running it repeatedly converges rather than accumulating
+duplicates.
+
+### Orphaned Rule Pruning
+
+`PluginManager::sync()` calls `DeletionRule::pruneOrphanedRules()` after
+registering every active plugin's rules — it deletes any rule whose source or
+target table matches no currently-loaded model (core or plugin, active or
+not; discovery scans the filesystem, not activation state). This is what
+clears out rules left behind by a renamed or removed table, since nothing
+else ever revisits an already-registered rule once its owning column is gone.
+Safe to call at any time — it only ever removes rules referencing a table
+nothing declares.
 
 ## How Deletion Works
 
@@ -295,9 +345,9 @@ $obj->permanent_delete($debug = true);  // Prints SQL without executing
 ### Key Classes
 
 **DeletionRule** (`/data/deletion_rule_class.php`)
-- `registerModelsFromDiscovery($options)` - Discover and register model rules
-- `registerModelRules($model_class)` - Register one model's rules incrementally
-- `getSourceTableFromColumn($column)` - Parse foreign key column to find source table
+- `registerModelsFromDiscovery($options)` - Discover and register model rules; returns warning strings for unresolvable declared overrides
+- `registerModelRules($model_class)` - Register one model's rules incrementally; returns the same kind of warnings
+- `pruneOrphanedRules()` - Delete rules whose source or target table matches no currently-loaded model
 
 **SystemBase** (`/includes/SystemBase.php`)
 - `permanent_delete_dry_run()` - Preview deletion impact

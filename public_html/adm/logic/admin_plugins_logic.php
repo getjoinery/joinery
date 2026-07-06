@@ -77,6 +77,9 @@ function admin_plugins_logic(array $input): LogicResult {
 				if (!empty($result['migration_messages'])) {
 					$parts[] = count($result['migration_messages']) . ' migration(s) applied';
 				}
+				if (!empty($result['deletion_rule_messages'])) {
+					$parts[] = count($result['deletion_rule_messages']) . ' deletion-rule notice(s)';
+				}
 
 				if (empty($parts)) {
 					$message = 'Sync complete. Everything is up to date.';
@@ -88,6 +91,9 @@ function admin_plugins_logic(array $input): LogicResult {
 				}
 				if (!empty($result['migration_messages'])) {
 					$message .= '<br><small>Migrations: ' . htmlspecialchars(implode('; ', $result['migration_messages'])) . '</small>';
+				}
+				if (!empty($result['deletion_rule_messages'])) {
+					$message .= '<br><small>Deletion rules: ' . htmlspecialchars(implode('; ', $result['deletion_rule_messages'])) . '</small>';
 				}
 				$message_type = 'success';
 			} catch (Exception $e) {

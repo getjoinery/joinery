@@ -36,6 +36,8 @@ class MethodExistenceTest {
     private $variable_types = []; // Track variable => class name mappings
     private $current_class_name = ''; // Name of the class currently being parsed (for self::/static:: resolution)
     private $current_parent_class = ''; // Name of the parent class (for parent:: resolution)
+    private $contract_errors = 0; // Hard contract violations: model + logic (drive the exit code)
+    private $call_errors = 0;     // Confirmed missing functions/methods/classes/args (drive the exit code)
 
     // Whitelist of common methods by class
     private $common_methods = [
@@ -54,22 +56,24 @@ class MethodExistenceTest {
         'property' => [
             '$this->sorts' => 'Use $this->order_by instead (SystemMultiBase stores order in $order_by property)',
         ],
-        // Method blacklist - obsolete or incorrect methods
+        // Method blacklist - obsolete or incorrect methods (bare method names,
+        // matched exactly)
         'method' => [
-            'CtldAccount::' => 'CtldAccount class is obsolete, use SubscriptionTier instead',
             'getUserAccount' => 'Method is obsolete, use getUserTier() or SubscriptionTier::GetUserTier() instead',
             'get_formwriter_object' => 'Removed - use $page->getFormWriter() in views/admin, or direct instantiation: require_once(PathHelper::getThemeFilePath(\'FormWriter.php\', \'includes\')); $fw = new FormWriter()',
-            'LogicResult::data' => 'Method does not exist - use LogicResult::render() instead for all return statements in logic files',
             'start_buttons' => 'Method does not exist in FormWriter V2 - use submitbutton() instead',
             'end_buttons' => 'Method does not exist in FormWriter V2 - use submitbutton() instead',
             'new_form_button' => 'Method does not exist in FormWriter V2 - use submitbutton() instead',
+        ],
+        // Static call blacklist - 'Class::method' matched exactly; a trailing
+        // '::' makes the entry a class-wide prefix. Also consulted for
+        // instance calls when the object's class is known.
+        'static' => [
+            'CtldAccount::' => 'CtldAccount class is obsolete, use SubscriptionTier instead',
+            'LogicResult::data' => 'Method does not exist - use LogicResult::render() instead for all return statements in logic files',
             'Pager::get_param_string' => 'Method does not exist - use Pager::get_url() instead',
             'Pager::get_param' => 'Method does not exist - use Pager::current_page() instead',
             'Pager::get_limit' => 'Method does not exist - use Pager::num_per_page() instead',
-        ],
-        // Static call blacklist - class::method patterns that are wrong
-        'static' => [
-            'CtldAccount::' => 'CtldAccount class is obsolete, use SubscriptionTier instead',
         ],
         // Code pattern blacklist - string patterns to search for in source code
         'code_pattern' => [
@@ -93,12 +97,6 @@ class MethodExistenceTest {
             '$_SERVER[\'DOCUMENT_ROOT\']' => 'Never use $_SERVER[\'DOCUMENT_ROOT\'] - use PathHelper::getIncludePath() instead',
             '__DIR__ . \'/../' => 'Avoid __DIR__ navigation - use PathHelper::getIncludePath() for proper path resolution',
 
-            // Constructor without parameters
-            'new Product()' => 'Product constructor requires parameter: new Product(NULL) for new, new Product($id, TRUE) to load',
-            'new User()' => 'User constructor requires parameter: new User(NULL) for new, new User($id, TRUE) to load',
-            'new Order()' => 'Order constructor requires parameter: new Order(NULL) for new, new Order($id, TRUE) to load',
-            'new Event()' => 'Event constructor requires parameter: new Event(NULL) for new, new Event($id, TRUE) to load',
-
             // Field specification anti-patterns
             "'type'=>'serial'" => "Use 'type'=>'int8' with 'serial'=>true instead of 'type'=>'serial' (PostgreSQL serial is a pseudo-type)",
             "'type' => 'serial'" => "Use 'type'=>'int8' with 'serial'=>true instead of 'type'=>'serial' (PostgreSQL serial is a pseudo-type)",
@@ -110,14 +108,9 @@ class MethodExistenceTest {
 
             // FormWriter V2 anti-patterns
             "\$formwriter->submitbutton('submit'" => "Never use submitbutton('submit' - shadows form.submit() method. Use submitbutton('submit_button' or similar instead",
-            "\$formwriter->textarea(" => "FormWriter V2 uses textbox() not textarea() - change ->textarea( to ->textbox(",
-            "->textarea(" => "FormWriter V2 uses textbox() not textarea() - change ->textarea( to ->textbox(",
-            "\$formwriter->begin(" => "FormWriter V2 uses begin_form() not begin() - change ->begin() to ->begin_form()",
             "->begin(" => "FormWriter V2 uses begin_form() not begin() - change ->begin() to ->begin_form()",
-            "\$formwriter->submit(" => "FormWriter V2 uses submitbutton() not submit() - change ->submit('Label') to ->submitbutton('name', 'Label')",
             "->submit(" => "FormWriter V2 uses submitbutton() not submit() - change ->submit('Label') to ->submitbutton('name', 'Label')",
-            "'class' => 'ctrlHolder'" => "ctrlHolder is a FormWriter V1 class - remove it. FormWriter V2 applies Bootstrap classes automatically",
-            "'ctrlHolder'" => "ctrlHolder is a FormWriter V1 class - remove it. FormWriter V2 applies Bootstrap classes automatically",
+            "'ctrlHolder'" => "ctrlHolder is a FormWriter V1 class - remove it; form rows are styled by the .jy-ui kit automatically",
         ],
     ];
 
@@ -169,6 +162,9 @@ class MethodExistenceTest {
         // Check property accesses
         $this->checkPropertyAccesses();
 
+        // Check constructor calls
+        $this->checkConstructors();
+
         // Check code patterns
         $this->checkCodePatterns();
 
@@ -178,8 +174,16 @@ class MethodExistenceTest {
         // Check AI action descriptor contract
         $this->checkDescriptorContract();
 
+        // Check data-model structure contract (SystemBase subclasses)
+        $this->checkModelContract();
+
+        // Check logic-file structure contract
+        $this->checkLogicContract();
+
         // Summary
         $this->printSummary();
+
+        return $this->contract_errors + $this->call_errors;
     }
 
     /**
@@ -188,6 +192,50 @@ class MethodExistenceTest {
     private function loadFile() {
         echo "Loading file and dependencies...\n";
 
+        // Core classes resolve one-class-per-file: Foo => includes/Foo.php.
+        // Autoloading them on demand lets class_exists()/method_exists()
+        // verify calls against LogicResult, Pager, EmailSender, etc. instead
+        // of reporting every core class as "Class not found".
+        spl_autoload_register(function ($class) {
+            if (!preg_match('/^[A-Za-z0-9_]+$/', $class)) {
+                return;
+            }
+            $base = PathHelper::getIncludePath('');
+            $candidates = array_merge(
+                [PathHelper::getIncludePath('includes/' . $class . '.php')],
+                glob($base . 'includes/*/' . $class . '.php') ?: [],
+                glob($base . 'plugins/*/includes/' . $class . '.php') ?: [],
+                glob($base . 'plugins/*/includes/*/' . $class . '.php') ?: []
+            );
+            foreach ($candidates as $path) {
+                if (is_file($path)) {
+                    try {
+                        require_once($path);
+                    } catch (Throwable $e) {
+                        // Dependency failure — leave the class unresolved
+                    }
+                    return;
+                }
+            }
+        });
+
+        // Composer autoloader, so vendor classes (\OTPHP\TOTP, Stripe, ...)
+        // resolve. The composerAutoLoad setting holds the vendor dir path
+        // relative to public_html; fall back to the conventional location.
+        try {
+            $vendor_dir = Globalvars::get_instance()->get_setting('composerAutoLoad');
+        } catch (Throwable $e) {
+            $vendor_dir = null;
+        }
+        foreach ([$vendor_dir, '../vendor/'] as $dir) {
+            if (!$dir) continue;
+            $autoload = PathHelper::getIncludePath(rtrim($dir, '/') . '/autoload.php');
+            if (is_file($autoload)) {
+                require_once($autoload);
+                break;
+            }
+        }
+
         // Load common data models
         $this->loadDataModels();
 
@@ -195,11 +243,103 @@ class MethodExistenceTest {
             // Include the file being tested
             require_once($this->file_path);
             echo "✓ File loaded successfully\n";
-        } catch (Exception $e) {
+        } catch (Throwable $e) {
             echo "⚠ Warning: Could not load file: " . $e->getMessage() . "\n";
         }
 
         echo "\n";
+    }
+
+    /**
+     * Lazily built index of every global function defined under logic/,
+     * includes/, and their plugin equivalents — collected with a regex scan
+     * (no code execution), so functions the router loads at runtime from
+     * sibling files are recognized without the side effects of require'ing
+     * every file. Maps lowercase function name => defining file.
+     */
+    private $function_definition_index = null;
+
+    private function isFunctionDefinedSomewhere($function_name) {
+        if ($this->function_definition_index === null) {
+            $this->function_definition_index = [];
+            $scan_files = array_merge(
+                glob(PathHelper::getIncludePath('logic') . '/*.php') ?: [],
+                glob(PathHelper::getIncludePath('includes') . '/*.php') ?: [],
+                glob(PathHelper::getIncludePath('plugins') . '/*/logic/*.php') ?: [],
+                glob(PathHelper::getIncludePath('plugins') . '/*/includes/*.php') ?: []
+            );
+            foreach ($scan_files as $scan_file) {
+                foreach ($this->extractGlobalFunctionNames($scan_file) as $name) {
+                    $this->function_definition_index[strtolower($name)] = $scan_file;
+                }
+            }
+        }
+        return isset($this->function_definition_index[strtolower($function_name)]);
+    }
+
+    /**
+     * Tokenize a file and return top-level (non-method) function names.
+     * Functions inside class/trait/interface bodies are skipped so methods
+     * are never mistaken for global functions.
+     */
+    private function extractGlobalFunctionNames($file) {
+        $names = [];
+        try {
+            $tokens = token_get_all(file_get_contents($file));
+        } catch (Throwable $e) {
+            return $names;
+        }
+        $depth = 0;
+        $class_depths = []; // brace depths at which a class body opened
+        $pending_class = false;
+        $count = count($tokens);
+        for ($i = 0; $i < $count; $i++) {
+            $token = $tokens[$i];
+            if (!is_array($token)) {
+                if ($token === '{') {
+                    $depth++;
+                    if ($pending_class) {
+                        $class_depths[] = $depth;
+                        $pending_class = false;
+                    }
+                } elseif ($token === '}') {
+                    if ($class_depths && end($class_depths) === $depth) {
+                        array_pop($class_depths);
+                    }
+                    $depth--;
+                }
+                continue;
+            }
+            if ($token[0] === T_CURLY_OPEN || $token[0] === T_DOLLAR_OPEN_CURLY_BRACES) {
+                $depth++; // string interpolation braces close with a bare '}'
+                continue;
+            }
+            if ($token[0] === T_CLASS || $token[0] === T_TRAIT || $token[0] === T_INTERFACE) {
+                // Skip ::class constants
+                $prev = $i > 0 && is_array($tokens[$i - 1]) ? $tokens[$i - 1][0] : null;
+                if ($prev !== T_DOUBLE_COLON && $prev !== T_PAAMAYIM_NEKUDOTAYIM) {
+                    $pending_class = true;
+                }
+                continue;
+            }
+            if ($token[0] === T_FUNCTION && empty($class_depths)) {
+                for ($j = $i + 1; $j < $count; $j++) {
+                    $t = $tokens[$j];
+                    // Skip whitespace and the by-reference '&' (a bare char on
+                    // older PHP, dedicated tokens on 8.1+)
+                    if ($t === '&' || (is_array($t) && ($t[0] === T_WHITESPACE
+                        || (defined('T_AMPERSAND_FOLLOWED_BY_VOID_OR_NULLABLE_TYPE') && $t[0] === T_AMPERSAND_FOLLOWED_BY_VOID_OR_NULLABLE_TYPE)
+                        || (defined('T_AMPERSAND_NOT_FOLLOWED_BY_VOID_OR_NULLABLE_TYPE') && $t[0] === T_AMPERSAND_NOT_FOLLOWED_BY_VOID_OR_NULLABLE_TYPE)))) {
+                        continue;
+                    }
+                    if (is_array($t) && $t[0] === T_STRING) {
+                        $names[] = $t[1];
+                    }
+                    break; // '(' means a closure — no name to record
+                }
+            }
+        }
+        return $names;
     }
 
     /**
@@ -212,12 +352,16 @@ class MethodExistenceTest {
             return;
         }
 
-        $model_files = glob($data_dir . '/*_class.php');
+        // Core models plus every plugin's models
+        $model_files = array_merge(
+            glob($data_dir . '/*_class.php'),
+            glob(PathHelper::getIncludePath('plugins') . '/*/data/*_class.php')
+        );
 
         foreach ($model_files as $model_file) {
             try {
                 require_once($model_file);
-            } catch (Exception $e) {
+            } catch (Throwable $e) {
                 // Silent fail - some models may have dependencies
             }
         }
@@ -316,6 +460,12 @@ class MethodExistenceTest {
                 }
             }
 
+            // Track foreach over a tracked Multi collection: the value variable
+            // holds an instance of the collection's model class
+            if ($token_type === T_FOREACH) {
+                $this->extractForeachValueType($i);
+            }
+
             // Look for function/method calls
             if ($token_type === T_STRING) {
                 // Check next non-whitespace token
@@ -327,26 +477,39 @@ class MethodExistenceTest {
 
                     if ($prev_token && is_array($prev_token)) {
                         if ($prev_token[0] === T_OBJECT_OPERATOR) {
-                            // Method call: $obj->method()
+                            // Method call: $obj->method() — snapshot the
+                            // variable's tracked type NOW; the same name may
+                            // be rebound to a different class later in the file
                             $var_name = $this->getVariableBeforeMethodCall($i);
                             $this->method_calls[] = [
                                 'name' => $token_value,
                                 'variable' => $var_name,
-                                'line' => $line_number
+                                'line' => $line_number,
+                                'tracked_class' => ($var_name && isset($this->variable_types[$var_name]))
+                                    ? $this->variable_types[$var_name] : null
                             ];
                         } elseif ($prev_token[0] === T_DOUBLE_COLON || $prev_token[0] === T_PAAMAYIM_NEKUDOTAYIM) {
-                            // Static call: Class::method()
+                            // Static call: Class::method() — snapshot the
+                            // enclosing class/parent NOW, so self::/parent::
+                            // resolve against the class this call sits in
+                            // (not whichever class the file declares last)
                             $class_name = $this->getClassBeforeStaticCall($i);
                             $this->static_calls[] = [
                                 'class' => $class_name,
                                 'method' => $token_value,
-                                'line' => $line_number
+                                'line' => $line_number,
+                                'context_class' => $this->current_class_name,
+                                'context_parent' => $this->current_parent_class
                             ];
                         } elseif ($prev_token[0] === T_NEW) {
-                            // Constructor call: new ClassName()
+                            // Constructor call: new ClassName(...) — note whether
+                            // any argument is passed (')' directly after '(')
+                            $paren_index = $this->getNextTokenIndex($i);
+                            $after_paren = $paren_index !== null ? $this->getNextToken($paren_index) : null;
                             $this->constructors[] = [
                                 'name' => $token_value,
-                                'line' => $line_number
+                                'line' => $line_number,
+                                'no_args' => ($after_paren === ')')
                             ];
                         } else {
                             // Regular function call
@@ -393,6 +556,21 @@ class MethodExistenceTest {
     }
 
     /**
+     * Get index of next non-whitespace token
+     */
+    private function getNextTokenIndex($index) {
+        $count = count($this->tokens);
+        for ($i = $index + 1; $i < $count; $i++) {
+            $token = $this->tokens[$i];
+            if (is_array($token) && $token[0] === T_WHITESPACE) {
+                continue;
+            }
+            return $i;
+        }
+        return null;
+    }
+
+    /**
      * Get previous non-whitespace token
      */
     private function getPrevToken($index) {
@@ -413,7 +591,9 @@ class MethodExistenceTest {
         for ($i = $index - 1; $i >= 0; $i--) {
             $token = $this->tokens[$i];
             if (is_array($token)) {
-                if ($token[0] === T_STRING) {
+                // T_NAME_QUALIFIED / T_NAME_FULLY_QUALIFIED cover namespaced
+                // names (Foo\Bar, \Foo\Bar), which tokenize as a single token
+                if ($token[0] === T_STRING || $token[0] === T_NAME_QUALIFIED || $token[0] === T_NAME_FULLY_QUALIFIED) {
                     return $token[1];
                 }
                 if ($token[0] !== T_WHITESPACE && $token[0] !== T_DOUBLE_COLON && $token[0] !== T_PAAMAYIM_NEKUDOTAYIM) {
@@ -456,7 +636,9 @@ class MethodExistenceTest {
         for ($i = $index + 1; $i < $count; $i++) {
             $token = $this->tokens[$i];
 
-            if (is_array($token) && ($token[0] === T_STRING || $token[0] === T_NS_SEPARATOR)) {
+            if (is_array($token) && ($token[0] === T_STRING || $token[0] === T_NS_SEPARATOR
+                || $token[0] === T_NAME_QUALIFIED || $token[0] === T_NAME_FULLY_QUALIFIED)) {
+                // PHP 8 tokenizes 'Foo\Bar\Baz' as a single T_NAME_QUALIFIED
                 $use .= $token[1];
             } elseif ($token === ';') {
                 if ($use) {
@@ -505,7 +687,10 @@ class MethodExistenceTest {
             }
 
             if ($token === '=') {
-                // Found assignment, check what's being assigned
+                // Found assignment. Only the FIRST expression token after '='
+                // may decide the type — scanning further would latch onto
+                // unrelated tokens later in the statement or file (e.g. a
+                // `throw new X()` after an `if ($v = expr)` condition).
 
                 // Pattern 1: $var = new ClassName()
                 for ($j = $i + 1; $j < $count; $j++) {
@@ -565,13 +750,15 @@ class MethodExistenceTest {
                             if ($method_name) {
                                 $lookup_key = "$class_name::$method_name";
                                 if (isset($this->method_return_types[$lookup_key])) {
-                                    return $this->method_return_types[$lookup_key];
+                                    // Follow any chained calls (e.g.
+                                    // DbConnector::get_instance()->get_db_link() is a PDO)
+                                    return $this->followMethodChain($this->method_return_types[$lookup_key], $m);
                                 }
 
                                 // Convention: factory methods (GetBy*, Create*, get_by_*, Find*)
                                 // typically return an instance of their own class
                                 if (class_exists($class_name) && $this->isFactoryMethodName($method_name)) {
-                                    return $class_name;
+                                    return $this->followMethodChain($class_name, $m);
                                 }
                             }
                         }
@@ -610,18 +797,15 @@ class MethodExistenceTest {
                                 $source_class = $this->variable_types[$source_var];
                                 $lookup_key = "$source_class::$method_name";
                                 if (isset($this->method_return_types[$lookup_key])) {
-                                    return $this->method_return_types[$lookup_key];
+                                    return $this->followMethodChain($this->method_return_types[$lookup_key], $m);
                                 }
                             }
                         }
                     }
 
-                    // Stop at the statement boundary so an assignment whose RHS
-                    // isn't a recognized pattern (e.g. $x = $arr[$k];) doesn't bleed
-                    // forward and latch onto the next `new` in the file.
-                    if ($next_token === ';' || $next_token === ',') {
-                        break;
-                    }
+                    // First non-whitespace token examined — whatever the
+                    // branches above concluded is the answer. Never scan on.
+                    break;
                 }
             }
 
@@ -630,6 +814,100 @@ class MethodExistenceTest {
         }
 
         return null;
+    }
+
+    /**
+     * For `foreach ($source as [$key =>] $value)`, when $source has a tracked
+     * SystemMultiBase type, record $value as that collection's model class.
+     */
+    private function extractForeachValueType($index) {
+        $count = count($this->tokens);
+        $source_var = null;
+        $value_var = null;
+        $seen_as = false;
+        for ($i = $index + 1; $i < $count; $i++) {
+            $token = $this->tokens[$i];
+            if ($token === ')') {
+                break;
+            }
+            if (!is_array($token)) {
+                continue;
+            }
+            if ($token[0] === T_AS) {
+                $seen_as = true;
+            } elseif ($token[0] === T_VARIABLE) {
+                if (!$seen_as) {
+                    // Only track a simple `$source` (first variable, no expression)
+                    if ($source_var === null) {
+                        $source_var = $token[1];
+                    }
+                } else {
+                    // Last variable before ')' — handles both `as $v` and `as $k => $v`
+                    $value_var = $token[1];
+                }
+            }
+        }
+        if (!$source_var || !$value_var) {
+            return;
+        }
+        // `foreach ($this as $x)` inside a Multi class iterates its models
+        $source_class = null;
+        if ($source_var === '$this') {
+            $source_class = $this->current_class_name;
+        } elseif (isset($this->variable_types[$source_var])) {
+            $source_class = $this->variable_types[$source_var];
+        }
+        if ($source_class && class_exists($source_class) && is_subclass_of($source_class, 'SystemMultiBase')) {
+            $props = (new ReflectionClass($source_class))->getStaticProperties();
+            if (!empty($props['model_class'])) {
+                $this->variable_types[$value_var] = $props['model_class'];
+                return;
+            }
+        }
+        // Unknown source: clear any stale mapping so a type tracked for this
+        // variable name in an earlier function doesn't bleed into this loop
+        unset($this->variable_types[$value_var]);
+    }
+
+    /**
+     * Follow a chained method call to its final return type. Starting from a
+     * method-name token whose call returns $type, skip that call's argument
+     * list; if a further ->method() follows, map it through
+     * $method_return_types. An unmapped link returns NULL — an unknown chain
+     * must not leave the variable tracked with a wrong intermediate type.
+     */
+    private function followMethodChain($type, $method_index) {
+        $count = count($this->tokens);
+        $i = $this->getNextTokenIndex($method_index);
+        if ($i === null || $this->tokens[$i] !== '(') {
+            return $type; // not a call — nothing chained
+        }
+        // Skip the balanced argument list
+        $paren_depth = 0;
+        for (; $i < $count; $i++) {
+            $token = $this->tokens[$i];
+            if ($token === '(') {
+                $paren_depth++;
+            } elseif ($token === ')') {
+                $paren_depth--;
+                if ($paren_depth === 0) {
+                    break;
+                }
+            }
+        }
+        $next = $this->getNextTokenIndex($i);
+        if ($next === null || !is_array($this->tokens[$next]) || $this->tokens[$next][0] !== T_OBJECT_OPERATOR) {
+            return $type; // chain ends here
+        }
+        $name_index = $this->getNextTokenIndex($next);
+        if ($name_index === null || !is_array($this->tokens[$name_index]) || $this->tokens[$name_index][0] !== T_STRING) {
+            return null; // dynamic member — unknown
+        }
+        $lookup_key = $type . '::' . $this->tokens[$name_index][1];
+        if (!isset($this->method_return_types[$lookup_key])) {
+            return null; // unmapped chain link — unknown
+        }
+        return $this->followMethodChain($this->method_return_types[$lookup_key], $name_index);
     }
 
     /**
@@ -733,15 +1011,21 @@ class MethodExistenceTest {
     }
 
     /**
-     * Check if a call matches a blacklist pattern
+     * Check if a call matches a blacklist pattern.
+     * Names match exactly (so 'start_buttons' cannot flag 'restart_buttons');
+     * an entry ending in '::' is a class-wide prefix (e.g. 'CtldAccount::').
      */
     private function checkBlacklist($type, $pattern) {
         if (!isset($this->blacklist[$type])) {
             return null;
         }
 
+        if (isset($this->blacklist[$type][$pattern])) {
+            return $this->blacklist[$type][$pattern];
+        }
+
         foreach ($this->blacklist[$type] as $blacklisted => $reason) {
-            if (strpos($pattern, $blacklisted) !== false) {
+            if (substr($blacklisted, -2) === '::' && strpos($pattern, $blacklisted) === 0) {
                 return $reason;
             }
         }
@@ -793,6 +1077,9 @@ class MethodExistenceTest {
             } elseif (class_exists($function_name)) {
                 // This is likely a constructor - skip it
                 $skipped++;
+            } elseif ($this->isFunctionDefinedSomewhere($function_name)) {
+                // Defined in a sibling logic/includes file the router loads at runtime
+                $found++;
             } else {
                 $missing++;
                 $issues[] = sprintf("  ✗ Line %4d: %s()", $line, $function_name);
@@ -806,6 +1093,7 @@ class MethodExistenceTest {
             }
         }
 
+        $this->call_errors += $missing;
         echo sprintf("\n✓ Found: %d  ✗ Missing: %d  🚫 Blacklisted: %d  ⊘ Skipped: %d\n\n", $found, $missing, $blacklisted, $skipped);
     }
 
@@ -844,10 +1132,13 @@ class MethodExistenceTest {
 
             // Try to determine the class
             $class_name = null;
+            $tracked = false;
 
-            // 1. Check if we tracked this variable from assignment
-            if ($var_name && isset($this->variable_types[$var_name])) {
-                $class_name = $this->variable_types[$var_name];
+            // 1. Use the type tracked at the call's position in the file
+            // (assignment/foreach bindings in effect at that point)
+            if (!empty($call['tracked_class'])) {
+                $class_name = $call['tracked_class'];
+                $tracked = true;
             }
 
             // 2. Try to infer from variable name
@@ -860,26 +1151,39 @@ class MethodExistenceTest {
             }
 
             if ($class_name) {
-                // Check if method is whitelisted for this class
-                if ($this->isMethodWhitelisted($class_name, $method_name)) {
-                    $whitelisted++;
+                // Class::method blacklist entries also apply to instance calls
+                $blacklist_reason = $this->checkBlacklist('static', "$class_name::$method_name");
+                if ($blacklist_reason) {
+                    $blacklisted++;
+                    $issues[] = sprintf("  🚫 Line %4d: %s->%s() - BLACKLISTED: %s",
+                        $line, $var_name ?: '?', $method_name, $blacklist_reason);
                     continue;
                 }
 
-                // We know the class, check if method exists
-                if (class_exists($class_name) && method_exists($class_name, $method_name)) {
-                    $found++;
-                } else {
-                    // Fix 2: If tracked type doesn't have the method but name-inferred
-                    // type does, the tracked type is likely wrong — prefer the inference
-                    if ($inferred_name && $inferred_name !== $class_name &&
-                        class_exists($inferred_name) && method_exists($inferred_name, $method_name)) {
+                if (class_exists($class_name)) {
+                    // The class is loaded — method_exists is authoritative,
+                    // no whitelist shortcut (a whitelist hit for a DIFFERENT
+                    // class must not excuse a missing method on this one)
+                    if (method_exists($class_name, $method_name)) {
                         $found++;
+                    } elseif (!$tracked) {
+                        // The class was only guessed from the variable's name —
+                        // a guess is not evidence, so a miss is unverifiable,
+                        // not an error
+                        $unknown++;
                     } else {
                         $missing++;
-                        $issues[] = sprintf("  ✗ Line %4d: %s->%s() [inferred class: %s]",
+                        $issues[] = sprintf("  ✗ Line %4d: %s->%s() [tracked class: %s]",
                             $line, $var_name ?: '?', $method_name, $class_name);
                     }
+                } elseif ($this->isMethodWhitelisted($class_name, $method_name)) {
+                    // Class not loadable in this environment — accept its
+                    // documented method surface
+                    $whitelisted++;
+                } else {
+                    // Class identified but not loadable and not documented —
+                    // unverifiable
+                    $unknown++;
                 }
             } else {
                 // Can't determine class
@@ -895,47 +1199,20 @@ class MethodExistenceTest {
             echo "\n";
         }
 
+        $this->call_errors += $missing;
         echo sprintf("✓ Found: %d  ✗ Missing: %d  🚫 Blacklisted: %d  ? Unknown: %d  ⊘ Whitelisted: %d\n\n",
             $found, $missing, $blacklisted, $unknown, $whitelisted);
     }
 
     /**
-     * Check if a method is whitelisted for a class
-     * Also checks parent classes (SystemBase, SystemMultiBase)
-     * If class identification is uncertain, checks if method exists in any whitelist
+     * Check if a method is whitelisted for a class. Consulted only for
+     * classes the validator could not load (loaded classes are verified with
+     * method_exists directly), so this is a strict per-class lookup — a
+     * method documented for one class never excuses a call on another.
      */
     private function isMethodWhitelisted($class_name, $method_name) {
-        // Direct match
-        if (isset($this->common_methods[$class_name]) &&
-            in_array($method_name, $this->common_methods[$class_name])) {
-            return true;
-        }
-
-        // Check if class extends SystemBase
-        if (class_exists($class_name)) {
-            if (is_subclass_of($class_name, 'SystemBase') &&
-                isset($this->common_methods['SystemBase']) &&
-                in_array($method_name, $this->common_methods['SystemBase'])) {
-                return true;
-            }
-
-            // Check if class extends SystemMultiBase
-            if (is_subclass_of($class_name, 'SystemMultiBase') &&
-                isset($this->common_methods['SystemMultiBase']) &&
-                in_array($method_name, $this->common_methods['SystemMultiBase'])) {
-                return true;
-            }
-        }
-
-        // Fallback: If class doesn't exist or doesn't match, check if method is in ANY whitelist
-        // This handles cases where variable type tracking is imperfect
-        foreach ($this->common_methods as $whitelisted_class => $methods) {
-            if (in_array($method_name, $methods)) {
-                return true;
-            }
-        }
-
-        return false;
+        return isset($this->common_methods[$class_name]) &&
+            in_array($method_name, $this->common_methods[$class_name]);
     }
 
     /**
@@ -952,6 +1229,7 @@ class MethodExistenceTest {
 
         $found = 0;
         $missing = 0;
+        $unknown = 0;
         $blacklisted = 0;
         $issues = [];
 
@@ -976,8 +1254,22 @@ class MethodExistenceTest {
                 continue;
             }
 
-            // Resolve class name
-            $resolved_class = $this->resolveClassName($class_name);
+            // The extractor couldn't identify the class (e.g. $var::method(),
+            // complex expressions) — unverifiable, not wrong
+            if ($class_name === 'Unknown') {
+                $unknown++;
+                continue;
+            }
+
+            // Resolve class name — self/static/parent use the class context
+            // captured at parse time
+            if ($class_name === 'self' || $class_name === 'static') {
+                $resolved_class = !empty($call['context_class']) ? $call['context_class'] : $class_name;
+            } elseif ($class_name === 'parent') {
+                $resolved_class = !empty($call['context_parent']) ? $call['context_parent'] : $class_name;
+            } else {
+                $resolved_class = $this->resolveClassName($class_name);
+            }
 
             // Check if class exists
             if (!class_exists($resolved_class)) {
@@ -1002,7 +1294,8 @@ class MethodExistenceTest {
             }
         }
 
-        echo sprintf("\n✓ Found: %d  ✗ Missing: %d  🚫 Blacklisted: %d\n\n", $found, $missing, $blacklisted);
+        $this->call_errors += $missing;
+        echo sprintf("\n✓ Found: %d  ✗ Missing: %d  🚫 Blacklisted: %d  ? Unknown: %d\n\n", $found, $missing, $blacklisted, $unknown);
     }
 
     /**
@@ -1081,6 +1374,61 @@ class MethodExistenceTest {
         }
 
         echo sprintf("\n✓ Safe: %d  🚫 Blacklisted: %d\n\n", $safe, $blacklisted);
+    }
+
+    /**
+     * Check constructor calls: a zero-argument `new X()` is an error when
+     * X::__construct requires parameters. Covers every SystemBase model
+     * (whose constructors require $key) and any other class with required
+     * constructor parameters — verified via reflection, so no per-class
+     * pattern list is needed.
+     */
+    private function checkConstructors() {
+        if (empty($this->constructors)) {
+            echo "No constructor calls found.\n\n";
+            return;
+        }
+
+        echo "CONSTRUCTOR CALLS (" . count($this->constructors) . " total)\n";
+        echo str_repeat("-", 80) . "\n";
+
+        $found = 0;
+        $missing = 0;
+        $unknown = 0;
+        $issues = [];
+
+        foreach ($this->constructors as $call) {
+            $class_name = $this->resolveClassName($call['name']);
+
+            if (!class_exists($class_name)) {
+                $unknown++;
+                continue;
+            }
+
+            $constructor = (new ReflectionClass($class_name))->getConstructor();
+            $required = $constructor ? $constructor->getNumberOfRequiredParameters() : 0;
+
+            if (!empty($call['no_args']) && $required > 0) {
+                $missing++;
+                $hint = is_subclass_of($class_name, 'SystemBase')
+                    ? " - use new {$class_name}(NULL) for new, new {$class_name}(\$id, TRUE) to load"
+                    : '';
+                $issues[] = sprintf("  ✗ Line %4d: new %s() requires %d argument(s)%s",
+                    $call['line'], $call['name'], $required, $hint);
+            } else {
+                $found++;
+            }
+        }
+
+        if (!empty($issues)) {
+            echo "Issues found:\n";
+            foreach ($issues as $issue) {
+                echo $issue . "\n";
+            }
+        }
+
+        $this->call_errors += $missing;
+        echo sprintf("\n✓ OK: %d  ✗ Missing args: %d  ? Unknown class: %d\n\n", $found, $missing, $unknown);
     }
 
     /**
@@ -1229,6 +1577,379 @@ class MethodExistenceTest {
     }
 
     /**
+     * Data-model structure contract. When the file declares SystemBase
+     * subclasses, verify them against the platform model contract
+     * (docs/example_class.php is the annotated reference):
+     *
+     *   ERRORS (✗ — nonzero exit code):
+     *   - $prefix declared, exactly 3 lowercase letters
+     *   - $tablename declared, lowercase snake_case, starts with {prefix}_
+     *   - $pkey_column declared, starts with {prefix}_, present in
+     *     $field_specifications, and flagged 'serial' => true
+     *   - $field_specifications declared and non-empty; every column key is
+     *     lowercase snake_case and starts with {prefix}_; every spec declares
+     *     a 'type' accepted by DatabaseUpdater::acceptedColumnTypeRegex()
+     *   - a SystemMultiBase subclass in the same file whose $model_class
+     *     points back at the model, implementing getMultiResults()
+     *
+     *   ADVISORIES (⚠️ — reported, do not affect exit code):
+     *   - $permanent_delete_actions not declared on the class itself
+     *   - Multi class not named Multi{Model}
+     *   - $prefix shared with another loaded model class
+     *
+     * Checks run via reflection on the live classes (the file has already been
+     * require'd), so they see exactly what SystemBase will see at runtime.
+     */
+    private function checkModelContract() {
+        echo "DATA MODEL CONTRACT\n";
+        echo str_repeat("-", 80) . "\n";
+
+        // Collect classes declared by THIS file
+        $real_path = realpath($this->file_path);
+        $file_models = [];
+        $file_multis = [];
+        foreach (get_declared_classes() as $class) {
+            $reflection = new ReflectionClass($class);
+            if ($reflection->getFileName() !== $real_path || $reflection->isAbstract()) {
+                continue;
+            }
+            if ($reflection->isSubclassOf('SystemBase')) {
+                $file_models[$class] = $reflection;
+            } elseif ($reflection->isSubclassOf('SystemMultiBase')) {
+                $file_multis[$class] = $reflection;
+            }
+        }
+
+        if (empty($file_models)) {
+            echo "✓ No data-model classes in this file\n\n";
+            return;
+        }
+
+        if (!class_exists('DatabaseUpdater')) {
+            require_once(PathHelper::getIncludePath('includes/DatabaseUpdater.php'));
+        }
+
+        // Map model class => Multi class (within this file)
+        $multi_by_model = [];
+        foreach ($file_multis as $multi_class => $reflection) {
+            $props = $reflection->getStaticProperties();
+            if (!empty($props['model_class'])) {
+                $multi_by_model[$props['model_class']] = $multi_class;
+            }
+        }
+
+        // Maps across every loaded model: prefix collisions (advisory),
+        // and prefix → tablename / tablename set for simulating the
+        // deletion-rule auto-detector's source-table guess
+        $prefix_owners = [];
+        $prefix_tables = [];
+        $all_tables = [];
+        foreach (get_declared_classes() as $class) {
+            $reflection = new ReflectionClass($class);
+            if (!$reflection->isSubclassOf('SystemBase') || $reflection->isAbstract()) continue;
+            $props = $reflection->getStaticProperties();
+            if (!empty($props['tablename'])) {
+                $all_tables[$props['tablename']] = $class;
+                if (!empty($props['prefix'])) {
+                    $prefix_tables[$props['prefix']] = $props['tablename'];
+                }
+            }
+            if (isset($file_models[$class])) continue;
+            if (!empty($props['prefix'])) {
+                $prefix_owners[$props['prefix']][] = $class;
+            }
+        }
+
+        $errors = [];
+        $advisories = [];
+        $type_regex = DatabaseUpdater::acceptedColumnTypeRegex();
+
+        foreach ($file_models as $class => $reflection) {
+            $props = $reflection->getStaticProperties();
+            $prefix = $props['prefix'] ?? null;
+            $tablename = $props['tablename'] ?? null;
+            $pkey = $props['pkey_column'] ?? null;
+            $specs = $props['field_specifications'] ?? null;
+
+            // $prefix — exactly 3 lowercase letters
+            if (!is_string($prefix) || $prefix === '') {
+                $errors[] = "$class: \$prefix is not declared";
+                $prefix = null;
+            } elseif (!preg_match('/^[a-z]{3}$/', $prefix)) {
+                $errors[] = "$class: \$prefix '$prefix' must be exactly 3 lowercase letters";
+            }
+
+            // $tablename — snake_case, carries the prefix
+            if (!is_string($tablename) || $tablename === '') {
+                $errors[] = "$class: \$tablename is not declared";
+            } else {
+                if (!preg_match('/^[a-z][a-z0-9_]*$/', $tablename)) {
+                    $errors[] = "$class: \$tablename '$tablename' must be lowercase snake_case";
+                }
+                if ($prefix && strpos($tablename, $prefix . '_') !== 0) {
+                    $errors[] = "$class: \$tablename '$tablename' must start with '{$prefix}_' (the class prefix)";
+                }
+            }
+
+            // $field_specifications — present, prefixed keys, valid types
+            if (!is_array($specs) || empty($specs)) {
+                $errors[] = "$class: \$field_specifications is missing or empty";
+                $specs = [];
+            }
+            foreach ($specs as $column => $spec) {
+                if (!preg_match('/^[a-z][a-z0-9_]*$/', $column)) {
+                    $errors[] = "$class: column '$column' must be lowercase snake_case";
+                }
+                if ($prefix && strpos($column, $prefix . '_') !== 0) {
+                    $errors[] = "$class: column '$column' must start with '{$prefix}_' (the class prefix)";
+                }
+                if (!is_array($spec) || empty($spec['type'])) {
+                    $errors[] = "$class: column '$column' has no 'type'";
+                } elseif (!preg_match($type_regex, trim($spec['type']))) {
+                    $errors[] = "$class: column '$column' type '{$spec['type']}' is not an accepted column type "
+                              . "(see DatabaseUpdater::acceptedColumnTypeRegex)";
+                }
+            }
+
+            // $pkey_column — declared, prefixed, specified, serial
+            if (!is_string($pkey) || $pkey === '') {
+                $errors[] = "$class: \$pkey_column is not declared";
+            } else {
+                if ($prefix && strpos($pkey, $prefix . '_') !== 0) {
+                    $errors[] = "$class: \$pkey_column '$pkey' must start with '{$prefix}_' (the class prefix)";
+                }
+                if ($specs && !isset($specs[$pkey])) {
+                    $errors[] = "$class: \$pkey_column '$pkey' is not in \$field_specifications";
+                } elseif ($specs && empty($specs[$pkey]['serial'])) {
+                    $errors[] = "$class: primary key '$pkey' must declare 'serial' => true "
+                              . "(int8 + serial is the platform primary-key convention)";
+                }
+            }
+
+            // Multi collection class — required, in the same file
+            if (!isset($multi_by_model[$class])) {
+                $errors[] = "$class: no SystemMultiBase collection class in this file with "
+                          . "\$model_class = '$class' (every model requires its Multi class)";
+            } else {
+                $multi_class = $multi_by_model[$class];
+                if (!method_exists($multi_class, 'getMultiResults')) {
+                    $errors[] = "$multi_class: getMultiResults() is not implemented";
+                }
+                if ($multi_class !== 'Multi' . $class) {
+                    $advisories[] = "$multi_class: collection class is conventionally named Multi{$class}";
+                }
+            }
+
+            // $permanent_delete_actions — must be declared per class (advisory:
+            // most legacy models inherit the SystemBase default)
+            $pda = $reflection->getProperty('permanent_delete_actions');
+            if ($pda->getDeclaringClass()->getName() !== $class) {
+                $advisories[] = "$class: \$permanent_delete_actions is not declared on the class itself "
+                              . "(define it, even if empty — see docs/deletion_system.md)";
+            }
+
+            // Prefix collision with other loaded models (advisory)
+            if ($prefix && !empty($prefix_owners[$prefix])) {
+                $advisories[] = "$class: \$prefix '$prefix' is also used by "
+                              . implode(', ', $prefix_owners[$prefix])
+                              . " — prefer a unique prefix for new models";
+            }
+
+            // $foreign_key_actions overrides that don't auto-register. The
+            // detector (data/deletion_rule_class.php) resolves a column's
+            // source table by stripping the declaring model's own prefix and
+            // looking up the remainder's first segment in a real
+            // prefix -> tablename registry built from every loaded model
+            // (never a guess). A key that neither resolves that way nor
+            // declares an explicit 'source_table'/'source_class' override
+            // will not register at all. See docs/deletion_system.md.
+            $fk_actions = $props['foreign_key_actions'] ?? [];
+            foreach ($fk_actions as $column => $override) {
+                if (isset($override['source_table']) || isset($override['source_class'])) {
+                    continue;
+                }
+                if ($this->resolvesFkColumnByConvention($column, $prefix, $prefix_tables)) {
+                    continue;
+                }
+                $advisories[] = "$class: \$foreign_key_actions['$column'] does not resolve to a known source "
+                              . "table by naming convention, and no 'source_table' or 'source_class' override is "
+                              . "given — this rule will NOT register. Add 'source_table' (or 'source_class') to "
+                              . "the override.";
+            }
+        }
+
+        if (!empty($errors)) {
+            echo "Errors:\n";
+            foreach ($errors as $error) {
+                echo "  ✗ $error\n";
+            }
+        }
+        if (!empty($advisories)) {
+            echo ($errors ? "\n" : "") . "Advisories:\n";
+            foreach ($advisories as $advisory) {
+                echo "  ⚠️  $advisory\n";
+            }
+        }
+        if (empty($errors) && empty($advisories)) {
+            echo "✓ " . count($file_models) . " model class(es) satisfy the data-model contract\n";
+        }
+
+        $this->contract_errors += count($errors);
+        echo sprintf("\n✗ Contract errors: %d  ⚠️  Advisories: %d\n\n", count($errors), count($advisories));
+    }
+
+    /**
+     * Mirror of DeletionRule::getSourceTableFromColumn() so the model-contract
+     * pass can predict whether the auto-detector will register a given FK
+     * column: strip the declaring model's own prefix, then check whether the
+     * remainder's first segment is a known model prefix and the remainder
+     * contains '_id'. Must stay in sync with data/deletion_rule_class.php.
+     */
+    private function resolvesFkColumnByConvention($column, $own_prefix, $prefix_tables) {
+        if (!$own_prefix) {
+            return false;
+        }
+        $own_prefix_str = $own_prefix . '_';
+        if (strpos($column, $own_prefix_str) !== 0) {
+            return false;
+        }
+        $remainder = substr($column, strlen($own_prefix_str));
+        if (strpos($remainder, '_id') === false) {
+            return false;
+        }
+        $first_segment = strstr($remainder, '_', true);
+        if ($first_segment === false || $first_segment === '') {
+            return false;
+        }
+        return isset($prefix_tables[$first_segment]);
+    }
+
+    /**
+     * Logic-file structure contract. Applied when the file lives in a logic/
+     * directory and is named *_logic.php (docs/logic_architecture.md is the
+     * reference):
+     *
+     *   ERRORS (✗ — nonzero exit code):
+     *   - Core logic/ file must define its entry function, named exactly after
+     *     the file basename. Plugin logic functions carry the plugin name
+     *     (file profile_chat_logic.php in plugin joinery_ai may define
+     *     profile_joinery_ai_chat_logic) — for plugins a missing entry is an
+     *     advisory instead, because shared-helper logic files are legitimate.
+     *   - The entry function takes a single required parameter ($input).
+     *   - No exit()/die() anywhere in a logic file — every code path must
+     *     return a LogicResult.
+     *
+     *   ADVISORIES (⚠️):
+     *   - throw outside any lexical try block (uncontained throws should be
+     *     converted to LogicResult::error(); throws caught in-function are
+     *     accepted practice)
+     *   - entry function missing the `array` parameter type or the
+     *     `: LogicResult` return type
+     */
+    private function checkLogicContract() {
+        echo "LOGIC FILE CONTRACT\n";
+        echo str_repeat("-", 80) . "\n";
+
+        $real = str_replace('\\', '/', realpath($this->file_path));
+        if (!preg_match('~(?:^|/)(?:(plugins|theme)/([^/]+)/)?logic/([a-z0-9_]+_logic)\.php$~', $real, $m)) {
+            echo "✓ Not a logic file\n\n";
+            return;
+        }
+        $plugin = ($m[1] === 'plugins') ? $m[2] : '';
+        $basename = $m[3];
+
+        $errors = [];
+        $advisories = [];
+
+        // Locate the entry function: exact basename, or (plugins) the
+        // basename with the plugin name inserted
+        $entry = null;
+        foreach ($this->extractGlobalFunctionNames($this->file_path) as $fn) {
+            if ($fn === $basename || ($plugin && str_replace($plugin . '_', '', $fn) === $basename)) {
+                $entry = $fn;
+                break;
+            }
+        }
+
+        if ($entry === null) {
+            $message = "no entry function for '$basename.php' — expected {$basename}()"
+                . ($plugin ? " (or the route-named variant carrying '{$plugin}')" : '');
+            if ($plugin) {
+                $advisories[] = "$message. Fine for a shared-helper logic file; a page logic file needs it.";
+            } else {
+                $errors[] = $message;
+            }
+        } elseif (function_exists($entry)) {
+            $reflection = new ReflectionFunction($entry);
+            if ($reflection->getNumberOfRequiredParameters() > 1) {
+                $errors[] = "{$entry}() must take a single \$input array (merged GET/POST/route params) — "
+                          . $reflection->getNumberOfRequiredParameters() . " required parameters found";
+            }
+            $params = $reflection->getParameters();
+            if (isset($params[0])) {
+                $param_type = $params[0]->getType();
+                if (!$param_type || (string)$param_type !== 'array') {
+                    $advisories[] = "{$entry}() first parameter should be typed `array \$input`";
+                }
+            }
+            $return_type = $reflection->getReturnType();
+            if (!$return_type || (string)$return_type !== 'LogicResult') {
+                $advisories[] = "{$entry}() should declare `: LogicResult` as its return type";
+            }
+        }
+
+        // exit()/die() are forbidden in logic files; throw is accepted only
+        // inside a lexical try block (locally contained)
+        $depth = 0;
+        $try_depths = [];
+        foreach ($this->tokens as $token) {
+            if (!is_array($token)) {
+                if ($token === '{') {
+                    $depth++;
+                } elseif ($token === '}') {
+                    while ($try_depths && end($try_depths) > $depth) {
+                        array_pop($try_depths);
+                    }
+                    $depth--;
+                }
+                continue;
+            }
+            if ($token[0] === T_CURLY_OPEN || $token[0] === T_DOLLAR_OPEN_CURLY_BRACES) {
+                $depth++;
+                continue;
+            }
+            if ($token[0] === T_TRY) {
+                $try_depths[] = $depth + 1;
+            } elseif ($token[0] === T_EXIT) {
+                $errors[] = "line {$token[2]}: " . trim($token[1]) . "() is forbidden in logic files — "
+                          . "return LogicResult::redirect()/error() instead (see docs/logic_architecture.md)";
+            } elseif ($token[0] === T_THROW && empty($try_depths)) {
+                $advisories[] = "line {$token[2]}: uncontained throw — return LogicResult::error() "
+                              . "or contain it in a try block";
+            }
+        }
+
+        if (!empty($errors)) {
+            echo "Errors:\n";
+            foreach ($errors as $error) {
+                echo "  ✗ $error\n";
+            }
+        }
+        if (!empty($advisories)) {
+            echo ($errors ? "\n" : "") . "Advisories:\n";
+            foreach ($advisories as $advisory) {
+                echo "  ⚠️  $advisory\n";
+            }
+        }
+        if (empty($errors) && empty($advisories)) {
+            echo "✓ Logic file satisfies the structure contract" . ($entry ? " (entry: {$entry})" : "") . "\n";
+        }
+
+        $this->contract_errors += count($errors);
+        echo sprintf("\n✗ Contract errors: %d  ⚠️  Advisories: %d\n\n", count($errors), count($advisories));
+    }
+
+    /**
      * Truncate long patterns for display
      */
     private function truncatePattern($pattern, $max_length = 50) {
@@ -1280,8 +2001,10 @@ if ($file_path[0] !== '/') {
 
 try {
     $tester = new MethodExistenceTest($file_path);
-    $tester->analyze();
-    exit(0);
+    $contract_errors = $tester->analyze();
+    // Model-contract violations are hard failures; other findings are
+    // reported in the output but do not change the exit status.
+    exit($contract_errors > 0 ? 1 : 0);
 } catch (Exception $e) {
     echo "ERROR: " . $e->getMessage() . "\n";
     exit(1);

@@ -2,7 +2,7 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -38,8 +38,8 @@ class ManagementJob extends SystemBase {
 	);
 
 	protected static $foreign_key_actions = [
-		'mjb_mgn_node_id' => ['table' => 'mgn_managed_nodes', 'column' => 'mgn_id', 'action' => 'set_null'],
-		'mjb_created_by'  => ['table' => 'usr_users', 'column' => 'usr_user_id', 'action' => 'set_null'],
+		'mjb_mgn_node_id' => ['action' => 'null'],
+		'mjb_created_by'  => ['action' => 'null', 'source_table' => 'usr_users'],
 	];
 
 	/**

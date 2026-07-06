@@ -72,7 +72,9 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	const USER_DELETED = 3;
 
 	protected static $foreign_key_actions = [
-		'usr_pic_picture_id' => ['action' => 'null'],
+		// 'pic' isn't a model prefix (the column stores a File id directly),
+		// so it doesn't fit the {prefix}_{target_prefix}_..._id convention.
+		'usr_pic_picture_id' => ['action' => 'null', 'source_table' => 'fil_files'],
 	];
 
 	// Password-change detection for API session key revocation. The hash as
