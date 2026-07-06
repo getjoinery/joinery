@@ -20,6 +20,16 @@ class AiConversation extends SystemBase {
     public static $tablename = 'aic_conversations';
     public static $pkey_column = 'aic_conversation_id';
 
+    // aic_owner_user_id doesn't fit the {prefix}_{owner_prefix}_..._id
+    // convention (the owning User's own prefix isn't in the column), so it
+    // needs an explicit source table. Action is permanent_delete rather than
+    // a flat cascade because each conversation has its own message/attachment
+    // cleanup (see AiConversationMessage::permanent_delete()) that a flat
+    // DELETE would bypass.
+    protected static $foreign_key_actions = [
+        'aic_owner_user_id' => ['action' => 'permanent_delete', 'source_table' => 'usr_users'],
+    ];
+
     public static $field_specifications = array(
         'aic_conversation_id'    => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
         'aic_owner_user_id'      => array('type'=>'int4', 'required'=>true),

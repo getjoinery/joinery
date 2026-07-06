@@ -12,18 +12,14 @@
  *
  * Cascade: the platform cascades via application-level deletion rules
  * (del_deletion_rules, consulted by SystemBase::permanent_delete), not DB FK
- * constraints. The user→grant cascade auto-registers and works (deleting a user
- * removes their grants). The alias→grant cascade is declared in
- * $foreign_key_actions but the core rule auto-detector only recognizes
- * four-segment FK columns, so the six-segment ieg_iea_inbound_email_alias_id
- * does not auto-register (a plugin-wide core limitation — the iem table's
- * alias/domain rules are likewise absent). The decisive guard is therefore at
- * the read layer: MailboxViewer::accessibleAliasIds() excludes soft-deleted
- * aliases, so a stale grant to a removed mailbox grants no access. The
- * declaration is kept so the cascade registers automatically if core widens the
- * detector later.
+ * constraints. Both the user→grant and alias→grant cascades auto-register from
+ * $foreign_key_actions (deleting a user or deleting an alias each remove the
+ * grants that reference it). MailboxViewer::accessibleAliasIds() also excludes
+ * soft-deleted aliases at the read layer, independent of the cascade — belt
+ * and suspenders against a grant to a mailbox that was soft-deleted rather than
+ * permanently deleted.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));

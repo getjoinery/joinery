@@ -291,6 +291,9 @@ class PluginHelper extends ComponentBase {
     /**
      * Register deletion rules for all active plugins
      * This is useful when rebuilding the deletion rules system
+     *
+     * @return array Warning strings from DeletionRule::registerModelsFromDiscovery()
+     *   for any declared $foreign_key_actions override that couldn't be registered
      */
     public static function registerAllActiveDeletionRules() {
         require_once(PathHelper::getIncludePath('data/deletion_rule_class.php'));
@@ -300,17 +303,19 @@ class PluginHelper extends ComponentBase {
         $plugins = new MultiPlugin(['plg_active' => 1]);
         $plugins->load();
 
+        $warnings = [];
         foreach ($plugins as $plugin) {
             $plugin_name = $plugin->get('plg_name');
             try {
-                DeletionRule::registerModelsFromDiscovery([
+                $warnings = array_merge($warnings, DeletionRule::registerModelsFromDiscovery([
                     'include_plugins' => true,
                     'plugin_filter' => $plugin_name
-                ]);
+                ]));
             } catch (Exception $e) {
                 error_log("Failed to register deletion rules for plugin {$plugin_name}: " . $e->getMessage());
             }
         }
+        return $warnings;
     }
 
     // Plugin-specific getters

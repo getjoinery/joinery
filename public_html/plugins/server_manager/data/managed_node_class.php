@@ -2,7 +2,7 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the control plane.
  *
- * @version 1.3.1
+ * @version 1.3.2
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -17,7 +17,7 @@ class ManagedNode extends SystemBase {
 	public static $json_vars = array('mgn_last_status_data');
 
 	protected static $foreign_key_actions = [
-		'mgn_mgh_host_id' => ['table' => 'mgh_managed_hosts', 'column' => 'mgh_id', 'action' => 'set_null'],
+		'mgn_mgh_host_id' => ['action' => 'null'],
 	];
 
 	public static $field_specifications = array(

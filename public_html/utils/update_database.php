@@ -265,11 +265,14 @@
 
 		try {
 			// Register rules for core models only, without affecting plugin rules
-			DeletionRule::registerModelsFromDiscovery([
+			$deletion_rule_warnings = DeletionRule::registerModelsFromDiscovery([
 				'include_plugins' => false,
 				'verbose' => $verbose
 			]);
 			echo "✓ Core deletion rules registered successfully<br>\n";
+			foreach ($deletion_rule_warnings as $warning) {
+				echo "⚠ $warning<br>\n";
+			}
 		} catch (Exception $e) {
 			echo "⚠ Warning: Failed to register deletion rules - " . $e->getMessage() . "<br>\n";
 			// Don't fail the entire update if deletion rule registration fails

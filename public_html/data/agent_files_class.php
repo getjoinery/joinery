@@ -40,7 +40,9 @@ class AgentFile extends SystemBase {
 	const TEMPLATE_PATH = 'maintenance_scripts/install_tools/default_agents_template.md';
 
 	protected static $foreign_key_actions = array(
-		'agf_candidate_for' => array('action' => 'cascade'),
+		// Self-referential (a candidate row points at the file it would replace),
+		// so it doesn't fit the {prefix}_{target_prefix}_..._id convention.
+		'agf_candidate_for' => array('action' => 'cascade', 'source_table' => 'agf_agent_files'),
 	);
 
 	public static $field_specifications = array(

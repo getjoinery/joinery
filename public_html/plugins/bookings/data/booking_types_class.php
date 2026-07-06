@@ -54,6 +54,13 @@ class BookingType extends SystemBase {
 
 	public static $field_constraints = array();
 
+	// A survey attached to a booking type for response collection is
+	// optional - deleting the survey should just detach it, not delete the
+	// booking type.
+	protected static $foreign_key_actions = [
+		'bkt_svy_survey_id' => ['action' => 'null'],
+	];
+
 	/** Resolve a booking type by its globally-unique public slug. */
 	static function GetBySlug($slug) {
 		$results = new MultiBookingType(array('slug' => $slug, 'deleted' => false));

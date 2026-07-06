@@ -61,11 +61,13 @@ class Event extends SystemBase {	public static $prefix = 'evt';
 	public static $url_namespace = 'event';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
 
 	protected static $foreign_key_actions = [
-		'evt_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED],
 		'evt_usr_user_id_leader' => ['action' => 'set_value', 'value' => User::USER_DELETED],
 		'evt_ety_event_type_id' => ['action' => 'prevent', 'message' => 'Cannot delete event type - events exist'],
 		'evt_loc_location_id' => ['action' => 'null'],
 		'evt_fil_file_id' => ['action' => 'null'],
+		// A survey attached to an event for response collection is optional -
+		// deleting the survey should just detach it, not delete the event.
+		'evt_svy_survey_id' => ['action' => 'null'],
 	];
 
 	const STATUS_ACTIVE = 1;

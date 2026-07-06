@@ -16,7 +16,9 @@ class AdminMenu extends SystemBase {	public static $prefix = 'amu';
 	public static $pkey_column = 'amu_admin_menu_id';
 
 	protected static $foreign_key_actions = [
-		'adm_adm_admin_menu_id_parent' => ['action' => 'null']
+		// Self-referential (a submenu points at its parent menu), so it
+		// doesn't fit the {prefix}_{target_prefix}_..._id convention.
+		'amu_parent_menu_id' => ['action' => 'null', 'source_table' => 'amu_admin_menus'],
 	];
 
 	/**

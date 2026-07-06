@@ -19,6 +19,12 @@ class Recipe extends SystemBase {
         'rcp_recipe_id'           => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
         'rcp_name'                => array('type'=>'varchar(255)', 'required'=>true),
         'rcp_prompt'              => array('type'=>'text'),
+        // agent: the model drives via tools, one conversation per run.
+        // pipeline: PHP drives, one bounded exchange per item — see
+        // specs/joinery_ai_item_pipeline.md.
+        'rcp_mode'                => array('type'=>'varchar(20)', 'default'=>'agent'),
+        'rcp_pipeline_job'        => array('type'=>'varchar(100)'),
+        'rcp_source_config'       => array('type'=>'jsonb'),
         'rcp_schedule_frequency'  => array('type'=>'varchar(20)', 'default'=>'weekly'),
         'rcp_schedule_day_of_week'=> array('type'=>'int4'),
         'rcp_schedule_time'       => array('type'=>'time'),
@@ -45,13 +51,65 @@ class Recipe extends SystemBase {
         'rcp_delete_time'         => array('type'=>'timestamp(6)'),
     );
 
-    public static $json_vars = array('rcp_allowed_tools', 'rcp_allowed_models', 'rcp_allowed_actions');
+    public static $json_vars = array('rcp_allowed_tools', 'rcp_allowed_models', 'rcp_allowed_actions',
+        'rcp_source_config');
+
+    // rcp_owner_user_id doesn't fit the {prefix}_{owner_prefix}_..._id
+    // convention (the owning User's own prefix isn't in the column), so it
+    // needs an explicit source table to cascade correctly on user deletion.
+    protected static $foreign_key_actions = [
+        'rcp_owner_user_id' => ['action' => 'cascade', 'source_table' => 'usr_users'],
+    ];
+
+    const MODE_AGENT    = 'agent';
+    const MODE_PIPELINE = 'pipeline';
 
     function authenticate_write($data) {
         if ($data['current_user_permission'] < 10) {
             throw new SystemAuthenticationError(
                 'Joinery AI recipes require permission level 10 to edit.');
         }
+    }
+
+    /**
+     * Validation only (per the prepare() rule — see docs/logic_architecture.md /
+     * repo conventions: prepare() isn't guaranteed to run before save(), so it
+     * never mutates state, only rejects invalid state). Pipeline mode requires
+     * a registered job whose configDescriptor() the stored rcp_source_config
+     * must satisfy — coerced and re-validated at read time by PipelineRunner,
+     * not persisted here.
+     */
+    function prepare() {
+        if ((string)$this->get('rcp_mode') !== self::MODE_PIPELINE) return;
+
+        require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobRegistry.php'));
+        require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/DescriptorValidator.php'));
+
+        $job_id = (string)$this->get('rcp_pipeline_job');
+        $job = PipelineJobRegistry::get($job_id);
+        if ($job === null) {
+            throw new RecipeException(
+                "Pipeline recipes require a registered job; '$job_id' is not registered.");
+        }
+
+        try {
+            $coerced = DescriptorValidator::coerce($job->configDescriptor(), self::decodeSourceConfig($this));
+            $job->validateConfig($coerced, $this);
+        } catch (InvalidArgumentException $e) {
+            throw new RecipeException($e->getMessage());
+        }
+    }
+
+    /** Decode rcp_source_config (jsonb, may arrive as a JSON string or an
+     *  already-decoded array) to a plain array. Shared by prepare() and
+     *  PipelineRunner so both read the column the same way. */
+    public static function decodeSourceConfig(Recipe $recipe): array {
+        $value = $recipe->get('rcp_source_config');
+        if (is_string($value)) {
+            $decoded = json_decode($value, true);
+            return is_array($decoded) ? $decoded : [];
+        }
+        return is_array($value) ? $value : [];
     }
 
 }

@@ -69,13 +69,12 @@ class AiConversationMessage extends SystemBase {
 
     /**
      * Permanently delete this message and clean up its attachment links (which in
-     * turn delete the uploaded File bytes). The deletion-rule auto-detector can't
-     * reach the attachment table from a message FK — the pattern
-     * {prefix}_{src}_{entity}_id would resolve `aia_aim_message_id` to the
-     * non-existent `aim_messages`, not `aim_conversation_messages` — so this edge
-     * is handled explicitly here rather than by an auto-registered rule. Reached
-     * both on a direct message delete and when a conversation is deleted (its
-     * aic→aim rule is `permanent_delete`, which loads each message and calls this).
+     * turn delete the uploaded File bytes), explicitly and in order, before the
+     * message row itself is deleted - each link's own File cleanup (cloud/disk
+     * bytes, not just the row) needs a real permanent_delete() call, not a flat
+     * cascade. Reached both on a direct message delete and when a conversation
+     * is deleted (its aic→aim rule is `permanent_delete`, which loads each
+     * message and calls this).
      *
      * A link's permanent_delete() is let to propagate rather than caught here: if
      * it fails, this message must NOT be deleted out from under a still-live
