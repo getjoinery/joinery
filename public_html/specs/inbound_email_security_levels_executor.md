@@ -137,7 +137,7 @@ erroring:
 | `inbound_email/mailboxes` | `logic/mailboxes_logic.php` | expose each mailbox's level + a `locked` state for the switcher |
 | `inbound_email/thread_action` | `logic/thread_action_logic.php` | state mutations (mark/star/delete) are cleartext-metadata — **unaffected**, keep working while locked |
 
-The native unlock ceremony is the passkey `mail-kek` derivation over `/api/v1` (passkeys +
+The native unlock ceremony is the passkey `vault-kek` derivation over `/api/v1` (passkeys +
 encryption packages), opening the same server-side window.
 
 ## Phase 4 — AI processing & spam learning (key-gate, not re-plumb)
@@ -153,7 +153,7 @@ around 163–166:
     side-queue at any level.
   - **Window open** → the sealed fields must be **decrypted in-window** before returning to
     the model. Route through the message model's in-window decrypt accessor (encryption
-    package's `MailboxCrypto`), not raw ciphertext columns — this is the one genuinely
+    package's `VaultCrypto`), not raw ciphertext columns — this is the one genuinely
     cross-plugin seam; keep the decrypt in the mail plugin and have `ModelQueryExecutor`
     consult a model-declared "sealed fields" hook (same discipline as the File decrypt hook
     and the DKIM signer hook). Standard rows: unchanged (gate always open).

@@ -8,9 +8,36 @@ signatures, and acceptance checks. Where they disagree on intent, the design spe
 governs; where the design spec's *literal wording* collides with the code as built, this
 document resolves it (see Phase 4's ordering resolution) and is authoritative on the
 mechanics.
-**Depends on (build first):** `specs/passkeys_core_executor.md` — this package is the
-`mail-kek` PRF consumer and subscribes to the passkey revocation-veto hook. Do not start
-until `PasskeyService` exists.
+**Depends on (build first):** `specs/passkeys_core_executor.md` (the `vault-kek` PRF context)
+and `specs/sealed_vault_core_executor.md` (the shared crypto core, key hierarchy, and unlock
+window — see the Vault baseline below). Do not start until `PasskeyService` and the vault
+exist.
+
+### Vault baseline (retarget — read before executing)
+
+The key hierarchy and unlock window are **not built here** — they are the shared core vault
+(`specs/sealed_vault_core_executor.md`), consumed by mail, AI chat, and later drive/passwords.
+This package's **Phase 1** (crypto helpers), **Phase 2** (key hierarchy), **Phase 3** (unlock
+window), the unlocker floor (2.4), **Phase 8** (key rotation), and the backup/recovery content
+are **superseded** by the vault package — build them there, once, not here. They remain below
+only as the detailed record that seeded the vault; **do not build them twice.** Apply these
+substitutions throughout this package:
+
+- `MailboxCrypto` → core **`VaultCrypto`** (mail supplies its own AD strings, e.g. `mail:{id}:{field}`)
+- `MailboxUnlock` → core **`VaultUnlock`** (`MailboxUnlock::open/secretKey/close` →
+  `VaultUnlock::open/secretKey/close`)
+- the `iek`/`iew` tables → core **`uev`/`uew`**; the `mailbox_unlock_*` endpoints → core
+  **`vault_unlock_*`**; PRF context `mail-kek` → **`vault-kek`**
+- the APCu/swap host hardening (Phase 10) is the vault's core `VaultHealth` check, not a mail one
+
+**Mail's own build is Phases 4, 5, 6, 7, 9, 10** — its content sealing, the ingest reorder,
+the File-decrypt-hook *registration* (the hook itself is core), the FTS index, no-sideways-
+copies, backfill, and mail-specific deployment. The per-message sealed-DEK column
+(`iem_sealed_key`) stays on the mail row (Phase 4.4) — that is the one key-related thing mail
+owns, per the vault consumer contract. Mail's key-rotation participation is a **re-seal
+callback** it registers with the vault ceremony (re-seal each `iem_sealed_key`; delete the
+FTS blob), not its own ceremony.
+
 ### Naming baseline (rename interaction — read before executing)
 
 **Recommended order: run `specs/plugin_rename_inbound_email_to_mailbox.md` FIRST, then
@@ -28,9 +55,11 @@ exactly **two** substitutions everywhere below — nothing else changes:
 2. Setting-key prefix: `inbound_email_…` → `mailbox_…` (so `inbound_email_unlock_idle_minutes`
    becomes `mailbox_unlock_idle_minutes`)
 
-**Rename-invariant (do NOT change):** table/column prefixes (`iem_`/`iea_`/`ima_`/`iek_`/
-`iew_`), PHP class names (`InboundEmailRouter`, `MailboxService`, `InboundEmailHealth`, the
-new `MailboxCrypto`/`MailboxUnlock`/`MailboxIndex`), data-class filenames
+**Rename-invariant (do NOT change):** table/column prefixes (`iem_`/`iea_`/`ima_`), PHP class
+names (`InboundEmailRouter`, `MailboxService`, `InboundEmailHealth`, the new `MailboxIndex` —
+note `MailboxCrypto`/`MailboxUnlock` and the `iek_`/`iew_` tables are superseded by the core
+vault per the Vault baseline above; `VaultCrypto`/`VaultUnlock`/`uev`/`uew` are core and the
+rename never touches them), data-class filenames
 (`inbound_email_*_class.php` — the rename keeps these), task class names, the
 `utils/inbound_email_handler.php` basename, and every line number cited. If the rename is
 *not* run first, use the paths/settings exactly as written below.
@@ -39,10 +68,7 @@ new `MailboxCrypto`/`MailboxUnlock`/`MailboxIndex`), data-class filenames
 
 | Area | Files (real paths, verified) |
 |---|---|
-| New generic crypto (core) | `includes/SealedBox.php` (sibling to `includes/SecretBox.php`) |
-| New mail crypto orchestration | `plugins/inbound_email/includes/MailboxCrypto.php` |
-| New key hierarchy | `plugins/inbound_email/data/inbound_email_key_class.php`, `…/inbound_email_key_wrapping_class.php` |
-| New unlock window | `plugins/inbound_email/includes/MailboxUnlock.php` + unlock/lock logic endpoints |
+| Crypto core, key hierarchy, unlock window | **built by the vault** — `SealedBox`/`VaultCrypto`/`VaultUnlock`, `uev`/`uew` tables (`specs/sealed_vault_core_executor.md`). Mail consumes them. |
 | New search engine | `plugins/inbound_email/includes/MailboxIndex.php` + a `/dev/shm` sweep task |
 | Ingest reorder + seal | `plugins/inbound_email/includes/InboundEmailRouter.php` (`storeMessage()` ~336–423, `extractAttachmentsToFiles()` ~472–524) |
 | Message schema | `plugins/inbound_email/data/inbound_email_message_class.php` (`$field_specifications`, `getMultiResults()` ~332–361) |

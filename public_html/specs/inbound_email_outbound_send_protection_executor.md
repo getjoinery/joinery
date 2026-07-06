@@ -7,8 +7,8 @@ the four closures, and the resolved "offer both postures from one build" decisio
 the *how*.
 **Depends on (build first):** `specs/passkeys_core_executor.md` and
 `specs/inbound_email_encryption_at_rest_executor.md`. This package reuses that package's
-`SealedBox` (the `crypto_box_seal` envelope), the per-user key hierarchy (`iek`/`iew`), and
-the `MailboxUnlock` window — the DKIM private key seals to the **same** user public key and
+`SealedBox` (the `crypto_box_seal` envelope), the per-user key hierarchy (`uev`/`uew`), and
+the `VaultUnlock` window — the DKIM private key seals to the **same** user public key and
 unwraps **in-window**. Do not start until those exist.
 
 ### Naming baseline (rename interaction)
@@ -37,7 +37,7 @@ rename-invariant. Core files under `includes/` (`EmailSender`, `SmtpProvider`,
 ## Phase 0 — Preflight
 
 Branch `outbound-send-protection`. Confirm the encryption package's `SealedBox`,
-`MailboxUnlock`, and `iek`/`iew` exist. No new dependencies (PHPMailer already present; it
+`VaultUnlock`, and `uev`/`uew` exist. No new dependencies (PHPMailer already present; it
 signs natively via `DKIM_private_string`).
 
 ## Phase 1 — Domain schema (protected identity + sealed DKIM)
@@ -84,10 +84,10 @@ is not a mailbox compose.
 `resolveFor(string $from_domain): ?array`:
 1. `InboundEmailDomain::GetByDomain($from_domain)`; return null unless
    `ied_is_protected_identity`.
-2. Require an **open unlock window** for the owner (`MailboxUnlock::secretKey`); null →
+2. Require an **open unlock window** for the owner (`VaultUnlock::secretKey`); null →
    throw a locked-state signal so the compose path prompts one-tap unlock (levels spec's
    locked-state contract) rather than silently sending unsigned.
-3. Unwrap: `SealedBox::openDek(ied_dkim_sealed_key, iek_public_key, secret_key)` → the DKIM
+3. Unwrap: `SealedBox::openDek(ied_dkim_sealed_key, uev_public_key, secret_key)` → the DKIM
    private key string (openDek opens any `crypto_box_seal` blob, not only DEKs).
 4. Return `['domain'=>$from_domain, 'selector'=>ied_dkim_selector, 'private_string'=>$key]`.
 The key is used in-memory for the send and never written to disk / never handed to
@@ -152,7 +152,7 @@ In `InboundEmailSetupCheck::checkDomain()` (495), branch on `ied_is_protected_id
 All in-window (they need the unwrapped secret key to seal the DKIM key).
 
 - **Enable protection** `logic/mailbox_protect_domain_logic.php`: generate a DKIM keypair;
-  `SealedBox::sealDek(dkim_private, iek_public_key)` → `ied_dkim_sealed_key`; store the
+  `SealedBox::sealDek(dkim_private, uev_public_key)` → `ied_dkim_sealed_key`; store the
   public half in `ied_dkim_public_dns` + a fresh `ied_dkim_selector`; show the DNS to
   publish (new DKIM selector record, tightened SPF `-all`, strict DMARC
   `p=reject; aspf=s; adkim=s`, forwarding-subdomain SPF). **Verify via the Setup tab before

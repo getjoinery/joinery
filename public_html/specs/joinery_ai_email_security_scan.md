@@ -111,9 +111,9 @@ under `tests/` with a fixture raw message.
 
 ### 2. The pipeline job
 
-`plugins/joinery_ai/recipe_tools/EmailSecurityScanJob.php` (or a `jobs/`
-sibling directory if preferred at implementation time), registered in
-`PipelineJobRegistry` as `email_security_scan`:
+`plugins/joinery_ai/pipeline_jobs/EmailSecurityScanJob.php` — the
+`pipeline_jobs/` directory established by the pipeline spec's executor notes
+(auto-discovered by `PipelineJobRegistry`), job id `email_security_scan`:
 
 - `configDescriptor()` / `validateConfig()` — one setting: the **mailbox
   alias** to scan. Validation requires the recipe owner to hold a grant on it
@@ -207,6 +207,57 @@ nothing about scope, flat per-item cost, local = $0). Job-specific points:
 5. Mailbox reader badge + banner.
 6. `php -l` + `validate_php_file.php` on every touched file; bump plugin
    versions (`joinery_ai`, `inbound_email`).
+
+## Executor notes (verified against the working tree 2026-07-06)
+
+Build `joinery_ai_item_pipeline.md` first; this job is its first consumer.
+
+**Frozen — do not rewrite:** the digest format (§1) including its exact
+section headers; the verdict descriptor and the score/verdict bands (§2); and
+the appendix prompt **verbatim** — it is empirically validated on the local
+models, and any wording change requires re-running the phish + two-control
+set per the appendix header. Implement these as given; no wordsmithing.
+
+**Verified file map (under `plugins/inbound_email/`):**
+
+- `data/inbound_email_message_class.php` — `InboundEmailMessage` /
+  `MultiInboundEmailMessage`. Existing columns: `iem_spf_result` /
+  `iem_dkim_result` / `iem_dmarc_result` (varchar(16), default
+  `'unverified'`), `iem_spam_verdict` (`nextItem()` excludes `'spam'`),
+  `iem_delete_time`, `iem_body_plain` / `iem_body_html`. The three new
+  `iem_ai_*` fields (§3) go in this class.
+- `data/inbound_email_mailbox_grant_class.php` — table
+  `ieg_inbound_email_mailbox_grants`, for `validateConfig()`'s owner-grant
+  check.
+- `includes/RawMessageStore.php` — raw MIME retrieval:
+  `RawMessageStore::read($driver, $key)` using the row's
+  `iem_raw_storage_driver` and `RawMessageStore::keyFor($message_id)`.
+- `includes/AuthenticationResults.php` — parses the Authentication-Results
+  header. The auth verdicts are already stored on the row, so the digest
+  builder reads the `iem_*_result` columns; only the DKIM signing domain
+  (`d=`) comes from raw headers.
+- Reader surface: `includes/mailbox_reader_mount.php` mounts the reader;
+  `logic/thread_list_logic.php` builds the message-list payload (badge),
+  `logic/thread_logic.php` returns the `messages` array (banner);
+  `includes/MailboxViewer.php` is the access scope.
+
+**Lookups the executor confirms in code (not decisions):** where existing
+code MIME-decodes body parts (`ImapIngestor` / `InboundEmailRouter`) so §1's
+body selection reuses it rather than reinventing decoding; the exact message
+serializer the reader JS consumes, before adding the badge/banner fields; the
+fixture-raw-message pattern under `tests/` for the digest unit test.
+
+**Test data:** step 4 of the outline needs the validation phish and the two
+controls as real rows on dev. If the original samples aren't still in
+`iem_inbound_email_messages`, mail them through the dev inbound domain
+(CLAUDE.md § inbound email testing) before seeding the recipe. A follow-up
+eval corpus (more scam categories + hard negatives) is planned separately and
+is not a blocker for this build.
+
+**Process:** schema sync via the plugin sync; `php -l` +
+`validate_php_file.php` on every touched file; bump both
+`plugins/joinery_ai/plugin.json` and `plugins/inbound_email/plugin.json`
+versions once at the end.
 
 ## Docs
 

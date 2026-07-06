@@ -338,6 +338,80 @@ constant in the job's code.
 6. `php -l` + `validate_php_file.php` on every touched file; bump
    `plugins/joinery_ai/plugin.json` version.
 
+## Executor notes (verified against the working tree 2026-07-06)
+
+Pointers and settled micro-decisions so implementation never has to choose.
+Anything that still feels like a decision is a **lookup** — read the existing
+code and follow its pattern. Build order: **this spec first, then
+`joinery_ai_email_security_scan.md`.**
+
+**Frozen — implement exactly as written above:** the `PipelineJobInterface`
+signature (§1), the three `rcp_` fields (§2), the runner-loop contracts (§3:
+fresh exchange per item, one retry on an invalid verdict, skip-on-error never
+wedges the queue, 3 consecutive item errors fail the run), and the
+`aip_recipe_item_log` schema (§5).
+
+**Job registry directory (settled):** jobs live in a `pipeline_jobs/`
+directory per plugin — a sibling of `recipe_tools/`. `PipelineJobRegistry`
+scans it exactly the way `RecipeToolRegistry` walks every plugin's
+`recipe_tools/`: require each `*.php`, keep classes implementing
+`PipelineJobInterface`, first-scan-wins on a duplicate id with an `error_log`
+warning. Copy that method's shape.
+
+**Where the mode branch goes:** `RecipeRunner::run()` — after
+`CostGuard::check()` and the status→RUNNING save, the agent path resolves the
+provider (`LlmProviderFactory::forModel`), the model, and the model controls
+(`AgentLoop::resolveFloat` / `resolveThinkingLevel`), then calls
+`AgentLoop::run(...)` followed by `self::finishFromResult($run, $recipe,
+$result, $max_iterations)`. Pipeline mode branches at the `AgentLoop::run`
+call site, reusing the already-resolved provider, model, and controls.
+`PipelineRunner::run()` returns a result array of the same shape
+`AgentLoop::run` returns (`input_tokens`, `output_tokens`,
+`cache_write_tokens`, `cache_read_tokens`, `stop_reason`, …) so
+`finishFromResult()` is reused unchanged — read `AgentLoop::run`'s return
+block for the full key list before writing it. The pre-flights and
+`checkAllowlistStaleness()` (private in `RecipeRunner`) run before the
+branch; staleness learns to verify `rcp_pipeline_job` still resolves when
+mode is pipeline.
+
+**Verified file map (all under `plugins/joinery_ai/` unless noted):**
+
+- `includes/RecipeRunner.php` — `run()`, `finishFromResult()`,
+  `checkAllowlistStaleness()`, the TaintGate run-start check.
+- `includes/RecipeToolRegistry.php` — the scan pattern to copy.
+- `includes/TaintGate.php` — currently
+  `evaluate(array $allowed_tools, array $allowed_models, string $workspace)`.
+  Its two callers are the save path in `logic/admin_edit_logic.php` and the
+  `RecipeRunner` pre-flight; §6's mode-aware derivation extends this class in
+  whatever way keeps `explain()` / `describeDrift()` working for both callers.
+- `includes/DescriptorValidator.php` — `coerce(array $descriptor, array
+  $input)`; its header comment already anticipates this extension.
+- `includes/AiPromptBuilder.php` —
+  `untrustedInputBlock(array $allowed, string $nonce, array $extraSources = [])`,
+  `systemBlocks(string $cachedText, string $untrustedBlock = '')`.
+- `tasks/RecipeDispatcher.php` — the scheduled dispatcher
+  (`ScheduledTaskInterface`); unchanged by this spec.
+- `data/recipes_class.php`, `data/recipe_runs_class.php` —
+  `rcr_kill_requested` and `rcr_tool_calls` already exist; `rcr_tool_calls`
+  is already in `$json_vars`.
+- `views/admin/edit.php` + `logic/admin_edit_logic.php` — the recipe edit
+  form (§7). Note the existing convention: allowed-tools checkboxes post as
+  `rcp_allowed_tools[]` and absence means empty.
+- `views/admin/runs.php`, `views/admin/run.php` — the runs UI (§7).
+- FormWriter `visibility_rules` examples: `adm/admin_coupon_code_edit.php`,
+  `adm/admin_event_edit.php` (repo root `adm/`).
+
+**Lookups the executor confirms in code (not decisions):** the full return
+shape of `AgentLoop::run()`; what `Recipe::prepare()` validates today
+(validation only — the prepare() rule) and where the edit logic persists
+jsonb config; how `views/admin/run.php` renders `rcr_tool_calls` for agent
+runs before adding the pipeline per-item rendering.
+
+**Process:** schema sync after data-class changes is the plugin sync (admin
+Plugins page → Sync with Filesystem, or `update_database`). `php -l` +
+`validate_php_file.php` on every touched file. Bump
+`plugins/joinery_ai/plugin.json` version once at the end.
+
 ## Docs
 
 On implementation, update `plugins/joinery_ai/docs/overview.md` in

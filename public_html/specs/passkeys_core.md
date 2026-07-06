@@ -75,7 +75,7 @@ All core, no plugin. Vanilla JS on the front end per theme rules.
 ### 2. Secret derivation (PRF)
 
 - A consumer asks the service for a **derived secret** in a named context
-  (e.g. `mail-kek`): the JS helper runs an assertion with the PRF extension,
+  (e.g. `vault-kek`): the JS helper runs an assertion with the PRF extension,
   salt = a fixed per-context constant, and the authenticator returns 32 bytes.
 - **Outputs are per-credential**: two enrolled passkeys derive two different
   secrets for the same context. Consumers must therefore hold one wrapping of
@@ -98,9 +98,10 @@ All core, no plugin. Vanilla JS on the front end per theme rules.
 1. **Login / account security** — passkey sign-in; a profile-page security
    section listing credentials with add / rename / revoke.
 2. **Step-up confirmation** — the generic re-confirm primitive.
-3. **Mail unlock** (`inbound_email` encryption specs) — PRF context
-   `mail-kek`; per-credential wrappings of the mail secret key; enrollment
-   embedded in the security-level ceremony.
+3. **Vault unlock** (`specs/sealed_vault_core.md`) — PRF context
+   `vault-kek`; per-credential wrappings of the user's **vault** secret key
+   (mail is the first content consumer, AI chat the second); enrollment
+   embedded in the vault setup ceremony.
 4. **Future candidates** — `specs/drive_encryption.md` (same client-held-key
    shape); any feature wanting user-held encryption enrolls a new PRF context
    rather than a new mechanism.

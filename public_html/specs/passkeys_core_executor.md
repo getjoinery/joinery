@@ -8,7 +8,7 @@ level a non-judgment executor can follow. Where the two disagree, the design spe
 governs intent; fix this file.
 **Consumed by (do NOT build here):** `specs/inbound_email_encryption_at_rest.md`. The
 mail secret-key wrapping, recovery codes, optional passphrase, the APCu unlock window,
-and the `mail-kek` unlock endpoints all live in the encryption package. This package
+and the `vault-kek` unlock endpoints all live in the encryption package. This package
 stops at: the credential store, the four ceremonies (register / authenticate / step-up
 / PRF-derive), the JS helper, and the revocation-veto hook. The mail package *calls*
 `PasskeyService` and *subscribes* to the veto hook.
@@ -383,7 +383,7 @@ confirm via `\d pkc_passkey_credentials`.
 - **Enroll:** profile → Add a passkey → step-up → create → row appears.
 - **Sign in:** log out → passkey sign-in → lands logged in as that user.
 - **PRF derive:** using a throwaway consumer call (or the mail package once built),
-  `getDerivationOptions('mail-kek')` → `derive()` → `verifyDerivation()` returns a stable
+  `getDerivationOptions('vault-kek')` → `derive()` → `verifyDerivation()` returns a stable
   32-byte output for the same credential across two runs, and a *different* output for a
   second enrolled credential (per-credential outputs — the design spec's requirement).
 - **Revoke veto:** with a mail consumer subscribed and at the floor, revoke is refused
