@@ -107,8 +107,8 @@ $token = $client->ensureFresh(OAuth2ProviderRegistry::get('google'), $token);
 
 ### First consumer: Inbound IMAP
 
-The Inbound Email plugin's IMAP transport is the first consumer (purpose
-`inbound_imap`, in `plugins/inbound_email/includes/oauth_consumers/`). One consent
+The Mailbox plugin's IMAP transport is the first consumer (purpose
+`inbound_imap`, in `plugins/mailbox/includes/oauth_consumers/`). One consent
 grants **both directions** — IMAP read for the inbound feed and SMTP send for
 outbound — so the scopes requested are:
 
@@ -120,7 +120,7 @@ outbound — so the scopes requested are:
 The consumer stores the granted tokens (encrypted) and the granted scopes on the
 IMAP account, and `ensureFresh()` keeps the XOAUTH2 bearer valid for both the poll
 and the SMTP send. See
-[Receiving by IMAP poll](/plugins/inbound_email/docs/overview.md#receiving-by-imap-poll)
+[Receiving by IMAP poll](/plugins/mailbox/docs/overview.md#receiving-by-imap-poll)
 and [Email System → Two send modes](/docs/email_system.md#two-send-modes--smtpconfig).
 The cloud-app registration (Google Cloud / Azure, the shared redirect URI, pasting
 client id/secret) is documented here once; the IMAP overview links to it and adds

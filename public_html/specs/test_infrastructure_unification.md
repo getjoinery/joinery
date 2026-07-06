@@ -15,7 +15,7 @@ common result contract; only the duplicated boilerplate is deleted.
 ### Scale
 
 - **84 test files, ~22,000 lines**: 70 under `tests/`, 14 under
-  `plugins/inbound_email/tests/` (the only plugin suite), plus two strays in
+  `plugins/mailbox/tests/` (the only plugin suite), plus two strays in
   `utils/` (`test_ab_testing.php`, `test_components.php`) that belong in the
   tree.
 - **No aggregate runner** exists anywhere. Every test is invoked individually
@@ -28,7 +28,7 @@ common result contract; only the duplicated boilerplate is deleted.
 
 | Style | Where | Reporting | CI-able |
 |---|---|---|---|
-| Hand-rolled micro-harness | ~30 files: `calendar/`, `unit/`, most of `integration/`, `scaffold/`, `schema/`, inbound_email plugin | Each file re-declares an ~8-line `check()`/`ok()` counter, `exit(1)` on failure | Yes |
+| Hand-rolled micro-harness | ~30 files: `calendar/`, `unit/`, most of `integration/`, `scaffold/`, `schema/`, mailbox plugin | Each file re-declares an ~8-line `check()`/`ok()` counter, `exit(1)` on failure | Yes |
 | `api_test_harness.php` (procedural) | `functional/api/` — 5 suites | `check()`, `section()`, fixture factories, LIFO teardown, `harness_finish()` exit code, debug-mode prod gate, Cloudflare-bypass cURL | Yes — the best harness in the tree |
 | `ModelTester` / `MultiModelTester` | `models/` | Static pass/fail counters, echoes HTML `[PASS]` spans | No — HTML only |
 | `EmailTestRunner` + suites | `email/` | Suites return nested `['passed'=>bool,...]` arrays; web dashboard renders | No |

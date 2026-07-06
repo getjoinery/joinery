@@ -898,3 +898,10 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
+	// ========== Rename inbound_email plugin → mailbox (v138) ==========
+	$migration = array();
+	$migration['database_version'] = '138';
+	$migration['migration_file'] = 'rename_inbound_email_to_mailbox.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+

@@ -14,8 +14,8 @@ contract once for every surface. Build it last.
 
 ### Naming baseline (rename interaction)
 
-**Run the rename first.** Paths use today's `plugins/inbound_email/…`; after the rename
-apply dir `plugins/inbound_email/`→`plugins/mailbox/` and setting-key
+**Run the rename first.** Paths use today's `plugins/mailbox/…`; after the rename
+apply dir `plugins/mailbox/`→`plugins/mailbox/` and setting-key
 `inbound_email_`→`mailbox_`. Class names (`InboundEmailDomain`, `MailboxService`,
 `RecipeDispatcher`, `ModelQueryExecutor`), table prefixes (`ied_`/`iem_`), and line numbers
 are rename-invariant. `joinery_ai` is a separate plugin — not renamed.
@@ -28,7 +28,7 @@ Add to `InboundEmailDomain::$field_specifications` (`ied`):
 ```
 This is the **single source of truth** for a domain's posture. To keep the mechanism
 packages (which were written against their own flags) correct without editing them, derive
-on save in `admin_inbound_email_domains_logic()`:
+on save in `admin_mailbox_domains_logic()`:
 - `ied_is_protected_identity = (ied_security_level === 'fortress')` (the outbound package's
   DKIM/DNS-inversion flag).
 - Ingest seals (encryption package) iff `ied_security_level` is `'private'` or `'fortress'`
@@ -62,7 +62,7 @@ are what this switches between). No new dependencies.
 
 ## Phase 1 — The level picker (domain editor)
 
-- **Form** (`plugins/inbound_email/admin/admin_inbound_email_domains.php`, `domain_form` at
+- **Form** (`plugins/mailbox/admin/admin_mailbox_domains.php`, `domain_form` at
   line 62): add a **required three-option level picker** right after `ied_is_enabled`
   (line 100). Use FormWriter radio options styled as cards (confirm the radio/segmented
   helper; else `dropinput`), each carrying **outcome language only** — name, one-line
@@ -72,7 +72,7 @@ are what this switches between). No new dependencies.
   existing `domain_type` field (mirror `$type_visibility`, lines 72–80) so the Fortress
   card is hidden when `domain_type !== 'custom'` (IMAP source — Fortress is meaningless
   there; the remote provider holds plaintext and there's no MX to move).
-- **Save** (`logic/admin_inbound_email_domains_logic.php`, set() block lines 40–52): add
+- **Save** (`logic/admin_mailbox_domains_logic.php`, set() block lines 40–52): add
   `$domain->set('ied_security_level', ...)` and the two derived sets above. On **raising**
   (Standard→Private/Fortress) the save is gated on an open unlock window (backfill needs the
   key); on **lowering** it's gated too (Private→Standard decrypts). The gate is structural.
@@ -131,11 +131,11 @@ erroring:
 
 | Action | Logic file | Insertion point |
 |---|---|---|
-| `inbound_email/thread_list` | `logic/thread_list_logic.php` | returns `listThreads()` verbatim (line 42) — add `locked` + placeholder swap here (or in `listThreads`) |
-| `inbound_email/thread` | `logic/thread_logic.php` | returns `getThread()` (line 37) — withhold body + set `locked` |
-| `inbound_email/send` | `logic/send_logic.php` | Fortress compose while locked → return `locked` instead of sending (`MailboxSender::send()`, line 56) |
-| `inbound_email/mailboxes` | `logic/mailboxes_logic.php` | expose each mailbox's level + a `locked` state for the switcher |
-| `inbound_email/thread_action` | `logic/thread_action_logic.php` | state mutations (mark/star/delete) are cleartext-metadata — **unaffected**, keep working while locked |
+| `mailbox/thread_list` | `logic/thread_list_logic.php` | returns `listThreads()` verbatim (line 42) — add `locked` + placeholder swap here (or in `listThreads`) |
+| `mailbox/thread` | `logic/thread_logic.php` | returns `getThread()` (line 37) — withhold body + set `locked` |
+| `mailbox/send` | `logic/send_logic.php` | Fortress compose while locked → return `locked` instead of sending (`MailboxSender::send()`, line 56) |
+| `mailbox/mailboxes` | `logic/mailboxes_logic.php` | expose each mailbox's level + a `locked` state for the switcher |
+| `mailbox/thread_action` | `logic/thread_action_logic.php` | state mutations (mark/star/delete) are cleartext-metadata — **unaffected**, keep working while locked |
 
 The native unlock ceremony is the passkey `vault-kek` derivation over `/api/v1` (passkeys +
 encryption packages), opening the same server-side window.
@@ -170,7 +170,7 @@ around 163–166:
   cloud provider is an operator choice (like forwarding to Gmail). The AI settings for a
   protected domain carry one disclosure line — *recipes send message text to your configured
   provider; choose a local model if it must never leave the box* — and nothing more.
-- **Spam learning** (`LearnSpamFeedback`, `plugins/inbound_email/tasks/LearnSpamFeedback.php`,
+- **Spam learning** (`LearnSpamFeedback`, `plugins/mailbox/tasks/LearnSpamFeedback.php`,
   `run()` 41): it ships the **raw** message via `getRawMessage()` (line 79) to rspamd's
   learn endpoint. Gate at line 79 — skip a Private/Fortress row's raw unless a window is
   open (it already skips absent raw at 80–82); learning happens in-window like AI. Ingest
@@ -214,7 +214,7 @@ health). No new check logic here beyond making level the switch.
 
 ## Phase 8 — Docs
 
-`plugins/inbound_email/docs/overview.md` — a "Security levels" section: the three postures,
+`plugins/mailbox/docs/overview.md` — a "Security levels" section: the three postures,
 the per-domain unit, the matrix, and the subdomain pattern for automated mail
 (current-state voice). `docs/settings.md` cross-reference if any level default lands in
 settings.

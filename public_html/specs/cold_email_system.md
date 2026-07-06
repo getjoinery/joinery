@@ -317,7 +317,7 @@ Declared in `plugin.json`:
 | `cold_email_scrape_max_pages` | `30` | Max pages to crawl per prospect |
 | `cold_email_scrape_delay_ms` | `500` | Delay between page fetches (ms) |
 | `cold_email_respect_robots_txt` | `1` | 1 = respect, 0 = ignore |
-| `cold_email_reply_detection` | `manual` | `manual` or `inbound_email` |
+| `cold_email_reply_detection` | `manual` | `manual` or `mailbox` |
 
 ---
 

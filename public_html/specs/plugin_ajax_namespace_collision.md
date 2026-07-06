@@ -2,7 +2,7 @@
 
 **Status:** Active — **decision settled**, ready to implement.
 **Touches:** `PluginManager` sync validation, the four plugins with flat-namespace
-endpoints (`server_manager`, `dns_filtering`, `inbound_email`, `bookings`) and
+endpoints (`server_manager`, `dns_filtering`, `mailbox`, `bookings`) and
 their JS callers, `docs/routing.md`, `docs/plugin_developer_guide.md`.
 
 ## The decision
@@ -81,18 +81,18 @@ Migration surface (callers are `fetch('/ajax/...')` strings in each plugin's
 |---|---|
 | server_manager | probe_api, job_status, discover_nodes, backup_actions, refresh_node_status, add_discovered_nodes |
 | dns_filtering | scan_url, purge_querylog, block_rule_add, block_rule_delete, block_filter_set, test_domain |
-| inbound_email | mailbox_send, mailbox_thread, mailbox_mailboxes, mailbox_list, mailbox_action |
+| mailbox | mailbox_send, mailbox_thread, mailbox_mailboxes, mailbox_list, mailbox_action |
 | bookings | booking_slots *(public page caller — set `requires_session` per its auth needs)* |
 
-The migration also removes inbound_email's defensive `mailbox_*` prefixing
-pressure — under `/api/v1/action/inbound_email/...` the plugin owns its names.
+The migration also removes mailbox's defensive `mailbox_*` prefixing
+pressure — under `/api/v1/action/mailbox/...` the plugin owns its names.
 
 **Stays flat (validator-guarded):**
 
-- `inbound_email/ajax/inbound_email_webhook.php` — called by external providers,
+- `mailbox/ajax/inbound_email_webhook.php` — called by external providers,
   not page JS; webhooks live in the flat namespace alongside core's Stripe
   webhooks.
-- `inbound_email/utils/inbound_email_handler` and the 12 `tests/*_test` files —
+- `mailbox/utils/inbound_email_handler` and the 12 `tests/*_test` files —
   `utils/` and `tests/` have no API-action analog.
 
 ### 3. Documentation

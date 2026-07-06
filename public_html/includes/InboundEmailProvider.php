@@ -16,7 +16,7 @@
 interface InboundEmailProvider {
     /**
      * Unique provider key (e.g. 'postfix', 'mailgun'). Also serves as the
-     * value stored in the inbound_email_provider setting.
+     * value stored in the mailbox_provider setting.
      */
     public static function getKey(): string;
 

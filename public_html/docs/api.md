@@ -680,7 +680,7 @@ change is required: a multipart POST leaves the raw body empty, so the
 dispatcher falls back to `$_POST` for the text fields and PHP fills `$_FILES`
 natively for the file parts. Two shipped actions take this transport:
 `joinery_ai/chat_send` (field `attachments[]`, chat file uploads) and
-`inbound_email/send` (field `attachments[]`, compose attachments).
+`mailbox/send` (field `attachments[]`, compose attachments).
 
 ### Plugin Actions
 

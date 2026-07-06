@@ -6,7 +6,7 @@
 the *how*: exact files, schema, signatures, endpoints, and acceptance checks, at a
 level a non-judgment executor can follow. Where the two disagree, the design spec
 governs intent; fix this file.
-**Consumed by (do NOT build here):** `specs/inbound_email_encryption_at_rest.md`. The
+**Consumed by (do NOT build here):** `specs/mailbox_encryption_at_rest.md`. The
 mail secret-key wrapping, recovery codes, optional passphrase, the APCu unlock window,
 and the `vault-kek` unlock endpoints all live in the encryption package. This package
 stops at: the credential store, the four ceremonies (register / authenticate / step-up
@@ -367,7 +367,7 @@ config).
   (contexts, per-credential PRF outputs, the revocation veto hook), the JS helper, the
   capability-probe fallback rules, and the **pinned `web-auth/webauthn-lib` minor**.
 - `docs/api.md`: add the eight action rows + the `Passkey` model to the surfaces.
-- `plugins/inbound_email/docs/overview.md` (or its renamed successor if the rename spec
+- `plugins/mailbox/docs/overview.md` (or its renamed successor if the rename spec
   ran first — coordinate): the mail-unlock section references this core service rather
   than describing WebAuthn.
 

@@ -16,7 +16,7 @@ documented there; don't re-derive it.
 2. **iOS gap** — `JoineryMailKit` is missing the label/move picker with
    create-folder (screen 5 below). The backend already supports it
    (`set_membership`/`create_folder` in
-   `plugins/inbound_email/logic/thread_action_logic.php`); only the iOS UI
+   `plugins/mailbox/logic/thread_action_logic.php`); only the iOS UI
    needs building.
 3. **Test-gate hardening** — no test directly exercises the `_api()` action
    layer itself (signed-URL expiry, cross-viewer denial for the native
@@ -61,7 +61,7 @@ refresh-on-foreground; push notification for new mail is a future spec.
 
 Add the missing screen to `JoineryMailKit` — a Move/Labels control on the
 open thread, matching the web reader's exclusive-vs-non-exclusive folder
-model (`plugins/inbound_email/assets/mailbox_reader.js`'s
+model (`plugins/mailbox/assets/mailbox_reader.js`'s
 `buildFolderControl()` is the reference behavior: single-pick "Move" for an
 exclusive feed, checkbox "Labels" for a non-exclusive one, plus
 create-folder). Wired to the existing `thread_action` API action's

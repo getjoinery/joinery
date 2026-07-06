@@ -40,7 +40,7 @@ FTS blob), not its own ceremony.
 
 ### Naming baseline (rename interaction — read before executing)
 
-**Recommended order: run `specs/plugin_rename_inbound_email_to_mailbox.md` FIRST, then
+**Recommended order: run `specs/implemented/plugin_rename_inbound_email_to_mailbox.md` FIRST, then
 this package.** Rationale: the rename spec is frozen and predates these feature files; if
 features land first, the rename must be reopened to sweep the ~15 new files, new settings,
 and new classes below — expanding a done spec's blast radius. Rename-first means features
@@ -51,7 +51,7 @@ This package is written against **today's on-disk `inbound_email` paths** so eve
 line number can be verified against the code as it exists now. After the rename, apply
 exactly **two** substitutions everywhere below — nothing else changes:
 
-1. Directory prefix: `plugins/inbound_email/…` → `plugins/mailbox/…`
+1. Directory prefix: `plugins/mailbox/…` → `plugins/mailbox/…`
 2. Setting-key prefix: `inbound_email_…` → `mailbox_…` (so `inbound_email_unlock_idle_minutes`
    becomes `mailbox_unlock_idle_minutes`)
 
@@ -69,13 +69,13 @@ rename never touches them), data-class filenames
 | Area | Files (real paths, verified) |
 |---|---|
 | Crypto core, key hierarchy, unlock window | **built by the vault** — `SealedBox`/`VaultCrypto`/`VaultUnlock`, `uev`/`uew` tables (`specs/sealed_vault_core_executor.md`). Mail consumes them. |
-| New search engine | `plugins/inbound_email/includes/MailboxIndex.php` + a `/dev/shm` sweep task |
-| Ingest reorder + seal | `plugins/inbound_email/includes/InboundEmailRouter.php` (`storeMessage()` ~336–423, `extractAttachmentsToFiles()` ~472–524) |
-| Message schema | `plugins/inbound_email/data/inbound_email_message_class.php` (`$field_specifications`, `getMultiResults()` ~332–361) |
-| Thread list / read | `plugins/inbound_email/includes/MailboxService.php` (`listThreads()` 434+, FTS predicate 477–485, previews 516–517, `getThread()` 596) |
-| Outbound seal | `plugins/inbound_email/includes/MailboxSender.php` (`storeOutboundRow()` 693, `buildBody()` 269, `attachOriginal()` 370, `readOriginalPartBytes()` 418) |
+| New search engine | `plugins/mailbox/includes/MailboxIndex.php` + a `/dev/shm` sweep task |
+| Ingest reorder + seal | `plugins/mailbox/includes/InboundEmailRouter.php` (`storeMessage()` ~336–423, `extractAttachmentsToFiles()` ~472–524) |
+| Message schema | `plugins/mailbox/data/inbound_email_message_class.php` (`$field_specifications`, `getMultiResults()` ~332–361) |
+| Thread list / read | `plugins/mailbox/includes/MailboxService.php` (`listThreads()` 434+, FTS predicate 477–485, previews 516–517, `getThread()` 596) |
+| Outbound seal | `plugins/mailbox/includes/MailboxSender.php` (`storeOutboundRow()` 693, `buildBody()` 269, `attachOriginal()` 370, `readOriginalPartBytes()` 418) |
 | Attachment decrypt hook | `data/files_class.php` (`serve_from_path()` 283–295), `serve.php` (private-cloud 417–448, local-restricted 459–483) |
-| Drop old FTS | `plugins/inbound_email/migrations/migrations.php` (`iem_007_fulltext_search_index`, index `iem_fulltext_idx`) |
+| Drop old FTS | `plugins/mailbox/migrations/migrations.php` (`iem_007_fulltext_search_index`, index `iem_fulltext_idx`) |
 | Key rotation / backfill / health | logic endpoints + `InboundEmailHealth` |
 
 ## Phase 0 — Preflight & new platform dependencies
@@ -146,11 +146,11 @@ Notes the executor must honor:
   `SODIUM_CRYPTO_PWHASH_OPSLIMIT_INTERACTIVE` / `MEMLIMIT_INTERACTIVE` or higher.
 - Cross-reference this class from `docs/secret_box.md` as the asymmetric companion.
 
-### 1.2 Plugin: `plugins/inbound_email/includes/MailboxCrypto.php`
+### 1.2 Plugin: `plugins/mailbox/includes/MailboxCrypto.php`
 
 Thin orchestration over `SealedBox` that owns the **mail AD conventions** and the
 per-message DEK dance, so the id-plus-field discipline lives in one place. Loaded via
-`require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/MailboxCrypto.php'))`.
+`require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxCrypto.php'))`.
 Surface:
 
 ```php
@@ -258,7 +258,7 @@ and the unlock window where noted:
 
 ## Phase 3 — The unlock window (APCu key store)
 
-### 3.1 `plugins/inbound_email/includes/MailboxUnlock.php`
+### 3.1 `plugins/mailbox/includes/MailboxUnlock.php`
 
 Owns the APCu-backed window. Surface:
 ```php
@@ -395,7 +395,7 @@ Wire it in **both** serve.php branches:
 
 ### 6.1 Remove the old FTS
 
-- New migration in `plugins/inbound_email/migrations/migrations.php`:
+- New migration in `plugins/mailbox/migrations/migrations.php`:
   `DROP INDEX IF EXISTS iem_fulltext_idx;` (the `iem_007` GIN index; a plain migration, so
   `update_database` won't recreate it). Leave `iem_007` in place as history; add a new
   versioned drop entry.
@@ -407,7 +407,7 @@ Wire it in **both** serve.php branches:
   in-session before mapping to `body_plain`/`body_html` (642). `buildSnippet()` (573)
   consumes the decrypted preview.
 
-### 6.2 `plugins/inbound_email/includes/MailboxIndex.php`
+### 6.2 `plugins/mailbox/includes/MailboxIndex.php`
 
 Owns the `/dev/shm` FTS5 lifecycle:
 ```php
@@ -442,7 +442,7 @@ prompts to unlock rather than erroring.
 
 ### 6.4 The `/dev/shm` sweep task
 
-New `plugins/inbound_email/tasks/SweepMailboxIndexTemp.php` + `.json`, mirroring
+New `plugins/mailbox/tasks/SweepMailboxIndexTemp.php` + `.json`, mirroring
 `tasks/PurgeOldErrors.php`. Implements `ScheduledTaskInterface::run(array $config)`:
 delete any `/dev/shm/mailfts_*.sqlite` whose unlock window is gone (no live APCu key for
 that user/session). `.json` `"default_frequency": "every_run"` (fires each 15-min cron
@@ -493,14 +493,14 @@ Private). Idempotent.
 
 ## Phase 10 — Settings, deployment, docs
 
-- Settings (`plugins/inbound_email/plugin.json` `settings`): `inbound_email_unlock_idle_minutes`
+- Settings (`plugins/mailbox/plugin.json` `settings`): `inbound_email_unlock_idle_minutes`
   default `"30"`. (No RP settings — passkeys owns those.)
 - **`InboundEmailHealth` checks** (warn when protected domains exist):
   swap off/encrypted; `apc.mmap_file_mask` anonymous; mail FPM pool `rlimit_core = 0`;
   `ext-sqlite3` with FTS5; `ext-apcu` enabled. These are what make APCu residency
   RAM-only and the index temp non-persistent.
 - Provisioning: add `php8.3-sqlite3`, `ext-apcu` to `install_email.sh` + Docker images.
-- Docs (current-state voice): `plugins/inbound_email/docs/overview.md` gains an
+- Docs (current-state voice): `plugins/mailbox/docs/overview.md` gains an
   "Encryption at rest" section (sealed-content model, cleartext/sealed split, sealed
   search-index lifecycle — do not narrate the removed GIN FTS); `docs/secret_box.md`
   cross-references `SealedBox`.

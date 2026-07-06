@@ -142,8 +142,8 @@ in plugin code.
 Plugin directory names appear directly in user-facing URLs (`/{pluginname}/*`, `/profile/{pluginname}/*`, `/admin/{pluginname}/*`), so choose them carefully:
 
 - **Must be distinctive** — avoid generic names like `events`, `billing`, `users`
-- **Use the product or brand name** — e.g. `scrolldaddy`, `inbound_email`
-- **Short, lowercase, underscores for multi-word** — e.g. `inbound_email` not `InboundEmail`
+- **Use the product or brand name** — e.g. `scrolldaddy`, `mailbox`
+- **Short, lowercase, underscores for multi-word** — e.g. `dns_filtering` not `DnsFiltering`
 - **Must not match a reserved system segment** — the following names are rejected at activation:
   `profile`, `admin`, `login`, `ajax`, `api`, `assets`, `theme`, `plugins`, `views`, `uploads`, `utils`, `tests`, `docs`, `specs`, `migrations`, `data`, `includes`, `logic`, `adm`
 - **Must not clash with existing base view filenames** — if `views/profile/billing.php` exists, a plugin named `billing` is rejected
@@ -266,7 +266,7 @@ The `version` field is the source of truth for a component's released identity, 
 - **Publish auto-bumps the patch when content changed without a bump.** At publish time, each component's working tree is content-hashed and compared against the last release's snapshot. If the files changed but the version did not, the publisher patch-bumps the manifest automatically and lists it in the publish summary for you to commit. This keeps archive filenames honest even when a content change ships without a manual bump. (See [Deploy and Upgrade](deploy_and_upgrade.md) for the full decision rule.)
 - **Activation is gated on `requires`** for plugins *and* themes. A component whose `requires.joinery` / `requires.php` / `requires.extensions` are not satisfied is refused activation with the specific failure reported. The gate runs only on activation, so an already-active component that newly fails requirements keeps running.
 
-**Dependency version constraints** (`depends`) are evaluated against the dependency's **live manifest** version, read from its `plugin.json` on disk — not a cached copy. A constraint like `"depends": {"inbound_email": ">=1.10.0"}` is satisfied whenever the installed `inbound_email` manifest reports a version that meets it.
+**Dependency version constraints** (`depends`) are evaluated against the dependency's **live manifest** version, read from its `plugin.json` on disk — not a cached copy. A constraint like `"depends": {"mailbox": ">=1.10.0"}` is satisfied whenever the installed `mailbox` manifest reports a version that meets it.
 
 #### Deprecation Fields
 
@@ -576,7 +576,7 @@ A `profileMenu` entry is the single way onto the member menu, everywhere: every 
   This is what keeps your slugs from colliding with core or other plugins — but it is a
   convention, not an enforced requirement. A bare slug like `shelf` will sync fine, and a
   hyphenated plugin name is the right prefix for an underscore-named plugin directory
-  (e.g. `inbound_email` → `inbound-email-…`).
+  (e.g. `dns_filtering` → `dns-filtering-…`).
 
 #### `adminMenu`
 
@@ -610,13 +610,13 @@ Children inherit the parent's `permission` unless they override it.
 {
   "adminMenu": [
     {
-      "slug": "incoming",
-      "title": "Incoming",
-      "url": "/plugins/inbound_email/admin/admin_inbound_email",
+      "slug": "mailbox-reader",
+      "title": "Mailbox",
+      "url": "/plugins/mailbox/admin/admin_mailbox_reader",
       "parent": "emails",
       "permission": 5,
       "order": 10,
-      "settingActivate": "inbound_email_enabled"
+      "settingActivate": "mailbox_enabled"
     }
   ]
 }

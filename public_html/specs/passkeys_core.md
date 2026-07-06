@@ -2,7 +2,7 @@
 
 **Status:** Draft / awaiting implementation
 **Version:** 1.2
-**Consumed by:** `specs/inbound_email_encryption_at_rest.md` (mail unlock — the
+**Consumed by:** `specs/mailbox_encryption_at_rest.md` (mail unlock — the
 first PRF consumer). Designed as a **core platform capability**, not an email
 feature: any future subsystem can enroll against the same service.
 
@@ -155,7 +155,7 @@ All core, no plugin. Vanilla JS on the front end per theme rules.
   contract (contexts, per-credential wrappings, revocation hook), JS helper
   usage, and the capability-probe fallback rules.
 - `docs/api.md` — the four endpoint actions.
-- `plugins/inbound_email/docs/overview.md` — the mail unlock section
+- `plugins/mailbox/docs/overview.md` — the mail unlock section
   references the core service rather than describing WebAuthn itself.
 
 ## Open Items to Confirm During Implementation

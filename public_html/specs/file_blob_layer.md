@@ -155,7 +155,7 @@ FileBlob($this->get('fil_fbb_file_blob_id'), true)`):
 
 `FileStorageProfile` / `FilePrivateStorageProfile` are **replaced** by
 `BlobStorageProfile` / `BlobPrivateStorageProfile` over `fbb_file_blobs`
-(pattern proven by inbound_email's `RawMessageStore`: profile owns
+(pattern proven by mailbox's `RawMessageStore`: profile owns
 offload-eligibility; consumers own request-time I/O):
 
 - Columns: `fbb_storage_driver` / `fbb_sync_failed_count` /

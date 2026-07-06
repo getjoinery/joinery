@@ -6,8 +6,8 @@
 unlockers, unlock window, `VaultCrypto`, and the two hooks. This spec is chat's **consumer**
 side: what seals, the per-conversation levels, and the unlock-first locked-state contract.
 The levels doctrine and locked-state contract mirror
-`specs/inbound_email_security_levels.md`; the crypto mirrors
-`specs/inbound_email_encryption_at_rest.md`. Chat reuses both — it does not re-derive them.
+`specs/mailbox_security_levels.md`; the crypto mirrors
+`specs/mailbox_encryption_at_rest.md`. Chat reuses both — it does not re-derive them.
 **Depends on (build first):** `sealed_vault_core.md` (and its retarget of the mail package)
 + `passkeys_core_executor.md` (context `vault-kek`).
 **Plugin:** `joinery_ai` (not affected by the inbound_email→mailbox rename).

@@ -10,7 +10,7 @@ import org.junit.Test
 import java.util.Calendar
 import java.util.TimeZone
 
-/** Parsing tests over live `inbound_email` API payloads captured from dev
+/** Parsing tests over live `mailbox` API payloads captured from dev
  *  (the fixtures dir holds verbatim API envelopes — the same files backing
  *  the iOS JoineryMailKit tests, parity by construction). */
 class MailParsingTest {

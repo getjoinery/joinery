@@ -2,7 +2,7 @@ import XCTest
 @testable import JoineryMailKit
 @testable import JoineryKit
 
-/// Parsing tests over live `inbound_email/*` payloads captured from dev
+/// Parsing tests over live `mailbox/*` payloads captured from dev
 /// (Fixtures/*.json are verbatim API envelopes).
 final class MailParsingTests: XCTestCase {
 

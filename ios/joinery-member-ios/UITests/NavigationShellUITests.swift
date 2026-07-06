@@ -39,7 +39,7 @@ final class NavigationShellUITests: XCTestCase {
         guard TestEnv.optional("JOINERY_EXPECT_MENU_PROBE") == "1" else {
             throw XCTSkip("menu probe not staged (JOINERY_EXPECT_MENU_PROBE unset)")
         }
-        let slug = TestEnv.optional("JOINERY_MENU_PROBE_SLUG") ?? "inbound-email-phase3-probe"
+        let slug = TestEnv.optional("JOINERY_MENU_PROBE_SLUG") ?? "mailbox-phase3-probe"
 
         let app = XCUIApplication()
         app.launchJoinery()

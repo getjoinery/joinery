@@ -1,0 +1,173 @@
+{
+    "name": "Mailbox",
+    "description": "Self-hosted email: receiving, forwarding, local mailboxes, webmail reader, IMAP sync, DKIM/SRS",
+    "version": "1.29.0",
+    "author": "Joinery",
+    "receives_upgrades": true,
+    "included_in_publish": true,
+    "requires": {
+        "php": ">=8.0"
+    },
+    "tags": [
+        "email",
+        "mailbox",
+        "inbound",
+        "forwarding",
+        "smtp"
+    ],
+    "styles": [
+        "assets/mailbox_reader.css",
+        "assets/css/mailbox.css"
+    ],
+    "storage_profiles": [
+        "RawMessageStore"
+    ],
+    "adminMenu": [
+        {
+            "slug": "mailbox-reader",
+            "title": "Mailbox",
+            "url": "/plugins/mailbox/admin/admin_mailbox_reader",
+            "parent": "emails",
+            "permission": 5,
+            "order": 10
+        }
+    ],
+    "profileMenu": [
+        {
+            "slug": "mailbox",
+            "title": "Email",
+            "url": "/profile/mailbox/mailbox",
+            "nativeScreen": "mailbox",
+            "icon": "envelope",
+            "visibility": "in",
+            "permission": 0,
+            "order": 58
+        }
+    ],
+    "provisioners": [
+        {
+            "key": "inbound_mail_server",
+            "label": "Inbound mail server",
+            "details": "Provider-specific. For Postfix, verifies port 25 is listening locally. For webhook providers (Mailgun, etc.) this is informational — the provider's own infrastructure handles MX.",
+            "check": {
+                "type": "code",
+                "call": "InboundEmailHealth::checkInboundMailServer"
+            },
+            "script": "provisioning/install_email.sh"
+        },
+        {
+            "key": "outbound_forwarding_relay",
+            "label": "Outbound mail relay for forwarding",
+            "details": "Forwarded messages are relayed out through this SMTP server.",
+            "check": {
+                "type": "code",
+                "call": "InboundEmailHealth::checkForwardingRelay"
+            }
+        },
+        {
+            "key": "domain_dns_records",
+            "label": "DNS records for inbound domains",
+            "details": "Each enabled inbound domain needs an MX record pointing here and an SPF record.",
+            "check": {
+                "type": "code",
+                "call": "InboundEmailHealth::checkDomainDns"
+            }
+        },
+        {
+            "key": "content_spam_scanner",
+            "label": "Content spam scanner (rspamd)",
+            "details": "Optional. rspamd milter scores inbound mail for content spam and stamps X-Spam; the router reads it into the spam verdict. Webhook providers supply their own spam signal instead.",
+            "check": {
+                "type": "code",
+                "call": "InboundEmailHealth::checkContentSpamScanner"
+            },
+            "script": "provisioning/install_email.sh"
+        }
+    ],
+    "settings": [
+        {
+            "name": "mailbox_enabled",
+            "default": "0"
+        },
+        {
+            "name": "mailbox_from_show_via",
+            "default": "1"
+        },
+        {
+            "name": "mailbox_log_retention_days",
+            "default": "30"
+        },
+        {
+            "name": "mailbox_forwarding_max_destinations",
+            "default": "10"
+        },
+        {
+            "name": "mailbox_forwarding_rate_limit_per_alias",
+            "default": "50"
+        },
+        {
+            "name": "mailbox_forwarding_rate_limit_per_domain",
+            "default": "200"
+        },
+        {
+            "name": "mailbox_forwarding_rate_limit_window",
+            "default": "3600"
+        },
+        {
+            "name": "mailbox_srs_enabled",
+            "default": "0"
+        },
+        {
+            "name": "mailbox_srs_secret",
+            "default": ""
+        },
+        {
+            "name": "mailbox_mail_hostname",
+            "default": ""
+        },
+        {
+            "name": "mailbox_public_ip",
+            "default": ""
+        },
+        {
+            "name": "mailbox_forwarding_smtp_host",
+            "default": ""
+        },
+        {
+            "name": "mailbox_forwarding_smtp_port",
+            "default": ""
+        },
+        {
+            "name": "mailbox_forwarding_smtp_username",
+            "default": ""
+        },
+        {
+            "name": "mailbox_forwarding_smtp_password",
+            "default": ""
+        },
+        {
+            "name": "mailbox_retention_days",
+            "default": "14"
+        },
+        {
+            "name": "mailbox_max_per_window",
+            "default": "500"
+        },
+        {
+            "name": "mailbox_provider",
+            "default": "postfix"
+        },
+        {
+            "name": "mailbox_spam_filtering_enabled",
+            "default": "0"
+        },
+        {
+            "name": "mailbox_content_spam_filtering_enabled",
+            "default": "0"
+        },
+        {
+            "name": "mailbox_rspamd_controller_url",
+            "default": "http://127.0.0.1:11334"
+        }
+    ]
+}

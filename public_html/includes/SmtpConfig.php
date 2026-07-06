@@ -12,7 +12,7 @@
  *   - fromConnectedAccount()  an already-connected mailbox (PRESETS coordinates +
  *                             the account's stored OAuth token or app password).
  *   - fromForwardingSettings() inbound forwarding's dedicated relay
- *                             (inbound_email_forwarding_smtp_*, else base smtp_*).
+ *                             (mailbox_forwarding_smtp_*, else base smtp_*).
  *
  * `encryption` is one of 'ssl' (implicit TLS / SMTPS), 'tls' (STARTTLS), 'none',
  * or null. Null means "auto-detect from port" — the back-compatible behavior of
@@ -80,29 +80,29 @@ class SmtpConfig {
 
     /**
      * Inbound forwarding's dedicated SMTP relay: start from the base global
-     * config, then apply the inbound_email_forwarding_smtp_* overrides when set.
+     * config, then apply the mailbox_forwarding_smtp_* overrides when set.
      * Replaces InboundEmailRouter::createMailer()'s manual override block.
      */
     public static function fromForwardingSettings(): self {
         $s = Globalvars::get_instance();
         $c = self::fromSettings();
 
-        $fwd_host = $s->get_setting('inbound_email_forwarding_smtp_host');
+        $fwd_host = $s->get_setting('mailbox_forwarding_smtp_host');
         if ($fwd_host) {
             $c->host = $fwd_host;
         }
-        $fwd_port = $s->get_setting('inbound_email_forwarding_smtp_port');
+        $fwd_port = $s->get_setting('mailbox_forwarding_smtp_port');
         if ($fwd_port) {
             $c->port = intval($fwd_port);
             // Let SmtpMailer re-detect encryption for the overridden port.
             $c->encryption = null;
         }
-        $fwd_user = $s->get_setting('inbound_email_forwarding_smtp_username');
+        $fwd_user = $s->get_setting('mailbox_forwarding_smtp_username');
         if ($fwd_user) {
             $c->authMode = self::AUTH_PASSWORD;
             $c->username = $fwd_user;
         }
-        $fwd_pass = $s->get_setting('inbound_email_forwarding_smtp_password');
+        $fwd_pass = $s->get_setting('mailbox_forwarding_smtp_password');
         if ($fwd_pass) {
             $c->password = $fwd_pass;
         }

@@ -36,14 +36,14 @@ enum class ComposeMode(val wire: String) {
 }
 
 /**
- * Thin typed face over the `inbound_email` API actions
+ * Thin typed face over the `mailbox` API actions
  * (specs/mobile_native_email.md § Server-side). Every call rides the app's
  * session key through [ApiClient]; scoping is entirely server-side.
  */
 class MailApi(val client: ApiClient) {
 
     suspend fun mailboxes(): MailboxHome {
-        val envelope = client.submitAction("inbound_email/mailboxes", JsonValue.Obj(emptyList()))
+        val envelope = client.submitAction("mailbox/mailboxes", JsonValue.Obj(emptyList()))
         return MailboxHome.from(envelope["data"]) ?: throw JoineryApiError.Malformed
     }
 
@@ -67,7 +67,7 @@ class MailApi(val client: ApiClient) {
             MailView.SPAM -> body.add("spam" to JsonValue.Bool(true))
         }
         if (query.isNotEmpty()) body.add("q" to JsonValue.Str(query))
-        val envelope = client.submitAction("inbound_email/thread_list", JsonValue.Obj(body))
+        val envelope = client.submitAction("mailbox/thread_list", JsonValue.Obj(body))
         return ThreadPage.from(envelope["data"]) ?: throw JoineryApiError.Malformed
     }
 
@@ -75,7 +75,7 @@ class MailApi(val client: ApiClient) {
         val body = ArrayList<Pair<String, JsonValue>>()
         body.add("thread_key" to JsonValue.Str(key))
         if (aliasId != null) body.add("alias_id" to JsonValue.Num(aliasId.toDouble()))
-        val envelope = client.submitAction("inbound_email/thread", JsonValue.Obj(body))
+        val envelope = client.submitAction("mailbox/thread", JsonValue.Obj(body))
         return MailThread.from(envelope["data"]) ?: throw JoineryApiError.Malformed
     }
 
@@ -94,7 +94,7 @@ class MailApi(val client: ApiClient) {
         if (aliasId != null) body.add("alias_id" to JsonValue.Num(aliasId.toDouble()))
         if (folderId != null) body.add("folder_id" to JsonValue.Num(folderId.toDouble()))
         if (present != null) body.add("present" to JsonValue.Bool(present))
-        val envelope = client.submitAction("inbound_email/thread_action", JsonValue.Obj(body))
+        val envelope = client.submitAction("mailbox/thread_action", JsonValue.Obj(body))
         return envelope["data"]?.get("count")?.intValue ?: 0
     }
 
@@ -106,7 +106,7 @@ class MailApi(val client: ApiClient) {
         body.add("thread_key" to JsonValue.Str(threadKey))
         body.add("name" to JsonValue.Str(name))
         if (aliasId != null) body.add("alias_id" to JsonValue.Num(aliasId.toDouble()))
-        val envelope = client.submitAction("inbound_email/thread_action", JsonValue.Obj(body))
+        val envelope = client.submitAction("mailbox/thread_action", JsonValue.Obj(body))
         return envelope["data"]?.get("folder")?.let { MailFolder.from(it) }
     }
 
@@ -139,7 +139,7 @@ class MailApi(val client: ApiClient) {
             fields.add("cc" to JsonValue.Str(cc))
             fields.add("subject" to JsonValue.Str(subject))
             fields.add("body" to JsonValue.Str(body))
-            client.submitAction("inbound_email/send", JsonValue.Obj(fields))
+            client.submitAction("mailbox/send", JsonValue.Obj(fields))
         } else {
             val textFields = ArrayList<Pair<String, String>>()
             textFields.add("mode" to mode.wire)
@@ -152,7 +152,7 @@ class MailApi(val client: ApiClient) {
             val files = attachments.map {
                 MultipartFile("attachments[]", it.filename, it.mimeType, it.data)
             }
-            client.submitMultipart("inbound_email/send", textFields, files)
+            client.submitMultipart("mailbox/send", textFields, files)
         }
     }
 }

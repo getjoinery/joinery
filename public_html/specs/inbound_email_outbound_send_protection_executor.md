@@ -14,8 +14,8 @@ unwraps **in-window**. Do not start until those exist.
 ### Naming baseline (rename interaction)
 
 Same convention as the encryption package: **run the rename first.** Paths below use
-today's on-disk `plugins/inbound_email/…`; after the rename apply exactly two
-substitutions — dir `plugins/inbound_email/`→`plugins/mailbox/`, setting-key
+today's on-disk `plugins/mailbox/…`; after the rename apply exactly two
+substitutions — dir `plugins/mailbox/`→`plugins/mailbox/`, setting-key
 `inbound_email_`→`mailbox_`. Class names (`InboundEmailDomain`, `SRSRewriter`,
 `InboundEmailSetupCheck`, `SmtpProvider`), table prefixes (`ied_`), and line numbers are
 rename-invariant. Core files under `includes/` (`EmailSender`, `SmtpProvider`,
@@ -25,14 +25,14 @@ rename-invariant. Core files under `includes/` (`EmailSender`, `SmtpProvider`,
 
 | Area | File |
 |---|---|
-| Domain schema (protected flag, sealed DKIM key, DNS value, selector) | `plugins/inbound_email/data/inbound_email_domain_class.php` (`ied`, no DKIM cols today) |
+| Domain schema (protected flag, sealed DKIM key, DNS value, selector) | `plugins/mailbox/data/inbound_email_domain_class.php` (`ied`, no DKIM cols today) |
 | In-app DKIM signing hook (core, crypto-agnostic) | `includes/email_providers/SmtpProvider.php` (`send()` 180–184) |
-| Protected-domain DKIM resolver (plugin, unwraps in-window) | new `plugins/inbound_email/includes/MailboxDkimSigner.php` |
+| Protected-domain DKIM resolver (plugin, unwraps in-window) | new `plugins/mailbox/includes/MailboxDkimSigner.php` |
 | Ambient-send guard | `includes/EmailSender.php` (`send()` 122, From default 124–126) |
-| Remove protected domain from opendkim | `plugins/inbound_email/provisioning/provision_dkim.sh` (append-only today; `signing.table` line `*@<domain> …`) |
+| Remove protected domain from opendkim | `plugins/mailbox/provisioning/provision_dkim.sh` (append-only today; `signing.table` line `*@<domain> …`) |
 | SRS → forwarding subdomain | `SRSRewriter::rewrite()` (42) called by `InboundEmailRouter::buildForwardMessage()` (~985, `$forwarding_domain = ied_domain`); bounce `handleSRSBounce()` (1169) |
-| DNS check inversion | `plugins/inbound_email/includes/InboundEmailSetupCheck.php` (`checkDomain()` 495; SPF 531–549 / `spfAuthorizes()` 977; DKIM 551–564; DMARC 566–582) |
-| Health gating | `plugins/inbound_email/includes/InboundEmailHealth.php` (`checkDomainDns()` 123) |
+| DNS check inversion | `plugins/mailbox/includes/InboundEmailSetupCheck.php` (`checkDomain()` 495; SPF 531–549 / `spfAuthorizes()` 977; DKIM 551–564; DMARC 566–582) |
+| Health gating | `plugins/mailbox/includes/InboundEmailHealth.php` (`checkDomainDns()` 123) |
 
 ## Phase 0 — Preflight
 
@@ -79,7 +79,7 @@ for non-protected domains (opendkim signs those, or they're unsigned). The raw-r
 `relayRawMessage()` (253) is unchanged — it carries the original sender's own signature and
 is not a mailbox compose.
 
-### 2.2 Plugin resolver — `plugins/inbound_email/includes/MailboxDkimSigner.php`
+### 2.2 Plugin resolver — `plugins/mailbox/includes/MailboxDkimSigner.php`
 
 `resolveFor(string $from_domain): ?array`:
 1. `InboundEmailDomain::GetByDomain($from_domain)`; return null unless
@@ -121,7 +121,7 @@ the backstop.
 
 - `InboundEmailRouter::buildForwardMessage()` (~985) currently sets `$forwarding_domain =
   $domain->get('ied_domain')`. Change to the domain's `ied_forwarding_subdomain` (falling
-  back to a server-wide `inbound_email_forwarding_subdomain` setting). `SRSRewriter::rewrite()`
+  back to a server-wide `mailbox_forwarding_subdomain` setting). `SRSRewriter::rewrite()`
   (42) is unchanged — it already takes the domain as a parameter.
 - `handleSRSBounce()` (1169): the freshly generated delivery-failure message sends from the
   forwarding subdomain, not the protected domain (it runs while locked).
@@ -172,9 +172,9 @@ All in-window (they need the unwrapped secret key to seal the DKIM key).
 
 ## Phase 8 — Settings & docs
 
-- Settings (`plugins/inbound_email/plugin.json`): `inbound_email_forwarding_subdomain`
+- Settings (`plugins/mailbox/plugin.json`): `mailbox_forwarding_subdomain`
   (server-wide default; per-domain override in `ied_forwarding_subdomain`).
-- Docs (current-state voice): `plugins/inbound_email/docs/overview.md` gains an "Outbound
+- Docs (current-state voice): `plugins/mailbox/docs/overview.md` gains an "Outbound
   send protection" section (the protected-domain invariant, the DNS shape, the in-app
   signing path, the forwarding-subdomain envelope, and the optional automated subdomain);
   `docs/email_system.md` notes protected-domain From addresses are usable only via the

@@ -93,7 +93,7 @@ becomes a version). Prune to `SubscriptionTier::getUserFeature($owner,
 
 ### FileAccessGrant — `data/file_access_grants_class.php` (`fga`, `fga_file_access_grants`)
 
-Generalization of `plugins/inbound_email/data/inbound_email_mailbox_grant_class.php`
+Generalization of `plugins/mailbox/data/inbound_email_mailbox_grant_class.php`
 (its method surface is the template), self-service instead of staff-gated:
 
 - `fga_file_access_grant_id` int8 serial PK

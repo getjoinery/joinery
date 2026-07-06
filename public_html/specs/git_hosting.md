@@ -438,11 +438,11 @@ root, seeded into its table by `update_database`.
 ```json
 [
     {
-        "name": "inbound_email",
+        "name": "mailbox",
         "owner_username": "jeremy",
         "target_type": "plugin",
-        "target_path": "plugins/inbound_email",
-        "mirror_url": "https://github.com/getjoinery/inbound_email.git"
+        "target_path": "plugins/mailbox",
+        "mirror_url": "https://github.com/getjoinery/mailbox.git"
     }
 ]
 ```

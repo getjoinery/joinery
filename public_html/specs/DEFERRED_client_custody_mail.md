@@ -3,9 +3,9 @@
 **Status: DEFERRED — design record, not for implementation.** Captured so the analysis
 doesn't have to be re-derived when/if it's revisited. Nothing here is scheduled.
 **Relationship to existing specs:** this is the "client-side crypto fork" already recorded
-as *deferred, not rejected* in `specs/inbound_email_encryption_at_rest.md` (§ *Alternative:
+as *deferred, not rejected* in `specs/mailbox_encryption_at_rest.md` (§ *Alternative:
 client-side key handling*) and `specs/mailbox_security_model_public.md` (§ *Why server-side
-decryption*). It builds on `specs/inbound_email_hardened_ingest_relay.md` (edge-sealing) and
+decryption*). It builds on `specs/mailbox_hardened_ingest_relay.md` (edge-sealing) and
 `specs/sealed_vault_core.md`'s **client-custody** mode (already designed for drive/passwords).
 
 ## What this is

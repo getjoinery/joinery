@@ -16,7 +16,7 @@ scoping) must land before the scheduling half of this spec. The triage/categoriz
 half has no such dependency and can proceed independently. **Reading attachments**
 additionally assumes `inbound_email_attachment_storage.md` (attachments stored as
 discrete `File` objects) and its prerequisite `implemented/file_private_storage.md`.
-**Plugin:** `joinery_ai` (reads `inbound_email`, writes the calendar/events surface)
+**Plugin:** `joinery_ai` (reads `mailbox`, writes the calendar/events surface)
 **Touches:** the **AI exposure surface** of `InboundEmailMessage` (read +
 untrusted-field declaration + a small writable category field), the calendar/event
 write path (model allowlist *or* a dedicated action — open question), and two
@@ -174,7 +174,7 @@ public static $ai_writable_fields = ['iem_ai_summary'];
 
 On a domain at a protected security level, this column is sealed like the other
 content columns — a gist is the body in miniature — and decrypts in-session with
-the previews (`inbound_email_security_levels.md` § AI Processing of Protected
+the previews (`mailbox_security_levels.md` § AI Processing of Protected
 Mail). Labels stay cleartext (operational metadata).
 
 It's a shared field (last-writer-wins is fine for a gist). The message has no owner
@@ -287,7 +287,7 @@ reads untrusted email and writes, the taint gate requires `rcp_allow_tainted_wri
 6. ~~**Trigger cadence.**~~ **Resolved: scheduled poll, key-gated** — the recipe
    runs on its normal schedule and picks up messages it hasn't processed
    (per-recipe log). On a domain at a protected security level
-   (`inbound_email_security_levels.md` § AI Processing of Protected Mail), a
+   (`mailbox_security_levels.md` § AI Processing of Protected Mail), a
    message is digestible only while an unlocked session's key is available; it
    stays pending in the log until then. An on-arrival trigger can come later;
    not v1.
@@ -337,4 +337,4 @@ reads untrusted email and writes, the taint gate requires `rcp_allow_tainted_wri
 On implementation, update `plugins/joinery_ai/docs/overview.md` (current-state
 voice): an "Email triage" section covering the two-recipe pattern, the untrusted-
 field declaration and taint opt-in, the triage fields, and the calendar door; and
-cross-reference `plugins/inbound_email/docs/overview.md`.
+cross-reference `plugins/mailbox/docs/overview.md`.

@@ -2,13 +2,13 @@
 
 **Status:** Draft / awaiting implementation
 **Version:** 1.1
-**Extracted from:** `specs/inbound_email_encryption_at_rest.md` (v1.3) — mail is the first
+**Extracted from:** `specs/mailbox_encryption_at_rest.md` (v1.3) — mail is the first
 consumer; the key hierarchy, unlock window, sealing helper, key-rotation ceremony, unlocker
 floor, and backup rules defined there are **promoted to core** by this spec and consumed by
 mail unchanged in intent.
 **Consumed by (inventory decided up front) — two custody modes, three keypairs (see *Two
 Custody Modes* / *Custody-scoped keys*):**
-1. **Mail** (`inbound_email` encryption at rest) — **server-custody**, scope `user` — built.
+1. **Mail** (`mailbox` encryption at rest) — **server-custody**, scope `user` — built.
 2. **AI chat** (`joinery_ai`) — **server-custody**, scope `user` — `specs/joinery_ai_chat_encryption.md`.
 3. **Drive / files** (`specs/drive_encryption.md`) — **client-custody**, scope `drive`.
 4. **Passwords** (`specs/password_vault.md`) — **client-custody**, scope `passwords`.

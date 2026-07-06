@@ -140,4 +140,4 @@ For hosts who keep Calendly live: booking page branches to `getEmbedHtml()` with
 
 ## Documentation
 
-When implemented, fold into `plugins/inbound_email`-style plugin docs under `plugins/bookings/docs/` — an "external integrations" page covering connect, import (migrate vs proxy), and calendar sync. Current-state only, per the docs rules.
+When implemented, fold into `plugins/mailbox`-style plugin docs under `plugins/bookings/docs/` — an "external integrations" page covering connect, import (migrate vs proxy), and calendar sync. Current-state only, per the docs rules.

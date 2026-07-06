@@ -13,8 +13,8 @@ through the same store path) and `specs/inbound_email_outbound_send_protection_e
 
 ### Naming baseline (rename interaction)
 
-**Run the rename first.** Paths use today's `plugins/inbound_email/…`; after the rename
-apply dir `plugins/inbound_email/`→`plugins/mailbox/` and setting-key
+**Run the rename first.** Paths use today's `plugins/mailbox/…`; after the rename
+apply dir `plugins/mailbox/`→`plugins/mailbox/` and setting-key
 `inbound_email_`→`mailbox_`. Class names (`InboundEmailRouter`, `PostfixProvider`,
 `ManagementJob`, `ManagedNode`), table prefixes (`iem_`/`iea_`/`ied_`/`mjb_`/`mgn_`), and
 line numbers are rename-invariant. `server_manager` is a **separate plugin** — not renamed.
@@ -31,12 +31,12 @@ relay-fronted mode are **both permanent**, chosen per deployment.
 
 | Area | File |
 |---|---|
-| The relay installer | new `plugins/inbound_email/provisioning/provision_relay.sh` (sibling of `install_email.sh`, 659 lines, v2.8) |
-| The Go sealing binary | new `plugins/inbound_email/provisioning/relay-sealer/` (Go source + build) |
+| The relay installer | new `plugins/mailbox/provisioning/provision_relay.sh` (sibling of `install_email.sh`, 659 lines, v2.8) |
+| The Go sealing binary | new `plugins/mailbox/provisioning/relay-sealer/` (Go source + build) |
 | Pipe interface it replaces | `utils/inbound_email_handler.php` (stdin raw, `$argv[1]` recipient) → `PostfixProvider::handleInbound()` (`includes/email_providers/PostfixProvider.php` 109) → `InboundEmailRouter::processEmail()` (125) |
 | Store re-injection (pull consumer) | `InboundEmailRouter::processEmail()` (125) / `storeMessage()` (336) / `storeExtracted()` (682) |
 | Alias/routing map source | `InboundEmailAlias` (`iea`, modes forward/store/forward_and_store) + `InboundEmailDomain` (`ied`: catch-all, `ied_reject_unmatched`); routing in `processEmail()` 134–192 |
-| Pull consumer + map sync tasks | new tasks in `plugins/inbound_email/tasks/` (mirror `PollImapAccounts.php` + `.json`, `every_run`) |
+| Pull consumer + map sync tasks | new tasks in `plugins/mailbox/tasks/` (mirror `PollImapAccounts.php` + `.json`, `every_run`) |
 | Provisioning jobs | `server_manager`: `JobCommandBuilder::build_provision_relay()`, `JobResultProcessor::process_provision_relay()` (mirror `build_install_node` 1269 / `process_install_node` 269); `ManagementJob::createJob()` (48) |
 | Node registration + WG | `ManagedNode` (`mgn`, `mgn_managed_nodes`) + new `mgn_wg_*` columns via `server_manager/migrations/migrations.php` |
 | Smarthost | `SmtpProvider` smarthost config points at the relay over the tunnel |
@@ -52,7 +52,7 @@ ships a Go agent (`joinery-agent`), so Go is in the lineage.
 
 ## Phase 1 — The Go sealing binary
 
-New `plugins/inbound_email/provisioning/relay-sealer/` (Go module, builds to a single
+New `plugins/mailbox/provisioning/relay-sealer/` (Go module, builds to a single
 static binary shipped by `provision_relay.sh`). It replaces the `utils/inbound_email_handler.php`
 pipe target on the relay. Behavior (design § 2 step 3, and the resolved decision):
 - Invoked by Postfix as the pipe transport: raw RFC822 on **stdin**, envelope recipient +
@@ -76,7 +76,7 @@ pipe target on the relay. Behavior (design § 2 step 3, and the resolved decisio
 
 ## Phase 2 — provision_relay.sh
 
-New `plugins/inbound_email/provisioning/provision_relay.sh`, sibling of `install_email.sh`
+New `plugins/mailbox/provisioning/provision_relay.sh`, sibling of `install_email.sh`
 (clone its structure). `chmod 666` the file; it runs as root on a fresh minimal Debian VPS,
 idempotent, one arg (mail hostname), zero prompts. Sections, mapped to `install_email.sh`:
 - **§1 packages** (install_email.sh 161): `postfix opendkim opendkim-tools opendmarc` —
@@ -121,7 +121,7 @@ syncs to the relay); store-and-forward both seals and forwards.
 The resolved decision: the dumber option, no bespoke relay daemon.
 - Relay network surface stays exactly **Postfix + WireGuard + key-only SSH**.
 - Main server, over the tunnel, on a short poll (~15–30s) via a new scheduled task
-  (`plugins/inbound_email/tasks/PullRelaySpool.php` + `.json`, `every_run`, mirror
+  (`plugins/mailbox/tasks/PullRelaySpool.php` + `.json`, `every_run`, mirror
   `PollImapAccounts`): `rsync` new `<spoolid>.seal`+`.meta` entries **copy-only** (never
   `--remove-source-files`), store each durably with an **idempotent store keyed on spool
   id** (re-pull of an un-acked-but-stored item = no-op = dedup), then **delete the remote
@@ -213,7 +213,7 @@ the Fortress guarantee is unchanged.
   a small status table for the health checks.
 - Deployment: `provision_relay.sh` + the sealer binary ship in the plugin's `provisioning/`;
   the pull consumer + map-sync run under the scheduled-task system.
-- Docs (current-state voice): `plugins/inbound_email/docs/overview.md` — the relay as where
+- Docs (current-state voice): `plugins/mailbox/docs/overview.md` — the relay as where
   the MTA stack runs, the sealed spool + pull transport, deferred ingest, relay-side
   forwarding; `docs/mobile_apps.md` / mail-DNS docs — mail hostname records point at the
   relay.

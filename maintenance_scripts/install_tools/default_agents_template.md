@@ -96,7 +96,7 @@ See `/docs/` for detailed guides on specific subsystems:
 - [Creating Components from Themes](docs/creating_components_from_themes.md) - Theme component extraction
 - [Deletion System](docs/deletion_system.md) - Soft delete and permanent delete patterns
 - [Deploy and Upgrade](docs/deploy_and_upgrade.md) - Deployment and upgrade procedures
-- [Inbound Email Plugin](plugins/inbound_email/docs/overview.md) - Self-hosted inbound email: forwarding, local mailboxes, DKIM/SRS
+- [Mailbox Plugin](plugins/mailbox/docs/overview.md) - Self-hosted email: receiving, forwarding, local mailboxes, webmail reader, IMAP sync, DKIM/SRS
 - [Email System](docs/email_system.md) - Email sending and templates
 - [FormWriter](docs/formwriter.md) - Form generation system
 - [Logic Architecture](docs/logic_architecture.md) - Business logic layer patterns

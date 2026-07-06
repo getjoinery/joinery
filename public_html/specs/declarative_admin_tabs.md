@@ -7,7 +7,7 @@ the top of a feature's admin pages) are today built one of two ways, both
 imperative:
 
 1. A hand-rolled `<ul class="nav nav-tabs">…</ul>` block **copy-pasted into every
-   sibling page** (e.g. the `inbound_email` plugin's admin pages).
+   sibling page** (e.g. the `mailbox` plugin's admin pages).
 2. A per-page PHP array literal passed to `AdminPage::tab_menu($tabs, $current)`
    (e.g. core settings pages).
 
@@ -28,9 +28,9 @@ sub-tabs, wizard steps, anything whose URLs carry instance ids) keep using the
 explicit-array form — they are not menu-tree nodes and must not be forced into
 one. See Non-goals.
 
-> Motivated by the Inbound Email Mailbox Reader spec
+> Motivated by the Mailbox Reader spec
 > (`specs/inbound_email_mailbox_reader.md`), which currently ships a self-contained
-> `inbound_email_admin_tabs()` PHP helper. Once this lands, that plugin becomes
+> `mailbox_admin_tabs()` PHP helper. Once this lands, that plugin becomes
 > the **first adopter**: it declares its admin pages in `plugin.json` and drops
 > the helper. This spec does **not** depend on the reader and can ship first or
 > independently.
@@ -84,7 +84,7 @@ Behavior:
    as `tab_menu()` today.
 
 Net result: a top-level admin tab group is declared once in JSON; every page in
-it calls `echo AdminPage::tab_menu_for('inbound_email')`; permission-hidden tabs
+it calls `echo AdminPage::tab_menu_for('mailbox')`; permission-hidden tabs
 disappear for users who can't reach them; a plugin can add a tab to another
 feature's group by declaring a child with that parent — no edits to the other
 code.
@@ -97,7 +97,7 @@ appear in the **sidebar** (nested under the parent), or only as tabs?
 The columns to express this already exist — `amu_location` and `amu_visibility`.
 Recommended model:
 
-- The **parent** item is the sidebar entry (e.g. the plugin's "Incoming" link).
+- The **parent** item is the sidebar entry (e.g. the plugin's "Mailbox" link).
 - Its **children** are the tab group. A child that should render as a tab but
   *not* clutter the sidebar is marked via `amu_location` (e.g. a `tabs` value, or
   excluded from `admin_sidebar`) so `getadminmenu(..., 'admin_sidebar')` skips it
@@ -112,20 +112,20 @@ sidebar.
 
 A plugin opts in by declaring the group's pages as `adminMenu` children in
 `plugin.json` (core features use `admin_menus.json` identically). Illustrative —
-the inbound_email group once adopted:
+the mailbox group once adopted:
 
 ```json
 "adminMenu": [
-  { "slug": "inbound_email", "title": "Incoming",
-    "url": "/plugins/inbound_email/admin/admin_inbound_email_setup",
+  { "slug": "mailbox", "title": "Mailbox",
+    "url": "/plugins/mailbox/admin/admin_mailbox_setup",
     "parent": "emails", "permission": 5, "order": 10 },
 
-  { "slug": "inbound_email_domains", "title": "Domains",
-    "url": "/plugins/inbound_email/admin/admin_inbound_email_domains",
-    "parent": "inbound_email", "permission": 5, "order": 20, "location": "tabs" },
-  { "slug": "inbound_email_mailbox", "title": "Mailbox",
-    "url": "/plugins/inbound_email/admin/admin_inbound_email_reader",
-    "parent": "inbound_email", "permission": 5, "order": 50, "location": "tabs" }
+  { "slug": "mailbox_domains", "title": "Domains",
+    "url": "/plugins/mailbox/admin/admin_mailbox_domains",
+    "parent": "mailbox", "permission": 5, "order": 20, "location": "tabs" },
+  { "slug": "mailbox_mailbox_reader", "title": "Mailboxes",
+    "url": "/plugins/mailbox/admin/admin_mailbox_reader",
+    "parent": "mailbox", "permission": 5, "order": 50, "location": "tabs" }
 ]
 ```
 
@@ -179,12 +179,12 @@ Run `php -l` and `validate_php_file.php` on every modified PHP file.
 
 ## Adoption (after this lands)
 
-1. **Inbound Email** — first adopter: declare its admin pages as `adminMenu`
-   children of `inbound_email` in `plugin.json`, replace
-   `AdminPage::tab_menu(inbound_email_admin_tabs(), …)` with
-   `AdminPage::tab_menu_for('inbound_email')`, and delete the
-   `inbound_email_admin_tabs()` helper — the whole file
-   `plugins/inbound_email/includes/admin_tabs.php` (it holds nothing else),
+1. **Mailbox** — first adopter: declare its admin pages as `adminMenu`
+   children of `mailbox` in `plugin.json`, replace
+   `AdminPage::tab_menu(mailbox_admin_tabs(), …)` with
+   `AdminPage::tab_menu_for('mailbox')`, and delete the
+   `mailbox_admin_tabs()` helper — the whole file
+   `plugins/mailbox/includes/admin_tabs.php` (it holds nothing else),
    along with the `require_once(...'admin_tabs.php')` line in each of its seven
    consumer pages.
 2. **Core settings pages** — optionally migrate `admin_settings*`'s array literal

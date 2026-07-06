@@ -27,7 +27,7 @@
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
-require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/InboundEmailRouter.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
 
 class InboundForwardingRelayTest {
 	private $pass = 0;
@@ -99,7 +99,7 @@ class InboundForwardingRelayTest {
 	private function testResolverProviderPath() {
 		$this->out('-- resolver: provider relay chosen --');
 		$this->setSetting('email_service', 'mailgun');
-		$this->setSetting('inbound_email_forwarding_smtp_host', '');
+		$this->setSetting('mailbox_forwarding_smtp_host', '');
 
 		$router = new InboundEmailRouter();
 		$relay = $router->resolveRelayProvider();
@@ -114,7 +114,7 @@ class InboundForwardingRelayTest {
 	private function testResolverNonSupportingFallback() {
 		$this->out('-- resolver: non-supporting provider falls back --');
 		$this->setSetting('email_service', 'postmark');
-		$this->setSetting('inbound_email_forwarding_smtp_host', '');
+		$this->setSetting('mailbox_forwarding_smtp_host', '');
 
 		$router = new InboundEmailRouter();
 		$relay = $router->resolveRelayProvider();
@@ -128,7 +128,7 @@ class InboundForwardingRelayTest {
 	private function testResolverOverrideForcesSmtp() {
 		$this->out('-- resolver: forwarding-SMTP override forces SMTP --');
 		$this->setSetting('email_service', 'mailgun');
-		$this->setSetting('inbound_email_forwarding_smtp_host', 'relay.example.com');
+		$this->setSetting('mailbox_forwarding_smtp_host', 'relay.example.com');
 
 		$router = new InboundEmailRouter();
 		$relay = $router->resolveRelayProvider();

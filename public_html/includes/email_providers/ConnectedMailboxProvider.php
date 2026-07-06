@@ -38,7 +38,7 @@ class ConnectedMailboxProvider implements EmailServiceProvider {
         if (class_exists('InboundImapAccount')) {
             return true;
         }
-        $file = PathHelper::getIncludePath('plugins/inbound_email/data/inbound_imap_account_class.php');
+        $file = PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php');
         if (is_file($file)) {
             require_once($file);
         }

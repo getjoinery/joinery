@@ -8,9 +8,9 @@ The email system consists of three focused classes that provide clear separation
 - **EmailTemplate**: Template processing (conditionals, variables)
 - **EmailSender**: All sending logic with service selection and fallback
 
-**Inbound email** is handled by the Inbound Email plugin — see [Inbound Email Plugin](/plugins/inbound_email/docs/overview.md) for setup, admin usage, and server configuration. Its guided **Setup** tab verifies MX, SPF, DKIM, and forward-confirmed reverse DNS (PTR) for each inbound domain, using `DnsResolver` (including `DnsResolver::getPtr()` for reverse lookups). Locally-stored mail is read through a Gmail-style **Mailbox Reader** with a **grant-based mailbox model** — each address is its own mailbox, shareable among several users, with read/star state shared per mailbox. The reader has two mounts of one UI: the staff **Mailboxes** admin tab, and a member page at `/profile/inbound_email/mailbox` where any signed-in member reads and answers the mailboxes they hold grants for; see [Mailbox Reader](/plugins/inbound_email/docs/overview.md#mailbox-reader).
+**Inbound email** is handled by the Mailbox plugin — see [Mailbox Plugin](/plugins/mailbox/docs/overview.md) for setup, admin usage, and server configuration. Its guided **Setup** tab verifies MX, SPF, DKIM, and forward-confirmed reverse DNS (PTR) for each inbound domain, using `DnsResolver` (including `DnsResolver::getPtr()` for reverse lookups). Locally-stored mail is read through a Gmail-style **Mailbox Reader** with a **grant-based mailbox model** — each address is its own mailbox, shareable among several users, with read/star state shared per mailbox. The reader has two mounts of one UI: the staff **Mailboxes** admin tab, and a member page at `/profile/mailbox/mailbox` where any signed-in member reads and answers the mailboxes they hold grants for; see [Mailbox Reader](/plugins/mailbox/docs/overview.md#mailbox-reader).
 
-**Inbound transports.** Mail can arrive three ways: a self-hosted **Postfix** MX→pipe, a **webhook** provider (Mailgun), or by **IMAP poll** of an existing mailbox (Gmail, Microsoft 365, Yahoo, iCloud, Fastmail, any IMAP host). The first two are *push*; IMAP is *pull* — a scheduled task polls the mailbox and ingests new mail. Combined with the generic **SMTP** outbound provider, IMAP-in gives a complete **bring-your-own-mailbox** pairing (SMTP out + IMAP in on the same account) for low-volume users with no self-hosted MX. See [Receiving by IMAP poll](/plugins/inbound_email/docs/overview.md#receiving-by-imap-poll).
+**Inbound transports.** Mail can arrive three ways: a self-hosted **Postfix** MX→pipe, a **webhook** provider (Mailgun), or by **IMAP poll** of an existing mailbox (Gmail, Microsoft 365, Yahoo, iCloud, Fastmail, any IMAP host). The first two are *push*; IMAP is *pull* — a scheduled task polls the mailbox and ingests new mail. Combined with the generic **SMTP** outbound provider, IMAP-in gives a complete **bring-your-own-mailbox** pairing (SMTP out + IMAP in on the same account) for low-volume users with no self-hosted MX. See [Receiving by IMAP poll](/plugins/mailbox/docs/overview.md#receiving-by-imap-poll).
 
 ## Architecture
 
@@ -622,7 +622,7 @@ interface). `encryption` is `'ssl'` (implicit TLS / SMTPS), `'tls'` (STARTTLS), 
 |---|---|---|
 | `SmtpConfig::fromSettings()` | Global `smtp_*` settings | The system SMTP provider (`new SmtpProvider()`), default for `new SmtpMailer()` |
 | `SmtpConfig::fromConnectedAccount($account)` | A connected `InboundImapAccount` — PRESETS SMTP coordinates + the stored OAuth token (`xoauth2`) or app password (`password`) | The connected-account provider and per-mailbox transport |
-| `SmtpConfig::fromForwardingSettings()` | `inbound_email_forwarding_smtp_*`, falling back to base `smtp_*` | Inbound forwarding's SMTP fallback |
+| `SmtpConfig::fromForwardingSettings()` | `mailbox_forwarding_smtp_*`, falling back to base `smtp_*` | Inbound forwarding's SMTP fallback |
 
 `SmtpMailer` takes an optional `SmtpConfig` (default `fromSettings()`), so `new SmtpMailer()`
 reads global `smtp_*` with password auth unchanged. The single `EmailMessage`→PHPMailer mapping
@@ -695,7 +695,7 @@ SMTP transaction lives in one place shared with all other SMTP relaying.
 
 > **One account, both directions.** A single connected `InboundImapAccount` serves inbound (the
 > IMAP feed) and outbound (the same `SmtpMailer`), with a shared OAuth grant and a shared
-> `iia_needs_reauth` health flag. See [Inbound Email Plugin](../plugins/inbound_email/docs/overview.md#receiving-by-imap-poll).
+> `iia_needs_reauth` health flag. See [Mailbox Plugin](../plugins/mailbox/docs/overview.md#receiving-by-imap-poll).
 
 ## Email Authentication Checks (DnsAuthChecker)
 
@@ -703,7 +703,7 @@ SMTP transaction lives in one place shared with all other SMTP relaying.
 **publishes** SPF, DKIM, and DMARC records. Use it — do not hand-roll
 `dns_get_record()` TXT parsing. `adm/admin_settings_email.php` and the
 `utils/email_setup_check.php` deep-dive tool both build on it, and the
-`inbound_email` plugin's domain status badges do too.
+`mailbox` plugin's domain status badges do too.
 
 > **Record presence ≠ message verification.** `DnsAuthChecker` is a DNS
 > *record* check — it inspects domains **we control** for a sane outbound/setup
@@ -711,9 +711,9 @@ SMTP transaction lives in one place shared with all other SMTP relaying.
 > against a record, and must never be repurposed for inbound verdicts. The app
 > does **not** compute inbound SPF/DKIM/DMARC at all. Per-inbound-message
 > verdicts come from the message's `Authentication-Results` header, stamped by
-> the verifying MTA (opendkim-verify + opendmarc) and read by the inbound_email
+> the verifying MTA (opendkim-verify + opendmarc) and read by the mailbox
 > plugin's `AuthenticationResults`/`InboundEmailRouter` — never from
-> `DnsAuthChecker`. See `plugins/inbound_email/docs/overview.md` →
+> `DnsAuthChecker`. See `plugins/mailbox/docs/overview.md` →
 > *Inbound authentication*.
 
 ```php
@@ -736,7 +736,7 @@ The email system uses a provider abstraction so that new email services can be a
 ### Architecture
 
 - **`EmailServiceProvider`** — interface in `includes/EmailServiceProvider.php` that all outbound providers implement
-- **`InboundEmailProvider`** — sibling interface in `includes/InboundEmailProvider.php` for inbound transports (Postfix, Mailgun webhook, etc.). A single provider class may implement both interfaces; the Inbound Email plugin discovers inbound providers via `InboundProviderRegistry`. See [Inbound Email Plugin](../plugins/inbound_email/docs/overview.md#inbound-providers) for the inbound side.
+- **`InboundEmailProvider`** — sibling interface in `includes/InboundEmailProvider.php` for inbound transports (Postfix, Mailgun webhook, etc.). A single provider class may implement both interfaces; the Mailbox plugin discovers inbound providers via `InboundProviderRegistry`. See [Mailbox Plugin](../plugins/mailbox/docs/overview.md#inbound-providers) for the inbound side.
 - **`RawMessageRelay`** — optional capability interface, declared alongside `EmailServiceProvider` in `includes/EmailServiceProvider.php`. A provider opts in to relay raw MIME with a chosen envelope sender; used by inbound-email forwarding. See [Raw-MIME relay](#raw-mime-relay-optional-capability) below.
 - **Provider classes** — live in `includes/email_providers/` (e.g., `MailgunProvider.php`, `SmtpProvider.php`, `SendGridProvider.php`)
 - **Auto-discovery** — `EmailSender` scans `includes/email_providers/` for classes implementing `EmailServiceProvider`; `InboundProviderRegistry` walks the same directory for classes implementing `InboundEmailProvider`. No manual registration needed in either case.
@@ -821,5 +821,5 @@ The structured-only providers (`postmark`, `sendgrid`, `brevo`, `mailjet`,
 raw-MIME relay. A provider without the capability is detected via
 `instanceof RawMessageRelay` and the caller falls back to an SMTP relay, so
 forwarding never regresses. See
-[Inbound Email — Forwarding relay](../plugins/inbound_email/docs/overview.md#forwarding-relay)
-for how the inbound plugin resolves the relay path and handles SRS per path.
+[Mailbox — Forwarding relay](../plugins/mailbox/docs/overview.md#forwarding-relay)
+for how the mailbox plugin resolves the relay path and handles SRS per path.

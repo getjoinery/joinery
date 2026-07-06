@@ -16,7 +16,7 @@ Welcome to the Joinery platform documentation. Select a topic from the sidebar, 
 - [Validation](validation.md) -- Three-layer validation system (client, server, model)
 - [Settings](settings.md) -- System settings management and auto-creating settings
 - [Email System](email_system.md) -- Composing and sending email with templates, service fallback, and batch operations
-- [Inbound Email](/plugins/inbound_email/docs/overview.md) -- Self-hosted inbound email: forwarding, local mailboxes, DKIM/SRS
+- [Mailbox](/plugins/mailbox/docs/overview.md) -- Self-hosted email: receiving, forwarding, local mailboxes, webmail reader, IMAP sync, DKIM/SRS
 - [Photo System](photo_system.md) -- Multi-photo management, uploads, and image sizing
 - [Cloud Storage](cloud_storage.md) -- S3-compatible cloud bucket for public uploaded files
 - [Deletion System](deletion_system.md) -- Soft delete, permanent delete, cascading, and foreign key actions
