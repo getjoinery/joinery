@@ -80,7 +80,7 @@ class PipelineRunner {
 
             [$verdict, $call_in, $call_out, $call_cw, $call_cr, $error] = self::judgeItem(
                 $provider, $model, $system, $digest_content, $verdict_descriptor,
-                $temperature, $top_p, $thinking_level
+                $temperature, $top_p, $thinking_level, $job
             );
             $in += $call_in; $out += $call_out; $cw += $call_cw; $cr += $call_cr;
 
@@ -151,7 +151,8 @@ class PipelineRunner {
      */
     private static function judgeItem(
         LlmProviderInterface $provider, string $model, array $system, string $digest_content,
-        array $verdict_descriptor, ?float $temperature, ?float $top_p, string $thinking_level
+        array $verdict_descriptor, ?float $temperature, ?float $top_p, string $thinking_level,
+        PipelineJobInterface $job
     ): array {
         $max_tokens = $provider->id() === 'local'
             ? AgentLoop::LOCAL_PER_CALL_MAX_TOKENS : AgentLoop::PER_CALL_MAX_TOKENS;
@@ -180,7 +181,7 @@ class PipelineRunner {
             $cr += (int)($usage['cache_read_input_tokens'] ?? 0);
 
             $text = self::responseText($response);
-            [$verdict, $error] = self::parseVerdict($text, $verdict_descriptor);
+            [$verdict, $error] = self::parseVerdict($text, $verdict_descriptor, $job);
 
             if ($verdict !== null) {
                 return [$verdict, $in, $out, $cw, $cr, null];
@@ -208,11 +209,14 @@ class PipelineRunner {
 
     /**
      * Strip any <think> remnant, extract the first balanced {...} JSON
-     * object, and coerce it against the verdict descriptor.
+     * object, coerce it against the verdict descriptor, and run the job's
+     * own cross-field check. All three failure modes (unparseable, schema
+     * mismatch, semantic rejection) return the same [null, error] shape, so
+     * the one-retry logic in judgeItem() treats them identically.
      *
      * @return array [verdict|null, error|null]
      */
-    private static function parseVerdict(string $text, array $verdict_descriptor): array {
+    private static function parseVerdict(string $text, array $verdict_descriptor, PipelineJobInterface $job): array {
         $stripped = preg_replace('/<think>.*?<\/think>/s', '', $text);
         $stripped = trim($stripped ?? $text);
 
@@ -227,7 +231,9 @@ class PipelineRunner {
         }
 
         try {
-            return [DescriptorValidator::coerce($verdict_descriptor, $decoded), null];
+            $verdict = DescriptorValidator::coerce($verdict_descriptor, $decoded);
+            $job->validateVerdict($verdict);
+            return [$verdict, null];
         } catch (InvalidArgumentException $e) {
             return [null, $e->getMessage()];
         }

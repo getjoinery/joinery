@@ -43,7 +43,7 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
- * @version 1.9
+ * @version 1.10
  */
 
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/MailboxViewer.php'));
@@ -505,6 +505,7 @@ class MailboxService {
 					COUNT(*) FILTER (WHERE iem_is_read = false) AS unread_count,
 					BOOL_OR(iem_is_starred) AS any_starred,
 					BOOL_OR(iem_is_archived) AS any_archived,
+					MAX(iem_ai_danger_score) AS danger_score,
 					CASE
 						WHEN COUNT(*) FILTER (WHERE iem_is_read = false) > 0 THEN 0
 						WHEN BOOL_OR(iem_is_starred) THEN 1
@@ -553,6 +554,11 @@ class MailboxService {
 				'unread_count' => intval($r['unread_count']),
 				'any_starred'  => (bool)$this->pgBool($r['any_starred']),
 				'any_archived' => (bool)$this->pgBool($r['any_archived']),
+				// AI security scan (specs/joinery_ai_email_security_scan.md):
+				// the highest danger score among the thread's messages, or
+				// null if none has been scanned. The list badge is silent
+				// below 3 — see the reader JS.
+				'danger_score' => $r['danger_score'] !== null ? intval($r['danger_score']) : null,
 				'latest_time'  => $r['latest_time'],
 				'latest_id'    => intval($r['latest_id']),
 			);
@@ -605,7 +611,8 @@ class MailboxService {
 					iem_is_read, iem_is_starred, iem_read_time, iem_dkim_result,
 					iem_spf_result, iem_dmarc_result, iem_auth_source, iem_spam_score,
 					iem_size_bytes, iem_message_id_header, iem_direction,
-					iem_body_plain, iem_body_html
+					iem_body_plain, iem_body_html,
+					iem_ai_danger_score, iem_ai_scan, iem_ai_scan_time
 				FROM iem_inbound_email_messages
 				WHERE iem_inbound_email_message_id IN ($in)
 				ORDER BY iem_received_time ASC, iem_inbound_email_message_id ASC";
@@ -641,6 +648,11 @@ class MailboxService {
 				'direction'         => $r['iem_direction'] ?: 'inbound',
 				'body_plain'        => $r['iem_body_plain'],
 				'body_html'         => $r['iem_body_html'],
+				// AI security scan (specs/joinery_ai_email_security_scan.md):
+				// null score/scan = not yet scanned by any recipe.
+				'ai_danger_score'   => ($r['iem_ai_danger_score'] !== null) ? intval($r['iem_ai_danger_score']) : null,
+				'ai_scan'           => self::decodeScan($r['iem_ai_scan']),
+				'ai_scan_time'      => $r['iem_ai_scan_time'],
 				'attachments'       => $att_by_msg[$mid] ?? array(),
 			);
 		}
@@ -989,6 +1001,14 @@ class MailboxService {
 			return $value;
 		}
 		return ($value === 't' || $value === 'true' || $value === '1' || $value === 1 || $value === true);
+	}
+
+	/** Decode iem_ai_scan (jsonb, PDO returns it as a JSON string) to
+	 *  {verdict, red_flags, summary, model, recipe_id}, or null when unset. */
+	private static function decodeScan($raw): ?array {
+		if ($raw === null || $raw === '') return null;
+		$decoded = json_decode((string)$raw, true);
+		return is_array($decoded) ? $decoded : null;
 	}
 }
 ?>

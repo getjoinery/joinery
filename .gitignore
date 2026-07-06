@@ -36,3 +36,10 @@ public_html/*.md.old
 # REMOVED these lines since theme/plugins are now tracked in repo:
 # /theme
 # /plugins
+
+# Email-security-scan model eval — local-only dev tooling, corpus data, and
+# tracking notes. Kept out of the repo (corpus contains real phishing samples;
+# the scripts are throwaway eval harnesses, not product code).
+public_html/tests/tools/
+public_html/tests/fixtures/email_security_corpus/
+public_html/specs/joinery_ai_email_security_scan_eval.md

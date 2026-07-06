@@ -358,22 +358,31 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
     }
 
     /**
-     * Control suffix appended to the system message for the thinking level. The
-     * local host (qwen) honors a /think or /no_think token; 'off' (the default)
-     * maps to /no_think, which skips the reasoning pass entirely. Subclasses that
-     * use a native reasoning parameter return '' (no suffix).
+     * Control suffix appended to the system message for the thinking level.
+     * Empty for the local host: current Ollama qwen3 templates gate thinking on
+     * the request-level reasoning control (see applyReasoning), not on a
+     * prompt-embedded /think or /no_think token — that soft switch is parsed
+     * out of the template, so emitting it only pollutes the system prompt with
+     * a stray literal the model reads as instruction text. Subclasses may
+     * override if their runtime still honors an in-prompt token.
      */
     protected function systemThinkingSuffix(string $level): string {
-        return ($level === 'off') ? '/no_think' : '/think';
+        return '';
     }
 
     /**
-     * Apply a native reasoning control to the request body. The local host uses
-     * the system-text suffix instead, so this is a no-op; remote subclasses that
-     * support reasoning_effort override it.
+     * Apply the request-level reasoning control. Ollama's OpenAI-compatible
+     * endpoint maps `reasoning_effort` onto the model's thinking channel, so
+     * this is the local equivalent of the native `think` field: 'off' -> 'none'
+     * (the strongest suppression the runtime offers), otherwise the level flows
+     * through as the effort. A reasoning-first model like qwen3:4b may still
+     * emit reasoning even at 'none' (relocated inline rather than in a <think>
+     * block); the <think> filter and the JSON extractor downstream handle both
+     * shapes. A non-reasoning model or a runtime that ignores the field is
+     * unaffected — an unknown field is dropped by the endpoint.
      */
     protected function applyReasoning(array &$request, string $level): void {
-        // no-op for the local host; see systemThinkingSuffix()
+        $request['reasoning_effort'] = ($level === '' || $level === 'off') ? 'none' : $level;
     }
 
     /**
