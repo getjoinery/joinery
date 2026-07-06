@@ -5,7 +5,7 @@
         "tabs": [
             "core-profile",
             "core-calendar",
-            "inbound-email-mailbox"
+            "mailbox"
         ],
         "entries": [
             {
@@ -39,13 +39,13 @@
                 }
             },
             {
-                "slug": "inbound-email-mailbox",
+                "slug": "mailbox",
                 "title": "Email",
                 "icon": "envelope",
                 "order": 58,
                 "destination": {
                     "type": "web",
-                    "url": "\/profile\/inbound_email\/mailbox"
+                    "url": "\/profile\/mailbox\/mailbox"
                 }
             },
             {

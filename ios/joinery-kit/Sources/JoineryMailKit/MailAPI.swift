@@ -29,7 +29,7 @@ public enum MailView: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// Thin typed face over the `inbound_email/*` actions
+/// Thin typed face over the `mailbox/*` actions
 /// (specs/mobile_native_email.md § Server-side). Every call rides the app's
 /// session key through APIClient; scoping is entirely server-side.
 public struct MailAPI: Sendable {
@@ -40,7 +40,7 @@ public struct MailAPI: Sendable {
     }
 
     public func mailboxes() async throws -> MailboxHome {
-        let envelope = try await client.submitAction("inbound_email/mailboxes", body: .object([]))
+        let envelope = try await client.submitAction("mailbox/mailboxes", body: .object([]))
         guard let home = MailboxHome(data: envelope["data"]) else {
             throw JoineryAPIError.malformedResponse
         }
@@ -68,7 +68,7 @@ public struct MailAPI: Sendable {
         if !query.isEmpty {
             body.append((key: "q", value: .string(query)))
         }
-        let envelope = try await client.submitAction("inbound_email/thread_list", body: .object(body))
+        let envelope = try await client.submitAction("mailbox/thread_list", body: .object(body))
         guard let pageData = ThreadPage(data: envelope["data"]) else {
             throw JoineryAPIError.malformedResponse
         }
@@ -82,7 +82,7 @@ public struct MailAPI: Sendable {
         if let aliasID {
             body.append((key: "alias_id", value: .number(Double(aliasID))))
         }
-        let envelope = try await client.submitAction("inbound_email/thread", body: .object(body))
+        let envelope = try await client.submitAction("mailbox/thread", body: .object(body))
         guard let thread = MailThread(data: envelope["data"]) else {
             throw JoineryAPIError.malformedResponse
         }
@@ -100,7 +100,7 @@ public struct MailAPI: Sendable {
         if let aliasID {
             body.append((key: "alias_id", value: .number(Double(aliasID))))
         }
-        let envelope = try await client.submitAction("inbound_email/thread_action", body: .object(body))
+        let envelope = try await client.submitAction("mailbox/thread_action", body: .object(body))
         return envelope["data"]?["count"]?.intValue ?? 0
     }
 
@@ -141,7 +141,7 @@ public struct MailAPI: Sendable {
                 (key: "subject", value: .string(subject)),
                 (key: "body", value: .string(body)),
             ])
-            _ = try await client.submitAction("inbound_email/send", body: .object(fields))
+            _ = try await client.submitAction("mailbox/send", body: .object(fields))
         } else {
             var textFields: [(key: String, value: String)] = [
                 (key: "mode", value: mode.rawValue),
@@ -157,7 +157,7 @@ public struct MailAPI: Sendable {
             let files = attachments.map {
                 MultipartFile(field: "attachments[]", filename: $0.filename, mimeType: $0.mimeType, data: $0.data)
             }
-            _ = try await client.submitMultipart("inbound_email/send", fields: textFields, files: files)
+            _ = try await client.submitMultipart("mailbox/send", fields: textFields, files: files)
         }
     }
 }

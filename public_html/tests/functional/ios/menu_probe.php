@@ -3,7 +3,7 @@
  * Menu probe for the Phase 3 gate (phase3_gate.sh): proves a plugin
  * profileMenu entry reaches shipped apps with no release.
  *
- * `add` syncs the inbound_email plugin's declared menus PLUS a probe entry
+ * `add` syncs the mailbox plugin's declared menus PLUS a probe entry
  * into the menu store (no plugin.json edit — the declared array is passed
  * explicitly). `remove` re-syncs straight from plugin.json; the prune step
  * drops the probe because it is in the plugin's recorded slugs but no
@@ -23,8 +23,8 @@ harness_require_debug_mode();
 
 require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
 
-const PROBE_SLUG = 'inbound-email-phase3-probe';
-const PLUGIN = 'inbound_email';
+const PROBE_SLUG = 'mailbox-phase3-probe';
+const PLUGIN = 'mailbox';
 
 $manager = PluginManager::getInstance();
 $cmd = $argv[1] ?? '';
@@ -36,7 +36,7 @@ if ($cmd === 'add') {
 		'profile' => array_merge($helper->getProfileMenuItems(), array(array(
 			'slug'       => PROBE_SLUG,
 			'title'      => 'Phase3 Probe',
-			'url'        => '/profile/inbound_email/mailbox',
+			'url'        => '/profile/mailbox/mailbox',
 			'order'      => 999,
 			'permission' => 0,
 			'icon'       => 'envelope',

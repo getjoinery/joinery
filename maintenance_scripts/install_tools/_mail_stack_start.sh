@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
-# _mail_stack_start.sh - re-assert the Inbound Email mail stack on container start.
+# _mail_stack_start.sh - re-assert the Mailbox mail stack on container start.
 #
 # Joinery site containers have no systemd, so the container CMD is the only
 # thing that brings services back after a `docker stop`/`start` or a rebuild.
 # This script is the mail-stack equivalent of the CMD's `service postgresql
-# start`: when the inbound_email plugin is active for the site, it runs the
+# start`: when the mailbox plugin is active for the site, it runs the
 # idempotent install_email.sh, which reconfigures and starts postfix + opendkim.
 #
 # It is deliberately fail-safe - plugin absent, plugin inactive, database
@@ -27,11 +27,11 @@ if [[ -z "${SITENAME}" ]]; then
 fi
 
 SITE_ROOT="/var/www/html/${SITENAME}"
-INSTALL_EMAIL="${SITE_ROOT}/public_html/plugins/inbound_email/provisioning/install_email.sh"
+INSTALL_EMAIL="${SITE_ROOT}/public_html/plugins/mailbox/provisioning/install_email.sh"
 CONFIG_FILE="${SITE_ROOT}/config/Globalvars_site.php"
 
 if [[ ! -f "${INSTALL_EMAIL}" ]]; then
-    echo "mail stack: inbound_email plugin not present - skipping"
+    echo "mail stack: mailbox plugin not present - skipping"
     exit 0
 fi
 if [[ ! -f "${CONFIG_FILE}" ]]; then
@@ -50,15 +50,15 @@ fi
 
 # PGPASSWORD is exported by the container CMD before this script is called.
 ACTIVE="$(psql -U postgres -d "${DBNAME}" -tAqc \
-    "SELECT plg_active FROM plg_plugins WHERE plg_name = 'inbound_email'" 2>/dev/null || true)"
+    "SELECT plg_active FROM plg_plugins WHERE plg_name = 'mailbox'" 2>/dev/null || true)"
 ACTIVE="$(printf '%s' "${ACTIVE}" | tr -d '[:space:]')"
 
 if [[ "${ACTIVE}" != "1" ]]; then
-    echo "mail stack: inbound_email plugin not active for ${SITENAME} - skipping"
+    echo "mail stack: mailbox plugin not active for ${SITENAME} - skipping"
     exit 0
 fi
 
-echo "mail stack: inbound_email active - asserting postfix/opendkim via install_email.sh"
+echo "mail stack: mailbox active - asserting postfix/opendkim via install_email.sh"
 if bash "${INSTALL_EMAIL}"; then
     echo "mail stack: postfix/opendkim asserted."
 else

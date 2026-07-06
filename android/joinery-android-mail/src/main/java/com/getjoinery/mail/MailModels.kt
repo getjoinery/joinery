@@ -28,7 +28,7 @@ data class MailFolder(
     }
 }
 
-/** One granted mailbox from `inbound_email/mailboxes`. `foldersExclusive`
+/** One granted mailbox from `mailbox/mailboxes`. `foldersExclusive`
  *  drives whether the folder control is a single-pick "Move" (exclusive feed)
  *  or checkbox "Labels" (Gmail-style). */
 data class Mailbox(
@@ -61,7 +61,7 @@ data class Mailbox(
     }
 }
 
-/** The `inbound_email/mailboxes` payload. */
+/** The `mailbox/mailboxes` payload. */
 data class MailboxHome(
     val mailboxes: List<Mailbox>,
     val canCompose: Boolean,
@@ -78,7 +78,7 @@ data class MailboxHome(
     }
 }
 
-/** One row of `inbound_email/thread_list`. */
+/** One row of `mailbox/thread_list`. */
 data class ThreadSummary(
     val threadKey: String,
     val subject: String,
@@ -111,7 +111,7 @@ data class ThreadSummary(
     }
 }
 
-/** The `inbound_email/thread_list` payload. */
+/** The `mailbox/thread_list` payload. */
 data class ThreadPage(
     val threads: List<ThreadSummary>,
     val hasMore: Boolean,
@@ -174,7 +174,7 @@ data class MailOutgoingAttachment(
     override fun hashCode(): Int = id.hashCode()
 }
 
-/** One message of `inbound_email/thread`. */
+/** One message of `mailbox/thread`. */
 data class MailMessage(
     val id: Int,
     val aliasId: Int?,
@@ -213,7 +213,7 @@ data class MailMessage(
     }
 }
 
-/** The `inbound_email/thread` payload: the in-scope messages plus the
+/** The `mailbox/thread` payload: the in-scope messages plus the
  *  thread's current folder/label memberships (ids into the mailbox's
  *  [Mailbox.folders]). */
 data class MailThread(

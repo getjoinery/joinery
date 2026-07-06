@@ -14,7 +14,7 @@ final class NavigationParsingTests: XCTestCase {
     func testParsesLiveFixture() throws {
         let navigation = try liveNavigation()
         XCTAssertEqual(navigation.entries.count, 11)
-        XCTAssertEqual(navigation.tabSlugs, ["core-profile", "core-calendar", "inbound-email-mailbox"])
+        XCTAssertEqual(navigation.tabSlugs, ["core-profile", "core-calendar", "mailbox"])
 
         let calendar = try XCTUnwrap(navigation.entries.first { $0.slug == "core-calendar" })
         XCTAssertEqual(calendar.title, "Calendar")
@@ -28,7 +28,7 @@ final class NavigationParsingTests: XCTestCase {
 
         // Tabs come back in pinning order, not entry order.
         XCTAssertEqual(navigation.tabEntries.map(\.slug),
-                       ["core-profile", "core-calendar", "inbound-email-mailbox"])
+                       ["core-profile", "core-calendar", "mailbox"])
 
         // More is everything else, in server entry order.
         XCTAssertEqual(navigation.moreEntries.first?.slug, "core-home")

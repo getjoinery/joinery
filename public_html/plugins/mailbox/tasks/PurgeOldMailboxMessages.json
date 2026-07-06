@@ -1,0 +1,9 @@
+{
+    "name": "Purge Old Inbound Mailbox Messages",
+    "description": "Hard-deletes inbound mailbox messages older than the configured number of days. Defaults to the mailbox_retention_days setting if days_to_keep is 0.",
+    "default_frequency": "daily",
+    "default_time": "03:45:00",
+    "config_fields": {
+        "days_to_keep": {"type": "number", "label": "Days to Keep (0 = use plugin setting)", "required": false}
+    }
+}

@@ -39,10 +39,10 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunCo
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/aip_recipe_item_log_class.php'));
-require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_domain_class.php'));
-require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_alias_class.php'));
-require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_mailbox_grant_class.php'));
-require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_message_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
 
 $pass = 0; $fail = 0;
 function ok($label, $cond) {

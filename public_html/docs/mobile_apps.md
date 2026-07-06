@@ -38,7 +38,7 @@ Response shape:
 ```json
 {
     "data": {
-        "tabs": ["core-profile", "core-calendar", "inbound-email-mailbox"],
+        "tabs": ["core-profile", "core-calendar", "mailbox"],
         "entries": [
             {
                 "slug": "core-profile",
@@ -64,7 +64,7 @@ Response shape:
   entry in `admin_menus.json` or the plugin's `plugin.json` `profileMenu`
   (stored as `amu_native_screen` by the menu sync). A non-empty value flips
   that entry's destination to `{type: "native"}` with the entry's URL as the
-  fallback. Worked examples: the inbound_email plugin's mailbox entry
+  fallback. Worked examples: the mailbox plugin's mailbox entry
   declares `"nativeScreen": "mailbox"` (rendered by JoineryMailKit), the core
   `core-calendar` entry in `admin_menus.json` declares `"nativeScreen":
   "calendar"` (rendered by JoineryCalendarKit), and the joinery_ai plugin's AI
@@ -143,7 +143,7 @@ byte-identically outside app mode.
 
 | Setting | Default | Purpose |
 |---|---|---|
-| `app_navigation` | `{"default": ["core-profile", "core-calendar", "inbound-email-mailbox"]}` | Per-app tab-bar pinning (JSON map of `client_app` → ordered slugs) |
+| `app_navigation` | `{"default": ["core-profile", "core-calendar", "mailbox"]}` | Per-app tab-bar pinning (JSON map of `client_app` → ordered slugs) |
 | `app_bridge_key_check_seconds` | `60` | How often a bridged session re-verifies its originating key |
 | `api_min_client_versions` | `{}` | Per-app minimum client versions (HTTP 426 gate, `docs/api.md` § Client Versioning) |
 | `api_session_key_lifetime_days` | `365` | Session key expiry |
@@ -240,8 +240,8 @@ in its init; the server's `mailbox` navigation destination then renders these
 screens, and builds without the module keep the web reader via the fallback
 URL.
 
-The screens consume the `inbound_email/*` actions
-(`plugins/inbound_email/docs/overview.md` § API Surface) — the same
+The screens consume the `mailbox/*` actions
+(`plugins/mailbox/docs/overview.md` § API Surface) — the same
 `MailboxService` brain as the web reader, so every read/star/archive/spam
 change is immediately visible in both:
 
@@ -272,7 +272,7 @@ change is immediately visible in both:
   offers Photo Library (HEIC transcoded to JPEG) and Files (any type, no
   allowlist — matching the server's policy); picked files show as removable
   chips. An attachments-only send goes out as `multipart/form-data` to
-  `inbound_email/send` (`APIClient.submitMultipart`, field
+  `mailbox/send` (`APIClient.submitMultipart`, field
   `attachments[]`), otherwise the plain JSON action — the same
   `ChatAPI.send()` shape the AI chat composer uses. Client-side preflight
   mirrors the server's caps (10 files, 10 MB per file, 25 MB total) but the
@@ -481,8 +481,8 @@ the module and calls `JoineryMail.registerScreens()` before mounting the root;
 the server's `mailbox` navigation destination then renders these screens, and
 builds without the module keep the web reader via the fallback URL.
 
-The screens consume the same `inbound_email` API actions as JoineryMailKit
-(`plugins/inbound_email/docs/overview.md` § API Surface) and mirror its UX;
+The screens consume the same `mailbox` API actions as JoineryMailKit
+(`plugins/mailbox/docs/overview.md` § API Surface) and mirror its UX;
 the platforms share fixtures (the same captured envelopes back both test
 suites) but no client code:
 
@@ -522,7 +522,7 @@ suites) but no client code:
   (`image/*`) and Files (`*/*` — any type, no allowlist, nothing
   transcoded; the server re-detects types from bytes); picked files show as
   removable rows. An attachments send goes out as `multipart/form-data` to
-  `inbound_email/send` (`ApiClient.submitMultipart`, field
+  `mailbox/send` (`ApiClient.submitMultipart`, field
   `attachments[]`), otherwise the plain JSON action. Client-side preflight
   mirrors the server's caps (10 files, 10 MB per file, 25 MB total) but the
   server is the authority; a rejected send keeps the draft and attachments

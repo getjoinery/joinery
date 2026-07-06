@@ -150,7 +150,7 @@ if (isset($_GET['check']) && $_GET['check'] !== '') {
             'dmarc'  => $row['iem_dmarc_result'],
             'source' => $row['iem_auth_source'] ?: 'none',
         ],
-        'reader_url'  => '/plugins/inbound_email/admin/admin_inbound_email_message?iem_inbound_email_message_id=' . (int)$row['iem_inbound_email_message_id'],
+        'reader_url'  => '/plugins/mailbox/admin/admin_mailbox_message?iem_inbound_email_message_id=' . (int)$row['iem_inbound_email_message_id'],
     ]);
     exit;
 }
@@ -169,7 +169,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } else {
         $domain = est_pick_loopback_domain($db);
-        if (!$domain || (string)$settings->get_setting('inbound_email_enabled') !== '1') {
+        if (!$domain || (string)$settings->get_setting('mailbox_enabled') !== '1') {
             $result = ['mode' => $mode, 'ok' => false, 'token' => $token, 'to' => '',
                 'error' => 'Loopback needs inbound email enabled with an inbound domain (ideally a store catch-all). Use "Send to an external address" instead.'];
         } else {
@@ -233,7 +233,7 @@ if ($result === null) {
         . '<em>External</em> sends to any address so you can eyeball deliverability with "Show original".</div>';
 
     $loop_domain = est_pick_loopback_domain($db);
-    $inbound_on  = (string)$settings->get_setting('inbound_email_enabled') === '1';
+    $inbound_on  = (string)$settings->get_setting('mailbox_enabled') === '1';
 
     $formwriter = $page->getFormWriter('email_selftest_form', ['action' => '/utils/email_send_test', 'method' => 'POST']);
     echo $formwriter->begin_form();
@@ -297,7 +297,7 @@ if ($result['mode'] === 'external') {
     echo '<p>Now open that message in the recipient\'s mailbox and use <strong>"Show original"</strong> (Gmail) or '
         . '<strong>"View source / message headers"</strong> (others). You want to see, in the <code>Authentication-Results</code> line:</p>';
     echo '<ul><li><code>spf=pass</code></li><li><code>dkim=pass</code> (signed by your sending domain)</li><li><code>dmarc=pass</code></li></ul>';
-    echo '<p class="mb-0 text-muted">If it never arrives, check the Mailbox <a href="/plugins/inbound_email/admin/admin_inbound_email_logs">Logs</a> and your spam folder.</p>';
+    echo '<p class="mb-0 text-muted">If it never arrives, check the Mailbox <a href="/plugins/mailbox/admin/admin_mailbox_logs">Logs</a> and your spam folder.</p>';
     echo '</div></div>';
     echo '<a href="/utils/email_send_test" class="btn btn-outline-secondary mt-3">Run another</a>';
     $page->admin_footer();
@@ -365,8 +365,8 @@ echo '<a href="/utils/email_send_test" class="btn btn-outline-secondary mt-3">Ru
                 if (++tries >= max) {
                     wait.className = 'alert alert-warning';
                     wait.innerHTML = 'Not received within ~90 seconds. The send succeeded, so this points at the inbound path — check the inbound '
-                        + '<a href="/plugins/inbound_email/admin/admin_inbound_email_logs">Logs</a> and the '
-                        + '<a href="/plugins/inbound_email/admin/admin_inbound_email_reader">Mailbox reader</a>. '
+                        + '<a href="/plugins/mailbox/admin/admin_mailbox_logs">Logs</a> and the '
+                        + '<a href="/plugins/mailbox/admin/admin_mailbox_reader">Mailbox reader</a>. '
                         + '<button class="btn btn-sm btn-outline-secondary ms-2" onclick="location.reload()">Retry wait</button>';
                     return;
                 }

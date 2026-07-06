@@ -28,7 +28,7 @@ class PostfixProvider implements InboundEmailProvider {
     }
 
     public static function getSetupChecks(?string $domain = null): array {
-        require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/InboundEmailSetupCheck.php'));
+        require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailSetupCheck.php'));
         $checker = new InboundEmailSetupCheck();
         // Postfix's catalogue is the host + mail-host + per-domain DNS layers
         // — exactly what runDomainChecks plus the host/mailhost block produces.
@@ -43,8 +43,8 @@ class PostfixProvider implements InboundEmailProvider {
 
     public static function getDnsRecords(string $domain): array {
         $settings = Globalvars::get_instance();
-        $mail_hostname = trim((string)$settings->get_setting('inbound_email_mail_hostname'));
-        $public_ip = trim((string)$settings->get_setting('inbound_email_public_ip'));
+        $mail_hostname = trim((string)$settings->get_setting('mailbox_mail_hostname'));
+        $public_ip = trim((string)$settings->get_setting('mailbox_public_ip'));
 
         if ($mail_hostname === '') {
             $mail_hostname = 'mail.' . $domain;

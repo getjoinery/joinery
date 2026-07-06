@@ -1,7 +1,7 @@
 import Foundation
 import JoineryKit
 
-/// One granted mailbox from `inbound_email/mailboxes`.
+/// One granted mailbox from `mailbox/mailboxes`.
 public struct Mailbox: Identifiable, Equatable, Sendable {
     public let aliasID: Int
     public let address: String
@@ -26,7 +26,7 @@ public struct Mailbox: Identifiable, Equatable, Sendable {
     }
 }
 
-/// The `inbound_email/mailboxes` payload.
+/// The `mailbox/mailboxes` payload.
 public struct MailboxHome: Equatable, Sendable {
     public let mailboxes: [Mailbox]
     public let canCompose: Bool
@@ -38,7 +38,7 @@ public struct MailboxHome: Equatable, Sendable {
     }
 }
 
-/// One row of `inbound_email/thread_list`.
+/// One row of `mailbox/thread_list`.
 public struct ThreadSummary: Identifiable, Equatable, Sendable {
     public let threadKey: String
     public let subject: String
@@ -67,7 +67,7 @@ public struct ThreadSummary: Identifiable, Equatable, Sendable {
     }
 }
 
-/// The `inbound_email/thread_list` payload.
+/// The `mailbox/thread_list` payload.
 public struct ThreadPage: Equatable, Sendable {
     public let threads: [ThreadSummary]
     public let hasMore: Bool
@@ -126,7 +126,7 @@ public struct MailOutgoingAttachment: Identifiable, Equatable, Sendable {
     }
 }
 
-/// One message of `inbound_email/thread`.
+/// One message of `mailbox/thread`.
 public struct MailMessage: Identifiable, Equatable, Sendable {
     public let id: Int
     public let sender: String
@@ -158,7 +158,7 @@ public struct MailMessage: Identifiable, Equatable, Sendable {
     }
 }
 
-/// The `inbound_email/thread` payload.
+/// The `mailbox/thread` payload.
 public struct MailThread: Equatable, Sendable {
     public let messages: [MailMessage]
 

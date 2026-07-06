@@ -296,7 +296,7 @@ Plugin-owned tasks follow the plugin lifecycle:
 
 ### PollImapAccounts — task-floor vs. per-account cadence
 
-The Inbound Email plugin's **PollImapAccounts** task (`every_run`) illustrates a
+The Mailbox plugin's **PollImapAccounts** task (`every_run`) illustrates a
 two-level cadence. The task frequency is a **floor**: it fires every cron pass but
 does no per-mailbox work unless an account is *due*. Each IMAP account carries its
 own `iia_poll_interval_seconds` (default 300), and the task only polls accounts
@@ -306,7 +306,7 @@ claimed with an atomic conditional `UPDATE` (stamping `iia_last_poll_time` on
 pickup) so two overlapping runs can't race the same account's UID cursor. Failures
 are per-account and non-fatal — one unreachable mailbox is recorded in that
 account's status and never fails the run. See
-[Receiving by IMAP poll](/plugins/inbound_email/docs/overview.md#receiving-by-imap-poll).
+[Receiving by IMAP poll](/plugins/mailbox/docs/overview.md#receiving-by-imap-poll).
 
 ## Related Files
 

@@ -2,21 +2,22 @@
 /**
  * Unit test for EmailSecurityDigest (specs/joinery_ai_email_security_scan.md
  * §1): section presence, whitespace-obfuscation annotation, URL extraction
- * (dedup + cap), and size caps, against a fixture raw message built in-memory
- * (no DB writes — InboundEmailMessage fields are set directly, never saved).
+ * (dedup + cap + anchor text), the DOMAINS summary, and size caps, against
+ * fixture raw messages built in-memory (no DB writes — InboundEmailMessage
+ * fields are set directly, never saved).
  *
  * Runs offline except for one read-only settings lookup (the configured
- * inbound_email_mail_hostname, used to build a trusted Authentication-Results
+ * mailbox_mail_hostname, used to build a trusted Authentication-Results
  * line in the fixture so the DKIM-domain extraction has something to find).
  *
  * Run: php tests/unit/email_security_digest_test.php
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_message_class.php'));
-require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/EmailSecurityDigest.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/EmailSecurityDigest.php'));
 
 $tests = 0;
 $failures = 0;
@@ -28,7 +29,7 @@ function check($label, $condition) {
 }
 
 $settings = Globalvars::get_instance();
-$authserv_id = (string)$settings->get_setting('inbound_email_mail_hostname');
+$authserv_id = (string)$settings->get_setting('mailbox_mail_hostname');
 if ($authserv_id === '') { $authserv_id = 'devmail.getjoinery.com'; } // fallback if unset on this box
 
 // --- Build an obfuscated-subject phishing fixture ---------------------------
@@ -122,6 +123,40 @@ if (preg_match('/\[truncated, (\d+) characters total\]/', $digest, $m)) {
 } else {
     check('body truncation marker present (fixture body exceeds the 4KB cap)', false);
 }
+
+// --- Domain summary ---------------------------------------------------------
+// 26 unique hosts (25 trackers + accounts.google.com) against the 15-domain cap.
+check('DOMAINS summary line present', strpos($digest, 'DOMAINS: ') !== false);
+check('DOMAINS summary marks hosts beyond the cap, not silently dropped',
+    strpos($digest, '+11 more domains') !== false);
+
+// --- Anchor text (HTML fixture): the text/href mismatch signal --------------
+$html_body = '<p>Your PayPal account is limited. '
+    . '<a href="http://evil-phish.example/login?u=1">https://www.paypal.com/security</a> '
+    . 'or <a href="http://evil-phish.example/login?u=1">click here</a> '
+    . 'or <a href="https://www.paypal.com/help">https://www.paypal.com/help</a>.</p>';
+
+$msg2 = new InboundEmailMessage(NULL);
+$msg2->set('iem_raw_storage_driver', 'inline');
+$msg2->set('iem_raw_message', "From: security@paypal.com\r\nTo: victim@example.com\r\n"
+    . "Subject: Account limited\r\nContent-Type: text/html; charset=utf-8\r\n\r\n" . $html_body);
+$msg2->set('iem_sender', 'security@paypal.com');
+$msg2->set('iem_recipient', 'victim@example.com');
+$msg2->set('iem_subject', 'Account limited');
+$msg2->set('iem_body_plain', '');
+$msg2->set('iem_body_html', $html_body);
+
+$digest2 = EmailSecurityDigest::build($msg2);
+
+check('deceptive anchor carries its visible link text',
+    strpos($digest2, 'http://evil-phish.example/login?u=1 — link text: "https://www.paypal.com/security"') !== false);
+check('anchor text equal to its URL is omitted (no redundant link-text suffix)',
+    strpos($digest2, 'https://www.paypal.com/help — link text:') === false);
+check('duplicate href keeps the first anchor text, not a later one',
+    strpos($digest2, 'link text: "click here"') === false);
+check('HTML fixture DOMAINS summary counts hosts across deduped URLs',
+    strpos($digest2, 'DOMAINS: ') !== false
+    && preg_match('/DOMAINS: .*evil-phish\.example \(\d+\)/', $digest2) === 1);
 
 echo "\n$tests checks, $failures failure(s)\n";
 exit($failures > 0 ? 1 : 0);
