@@ -32,6 +32,14 @@ class InboundEmailHealth {
      * because the provider's own infrastructure handles MX.
      */
     public static function checkInboundMailServer() {
+        // Relay-fronted deployment (specs/…hardened_ingest_relay § Phase 8/9): the
+        // MTA runs on the relay, not here — the main box's local port 25 is
+        // decommissioned. The relay's own port 25 / milters / tunnel are covered by
+        // checkRelayTunnel, so this local check no longer applies.
+        if (self::activeRelay() !== null) {
+            return;
+        }
+
         $provider = InboundProviderRegistry::active();
         if ($provider::isWebhook()) {
             // Webhook-based providers don't run a local mail server. The provider's
@@ -47,6 +55,16 @@ class InboundEmailHealth {
             );
         }
         @fclose($sock);
+    }
+
+    /** The active hardened ingest relay, or null on a colocated deployment. */
+    private static function activeRelay() {
+        require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+        try {
+            return MailboxRelay::active();
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 
     /** Connection timeout, in seconds, applied to the relay check. */
@@ -172,6 +190,25 @@ class InboundEmailHealth {
             return;
         }
 
+        // Relay-fronted: the local MILTER is unused (the relay's rspamd stamps
+        // X-Spam into the sealed raw), but deferred ingest still scores through
+        // the local rspamd CONTROLLER at parse time — so probe that instead of
+        // the milter port.
+        if (self::activeRelay() !== null) {
+            $controller = (string)$settings->get_setting('mailbox_rspamd_controller_url');
+            $host = parse_url($controller, PHP_URL_HOST) ?: '127.0.0.1';
+            $port = parse_url($controller, PHP_URL_PORT) ?: 11334;
+            $sock = @stream_socket_client('tcp://' . $host . ':' . $port, $errno, $errstr, 2);
+            if (!$sock) {
+                throw new ProvisioningCheckFailed(
+                    'The rspamd controller (' . $host . ':' . $port . ') is not accepting connections'
+                    . ' — deferred ingest cannot spam-score parsed messages: ' . ($errstr ?: 'connection refused')
+                );
+            }
+            @fclose($sock);
+            return;
+        }
+
         $provider = InboundProviderRegistry::active();
         if ($provider::isWebhook()) {
             return;
@@ -213,5 +250,150 @@ class InboundEmailHealth {
                 'ext-sqlite3 is loaded but FTS5 is not compiled in: ' . $e->getMessage()
             );
         }
+    }
+
+    // ---------------------------------------------------- hardened ingest relay
+
+    /**
+     * The relay's SMTP port 25 is reachable over the WireGuard tunnel. This is the
+     * relay analogue of checkInboundMailServer's local port-25 probe: on a
+     * relay-fronted deployment the MTA lives on the relay, reached at its tunnel
+     * IP. No-op on colocated deployments. (specs/…hardened_ingest_relay § Phase 8.)
+     */
+    public static function checkRelayTunnel() {
+        $relay = self::activeRelay();
+        if ($relay === null) {
+            return;
+        }
+        $host = trim((string)$relay->get('mrl_host'));
+        if ($host === '') {
+            throw new ProvisioningCheckFailed('The relay has no tunnel address configured yet.');
+        }
+        $sock = @stream_socket_client('tcp://' . $host . ':25', $errno, $errstr, self::RELAY_TIMEOUT);
+        if (!$sock) {
+            throw new ProvisioningCheckFailed(
+                'The relay SMTP port 25 is not reachable over the tunnel (' . $host . '): '
+                . ($errstr ?: 'connection refused') . ' — check WireGuard is up.'
+            );
+        }
+        @fclose($sock);
+    }
+
+    /**
+     * The relay spool is draining: a pull ran recently. A stalled pull means mail
+     * is accumulating (sealed) on the relay and not reaching the inbox. No-op on
+     * colocated deployments.
+     */
+    public static function checkRelaySpoolDraining() {
+        $relay = self::activeRelay();
+        if ($relay === null) {
+            return;
+        }
+        $last = trim((string)$relay->get('mrl_last_pull_time'));
+        if ($last === '') {
+            throw new ProvisioningCheckFailed('The relay spool has never been pulled — is the PullRelaySpool task enabled?');
+        }
+        // The pull runs every cron pass; more than 10 minutes stale means it stopped.
+        if (strtotime($last . ' UTC') < time() - 600) {
+            throw new ProvisioningCheckFailed(
+                'The relay spool has not been pulled since ' . $last . ' UTC (over 10 minutes) — the pull task may be stalled.'
+            );
+        }
+    }
+
+    /**
+     * The relay's alias map is fresh: the map the relay is running matches what the
+     * current domains/aliases would produce. A stale map risks bouncing newly
+     * created aliases (reject_unmatched). No-op on colocated deployments.
+     */
+    public static function checkRelayMapFresh() {
+        $relay = self::activeRelay();
+        if ($relay === null) {
+            return;
+        }
+        require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayMapSync.php'));
+        try {
+            $artifacts = (new RelayMapExporter($relay))->build();
+        } catch (\Throwable $e) {
+            throw new ProvisioningCheckFailed('Could not build the relay alias map to check freshness: ' . $e->getMessage());
+        }
+        if (RelayMapSync::contentHash($artifacts) !== (string)$relay->get('mrl_map_content_hash')) {
+            throw new ProvisioningCheckFailed(
+                'The relay alias map is out of date — the SyncRelayMap task has not pushed the latest domains/aliases yet.'
+            );
+        }
+    }
+
+    /**
+     * Deployment-wide origin-hiding check: once a relay exists, the main box's
+     * public IP must not appear in ANY hosted domain's mail DNS (MX or the mail
+     * hostname A record) — a single leak defeats the hidden origin. Not
+     * Fortress-only. No-op on colocated deployments.
+     */
+    public static function checkOriginHidden() {
+        $relay = self::activeRelay();
+        if ($relay === null) {
+            return;
+        }
+        $settings = Globalvars::get_instance();
+        $origin_ip = trim((string)$settings->get_setting('mailbox_public_ip'));
+        if ($origin_ip === '') {
+            return; // unknown origin IP — nothing to assert against
+        }
+
+        $domains = new MultiInboundEmailDomain(array('enabled' => true, 'deleted' => false));
+        $domains->load();
+        $leaks = array();
+        foreach ($domains->results as $domain) {
+            $name = trim((string)$domain->get('ied_domain'));
+            if ($name === '') {
+                continue;
+            }
+            try {
+                foreach (DnsResolver::getMx($name) as $mx) {
+                    $target = (string)($mx['host'] ?? '');
+                    if ($target === '') {
+                        continue;
+                    }
+                    if (in_array($origin_ip, DnsResolver::getA($target), true)) {
+                        $leaks[] = $name . ' (MX ' . $target . ' → ' . $origin_ip . ')';
+                    }
+                }
+                // SPF TXT can also expose the origin: a v=spf1 record still listing
+                // the main box IP (ip4:<origin>) leaks it even with the MX moved
+                // (specs/mailbox_relay_fix_pack.md § additional gap).
+                foreach (DnsResolver::getTxt($name) as $txt) {
+                    if (stripos($txt, 'v=spf1') === false) {
+                        continue;
+                    }
+                    if (self::spfNamesIp($txt, $origin_ip)) {
+                        $leaks[] = $name . ' (SPF lists ' . $origin_ip . ')';
+                    }
+                }
+            } catch (\Throwable $e) {
+                // A transient resolver failure is not an origin leak; skip this domain.
+                continue;
+            }
+        }
+        if (!empty($leaks)) {
+            throw new ProvisioningCheckFailed(
+                'The main box IP (' . $origin_ip . ') is present in mail DNS for: ' . implode(', ', array_unique($leaks))
+                . ' — point every hosted domain\'s MX at the relay and drop the origin from SPF to keep it hidden.'
+            );
+        }
+    }
+
+    /** True if an SPF record names $ip via an ip4:/ip6: mechanism (network part match). */
+    private static function spfNamesIp(string $spf, string $ip): bool {
+        foreach (preg_split('/\s+/', trim($spf)) as $token) {
+            $t = ltrim($token, '+-~?');
+            if (stripos($t, 'ip4:') === 0 || stripos($t, 'ip6:') === 0) {
+                $addr = explode('/', substr($t, 4), 2)[0];
+                if (strcasecmp($addr, $ip) === 0) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 }

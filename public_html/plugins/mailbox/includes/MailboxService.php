@@ -440,6 +440,12 @@ class MailboxService {
 		$perpage = max(1, min(200, $perpage));
 		$offset = ($page - 1) * $perpage;
 
+		// Deferred ingest (specs/inbound_email_hardened_ingest_relay_executor.md § Phase 5):
+		// if this scope's owner holds an unlocked vault, parse any relay-sealed
+		// Fortress backlog before listing, so the mailbox view reflects fully-parsed
+		// mail. No-op on colocated deployments (no pending rows ever exist).
+		$this->drainRelayBacklog($aliasId);
+
 		$where = array($this->readScopeSql($aliasId));
 		$params = array();
 
@@ -715,6 +721,48 @@ class MailboxService {
 	 *
 	 * @return array[]  message rows
 	 */
+	/**
+	 * Parse the relay-sealed pending-parse backlog for this scope's owner, once
+	 * per request per owner, when their vault is unlocked. Cheap and skipped
+	 * entirely on colocated deployments (the pending query hits an owner index and
+	 * returns nothing). Never throws into the caller — a drain failure must not
+	 * break the mailbox view.
+	 */
+	private function drainRelayBacklog(?int $aliasId): void {
+		static $drained = array();
+
+		// Resolve whose pending-parse backlog to drain. A single-alias scope drains
+		// that alias's single owner; the combined "all mailboxes" view ($aliasId
+		// null) is the primary reader surface (thread_list_logic + native apps), so
+		// it must drain too — the session user, whose own Fortress mail is what the
+		// relay pulled (specs/mailbox_relay_fix_pack.md § Fix 9). Without this, a
+		// Fortress owner's default inbox shows blank sender/subject/body forever.
+		if ($aliasId !== null && $aliasId > 0) {
+			$owner_id = InboundEmailMessage::singleOwnerUserId($aliasId);
+		} else {
+			$owner_id = $this->viewer->getUserId();
+		}
+		if ($owner_id === null || $owner_id <= 0 || isset($drained[$owner_id])) {
+			return;
+		}
+		$drained[$owner_id] = true;
+
+		try {
+			$vault = UserEncryptionVault::loadForUser($owner_id);
+			if ($vault === null) {
+				return;
+			}
+			$secret = VaultUnlock::secretKey($owner_id);
+			if ($secret === null) {
+				return; // locked — nothing to parse until the next unlocked view
+			}
+			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/DeferredIngest.php'));
+			DeferredIngest::drainForUser($owner_id, $secret);
+		} catch (\Throwable $e) {
+			error_log('MailboxService: relay backlog drain failed for owner ' . $owner_id . ': ' . $e->getMessage());
+		}
+	}
+
 	public function getThread(?int $aliasId, string $thread_key): array {
 		$ids = $this->messageIdsInThread($aliasId, $thread_key);
 		if (!count($ids)) {

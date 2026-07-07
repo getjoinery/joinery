@@ -110,6 +110,25 @@ class SmtpConfig {
     }
 
     /**
+     * The hardened ingest relay as an outbound smarthost
+     * (specs/inbound_email_hardened_ingest_relay_executor.md § Phase 7). On a
+     * relay-fronted deployment, compose sends must leave THROUGH the relay over
+     * the tunnel — otherwise every sent message's Received: chain leaks the main
+     * box's IP. The relay accepts submission from the tunnel (permit_mynetworks on
+     * the WireGuard subnet) with no auth and no TLS (the transport is already
+     * confidential and authenticated by WireGuard). DKIM signing stays in-app
+     * (SmtpProvider runs the signer); the relay only transports.
+     */
+    public static function fromRelaySmarthost($relay): self {
+        $c = new self();
+        $c->host       = trim((string)$relay->get('mrl_host'));
+        $c->port       = 25;
+        $c->encryption = 'none';
+        $c->authMode   = self::AUTH_NONE;
+        return $c;
+    }
+
+    /**
      * Build a transport that authenticates as an already-connected mailbox. Host/
      * port/encryption come from the account's PRESETS SMTP coordinates; the
      * credential comes from the account itself — XOAUTH2 (via the shared OAuth

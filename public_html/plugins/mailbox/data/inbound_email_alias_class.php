@@ -10,7 +10,10 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 
 class InboundEmailAliasException extends SystemBaseException {}
 
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/NotifiesRelayMapOnChange.php'));
+
 class InboundEmailAlias extends SystemBase {
+	use NotifiesRelayMapOnChange;
 	public static $prefix = 'iea';
 	public static $tablename = 'iea_inbound_email_aliases';
 	public static $pkey_column = 'iea_inbound_email_alias_id';

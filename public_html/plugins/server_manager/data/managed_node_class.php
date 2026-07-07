@@ -55,6 +55,15 @@ class ManagedNode extends SystemBase {
 		'mgn_uptime_down_since'           => array('type'=>'timestamp(6)'),
 		'mgn_cert_expiry_ts'              => array('type'=>'timestamp(6)'),
 		'mgn_cert_alerted_ts'             => array('type'=>'timestamp(6)'),
+		// Hardened ingest relay (specs/inbound_email_hardened_ingest_relay_executor.md
+		// § Phase 6). A relay is a ManagedNode row so it gets the dashboard health
+		// dot / heartbeat machinery; these columns carry the WireGuard peering the
+		// main box dials out to. mgn_is_relay marks the node a relay (no Joinery app
+		// runs on it, so the Joinery-app health checks are skipped for it).
+		'mgn_is_relay'            => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+		'mgn_wg_public_key'       => array('type'=>'varchar(255)'),
+		'mgn_wg_endpoint'         => array('type'=>'varchar(255)'),
+		'mgn_wg_ip'               => array('type'=>'varchar(64)'),
 		'mgn_create_time'         => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'mgn_update_time'         => array('type'=>'timestamp(6)'),
 		'mgn_delete_time'         => array('type'=>'timestamp(6)'),

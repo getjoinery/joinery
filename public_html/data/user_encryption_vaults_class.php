@@ -83,6 +83,8 @@ class MultiUserEncryptionVault extends SystemMultiBase {
 			$filters['uev_scope'] = [$this->options['scope'], PDO::PARAM_STR];
 		if (isset($this->options['custody']))
 			$filters['uev_custody'] = [$this->options['custody'], PDO::PARAM_STR];
+		if (isset($this->options['public_key']))
+			$filters['uev_public_key'] = [$this->options['public_key'], PDO::PARAM_STR];
 		return $this->_get_resultsv2('uev_user_encryption_vaults', $filters, $this->order_by, $only_count, $debug);
 	}
 }

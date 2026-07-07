@@ -82,7 +82,13 @@
  * message field the email_triage pipeline job writes — a one-line gist for the inbox,
  * content in miniature, so it is a $sealed_fields member like the body columns above.
  *
- * @version 1.12
+ * DEFERRED INGEST (specs/inbound_email_hardened_ingest_relay_executor.md § Phase 5). On a
+ * relay-fronted deployment, MX-path Fortress mail arrives sealed to the owner's vault public
+ * key and is stored PENDING-PARSE (iem_pending_parse) with the sealed blob in
+ * iem_relay_sealed_raw until the next unlock, when DeferredIngest parses and seals it under a
+ * fresh DEK. iem_relay_spool_id is the pull dedup key.
+ *
+ * @version 1.13
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -147,6 +153,20 @@ class InboundEmailMessage extends SystemBase {
 		// message DEK — set by the sealed-mailbox extraction-failure fallback
 		// (InboundEmailRouter::persistRawAndManifest); getRawMessage() opens it.
 		'iem_raw_sealed'          => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
+		// Deferred ingest — hardened ingest relay (specs/inbound_email_hardened_ingest_relay_executor.md
+		// § Phase 5). For MX-path Fortress mail the relay seals the WHOLE raw message to the
+		// owner's vault public key (crypto_box_seal → SealedBox::openDek, NOT the per-message
+		// DEK). While the owner is logged out the pull consumer (PullRelaySpool) can only store
+		// operational metadata + this sealed blob in a PENDING-PARSE state: threading and unread
+		// counts work, but subject/sender/body/attachments do not exist as fields yet. At the next
+		// unlock DeferredIngest opens iem_relay_sealed_raw, runs the full pipeline (parse, filters,
+		// attachment split, seal fields under a fresh per-message DEK), then clears both columns.
+		// Standard/Private MX mail is opened at pull with the ambient transport key and ingested
+		// immediately, so it is never pending. iem_relay_spool_id is the pull dedup key (a re-pull
+		// of an un-acked-but-stored item is a no-op via the unique constraint).
+		'iem_pending_parse'       => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
+		'iem_relay_sealed_raw'    => array('type'=>'text', 'is_nullable'=>true),
+		'iem_relay_spool_id'      => array('type'=>'varchar(255)', 'is_nullable'=>true, 'unique'=>true),
 		// Raw-message storage descriptor (specs/inbound_raw_message_storage.md).
 		'iem_raw_storage_driver'    => array('type'=>'varchar(16)', 'default'=>'inline'), // inline | local | cloud | remote
 		'iem_raw_storage_key'       => array('type'=>'varchar(500)'),                     // tier-invariant relative key (local/cloud); null for inline/remote
@@ -573,6 +593,49 @@ class InboundEmailMessage extends SystemBase {
 		}
 		$msg->save();
 		return $msg;
+	}
+
+	/**
+	 * Targeted single-row UPDATE of exactly the given columns — never a full-row
+	 * save(). Sealed-mailbox ingest writes some columns behind the model's back
+	 * (sealAndPersistContent / persistRawAndManifest UPDATE by id), so a full
+	 * save() from a stale in-memory object would clobber the sealed sender/subject/
+	 * body/key/raw-storage descriptor with empty values. Callers that only need to
+	 * flip a few columns (pending-parse clear, spool-id stamp, spam verdict) use
+	 * this instead. $columns maps column name => value (null allowed).
+	 */
+	static function updateColumns(int $message_id, array $columns): void {
+		if ($message_id <= 0 || empty($columns)) {
+			return;
+		}
+		$sets = array();
+		$params = array();
+		foreach ($columns as $col => $value) {
+			if (!array_key_exists($col, static::$field_specifications)) {
+				continue; // never build SQL from an unknown column name
+			}
+			$sets[] = $col . ' = ?';
+			$params[] = $value;
+		}
+		if (empty($sets)) {
+			return;
+		}
+		$params[] = $message_id;
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare(
+			'UPDATE iem_inbound_email_messages SET ' . implode(', ', $sets)
+			. ' WHERE iem_inbound_email_message_id = ?'
+		);
+		// Typed binding: pdo_pgsql stringifies an untyped PHP false to '', which
+		// PostgreSQL rejects for boolean columns (22P02).
+		foreach (array_values($params) as $i => $value) {
+			$type = PDO::PARAM_STR;
+			if (is_bool($value))     { $type = PDO::PARAM_BOOL; }
+			elseif ($value === null) { $type = PDO::PARAM_NULL; }
+			elseif (is_int($value))  { $type = PDO::PARAM_INT; }
+			$stmt->bindValue($i + 1, $value, $type);
+		}
+		$stmt->execute();
 	}
 }
 

@@ -124,13 +124,18 @@ class InboundEmailRouter {
 	 * @return int Exit code (0=success, 67=unknown user, 75=temp failure)
 	 */
 	public function processEmail($raw_email, $envelope_recipient, $provider_auth = null, $provider_spam = null) {
-		$envelope_recipient = strtolower(trim($envelope_recipient));
+		// SRS bounce addresses carry a case-sensitive hash in the local part (the
+		// pipe preserves it — flags=DRh), so the SRS check runs on the raw
+		// recipient; everything after it lowercases (lookups are case-insensitive).
+		$envelope_recipient = trim($envelope_recipient);
 		$parsed = $this->parseEmail($raw_email);
 
 		// 1. SRS bounce check
-		if ($this->settings->get_setting('mailbox_srs_enabled') && SRSRewriter::isSRSAddress($envelope_recipient)) {
-			return $this->handleSRSBounce($parsed, $raw_email, $envelope_recipient);
+		$srs_result = $this->handleSrsBounceIfApplicable($parsed, $raw_email, $envelope_recipient);
+		if ($srs_result !== null) {
+			return $srs_result;
 		}
+		$envelope_recipient = strtolower($envelope_recipient);
 
 		// 2. Look up alias
 		$parts = explode('@', $envelope_recipient, 2);
@@ -472,6 +477,226 @@ class InboundEmailRouter {
 		}
 
 		return ['message' => $msg, 'dedup' => false];
+	}
+
+	/**
+	 * Deferred ingest (specs/inbound_email_hardened_ingest_relay_executor.md § Phase 5).
+	 *
+	 * A Fortress message from the hardened relay lands PENDING-PARSE: the pull
+	 * consumer stored operational metadata + the whole raw message sealed to the
+	 * owner's vault public key (iem_relay_sealed_raw, a crypto_box_seal blob),
+	 * but subject/sender/body/attachments do not exist yet. This runs at the next
+	 * unlock (the owner's vault secret is in hand), unseals that blob, and folds
+	 * the message into its existing row through the SAME pipeline receive-time
+	 * ingest uses — parse, seal fields under a fresh per-message DEK, split
+	 * attachments, run filters — then clears the pending state. The message row's
+	 * identity (id, thread key, unread state) is preserved; only the parsed
+	 * content is added.
+	 *
+	 * $secret_key is the in-window vault secret for the row's sealed owner. Returns
+	 * true when the row was parsed, false when there was nothing to do (already
+	 * parsed, or no sealed blob). Throws only on a genuine crypto/parse failure so
+	 * the caller can leave the row pending and retry at the next unlock.
+	 */
+	public function parsePendingMessage(InboundEmailMessage $msg, string $secret_key): bool {
+		if (!$msg->get('iem_pending_parse')) {
+			return false;
+		}
+		$sealed_raw = (string)$msg->get('iem_relay_sealed_raw');
+		if ($sealed_raw === '') {
+			// Pending flag with no blob is an inconsistent row; clear the flag so
+			// it stops being retried forever, but surface nothing to parse. Targeted
+			// UPDATE — a full save() would clobber any sealed columns.
+			InboundEmailMessage::updateColumns(intval($msg->key), array('iem_pending_parse' => false));
+			return false;
+		}
+
+		require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
+		$raw = (new SealedBox())->openDek($sealed_raw, $secret_key);
+
+		$parsed = $this->parseEmail($raw);
+		$bodies = $this->extractBodies($raw, $parsed);
+		$subject = substr($this->decodeMimeHeader($parsed['subject'] ?? ''), 0, 4000);
+		$sender  = substr($parsed['from_email'] ?? ($parsed['from'] ?? ''), 0, 500);
+
+		$owner_id = intval($msg->get('iem_sealed_owner_user_id'));
+		$vault = ($owner_id > 0) ? $this->loadOwnerVault($owner_id) : null;
+		if ($vault === null) {
+			// A Fortress row must have a vault owner; without one there is no key
+			// to seal to. Leave pending — the owner may still be enrolling.
+			throw new \RuntimeException('parsePendingMessage: no vault for owner ' . $owner_id . ' on message ' . $msg->key);
+		}
+
+		$alias = null;
+		$alias_id = $msg->get('iem_iea_inbound_email_alias_id');
+		if ($alias_id) {
+			require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+			try { $alias = new InboundEmailAlias(intval($alias_id), TRUE); } catch (\Throwable $e) { $alias = null; }
+		}
+
+		// Seal the content columns under a fresh DEK and UPDATE the row (the same
+		// helper receive-time ingest uses), then split attachments under that DEK.
+		$dek = $this->sealMessageContent(intval($msg->key), $vault, $sender, $subject, $bodies['plain'], $bodies['html']);
+		$this->persistRawAndManifest(intval($msg->key), $raw, $alias, $dek);
+
+		// Content-spam classification now runs on the parsed plaintext, exactly as
+		// storeMessage does — the relay stamps X-Spam inside the sealed raw, and the
+		// auth verdicts were stored at pull time. Reuse the row's stored verdicts as
+		// the auth signal so classifySpam sees the same inputs receive-time ingest
+		// would. (specs/mailbox_relay_fix_pack.md § Fix 8.)
+		$auth = array(
+			'dkim'   => (string)$msg->get('iem_dkim_result'),
+			'spf'    => (string)$msg->get('iem_spf_result'),
+			'dmarc'  => (string)$msg->get('iem_dmarc_result'),
+			'source' => (string)$msg->get('iem_auth_source'),
+		);
+		$content_spam = $this->resolveContentSpam($raw);
+		$spam_verdict = $this->classifySpam($auth, $content_spam['signal']);
+
+		// Clear the pending state, discard the sealed raw blob, and record the spam
+		// verdict/score — all via a TARGETED update so the sealed content columns
+		// just written behind the model's back are never clobbered by a full save().
+		InboundEmailMessage::updateColumns(intval($msg->key), array(
+			'iem_pending_parse'    => false,
+			'iem_relay_sealed_raw' => null,
+			'iem_spam_verdict'     => $spam_verdict,
+			'iem_spam_score'       => $content_spam['score'],
+		));
+
+		// Reload the row so the filter run sees the fully-parsed, sealed state (never
+		// the stale pre-parse object, which would also re-save it). Filters match on
+		// the plaintext in hand, never on the row's now-sealed columns.
+		try {
+			$fresh = new InboundEmailMessage(intval($msg->key), TRUE);
+			require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_filter_class.php'));
+			InboundEmailFilter::runForMessage($fresh, $parsed, $alias, [
+				'sender' => $sender, 'subject' => $subject,
+				'body_plain' => $bodies['plain'], 'body_html' => $bodies['html'],
+			]);
+		} catch (\Throwable $e) {
+			error_log('InboundEmailRouter: deferred-ingest filter run failed for message ' . $msg->key . ': ' . $e->getMessage());
+		}
+
+		return true;
+	}
+
+	/**
+	 * Store a pulled Fortress blob as a PENDING-PARSE row (specs/…hardened_ingest_relay §
+	 * Phase 5.1). The raw is sealed to the owner's vault and cannot be opened while
+	 * logged out, so only operational metadata + the sealed blob are stored now;
+	 * threading and unread counts work, and DeferredIngest fills in the content at the
+	 * next unlock. Dedup is keyed on the spool id (idempotent re-pull) and, as a
+	 * backstop, the message-id unique constraint. $owner_id is the alias's single
+	 * grantee (recorded so deferred ingest knows whose vault to unseal with).
+	 */
+	public function storeRelayPending(array $meta, string $sealed_raw, $domain, $alias, int $owner_id): array {
+		$recipient = strtolower(trim((string)($meta['recipient'] ?? '')));
+		$message_id_header = trim((string)($meta['message_id'] ?? ''));
+		$message_id_header = ($message_id_header !== '') ? substr($message_id_header, 0, 255) : null;
+
+		$parsed = array('headers' => array(
+			'references'  => (string)($meta['references'] ?? ''),
+			'in-reply-to' => (string)($meta['in_reply_to'] ?? ''),
+		));
+		$thread_key = $this->computeThreadKey($parsed, $message_id_header);
+		$auth = $this->authFromRelayMeta($meta);
+
+		$row = array(
+			'iem_ied_inbound_email_domain_id' => $domain->key,
+			'iem_iea_inbound_email_alias_id'  => $alias ? $alias->key : null,
+			'iem_sender'      => '',
+			'iem_recipient'   => substr($recipient, 0, 500),
+			'iem_subject'     => '',
+			'iem_body_plain'  => '',
+			'iem_body_html'   => '',
+			'iem_raw_message' => '',
+			'iem_message_id_header' => $message_id_header,
+			'iem_thread_key'  => $thread_key,
+			'iem_dkim_result'  => $auth['dkim'],
+			'iem_spf_result'   => $auth['spf'],
+			'iem_dmarc_result' => $auth['dmarc'],
+			'iem_auth_source'  => $auth['source'],
+			'iem_size_bytes'  => intval($meta['size'] ?? 0),
+			'iem_received_time' => (string)($meta['received_utc'] ?? gmdate('Y-m-d H:i:s')),
+			'iem_pending_parse' => true,
+			'iem_relay_sealed_raw' => $sealed_raw,
+			'iem_relay_spool_id' => substr((string)($meta['spool_id'] ?? ''), 0, 255),
+			'iem_sealed_owner_user_id' => $owner_id > 0 ? $owner_id : null,
+		);
+
+		try {
+			$saved = InboundEmailMessage::CreateEntry($row);
+			return array('message' => $saved, 'dedup' => false);
+		} catch (\Throwable $e) {
+			if ($this->isUniqueViolation($e) || $this->duplicateMessageExists($message_id_header, $row['iem_recipient'])) {
+				return array('message' => null, 'dedup' => true);
+			}
+			throw $e;
+		}
+	}
+
+	/**
+	 * Turn the relay's forwarded Authentication-Results (carried in the .meta
+	 * sidecar) into verdict columns — the relay is a trusted verdict source
+	 * (specs/…hardened_ingest_relay § Phase 5.3), parsed exactly like the milter
+	 * path but tagged source='relay'. Falls back to 'unverified' when the relay
+	 * stamped nothing trustworthy.
+	 */
+	public function authFromRelayMeta(array $meta): array {
+		$default = array('dkim'=>'unverified','spf'=>'unverified','dmarc'=>'unverified','source'=>'none');
+
+		// The relay records EVERY Authentication-Results header in document order.
+		// Milters prepend, so the trusted (milter-stamped) verdicts are the earliest
+		// entries; a sender-forged A-R sits below. Walk top-down and take the FIRST
+		// verdict per method from a header whose authserv-id matches ours — first-wins
+		// mirrors the milter prepend and never lets a lower forged line beat it.
+		// (specs/mailbox_relay_fix_pack.md § Fix 2.) Back-compat: tolerate a legacy
+		// single string.
+		$list = $meta['authentication_results'] ?? array();
+		if (is_string($list)) {
+			$list = ($list === '') ? array() : array($list);
+		}
+		if (!is_array($list) || empty($list)) {
+			return $default;
+		}
+
+		$authserv_id = strtolower(trim((string)$this->settings->get_setting('mailbox_mail_hostname')));
+		$verdict = array('dkim'=>null, 'spf'=>null, 'dmarc'=>null);
+		$matched = false;
+
+		foreach ($list as $ar) {
+			$ar = trim((string)$ar);
+			if ($ar === '') {
+				continue;
+			}
+			$synthetic = "Authentication-Results: " . $ar . "\r\n\r\n";
+			$parsed = AuthenticationResults::fromMessage($synthetic, $authserv_id);
+			if ($parsed === null) {
+				continue; // authserv-id mismatch — untrusted (e.g. a forged line)
+			}
+			$matched = true;
+			foreach (array('dkim', 'spf', 'dmarc') as $method) {
+				if ($verdict[$method] === null) {
+					$val = $parsed->$method();
+					if ($val !== null && $val !== '') {
+						$verdict[$method] = $val;
+					}
+				}
+			}
+			if ($verdict['dkim'] !== null && $verdict['spf'] !== null && $verdict['dmarc'] !== null) {
+				break;
+			}
+		}
+
+		if (!$matched) {
+			return $default;
+		}
+		return array(
+			'dkim'   => $verdict['dkim']  ?: 'none',
+			'spf'    => $verdict['spf']   ?: 'none',
+			'dmarc'  => $verdict['dmarc'] ?: 'none',
+			'source' => 'relay',
+		);
 	}
 
 	/** The owner's Sealed Vault, or null when they have none (never sealed). */
@@ -1347,6 +1572,21 @@ class InboundEmailRouter {
 	 * abstraction outbound mail uses), reusing the provider credential — no
 	 * dependence on a separate SMTP password.
 	 */
+	/**
+	 * If $recipient is an SRS-rewritten bounce address (and SRS is enabled), decode
+	 * it and deliver a delivery-failure notice to the original sender; returns the
+	 * exit code. Returns null when it is not an SRS address, so the caller continues
+	 * normal routing. Shared by the receive-time router (processEmail) and the relay
+	 * pull consumer, so relay-fronted bounces are handled identically to colocated
+	 * ones (specs/mailbox_relay_fix_pack.md § Fix 6).
+	 */
+	public function handleSrsBounceIfApplicable(array $parsed, string $raw_email, string $recipient): ?int {
+		if ($this->settings->get_setting('mailbox_srs_enabled') && SRSRewriter::isSRSAddress($recipient)) {
+			return $this->handleSRSBounce($parsed, $raw_email, $recipient);
+		}
+		return null;
+	}
+
 	private function handleSRSBounce($parsed, $raw_email, $envelope_recipient) {
 		$srs = new SRSRewriter();
 

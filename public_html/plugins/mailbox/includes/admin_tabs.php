@@ -35,6 +35,7 @@ if (!function_exists('mailbox_admin_tabs')) {
 			'Filters'   => $base . 'admin_mailbox_filters',
 			'Logs'      => $base . 'admin_mailbox_logs',
 			'Setup'     => $base . 'admin_mailbox_setup',
+			'Relay'     => $base . 'admin_mailbox_relay',
 			'Settings'  => $base . 'admin_mailbox_settings',
 		);
 	}

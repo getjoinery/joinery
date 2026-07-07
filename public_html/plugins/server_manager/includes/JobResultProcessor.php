@@ -300,6 +300,136 @@ class JobResultProcessor {
 	}
 
 	/**
+	 * Post-process provision_relay: on success (PROVISION_RELAY_SUCCESS marker),
+	 * store the relay's returned WireGuard public key + endpoint + public IP on the
+	 * ManagedNode, flag it a relay, and clear the install state; on failure set
+	 * install_failed. Runs for both 'completed' and 'failed' terminal states.
+	 */
+	private static function process_provision_relay($job) {
+		$node_id = $job->get('mjb_mgn_node_id');
+		if (!$node_id) return;
+
+		try {
+			$node = new ManagedNode($node_id, TRUE);
+		} catch (Exception $e) { return; }
+
+		$status = $job->get('mjb_status');
+		$output = $job->get('mjb_output') ?: '';
+
+		if ($status === 'completed' && strpos($output, 'PROVISION_RELAY_SUCCESS') !== false) {
+			$node->set('mgn_is_relay', true);
+			$node->set('mgn_install_state', null);
+			// The relay runs no Joinery app, so skip the app health checks for it.
+			$node->set('mgn_skip_joinery_checks', true);
+
+			$wg_pubkey = self::extract_marker($output, 'RELAY_WG_PUBKEY');
+			$public_ip = self::extract_marker($output, 'RELAY_PUBLIC_IP');
+			if ($wg_pubkey !== '') {
+				$node->set('mgn_wg_public_key', substr($wg_pubkey, 0, 255));
+			}
+			if ($public_ip !== '') {
+				$node->set('mgn_wg_endpoint', $public_ip . ':51820');
+			}
+			// The relay's tunnel IP is fixed by provision_relay.sh.
+			$node->set('mgn_wg_ip', '10.99.0.1');
+			$node->save();
+
+			// Register (or refresh) the MailboxRelay row the mailbox plugin drives —
+			// created DISABLED so the admin enables it after verifying (Fix 10).
+			self::register_relay_row($node, $public_ip, $wg_pubkey);
+
+			// Peer the relay on the MAIN box's WireGuard interface — the other half
+			// of the tunnel. provision_relay_main.sh installs the root helper + a
+			// sudoers rule for exactly this call. Best-effort: on failure the tunnel
+			// health checks go red and the log says what to run.
+			if ($wg_pubkey !== '' && $public_ip !== '') {
+				$peer_cmd = 'sudo -n /usr/local/sbin/joinery-relay-peer '
+					. escapeshellarg($wg_pubkey) . ' ' . escapeshellarg($public_ip . ':51820') . ' 2>&1';
+				$peer_out = array(); $peer_code = 1;
+				exec($peer_cmd, $peer_out, $peer_code);
+				if ($peer_code !== 0) {
+					error_log('process_provision_relay: main-box WireGuard peer add failed ('
+						. $peer_code . '): ' . implode(' ', $peer_out)
+						. ' — run plugins/mailbox/provisioning/provision_relay_main.sh on the main box');
+				}
+			}
+		} else {
+			$node->set('mgn_install_state', 'install_failed');
+			$node->save();
+		}
+
+		$job->set('mjb_result', json_encode([
+			'is_relay'      => (bool)$node->get('mgn_is_relay'),
+			'wg_public_key' => $node->get('mgn_wg_public_key'),
+			'wg_endpoint'   => $node->get('mgn_wg_endpoint'),
+			'install_state' => $node->get('mgn_install_state'),
+		]));
+		$job->save();
+	}
+
+	/** rebuild_relay post-processing is identical to a fresh provision. */
+	private static function process_rebuild_relay($job) {
+		self::process_provision_relay($job);
+	}
+
+	/**
+	 * Create or update the mailbox plugin's MailboxRelay row for a provisioned node
+	 * (Fix 10). Owned by the mailbox plugin, so it is required lazily and skipped
+	 * (no fatal) when that plugin is inactive. The row is left DISABLED — enabling
+	 * it (which makes the relay front every hosted domain) is an explicit admin act.
+	 */
+	private static function register_relay_row($node, string $public_ip, string $wg_pubkey): void {
+		$relay_class = PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php');
+		if (!is_file($relay_class)) {
+			return; // mailbox plugin not present
+		}
+		try {
+			require_once($relay_class);
+			$db = DbConnector::get_instance()->get_db_link();
+			$stmt = $db->prepare(
+				"SELECT mrl_mailbox_relay_id FROM mrl_mailbox_relays
+				  WHERE mrl_mgn_managed_node_id = ? AND mrl_delete_time IS NULL LIMIT 1"
+			);
+			$stmt->execute(array($node->key));
+			$existing = $stmt->fetchColumn();
+
+			$relay = $existing ? new MailboxRelay(intval($existing), TRUE) : new MailboxRelay(NULL);
+			$relay->set('mrl_mgn_managed_node_id', $node->key);
+			$relay->set('mrl_name', $node->get('mgn_name'));
+			// The main box reaches the relay over the tunnel at its WireGuard IP.
+			$relay->set('mrl_host', (string)$node->get('mgn_wg_ip') ?: '10.99.0.1');
+			if ($public_ip !== '') { $relay->set('mrl_public_ip', $public_ip); }
+			$relay->set('mrl_ssh_user', 'root');
+			$relay->set('mrl_ssh_port', intval($node->get('mgn_ssh_port')) ?: 22);
+			$relay->set('mrl_ssh_key_path', (string)$node->get('mgn_ssh_key_path'));
+			$relay->set('mrl_spool_path', '/var/spool/joinery-relay');
+			if ($wg_pubkey !== '') { $relay->set('mrl_wg_public_key', substr($wg_pubkey, 0, 255)); }
+			$relay->set('mrl_wg_endpoint', (string)$node->get('mgn_wg_endpoint'));
+			$relay->set('mrl_wg_ip', (string)$node->get('mgn_wg_ip'));
+			if (!$existing) {
+				$relay->set('mrl_is_enabled', false); // admin enables after verifying
+			}
+			$relay->save();
+			// Mint the ambient transport keypair now so the first map push can seal
+			// Standard/Private mail immediately once enabled.
+			$relay->ensureTransportKeypair();
+		} catch (\Throwable $e) {
+			error_log('JobResultProcessor::register_relay_row failed: ' . $e->getMessage());
+		}
+	}
+
+	/**
+	 * Pull the value of an `echo KEY=value` marker line out of streamed job output
+	 * (the last occurrence wins). Returns '' when absent.
+	 */
+	private static function extract_marker(string $output, string $key): string {
+		if (preg_match_all('/^' . preg_quote($key, '/') . '=(.*)$/m', $output, $m) && !empty($m[1])) {
+			return trim((string)end($m[1]));
+		}
+		return '';
+	}
+
+	/**
 	 * Send the post-provisioning welcome email to the customer via getjoinery's
 	 * QueuedEmail API. Reads credentials from Server Manager plugin settings.
 	 * Silently returns on any failure — email delivery is best-effort.

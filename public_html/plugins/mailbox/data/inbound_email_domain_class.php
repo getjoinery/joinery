@@ -26,7 +26,10 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 
 class InboundEmailDomainException extends SystemBaseException {}
 
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/NotifiesRelayMapOnChange.php'));
+
 class InboundEmailDomain extends SystemBase {
+	use NotifiesRelayMapOnChange;
 	public static $prefix = 'ied';
 	public static $tablename = 'ied_inbound_email_domains';
 	public static $pkey_column = 'ied_inbound_email_domain_id';

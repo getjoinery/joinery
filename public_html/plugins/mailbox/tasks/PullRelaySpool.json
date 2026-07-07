@@ -1,0 +1,9 @@
+{
+  "name": "Pull relay mail spool",
+  "description": "Dials out over WireGuard to the hardened ingest relay, rsyncs new sealed message blobs off its spool (copy-only), stores each durably (Standard/Private opened and ingested now; Fortress stored pending-parse for the next unlock), then deletes the entries it durably stored as the ack. Runs every cron pass (every_run) as the short poll. No-op on colocated deployments.",
+  "default_frequency": "every_run",
+  "default_time": "",
+  "config_fields": {
+    "max_per_run": {"type": "number", "label": "Max spool entries per run (default 500)", "required": false}
+  }
+}

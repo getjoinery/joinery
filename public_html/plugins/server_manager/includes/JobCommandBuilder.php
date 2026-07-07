@@ -1685,5 +1685,86 @@ fi
 echo "SCAN_COMPLETE|$found"
 BASH;
 	}
+
+	/**
+	 * Build the steps that stand up a HARDENED INGEST RELAY on a fresh VPS
+	 * (specs/inbound_email_hardened_ingest_relay_executor.md § Phase 6). Reuses the
+	 * job/agent machinery: delivers the shipped provisioning/ files (the sealer Go
+	 * source + provision_relay.sh) as a tarball, runs the installer, optionally
+	 * peers the main box's WireGuard key, and emits the markers
+	 * process_provision_relay parses.
+	 *
+	 * $params: mail_hostname (required), main_wg_public_key (optional — the main
+	 * box's WG public key to add as a [Peer] so Joinery can dial out).
+	 */
+	public static function build_provision_relay($node, $params) {
+		$mail_hostname = trim((string)($params['mail_hostname'] ?? ''));
+		if ($mail_hostname === '' || strpos($mail_hostname, '.') === false) {
+			throw new Exception("provision_relay requires a FQDN mail_hostname (e.g. mx.example.com).");
+		}
+		$main_wg_pubkey = trim((string)($params['main_wg_public_key'] ?? ''));
+
+		$transfer_id = substr(md5(uniqid(mt_rand(), true)), 0, 12);
+		$provisioning_dir = PathHelper::getIncludePath('plugins/mailbox/provisioning');
+		$local_tarball = "/tmp/joinery-relay-{$transfer_id}.tgz";
+		$remote_tarball = "/tmp/joinery-relay-{$transfer_id}.tgz";
+		$remote_dir = "/tmp/joinery-relay-{$transfer_id}";
+
+		$hostname_esc = escapeshellarg($mail_hostname);
+		$provisioning_esc = escapeshellarg($provisioning_dir);
+		$tarball_esc = escapeshellarg($local_tarball);
+		$remote_tarball_esc = escapeshellarg($remote_tarball);
+		$remote_dir_esc = escapeshellarg($remote_dir);
+
+		$steps = [];
+
+		// 1. Pre-flight on the control plane: the sealer source + installer exist,
+		//    packaged into one tarball for delivery.
+		$steps[] = ['type' => 'local', 'label' => 'Pre-flight: package relay provisioning files',
+			'cmd' => "test -d {$provisioning_esc}/relay-sealer && test -f {$provisioning_esc}/provision_relay.sh && "
+			       . "tar czf {$tarball_esc} -C {$provisioning_esc} relay-sealer provision_relay.sh && echo PREFLIGHT_OK"];
+
+		// 2. Deliver the tarball to the relay.
+		$steps[] = ['type' => 'scp', 'label' => 'Upload relay provisioning bundle',
+			'direction' => 'upload', 'local_path' => $local_tarball, 'remote_path' => $remote_tarball];
+
+		// 3. Extract and run the installer (builds the sealer, wires Postfix + milters
+		//    + WireGuard + firewall). Idempotent; safe to re-run.
+		$steps[] = ['type' => 'ssh', 'label' => 'Run provision_relay.sh', 'on_host' => true,
+			'cmd' => "sudo rm -rf {$remote_dir_esc} && sudo mkdir -p {$remote_dir_esc} && "
+			       . "sudo tar xzf {$remote_tarball_esc} -C {$remote_dir_esc} && "
+			       . "cd {$remote_dir_esc} && sudo bash provision_relay.sh {$hostname_esc}",
+			'timeout' => 1800];
+
+		// 4. Peer the main box's WireGuard key so Joinery can dial out (idempotent).
+		if ($main_wg_pubkey !== '') {
+			$pk_esc = escapeshellarg($main_wg_pubkey);
+			$steps[] = ['type' => 'ssh', 'label' => 'Add main-box WireGuard peer', 'on_host' => true,
+				'cmd' => "sudo wg set wg0 peer {$pk_esc} allowed-ips 10.99.0.2/32 && "
+				       . "( sudo grep -qF {$pk_esc} /etc/wireguard/wg0.conf || "
+				       . "printf '\\n[Peer]\\nPublicKey = %s\\nAllowedIPs = 10.99.0.2/32\\n' {$pk_esc} | sudo tee -a /etc/wireguard/wg0.conf >/dev/null ) && "
+				       . "echo WG_PEER_ADDED",
+				'continue_on_error' => true];
+		}
+
+		// 5. Verify + emit the markers the result processor parses.
+		$steps[] = ['type' => 'ssh', 'label' => 'Verify relay + report WireGuard details', 'on_host' => true,
+			'cmd' => "echo RELAY_WG_PUBKEY=$(sudo cat /etc/wireguard/relay_public.key 2>/dev/null); "
+			       . "echo RELAY_PUBLIC_IP=$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}'); "
+			       . "sudo postfix status >/dev/null 2>&1 && echo PROVISION_RELAY_SUCCESS"];
+
+		return $steps;
+	}
+
+	/**
+	 * Rebuild an existing relay in place (or on a fresh VPS): the same provisioning
+	 * run again. Incident response is click → wait → update DNS, and it is also
+	 * schedulable (monthly, same IP) so persistence on the relay has a shelf life.
+	 * Nothing is lost: unacked mail is queued at senders' MTAs, acked mail is on
+	 * Joinery.
+	 */
+	public static function build_rebuild_relay($node, $params) {
+		return self::build_provision_relay($node, $params);
+	}
 }
 ?>

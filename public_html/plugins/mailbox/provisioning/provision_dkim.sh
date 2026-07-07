@@ -78,6 +78,12 @@ TXT_FILE="${KEY_DIR}/${SELECTOR}.txt"
 KEY_TABLE="/etc/opendkim/key.table"
 SIGNING_TABLE="/etc/opendkim/signing.table"
 KEY_NAME="${SELECTOR}._domainkey.${DOMAIN}"
+# The web server's group — in-app DKIM signing (relay-fronted deployments)
+# reads the private key from the PHP process.
+WEB_GROUP="www-data"
+if ! getent group "${WEB_GROUP}" >/dev/null 2>&1; then
+    WEB_GROUP="apache"
+fi
 
 restart_opendkim() {
     if command -v systemctl >/dev/null 2>&1 && systemctl restart opendkim 2>/dev/null; then
@@ -152,11 +158,23 @@ else
     opendkim-genkey -b 2048 -s "${SELECTOR}" -d "${DOMAIN}" -D "${KEY_DIR}"
     chown -R opendkim:opendkim "${KEY_DIR}"
     # opendkim must read the private key; www-data (the Setup tab) must be able
-    # to traverse in and read the public mail.txt. The private key stays 600.
+    # to traverse in and read the public mail.txt. The private key is group-
+    # readable by the web server: on a relay-fronted deployment the opendkim
+    # milter is decommissioned and the app signs in-app with this same key
+    # (MailboxDkimSigner::standardFilesystemSigner) — 600 would leave those
+    # sends silently unsigned.
     chmod 755 "${KEY_ROOT}" "${KEY_DIR}"
-    chmod 600 "${PRIVATE_KEY}"
+    chown "opendkim:${WEB_GROUP}" "${PRIVATE_KEY}"
+    chmod 640 "${PRIVATE_KEY}"
     chmod 644 "${TXT_FILE}"
     echo "opendkim: generated 2048-bit key at ${PRIVATE_KEY}"
+fi
+
+# In-app signing needs group read even on keys generated before this script
+# set it (re-runs are idempotent).
+if [[ -f "${PRIVATE_KEY}" ]]; then
+    chown "opendkim:${WEB_GROUP}" "${PRIVATE_KEY}"
+    chmod 640 "${PRIVATE_KEY}"
 fi
 
 # --- 2. wire key.table / signing.table (append once) -------------------------
