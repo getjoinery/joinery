@@ -2,6 +2,8 @@
 require_once(PathHelper::getIncludePath('includes/EmailServiceProvider.php'));
 require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
 require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
+require_once(PathHelper::getIncludePath('includes/MailIdentityGuard.php'));
+require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException (the locked-state signal)
 
 require_once(PathHelper::getIncludePath('data/debug_email_logs_class.php'));
 
@@ -125,6 +127,19 @@ class EmailSender {
             $message->from($this->defaultFrom, $this->defaultFromName);
         }
 
+        // Protected-identity ambient-send guard (specs/mailbox_outbound_send_protection.md,
+        // closure 4 / Phase 3). A protected From-domain may leave ONLY through the
+        // session-gated mailbox compose path, which reaches send() with an injected
+        // $transport. An ambient/transactional call (no transport) with a protected
+        // From-domain is refused outright — a locked box's transactional code must
+        // never emit protected-domain mail. This also backstops the SRS bounce
+        // generator, which Phase 5 already moves off the protected domain.
+        if ($transport === null
+            && MailIdentityGuard::isProtectedDomain(MailIdentityGuard::domainOf((string)$message->getFrom()))) {
+            throw new Exception('Refusing to send from a protected identity domain outside the '
+                . 'session-gated mailbox compose path.');
+        }
+
         // Validate
         $errors = $message->validate();
         if (!empty($errors)) {
@@ -140,6 +155,12 @@ class EmailSender {
                     $result ? "Email sent successfully via injected transport $service"
                             : "Email send failed via injected transport $service",
                     $service);
+            } catch (VaultLockedException $e) {
+                // A protected-identity send whose vault window is closed: this is
+                // the locked-state signal, not a transport failure. Let it
+                // propagate so the compose path prompts a one-tap unlock instead
+                // of silently queueing/failing the send.
+                throw $e;
             } catch (\Exception $e) {
                 $this->logEmailDebug("Email send exception via injected transport $service: " . $e->getMessage(), $service);
                 $result = false;
@@ -247,6 +268,12 @@ class EmailSender {
         // Set defaults if not specified
         if (!$message->getFrom()) {
             $message->from($this->defaultFrom, $this->defaultFromName);
+        }
+
+        // Batch sends are always ambient (no per-send session transport), so a
+        // protected identity domain must never ride them (see send()'s guard).
+        if (MailIdentityGuard::isProtectedDomain(MailIdentityGuard::domainOf((string)$message->getFrom()))) {
+            throw new Exception('Refusing to batch-send from a protected identity domain.');
         }
 
         $settings = Globalvars::get_instance();

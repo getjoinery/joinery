@@ -18,7 +18,12 @@
  *
  * See specs/implemented/email_forwarding_pgsql_credential.md.
  *
- * @version 1.2
+ * The map is a live query — Postfix runs it per lookup, so domain AND
+ * forwarding-subdomain changes take effect without re-rendering. Re-running
+ * install_email.sh (which regenerates this file) is only needed to rotate the
+ * role password or pick up a query-shape change like this one.
+ *
+ * @version 1.3
  */
 
 $role = $argv[1] ?? '';
@@ -77,8 +82,14 @@ $lines[] = 'dbname = ' . $dbname;
 // This query is the single definition of "active inbound domain" and must
 // stay aligned with the InboundEmailDomain model. lower() on the column
 // side also covers any row written by a path that bypassed prepare().
+// The UNION accepts each domain's forwarding subdomain too: the SRS envelope
+// leaves from it (specs/mailbox_send_protection_fix_pack.md, Fix 7), so
+// remote DSNs to SRS0=...@<subdomain> must be deliverable back to the router
+// or bounce handling silently dies.
 $lines[] = "query = SELECT ied_domain FROM ied_inbound_email_domains"
-	. " WHERE lower(ied_domain) = '%s' AND ied_is_enabled = true AND ied_delete_time IS NULL";
+	. " WHERE lower(ied_domain) = '%s' AND ied_is_enabled = true AND ied_delete_time IS NULL"
+	. " UNION SELECT ied_forwarding_subdomain FROM ied_inbound_email_domains"
+	. " WHERE lower(ied_forwarding_subdomain) = '%s' AND ied_is_enabled = true AND ied_delete_time IS NULL";
 
 echo implode("\n", $lines) . "\n";
 exit(0);

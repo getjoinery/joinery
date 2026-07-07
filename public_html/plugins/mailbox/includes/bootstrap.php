@@ -10,17 +10,36 @@
  * registration here — it is declared directly on the model class, which is
  * already required wherever a message is read.
  *
- * @version 1.1
+ * It also wires the outbound send protection consumer
+ * (specs/mailbox_outbound_send_protection.md): the two MailIdentityGuard
+ * callables (protected-domain predicate + DKIM signer resolver) that core send
+ * code reads, and the reseal of a protected domain's sealed DKIM key alongside
+ * the message DEKs on a vault key rotation.
+ *
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('data/files_class.php'));
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
+require_once(PathHelper::getIncludePath('includes/MailIdentityGuard.php'));
 require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachment_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxDkimSigner.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxIndex.php'));
+
+// --- Protected sending identity hooks (specs/mailbox_outbound_send_protection.md) ---
+// Core send code (EmailSender ambient guard, SmtpProvider DKIM signing) reads
+// these two well-known callables so it never names a mailbox symbol directly.
+MailIdentityGuard::registerProtectedDomainCheck(function (string $from_domain): bool {
+	return MailboxDkimSigner::isProtected($from_domain);
+});
+MailIdentityGuard::registerDkimSigner(function (string $from_domain): ?array {
+	return MailboxDkimSigner::resolveFor($from_domain);
+});
 
 // --- Sealed-File decrypt hook (docs/sealed_vault.md § The two generic consumer hooks) ---
 // Resolve the owning message (and its owner) from the attachment manifest,
@@ -53,48 +72,83 @@ File::registerDecryptHook(File::SOURCE_EMAIL_ATTACHMENT, function (string $ciphe
 // under the now-superseded key too, so it is purged rather than re-sealed —
 // the next unlock rebuilds it from the freshly-resealed rows.
 VaultUnlock::onReseal(function (int $user_id, string $old_secret_key, int $old_key_generation, string $new_public_key, int $new_key_generation) {
-	$alias_ids = InboundEmailMailboxGrant::alias_ids_for_user($user_id);
-	if (!count($alias_ids)) {
-		return;
-	}
-
 	$db = DbConnector::get_instance()->get_db_link();
-	$in = implode(',', array_map('intval', $alias_ids));
-	$stmt = $db->prepare(
-		"SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
-		 WHERE iem_iea_inbound_email_alias_id IN ($in)
-		 AND iem_content_sealed = true AND iem_key_generation = ? AND iem_delete_time IS NULL");
-	$stmt->execute(array($old_key_generation));
-	$ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
-
 	$crypto = new VaultCrypto();
 	$failed = 0;
+	$ids = array();
 
-	foreach ($ids as $id) {
-		$id = intval($id);
-		try {
-			$msg = new InboundEmailMessage($id, TRUE);
-			if (!$msg->key || !$msg->get('iem_sealed_key')) {
+	// Message DEKs: only users holding mailbox grants have sealed messages.
+	// This block is conditional; the DKIM block below is NOT — owning a
+	// protected sending domain is independent of holding mailbox grants, and
+	// an early return here would silently skip the DKIM re-seal (permanent
+	// key loss once the old generation is retired).
+	$alias_ids = InboundEmailMailboxGrant::alias_ids_for_user($user_id);
+	if (count($alias_ids)) {
+		$in = implode(',', array_map('intval', $alias_ids));
+		$stmt = $db->prepare(
+			"SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
+			 WHERE iem_iea_inbound_email_alias_id IN ($in)
+			 AND iem_content_sealed = true AND iem_key_generation = ? AND iem_delete_time IS NULL");
+		$stmt->execute(array($old_key_generation));
+		$ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+		foreach ($ids as $id) {
+			$id = intval($id);
+			try {
+				$msg = new InboundEmailMessage($id, TRUE);
+				if (!$msg->key || !$msg->get('iem_sealed_key')) {
+					continue;
+				}
+				$dek = $crypto->openItemDek((string)$msg->get('iem_sealed_key'), $old_secret_key);
+				$new_sealed_key = $crypto->sealItemDek($dek, $new_public_key);
+				$upd = $db->prepare(
+					'UPDATE iem_inbound_email_messages SET iem_sealed_key = ?, iem_key_generation = ?
+					 WHERE iem_inbound_email_message_id = ?');
+				$upd->execute(array($new_sealed_key, $new_key_generation, $id));
+			} catch (Throwable $e) {
+				$failed++;
+				error_log('Mailbox vault reseal: failed for message ' . $id . ': ' . $e->getMessage());
+			}
+		}
+
+		$index = new MailboxIndex();
+		$index->purgePersisted($user_id);
+	}
+
+	// Protected-domain DKIM keys seal to this same vault public key, so a
+	// rotation must re-seal them alongside the message DEKs or the in-app
+	// signer can no longer unwrap the key. Both the live key and any
+	// rotation-pending key (staged but not yet cut over) are re-sealed.
+	// Fail-loud on the same contract: a key that cannot be re-sealed blocks
+	// retiring the old generation.
+	$dkim_failed = 0;
+	$dkim_columns = array('ied_dkim_sealed_key', 'ied_dkim_pending_sealed_key');
+	$protected = InboundEmailDomain::ProtectedForOwner($user_id);
+	foreach ($protected as $domain) {
+		foreach ($dkim_columns as $col) {
+			$sealed = (string)$domain->get($col);
+			if ($sealed === '') {
 				continue;
 			}
-			$dek = $crypto->openItemDek((string)$msg->get('iem_sealed_key'), $old_secret_key);
-			$new_sealed_key = $crypto->sealItemDek($dek, $new_public_key);
-			$upd = $db->prepare(
-				'UPDATE iem_inbound_email_messages SET iem_sealed_key = ?, iem_key_generation = ?
-				 WHERE iem_inbound_email_message_id = ?');
-			$upd->execute(array($new_sealed_key, $new_key_generation, $id));
-		} catch (Throwable $e) {
-			$failed++;
-			error_log('Mailbox vault reseal: failed for message ' . $id . ': ' . $e->getMessage());
+			try {
+				$private = $crypto->openItemDek($sealed, $old_secret_key);
+				$resealed = $crypto->sealItemDek($private, $new_public_key);
+				$upd = $db->prepare(
+					'UPDATE ied_inbound_email_domains SET ' . $col . ' = ?
+					 WHERE ied_inbound_email_domain_id = ?');
+				$upd->execute(array($resealed, intval($domain->key)));
+			} catch (Throwable $e) {
+				$dkim_failed++;
+				error_log('Mailbox vault reseal: failed to re-seal DKIM key (' . $col . ') for domain '
+					. $domain->get('ied_domain') . ': ' . $e->getMessage());
+			}
 		}
 	}
 
-	$index = new MailboxIndex();
-	$index->purgePersisted($user_id);
-
-	if ($failed > 0) {
+	if ($failed > 0 || $dkim_failed > 0) {
 		throw new RuntimeException(
-			'Mailbox reseal: ' . $failed . ' of ' . count($ids) . ' sealed messages could not be re-sealed; '
+			'Mailbox reseal: ' . $failed . ' of ' . count($ids) . ' sealed messages and '
+			. $dkim_failed . ' of ' . count($protected) . ' protected DKIM keys could not be re-sealed; '
 			. 'the old key generation must not be retired.');
 	}
 });

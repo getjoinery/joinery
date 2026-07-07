@@ -139,6 +139,8 @@ on today.
 | Rotate the vault key | Live PRF assertion from an enrolled passkey |
 | Password reset | Control of the account email; never opens a vault |
 | Change a sealed mailbox's filters or alias routing | Session + open unlock window (the owner's own) |
+| Send as a protected identity domain | Open unlock window, via the mailbox compose path only — ambient/transactional senders are refused outright |
+| Protect a domain / stage or cut over a DKIM rotation | Admin session + open unlock window (the key seals to the owner's vault) |
 
 Consumers of the vault (mail, chat) define their own *content* policies —
 what they seal, what their locked state looks like — on top of these rules;

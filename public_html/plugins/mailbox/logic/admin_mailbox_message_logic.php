@@ -42,7 +42,7 @@ function admin_mailbox_message_logic(array $input): LogicResult {
 		$session->save_message(new DisplayMessage(
 			'Message deleted.',
 			'Deleted',
-			'/plugins/mailbox/admin/',
+			'~/plugins/mailbox/admin/~',
 			DisplayMessage::MESSAGE_ANNOUNCEMENT,
 			DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 		));

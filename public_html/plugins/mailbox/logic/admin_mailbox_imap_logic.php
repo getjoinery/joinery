@@ -118,7 +118,7 @@ function _imap_msg_redirect($session, string $message, string $url): LogicResult
 	$session->save_message(new DisplayMessage(
 		$message,
 		'IMAP Accounts',
-		'/plugins/mailbox/admin/',
+		'~/plugins/mailbox/admin/~',
 		DisplayMessage::MESSAGE_ANNOUNCEMENT,
 		DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 	));

@@ -12,11 +12,12 @@
  * forwarding relay. The EmailMessage→PHPMailer mapping lives once in
  * SmtpMailer::applyMessage().
  *
- * @version 1.2
+ * @version 1.4
  */
 
 require_once(PathHelper::getIncludePath('includes/SmtpMailer.php'));
 require_once(PathHelper::getIncludePath('includes/SmtpConfig.php'));
+require_once(PathHelper::getIncludePath('includes/MailIdentityGuard.php'));
 
 class SmtpProvider implements EmailServiceProvider, RawMessageRelay {
 
@@ -181,7 +182,34 @@ class SmtpProvider implements EmailServiceProvider, RawMessageRelay {
         $mailer = new SmtpMailer($this->config);
         $mailer->applyMessage($message);
 
-        if (!$mailer->send()) {
+        // Protected-identity DKIM signing (specs/mailbox_outbound_send_protection.md).
+        // Core names no mailbox symbol: it asks MailIdentityGuard, into which the
+        // plugin registered a resolver, for a signer keyed on the From-domain. A
+        // protected domain returns its in-app signer (unwrapped in-window); a
+        // non-protected domain returns null (opendkim signs it, or it is unsigned);
+        // a protected domain with no open window throws VaultLockedException, which
+        // propagates so the compose path prompts an unlock rather than sending
+        // unsigned. The raw-relay path (relayRawMessage) is untouched — it carries
+        // the original sender's own signature and is not a mailbox compose.
+        $sig = MailIdentityGuard::resolveDkimSigner(MailIdentityGuard::domainOf((string)$message->getFrom()));
+        if ($sig !== null) {
+            $mailer->DKIM_domain         = $sig['domain'];
+            $mailer->DKIM_selector       = $sig['selector'];
+            $mailer->DKIM_private_string = $sig['private_string']; // in-memory only, never a file
+            $mailer->DKIM_identity       = (string)$message->getFrom();
+        }
+
+        $ok = $mailer->send();
+
+        if ($sig !== null) {
+            // The unwrapped signing key must not outlive the send — php-fpm
+            // workers persist across requests (same discipline as SealedBox).
+            sodium_memzero($sig['private_string']);
+            sodium_memzero($mailer->DKIM_private_string);
+            $mailer->DKIM_private_string = '';
+        }
+
+        if (!$ok) {
             error_log("[SmtpProvider] Send failed: " . $mailer->ErrorInfo);
             return false;
         }

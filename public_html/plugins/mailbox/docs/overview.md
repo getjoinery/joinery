@@ -789,6 +789,94 @@ the extension and FTS5 support. The unlock window's own host-hardening facts (AP
 `apc.mmap_file_mask`, swap, coredumps) are the vault's own `VaultHealth` check
 (`includes/VaultHealth.php`), not repeated here.
 
+## Outbound send protection
+
+Encryption at rest protects *reading* stored mail while locked; outbound send
+protection protects the *sending identity*. A domain flagged
+`ied_is_protected_identity` is a **protected sending identity**: while no unlock
+window is open, no credential on the box can produce a DMARC-passing message with
+a `From:` header at that domain. The enforcement point is other people's mail
+servers applying the domain's published DMARC policy — infrastructure a
+compromised (even root) box does not control.
+
+**The invariant holds by closing every ambient send path:**
+
+- **Sealed DKIM key, signed in-app.** The domain's DKIM private key is generated
+  in-session, sealed to the owner's vault public key (`ied_dkim_sealed_key`, a
+  `crypto_box_seal` envelope — the same one message DEKs use), and stored in the
+  database. The plaintext never touches disk and is never given to opendkim. At
+  compose time, inside an unlock window, `MailboxDkimSigner::resolveFor()` unwraps
+  it and PHPMailer signs with it as an in-memory string (`DKIM_private_string`),
+  zeroized (`sodium_memzero`) as soon as the send returns. Core send code names
+  no mailbox symbol: `SmtpProvider` and `EmailSender` read two callables the
+  plugin registers on `MailIdentityGuard` at bootstrap (a protected-domain
+  predicate and the DKIM signer resolver, memoized per request). A locked window
+  makes the resolver throw, and the compose path prompts a one-tap unlock rather
+  than sending unsigned.
+- **Protected compose submits through the box's own SMTP transport.** A hosted
+  alias on a protected domain resolves an `SmtpProvider` on the forwarding SMTP
+  coordinates (`OutboundTransport::forHostedAlias()`), never the ambient
+  platform provider — that transport is where the in-app signer runs, and the
+  injected transport is what marks the send as the session-gated compose path.
+  DMARC acceptance rides the strict-aligned DKIM signature alone; the domain's
+  SPF excludes the box by design.
+- **Box out of SPF; strict alignment.** The protected domain's SPF (`v=spf1
+  -all`) does not authorize the box, and its DMARC is `p=reject; aspf=s; adkim=s`.
+  Strict alignment is load-bearing: it stops the box-authorizing forwarding
+  subdomain from aligning the bare domain.
+- **SRS envelope on the forwarding subdomain.** Alias forwarding runs while
+  logged out, so its SRS envelope leaves from `ied_forwarding_subdomain` —
+  strictly per-domain, always a subdomain of the protected domain (e.g.
+  `fwd.<domain>`), set on the Protect page. Its SPF authorizes the box and its
+  MX points back at the box (Postfix accepts it via the pgsql domain map), so
+  forwarded mail passes SPF and delivery-failure notices (DSNs to the SRS
+  envelope) route back to the router. The forwarded message's `From:` is the
+  original sender's own domain, so forwarding never needs the user's identity.
+  The SRS bounce notification sends from the platform's default identity — the
+  one the ambient provider is verified for — so the notice itself is
+  deliverable.
+- **Ambient senders refused.** `EmailSender::send()` refuses any transactional
+  (no injected transport) send from a protected From-domain; only the
+  session-gated mailbox compose path (which injects a transport) may send as the
+  identity.
+
+**opendkim keeps verify duty, not signing.** `provision_dkim.sh --remove
+<domain>` strips the domain's `signing.table` / `key.table` lines and destroys
+its on-disk key (a resting key is a resting send capability), leaving the in-app
+per-send signer as the sole signer. `Mode sv` is untouched, so inbound
+verification is unaffected.
+
+**Setup verification inverts for a protected domain.** The Setup tab checks that
+SPF *excludes* the box, DMARC is strict, the published DKIM record matches the
+sealed key's public half (`ied_dkim_public_dns`, cleartext so it verifies while
+locked), the forwarding subdomain's SPF authorizes the box and its MX resolves to
+the box, and the domain is not relay-provider-verified. These are REQUIRED, so
+`InboundEmailHealth` gates on them and activation blocks until the whole shape —
+forwarding subdomain included — is published. One assembly
+(`InboundEmailSetupCheck::protectedShapeResults()`) feeds both the Setup tab and
+the ceremony's pre-activation verify, so they can never disagree.
+
+**Enabling** is an in-window ceremony on the domain's *Protected sending
+identity* page (`admin_mailbox_protect`): set the forwarding subdomain, generate
++ seal the key, publish the DNS shown, verify the shape, then flip the flag and
+run the opendkim removal.
+
+**Rotation is staged.** On an enforced domain, *Rotate key* seals a fresh key
+under the next selector (`mailk{n}`) into the pending columns
+(`ied_dkim_pending_*`) while the live key keeps signing; *Verify & cut over*
+swaps pending → live only after the pending selector's published DNS record
+matches, and *Cancel rotation* abandons the staged key. The live key is never
+overwritten or destroyed until its replacement is proven in DNS. A vault key
+rotation re-seals the DKIM keys — live and pending — alongside the message DEKs
+(the plugin's `onReseal` callback), for every protected-domain owner regardless
+of mailbox grants, on the same fail-loud contract.
+
+**Automated mail** (lists, receipts, notifications) that must run around the clock
+lives on a dedicated **non-protected** sending subdomain (e.g. `mail.<domain>`),
+signed ambiently by `provision_dkim.sh` as usual. Under the bare domain's
+`adkim=s` that subdomain's key can never sign as the bare domain, so a locked box
+can send as `list@mail.<domain>` but never as `you@<domain>`.
+
 ## Mailbox Reader
 
 The Mailbox Reader is a two-pane Gmail-style reader over the stored messages:

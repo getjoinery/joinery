@@ -66,7 +66,7 @@
  * paths alike, never IMAP-polled mail. forwardStoredMessage() relays a copy for a filter's
  * "Forward to" action, reusing the alias-forward envelope rebuild + relay.
  *
- * @version 1.18
+ * @version 1.19
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -1156,7 +1156,14 @@ class InboundEmailRouter {
 	 * @return array{0:string,1:string}    [raw_mime (CRLF), envelope_sender]
 	 */
 	private function buildForwardMessage($raw_email, $parsed, $domain, $original_to_address) {
-		$forwarding_domain = $domain->get('ied_domain');
+		// The SRS envelope leaves from the forwarding subdomain, not the bare
+		// domain (specs/mailbox_outbound_send_protection.md, closure 3): under a
+		// protected domain's strict alignment (aspf=s) the forwarding subdomain's
+		// SPF pass can never align the bare domain, so forwarding keeps working
+		// while locked without handing the box any spoofing capability. For a
+		// non-protected domain with no override, forwarding_subdomain() returns
+		// the bare domain — today's behavior.
+		$forwarding_domain = $domain->forwarding_subdomain();
 
 		// SRS rewrite envelope sender
 		$envelope_sender = $parsed['from_email'];
@@ -1359,6 +1366,13 @@ class InboundEmailRouter {
 				->subject('Delivery failure: ' . ($parsed['subject'] ?: '(no subject)'))
 				->text("Your email could not be delivered.\n\n" . ($parsed['body'] ?: ''));
 
+			// No explicit From: EmailSender stamps its platform default — the
+			// identity the ambient provider is verified and DKIM-aligned for,
+			// so the notice itself is deliverable. A customer-domain From here
+			// (protected or not) would fail the provider's alignment and get
+			// the failure notice itself rejected. The platform From is never a
+			// protected identity, so the ambient-send guard is satisfied by
+			// construction.
 			$sender = new EmailSender();
 			$sender->send($message);
 			$this->logTransaction($parsed, null, InboundEmailLog::STATUS_BOUNCE_FORWARDED, $envelope_recipient, $original_sender);

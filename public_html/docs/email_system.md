@@ -85,6 +85,20 @@ $result = $sender->sendBatch($message, $recipients);
 - Automatic fallback if primary fails
 - Queue failed emails for retry
 
+**Protected identity domains.** A From address at a domain the Mailbox plugin
+marks as a protected sending identity is usable **only** through the session-gated
+mailbox compose path (`MailboxSender`, which sends with an injected transport).
+For such a domain, `OutboundTransport::forHostedAlias()` resolves an
+`SmtpProvider` on the box's own SMTP submission coordinates — protected mail
+rides the box's SMTP path, never the ambient platform provider.
+`EmailSender::send()` and `sendBatch()` refuse any transactional (no injected
+transport) send from such a domain, and `SmtpProvider` DKIM-signs it in-app with a
+key unwrapped only inside an open vault unlock window and zeroized after the
+send. Transactional and notification mail therefore sends from the platform's
+ordinary domain (or an automated sending subdomain), never a protected identity
+domain. Core send code consults `MailIdentityGuard`; the mailbox plugin registers
+the predicate and signer. See [Mailbox Plugin → Outbound send protection](/plugins/mailbox/docs/overview.md#outbound-send-protection).
+
 ### EmailTemplate Class
 
 Focused on template processing:

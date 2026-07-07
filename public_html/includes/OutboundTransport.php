@@ -22,12 +22,13 @@
  * `filesSent` is the PRESETS smtp_files_sent capability: true when the provider's
  * SMTP saves the sent copy itself; false when two-way sync must APPEND it.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/EmailServiceProvider.php'));
 require_once(PathHelper::getIncludePath('includes/SmtpConfig.php'));
 require_once(PathHelper::getIncludePath('includes/email_providers/SmtpProvider.php'));
+require_once(PathHelper::getIncludePath('includes/MailIdentityGuard.php'));
 
 class OutboundTransport {
 
@@ -78,6 +79,19 @@ class OutboundTransport {
         $t = new self();
         $t->fromAddress = $aliasAddress;
         $t->filesSent = false; // no source mailbox to file a copy into
+
+        if (MailIdentityGuard::isProtectedDomain(MailIdentityGuard::domainOf($aliasAddress))) {
+            // A protected identity never rides the ambient provider: the box
+            // submits it itself through SmtpProvider, whose send() runs the
+            // in-app DKIM signer (sealed key, unwrapped in-window). DMARC passes
+            // on the strict-aligned DKIM signature alone — the domain's SPF is
+            // v=spf1 -all by design. This injected transport is also what marks
+            // the send as the session-gated compose path for EmailSender's
+            // ambient-send guard.
+            $t->transport = new SmtpProvider(SmtpConfig::fromForwardingSettings());
+            return $t;
+        }
+
         $t->transport = null;  // platform active provider via the default EmailSender path
         return $t;
     }

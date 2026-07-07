@@ -530,4 +530,19 @@ return [
 				 AND m.iem_sealed_owner_user_id IS NULL");
 		},
 	],
+
+	[
+		// Send-protection fix pack (specs/mailbox_send_protection_fix_pack.md,
+		// Fix 8): the forwarding subdomain is strictly per-domain
+		// (ied_forwarding_subdomain) — a server-wide value would rewrite one
+		// tenant's SRS envelope onto another tenant's subdomain. The setting is
+		// no longer declared in plugin.json; drop its seeded row.
+		'id' => 'stg_001_drop_forwarding_subdomain_setting',
+		'version' => '1.34.0',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$stmt = $dblink->prepare("DELETE FROM stg_settings WHERE stg_name = ?");
+			$stmt->execute(array('mailbox_forwarding_subdomain'));
+		},
+	],
 ];

@@ -58,7 +58,7 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 			$session->save_message(new DisplayMessage(
 				'Domain saved.',
 				'Saved',
-				'/plugins/mailbox/admin/',
+				'~/plugins/mailbox/admin/~',
 				DisplayMessage::MESSAGE_ANNOUNCEMENT,
 				DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 			));
@@ -99,7 +99,7 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 				$msg = 'Domain deleted' . ($alias_count ? " along with {$alias_count} alias(es)." : '.');
 				$session->save_message(new DisplayMessage(
 					$msg, 'Deleted',
-					'/plugins/mailbox/admin/',
+					'~/plugins/mailbox/admin/~',
 					DisplayMessage::MESSAGE_ANNOUNCEMENT,
 					DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 				));
@@ -123,7 +123,7 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 				$msg = 'Domain restored' . (!empty($restored_count) ? " along with {$restored_count} alias(es)." : '.');
 				$session->save_message(new DisplayMessage(
 					$msg, 'Restored',
-					'/plugins/mailbox/admin/',
+					'~/plugins/mailbox/admin/~',
 					DisplayMessage::MESSAGE_ANNOUNCEMENT,
 					DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 				));
@@ -134,7 +134,7 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 				$session->save_message(new DisplayMessage(
 					'Domain permanently deleted.',
 					'Deleted',
-					'/plugins/mailbox/admin/',
+					'~/plugins/mailbox/admin/~',
 					DisplayMessage::MESSAGE_ANNOUNCEMENT,
 					DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 				));

@@ -253,7 +253,7 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 				? 'Mailbox saved. Click "Connect" to authorize mailbox access.'
 				: 'Mailbox saved.';
 			$session->save_message(new DisplayMessage(
-				$msg, 'Accounts', '/plugins/mailbox/admin/',
+				$msg, 'Accounts', '~/plugins/mailbox/admin/~',
 				DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 			));
 			return LogicResult::redirect($list_url);
