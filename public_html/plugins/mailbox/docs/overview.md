@@ -1166,6 +1166,29 @@ that can blow a small model's attention. Subject and body are each size-capped
 (1024 / 4096 characters) with a `[truncated, N characters total]` marker;
 URLs are capped at 20 with a `(+N more)` marker. `EmailSecurityDigest::build()`
 is a pure function of an `InboundEmailMessage` — no LLM concepts in the class.
+Its format is corpus-validated for this job (any change requires a full
+re-score against the labelled corpus), so `email_security_scan` reads it
+alone, unaugmented, until that re-score happens.
+
+**`EmailAttachmentDigest`** (`includes/EmailAttachmentDigest.php`) is a
+sibling builder the `email_triage` and `email_schedule` jobs append after
+`EmailSecurityDigest::build()` — an `ATTACHMENTS (N):` section listing every
+non-inline attachment (up to 10, then a `(+N more attachments)` marker):
+a metadata line always (`filename — content-type, size bytes`, filename
+whitespace-collapsed and capped at 120 characters), plus, for file-backed
+parts only, readable text — a `text/plain` body (collapsed, capped at 2000
+characters per part) or a `text/calendar`/`.ics` invite parsed with
+`IcsImporter::parse()` and rendered as a deterministic `ICS EVENT:` block
+(title, start with its timezone, end, location, organizer). All attachment
+text combined is capped at 4000 characters, with the same
+`[truncated, N characters total]` marker style `EmailSecurityDigest` uses. A
+section-pointer or IMAP (`remote`) part gets its metadata line only — no
+on-demand IMAP fetch from an unattended job. Any read failure degrades to
+`[content unreadable]` and a malformed `.ics` to
+`[calendar attachment could not be parsed]`, each after the metadata line,
+never failing the item. `EmailSecurityDigest` stays untouched and
+corpus-frozen; opting the scan job into attachment evidence is possible but
+only alongside a corpus re-score.
 
 **Verdict fields**, written only by the job's `recordVerdict()` (not
 `$ai_writable_fields` — there is no other write door):
@@ -1224,7 +1247,10 @@ that message, same as the security scan job.
 Its sibling `email_schedule` job (same mailbox-selection config and
 digest, its own `aip_recipe_item_log` row) reads for a real, dated event
 instead of a label, and puts it on the recipe owner's calendar — see
-`plugins/joinery_ai/docs/overview.md` § Calendar access.
+`plugins/joinery_ai/docs/overview.md` § Calendar access. When the digest's
+ATTACHMENTS section carries an ICS EVENT block (an invite attached to the
+email), that job takes the invite's own title/start/end/timezone as
+authoritative instead of inferring them from prose.
 
 ## Filters
 
