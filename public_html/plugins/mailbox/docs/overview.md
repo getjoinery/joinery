@@ -1235,7 +1235,9 @@ dependency points this plugin → `joinery_ai`, never the reverse.
 - `iem_ai_summary` (`varchar(280)`) — the one AI-authored message field this
   job writes. Content in miniature, so it is a sealed field alongside the
   message body on a protected domain (see Encryption at rest, above); labels
-  stay cleartext.
+  stay cleartext. The reader's inbox list shows it as the thread's preview
+  line (italic, replacing the body snippet) once a message has been triaged;
+  an untriaged thread still shows its body snippet.
 - A label application via `InboundLabelMember::apply()` — an *existing*
   label only (`InboundEmailLabel::getByName()`); this job never creates one.
   A message with no fitting label gets a summary only.
