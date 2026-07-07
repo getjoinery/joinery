@@ -6,7 +6,7 @@
  * list). DNS and host verification live on the Setup tab
  * (admin_mailbox_setup), driven by InboundEmailSetupCheck.
  *
- * @version 2.1
+ * @version 2.2
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -32,14 +32,8 @@ $page->admin_header(
 
 echo AdminPage::tab_menu(mailbox_admin_tabs(), 'Accounts');
 
-// Display session messages
-$display_messages = $session->get_messages('/plugins\/inbound_email\/admin\//');
-if (!empty($display_messages)) {
-	foreach ($display_messages as $msg) {
-		echo '<div class="alert alert-success">' . htmlspecialchars($msg->message) . '</div>';
-	}
-	$session->clear_clearable_messages();
-}
+// Flash messages render in the AdminPage header (admin pages must not
+// fetch or render session messages themselves).
 
 if (isset($error)) {
 	echo '<div class="alert alert-danger">' . htmlspecialchars($error) . '</div>';
@@ -119,6 +113,22 @@ if ($show_form) {
 	echo $formwriter->end_form();
 
 	$page->end_box();
+
+	// Protected sending identity — the outbound send protection ceremony lives on
+	// its own page (in-window key sealing, DNS shape, activation). Offered only for
+	// a saved, hosted (non-IMAP) domain.
+	if ($edit_domain && $edit_domain->key && !$edit_domain->get('ied_is_imap_source')) {
+		$page->begin_box(array('title' => 'Protected sending identity'));
+		if ($edit_domain->is_protected_identity()) {
+			echo '<p class="alert alert-success">Protection is enforced for this domain.</p>';
+		} else {
+			echo '<p>Make it impossible for a compromised, locked box to send DMARC-passing mail as this domain. '
+				. 'DKIM signing moves in-app, gated by a vault unlock.</p>';
+		}
+		echo '<a class="btn btn-primary" href="/plugins/mailbox/admin/admin_mailbox_protect?ied_inbound_email_domain_id='
+			. (int)$edit_domain->key . '">Manage outbound send protection</a>';
+		$page->end_box();
+	}
 } // end show_form
 
 // The active-domain list lives in the Accounts tree; this page is now purely the

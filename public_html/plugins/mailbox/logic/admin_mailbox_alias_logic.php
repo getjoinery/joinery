@@ -102,7 +102,7 @@ function admin_mailbox_alias_logic(array $input): LogicResult {
 			$session->save_message(new DisplayMessage(
 				'Alias saved.',
 				'Saved',
-				'/plugins/mailbox/admin/',
+				'~/plugins/mailbox/admin/~',
 				DisplayMessage::MESSAGE_ANNOUNCEMENT,
 				DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 			));

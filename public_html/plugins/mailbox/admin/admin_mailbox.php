@@ -34,14 +34,8 @@ $page->admin_header(
 
 echo AdminPage::tab_menu(mailbox_admin_tabs(), 'Accounts');
 
-// Display session messages
-$display_messages = $session->get_messages('/plugins\/inbound_email\/admin\//');
-if (!empty($display_messages)) {
-	foreach ($display_messages as $msg) {
-		echo '<div class="alert alert-success">' . htmlspecialchars($msg->message) . '</div>';
-	}
-	$session->clear_clearable_messages();
-}
+// Flash messages render in the AdminPage header (admin pages must not
+// fetch or render session messages themselves).
 
 // Build search criteria
 $search_criteria = array('deleted' => false);

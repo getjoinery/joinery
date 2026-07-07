@@ -50,7 +50,7 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 
 	$announce = function ($msg, $title) use ($session) {
 		$session->save_message(new DisplayMessage(
-			$msg, $title, '/plugins/mailbox/admin/',
+			$msg, $title, '~/plugins/mailbox/admin/~',
 			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 		));
 	};

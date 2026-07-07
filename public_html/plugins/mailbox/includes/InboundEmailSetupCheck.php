@@ -16,7 +16,7 @@
  *   id, scope, layer, label, severity, status, summary, detail, fix, recheckable
  * where fix is null or ['text'=>, 'command'=>?, 'dns_record'=>['type','name','value']?].
  *
- * @version 1.10
+ * @version 1.11
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -528,58 +528,68 @@ class InboundEmailSetupCheck {
 			$out[] = $this->mxResult($domain, strtolower(rtrim($mx[0]['host'], '.')), $mx[0]['pri']);
 		}
 
-		// SPF — one check covering both that a v=spf1 record exists and that it
-		// authorizes this server. The first unmet condition wins.
+		// A protected sending identity (specs/mailbox_outbound_send_protection.md)
+		// inverts the correct DNS shape: SPF must NOT authorize the box, DMARC
+		// must be strict (p=reject; aspf=s; adkim=s), the DKIM record must match
+		// the in-app sealed key's public half (not opendkim's on-disk key), the
+		// forwarding subdomain's SPF must authorize the box, and the domain must
+		// not be relay-provider-verified. Non-protected domains keep the ambient
+		// shape below.
+		$protected = ($model && $model->is_protected_identity());
+
+		// SPF — fetch the domain's TXT once; both branches read it.
 		list($txt, $txtOk) = $this->dns(function () use ($domain) { return DnsResolver::getTxt($domain); });
-		$spfValue = 'v=spf1 ip4:' . ($this->publicIp !== '' ? $this->publicIp : 'YOUR_SERVER_IP') . ' -all';
-		if (!$txtOk) {
-			$out[] = $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::UNKNOWN,
-				'DNS TXT lookup for ' . $domain . ' failed — try again.');
-		} else {
-			$spf = '';
-			foreach ($txt as $t) {
-				if (stripos($t, 'v=spf1') === 0) { $spf = $t; break; }
+		$spf = $txtOk ? $this->extractSpf($txt) : '';
+
+		if ($protected) {
+			foreach ($this->protectedShapeResults($model, $domain, $txtOk, $spf) as $r) {
+				$out[] = $r;
 			}
-			if ($spf === '') {
+		} else {
+			$spfValue = 'v=spf1 ip4:' . ($this->publicIp !== '' ? $this->publicIp : 'YOUR_SERVER_IP') . ' -all';
+			if (!$txtOk) {
+				$out[] = $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::UNKNOWN,
+					'DNS TXT lookup for ' . $domain . ' failed — try again.');
+			} elseif ($spf === '') {
 				$out[] = $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::FAIL,
 					$domain . ' has no SPF (v=spf1) record.', '', $this->dnsFix('TXT', $domain, $spfValue));
 			} else {
 				$out[] = $this->spfResult($domain, $spf, $spfValue);
 			}
-		}
 
-		// DKIM — one check covering both that a signing key exists on this
-		// server and that the matching record is published in DNS. The first
-		// unmet condition wins.
-		$keyFile = '/etc/opendkim/keys/' . $domain . '/mail.txt';
-		$localKey = $this->readDkimKey($keyFile);
-		if ($localKey === '') {
-			$out[] = $this->r('domain.dkim', $domain, 'domain', 'DKIM record', self::RECOMMENDED, self::WARN,
-				'No DKIM key has been generated for ' . $domain . ' on this server.',
-				'Forwarding works without DKIM; generating a key improves outbound deliverability. '
-				. 'The command below generates the key, wires opendkim, and prints the DNS record to publish.',
-				$this->dkimFix($domain));
-		} else {
-			$out[] = $this->dkimResult($domain, $localKey);
-		}
+			// DKIM — one check covering both that a signing key exists on this
+			// server and that the matching record is published in DNS. The first
+			// unmet condition wins.
+			$keyFile = '/etc/opendkim/keys/' . $domain . '/mail.txt';
+			$localKey = $this->readDkimKey($keyFile);
+			if ($localKey === '') {
+				$out[] = $this->r('domain.dkim', $domain, 'domain', 'DKIM record', self::RECOMMENDED, self::WARN,
+					'No DKIM key has been generated for ' . $domain . ' on this server.',
+					'Forwarding works without DKIM; generating a key improves outbound deliverability. '
+					. 'The command below generates the key, wires opendkim, and prints the DNS record to publish.',
+					$this->dkimFix($domain));
+			} else {
+				$out[] = $this->dkimResult($domain, $localKey);
+			}
 
-		// DMARC
-		list($dmarcTxt, $dmarcOk) = $this->dns(function () use ($domain) {
-			return DnsResolver::getTxt('_dmarc.' . $domain);
-		});
-		if (!$dmarcOk) {
-			$out[] = $this->r('domain.dmarc', $domain, 'domain', 'DMARC record', self::RECOMMENDED, self::UNKNOWN,
-				'DNS lookup for _dmarc.' . $domain . ' failed — try again.');
-		} else {
-			$hasDmarc = false;
-			foreach ($dmarcTxt as $t) { if (stripos($t, 'v=DMARC1') === 0) { $hasDmarc = true; break; } }
-			$out[] = $hasDmarc
-				? $this->r('domain.dmarc', $domain, 'domain', 'DMARC record', self::RECOMMENDED, self::PASS,
-					'A DMARC record is published.')
-				: $this->r('domain.dmarc', $domain, 'domain', 'DMARC record', self::RECOMMENDED, self::WARN,
-					$domain . ' has no DMARC record.',
-					'DMARC is optional but recommended once SPF and DKIM pass.',
-					$this->dnsFix('TXT', '_dmarc.' . $domain, 'v=DMARC1; p=none; rua=mailto:postmaster@' . $domain));
+			// DMARC
+			list($dmarcTxt, $dmarcOk) = $this->dns(function () use ($domain) {
+				return DnsResolver::getTxt('_dmarc.' . $domain);
+			});
+			if (!$dmarcOk) {
+				$out[] = $this->r('domain.dmarc', $domain, 'domain', 'DMARC record', self::RECOMMENDED, self::UNKNOWN,
+					'DNS lookup for _dmarc.' . $domain . ' failed — try again.');
+			} else {
+				$hasDmarc = false;
+				foreach ($dmarcTxt as $t) { if (stripos($t, 'v=DMARC1') === 0) { $hasDmarc = true; break; } }
+				$out[] = $hasDmarc
+					? $this->r('domain.dmarc', $domain, 'domain', 'DMARC record', self::RECOMMENDED, self::PASS,
+						'A DMARC record is published.')
+					: $this->r('domain.dmarc', $domain, 'domain', 'DMARC record', self::RECOMMENDED, self::WARN,
+						$domain . ' has no DMARC record.',
+						'DMARC is optional but recommended once SPF and DKIM pass.',
+						$this->dnsFix('TXT', '_dmarc.' . $domain, 'v=DMARC1; p=none; rua=mailto:postmaster@' . $domain));
+			}
 		}
 
 		// mydestination conflict
@@ -873,6 +883,317 @@ class InboundEmailSetupCheck {
 		return $this->r('domain.dkim', $domain, 'domain', 'DKIM record', self::RECOMMENDED, self::WARN,
 			'A DKIM key exists on this server, but the published record does not match the local key.', '',
 			$this->dnsFix('TXT', $rrName, $localKey));
+	}
+
+	// ===================================================================
+	// Protected sending identity (specs/mailbox_outbound_send_protection.md)
+	// ===================================================================
+
+	/**
+	 * Run just the protected-identity DNS checks for a domain model, regardless
+	 * of whether its ied_is_protected_identity flag is set yet. The enable
+	 * ceremony calls this to verify the published DNS shape BEFORE flipping the
+	 * flag (publish → verify → activate), so the flag never turns on against an
+	 * unpublished record. Returns the same result rows checkDomain emits.
+	 *
+	 * @return array result rows
+	 */
+	public function protectedDomainChecks(InboundEmailDomain $model): array {
+		$domain = strtolower(trim((string)$model->get('ied_domain')));
+		list($txt, $txtOk) = $this->dns(function () use ($domain) { return DnsResolver::getTxt($domain); });
+		$spf = $txtOk ? $this->extractSpf($txt) : '';
+		return $this->protectedShapeResults($model, $domain, $txtOk, $spf);
+	}
+
+	/** The first v=spf1 record in a TXT record set, or ''. */
+	private function extractSpf(array $txt) {
+		foreach ($txt as $t) {
+			if (stripos($t, 'v=spf1') === 0) { return $t; }
+		}
+		return '';
+	}
+
+	/**
+	 * The one assembly of the protected-identity shape — checkDomain (for an
+	 * already-enforced domain) and protectedDomainChecks (the ceremony's
+	 * pre-activation verify) both emit exactly this list, so the ceremony can
+	 * never pass a shape the Setup tab would fail, or vice versa.
+	 */
+	private function protectedShapeResults(InboundEmailDomain $model, $domain, $txtOk, $spf) {
+		list($dmarcTxt, $dmarcOk) = $this->dns(function () use ($domain) {
+			return DnsResolver::getTxt('_dmarc.' . $domain);
+		});
+		return array(
+			$this->protectedSpfResult($domain, $txtOk, $spf),
+			$this->providerVerificationResult($domain, $txtOk, $spf),
+			$this->forwardingSubdomainSpfResult($model),
+			$this->forwardingSubdomainMxResult($model),
+			$this->protectedDkimResult($domain, $model),
+			$this->protectedDmarcResult($domain, $dmarcOk, $dmarcOk ? $dmarcTxt : array()),
+		);
+	}
+
+	/**
+	 * SPF for a protected domain — INVERTED: the correct shape is one that does
+	 * NOT authorize the box. PASS when SPF excludes the box (or there is no SPF),
+	 * FAIL when it authorizes the box. REQUIRED: a box-authorizing SPF hands an
+	 * attacker an aligned ambient send path with no key at all.
+	 */
+	private function protectedSpfResult($domain, $txtOk, $spf) {
+		$suggested = 'v=spf1 -all';
+		if (!$txtOk) {
+			return $this->r('domain.spf', $domain, 'domain', 'SPF excludes this server', self::REQUIRED, self::UNKNOWN,
+				'DNS TXT lookup for ' . $domain . ' failed — try again.');
+		}
+		if ($spf === '') {
+			return $this->r('domain.spf', $domain, 'domain', 'SPF excludes this server', self::REQUIRED, self::PASS,
+				'No SPF record authorizes this server for ' . $domain . '.',
+				'Publishing an explicit ' . $suggested . ' makes the exclusion unambiguous.',
+				$this->dnsFix('TXT', $domain, $suggested));
+		}
+		$eval = $this->spfAuthorizes($spf, $domain);
+		if ($eval === 'pass') {
+			return $this->r('domain.spf', $domain, 'domain', 'SPF excludes this server', self::REQUIRED, self::FAIL,
+				'SPF authorizes this server (' . $this->publicIp . ') — a protected identity must exclude it, so a locked box cannot send SPF-aligned mail.',
+				'Record: ' . $spf,
+				$this->dnsFix('TXT', $domain, $suggested));
+		}
+		if ($eval === 'include') {
+			return $this->r('domain.spf', $domain, 'domain', 'SPF excludes this server', self::REQUIRED, self::WARN,
+				'SPF uses include:/redirect mechanisms — could not confirm the box (' . $this->publicIp . ') is excluded.',
+				'Record: ' . $spf,
+				array('text' => 'Confirm no included policy authorizes ' . $this->publicIp . '; the tightest shape is ' . $suggested . '.'));
+		}
+		return $this->r('domain.spf', $domain, 'domain', 'SPF excludes this server', self::REQUIRED, self::PASS,
+			'SPF does not authorize this server — correct for a protected identity.');
+	}
+
+	/**
+	 * Closure 4: the protected domain must not be a relay-provider-verified
+	 * sending domain. The DNS-visible proxy is a provider include in the SPF —
+	 * a resting relay API key that could send for the domain is a resting send
+	 * capability, exactly like a resting DKIM key.
+	 */
+	private function providerVerificationResult($domain, $txtOk, $spf) {
+		if (!$txtOk) {
+			return $this->r('domain.provider', $domain, 'domain', 'No relay provider authorized', self::REQUIRED, self::UNKNOWN,
+				'DNS TXT lookup for ' . $domain . ' failed — try again.');
+		}
+		$provider_hosts = array('mailgun.org', 'sendgrid.net', 'amazonses.com', 'spf.protection.outlook.com',
+			'_spf.google.com', 'sparkpostmail.com', 'mailchimp.com', 'servers.mcsv.net', 'sendinblue.com', 'postmarkapp.com');
+		$found = '';
+		if ($spf !== '') {
+			foreach (preg_split('/\s+/', trim($spf)) as $term) {
+				$term = ltrim($term, '+');
+				if (stripos($term, 'include:') !== 0 && stripos($term, 'redirect=') !== 0) {
+					continue;
+				}
+				$host = strtolower(substr($term, strpos($term, ':') !== false ? strpos($term, ':') + 1 : strpos($term, '=') + 1));
+				foreach ($provider_hosts as $ph) {
+					if (strpos($host, $ph) !== false) { $found = $host; break 2; }
+				}
+			}
+		}
+		if ($found !== '') {
+			return $this->r('domain.provider', $domain, 'domain', 'No relay provider authorized', self::REQUIRED, self::FAIL,
+				'SPF authorizes a relay provider (' . $found . ') — a protected identity must not be provider-verified, or a resting API key can send as the domain.',
+				'Record: ' . $spf,
+				array('text' => 'Remove the provider include from ' . $domain . '\'s SPF and de-verify the domain at the provider. Automated mail belongs on a separate sending subdomain.'));
+		}
+		return $this->r('domain.provider', $domain, 'domain', 'No relay provider authorized', self::REQUIRED, self::PASS,
+			'No relay provider is authorized in ' . $domain . '\'s SPF.');
+	}
+
+	/**
+	 * The forwarding subdomain's SPF must authorize the box — alias forwarding
+	 * runs while locked and needs an SPF-passing envelope for bounce routing.
+	 * Under the bare domain's aspf=s this subdomain can never align the identity,
+	 * so it adds no spoofing capability.
+	 */
+	private function forwardingSubdomainSpfResult($model) {
+		$domain = (string)$model->get('ied_domain');
+		$sub = $model->forwarding_subdomain();
+		if ($sub === '' || strcasecmp($sub, $domain) === 0) {
+			// REQUIRED: without a dedicated subdomain the SRS envelope falls
+			// back to the bare domain, whose protected SPF is v=spf1 -all —
+			// every alias-forwarded message would hard-fail SPF at the
+			// destination. Activation must block on this.
+			return $this->r('domain.fwd_spf', $domain, 'domain', 'Forwarding subdomain SPF', self::REQUIRED, self::FAIL,
+				'No dedicated forwarding subdomain is configured for ' . $domain . '.',
+				'A protected domain routes its SRS forwarding envelope through a subdomain (e.g. fwd.' . $domain . ') so forwarding and bounces keep working while locked.',
+				array('text' => 'Set the forwarding subdomain on the Protect page.'));
+		}
+		$spfValue = 'v=spf1 ip4:' . ($this->publicIp !== '' ? $this->publicIp : 'YOUR_SERVER_IP') . ' -all';
+		list($txt, $ok) = $this->dns(function () use ($sub) { return DnsResolver::getTxt($sub); });
+		if (!$ok) {
+			return $this->r('domain.fwd_spf', $domain, 'domain', 'Forwarding subdomain SPF', self::REQUIRED, self::UNKNOWN,
+				'DNS TXT lookup for ' . $sub . ' failed — try again.');
+		}
+		$spf = '';
+		foreach ($txt as $t) { if (stripos($t, 'v=spf1') === 0) { $spf = $t; break; } }
+		if ($spf === '') {
+			return $this->r('domain.fwd_spf', $domain, 'domain', 'Forwarding subdomain SPF', self::REQUIRED, self::FAIL,
+				$sub . ' has no SPF record — forwarded mail will fail SPF at the destination.', '',
+				$this->dnsFix('TXT', $sub, $spfValue));
+		}
+		$eval = $this->spfAuthorizes($spf, $sub);
+		if ($eval === 'pass') {
+			return $this->r('domain.fwd_spf', $domain, 'domain', 'Forwarding subdomain SPF', self::REQUIRED, self::PASS,
+				$sub . ' SPF authorizes this server (' . $this->publicIp . ').');
+		}
+		if ($eval === 'include') {
+			return $this->r('domain.fwd_spf', $domain, 'domain', 'Forwarding subdomain SPF', self::REQUIRED, self::WARN,
+				$sub . ' SPF uses include:/redirect — could not confirm it authorizes ' . $this->publicIp . '.', 'Record: ' . $spf,
+				array('text' => 'Confirm the included policy covers ' . $this->publicIp . ', or add ip4:' . $this->publicIp . ' directly.'));
+		}
+		return $this->r('domain.fwd_spf', $domain, 'domain', 'Forwarding subdomain SPF', self::REQUIRED, self::FAIL,
+			$sub . ' SPF does not authorize this server (' . $this->publicIp . ').', 'Record: ' . $spf,
+			$this->dnsFix('TXT', $sub, $spfValue));
+	}
+
+	/**
+	 * The forwarding subdomain must RECEIVE mail, not just send it: remote DSNs
+	 * are addressed to the SRS envelope (SRS0=...@<subdomain>), so without an MX
+	 * pointing back at this box, bounce handling silently dies and original
+	 * senders never learn their mail failed. REQUIRED for the protected shape.
+	 */
+	private function forwardingSubdomainMxResult($model) {
+		$domain = (string)$model->get('ied_domain');
+		$sub = $model->forwarding_subdomain();
+		$mxTarget = $this->mailHostname !== '' ? $this->mailHostname : 'YOUR_MAIL_HOST';
+		if ($sub === '' || strcasecmp($sub, $domain) === 0) {
+			return $this->r('domain.fwd_mx', $domain, 'domain', 'Forwarding subdomain MX', self::REQUIRED, self::FAIL,
+				'No dedicated forwarding subdomain is configured for ' . $domain . '.', '',
+				array('text' => 'Set the forwarding subdomain on the Protect page.'));
+		}
+		list($mx, $mxOk) = $this->dns(function () use ($sub) { return DnsResolver::getMx($sub); });
+		if (!$mxOk) {
+			return $this->r('domain.fwd_mx', $domain, 'domain', 'Forwarding subdomain MX', self::REQUIRED, self::UNKNOWN,
+				'DNS MX lookup for ' . $sub . ' failed — try again.');
+		}
+		if (empty($mx)) {
+			return $this->r('domain.fwd_mx', $domain, 'domain', 'Forwarding subdomain MX', self::REQUIRED, self::FAIL,
+				$sub . ' has no MX record — delivery-failure notices sent to the SRS envelope cannot reach this server.', '',
+				$this->dnsFix('MX', $sub, '10 ' . $mxTarget));
+		}
+		$host = strtolower(rtrim($mx[0]['host'], '.'));
+		list($mxA, $mxAOk) = $this->dns(function () use ($host) { return DnsResolver::getA($host); });
+		if (!$mxAOk) {
+			return $this->r('domain.fwd_mx', $domain, 'domain', 'Forwarding subdomain MX', self::REQUIRED, self::UNKNOWN,
+				$sub . ' MX → ' . $host . '. DNS lookup for ' . $host . ' failed — try again.');
+		}
+		if ($this->publicIp === '') {
+			return $this->r('domain.fwd_mx', $domain, 'domain', 'Forwarding subdomain MX', self::REQUIRED, self::UNKNOWN,
+				$sub . ' MX → ' . $host . '. Cannot confirm it points here — the server public IP could not be determined.');
+		}
+		if (!in_array($this->publicIp, $mxA, true)) {
+			return $this->r('domain.fwd_mx', $domain, 'domain', 'Forwarding subdomain MX', self::REQUIRED, self::FAIL,
+				$sub . ' MX → ' . $host . ' → ' . implode(', ', $mxA) . ', not this server (' . $this->publicIp . ').', '',
+				$this->dnsFix('MX', $sub, '10 ' . $mxTarget));
+		}
+		return $this->r('domain.fwd_mx', $domain, 'domain', 'Forwarding subdomain MX', self::REQUIRED, self::PASS,
+			$sub . ' MX → ' . $host . ' → this server; SRS bounces route back to the router.');
+	}
+
+	/**
+	 * DKIM for a protected domain: the published selector record must match the
+	 * in-app sealed key's public half (ied_dkim_public_dns), NOT opendkim's
+	 * on-disk key (which is removed at cutover). REQUIRED — the signature is the
+	 * only path to DMARC acceptance for a protected identity.
+	 */
+	private function protectedDkimResult($domain, $model) {
+		$selector = trim((string)$model->get('ied_dkim_selector'));
+		$expected = trim((string)$model->get('ied_dkim_public_dns'));
+		if ($selector === '' || $expected === '') {
+			return $this->r('domain.dkim', $domain, 'domain', 'DKIM record (in-app key)', self::REQUIRED, self::FAIL,
+				'Protection is enabled but no in-app DKIM key is provisioned for ' . $domain . '.',
+				'Run the Enable protection ceremony from the Domains tab to generate and seal the key.');
+		}
+		return $this->dkimRecordResult($domain, $selector, $expected, 'domain.dkim', 'DKIM record (in-app key)');
+	}
+
+	/**
+	 * The staged-rotation gate: PASS only when the PENDING selector's published
+	 * DNS record matches the pending sealed key's public half. The rotation
+	 * ceremony refuses to cut over (pending → live) until this passes, so the
+	 * live, DNS-proven key keeps signing throughout.
+	 */
+	public function pendingDkimResult(InboundEmailDomain $model): array {
+		$domain = strtolower(trim((string)$model->get('ied_domain')));
+		$selector = trim((string)$model->get('ied_dkim_pending_selector'));
+		$expected = trim((string)$model->get('ied_dkim_pending_public_dns'));
+		if ($selector === '' || $expected === '') {
+			return $this->r('domain.dkim_pending', $domain, 'domain', 'DKIM record (pending rotation key)', self::REQUIRED, self::FAIL,
+				'No rotation is staged for ' . $domain . '.');
+		}
+		return $this->dkimRecordResult($domain, $selector, $expected, 'domain.dkim_pending', 'DKIM record (pending rotation key)');
+	}
+
+	/** Match one published DKIM selector record against an expected value. */
+	private function dkimRecordResult($domain, $selector, $expected, $checkId, $label) {
+		$rrName = $selector . '._domainkey.' . $domain;
+		list($dkimTxt, $ok) = $this->dns(function () use ($rrName) { return DnsResolver::getTxt($rrName); });
+		if (!$ok) {
+			return $this->r($checkId, $domain, 'domain', $label, self::REQUIRED, self::UNKNOWN,
+				'DNS lookup for ' . $rrName . ' failed — try again.');
+		}
+		$published = '';
+		foreach ($dkimTxt as $t) {
+			if (stripos($t, 'v=DKIM1') !== false || strpos($t, 'p=') !== false) { $published .= $t; }
+		}
+		$pubP = $this->extractDkimP($published);
+		if ($pubP === '') {
+			return $this->r($checkId, $domain, 'domain', $label, self::REQUIRED, self::FAIL,
+				'No DKIM record is published at ' . $rrName . '.', '',
+				$this->dnsFix('TXT', $rrName, $expected));
+		}
+		if ($pubP === $this->extractDkimP($expected)) {
+			return $this->r($checkId, $domain, 'domain', $label, self::REQUIRED, self::PASS,
+				'The published DKIM record matches the sealed key at selector ' . $selector . '.');
+		}
+		return $this->r($checkId, $domain, 'domain', $label, self::REQUIRED, self::FAIL,
+			'The published DKIM record at ' . $rrName . ' does not match the sealed key.', '',
+			$this->dnsFix('TXT', $rrName, $expected));
+	}
+
+	/**
+	 * DMARC for a protected domain: parse and REQUIRE p=reject; aspf=s; adkim=s.
+	 * Strict alignment is load-bearing — with relaxed alignment the forwarding
+	 * subdomain's box-authorizing SPF would align the bare domain and hand the
+	 * ambient capability right back.
+	 */
+	private function protectedDmarcResult($domain, $ok, $dmarcTxt) {
+		$strict = 'v=DMARC1; p=reject; aspf=s; adkim=s; rua=mailto:postmaster@' . $domain;
+		if (!$ok) {
+			return $this->r('domain.dmarc', $domain, 'domain', 'Strict DMARC (p=reject; aspf=s; adkim=s)', self::REQUIRED, self::UNKNOWN,
+				'DNS lookup for _dmarc.' . $domain . ' failed — try again.');
+		}
+		$record = '';
+		foreach ($dmarcTxt as $t) { if (stripos($t, 'v=DMARC1') === 0) { $record = $t; break; } }
+		if ($record === '') {
+			return $this->r('domain.dmarc', $domain, 'domain', 'Strict DMARC (p=reject; aspf=s; adkim=s)', self::REQUIRED, self::FAIL,
+				$domain . ' has no DMARC record — a protected identity requires a strict policy.', '',
+				$this->dnsFix('TXT', '_dmarc.' . $domain, $strict));
+		}
+		$tags = array();
+		foreach (explode(';', $record) as $pair) {
+			$pair = trim($pair);
+			if ($pair === '' || strpos($pair, '=') === false) { continue; }
+			list($k, $v) = explode('=', $pair, 2);
+			$tags[strtolower(trim($k))] = strtolower(trim($v));
+		}
+		$problems = array();
+		if (($tags['p'] ?? '') !== 'reject') { $problems[] = 'p must be reject (is "' . ($tags['p'] ?? '(absent)') . '")'; }
+		if (($tags['aspf'] ?? '') !== 's')   { $problems[] = 'aspf must be s (is "' . ($tags['aspf'] ?? '(absent)') . '")'; }
+		if (($tags['adkim'] ?? '') !== 's')  { $problems[] = 'adkim must be s (is "' . ($tags['adkim'] ?? '(absent)') . '")'; }
+		if (empty($problems)) {
+			return $this->r('domain.dmarc', $domain, 'domain', 'Strict DMARC (p=reject; aspf=s; adkim=s)', self::REQUIRED, self::PASS,
+				$domain . ' publishes a strict DMARC policy (p=reject; aspf=s; adkim=s).');
+		}
+		return $this->r('domain.dmarc', $domain, 'domain', 'Strict DMARC (p=reject; aspf=s; adkim=s)', self::REQUIRED, self::FAIL,
+			$domain . ' DMARC is not strict enough: ' . implode('; ', $problems) . '.',
+			'Record: ' . $record,
+			$this->dnsFix('TXT', '_dmarc.' . $domain, $strict));
 	}
 
 	/**

@@ -7,7 +7,19 @@
  * The Setup tab skips MX/DNS checks for such a domain — the mail is already in
  * the remote mailbox, so no MX is required.
  *
- * @version 1.4
+ * ied_is_protected_identity marks a domain as a protected sending identity
+ * (specs/mailbox_outbound_send_protection.md): while no unlock window is open,
+ * the box holds no credential that can produce a DMARC-passing message From this
+ * domain. Its DKIM private key is sealed to ied_owner_usr_user_id's vault public
+ * key (ied_dkim_sealed_key), never given to opendkim, and unwrapped in-window at
+ * compose time only. ied_dkim_public_dns holds the cleartext DKIM DNS value so
+ * the Setup tab can verify the published record while the vault is locked.
+ *
+ * Rotation is staged: a new key seals into the ied_dkim_pending_* columns while
+ * the live key keeps signing; cutover (pending → live) happens only after the
+ * pending selector's DNS record verifies. Signing always reads the live columns.
+ *
+ * @version 1.6
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -31,6 +43,19 @@ class InboundEmailDomain extends SystemBase {
 		'ied_catch_all_address' => array('type'=>'varchar(500)'),
 		'ied_reject_unmatched'  => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),
 		'ied_is_imap_source'    => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+		// Outbound send protection (specs/mailbox_outbound_send_protection.md).
+		'ied_is_protected_identity' => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
+		'ied_owner_usr_user_id'     => array('type'=>'int8', 'is_nullable'=>true),   // whose vault seals the DKIM key
+		'ied_dkim_selector'         => array('type'=>'varchar(63)', 'is_nullable'=>true),  // e.g. 'mailk1'
+		'ied_dkim_sealed_key'       => array('type'=>'text', 'is_nullable'=>true),   // DKIM private key, crypto_box_seal'd to the owner public key
+		'ied_dkim_public_dns'       => array('type'=>'text', 'is_nullable'=>true),   // cleartext DKIM DNS record value (Setup tab reads it while locked)
+		'ied_dkim_key_generation'   => array('type'=>'int4', 'is_nullable'=>false, 'default'=>0),
+		// Staged rotation: the next key, sealed and awaiting DNS verification.
+		// The live key keeps signing until cutover swaps pending → live.
+		'ied_dkim_pending_selector'   => array('type'=>'varchar(63)', 'is_nullable'=>true),
+		'ied_dkim_pending_sealed_key' => array('type'=>'text', 'is_nullable'=>true),
+		'ied_dkim_pending_public_dns' => array('type'=>'text', 'is_nullable'=>true),
+		'ied_forwarding_subdomain'  => array('type'=>'varchar(255)', 'is_nullable'=>true),  // e.g. 'fwd.example.com' (per-domain only)
 		'ied_create_time'       => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'ied_update_time'       => array('type'=>'timestamp(6)'),
 		'ied_delete_time'       => array('type'=>'timestamp(6)'),
@@ -105,6 +130,40 @@ class InboundEmailDomain extends SystemBase {
 		}
 		return false;
 	}
+
+	/** True when this domain is an enforced protected sending identity. */
+	function is_protected_identity() {
+		$v = $this->get('ied_is_protected_identity');
+		return ($v === true || $v === 't' || $v === 'true' || $v === '1' || $v === 1);
+	}
+
+	/**
+	 * The forwarding-subdomain the SRS envelope leaves from: the per-domain
+	 * value, else the bare domain (the behavior for a non-protected domain).
+	 * Strictly per-domain — a shared server-wide value would rewrite one
+	 * tenant's envelope onto another tenant's subdomain.
+	 */
+	function forwarding_subdomain() {
+		$per_domain = trim((string)$this->get('ied_forwarding_subdomain'));
+		return $per_domain !== '' ? $per_domain : (string)$this->get('ied_domain');
+	}
+
+	/**
+	 * Protected domains owned by a user (their DKIM key seals to this user's
+	 * vault). Used by the vault reseal callback so a key-rotation re-seals the
+	 * sealed DKIM key alongside the message DEKs.
+	 *
+	 * @return InboundEmailDomain[]
+	 */
+	static function ProtectedForOwner(int $user_id) {
+		$multi = new MultiInboundEmailDomain(array('owner_id' => $user_id, 'protected' => true, 'deleted' => false));
+		$multi->load();
+		$out = array();
+		foreach ($multi as $d) {
+			$out[] = $d;
+		}
+		return $out;
+	}
 }
 
 class MultiInboundEmailDomain extends SystemMultiBase {
@@ -115,6 +174,14 @@ class MultiInboundEmailDomain extends SystemMultiBase {
 
 		if (isset($this->options['domain'])) {
 			$filters['ied_domain'] = [$this->options['domain'], PDO::PARAM_STR];
+		}
+
+		if (isset($this->options['owner_id'])) {
+			$filters['ied_owner_usr_user_id'] = [$this->options['owner_id'], PDO::PARAM_INT];
+		}
+
+		if (isset($this->options['protected'])) {
+			$filters['ied_is_protected_identity'] = $this->options['protected'] ? "= true" : "= false";
 		}
 
 		if (isset($this->options['enabled'])) {

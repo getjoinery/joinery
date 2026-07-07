@@ -30,14 +30,8 @@ $page->admin_header(array(
 
 echo AdminPage::tab_menu(mailbox_admin_tabs(), 'Accounts');
 
-// Session messages (action results)
-$display_messages = $session->get_messages('/plugins\/inbound_email\/admin\//');
-if (!empty($display_messages)) {
-	foreach ($display_messages as $msg) {
-		echo '<div class="alert alert-info">' . htmlspecialchars($msg->message) . '</div>';
-	}
-	$session->clear_clearable_messages();
-}
+// Flash messages render in the AdminPage header (admin pages must not
+// fetch or render session messages themselves).
 
 echo '<p class="text-muted">Poll an existing mailbox (Gmail, Microsoft 365, Yahoo, iCloud, Fastmail, or any '
 	. 'IMAP host) and ingest its mail into a bound local mailbox. Gmail and Microsoft connect with OAuth; '

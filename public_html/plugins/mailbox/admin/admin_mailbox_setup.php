@@ -34,14 +34,8 @@ echo AdminPage::tab_menu(mailbox_admin_tabs(), 'Setup');
 
 // The per-check "Details & how to fix" disclosure reads as a link, not a field.
 
-// Session messages
-$display_messages = $session->get_messages('/plugins\/inbound_email\/admin\//');
-if (!empty($display_messages)) {
-	foreach ($display_messages as $msg) {
-		echo '<div class="alert alert-success">' . htmlspecialchars($msg->message) . '</div>';
-	}
-	$session->clear_clearable_messages();
-}
+// Flash messages render in the AdminPage header (admin pages must not
+// fetch or render session messages themselves).
 
 // --- Shared check-row renderers (used by scoped sections and Advanced) ---
 $status_badge = function ($status) {

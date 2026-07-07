@@ -48,7 +48,7 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 			mailbox_settings_write_setting($k, (string)$value);
 		}
 		$session->save_message(new DisplayMessage(
-			'Settings saved.', 'Saved', '/plugins/mailbox/admin/',
+			'Settings saved.', 'Saved', '~/plugins/mailbox/admin/~',
 			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 		));
 		return LogicResult::redirect($base);

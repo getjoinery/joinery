@@ -308,7 +308,10 @@ independently of the vault row itself.
 4. Register a re-seal callback for rotation (`VaultUnlock::onReseal()`):
    re-seal exactly the items on `$old_key_generation`, attempt every item,
    and throw if any failed — a swallowed failure would let the ceremony
-   retire the only path to that content.
+   retire the only path to that content. The callback must cover **every**
+   sealed asset the user can own, unconditionally — the mailbox callback
+   re-seals protected-domain DKIM keys (live and rotation-pending) for a
+   domain owner even when that user holds no mailbox grants at all.
 5. Register a wipe callback if you keep any disposable in-window cache
    (`VaultUnlock::onWipe()`), e.g. a plaintext search index.
 6. Own your own levels, scope, and locked-state surfaces (list placeholders,

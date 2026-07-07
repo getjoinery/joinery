@@ -42,7 +42,7 @@
  * ingest uses — so a recipient's reply threads back into this conversation
  * (specs/implemented/inbound_email_new_message_compose.md).
  *
- * @version 1.5
+ * @version 1.6
  */
 
 require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
@@ -185,6 +185,12 @@ class MailboxSender {
 		try {
 			$sender = new EmailSender();
 			$ok = $sender->send($email, false, $transport->transport);
+		} catch (VaultLockedException $e) {
+			// Signing a protected identity domain unwraps its sealed DKIM key, so it
+			// is a content action under the locked-state contract: a closed window
+			// (never opened, or lapsed mid-compose) prompts the same one-tap unlock
+			// rather than escaping an unsigned/ambient send.
+			throw new MailboxSenderException('Your vault is locked — unlock it to send from this address.');
 		} catch (Throwable $e) {
 			error_log('MailboxSender: send threw for alias ' . $alias_id . ': ' . $e->getMessage());
 			throw new MailboxSenderException('The message could not be sent: ' . $e->getMessage());

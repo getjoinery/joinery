@@ -37,14 +37,8 @@ $page->admin_header(array(
 
 echo AdminPage::tab_menu(mailbox_admin_tabs(), 'Accounts');
 
-// Action-result messages (saved by the editors / IMAP action handler).
-$display_messages = $session->get_messages('/plugins\/inbound_email\/admin\//');
-if (!empty($display_messages)) {
-	foreach ($display_messages as $msg) {
-		echo '<div class="alert alert-success">' . htmlspecialchars($msg->message) . '</div>';
-	}
-	$session->clear_clearable_messages();
-}
+// Flash messages render in the AdminPage header (admin pages must not
+// fetch or render session messages themselves).
 
 $domain_base  = '/plugins/mailbox/admin/admin_mailbox_domains';
 $alias_base   = '/plugins/mailbox/admin/admin_mailbox_alias';
