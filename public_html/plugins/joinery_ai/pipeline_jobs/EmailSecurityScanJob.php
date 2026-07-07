@@ -1,7 +1,7 @@
 <?php
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxAliasConfig.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/EmailSecurityDigest.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/aip_recipe_item_log_class.php'));
 
@@ -20,7 +20,10 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/aip_recipe_item
  * The prompt is corpus-validated (specs/joinery_ai_email_security_scan_eval.md)
  * — any wording change requires a full re-score against the labelled corpus.
  *
- * @version 1.1
+ * Mailbox-alias config (dropdown options, address resolution, owner-grant
+ * validation) delegates to MailboxAliasConfig, shared with EmailTriageJob.
+ *
+ * @version 1.2
  */
 class EmailSecurityScanJob implements PipelineJobInterface {
 
@@ -33,16 +36,10 @@ class EmailSecurityScanJob implements PipelineJobInterface {
     }
 
     public function configDescriptor(): array {
-        $options = self::aliasOptions();
         return ['input' => [
-            'mailbox_alias' => [
-                'type'     => 'select',
-                'required' => true,
-                'label'    => 'Mailbox to scan',
-                'help'     => 'The stored mailbox this recipe scans. The recipe owner must hold a grant on it.',
-                'options'  => $options,
-                'enum'     => array_keys($options),
-            ],
+            'mailbox_alias' => MailboxAliasConfig::descriptorField(
+                'Mailbox to scan',
+                'The stored mailbox this recipe scans. The recipe owner must hold a grant on it.'),
         ]];
     }
 
@@ -54,19 +51,8 @@ class EmailSecurityScanJob implements PipelineJobInterface {
      * couldn't already see in their inbox.
      */
     public function validateConfig(array $config, Recipe $recipe): void {
-        $address = (string)($config['mailbox_alias'] ?? '');
-        $alias_id = self::resolveAliasId($address);
-        if ($alias_id === null) {
-            throw new InvalidArgumentException(
-                "Mailbox to scan ($address) does not match a stored, enabled mailbox alias.");
-        }
-
-        $owner_id = (int)$recipe->get('rcp_owner_user_id');
-        $granted_ids = InboundEmailMailboxGrant::alias_ids_for_user($owner_id);
-        if (!in_array($alias_id, $granted_ids, true)) {
-            throw new InvalidArgumentException(
-                "The recipe owner does not hold a mailbox grant for $address.");
-        }
+        MailboxAliasConfig::validateOwnerGrant(
+            (string)($config['mailbox_alias'] ?? ''), (int)$recipe->get('rcp_owner_user_id'));
     }
 
     /** Email is attacker-controlled text — the recipe carries
@@ -77,18 +63,24 @@ class EmailSecurityScanJob implements PipelineJobInterface {
 
     public function nextItem(array $config, Recipe $recipe): ?array {
         $address = (string)($config['mailbox_alias'] ?? '');
-        $alias_id = self::resolveAliasId($address);
+        $alias_id = MailboxAliasConfig::resolveAliasId($address);
         // Config drift (the alias was renamed/disabled/removed after this
         // recipe was saved) — nothing to scan rather than a hard failure;
         // re-saving the recipe re-validates and would catch it at edit time.
         if ($alias_id === null) return null;
 
+        // Sealed mail (specs/mailbox_encryption_at_rest.md § No Sideways Copies)
+        // is excluded outright: this job runs as an unattended pipeline job with
+        // no unlock window, so a sealed message's content columns are structurally
+        // unreadable here — never a candidate to retry, never a blocker for the
+        // unsealed mail behind it in the queue.
         $db = DbConnector::get_instance()->get_db_link();
         $sql = "SELECT iem_inbound_email_message_id
                 FROM iem_inbound_email_messages
                 WHERE iem_iea_inbound_email_alias_id = :alias_id
                   AND iem_delete_time IS NULL
                   AND iem_spam_verdict IS DISTINCT FROM 'spam'
+                  AND iem_content_sealed IS NOT TRUE
                   AND " . MultiAipRecipeItemLog::notExistsClause('iem_inbound_email_message_id::text') . "
                 ORDER BY iem_received_time ASC, iem_inbound_email_message_id ASC
                 LIMIT 1";
@@ -167,7 +159,7 @@ class EmailSecurityScanJob implements PipelineJobInterface {
         // write door to a different message's mailbox than the admin
         // configured.
         $config = Recipe::decodeSourceConfig($recipe);
-        $alias_id = self::resolveAliasId((string)($config['mailbox_alias'] ?? ''));
+        $alias_id = MailboxAliasConfig::resolveAliasId((string)($config['mailbox_alias'] ?? ''));
         if ($alias_id === null || (int)$msg->get('iem_iea_inbound_email_alias_id') !== $alias_id) {
             throw new InvalidArgumentException("Message $item_key is not on this recipe's configured mailbox.");
         }
@@ -275,47 +267,6 @@ PROMPT;
         if ($score <= 2) return 'safe';
         if ($score <= 6) return 'suspicious';
         return 'dangerous';
-    }
-
-    /** address (local@domain) -> alias id, for an enabled, store-capable,
-     *  non-deleted alias. Null when no such alias exists. */
-    private static function resolveAliasId(string $address): ?int {
-        $address = strtolower(trim($address));
-        if ($address === '') return null;
-
-        $db = DbConnector::get_instance()->get_db_link();
-        $q = $db->prepare(
-            "SELECT a.iea_inbound_email_alias_id
-               FROM iea_inbound_email_aliases a
-               JOIN ied_inbound_email_domains d ON d.ied_inbound_email_domain_id = a.iea_ied_inbound_email_domain_id
-              WHERE a.iea_delete_time IS NULL
-                AND lower(a.iea_alias || '@' || d.ied_domain) = ?
-              LIMIT 1");
-        $q->execute([$address]);
-        $id = $q->fetchColumn();
-        return $id !== false ? (int)$id : null;
-    }
-
-    /** address -> "address — description" for every enabled, store-capable
-     *  mailbox — the Job dropdown's option list. */
-    private static function aliasOptions(): array {
-        $db = DbConnector::get_instance()->get_db_link();
-        $q = $db->query(
-            "SELECT a.iea_alias, d.ied_domain, a.iea_description
-               FROM iea_inbound_email_aliases a
-               JOIN ied_inbound_email_domains d ON d.ied_inbound_email_domain_id = a.iea_ied_inbound_email_domain_id
-              WHERE a.iea_delete_time IS NULL AND a.iea_is_enabled = true
-                AND a.iea_delivery_mode IN ('store', 'forward_and_store')
-                AND d.ied_is_enabled = true
-              ORDER BY d.ied_domain, a.iea_alias");
-
-        $options = [];
-        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $address = strtolower($row['iea_alias'] . '@' . $row['ied_domain']);
-            $desc = trim((string)$row['iea_description']);
-            $options[$address] = $address . ($desc !== '' ? " — $desc" : '');
-        }
-        return $options;
     }
 
 }
