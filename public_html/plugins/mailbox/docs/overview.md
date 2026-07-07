@@ -1221,6 +1221,11 @@ dependency points this plugin → `joinery_ai`, never the reverse.
 mis-label is an admin deleting the recipe's `aip_recipe_item_log` row for
 that message, same as the security scan job.
 
+Its sibling `email_schedule` job (same mailbox-selection config and
+digest, its own `aip_recipe_item_log` row) reads for a real, dated event
+instead of a label, and puts it on the recipe owner's calendar — see
+`plugins/joinery_ai/docs/overview.md` § Calendar access.
+
 ## Filters
 
 Operator-defined rules that match incoming mail and apply actions to it

@@ -55,3 +55,5 @@ The booking page branches once on mode; everything downstream (booking rows, cal
 ## Calendar integration
 
 `BookingItemSource` (`includes/calendar_item_sources/BookingItemSource.php`) projects confirmed bookings and active paid holds where the subject is host onto their calendar and into the busy projection — the one item that both shows on the calendar and removes the time from future availability. Canceled/deleted bookings stop projecting and leave the calendar automatically.
+
+**Undecided: tentative entries and availability.** AI-extracted calendar entries (`specs/joinery_ai_calendar_ai_surface.md`) land `cal_status = 'tentative'` and still block availability by default. `CalendarItemSourceRegistry::getBusyBlocks()` exposes an optional `$include` policy precisely so this plugin can choose to exclude tentative items from a host's bookable slots — that choice has not been made; `NativeSchedulingProvider` currently passes no policy and treats every busy item the same regardless of firmness (see `docs/calendar.md` § Firmness).

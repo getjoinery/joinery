@@ -30,6 +30,10 @@ class CalendarItem {
     public $title = null;               // owner-visible only
     public $url = null;                 // owner-visible only
     public $blocks_availability = true;
+    // Firmness axis, distinct from blocks_availability (busy/free): 'tentative'
+    // (AI/pipeline-extracted, unconfirmed) | 'confirmed' (default; every
+    // human-authored and non-native source) | 'cancelled' (reserved).
+    public $status = 'confirmed';
     public $visibility = self::VIS_DETAILS;
     public $source = null;              // CalendarItemSource key that produced it
     public $source_key = null;          // stable id per item: "{source}:{record-id}"

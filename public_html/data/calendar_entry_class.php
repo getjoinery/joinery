@@ -17,6 +17,15 @@ class CalendarEntry extends SystemBase {
 	// AI model surface (joinery_ai) — plugins/joinery_ai/docs/overview.md
 	public static $ai_readable = true;
 	public static $ai_description = 'Native personal calendar entries: appointments and blocked-out time created directly on a subject\'s calendar.';
+	// The owner is a CalendarSubject (cal_subject_type + cal_subject_id), not a
+	// single owner column — declare the polymorphic form so OwnerScopeResolver
+	// can still confine a member's reads to their own entries (type=user only;
+	// resource/team/venue subjects are out of scope for AI reads).
+	public static $ai_owner_field = ['polymorphic' => [
+		'type_column' => 'cal_subject_type',
+		'id_column'   => 'cal_subject_id',
+		'type_value'  => 'user',
+	]];
 
 	public static $field_specifications = array(
 		'cal_calendar_entry_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true, 'is_primary_key'=>true),
@@ -31,6 +40,11 @@ class CalendarEntry extends SystemBase {
 		'cal_all_day' => array('type'=>'bool', 'default'=>false),
 		'cal_title' => array('type'=>'varchar(255)'),
 		'cal_blocks_availability' => array('type'=>'bool', 'default'=>true),
+		// Firmness axis (specs/joinery_ai_calendar_ai_surface.md), distinct from
+		// busy/free (cal_blocks_availability). tentative | confirmed | cancelled.
+		// AI/pipeline-authored entries land tentative; every human-authored path
+		// (the calendar form, .ics import) keeps the confirmed default.
+		'cal_status' => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'confirmed'),
 		'cal_visibility' => array('type'=>'varchar(16)', 'default'=>'details'),
 		'cal_type' => array('type'=>'varchar(16)', 'default'=>'personal'),
 		'cal_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
@@ -96,6 +110,35 @@ class CalendarEntry extends SystemBase {
 	/** The CalendarSubject this entry belongs to. */
 	function subject() {
 		return new CalendarSubject($this->get('cal_subject_type'), $this->get('cal_subject_id'));
+	}
+
+	/**
+	 * Set the core time/title/visibility fields shared by every write path
+	 * (the calendar form's _calendar_set_fields() delegates here; so does
+	 * CalendarEntryImporter). Does not touch subject, type, status, or
+	 * recurrence — callers set those themselves.
+	 */
+	public function set_core_fields(
+		string $title,
+		bool $all_day,
+		bool $blocks,
+		?string $start_local,
+		?string $end_local,
+		?string $start_utc,
+		?string $end_utc,
+		string $tz
+	): void {
+		$this->set('cal_start_utc',   $start_utc);
+		$this->set('cal_end_utc',     $end_utc);
+		$this->set('cal_start_local', $start_local);
+		$this->set('cal_end_local',   $end_local);
+		$this->set('cal_timezone',    $tz);
+		$this->set('cal_tzdata_version', '2026a');
+		$this->set('cal_all_day',     $all_day);
+		$this->set('cal_title',       $title);
+		$this->set('cal_blocks_availability', $blocks);
+		$this->set('cal_visibility',  'details');
+		$this->set('cal_update_time', gmdate('Y-m-d H:i:s'));
 	}
 
 	/** True when this entry is a recurring parent. */
@@ -415,6 +458,7 @@ class CalendarEntry extends SystemBase {
 					? '/profile/calendar/entry/' . $parent_id . '/occurrence/' . $date
 					: null,
 				'blocks_availability' => (bool)$this->get('cal_blocks_availability'),
+				'status'              => (string)($this->get('cal_status') ?: 'confirmed'),
 				'visibility'          => $visibility,
 				'source'              => 'native',
 				'source_key'          => 'native:cal-' . $parent_id . '-' . $date,
@@ -563,6 +607,12 @@ class MultiCalendarEntry extends SystemMultiBase {
 		}
 		if (isset($this->options['deleted'])) {
 			$filters['cal_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
+		}
+		// Provenance lookup (CalendarEntryImporter dedup) — both must be given
+		// together; there is no case for matching one without the other.
+		if (isset($this->options['source']) && isset($this->options['source_ref'])) {
+			$filters['cal_source'] = [$this->options['source'], PDO::PARAM_STR];
+			$filters['cal_source_event_id'] = [$this->options['source_ref'], PDO::PARAM_STR];
 		}
 		if (!empty($this->options['recurring_only'])) {
 			$filters['cal_recurrence_type'] = "IS NOT NULL";

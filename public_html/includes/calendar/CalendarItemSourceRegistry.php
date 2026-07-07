@@ -92,16 +92,27 @@ class CalendarItemSourceRegistry {
      * they block availability, reduced to {start,end} and merged. This is the
      * single thing the availability engine and SlotGenerator consume.
      *
+     * $include is an optional caller policy on top of blocks_availability — e.g.
+     * a consumer that wants to treat tentative (cal_status) entries differently
+     * can filter on $item->status here, since raw {start,end} blocks have no
+     * per-item metadata left to post-filter on. Default null = every busy item
+     * counts, exactly as before this parameter existed — zero behavior change
+     * for a caller that doesn't pass one (specs/joinery_ai_calendar_ai_surface.md § 4).
+     *
      * @return array[] list of ['start'=>UTC, 'end'=>UTC], sorted and merged
      */
     public static function getBusyBlocks(
         CalendarSubject $subject,
         string $start_utc,
-        string $end_utc
+        string $end_utc,
+        ?callable $include = null
     ): array {
         $blocks = [];
         foreach (self::getItems($subject, $start_utc, $end_utc, CalendarItem::VIS_BUSY) as $item) {
             if (!$item->blocks_availability) {
+                continue;
+            }
+            if ($include !== null && !$include($item)) {
                 continue;
             }
             $blocks[] = ['start' => $item->start_utc, 'end' => $item->end_utc];

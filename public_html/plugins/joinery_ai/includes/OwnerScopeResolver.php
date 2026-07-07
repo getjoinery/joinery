@@ -18,6 +18,11 @@
  *                      users.usr_user_id that the convention can't infer).
  *   - array of strings OR-match across the columns (e.g. messages =
  *                      sender-or-recipient). A member sees a row if they own any.
+ *   - ['polymorphic' => ['type_column'=>.., 'id_column'=>.., 'type_value'=>..]]
+ *                      the owner is a (type, id) pair rather than a single FK-
+ *                      style column (e.g. CalendarEntry/Schedule, owned by a
+ *                      CalendarSubject). Scopes WHERE type_column = type_value
+ *                      AND id_column = me.
  *   - false            ownerless catalog/config (products, pages, …). Members
  *                      read every row; there is nothing to contain.
  *
@@ -27,6 +32,8 @@
  * Modes returned by resolve():
  *   ['mode' => 'all']                          ownerless — read every row
  *   ['mode' => 'owner', 'columns' => [..]]     scope WHERE col = me (OR-match)
+ *   ['mode' => 'polymorphic_owner', 'type_column' => .., 'id_column' => ..,
+ *    'type_value' => '..']                     scope WHERE type_column = type_value AND id_column = me
  *   ['mode' => 'hidden', 'reason' => '..']     not exposed to members
  */
 class OwnerScopeResolver {
@@ -74,6 +81,33 @@ class OwnerScopeResolver {
             return in_array($decl, $fields, true)
                 ? ['mode' => 'owner', 'columns' => [$decl]]
                 : ['mode' => 'hidden', 'reason' => "declared owner column '$decl' is not a field on the model"];
+        }
+
+        // Polymorphic owner: a (type_column, id_column) pair instead of a single
+        // FK-style column (e.g. CalendarEntry/Schedule's CalendarSubject shape).
+        // Checked before the OR-match array branch below, which would otherwise
+        // filter this nested array down to an empty column list and fail closed
+        // with a misleading "empty list" reason instead of the real one.
+        if (is_array($decl) && isset($decl['polymorphic'])) {
+            $poly = $decl['polymorphic'];
+            $type_column = is_array($poly) ? ($poly['type_column'] ?? null) : null;
+            $id_column   = is_array($poly) ? ($poly['id_column']   ?? null) : null;
+            $type_value  = is_array($poly) ? ($poly['type_value']  ?? null) : null;
+
+            if (!is_string($type_column) || $type_column === ''
+                || !is_string($id_column) || $id_column === ''
+                || !is_string($type_value) || $type_value === '') {
+                return ['mode' => 'hidden', 'reason' => '$ai_owner_field polymorphic declaration is missing type_column, id_column, or type_value'];
+            }
+            if (!in_array($type_column, $fields, true) || !in_array($id_column, $fields, true)) {
+                return ['mode' => 'hidden', 'reason' => "declared polymorphic column(s) not on the model: $type_column, $id_column"];
+            }
+            return [
+                'mode'        => 'polymorphic_owner',
+                'type_column' => $type_column,
+                'id_column'   => $id_column,
+                'type_value'  => $type_value,
+            ];
         }
 
         // Explicit OR-match list.
