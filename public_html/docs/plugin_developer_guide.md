@@ -811,15 +811,16 @@ Discovery → Install → Activate ↔ Deactivate → Uninstall
 5. Resumes any suspended scheduled tasks for this plugin
 6. Sets `plg_active = 1`
 
-**Developer workflow for schema changes** — If you add columns to `$field_specifications` on an already-installed plugin: modify the class, then run **Sync with Filesystem** from the admin Plugins page (`/admin/admin_plugins?action=sync_filesystem`). Sync calls `runPluginTablesOnly()` for all active plugins, which picks up new columns and creates new tables. Schema changes are also applied automatically during deploys (`upgrade.php`) and when running `update_database` from admin utilities.
+**Developer workflow for schema changes** — Modify `$field_specifications` on an already-installed plugin, then run **Sync with Filesystem** from the admin Plugins page (`/admin/admin_plugins?action=sync_filesystem`). Sync applies the full column reconciliation: new tables, new columns, type/length and nullability modifications (widening a `varchar`, adding `NOT NULL`) on existing columns, unique constraints, and indexes. Column *removal* is the one schema change sync never performs — dropping a column absent from the spec stays a deliberate migration-or-manual act. Schema changes are also applied automatically during deploys (`upgrade.php`) and when running `update_database` from admin utilities.
 
 **Schema changes on inactive plugins are deferred.** Sync and `update_database` only touch tables for active plugins. If you modify `$field_specifications` on a plugin that is installed but not active, the schema change will not be applied until the plugin is next activated (`PluginManager::activate()` calls `runPluginTablesOnly()` as its first step).
 
 **Sync** (`PluginManager::sync()`)
 1. Scans filesystem — discovers new plugins, updates metadata from manifests, detects missing directories
-2. Updates database tables for **all active plugins** via `DatabaseUpdater::runPluginTablesOnly()`
-3. Runs pending migrations for all active plugins
-4. Re-registers deletion rules for all active plugins via `PluginHelper::registerAllActiveDeletionRules()`
+2. Updates database tables for **all active plugins** via `DatabaseUpdater::runPluginTablesOnly()` — creates missing tables, adds missing columns
+3. Applies column modifications on existing columns (type/length widening, nullability) via `DatabaseUpdater::processAdvancedColumnOperations()`, then unique constraints and indexes
+4. Runs pending migrations for all active plugins
+5. Re-registers deletion rules for all active plugins via `PluginHelper::registerAllActiveDeletionRules()`
 
 Sync is the recommended way to apply schema changes after code deploys. It is also available as an admin UI action on the Plugins page and the Themes page.
 
