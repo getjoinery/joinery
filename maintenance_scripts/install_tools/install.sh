@@ -1415,6 +1415,7 @@ do_server_setup() {
         php8.3-bcmath \
         php8.3-intl \
         php8.3-readline \
+        php8.3-sqlite3 \
         libapache2-mod-php8.3
 
     print_success "PHP installation completed. Version: $(php -v | head -n1)"

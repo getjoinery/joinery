@@ -17,6 +17,7 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
 function admin_mailbox_message_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
@@ -75,11 +76,29 @@ function admin_mailbox_message_logic(array $input): LogicResult {
 	);
 	$attachments->load();
 
+	// Sealed content (specs/implemented/inbound_email_encryption_at_rest.md § 7):
+	// gate on KEY POSSESSION, not permission — a permission-10 admin (including
+	// via login-as) with no open window for this message's OWNER sees a locked
+	// placeholder, same as anyone else. VaultUnlock is keyed to the owning
+	// user's session, so an admin viewing someone else's sealed mailbox is
+	// locked out by construction, not by a permission check.
+	$locked = false;
+	$sender = $recipient = $subject = $body_plain = '';
+	$body_html = '';
+	try {
+		$sender = (string)$message->get('iem_sender');
+		$recipient = (string)$message->get('iem_recipient');
+		$subject = (string)$message->get('iem_subject');
+		$body_plain = (string)$message->get('iem_body_plain');
+		$body_html = (string)$message->get('iem_body_html');
+	} catch (VaultLockedException $e) {
+		$locked = true;
+	}
+
 	// Inline images: rewrite cid: references in the HTML body to short-lived
 	// signed URLs (shared resolver — the permission-5 gate above is the
 	// authorization statement for the mint).
-	$body_html = $message->get('iem_body_html');
-	if ($body_html !== '' && $body_html !== null) {
+	if ($body_html !== '' && !$locked) {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxService.php'));
 		$resolved = MailboxService::resolveInlineImages(array(
 			array('id' => $message->key, 'body_html' => $body_html),
@@ -94,6 +113,11 @@ function admin_mailbox_message_logic(array $input): LogicResult {
 		'domain_name' => $domain_name,
 		'alias_name' => $alias_name,
 		'attachments' => $attachments,
+		'locked' => $locked,
+		'sender' => $sender,
+		'recipient' => $recipient,
+		'subject' => $subject,
+		'body_plain' => $body_plain,
 		'body_html' => $body_html,
 	));
 }

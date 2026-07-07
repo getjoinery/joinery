@@ -42,7 +42,7 @@
  * ingest uses — so a recipient's reply threads back into this conversation
  * (specs/implemented/inbound_email_new_message_compose.md).
  *
- * @version 1.4
+ * @version 1.5
  */
 
 require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
@@ -50,6 +50,8 @@ require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 require_once(PathHelper::getIncludePath('includes/OutboundTransport.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('data/files_class.php'));
+require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
+require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxViewer.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
@@ -139,8 +141,19 @@ class MailboxSender {
 			throw new MailboxSenderException('Add at least one recipient.');
 		}
 
-		$subject = $this->normalizeSubject((string)($params['subject'] ?? ''), $mode,
-			$source !== null ? (string)$source->get('iem_subject') : '');
+		// Reading the source message's sealed fields (quoting/subject) requires
+		// an open window for its owner — composing is always in-window per
+		// specs/implemented/inbound_email_encryption_at_rest.md § 4.6, but a
+		// window can still close mid-compose (idle timeout, another tab's
+		// explicit lock); surface that as a clean user-facing message rather
+		// than an uncaught fatal.
+		try {
+			$subject = $this->normalizeSubject((string)($params['subject'] ?? ''), $mode,
+				$source !== null ? (string)$source->get('iem_subject') : '');
+			$body_html = $this->buildBody($mode, (string)($params['body'] ?? ''), $source);
+		} catch (VaultLockedException $e) {
+			throw new MailboxSenderException('Your vault is locked — unlock it to reply to or forward this message.');
+		}
 		$message_id = $this->generateMessageId($from_address);
 
 		$email = new EmailMessage();
@@ -148,7 +161,7 @@ class MailboxSender {
 		foreach ($to as $addr) { $email->to($addr); }
 		foreach ($cc as $addr) { $email->cc($addr); }
 		$email->subject($subject);
-		$email->html($this->buildBody($mode, (string)($params['body'] ?? ''), $source));
+		$email->html($body_html);
 		$email->messageId($message_id);
 
 		// Threading: replies are In-Reply-To/References the original; a forward
@@ -199,13 +212,13 @@ class MailboxSender {
 			// filed copy dedups by Message-ID on ingest.
 		}
 
-		$outbound_id = $this->storeOutboundRow($source, $alias, $mode, $from_address,
+		$stored = $this->storeOutboundRow($source, $alias, $mode, $from_address,
 			array_merge($to, $cc), $subject, $email, $message_id);
 		if ($accepted) {
-			$this->persistOutboundUploads($outbound_id, $accepted);
+			$this->persistOutboundUploads($stored['id'], $accepted, $stored['dek']);
 		}
 
-		return array('ok' => true, 'outbound_id' => $outbound_id);
+		return array('ok' => true, 'outbound_id' => $stored['id']);
 	}
 
 	// ── source + identity ──────────────────────────────────────────────────
@@ -423,7 +436,22 @@ class MailboxSender {
 			if (!$file->key || $file->get('fil_delete_time')) {
 				return null;
 			}
-			return $file->read_bytes('original');
+			$bytes = $file->read_bytes('original');
+			if ($bytes === null) {
+				return null;
+			}
+			// read_bytes() returns raw on-disk bytes, bypassing File's decrypt hook
+			// (which only fires through serve_from_path()/HTTP serving) — a sealed
+			// attachment (ima_is_sealed) must be opened explicitly here. Composing
+			// is always in-window (specs/implemented/inbound_email_encryption_at_rest.md
+			// § 4.6), so the owner's window should be open; a VaultLockedException
+			// (window closed mid-compose) surfaces as the same "no longer available"
+			// forward failure the caller already handles for a missing part.
+			try {
+				return InboundEmailMessage::openSealedAttachment($source, $att, $bytes);
+			} catch (VaultLockedException $e) {
+				return null;
+			}
 		}
 
 		$driver = (string)$source->get('iem_raw_storage_driver') ?: 'inline';
@@ -442,7 +470,13 @@ class MailboxSender {
 		}
 
 		// Legacy raw row (inline/local/cloud stored raw): extract the one part.
-		$part = $source->getRawMimePart((string)$att->get('ima_mime_part'));
+		// A sealed stored raw with the window closed mid-compose surfaces as the
+		// same "no longer available" failure the file-backed branch returns.
+		try {
+			$part = $source->getRawMimePart((string)$att->get('ima_mime_part'));
+		} catch (VaultLockedException $e) {
+			return null;
+		}
 		return $part === null ? null : (string)$part['content'];
 	}
 
@@ -524,21 +558,44 @@ class MailboxSender {
 	 *
 	 * @param array<int, array{bytes:string, name:string}> $accepted
 	 */
-	private function persistOutboundUploads(int $message_id, array $accepted): void {
+	private function persistOutboundUploads(int $message_id, array $accepted, ?string $dek = null): void {
+		$crypto = null;
+		if ($dek !== null) {
+			require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
+			$crypto = new VaultCrypto();
+		}
+		$index = 0;
 		foreach ($accepted as $a) {
+			$index++;
 			try {
 				$mime = File::detect_mime_bytes($a['bytes']) ?: 'application/octet-stream';
-				$file = File::createFromBytes($a['bytes'], $a['name'], $mime, $this->viewer->getUserId(), array(
+				$bytes = $a['bytes'];
+				$original_size = strlen($bytes);
+				// A stable-enough part id for an upload (no real MIME part, since
+				// this bypasses MIME parsing entirely) — unique per message, which
+				// is all attachmentAd()'s row-binding needs.
+				$part_id = 'upload:' . $index;
+				if ($crypto !== null) {
+					$bytes = $crypto->sealField($bytes, $dek, InboundEmailMessage::attachmentAd($message_id, $part_id));
+				}
+				$file = File::createFromBytes($bytes, $a['name'], $mime, $this->viewer->getUserId(), array(
 					'fil_private' => true,
 					'fil_source'  => File::SOURCE_EMAIL_ATTACHMENT,
 				));
+				if ($crypto !== null) {
+					// Magic-byte detection on save() saw ciphertext — restore the real type.
+					$file->set('fil_type', substr($mime, 0, 128));
+					$file->save();
+				}
 				InboundMessageAttachment::CreateEntry(array(
 					'ima_iem_inbound_email_message_id' => $message_id,
 					'ima_filename'     => $a['name'],
-					'ima_content_type' => $file->get('fil_type') ?: $mime,
-					'ima_size_bytes'   => strlen($a['bytes']),
+					'ima_content_type' => $mime,
+					'ima_size_bytes'   => $original_size,
+					'ima_mime_part'    => $part_id,
 					'ima_is_inline'    => false,
 					'ima_fil_file_id'  => (int)$file->key,
+					'ima_is_sealed'    => ($crypto !== null),
 				));
 			} catch (Throwable $e) {
 				error_log('MailboxSender: failed to persist outbound upload "' . $a['name'] . '" on message '
@@ -689,14 +746,36 @@ class MailboxSender {
 	 * together (§6). A new message ($source === null) has no thread to join: its
 	 * own Message-ID becomes the thread root — the same "singleton thread" rule
 	 * inbound ingest uses — so a recipient's reply resolves back to this row.
+	 *
+	 * Encryption at rest (specs/implemented/inbound_email_encryption_at_rest.md §
+	 * 4.6): composing is always in-window, so when the sending alias's owner
+	 * holds a Sealed Vault, the row is inserted with empty content columns
+	 * (mirroring InboundEmailRouter::storeMessage) and immediately sealed —
+	 * including iem_recipient, which on an outbound row is real content (who
+	 * you emailed), unlike an inbound row's routing-only alias address.
+	 *
+	 * @return array{id:int,dek:?string} the row id, and the per-message DEK
+	 *         (raw bytes) when sealed — persistOutboundUploads() reuses it to
+	 *         seal any re-uploaded attachments under the same key.
 	 */
 	private function storeOutboundRow(?InboundEmailMessage $source, InboundEmailAlias $alias,
 			string $mode, string $from_address, array $recipients, string $subject,
-			EmailMessage $email, string $message_id): int {
+			EmailMessage $email, string $message_id): array {
 
 		$thread_key = $source !== null
 			? $this->resolveThreadKey($source, $message_id)
 			: substr($message_id, 0, 255);
+
+		// Never truncated: the full list is real content (iem_recipient is text;
+		// a sealed row stores its AEAD blob, which outgrows any plaintext cap).
+		$recipient_str = implode(', ', $recipients);
+		$body_plain = (string)$email->getTextBody();
+		$body_html = (string)$email->getHtmlBody();
+		$subject_trunc = substr($subject, 0, 4000);
+
+		$owner_id = InboundEmailMessage::singleOwnerUserId(intval($alias->key));
+		$vault = $owner_id !== null ? UserEncryptionVault::loadForUser($owner_id) : null;
+		$sealing = ($vault !== null);
 
 		$row = new InboundEmailMessage(NULL);
 		$row->set('iem_ied_inbound_email_domain_id', $source !== null
@@ -704,11 +783,11 @@ class MailboxSender {
 			: $alias->get('iea_ied_inbound_email_domain_id'));
 		$row->set('iem_iea_inbound_email_alias_id', $alias->key);
 		$row->set('iem_direction', 'outbound');
-		$row->set('iem_sender', substr($from_address, 0, 500));
-		$row->set('iem_recipient', substr(implode(', ', $recipients), 0, 500));
-		$row->set('iem_subject', substr($subject, 0, 1000));
-		$row->set('iem_body_plain', (string)$email->getTextBody());
-		$row->set('iem_body_html', (string)$email->getHtmlBody());
+		$row->set('iem_sender', $sealing ? '' : substr($from_address, 0, 500));
+		$row->set('iem_recipient', $sealing ? '' : $recipient_str);
+		$row->set('iem_subject', $sealing ? '' : $subject_trunc);
+		$row->set('iem_body_plain', $sealing ? '' : $body_plain);
+		$row->set('iem_body_html', $sealing ? '' : $body_html);
 		$row->set('iem_raw_message', '');
 		$row->set('iem_message_id_header', substr($message_id, 0, 255));
 		$row->set('iem_thread_key', $thread_key);
@@ -719,9 +798,32 @@ class MailboxSender {
 		$row->set('iem_dmarc_result', 'unverified');
 		$row->set('iem_auth_source', 'none');
 		$row->set('iem_received_time', gmdate('Y-m-d H:i:s'));
-		$row->save();
 
-		return intval($row->key);
+		// A sealing row's insert and its seal UPDATE are one transaction — the
+		// empty-content insert must never survive a seal failure (mirrors
+		// InboundEmailRouter::storeMessage; the mail is already on the wire, so
+		// a failure here reports honestly rather than leaving a hollow Sent row).
+		$db = null;
+		if ($sealing) {
+			$db = DbConnector::get_instance()->get_db_link();
+			$db->beginTransaction();
+		}
+		$dek = null;
+		try {
+			$row->save();
+			if ($sealing) {
+				$dek = InboundEmailMessage::sealAndPersistContent(intval($row->key), $vault,
+					substr($from_address, 0, 500), $recipient_str, $subject_trunc, $body_plain, $body_html, true);
+				$db->commit();
+			}
+		} catch (\Throwable $e) {
+			if ($db !== null) {
+				$db->rollBack();
+			}
+			throw $e;
+		}
+
+		return array('id' => intval($row->key), 'dek' => $dek);
 	}
 
 	/**

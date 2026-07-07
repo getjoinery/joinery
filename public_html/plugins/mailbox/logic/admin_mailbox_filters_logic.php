@@ -47,6 +47,11 @@ function admin_mailbox_filters_logic(array $input): LogicResult {
 	if ($op === 'toggle' && !empty($input['id'])) {
 		$f = new InboundEmailFilter(intval($input['id']), TRUE);
 		if ($f->key) {
+			$locked_msg = _filter_require_unlock($f->get('fil_iea_inbound_email_alias_id'));
+			if ($locked_msg !== null) {
+				_filter_flash($session, $locked_msg, $scoped_list($return_scope));
+				return LogicResult::redirect($scoped_list($return_scope));
+			}
 			// Flip the bool directly (no prepare(), so criteria validation does not
 			// re-fire on a simple enable/disable).
 			$f->set('fil_is_enabled', $f->get('fil_is_enabled') ? false : true);
@@ -57,6 +62,11 @@ function admin_mailbox_filters_logic(array $input): LogicResult {
 	if ($op === 'delete' && !empty($input['id'])) {
 		$f = new InboundEmailFilter(intval($input['id']), TRUE);
 		if ($f->key) {
+			$locked_msg = _filter_require_unlock($f->get('fil_iea_inbound_email_alias_id'));
+			if ($locked_msg !== null) {
+				_filter_flash($session, $locked_msg, $scoped_list($return_scope));
+				return LogicResult::redirect($scoped_list($return_scope));
+			}
 			$f->soft_delete();
 		}
 		_filter_flash($session, 'Filter deleted.', $scoped_list($return_scope));
@@ -229,6 +239,39 @@ function _filter_default_scope(array $options): string {
 		}
 	}
 	return (string)array_key_first($options);
+}
+
+/**
+ * Vault-gated settings pull-forward (specs/implemented/inbound_email_
+ * encryption_at_rest.md, from specs/mailbox_security_levels.md §
+ * Vault-Gated Settings): a filter — especially a "Forward to" action — acts
+ * at receive time, on the plaintext parse, before sealing ever happens. Left
+ * ungated, editing a sealed mailbox's filters would let its future mail be
+ * silently redirected around the vault entirely, at the control plane rather
+ * than the content. So a mutation to a single-owner, vault-holding mailbox's
+ * filters requires an open unlock window — and since `VaultUnlock::isOpen()`
+ * is scoped to the CALLING session, this can only ever be satisfied by the
+ * mailbox owner's own logged-in session (an admin managing someone else's
+ * mailbox structurally cannot open that owner's vault). A domain-wide scope
+ * (no single owner) is never gated. Returns null when the mutation may
+ * proceed, else a user-facing message.
+ */
+function _filter_require_unlock($alias_id): ?string {
+	if ($alias_id === null) {
+		return null;
+	}
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+	require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
+
+	$owner_id = InboundEmailMessage::singleOwnerUserId(intval($alias_id));
+	if ($owner_id === null || !UserEncryptionVault::loadForUser($owner_id)) {
+		return null; // shared/ownerless mailbox, or no vault - never sealed, nothing to gate
+	}
+	if (!VaultUnlock::isOpen($owner_id)) {
+		return 'This mailbox is sealed. Its owner must unlock their vault before its filters can change.';
+	}
+	return null;
 }
 
 /** Save a DisplayMessage flash for the next page load. */
@@ -435,6 +478,10 @@ function _filter_save(array $v, array $alias_domain): InboundEmailFilter {
 	}
 	if (!$domain_id) {
 		throw new InboundEmailFilterException('Pick a valid mailbox or domain for this filter.');
+	}
+	$locked_msg = _filter_require_unlock($alias_id);
+	if ($locked_msg !== null) {
+		throw new InboundEmailFilterException($locked_msg);
 	}
 
 	$filter->set('fil_iea_inbound_email_alias_id', $alias_id);

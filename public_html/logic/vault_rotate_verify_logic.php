@@ -62,19 +62,37 @@ function vault_rotate_verify_logic(array $input): LogicResult {
 	$all_wrappings = new MultiUserEncryptionWrapping(['vault_id' => $vault->key]);
 	$all_wrappings->load();
 
+	// The authorizing wrapping is the presented credential's LOWEST-generation
+	// live wrapping. Normally there is exactly one; after a partial rotation
+	// failure both generations' wrappings are live, and the retry must unwrap
+	// the OLDEST secret — that is the generation still holding un-resealed
+	// content, and the one this ceremony drains.
 	$authorizing_wrapping = null;
-	$dropped_passkeys = [];
 	foreach ($all_wrappings as $wrapping) {
-		if ($wrapping->get('uew_unlocker_type') === UserEncryptionWrapping::TYPE_PASSKEY) {
-			if ((int)$wrapping->get('uew_pkc_credential_id') === (int)$passkey->key) {
-				$authorizing_wrapping = $wrapping;
-			} else {
-				$dropped_passkeys[] = ['credential_id' => (int)$wrapping->get('uew_pkc_credential_id'), 'label' => $wrapping->get('uew_label')];
-			}
+		if ($wrapping->get('uew_unlocker_type') !== UserEncryptionWrapping::TYPE_PASSKEY
+				|| (int)$wrapping->get('uew_pkc_credential_id') !== (int)$passkey->key) {
+			continue;
+		}
+		if ($authorizing_wrapping === null
+				|| (int)$wrapping->get('uew_key_generation') < (int)$authorizing_wrapping->get('uew_key_generation')) {
+			$authorizing_wrapping = $wrapping;
 		}
 	}
 	if (!$authorizing_wrapping) {
 		return LogicResult::error('This passkey does not currently unlock your vault - add it first, then rotate.');
+	}
+	$old_generation = (int)$authorizing_wrapping->get('uew_key_generation');
+
+	// The unlockers this rotation retires (everything in the drained
+	// generation except the authorizing passkey) — surfaced so the user knows
+	// what to re-add.
+	$dropped_passkeys = [];
+	foreach ($all_wrappings as $wrapping) {
+		if ($wrapping->get('uew_unlocker_type') === UserEncryptionWrapping::TYPE_PASSKEY
+				&& (int)$wrapping->get('uew_key_generation') === $old_generation
+				&& (int)$wrapping->get('uew_pkc_credential_id') !== (int)$passkey->key) {
+			$dropped_passkeys[] = ['credential_id' => (int)$wrapping->get('uew_pkc_credential_id'), 'label' => $wrapping->get('uew_label')];
+		}
 	}
 
 	$box = new SealedBox();
@@ -123,18 +141,31 @@ function vault_rotate_verify_logic(array $input): LogicResult {
 		$passphrase_reenrolled = true;
 	}
 
-	// Consumer packages: re-seal callbacks MUST be idempotent and keyed on
-	// each item's own per-item key-generation column (vs uev_key_generation) -
-	// a retry after a partial crash has to skip items already flipped to the
-	// new generation, not re-seal an already-current item.
-	foreach (VaultUnlock::resealCallbacks() as $callback) {
-		call_user_func($callback, (int)$user->key, $old_secret_key, $keypair['public'], $new_generation);
+	// Consumer packages: re-seal callbacks are scoped to the generation being
+	// drained ($old_generation — the only one $old_secret_key can open) and
+	// THROW on any failure (VaultUnlock::onReseal() contract). A failure here
+	// must never reach the retirement step below: retiring wrappings whose
+	// content is not fully re-sealed destroys the only path to that content.
+	try {
+		foreach (VaultUnlock::resealCallbacks() as $callback) {
+			call_user_func($callback, (int)$user->key, $old_secret_key, $old_generation, $keypair['public'], $new_generation);
+		}
+	} catch (Throwable $e) {
+		error_log('Vault rotation: consumer re-seal incomplete for user ' . $user->key . ': ' . $e->getMessage());
+		return LogicResult::error(
+			'Key rotation could not finish re-securing all of your content, so nothing was retired - '
+			. 'every unlocker you had still works. Run the rotation again to complete it.'
+		);
 	}
 
-	// Only now retire the previous generation - every consumer has confirmed
-	// its content is re-sealed, so the old secret is no longer needed.
+	// Only now retire the drained generation - every consumer has confirmed
+	// its content is re-sealed off it, so that secret is no longer needed.
+	// Wrappings of any OTHER live generation (a partially-failed earlier
+	// rotation) are left alone; a later rotation drains and retires them.
 	foreach ($all_wrappings as $wrapping) {
-		$wrapping->soft_delete();
+		if ((int)$wrapping->get('uew_key_generation') === $old_generation) {
+			$wrapping->soft_delete();
+		}
 	}
 
 	VaultUnlock::open($user->key, $keypair['secret'], UserEncryptionVault::SCOPE_USER);

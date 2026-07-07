@@ -663,6 +663,132 @@ message reclaims its attachment `File`s **and** any stored raw through the messa
 hard-delete hook (the single reclaim path); soft delete leaves everything in place (the
 row is recoverable).
 
+## Encryption at rest
+
+A mailbox seals when its **single owner** (the alias's one grantee — a shared or
+catch-all mailbox is never sealed) holds a Sealed Vault (`docs/sealed_vault.md`, the
+platform's per-user X25519 key hierarchy and unlock window). Mail is the vault's first
+consumer: it supplies its own AD row-binding convention and content, and reuses every
+generic vault mechanism — key hierarchy, unlock window, the File decrypt hook, the
+sealed-field model hook, rotation, revocation. See the [Passkeys](../../../docs/passkeys.md)
+and [Account Security](../../../docs/account_security.md) docs for the sign-in and
+unlock ceremonies themselves; this section covers only mail's own participation.
+
+**What's sealed.** `InboundEmailRouter::storeMessage()` resolves the owner's vault
+*before* the insert: a sealing row is written with **empty** content columns from the
+start (`iem_sender` / `iem_subject` / `iem_body_plain` / `iem_body_html`), then a fresh
+per-message DEK seals each field and the row is UPDATEd — no plaintext is ever written,
+even transiently, and the insert + seal UPDATE run as **one DB transaction**, so no
+empty-content row can ever survive a seal failure (a failed delivery tempfails and the
+MTA's retry re-inserts from a clean slate instead of hitting the dedup constraint).
+`iem_sealed_key` (the DEK, sealed to the owner's vault public key),
+`iem_key_generation` (0 = never sealed), `iem_sealed_owner_user_id` (whose vault, recorded
+at seal time — decryption resolves the owner from the row itself, so later grant or alias
+changes can never strand sealed mail), and `iem_content_sealed` (true once the UPDATE
+lands) mark the row. Attachments seal under the **same** DEK
+(`InboundEmailRouter::extractAttachmentsToFiles()`), AD-bound to their MIME part id — no
+chicken-and-egg with the manifest row's serial id, which doesn't exist yet at seal time —
+and each manifest row records its own `ima_is_sealed`: sealed state is a per-file fact
+about the stored bytes, never an inference from the message's flags. If attachment
+extraction fails for a sealed mailbox, the whole raw is preserved **sealed** (one AEAD
+blob under the same DEK, `iem_raw_sealed = true`, opened in-window by
+`getRawMessage()`) with a section-pointer manifest — the same durability a plaintext
+mailbox gets from the raw fallback, with nothing written in the clear.
+A composed outbound row (`MailboxSender::storeOutboundRow()`) seals identically (same
+one-transaction insert + seal), and also seals `iem_recipient` — an outbound row's
+recipient list is real content (who you emailed; stored untruncated — the column is
+`text`), unlike an inbound row's `iem_recipient`, which is the receiving alias address
+(routing metadata, never sealed regardless of the row's sealed state). Standard-tier
+mail (no vault) is unaffected: `iem_content_sealed` stays false and every column holds
+plaintext, exactly as before this package.
+
+**Reading.** `InboundEmailMessage::$sealed_fields` + `decryptSealedField()` /
+`decryptSealedFieldStatic()` are the Sealed Vault's generic model read hook: any
+`$msg->get('iem_body_plain')` on a loaded model decrypts automatically when the owner's
+window is open, and throws `VaultLockedException` when it isn't. `MailboxService`'s raw
+SQL reads (`listThreads()`, `getThread()`) batch-decrypt through
+`decryptSealedFieldStatic()` directly (mirroring
+`plugins/joinery_ai/includes/ModelQueryExecutor.php`'s raw-row hook), catching a locked
+vault into a `[locked - unlock your vault to view]` placeholder rather than an error.
+Attachments decrypt through `InboundEmailMessage::openSealedAttachment()` — the one
+opener keyed on the manifest row's `ima_is_sealed` (plaintext Files stream as-is) —
+reached three ways: the generic `File` decrypt hook
+(`File::registerDecryptHook(File::SOURCE_EMAIL_ATTACHMENT, …)`, registered by
+`plugins/mailbox/includes/bootstrap.php`, called by `File::serve_from_path()` between
+reading the on-disk ciphertext and streaming the response), the per-attachment download
+endpoints (`includes/attachment_retrieval.php` opens explicitly after
+`File::read_bytes()`, which bypasses the serve hook), and a forward's re-attach path
+(`MailboxSender::readOriginalPartBytes()`). A locked vault becomes a generic
+`423 Locked` on the serve path and a clean "Unlock your vault" message on the download
+endpoints — never a raw error or leaked ciphertext. The admin single-message
+viewer (`admin_mailbox_message.php`) gates on the same key-possession rule as anyone
+else — a permission-10 admin (including via login-as) with no open window for the
+message's *owner* sees a `[locked]` placeholder, never real content; permission is not a
+bypass.
+
+**Bootstrap.** `plugins/mailbox/includes/bootstrap.php` is mail's one-time-per-request
+wiring point, loaded lazily by `VaultUnlock::loadConsumerBootstraps()` from every code
+path that needs a consumer's hooks live (the File decrypt-hook resolution, the rotation
+ceremony, and window-close) — it registers the File decrypt hook and mail's
+`VaultUnlock::onReseal()` / `VaultUnlock::onWipe()` callbacks in one place.
+
+**Search.** A sealed mailbox's content columns are ciphertext, unsearchable in SQL.
+`plugins/mailbox/includes/MailboxIndex.php` is a disposable, per-owner SQLite FTS5
+index — sender, subject, both bodies, and attachment *filenames* (never attachment
+contents) — held **only** in `/dev/shm` (RAM-backed, never touches disk in the clear)
+for the lifetime of the unlock window. Every fold immediately re-seals and persists the
+working copy as a private File (seal-after-fold; the sealed blob and its bookkeeping —
+high-water mark, sealed DEK — live in `imi_inbound_mailbox_search_index`), so a crash
+never loses folded work and a fresh unlock restores instantly instead of rebuilding.
+Missing, stale, or corrupt → `rebuild()` from the sealed message rows; the cache is
+never the source of truth. `plugins/mailbox/tasks/SweepMailboxIndexTemp.php` is the
+passive-close safety net for a working copy the wipe callback missed (an idle APCu
+expiry, a worker recycle) — worst case it lingers one cron interval.
+`MailboxService::listThreads()`'s `q` path uses the index only when the scope resolves
+to a single, vault-holding owner (locked surfaces as `search_locked` in the response,
+not a silent empty result); every broader scope (all-mail, an unsealed mailbox) keeps
+the plain Postgres `tsvector` search, which simply never matches a sealed row's
+ciphertext.
+
+**Key rotation and window close.** Mail's `VaultUnlock::onReseal()` callback re-seals
+every message on the generation being drained (`iem_key_generation =
+old_key_generation` — the only generation the ceremony's old secret can open; idempotent,
+so a retry skips already-flipped rows), purges the FTS blob (sealed under the
+now-superseded key; the next unlock rebuilds it), and **throws** if any row failed —
+per the vault's re-seal contract, so the ceremony never retires a generation whose mail
+is still sealed to it. Its `VaultUnlock::onWipe()` callback clears the `/dev/shm`
+working copy on an explicit lock, a credential event, or `lockAll()` — the persisted
+sealed blob is untouched, so the next unlock restores it without a rebuild.
+
+**No sideways copies.** The inbound log viewer (`iel_inbound_email_logs`) never carries
+subject or body — every write passes an empty subject, sender/recipient addresses are
+logged as routing metadata only. Content-derived AI processing
+(`plugins/joinery_ai/pipeline_jobs/EmailSecurityScanJob.php`) excludes sealed rows from
+its candidate pool outright: it runs unattended with no unlock window, so a sealed
+message is simply never a scan candidate, not a retried failure. `LearnSpamFeedback`
+already only trains from a message's raw RFC822, which a sealed message never
+retains — nothing further was needed there.
+
+**Pre-launch backfill.** `logic/backfill_seal_logic.php` (an in-window,
+session-authenticated API action, `mailbox/backfill_seal`) converges a user's
+already-stored, not-yet-sealed mail to the sealed form once they set up a vault — one
+bounded batch per call, called repeatedly until `done: true`. It seals what the read
+path expects per direction: an outbound row's `iem_recipient` seals as content, an
+inbound row's stays plaintext routing metadata. A message still carrying
+its raw (a legacy fallback-stored row) re-splits its attachments into sealed Files and
+destroys the raw; an already-lean row (Files already extracted before the vault
+existed) has its content columns sealed while its existing attachment Files stay
+plaintext — safe, because every byte reader keys on the per-file `ima_is_sealed` flag,
+so those Files keep streaming as-is (the accepted pre-launch residual; there are no
+production users yet).
+
+**Provisioning.** `ext-sqlite3` (with FTS5 compiled in) backs `MailboxIndex` and has no
+fallback — without it, search on a sealed mailbox is simply unavailable (the reader
+surfaces this, not a 500). `InboundEmailHealth::checkSearchIndexEngine()` verifies both
+the extension and FTS5 support. The unlock window's own host-hardening facts (APCu
+`apc.mmap_file_mask`, swap, coredumps) are the vault's own `VaultHealth` check
+(`includes/VaultHealth.php`), not repeated here.
+
 ## Mailbox Reader
 
 The Mailbox Reader is a two-pane Gmail-style reader over the stored messages:
@@ -1059,6 +1185,41 @@ messages). The message view shows a banner with the score, the summary, and
 the red-flags findings, styled by verdict (`safe` / `suspicious` /
 `dangerous`); it renders as a sibling of the message body (not inside it) so
 it stays visible even when the message is collapsed.
+
+## Email triage
+
+A one-line **summary** plus an **existing label** applied automatically,
+generated by the `email_triage` pipeline job (see
+`plugins/joinery_ai/docs/overview.md` § Registered jobs) — the inbox sorts
+itself into the labels the mailbox owner already uses, with no new
+vocabulary invented by the job. It shares its mailbox-selection config,
+access check, and source digest (`EmailSecurityDigest::build()`) with the
+`email_security_scan` job above; the two run as independent recipes with
+their own `aip_recipe_item_log` rows, so either can run on a mailbox without
+the other, or both together.
+
+**`MailboxAliasConfig`** (`includes/MailboxAliasConfig.php`) is the shared
+mailbox-alias config helper both AI pipeline jobs bind through: the dropdown
+of enabled, store-capable mailbox addresses (`aliasOptions()`), address
+resolution to an alias id (`resolveAliasId()`), the `mailbox_alias`
+descriptor field (`descriptorField()`), and the owner-grant check a recipe's
+`validateConfig()` runs at save time (`validateOwnerGrant()`). It lives in
+this plugin, not `joinery_ai`, because it is mailbox-domain knowledge — the
+dependency points this plugin → `joinery_ai`, never the reverse.
+
+**Verdict fields**, written only by the job's `recordVerdict()`:
+
+- `iem_ai_summary` (`varchar(280)`) — the one AI-authored message field this
+  job writes. Content in miniature, so it is a sealed field alongside the
+  message body on a protected domain (see Encryption at rest, above); labels
+  stay cleartext.
+- A label application via `InboundLabelMember::apply()` — an *existing*
+  label only (`InboundEmailLabel::getByName()`); this job never creates one.
+  A message with no fitting label gets a summary only.
+
+`NULL` until a pipeline recipe triages the message; re-triaging after a
+mis-label is an admin deleting the recipe's `aip_recipe_item_log` row for
+that message, same as the security scan job.
 
 ## Filters
 

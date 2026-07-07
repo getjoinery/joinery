@@ -43,13 +43,24 @@ $received_local = LibraryFunctions::convert_time(
 	$message->get('iem_received_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i:s A T'
 );
 
+// Sender/recipient/subject/body come from the logic layer as $sender/
+// $recipient/$subject/$body_plain/$body_html, already resolved through the
+// Sealed Vault decrypt path — never read directly off $message here
+// (specs/implemented/inbound_email_encryption_at_rest.md § 7: gate on key
+// possession, not permission — $locked means no open window for this
+// message's owner, admin or not).
+if ($locked) {
+	echo '<div class="alert alert-warning mb-3">This message is sealed and its owner\'s vault is locked. '
+		. 'Content is unreadable until they unlock it.</div>';
+}
+
 // Header card
 echo '<div class="card mb-3">';
 echo '<div class="card-body">';
 echo '<dl class="row mb-0">';
-echo '<dt class="col-sm-2">From</dt><dd class="col-sm-10">' . htmlspecialchars($message->get('iem_sender') ?: '-') . '</dd>';
-echo '<dt class="col-sm-2">To</dt><dd class="col-sm-10">' . htmlspecialchars($message->get('iem_recipient') ?: '-') . '</dd>';
-echo '<dt class="col-sm-2">Subject</dt><dd class="col-sm-10">' . htmlspecialchars($message->get('iem_subject') ?: '(no subject)') . '</dd>';
+echo '<dt class="col-sm-2">From</dt><dd class="col-sm-10">' . htmlspecialchars($locked ? '[locked]' : ($sender ?: '-')) . '</dd>';
+echo '<dt class="col-sm-2">To</dt><dd class="col-sm-10">' . htmlspecialchars($locked ? '[locked]' : ($recipient ?: '-')) . '</dd>';
+echo '<dt class="col-sm-2">Subject</dt><dd class="col-sm-10">' . htmlspecialchars($locked ? '[locked]' : ($subject ?: '(no subject)')) . '</dd>';
 echo '<dt class="col-sm-2">Received</dt><dd class="col-sm-10">' . htmlspecialchars($received_local) . '</dd>';
 echo '<dt class="col-sm-2">Domain</dt><dd class="col-sm-10">' . htmlspecialchars($domain_name ?: '-') . '</dd>';
 echo '<dt class="col-sm-2">Alias</dt><dd class="col-sm-10">' . htmlspecialchars($alias_name ?: '(catch-all)') . '</dd>';
@@ -107,7 +118,7 @@ if (!empty($attachments) && count($attachments)) {
 $base = '/plugins/mailbox/admin/admin_mailbox_message?iem_inbound_email_message_id=' . intval($message->key);
 echo '<div class="mb-3">';
 echo '<a class="btn btn-sm ' . (!$show_html ? 'btn-primary' : 'btn-outline-primary') . '" href="' . $base . '">Plain text</a> ';
-$has_html = $body_html !== '' && $body_html !== null;
+$has_html = !$locked && $body_html !== '' && $body_html !== null;
 if ($has_html) {
 	echo '<a class="btn btn-sm ' . ($show_html ? 'btn-primary' : 'btn-outline-primary') . '" href="' . $base . '&amp;view=html">HTML (sandboxed)</a> ';
 }
@@ -128,11 +139,12 @@ if ($show_html && $has_html) {
 	echo '</div></div>';
 } else {
 	echo '<div class="card"><div class="card-body">';
-	$plain = $message->get('iem_body_plain');
-	if ($plain === '' || $plain === null) {
+	if ($locked) {
+		echo '<em class="text-muted">This message is sealed and locked.</em>';
+	} elseif ($body_plain === '' || $body_plain === null) {
 		echo '<em class="text-muted">No plain-text body. Use the HTML or Raw view.</em>';
 	} else {
-		echo '<pre class="iem-msg-plain">' . htmlspecialchars($plain) . '</pre>';
+		echo '<pre class="iem-msg-plain">' . htmlspecialchars($body_plain) . '</pre>';
 	}
 	echo '</div></div>';
 }

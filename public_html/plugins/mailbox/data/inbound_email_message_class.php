@@ -59,7 +59,30 @@
  * its numeric score for display/tuning only (never disposition); iem_learned_verdict
  * tracks what the LearnSpamFeedback task has taught rspamd's Bayes classifier.
  *
- * @version 1.9
+ * ENCRYPTION AT REST (specs/implemented/inbound_email_encryption_at_rest.md). When the
+ * owning user (the alias's single grantee) holds a Sealed Vault (docs/sealed_vault.md),
+ * InboundEmailRouter::storeMessage seals iem_sender/iem_subject/iem_body_plain/
+ * iem_body_html under a per-message DEK (iem_sealed_key, sealed to the owner's vault
+ * public key); iem_content_sealed marks a row sealed and iem_key_generation matches the
+ * vault generation the DEK is sealed to (0 = never sealed — a Standard-tier mailbox with
+ * no vault, or a row from before the owner had one). $sealed_fields + decryptSealedField()/
+ * decryptSealedFieldStatic() are the generic Sealed Vault read hook: SystemBase::get()
+ * decrypts automatically for a loaded model, and the raw-row paths (MailboxService,
+ * ModelQueryExecutor) call decryptSealedFieldStatic() directly. A locked vault raises
+ * VaultLockedException; an unsealed row (iem_content_sealed = false) is returned as-is —
+ * there is nothing to decrypt. iem_sealed_owner_user_id records WHOSE vault the row is
+ * sealed to at seal time — decryption resolves the owner from the row itself, immune to
+ * later grant-list or alias changes. sealAd()/attachmentAd()/rawAd() are the single
+ * source of the AD (additional data) row-binding convention every sealer/opener must
+ * agree on byte-for-byte. Attachment Files record their own sealed state per file
+ * (ima_is_sealed); a sealed-mailbox extraction-failure fallback stores the raw as one
+ * AEAD blob (iem_raw_sealed) that getRawMessage() opens in-window.
+ *
+ * AI TRIAGE (specs/implemented/joinery_ai_email_triage.md). iem_ai_summary is the one AI-authored
+ * message field the email_triage pipeline job writes — a one-line gist for the inbox,
+ * content in miniature, so it is a $sealed_fields member like the body columns above.
+ *
+ * @version 1.12
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -76,6 +99,15 @@ class InboundEmailMessage extends SystemBase {
 	const SPAM_VERDICT_HAM  = 'ham';
 	const SPAM_VERDICT_SPAM = 'spam';
 
+	// Sealed Vault generic read hook (docs/sealed_vault.md) — decrypted transparently
+	// by SystemBase::get() for a loaded model; raw-row readers call
+	// decryptSealedFieldStatic() directly (see class docblock). iem_recipient is
+	// sealed ONLY on an outbound row (§ 4.6 — the recipient list is real content
+	// worth sealing there; an inbound row's iem_recipient is the receiving
+	// alias address, routing metadata, and is never sealed even on an otherwise
+	// sealed row) — see the iem_direction check in decryptSealedField() below.
+	public static $sealed_fields = array('iem_sender', 'iem_subject', 'iem_body_plain', 'iem_body_html', 'iem_recipient', 'iem_ai_summary');
+
 	protected static $foreign_key_actions = [
 		'iem_ied_inbound_email_domain_id' => ['action' => 'cascade'],
 		'iem_iea_inbound_email_alias_id'  => ['action' => 'null'],
@@ -86,12 +118,35 @@ class InboundEmailMessage extends SystemBase {
 		'iem_inbound_email_message_id'    => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'iem_ied_inbound_email_domain_id' => array('type'=>'int4', 'is_nullable'=>false),
 		'iem_iea_inbound_email_alias_id'  => array('type'=>'int4'),
-		'iem_sender'              => array('type'=>'varchar(500)'),
-		'iem_recipient'           => array('type'=>'varchar(500)'),
-		'iem_subject'             => array('type'=>'varchar(1000)'),
+		// iem_sender/iem_subject/iem_recipient hold ciphertext once sealed, so all
+		// are 'text' — varchar caps are too small for base64 + AEAD overhead
+		// (iem_recipient carries a sealed outbound row's full recipient list).
+		'iem_sender'              => array('type'=>'text'),
+		'iem_recipient'           => array('type'=>'text'),
+		'iem_subject'             => array('type'=>'text'),
 		'iem_body_plain'          => array('type'=>'text'),
 		'iem_body_html'           => array('type'=>'text'),
 		'iem_raw_message'         => array('type'=>'text'), // legacy/'inline' only — new push writes leave this empty
+		// Encryption at rest (specs/implemented/inbound_email_encryption_at_rest.md).
+		// iem_sealed_key is the per-message DEK, sealed to the owner's vault public key
+		// (null when never sealed). iem_key_generation matches the vault generation the
+		// DEK is sealed to; 0 = not sealed (Standard-tier / no vault). iem_content_sealed
+		// marks a row whose content columns hold ciphertext; a row can exist with
+		// iem_content_sealed = false and empty content columns mid-ingest (the crash
+		// window InboundEmailRouter::storeMessage's UPDATE closes) or permanently for a
+		// Standard-tier message, which is never sealed and holds plaintext throughout.
+		'iem_sealed_key'          => array('type'=>'text', 'is_nullable'=>true),
+		'iem_key_generation'      => array('type'=>'int4', 'is_nullable'=>false, 'default'=>0),
+		'iem_content_sealed'      => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
+		// Whose vault this row's DEK is sealed to, recorded AT SEAL TIME — the
+		// decrypt paths resolve the owner from here, so later grant-list or
+		// alias changes can never strand already-sealed mail (null only on a
+		// legacy row; readers fall back to the live single-grantee resolution).
+		'iem_sealed_owner_user_id' => array('type'=>'int8', 'is_nullable'=>true),
+		// The stored raw (fallback shape) is itself an AEAD blob under the
+		// message DEK — set by the sealed-mailbox extraction-failure fallback
+		// (InboundEmailRouter::persistRawAndManifest); getRawMessage() opens it.
+		'iem_raw_sealed'          => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		// Raw-message storage descriptor (specs/inbound_raw_message_storage.md).
 		'iem_raw_storage_driver'    => array('type'=>'varchar(16)', 'default'=>'inline'), // inline | local | cloud | remote
 		'iem_raw_storage_key'       => array('type'=>'varchar(500)'),                     // tier-invariant relative key (local/cloud); null for inline/remote
@@ -130,6 +185,12 @@ class InboundEmailMessage extends SystemBase {
 		'iem_ai_danger_score'     => array('type'=>'int2'),
 		'iem_ai_scan'             => array('type'=>'jsonb'), // {verdict, red_flags, summary, model, recipe_id}
 		'iem_ai_scan_time'        => array('type'=>'timestamp(6)'),
+		// AI triage (specs/implemented/joinery_ai_email_triage.md). One-line gist for the
+		// inbox, written ONLY by EmailTriageJob::recordVerdict() (not
+		// $ai_writable_fields). Content in miniature, so it is a sealed field
+		// like the message body on a protected domain (see $sealed_fields) —
+		// labels stay cleartext (operational metadata).
+		'iem_ai_summary'          => array('type'=>'varchar(280)'),
 		'iem_size_bytes'          => array('type'=>'int4'),
 		// IMAP locator (populated only for reference-backed, IMAP-sourced rows;
 		// a non-null iem_iia_inbound_imap_account_id marks the row reference-backed
@@ -157,6 +218,209 @@ class InboundEmailMessage extends SystemBase {
 		}
 	}
 
+	// ---------------------------------------------------------- encryption at rest
+
+	/**
+	 * The AD (additional data) row-binding string for a sealed content field —
+	 * the single source of this convention (docs/sealed_vault.md § AD). Every
+	 * sealer (InboundEmailRouter::storeMessage, MailboxSender::storeOutboundRow,
+	 * the rotation re-seal callback) and every opener (decryptSealedField(),
+	 * decryptSealedFieldStatic()) must build the identical string, or the AEAD
+	 * open fails (by design — the splice defense).
+	 */
+	public static function sealAd(int $message_id, string $field): string {
+		return 'mail:' . $message_id . ':' . $field;
+	}
+
+	/**
+	 * The AD for a sealed attachment File's bytes — see sealAd(). Bound to the
+	 * MIME part id (e.g. "2", "1.2"), not the ima_ manifest row's serial id:
+	 * the part id is known before the manifest row is inserted (the seal
+	 * happens while minting the File, one step before the manifest insert —
+	 * InboundEmailRouter::extractAttachmentsToFiles), so there is no
+	 * chicken-and-egg with an id that doesn't exist yet.
+	 */
+	public static function attachmentAd(int $message_id, string $mime_part): string {
+		return 'mail:' . $message_id . ':att:' . $mime_part;
+	}
+
+	/**
+	 * The AD for a sealed stored raw (the extraction-failure fallback shape on
+	 * a sealed mailbox — see InboundEmailRouter::persistRawAndManifest) — see
+	 * sealAd().
+	 */
+	public static function rawAd(int $message_id): string {
+		return 'mail:' . $message_id . ':raw';
+	}
+
+	/**
+	 * The single grantee who owns this alias's mailbox — the vault the message
+	 * seals to. Mirrors InboundEmailRouter::attachmentOwnerId(): sealing only
+	 * applies to a single-reader mailbox (the ProtonMail model this package
+	 * targets); a shared alias or NULL/catch-all alias has no single owner to
+	 * seal to and is never sealed (specs/implemented/inbound_email_encryption_at_rest.md § 4.3).
+	 * Returns null when there is no single owner.
+	 */
+	public static function singleOwnerUserId(?int $alias_id): ?int {
+		if (!$alias_id) {
+			return null;
+		}
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
+		$grantees = InboundEmailMailboxGrant::user_ids_for_alias($alias_id);
+		return (count($grantees) === 1) ? intval($grantees[0]) : null;
+	}
+
+	/**
+	 * The vault owner a sealed row decrypts against: the owner recorded at
+	 * seal time (iem_sealed_owner_user_id — immune to later grant/alias
+	 * changes), falling back to the live single-grantee resolution only for a
+	 * legacy row sealed before the column existed.
+	 */
+	private static function sealedOwnerUserId($sealed_owner, $alias_id): ?int {
+		if ($sealed_owner !== null && intval($sealed_owner) > 0) {
+			return intval($sealed_owner);
+		}
+		return self::singleOwnerUserId($alias_id !== null ? intval($alias_id) : null);
+	}
+
+	/**
+	 * Sealed Vault generic read hook (docs/sealed_vault.md), the SystemBase::get()
+	 * path for a loaded model. Returns the ciphertext unchanged for a row that was
+	 * never sealed (iem_content_sealed = false / no iem_sealed_key — Standard-tier,
+	 * or a row mid-ingest before Phase 4's UPDATE completes). Throws
+	 * VaultLockedException when the owner's vault window is closed.
+	 */
+	protected function decryptSealedField($field, $ciphertext) {
+		if (!$this->get('iem_content_sealed') || !$this->get('iem_sealed_key')) {
+			return $ciphertext;
+		}
+		if ($field === 'iem_recipient' && $this->get('iem_direction') !== 'outbound') {
+			return $ciphertext; // inbound row: the receiving alias address, never sealed
+		}
+		$owner_id = self::sealedOwnerUserId($this->get('iem_sealed_owner_user_id'), $this->get('iem_iea_inbound_email_alias_id'));
+		if ($owner_id === null) {
+			require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+			throw new VaultLockedException();
+		}
+		return self::openSealedField(intval($this->key), $owner_id, (string)$this->get('iem_sealed_key'), $field, $ciphertext);
+	}
+
+	/**
+	 * Same as decryptSealedField(), for the raw-row path (MailboxService's direct
+	 * SQL reads; plugins/joinery_ai/includes/ModelQueryExecutor.php) that never
+	 * instantiates a model.
+	 */
+	public static function decryptSealedFieldStatic($field, $ciphertext, array $row) {
+		if (empty($row['iem_content_sealed']) || empty($row['iem_sealed_key'])) {
+			return $ciphertext;
+		}
+		if ($field === 'iem_recipient' && ($row['iem_direction'] ?? 'inbound') !== 'outbound') {
+			return $ciphertext; // inbound row: the receiving alias address, never sealed
+		}
+		$owner_id = self::sealedOwnerUserId($row['iem_sealed_owner_user_id'] ?? null, $row['iem_iea_inbound_email_alias_id'] ?? null);
+		if ($owner_id === null) {
+			require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+			throw new VaultLockedException();
+		}
+		$message_id = intval($row['iem_inbound_email_message_id'] ?? 0);
+		return self::openSealedField($message_id, $owner_id, (string)$row['iem_sealed_key'], $field, $ciphertext);
+	}
+
+	/** Shared opener: unwrap the per-message DEK (in-window), then the AEAD field. */
+	private static function openSealedField(int $message_id, int $owner_id, string $sealed_key, string $field, string $ciphertext): string {
+		$crypto = self::openMessageDekCrypto($owner_id, $sealed_key);
+		return $crypto['crypto']->openField($ciphertext, $crypto['dek'], self::sealAd($message_id, $field));
+	}
+
+	/**
+	 * Open one attachment's stored bytes for a message — the one
+	 * implementation the File decrypt hook (plugins/mailbox/includes/
+	 * bootstrap.php), the download endpoints (includes/attachment_retrieval.php)
+	 * and a forward's re-attach path (MailboxSender::readOriginalPartBytes) all
+	 * call, so the owner/window/vault resolution lives once. Whether the bytes
+	 * are sealed is the ATTACHMENT row's ima_is_sealed — a per-file fact (a
+	 * backfilled message's pre-vault Files stay plaintext while its body is
+	 * sealed), never inferred from the message's own flags. Throws
+	 * VaultLockedException when the owner's window is closed or no owner is
+	 * resolvable.
+	 */
+	public static function openSealedAttachment(InboundEmailMessage $msg, InboundMessageAttachment $att, string $bytes): string {
+		if (!$att->get('ima_is_sealed')) {
+			return $bytes; // stored plaintext - nothing to open
+		}
+		$owner_id = self::sealedOwnerUserId($msg->get('iem_sealed_owner_user_id'), $msg->get('iem_iea_inbound_email_alias_id'));
+		if ($owner_id === null || !$msg->get('iem_sealed_key')) {
+			require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+			throw new VaultLockedException();
+		}
+		$message_id = intval($msg->key);
+		$crypto = self::openMessageDekCrypto($owner_id, (string)$msg->get('iem_sealed_key'));
+		return $crypto['crypto']->openField($bytes, $crypto['dek'], self::attachmentAd($message_id, (string)$att->get('ima_mime_part')));
+	}
+
+	/** @return array{crypto:VaultCrypto,dek:string} */
+	private static function openMessageDekCrypto(int $owner_id, string $sealed_key): array {
+		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
+
+		$secret = VaultUnlock::secretKey($owner_id);
+		if ($secret === null) {
+			throw new VaultLockedException();
+		}
+		$crypto = new VaultCrypto();
+		$dek = $crypto->openItemDek($sealed_key, $secret);
+		return array('crypto' => $crypto, 'dek' => $dek);
+	}
+
+	/**
+	 * Seal a just-inserted row's content columns and UPDATE it in place —
+	 * shared by InboundEmailRouter::storeMessage (inbound) and
+	 * MailboxSender::storeOutboundRow (outbound; also seals $recipient, since
+	 * an outbound row's recipient list is real content — see $sealed_fields).
+	 * $vault is the OWNER's vault (the alias's single grantee), which is who
+	 * the DEK seals to either direction. Returns the per-message DEK (raw
+	 * bytes) so the caller can also seal this message's attachments under the
+	 * same key.
+	 */
+	public static function sealAndPersistContent(int $message_id, UserEncryptionVault $vault, string $sender,
+			string $recipient, string $subject, string $body_plain, string $body_html, bool $seal_recipient = false): string {
+		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
+		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
+
+		$crypto = new VaultCrypto();
+		$dek = $crypto->newItemDek();
+		$sealed_key = $crypto->sealItemDek($dek, (string)$vault->get('uev_public_key'));
+
+		// The owner is recorded ON the row at seal time (iem_sealed_owner_user_id)
+		// so decryption never depends on the grant list as it happens to look
+		// later — a grant addition or alias deletion must not strand sealed mail.
+		$sets = 'iem_sender = ?, iem_subject = ?, iem_body_plain = ?, iem_body_html = ?,
+				 iem_sealed_key = ?, iem_key_generation = ?, iem_sealed_owner_user_id = ?, iem_content_sealed = true';
+		$params = [
+			$crypto->sealField($sender, $dek, self::sealAd($message_id, 'iem_sender')),
+			$crypto->sealField($subject, $dek, self::sealAd($message_id, 'iem_subject')),
+			$crypto->sealField($body_plain, $dek, self::sealAd($message_id, 'iem_body_plain')),
+			$crypto->sealField($body_html, $dek, self::sealAd($message_id, 'iem_body_html')),
+			$sealed_key,
+			intval($vault->get('uev_key_generation')),
+			intval($vault->get('uev_usr_user_id')),
+		];
+		// iem_recipient is only touched when the caller opts into sealing it
+		// (an outbound row's recipient list). An inbound row's iem_recipient —
+		// the receiving alias address, routing metadata — was already written
+		// correctly at insert and must be left alone here.
+		if ($seal_recipient) {
+			$sets = 'iem_recipient = ?, ' . $sets;
+			array_unshift($params, $crypto->sealField($recipient, $dek, self::sealAd($message_id, 'iem_recipient')));
+		}
+		$params[] = $message_id;
+
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare("UPDATE iem_inbound_email_messages SET $sets WHERE iem_inbound_email_message_id = ?");
+		$stmt->execute($params);
+		return $dek;
+	}
+
 	/**
 	 * The whole raw RFC822 message, resolved through the storage descriptor.
 	 * Returns null when there is no stored raw (empty inline, or a 'remote' row
@@ -168,14 +432,14 @@ class InboundEmailMessage extends SystemBase {
 		$driver = (string)$this->get('iem_raw_storage_driver') ?: 'inline';
 		$key    = (string)$this->get('iem_raw_storage_key');
 
+		$raw = null;
 		if ($driver === 'inline') {
-			$raw = $this->get('iem_raw_message');
-			return ($raw === null || $raw === '') ? null : (string)$raw;
-		}
-		if ($driver === 'local' || $driver === 'cloud') {
+			$inline = $this->get('iem_raw_message');
+			$raw = ($inline === null || $inline === '') ? null : (string)$inline;
+		} elseif ($driver === 'local' || $driver === 'cloud') {
 			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RawMessageStore.php'));
 			try {
-				return RawMessageStore::read($driver, $key);
+				$raw = RawMessageStore::read($driver, $key);
 			} catch (Throwable $e) {
 				error_log('InboundEmailMessage::getRawMessage failed (driver=' . $driver
 					. ', id=' . $this->key . '): ' . $e->getMessage());
@@ -184,7 +448,24 @@ class InboundEmailMessage extends SystemBase {
 		}
 		// 'remote' — the whole raw is never reconstructed; callers fetch the one
 		// part they need via ImapIngestor::fetchPart().
-		return null;
+		if ($raw === null) {
+			return null;
+		}
+
+		// A sealed-mailbox extraction-failure fallback stores the raw as one
+		// AEAD blob under the message DEK (InboundEmailRouter::
+		// persistRawAndManifest) — open it in-window; a closed window raises
+		// VaultLockedException like every other sealed read.
+		if ($this->get('iem_raw_sealed')) {
+			$owner_id = self::sealedOwnerUserId($this->get('iem_sealed_owner_user_id'), $this->get('iem_iea_inbound_email_alias_id'));
+			if ($owner_id === null || !$this->get('iem_sealed_key')) {
+				require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+				throw new VaultLockedException();
+			}
+			$crypto = self::openMessageDekCrypto($owner_id, (string)$this->get('iem_sealed_key'));
+			return $crypto['crypto']->openField($raw, $crypto['dek'], self::rawAd(intval($this->key)));
+		}
+		return $raw;
 	}
 
 	/**
@@ -338,18 +619,11 @@ class MultiInboundEmailMessage extends SystemMultiBase {
 			$filters['iem_thread_key'] = [$this->options['thread_key'], PDO::PARAM_STR];
 		}
 
-		if (isset($this->options['subject']) && $this->options['subject'] !== '') {
-			$term = '%' . str_replace(array('%', '_'), array('\\%', '\\_'), $this->options['subject']) . '%';
-			$filters['iem_subject'] = 'ILIKE ' . $dblink->quote($term);
-		}
-
-		// Body search spans both decoded bodies; OR-grouped so it does not widen
-		// any other clause. Uses the split-parenthesis option-key convention.
-		if (isset($this->options['body']) && $this->options['body'] !== '') {
-			$term = '%' . str_replace(array('%', '_'), array('\\%', '\\_'), $this->options['body']) . '%';
-			$q = $dblink->quote($term);
-			$filters['(iem_body_plain'] = 'ILIKE ' . $q . ' OR iem_body_html ILIKE ' . $q . ')';
-		}
+		// subject/body/sender ILIKE search removed (specs/implemented/
+		// inbound_email_encryption_at_rest.md § 4.5) — those columns hold
+		// ciphertext once sealed and can never be scanned in SQL. Full-text
+		// search is MailboxIndex's FTS5 id-whitelist (plugins/mailbox/includes/
+		// MailboxIndex.php), joined into MailboxService::listThreads() instead.
 
 		if (isset($this->options['is_read'])) {
 			$filters['iem_is_read'] = $this->options['is_read'] ? '= true' : '= false';
@@ -362,11 +636,6 @@ class MultiInboundEmailMessage extends SystemMultiBase {
 		if (isset($this->options['recipient']) && $this->options['recipient'] !== '') {
 			$term = '%' . str_replace(array('%', '_'), array('\\%', '\\_'), $this->options['recipient']) . '%';
 			$filters['iem_recipient'] = 'ILIKE ' . $dblink->quote($term);
-		}
-
-		if (isset($this->options['sender']) && $this->options['sender'] !== '') {
-			$term = '%' . str_replace(array('%', '_'), array('\\%', '\\_'), $this->options['sender']) . '%';
-			$filters['iem_sender'] = 'ILIKE ' . $dblink->quote($term);
 		}
 
 		if (isset($this->options['message_id_header'])) {

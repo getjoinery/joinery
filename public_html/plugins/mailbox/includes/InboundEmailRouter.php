@@ -66,7 +66,7 @@
  * paths alike, never IMAP-polled mail. forwardStoredMessage() relays a copy for a filter's
  * "Forward to" action, reusing the alias-forward envelope rebuild + relay.
  *
- * @version 1.17
+ * @version 1.18
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -82,6 +82,7 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mail
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RawMessageStore.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/AuthenticationResults.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/SRSRewriter.php'));
+require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
 
 class InboundEmailRouter {
 
@@ -355,21 +356,32 @@ class InboundEmailRouter {
 		}
 
 		$subject_raw = $parsed['subject'] ?? '';
-		$subject = $this->decodeMimeHeader($subject_raw);
+		$subject = substr($this->decodeMimeHeader($subject_raw), 0, 4000);
+		$sender = substr($parsed['from_email'] ?? ($parsed['from'] ?? ''), 0, 500);
 
 		// Conversation grouping for the Mailbox Reader. Computed in-memory from
 		// the already-parsed In-Reply-To / References headers — the raw headers
 		// themselves are not persisted (recoverable from iem_raw_message).
 		$thread_key = $this->computeThreadKey($parsed, $message_id_header);
 
+		// Encryption at rest (specs/implemented/inbound_email_encryption_at_rest.md
+		// § 4.1), resolved BEFORE the insert: the owner (this alias's single
+		// grantee — the same resolution attachmentOwnerId() already does for
+		// attachment ownership) and, if they hold a Sealed Vault, key material to
+		// seal to. A sealing row is built with EMPTY content columns from the
+		// start — no plaintext is ever written, even transiently.
+		$owner_id = $this->attachmentOwnerId($alias);
+		$vault = ($owner_id !== User::USER_SYSTEM) ? $this->loadOwnerVault($owner_id) : null;
+		$sealing = ($vault !== null);
+
 		$row = [
 			'iem_ied_inbound_email_domain_id' => $domain->key,
 			'iem_iea_inbound_email_alias_id'  => $alias ? $alias->key : null,
-			'iem_sender'      => substr($parsed['from_email'] ?? ($parsed['from'] ?? ''), 0, 500),
+			'iem_sender'      => $sealing ? '' : $sender,
 			'iem_recipient'   => substr($envelope_recipient, 0, 500),
-			'iem_subject'     => substr($subject, 0, 1000),
-			'iem_body_plain'  => $bodies['plain'],
-			'iem_body_html'   => $bodies['html'],
+			'iem_subject'     => $sealing ? '' : $subject,
+			'iem_body_plain'  => $sealing ? '' : $bodies['plain'],
+			'iem_body_html'   => $sealing ? '' : $bodies['html'],
 			'iem_raw_message' => '', // raw goes to the store after insert (see below)
 			'iem_message_id_header' => $message_id_header,
 			'iem_thread_key'  => $thread_key,
@@ -383,9 +395,23 @@ class InboundEmailRouter {
 			'iem_received_time' => gmdate('Y-m-d H:i:s'),
 		];
 
+		// A sealing row's insert and its seal UPDATE are ONE transaction: the
+		// empty-content insert must never survive a seal failure. If it did,
+		// Postfix's retry (exit 75 from handleDelivery) would hit the dedup
+		// unique constraint and report success — a permanently empty message.
+		// Rolling back instead means the retry re-inserts from a clean slate.
+		$db = null;
+		if ($sealing) {
+			$db = DbConnector::get_instance()->get_db_link();
+			$db->beginTransaction();
+		}
+
 		try {
 			$msg = InboundEmailMessage::CreateEntry($row);
 		} catch (PDOException $e) {
+			if ($db !== null) {
+				$db->rollBack();
+			}
 			if ($e->getCode() === '23505') {
 				// Dedup before any file is written — a deduped message never orphans
 				// a stored object.
@@ -393,6 +419,9 @@ class InboundEmailRouter {
 			}
 			throw $e;
 		} catch (\Throwable $e) {
+			if ($db !== null) {
+				$db->rollBack();
+			}
 			// Some SystemBase implementations may wrap the PDOException.
 			$prev = $e->getPrevious();
 			if ($prev instanceof PDOException && $prev->getCode() === '23505') {
@@ -401,9 +430,24 @@ class InboundEmailRouter {
 			throw $e;
 		}
 
+		// With key material: seal the content columns now that the row has its
+		// serial id (the AD row-binding needs it) and UPDATE. $dek carries
+		// through to attachment sealing (persistRawAndManifest below) — one DEK
+		// seals the whole message, body and attachments alike.
+		$dek = null;
+		if ($sealing) {
+			try {
+				$dek = $this->sealMessageContent(intval($msg->key), $vault, $sender, $subject, $bodies['plain'], $bodies['html']);
+				$db->commit();
+			} catch (\Throwable $e) {
+				$db->rollBack();
+				throw $e; // handleDelivery returns 75; no half-row survives to poison dedup
+			}
+		}
+
 		// Row inserted (we now have the serial id): split attachments into private
 		// Files and store the lean record (or fall back to raw storage on failure).
-		$this->persistRawAndManifest(intval($msg->key), $raw_email, $alias);
+		$this->persistRawAndManifest(intval($msg->key), $raw_email, $alias, $dek);
 
 		// Inbound filters (specs/implemented/inbound_email_filters.md). storeMessage
 		// is the single local-only post-persist point, reached by every locally-
@@ -412,14 +456,40 @@ class InboundEmailRouter {
 		// uses storeExtracted). It runs AFTER the spam verdict is set, so a filter's
 		// never_spam/mark_spam is the last word on disposition. Best-effort: a filter
 		// failure is logged but never aborts ingest (the message is already stored).
+		//
+		// Filters match on the plaintext this method already has in hand, NEVER on
+		// $msg's own columns (specs/implemented/inbound_email_encryption_at_rest.md
+		// § 4.2): ingest runs with no unlock window, so a sealed row's iem_sender/
+		// iem_subject/iem_body_* would raise VaultLockedException on read.
 		try {
 			require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_filter_class.php'));
-			InboundEmailFilter::runForMessage($msg, $parsed, $alias);
+			InboundEmailFilter::runForMessage($msg, $parsed, $alias, [
+				'sender' => $sender, 'subject' => $subject,
+				'body_plain' => $bodies['plain'], 'body_html' => $bodies['html'],
+			]);
 		} catch (\Throwable $e) {
 			error_log('InboundEmailRouter: inbound filter run failed for message ' . $msg->key . ': ' . $e->getMessage());
 		}
 
 		return ['message' => $msg, 'dedup' => false];
+	}
+
+	/** The owner's Sealed Vault, or null when they have none (never sealed). */
+	private function loadOwnerVault(int $owner_id) {
+		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
+		return UserEncryptionVault::loadForUser($owner_id);
+	}
+
+	/**
+	 * Seal a just-inserted message's content columns and UPDATE the row.
+	 * Returns the per-message DEK (raw bytes) so the caller can also seal this
+	 * message's attachments under the SAME key.
+	 */
+	private function sealMessageContent(int $message_id, $vault, string $sender, string $subject, string $body_plain, string $body_html): string {
+		// iem_recipient is an inbound row's receiving alias address — routing
+		// metadata, not content — so $seal_recipient stays false; storeMessage
+		// already wrote it in cleartext at insert (it is never emptied above).
+		return InboundEmailMessage::sealAndPersistContent($message_id, $vault, $sender, '', $subject, $body_plain, $body_html, false);
 	}
 
 	/**
@@ -438,15 +508,49 @@ class InboundEmailRouter {
 	 *
 	 * Ingest never aborts; a message always lands in whichever shape succeeded.
 	 * The fallback is logged (a distinct marker) so an operator sees disk pressure.
+	 *
+	 * $dek: the message's per-item DEK (raw bytes), non-null only when
+	 * sealMessageContent() sealed the message body — attachments seal under
+	 * the SAME key (specs/implemented/inbound_email_encryption_at_rest.md § 5.1).
+	 * A sealed message's raw fallback is itself SEALED (one AEAD blob under the
+	 * DEK, iem_raw_sealed = true) before it reaches the raw store — the raw
+	 * path never writes a sealed mailbox's plaintext to disk, and the message
+	 * keeps the same durability a plaintext mailbox gets.
 	 */
-	private function persistRawAndManifest(int $message_id, string $raw_email, $alias = null) {
+	private function persistRawAndManifest(int $message_id, string $raw_email, $alias = null, ?string $dek = null) {
 		try {
-			$this->extractAttachmentsToFiles($message_id, $raw_email, $alias);
+			$this->extractAttachmentsToFiles($message_id, $raw_email, $alias, $dek);
 			return; // lean record: Files written, manifest linked, no raw retained
 		} catch (\Throwable $e) {
 			// extractAttachmentsToFiles() rolled back its own Files + manifest rows.
 			error_log('INBOUND_ATTACHMENT_EXTRACTION_FAILED message_id=' . $message_id
 				. ' (falling back to raw storage): ' . $e->getMessage());
+		}
+
+		if ($dek !== null) {
+			// Sealed message, extraction failed: preserve the raw WITHOUT leaking
+			// plaintext by sealing the whole RFC822 as one AEAD blob under the
+			// same message DEK before it hits the raw store. The section-pointer
+			// manifest is parsed from the in-memory plaintext as usual;
+			// getRawMessage() opens the blob in-window (iem_raw_sealed), so the
+			// download/forward paths keep working exactly like the plaintext
+			// fallback — just gated on the owner's unlock window. The sealed
+			// mailbox loses nothing a plaintext mailbox would have kept.
+			error_log('INBOUND_SEALED_ATTACHMENT_EXTRACTION_FAILED message_id=' . $message_id
+				. ' — falling back to SEALED raw storage.');
+			require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
+			$crypto = new VaultCrypto();
+			$sealed_raw = $crypto->sealField($raw_email, $dek, InboundEmailMessage::rawAd($message_id));
+			$this->persistRawFallback($message_id, $sealed_raw);
+			DbConnector::get_instance()->get_db_link()
+				->prepare('UPDATE iem_inbound_email_messages SET iem_raw_sealed = true WHERE iem_inbound_email_message_id = ?')
+				->execute([$message_id]);
+			try {
+				$this->writeManifestFromRaw($message_id, $raw_email);
+			} catch (\Throwable $e) {
+				error_log('InboundEmailRouter: attachment manifest write failed for message ' . $message_id . ': ' . $e->getMessage());
+			}
+			return;
 		}
 
 		// Fallback: persist the whole raw and write a section-pointer manifest —
@@ -469,9 +573,14 @@ class InboundEmailRouter {
 	 * rows are written only once every File exists, so a partial File failure
 	 * never leaves dangling links.
 	 */
-	private function extractAttachmentsToFiles(int $message_id, string $raw_email, $alias) {
+	private function extractAttachmentsToFiles(int $message_id, string $raw_email, $alias, ?string $dek = null) {
 		$owner_id = $this->attachmentOwnerId($alias);
 		$parts    = $this->enumerateNonTextParts($raw_email);
+		$crypto   = null;
+		if ($dek !== null) {
+			require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
+			$crypto = new VaultCrypto();
+		}
 
 		$created_files = array(); // File[] — for rollback
 		$rows = array();          // pending ima_ row arrays
@@ -485,6 +594,16 @@ class InboundEmailRouter {
 				$isInline = ($disp === 'inline') || ($cid !== null && $cid !== '' && $disp !== 'attachment');
 				$name = $part->getName() ? substr($part->getName(), 0, 500) : null;
 				$type = (string)$part->getType() ?: 'application/octet-stream';
+				$mime_part = (string)$part->getMimeId();
+
+				// Encryption at rest: with a DEK in hand, seal this part's bytes
+				// under it before the File is written — the File then stores
+				// ciphertext, and fil_source is the marker the decrypt hook
+				// (plugins/mailbox/includes/bootstrap.php) keys on.
+				$original_size = strlen($bytes);
+				if ($crypto !== null) {
+					$bytes = $crypto->sealField($bytes, $dek, InboundEmailMessage::attachmentAd($message_id, $mime_part));
+				}
 
 				// No resize()/variants — email attachments are served as their
 				// original; skipping resize is exactly the small-VPS relief.
@@ -495,18 +614,29 @@ class InboundEmailRouter {
 					$owner_id,
 					array('fil_private' => true, 'fil_source' => File::SOURCE_EMAIL_ATTACHMENT)
 				);
+				if ($crypto !== null) {
+					// createFromBytes()/save() detects fil_type from the on-disk bytes,
+					// which are now ciphertext (never a recognizable magic-byte
+					// signature) — restore the real content-type the caller supplied,
+					// so the reader shows the correct type once the hook decrypts.
+					$file->set('fil_type', substr($type, 0, 128));
+					$file->save();
+				}
 				$created_files[] = $file;
 
 				$rows[] = array(
 					'ima_iem_inbound_email_message_id' => $message_id,
 					'ima_filename'     => $name,
 					'ima_content_type' => substr($type, 0, 255),
-					'ima_size_bytes'   => strlen($bytes),
+					'ima_size_bytes'   => $original_size,
 					'ima_mime_part'    => substr((string)$part->getMimeId(), 0, 40),
 					'ima_encoding'     => substr($this->partTransferEncoding($part), 0, 40),
 					'ima_content_id'   => $cid ? substr(trim($cid, '<>'), 0, 255) : null,
 					'ima_is_inline'    => $isInline,
 					'ima_fil_file_id'  => intval($file->key),
+					// Per-file sealed state — every reader of the File bytes keys
+					// on this (InboundEmailMessage::openSealedAttachment).
+					'ima_is_sealed'    => ($crypto !== null),
 				);
 			}
 
@@ -585,6 +715,46 @@ class InboundEmailRouter {
 		} catch (\Throwable $e) {
 			error_log('InboundEmailRouter: manifest rollback failed for message ' . $message_id . ': ' . $e->getMessage());
 		}
+	}
+
+	/**
+	 * Pre-launch backfill (specs/implemented/inbound_email_encryption_at_rest.md
+	 * § 9), called from logic/mailbox_backfill_seal_logic.php: re-split a
+	 * still-raw message's attachments into SEALED Files under $dek. Deletes any
+	 * section-pointer manifest rows the original ingest wrote (the raw-fallback
+	 * shape) first, so re-extraction never duplicates the attachment list.
+	 */
+	public function resealBackfillAttachments(int $message_id, string $raw_email, string $dek): void {
+		$this->deleteManifestRows($message_id);
+		$msg = new InboundEmailMessage($message_id, TRUE);
+		$alias_id = $msg->get('iem_iea_inbound_email_alias_id');
+		$alias = $alias_id ? new InboundEmailAlias(intval($alias_id), TRUE) : null;
+		$this->extractAttachmentsToFiles($message_id, $raw_email, $alias, $dek);
+	}
+
+	/**
+	 * Pre-launch backfill: destroy a message's raw once its content and
+	 * attachments are sealed — not marked done until the raw is actually gone
+	 * (specs/implemented/inbound_email_encryption_at_rest.md § 9).
+	 */
+	public function destroyRawAfterBackfill(int $message_id): void {
+		$msg = new InboundEmailMessage($message_id, TRUE);
+		$driver = (string)$msg->get('iem_raw_storage_driver');
+		$key = (string)$msg->get('iem_raw_storage_key');
+		if ($driver === 'local' || $driver === 'cloud') {
+			try {
+				require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RawMessageStore.php'));
+				RawMessageStore::delete($driver, $key);
+			} catch (\Throwable $e) {
+				error_log('InboundEmailRouter: backfill raw reclaim failed for message ' . $message_id . ': ' . $e->getMessage());
+			}
+		}
+		$db = DbConnector::get_instance()->get_db_link();
+		$db->prepare(
+			"UPDATE iem_inbound_email_messages
+			 SET iem_raw_message = '', iem_raw_storage_driver = 'inline', iem_raw_storage_key = NULL
+			 WHERE iem_inbound_email_message_id = ?")
+			->execute([$message_id]);
 	}
 
 	/**
@@ -952,7 +1122,11 @@ class InboundEmailRouter {
 		if (!count($destinations)) {
 			return array();
 		}
-		$raw = $msg->getRawMessage();
+		try {
+			$raw = $msg->getRawMessage();
+		} catch (VaultLockedException $e) {
+			$raw = null; // sealed raw and no open window — treated as unavailable below
+		}
 		if ($raw === null || $raw === '') {
 			error_log('InboundEmailRouter::forwardStoredMessage: no raw available for message ' . $msg->key);
 			return array();
@@ -1479,12 +1653,17 @@ class InboundEmailRouter {
 	 * domain filter and the per-domain rate-limit query work without a
 	 * join through the alias table — and so catch-all stores (alias null)
 	 * remain visible to the domain filter.
+	 *
+	 * Never logs the subject (specs/implemented/inbound_email_encryption_at_rest.md
+	 * § 7 "no sideways copies" — the log viewer is routing metadata only: sender/
+	 * recipient addresses, verdicts, sizes; never subject/body content, sealed
+	 * mailbox or not).
 	 */
 	public function logTransaction($parsed, $alias, $status, $to_address, $destinations = null, $error = null, $domain_id = null) {
 		InboundEmailLog::CreateEntry(
 			$parsed['from'] ?? '',
 			$to_address,
-			$parsed['subject'] ?? '',
+			'',
 			$destinations,
 			$status,
 			$alias ? $alias->key : null,

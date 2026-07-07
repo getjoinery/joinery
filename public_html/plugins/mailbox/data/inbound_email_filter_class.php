@@ -168,21 +168,29 @@ class InboundEmailFilter extends SystemBase {
 	 * Does this filter match the given stored message? Pure and side-effect-free
 	 * (the single source of truth for criteria, shared by ingest and backfill).
 	 *
-	 * All non-empty criteria must match (AND across fields — Gmail's model). The
-	 * evaluation reads the persisted message columns so ingest and backfill agree
-	 * exactly; $parsed is accepted for signature symmetry but is not relied upon.
+	 * All non-empty criteria must match (AND across fields — Gmail's model).
+	 *
+	 * $plaintext, when supplied, carries the sender/subject/body_plain/body_html
+	 * the caller already has in hand from the ingest parse (InboundEmailRouter::
+	 * storeMessage) rather than reading them back off $msg — ingest runs with no
+	 * unlock window, so a sealed row's content columns would raise
+	 * VaultLockedException on read (specs/implemented/inbound_email_encryption_
+	 * at_rest.md § 4.2). Omitted (the backfill task, ApplyInboundEmailFilters,
+	 * scanning already-stored mail) falls back to $msg->get() — correct for
+	 * unsealed mail, and for sealed mail only reachable in-window.
 	 */
-	function matches(InboundEmailMessage $msg, array $parsed = array()): bool {
-		$sender    = mb_strtolower((string)$msg->get('iem_sender'));
-		$recipient = mb_strtolower((string)$msg->get('iem_recipient'));
-		$subject   = mb_strtolower((string)$msg->get('iem_subject'));
+	function matches(InboundEmailMessage $msg, array $parsed = array(), ?array $plaintext = null): bool {
+		$sender_raw      = $plaintext['sender']      ?? (string)$msg->get('iem_sender');
+		$subject_raw     = $plaintext['subject']     ?? (string)$msg->get('iem_subject');
+		$body_plain_raw  = $plaintext['body_plain']  ?? (string)$msg->get('iem_body_plain');
+		$body_html_raw   = $plaintext['body_html']   ?? (string)$msg->get('iem_body_html');
+
+		$sender    = mb_strtolower($sender_raw);
+		$recipient = mb_strtolower((string)$msg->get('iem_recipient')); // never sealed
+		$subject   = mb_strtolower($subject_raw);
 		// The "has the words" / "doesn't have" field set mirrors the reader's
 		// full-text search: sender + subject + plain + HTML body.
-		$haystack  = mb_strtolower(
-			(string)$msg->get('iem_sender') . ' ' .
-			(string)$msg->get('iem_subject') . ' ' .
-			(string)$msg->get('iem_body_plain') . ' ' .
-			(string)$msg->get('iem_body_html'));
+		$haystack  = mb_strtolower($sender_raw . ' ' . $subject_raw . ' ' . $body_plain_raw . ' ' . $body_html_raw);
 
 		// From — case-insensitive substring; comma-separated terms are OR'd.
 		$from = trim((string)$this->get('fil_match_from'));
@@ -396,12 +404,14 @@ class InboundEmailFilter extends SystemBase {
 	 * InboundEmailRouter::storeMessage (the single local-only post-persist point),
 	 * so Postfix and webhook deliveries are filtered identically.
 	 *
-	 * @param InboundEmailMessage    $msg    the just-persisted message (has its id)
-	 * @param array                  $parsed parsed email (ingest context; not relied on)
-	 * @param InboundEmailAlias|null $alias  the matched alias, or null for catch-all store
+	 * @param InboundEmailMessage    $msg       the just-persisted message (has its id)
+	 * @param array                  $parsed    parsed email (ingest context; not relied on)
+	 * @param InboundEmailAlias|null $alias     the matched alias, or null for catch-all store
+	 * @param array|null             $plaintext sender/subject/body_plain/body_html the caller
+	 *                                          already has decoded, for a sealed row — see matches().
 	 * @return array{matched:int[],actions:string[]}
 	 */
-	static function runForMessage(InboundEmailMessage $msg, array $parsed = array(), ?InboundEmailAlias $alias = null): array {
+	static function runForMessage(InboundEmailMessage $msg, array $parsed = array(), ?InboundEmailAlias $alias = null, ?array $plaintext = null): array {
 		$aliasId  = $msg->get('iem_iea_inbound_email_alias_id') !== null
 			? intval($msg->get('iem_iea_inbound_email_alias_id')) : null;
 		$domainId = intval($msg->get('iem_ied_inbound_email_domain_id'));
@@ -416,7 +426,7 @@ class InboundEmailFilter extends SystemBase {
 			'star'=>false, 'mark_read'=>false, 'archive'=>false, 'forward_to'=>array(), 'delete'=>false);
 		$matched = array();
 		foreach ($filters as $f) {
-			if (!$f->matches($msg, $parsed)) {
+			if (!$f->matches($msg, $parsed, $plaintext)) {
 				continue;
 			}
 			$matched[] = intval($f->key);
@@ -436,7 +446,7 @@ class InboundEmailFilter extends SystemBase {
 		}
 
 		$actions = self::applyActionSet($msg, $accum, true);
-		self::logMatch($msg, $matched, $actions);
+		self::logMatch($msg, $matched, $actions, $plaintext['sender'] ?? null);
 		return array('matched' => $matched, 'actions' => $actions);
 	}
 
@@ -466,12 +476,18 @@ class InboundEmailFilter extends SystemBase {
 	 * surfaced under the Logs tab), so "why did this message get labeled/archived/
 	 * deleted" is answerable the same way auth/spam disposition is.
 	 */
-	private static function logMatch(InboundEmailMessage $msg, array $matchedIds, array $actions): void {
+	private static function logMatch(InboundEmailMessage $msg, array $matchedIds, array $actions, ?string $sender = null): void {
 		try {
+			// $sender is a routing address, not content, so it is fine to log
+			// (the class docblock's "metadata only" rule targets subject/body).
+			// It is passed in rather than read via $msg->get('iem_sender') because
+			// this runs at ingest with no unlock window — a sealed row's own
+			// column would raise VaultLockedException. Subject/body are never
+			// logged at all (specs/implemented/inbound_email_encryption_at_rest.md § 7).
 			InboundEmailLog::CreateEntry(
-				(string)$msg->get('iem_sender'),
-				(string)$msg->get('iem_recipient'),
-				(string)$msg->get('iem_subject'),
+				(string)($sender ?? ''),
+				(string)$msg->get('iem_recipient'), // never sealed
+				'', // never log subject/body — see specs/implemented/inbound_email_encryption_at_rest.md § 7
 				'filters: #' . implode(', #', $matchedIds) . ' -> ' . (count($actions) ? implode(', ', $actions) : 'no-op'),
 				InboundEmailLog::STATUS_FILTERED,
 				$msg->get('iem_iea_inbound_email_alias_id') !== null ? intval($msg->get('iem_iea_inbound_email_alias_id')) : null,

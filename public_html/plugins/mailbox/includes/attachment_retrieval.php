@@ -15,7 +15,7 @@
  * (the admin endpoint per its backing rules, the member endpoint via
  * MailboxViewer scope) and only then retrieves.
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachment_class.php'));
@@ -36,6 +36,7 @@ function mailbox_retrieve_attachment_bytes(InboundMessageAttachment $att, Inboun
 	if ($fil_id > 0) {
 		// File-backed (push mail, lean record): the bytes are a private File.
 		require_once(PathHelper::getIncludePath('data/files_class.php'));
+		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
 		$file = new File($fil_id, TRUE);
 		if (!$file->key || $file->get('fil_delete_time')) {
 			return $fail('This attachment is no longer available.');
@@ -43,6 +44,14 @@ function mailbox_retrieve_attachment_bytes(InboundMessageAttachment $att, Inboun
 		$content = $file->read_bytes('original');
 		if ($content === null) {
 			return $fail('This attachment is no longer available.');
+		}
+		// read_bytes() returns raw on-disk bytes, bypassing File's decrypt hook
+		// (which only fires through serve_from_path()) — a sealed attachment
+		// (ima_is_sealed) must be opened explicitly before streaming.
+		try {
+			$content = InboundEmailMessage::openSealedAttachment($message, $att, $content);
+		} catch (VaultLockedException $e) {
+			return $fail('Unlock your vault to download this attachment.');
 		}
 		return array('ok' => true, 'content' => $content, 'error' => null);
 	}
@@ -82,7 +91,14 @@ function mailbox_retrieve_attachment_bytes(InboundMessageAttachment $att, Inboun
 	}
 
 	// Stored raw (inline / local / cloud): MIME-parse and extract the one part.
-	$part = $message->getRawMimePart((string)$att->get('ima_mime_part'));
+	// A sealed stored raw (iem_raw_sealed) decrypts inside getRawMessage() and
+	// raises VaultLockedException when the owner's window is closed.
+	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
+	try {
+		$part = $message->getRawMimePart((string)$att->get('ima_mime_part'));
+	} catch (VaultLockedException $e) {
+		return $fail('Unlock your vault to download this attachment.');
+	}
 	if ($part === null) {
 		return $fail('This attachment is no longer available.');
 	}

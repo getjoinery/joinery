@@ -18,6 +18,7 @@
  */
 
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
+require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_filter_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
 
@@ -83,10 +84,18 @@ class ApplyInboundEmailFilters implements ScheduledTaskInterface {
 				$scanned++;
 				$msg = new InboundEmailMessage($id, TRUE);
 				if (!$msg->key) { continue; }
-				if ($filter->matches($msg)) {
-					// No re-forward on historical mail (allow_forward = false).
-					$filter->applyActions($msg, array(), false);
-					$matched++;
+				try {
+					if ($filter->matches($msg)) {
+						// No re-forward on historical mail (allow_forward = false).
+						$filter->applyActions($msg, array(), false);
+						$matched++;
+					}
+				} catch (VaultLockedException $e) {
+					// A cron task has no unlock window — a sealed message simply
+					// can't be evaluated here. The cursor still advances past it
+					// (see below); "also apply to existing mail" for sealed mail is
+					// an in-window admin action, not this backlog drain.
+					continue;
 				}
 			}
 
