@@ -280,7 +280,46 @@ public static function get_by_name($name, $search_deleted = false) {
 	 *                              for gated/signed streams; 'public,
 	 *                              max-age=...' for public bytes)
 	 */
+	/** @var array<string,callable> fil_source => decryptor(string $ciphertext, File $file): string
+	 *  Sealed Vault decrypt hook (docs/sealed_vault.md) - a consumer with
+	 *  sealed attachments registers its source tag here once, at bootstrap. */
+	private static $decrypt_hooks = array();
+
+	/**
+	 * Register the decryptor for a fil_source tag. The decryptor reads the
+	 * in-window vault secret key itself (VaultUnlock::secretKey()) and throws
+	 * VaultLockedException when the vault is locked - serve_from_path()
+	 * turns that into a generic 423 response, never a raw error.
+	 */
+	public static function registerDecryptHook(string $source, callable $decryptor): void {
+		self::$decrypt_hooks[$source] = $decryptor;
+	}
+
+	private static function resolve_decrypt_hook($source) {
+		return ($source !== null && isset(self::$decrypt_hooks[$source])) ? self::$decrypt_hooks[$source] : null;
+	}
+
 	function serve_from_path($path, $cache_control) {
+		$bytes = null;
+		$decryptor = self::resolve_decrypt_hook($this->get('fil_source'));
+		if ($decryptor) {
+			require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
+			$ciphertext = @file_get_contents($path);
+			if ($ciphertext === false) {
+				require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+				LibraryFunctions::display_404_page();
+				return;
+			}
+			try {
+				$bytes = call_user_func($decryptor, $ciphertext, $this);
+			} catch (VaultLockedException $e) {
+				http_response_code(423);
+				header('Content-Type: text/plain; charset=utf-8');
+				echo 'This file is locked. Unlock your vault to view it.';
+				return;
+			}
+		}
+
 		$content_type = $this->get('fil_type') ?: 'application/octet-stream';
 		header('Content-Type: ' . $content_type);
 		header('X-Content-Type-Options: nosniff');
@@ -288,10 +327,15 @@ public static function get_by_name($name, $search_deleted = false) {
 		if (!self::is_inline_safe_type($content_type)) {
 			header('Content-Disposition: attachment; filename="' . basename($this->get('fil_name')) . '"');
 		}
-		if (($len = @filesize($path)) !== false) {
-			header('Content-Length: ' . $len);
+		if ($bytes !== null) {
+			header('Content-Length: ' . strlen($bytes));
+			echo $bytes;
+		} else {
+			if (($len = @filesize($path)) !== false) {
+				header('Content-Length: ' . $len);
+			}
+			readfile($path);
 		}
-		readfile($path);
 	}
 
 	/**

@@ -99,6 +99,17 @@ abstract class SystemBase {
 	public static $api_unwritable_fields = array();
 
 	/**
+	 * Sealed Vault (docs/sealed_vault.md) generic read hook. A consumer with
+	 * fields sealed under the vault lists their column names here and
+	 * overrides decryptSealedField()/decryptSealedFieldStatic() to actually
+	 * decrypt (using its own VaultUnlock::secretKey() call, its own AD
+	 * convention, its own owning-user lookup - the vault names no consumer).
+	 * Every other model leaves this empty and pays nothing: get() only takes
+	 * the decrypt path when the field name is listed here.
+	 */
+	public static $sealed_fields = array();
+
+	/**
 	 * Set true only around an intentional GET-action mutation (e.g. a delete link).
 	 * See assert_not_get_mutation(). Always reset in a finally{} block.
 	 */
@@ -374,7 +385,38 @@ abstract class SystemBase {
 	}
 	
 	function get($key) {
-		return $this->data->$key ?? NULL;
+		$value = $this->data->$key ?? NULL;
+		if ($value !== NULL && !empty(static::$sealed_fields) && in_array($key, static::$sealed_fields, true)) {
+			return $this->decryptSealedField($key, $value);
+		}
+		return $value;
+	}
+
+	/**
+	 * Sealed Vault generic read hook (instance path - covers get() and
+	 * anything built on it, e.g. export_as_array()). A model that declares
+	 * $sealed_fields MUST override this; the base implementation throws so a
+	 * declared-but-undecrypted field is never returned as ciphertext.
+	 */
+	protected function decryptSealedField($field, $ciphertext) {
+		throw new RuntimeException(
+			get_called_class() . ' declares "' . $field . '" in $sealed_fields '
+			. 'but does not override decryptSealedField().'
+		);
+	}
+
+	/**
+	 * Sealed Vault generic read hook (raw-row path - for readers that fetch
+	 * rows directly via SQL without instantiating a model, e.g.
+	 * joinery_ai's ModelQueryExecutor). A model that declares $sealed_fields
+	 * MUST override this too; the base implementation throws for the same
+	 * reason decryptSealedField() does.
+	 */
+	public static function decryptSealedFieldStatic($field, $ciphertext, array $row) {
+		throw new RuntimeException(
+			get_called_class() . ' declares "' . $field . '" in $sealed_fields '
+			. 'but does not override decryptSealedFieldStatic().'
+		);
 	}
 
 	/**

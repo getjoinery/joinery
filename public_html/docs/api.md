@@ -572,7 +572,11 @@ Any **core** SystemBase model class is available via the API (plugin models are 
 PascalCase. Which **rows** a key may read or change within a model is governed by that model's
 `authenticate_read`/`authenticate_write` — see [Per-record authorization](#per-record-authorization).
 
-Common models include: `User`, `Product`, `Event`, `EventRegistrant`, `EventSession`, `Order`, `OrderItem`, `Group`, `GroupMember`, `Post`, `Page`, `Email`, `Message`, `File`, `CouponCode`, `SubscriptionTier`, `Location`, `Video`, `Comment`, `Survey`, `SurveyAnswer`, `Question`, `QuestionOption`, `MailingList`, `MailingListRegistrant`.
+Common models include: `User`, `Product`, `Event`, `EventRegistrant`, `EventSession`, `Order`, `OrderItem`, `Group`, `GroupMember`, `Post`, `Page`, `Email`, `Message`, `File`, `CouponCode`, `SubscriptionTier`, `Location`, `Video`, `Comment`, `Survey`, `SurveyAnswer`, `Question`, `QuestionOption`, `MailingList`, `MailingListRegistrant`, `Passkey`.
+
+`Passkey` (`GET /api/v1/Passkeys`) is read-only, owner-scoped: an enrolled WebAuthn
+credential's label, created/last-used times, and PRF capability. Rename and
+revoke are actions, not CRUD writes — see [Passkeys](passkeys.md).
 
 ## Error Handling
 
@@ -760,6 +764,32 @@ Request logs and error messages use the full namespaced name (e.g. `action dns_f
 | `event_sessions` | Select event sessions | Yes |
 | `event_sessions_course` | Select course sessions | Yes |
 | `orders_recurring_action` | Recurring order action | Yes |
+| `passkey_login_options` | Begin passwordless passkey sign-in (WebAuthn request options) | No |
+| `passkey_login_verify` | Complete passkey sign-in and establish the browser session | No |
+| `passkey_register_options` | Begin passkey enrollment (WebAuthn creation options); requires a recent step-up once ≥1 passkey exists | Yes |
+| `passkey_register_verify` | Complete passkey enrollment and persist the new credential | Yes |
+| `passkey_stepup_options` | Begin passkey step-up confirmation (WebAuthn request options scoped to the current user) | Yes |
+| `passkey_stepup_verify` | Complete passkey step-up confirmation, marking the session recently re-verified | Yes |
+| `passkey_rename` | Rename an enrolled passkey | Yes |
+| `passkey_revoke` | Revoke an enrolled passkey (a consumer's unlocker floor may veto) | Yes |
+| `vault_setup_options` | Begin Sealed Vault setup (WebAuthn PRF request options); requires an existing account password | Yes |
+| `vault_setup_verify` | Complete vault setup: keypair, recovery codes, optional passphrase, open the unlock window | Yes |
+| `vault_status` | Report the current user's vault setup/unlock status and enrolled unlockers | Yes |
+| `vault_unlock_options` | Begin unlocking the vault with a passkey (userVerification required) | Yes |
+| `vault_unlock_passkey` | Complete unlocking the vault with a passkey | Yes |
+| `vault_unlock_recovery` | Unlock the vault with a one-time recovery code | Yes |
+| `vault_unlock_passphrase` | Unlock the vault with the enrolled passphrase | Yes |
+| `vault_lock` | Explicitly lock the vault for the current session | Yes |
+| `vault_add_passkey_options` | Begin adding a vault wrapping for another PRF-capable passkey; vault must be unlocked | Yes |
+| `vault_add_passkey_verify` | Complete adding a vault wrapping for another PRF-capable passkey | Yes |
+| `vault_regenerate_codes` | Invalidate all recovery codes and issue a fresh set; requires step-up and an unlocked vault | Yes |
+| `vault_passphrase_enroll` | Enroll (or replace) the optional vault passphrase; requires step-up and an unlocked vault | Yes |
+| `vault_passphrase_remove` | Remove the vault passphrase; requires a recent step-up | Yes |
+| `vault_rotate_options` | Begin vault key rotation (WebAuthn PRF request options) | Yes |
+| `vault_rotate_verify` | Complete vault key rotation: fresh keypair, consumer re-seal, recovery codes replaced | Yes |
+
+See [Passkeys](passkeys.md) for the WebAuthn ceremonies behind the `passkey_*` actions, and
+[Sealed Vault](sealed_vault.md) for the `vault_*` ones.
 
 Plugin action surfaces are documented with their plugin (e.g. the DNS filtering surface in [plugins/dns_filtering/docs/overview.md](../plugins/dns_filtering/docs/overview.md)) and appear in the discovery endpoint below.
 

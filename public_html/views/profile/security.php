@@ -138,6 +138,470 @@
 
             </div>
 
+            <?php if ($page_vars['settings']->get_setting('passkeys_enabled')): ?>
+            <div class="jy-panel jy-mt-4 d-none" id="passkeys-panel">
+                <h2>Passkeys</h2>
+
+                <table class="jy-table jy-w-full d-none" id="passkeys-table">
+                    <thead>
+                        <tr>
+                            <th>Passkey</th>
+                            <th>Added</th>
+                            <th>Last used</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="passkeys-table-body"></tbody>
+                </table>
+                <p id="passkeys-empty" class="d-none">No passkeys are enrolled on this account yet.</p>
+
+                <div class="jy-mt-2 d-none" id="passkey-password-row">
+                    <label for="passkey-current-password">Confirm your password to add your first passkey</label>
+                    <input type="password" id="passkey-current-password" autocomplete="current-password">
+                    <button type="button" class="btn btn-primary" id="passkey-password-continue">Continue</button>
+                    <button type="button" class="btn btn-secondary" id="passkey-password-cancel">Cancel</button>
+                </div>
+
+                <button type="button" class="btn btn-primary jy-mt-2" id="passkey-add-btn">Add a Passkey</button>
+            </div>
+
+            <script defer src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
+            <script defer>
+            document.addEventListener('DOMContentLoaded', function () {
+                var panel = document.getElementById('passkeys-panel');
+                if (!window.JoineryPasskeys || !JoineryPasskeys.isSupported()) return;
+                panel.classList.remove('d-none');
+
+                var csrf = document.querySelector('meta[name="joinery-api-csrf"]').content;
+                var tableBody = document.getElementById('passkeys-table-body');
+                var table = document.getElementById('passkeys-table');
+                var empty = document.getElementById('passkeys-empty');
+                var addBtn = document.getElementById('passkey-add-btn');
+                var credentialCount = 0;
+
+                function apiFetch(url, options) {
+                    options = options || {};
+                    options.headers = Object.assign({ 'Content-Type': 'application/json', 'X-Joinery-Csrf': csrf }, options.headers || {});
+                    return fetch(url, options).then(async function (res) {
+                        var json = await res.json();
+                        if (!res.ok) throw new Error(json.error || 'Request failed.');
+                        return json;
+                    });
+                }
+
+                function renderRow(passkey) {
+                    var tr = document.createElement('tr');
+
+                    var nameTd = document.createElement('td');
+                    nameTd.textContent = passkey.pkc_label || 'Passkey';
+                    tr.appendChild(nameTd);
+
+                    var createdTd = document.createElement('td');
+                    createdTd.textContent = passkey.pkc_created_time ? new Date(passkey.pkc_created_time + 'Z').toLocaleDateString() : '';
+                    tr.appendChild(createdTd);
+
+                    var lastUsedTd = document.createElement('td');
+                    lastUsedTd.textContent = passkey.pkc_last_used_time ? new Date(passkey.pkc_last_used_time + 'Z').toLocaleString() : 'Never';
+                    tr.appendChild(lastUsedTd);
+
+                    var actionsTd = document.createElement('td');
+                    actionsTd.className = 'text-end';
+
+                    var renameBtn = document.createElement('button');
+                    renameBtn.type = 'button';
+                    renameBtn.className = 'btn btn-secondary';
+                    renameBtn.textContent = 'Rename';
+                    renameBtn.addEventListener('click', function () { renamePasskey(passkey); });
+                    actionsTd.appendChild(renameBtn);
+
+                    var revokeBtn = document.createElement('button');
+                    revokeBtn.type = 'button';
+                    revokeBtn.className = 'btn btn-danger';
+                    revokeBtn.textContent = 'Revoke';
+                    revokeBtn.addEventListener('click', function () { revokePasskey(passkey); });
+                    actionsTd.appendChild(revokeBtn);
+
+                    tr.appendChild(actionsTd);
+                    return tr;
+                }
+
+                function loadPasskeys() {
+                    return apiFetch('/api/v1/Passkeys').then(function (json) {
+                        var credentials = json.data || [];
+                        credentialCount = credentials.length;
+                        tableBody.innerHTML = '';
+                        credentials.forEach(function (passkey) { tableBody.appendChild(renderRow(passkey)); });
+                        table.classList.toggle('d-none', !credentials.length);
+                        empty.classList.toggle('d-none', !!credentials.length);
+                    });
+                }
+
+                async function renamePasskey(passkey) {
+                    var label = prompt('Rename this passkey:', passkey.pkc_label || '');
+                    if (label === null || label.trim() === '') return;
+                    try {
+                        await apiFetch('/api/v1/action/passkey_rename', {
+                            method: 'POST',
+                            body: JSON.stringify({ credential_id: passkey.pkc_passkey_credential_id, label: label.trim() }),
+                        });
+                        await loadPasskeys();
+                    } catch (e) {
+                        alert(e.message || 'Could not rename passkey.');
+                    }
+                }
+
+                async function revokePasskey(passkey) {
+                    if (!confirm('Revoke "' + (passkey.pkc_label || 'this passkey') + '"? It will no longer be able to sign in to this account.')) return;
+                    try {
+                        await apiFetch('/api/v1/action/passkey_revoke', {
+                            method: 'POST',
+                            body: JSON.stringify({ credential_id: passkey.pkc_passkey_credential_id }),
+                        });
+                        await loadPasskeys();
+                    } catch (e) {
+                        alert(e.message || 'Could not revoke passkey.');
+                    }
+                }
+
+                async function stepUp() {
+                    var options = await apiFetch('/api/v1/action/passkey_stepup_options', { method: 'POST', body: '{}' });
+                    var credential = await JoineryPasskeys.authenticate(options.data.options);
+                    await apiFetch('/api/v1/action/passkey_stepup_verify', {
+                        method: 'POST',
+                        body: JSON.stringify({ credential: credential }),
+                    });
+                }
+
+                var pwRow = document.getElementById('passkey-password-row');
+                var pwInput = document.getElementById('passkey-current-password');
+
+                async function addPasskey(currentPassword) {
+                    var label = prompt('Label this passkey (e.g. "MacBook Touch ID"):', '');
+                    if (label === null) return;
+                    addBtn.disabled = true;
+                    try {
+                        if (credentialCount > 0) {
+                            await stepUp();
+                        }
+                        // Always request PRF: the extension can only be enabled at
+                        // creation time, and vault consumers need PRF-capable
+                        // credentials. Harmless when the authenticator lacks it.
+                        var body = { prf_capable_requested: 1 };
+                        if (currentPassword) body.current_password = currentPassword;
+                        var options = await apiFetch('/api/v1/action/passkey_register_options', { method: 'POST', body: JSON.stringify(body) });
+                        var credential = await JoineryPasskeys.register(options.data.options);
+                        await apiFetch('/api/v1/action/passkey_register_verify', {
+                            method: 'POST',
+                            body: JSON.stringify({ credential: credential, label: label }),
+                        });
+                        pwRow.classList.add('d-none');
+                        pwInput.value = '';
+                        await loadPasskeys();
+                    } catch (e) {
+                        alert(e.message || 'Could not add passkey.');
+                    } finally {
+                        addBtn.disabled = false;
+                    }
+                }
+
+                addBtn.addEventListener('click', function () {
+                    // First passkey: confirm the account password (there is no
+                    // existing credential to step up with). Later passkeys step up.
+                    if (credentialCount === 0 && pwRow.classList.contains('d-none')) {
+                        pwRow.classList.remove('d-none');
+                        pwInput.focus();
+                        return;
+                    }
+                    if (credentialCount > 0) addPasskey('');
+                });
+                document.getElementById('passkey-password-continue').addEventListener('click', function () {
+                    addPasskey(pwInput.value);
+                });
+                document.getElementById('passkey-password-cancel').addEventListener('click', function () {
+                    pwRow.classList.add('d-none');
+                    pwInput.value = '';
+                });
+                loadPasskeys();
+            });
+            </script>
+            <?php endif; ?>
+
+            <?php if ($page_vars['settings']->get_setting('passkeys_enabled')): ?>
+            <div class="jy-panel jy-mt-4 d-none" id="vault-panel">
+                <h2>Encrypted Vault</h2>
+
+                <div id="vault-not-set-up">
+                    <p>Seal your mail and chat content so it's readable only when you unlock it with a passkey, a recovery code, or a passphrase.</p>
+                    <button type="button" class="btn btn-primary" id="vault-setup-btn">Set Up Your Vault</button>
+                </div>
+
+                <div class="d-none" id="vault-locked">
+                    <p><strong>Status:</strong> Locked</p>
+                    <button type="button" class="btn btn-primary" id="vault-unlock-passkey-btn">Unlock with Passkey</button>
+                    <button type="button" class="btn btn-secondary" id="vault-unlock-recovery-btn">Unlock with Recovery Code</button>
+                    <button type="button" class="btn btn-secondary" id="vault-unlock-passphrase-btn">Unlock with Passphrase</button>
+                </div>
+
+                <div class="d-none" id="vault-unlocked">
+                    <p><strong>Status:</strong> Unlocked <span id="vault-regen-note" class="d-none">— fewer than 3 unused recovery codes remain, consider regenerating.</span></p>
+                    <button type="button" class="btn btn-secondary" id="vault-lock-btn">Lock Now</button>
+
+                    <table class="jy-table jy-w-full jy-mt-2" id="vault-wrappings-table">
+                        <thead>
+                            <tr><th>Unlocker</th><th>Added</th><th>Status</th></tr>
+                        </thead>
+                        <tbody id="vault-wrappings-body"></tbody>
+                    </table>
+
+                    <h3 class="jy-mt-4">Manage Unlockers</h3>
+                    <button type="button" class="btn btn-secondary" id="vault-add-passkey-btn">Add Another Passkey</button>
+                    <button type="button" class="btn btn-secondary" id="vault-regenerate-codes-btn">Regenerate Recovery Codes</button>
+                    <button type="button" class="btn btn-secondary" id="vault-passphrase-enroll-btn">Enroll/Replace Passphrase</button>
+                    <button type="button" class="btn btn-secondary" id="vault-passphrase-remove-btn">Remove Passphrase</button>
+
+                    <h3 class="jy-mt-4">Rotate Vault Key</h3>
+                    <p class="jy-security-note">Generates a fresh vault key and re-seals your content. Only the passkey you rotate with (and a passphrase you re-enter) carry forward — other passkeys need re-adding afterward. Recovery codes are always replaced.</p>
+                    <button type="button" class="btn btn-danger" id="vault-rotate-btn">Rotate Vault Key</button>
+                </div>
+
+                <div class="d-none" id="vault-codes-display">
+                    <h3 class="jy-mt-4">Recovery Codes</h3>
+                    <p>Store these somewhere safe. Each can be used once. They will not be shown again.</p>
+                    <pre class="jy-security-codes" id="vault-codes-pre"></pre>
+                    <button type="button" class="btn btn-secondary" id="vault-download-keyfile-btn">Download Key File</button>
+                    <button type="button" class="btn btn-primary" id="vault-codes-done-btn">Done</button>
+                </div>
+            </div>
+
+            <script defer src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
+            <script defer>
+            document.addEventListener('DOMContentLoaded', function () {
+                var panel = document.getElementById('vault-panel');
+                if (!window.JoineryPasskeys || !JoineryPasskeys.isSupported()) return;
+                panel.classList.remove('d-none');
+
+                var csrf = document.querySelector('meta[name="joinery-api-csrf"]').content;
+                var notSetUp = document.getElementById('vault-not-set-up');
+                var locked = document.getElementById('vault-locked');
+                var unlocked = document.getElementById('vault-unlocked');
+                var codesDisplay = document.getElementById('vault-codes-display');
+                var codesPre = document.getElementById('vault-codes-pre');
+                var lastKeyFile = null;
+
+                function apiFetch(url, options) {
+                    options = options || {};
+                    options.headers = Object.assign({ 'Content-Type': 'application/json', 'X-Joinery-Csrf': csrf }, options.headers || {});
+                    return fetch(url, options).then(async function (res) {
+                        var json = await res.json();
+                        if (!res.ok) {
+                            var err = new Error(json.error || 'Request failed.');
+                            err.data = json.data || {};
+                            throw err;
+                        }
+                        return json;
+                    });
+                }
+
+                function showCodes(recoveryCodes, keyFile) {
+                    codesPre.textContent = recoveryCodes.join('\n');
+                    lastKeyFile = keyFile || null;
+                    notSetUp.classList.add('d-none');
+                    locked.classList.add('d-none');
+                    unlocked.classList.add('d-none');
+                    codesDisplay.classList.remove('d-none');
+                }
+
+                function renderWrappings(status) {
+                    var body = document.getElementById('vault-wrappings-body');
+                    body.innerHTML = '';
+                    (status.wrappings || []).forEach(function (w) {
+                        var tr = document.createElement('tr');
+                        var nameTd = document.createElement('td');
+                        nameTd.textContent = w.unlocker_type + (w.label ? ' (' + w.label + ')' : '');
+                        var addedTd = document.createElement('td');
+                        addedTd.textContent = w.created_time ? new Date(w.created_time + 'Z').toLocaleDateString() : '';
+                        var statusTd = document.createElement('td');
+                        statusTd.textContent = w.is_used ? 'Used' : 'Active';
+                        tr.appendChild(nameTd); tr.appendChild(addedTd); tr.appendChild(statusTd);
+                        body.appendChild(tr);
+                    });
+                    document.getElementById('vault-regen-note').classList.toggle('d-none', !status.regenerate_recommended);
+                }
+
+                function refresh() {
+                    return apiFetch('/api/v1/action/vault_status', { method: 'POST', body: '{}' }).then(function (json) {
+                        var status = json.data;
+                        codesDisplay.classList.add('d-none');
+                        if (!status.set_up) {
+                            notSetUp.classList.remove('d-none');
+                            locked.classList.add('d-none');
+                            unlocked.classList.add('d-none');
+                        } else if (!status.unlocked) {
+                            notSetUp.classList.add('d-none');
+                            locked.classList.remove('d-none');
+                            unlocked.classList.add('d-none');
+                        } else {
+                            notSetUp.classList.add('d-none');
+                            locked.classList.add('d-none');
+                            unlocked.classList.remove('d-none');
+                            renderWrappings(status);
+                        }
+                    });
+                }
+
+                document.getElementById('vault-setup-btn').addEventListener('click', async function () {
+                    try {
+                        await apiFetch('/api/v1/action/vault_setup_options', { method: 'POST', body: '{}' });
+                    } catch (e) {
+                        if (e.data && e.data.requires_password) {
+                            alert('Set an account password first (see the top of this page), then try again.');
+                        } else {
+                            alert(e.message || 'Could not begin vault setup.');
+                        }
+                        return;
+                    }
+                    if (!confirm('If you lose every unlocker (passkey, recovery codes, and passphrase), everything sealed in your vault is permanently lost - there is no support-desk recovery. Continue?')) return;
+                    var passphrase = prompt('Optional: set a vault passphrase now (12+ characters), or leave blank to skip:', '') || '';
+                    try {
+                        var options = await apiFetch('/api/v1/action/vault_setup_options', { method: 'POST', body: '{}' });
+                        var credential = (await JoineryPasskeys.derive(options.data.options)).response;
+                        var body = { credential: credential, acknowledged: true };
+                        if (passphrase) body.passphrase = passphrase;
+                        var result = await apiFetch('/api/v1/action/vault_setup_verify', { method: 'POST', body: JSON.stringify(body) });
+                        showCodes(result.data.recovery_codes, result.data.key_file);
+                    } catch (e) {
+                        alert(e.message || 'Could not set up your vault.');
+                    }
+                });
+
+                document.getElementById('vault-unlock-passkey-btn').addEventListener('click', async function () {
+                    try {
+                        var options = await apiFetch('/api/v1/action/vault_unlock_options', { method: 'POST', body: '{}' });
+                        var credential = (await JoineryPasskeys.derive(options.data.options)).response;
+                        await apiFetch('/api/v1/action/vault_unlock_passkey', { method: 'POST', body: JSON.stringify({ credential: credential }) });
+                        await refresh();
+                    } catch (e) {
+                        alert(e.message || 'Could not unlock your vault.');
+                    }
+                });
+
+                document.getElementById('vault-unlock-recovery-btn').addEventListener('click', async function () {
+                    var code = prompt('Enter a recovery code:', '');
+                    if (!code) return;
+                    try {
+                        var result = await apiFetch('/api/v1/action/vault_unlock_recovery', { method: 'POST', body: JSON.stringify({ code: code }) });
+                        if (result.data && result.data.regenerate_recommended) {
+                            alert('Unlocked. Fewer than 3 unused recovery codes remain - consider regenerating them.');
+                        }
+                        await refresh();
+                    } catch (e) {
+                        alert(e.message || 'Could not unlock your vault.');
+                    }
+                });
+
+                document.getElementById('vault-unlock-passphrase-btn').addEventListener('click', async function () {
+                    var passphrase = prompt('Enter your vault passphrase:', '');
+                    if (!passphrase) return;
+                    try {
+                        await apiFetch('/api/v1/action/vault_unlock_passphrase', { method: 'POST', body: JSON.stringify({ passphrase: passphrase }) });
+                        await refresh();
+                    } catch (e) {
+                        alert(e.message || 'Could not unlock your vault.');
+                    }
+                });
+
+                document.getElementById('vault-lock-btn').addEventListener('click', async function () {
+                    try {
+                        await apiFetch('/api/v1/action/vault_lock', { method: 'POST', body: '{}' });
+                        await refresh();
+                    } catch (e) {
+                        alert(e.message || 'Could not lock your vault.');
+                    }
+                });
+
+                document.getElementById('vault-add-passkey-btn').addEventListener('click', async function () {
+                    try {
+                        var options = await apiFetch('/api/v1/action/vault_add_passkey_options', { method: 'POST', body: '{}' });
+                        var credential = (await JoineryPasskeys.derive(options.data.options)).response;
+                        await apiFetch('/api/v1/action/vault_add_passkey_verify', { method: 'POST', body: JSON.stringify({ credential: credential }) });
+                        await refresh();
+                        alert('Passkey added to your vault.');
+                    } catch (e) {
+                        alert(e.message || 'Could not add this passkey to your vault.');
+                    }
+                });
+
+                document.getElementById('vault-regenerate-codes-btn').addEventListener('click', async function () {
+                    if (!confirm('This invalidates all existing recovery codes. Continue?')) return;
+                    try {
+                        var result = await apiFetch('/api/v1/action/vault_regenerate_codes', { method: 'POST', body: '{}' });
+                        showCodes(result.data.recovery_codes, null);
+                    } catch (e) {
+                        alert(e.message || 'Could not regenerate recovery codes.');
+                    }
+                });
+
+                document.getElementById('vault-passphrase-enroll-btn').addEventListener('click', async function () {
+                    var passphrase = prompt('Set a vault passphrase (12+ characters):', '');
+                    if (!passphrase) return;
+                    try {
+                        await apiFetch('/api/v1/action/vault_passphrase_enroll', { method: 'POST', body: JSON.stringify({ passphrase: passphrase }) });
+                        await refresh();
+                        alert('Vault passphrase enrolled.');
+                    } catch (e) {
+                        alert(e.message || 'Could not enroll a vault passphrase.');
+                    }
+                });
+
+                document.getElementById('vault-passphrase-remove-btn').addEventListener('click', async function () {
+                    if (!confirm('Remove your vault passphrase?')) return;
+                    try {
+                        await apiFetch('/api/v1/action/vault_passphrase_remove', { method: 'POST', body: '{}' });
+                        await refresh();
+                    } catch (e) {
+                        alert(e.message || 'Could not remove your vault passphrase.');
+                    }
+                });
+
+                document.getElementById('vault-rotate-btn').addEventListener('click', async function () {
+                    if (!confirm('Rotate your vault key now? Passkeys other than the one you use here, and your passphrase unless re-entered, will need to be re-added afterward. Continue?')) return;
+                    var passphrase = prompt('Re-enter your vault passphrase to carry it forward, or leave blank to drop it:', '') || '';
+                    try {
+                        var options = await apiFetch('/api/v1/action/vault_rotate_options', { method: 'POST', body: '{}' });
+                        var credential = (await JoineryPasskeys.derive(options.data.options)).response;
+                        var body = { credential: credential, acknowledged: true };
+                        if (passphrase) body.passphrase = passphrase;
+                        var result = await apiFetch('/api/v1/action/vault_rotate_verify', { method: 'POST', body: JSON.stringify(body) });
+                        showCodes(result.data.recovery_codes, null);
+                        if (result.data.dropped_passkeys && result.data.dropped_passkeys.length) {
+                            alert('These passkeys need to be re-added to your vault: ' + result.data.dropped_passkeys.map(function (p) { return p.label || 'Passkey'; }).join(', '));
+                        }
+                    } catch (e) {
+                        alert(e.message || 'Could not rotate your vault key.');
+                    }
+                });
+
+                document.getElementById('vault-download-keyfile-btn').addEventListener('click', function () {
+                    if (!lastKeyFile) { alert('No key file available for this action.'); return; }
+                    var blob = new Blob([JSON.stringify(lastKeyFile, null, 2)], { type: 'application/json' });
+                    var url = URL.createObjectURL(blob);
+                    var a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'vault-key-file.json';
+                    a.click();
+                    URL.revokeObjectURL(url);
+                });
+
+                document.getElementById('vault-codes-done-btn').addEventListener('click', function () {
+                    codesDisplay.classList.add('d-none');
+                    refresh();
+                });
+
+                refresh();
+            });
+            </script>
+            <?php endif; ?>
+
             <?php if (!empty($page_vars['app_sessions']) && count($page_vars['app_sessions'])): ?>
             <div class="jy-panel jy-mt-4">
                 <h2>App Sessions</h2>

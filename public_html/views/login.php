@@ -65,6 +65,12 @@
 
         <?php $formwriter->end_form(); ?>
 
+        <?php if ($settings->get_setting('passkeys_enabled')): ?>
+        <div class="jy-passkey-signin d-none" id="passkey-signin">
+            <button type="button" class="btn btn-secondary jy-w-full" id="passkey-signin-btn">Sign in with a passkey</button>
+        </div>
+        <?php endif; ?>
+
         <div class="auth-footer-text">
             Don't have an account yet?
             <a href="/register<?php if (isset($_GET['m'])) { echo '?m=' . htmlspecialchars($_GET['m']); } ?>">Register for an Account</a>
@@ -73,6 +79,49 @@
     </div>
 </div>
 </div>
+
+<?php if ($settings->get_setting('passkeys_enabled')): ?>
+<script defer src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
+<script defer>
+document.addEventListener('DOMContentLoaded', function () {
+    if (!window.JoineryPasskeys || !JoineryPasskeys.isSupported()) return;
+    var wrap = document.getElementById('passkey-signin');
+    var btn = document.getElementById('passkey-signin-btn');
+    wrap.classList.remove('d-none');
+
+    btn.addEventListener('click', async function () {
+        btn.disabled = true;
+        try {
+            var emailField = document.querySelector('input[name="email"]');
+            var email = emailField ? emailField.value.trim() : '';
+
+            var optRes = await fetch('/api/v1/action/passkey_login_options', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: email }),
+            });
+            var optJson = await optRes.json();
+            if (!optRes.ok) throw new Error(optJson.error || 'Unable to start passkey sign-in.');
+
+            var credential = await JoineryPasskeys.authenticate(optJson.data.options);
+
+            var verifyRes = await fetch('/api/v1/action/passkey_login_verify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ credential: credential }),
+            });
+            var verifyJson = await verifyRes.json();
+            if (!verifyRes.ok) throw new Error(verifyJson.error || 'Passkey sign-in failed.');
+
+            window.location.href = (verifyJson.data && verifyJson.data.redirect) || '/profile';
+        } catch (e) {
+            alert(e.message || 'Passkey sign-in was not completed.');
+            btn.disabled = false;
+        }
+    });
+});
+</script>
+<?php endif; ?>
 
 <?php
     $page->public_footer(['header_only' => true]);

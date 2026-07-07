@@ -185,11 +185,25 @@ class ComposerValidator {
         // Check each required package
         $missingPackages = [];
         foreach ($composerJson['require'] as $packageName => $version) {
-            // Skip PHP version requirement
+            // Skip the PHP version requirement itself.
             if ($packageName === 'php') {
                 continue;
             }
-            
+
+            // Platform packages (ext-*, lib-*, hhvm) are never vendor packages
+            // Composer installs into composer.lock's packages array - they're
+            // satisfied by the runtime itself. Verify an ext-* requirement
+            // against the actually-loaded extension instead.
+            if (strpos($packageName, 'ext-') === 0) {
+                if (!extension_loaded(substr($packageName, 4))) {
+                    $missingPackages[] = $packageName;
+                }
+                continue;
+            }
+            if (strpos($packageName, 'lib-') === 0 || $packageName === 'hhvm') {
+                continue;
+            }
+
             if (!isset($installedPackages[$packageName])) {
                 $missingPackages[] = $packageName;
             }

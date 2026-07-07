@@ -88,3 +88,13 @@ $plain  = SecretBox::looksEncrypted($stored) ? (new SecretBox())->decrypt($store
 - **Fail-closed** — no key, no operation; never a plaintext fallback.
 - **Quiet** — never logs or echoes plaintext.
 - **Self-contained** — no DB dependency; safe to use from any layer.
+
+## The per-user asymmetric layer above this
+
+SecretBox is one symmetric key the *server* holds for its own secrets.
+[`SealedBox`](sealed_vault.md) (`includes/SealedBox.php`) is the asymmetric
+sibling one layer up: a per-*user* X25519 keypair whose secret half the
+server never holds at rest, behind the [Sealed Vault](sealed_vault.md)'s
+unlock window. Reach for SecretBox for server-held credentials (OAuth
+secrets, IMAP passwords); reach for the vault for user content the server
+should only read while the user has proven presence.

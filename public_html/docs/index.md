@@ -38,6 +38,15 @@ Welcome to the Joinery platform documentation. Select a topic from the sidebar, 
 - [Joinery AI Plugin](/plugins/joinery_ai/docs/overview.md) -- LLM-driven recipes and the generic `query_model` read surface
 - [ScrollDaddy Plugin](/plugins/dns_filtering/docs/overview.md) -- DNS filtering: unified block model, tier gating, editor UI, resolver flow
 
+## Security
+
+- [Account Security](account_security.md) -- The doctrine: sign-in paths, the passkey role split, step-up, unlock windows, and what every sensitive action requires
+- [Passkeys](passkeys.md) -- Platform WebAuthn: sign-in, step-up confirmation, PRF secret derivation, and the consumer contract
+- [Sealed Vault](sealed_vault.md) -- Per-user encryption identity: key hierarchy, unlock window, consumer hooks, and key rotation
+- [SecretBox](secret_box.md) -- Authenticated encryption for server-held secrets at rest
+- [OAuth2 Core](oauth2.md) -- Platform OAuth2 client, provider catalog, consumers, and callback flow
+- [File Signed URLs](file_signed_urls.md) -- Short-lived signed links for private files
+
 ## Extensibility
 
 - [Plugin and Theme Developer Guide](plugin_developer_guide.md) -- Plugin architecture, routing, and theme overrides
