@@ -3,12 +3,13 @@ package com.getjoinery.android
 import androidx.compose.runtime.Composable
 
 /** Everything a registered native screen needs from the shell. `onExit` returns
- *  to the previous screen (a no-op when the screen sits at a tab-bar root). */
+ *  to the previous screen, or is null when the screen sits at a navigation root
+ *  with nowhere to go back to — a screen hides its back affordance then. */
 class NativeScreenContext(
     val session: SessionController,
     val user: UserSummary,
     val web: WebSessionCoordinator,
-    val onExit: () -> Unit = {},
+    val onExit: (() -> Unit)? = null,
 )
 
 /**
@@ -30,6 +31,14 @@ object NativeScreenRegistry {
     /** Register (or replace) the builder for a screen name. */
     fun register(name: String, builder: @Composable (NativeScreenContext) -> Unit) {
         synchronized(lock) { builders[name] = builder }
+    }
+
+    /** Remove a screen name so it resolves to its web fallback again. Lets a
+     *  build deterministically opt out of a native screen regardless of what
+     *  earlier registrations ran in the same process (instrumented fallback
+     *  test). No-op when the name was never registered. */
+    fun unregister(name: String) {
+        synchronized(lock) { builders.remove(name) }
     }
 
     /** Does this build know the screen name? */

@@ -48,12 +48,15 @@ public struct SecurityAPI: Sendable {
     }
 
     /// Disable TOTP with a current 6-digit code or an 8-character backup
-    /// code. The `security` action redirects on both success and a bad
-    /// code, so this re-reads `security_overview` to tell them apart.
+    /// code. The server's `disable` branch reads a single `confirm_code` and
+    /// classifies its shape itself (6 digits = authenticator code, 8 chars =
+    /// backup code), so whichever the user entered is sent under that one key.
+    /// The action redirects on both success and a bad code, so this re-reads
+    /// `security_overview` to tell them apart.
     public func disable(totpCode: String, backupCode: String) async throws -> Bool {
+        let confirmation = totpCode.isEmpty ? backupCode : totpCode
         var extra: [(key: String, value: JSONValue)] = []
-        if !totpCode.isEmpty { extra.append((key: "totp_code", value: .string(totpCode))) }
-        if !backupCode.isEmpty { extra.append((key: "confirm_code", value: .string(backupCode))) }
+        if !confirmation.isEmpty { extra.append((key: "confirm_code", value: .string(confirmation))) }
         _ = try await client.submitAction("security", body: .object(
             [(key: "action", value: .string("disable"))] + extra
         ))

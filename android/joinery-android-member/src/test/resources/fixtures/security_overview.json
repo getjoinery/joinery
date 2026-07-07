@@ -1,0 +1,1 @@
+{"api_version":"1.0","success_message":"Action 'security_overview' completed successfully.","data":{"totp_enabled":false,"totp_enabled_time":null,"backup_codes_remaining":0,"app_sessions":[{"api_key_id":207,"device_label":"App session","created_time":"2026-07-07 15:50:57.791146","last_used_time":"2026-07-07 15:50:57","is_current":true}],"passkey_count":0,"vault_active":false}}

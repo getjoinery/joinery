@@ -1,0 +1,1 @@
+{"api_version":"1.0","success_message":"Action 'conversation_list' completed successfully.","data":{"conversations":[{"conversation_id":5,"other_display_name":"Fixture UserB","preview":"Fixture capture message from A","last_message_time":"2026-07-07 15:50:57","unread":true,"muted":false}],"total_count":1,"offset":0,"per_page":20}}

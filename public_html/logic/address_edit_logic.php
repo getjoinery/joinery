@@ -93,6 +93,44 @@ function address_edit_logic_api() {
     ];
 }
 
+/**
+ * Form definition for the native/API form face (GET /api/v1/form/address_edit).
+ * Prefills from the acting user's first address, mirroring the web page's
+ * "load first or create new" behavior; the submit round-trips through the
+ * address_edit action (address_edit_logic on POST). Field set is identical to
+ * the web form (Address::renderFormFields), so client and web stay in lockstep.
+ */
+function address_edit_logic_form($formwriter, $user = null, $input = []) {
+	require_once(PathHelper::getIncludePath('data/address_class.php'));
+
+	$user_id = $user ? $user->key : null;
+
+	$address = new Address(NULL);
+	if ($user_id) {
+		$addresses = new MultiAddress(array('user_id' => $user_id));
+		if ($addresses->count_all()) {
+			$addresses->load();
+			$address = $addresses->get(0);
+		}
+	}
+
+	if ($address->key) {
+		$formwriter->set_model($address);
+		// Carries the address id so the submit updates it rather than creating
+		// a second address (address_edit_logic keys off this on POST).
+		$formwriter->hiddeninput('edit_primary_key_value', '', ['value' => $address->key]);
+	}
+
+	Address::renderFormFields($formwriter, [
+		'required' => true,
+		'include_country' => true,
+		'include_user_id' => false,
+		'model' => $address,
+	]);
+
+	$formwriter->submitbutton('btn_submit', 'Submit');
+}
+
 function address_edit_logic_descriptor(): array {
 	return [
 		'description'      => 'Create or update the current user\'s address.',

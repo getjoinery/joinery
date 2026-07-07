@@ -917,3 +917,15 @@
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
 
+	// ========== Drop dead Event Sessions menu entry (v140) ==========
+	// core-event-sessions is a deep link needing an event id, not a menu
+	// destination — it errors when reached from the menu. admin_menus.json
+	// dropped it, but core menu seeding never prunes, so the existing row is
+	// deleted here (insert-only precedent, same as v136/v139).
+	$migration = array();
+	$migration['database_version'] = '140';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'drop_event_sessions_menu.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+

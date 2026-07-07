@@ -206,7 +206,7 @@ private fun DestinationScreen(
         is NavDestination.Native -> when (dest.screen) {
             "settings" -> SettingsScreen(session, user, web, onExit = onBack)
             else -> {
-                val context = NativeScreenContext(session, user, web, onExit = onBack ?: {})
+                val context = NativeScreenContext(session, user, web, onExit = onBack)
                 when {
                     NativeScreenRegistry.contains(dest.screen) ->
                         NativeScreenRegistry.Render(dest.screen, context)

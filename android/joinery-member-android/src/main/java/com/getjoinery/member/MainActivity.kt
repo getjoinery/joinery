@@ -10,6 +10,7 @@ import com.getjoinery.android.JoineryConfig
 import com.getjoinery.aichat.JoineryAIChat
 import com.getjoinery.calendar.JoineryCalendar
 import com.getjoinery.mail.JoineryMail
+import com.getjoinery.memberkit.JoineryMember
 
 /**
  * The Joinery member app: pure brand shell. All behavior lives in
@@ -31,6 +32,17 @@ class MainActivity : ComponentActivity() {
         JoineryMail.registerScreens()
         JoineryCalendar.registerScreens()
         JoineryAIChat.registerScreens()
+        // The member module registration is skippable so the instrumented gate
+        // can prove the version-safe fallback: with it off, the flipped member
+        // entries land on their web URLs, exactly as an older build would.
+        // Unregistering (not merely skipping) makes the flag authoritative even
+        // if an earlier test in the same process registered the screens — the
+        // registry is a process-global map.
+        if (intent?.getBooleanExtra(EXTRA_DISABLE_MEMBER, false) == true) {
+            JoineryMember.unregisterScreens()
+        } else {
+            JoineryMember.registerScreens()
+        }
 
         setContent {
             JoineryAppRoot(config = buildConfig(), storeFileName = STORE_FILE)
@@ -60,5 +72,6 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_RESET_AUTH = "reset_auth"
         const val EXTRA_BASE_URL = "base_url"
         const val EXTRA_CLIENT_VERSION = "client_version"
+        const val EXTRA_DISABLE_MEMBER = "disable_member_module"
     }
 }
