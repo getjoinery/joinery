@@ -1,6 +1,10 @@
 # Joinery AI — Calendar AI surface (read scope + safe write door)
 
-**Status:** Ready to implement.
+**Status:** Implemented and verified — `CalendarEntryImporter`, the
+`create_calendar_entry` action, polymorphic read scoping
+(`CalendarEntry`/`Schedule`), `cal_status` + the `getBusyBlocks()` policy
+seam, and `EmailScheduleJob` (live pipeline run + unit-level verification of
+every § 1/§ 5 rule).
 **Built on:** `joinery_ai_item_pipeline.md` — **implemented**. The first write
 consumer is a pipeline job (`EmailScheduleJob`, § 5), the Job B that
 `implemented/joinery_ai_email_triage.md` § 2 left blocked on this spec.
