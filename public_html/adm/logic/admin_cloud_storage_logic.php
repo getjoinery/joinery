@@ -223,9 +223,7 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 		'private_errors'       => $private_errors,
 		'private_test_results' => $private_test_results,
 		'health'               => CloudStorageLifecycle::health($profile),
-		'display_messages'     => $session->get_messages('/admin/admin_cloud_storage'),
 	);
-	$session->clear_clearable_messages();
 
 	return LogicResult::render($page_data);
 }

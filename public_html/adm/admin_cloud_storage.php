@@ -30,23 +30,6 @@ $page->admin_header(array(
 ));
 
 // =====================================================
-// SESSION MESSAGES (success/error from POST→redirect)
-// =====================================================
-if (!empty($display_messages)) {
-	foreach ($display_messages as $msg) {
-		$alert_class = 'alert-info';
-		if ($msg->display_type == DisplayMessage::MESSAGE_ERROR)        $alert_class = 'alert-danger';
-		elseif ($msg->display_type == DisplayMessage::MESSAGE_WARNING)  $alert_class = 'alert-warning';
-		elseif ($msg->display_type == DisplayMessage::MESSAGE_ANNOUNCEMENT) $alert_class = 'alert-success';
-		echo '<div class="alert ' . $alert_class . '" role="alert">';
-		if ($msg->message_title) echo '<strong>' . htmlspecialchars($msg->message_title) . ':</strong> ';
-		echo htmlspecialchars($msg->message);
-		echo '<button type="button" class="alert-close" aria-label="Close">&times;</button>';
-		echo '</div>';
-	}
-}
-
-// =====================================================
 // HEALTH STATUS BLOCK
 // =====================================================
 $pageoptions = array('title' => 'Status');

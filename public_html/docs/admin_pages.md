@@ -417,8 +417,16 @@ Action handling and the resulting flash message belong in the logic file (see th
 
 ### DisplayMessage Flash Messages
 
+`AdminPage` renders every pending session flash message automatically as a
+theme alert at the top of the content area (`admin_header()`), and
+`admin_footer()` clears what was shown — each message displays exactly once.
+Admin logic files and views must not call `get_messages()`,
+`clear_clearable_messages()`, or render message alerts themselves.
+
+A logic file surfaces a message in one of two ways:
+
 ```php
-// In the logic file — after a successful save/delete
+// After a successful save/delete — save the flash, then redirect
 $page_regex = '/\/admin\/admin_items/';
 
 if ($message) {
@@ -430,29 +438,14 @@ if ($message) {
 }
 return LogicResult::redirect('/admin/admin_items');
 
-// Earlier in the same logic function, on the GET path
-$display_messages = $session->get_messages('/admin/admin_items');
-$page_vars['display_messages'] = $display_messages;
+// On a refused action — return an error with the page's data payload;
+// process_logic() saves it as an error flash and the page re-renders with
+// the alert shown
+return LogicResult::error('Why the save was refused.', $page_vars);
 ```
 
-```php
-// View — render and clear
-if (!empty($display_messages)) {
-    foreach ($display_messages as $msg) {
-        $alert_class = 'alert-info';
-        if ($msg->display_type == DisplayMessage::MESSAGE_ERROR)        $alert_class = 'alert-danger';
-        elseif ($msg->display_type == DisplayMessage::MESSAGE_WARNING)  $alert_class = 'alert-warning';
-        elseif ($msg->display_type == DisplayMessage::MESSAGE_ANNOUNCEMENT) $alert_class = 'alert-success';
-        ?>
-        <div class="alert <?= $alert_class ?>">
-            <?php if ($msg->message_title): ?><strong><?= htmlspecialchars($msg->message_title) ?>:</strong><?php endif; ?>
-            <?= htmlspecialchars($msg->message) ?>
-        </div>
-        <?php
-    }
-    $session->clear_clearable_messages();
-}
-```
+Message type maps to alert style: `MESSAGE_ANNOUNCEMENT` → success,
+`MESSAGE_WARNING` → warning, `MESSAGE_ERROR` → danger.
 
 ### Modal Dialogs (JoineryModal)
 

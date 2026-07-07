@@ -180,9 +180,6 @@ function admin_scheduled_tasks_logic(array $input): LogicResult {
 		unset($_SESSION['dry_run_preview_html']);
 	}
 
-	// Get session messages
-	$display_messages = $session->get_messages('/admin/admin_scheduled_tasks');
-
 	return LogicResult::render(array(
 		'session' => $session,
 		'active_tasks' => $active_tasks,
@@ -193,7 +190,6 @@ function admin_scheduled_tasks_logic(array $input): LogicResult {
 		'is_docker' => $is_docker,
 		'mailing_lists' => $mailing_lists,
 		'site_timezone' => $site_timezone,
-		'display_messages' => $display_messages,
 		'dry_run_supported' => $dry_run_supported,
 		'orphaned_tasks' => $orphaned_tasks,
 		'dry_run_preview_html' => $dry_run_preview_html,

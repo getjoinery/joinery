@@ -302,9 +302,6 @@ if ($action) {
     }
 }
 
-// Get any saved messages
-$display_messages = $session->get_messages('/admin/admin_static_cache');
-
 // Get cache statistics
 $stats = StaticPageCache::getCacheStats();
 $cached_urls = StaticPageCache::getCachedUrls(50);
@@ -375,29 +372,6 @@ if ($stats['enabled']) {
 $altlinks['Clear All Cache'] = '/admin/admin_static_cache?action=clear_all';
 
 $page->begin_box(array('altlinks' => $altlinks));
-
-// Display session messages
-if (!empty($display_messages)) {
-    foreach ($display_messages as $msg) {
-        $alert_class = 'alert-info';
-        if ($msg->display_type == DisplayMessage::MESSAGE_ERROR) {
-            $alert_class = 'alert-danger';
-        } elseif ($msg->display_type == DisplayMessage::MESSAGE_WARNING) {
-            $alert_class = 'alert-warning';
-        } elseif ($msg->display_type == DisplayMessage::MESSAGE_ANNOUNCEMENT) {
-            $alert_class = 'alert-success';
-        }
-        echo '<div class="alert ' . $alert_class . '" role="alert">';
-        if ($msg->message_title) {
-            echo '<strong>' . htmlspecialchars($msg->message_title) . ':</strong> ';
-        }
-        echo htmlspecialchars($msg->message);
-        echo '<button type="button" class="alert-close" aria-label="Close">&times;</button>';
-        echo '</div>';
-    }
-    // Clear messages after displaying
-    $session->clear_clearable_messages();
-}
 ?>
 <!-- Cache Statistics -->
 <div class="row">
