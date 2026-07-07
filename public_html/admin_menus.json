@@ -509,7 +509,8 @@
             "url": "/profile",
             "order": 50,
             "permission": 0,
-            "icon": "user"
+            "icon": "user",
+            "nativeScreen": "profile"
         },
         {
             "slug": "core-calendar",
@@ -523,10 +524,11 @@
         {
             "slug": "core-orders",
             "title": "Orders",
-            "url": "/profile#orders",
+            "url": "/profile/orders",
             "order": 60,
             "permission": 0,
-            "icon": "shopping-bag"
+            "icon": "shopping-bag",
+            "nativeScreen": "orders"
         },
         {
             "slug": "core-subscriptions",
@@ -534,15 +536,17 @@
             "url": "/profile/subscriptions",
             "order": 70,
             "permission": 0,
-            "icon": "refresh"
+            "icon": "refresh",
+            "nativeScreen": "subscriptions"
         },
         {
             "slug": "core-events",
             "title": "My Events",
-            "url": "/profile#events",
+            "url": "/profile/events",
             "order": 80,
             "permission": 0,
-            "icon": "calendar"
+            "icon": "calendar",
+            "nativeScreen": "events"
         },
         {
             "slug": "core-event-sessions",

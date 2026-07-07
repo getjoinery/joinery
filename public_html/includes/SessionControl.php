@@ -810,8 +810,10 @@ class SessionControl{
 	 * Stores original session state for restoration via clear_api_user().
 	 *
 	 * @param int $user_id The user ID associated with the API key
+	 * @param int|null $api_key_id The presented ApiKey's id (null for the
+	 *        browser-session credential, which has no ApiKey row)
 	 */
-	public function set_api_user($user_id) {
+	public function set_api_user($user_id, $api_key_id = null) {
 		require_once(PathHelper::getIncludePath('data/users_class.php'));
 		$user = new User($user_id, TRUE);
 
@@ -820,6 +822,7 @@ class SessionControl{
 			'usr_user_id' => $_SESSION['usr_user_id'] ?? null,
 			'permission' => $_SESSION['permission'] ?? null,
 			'timezone' => $_SESSION['timezone'] ?? null,
+			'api_key_id' => $_SESSION['api_key_id'] ?? null,
 		];
 		$this->_api_context = true;
 
@@ -827,6 +830,17 @@ class SessionControl{
 		$_SESSION['usr_user_id'] = $user->key;
 		$_SESSION['permission'] = $user->get('usr_permission');
 		$_SESSION['timezone'] = $user->get('usr_timezone');
+		$_SESSION['api_key_id'] = $api_key_id;
+	}
+
+	/**
+	 * The ApiKey id that authenticated the current API request, or null for
+	 * the browser-session credential (no ApiKey row) or outside API context.
+	 *
+	 * @return int|null
+	 */
+	public function get_api_key_id() {
+		return $_SESSION['api_key_id'] ?? null;
 	}
 
 	/**

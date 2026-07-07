@@ -239,19 +239,26 @@ $conversation = Conversation::get_or_create_conversation($user_id_1, $user_id_2)
 
 Plugins that want to restrict who can message whom (e.g., dating match-only messaging) handle that in their own routes and logic before calling the messaging API. The messaging system itself has no gating -- it's just an API for creating conversations and sending messages.
 
-### AJAX Endpoint
+### API Surface
 
-**File:** `ajax/conversations_ajax.php`
+The messaging surface is `/api/v1` actions (session-key auth: browser-session
+credential for the web page, native session key for the apps) — both the web
+conversation page and the iOS native member surface
+(`ios/joinery-kit/Sources/JoineryMemberKit`) call these actions directly, so
+a conversation opened in either place is the same thread:
 
-| Action | Method | Params | Response |
-|--------|--------|--------|----------|
-| `send_message` | POST | `body` + (`conversation_id` OR `recipient_user_id`) | `{success, conversation_id, message_html, message_id, sent_time}` |
-| `mark_read` | POST | `conversation_id` | `{success}` |
-| `delete_conversation` | POST | `conversation_id` | `{success}` |
-| `mute_conversation` | POST | `conversation_id` | `{success, is_muted}` |
-| `unmute_conversation` | POST | `conversation_id` | `{success, is_muted}` |
+| Action | Params | Returns |
+|--------|--------|---------|
+| `conversation_list` | `offset` (20/page) | Paginated inbox: id, other-participant display name, preview, last-message time, unread flag, muted flag |
+| `conversation_thread` | `conversation_id` OR `to` (compose-mode dedup — no existing 1:1 returns `is_compose_mode: true` with an empty message list); `before`/`after` ISO UTC cursors (50/page) | One conversation's messages (id, sender id, body, time, `is_mine`); marks the conversation read as a side effect |
+| `conversation_send` | `body` + (`conversation_id` OR `to`) | The created message (`conversation_id`, `message_id`, `body`, `sent_time`) |
+| `conversation_action` | `conversation_id`, `action` (`mute` / `unmute` / `delete`) | `{conversation_id, action}` |
 
-All actions require login. `send_message` with `recipient_user_id` calls `get_or_create_conversation()` automatically. Actions that take `conversation_id` verify the user is a participant.
+All four require a session and re-check participation on every call —
+`send`/`thread`/`action` verify the caller is sender or recipient via the
+`ConversationParticipant` row (`cnp_usr_user_id`) before touching anything.
+`conversation_send` with `to` calls `get_or_create_conversation()`
+automatically, matching an existing 1:1 or starting one.
 
 ### Header Icon
 

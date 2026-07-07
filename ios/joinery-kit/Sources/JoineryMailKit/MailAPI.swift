@@ -90,9 +90,18 @@ public struct MailAPI: Sendable {
     }
 
     /// A thread-level state mutation (mark_read, star, archive, delete,
-    /// mark_spam, …). Returns the number of affected messages.
+    /// mark_spam, set_membership, …). Returns the number of affected
+    /// messages. `folderID`/`present` drive `set_membership`: for an
+    /// exclusive feed present is always true (choosing a folder relocates
+    /// the thread); for a non-exclusive one it toggles the label.
     @discardableResult
-    public func threadAction(_ action: String, threadKey: String, aliasID: Int?) async throws -> Int {
+    public func threadAction(
+        _ action: String,
+        threadKey: String,
+        aliasID: Int?,
+        folderID: Int? = nil,
+        present: Bool? = nil
+    ) async throws -> Int {
         var body: [(key: String, value: JSONValue)] = [
             (key: "action", value: .string(action)),
             (key: "thread_key", value: .string(threadKey)),
@@ -100,8 +109,30 @@ public struct MailAPI: Sendable {
         if let aliasID {
             body.append((key: "alias_id", value: .number(Double(aliasID))))
         }
+        if let folderID {
+            body.append((key: "folder_id", value: .number(Double(folderID))))
+        }
+        if let present {
+            body.append((key: "present", value: .bool(present)))
+        }
         let envelope = try await client.submitAction("mailbox/thread_action", body: .object(body))
         return envelope["data"]?["count"]?.intValue ?? 0
+    }
+
+    /// Create a folder/label on the thread's mailbox and file the thread
+    /// into it — one call, matching the web reader's "New label / New
+    /// folder" row (`buildFolderControl()` in mailbox_reader.js).
+    public func createFolder(name: String, threadKey: String, aliasID: Int?) async throws -> MailFolder? {
+        var body: [(key: String, value: JSONValue)] = [
+            (key: "action", value: .string("create_folder")),
+            (key: "thread_key", value: .string(threadKey)),
+            (key: "name", value: .string(name)),
+        ]
+        if let aliasID {
+            body.append((key: "alias_id", value: .number(Double(aliasID))))
+        }
+        let envelope = try await client.submitAction("mailbox/thread_action", body: .object(body))
+        return envelope["data"]?["folder"].flatMap(MailFolder.init(json:))
     }
 
     public enum ComposeMode: String, Sendable {

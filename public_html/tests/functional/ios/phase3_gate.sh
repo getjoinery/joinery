@@ -7,22 +7,30 @@
 #   1. Regression: Phase 2 auth + account-form suites under the new shell
 #   2. Navigation: tab bar + More list from /api/v1/app/navigation
 #   3. Calendar: native month grid + entry create/delete round-trip, the
-#      soft-deleted row verified in cal_entries; then the remaining webview
-#      legs (orders load, conversations via in-webview navigation)
-#   4. Mailbox: grant + seeded message (local SMTP), read + reply in-app,
-#      reply arrival verified in iem_inbound_email_messages
-#   5. Menu probe: plugin profileMenu entry synced server-side appears with
+#      soft-deleted row verified in cal_entries
+#   4. Native member screens (JoineryMemberKit): profile dashboard, orders,
+#      subscriptions, events, security — each with a no-webview assertion
+#   5. Webview: the deliberately-web surfaces load through the bridge from
+#      their native entry points (change-tier, notifications)
+#   6. Conversations: seeded peer + 1:1 thread, native read + reply, the
+#      reply row verified in msg_messages
+#   7. Mailbox: grant + seeded message (local SMTP), read + reply in-app,
+#      reply arrival verified in iem_inbound_email_messages; then the
+#      folder picker files the seeded thread into a fresh label, verified
+#      in ilb_inbound_email_labels/ilm_inbound_label_members
+#   8. Menu probe: plugin profileMenu entry synced server-side appears with
 #      NO app rebuild, then pruned
-#   6. Link probe: staged off-site link on /profile opens Safari
-#   7. Revocation (LAST): Revoke All on the App Sessions page signs out the
-#      webview AND native layers (app_bridge_key_check_seconds=0 for the leg)
+#   9. Link probe: staged off-site link on /notifications opens Safari
+#  10. Revocation (LAST): Sign Out All Devices on the native security screen
+#      kills every session key and signs the app out
+#      (app_bridge_key_check_seconds=0 so bridged web sessions die too)
 #
 # Requirements (dev box): ssh macmini, psql joinerytest, the fixture creds
 # file ~/.joinery_app_test_creds, and the iOS source tree in this repo at
 # {repo root}/ios/ (synced to the mini build area ~/dev/joinery-ios before
 # building).
 #
-# Version: 1.2.0
+# Version: 1.3.1
 
 set -u
 cd "$(dirname "$0")"
@@ -79,29 +87,31 @@ record_fail() {
     echo "-- $1: FAIL"
 }
 
-# ---- link probe (temporary off-site anchor on /profile) --------------------
+# ---- link probe (temporary off-site anchor on /notifications) ---------------
+# The notifications page is a deliberately-web surface reached from the
+# native dashboard — the /profile page itself renders natively in-app now.
 
-PROFILE_VIEW="$PUBLIC_HTML/views/profile/profile.php"
+PROBE_VIEW="$PUBLIC_HTML/views/notifications.php"
 add_link_probe() {
-    if grep -q PHASE3_LINK_PROBE "$PROFILE_VIEW"; then return 0; fi
-    python3 - "$PROFILE_VIEW" <<'PYEOF'
+    if grep -q PHASE3_LINK_PROBE "$PROBE_VIEW"; then return 0; fi
+    python3 - "$PROBE_VIEW" <<'PYEOF'
 import sys
 path = sys.argv[1]
 src = open(path).read()
-anchor = '        <div class="stats-grid jy-mb-5">\n'
-probe = ('        <!-- PHASE3_LINK_PROBE_START (temporary; removed by phase3_gate.sh) -->\n'
-         '        <a href="https://example.com/" class="jy-profile-actionlink">External Probe Link</a>\n'
-         '        <!-- PHASE3_LINK_PROBE_END -->\n')
+anchor = '<div class="ntf-inbox">\n'
+probe = ('<!-- PHASE3_LINK_PROBE_START (temporary; removed by phase3_gate.sh) -->\n'
+         '<a href="https://example.com/">External Probe Link</a>\n'
+         '<!-- PHASE3_LINK_PROBE_END -->\n')
 if anchor not in src:
-    sys.exit("link probe anchor not found in profile.php")
+    sys.exit("link probe anchor not found in notifications.php")
 open(path, 'w').write(src.replace(anchor, probe + anchor, 1))
 PYEOF
-    php -l "$PROFILE_VIEW" > /dev/null || { echo "FATAL: link probe broke syntax"; exit 1; }
+    php -l "$PROBE_VIEW" > /dev/null || { echo "FATAL: link probe broke syntax"; exit 1; }
 }
 remove_link_probe() {
-    if grep -q PHASE3_LINK_PROBE "$PROFILE_VIEW"; then
-        sed -i '/PHASE3_LINK_PROBE_START/,/PHASE3_LINK_PROBE_END/d' "$PROFILE_VIEW"
-        php -l "$PROFILE_VIEW" > /dev/null || echo "WARNING: check $PROFILE_VIEW after probe removal"
+    if grep -q PHASE3_LINK_PROBE "$PROBE_VIEW"; then
+        sed -i '/PHASE3_LINK_PROBE_START/,/PHASE3_LINK_PROBE_END/d' "$PROBE_VIEW"
+        php -l "$PROBE_VIEW" > /dev/null || echo "WARNING: check $PROBE_VIEW after probe removal"
     fi
 }
 
@@ -173,7 +183,7 @@ run_suite "Regression: account form submit" "JoineryMemberUITests/AccountFormUIT
 run_suite "Navigation shell (tabs + More from server)" \
     "JoineryMemberUITests/NavigationShellUITests/testTabsAndMoreRenderFromServerNavigation"
 
-# ---- 3. calendar (native) + remaining webviews -------------------------------------
+# ---- 3. calendar (native) ------------------------------------------------------
 
 CAL_TITLE="NativeCal Probe $(date +%s)"
 run_suite "Calendar: native grid + entry CRUD" "JoineryMemberUITests/CalendarUITests" \
@@ -190,46 +200,92 @@ else
     record_fail "calendar-entry-roundtrip (no soft-deleted row for probe title)"
 fi
 
-run_suite "Webview: orders load" "JoineryMemberUITests/WebviewUITests/testOrdersLoads"
-run_suite "Webview: conversations via in-webview navigation" \
-    "JoineryMemberUITests/WebviewUITests/testConversationsLoadViaInWebviewNavigation"
+# ---- 4. native member screens (JoineryMemberKit) -------------------------------
 
-# ---- 4. mailbox read + reply ------------------------------------------------------
+run_suite "Native: profile dashboard + security tile" "JoineryMemberUITests/ProfileUITests"
+run_suite "Native: orders list" "JoineryMemberUITests/OrdersUITests"
+run_suite "Native: subscriptions list" "JoineryMemberUITests/SubscriptionsUITests"
+run_suite "Native: events list" "JoineryMemberUITests/EventsUITests"
+run_suite "Native: security screen" "JoineryMemberUITests/SecurityUITests"
+
+# ---- 5. webview (deliberately-web surfaces via native entry points) -------------
+
+run_suite "Webview: change-tier from native subscriptions" \
+    "JoineryMemberUITests/WebviewUITests/testChangePlanLoadsFromNativeSubscriptions"
+run_suite "Webview: notifications from native dashboard" \
+    "JoineryMemberUITests/WebviewUITests/testNotificationsLoadFromProfileDashboard"
+
+# ---- 6. conversations (native read + reply) --------------------------------------
+
+echo ""
+echo "== conversation fixtures (peer user + seeded thread) =="
+CONV_FIXTURES=$(php "$PUBLIC_HTML/tests/functional/ios/phase3_conversation_fixtures.php" ensure "$TEST_EMAIL") || {
+    echo "FATAL: conversation fixtures failed: $CONV_FIXTURES"; exit 1; }
+echo "$CONV_FIXTURES"
+CONV_ID=$(echo "$CONV_FIXTURES" | sed -n 's/.*conversation=\([0-9]*\).*/\1/p')
+CONV_OTHER_NAME=$(echo "$CONV_FIXTURES" | sed -n 's/.*other_name=//p')
+CONV_REPLY="Phase3ConvReply-$(date +%s)"
+
+run_suite "Conversations: native inbox + thread reply" \
+    "JoineryMemberUITests/ConversationsUITests" \
+    "TEST_RUNNER_JOINERY_CONVERSATION_OTHER_NAME='$CONV_OTHER_NAME' \
+     TEST_RUNNER_JOINERY_CONVERSATION_REPLY_TEXT='$CONV_REPLY'"
+
+# Server-side proof the reply hit msg_messages in the seeded conversation.
+CONV_ROW=$($PSQL "SELECT msg_message_id FROM msg_messages
+                  WHERE msg_cnv_conversation_id = ${CONV_ID:-0}
+                    AND msg_body = '$CONV_REPLY' LIMIT 1")
+if [ -n "$CONV_ROW" ]; then
+    PASS_COUNT=$((PASS_COUNT+1))
+    echo "-- Conversation reply round-trip (server-side): PASS (msg id $CONV_ROW)"
+else
+    record_fail "conversation-reply-roundtrip (no msg_messages row for reply text)"
+fi
+
+# ---- 7. mailbox read + reply ------------------------------------------------------
 
 STAMP=$(date +%s)
 MAIL_SUBJECT="Phase3 Gate Mail $STAMP"
 MAIL_BODY="Phase3GateBody-$STAMP"
 MAIL_REPLY="Phase3GateReply-$STAMP"
+# The picker leg gets its own message: the read+reply leg's reply retitles
+# that thread's list row ("Re: …"), so an exact subject lookup needs a
+# thread the reply never touched.
+PICKER_SUBJECT="Phase3 Picker Mail $STAMP"
 
 flip_smtp_local
 echo ""
-echo "== seed mailbox message =="
-python3 - "$SENDER_EMAIL" "$TEST_EMAIL" "$MAIL_SUBJECT" "$MAIL_BODY" <<'PYEOF'
+echo "== seed mailbox messages (read+reply and picker) =="
+python3 - "$SENDER_EMAIL" "$TEST_EMAIL" "$MAIL_SUBJECT" "$MAIL_BODY" "$PICKER_SUBJECT" <<'PYEOF'
 import smtplib, sys
 from email.message import EmailMessage
-sender, to, subject, body = sys.argv[1:5]
-msg = EmailMessage()
-msg['From'] = f'Phase3 Sender <{sender}>'
-msg['To'] = to
-msg['Subject'] = subject
-msg.set_content(body)
+sender, to, subject, body, picker_subject = sys.argv[1:6]
 s = smtplib.SMTP('localhost', 25, timeout=30)
-s.send_message(msg)
+for subj in (subject, picker_subject):
+    msg = EmailMessage()
+    msg['From'] = f'Phase3 Sender <{sender}>'
+    msg['To'] = to
+    msg['Subject'] = subj
+    msg.set_content(body)
+    s.send_message(msg)
 s.quit()
 PYEOF
 
 SEEDED=""
+PICKER_SEEDED=""
 for i in $(seq 1 18); do
     SEEDED=$($PSQL "SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
                     WHERE iem_recipient = '$TEST_EMAIL' AND iem_subject = '$MAIL_SUBJECT' LIMIT 1")
-    [ -n "$SEEDED" ] && break
+    PICKER_SEEDED=$($PSQL "SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
+                    WHERE iem_recipient = '$TEST_EMAIL' AND iem_subject = '$PICKER_SUBJECT' LIMIT 1")
+    [ -n "$SEEDED" ] && [ -n "$PICKER_SEEDED" ] && break
     sleep 5
 done
-if [ -z "$SEEDED" ]; then
+if [ -z "$SEEDED" ] || [ -z "$PICKER_SEEDED" ]; then
     record_fail "mailbox-seed (message never arrived)"
     restore_smtp
 else
-    echo "-- seeded message stored (iem id $SEEDED)"
+    echo "-- seeded messages stored (iem ids $SEEDED, $PICKER_SEEDED)"
     run_suite "Mailbox: read + reply in-app" "JoineryMemberUITests/MailboxUITests" \
         "TEST_RUNNER_JOINERY_MAIL_SUBJECT='$MAIL_SUBJECT' \
          TEST_RUNNER_JOINERY_MAIL_BODY_SNIPPET='$MAIL_BODY' \
@@ -251,9 +307,35 @@ else
     else
         record_fail "mailbox-reply-delivery (reply never stored)"
     fi
+
+    # Folder picker: files its own seeded thread into a fresh label. The
+    # fixtures step guaranteed a base label exists, so the Move/Labels
+    # control shows.
+    MAIL_FOLDER="Phase3Folder$STAMP"
+    run_suite "Mailbox: folder picker files thread" \
+        "JoineryMemberUITests/MailFolderPickerUITests" \
+        "TEST_RUNNER_JOINERY_MAIL_SUBJECT='$PICKER_SUBJECT' \
+         TEST_RUNNER_JOINERY_MAIL_FOLDER_NAME='$MAIL_FOLDER'"
+
+    # Server-side proof: the label was created and the picker message is a
+    # present member of it.
+    FOLDER_ROW=$($PSQL "SELECT ilm.ilm_inbound_label_member_id
+                        FROM ilm_inbound_label_members ilm
+                        JOIN ilb_inbound_email_labels ilb
+                          ON ilb.ilb_inbound_email_label_id = ilm.ilm_ilb_inbound_email_label_id
+                        WHERE ilb.ilb_name = '$MAIL_FOLDER'
+                          AND ilb.ilb_delete_time IS NULL
+                          AND ilm.ilm_iem_inbound_email_message_id = ${PICKER_SEEDED:-0}
+                          AND ilm.ilm_present_local = true LIMIT 1")
+    if [ -n "$FOLDER_ROW" ]; then
+        PASS_COUNT=$((PASS_COUNT+1))
+        echo "-- Folder membership round-trip (server-side): PASS (ilm id $FOLDER_ROW)"
+    else
+        record_fail "folder-membership-roundtrip (no membership row for $MAIL_FOLDER)"
+    fi
 fi
 
-# ---- 5. menu probe (no rebuild) ---------------------------------------------------
+# ---- 8. menu probe (no rebuild) ---------------------------------------------------
 
 echo ""
 echo "== stage menu probe =="
@@ -263,17 +345,17 @@ run_suite "Plugin menu entry appears (no rebuild)" \
     "TEST_RUNNER_JOINERY_EXPECT_MENU_PROBE=1 TEST_RUNNER_JOINERY_MENU_PROBE_SLUG='$PROBE_SLUG'"
 php "$PUBLIC_HTML/tests/functional/ios/menu_probe.php" remove
 
-# ---- 6. link probe (external → Safari) ---------------------------------------------
+# ---- 9. link probe (external → Safari) ---------------------------------------------
 
 add_link_probe
 run_suite "External link opens Safari" "JoineryMemberUITests/ExternalLinkUITests" \
     "TEST_RUNNER_JOINERY_EXPECT_LINK_PROBE=1"
 remove_link_probe
 
-# ---- 7. revocation (LAST — revokes every session key for the fixture user) ---------
+# ---- 10. revocation (LAST — revokes every session key for the fixture user) ---------
 
 $SETTING_CTL set app_bridge_key_check_seconds 0
-run_suite "Revocation from web signs out both layers" "JoineryMemberUITests/RevocationUITests"
+run_suite "Revocation: Sign Out All Devices signs the app out" "JoineryMemberUITests/RevocationUITests"
 $SETTING_CTL set app_bridge_key_check_seconds "$BRIDGE_CHECK_BEFORE"
 
 # ---- summary -------------------------------------------------------------------

@@ -905,3 +905,15 @@
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
 
+	// ========== Native member screen route flips + app_navigation slug (v139) ==========
+	// Core menu seeding is insert-only, so the nativeScreen/URL changes in
+	// admin_menus.json for the member-screens conversion move existing rows
+	// here (same pattern as v136). Also repairs the app_navigation tab pinning
+	// that still named the mailbox entry by its pre-rename slug.
+	$migration = array();
+	$migration['database_version'] = '139';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'native_member_screen_menu_flips.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+

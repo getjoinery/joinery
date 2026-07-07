@@ -1,8 +1,9 @@
 import XCTest
 
-/// Gate: member pages render inside the app through the bridged webview —
-/// orders and conversations load, and in-webview same-origin navigation
-/// stays in the app.
+/// Gate: the deliberately-web member surfaces render inside the app through
+/// the bridged webview, reached from their native entry points — Change Plan
+/// from the native subscriptions screen, Notifications from the native
+/// profile dashboard — chrome-less and with no login prompt.
 final class WebviewUITests: XCTestCase {
 
     override func setUp() {
@@ -17,29 +18,34 @@ final class WebviewUITests: XCTestCase {
         return app
     }
 
-    func testOrdersLoads() {
+    func testChangePlanLoadsFromNativeSubscriptions() {
         let app = signedInApp()
         app.openMore()
-        app.buttons["more_core-orders"].tap()
+        app.buttons["more_core-subscriptions"].tap()
+        app.expect(app.navigationBars["Subscriptions"].firstMatch, timeout: 20, "native subscriptions screen")
 
-        // /profile#orders is the profile page; its orders card renders.
+        app.buttons["subscriptions_change_plan"].firstMatch.tap()
+
+        // The change-tier page renders in the bridged webview, no login page.
         let webView = app.webViews.firstMatch
-        app.expect(webView.staticTexts["Recent Orders"], timeout: 30, "orders card on profile page")
+        app.expect(webView.staticTexts["Choose Your Membership Level"], timeout: 30,
+                   "change-tier page heading in webview")
     }
 
-    func testConversationsLoadViaInWebviewNavigation() {
+    func testNotificationsLoadFromProfileDashboard() {
         let app = signedInApp()
         app.tabBars.buttons["My Profile"].tap()
+        app.expect(app.staticTexts["profile_user_name"].firstMatch, timeout: 20, "native profile dashboard")
 
-        // Same-origin navigation stays in the webview: the profile page's
-        // Unread Messages card links to /profile/conversations.
+        let row = app.buttons["profile_notifications"].firstMatch
+        app.expect(row, timeout: 10, "Notifications row on dashboard")
+        row.tap()
+
+        // The notifications page renders in the bridged webview and the app
+        // stays foreground (same-origin content never hands off to Safari).
         let webView = app.webViews.firstMatch
-        let messagesCard = webView.staticTexts["Unread Messages"]
-        app.expect(messagesCard, timeout: 30, "messages stat card on profile")
-        messagesCard.tap()
-
-        app.expect(webView.staticTexts["Messages"].firstMatch, timeout: 20, "conversations page heading")
-        // Still inside the app (no Safari hand-off for same-origin).
+        app.expect(webView.staticTexts["Notifications"].firstMatch, timeout: 30,
+                   "notifications page heading in webview")
         XCTAssertEqual(app.state, .runningForeground)
     }
 }

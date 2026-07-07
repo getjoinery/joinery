@@ -31,6 +31,8 @@ targets:
         product: JoineryCalendarKit
       - package: JoineryKit
         product: JoineryAIChatKit
+      - package: JoineryKit
+        product: JoineryMemberKit
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.getjoinery.member

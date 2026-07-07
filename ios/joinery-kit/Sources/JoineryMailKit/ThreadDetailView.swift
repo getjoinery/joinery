@@ -15,12 +15,26 @@ struct ThreadDetailView: View {
     @State private var isLoading = true
     @State private var isStarred: Bool
     @State private var compose: ComposeRequest?
+    @State private var folderIDs: Set<Int> = []
+    @State private var showFolderPicker = false
     @Environment(\.dismiss) private var dismiss
 
     init(store: MailboxStore, summary: ThreadSummary) {
         self.store = store
         self.summary = summary
         _isStarred = State(initialValue: summary.isStarred)
+    }
+
+    /// The mailbox whose folder rail applies to this thread — resolved from
+    /// the messages' alias so Move/Labels works in the "all mailboxes" list
+    /// too (mirrors the Android `threadMailbox` derivation).
+    private var threadAlias: Int? {
+        messages.first(where: { $0.aliasID != nil })?.aliasID
+    }
+
+    private var threadMailbox: Mailbox? {
+        guard let threadAlias else { return nil }
+        return store.home?.mailboxes.first { $0.aliasID == threadAlias }
     }
 
     var body: some View {
@@ -50,6 +64,57 @@ struct ThreadDetailView: View {
             ComposeSheet(api: store.api, request: request,
                          mailboxes: store.home?.mailboxes ?? [], preselectedAlias: store.selectedAlias) {
                 Task { await load(markRead: false) }
+            }
+        }
+        .sheet(isPresented: $showFolderPicker) {
+            if let threadMailbox {
+                FolderPickerSheet(
+                    mailbox: threadMailbox,
+                    currentIDs: folderIDs,
+                    onMove: { folder in
+                        Task {
+                            do {
+                                _ = try await store.api.threadAction(
+                                    "set_membership", threadKey: summary.threadKey, aliasID: store.selectedAlias,
+                                    folderID: folder.id, present: true
+                                )
+                                showFolderPicker = false
+                                await store.reload(refreshMailboxes: true)
+                                dismiss()
+                            } catch {
+                                showFolderPicker = false
+                            }
+                        }
+                    },
+                    onToggle: { folder, present in
+                        Task {
+                            do {
+                                _ = try await store.api.threadAction(
+                                    "set_membership", threadKey: summary.threadKey, aliasID: store.selectedAlias,
+                                    folderID: folder.id, present: present
+                                )
+                                folderIDs = present ? folderIDs.union([folder.id]) : folderIDs.subtracting([folder.id])
+                                await store.reload(refreshMailboxes: true)
+                            } catch {
+                                // Leave the sheet state as-is; the toggle reflects folderIDs.
+                            }
+                        }
+                    },
+                    onCreate: { name in
+                        Task {
+                            if let folder = try? await store.api.createFolder(
+                                name: name, threadKey: summary.threadKey, aliasID: threadAlias
+                            ) {
+                                folderIDs.insert(folder.id)
+                                await store.reload(refreshMailboxes: true)
+                                if threadMailbox.foldersExclusive {
+                                    showFolderPicker = false
+                                    dismiss()
+                                }
+                            }
+                        }
+                    }
+                )
             }
         }
         .task { await load() }
@@ -97,6 +162,14 @@ struct ThreadDetailView: View {
                     Image(systemName: "archivebox")
                 }
                 .accessibilityIdentifier("mail_archive")
+            }
+            if let threadMailbox, !threadMailbox.folders.isEmpty {
+                Button {
+                    showFolderPicker = true
+                } label: {
+                    Image(systemName: threadMailbox.foldersExclusive ? "folder" : "tag")
+                }
+                .accessibilityIdentifier("mail_folders")
             }
             Menu {
                 Button {
@@ -168,6 +241,7 @@ struct ThreadDetailView: View {
         do {
             let thread = try await store.api.thread(key: summary.threadKey, aliasID: store.selectedAlias)
             messages = thread.messages
+            folderIDs = Set(thread.folderIDs)
             // Latest message expanded, everything read collapsed; unread
             // messages always start expanded.
             var open = Set(thread.messages.filter { !$0.isRead }.map(\.id))

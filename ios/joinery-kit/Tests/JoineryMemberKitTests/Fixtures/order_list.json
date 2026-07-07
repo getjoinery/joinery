@@ -1,0 +1,1 @@
+{"api_version":"1.0","success_message":"Action 'order_list' completed successfully.","data":{"orders":[{"order_id":6464,"number":6464,"total":"50.00","date":"2026-06-27 15:50:57","items":[]},{"order_id":6463,"number":6463,"total":"25.00","date":"2026-07-04 15:50:57","items":[]}],"total_count":2,"offset":0,"per_page":10}}

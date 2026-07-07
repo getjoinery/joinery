@@ -143,3 +143,39 @@ on today.
 Consumers of the vault (mail, chat) define their own *content* policies —
 what they seal, what their locked state looks like — on top of these rules;
 see each consumer's own doc.
+
+## Native app: sessions and TOTP
+
+The iOS member app's Security screen
+(`ios/joinery-kit/Sources/JoineryMemberKit/SecurityScreen.swift`, reached
+from Settings) renders app sessions and TOTP status natively, backed by two
+`/api/v1` actions:
+
+- **`security_overview`** (read) — TOTP enabled flag and enrollment time,
+  backup-codes-remaining count, the app-session list (device label, created
+  time, last-used time, an `is_current` flag on the key that made the
+  request), passkey count, and vault-active flag. It is the only read
+  surface for `ApiKey` — the model gets no CRUD exposure; this payload is it.
+- **`security`** (mutation) — the same TOTP and app-session actions the web
+  security page uses: `start_enable` / `confirm_enable` / `cancel_enable` /
+  `regenerate_backup_codes` / `disable` for TOTP, `revoke_app_session` /
+  `revoke_all_app_sessions` for sessions. The enable flow's response carries
+  the `provisioning_uri` (an `otpauth://` string) the native screen renders
+  as a QR with `CIFilter.qrCodeGenerator` — the same value the web page's SVG
+  QR encodes.
+
+Revoking the session key that made the request signs the native app out
+immediately through the client's existing 401 handling
+(`SessionController.sessionInvalidatedHandler`) rather than leaving a dead
+session in the UI.
+
+**Passkey and Sealed Vault management stay web-only.** WKWebView does not
+expose platform WebAuthn to an embedded webview, so the only possible native
+path is `ASAuthorizationPlatformPublicKeyCredential` (with PRF for the
+vault) — a policy decision of its own (`passkey_register_options`,
+`passkey_rename`, and `passkey_revoke` currently require the browser-session
+credential; see [API](api.md) § Two authorization axes). The native Security
+screen shows passkey count and vault status from `security_overview` and
+links out to the web security page for management; native enrollment and
+revocation belong to a dedicated future
+`mobile_native_security_credentials` spec.

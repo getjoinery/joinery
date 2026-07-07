@@ -1,12 +1,32 @@
 import Foundation
 import JoineryKit
 
-/// One granted mailbox from `mailbox/mailboxes`.
+/// One tracked folder/label on a mailbox — the unit the reader's Move/Labels
+/// control and folder-filtered views operate on.
+public struct MailFolder: Identifiable, Equatable, Sendable {
+    public let id: Int
+    public let name: String
+    public let role: String
+
+    init?(json: JSONValue) {
+        guard let id = json["id"]?.intValue else { return nil }
+        self.id = id
+        name = json["name"]?.stringValue ?? ""
+        role = json["role"]?.stringValue ?? "custom"
+    }
+}
+
+/// One granted mailbox from `mailbox/mailboxes`. `foldersExclusive` drives
+/// whether the folder control is a single-pick "Move" (exclusive feed, e.g.
+/// an IMAP mailbox where a message lives in exactly one folder) or checkbox
+/// "Labels" (Gmail-style, non-exclusive membership).
 public struct Mailbox: Identifiable, Equatable, Sendable {
     public let aliasID: Int
     public let address: String
     public let unread: Int
     public let total: Int
+    public let folders: [MailFolder]
+    public let foldersExclusive: Bool
 
     public var id: Int { aliasID }
 
@@ -23,6 +43,8 @@ public struct Mailbox: Identifiable, Equatable, Sendable {
         self.address = address
         self.unread = json["unread"]?.intValue ?? 0
         self.total = json["total"]?.intValue ?? 0
+        self.folders = (json["folders"]?.arrayValue ?? []).compactMap(MailFolder.init(json:))
+        self.foldersExclusive = json["folders_exclusive"]?.boolValue ?? false
     }
 }
 
@@ -129,6 +151,10 @@ public struct MailOutgoingAttachment: Identifiable, Equatable, Sendable {
 /// One message of `mailbox/thread`.
 public struct MailMessage: Identifiable, Equatable, Sendable {
     public let id: Int
+    /// The mailbox this message arrived through, `nil` for the superadmin
+    /// "Unmatched" view. Resolves which mailbox's folder rail the Move/Labels
+    /// control uses (the first message in a thread that has one).
+    public let aliasID: Int?
     public let sender: String
     public let recipient: String
     public let subject: String
@@ -145,6 +171,7 @@ public struct MailMessage: Identifiable, Equatable, Sendable {
     init?(json: JSONValue) {
         guard let id = json["id"]?.intValue else { return nil }
         self.id = id
+        aliasID = json["alias_id"]?.isNull == false ? json["alias_id"]?.intValue : nil
         sender = json["sender"]?.stringValue ?? ""
         recipient = json["recipient"]?.stringValue ?? ""
         subject = json["subject"]?.stringValue ?? ""
@@ -158,13 +185,16 @@ public struct MailMessage: Identifiable, Equatable, Sendable {
     }
 }
 
-/// The `mailbox/thread` payload.
+/// The `mailbox/thread` payload: the in-scope messages plus the thread's
+/// current folder/label memberships (ids into the mailbox's `folders`).
 public struct MailThread: Equatable, Sendable {
     public let messages: [MailMessage]
+    public let folderIDs: [Int]
 
     public init?(data: JSONValue?) {
         guard let data else { return nil }
         messages = (data["messages"]?.arrayValue ?? []).compactMap(MailMessage.init(json:))
+        folderIDs = (data["folders"]?.arrayValue ?? []).compactMap(\.intValue)
     }
 }
 

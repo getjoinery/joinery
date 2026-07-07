@@ -123,6 +123,26 @@ Users manage their subscriptions from a dedicated subscription management page:
 - Only if `subscription_reactivation_enabled = true`
 - Available for cancelled subscriptions before they expire
 
+### Native App Read Access
+
+The iOS member app's Subscriptions screen
+(`ios/joinery-kit/Sources/JoineryMemberKit/SubscriptionsScreen.swift`) reads
+the same subscription data through `POST /api/v1/action/subscription_summary`
+(session key). The payload returns active and cancelled subscriptions
+(order-item id, product/tier name, price, period, status, renewal-or-end
+date, `can_cancel`), the current tier from the user record, and a
+`payment_source` marker (`stripe` / `paypal` / none) so the client knows
+which management affordances to show.
+
+The screen is read-only plus Cancel, which calls the existing
+`orders_recurring_action` — the same action the web page's cancel button
+uses, with no server change. Upgrade, downgrade, reactivate, and billing
+management stay web-only in the native app: selling digital subscriptions
+inside an iOS app must go through Apple In-App Purchase, so purchase/upgrade
+UI is not rebuilt natively around Stripe until a dedicated billing spec
+lands. The screen's "Change Plan" and "Manage Billing" rows open the
+existing web pages in the app's authenticated webview instead.
+
 ---
 
 ## Developer Reference
