@@ -57,12 +57,26 @@ fun SettingsScreen(
         if (route != SettingsRoute.Root) route = SettingsRoute.Root else onExit?.invoke()
     }
 
+    // The native Security screen owns its own chrome (app bar + list), so it
+    // renders full-screen rather than under the Settings app bar. A build with
+    // a member module registers "security"; without it, the route falls back to
+    // the web security page below (which has no chrome of its own).
+    if (route == SettingsRoute.Security && web != null && NativeScreenRegistry.contains("security")) {
+        NativeScreenRegistry.Render(
+            "security",
+            NativeScreenContext(session, user, web, onExit = { route = SettingsRoute.Root }),
+        )
+        return
+    }
+
     val title = when (route) {
         SettingsRoute.Root -> "Settings"
         SettingsRoute.AccountEdit -> "Edit Account"
+        SettingsRoute.AddressEdit -> "Edit Address"
+        SettingsRoute.PhoneEdit -> "Edit Phone Number"
         SettingsRoute.ContactPreferences -> "Contact Preferences"
         SettingsRoute.PasswordEdit -> "Change Password"
-        SettingsRoute.AppSessions -> "App Sessions"
+        SettingsRoute.Security -> "Security"
     }
 
     Scaffold(topBar = {
@@ -89,11 +103,17 @@ fun SettingsScreen(
                 FormScreen(session.client, "account_edit", content) {
                     scope.launch { session.refreshUser() }
                 }
+            SettingsRoute.AddressEdit ->
+                FormScreen(session.client, "address_edit", content)
+            SettingsRoute.PhoneEdit ->
+                FormScreen(session.client, "phone_numbers_edit", content)
             SettingsRoute.ContactPreferences ->
                 FormScreen(session.client, "contact_preferences", content)
             SettingsRoute.PasswordEdit ->
                 FormScreen(session.client, "password_edit", content)
-            SettingsRoute.AppSessions ->
+            SettingsRoute.Security ->
+                // Reached only when the native screen isn't registered (the
+                // native path returns above): the web security page as a fallback.
                 if (web != null) {
                     val state = remember { WebPageState() }
                     WebScreen("/profile/security", session.client, web, state, content)
@@ -106,7 +126,7 @@ fun SettingsScreen(
 private fun SettingsRoot(
     session: SessionController,
     user: UserSummary,
-    showAppSessions: Boolean,
+    showSecurity: Boolean,
     modifier: Modifier,
     navigate: (SettingsRoute) -> Unit,
 ) {
@@ -138,12 +158,14 @@ private fun SettingsRoot(
         HorizontalDivider()
         SectionLabel("Account")
         SettingsRow("Edit Account", "settings_account_edit") { navigate(SettingsRoute.AccountEdit) }
+        SettingsRow("Edit Address", "settings_address_edit") { navigate(SettingsRoute.AddressEdit) }
+        SettingsRow("Edit Phone Number", "settings_phone_numbers_edit") { navigate(SettingsRoute.PhoneEdit) }
         SettingsRow("Contact Preferences", "settings_contact_preferences") { navigate(SettingsRoute.ContactPreferences) }
         SettingsRow("Change Password", "settings_password_edit") { navigate(SettingsRoute.PasswordEdit) }
-        if (showAppSessions) {
+        if (showSecurity) {
             HorizontalDivider()
             SectionLabel("Security")
-            SettingsRow("App Sessions", "settings_app_sessions") { navigate(SettingsRoute.AppSessions) }
+            SettingsRow("Security", "settings_security") { navigate(SettingsRoute.Security) }
         }
         HorizontalDivider()
         Text(
@@ -200,4 +222,4 @@ private fun SettingsRow(label: String, tag: String, onClick: () -> Unit) {
     )
 }
 
-private enum class SettingsRoute { Root, AccountEdit, ContactPreferences, PasswordEdit, AppSessions }
+private enum class SettingsRoute { Root, AccountEdit, AddressEdit, PhoneEdit, ContactPreferences, PasswordEdit, Security }

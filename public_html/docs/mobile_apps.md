@@ -755,6 +755,108 @@ Compose `testTag` values (`chat_*`) are the stable UI-test addressing:
 
 Not in the module (the web chat remains for it): thread export.
 
+## joinery-android-member (native member surface module)
+
+**joinery-android-member** is the Android native member-account surface
+(`android/joinery-android-member`, namespace `com.getjoinery.memberkit`,
+depends on `:joinery-android`), the platform counterpart to JoineryMemberKit.
+An app adds the module and calls `JoineryMember.registerScreens()` before
+mounting the root; the server's `profile`, `orders`, `subscriptions`,
+`events`, `conversations`, and `security` navigation destinations then render
+these screens, and builds without the module keep the web pages via each
+entry's fallback URL. `conversations` and `security` are not menu entries —
+they are reached from the dashboard and from Settings respectively, both
+resolved through the same `NativeScreenRegistry` table so a core-only build
+(no member module) falls back to the equivalent webview destination.
+
+The screens consume the same seven purpose-built read actions and reused
+mutations as iOS — `profile_dashboard`, `order_list`, `subscription_summary`,
+`my_events`, `conversation_list`, `conversation_thread`, `security_overview`
+for reads; `orders_recurring_action`, `event_withdraw`, `security`,
+`address_edit`, `phone_numbers_edit`, `conversation_send`, and
+`conversation_action` for mutations. The iOS JoineryMemberKit sources are the
+behavioral contract (same payloads, same affordances, same deliberately-web
+boundaries); models parse with the core `JsonValue` parser and stores follow
+the established store conventions (`MailboxStore` is the reference): a
+`MemberPhase` (loading / loaded / failed), a `loadGeneration` stale-load guard
+so a slow older response never lands over a newer one, keep-last-good on
+reload (a refresh never blanks the list), and both pull-to-refresh and an
+ON_RESUME foreground refresh on every screen.
+
+Each screen takes an optional `onBack` and shows a back arrow only when it is
+non-null: `NativeScreenContext.onExit` is `(() -> Unit)?`, the navigation shell
+passes the pop lambda for a pushed screen and null at a navigation root, and
+`JoineryMember.registerScreens()` wires `onBack = ctx.onExit` into all six.
+
+- **Dashboard** (`ProfileScreen` + `ProfileStore`, registry name `profile`) —
+  the user card, a needs-attention row (pending event surveys, unread message
+  count), stat tiles, and recent-item lists. Every section renders strictly
+  from keys the `profile_dashboard` payload actually sent — a settings-gated
+  section (`messaging_active` / `products_active` / `subscriptions_active`
+  off) is an absent key, not an empty placeholder. Tiles and rows navigate to
+  the other native screens directly; Notifications and event survey links open
+  through `ctx.web`.
+- **Orders** (`OrdersScreen` + `OrderListStore`, registry name `orders`) — a
+  paginated, read-only order history (10/page) with each order's line-item
+  summaries.
+- **Subscriptions** (`SubscriptionsScreen` + `SubscriptionStore`, registry
+  name `subscriptions`) — active and cancelled subscriptions, current tier,
+  and Cancel (a confirmation dialog into `orders_recurring_action`, which
+  cancels at period end unconditionally once called). Change Plan opens
+  `/profile/change-tier` and Manage Billing opens `/profile/billing` through
+  `ctx.web` — deliberately web (Google Play IAP rules for digital
+  subscriptions mirror Apple's; native purchase UI belongs to
+  `specs/mobile_app_billing.md`). The billing row shows only when
+  `payment_source` is `stripe`.
+- **Events** (`EventsScreen` + `EventListStore`, registry name `events`) — a
+  status-tabbed (all / active / expired / canceled / completed), paginated
+  (10/page) registration list. Rows open the session content page through
+  `ctx.web`; Withdraw is a confirmation dialog into `event_withdraw`.
+- **Conversations** (`ConversationsScreen` + `ConversationListStore` for the
+  inbox, `ConversationThreadView` + `ConversationThreadStore` for one thread,
+  registry name `conversations`) — a paginated (20/page) inbox with swipe
+  mute/unmute (right, immediate) and delete (left, which arms a confirmation
+  dialog rather than deleting outright — deletion is destructive with no undo),
+  opening into a bubble thread with cursor-paginated messages (`before`/`after`
+  ISO cursors) and a compose bar.
+  Opening a thread marks it read as a side effect of the `conversation_thread`
+  call, exactly as the web page does. There is no new-conversation entry
+  point — the compose/member-picker is parked on a product decision on both
+  platforms.
+- **Security** (`SecurityScreen` + `SecurityStore`, registry name `security`)
+  — the app-session list (per-row Sign Out and Sign Out All Devices) and TOTP
+  status with enable / confirm / disable / regenerate flows. The enable flow
+  renders the `provisioning_uri` (`otpauth://…`) as a QR natively with ZXing
+  (`com.google.zxing:core`) — the server returns the URI, not an image. Enable
+  confirms with a code under `totp_code`; disable sends whichever code the user
+  entered (authenticator or backup) as the server's single `confirm_code`
+  field, which classifies it by shape (6 digits = authenticator, 8 chars =
+  backup). Revoking the session key that made the request signs the app out
+  through the core 401 path: `SecurityStore.revoke` reloads `security_overview`
+  on the now dead key, the 401 fires `ApiClient.sessionInvalidatedHandler`, and
+  the app returns to the login screen. Passkeys and the Sealed Vault are
+  web-managed — the WebView cannot expose platform WebAuthn — so a "Manage on
+  the Website" row opens `/profile/security` through the web-session bridge, and
+  returning from it refreshes the overview.
+
+Settings additions live in the core module (`joinery-android`), not here — the
+generic `FormScreen` renderer already covers them: `SettingsScreen` gained
+`Edit Address` (`address_edit`) and `Edit Phone Number` (`phone_numbers_edit`)
+form rows alongside `Edit Account`, and its Security row resolves the native
+`security` screen through `NativeScreenRegistry`, falling back to the
+`/profile/security` webview when no member module is registered.
+
+Stable `testTag` values use a `member_*` prefix for the module's screens
+(e.g. `member_profile_dashboard`, `member_profile_tile_events`,
+`member_orders_list`, `member_subscriptions_change_plan`,
+`member_events_status_menu`, `member_conversations_list`,
+`member_conversation_send`, `member_conversation_delete_confirm`,
+`member_security_list`, `member_security_revoke_all`,
+`member_security_revoke_all_confirm`, `member_security_manage_web`,
+`member_security_totp_qr`). The core Settings rows keep the core `settings_*`
+prefix: `settings_address_edit`, `settings_phone_numbers_edit`,
+`settings_security`.
+
 ## Standing up a new branded app
 
 1. Pick a `client_app` identifier (e.g. `joinery-member-ios`); the app sends
@@ -816,3 +918,29 @@ Not in the module (the web chat remains for it): thread export.
   revokes every session key for the fixture user — Revoke All on the App
   Sessions page signing out the webview and native layers in one gesture
   (`app_bridge_key_check_seconds=0` for that leg).
+- joinery-android unit tests — on the mini (after syncing `android/` to the
+  build area `~/dev/joinery-android`): `~/gradle-8.9/bin/gradle
+  :joinery-android-member:testDebugUnitTest` (member payload parsing over the
+  shared fixtures) plus the core, mail, calendar, and ai-chat module test
+  tasks. The member module's fixtures
+  (`src/test/resources/fixtures/*.json`) are the verbatim JoineryMemberKit
+  fixtures, parity by construction.
+- `tests/functional/android/member_gate.sh` — the Android instrumented gate:
+  drives the `joinery-member-android` Compose test suites on the emulator
+  (`joinery_test` AVD) against dev, mirroring `phase3_gate.sh` leg for leg
+  and reusing its platform-neutral seed scripts unchanged
+  (`phase3_fixtures.php`, `phase3_conversation_fixtures.php`). Legs: the
+  native member screens render with no webview present (dashboard, orders,
+  subscriptions, events, conversations, security); a conversation round-trip
+  (reply verified in `msg_messages`); mailbox read + reply and the folder
+  picker filing a dedicated seeded thread (verified in
+  `ilm_inbound_label_members`); the deliberately-web surfaces loading through
+  the bridge from their native entry points (change-tier from subscriptions,
+  notifications from the dashboard); Revoke All from the native security
+  screen signing the app out (`app_bridge_key_check_seconds=0`, last); and a
+  module-less build landing every flipped entry on its web fallback. The
+  fixture password never appears in a command line: the script streams the
+  creds file over stdin to `/data/local/tmp/joinery_member_gate.creds` on the
+  emulator (deleted at gate end) and the tests read it there. Do not run the
+  emulator while the mini's Ollama is serving a generation — they starve each
+  other.

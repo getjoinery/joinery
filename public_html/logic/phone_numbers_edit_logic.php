@@ -83,6 +83,44 @@ function phone_numbers_edit_logic_api() {
     ];
 }
 
+/**
+ * Form definition for the native/API form face
+ * (GET /api/v1/form/phone_numbers_edit). Prefills from the acting user's first
+ * phone number, mirroring the web page's "load first or create new" behavior;
+ * the submit round-trips through the phone_numbers_edit action
+ * (phone_numbers_edit_logic on POST). Field set is identical to the web form
+ * (PhoneNumber::renderFormFields), so client and web stay in lockstep.
+ */
+function phone_numbers_edit_logic_form($formwriter, $user = null, $input = []) {
+	require_once(PathHelper::getIncludePath('data/phone_number_class.php'));
+
+	$user_id = $user ? $user->key : null;
+
+	$phone_number = new PhoneNumber(NULL);
+	if ($user_id) {
+		$phone_numbers = new MultiPhoneNumber(array('user_id' => $user_id));
+		if ($phone_numbers->count_all()) {
+			$phone_numbers->load();
+			$phone_number = $phone_numbers->get(0);
+		}
+	}
+
+	if ($phone_number->key) {
+		$formwriter->set_model($phone_number);
+		// Carries the phone id so the submit updates it rather than creating a
+		// second row (phone_numbers_edit_logic keys off this on POST).
+		$formwriter->hiddeninput('edit_primary_key_value', '', ['value' => $phone_number->key]);
+	}
+
+	PhoneNumber::renderFormFields($formwriter, [
+		'required' => true,
+		'include_user_id' => false,
+		'model' => $phone_number,
+	]);
+
+	$formwriter->submitbutton('btn_submit', 'Submit');
+}
+
 function phone_numbers_edit_logic_descriptor(): array {
 	return [
 		'description'      => 'Create or update the current user\'s phone number.',

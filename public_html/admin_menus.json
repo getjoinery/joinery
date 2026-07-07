@@ -549,14 +549,6 @@
             "nativeScreen": "events"
         },
         {
-            "slug": "core-event-sessions",
-            "title": "Event Sessions",
-            "url": "/profile/event_sessions",
-            "order": 90,
-            "permission": 0,
-            "icon": "clock"
-        },
-        {
             "slug": "core-admin-dashboard",
             "title": "Admin Dashboard",
             "url": "/admin/admin_users",
