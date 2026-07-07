@@ -55,6 +55,7 @@ function vault_passphrase_enroll_logic(array $input): LogicResult {
 function vault_passphrase_enroll_logic_api() {
 	return [
 		'requires_session' => true,
+		'auth' => array('requires_browser_session' => true),
 		'description' => 'Enroll (or replace) the optional vault passphrase unlocker; requires a recent step-up and an unlocked vault',
 	];
 }

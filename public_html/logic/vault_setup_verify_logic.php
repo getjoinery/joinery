@@ -6,7 +6,6 @@ function vault_setup_verify_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/PasskeyService.php'));
 	require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
 	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
-	require_once(PathHelper::getIncludePath('includes/VaultHealth.php'));
 	require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 	require_once(PathHelper::getIncludePath('data/user_encryption_wrappings_class.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
@@ -111,24 +110,17 @@ function vault_setup_verify_logic(array $input): LogicResult {
 		'wrappings'  => $wrapping_rows,
 	];
 
-	$host_warnings = [];
-	try {
-		$host_warnings = VaultHealth::runAll();
-	} catch (Exception $e) {
-		// Host hardening is advisory - never block setup on it.
-	}
-
 	return LogicResult::render([
 		'vault_id'       => (int)$vault->key,
 		'recovery_codes' => $recovery_codes,
 		'key_file'       => $key_file,
-		'host_warnings'  => array_values(array_filter($host_warnings, function ($w) { return $w['state'] !== 'verified'; })),
 	]);
 }
 
 function vault_setup_verify_logic_api() {
 	return [
 		'requires_session' => true,
+		'auth' => array('requires_browser_session' => true),
 		'description' => 'Complete Sealed Vault setup: generate the keypair, wrap it under the enrolling passkey/recovery codes/optional passphrase, and open the unlock window',
 	];
 }

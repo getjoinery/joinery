@@ -58,6 +58,7 @@ function vault_passphrase_remove_logic(array $input): LogicResult {
 function vault_passphrase_remove_logic_api() {
 	return [
 		'requires_session' => true,
+		'auth' => array('requires_browser_session' => true),
 		'description' => 'Remove the vault passphrase unlocker; requires a recent step-up',
 	];
 }

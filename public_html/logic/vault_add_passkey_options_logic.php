@@ -40,6 +40,7 @@ function vault_add_passkey_options_logic(array $input): LogicResult {
 function vault_add_passkey_options_logic_api() {
 	return [
 		'requires_session' => true,
+		'auth' => array('requires_browser_session' => true),
 		'description' => 'Begin adding a vault wrapping for another PRF-capable passkey (returns WebAuthn PRF request options); vault must already be unlocked',
 	];
 }

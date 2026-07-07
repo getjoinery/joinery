@@ -46,6 +46,7 @@ function passkey_register_options_logic(array $input): LogicResult {
 function passkey_register_options_logic_api() {
 	return [
 		'requires_session' => true,
+		'auth' => array('requires_browser_session' => true),
 		'description' => 'Begin passkey enrollment (returns WebAuthn creation options); requires a recent step-up',
 	];
 }

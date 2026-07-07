@@ -17,7 +17,6 @@ function vault_rotate_verify_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/PasskeyService.php'));
 	require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
 	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
-	require_once(PathHelper::getIncludePath('includes/VaultHealth.php'));
 	require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 	require_once(PathHelper::getIncludePath('data/user_encryption_wrappings_class.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
@@ -140,26 +139,19 @@ function vault_rotate_verify_logic(array $input): LogicResult {
 
 	VaultUnlock::open($user->key, $keypair['secret'], UserEncryptionVault::SCOPE_USER);
 
-	$host_warnings = [];
-	try {
-		$host_warnings = array_values(array_filter(VaultHealth::runAll(), function ($w) { return $w['state'] !== 'verified'; }));
-	} catch (Exception $e) {
-		// advisory only
-	}
-
 	return LogicResult::render([
 		'rotated'               => true,
 		'key_generation'        => $new_generation,
 		'recovery_codes'        => $recovery_codes,
 		'passphrase_reenrolled' => $passphrase_reenrolled,
 		'dropped_passkeys'      => $dropped_passkeys,
-		'host_warnings'         => $host_warnings,
 	]);
 }
 
 function vault_rotate_verify_logic_api() {
 	return [
 		'requires_session' => true,
+		'auth' => array('requires_browser_session' => true),
 		'description' => 'Complete vault key rotation: fresh keypair, every consumer re-seals its content, recovery codes replaced, other unlockers must be re-added',
 	];
 }

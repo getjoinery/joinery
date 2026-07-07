@@ -60,6 +60,7 @@ function vault_unlock_passphrase_logic(array $input): LogicResult {
 function vault_unlock_passphrase_logic_api() {
 	return [
 		'requires_session' => true,
+		'auth' => array('requires_browser_session' => true),
 		'description' => 'Unlock the vault with the enrolled passphrase',
 	];
 }

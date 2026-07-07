@@ -33,6 +33,7 @@ function passkey_stepup_verify_logic(array $input): LogicResult {
 function passkey_stepup_verify_logic_api() {
 	return [
 		'requires_session' => true,
+		'auth' => array('requires_browser_session' => true),
 		'description' => 'Complete passkey step-up confirmation, marking the session recently re-verified',
 	];
 }

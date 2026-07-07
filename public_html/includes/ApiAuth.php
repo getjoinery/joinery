@@ -244,9 +244,16 @@ class ApiAuth {
 	 * historically hardcoded; a descriptor's ['auth'] block can override.
 	 *
 	 * @param array  $auth Recognized keys (all optional):
-	 *   'capability'           => 'read'|'write'|'delete'|null (null = no apk_permission check)
-	 *   'requires_machine_key' => bool (default false)
-	 *   'min_user_permission'  => int  (default 0)
+	 *   'capability'              => 'read'|'write'|'delete'|null (null = no apk_permission check)
+	 *   'requires_machine_key'    => bool (default false)
+	 *   'requires_browser_session'=> bool (default false) — reject any API-key
+	 *                                credential; the action is reachable only via
+	 *                                the browser-session credential (session cookie
+	 *                                + CSRF). For operations bound to session state
+	 *                                (e.g. a Sealed Vault unlock window keyed to the
+	 *                                session id) so the boundary is declared, not
+	 *                                left to incidental session-plumbing behavior.
+	 *   'min_user_permission'     => int  (default 0)
 	 * @param ApiKey $api_entry       The authenticated key.
 	 * @param int    $user_permission The owning user's usr_permission.
 	 * @param string $message_prefix  Surface label for the 403 body.
@@ -258,6 +265,14 @@ class ApiAuth {
 		if (!empty($auth['requires_machine_key'])
 			&& (!$api_entry || $api_entry->get('apk_type') !== ApiKey::TYPE_MACHINE)) {
 			api_error($message_prefix . ' requires a machine key', 'AuthenticationError', 403);
+		}
+
+		// Browser-session gate — the inverse of the machine-key gate. A browser
+		// session presents no key row ($api_entry === null); any non-null entry
+		// is an API key and is refused. Native apps ride the same browser-session
+		// bridge, so they satisfy this too.
+		if (!empty($auth['requires_browser_session']) && $api_entry !== null) {
+			api_error($message_prefix . ' is available only to a signed-in browser session', 'AuthenticationError', 403);
 		}
 
 		// Capability gate (apk_permission). Null = this surface does not gate on it.
