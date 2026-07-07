@@ -33,7 +33,7 @@ class MailGateTest {
 
         MemberGate.launch()
         compose.signIn()
-        compose.openMoreEntry("mailbox")
+        compose.openNavEntry("mailbox")
         compose.awaitTag("mail_list")
 
         openMessageBySubject(subject)
@@ -55,7 +55,7 @@ class MailGateTest {
 
         MemberGate.launch()
         compose.signIn()
-        compose.openMoreEntry("mailbox")
+        compose.openNavEntry("mailbox")
         compose.awaitTag("mail_list")
 
         openMessageBySubject(subject)

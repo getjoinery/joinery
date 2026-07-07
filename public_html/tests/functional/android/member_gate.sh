@@ -79,13 +79,17 @@ run_leg() {
     echo ""
     echo "== $label =="
     local out
-    out=$(ssh macmini "source ~/.android-env; adb shell am instrument -w \
+    # The am command is one escaped-double-quoted string so adb hands the
+    # device shell a single command and the inner single quotes survive to be
+    # parsed THERE — values with spaces (seeded display names, reply text)
+    # otherwise shatter into stray am tokens on the device.
+    out=$(ssh macmini "source ~/.android-env; adb shell \"am instrument -w \
         -e class $target \
         -e base_url '$BASE_URL' \
         -e email '$TEST_EMAIL' \
         -e client_version '9.9.9' \
         $extra_args \
-        $TEST_PKG/$RUNNER 2>&1")
+        $TEST_PKG/$RUNNER\" 2>&1")
     echo "$out" | grep -E "OK \(|Failures|Error|Tests run" | tail -6
     if echo "$out" | grep -q "OK ("; then
         PASS_COUNT=$((PASS_COUNT+1)); echo "-- $label: PASS"
