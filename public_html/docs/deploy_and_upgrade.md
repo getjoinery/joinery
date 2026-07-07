@@ -375,6 +375,10 @@ Setting names and defaults are declared, not migrated. Every `update_database` r
 
 The same principle applies to core admin/profile menu rows (declared in `public_html/admin_menus.json`) and plugin menu rows (declared in `plugin.json` under `adminMenu` / `profileMenu`).
 
+### Column Defaults
+
+A `default` in `$field_specifications` is enforced in both layers. `SystemBase::save()` applies it to unset fields on a new model row, and the updater declares it on the column itself — at table creation, on `ADD COLUMN` (Postgres backfills existing rows), and reconciled under `--upgrade` when a declared default is absent from the live column — so raw-SQL inserts get the same value the model path gets. The reconcile pass only *adds* missing defaults: a live default that differs from the declaration is reported as a drift warning and left unchanged, and a live default with no declared counterpart is left alone.
+
 ### Index Management
 
 `update_database` reconciles ordinary (non-unique) indexes from the data class the same way it reconciles unique constraints. Declare an index and the run creates it; remove the declaration and a cleanup run drops it.

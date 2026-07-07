@@ -34,7 +34,7 @@ class PublicMenu extends SystemBase {	public static $prefix = 'pmu';
 	    'pmu_public_menu_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 	    'pmu_name' => array('type'=>'varchar(100)', 'required'=>true),
 	    'pmu_link' => array('type'=>'varchar(100)', 'required'=>true),
-	    'pmu_is_active' => array('type'=>'bool', 'default'=>1),
+	    'pmu_is_active' => array('type'=>'bool', 'default'=>true),
 	    'pmu_parent_menu_id' => array('type'=>'int4'),
 	    'pmu_order' => array('type'=>'int2'),
 	);	

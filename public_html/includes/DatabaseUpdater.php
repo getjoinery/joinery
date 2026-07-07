@@ -196,6 +196,11 @@ class DatabaseUpdater {
                 
                 if (isset($field_specs['serial']) && $field_specs['serial']) {
                     $sql .= "DEFAULT nextval('{$sequence_name}'::regclass)";
+                } elseif (isset($field_specs['default'])) {
+                    // Declared defaults live in the schema too, not only in
+                    // SystemBase::save()'s client-side application — raw-SQL
+                    // inserts get the same value the model path gets.
+                    $sql .= ' DEFAULT ' . $this->defaultToSqlLiteral($field_specs['default']);
                 }
                 $sql .= ', ';
             }
@@ -440,8 +445,41 @@ class DatabaseUpdater {
                 $results['warnings'][] = "Could not modify nullable constraint for {$table_name}.{$field_name}: " . $e->getMessage();
             }
         }
+
+        // Reconcile a declared default the database is missing. Absent →
+        // present only: a live default that differs from the spec is warned
+        // about, never rewritten (comparing Postgres's normalized default
+        // expressions against PHP literals is fragile — fail toward inaction);
+        // a live default with no spec counterpart is hand-managed legacy and
+        // left alone silently. Dropping defaults is out of scope.
+        if (isset($field_specs['default']) && empty($field_specs['serial'])) {
+            $sql_default = $this->defaultToSqlLiteral($field_specs['default']);
+            $live_default = $live_column_info['column_default'] ?? null;
+            if ($live_default === null) {
+                $sql = "ALTER TABLE {$table_name} ALTER COLUMN {$field_name} SET DEFAULT {$sql_default}";
+                try {
+                    $q = $dblink->prepare($sql);
+                    $q->execute();
+                    $results['columns_modified'][] = "{$table_name}.{$field_name} (default)";
+                    $results['messages'][] = "Set missing column default: {$table_name}.{$field_name} DEFAULT {$sql_default}";
+                } catch (PDOException $e) {
+                    $results['warnings'][] = "Could not set default for {$table_name}.{$field_name}: " . $e->getMessage();
+                }
+            } else {
+                // Loose equivalence to avoid false drift warnings: Postgres
+                // normalizes ('confirmed'::character varying, NOW() -> now(),
+                // '0' -> 0 on numeric columns), so match case-insensitively
+                // with and without the literal's quotes before calling it drift.
+                $live_lower = strtolower($live_default);
+                $matches = strpos($live_lower, strtolower($sql_default)) !== false
+                    || strpos($live_lower, strtolower(trim($sql_default, "'"))) !== false;
+                if (!$matches) {
+                    $results['warnings'][] = "Column default drift (not changed): {$table_name}.{$field_name} is {$live_default}, field_specifications declares {$sql_default}";
+                }
+            }
+        }
     }
-    
+
     /**
      * Clean up columns that don't exist in specifications
      * CRITICAL SAFETY: Never drop primary key columns
@@ -621,7 +659,13 @@ class DatabaseUpdater {
             // Add column as nullable to avoid constraint violations on existing tables
             // NOT NULL constraints will be handled by processAdvancedColumnOperations() when --upgrade flag is used
             $sql = 'ALTER TABLE "public"."' . $table_name . '" ADD COLUMN "' . $field_name . '" ' . $field_specs['type'];
-            
+            if (isset($field_specs['default'])) {
+                // Postgres applies ADD COLUMN ... DEFAULT to existing rows
+                // itself, so raw-SQL writers that predate the column keep
+                // working without waiting for an --upgrade backfill.
+                $sql .= ' DEFAULT ' . $this->defaultToSqlLiteral($field_specs['default']);
+            }
+
             $q = $dblink->prepare($sql);
             $q->execute();
             
