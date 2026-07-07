@@ -1169,6 +1169,19 @@ class PluginManager extends AbstractExtensionManager {
                     'include_plugins' => true,
                     'plugin_filter' => $plugin_name,
                 ]);
+
+                // Column modifications (type/length widening, nullability) for existing
+                // plugin columns — the same pass core tables get from
+                // update_database --upgrade. upgrade=true / cleanup=false on this updater
+                // means specs are applied but columns are never dropped here.
+                $advanced_result = $database_updater->processAdvancedColumnOperations($plugin_classes);
+                if (!empty($advanced_result['messages'])) {
+                    $table_messages = array_merge($table_messages, $advanced_result['messages']);
+                }
+                foreach (($advanced_result['errors'] ?? []) as $error) {
+                    $table_messages[] = "$plugin_name: column modification error - $error";
+                }
+
                 $constraint_result = $database_updater->manageUniqueConstraints($plugin_classes);
                 if (!empty($constraint_result['messages'])) {
                     $table_messages = array_merge($table_messages, $constraint_result['messages']);
