@@ -16,6 +16,13 @@ class Schedule extends SystemBase {
 	// AI model surface (joinery_ai) — plugins/joinery_ai/docs/overview.md
 	public static $ai_readable = true;
 	public static $ai_description = 'A schedulable subject\'s working hours: one row per subject defining their availability timezone.';
+	// The owner is a CalendarSubject (sch_subject_type + sch_subject_id), not a
+	// single owner column — same polymorphic shape as CalendarEntry (type=user only).
+	public static $ai_owner_field = ['polymorphic' => [
+		'type_column' => 'sch_subject_type',
+		'id_column'   => 'sch_subject_id',
+		'type_value'  => 'user',
+	]];
 
 	public static $field_specifications = array(
 		'sch_schedule_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true, 'is_primary_key'=>true),

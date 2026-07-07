@@ -29,7 +29,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelRegist
 $models = ModelRegistry::all();
 ksort($models);
 
-$buckets = ['owner' => [], 'all' => [], 'hidden' => []];
+$buckets = ['owner' => [], 'polymorphic_owner' => [], 'all' => [], 'hidden' => []];
 foreach ($models as $class => $info) {
     $scope = $info['owner_scope'] ?? ['mode' => 'hidden', 'reason' => 'no owner_scope in registry'];
     $buckets[$scope['mode']][$class] = $scope;
@@ -47,6 +47,12 @@ printf("\nOWNER-SCOPED (%d) — member reads WHERE owner = me\n", count($buckets
 echo str_repeat('-', 62) . "\n";
 foreach ($buckets['owner'] as $class => $scope) {
     printf("  %-34s %s\n", $short($class), implode(' OR ', $scope['columns']));
+}
+
+printf("\nPOLYMORPHIC-OWNER-SCOPED (%d) — member reads WHERE type_column = type_value AND id_column = me\n", count($buckets['polymorphic_owner']));
+echo str_repeat('-', 62) . "\n";
+foreach ($buckets['polymorphic_owner'] as $class => $scope) {
+    printf("  %-34s %s = '%s' AND %s = me\n", $short($class), $scope['type_column'], $scope['type_value'], $scope['id_column']);
 }
 
 printf("\nOWNERLESS CATALOG (%d) — member reads all rows (\$ai_owner_field = false)\n", count($buckets['all']));

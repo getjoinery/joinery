@@ -52,6 +52,7 @@ class NativeCalendarItemSource implements CalendarItemSource {
                 'title'               => $entry->get('cal_title') ?: 'Busy',
                 'url'                 => '/profile/calendar?edit_entry=' . $entry->key,
                 'blocks_availability' => (bool)$entry->get('cal_blocks_availability'),
+                'status'              => (string)($entry->get('cal_status') ?: 'confirmed'),
                 'visibility'          => $visibility,
                 'source'              => self::getKey(),
                 'source_key'          => 'native:cal-' . $entry->key,

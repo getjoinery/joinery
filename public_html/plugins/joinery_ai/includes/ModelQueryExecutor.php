@@ -103,6 +103,11 @@ class ModelQueryExecutor {
                 }
                 $where_parts[] = count($or) > 1 ? '(' . implode(' OR ', $or) . ')' : $or[0];
             }
+            if ($scope['mode'] === 'polymorphic_owner') {
+                $where_parts[] = "{$scope['type_column']} = ? AND {$scope['id_column']} = ?";
+                $params[] = $scope['type_value'];
+                $params[] = $ctx->actingUserId();
+            }
             // mode 'all' (ownerless catalog) adds no clause — members read all rows.
         }
 

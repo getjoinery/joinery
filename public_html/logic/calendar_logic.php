@@ -292,17 +292,7 @@ function _calendar_set_fields(
     ?string $end_utc,
     string $tz
 ): void {
-    $entry->set('cal_start_utc',   $start_utc);
-    $entry->set('cal_end_utc',     $end_utc);
-    $entry->set('cal_start_local', $start_local);
-    $entry->set('cal_end_local',   $end_local);
-    $entry->set('cal_timezone',    $tz);
-    $entry->set('cal_tzdata_version', '2026a');
-    $entry->set('cal_all_day',     $all_day);
-    $entry->set('cal_title',       $title);
-    $entry->set('cal_blocks_availability', $blocks);
-    $entry->set('cal_visibility',  'details');
-    $entry->set('cal_update_time', gmdate('Y-m-d H:i:s'));
+    $entry->set_core_fields($title, $all_day, $blocks, $start_local, $end_local, $start_utc, $end_utc, $tz);
 }
 
 function _calendar_set_recurrence(
