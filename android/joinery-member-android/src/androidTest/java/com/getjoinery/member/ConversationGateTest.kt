@@ -37,7 +37,7 @@ class ConversationGateTest {
         MemberGate.launch()
         compose.signIn()
 
-        compose.openMoreEntry("core-profile")
+        compose.openNavEntry("core-profile")
         compose.awaitTag("member_profile_dashboard")
         compose.scrollListTo("member_profile_dashboard", "member_profile_tile_conversations")
         compose.onNodeWithTag("member_profile_tile_conversations").performClick()
@@ -68,7 +68,7 @@ class ConversationGateTest {
         MemberGate.launch()
         compose.signIn()
 
-        compose.openMoreEntry("core-profile")
+        compose.openNavEntry("core-profile")
         compose.awaitTag("member_profile_dashboard")
         compose.scrollListTo("member_profile_dashboard", "member_profile_tile_conversations")
         compose.onNodeWithTag("member_profile_tile_conversations").performClick()

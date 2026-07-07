@@ -29,12 +29,12 @@ class MemberScreensTest {
         compose.signIn()
 
         // Dashboard (native, from the menu entry).
-        compose.openMoreEntry("core-profile")
+        compose.openNavEntry("core-profile")
         compose.awaitTag("member_profile_dashboard")
         compose.onNodeWithTag("member_profile_dashboard").assertIsDisplayed()
         // A native screen carries no webview; a web fallback would show none of
-        // the member_* tags and instead a web_loading/web_error node.
-        assertFalse("webview present on native dashboard", compose.hasTag("web_loading"))
+        // the member_* tags and instead a web_view node.
+        assertFalse("webview present on native dashboard", compose.hasTag("web_view"))
 
         // Security + Conversations are reached from the dashboard tiles.
         compose.scrollListTo("member_profile_dashboard", "member_profile_tile_security")
@@ -49,20 +49,21 @@ class MemberScreensTest {
         compose.awaitTag("member_conversations_list")
         compose.onNodeWithTag("member_conversations_list").assertIsDisplayed()
         Espresso.pressBack()
-        Espresso.pressBack() // dashboard -> More list
+        // No back press out of the dashboard: when profile is a pinned tab it
+        // is the tab root, and openNavEntry switches tabs itself.
 
         // Orders / Subscriptions / Events reachable as menu entries directly.
-        compose.openMoreEntry("core-orders")
+        compose.openNavEntry("core-orders")
         compose.awaitTag("member_orders_list")
         compose.onNodeWithTag("member_orders_list").assertIsDisplayed()
         Espresso.pressBack()
 
-        compose.openMoreEntry("core-subscriptions")
+        compose.openNavEntry("core-subscriptions")
         compose.awaitTag("member_subscriptions_list")
         compose.onNodeWithTag("member_subscriptions_list").assertIsDisplayed()
         Espresso.pressBack()
 
-        compose.openMoreEntry("core-events")
+        compose.openNavEntry("core-events")
         compose.awaitTag("member_events_list")
         compose.onNodeWithTag("member_events_list").assertIsDisplayed()
     }
@@ -73,21 +74,21 @@ class MemberScreensTest {
         compose.signIn()
 
         // Change Plan (from native subscriptions) is a web bridge surface.
-        compose.openMoreEntry("core-subscriptions")
+        compose.openNavEntry("core-subscriptions")
         compose.awaitTag("member_subscriptions_change_plan")
         compose.onNodeWithTag("member_subscriptions_change_plan").performClick()
         // The authenticated webview shows its loading/loaded chrome, never a
         // native member list.
-        compose.awaitTag("web_loading")
+        compose.awaitTag("web_view")
         Espresso.pressBack()
         Espresso.pressBack()
 
         // Notifications (from the dashboard) is likewise a web bridge surface.
-        compose.openMoreEntry("core-profile")
+        compose.openNavEntry("core-profile")
         compose.awaitTag("member_profile_dashboard")
         compose.scrollListTo("member_profile_dashboard", "member_profile_notifications")
         compose.onNodeWithTag("member_profile_notifications").performClick()
-        compose.awaitTag("web_loading")
+        compose.awaitTag("web_view")
     }
 
     @Test
@@ -95,7 +96,7 @@ class MemberScreensTest {
         MemberGate.launch()
         compose.signIn()
 
-        compose.openMoreEntry("core-profile")
+        compose.openNavEntry("core-profile")
         compose.awaitTag("member_profile_dashboard")
         compose.scrollListTo("member_profile_dashboard", "member_profile_tile_security")
         compose.onNodeWithTag("member_profile_tile_security").performClick()
@@ -105,7 +106,7 @@ class MemberScreensTest {
         compose.scrollListTo("member_security_list", "member_security_manage_web")
         compose.onNodeWithTag("member_security_manage_web").assertIsDisplayed()
         compose.onNodeWithTag("member_security_manage_web").performClick()
-        compose.awaitTag("web_loading")
+        compose.awaitTag("web_view")
     }
 
     @Test
@@ -115,8 +116,8 @@ class MemberScreensTest {
         MemberGate.launch(disableMember = true)
         compose.signIn()
 
-        compose.openMoreEntry("core-profile")
-        compose.awaitTag("web_loading")
+        compose.openNavEntry("core-profile")
+        compose.awaitTag("web_view")
         assertFalse("native dashboard rendered without the module",
             compose.hasTag("member_profile_dashboard"))
     }

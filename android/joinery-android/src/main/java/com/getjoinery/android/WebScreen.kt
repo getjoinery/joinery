@@ -99,7 +99,9 @@ fun WebScreen(
 
     Box(modifier.fillMaxSize()) {
         AndroidView(
-            modifier = Modifier.fillMaxSize(),
+            // The persistent marker that web content is hosted here — the
+            // web_loading spinner below is transient, so tests key on this.
+            modifier = Modifier.fillMaxSize().testTag("web_view"),
             factory = { ctx ->
                 val swipe = SwipeRefreshLayout(ctx)
                 val webView = WebView(ctx).apply {

@@ -34,10 +34,16 @@ object MemberGate {
 
     private val deviceCreds: Map<String, String> by lazy {
         try {
-            java.io.File(DEVICE_CREDS).readLines().mapNotNull { line ->
-                val i = line.indexOf('=')
-                if (i > 0) line.substring(0, i).trim() to line.substring(i + 1).trim() else null
-            }.toMap()
+            // /data/local/tmp is shell-owned; SELinux blocks a direct File read
+            // from the app process. UiAutomation runs the read at shell
+            // privilege, which is exactly the trust level that wrote the file.
+            val pfd = InstrumentationRegistry.getInstrumentation().uiAutomation
+                .executeShellCommand("cat $DEVICE_CREDS")
+            android.os.ParcelFileDescriptor.AutoCloseInputStream(pfd)
+                .bufferedReader().readLines().mapNotNull { line ->
+                    val i = line.indexOf('=')
+                    if (i > 0) line.substring(0, i).trim() to line.substring(i + 1).trim() else null
+                }.toMap()
         } catch (e: Exception) {
             emptyMap()
         }
@@ -75,19 +81,35 @@ fun ComposeTestRule.awaitTag(tag: String, timeoutMs: Long = 30_000) {
 fun ComposeTestRule.hasTag(tag: String): Boolean =
     onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty()
 
-/** Sign in through the login screen and wait for the signed-in shell (the More
- *  list, since this app pins no tabs). */
+/** Sign in through the login screen and wait for the signed-in shell. The
+ *  More tab is the one bottom-bar item every nav config renders, so it is the
+ *  signed-in signal regardless of which entries the server pins as tabs. */
 fun ComposeTestRule.signIn() {
     awaitTag("login_submit")
     onNodeWithTag("login_email").performTextInput(MemberGate.email)
     onNodeWithTag("login_password").performTextInput(MemberGate.password)
     onNodeWithTag("login_submit").performClick()
-    // The signed-in shell lands on the More list (no pinned tabs for this app).
-    awaitTag("more_core-profile")
+    awaitTag("nav_tab_more")
 }
 
-/** Open a More-list entry by slug (e.g. "core-profile", "core-orders"). */
-fun ComposeTestRule.openMoreEntry(slug: String) {
+/** Open a navigation entry by slug (e.g. "core-profile", "mailbox") wherever
+ *  the server's nav config put it: a pinned bottom tab when one exists,
+ *  otherwise through the More list. A previously opened More entry stays
+ *  pushed over the list, so system-back pops until the target row shows. */
+fun ComposeTestRule.openNavEntry(slug: String) {
+    awaitTag("nav_tab_more")
+    if (hasTag("nav_tab_$slug")) {
+        onNodeWithTag("nav_tab_$slug").performClick()
+        return
+    }
+    onNodeWithTag("nav_tab_more").performClick()
+    waitForIdle()
+    var pops = 0
+    while (!hasTag("more_$slug") && pops < 5) {
+        androidx.test.espresso.Espresso.pressBack()
+        waitForIdle()
+        pops++
+    }
     awaitTag("more_$slug")
     onNodeWithTag("more_$slug").performClick()
 }

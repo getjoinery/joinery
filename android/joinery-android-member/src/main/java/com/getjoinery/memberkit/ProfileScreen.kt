@@ -147,7 +147,7 @@ fun ProfileScreen(client: ApiClient, web: WebSessionCoordinator?, onBack: (() ->
             is ProfileChild.Subscriptions -> SubscriptionsScreen(client, web, onBack = back)
             is ProfileChild.Events -> EventsScreen(client, web, onBack = back)
             is ProfileChild.Conversations -> ConversationsScreen(client, onBack = back)
-            is ProfileChild.Security -> SecurityScreen(client, onBack = back)
+            is ProfileChild.Security -> SecurityScreen(client, web, onBack = back)
             is ProfileChild.Web -> MemberWebDetail(active.title, active.target, client, web, onBack = back)
         }
         return
