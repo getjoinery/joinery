@@ -1,0 +1,9 @@
+{
+  "name": "Sync relay alias map",
+  "description": "Rebuilds the hardened relay's DB-free routing map from the enabled domains/aliases and pushes it over the tunnel when it has changed. Runs every cron pass (every_run) as the reconcile floor behind push-on-change, so a newly created alias is valid on the relay before reject_unmatched can bounce mail to it. No-op on colocated deployments.",
+  "default_frequency": "every_run",
+  "default_time": "",
+  "config_fields": {
+    "force": {"type": "boolean", "label": "Force re-push even when unchanged (e.g. after a relay rebuild)", "required": false}
+  }
+}

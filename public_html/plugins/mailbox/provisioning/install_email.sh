@@ -196,13 +196,17 @@ systemctl start postfix  >/dev/null 2>&1 || true
 # path baked on a different host — is corrected in place instead of silently
 # bouncing every inbound message. \${recipient} stays literal for Postfix to
 # expand at delivery time.
+# flags=DRh — deliberately NOT 'u' (fold localpart to lowercase): SRS bounce
+# addresses carry a case-sensitive hash in the local part; folding it would make
+# SRSRewriter::validate() reject every bounce. Alias lookup lowercases
+# internally, so normal recipients are unaffected.
 JOINERY_ARGV="argv=${PHP_BIN} ${PIPE_SCRIPT} \${recipient}"
-JOINERY_DEF="joinery unix - n n - 5 pipe flags=DRhu user=www-data ${JOINERY_ARGV}"
+JOINERY_DEF="joinery unix - n n - 5 pipe flags=DRh user=www-data ${JOINERY_ARGV}"
 existing_joinery="$(postconf -M joinery/unix 2>/dev/null | tr -s ' \t' ' ' | tr -d '\n' || true)"
 if [[ -z "${existing_joinery}" ]]; then
     postconf -Me "joinery/unix=${JOINERY_DEF}"
     echo "master.cf: added joinery pipe transport -> ${PHP_BIN} ${PIPE_SCRIPT}"
-elif [[ "${existing_joinery}" == *"${JOINERY_ARGV} "* || "${existing_joinery}" == *"${JOINERY_ARGV}" ]]; then
+elif [[ ( "${existing_joinery}" == *"${JOINERY_ARGV} "* || "${existing_joinery}" == *"${JOINERY_ARGV}" ) && "${existing_joinery}" == *"flags=DRh "* ]]; then
     echo "master.cf: joinery transport already correct - leaving it."
 else
     postconf -Me "joinery/unix=${JOINERY_DEF}"

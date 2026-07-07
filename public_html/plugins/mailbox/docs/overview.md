@@ -877,6 +877,139 @@ signed ambiently by `provision_dkim.sh` as usual. Under the bare domain's
 `adkim=s` that subdomain's key can never sign as the bare domain, so a locked box
 can send as `list@mail.<domain>` but never as `you@<domain>`.
 
+## Hardened ingest relay
+
+A deployment runs one of two receive topologies, chosen per deployment and both
+permanent:
+
+- **Colocated** (the default, the cost floor): the MTA stack runs on the Joinery
+  box itself, exactly as `install_email.sh` builds it. Zero extra infrastructure.
+- **Relay-fronted** (the opt-in upgrade): a minimal, hardened, disposable VPS at
+  the public MX fronts every hosted domain. It buys a hidden origin, edge-sealed
+  ingest, and a shrunken main box.
+
+The relay runs Postfix + verify milters + a small Go sealing binary + WireGuard,
+and nothing else — no PHP, no database, no web, no application. It accepts mail,
+verifies it, **seals it to the recipient's public key at the moment of
+acceptance**, and spools ciphertext. The main Joinery box dials out over
+WireGuard and pulls the sealed blobs. Its own IP appears in no mail DNS.
+
+Once a relay exists it is the MX for **all** the deployment's hosted domains (a
+mixed MX would leak the origin). The security level controls where mail is
+*sealed*, never where it is *routed*.
+
+### The sealing binary
+
+`provisioning/relay-sealer/` is a single static Go binary built and installed by
+`provision_relay.sh` to `/opt/joinery-relay/relay-sealer`. It replaces the PHP
+pipe on the MX path as the Postfix `joinery` transport (raw on stdin,
+`${recipient} ${sender}` as argv). For each accepted message it:
+
+- Looks up the recipient's public key + routing in the synced `routing.json` (no
+  database).
+- Seals the **entire raw message** with `crypto_box_seal` (libsodium wire format,
+  `SealedBox::openDek`-compatible) to that public key — Fortress recipients to the
+  owner's vault key, Standard/Private to the ambient transport key Joinery holds.
+- Writes `<spoolid>.seal` (ciphertext) + `<spoolid>.meta` (cleartext operational
+  metadata only — recipient, Message-ID, thread inputs, size, the milter-stamped
+  Authentication-Results; never subject or body) via write-tempfile → fsync →
+  atomic rename, returning the Postfix exit code only after the fsync. Plaintext
+  is never written to the relay's disk.
+- Executes forward-mode aliases relay-side, applying the identical header
+  treatment `InboundEmailRouter::buildForwardMessage` applies (a byte-for-byte Go
+  port with a parity test): rewrite From to the site's verified address so the
+  original sender domain's DMARC never judges us, preserve the original sender as
+  Reply-To, stamp the `X-Forwarded-*` headers, and SRS-rewrite the envelope sender
+  (byte-compatible with `SRSRewriter`, so bounces decode on the main box).
+- Stores SRS bounces: a delivery-failure notice returning to `SRS0=…@forwardingdomain`
+  is accepted (a Postfix regexp map), transport-sealed, and spooled; the pull
+  consumer routes it through the same `handleSRSBounce` path colocated ingest uses,
+  so the original sender gets the NDR (never a stray stored message).
+
+### Alias-map sync
+
+The relay holds no database, so `RelayMapExporter` compiles the routing from the
+enabled domains/aliases + each recipient's public key into static files, and
+`RelayMapSync` pushes them over the tunnel: the Postfix `relay_domains`,
+`check_recipient_access` (preserving `reject_unmatched` — listed aliases match
+before a domain REJECT, so no backscatter), `transport_maps`, and the SRS-bounce
+accept `regexp` map, plus the sealer's `routing.json`. Each rsync's exit code is
+checked, so a failed upload never records success for a stale map. The push is
+content-hashed and skipped when unchanged. Every routing change (alias/domain/grant
+write, via a data-layer hook) triggers an immediate best-effort push, and the
+`SyncRelayMap` scheduled task reconciles every cron pass as the backstop — so a
+newly created alias reaches the relay before it can bounce.
+
+### Spool pull + deferred ingest
+
+`PullRelaySpool` (scheduled task) dials out over WireGuard, `rsync`s new spool
+entries **copy-only**, stores each durably keyed on the spool id (an idempotent
+re-pull is a no-op), and deletes the remote entries it stored — the
+delete-after-store is the ack. Standard/Private blobs are opened at pull with the
+ambient transport key and run through today's ingest. Fortress blobs cannot be
+opened while the owner is logged out, so they land as **pending-parse** rows:
+operational metadata + the sealed blob, so threading and unread counts work while
+subject/sender/body/attachments do not exist yet. At the next unlock,
+`DeferredIngest` unseals each blob, runs the full pipeline (parse, filters,
+attachment split, seal fields under a fresh per-message DEK), and clears the
+pending state. For a single reader this is invisible — the rules have always run
+by the time any mailbox view renders.
+
+Degradation is safe: relay down → senders' MTAs retry for days; tunnel down → the
+relay keeps spooling sealed blobs until the next pull. Neither loses mail.
+
+### Outbound smarthost
+
+On a relay-fronted deployment, compose sends leave **through** the relay as
+smarthost over the tunnel — otherwise every sent message's `Received:` chain would
+leak the main box IP. `OutboundTransport` routes hosted-alias sends through
+`SmtpConfig::fromRelaySmarthost()`; DKIM signing stays in-app, the relay only
+transports. Because the main box's opendkim milter is decommissioned,
+`MailboxDkimSigner::resolveFor()` signs in-app for **both** postures on a
+relay-fronted box: a protected domain with its vault-sealed key, and a standard
+domain with the same filesystem key opendkim would have used (colocated, it stays
+null and opendkim signs, avoiding a double signature). The relay trusts the
+WireGuard subnet (`mynetworks`) to relay out.
+
+### Provisioning
+
+`provisioning/provision_relay.sh` is the self-contained installer: idempotent, one
+argument (the mail hostname), zero prompts, runnable as root on a fresh minimal
+Debian VPS. It builds the sealer, wires Postfix + opendkim(verify, `RemoveARFrom`
+stripping forged Authentication-Results) + opendmarc(stamp) + rspamd(add-header
+spam scoring) + WireGuard + a default-deny firewall, and prints the relay public
+IP, WireGuard public key, and spool endpoint.
+
+The main box's half of the tunnel is `provisioning/provision_relay_main.sh`
+(root, once per deployment): it generates the box's WireGuard keypair (private
+key root-only in `/etc/wireguard`), writes the `jyrelay0` dial-out interface,
+installs the `joinery-relay-peer` root helper plus the sudoers rule that lets
+the provision job peer a freshly built relay automatically, and registers the
+public key in settings (`mailbox_relay_wg_public_key`). The Relay tab's
+provision form stays gated — showing the exact command to run — until that key
+exists.
+
+The **Relay** admin tab (`admin_mailbox_relay`) is the dashboard: it lists each
+relay with the four provisioning checks (tunnel, spool draining, map fresh, origin
+hidden), and its guided controls provision, rebuild, enable/disable, and delete.
+"Provision" picks a managed node and fires a `provision_relay` job through
+`server_manager` (`JobCommandBuilder::build_provision_relay`); on success the job
+result processor registers the relay as a `ManagedNode` (health dot) and creates a
+**disabled** `MailboxRelay` row the admin then enables (enabling makes the relay
+front every hosted domain). "Rebuild" re-runs provisioning on the same node.
+Without `server_manager`, run `provision_relay.sh` by hand — the standalone floor.
+
+### The shrunken main box
+
+With every domain fronted, the relay is the sole mail listener: the main box's
+Postfix/opendkim/opendmarc are decommissioned and port 25 closed — the box holding
+the data no longer exposes a mail listener. **rspamd stays**: deferred ingest
+still scores each message through rspamd's controller interface at parse time;
+only the milter mode is unused. The setup/health checks retarget to the relay
+(`checkRelayTunnel`, `checkRelaySpoolDraining`, `checkRelayMapFresh`) and add a
+deployment-wide origin-hidden check (`checkOriginHidden`) that fails if the main
+box IP appears in any hosted domain's mail DNS.
+
 ## Mailbox Reader
 
 The Mailbox Reader is a two-pane Gmail-style reader over the stored messages:

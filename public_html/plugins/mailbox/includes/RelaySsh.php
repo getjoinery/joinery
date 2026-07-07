@@ -1,0 +1,83 @@
+<?php
+/**
+ * RelaySsh - the one place the tunnel's SSH/rsync command lines are built.
+ *
+ * The relay's whole network surface is Postfix + WireGuard + key-only SSH
+ * (specs/inbound_email_hardened_ingest_relay_executor.md), so both the alias-map
+ * push and the spool pull reach it over SSH on the WireGuard interface. This
+ * centralises the connection flags (batch mode, accept-new host key, timeout,
+ * port, identity file, login user) so the two consumers can never drift.
+ *
+ * @version 1.0
+ */
+
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+
+class RelaySsh {
+
+	/** Common ssh options both ssh and rsync-over-ssh use. */
+	private static function options(MailboxRelay $relay): array {
+		$opts = array('-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=15');
+		$port = intval($relay->get('mrl_ssh_port'));
+		if ($port > 0 && $port !== 22) {
+			$opts[] = '-p';
+			$opts[] = (string)$port;
+		}
+		$key = trim((string)$relay->get('mrl_ssh_key_path'));
+		if ($key !== '') {
+			$opts[] = '-i';
+			$opts[] = $key;
+		}
+		return $opts;
+	}
+
+	public static function host(MailboxRelay $relay): string {
+		return trim((string)$relay->get('mrl_host'));
+	}
+
+	public static function user(MailboxRelay $relay): string {
+		return trim((string)$relay->get('mrl_ssh_user')) ?: 'root';
+	}
+
+	/**
+	 * A ready-to-run `ssh ... -l user host <remote-command>` line, fully shell
+	 * quoted. $remote_command is escaped as a single argument.
+	 */
+	public static function sshCommand(MailboxRelay $relay, string $remote_command): string {
+		$parts = array_merge(array('ssh'), self::options($relay), array('-l', self::user($relay), self::host($relay)));
+		return implode(' ', array_map('escapeshellarg', $parts)) . ' ' . escapeshellarg($remote_command);
+	}
+
+	/**
+	 * An `rsync ... -e <ssh> <src> <user@host:dst>` line. $download flips the
+	 * direction (remote→local). rsync always COPIES — never --remove-source-files,
+	 * so a pull can never delete before durability.
+	 */
+	public static function rsyncCommand(MailboxRelay $relay, string $local, string $remote, bool $download, array $extra = array()): string {
+		// rsync -e wants a plain command line it splits on spaces (not per-token
+		// quoted); paths here are space-free. The whole thing is escaped once below.
+		$transport = implode(' ', array_merge(array('ssh'), self::options($relay)));
+		$remote_spec = self::user($relay) . '@' . self::host($relay) . ':' . $remote;
+
+		$args = array('rsync', '-az', '--timeout=30');
+		$args = array_merge($args, $extra);
+		$args[] = '-e';
+		$args[] = $transport;
+		if ($download) {
+			$args[] = $remote_spec;
+			$args[] = $local;
+		} else {
+			$args[] = $local;
+			$args[] = $remote_spec;
+		}
+		return implode(' ', array_map('escapeshellarg', $args));
+	}
+
+	/** Run a shell command, returning [exit_code, combined_output]. */
+	public static function run(string $cmd): array {
+		$output = array();
+		$code = 0;
+		exec($cmd . ' 2>&1', $output, $code);
+		return array($code, implode("\n", $output));
+	}
+}

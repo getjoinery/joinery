@@ -80,6 +80,16 @@ class OutboundTransport {
         $t->fromAddress = $aliasAddress;
         $t->filesSent = false; // no source mailbox to file a copy into
 
+        // Relay-fronted deployment (specs/…hardened_ingest_relay § Phase 7): every
+        // hosted-domain send leaves through the relay smarthost over the tunnel, so
+        // the sent message's Received: chain shows the relay, never the main box IP.
+        // SmtpProvider still runs the in-app DKIM signer; the relay only transports.
+        $relay = self::activeRelay();
+        if ($relay !== null) {
+            $t->transport = new SmtpProvider(SmtpConfig::fromRelaySmarthost($relay));
+            return $t;
+        }
+
         if (MailIdentityGuard::isProtectedDomain(MailIdentityGuard::domainOf($aliasAddress))) {
             // A protected identity never rides the ambient provider: the box
             // submits it itself through SmtpProvider, whose send() runs the
@@ -94,6 +104,24 @@ class OutboundTransport {
 
         $t->transport = null;  // platform active provider via the default EmailSender path
         return $t;
+    }
+
+    /**
+     * The active hardened ingest relay, or null on a colocated deployment. Loaded
+     * defensively — the mailbox plugin owns the class, so a core send path must not
+     * fatal if it is absent or the table does not exist yet.
+     */
+    private static function activeRelay() {
+        $path = PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php');
+        if (!is_file($path)) {
+            return null;
+        }
+        require_once($path);
+        try {
+            return MailboxRelay::active();
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 }
 

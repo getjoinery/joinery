@@ -26,7 +26,10 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 
 class InboundEmailMailboxGrantException extends SystemBaseException {}
 
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/NotifiesRelayMapOnChange.php'));
+
 class InboundEmailMailboxGrant extends SystemBase {
+	use NotifiesRelayMapOnChange;
 	public static $prefix = 'ieg';
 	public static $tablename = 'ieg_inbound_email_mailbox_grants';
 	public static $pkey_column = 'ieg_inbound_email_mailbox_grant_id';

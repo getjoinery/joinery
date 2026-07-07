@@ -1,7 +1,7 @@
 {
     "name": "Mailbox",
     "description": "Self-hosted email: receiving, forwarding, local mailboxes, webmail reader, IMAP sync, DKIM/SRS",
-    "version": "1.34.0",
+    "version": "1.36.1",
     "author": "Joinery",
     "receives_upgrades": true,
     "included_in_publish": true,
@@ -48,7 +48,7 @@
         {
             "key": "inbound_mail_server",
             "label": "Inbound mail server",
-            "details": "Provider-specific. For Postfix, verifies port 25 is listening locally. For webhook providers (Mailgun, etc.) this is informational — the provider's own infrastructure handles MX.",
+            "details": "Provider-specific. For Postfix, verifies port 25 is listening locally. For webhook providers (Mailgun, etc.) this is informational \u2014 the provider's own infrastructure handles MX.",
             "check": {
                 "type": "code",
                 "call": "InboundEmailHealth::checkInboundMailServer"
@@ -92,6 +92,43 @@
                 "call": "InboundEmailHealth::checkContentSpamScanner"
             },
             "script": "provisioning/install_email.sh"
+        },
+        {
+            "key": "relay_tunnel",
+            "label": "Hardened relay tunnel",
+            "details": "On a relay-fronted deployment the MTA runs on a hardened relay VPS reached over WireGuard. Verifies the relay's SMTP port 25 is reachable over the tunnel. No-op on colocated deployments.",
+            "check": {
+                "type": "code",
+                "call": "InboundEmailHealth::checkRelayTunnel"
+            },
+            "script": "provisioning/provision_relay.sh"
+        },
+        {
+            "key": "relay_spool_draining",
+            "label": "Relay spool draining",
+            "details": "The main box pulls sealed mail off the relay spool every cron pass. Verifies a pull ran in the last 10 minutes so sealed mail is reaching the inbox. No-op on colocated deployments.",
+            "check": {
+                "type": "code",
+                "call": "InboundEmailHealth::checkRelaySpoolDraining"
+            }
+        },
+        {
+            "key": "relay_map_fresh",
+            "label": "Relay alias map fresh",
+            "details": "The relay validates recipients against a synced alias map. Verifies the map the relay is running matches the current domains/aliases, so a newly created alias is not bounced. No-op on colocated deployments.",
+            "check": {
+                "type": "code",
+                "call": "InboundEmailHealth::checkRelayMapFresh"
+            }
+        },
+        {
+            "key": "origin_hidden",
+            "label": "Origin IP not in mail DNS",
+            "details": "Once a relay exists, the main box IP must not appear in any hosted domain's mail DNS (a single leak defeats the hidden origin). Checks every hosted domain's MX. No-op on colocated deployments.",
+            "check": {
+                "type": "code",
+                "call": "InboundEmailHealth::checkOriginHidden"
+            }
         }
     ],
     "settings": [
@@ -178,6 +215,10 @@
         {
             "name": "mailbox_rspamd_controller_url",
             "default": "http://127.0.0.1:11334"
+        },
+        {
+            "name": "mailbox_relay_wg_public_key",
+            "default": ""
         }
     ]
 }
