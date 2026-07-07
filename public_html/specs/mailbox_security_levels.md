@@ -1,11 +1,18 @@
 # Mailbox — Security Levels (Per-Domain Protection Posture)
 
 **Status:** Draft / awaiting implementation
-**Version:** 1.1
+**Version:** 1.5
 **Unifies:** `specs/mailbox_encryption_at_rest.md`,
 `specs/mailbox_outbound_send_protection.md`,
 `specs/mailbox_hardened_ingest_relay.md`. Those specs define the
 mechanisms; this spec defines how they are packaged, chosen, and presented.
+**Also authoritative for** (added in v1.2–1.5): the per-level authentication
+and unlock ceremonies, the role split between passwords/2FA and passkeys, the
+unlock-window lifecycle (arming, ending events, caps), the vault-gated
+settings rule (rerouting follows the content), and password reset /
+account recovery (the three populations). The vault's window
+*mechanism* is `specs/implemented/sealed_vault_core.md` (`VaultUnlock`); this spec sets the
+mail consumer's window *policy*.
 
 ## Goal
 
@@ -39,6 +46,9 @@ count:
 | One-line meaning | The server manages this mailbox for you | Only you can read stored mail | Even a fully hacked server can't read new mail or send as you |
 | Stored bodies/subjects/attachments/search index encrypted | — | ✓ | ✓ |
 | Unlock ceremony required (enroll a passkey + print recovery codes; passphrase optional) | — | ✓ | ✓ |
+| Sign in with | password *or* passkey (no vault to double-unlock); 2FA optional | password (vault disables sole passkey sign-in); 2FA optional | password (same); 2FA **enrollment mandatory** |
+| Open sealed content with | — | passkey + PIN/biometric (user verification) | passkey + PIN/biometric (user verification) |
+| Unlock window ends | — | on lock/leave events (§ The Unlock Window) | on lock/leave events **+ idle and absolute caps** |
 | Automated sends from this domain (confirmations, notifications, mailing lists) | ✓ | ✓ | ✗ — sending is session-gated |
 | Sending identity survives server compromise (DMARC-enforced) | — | — | ✓ |
 | Fresh inbound mail sealed before reaching Joinery (relay at edge) | — | — | ✓ |
@@ -85,11 +95,311 @@ controls, not explainer prose).
 One operator, one key hierarchy. The first time any domain is set above
 Standard, the setup flow runs the unlock ceremony from the encryption-at-rest
 spec, once: enroll a passkey (the everyday unlocker — fingerprint/face, nothing
-to memorize; `specs/passkeys_core.md`), print the one-time recovery codes, and
+to memorize; `specs/implemented/passkeys_core.md`), print the one-time recovery codes, and
 optionally set a passphrase. Every Private and Fortress domain seals to the
 same user keypair; raising a second domain's level never re-runs the ceremony.
 Dropping the last protected domain back to Standard does not delete the key
 material (re-raising should not re-run the ceremony either).
+
+## Authentication & Ceremonies (Per Level)
+
+### The role split (a firm product decision)
+
+**A passkey never opens both the session and the vault on the same account.**
+That single configuration — one ceremony class as front door *and* vault
+key — is the collapse being eliminated; everything else is allowed:
+
+- **Account with no vault:** passkey sign-in is available and encouraged —
+  it is the unphishable front door, and there is nothing sealed for it to
+  double-unlock.
+- **Account with an active vault** (any Private/Fortress domain): sole
+  passkey sign-in is disabled account-wide — sign-in starts from the
+  password. Passkeys answer "is the owner physically present, right now?"
+  and that answer opens the vault. The session gate (server-verified
+  knowledge + optional second device) and the vault gate (key material that
+  only exists in authenticator hardware) stay on different failure modes.
+- **Passkey as a second factor: always allowed**, vault or no vault — a
+  step-up assertion after the password, alongside TOTP. (When the same
+  credential is both a vault unlocker and the login 2FA, the separation
+  nudge below applies — warned, not blocked.)
+
+**The flip is an event in the vault setup ceremony**, not a standing feature:
+raising the first domain above Standard (1) verifies the account has a
+working password — prompting to set one if the user has lived on passkey
+sign-in — and then (2) disables sole passkey sign-in for the account
+(`passkey_login_verify` rejects users who hold a vault; the login page hides
+the button for them). Dropping the last protected domain does not silently
+re-enable it — re-enabling is an explicit account-security action, stated in
+outcome language.
+
+The built sign-in surface (`passkey_login_options` / `passkey_login_verify`,
+the login-page button) therefore remains, serving no-vault accounts; the same
+ceremony additionally serves as the passkey-as-2FA step in the password flow
+(pending-login state, mirroring `verify_totp_logic.php`). This amends
+`specs/implemented/passkeys_core.md` consumer #1.
+
+### What each level requires
+
+| | Sign in (session) | Open sealed content (vault) |
+|---|---|---|
+| **Standard** | password; 2FA optional (TOTP or passkey step-up) | — (nothing is sealed) |
+| **Private** | password; 2FA optional | passkey ceremony with **user verification required** |
+| **Fortress** | password; **2FA enrollment mandatory** — adding a Fortress domain (or receiving a grant on one) blocks at next login until a second factor is enrolled | passkey ceremony with **user verification required** |
+
+**User verification (the "PIN" question, resolved):** every vault unlock
+ceremony sets `userVerification: required` — the authenticator itself must
+check a person, not just presence. On platform authenticators that is the
+biometric (Touch ID / Face ID / Windows Hello, device-passcode fallback). On
+security keys it is the key's own FIDO2 PIN — verified inside the key, never
+sent to the server, hardware-locked after 8 wrong attempts. A key with no PIN
+set is forced by the browser to create one at enrollment. So "passkey + PIN"
+reads formally as "passkey + user verification", and every PRF-capable
+authenticator satisfies it. (Login step-up ceremonies stay
+`userVerification: preferred` — the session gate has the password already.)
+
+**Honest note on the biometric fallback:** platform authenticators accept the
+*device passcode* when the biometric fails (Touch ID → Mac login password,
+etc.). So a vault whose only unlocker is the laptop's platform passkey has the
+laptop's passcode as its true floor — fine against thieves and remote
+attackers, not against someone who knows that passcode. A hardware key's PIN
+lives in the key and is independent of every computer it plugs into. The
+ceremony/setup UI states this in one line at enrollment (*your device passcode
+can stand in for the fingerprint — add a hardware key if you want the vault
+independent of this computer*), enabling the choice without forcing it.
+
+### 2FA cadence (user setting)
+
+One account-level setting, two values:
+
+- **`every_login`** — the second factor is asked on each password sign-in.
+- **`sensitive_only`** — sign-in is password-only; the second factor is asked
+  at sensitive actions: password/email change, 2FA method changes, passkey
+  enrollment or revocation, recovery-code view/regenerate, domain
+  security-level changes, recovery-code vault unlocks, and — on accounts
+  with a vault — the mail-administration actions § Vault-Gated Settings
+  assigns here (API keys, mailbox grants, notification toggle, AI recipe
+  config).
+
+The cadence is the user's choice at every level (Fortress mandates
+*enrollment*, not cadence). When Fortress enrollment triggers, the setting
+defaults to `every_login`; the user may relax it, and the setting's helptext
+carries the one-line consequence (*password-only sign-ins expose Standard
+content and mailbox metadata to a phished password*).
+
+`sensitive_only` is a sound choice — not a loophole — because every
+escalation path from a bare session is independently gated: sealed content
+and Fortress compose need the passkey; password/2FA/passkey/recovery changes
+need the second factor; and the settings that could reroute future mail need
+an open vault window (§ Vault-Gated Settings). A phished password on this
+posture sees the mailbox's shape — counts, times, labels, placeholders — and
+opens nothing.
+
+### Separation guidance (nudge, not gate)
+
+If the credential a user picks as their login second factor is also a vault
+unlocker, one stolen bag holds both gates. The ceremony/setup UI nudges
+toward separation — login 2FA on the phone (TOTP), vault passkey on the
+laptop or a hardware key — and shows a one-line warning when the same
+credential ends up in both roles. It never blocks: one YubiKey is still
+vastly better than none.
+
+### Recovery-code unlocks
+
+A recovery code is the everything-bypass, so it gets the strictest, least
+convenient path — it is for disasters, not Tuesdays: it requires an
+authenticated session **plus the account's second factor regardless of
+cadence setting** (when the account has one), and every use notifies all of
+the user's sessions and devices immediately. Code use also ends every open
+unlock window everywhere (see below) — if the code was stolen rather than
+recovered, the legitimate owner's notification arrives while the attacker
+holds a *re-locked* vault.
+
+### Password reset & account recovery (the three populations)
+
+The governing property: **a password reset re-issues the session, never the
+vault.** A successful reset — legitimate or hostile — yields a login:
+metadata, Standard content, account standing. Sealed content still demands
+the passkey ceremony. Every reset is a credential event (§ The Unlock
+Window): all windows end everywhere, all sessions and devices are notified.
+This is what lets reset stay humane — it is not the total-takeover event it
+is at a conventional email provider.
+
+**Population 1 — external account email (most members of most sites).** The
+login address is a gmail/outlook/etc. address. "Forgot password" is today's
+email reset link, unchanged. No new requirements: nothing is circular, and
+nothing sealed rides on it.
+
+**Population 2 — the login email is a hosted mailbox (the circular case).**
+Detectable precisely: the account email's domain is one of the user's own
+hosted domains, so the reset link would land in the mailbox the user is
+locked out of. The fix is a targeted precondition, not a blanket 2FA
+mandate: **making a hosted mailbox the account's login email requires
+holding at least one non-email reset path first** — a passkey, TOTP, or an
+external recovery address. The account-email change flow enforces it (and
+account creation, where a hosted address is chosen up front). You closed the
+email escape hatch; you must carry a key. There is no other mandatory-2FA
+rule below Fortress.
+
+**Population 3 — reset authorizers, ranked.** "Forgot password" offers
+whichever of these the account holds:
+
+- **Passkey** (best): a sessionless ceremony — "Reset with your passkey" —
+  then set a new password. **For vault holders the ceremony additionally
+  requires the account's second factor**: without it, a stolen
+  authenticator could reset the password, log in, and unlock — the passkey
+  transitively opening both doors, which § The role split forbids. Fortress
+  always has the second factor (mandatory enrollment); a Private user who
+  declined 2FA accepts passkey-alone reset as their floor, consistent with
+  every other consequence of that choice.
+- **TOTP alone** — for accounts without a vault: proving possession of the
+  enrolled phone is at least as strong as proving control of an inbox.
+  Rate-limited; notified like every reset.
+- **External recovery address** — always available as a user choice, with
+  the one-line disclosure that account-session security now includes that
+  inbox. For a vault user a reasonable trade: a hijacked recovery inbox
+  yields a session staring at placeholders.
+- **Vault recovery codes are vault-only.** They answer "I lost my devices —
+  give me my *data*", never "log me in." Blurring them into account reset
+  would soften the one credential whose meaning must stay sharp.
+
+**The stated floor:** a Population-2 user who loses every path — password,
+passkey, phone, and holds no recovery address — is locked out of the
+account, by design; the setup flow states this trade at the moment the
+hosted address is chosen, not during the crisis. Operator-assisted reset
+(admin) remains the human backstop for the *account*; it cannot open vaults
+— structurally, not as policy.
+
+## The Unlock Window
+
+One vault-unlock ceremony arms a **window**: a bounded period where the
+server holds the unwrapped key in RAM (`VaultUnlock`, APCu — mechanism in
+`specs/implemented/sealed_vault_core.md`) so reading, search, and AI catch-up work
+without re-prompting. The window is **per browser session** (keyed to the
+session id; a second browser or device arms its own), and the design goal is:
+*you feel it once per sitting, and it is gone the moment your sitting ends.*
+
+### What arms it
+
+A successful passkey ceremony with user verification, inside an authenticated
+session (or a recovery-code/passphrase unlock, per their rules above).
+
+### What ends it — the event list
+
+Any one of these ends the window immediately; ending is idempotent and wipes
+the APCu entry:
+
+1. **Explicit lock.** A one-click Lock control on every mail surface
+   (web and native). The panic gesture is *change your password from your
+   phone* — see 7.
+2. **Session end.** Logout, session expiry, or session destruction for any
+   reason. The window never outlives its session.
+3. **Browser gone.** The unlocked mail page maintains a heartbeat while
+   visible-or-recently-active; the window ends after one missed grace
+   interval (60 s). Closing the tab/browser, killing the machine, or system
+   sleep all stop the heartbeat.
+4. **Machine asleep or locked.** Lid close and system sleep stop the
+   heartbeat (see 3). Where the browser exposes screen-lock/idle signals
+   (Idle Detection API), the page reports lock immediately rather than
+   waiting out the grace interval — a progressive enhancement, not the
+   mechanism of record.
+5. **Network identity change.** The platform's existing IP-change guard
+   already zeroes elevated session permissions when a session's address
+   jumps; the same trigger ends the window. A laptop that leaves the cafe
+   re-locks when it reappears on another network.
+6. **Idle and absolute caps (Fortress).** On Fortress domains the window
+   additionally ends after **2 hours without a content decrypt** (idle cap)
+   and unconditionally **24 hours after arming** (absolute cap) — one touch
+   per working day at most, even for a whole-mailbox-Fortress user. Private
+   windows carry only a 7-day absolute backstop. (Defaults; if they need
+   tuning they become settings, not code changes.)
+7. **Credential events (global).** Password change, 2FA method change,
+   passkey revocation, or recovery-code use ends **every** window on
+   **every** session, everywhere. This is the remote kill switch: a user
+   whose laptop just walked away changes their password from their phone
+   and every window dies with it.
+
+### The honest residual
+
+A thief who takes a machine **awake, unlocked, on the same network, inside an
+armed window** reads sealed content until an event above fires — at worst the
+Fortress idle/absolute cap, at best the seconds it takes the owner to trigger
+event 7. That residual is inherent to any design where content is readable
+in-session (it is ProtonMail's residual too); everything in this spec exists
+to make the exposure window short, endable from another device, and
+impossible to re-arm without the owner's hardware and verification.
+
+### Native apps
+
+The app arms a window via the platform passkey ceremony (same server-side
+`VaultUnlock`). On Fortress, backgrounding the app beyond a 5-minute grace
+ends the window and re-entry re-prompts (biometric, one tap); on Private the
+window survives backgrounding up to the same caps as web. App session
+revocation (the existing App Sessions surface) is a credential event — it
+ends that device's window with it.
+
+## Vault-Gated Settings — Rerouting Follows the Content
+
+Sealing the mail while the rules that *route* it sit behind password+2FA
+leaves the attacker a better door than the one being guarded: don't pick the
+vault, just reprogram what feeds it. A filter on a Private domain acts **at
+receive time, on plaintext, before sealing** — a phished-password attacker
+who adds "forward everything" reads all future mail without ever touching a
+passkey — and a repointed outbound relay does the same to everything sent.
+So the rule, stated once:
+
+**When the account has an active vault (any Private/Fortress domain), every
+action that redirects protected mail's plaintext — inbound before sealing,
+or outbound after composing — requires an open unlock window.** No window →
+the same one-tap prompt-and-continue the locked-state contract already
+defines for content actions. Since a user rewiring mail routing is usually
+mid-session and already unlocked, the gate adds zero friction in legitimate
+use; it exists only for the credential thief who cannot produce the touch.
+
+The vault-gated actions (enumerated and closed — a new setting joins this
+list only if it can redirect protected plaintext):
+
+1. **Filters and forwarding rules** on protected domains — create, edit,
+   import. The receive-time plaintext window on Private is exactly what a
+   malicious forward exploits.
+2. **Alias changes on protected domains** — destinations, mode
+   (store/forward), enable/disable. An alias in forward mode is a filter by
+   another name.
+3. **Outbound relay settings** (`mailbox_forwarding_smtp_*`) — repointing the
+   relay routes future outbound plaintext through an attacker's box.
+
+That is the whole list, and the line it draws: **the vault gates plaintext
+redirection; the second factor gates administration.** Sensitive mail
+administration on a vault account is a 2FA step-up (it joins § 2FA cadence's
+sensitive-actions list), not a window requirement — an automated system
+never performs these, and a signed-in owner can perform them from any
+device, enrolled or not:
+
+- **API keys** — creation, scope changes, revealing a secret. A stolen key
+  cannot open the vault and reads only what a bare session reads — metadata,
+  Standard mail, ambient sends; the lock it would need to matter is the one
+  it can't pick.
+- **Mailbox grants** — minting a reader, but of non-sealed content only;
+  sealed mail stays sealed against the grantee.
+- **Notification content toggle** on protected mailboxes — leaks future
+  sender/subject to the push channel; real, but headers, not bodies.
+- **AI recipe configuration targeting protected mailboxes.** Honest
+  residual: a recipe reads content inside the owner's *future* windows, so
+  an attacker who phishes a 2FA prompt can mint one that waits. Accepted so
+  that automation stays manageable from any signed-in device; the recipe
+  list is part of the unlock surface — visible wherever windows are.
+- **Domain security-level changes** — already on the sensitive-actions
+  list, and lowering is structurally in-window anyway (converting sealed
+  mail back requires the key).
+
+Unlocker and recovery management keep their § Authentication rules (2FA +
+step-up + the structural floor) — those gates are about *identity* changes
+and already compose with the vault veto hook.
+
+Actions gated by nothing new, deliberately: app-session and password/2FA
+management (2FA-gated identity actions; a new app session alone reads only
+placeholders until its own passkey ceremony), Standard-domain filters and
+aliases (nothing sealed to protect), and reading any settings page (gates are
+on mutation, not navigation).
 
 ## Setup Presentation
 
@@ -231,7 +541,7 @@ not by policy:**
 **The native apps follow the web's unlock model exactly:**
 
 - Unlock in-app is the passkey ceremony via the platform credential managers
-  (`specs/passkeys_core.md`, native open item), opening the same server-side
+  (`specs/implemented/passkeys_core.md`, native open item), opening the same server-side
   unlock window; reading and search are server-decrypted in-window over
   `/api/v1`, and sealed attachments serve through the gated `File` stream via
   signed URLs as today. No mail-key material is ever stored in the app.
@@ -256,6 +566,30 @@ not by policy:**
   direct MX vs relay pull; SQL vs FTS5 search). The three mechanism specs
   define both branches of each fork; this spec makes the domain level the
   single switch that selects between them.
+- **Login flow** — passkey sole sign-in becomes vault-conditional
+  (`passkey_login_verify` rejects vault holders; `views/login.php` hides the
+  button for them); the same ceremony additionally lands as the
+  passkey-as-2FA step in the password flow, alongside TOTP (pending-login
+  state per `verify_totp_logic.php`). The 2FA cadence setting and the
+  Fortress mandatory-enrollment gate live in the account security surface;
+  the vault setup ceremony gains the password-exists precondition and the
+  sign-in flip.
+- **Password reset flow** — gains the passkey and TOTP authorizers (§ Password
+  reset & account recovery), the vault-holder passkey+2FA rule, the external
+  recovery-address field, and reset-as-credential-event wiring; the
+  account-email change flow (and signup with a hosted address) gains the
+  Population-2 precondition check.
+- **`VaultUnlock` end events** — a lightweight heartbeat endpoint for the
+  unlocked mail surfaces; hooks from the IP-change guard, logout/session
+  destruction, and credential-change paths (password/2FA/passkey/recovery
+  events) that wipe windows; the per-level idle/absolute caps; the one-click
+  Lock control on mail surfaces.
+- **Vault-gated settings surfaces** — the reroute actions in § Vault-Gated
+  Settings gain the window-required gate at their logic layer
+  (filter/forwarding and alias editors on protected domains, relay SMTP
+  settings), reusing the locked-state prompt-and-continue contract; API key
+  actions, mailbox grants, the notification toggle, and recipe config join
+  the 2FA sensitive-actions step-up instead.
 
 ## Schema Changes (via data-class `$field_specifications`)
 

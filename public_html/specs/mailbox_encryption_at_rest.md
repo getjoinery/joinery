@@ -159,7 +159,7 @@ keeps the asymmetric op to once per message rather than once per field.
   - **Passkey (the primary, default UX).** A PRF-capable WebAuthn credential
     derives a 32-byte KEK inside the authenticator hardware on a touch/face
     check — nothing to memorize, and the ingredient never rests on the server.
-    Provided by the core passkey service (`specs/passkeys_core.md`, context
+    Provided by the core passkey service (`specs/implemented/passkeys_core.md`, context
     `vault-kek`). PRF outputs are **per-credential**, so each enrolled passkey
     holds its own wrapping; revoking a passkey deletes its wrapping.
   - **Recovery codes (required backup).** A printed list of one-time codes

@@ -9,7 +9,7 @@ sees plaintext. The product target is the single-user instance that opts in, but
 functions correctly multi-user (sharing encrypted files between users on the same instance
 works; it just isn't the sales pitch).
 
-**This is a client-custody consumer of the Sealed Vault** (`specs/sealed_vault_core.md`). The
+**This is a client-custody consumer of the Sealed Vault** (`specs/implemented/sealed_vault_core.md`). The
 per-user **encryption identity and the unlockers come from the vault** — one keypair, one
 passkey, one recovery scheme, shared with the password manager. Drive does **not** build its
 own keyring; it adds only the file-content encryption and the multi-user sharing on top of the
@@ -146,7 +146,7 @@ Inventoried up front — every server feature that interprets file content, and 
 
 ## Phases
 
-1. **Vault client-custody identity** — built by `specs/sealed_vault_core.md` (the shared browser
+1. **Vault client-custody identity** — built by `specs/implemented/sealed_vault_core.md` (the shared browser
    crypto module, keyring, passkey/recovery/passphrase unlock, auto-lock). Drive consumes it; it
    is not rebuilt here. (Shares the browser crypto module with the password manager, but Drive
    uses its **own** `drive` scope/keypair — separate from passwords.)

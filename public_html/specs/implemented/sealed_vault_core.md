@@ -107,7 +107,12 @@ to these (a cheap edit — nothing is implemented yet):
   `uew_user_encryption_wrappings`; see *Schema*). One vault row per user; many wrapping rows.
 - **The unlock window** — `includes/VaultUnlock.php` (was the mail plugin's `MailboxUnlock`):
   the APCu-backed secret-key store keyed to the session, TTL = idle timeout, activity-
-  extended, wiped on close. **One window, one key, every consumer.** The three host-hardening
+  extended, wiped on close. **One window, one key, every consumer.** End-of-window *policy* —
+  the ending events (heartbeat loss, IP change, credential events, explicit lock), the
+  per-level idle/absolute caps, and arming requirements (user verification required) — is
+  consumer-defined; the mail consumer's policy is `specs/mailbox_security_levels.md`
+  § The Unlock Window, and `VaultUnlock` exposes the wipe hooks those events call. The
+  three host-hardening
   facts (anonymous `apc.mmap_file_mask`, coredumps off, swap off/encrypted) are a **core**
   provisioner health check, not a per-consumer one.
 - **The unlocker set + floor** — passkey PRF wrappings (per credential), ≥128-bit recovery

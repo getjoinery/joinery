@@ -162,8 +162,35 @@ class ModelQueryExecutor {
         $q = $db->prepare($sql);
         $q->execute($params);
         $rows = $q->fetchAll(PDO::FETCH_ASSOC);
+        $rows = self::decryptSealedFields($rows, $class);
 
         return self::wrapUntrustedFields($rows, $info, $select_fields, $ctx);
+    }
+
+    /**
+     * Sealed Vault generic read hook (docs/sealed_vault.md) for the raw-row
+     * path: this reads models by SQL, never instantiating them, so it cannot
+     * go through SystemBase::get()'s decrypt hook. A model declaring
+     * $sealed_fields gets each one run through its own
+     * decryptSealedFieldStatic() override; a locked vault (VaultLockedException)
+     * becomes a placeholder, never raw ciphertext or a thrown error.
+     */
+    private static function decryptSealedFields(array $rows, string $class): array {
+        $sealed = $class::$sealed_fields;
+        if (empty($sealed)) return $rows;
+
+        require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
+        foreach ($rows as &$row) {
+            foreach ($sealed as $field) {
+                if (!array_key_exists($field, $row) || $row[$field] === null) continue;
+                try {
+                    $row[$field] = $class::decryptSealedFieldStatic($field, $row[$field], $row);
+                } catch (VaultLockedException $e) {
+                    $row[$field] = '[locked - unlock your vault to view]';
+                }
+            }
+        }
+        return $rows;
     }
 
     /**

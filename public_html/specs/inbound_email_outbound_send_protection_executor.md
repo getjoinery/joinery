@@ -5,7 +5,7 @@
 **Design authority:** `specs/inbound_email_outbound_send_protection.md` (v1.2) — the *why*,
 the four closures, and the resolved "offer both postures from one build" decision. This is
 the *how*.
-**Depends on (build first):** `specs/passkeys_core_executor.md` and
+**Depends on (build first):** `specs/implemented/passkeys_core_executor.md` and
 `specs/inbound_email_encryption_at_rest_executor.md`. This package reuses that package's
 `SealedBox` (the `crypto_box_seal` envelope), the per-user key hierarchy (`uev`/`uew`), and
 the `VaultUnlock` window — the DKIM private key seals to the **same** user public key and

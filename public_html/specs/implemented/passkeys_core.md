@@ -96,7 +96,14 @@ All core, no plugin. Vanilla JS on the front end per theme rules.
 ## Consumer Inventory (decided up front)
 
 1. **Login / account security** — passkey sign-in; a profile-page security
-   section listing credentials with add / rename / revoke.
+   section listing credentials with add / rename / revoke. **Amended by
+   `specs/mailbox_security_levels.md` § Authentication & Ceremonies (a firm
+   product decision):** a passkey never opens both the session and the vault
+   on the same account. Sole passkey sign-in is available only while the
+   account has no vault; activating the vault disables it account-wide
+   (after verifying a password exists), and the same ceremony then serves as
+   an optional second factor (step-up after password, alongside TOTP) and as
+   the vault unlocker. Passkey-as-2FA is allowed always.
 2. **Step-up confirmation** — the generic re-confirm primitive.
 3. **Vault unlock** (`specs/sealed_vault_core.md`) — PRF context
    `vault-kek`; per-credential wrappings of the user's **vault** secret key

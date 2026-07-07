@@ -13,6 +13,24 @@ This package builds the crypto core, the per-user key hierarchy, the unlock wind
 generic hooks, key rotation, and backups. A **consumer** package builds only *what it seals*,
 *its levels/scope*, and *its locked-state surfaces* — everything below the content is here.
 
+> **v1.3 doctrine delta (`specs/mailbox_security_levels.md` § Authentication /
+> § The Unlock Window) — fold in while building:** (1) every vault unlock
+> ceremony sets `userVerification: required` on its assertion options
+> (`PasskeyService::getDerivationOptions()` call site); (2) `VaultUnlock`
+> exposes a generic wipe surface — `lock($user_id, $session_id)` and
+> `lockAll($user_id)` — that consumer-policy events call (explicit lock,
+> credential events, heartbeat loss, IP change, caps); end-of-window *policy*
+> is consumer-defined, the mechanism just makes wiping callable. (3) **The
+> vault-activation flip:** a passkey never opens both session and vault on
+> the same account — the enrollment ceremony this package builds must first
+> verify the account has a working password (prompt to set one if not) and
+> then disable sole passkey sign-in for the account (`passkey_login_verify`
+> rejects vault holders; the login button hides for them). Passkey-as-2FA
+> remains allowed always; no-vault accounts keep passkey sign-in untouched.
+> If passkey-based password reset exists by the time this builds, it follows
+> the same rule: a vault holder's reset ceremony requires the second factor
+> (levels spec § Password reset & account recovery).
+
 ## Phase 0 — Preflight & host dependencies (core)
 
 Branch `sealed-vault-core`. Dependencies (were previously scoped to the mail package; they

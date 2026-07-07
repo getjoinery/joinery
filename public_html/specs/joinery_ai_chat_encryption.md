@@ -2,7 +2,7 @@
 
 **Status:** Ready for implementation
 **Version:** 1.0
-**Design authority:** `specs/sealed_vault_core.md` (v1.0) — the vault provides the keypair,
+**Design authority:** `specs/implemented/sealed_vault_core.md` (v1.0) — the vault provides the keypair,
 unlockers, unlock window, `VaultCrypto`, and the two hooks. This spec is chat's **consumer**
 side: what seals, the per-conversation levels, and the unlock-first locked-state contract.
 The levels doctrine and locked-state contract mirror

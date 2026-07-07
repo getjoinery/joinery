@@ -2,21 +2,40 @@
 
 **Status:** Ready for implementation
 **Version:** 1.0
-**Design authority:** `specs/inbound_email_encryption_at_rest.md` (v1.3) — the *why* and
+**Design authority:** `specs/mailbox_encryption_at_rest.md` (v1.3) — the *why* and
 the threat model. This document is the *how*: exact files, line anchors, schema,
 signatures, and acceptance checks. Where they disagree on intent, the design spec
 governs; where the design spec's *literal wording* collides with the code as built, this
 document resolves it (see Phase 4's ordering resolution) and is authoritative on the
 mechanics.
-**Depends on (build first):** `specs/passkeys_core_executor.md` (the `vault-kek` PRF context)
-and `specs/sealed_vault_core_executor.md` (the shared crypto core, key hierarchy, and unlock
+
+> **Pull-forward from `specs/mailbox_security_levels.md` v1.5 (§ Vault-Gated
+> Settings) — ship in THIS release, not with the levels package:** the moment
+> any mailbox is sealed, the settings that reroute its future mail must be
+> behind the same ceremony as the mail, or sealing is bypassable at the
+> control plane (a filter on a protected domain acts at receive time, on
+> plaintext). In the same release as sealing, gate these mutations on an open
+> unlock window (one-tap prompt-and-continue, the locked-state pattern):
+> **filters/forwarding rules, alias destinations/modes, and outbound relay
+> SMTP settings** for accounts with a vault — the actions that redirect
+> plaintext. API-key creation/scope/reveal, mailbox grants, and the
+> notification-content toggle are a 2FA step-up (the design spec's
+> sensitive-actions list), NOT a window gate. Also ship the *minimal*
+> window end-event set: session end, explicit lock, and the global
+> credential-event kill (password/2FA/passkey/recovery changes end all
+> windows). The full event polish (heartbeat, IP-change hook, idle/absolute
+> caps, native grace) may wait for the levels package. Document what this
+> pull-forward ships by extending `docs/account_security.md` (the single
+> doctrine doc) — not by creating a new doc.
+**Depends on (build first):** `specs/implemented/passkeys_core_executor.md` (the `vault-kek` PRF context)
+and `specs/implemented/sealed_vault_core_executor.md` (the shared crypto core, key hierarchy, and unlock
 window — see the Vault baseline below). Do not start until `PasskeyService` and the vault
 exist.
 
 ### Vault baseline (retarget — read before executing)
 
 The key hierarchy and unlock window are **not built here** — they are the shared core vault
-(`specs/sealed_vault_core_executor.md`), consumed by mail, AI chat, and later drive/passwords.
+(`specs/implemented/sealed_vault_core_executor.md`), consumed by mail, AI chat, and later drive/passwords.
 This package's **Phase 1** (crypto helpers), **Phase 2** (key hierarchy), **Phase 3** (unlock
 window), the unlocker floor (2.4), **Phase 8** (key rotation), and the backup/recovery content
 are **superseded** by the vault package — build them there, once, not here. They remain below
@@ -68,7 +87,7 @@ rename never touches them), data-class filenames
 
 | Area | Files (real paths, verified) |
 |---|---|
-| Crypto core, key hierarchy, unlock window | **built by the vault** — `SealedBox`/`VaultCrypto`/`VaultUnlock`, `uev`/`uew` tables (`specs/sealed_vault_core_executor.md`). Mail consumes them. |
+| Crypto core, key hierarchy, unlock window | **built by the vault** — `SealedBox`/`VaultCrypto`/`VaultUnlock`, `uev`/`uew` tables (`specs/implemented/sealed_vault_core_executor.md`). Mail consumes them. |
 | New search engine | `plugins/mailbox/includes/MailboxIndex.php` + a `/dev/shm` sweep task |
 | Ingest reorder + seal | `plugins/mailbox/includes/InboundEmailRouter.php` (`storeMessage()` ~336–423, `extractAttachmentsToFiles()` ~472–524) |
 | Message schema | `plugins/mailbox/data/inbound_email_message_class.php` (`$field_specifications`, `getMultiResults()` ~332–361) |

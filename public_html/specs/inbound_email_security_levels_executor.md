@@ -1,9 +1,28 @@
 # Inbound Email — Security Levels — Executor Package
 
-**Status:** Ready for implementation
+**Status:** Ready for implementation — **re-derive against design v1.5 before executing**
 **Version:** 1.0
-**Design authority:** `specs/inbound_email_security_levels.md` (v1.1) — the *why*, the
+**Design authority:** `specs/mailbox_security_levels.md` (v1.5) — the *why*, the
 three-level matrix, and the locked-state contract. This is the *how*.
+
+> **v1.2–1.5 delta (not yet reflected below):** the design spec gained
+> § Authentication & Ceremonies, § The Unlock Window, and § Vault-Gated
+> Settings — the password/2FA vs passkey role split (a passkey never opens
+> both session and vault on one account: sole passkey sign-in is
+> vault-conditional, disabled by vault activation, and doubles as a 2FA
+> step-up), the 2FA cadence setting and Fortress
+> mandatory-2FA enrollment, user-verification-required vault ceremonies,
+> recovery-code 2FA+notify rules, the window end-event list (heartbeat,
+> IP-change, credential events, idle/absolute caps, native grace), the
+> vault-gated reroute surfaces (filters/forwarding, alias
+> destinations/modes, relay SMTP settings — window-gated) with API keys,
+> mailbox grants, the notification toggle, and recipe config on the 2FA
+> sensitive-actions step-up instead, and
+> § Password reset & account recovery (passkey/TOTP reset authorizers, the
+> vault-holder passkey+2FA reset rule, the hosted-login-email precondition,
+> external recovery address, reset as credential event). Those add build
+> items this package does not yet enumerate — extend the phase list from the
+> design spec before running it.
 **Orchestrates (build these first):** `passkeys_core_executor.md`,
 `inbound_email_encryption_at_rest_executor.md`,
 `inbound_email_outbound_send_protection_executor.md`,
@@ -218,6 +237,14 @@ health). No new check logic here beyond making level the switch.
 the per-domain unit, the matrix, and the subdomain pattern for automated mail
 (current-state voice). `docs/settings.md` cross-reference if any level default lands in
 settings.
+
+`docs/account_security.md` is the platform's single doctrine doc — **extend it,
+don't create parallel docs**: this package adds the 2FA cadence setting, the
+per-level ceremony table, the window end-event list (heartbeat, IP-change,
+credential events, per-level caps), the vault-gated reroute settings, and the
+password-reset three-populations rules, all rewritten from the design spec's
+§ Authentication / § The Unlock Window / § Vault-Gated Settings / § Password
+reset sections into current-state voice.
 
 ## Phase 9 — Verification (acceptance gate)
 

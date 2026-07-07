@@ -7,7 +7,7 @@ The fourth leg of the self-hosted Proton-suite replacement, alongside mail (buil
 the **password manager** — client-side zero-knowledge, end of discussion.
 
 **Two senses of "vault," disambiguated up front:** *the Sealed Vault* is the platform's shared
-per-user encryption identity (`specs/sealed_vault_core.md`) — the keypair and unlockers. *Your
+per-user encryption identity (`specs/implemented/sealed_vault_core.md`) — the keypair and unlockers. *Your
 vault* (user-facing) is your collection of passwords. This feature is the **password manager**;
 it is a **client-custody consumer of the Sealed Vault**, sharing the same keypair, passkey,
 recovery scheme, and browser crypto module as Drive encryption. It lives in `plugins/vault/`
@@ -131,7 +131,7 @@ protected); the keyring is hard-delete only. Both tables auto-created by `update
 ### Phase 1 — Crypto core + usable manager (the v1)
 
 The **vault's client-custody identity** (shared module, keyring, passkey/recovery/passphrase
-unlock, auto-lock) is built by `specs/sealed_vault_core.md` — this phase consumes it. On top:
+unlock, auto-lock) is built by `specs/implemented/sealed_vault_core.md` — this phase consumes it. On top:
 generate + seal the store DEK on first use; CRUD on encrypted entries (server stores/returns
 opaque blobs only); list view that decrypts in memory, in-memory search, copy-to-clipboard. A
 usable, zero-knowledge manager unlocked by a passkey tap.

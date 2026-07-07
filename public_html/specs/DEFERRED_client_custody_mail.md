@@ -6,7 +6,7 @@ doesn't have to be re-derived when/if it's revisited. Nothing here is scheduled.
 as *deferred, not rejected* in `specs/mailbox_encryption_at_rest.md` (§ *Alternative:
 client-side key handling*) and `specs/mailbox_security_model_public.md` (§ *Why server-side
 decryption*). It builds on `specs/mailbox_hardened_ingest_relay.md` (edge-sealing) and
-`specs/sealed_vault_core.md`'s **client-custody** mode (already designed for drive/passwords).
+`specs/implemented/sealed_vault_core.md`'s **client-custody** mode (already designed for drive/passwords).
 
 ## What this is
 

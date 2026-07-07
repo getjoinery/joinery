@@ -232,21 +232,26 @@ by the library's response validators; reject cross-origin. Attestation conveyanc
 
 ### 2.3 Challenge lifecycle
 
-Stash the pending challenge in the **web session** via `SessionControl` (the anonymous
-session exists pre-login, which is what lets sign-in carry a challenge across the two
-sessionless calls). Store: the raw challenge, a purpose tag (`register` / `authenticate`
-/ `stepup` / `derive:{context}`), and an expiry (e.g. now + 120s). On verify: load,
-check purpose + expiry, then **delete it before validating** (single-use; a replay finds
-no challenge). Use the same `SessionControl` raw get/set the CSRF token uses
-(`get_raw`/set); confirm the exact setter name in `SessionControl`.
+Stash the pending challenge in a dedicated `pks_passkey_ceremonies` table keyed by the
+browser-session id (`session_id()`; the anonymous session exists pre-login, which is
+what lets sign-in carry a challenge across the two sessionless calls). **Not in
+`$_SESSION`:** browser-session API requests are read-only on the web session —
+`ApiAuth::authenticateBrowserSession()` calls `session_write_close()` before dispatch,
+so `$_SESSION` writes made inside a sessioned action are silently discarded. Store: the
+challenge, a purpose tag (`register` / `authenticate` / `stepup` / `derive:{context}`),
+and an expiry (now + 120s). One in-flight ceremony per session (a new stash replaces any
+pending challenge); sweep expired rows on stash. On verify: load, **delete it before
+validating** (single-use; a replay finds no challenge), then check purpose + expiry.
 
 ### 2.4 Session establishment & step-up flag
 
 - `verifyAuthentication` success must establish the login **exactly as a password login
   does** — call the same `SessionControl` path the password flow uses (find it in the
   password-login logic). Do not hand-roll session creation.
-- `verifyStepUp` sets a session marker `passkey_stepup_verified_time = <utc now>`.
-  `hasRecentStepUp($n)` returns true iff that marker is within `$n` seconds.
+- `verifyStepUp` writes a step-up marker row to `pks_passkey_ceremonies` (kind
+  `stepup`, keyed by the browser-session id — same reason as 2.3: sessioned API
+  actions cannot write `$_SESSION`). `hasRecentStepUp($n)` returns true iff a marker
+  row for this session was created within `$n` seconds.
 
 ### 2.5 Revocation veto hook (the only unlocker-floor touchpoint here)
 
@@ -289,7 +294,7 @@ off. Segment names must match `^[a-z0-9_]+$` (dispatcher guard) — all names be
 |---|---|---|---|
 | `passkey_login_options`  | `POST /api/v1/action/passkey_login_options`  | **false** | Body `{email?}`. Returns request options; stashes challenge in anon session. Sessionless: no CSRF, rate-limited, challenge-bound. |
 | `passkey_login_verify`   | `POST /api/v1/action/passkey_login_verify`   | **false** | Body = assertion client JSON. On success establishes the session and returns the user summary (mirror `auth/login`'s `data`). |
-| `passkey_register_options` | `POST /api/v1/action/passkey_register_options` | true | Requires a **fresh step-up** (`hasRecentStepUp()`), else refuse — a session thief must not enroll quietly. Returns creation options with `excludeCredentials` = the user's live credentials. |
+| `passkey_register_options` | `POST /api/v1/action/passkey_register_options` | true | Enrollment always demands proof beyond the session cookie — a session thief must not enroll quietly. With ≥1 credential: requires a **fresh step-up** (`hasRecentStepUp()`), else refuse. First passkey (nothing to step up with): requires the account password (`current_password` in the body, `User::check_password()`); accounts with no password (OAuth-only) fall back to the session anchor. Returns creation options with `excludeCredentials` = the user's live credentials. The UI always sends `prf_capable_requested` (PRF is enabled only at creation time; vault consumers need it). |
 | `passkey_register_verify` | `POST /api/v1/action/passkey_register_verify` | true | Body = attestation client JSON + `label`. Persists; returns the new credential row (through `export_for_api()`). |
 | `passkey_stepup_options` | `POST /api/v1/action/passkey_stepup_options` | true | Assertion options scoped to the current user. |
 | `passkey_stepup_verify`  | `POST /api/v1/action/passkey_stepup_verify`  | true | Sets the step-up marker. |
