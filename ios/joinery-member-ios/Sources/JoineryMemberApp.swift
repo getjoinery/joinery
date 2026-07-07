@@ -3,6 +3,7 @@ import JoineryKit
 import JoineryMailKit
 import JoineryCalendarKit
 import JoineryAIChatKit
+import JoineryMemberKit
 
 /// The Joinery member app: pure brand shell. All behavior lives in
 /// JoineryKit and its layered modules; this target supplies configuration
@@ -15,10 +16,12 @@ struct JoineryMemberApp: App {
         // Native modules register their navigation screens; the server's
         // routing table lights them up (screen "mailbox" → JoineryMailKit,
         // screen "calendar" → JoineryCalendarKit, screen "ai_chat" →
-        // JoineryAIChatKit).
+        // JoineryAIChatKit, screen "profile"/"orders"/"subscriptions"/
+        // "events"/"conversations"/"security" → JoineryMemberKit).
         JoineryMail.registerScreens()
         JoineryCalendar.registerScreens()
         JoineryAIChat.registerScreens()
+        JoineryMember.registerScreens()
 
         // Deterministic UI-test startup: wipe stored credentials so every
         // test run begins signed out.

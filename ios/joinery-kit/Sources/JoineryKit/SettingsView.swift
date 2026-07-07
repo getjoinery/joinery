@@ -44,6 +44,16 @@ public struct SettingsView: View {
                     .navigationTitle("Edit Account")
                 }
                 .accessibilityIdentifier("settings_account_edit")
+                NavigationLink("Edit Address") {
+                    FormScreen(client: session.client, action: "address_edit")
+                        .navigationTitle("Edit Address")
+                }
+                .accessibilityIdentifier("settings_address_edit")
+                NavigationLink("Edit Phone Number") {
+                    FormScreen(client: session.client, action: "phone_numbers_edit")
+                        .navigationTitle("Edit Phone Number")
+                }
+                .accessibilityIdentifier("settings_phone_numbers_edit")
                 NavigationLink("Contact Preferences") {
                     FormScreen(client: session.client, action: "contact_preferences")
                         .navigationTitle("Contact Preferences")
@@ -55,14 +65,11 @@ public struct SettingsView: View {
                 }
                 .accessibilityIdentifier("settings_password_edit")
             }
-            if let web {
-                Section("Security") {
-                    NavigationLink("App Sessions") {
-                        WebScreen(title: "App Sessions", target: "/profile/security",
-                                  client: session.client, web: web)
-                    }
-                    .accessibilityIdentifier("settings_app_sessions")
+            Section("Security") {
+                NavigationLink("Security") {
+                    securityDestination
                 }
+                .accessibilityIdentifier("settings_security")
             }
             Section {
                 Button(role: .destructive) {
@@ -85,6 +92,23 @@ public struct SettingsView: View {
                 Task { await session.logout() }
             }
             .accessibilityIdentifier("settings_sign_out_confirm")
+        }
+    }
+
+    /// The native `security` screen (app sessions + TOTP) when a layered
+    /// module has registered it, else the same web page it always pointed
+    /// to — so a build without JoineryMemberKit keeps working unchanged.
+    @ViewBuilder
+    private var securityDestination: some View {
+        if let registered = NativeScreenRegistry.view(
+            for: "security",
+            context: NativeScreenContext(session: session, user: user, web: web)
+        ) {
+            registered
+        } else if let web {
+            WebScreen(title: "Security", target: "/profile/security", client: session.client, web: web)
+        } else {
+            ProgressView()
         }
     }
 }

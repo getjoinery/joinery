@@ -1031,19 +1031,20 @@ private static function UcName($string) {
 		$this->loaded_password_hash = $this->get('usr_password');
 
 		//THIS IS A SPECIAL CALCULATED FIELD BASED ON THE USER ID
-		if($rowdata['usr_authhash'] === NULL){
-			$rowdata['usr_authhash'] = substr(hash('sha256', $this->key.'izsalt'), 0, 8);
+		if($this->get('usr_authhash') === NULL){
+			$authhash = substr(hash('sha256', $this->key.'izsalt'), 0, 8);
 			$sql = "UPDATE usr_users SET usr_authhash = :usr_authhash WHERE usr_user_id = :usr_user_id";
-		
+
 			try{
 				$q = $dblink->prepare($sql);
-				$q->bindParam(':usr_authhash', $rowdata['usr_authhash'], PDO::PARAM_STR);
+				$q->bindParam(':usr_authhash', $authhash, PDO::PARAM_STR);
 				$q->bindParam(':usr_user_id', $this->key, PDO::PARAM_INT);
-				$success = $q->execute();
+				$q->execute();
+				$this->set('usr_authhash', $authhash);
 			}
 			catch(PDOException $e){
 				$dbhelper->handle_query_error($e);
-			}			
+			}
 		}
 	}
 

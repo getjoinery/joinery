@@ -1,41 +1,50 @@
 import XCTest
 
-/// Gate: revoking the app's session from the web signs out both layers.
-/// Driven end-to-end inside the app: the App Sessions page (a webview
-/// destination in Settings) is the web surface; Revoke All kills the API
-/// key, the bridged web session dies with it (lifetime coupling — the
-/// runner sets app_bridge_key_check_seconds=0 so the very next page load
-/// notices), the silent re-bridge mint 401s, and the native layer signs out.
+/// Gate: revoking every session from the native security screen signs the
+/// app out (specs/implemented/mobile_native_member_screens.md acceptance 5).
+/// Sign Out All Devices runs the same `security` action the web page uses;
+/// it kills the current API key, so the next authenticated call 401s and
+/// the native shell lands on login. The runner sets
+/// app_bridge_key_check_seconds=0 so any bridged web session dies on its
+/// very next load too (lifetime coupling).
 final class RevocationUITests: XCTestCase {
 
     override func setUp() {
         continueAfterFailure = false
     }
 
-    func testRevokeFromWebSignsOutBothLayers() {
+    func testRevokeAllFromNativeSecuritySignsOut() {
         let app = XCUIApplication()
         app.launchJoinery()
         app.signIn(email: TestEnv.email, password: TestEnv.password)
         app.openSettings()
 
-        app.expect(app.buttons["settings_app_sessions"], "App Sessions row")
-        app.buttons["settings_app_sessions"].tap()
+        app.expect(app.buttons["settings_security"], "Security row in Settings")
+        app.buttons["settings_security"].tap()
+        app.expect(app.collectionViews["security_list"].firstMatch, timeout: 20, "native security screen")
+        app.expect(app.staticTexts["This device"].firstMatch, timeout: 15, "current session marker")
 
-        // The web App Sessions surface, chrome-less, inside the app.
-        let webView = app.webViews.firstMatch
-        app.expect(webView.staticTexts["App Sessions"].firstMatch, timeout: 30, "App Sessions page")
-
-        let revokeAll = webView.buttons["Revoke All"].firstMatch
-        app.expect(revokeAll, timeout: 10, "Revoke All button")
+        // Sign Out All Devices renders whenever more than one session key is
+        // live — always true mid-gate (every prior suite minted one). It sits
+        // below the per-session rows, and the gate accumulates enough of them
+        // to push it off-screen; List is lazy, so scroll until it exists.
+        let revokeAll = app.buttons["security_revoke_all"].firstMatch
+        var scrolls = 0
+        while !revokeAll.exists && scrolls < 10 {
+            app.collectionViews["security_list"].firstMatch.swipeUp()
+            scrolls += 1
+        }
+        app.expect(revokeAll, timeout: 10, "Sign Out All Devices button")
         revokeAll.tap()
 
-        // The page's confirm() surfaces as a native alert.
-        let confirmOK = app.alerts.buttons["OK"]
-        app.expect(confirmOK, timeout: 10, "native confirm for Revoke All")
-        confirmOK.tap()
+        // The confirmationDialog is an action sheet; scope to it, because the
+        // triggering row button carries the same label.
+        let confirm = app.sheets.buttons["Sign Out All Devices"].firstMatch
+        app.expect(confirm, timeout: 10, "revoke-all confirmation")
+        confirm.tap()
 
-        // Both layers die: bridged session invalid on the next load, the
-        // re-bridge mint 401s, and the native shell lands on login.
-        app.expect(app.textFields["login_email"], timeout: 30, "login screen after web-side revocation")
+        // The current key is among the revoked: the next authenticated call
+        // 401s and the shell signs out to the login screen.
+        app.expect(app.textFields["login_email"], timeout: 30, "login screen after revoke-all")
     }
 }

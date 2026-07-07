@@ -2,7 +2,13 @@
 
 **Created:** 2026-07-07
 
-**Status:** Active — not yet implemented.
+**Status:** Implemented. All acceptance criteria verified by the phase 3
+gate (22/22 checks, `tests/functional/ios/phase3_gate.sh` v1.3.1). The
+route flips ship as migration v139 — core menu seeding is insert-only, so
+`admin_menus.json` edits alone do not move existing rows. Item 2 of
+`specs/mobile_native_member_screens_followups.md` (conversation compose /
+member picker) is deliberately unbuilt pending the messaging-initiation
+product decision.
 
 **Purpose:** Convert the remaining member-facing web screens in the iOS app
 to native, following the pattern proven by mail, calendar, and AI chat:

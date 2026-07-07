@@ -6,7 +6,11 @@
 // agenda, entry editor), same layering pattern as mail.
 // JoineryAIChatKit — the native AI chat surface (conversation list + threaded
 // chat with the assistant, send-then-poll streaming), same layering as mail.
-// Version: 0.4.1 (navigation shell + webviews + native mail + calendar + AI chat + chat attachments)
+// JoineryMemberKit — the native member surface (dashboard, orders,
+// subscriptions, events, conversations, security), same layering as mail;
+// its Settings additions (address/phone forms, the Security row) live in
+// JoineryKit itself and route to this module through NativeScreenRegistry.
+// Version: 0.5.0 (native member surface: profile, orders, subscriptions, events, conversations, security)
 import PackageDescription
 
 let package = Package(
@@ -19,6 +23,7 @@ let package = Package(
         .library(name: "JoineryMailKit", targets: ["JoineryMailKit"]),
         .library(name: "JoineryCalendarKit", targets: ["JoineryCalendarKit"]),
         .library(name: "JoineryAIChatKit", targets: ["JoineryAIChatKit"]),
+        .library(name: "JoineryMemberKit", targets: ["JoineryMemberKit"]),
     ],
     targets: [
         .target(
@@ -39,6 +44,11 @@ let package = Package(
             name: "JoineryAIChatKit",
             dependencies: ["JoineryKit"],
             path: "Sources/JoineryAIChatKit"
+        ),
+        .target(
+            name: "JoineryMemberKit",
+            dependencies: ["JoineryKit"],
+            path: "Sources/JoineryMemberKit"
         ),
         .testTarget(
             name: "JoineryKitTests",
@@ -68,6 +78,14 @@ let package = Package(
             name: "JoineryAIChatKitTests",
             dependencies: ["JoineryAIChatKit"],
             path: "Tests/JoineryAIChatKitTests",
+            resources: [
+                .copy("Fixtures"),
+            ]
+        ),
+        .testTarget(
+            name: "JoineryMemberKitTests",
+            dependencies: ["JoineryMemberKit"],
+            path: "Tests/JoineryMemberKitTests",
             resources: [
                 .copy("Fixtures"),
             ]

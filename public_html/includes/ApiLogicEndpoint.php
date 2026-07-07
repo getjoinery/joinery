@@ -141,7 +141,7 @@ class ApiLogicEndpoint {
 		// Set up session simulation if needed
 		$session = SessionControl::get_instance();
 		if ($api_user) {
-			$session->set_api_user($api_user->key);
+			$session->set_api_user($api_user->key, $api_entry ? $api_entry->key : null);
 		}
 
 		// Build parameters from JSON request body or form data
@@ -398,7 +398,7 @@ class ApiLogicEndpoint {
 		// Session simulation so the builder sees the acting user's timezone
 		// and session context, exactly as the action face provides
 		$session = SessionControl::get_instance();
-		$session->set_api_user($api_user->key);
+		$session->set_api_user($api_user->key, $api_entry ? $api_entry->key : null);
 
 		self::serveForm($action_label, $action_name, $form_function, $api_user, $api_user->key);
 	}

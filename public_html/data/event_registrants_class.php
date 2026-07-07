@@ -157,23 +157,26 @@ static function check_if_registrant_exists($userid, $eventid){
 			$dblink = $dbhelper->get_db_link();
 			//MAKE SURE NO DUPLICATES
 			$sql = "SELECT COUNT(*) AS numfound FROM evr_event_registrants WHERE evr_evt_event_id=:event_registrants AND evr_usr_user_id=:user";
+			$numfound = 0;
+			$event_id = $this->get('evr_evt_event_id');
+			$user_id = $this->get('evr_usr_user_id');
 			try{
 				$q = $dblink->prepare($sql);
-				$q->bindParam(':event_registrants', $rowdata['evr_evt_event_id'], PDO::PARAM_INT);
-				$q->bindParam(':user', $rowdata['evr_usr_user_id'], PDO::PARAM_INT);
-				$success = $q->execute();
-				$numfound = $q->fetch()->numfound;
+				$q->bindParam(':event_registrants', $event_id, PDO::PARAM_INT);
+				$q->bindParam(':user', $user_id, PDO::PARAM_INT);
+				$q->execute();
+				$numfound = (int)$q->fetchColumn();
 			}
 			catch(PDOException $e){
 				$dbhelper->handle_query_error($e);
-			}		
-			
+			}
+
 			if($numfound){
 				throw new DisplayableEventRegistrantException('You cannot register twice for the same event.');
-			}			
+			}
 		}
 		parent::save($debug);
-	}	
+	}
 
 }
 

@@ -6,7 +6,7 @@
     { "name": "api_require_https", "default": "1" },
     { "name": "api_session_key_lifetime_days", "default": "365", "helptext": "Days until an API session key minted by /api/v1/auth/login expires (apk_expires_time). Existing keys keep the expiry they were minted with." },
     { "name": "app_bridge_key_check_seconds", "default": "60", "helptext": "How often (seconds) an app-context web session re-verifies that its originating API session key is still live. 0 checks on every request. Lower values make key revocation propagate to app webviews faster at the cost of a key lookup per interval." },
-    { "name": "app_navigation", "default": "{\"default\": [\"core-profile\", \"core-calendar\", \"inbound-email-mailbox\"]}", "helptext": "JSON map of client_app to the ordered menu slugs pinned to that app's tab bar (GET /api/v1/app/navigation). The default key applies to apps without their own entry; all other entries land in the app's More list." },
+    { "name": "app_navigation", "default": "{\"default\": [\"core-profile\", \"core-calendar\", \"mailbox\"]}", "helptext": "JSON map of client_app to the ordered menu slugs pinned to that app's tab bar (GET /api/v1/app/navigation). The default key applies to apps without their own entry; all other entries land in the app's More list." },
     { "name": "blog_active", "default": "1" },
     { "name": "comments_active", "default": "1" },
     { "name": "comments_unregistered_users", "default": "0" },

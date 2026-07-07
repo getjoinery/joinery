@@ -14,10 +14,14 @@
  *   2. ensures a second store-mode alias <sender_local_part> on the same
  *      domain, so the in-app reply is delivered locally and verifiable in
  *      iem_inbound_email_messages
+ *   3. ensures one global custom label exists — a feedless mailbox's folder
+ *      rail is the global label set, and the reader/app hide the Move/Labels
+ *      control entirely when it is empty, so the folder-picker leg needs a
+ *      pre-existing label for the control to show at all
  *
- * Prints "grant=<id> sender_alias=<id>" on success.
+ * Prints "grant=<id> sender_alias=<id> base_label=<id>" on success.
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 
 require_once('/var/www/html/joinerytest/public_html/tests/functional/api/api_test_harness.php');
@@ -26,6 +30,7 @@ harness_require_debug_mode();
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_labels_class.php'));
 
 $cmd = $argv[1] ?? '';
 if ($cmd !== 'ensure' || !isset($argv[2], $argv[3])) {
@@ -99,5 +104,12 @@ if (!$sender_alias_id) {
 	$sender_alias_id = $alias->key;
 }
 
-echo "grant=$grant_id sender_alias=$sender_alias_id\n";
+// 3. One global custom label, so the Move/Labels control is visible.
+$base_label = InboundEmailLabel::findOrCreate('Phase3 Base');
+if (!$base_label || !$base_label->key) {
+	fwrite(STDERR, "base label could not be created\n");
+	exit(1);
+}
+
+echo "grant=$grant_id sender_alias=$sender_alias_id base_label=" . $base_label->key . "\n";
 ?>

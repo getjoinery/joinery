@@ -280,9 +280,21 @@ change is immediately visible in both:
   the sheet. Forwards still re-attach the original's attachments
   server-side; a sent copy with new uploads shows them in the thread view
   once the manifest persists — no separate rendering path.
+- **Labels/move picker** (`FolderPickerSheet`, opened from a thread's
+  `mail_folders` toolbar button) — the web reader's `buildFolderControl()`
+  exclusive-vs-non-exclusive model as a native sheet: an exclusive feed (an
+  IMAP mailbox where a message lives in exactly one folder) gets a
+  single-pick "Move to" that relocates the thread on selection; a
+  non-exclusive feed (Gmail-style custom labels) gets checkbox "Labels" that
+  toggle membership independently. Both end with a create-folder/label row.
+  All three operations ride the existing `mailbox/thread_action`
+  (`set_membership`, `create_folder`) — no server change. The button is
+  hidden entirely when the thread's mailbox has no tracked folders yet,
+  matching the web and Android pickers exactly (there is no empty-state
+  affordance to create the first one from the button itself).
 
-Not in the module (the web reader remains for them): labels/move and
-create-folder, filter management, spam settings.
+Not in the module (the web reader remains for them): filter management, spam
+settings.
 
 ## JoineryCalendarKit (native calendar module)
 
@@ -391,6 +403,99 @@ Accessibility ids (`chat_*`) are the stable UI-test API: `chat_loading`,
 `chat_set_web_search`, `chat_set_thinking`, `chat_settings_done`.
 
 Not in the module yet (the web chat remains for it): thread export.
+
+## JoineryMemberKit (native member surface module)
+
+**JoineryMemberKit** is the native member-account surface — same package
+repo, fifth product (`ios/joinery-kit/Sources/JoineryMemberKit`, depends on
+JoineryKit). An app adds the product and calls
+`JoineryMember.registerScreens()` in its init; the server's `profile`,
+`orders`, `subscriptions`, `events`, `conversations`, and `security`
+navigation destinations then render these screens, and builds without the
+module keep the web pages via each entry's fallback URL. `conversations` and
+`security` are not menu entries — they are reached from the dashboard and
+from Settings respectively, both resolved through the same
+`NativeScreenRegistry` table so a JoineryKit-only build (no JoineryMemberKit)
+falls back to the equivalent webview destination.
+
+The screens consume seven purpose-built read actions and reuse existing
+mutation actions rather than adding new ones — `profile_dashboard`,
+`order_list`, `subscription_summary`, `my_events`, `conversation_list`,
+`conversation_thread`, `security_overview` for reads;
+`orders_recurring_action`, `event_withdraw`, `security`, `address_edit`,
+`phone_numbers_edit`, `conversation_send`, and `conversation_action` for
+mutations:
+
+- **Dashboard** (`ProfileScreen` + `ProfileStore`, registry name `profile`) —
+  the user card, a needs-attention row (pending event surveys, unread message
+  count), stat tiles, and recent-item lists (events, conversations, orders,
+  subscriptions). Every section renders strictly from keys the
+  `profile_dashboard` payload actually sent — a settings-gated section
+  (`messaging_active` / `products_active` / `subscriptions_active` off) is an
+  absent key, not an empty placeholder. Tiles and rows navigate to the other
+  native screens directly; Notifications and event survey links open through
+  `context.web`.
+- **Orders** (`OrdersScreen` + `OrderListStore`, registry name `orders`) — a
+  paginated, read-only order history (10/page) with each order's line item
+  summaries.
+- **Subscriptions** (`SubscriptionsScreen` + `SubscriptionStore`, registry
+  name `subscriptions`) — active and cancelled subscriptions, current tier,
+  and Cancel (a confirmation alert into `orders_recurring_action`, which
+  cancels at period end unconditionally once called — the confirmation is
+  purely client-side, matching the web flow). Change Plan and Manage Billing
+  open the web pages through `context.web` — deliberately: Apple IAP policy
+  means purchase/upgrade UI cannot be rebuilt natively around Stripe until
+  `specs/mobile_app_billing.md` lands, and the Stripe Billing Portal is a
+  hosted web flow regardless.
+- **Events** (`EventsScreen` + `EventListStore`, registry name `events`) — a
+  status-tabbed (all / active / expired / canceled / completed), paginated
+  (10/page) registration list. Rows open the session content page (video
+  embeds, CMS content) through `context.web` — deliberately, since a native
+  rendering would embed a webview for the video anyway. Withdraw is a
+  confirmation alert into the existing `event_withdraw` action.
+- **Conversations** (`ConversationsScreen` + `ConversationListStore` for the
+  inbox, `ConversationThreadView` + `ConversationThreadStore` for one thread,
+  registry name `conversations`) — a paginated (20/page) inbox with
+  mute/unmute/delete, opening into a bubble thread with cursor-paginated
+  messages (50/page, `before`/`after` ISO cursors) and a compose bar. Opening
+  a thread marks it read as a side effect of the `conversation_thread` call,
+  exactly as the web conversation page does — both ride the same actions, so
+  read state and messages are shared in real time. A `to`-addressed thread
+  dedups to an existing 1:1 conversation server-side (`is_compose_mode` in the
+  response) or creates one on first send.
+- **Security** (`SecurityScreen` + `SecurityStore`, registry name `security`)
+  — the app-session list (per-row and revoke-all, via the `security` action's
+  `revoke_app_session` / `revoke_all_app_sessions`) and TOTP status with
+  enable / confirm / disable / regenerate flows (`start_enable`,
+  `confirm_enable`, `cancel_enable`, `regenerate_backup_codes`, `disable`).
+  The enable flow renders the `provisioning_uri` (`otpauth://…`) as a QR
+  natively with `CIFilter.qrCodeGenerator` — no SVG parsing needed, since the
+  server already returns the same URI the web page's SVG QR encodes.
+  Revoking the session key that made the request signs the app out through
+  the kit's existing 401 sign-out path (`SessionController.logout()`).
+  Passkeys and the Sealed Vault are stated as web-managed here — WKWebView
+  cannot expose platform WebAuthn, so native passkey/vault management is a
+  separate future spec (`specs/mobile_native_member_screens.md` §
+  Deliberately web).
+
+The `security` action predates the purpose-built-payload pattern: most of its
+mutating branches redirect server-side with an empty `data: {}` on both
+success and failure (the web page tells them apart with a flash message a
+native client can't read). `SecurityAPI` re-reads `security_overview` after
+`disable` to confirm the outcome rather than trusting the envelope alone —
+see `ios/joinery-kit/Sources/JoineryMemberKit/SecurityAPI.swift`.
+
+Settings additions (JoineryKit core, not this module — no new module needed
+since the generic form renderer already covers them): `SettingsView` gained
+`FormScreen` rows for `address_edit` and `phone_numbers_edit` (matching the
+existing `account_edit` row), and its Security row resolves through
+`NativeScreenRegistry.view(for: "security", …)`, falling back to the
+`/profile/security` webview when JoineryMemberKit isn't linked.
+
+Accessibility ids follow each screen's own prefix: `profile_*`, `orders_*`,
+`subscriptions_*`, `events_*`, `conversations_*` / `conversation_*`,
+`security_*`. `settings_security`, `settings_address_edit`, and
+`settings_phone_numbers_edit` are the new Settings rows.
 
 ## joinery-android (Android client core)
 
