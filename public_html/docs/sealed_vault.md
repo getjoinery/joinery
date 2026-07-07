@@ -88,7 +88,11 @@ Neither table is an API resource; consumers never touch them directly.
 ## Enrollment
 
 All in `logic/vault_*_logic.php`, gated on `passkeys_enabled` and a signed-in
-session:
+session. Every vault endpoint declares `requires_browser_session` (see
+[API § Authentication](api.md#authentication)): the unlock window is keyed to
+the browser session id, so these actions are reachable only through the
+browser-session credential, never an API key — the boundary is stated in the
+contract rather than left to fail incidentally.
 
 | Action pair | Purpose |
 |---|---|

@@ -32,6 +32,20 @@ and `specs/implemented/sealed_vault_core_executor.md` (the shared crypto core, k
 window — see the Vault baseline below). Do not start until `PasskeyService` and the vault
 exist.
 
+> **As-built vault API (verified 2026-07-07) — trust `docs/sealed_vault.md` over any
+> surface sketched below; it documents the code as shipped.** The load-bearing facts:
+> `VaultUnlock` is all-static (`secretKey($user_id)` returns null when locked;
+> `lock`/`lockAll` exist); the File decrypt hook is `File::registerDecryptHook($source,
+> $decryptor)` — register at bootstrap, throw `VaultLockedException` (declared in
+> `includes/VaultUnlock.php`) and serving returns a 423; the sealed-field hook is
+> `SystemBase::$sealed_fields` + override `decryptSealedField()` (instance) and
+> `decryptSealedFieldStatic()` (raw-row, used by ModelQueryExecutor); rotation calls
+> `VaultUnlock::onReseal($cb)` with signature `($user_id, $old_secret_key,
+> $new_public_key, $new_key_generation)` and mail's callback **MUST be idempotent and
+> keyed on the per-item key-generation column** (a crash retry skips already-flipped
+> items) — so `iem_` rows need a key-generation column alongside `iem_sealed_key`;
+> register a wipe callback via `VaultUnlock::onWipe()` to clear the FTS blob on lock.
+
 ### Vault baseline (retarget — read before executing)
 
 The key hierarchy and unlock window are **not built here** — they are the shared core vault

@@ -61,6 +61,7 @@ function vault_add_passkey_verify_logic(array $input): LogicResult {
 function vault_add_passkey_verify_logic_api() {
 	return [
 		'requires_session' => true,
+		'auth' => array('requires_browser_session' => true),
 		'description' => 'Complete adding a vault wrapping for another PRF-capable passkey',
 	];
 }

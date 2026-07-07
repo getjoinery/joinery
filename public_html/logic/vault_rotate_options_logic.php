@@ -33,6 +33,7 @@ function vault_rotate_options_logic(array $input): LogicResult {
 function vault_rotate_options_logic_api() {
 	return [
 		'requires_session' => true,
+		'auth' => array('requires_browser_session' => true),
 		'description' => 'Begin vault key rotation (returns WebAuthn PRF request options); use an already-enrolled passkey',
 	];
 }

@@ -40,6 +40,7 @@ function passkey_revoke_logic(array $input): LogicResult {
 function passkey_revoke_logic_api() {
 	return [
 		'requires_session' => true,
+		'auth' => array('requires_browser_session' => true),
 		'description' => 'Revoke an enrolled passkey (may be refused if a consumer\'s unlocker floor requires it)',
 	];
 }

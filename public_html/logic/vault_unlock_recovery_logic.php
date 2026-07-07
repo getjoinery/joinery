@@ -79,6 +79,7 @@ function vault_unlock_recovery_logic(array $input): LogicResult {
 function vault_unlock_recovery_logic_api() {
 	return [
 		'requires_session' => true,
+		'auth' => array('requires_browser_session' => true),
 		'description' => 'Unlock the vault with a one-time recovery code',
 	];
 }

@@ -245,7 +245,7 @@ API authorization decisions involve two distinct axes — keep them separate whe
 | **Key capability** | `apk_permission` | What a *key* may do on the CRUD axis (read / write / delete, non-monotonic — see above). |
 | **User role** | `usr_permission` | The owning *user's* role floor (e.g. `5` = staff, `10` = superadmin). This is the value passed to per-record `authenticate_read/write` as `current_user_permission`, and the floor the management plane gates on. |
 
-Both axes live in one class, `ApiAuth` (`includes/ApiAuth.php`), which owns the whole security boundary: `ApiAuth::authenticate()` resolves the principal from request headers, and `ApiAuth::authorize()` enforces every endpoint's authorization against a small contract — a `capability`, an optional `requires_machine_key`, and a `min_user_permission` floor.
+Both axes live in one class, `ApiAuth` (`includes/ApiAuth.php`), which owns the whole security boundary: `ApiAuth::authenticate()` resolves the principal from request headers, and `ApiAuth::authorize()` enforces every endpoint's authorization against a small contract — a `capability`, an optional `requires_machine_key` or its inverse `requires_browser_session`, and a `min_user_permission` floor.
 
 ### Declaring endpoint authorization
 
@@ -256,10 +256,11 @@ function catalog_logic_api() {
     return [
         'description' => 'List blockable categories',
         'auth' => [
-            'capability'           => 'read',   // 'read' | 'write' | 'delete' | null (no apk_permission check)
-            'requires_session'     => true,     // run under session simulation as the key's user
-            'requires_machine_key' => false,    // require apk_type = machine
-            'min_user_permission'  => 0,        // usr_permission floor
+            'capability'               => 'read',  // 'read' | 'write' | 'delete' | null (no apk_permission check)
+            'requires_session'         => true,    // run under session simulation as the key's user
+            'requires_machine_key'     => false,   // require apk_type = machine
+            'requires_browser_session' => false,   // inverse of machine_key: refuse ALL API keys, browser-session credential only
+            'min_user_permission'      => 0,       // usr_permission floor
         ],
     ];
 }
@@ -273,6 +274,8 @@ Resolution order for each field: explicit `auth` value → router default → `A
 | Form (`GET /api/v1/form/*`) | `capability: read` |
 | CRUD verbs (`/api/v1/{Class}…`) | `read` for GET, `write` for POST/PUT, `delete` for DELETE |
 | Management (`/api/v1/management/*`) | `requires_machine_key: true, min_user_permission: 10` (no `apk_permission` check) |
+
+`requires_machine_key` and `requires_browser_session` are mutually exclusive opposites: the first admits only machine keys, the second refuses every API key so the action is reachable only through the browser-session credential (session cookie + CSRF; native apps ride the same bridge). Session-bound operations whose state is keyed to the session id — Sealed Vault and passkey management — set `requires_browser_session` so the boundary is declared, not left to incidental session-plumbing behavior.
 
 A management handler's `auth` block may **tighten** the default (e.g. raise the user floor or add a capability) but cannot loosen it — the machine-key + superadmin default is enforced before the handler resolves so unknown paths still fail closed.
 

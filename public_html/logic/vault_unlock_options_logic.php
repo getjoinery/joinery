@@ -33,6 +33,7 @@ function vault_unlock_options_logic(array $input): LogicResult {
 function vault_unlock_options_logic_api() {
 	return [
 		'requires_session' => true,
+		'auth' => array('requires_browser_session' => true),
 		'description' => 'Begin unlocking the vault with a passkey (returns WebAuthn PRF request options, userVerification required)',
 	];
 }

@@ -19,6 +19,7 @@ function vault_lock_logic(array $input): LogicResult {
 function vault_lock_logic_api() {
 	return [
 		'requires_session' => true,
+		'auth' => array('requires_browser_session' => true),
 		'description' => 'Explicitly lock the vault (close the unlock window) for the current session',
 	];
 }

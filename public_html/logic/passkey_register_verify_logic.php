@@ -32,6 +32,7 @@ function passkey_register_verify_logic(array $input): LogicResult {
 function passkey_register_verify_logic_api() {
 	return [
 		'requires_session' => true,
+		'auth' => array('requires_browser_session' => true),
 		'description' => 'Complete passkey enrollment and persist the new credential',
 	];
 }

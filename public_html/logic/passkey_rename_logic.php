@@ -31,6 +31,7 @@ function passkey_rename_logic(array $input): LogicResult {
 function passkey_rename_logic_api() {
 	return [
 		'requires_session' => true,
+		'auth' => array('requires_browser_session' => true),
 		'description' => 'Rename an enrolled passkey',
 	];
 }

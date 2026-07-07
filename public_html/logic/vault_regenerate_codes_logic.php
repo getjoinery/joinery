@@ -58,6 +58,7 @@ function vault_regenerate_codes_logic(array $input): LogicResult {
 function vault_regenerate_codes_logic_api() {
 	return [
 		'requires_session' => true,
+		'auth' => array('requires_browser_session' => true),
 		'description' => 'Invalidate all existing recovery codes and issue a fresh set; requires a recent step-up and an unlocked vault',
 	];
 }
