@@ -47,7 +47,10 @@ class Comment extends SystemBase {	public static $prefix = 'cmt';
 	    'cmt_pst_post_id' => array('type'=>'int4', 'required'=>true),
 	    'cmt_body' => array('type'=>'text', 'required'=>true),
 	    'cmt_created_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
-	    'cmt_is_approved' => array('type'=>'bool', 'default'=>true),
+	    // Held for moderation unless a code path explicitly approves (every
+	    // current creator sets this) — a forgotten set means a comment waits,
+	    // never that spam auto-publishes.
+	    'cmt_is_approved' => array('type'=>'bool', 'default'=>false),
 	    'cmt_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
