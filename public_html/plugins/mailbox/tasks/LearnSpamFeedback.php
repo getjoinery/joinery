@@ -29,6 +29,7 @@
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundProviderRegistry.php'));
+require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
 
 class LearnSpamFeedback implements ScheduledTaskInterface {
 
@@ -76,7 +77,14 @@ class LearnSpamFeedback implements ScheduledTaskInterface {
 			}
 
 			$msg = new InboundEmailMessage($id, true);
-			$raw = $msg->getRawMessage();
+			try {
+				$raw = $msg->getRawMessage();
+			} catch (VaultLockedException $e) {
+				// Sealed raw (iem_raw_sealed) — learning is key-gated and this
+				// cron pass never holds a window, so a sealed raw is permanently
+				// out of reach here, same as a pruned one.
+				$raw = null;
+			}
 			if ($raw === null || $raw === '') {
 				// Pruned or reference-backed (IMAP) — nothing local to learn from.
 				$this->markReconciled($id);

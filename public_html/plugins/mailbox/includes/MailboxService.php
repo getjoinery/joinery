@@ -43,10 +43,13 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
- * @version 1.10
+ * @version 1.11
  */
 
+require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
+require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxViewer.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxIndex.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
@@ -469,19 +472,47 @@ class MailboxService {
 			$params[] = $folderId;
 		}
 
-		// Row-level full-text filter: a thread shows if any message matches.
-		// The expression MUST stay byte-identical to iem_007's GIN index
-		// expression (plugins/mailbox/migrations/migrations.php), or the
-		// planner will not use the index. websearch_to_tsquery tolerates
-		// arbitrary user input (stray quotes/operators won't raise).
+		// Full-text search (specs/implemented/inbound_email_encryption_at_rest.md §
+		// 6): a sealed mailbox's content columns are ciphertext, unsearchable in
+		// SQL — MailboxIndex (a sealed, in-window SQLite FTS5 working copy) is the
+		// only way to search it. This resolves per single-mailbox scope, since the
+		// index is per owner: a single alias whose owner holds a Sealed Vault
+		// searches via the index (locked → an explicit signal, not silently empty
+		// forever); every other scope (all-mail, an unsealed mailbox, "unmatched")
+		// keeps the Postgres tsvector search on the plaintext columns — a sealed
+		// row elsewhere in a broad scope simply never matches its own ciphertext,
+		// which is inert degradation, not a leak.
+		$search_locked = false;
 		if (!empty($filters['q'])) {
-			$where[] = "to_tsvector('english',
-					coalesce(iem_sender, '')      || ' ' ||
-					coalesce(iem_subject, '')     || ' ' ||
-					coalesce(iem_body_plain, '')  || ' ' ||
-					coalesce(iem_body_html, ''))
-				@@ websearch_to_tsquery('english', ?)";
-			$params[] = $filters['q'];
+			$owner_id = ($aliasId !== null && $aliasId > 0) ? InboundEmailMessage::singleOwnerUserId($aliasId) : null;
+			$vault = $owner_id !== null ? UserEncryptionVault::loadForUser($owner_id) : null;
+
+			if ($vault !== null) {
+				$secret = VaultUnlock::secretKey($owner_id);
+				if ($secret === null) {
+					$search_locked = true;
+					$where[] = '1=0'; // no query is meaningful while locked
+				} else {
+					$index = new MailboxIndex();
+					$index->fold($owner_id, $secret);
+					$ids = $index->search($owner_id, $filters['q']);
+					$where[] = count($ids)
+						? 'iem_inbound_email_message_id IN (' . implode(',', array_map('intval', $ids)) . ')'
+						: '1=0';
+				}
+			} else {
+				// The expression MUST stay byte-identical to iem_007's GIN index
+				// expression (plugins/mailbox/migrations/migrations.php), or the
+				// planner will not use the index. websearch_to_tsquery tolerates
+				// arbitrary user input (stray quotes/operators won't raise).
+				$where[] = "to_tsvector('english',
+						coalesce(iem_sender, '')      || ' ' ||
+						coalesce(iem_subject, '')     || ' ' ||
+						coalesce(iem_body_plain, '')  || ' ' ||
+						coalesce(iem_body_html, ''))
+					@@ websearch_to_tsquery('english', ?)";
+				$params[] = $filters['q'];
+			}
 		}
 
 		// Thread-level filters.
@@ -498,6 +529,11 @@ class MailboxService {
 		// 0 = has unread, 1 = starred (all read), 2 = everything else. Ordering by
 		// it first keeps the buckets contiguous across pages, so the client renders
 		// one header per section even with pagination.
+		//
+		// No content columns (sender/subject/body) are aggregated here — they may
+		// be ciphertext (specs/implemented/inbound_email_encryption_at_rest.md §
+		// 6.1). member_ids carries every message id in the thread so the caller can
+		// decrypt (or read plain) each one in PHP via the Sealed Vault raw-row hook.
 		$sql = "SELECT
 					$gk AS thread_key,
 					MAX(iem_received_time) AS latest_time,
@@ -511,11 +547,7 @@ class MailboxService {
 						WHEN BOOL_OR(iem_is_starred) THEN 1
 						ELSE 2
 					END AS section_rank,
-					STRING_AGG(DISTINCT iem_sender, ', ') AS senders,
-					(ARRAY_AGG(iem_sender ORDER BY iem_received_time DESC, iem_inbound_email_message_id DESC))[1] AS latest_sender,
-					(ARRAY_AGG(iem_subject ORDER BY iem_received_time DESC, iem_inbound_email_message_id DESC))[1] AS latest_subject,
-					(ARRAY_AGG(left(coalesce(iem_body_plain, ''), 400) ORDER BY iem_received_time DESC, iem_inbound_email_message_id DESC))[1] AS preview_plain,
-					(ARRAY_AGG(left(coalesce(iem_body_html, ''), 2000) ORDER BY iem_received_time DESC, iem_inbound_email_message_id DESC))[1] AS preview_html,
+					ARRAY_AGG(iem_inbound_email_message_id) AS member_ids,
 					(ARRAY_AGG(iem_inbound_email_message_id ORDER BY iem_received_time DESC, iem_inbound_email_message_id DESC))[1] AS latest_id
 				FROM iem_inbound_email_messages
 				WHERE " . implode(' AND ', $where) . "
@@ -539,16 +571,38 @@ class MailboxService {
 			$rows = array_slice($rows, 0, $perpage);
 		}
 
+		// Batch-decrypt every message on this page in one query (mirrors
+		// ModelQueryExecutor::decryptSealedFields()) — bounded to the page's
+		// threads, not the whole mailbox.
+		$page_ids = array();
+		foreach ($rows as $r) {
+			foreach ($this->pgIntArray($r['member_ids']) as $mid) {
+				$page_ids[] = $mid;
+			}
+		}
+		$content = $this->fetchAndDecryptContent(array_unique($page_ids));
+
 		$section_for = array(0 => 'unread', 1 => 'starred', 2 => 'other');
 		$threads = array();
 		foreach ($rows as $r) {
 			$rank = intval($r['section_rank']);
+			$latest_id = intval($r['latest_id']);
+			$latest = $content[$latest_id] ?? array('sender' => '', 'subject' => '', 'body_plain' => '', 'body_html' => '');
+
+			$senders = array();
+			foreach ($this->pgIntArray($r['member_ids']) as $mid) {
+				$s = trim((string)($content[$mid]['sender'] ?? ''));
+				if ($s !== '' && !in_array($s, $senders, true)) {
+					$senders[] = $s;
+				}
+			}
+
 			$threads[] = array(
 				'thread_key'   => $r['thread_key'],
-				'subject'      => $r['latest_subject'],
-				'senders'      => $r['senders'],
-				'sender'       => $r['latest_sender'],
-				'snippet'      => $this->buildSnippet($r['preview_plain'], $r['preview_html']),
+				'subject'      => $latest['subject'],
+				'senders'      => implode(', ', $senders),
+				'sender'       => $latest['sender'],
+				'snippet'      => $this->buildSnippet(mb_substr($latest['body_plain'], 0, 400), mb_substr($latest['body_html'], 0, 2000)),
 				'section'      => $section_for[$rank] ?? 'other',
 				'msg_count'    => intval($r['msg_count']),
 				'unread_count' => intval($r['unread_count']),
@@ -560,15 +614,72 @@ class MailboxService {
 				// below 3 — see the reader JS.
 				'danger_score' => $r['danger_score'] !== null ? intval($r['danger_score']) : null,
 				'latest_time'  => $r['latest_time'],
-				'latest_id'    => intval($r['latest_id']),
+				'latest_id'    => $latest_id,
 			);
 		}
 
-		return array(
+		$result = array(
 			'threads'  => $threads,
 			'has_more' => $has_more,
 			'page'     => $page,
 		);
+		if ($search_locked) {
+			// The vault-holding mailbox being searched has no open window — the
+			// reader prompts to unlock rather than showing an empty result forever.
+			$result['search_locked'] = true;
+		}
+		return $result;
+	}
+
+	/**
+	 * Every message id in $ids, with sender/subject/body_plain/body_html
+	 * resolved through the Sealed Vault raw-row read hook (docs/sealed_vault.md)
+	 * — decrypted when sealed and in-window, a locked placeholder when sealed
+	 * and locked, plain as-is when never sealed. Mirrors
+	 * plugins/joinery_ai/includes/ModelQueryExecutor.php's decryptSealedFields().
+	 *
+	 * @return array<int, array{sender:string,subject:string,body_plain:string,body_html:string}>
+	 */
+	private function fetchAndDecryptContent(array $ids): array {
+		$out = array();
+		if (!count($ids)) {
+			return $out;
+		}
+		$in = implode(',', array_map('intval', $ids));
+		$sql = "SELECT iem_inbound_email_message_id, iem_iea_inbound_email_alias_id, iem_direction,
+					iem_content_sealed, iem_sealed_key, iem_sealed_owner_user_id,
+					iem_sender, iem_subject, iem_body_plain, iem_body_html
+				FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id IN ($in)";
+		$rows = $this->db()->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+
+		$fields = array('iem_sender' => 'sender', 'iem_subject' => 'subject',
+			'iem_body_plain' => 'body_plain', 'iem_body_html' => 'body_html');
+		foreach ($rows as $row) {
+			$mid = intval($row['iem_inbound_email_message_id']);
+			$entry = array();
+			foreach ($fields as $col => $key) {
+				$value = $row[$col];
+				if ($value !== null && $value !== '') {
+					try {
+						$value = InboundEmailMessage::decryptSealedFieldStatic($col, $value, $row);
+					} catch (VaultLockedException $e) {
+						$value = '[locked - unlock your vault to view]';
+					}
+				}
+				$entry[$key] = (string)$value;
+			}
+			$out[$mid] = $entry;
+		}
+		return $out;
+	}
+
+	/** Parse a Postgres integer array literal ("{1,2,3}", PDO returns it as a string) to int[]. */
+	private function pgIntArray($raw): array {
+		$raw = trim((string)$raw, "{}");
+		if ($raw === '') {
+			return array();
+		}
+		return array_map('intval', explode(',', $raw));
 	}
 
 	/**
@@ -611,8 +722,8 @@ class MailboxService {
 					iem_is_read, iem_is_starred, iem_read_time, iem_dkim_result,
 					iem_spf_result, iem_dmarc_result, iem_auth_source, iem_spam_score,
 					iem_size_bytes, iem_message_id_header, iem_direction,
-					iem_body_plain, iem_body_html,
-					iem_ai_danger_score, iem_ai_scan, iem_ai_scan_time
+					iem_body_plain, iem_body_html, iem_content_sealed, iem_sealed_key,
+					iem_sealed_owner_user_id, iem_ai_danger_score, iem_ai_scan, iem_ai_scan_time
 				FROM iem_inbound_email_messages
 				WHERE iem_inbound_email_message_id IN ($in)
 				ORDER BY iem_received_time ASC, iem_inbound_email_message_id ASC";
@@ -625,13 +736,14 @@ class MailboxService {
 		$out = array();
 		foreach ($rows as $r) {
 			$mid = intval($r['iem_inbound_email_message_id']);
+			$decrypted = $this->decryptThreadRow($r);
 			$out[] = array(
 				'id'                => intval($r['iem_inbound_email_message_id']),
 				'alias_id'          => $r['iem_iea_inbound_email_alias_id'] !== null
 										? intval($r['iem_iea_inbound_email_alias_id']) : null,
-				'sender'            => $r['iem_sender'],
-				'recipient'         => $r['iem_recipient'],
-				'subject'           => $r['iem_subject'],
+				'sender'            => $decrypted['iem_sender'],
+				'recipient'         => $decrypted['iem_recipient'],
+				'subject'           => $decrypted['iem_subject'],
 				'received_time'     => $r['iem_received_time'],
 				'is_read'           => (bool)$this->pgBool($r['iem_is_read']),
 				'is_starred'        => (bool)$this->pgBool($r['iem_is_starred']),
@@ -646,8 +758,8 @@ class MailboxService {
 				'size_bytes'        => intval($r['iem_size_bytes']),
 				'message_id_header' => $r['iem_message_id_header'],
 				'direction'         => $r['iem_direction'] ?: 'inbound',
-				'body_plain'        => $r['iem_body_plain'],
-				'body_html'         => $r['iem_body_html'],
+				'body_plain'        => $decrypted['iem_body_plain'],
+				'body_html'         => $decrypted['iem_body_html'],
 				// AI security scan (specs/joinery_ai_email_security_scan.md):
 				// null score/scan = not yet scanned by any recipe.
 				'ai_danger_score'   => ($r['iem_ai_danger_score'] !== null) ? intval($r['iem_ai_danger_score']) : null,
@@ -655,6 +767,32 @@ class MailboxService {
 				'ai_scan_time'      => $r['iem_ai_scan_time'],
 				'attachments'       => $att_by_msg[$mid] ?? array(),
 			);
+		}
+		return $out;
+	}
+
+	/**
+	 * Decrypt a getThread() row's sealed fields (docs/sealed_vault.md raw-row
+	 * hook) — sender/subject/body_plain/body_html always; recipient only for an
+	 * outbound row (InboundEmailMessage's $sealed_fields / decryptSealedFieldStatic
+	 * apply the same direction check). A locked vault becomes a placeholder per
+	 * field, never a thrown error into the reader.
+	 *
+	 * @return array<string,string> the same column names, decrypted (or unchanged)
+	 */
+	private function decryptThreadRow(array $row): array {
+		$fields = array('iem_sender', 'iem_recipient', 'iem_subject', 'iem_body_plain', 'iem_body_html');
+		$out = array();
+		foreach ($fields as $col) {
+			$value = $row[$col];
+			if ($value !== null && $value !== '') {
+				try {
+					$value = InboundEmailMessage::decryptSealedFieldStatic($col, $value, $row);
+				} catch (VaultLockedException $e) {
+					$value = '[locked - unlock your vault to view]';
+				}
+			}
+			$out[$col] = (string)$value;
 		}
 		return $out;
 	}

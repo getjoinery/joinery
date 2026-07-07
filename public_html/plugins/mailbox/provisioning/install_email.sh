@@ -161,7 +161,11 @@ fi
 echo "PHP CLI: ${PHP_BIN}"
 
 # --- 1. install packages -----------------------------------------------------
-PACKAGES=(postfix postfix-pgsql opendkim opendkim-tools opendmarc)
+# php8.3-sqlite3 (ext-sqlite3, FTS5 compiled in) backs MailboxIndex, the sealed
+# mailbox search index (specs/implemented/inbound_email_encryption_at_rest.md §
+# 6) — pinned to the dev/prod PHP 8.3 line; bump alongside a PHP version
+# upgrade. ext-apcu (the unlock window's key store) ships with the base image.
+PACKAGES=(postfix postfix-pgsql opendkim opendkim-tools opendmarc php8.3-sqlite3)
 MISSING=()
 for pkg in "${PACKAGES[@]}"; do
     if dpkg -s "${pkg}" >/dev/null 2>&1; then

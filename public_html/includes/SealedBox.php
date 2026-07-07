@@ -17,7 +17,7 @@
  * tampered ciphertext, or an AD mismatch all raise RuntimeException; nothing
  * is ever returned half-verified.
  *
- * @version 1.0
+ * @version 1.1
  */
 class SealedBox {
 
@@ -64,21 +64,23 @@ class SealedBox {
 	}
 
 	/**
-	 * Open a blob produced by sealDek(). Throws on tamper or a mismatched
-	 * keypair.
+	 * Open a blob produced by sealDek(). Throws on tamper or a wrong secret
+	 * key. The matching public key is DERIVED from the secret key — a caller
+	 * can never supply a mismatched pair, so the one thing it must get right
+	 * is the one thing it holds: the in-window secret.
 	 */
-	public function openDek(string $sealed, string $public_key, string $secret_key): string {
+	public function openDek(string $sealed, string $secret_key): string {
 		$parts = explode('.', $sealed);
 		if (count($parts) !== 3 || $parts[0] !== 'v1' || $parts[1] !== 'seal') {
 			throw new RuntimeException('SealedBox: malformed sealed blob.');
 		}
 		$ciphertext = self::b64url_decode($parts[2]);
-		$public_raw = self::b64url_decode($public_key);
 		$secret_raw = self::b64url_decode($secret_key);
-		if ($ciphertext === false || $public_raw === false || $secret_raw === false) {
+		if ($ciphertext === false || $secret_raw === false || strlen($secret_raw) !== SODIUM_CRYPTO_BOX_SECRETKEYBYTES) {
 			throw new RuntimeException('SealedBox: malformed sealed blob encoding.');
 		}
 
+		$public_raw = sodium_crypto_box_publickey_from_secretkey($secret_raw);
 		$keypair = sodium_crypto_box_keypair_from_secretkey_and_publickey($secret_raw, $public_raw);
 		$plain = sodium_crypto_box_seal_open($ciphertext, $keypair);
 		sodium_memzero($keypair);

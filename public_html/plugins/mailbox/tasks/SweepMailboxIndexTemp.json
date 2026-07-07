@@ -1,0 +1,6 @@
+{
+    "name": "Sweep Mailbox Index Temp Files",
+    "description": "Deletes /dev/shm sealed-search-index working copies whose unlock window has closed everywhere",
+    "default_frequency": "every_run",
+    "config_fields": {}
+}

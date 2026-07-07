@@ -11,7 +11,7 @@
  * the Mailbox Reader's thread-key index is created here (same pattern as the
  * server_manager plugin's index migration).
  *
- * @version 1.21.0
+ * @version 1.22.0
  */
 return [
 	[
@@ -465,6 +465,69 @@ return [
 				"CREATE INDEX IF NOT EXISTS ilm_label_idx
 				 ON ilm_inbound_label_members (ilm_ilb_inbound_email_label_id)"
 			);
+		},
+	],
+
+	[
+		// Encryption at rest (specs/implemented/inbound_email_encryption_at_rest.md
+		// § 6.1): iem_sender/iem_subject/iem_body_plain/iem_body_html hold
+		// ciphertext once a mailbox owner holds a Sealed Vault, so the GIN
+		// tsvector index scanning them is both useless (never matches a search
+		// term) and a wasted-write cost on every ingest. Search moves to
+		// MailboxIndex (a per-owner sealed FTS5 working copy). iem_007 itself is
+		// left in place as history — a plain drop, not a rollback, so
+		// update_database never recreates it.
+		'id' => 'iem_012_drop_fulltext_gin_index',
+		'version' => '1.30.0',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$dblink->exec("DROP INDEX IF EXISTS iem_fulltext_idx");
+		},
+	],
+
+	[
+		// Sealing fix pack (specs/mailbox_sealing_fix_pack.md, Fix 2): sealed
+		// state became a per-attachment fact (ima_is_sealed) instead of an
+		// inference from the message's flags. Every file-backed attachment of an
+		// already-sealed message was sealed by ingest under the old inference,
+		// so stamp them; plaintext Files left by backfill on rows sealed AFTER
+		// this fix land with the flag correctly false at write time.
+		'id' => 'ima_001_stamp_sealed_attachment_flags',
+		'version' => '1.31.0',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$dblink->exec(
+				"UPDATE ima_inbound_message_attachments SET ima_is_sealed = true
+				 WHERE ima_fil_file_id IS NOT NULL
+				 AND ima_iem_inbound_email_message_id IN (
+					SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
+					WHERE iem_content_sealed = true)");
+		},
+	],
+
+	[
+		// Sealing fix pack (specs/mailbox_sealing_fix_pack.md, Fix 7): decryption
+		// resolves the vault owner from the row itself (iem_sealed_owner_user_id,
+		// written at seal time) so grant/alias changes can never strand sealed
+		// mail. Populate existing sealed rows from the alias's current single
+		// grantee — the same resolution their sealer used at the time.
+		'id' => 'iem_013_populate_sealed_owner',
+		'version' => '1.31.0',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$dblink->exec(
+				"UPDATE iem_inbound_email_messages m
+				 SET iem_sealed_owner_user_id = g.owner_id
+				 FROM (
+					SELECT ieg_iea_inbound_email_alias_id AS alias_id,
+						   MIN(ieg_usr_user_id) AS owner_id
+					FROM ieg_inbound_email_mailbox_grants
+					GROUP BY ieg_iea_inbound_email_alias_id
+					HAVING COUNT(*) = 1
+				 ) g
+				 WHERE m.iem_iea_inbound_email_alias_id = g.alias_id
+				 AND m.iem_content_sealed = true
+				 AND m.iem_sealed_owner_user_id IS NULL");
 		},
 	],
 ];

@@ -42,6 +42,7 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	const SOURCE_ENTITY_PHOTO     = 'entity_photo';      // avatar / event / location / gallery photo
 	const SOURCE_EMAIL_ATTACHMENT = 'email_attachment';  // inbound-email attachment
 	const SOURCE_AI_CHAT_UPLOAD   = 'ai_chat_upload';    // file uploaded into a joinery_ai chat
+	const SOURCE_MAILBOX_SEARCH_INDEX = 'mailbox_search_index'; // sealed FTS5 blob (MailboxIndex) — read server-side only, never streamed via serve_from_path
 
 	// MIME types safe to render inline in the browser. Only raster image
 	// formats that cannot carry executable script belong here. SVG is
@@ -300,10 +301,11 @@ public static function get_by_name($name, $search_deleted = false) {
 	}
 
 	function serve_from_path($path, $cache_control) {
+		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
+		VaultUnlock::loadConsumerBootstraps(); // a consumer's decrypt hook is registered lazily, at first use
 		$bytes = null;
 		$decryptor = self::resolve_decrypt_hook($this->get('fil_source'));
 		if ($decryptor) {
-			require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
 			$ciphertext = @file_get_contents($path);
 			if ($ciphertext === false) {
 				require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));

@@ -24,7 +24,7 @@
  * IMAP ('remote') part fetched on demand via ima_mime_part. Presence of
  * ima_fil_file_id — not the transport — is what dispatch keys on.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -53,6 +53,13 @@ class InboundMessageAttachment extends SystemBase {
 		// Set ⇒ the bytes are a private File (push mail); absent ⇒ section-pointer
 		// into a stored raw (legacy/fallback) or an IMAP on-demand part.
 		'ima_fil_file_id'   => array('type'=>'int8', 'is_nullable'=>true),
+		// Sealed Vault (docs/sealed_vault.md): true ⇒ the linked File's bytes are
+		// an AEAD blob under the owning message's DEK. Recorded PER FILE because
+		// sealed state is a property of the stored bytes, not of the message — a
+		// backfilled message's pre-vault Files stay plaintext while its content
+		// columns are sealed. Every reader of the File bytes consults this flag
+		// via InboundEmailMessage::openSealedAttachment().
+		'ima_is_sealed'     => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'ima_create_time'   => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
 
@@ -93,6 +100,12 @@ class MultiInboundMessageAttachment extends SystemMultiBase {
 		// File-backed (bytes stored as a private File) vs. section-pointer rows.
 		if (isset($this->options['file_backed'])) {
 			$filters['ima_fil_file_id'] = $this->options['file_backed'] ? 'IS NOT NULL' : 'IS NULL';
+		}
+
+		// The manifest row backing a given File — the sealed-attachment decrypt
+		// hook's lookup (plugins/mailbox/includes/bootstrap.php).
+		if (isset($this->options['file_id'])) {
+			$filters['ima_fil_file_id'] = array($this->options['file_id'], PDO::PARAM_INT);
 		}
 
 		return $this->_get_resultsv2('ima_inbound_message_attachments', $filters, $this->order_by, $only_count, $debug);

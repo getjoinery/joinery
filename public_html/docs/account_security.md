@@ -99,6 +99,32 @@ sealed content still demands an unlocker ceremony the resetter cannot fake.
 An admin-assisted reset has the same shape — it can restore the account, and
 structurally cannot open the vault.
 
+## Vault-gated routing settings
+
+Sealing protects *content at rest* — it does nothing about a setting that
+redirects a sealed mailbox's *future* mail before it is ever sealed. A
+filter's "Forward to" action, an alias's destination list, or its delivery
+mode all act at receive time on the plaintext parse, upstream of sealing
+entirely — a control-plane bypass that leaves the content encryption
+technically intact while quietly routing around it. So once a mailbox is
+sealed (its single owner holds a Sealed Vault), a mutation to any of these is
+refused unless the owner has an **open unlock window** — proof of active,
+in-the-moment consent to the routing change, not just a permission check.
+
+This is enforced where the mutation happens (`plugins/mailbox/logic/
+admin_mailbox_filters_logic.php`'s `_filter_require_unlock()`,
+`admin_mailbox_alias_logic.php`'s `_mailbox_alias_require_unlock()`), not as
+a new platform mechanism: both call the existing `VaultUnlock::isOpen($owner_id)`.
+Because that check is scoped to the *calling* session, it can only ever be
+satisfied by the owner's own logged-in session — an admin managing someone
+else's sealed mailbox structurally cannot open that owner's vault, so the
+mutation is refused with a clear message rather than a raw permission error.
+A domain-wide filter scope (no single owner) and a brand-new alias (no
+established owner/grant relationship yet) are never gated. Outbound relay SMTP
+settings (`mailbox_forwarding_smtp_*`) are a known gap: they render through
+the generic settings-save mechanism, which has no per-field save hook to gate
+on today.
+
 ## What each action requires
 
 | Action | Requires |
@@ -112,6 +138,7 @@ structurally cannot open the vault.
 | Revoke a passkey | Session; refused if it breaks the unlocker floor |
 | Rotate the vault key | Live PRF assertion from an enrolled passkey |
 | Password reset | Control of the account email; never opens a vault |
+| Change a sealed mailbox's filters or alias routing | Session + open unlock window (the owner's own) |
 
 Consumers of the vault (mail, chat) define their own *content* policies —
 what they seal, what their locked state looks like — on top of these rules;

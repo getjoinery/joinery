@@ -37,7 +37,7 @@ philosophy as SecretBox: fail closed, never return half-verified plaintext.
 $box = new SealedBox();
 $keypair = $box->generateKeypair();               // ['public'=>b64, 'secret'=>b64] X25519
 $sealed  = $box->sealDek($bytes, $public_key);     // crypto_box_seal - anyone can seal
-$bytes   = $box->openDek($sealed, $public_key, $secret_key);
+$bytes   = $box->openDek($sealed, $secret_key);       // public key derived from the secret
 $blob    = $box->aeadEncrypt($plaintext, $key, $ad);   // xchacha20poly1305_ietf
 $plain   = $box->aeadDecrypt($blob, $key, $ad);        // throws on tamper or AD mismatch
 $wrapped = $box->wrapKey($secret_key, $kek, $ad);      // same AEAD primitive, wrapping a key
@@ -55,7 +55,7 @@ consumer repeats, thin over `SealedBox`:
 $crypto = new VaultCrypto();
 $dek    = $crypto->newItemDek();                        // random 32B, one per content item
 $sealed = $crypto->sealItemDek($dek, $public_key);       // store on the consumer's own row
-$dek    = $crypto->openItemDek($sealed, $public_key, $secret_key);
+$dek    = $crypto->openItemDek($sealed, $secret_key);
 $blob   = $crypto->sealField($plaintext, $dek, $ad);     // $ad is the CONSUMER's row-binding string
 $plain  = $crypto->openField($blob, $dek, $ad);          // e.g. 'mail:{message_id}:body_plain'
 ```
@@ -115,12 +115,24 @@ VaultUnlock::secretKey($user_id, $scope = 'user'): ?string;  // null = locked
 VaultUnlock::close($user_id, $scope = 'user'): void;         // current session
 VaultUnlock::lock($user_id, $session_id, $scope = 'user'): void;  // a specific session
 VaultUnlock::lockAll($user_id): void;                        // every scope, every session
+VaultUnlock::hasAnyOpenWindow($user_id, $scope = 'user'): bool;  // ANY session, any SAPI
 ```
 
 Every content read calls `secretKey()` and treats `null` as **locked** — a
 one-tap unlock prompt, never an error. `lock()`/`lockAll()` are the generic
 wipe surface; *when* to call them (explicit lock, a credential event, a
 heartbeat/IP-change policy, a permission cap) is entirely consumer-defined.
+
+`hasAnyOpenWindow()` answers "does any session hold a window for this user"
+for a consumer's passive-close sweep (e.g. reclaiming `/dev/shm` working
+copies from cron). Its signal is a secret-free marker file
+(`/dev/shm/vault_window_{user_id}_{scope}`, mtime = the window's current
+expiry, stamped by `open()`/`secretKey()`), NOT APCu — a CLI cron process has
+its own APCu segment and can never see the web workers' entries, but every
+process on the host sees `/dev/shm`. A single-session `lock()` leaves the
+marker (another session may still hold a window); it expires with the idle
+TTL, so a sweep is at worst delayed one interval, never wrong about an open
+window. `lockAll()` removes the user's markers outright.
 
 Unlock endpoints (`logic/vault_unlock_options_logic.php` and its
 `vault_unlock_passkey` / `vault_unlock_recovery` / `vault_unlock_passphrase`
@@ -231,9 +243,13 @@ provides only the hook.
 `logic/vault_rotate_options_logic.php` / `vault_rotate_verify_logic.php`: a
 fresh PRF assertion from an already-enrolled passkey both proves possession
 (unwrapping the current secret) and supplies a KEK the ceremony can act on
-immediately. From there, in crash-safety order:
+immediately. The authorizing wrapping is the presented credential's
+**lowest-generation** live wrapping — after a partial failure both
+generations' wrappings are live, and a retry must unwrap the oldest secret,
+the one still holding un-resealed content. From there, in crash-safety order:
 
-1. Generate a new keypair and salt; compute `new_key_generation` (`uev_key_generation + 1`).
+1. Generate a new keypair and salt; compute `new_key_generation` (`uev_key_generation + 1`);
+   note `old_key_generation` (the authorizing wrapping's generation).
 2. **Persist the new generation first**, while the old wrappings are still
    live: the authorizing passkey's wrapping, 10 fresh recovery-code
    wrappings, and a resupplied passphrase's wrapping — each tagged
@@ -241,20 +257,27 @@ immediately. From there, in crash-safety order:
    (public key, salt, generation, updated time).
 3. **Only then** walk every registered consumer's re-seal callback
    (`VaultUnlock::onReseal($callback)`, registration order; signature
-   `function(int $user_id, string $old_secret_key, string $new_public_key,
-   int $new_key_generation): void`) — the old secret is still in hand to
-   open with, the new public key to seal to.
-4. **Only after that** soft-delete the previous generation's wrappings.
+   `function(int $user_id, string $old_secret_key, int $old_key_generation,
+   string $new_public_key, int $new_key_generation): void`) — the old secret
+   is still in hand to open with, the new public key to seal to. A callback
+   re-seals **exactly** the items whose per-item generation equals
+   `$old_key_generation` (the only generation `$old_secret_key` can open),
+   attempts every item, and **throws** if any failed. Any callback throw
+   aborts the ceremony here with an error: nothing is retired, every
+   unlocker still works, and re-running the rotation converges.
+4. **Only after every callback confirms the drain**, soft-delete the drained
+   generation's wrappings (`uew_key_generation = old_key_generation`) —
+   never the whole pre-rotation list, so wrappings of any other live
+   generation survive until a later rotation drains them.
 
-A crash at any point up through step 3 leaves both generations' wrappings
-live and both secrets recoverable — old wrappings still unwrap the old
-secret, and each wrapping's own `uew_key_generation` says which secret it
-belongs to. This is the resumability guarantee expressed as an ordering
-constraint, not a resume endpoint; the consumer packages built on top of this
-(mail package) are responsible for making their own re-seal callback
-idempotent and keyed on each item's own per-item generation column, so a
-retry after a partial crash skips items already flipped rather than re-sealing
-them again.
+A crash or callback failure at any point up through step 3 leaves both
+generations' wrappings live and both secrets recoverable — old wrappings
+still unwrap the old secret, and each wrapping's own `uew_key_generation`
+says which secret it belongs to. This is the resumability guarantee expressed
+as an ordering constraint, not a resume endpoint; a consumer's re-seal
+callback is idempotent because it selects by per-item generation — a retry
+after a partial crash skips items already flipped rather than re-sealing them
+again.
 
 **Every wrapping not re-derivable during this same request is invalidated**,
 not left dangling — a KEK for another enrolled passkey can only come from
@@ -282,7 +305,10 @@ independently of the vault row itself.
 3. Reuse the File decrypt hook for sealed attachments (`File::registerDecryptHook`)
    and the sealed-field model hook for generic reads (`$sealed_fields` +
    `decryptSealedField()`/`decryptSealedFieldStatic()`).
-4. Register a re-seal callback for rotation (`VaultUnlock::onReseal()`).
+4. Register a re-seal callback for rotation (`VaultUnlock::onReseal()`):
+   re-seal exactly the items on `$old_key_generation`, attempt every item,
+   and throw if any failed — a swallowed failure would let the ceremony
+   retire the only path to that content.
 5. Register a wipe callback if you keep any disposable in-window cache
    (`VaultUnlock::onWipe()`), e.g. a plaintext search index.
 6. Own your own levels, scope, and locked-state surfaces (list placeholders,

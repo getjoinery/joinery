@@ -18,7 +18,7 @@
  * different row and decrypt successfully — VaultCrypto enforces nothing about
  * the AD's shape, it just always requires one.
  *
- * @version 1.0
+ * @version 1.1
  */
 require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
 
@@ -43,9 +43,10 @@ class VaultCrypto {
 		return $this->box->sealDek($dek, $public_key);
 	}
 
-	/** Open a sealed per-item DEK with the in-window vault secret key. */
-	public function openItemDek(string $sealed, string $public_key, string $secret_key): string {
-		return $this->box->openDek($sealed, $public_key, $secret_key);
+	/** Open a sealed per-item DEK with the in-window vault secret key (the
+	 *  matching public key is derived from it — see SealedBox::openDek()). */
+	public function openItemDek(string $sealed, string $secret_key): string {
+		return $this->box->openDek($sealed, $secret_key);
 	}
 
 	/** Seal plaintext content under a (now-open) per-item DEK, bound to the consumer's AD. */

@@ -19,7 +19,7 @@
  * heartbeat/IP-change policy, a permission cap — is always a consumer
  * *policy* decision; this class only makes wiping callable (lock/lockAll).
  *
- * @version 1.0
+ * @version 1.1
  */
 
 /** Thrown by a consumer's decrypt path when it needs the vault open but the
@@ -37,9 +37,49 @@ class VaultUnlock {
 	/** @var callable[] consulted, in registration order, whenever a window closes. */
 	private static $wipe_callbacks = array();
 
+	/** @var bool guards loadConsumerBootstraps() to once per request. */
+	private static $consumer_bootstraps_loaded = false;
+
+	/**
+	 * Every consumer package's bootstrap file, keyed by the plugin name that
+	 * guards it — plugin.json convention: 'plugins/{name}/includes/bootstrap.php'.
+	 * A consumer's bootstrap registers its File decrypt hook (File::registerDecryptHook)
+	 * and its onReseal()/onWipe() callbacks. Add a plugin name here when a new
+	 * consumer package lands (mail was the first; chat is the second).
+	 */
+	const CONSUMER_PLUGINS = array('mailbox');
+
+	/**
+	 * Load each active consumer's bootstrap file — lazy, once per request, called
+	 * by every code path that needs a consumer's hooks live: the File decrypt-hook
+	 * resolution (File::serve_from_path()), the rotation ceremony (resealCallbacks()),
+	 * and window-close (runWipeCallbacks()). Static callback registries reset at the
+	 * start of every request (a fresh PHP execution context even under php-fpm
+	 * worker reuse), so this must be called before any of those three read them —
+	 * calling it from all three read sites, guarded to run once, means no call site
+	 * has to remember the ordering.
+	 */
+	public static function loadConsumerBootstraps(): void {
+		if (self::$consumer_bootstraps_loaded) {
+			return;
+		}
+		self::$consumer_bootstraps_loaded = true;
+		require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
+		foreach (self::CONSUMER_PLUGINS as $plugin) {
+			if (!PluginHelper::isPluginActive($plugin)) {
+				continue;
+			}
+			$path = PathHelper::getIncludePath('plugins/' . $plugin . '/includes/bootstrap.php');
+			if (file_exists($path)) {
+				require_once($path);
+			}
+		}
+	}
+
 	/** Unwrap and open the window for the current session. */
 	public static function open(int $user_id, string $secret_key, string $scope = 'user'): void {
 		apcu_store(self::apcuKey(self::currentSessionId(), $user_id, $scope), $secret_key, self::idleSeconds());
+		self::touchWindowMarker($user_id, $scope);
 	}
 
 	public static function isOpen(int $user_id, string $scope = 'user'): bool {
@@ -58,6 +98,7 @@ class VaultUnlock {
 			return null;
 		}
 		apcu_store($key, $value, self::idleSeconds());
+		self::touchWindowMarker($user_id, $scope);
 		return $value;
 	}
 
@@ -84,18 +125,69 @@ class VaultUnlock {
 				apcu_delete($entry['key']);
 			}
 		}
+		foreach (glob('/dev/shm/vault_window_' . $user_id . '_*') ?: array() as $marker) {
+			@unlink($marker); // every scope's window is gone — the markers with them
+		}
 		self::runWipeCallbacks($user_id, null);
 	}
 
 	/**
+	 * True if ANY session currently holds an open window for this user/scope —
+	 * unlike isOpen(), not scoped to the calling session. For a consumer's
+	 * passive-close sweep task (e.g. plugins/mailbox/tasks/
+	 * SweepMailboxIndexTemp.php): a disposable working copy tied to $user_id
+	 * can be reclaimed once no session's window still covers it.
+	 *
+	 * The signal is the /dev/shm window marker, NOT APCu: the sweep runs under
+	 * the CLI cron SAPI, whose APCu segment is separate per process — the web
+	 * workers' vault:* entries are invisible there. The marker file (no secret,
+	 * just existence + a future mtime stamped by open()/secretKey()) is visible
+	 * to every process on the host, exactly like the working copies it guards.
+	 * A single-session lock() leaves the marker (another session may hold a
+	 * window), so it can outlive an explicit lock by up to one idle interval —
+	 * the sweep is at worst delayed, never wrong.
+	 */
+	public static function hasAnyOpenWindow(int $user_id, string $scope = 'user'): bool {
+		$marker = self::windowMarkerPath($user_id, $scope);
+		$mtime = @filemtime($marker);
+		if ($mtime === false) {
+			return false;
+		}
+		if ($mtime <= time()) {
+			@unlink($marker); // expired — reclaim opportunistically
+			return false;
+		}
+		return true;
+	}
+
+	/** The cross-process open-window marker (see hasAnyOpenWindow()). */
+	private static function windowMarkerPath(int $user_id, string $scope): string {
+		$scope_safe = preg_replace('/[^a-z0-9_]/i', '_', $scope);
+		return '/dev/shm/vault_window_' . $user_id . '_' . $scope_safe;
+	}
+
+	/** Stamp the marker with the window's current expiry (mtime = now + idle TTL). */
+	private static function touchWindowMarker(int $user_id, string $scope): void {
+		@touch(self::windowMarkerPath($user_id, $scope), time() + self::idleSeconds());
+	}
+
+	/**
 	 * Registers a callback consulted (in registration order) by the
-	 * key-rotation ceremony (logic/vault_rotate_logic.php): re-seal the
+	 * key-rotation ceremony (logic/vault_rotate_verify_logic.php): re-seal the
 	 * consumer's own per-item DEKs from the old secret key to the new public
 	 * key, bumping its per-item key-generation. Mirrors
 	 * PasskeyService::onPreRevoke()'s registry mechanism.
 	 *
 	 * Callback signature: function(int $user_id, string $old_secret_key,
-	 * string $new_public_key, int $new_key_generation): void
+	 * int $old_key_generation, string $new_public_key,
+	 * int $new_key_generation): void
+	 *
+	 * Contract (docs/sealed_vault.md § Key rotation): re-seal EXACTLY the
+	 * items whose per-item generation equals $old_key_generation — that is the
+	 * generation $old_secret_key belongs to, the only one it can open. Attempt
+	 * every item, then THROW if any failed: the ceremony retires a
+	 * generation's wrappings only when its consumers confirmed the drain, so a
+	 * swallowed failure here would destroy the only path to that content.
 	 */
 	public static function onReseal(callable $callback): void {
 		self::$reseal_callbacks[] = $callback;
@@ -103,6 +195,7 @@ class VaultUnlock {
 
 	/** @return callable[] */
 	public static function resealCallbacks(): array {
+		self::loadConsumerBootstraps();
 		return self::$reseal_callbacks;
 	}
 
@@ -231,6 +324,7 @@ class VaultUnlock {
 	}
 
 	private static function runWipeCallbacks(int $user_id, ?string $scope): void {
+		self::loadConsumerBootstraps();
 		foreach (self::$wipe_callbacks as $callback) {
 			call_user_func($callback, $user_id, $scope);
 		}

@@ -186,4 +186,32 @@ class InboundEmailHealth {
         }
         @fclose($sock);
     }
+
+    /**
+     * Verify ext-sqlite3 is loaded WITH FTS5 compiled in — MailboxIndex's
+     * sealed search index (specs/implemented/inbound_email_encryption_at_rest.md
+     * § 6) has no fallback: without it, search on a sealed mailbox is simply
+     * unavailable (the reader surfaces this, not a 500). The APCu/swap host
+     * hardening this feature also depends on is the vault's own VaultHealth
+     * check (includes/VaultHealth.php), not repeated here.
+     *
+     * @throws ProvisioningCheckFailed if ext-sqlite3 is missing, or FTS5 is
+     *         not compiled into the linked sqlite3 library.
+     */
+    public static function checkSearchIndexEngine() {
+        if (!class_exists('SQLite3')) {
+            throw new ProvisioningCheckFailed(
+                'ext-sqlite3 is not loaded — the sealed mailbox search index (MailboxIndex) requires it.'
+            );
+        }
+        try {
+            $db = new SQLite3(':memory:');
+            $db->exec('CREATE VIRTUAL TABLE t USING fts5(x)');
+            $db->close();
+        } catch (\Throwable $e) {
+            throw new ProvisioningCheckFailed(
+                'ext-sqlite3 is loaded but FTS5 is not compiled in: ' . $e->getMessage()
+            );
+        }
+    }
 }

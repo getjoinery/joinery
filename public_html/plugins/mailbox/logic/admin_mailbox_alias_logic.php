@@ -34,6 +34,15 @@ function admin_mailbox_alias_logic(array $input): LogicResult {
 
 	// Process form submission
 	if ($input && isset($input['iea_alias'])) {
+		// Vault-gated settings pull-forward (specs/implemented/inbound_email_
+		// encryption_at_rest.md, from specs/mailbox_security_levels.md § Vault-
+		// Gated Settings): capture the pre-edit destinations/mode so a real
+		// change to either can be gated below — a rename or grant-list edit
+		// with no routing change is never gated.
+		$was_edit = (bool)$alias->key;
+		$old_destinations = $was_edit ? (string)$alias->get('iea_destinations') : null;
+		$old_mode = $was_edit ? (string)$alias->get('iea_delivery_mode') : null;
+
 		$editable_fields = array('iea_ied_inbound_email_domain_id', 'iea_alias', 'iea_destinations', 'iea_description', 'iea_delivery_mode');
 		foreach ($editable_fields as $field) {
 			if (isset($input[$field])) {
@@ -57,6 +66,28 @@ function admin_mailbox_alias_logic(array $input): LogicResult {
 		if (isset($input['users_with_access']) && is_array($input['users_with_access'])) {
 			foreach ($input['users_with_access'] as $uid) {
 				$submitted_grant_users[] = intval($uid);
+			}
+		}
+
+		// The routing change this mailbox's owner must actively consent to
+		// (an open unlock window) — see the capture above. A new alias has no
+		// established owner/grant relationship yet, so it is never gated.
+		if ($was_edit) {
+			$destinations_changed = ((string)$alias->get('iea_destinations') !== $old_destinations);
+			$mode_changed = ((string)$alias->get('iea_delivery_mode') !== $old_mode);
+			if ($destinations_changed || $mode_changed) {
+				$locked_msg = _mailbox_alias_require_unlock(intval($alias->key));
+				if ($locked_msg !== null) {
+					return LogicResult::render(array(
+						'alias' => $alias,
+						'error' => $locked_msg,
+						'session' => $session,
+						'settings' => $settings,
+						'domains' => new MultiInboundEmailDomain(array('deleted' => false), array('ied_domain' => 'ASC')),
+						'user_options' => $user_options,
+						'granted_user_ids' => $submitted_grant_users,
+					));
+				}
 			}
 		}
 
@@ -122,5 +153,28 @@ function admin_mailbox_alias_logic(array $input): LogicResult {
 		'user_options' => $user_options,
 		'granted_user_ids' => $granted_user_ids,
 	));
+}
+
+/**
+ * Vault-gated settings pull-forward — see the identical guard in
+ * admin_mailbox_filters_logic.php for the full rationale. A destination or
+ * delivery-mode change reroutes this mailbox's future mail before it is ever
+ * sealed, so it requires an open unlock window — which, since
+ * VaultUnlock::isOpen() is scoped to the calling session, only the mailbox
+ * owner's own session can ever satisfy.
+ */
+function _mailbox_alias_require_unlock(int $alias_id): ?string {
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+	require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
+
+	$owner_id = InboundEmailMessage::singleOwnerUserId($alias_id);
+	if ($owner_id === null || !UserEncryptionVault::loadForUser($owner_id)) {
+		return null;
+	}
+	if (!VaultUnlock::isOpen($owner_id)) {
+		return 'This mailbox is sealed. Its owner must unlock their vault before its destinations or delivery mode can change.';
+	}
+	return null;
 }
 ?>

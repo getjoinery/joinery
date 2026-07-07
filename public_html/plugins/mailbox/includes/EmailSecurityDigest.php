@@ -26,6 +26,7 @@
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/AuthenticationResults.php'));
+require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
 
 class EmailSecurityDigest {
 
@@ -41,7 +42,11 @@ class EmailSecurityDigest {
 	const WHITESPACE_RUN_PATTERN = '/[ \t\x{00A0}\x{200B}\x{200C}\x{200D}\x{2060}\x{FEFF}\x{3000}]{4,}/u';
 
 	public static function build(InboundEmailMessage $msg): string {
-		$raw = $msg->getRawMessage();
+		try {
+			$raw = $msg->getRawMessage();
+		} catch (VaultLockedException $e) {
+			$raw = null; // sealed raw, no window — the column fallbacks below apply
+		}
 
 		$from_raw       = $raw !== null ? self::extractHeader($raw, 'from') : (string)$msg->get('iem_sender');
 		$reply_to_raw   = $raw !== null ? self::extractHeader($raw, 'reply-to') : null;
