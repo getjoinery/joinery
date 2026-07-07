@@ -81,6 +81,10 @@ create-folder). Wired to the existing `thread_action` API action's
 
 ## Delivery gate (Android)
 
+Delivered as part of the combined instrumented run in
+`specs/android_native_member_screens.md` — one emulator suite covers this
+gate and the member-screen gates.
+
 **Gate:** UI test suite (Simulator/emulator against `dev.getjoinery.com`,
 seeding mail via `*@inbox.dev.getjoinery.com`) — read a seeded thread; every
 thread action reflects in the web reader and vice versa; search and paging
