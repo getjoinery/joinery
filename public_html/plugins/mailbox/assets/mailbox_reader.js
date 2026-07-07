@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.9
+ * No framework. @version 2.10
  *
  * Two-pane layout: the main pane swaps between the conversation list and an
  * opened conversation (toggled by the `reading` class on #mbx-reader); a back
@@ -317,8 +317,15 @@
 			var tier = t.danger_score >= 7 ? 'red' : 'amber';
 			mid.appendChild(el('span', 'mbx-danger-badge ' + tier, 'Danger ' + t.danger_score + '/10'));
 		}
-		if (t.snippet) {
-			mid.appendChild(el('span', 'mbx-thread-snippet', ' — ' + t.snippet));
+		// AI triage summary (specs/implemented/joinery_ai_email_triage.md) replaces
+		// the body snippet as the preview when the message has been triaged -- it
+		// is the better snippet, so the two never stack.
+		var preview = t.ai_summary || t.snippet;
+		if (preview) {
+			var previewCls = t.ai_summary ? 'mbx-thread-snippet mbx-thread-ai' : 'mbx-thread-snippet';
+			var span = el('span', previewCls, ' — ' + preview);
+			if (t.ai_summary) { span.title = 'AI summary'; }
+			mid.appendChild(span);
 		}
 		li.appendChild(mid);
 

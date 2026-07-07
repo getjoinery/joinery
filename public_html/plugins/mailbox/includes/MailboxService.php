@@ -43,7 +43,7 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
- * @version 1.11
+ * @version 1.12
  */
 
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
@@ -603,6 +603,10 @@ class MailboxService {
 				'senders'      => implode(', ', $senders),
 				'sender'       => $latest['sender'],
 				'snippet'      => $this->buildSnippet(mb_substr($latest['body_plain'], 0, 400), mb_substr($latest['body_html'], 0, 2000)),
+				// AI triage (specs/implemented/joinery_ai_email_triage.md): the latest
+				// message's one-line AI summary, empty if untriaged. The reader shows
+				// this in place of the snippet when present.
+				'ai_summary'   => trim((string)($latest['ai_summary'] ?? '')),
 				'section'      => $section_for[$rank] ?? 'other',
 				'msg_count'    => intval($r['msg_count']),
 				'unread_count' => intval($r['unread_count']),
@@ -632,13 +636,13 @@ class MailboxService {
 	}
 
 	/**
-	 * Every message id in $ids, with sender/subject/body_plain/body_html
+	 * Every message id in $ids, with sender/subject/body_plain/body_html/ai_summary
 	 * resolved through the Sealed Vault raw-row read hook (docs/sealed_vault.md)
 	 * — decrypted when sealed and in-window, a locked placeholder when sealed
 	 * and locked, plain as-is when never sealed. Mirrors
 	 * plugins/joinery_ai/includes/ModelQueryExecutor.php's decryptSealedFields().
 	 *
-	 * @return array<int, array{sender:string,subject:string,body_plain:string,body_html:string}>
+	 * @return array<int, array{sender:string,subject:string,body_plain:string,body_html:string,ai_summary:string}>
 	 */
 	private function fetchAndDecryptContent(array $ids): array {
 		$out = array();
@@ -648,12 +652,13 @@ class MailboxService {
 		$in = implode(',', array_map('intval', $ids));
 		$sql = "SELECT iem_inbound_email_message_id, iem_iea_inbound_email_alias_id, iem_direction,
 					iem_content_sealed, iem_sealed_key, iem_sealed_owner_user_id,
-					iem_sender, iem_subject, iem_body_plain, iem_body_html
+					iem_sender, iem_subject, iem_body_plain, iem_body_html, iem_ai_summary
 				FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id IN ($in)";
 		$rows = $this->db()->query($sql)->fetchAll(PDO::FETCH_ASSOC);
 
 		$fields = array('iem_sender' => 'sender', 'iem_subject' => 'subject',
-			'iem_body_plain' => 'body_plain', 'iem_body_html' => 'body_html');
+			'iem_body_plain' => 'body_plain', 'iem_body_html' => 'body_html',
+			'iem_ai_summary' => 'ai_summary');
 		foreach ($rows as $row) {
 			$mid = intval($row['iem_inbound_email_message_id']);
 			$entry = array();
@@ -723,7 +728,8 @@ class MailboxService {
 					iem_spf_result, iem_dmarc_result, iem_auth_source, iem_spam_score,
 					iem_size_bytes, iem_message_id_header, iem_direction,
 					iem_body_plain, iem_body_html, iem_content_sealed, iem_sealed_key,
-					iem_sealed_owner_user_id, iem_ai_danger_score, iem_ai_scan, iem_ai_scan_time
+					iem_sealed_owner_user_id, iem_ai_danger_score, iem_ai_scan, iem_ai_scan_time,
+					iem_ai_summary
 				FROM iem_inbound_email_messages
 				WHERE iem_inbound_email_message_id IN ($in)
 				ORDER BY iem_received_time ASC, iem_inbound_email_message_id ASC";
@@ -765,6 +771,10 @@ class MailboxService {
 				'ai_danger_score'   => ($r['iem_ai_danger_score'] !== null) ? intval($r['iem_ai_danger_score']) : null,
 				'ai_scan'           => self::decodeScan($r['iem_ai_scan']),
 				'ai_scan_time'      => $r['iem_ai_scan_time'],
+				// AI triage (specs/implemented/joinery_ai_email_triage.md): carried for
+				// native/API consumers. The web thread view does not render it — the
+				// full body is already on screen, so a summary of it is noise there.
+				'ai_summary'        => $decrypted['iem_ai_summary'],
 				'attachments'       => $att_by_msg[$mid] ?? array(),
 			);
 		}
@@ -773,7 +783,7 @@ class MailboxService {
 
 	/**
 	 * Decrypt a getThread() row's sealed fields (docs/sealed_vault.md raw-row
-	 * hook) — sender/subject/body_plain/body_html always; recipient only for an
+	 * hook) — sender/subject/body_plain/body_html/ai_summary always; recipient only for an
 	 * outbound row (InboundEmailMessage's $sealed_fields / decryptSealedFieldStatic
 	 * apply the same direction check). A locked vault becomes a placeholder per
 	 * field, never a thrown error into the reader.
@@ -781,7 +791,7 @@ class MailboxService {
 	 * @return array<string,string> the same column names, decrypted (or unchanged)
 	 */
 	private function decryptThreadRow(array $row): array {
-		$fields = array('iem_sender', 'iem_recipient', 'iem_subject', 'iem_body_plain', 'iem_body_html');
+		$fields = array('iem_sender', 'iem_recipient', 'iem_subject', 'iem_body_plain', 'iem_body_html', 'iem_ai_summary');
 		$out = array();
 		foreach ($fields as $col) {
 			$value = $row[$col];
