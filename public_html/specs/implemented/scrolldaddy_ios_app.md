@@ -28,7 +28,8 @@ well-trodden ground.
 - The resolver **already serves DoH and DoT** (`internal/doh/`, `internal/dot/`
   in `/home/user1/scrolldaddy-dns/`) with per-device identification baked into
   the URL: `https://{dns_host}/resolve/{sdd_resolver_uid}` — the exact format
-  the existing `.mobileconfig` generator emits (`logic/mobileconfig_logic.php:32`).
+  the existing `.mobileconfig` generator emits
+  (`plugins/dns_filtering/logic/mobileconfig_logic.php:32`).
   **No resolver changes are needed.** The app saves that URL as a DoH
   configuration and the device is filtered.
 - **One unavoidable manual step:** after the app saves the configuration, iOS
@@ -118,15 +119,23 @@ what lets the App Store release ship before the native editor (see phases).
 
 ## Architecture
 
-Two ScrollDaddy-specific Swift packages plus the app shell, on top of
-JoineryKit (from `specs/implemented/ios_app_platform.md`), developed on the Mac mini per
-`specs/mac_mini_ios_development_access.md` (repo: `~/dev/scrolldaddy-ios`):
+Two ScrollDaddy-specific layers plus the app shell, on top of JoineryKit
+(from `specs/implemented/ios_app_platform.md`). iOS source lives in the main
+repo under `ios/`: the shared `ios/joinery-kit` package holds JoineryKit and
+the feature kits (JoineryMailKit, JoineryCalendarKit, JoineryAIChatKit,
+JoineryMemberKit); each app is a thin directory alongside it
+(`ios/joinery-member-ios` is the reference). JoineryDNSFilterKit joins the
+package as a new library product; the ScrollDaddy app lives at
+`ios/scrolldaddy-ios`. Builds run on the Mac mini over SSH
+(`specs/implemented/mac_mini_ios_development_access.md`) — the mini's
+`~/dev` checkout is a disposable rsync'd build area, never the source of
+truth:
 
 | Layer | Package | Reusable for | Contents |
 |---|---|---|---|
 | Core | **JoineryKit** | any app on any Joinery deployment | Specified and delivered by `specs/implemented/ios_app_platform.md` |
-| DNS filtering | **DNSFilterKit** | any ScrollDaddy-style deployment (e.g. NetworkSentry) | Device list/registration, native block editor (always-on + scheduled), category/service/custom-rule screens with server-driven tier gates, `NEDNSSettingsManager` activation flow, protection-mode control |
-| Hard blocking | **Packet tunnel extension** (app extension target, shared via DNSFilterKit) | same as DNSFilterKit | `NEPacketTunnelProvider`: in-tunnel DNS forwarding to the deployment's DoH resolver, SNI/IP connection blocking from the synced hard-block list |
+| DNS filtering | **JoineryDNSFilterKit** | any ScrollDaddy-style deployment (e.g. NetworkSentry) | Device list/registration, native block editor (always-on + scheduled), category/service/custom-rule screens with server-driven tier gates, `NEDNSSettingsManager` activation flow, protection-mode control |
+| Hard blocking | **Packet tunnel extension** (app extension target, shared via JoineryDNSFilterKit) | same as JoineryDNSFilterKit | `NEPacketTunnelProvider`: in-tunnel DNS forwarding to the deployment's DoH resolver, SNI/IP connection blocking from the synced hard-block list |
 | Brand | **ScrollDaddy app target** | — | Bundle ID, branding/theme, deployment base URL, `client_app` id (`scrolldaddy-ios`), App Store assets |
 
 Design rules carried over from the web product:
@@ -156,8 +165,8 @@ consumed post-launch.
 Apple's rules for digital subscriptions:
 
 1. **At launch — login-only.** Accounts are created on the website (free or
-   paid); the app signs users in (JoineryKit's registration toggle stays
-   off), displays subscription status, and every tier gets its full function
+   paid); the app signs users in (JoineryKit's `registrationEnabled` config
+   stays false), displays subscription status, and every tier gets its full function
    (category blocking on the always-on block — the free-tier floor stays
    intact). No purchase and no registration inside the app (login-only
    pattern: NextDNS, Netflix). Because the app offers no account creation,
@@ -201,8 +210,13 @@ DNS with no residue.
 
 ## Delivery phases & test gates
 
-**Phase 0 (dependency): the platform ships first** — JoineryKit and the
-server pieces per `specs/implemented/ios_app_platform.md`, through its own gates.
+**Phase 0 (dependency) — delivered.** JoineryKit, the server pieces, and the
+native member screens are implemented and gate-tested
+(`specs/implemented/ios_app_platform.md`,
+`specs/implemented/mobile_native_member_screens.md`). The one platform-level
+prerequisite still open is the store-release pipeline: the member app's
+release (`specs/ios_member_app_release.md`) establishes the signing, App
+Store Connect, and TestFlight process that ScrollDaddy's Phase 2 reuses.
 
 The ScrollDaddy phases are strictly sequential after that; each gate re-runs
 earlier suites as regression. Phase 1 runs in the iOS Simulator against
@@ -225,9 +239,13 @@ ScrollDaddy branding.
 
 ### Phase 2 — Automatic DNS (first App Store release)
 
-DNSFilterKit's device registration and `NEDNSSettingsManager` activation:
+JoineryDNSFilterKit's device registration and `NEDNSSettingsManager` activation:
 guided enable step, protected-status verification, disable/uninstall flow.
-Billing: login-only model. App Store submission closes this phase.
+Billing: login-only model. App Store submission closes this phase, following
+the checklist established by `specs/ios_member_app_release.md` (signing,
+listing, privacy labels, demo-account review notes for a login-only app,
+TestFlight pass) — plus a production deployment base URL with
+`scrolldaddy-ios` entries in `api_min_client_versions` and `app_navigation`.
 
 **Gate:** on a physical iPhone — full onboarding from install to "Protected"
 with zero copy/paste; a blocked category fails to resolve; disable and
@@ -236,10 +254,12 @@ network-switch edge cases behave as documented. Then TestFlight, then review.
 
 ### Phase 3 — Native filter editor
 
-DNSFilterKit's SwiftUI editor screens — always-on editor, scheduled blocks,
-custom rules, server-driven tier gates — flipping the navigation routes from
-the webview pages to native, one route at a time (the platform's
-version-skew rule keeps older shipped versions on the webviews).
+JoineryDNSFilterKit's SwiftUI editor screens — always-on editor, scheduled blocks,
+custom rules, server-driven tier gates — promoted one route at a time by
+declaring `nativeScreen` on the dns_filtering plugin's `profileMenu` entries
+(`plugin.json`): the navigation endpoint then serves `{type: "native",
+screen, fallback_url}` and older shipped versions keep the webview via the
+fallback.
 
 **Gate:** XCUITest — edits made natively appear in the web editor and vice
 versa; tier gates server-rejected and rendered locked; "Allow = no row"
@@ -284,12 +304,47 @@ tunnel memory stays under the extension ceiling under sustained browsing.
    third-party browser configured with its own DoH (DNS bypass), while
    non-blocked sites load normally; disabling strict mode falls back to
    standard DNS protection, not to unprotected.
-6. DNSFilterKit builds with no ScrollDaddy imports and works against a
+6. JoineryDNSFilterKit builds with no ScrollDaddy imports and works against a
    second ScrollDaddy-style deployment unchanged (branding aside).
+
+## Post-implementation review & fix round (2026-07-08)
+
+Phases 1/3 code is delivered and simulator-verified (15/15 unit tests; app +
+tunnel extension build). Review against the live server found five defects,
+all fixed the same day — the sources now carry the corrected patterns:
+
+1. **Registration** — `createDevice` sends the server's actual create
+   contract (`device_name` / `device_type` / `sdd_timezone` /
+   `sdd_allow_device_edits`; the earlier `sdd_`-prefixed guesses silently
+   created nothing), and `registerThisPhone` pins the device that *appears*
+   in a before/after ID diff — never "newest on the account", which could
+   claim another device.
+2. **Strict mode UI** is gated behind `DNSFilterConfig.strictModeAvailable`
+   (default **false**) because `PacketRelay.forward()` is still a
+   transportless seam — an entitled device build with the tunnel enabled
+   would black-hole traffic. The flag flips true only when the Phase 4
+   relay ships.
+3. **Mode-switch ordering** — `enableStrict` keeps the standard DoH profile
+   installed *first*, then starts the tunnel; on a start failure (VPN
+   conflict is a designed failure) the user falls back to standard
+   protection, never to unprotected (acceptance item 5).
+4. **Settings deep link** uses `UIApplication.openSettingsURLString`
+   (`App-prefs:` panes are a private-API App Store rejection trigger).
+5. **`StrictModeManager.refresh()`** actually returns `.vpnConflict`, so
+   the conflict UI is reachable.
+
+Still open: a live create-path registration test needs a *subscribed*
+fixture account (`device_edit` tier-gates before the create branch);
+`DNSDevice.lastSeen` parses a string but the server emits an object/null
+(unused by any screen); Phase 4 must add IPv6 routes and a UDP/443 (QUIC)
+stance or an IPv6 network bypasses enforcement. The cleaner server-side
+create contract (API-context create returns the device export) is specced
+in `specs/scrolldaddy_android_app.md` § Server-side work and retrofits this
+client when it lands.
 
 ## Documentation deliverables (on implementation)
 
 - `plugins/dns_filtering/docs/overview.md` — the app as a config delivery
   channel alongside mobileconfig.
 - `docs/mobile_apps.md` (owned by the platform spec) — add ScrollDaddy as a
-  consuming app with its DNSFilterKit layers.
+  consuming app with its JoineryDNSFilterKit layers.

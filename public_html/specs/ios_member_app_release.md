@@ -74,7 +74,7 @@ and chrome-less; App Store review passes.
   nothing in-app.
 - Push notifications, native content screens, Android — see the platform
   spec's future list.
-- ScrollDaddy iOS release (`specs/scrolldaddy_ios_app.md`) — its own spec.
+- ScrollDaddy iOS release (`specs/implemented/scrolldaddy_ios_app.md`) — its own spec.
 
 ## Documentation deliverables (on implementation)
 
