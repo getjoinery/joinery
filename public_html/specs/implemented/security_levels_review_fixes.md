@@ -1,6 +1,7 @@
 # Security Levels — Post-Build Review Fixes
 
-**Status:** Active
+**Status:** Implemented — 2026-07-08. All six fixes built, validated, and
+functionally verified on dev.
 **Version:** 1.0
 **Parent:** `specs/mailbox_security_levels.md` (design authority, v1.6 → v1.7 with this spec)
 **Origin:** Final code review of the Phase 7-rest / 5.4 / 12 build found three

@@ -1,6 +1,8 @@
 # Mailbox — Security Levels (Per-Domain Protection Posture)
 
-**Status:** Draft / awaiting implementation
+**Status:** Implemented — 2026-07-08. All phases built, review-fixed, and
+browser-verified; see `inbound_email_security_levels_executor.md` (build log)
+and `security_levels_review_fixes.md` (post-build fixes) in this directory.
 **Version:** 1.7 — Fortress 2FA enrollment requires a factor INDEPENDENT of
 any single passkey (TOTP or a second passkey): the vault-holder reset excludes
 the authorizing passkey and demands another factor, so enrollment must
