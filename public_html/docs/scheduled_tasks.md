@@ -56,7 +56,7 @@ Place in `/tasks/` (core) or `/plugins/{plugin}/tasks/` (plugin).
 - `description` — Explains what the task does
 - `default_frequency` — Default frequency: `every_run`, `hourly`, `daily`, `weekly` (defaults to `daily`)
 - `default_day_of_week` — Default schedule day (0=Sunday–6=Saturday, only used for `weekly`)
-- `default_time` — Default time of day (HH:MM:SS, only used for `daily` and `weekly`)
+- `default_time` — Default time of day (HH:MM:SS, only used for `daily` and `weekly`). Omit the key entirely for other frequencies — the value is written verbatim to a `time` column, so an empty string fails activation
 - `config_fields` — Task-specific parameters rendered in admin form
 
 **Config field types:**

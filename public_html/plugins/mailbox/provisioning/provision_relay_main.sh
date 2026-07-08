@@ -12,6 +12,11 @@
 #     one relay as a peer, plus a sudoers rule letting the web user invoke it —
 #     that is how the provision job's result processor peers a freshly
 #     provisioned relay with no manual step
+#   - generates the RELAY PULL KEY at {site root}/config/relay_pull_key, a
+#     dedicated SSH identity owned by the web user (spool pull, map push and the
+#     health battery all run as the web user, and ssh requires the key file to
+#     be owned by its caller with mode 600); the provision job installs the
+#     public half on the relay and the relay row points at this path
 #   - registers the public key in app settings (mailbox_relay_wg_public_key) via
 #     plugins/mailbox/utils/relay_wg_register.php, which unlocks the relay
 #     admin page's provision form
@@ -120,7 +125,18 @@ if ! visudo -cf "${SUDOERS_FILE}" >/dev/null; then
 fi
 echo "sudoers: ${WEB_USER} may run ${PEER_HELPER}"
 
-# --- 4. register the public key in app settings --------------------------------
+# --- 4. relay pull key (the web user's own SSH identity for the tunnel) --------
+# Must match RelaySsh::pullKeyPath(): {site root}/config/relay_pull_key.
+PULL_KEY="$(cd "${PUBLIC_HTML}/.." && pwd)/config/relay_pull_key"
+if [[ ! -f "${PULL_KEY}" ]]; then
+    ( umask 077; ssh-keygen -t ed25519 -N '' -C 'joinery-relay-pull' -f "${PULL_KEY}" -q )
+    echo "pull key: generated ${PULL_KEY}"
+fi
+chown "${WEB_USER}:${WEB_USER}" "${PULL_KEY}" "${PULL_KEY}.pub"
+chmod 600 "${PULL_KEY}"
+chmod 644 "${PULL_KEY}.pub"
+
+# --- 5. register the public key in app settings --------------------------------
 if [[ ! -f "${REGISTER_CLI}" ]]; then
     echo "ERROR: ${REGISTER_CLI} not found - is this script inside the app tree?" >&2
     exit 1
@@ -131,6 +147,7 @@ echo ""
 echo "Main box relay tunnel identity is ready:"
 echo "  WireGuard pubkey : $(cat "${PUB}")"
 echo "  Tunnel address   : ${WG_ADDR} (interface ${WG_IF})"
+echo "  Relay pull key   : ${PULL_KEY} (owner ${WEB_USER})"
 echo ""
 echo "Provision a relay from /plugins/mailbox/admin/admin_mailbox_relay - the"
 echo "job peers both ends automatically."

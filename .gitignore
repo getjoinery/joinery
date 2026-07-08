@@ -43,3 +43,9 @@ public_html/*.md.old
 # spec itself IS tracked, like every other spec.
 public_html/tests/tools/
 public_html/tests/fixtures/email_security_corpus/
+
+# Relay SSH identities (deployment-generated, never committed)
+/config/relay_pull_key
+/config/relay_pull_key.pub
+/config/relay_test_key
+/config/relay_test_key.pub

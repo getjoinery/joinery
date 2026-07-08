@@ -22,7 +22,7 @@ use PHPMailer\PHPMailer\SMTP;
  * SMTP send (global, connected-account, per-mailbox) is "new SmtpMailer($config),
  * applyMessage($m), send()".
  *
- * @version 2.1
+ * @version 2.2
  */
 class SmtpMailer extends PHPMailer {
     // Only encoding is truly universal
@@ -52,6 +52,15 @@ class SmtpMailer extends PHPMailer {
             $this->SMTPSecure = self::encryptionForPort($this->Port);
         } else {
             $this->SMTPSecure = self::mapEncryption($config->encryption);
+        }
+
+        // Explicit 'none' means send in the clear — disable PHPMailer's opportunistic
+        // auto-STARTTLS. Otherwise, when the server advertises STARTTLS (e.g. the relay
+        // smarthost over the already-encrypted WireGuard tunnel, whose Postfix offers a
+        // self-signed cert), PHPMailer would upgrade and fail the handshake. The null
+        // (auto-detect) path keeps opportunistic TLS.
+        if ($config->encryption === 'none') {
+            $this->SMTPAutoTLS = false;
         }
 
         // Authentication
