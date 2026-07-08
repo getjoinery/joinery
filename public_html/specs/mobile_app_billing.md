@@ -18,8 +18,8 @@ respective app's first store release.
 (`docs/subscription_tiers.md`), `StripeHelper` as the integration pattern,
 and the `change_tier` tier-assignment path.
 
-**Consumed by:** `specs/scrolldaddy_ios_app.md`,
-`specs/scrolldaddy_android_app.md` (each references this spec for its
+**Consumed by:** `specs/implemented/scrolldaddy_ios_app.md`,
+`specs/implemented/scrolldaddy_android_app.md` (each references this spec for its
 billing phase).
 
 ---

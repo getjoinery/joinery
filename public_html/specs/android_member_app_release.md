@@ -83,7 +83,7 @@ and chrome-less; Play review passes.
   login-only v1 sells nothing in-app.
 - Push notifications, native content screens, iOS — see the platform spec's
   future list.
-- ScrollDaddy Android release (`specs/scrolldaddy_android_app.md`) — its own
+- ScrollDaddy Android release (`specs/implemented/scrolldaddy_android_app.md`) — its own
   spec, adds the VpnService DNS-filtering layer on this platform.
 
 ## Documentation deliverables (on implementation)

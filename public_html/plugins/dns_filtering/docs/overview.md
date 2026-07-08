@@ -110,12 +110,23 @@ the device two ways, both pointing at the same per-device DoH/DoT endpoints
   download, no copy/paste. It reads the URL from the `devices` action's
   `doh_url` (the identical string the `.mobileconfig` generator emits) and,
   after a one-time OS enable, applies every later change (new UID, server
-  switch) silently. Strict mode adds a local packet tunnel that also enforces
-  the `hard_block_hostnames` list at the connection level. See
-  `docs/mobile_apps.md` § JoineryDNSFilterKit and
+  switch) silently. See `docs/mobile_apps.md` § JoineryDNSFilterKit and
   `specs/implemented/scrolldaddy_ios_app.md`.
+- **Native app (`VpnService`)** — the ScrollDaddy Android app
+  (`android/scrolldaddy-android`, on `joinery-android-dnsfilter`) runs a local
+  `VpnService` that claims only DNS traffic and forwards every query to the same
+  per-device `doh_url` from the `devices` action. Consent is a single in-app
+  dialog — no Settings trip. Uninstalling or stopping the service restores
+  the device's original DNS automatically. See `docs/mobile_apps.md`
+  § JoineryDNSFilterKit and `specs/implemented/scrolldaddy_android_app.md`.
+- **Private DNS (DoT)** — Android 9+ carries a system-wide encrypted-DNS
+  setting, and the resolver identifies devices by DoT SNI subdomain
+  (`{resolver_uid}.{dns_host}`, the `dot_hostname` field). Apps can't set Private
+  DNS programmatically, so this is a manual path: a user who needs their VPN
+  slot for something else (Tailscale, a work VPN) types the `dot_hostname` into
+  Settings → Private DNS. Same policy, no VpnService.
 
-Both channels are pure delivery of the same server-side policy; the resolver
+All channels are pure delivery of the same server-side policy; the resolver
 behaves identically regardless of how the UID reached the device.
 
 ## DNS Resolver Flow

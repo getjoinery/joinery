@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- The filtering tunnel runs as a foreground service: Android requires the
+         persistent notification while a VPN is up. systemExempted is the
+         foreground type for a device-policy/VPN service. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
+    <!-- The ongoing "Protected" notification (runtime-requested on API 33+). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Reboot recovery: re-establish the tunnel after a restart when the user
+         has protection enabled (acceptance item 6). -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <application>
+
+        <!-- The DNS-filtering VpnService. BIND_VPN_SERVICE + the android.net.VpnService
+             intent filter are what let the OS hand it the tun interface; the
+             per-app consent dialog is triggered from VpnService.prepare(). -->
+        <service
+            android:name="com.getjoinery.dnsfilter.DnsFilterVpnService"
+            android:exported="false"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:foregroundServiceType="systemExempted">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+        </service>
+
+        <receiver
+            android:name="com.getjoinery.dnsfilter.BootReceiver"
+            android:exported="true"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+    </application>
+
+</manifest>
