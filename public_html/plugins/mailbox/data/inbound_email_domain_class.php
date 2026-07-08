@@ -152,6 +152,26 @@ class InboundEmailDomain extends SystemBase {
 	}
 
 	/**
+	 * True when an email address sits on a mailbox domain hosted on this platform
+	 * (specs/mailbox_security_levels.md § Password reset, Population 2). A login OR
+	 * recovery email on a hosted domain is circular — a reset link would land in an
+	 * inbox that requires this very account to read. Shared by the register-time,
+	 * account-email, and recovery-address guards.
+	 */
+	static function isHostedEmailAddress($email) {
+		$email = strtolower(trim((string)$email));
+		$at = strrpos($email, '@');
+		if ($at === false) {
+			return false;
+		}
+		$domain = substr($email, $at + 1);
+		if ($domain === '') {
+			return false;
+		}
+		return self::GetByDomain($domain) !== false;
+	}
+
+	/**
 	 * This domain's security level (specs/mailbox_security_levels.md) — the
 	 * single switch selecting each mechanism's plaintext-vs-sealed branch.
 	 * Falls back to Standard for any unrecognized or empty stored value.

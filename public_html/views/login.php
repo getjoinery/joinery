@@ -95,25 +95,12 @@ document.addEventListener('DOMContentLoaded', function () {
             var emailField = document.querySelector('input[name="email"]');
             var email = emailField ? emailField.value.trim() : '';
 
-            var optRes = await fetch('/api/v1/action/passkey_login_options', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: email }),
-            });
-            var optJson = await optRes.json();
-            if (!optRes.ok) throw new Error(optJson.error || 'Unable to start passkey sign-in.');
-
-            var credential = await JoineryPasskeys.authenticate(optJson.data.options);
-
-            var verifyRes = await fetch('/api/v1/action/passkey_login_verify', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ credential: credential }),
-            });
-            var verifyJson = await verifyRes.json();
-            if (!verifyRes.ok) throw new Error(verifyJson.error || 'Passkey sign-in failed.');
-
-            window.location.href = (verifyJson.data && verifyJson.data.redirect) || '/profile';
+            var data = await JoineryPasskeys.runFlow(
+                '/api/v1/action/passkey_login_options',
+                '/api/v1/action/passkey_login_verify',
+                { email: email }
+            );
+            window.location.href = data.redirect || '/profile';
         } catch (e) {
             alert(e.message || 'Passkey sign-in was not completed.');
             btn.disabled = false;

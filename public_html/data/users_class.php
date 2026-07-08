@@ -145,6 +145,12 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	    // the second factor on each password sign-in; 'sensitive_only' signs in
 	    // password-only and defers the factor to sensitive actions (step-up).
 	    'usr_2fa_cadence' => array('type'=>'varchar(20)', 'default'=>'every_login'),
+	    // External recovery address (specs/mailbox_security_levels.md § Password
+	    // reset, Population 3): an out-of-band inbox a reset link is also sent to,
+	    // so a Population-2 user whose login email is a hosted mailbox still has a
+	    // path in. Only counts as a reset path once verified.
+	    'usr_recovery_email' => array('type'=>'varchar(64)'),
+	    'usr_recovery_email_verified_time' => array('type'=>'timestamp(6)'),
 	);
 
 private static function UcName($string) {
@@ -703,6 +709,40 @@ private static function UcName($string) {
 	function two_factor_cadence() {
 		$v = strtolower(trim((string)$this->get('usr_2fa_cadence')));
 		return $v === 'sensitive_only' ? 'sensitive_only' : 'every_login';
+	}
+
+	/**
+	 * The account's verified external recovery address, or '' when none is set
+	 * or the pending one is unverified (specs/mailbox_security_levels.md
+	 * § Password reset). Only a verified address is a reset path — an unverified
+	 * one is a claim, not a capability.
+	 */
+	function recovery_email() {
+		if (empty($this->get('usr_recovery_email_verified_time'))) {
+			return '';
+		}
+		return trim((string)$this->get('usr_recovery_email'));
+	}
+
+	/** True when the account holds a verified external recovery address. */
+	function has_verified_recovery_email() {
+		return $this->recovery_email() !== '';
+	}
+
+	/**
+	 * True when the account has an active Sealed Vault (any Private/Fortress
+	 * mailbox). The vault-holder branch of the password-reset authorizers keys
+	 * off this: reset re-issues the session, never the vault, so a vault holder's
+	 * passkey reset additionally demands the account's second factor
+	 * (specs/mailbox_security_levels.md § Password reset).
+	 */
+	function has_active_vault() {
+		$vault_class = PathHelper::getIncludePath('data/user_encryption_vaults_class.php');
+		if (!is_file($vault_class)) {
+			return false;
+		}
+		require_once($vault_class);
+		return UserEncryptionVault::loadForUser((int)$this->key) !== null;
 	}
 
 	/**

@@ -250,11 +250,21 @@ class PasskeyService {
 	// Step-up
 	// ========================================================================
 
-	public function getStepUpOptions(User $user): array {
+	/**
+	 * @param string[] $exclude_credential_ids base64url credential ids to omit
+	 *   from the allow list — used by the vault-holder password reset so the
+	 *   step-up second factor is a DIFFERENT credential than the passkey that
+	 *   authorized the reset (specs/mailbox_security_levels.md § Password reset:
+	 *   the passkey must not transitively open both doors).
+	 */
+	public function getStepUpOptions(User $user, array $exclude_credential_ids = []): array {
 		$creds = new MultiPasskey(['user_id' => $user->key]);
 		$creds->load();
 		$allow = [];
 		foreach ($creds as $passkey) {
+			if (in_array($passkey->get('pkc_credential_id'), $exclude_credential_ids, true)) {
+				continue;
+			}
 			$allow[] = PublicKeyCredentialDescriptor::create(
 				PublicKeyCredentialDescriptor::CREDENTIAL_TYPE_PUBLIC_KEY,
 				Base64UrlSafe::decodeNoPadding($passkey->get('pkc_credential_id'))
@@ -270,7 +280,11 @@ class PasskeyService {
 		return json_decode($this->serializer->serialize($options, 'json'), true);
 	}
 
-	public function verifyStepUp(string $client_response_json, User $user): void {
+	/** @return string the verified credential's base64url pkc_credential_id —
+	 *  the server-derived identity of the passkey that answered, for callers
+	 *  that must know WHICH credential stepped up (the vault-holder password
+	 *  reset refuses the credential that authorized the reset). */
+	public function verifyStepUp(string $client_response_json, User $user): string {
 		$challenge = $this->_consumeChallenge('stepup:' . $user->key);
 		$pk_credential = $this->_decodeAssertionResponse($client_response_json);
 		$passkey = $this->_findLivePasskeyByRawId($pk_credential->rawId);
@@ -288,6 +302,8 @@ class PasskeyService {
 		$marker->set('pks_purpose', 'stepup_verified');
 		$marker->set('pks_expires_time', gmdate('Y-m-d H:i:s', time() + self::STEPUP_MARKER_TTL_SECONDS));
 		$marker->save();
+
+		return (string)$passkey->get('pkc_credential_id');
 	}
 
 	public function hasRecentStepUp(int $max_age_seconds = 300): bool {

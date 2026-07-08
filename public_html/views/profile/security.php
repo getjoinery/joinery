@@ -159,6 +159,45 @@
             </div>
             <?php endif; ?>
 
+            <?php if (!empty($page_vars['separation_nudge'])): ?>
+            <div class="jy-alert jy-alert-warning jy-mt-4">
+                One of your passkeys both signs you in and unlocks your vault, so a single stolen device could hold both. Consider keeping them separate — a phone authenticator app for your login second factor, and a laptop or hardware-key passkey for your vault.
+            </div>
+            <?php endif; ?>
+
+            <div class="jy-panel jy-mt-4">
+                <h2>Recovery address</h2>
+                <?php if (!empty($page_vars['recovery_email']) && !empty($page_vars['recovery_email_verified'])): ?>
+                    <p><strong>Status:</strong> Active — <?php echo htmlspecialchars($page_vars['recovery_email']); ?></p>
+                    <p class="jy-auth-hint">Password reset links are also sent here. Anyone who controls this inbox can start a reset of your account session (they still cannot open your sealed mail).</p>
+                    <form action="/profile/security" method="POST" onsubmit="return confirm('Remove your recovery address?');">
+                        <input type="hidden" name="action" value="remove_recovery_email">
+                        <button type="submit" class="btn btn-secondary">Remove Recovery Address</button>
+                    </form>
+                <?php else: ?>
+                    <?php if (!empty($page_vars['recovery_email'])): ?>
+                        <p><strong>Status:</strong> Pending confirmation — <?php echo htmlspecialchars($page_vars['recovery_email']); ?></p>
+                        <p class="jy-auth-hint">Open the confirmation link we sent to that inbox. Until then it is not yet a reset path.</p>
+                    <?php else: ?>
+                        <p>An out-of-band address that also receives your password reset links — the way back in if your login email is a mailbox you could be locked out of. Anyone who controls this inbox can start a reset of your account session, so pick one only you reach.</p>
+                    <?php endif; ?>
+                    <?php
+                    $recovery_formwriter = $page->getFormWriter('recovery_form', ['action' => '/profile/security', 'method' => 'POST']);
+                    $recovery_formwriter->begin_form();
+                    $recovery_formwriter->hiddeninput('action', '', ['value' => 'set_recovery_email']);
+                    $recovery_formwriter->textinput('recovery_email', 'Recovery email address', [
+                        'type'         => 'email',
+                        'required'     => true,
+                        'maxlength'    => 64,
+                        'autocomplete' => 'email',
+                        'placeholder'  => 'you@example.com',
+                    ]);
+                    $recovery_formwriter->submitbutton('btn_recovery', !empty($page_vars['recovery_email']) ? 'Resend / Change' : 'Add Recovery Address', ['class' => 'btn btn-primary']);
+                    $recovery_formwriter->end_form();
+                    ?>
+                <?php endif; ?>
+            </div>
+
             <?php if ($page_vars['settings']->get_setting('passkeys_enabled')): ?>
             <div class="jy-panel jy-mt-4 d-none" id="passkeys-panel">
                 <h2>Passkeys</h2>

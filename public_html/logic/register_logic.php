@@ -106,6 +106,17 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		if (User::GetByEmail($fixed_fields['usr_email'])) {
 			return LogicResult::error('An account has already been registered with this email address.  Please go back and double check the email you entered or <a href="/password-reset-1">click here</a> if you forgot your password.');
 		}
+		// Population-2 precondition at account creation
+		// (specs/mailbox_security_levels.md § Password reset): a login email that is
+		// a mailbox hosted on this platform is circular — a forgotten-password link
+		// would land in an inbox that requires this very account to read. A brand-new
+		// account holds no non-email reset path yet, so choosing such an address up
+		// front is refused; the user signs up with an external address and may switch
+		// to a hosted one later (account_edit) once a passkey/authenticator/recovery
+		// address exists. State the locked-out floor now, not during the crisis.
+		else if (_register_email_is_platform_hosted($fixed_fields['usr_email'])) {
+			return LogicResult::error('That address is a mailbox hosted here, so it cannot be your login email yet: a forgotten-password link would land in an inbox you would be locked out of. Sign up with an outside email address (Gmail, Outlook, etc.). Once you are in, you can add a passkey or authenticator app and then switch your login to a hosted address.');
+		}
 		else{
 			$user = User::CreateCompleteNew($fixed_fields, true, true, $fixed_fields['setcookie']);
 			$user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
@@ -138,6 +149,31 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		$session->set_formfields_save("register");
 	}
 	return LogicResult::render($page_vars);
+}
+
+/**
+ * True when the email's domain is a mailbox domain hosted on this platform
+ * (specs/mailbox_security_levels.md § Password reset, Population 2). The mailbox
+ * plugin may be absent; treat "no plugin" as "not hosted".
+ */
+function _register_email_is_platform_hosted(string $email): bool {
+	$at = strrpos($email, '@');
+	if ($at === false) {
+		return false;
+	}
+	$domain = strtolower(trim(substr($email, $at + 1)));
+	if ($domain === '') {
+		return false;
+	}
+	$domain_class = PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php');
+	if (!is_file($domain_class)) {
+		return false;
+	}
+	require_once($domain_class);
+	if (!class_exists('InboundEmailDomain')) {
+		return false;
+	}
+	return InboundEmailDomain::isHostedEmailAddress($email);
 }
 
 function register_logic_api() {

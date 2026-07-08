@@ -62,12 +62,42 @@ same helper is how the remaining sensitive-administration actions adopt the gate
 
 A user who owns or holds a grant on a **Fortress**-level domain
 (`InboundEmailDomain::maxSecurityLevelForUser()`) must have a second factor
-enrolled. Until they do, `SessionControl::must_enroll_2fa_for_fortress()` blocks
-every page behind a redirect to `/profile/security` (the same session-cached,
-enrollment-surface pattern the admin-2FA requirement uses) — exempting only that
-page and `/logout` to avoid a loop. Enrolling any second factor (a passkey or
-TOTP) clears the gate immediately. The posture lookup is cached per session and
-dropped when the acting user changes a domain's level.
+enrolled that is **independent of any single passkey**: TOTP, or at least two
+passkeys (`SessionControl::user_has_independent_second_factor()`). One passkey
+alone does not satisfy it — the vault-holder password reset excludes the
+passkey that authorized it and demands another factor, so enrollment must
+guarantee that a lone stolen authenticator can never be both the reset
+authorizer and its own confirmation. Until a qualifying factor exists,
+`SessionControl::must_enroll_2fa_for_fortress()` blocks every page behind a
+redirect to `/profile/security` (the same session-cached, enrollment-surface
+pattern the admin-2FA requirement uses) — exempting only that page and
+`/logout` to avoid a loop. Enrolling a qualifying factor clears the gate
+immediately. The posture lookup is cached per session and dropped when the
+acting user changes a domain's level.
+
+## Second factor at sign-in
+
+Whether a second factor is asked at password sign-in is the account's **2FA
+cadence** (`usr_2fa_cadence`): `every_login` asks it on each sign-in;
+`sensitive_only` signs in password-only and defers the factor to the step-up
+gate above. When it is asked, the sign-in stashes a pending-login state and
+diverts to `/verify-totp`, which offers **either** a TOTP/backup code **or a
+passkey step-up** (`login_2fa_passkey_options`/`_verify`) — both finish through
+the same `Login2fa::completePendingLogin()`. The divert fires whenever the
+account holds *any* usable second factor (`user_has_second_factor()` — TOTP,
+or a live passkey while `passkeys_enabled` is on), so a passkey-only account is
+asked for its passkey at sign-in rather than silently skipping the second
+factor. Passkeys stop counting while passkey sign-in is disabled site-wide, so
+turning the setting off drops a passkey-only account to password-only sign-in
+instead of stranding it at a factor prompt it cannot complete. This is separate
+from the vault: a
+passkey used here confirms *presence for the session*; it does not open the
+vault (that is a distinct user-verification ceremony).
+
+**Separation nudge.** When a passkey both signs the user in and unlocks their
+vault, one stolen device holds both gates. The security page warns — never
+blocks — steering toward a separate login factor (a phone authenticator) from
+the vault passkey (a laptop or hardware key).
 
 ## Enrollment is guarded
 
@@ -158,20 +188,49 @@ account there.
 
 ## Password reset
 
-A password reset re-issues the **session, never the vault**: the reset link
-proves control of the account email and yields a signed-in session, but
-sealed content still demands an unlocker ceremony the resetter cannot fake.
-An admin-assisted reset has the same shape — it can restore the account, and
+A password reset re-issues the **session, never the vault**: an authorizer
+proves control of the account and yields a signed-in session, but sealed
+content still demands an unlocker ceremony the resetter cannot fake. An
+admin-assisted reset has the same shape — it can restore the account, and
 structurally cannot open the vault. Every reset is a **credential event**: on
 completion it ends every open window everywhere (`lockAll()`) and alerts the
 account — so even a hostile reset lands the attacker in a re-locked vault.
 
+**Reset authorizers.** "Forgot password" offers whichever the account holds,
+each routed through the one completion path
+(`PasswordResetAuthorizers::issueResetUrl()` mints a single-use account code
+consumed by `password_reset_2_logic`, never anything vault-scoped):
+
+- **Email link** — the reset link mailed to the account email (and to a
+  verified recovery address, if set). Today's flow, unchanged.
+- **Passkey** — a sessionless ceremony
+  (`password_reset_passkey_options`/`_verify`), reusing the passwordless
+  sign-in dispatch. **For a vault holder the passkey is not enough on its own**:
+  the ceremony additionally requires an *independent* second factor (TOTP, or a
+  passkey other than the one that authorized the reset) at `/password-reset-2fa`
+  — without it a stolen authenticator could reset, sign in, and unlock with one
+  key, the collapse [the role split](#the-role-split-passwords-vs-passkeys)
+  forbids. A vault holder with no independent factor accepts passkey-alone as
+  their floor, consistent with declining 2FA everywhere else.
+- **TOTP alone** — for accounts **without** a vault only
+  (`password_reset_totp_logic`); a vault holder is refused and steered to the
+  passkey path *before* any code is verified, so a denied reset never burns a
+  backup code. Rate-limited.
+- **External recovery address** — an out-of-band inbox the reset link is also
+  sent to (`usr_recovery_email`, verified via `recovery_verify_logic`;
+  set/removed under step-up in `security_logic`). **Vault recovery codes are
+  never account-reset authorizers** — they answer "give me my data", never "log
+  me in", and are only consumed by `vault_unlock_recovery_logic`.
+
 **Population 2 — the login email is a hosted mailbox (the circular case).**
 Making one of the user's own hosted addresses the account (login) email would
 send every future reset link into the very inbox a locked-out user cannot
-reach. So the account-email change requires holding a **non-email reset path**
-first (a passkey or TOTP today) — enforced in `account_edit_logic.php`, stated
-at the moment the address is chosen, not during the crisis.
+reach. So it requires holding a **non-email reset path** first (a passkey,
+TOTP, or a verified recovery address) — enforced when the login email is
+changed (`account_edit_logic.php`) and when a hosted address is chosen at
+**account creation** (`register_logic.php`, via
+`InboundEmailDomain::isHostedEmailAddress()`), stated at the moment the address
+is chosen, not during the crisis.
 
 ## Vault-gated routing settings
 
@@ -209,6 +268,7 @@ core dependency on any one plugin.
 | Action | Requires |
 |---|---|
 | Sign in | Password — or passkey, only while the account has no vault |
+| Second factor at sign-in | Asked when cadence is `every_login` and the account holds any factor: a TOTP/backup code or a passkey step-up |
 | Read sealed content | Open unlock window |
 | Open the window | Unlocker ceremony (passkey + user verification / recovery code / passphrase) |
 | Enroll first passkey | Session + password re-entry |
@@ -216,7 +276,9 @@ core dependency on any one plugin.
 | Add a vault unlocker | Open window (+ step-up for codes/passphrase) |
 | Revoke a passkey | Session; refused if it breaks the unlocker floor |
 | Rotate the vault key | Live PRF assertion from an enrolled passkey |
-| Password reset | Control of the account email; never opens a vault |
+| Password reset | An authorizer — email link, passkey, TOTP (no-vault only), or verified recovery address; never opens a vault |
+| Passkey reset on a vault account | Passkey **plus** an independent second factor (TOTP or a different passkey), when one is enrolled |
+| Set / verify an external recovery address | Session + recent step-up; a hosted-domain or over-length address is refused |
 | Change the account password | Session + recent step-up; ends all windows + alerts |
 | Change the account (login) email | Session + recent step-up; a hosted address needs a non-email reset path first |
 | Regenerate 2FA backup codes | Session + recent step-up |

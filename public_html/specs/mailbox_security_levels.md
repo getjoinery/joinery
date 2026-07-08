@@ -1,9 +1,13 @@
 # Mailbox — Security Levels (Per-Domain Protection Posture)
 
 **Status:** Draft / awaiting implementation
-**Version:** 1.6 — § The Unlock Window event 3: presence is site-wide ("on
-Joinery"), not mail-page-only; grace threshold ~5 min to tolerate
-background-tab throttling.
+**Version:** 1.7 — Fortress 2FA enrollment requires a factor INDEPENDENT of
+any single passkey (TOTP or a second passkey): the vault-holder reset excludes
+the authorizing passkey and demands another factor, so enrollment must
+guarantee one exists — otherwise a single-passkey Fortress holder falls to the
+passkey-alone reset floor meant only for Private users who declined 2FA.
+(1.6 — § The Unlock Window event 3: presence is site-wide ("on Joinery"), not
+mail-page-only; grace threshold ~5 min to tolerate background-tab throttling.)
 **Unifies:** `specs/mailbox_encryption_at_rest.md`,
 `specs/mailbox_outbound_send_protection.md`,
 `specs/mailbox_hardened_ingest_relay.md`. Those specs define the
@@ -146,7 +150,7 @@ ceremony additionally serves as the passkey-as-2FA step in the password flow
 |---|---|---|
 | **Standard** | password; 2FA optional (TOTP or passkey step-up) | — (nothing is sealed) |
 | **Private** | password; 2FA optional | passkey ceremony with **user verification required** |
-| **Fortress** | password; **2FA enrollment mandatory** — adding a Fortress domain (or receiving a grant on one) blocks at next login until a second factor is enrolled | passkey ceremony with **user verification required** |
+| **Fortress** | password; **2FA enrollment mandatory** — adding a Fortress domain (or receiving a grant on one) blocks at next login until a second factor **independent of any single passkey** is enrolled (TOTP, or a second passkey) | passkey ceremony with **user verification required** |
 
 **User verification (the "PIN" question, resolved):** every vault unlock
 ceremony sets `userVerification: required` — the authenticator itself must
@@ -250,9 +254,11 @@ whichever of these the account holds:
   requires the account's second factor**: without it, a stolen
   authenticator could reset the password, log in, and unlock — the passkey
   transitively opening both doors, which § The role split forbids. Fortress
-  always has the second factor (mandatory enrollment); a Private user who
-  declined 2FA accepts passkey-alone reset as their floor, consistent with
-  every other consequence of that choice.
+  always has an *independent* second factor to demand — mandatory enrollment
+  requires one separate from any single passkey, precisely so this ceremony's
+  demand is always satisfiable; a Private user who declined 2FA accepts
+  passkey-alone reset as their floor, consistent with every other consequence
+  of that choice.
 - **TOTP alone** — for accounts without a vault: proving possession of the
   enrolled phone is at least as strong as proving control of an inbox.
   Rate-limited; notified like every reset.

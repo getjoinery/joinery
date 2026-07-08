@@ -22,17 +22,29 @@ function verify_totp_logic(array $input): LogicResult{
 		return LogicResult::redirect('/login?msgtext=session_expired');
 	}
 
-	if (!empty($_POST)) {
+	// Which factors this pending user can present (specs/mailbox_security_levels.md
+	// § 5.4): TOTP and/or a passkey step-up. A passkey-only user (Fortress enrolled
+	// via a step-up passkey, no TOTP) sees only the passkey button — the whole point
+	// of keying the login divert on user_has_second_factor rather than TOTP alone.
+	$pending_user = new User($_SESSION['totp_pending_user_id'], TRUE);
+	if (!$pending_user || !$pending_user->key) {
+		unset($_SESSION['totp_pending_user_id'], $_SESSION['totp_pending_remember'],
+			$_SESSION['totp_pending_return'], $_SESSION['totp_pending_expires']);
+		return LogicResult::redirect('/login');
+	}
+	$page_vars['has_totp'] = $pending_user->has_totp_enabled();
+	require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+	$pending_passkeys = new MultiPasskey(array('user_id' => (int)$pending_user->key));
+	$pending_passkeys->load();
+	$page_vars['has_passkey'] = (count($pending_passkeys) > 0)
+		&& (bool)$page_vars['settings']->get_setting('passkeys_enabled');
+
+	if (!empty($_POST) && $page_vars['has_totp']) {
 		if (!RequestLogger::check_rate_limit('totp', 5, 300, false)) {
 			return LogicResult::error('Too many verification attempts. Please wait 5 minutes and try again.');
 		}
 
-		$user = new User($_SESSION['totp_pending_user_id'], TRUE);
-		if (!$user || !$user->key) {
-			unset($_SESSION['totp_pending_user_id'], $_SESSION['totp_pending_remember'],
-				$_SESSION['totp_pending_return'], $_SESSION['totp_pending_expires']);
-			return LogicResult::redirect('/login');
-		}
+		$user = $pending_user;
 
 		$submitted = isset($input['totp_code']) ? trim($input['totp_code']) : '';
 		$canonical = strtoupper(preg_replace('/[\s-]+/', '', $submitted));
@@ -67,22 +79,6 @@ function verify_totp_logic(array $input): LogicResult{
 			'user_id' => $user->key,
 		]);
 
-		$remember        = !empty($_SESSION['totp_pending_remember']);
-		$returnurl       = $_SESSION['totp_pending_return'] ?? null;
-
-		unset($_SESSION['totp_pending_user_id'], $_SESSION['totp_pending_remember'],
-			$_SESSION['totp_pending_return'], $_SESSION['totp_pending_expires']);
-
-		$session->store_session_variables($user);
-		LoginClass::StoreUserLogin($user->key, LoginClass::LOGIN_FORM);
-
-		if ($remember) {
-			$session->save_user_to_cookie();
-		}
-
-		// Trust this device if the setting is on
-		$session->set_trusted_device_cookie($user);
-
 		if ($used_backup_code) {
 			$msgtxt = 'A backup code was used to log in. Consider regenerating your backup codes from the security settings page.';
 			$message = new DisplayMessage($msgtxt, 'Backup code used', '/.*/',
@@ -90,8 +86,8 @@ function verify_totp_logic(array $input): LogicResult{
 			$session->save_message($message);
 		}
 
-		$alternate_homepage = $page_vars['settings']->get_setting('alternate_loggedin_homepage');
-		return LogicResult::redirect($returnurl ?: ($alternate_homepage ?: '/profile'));
+		require_once(PathHelper::getIncludePath('includes/Login2fa.php'));
+		return LogicResult::redirect(Login2fa::completePendingLogin($user));
 	}
 
 	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);

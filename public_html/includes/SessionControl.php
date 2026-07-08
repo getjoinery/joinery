@@ -626,10 +626,15 @@ class SessionControl{
 			return FALSE;
 		}
 
-		// 2FA check: if user has TOTP enabled and no valid trusted-device cookie,
-		// stash a pending state and redirect to /verify-totp instead of completing login.
-		// Leave the 'tt' cookie alone so a successful TOTP completes the auto-login.
-		if ($user_obj->has_totp_enabled() && !$this->has_valid_trusted_device_cookie($user_obj)) {
+		// 2FA check: if the user holds ANY second factor (TOTP or a step-up-capable
+		// passkey), the cadence asks it at sign-in, and there is no valid
+		// trusted-device cookie, stash a pending state and redirect to /verify-totp
+		// instead of completing the cookie auto-login. Keying on user_has_second_factor
+		// (not has_totp_enabled) closes the passkey-only-Fortress quirk
+		// (specs/mailbox_security_levels.md § 5.4). Leave the 'tt' cookie alone so a
+		// successful factor completes the auto-login.
+		if ($this->user_has_second_factor($user_obj) && $user_obj->two_factor_cadence() === 'every_login'
+				&& !$this->has_valid_trusted_device_cookie($user_obj)) {
 			session_regenerate_id(true);
 			$_SESSION['totp_pending_user_id']  = $user_obj->key;
 			$_SESSION['totp_pending_remember'] = false; // Already had a remember cookie
@@ -1061,18 +1066,41 @@ class SessionControl{
 	// step-up writes it via stamp_second_factor().
 	// ====================================================================
 
-	/** True when the user holds a usable second factor (TOTP or ≥1 live passkey). */
+	/** True when the user holds a USABLE second factor: TOTP, or ≥1 live passkey
+	 *  while passkey sign-in is enabled site-wide. Passkeys stop counting when
+	 *  passkeys_enabled is off — every consumer (the sign-in divert, step-up
+	 *  gates) offers only ceremonies the user can actually run, so disabling
+	 *  passkeys never strands a passkey-only account at a factor prompt with no
+	 *  completion path. */
 	function user_has_second_factor($user): bool {
+		return $this->_count_usable_factors($user, 1);
+	}
+
+	/** True when the user holds a second factor INDEPENDENT of any single
+	 *  passkey: TOTP, or at least two live passkeys. The Fortress enrollment
+	 *  gate keys on this — the vault-holder password reset excludes the passkey
+	 *  that authorized it and demands another factor, so enrollment must
+	 *  guarantee one credential is never both the authorizer and its own
+	 *  confirmation (specs/security_levels_review_fixes.md Fix 1). */
+	function user_has_independent_second_factor($user): bool {
+		return $this->_count_usable_factors($user, 2);
+	}
+
+	private function _count_usable_factors($user, int $passkeys_needed): bool {
 		if (!$user || !$user->key) {
 			return false;
 		}
 		if ($user->has_totp_enabled()) {
 			return true;
 		}
+		$settings = Globalvars::get_instance();
+		if (!$settings->get_setting('passkeys_enabled')) {
+			return false;
+		}
 		require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
 		$creds = new MultiPasskey(array('user_id' => (int)$user->key));
 		$creds->load();
-		return count($creds) > 0;
+		return count($creds) >= $passkeys_needed;
 	}
 
 	/** True when THIS session re-confirmed a second factor within $ttl seconds. */
@@ -1294,7 +1322,7 @@ class SessionControl{
 				$current_path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 				if ($current_path !== '/profile/security' && $current_path !== '/logout'
 						&& strpos((string)$current_path, '/api/v1/') !== 0) {
-					$msgtxt = urlencode('A domain on your account uses the Fortress level, which requires two-factor authentication. Enroll a second factor to continue.');
+					$msgtxt = urlencode('A domain on your account uses the Fortress level, which requires a second factor that is separate from any single passkey. Add an authenticator app or a second passkey to continue.');
 					header('Location: /profile/security?msgtext=' . $msgtxt);
 					exit();
 				}
@@ -1325,10 +1353,12 @@ class SessionControl{
 
 	/**
 	 * True when the current user touches a Fortress-level domain (owns one or
-	 * holds a grant on one) but has no second factor enrolled — the Fortress
-	 * mandatory-2FA gate (specs/mailbox_security_levels.md § 5.3). The heavy
-	 * posture lookup is cached in session; the factor check stays live so
-	 * enrolling clears the gate immediately without busting the cache.
+	 * holds a grant on one) but has no INDEPENDENT second factor enrolled (TOTP
+	 * or a second passkey — one credential must never be both the reset
+	 * authorizer and its own confirmation) — the Fortress mandatory-2FA gate
+	 * (specs/mailbox_security_levels.md § 5.3). The heavy posture lookup is
+	 * cached in session; the factor check stays live so enrolling clears the
+	 * gate immediately without busting the cache.
 	 */
 	function must_enroll_2fa_for_fortress() {
 		if (!isset($_SESSION['usr_user_id'])) {
@@ -1354,7 +1384,7 @@ class SessionControl{
 		}
 		require_once(PathHelper::getIncludePath('data/users_class.php'));
 		$user = new User($_SESSION['usr_user_id'], true);
-		return !$this->user_has_second_factor($user);
+		return !$this->user_has_independent_second_factor($user);
 	}
 
 	/**

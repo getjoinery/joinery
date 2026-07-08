@@ -166,12 +166,43 @@ window.JoineryPasskeys = (function () {
 		};
 	}
 
+	/**
+	 * The full options -> authenticate -> verify round trip shared by every
+	 * password-flow passkey button (sign-in, password reset, reset second factor).
+	 * POSTs {} (plus any extraBody) to optionsUrl, runs the request ceremony, POSTs
+	 * the credential to verifyUrl, and resolves with verify's `data` object (e.g.
+	 * { redirect, second_factor_required }). Throws with the server error message on
+	 * any failure so callers can surface it uniformly.
+	 */
+	async function runFlow(optionsUrl, verifyUrl, extraBody) {
+		var optRes = await fetch(optionsUrl, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(extraBody || {}),
+		});
+		var optJson = await optRes.json();
+		if (!optRes.ok) throw new Error((optJson && optJson.error) || 'Unable to start passkey ceremony.');
+
+		var credential = await authenticate(optJson.data.options);
+
+		var verRes = await fetch(verifyUrl, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ credential: credential }),
+		});
+		var verJson = await verRes.json();
+		if (!verRes.ok) throw new Error((verJson && verJson.error) || 'Passkey verification failed.');
+
+		return (verJson && verJson.data) || {};
+	}
+
 	return {
 		isSupported: isSupported,
 		isPrfLikely: isPrfLikely,
 		register: register,
 		authenticate: authenticate,
 		derive: derive,
+		runFlow: runFlow,
 		bufferToB64url: bufferToB64url,
 		b64urlToBuffer: b64urlToBuffer,
 	};

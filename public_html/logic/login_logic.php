@@ -142,16 +142,19 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			}
 		}
 
-		// 2FA check: if user has TOTP enabled and no valid trusted-device cookie,
-		// stash a pending state and redirect to /verify-totp instead of completing login.
-		// The 2FA cadence (specs/mailbox_security_levels.md § 5.2) decides whether the
-		// factor is asked at sign-in: 'every_login' asks it here; 'sensitive_only'
-		// signs in password-only and defers the factor to sensitive actions (step-up).
-		// This is sound because every escalation from a bare session — password/email
-		// change, 2FA changes, recovery-code use, protected-mail routing — is
-		// independently gated; a phished password on 'sensitive_only' sees the
-		// mailbox's shape and opens nothing.
-		if ($user->has_totp_enabled() && $user->two_factor_cadence() === 'every_login'
+		// 2FA check: if the user holds ANY second factor (TOTP or a step-up-capable
+		// passkey) and has no valid trusted-device cookie, stash a pending state and
+		// redirect to /verify-totp instead of completing login. Keying on
+		// user_has_second_factor (not has_totp_enabled) closes the quirk where a
+		// passkey-only Fortress user was never asked a second factor at sign-in
+		// (specs/mailbox_security_levels.md § 5.4). The 2FA cadence (§ 5.2) decides
+		// whether the factor is asked at sign-in: 'every_login' asks it here;
+		// 'sensitive_only' signs in password-only and defers the factor to sensitive
+		// actions (step-up). That is sound because every escalation from a bare
+		// session — password/email change, 2FA changes, recovery-code use,
+		// protected-mail routing — is independently gated; a phished password on
+		// 'sensitive_only' sees the mailbox's shape and opens nothing.
+		if ($session->user_has_second_factor($user) && $user->two_factor_cadence() === 'every_login'
 				&& !$session->has_valid_trusted_device_cookie($user)) {
 			session_regenerate_id(true);
 			$_SESSION['totp_pending_user_id']  = $user->key;

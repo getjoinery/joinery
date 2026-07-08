@@ -22,6 +22,7 @@ class Activation {
 	const EMAIL_VERIFY = 2;
 	const PHONE_VERIFY = 3;
 	const EMAIL_CHANGE = 4;
+	const RECOVERY_VERIFY = 5;
 
 	static function ActivateUser($act_code, $user_id_confirm=NULL) {
 		$user_id = self::getIdFromTempCode(strtolower($act_code), Activation::EMAIL_VERIFY);
@@ -142,6 +143,18 @@ class Activation {
 		$statement->execute();
 	}
 
+	// Revoke every outstanding code of a given purpose for a user — used when a
+	// recovery address is changed or removed so old confirmation links die at
+	// once (specs/mailbox_security_levels.md § Password reset). recovery_verify
+	// also reconciles against the current candidate, so this is defense in depth.
+	static function deleteUserCodes($usr_user_id, $purpose){
+		$statement = DbConnector::GetPreparedStatement(
+			"UPDATE act_activation_codes SET act_deleted = TRUE WHERE act_usr_user_id = :uid AND act_purpose = :purpose AND act_deleted = FALSE");
+		$statement->bindValue(':uid', (int)$usr_user_id, PDO::PARAM_INT);
+		$statement->bindValue(':purpose', (int)$purpose, PDO::PARAM_INT);
+		$statement->execute();
+	}
+
 	static function deleteTempCodePhone($act_phn_phone_number_id) {
 		$statement = DbConnector::GetPreparedStatement(
 			'UPDATE act_activation_codes SET act_deleted=TRUE WHERE act_phn_phone_number_id=:act_phn_phone_number_id');
@@ -250,7 +263,50 @@ class Activation {
 				'recipient' => $user->export_as_array()
 			]
 		);
+
+		// External recovery-address authorizer (specs/mailbox_security_levels.md
+		// § Password reset, Population 3): a verified recovery address is a
+		// deliberate out-of-band reset path, so the same link is also sent there.
+		// This is what carries a Population-2 user (login email is a hosted
+		// mailbox they may be locked out of) — the link lands in an inbox they
+		// still control. Best-effort: a failed recovery copy never blocks the
+		// primary send.
+		$recovery = $user->recovery_email();
+		if ($recovery !== '' && strtolower($recovery) !== strtolower((string)$user->get('usr_email'))) {
+			try {
+				EmailSender::sendTemplate('forgotpw_content',
+					$recovery,
+					[
+						'act_code' => $act_code,
+						'web_dir' => LibraryFunctions::get_absolute_url(''),
+						'recipient' => $user->export_as_array()
+					]
+				);
+			} catch (\Throwable $e) {
+				error_log('email_forgotpw_send: recovery-address copy failed for user ' . $user->key . ': ' . $e->getMessage());
+			}
+		}
 		return $success;
+	}
+
+	// External recovery-address verification (specs/mailbox_security_levels.md
+	// § Password reset). Sends a verify link to the CANDIDATE recovery address;
+	// clicking it (recovery_verify_logic) stamps usr_recovery_email_verified_time.
+	// Mirrors email_change_send: the code proves control of the target inbox.
+	static function email_recovery_verify_send($usr_user_id, $recovery_email){
+		$user = new User($usr_user_id, TRUE);
+		$act_code = self::getTempCode($user->key, '2 days', Activation::RECOVERY_VERIFY, NULL, strtolower(trim($recovery_email)));
+
+		$settings = Globalvars::get_instance();
+		$site = (string)$settings->get_setting('site_name');
+		$link = LibraryFunctions::get_absolute_url('recovery-verify?act_code=' . rawurlencode($act_code));
+		EmailSender::quickSend(
+			strtolower(trim($recovery_email)),
+			trim($site . ' — confirm your recovery address'),
+			"You (or someone using your " . $site . " account) added this address as a password-recovery address.\n\n"
+			. "Confirm it by opening this link:\n" . $link . "\n\n"
+			. "If you did not request this, you can ignore this email."
+		);
 	}
 
 	// Email change

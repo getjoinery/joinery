@@ -1,21 +1,32 @@
 # Mailbox — Security Levels — Executor Package
 
-**Status:** BUILD IN PROGRESS — checkpoint 2026-07-08. Built, review-fixed
-(three review rounds), and browser-verified: Phases 1, 2, 3, 4, 6, 8, 9, 10,
-11, and Phase 5 except 5.4. **Remaining:** Phase 5.4 (passkey-as-2FA at login
-+ separation nudge — a login-flow restructure; closes the quirk where a
-passkey-only Fortress user is never asked a second factor at sign-in), Phase
-7-rest (sessionless passkey reset with the vault-holder +2FA rule, TOTP-alone
-reset, external recovery-address field + verify flow, signup-time Population-2
-— a takeover surface; build with fresh headroom and verify each authorizer
-live), and Phase 12 (final end-to-end acceptance pass, including the unlocked
-side of the site-wide presence beacon). Design authority is now **v1.6**:
-§ The Unlock Window event 3 changed after build start — presence is site-wide
-("on Joinery", `assets/js/vault-presence.js`, 300s grace), not mail-page-only;
-that part is already implemented. Scope note recorded: the "add a Standard
-subdomain" one-click prefills the domain name only, not DKIM/DNS from the
-parent's setup state.
-**Version:** 1.2 — status checkpoint added.
+**Status:** BUILD COMPLETE — 2026-07-08. All phases built, review-fixed, and
+browser-verified. The final tranche (this session): **Phase 7-rest** (the
+Population-3 reset authorizers — sessionless passkey reset with the vault-holder
+independent-second-factor rule, TOTP-alone reset for no-vault accounts, external
+recovery-address field + verify flow, signup-time Population-2), **Phase 5.4**
+(passkey-as-2FA at login keyed on `user_has_second_factor` + the separation
+nudge), and **Phase 12** acceptance. A workflow-backed high-effort review ran
+after Phase 7-rest; nine findings were fixed (unthrottled second-factor bucket,
+recovery-verify replay/resurrection, backup-code burn on a denied vault-holder
+reset, recovery address accepting a platform-hosted domain, and cleanups) and
+one accepted-with-rationale (reset marking an unproven login email verified —
+nothing in the codebase gates security on `usr_email_is_verified`). Acceptance
+drove end-to-end in a browser (WebAuthn virtual authenticator via CDP): signup
+Population-2 refusal, passkey-as-2FA login (the quirk closure), passkey reset
+(no-vault → passkey-alone), TOTP-alone reset happy path, TOTP-alone reset
+refused for a vault holder, the both-doors closure (vault-holder passkey reset →
+second factor demanded → completed via TOTP), the recovery-address set/verify
+flow with replay-refusal, and the separation-nudge render. The presence-beacon
+unlocked side is verified structurally (`PublicPageBase` emits the
+`joinery-vault-window` meta gated on `VaultUnlock::isOpen()` and loads the
+beacon site-wide; `vault_heartbeat` action present); driving it live needs a
+real PRF unlock, which the CDP virtual authenticator cannot perform.
+Design authority is **v1.6**: § The Unlock Window event 3 — presence is
+site-wide ("on Joinery", `assets/js/vault-presence.js`, 300s grace). Scope note:
+the "add a Standard subdomain" one-click prefills the domain name only, not
+DKIM/DNS from the parent's setup state. **Ready to move to `specs/implemented/`.**
+**Version:** 1.3 — build complete; Phases 5.4, 7-rest, 12 landed.
 **Version 1.1 baseline:** re-derived against design v1.5 and reconciled against
 the built system (2026-07-08). All file paths and line anchors below were
 verified against the working tree on that date; re-confirm any anchor before
