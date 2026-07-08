@@ -89,8 +89,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			// Population-2 precondition (§ 7): making one of the user's OWN hosted
 			// mailboxes the login email would send every future reset link into the
 			// very inbox a locked-out user cannot reach. So it requires holding at
-			// least one non-email reset path first (a passkey or TOTP today; an
-			// external recovery address joins this list with Phase 7). State the
+			// least one non-email reset path first: a passkey, TOTP, or a verified
+			// external recovery address (reset links also land there). State the
 			// locked-out floor now, not during the crisis.
 			$new_email_addr = trim($input['usr_email_new']);
 			$at = strrpos($new_email_addr, '@');
@@ -106,10 +106,12 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 						InboundEmailDomain::userHostedDomainNames((int)$user->key), true);
 				}
 			}
-			$precondition_ok = !($is_user_hosted && !$session->user_has_second_factor($user));
+			$has_reset_path = $session->user_has_second_factor($user)
+				|| $user->has_verified_recovery_email();
+			$precondition_ok = !($is_user_hosted && !$has_reset_path);
 
 			if (!$precondition_ok) {
-				$msgtxt = 'Before using a hosted address as your login email, set up a passkey or an authenticator app. '
+				$msgtxt = 'Before using a hosted address as your login email, set up a passkey, an authenticator app, or a verified recovery address. '
 					. 'Otherwise a forgotten password would send the reset link into the very inbox you would be locked out of.';
 				$message = new DisplayMessage($msgtxt, 'Set up a recovery method first', '/\/profile\/account_edit.*/', DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'userbox', TRUE);
 				$session->save_message($message);

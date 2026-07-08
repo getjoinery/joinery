@@ -29,6 +29,28 @@ function security_logic(array $input): LogicResult{
 	$page_vars['just_enabled'] = false;
 	$page_vars['has_second_factor'] = $session->user_has_second_factor($user);
 	$page_vars['cadence'] = $user->two_factor_cadence();
+	// External recovery address (specs/mailbox_security_levels.md § Password reset).
+	$page_vars['recovery_email'] = trim((string)$user->get('usr_recovery_email'));
+	$page_vars['recovery_email_verified'] = $user->has_verified_recovery_email();
+
+	// Separation nudge (specs/mailbox_security_levels.md § 5.4 / § Separation
+	// guidance): a passkey can serve as the login second factor AND unlock the
+	// vault. When the same credential fills both roles, one stolen credential holds
+	// both gates. Warn — never block. Fires when the account has a vault and at
+	// least one passkey that is also a vault unlocker (a uew wrapping references it).
+	$page_vars['separation_nudge'] = false;
+	require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
+	$sep_vault = UserEncryptionVault::loadForUser((int)$user->key);
+	if ($sep_vault) {
+		require_once(PathHelper::getIncludePath('data/user_encryption_wrappings_class.php'));
+		$passkey_unlockers = new MultiUserEncryptionWrapping(array(
+			'vault_id' => $sep_vault->key,
+			'unlocker_type' => UserEncryptionWrapping::TYPE_PASSKEY,
+			'deleted' => false,
+		));
+		$passkey_unlockers->load();
+		$page_vars['separation_nudge'] = count($passkey_unlockers) > 0;
+	}
 
 	$msgtxt_from_get = $input['msgtext'] ?? null;
 	if ($msgtxt_from_get) {
@@ -55,6 +77,90 @@ function security_logic(array $input): LogicResult{
 			? 'Sign-in is now password-only. Your second factor is asked at sensitive actions. Note: a phished password can then see your Standard mail and mailbox metadata.'
 			: 'Your second factor is now asked at every sign-in.';
 		$message = new DisplayMessage($msgtxt, 'Two-factor cadence updated', '/\/profile\/security.*/',
+			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'securitybox', TRUE);
+		$session->save_message($message);
+		return LogicResult::redirect('/profile/security');
+	}
+
+	if ($action === 'set_recovery_email') {
+		// Setting an external recovery address adds a reset path
+		// (specs/mailbox_security_levels.md § Password reset), so it is a
+		// sensitive action — re-confirm the second factor first.
+		$stepup = $session->require_recent_second_factor('/profile/security');
+		if ($stepup !== null) {
+			return $stepup;
+		}
+		require_once(PathHelper::getIncludePath('includes/Activation.php'));
+		$candidate = strtolower(trim((string)($input['recovery_email'] ?? '')));
+		if ($candidate === '' || strlen($candidate) > 64 || !LibraryFunctions::IsValidEmail($candidate)) {
+			$msgtxt = 'Please enter a valid email address (up to 64 characters) for account recovery.';
+			$message = new DisplayMessage($msgtxt, 'Invalid address', '/\/profile\/security.*/',
+				DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'securitybox', TRUE);
+			$session->save_message($message);
+			return LogicResult::redirect('/profile/security');
+		}
+		if ($candidate === strtolower((string)$user->get('usr_email'))) {
+			$msgtxt = 'Your recovery address must be different from your login email — the point is an inbox you can still reach if you are locked out.';
+			$message = new DisplayMessage($msgtxt, 'Choose a different address', '/\/profile\/security.*/',
+				DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'securitybox', TRUE);
+			$session->save_message($message);
+			return LogicResult::redirect('/profile/security');
+		}
+		// A recovery address on a mailbox hosted HERE is circular — locked out of the
+		// account, the user cannot read that inbox either. Same Population-2 guard the
+		// register/account-email flows apply (specs/mailbox_security_levels.md).
+		$domain_class = PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php');
+		if (is_file($domain_class)) {
+			require_once($domain_class);
+			if (class_exists('InboundEmailDomain') && InboundEmailDomain::isHostedEmailAddress($candidate)) {
+				$msgtxt = 'Choose a recovery address on an outside provider (Gmail, Outlook, etc.). A mailbox hosted here would be unreachable when you are locked out — the very situation recovery exists to solve.';
+				$message = new DisplayMessage($msgtxt, 'Use an outside address', '/\/profile\/security.*/',
+					DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'securitybox', TRUE);
+				$session->save_message($message);
+				return LogicResult::redirect('/profile/security');
+			}
+		}
+		// Throttle sends — the confirmation email goes to an arbitrary external
+		// address, so an authenticated account must not become a spam cannon.
+		require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
+		if (!RequestLogger::check_rate_limit('recovery_verify_send', 5, 3600)) {
+			$msgtxt = 'Too many confirmation emails sent recently. Please wait an hour and try again.';
+			$message = new DisplayMessage($msgtxt, 'Please wait', '/\/profile\/security.*/',
+				DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'securitybox', TRUE);
+			$session->save_message($message);
+			return LogicResult::redirect('/profile/security');
+		}
+		RequestLogger::log('recovery_verify_send', 'send', true, ['user_id' => (int)$user->key]);
+		// Any earlier confirmation links die now (defense in depth; the verify step
+		// also reconciles against this candidate).
+		Activation::deleteUserCodes($user->key, Activation::RECOVERY_VERIFY);
+		// Store the candidate as unverified; the emailed link promotes it.
+		$user->set('usr_recovery_email', $candidate);
+		$user->set('usr_recovery_email_verified_time', null);
+		$user->save();
+		Activation::email_recovery_verify_send($user->key, $candidate);
+		$msgtxt = 'A confirmation link was sent to ' . htmlspecialchars($candidate) . '. Open it from that inbox to activate recovery. Until then it is not yet a reset path.';
+		$message = new DisplayMessage($msgtxt, 'Confirm your recovery address', '/\/profile\/security.*/',
+			DisplayMessage::MESSAGE_WARNING, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'securitybox', TRUE);
+		$session->save_message($message);
+		return LogicResult::redirect('/profile/security');
+	}
+
+	if ($action === 'remove_recovery_email') {
+		// Removing a reset path is also sensitive — re-confirm the second factor.
+		$stepup = $session->require_recent_second_factor('/profile/security');
+		if ($stepup !== null) {
+			return $stepup;
+		}
+		require_once(PathHelper::getIncludePath('includes/Activation.php'));
+		// Kill any outstanding confirmation links so a removed address cannot be
+		// resurrected by an old link.
+		Activation::deleteUserCodes($user->key, Activation::RECOVERY_VERIFY);
+		$user->set('usr_recovery_email', null);
+		$user->set('usr_recovery_email_verified_time', null);
+		$user->save();
+		$msgtxt = 'Your recovery address has been removed.';
+		$message = new DisplayMessage($msgtxt, 'Recovery address removed', '/\/profile\/security.*/',
 			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'securitybox', TRUE);
 		$session->save_message($message);
 		return LogicResult::redirect('/profile/security');
