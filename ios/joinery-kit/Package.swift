@@ -10,7 +10,10 @@
 // subscriptions, events, conversations, security), same layering as mail;
 // its Settings additions (address/phone forms, the Security row) live in
 // JoineryKit itself and route to this module through NativeScreenRegistry.
-// Version: 0.5.0 (native member surface: profile, orders, subscriptions, events, conversations, security)
+// JoineryDNSFilterKit — the native DNS-filtering surface (device policy editor,
+// protection-mode control, NEDNSSettingsManager activation, packet-tunnel
+// hard-block engine) for any ScrollDaddy-style deployment; same layering as mail.
+// Version: 0.6.0 (native DNS-filtering surface: devices, always-on editor, protection modes, tunnel engine)
 import PackageDescription
 
 let package = Package(
@@ -24,6 +27,7 @@ let package = Package(
         .library(name: "JoineryCalendarKit", targets: ["JoineryCalendarKit"]),
         .library(name: "JoineryAIChatKit", targets: ["JoineryAIChatKit"]),
         .library(name: "JoineryMemberKit", targets: ["JoineryMemberKit"]),
+        .library(name: "JoineryDNSFilterKit", targets: ["JoineryDNSFilterKit"]),
     ],
     targets: [
         .target(
@@ -49,6 +53,11 @@ let package = Package(
             name: "JoineryMemberKit",
             dependencies: ["JoineryKit"],
             path: "Sources/JoineryMemberKit"
+        ),
+        .target(
+            name: "JoineryDNSFilterKit",
+            dependencies: ["JoineryKit"],
+            path: "Sources/JoineryDNSFilterKit"
         ),
         .testTarget(
             name: "JoineryKitTests",
@@ -89,6 +98,11 @@ let package = Package(
             resources: [
                 .copy("Fixtures"),
             ]
+        ),
+        .testTarget(
+            name: "JoineryDNSFilterKitTests",
+            dependencies: ["JoineryDNSFilterKit"],
+            path: "Tests/JoineryDNSFilterKitTests"
         ),
     ]
 )

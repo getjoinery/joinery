@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Packet-tunnel extension entitlements. The extension hosts the
+  NEPacketTunnelProvider (strict mode) and shares the app group so it can read
+  the synced hard-block list. Requires a paid Apple Developer Program membership.
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.developer.networking.networkextension</key>
+    <array>
+        <string>packet-tunnel-provider</string>
+    </array>
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>group.app.scrolldaddy.ios</string>
+    </array>
+</dict>
+</plist>

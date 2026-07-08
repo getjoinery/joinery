@@ -1,6 +1,6 @@
 {
     "name": "DNS Filtering",
-    "version": "1.1.1",
+    "version": "1.1.2",
     "description": "Self-hosted DNS filtering service with per-device filtering profiles",
     "author": "System Developer",
     "receives_upgrades": true,
@@ -54,7 +54,8 @@
             "icon": "shield",
             "visibility": "in",
             "permission": 0,
-            "order": 75
+            "order": 75,
+            "nativeScreen": "dns_protection"
         },
         {
             "slug": "dns-filtering-devices",
@@ -63,7 +64,8 @@
             "icon": "devices",
             "visibility": "in",
             "permission": 0,
-            "order": 76
+            "order": 76,
+            "nativeScreen": "dns_devices"
         }
     ]
 }

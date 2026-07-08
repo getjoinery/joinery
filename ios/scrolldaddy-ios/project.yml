@@ -1,0 +1,72 @@
+# ScrollDaddy iOS — a DNS-filtering brand target on JoineryKit +
+# JoineryDNSFilterKit. Structured exactly like ios/joinery-member-ios: a thin
+# app directory consuming the shared ios/joinery-kit package.
+#
+# Regenerate the Xcode project with:
+#   ~/dev/.tools/xcodegen/xcodegen/bin/xcodegen generate
+#
+# The DNS Settings and Packet Tunnel capabilities require a paid Apple
+# Developer Program membership (Network Extension entitlements aren't available
+# to free personal teams). Simulator compile checks pass with
+# CODE_SIGNING_ALLOWED=NO; real function (Phases 2 and 4) needs a physical
+# iPhone with the entitlements provisioned.
+name: ScrollDaddy
+options:
+  bundleIdPrefix: app.scrolldaddy
+settings:
+  base:
+    GENERATE_INFOPLIST_FILE: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: J634NTDX3D
+packages:
+  JoineryKit:
+    path: ../joinery-kit
+targets:
+  ScrollDaddy:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources: [Sources]
+    dependencies:
+      - package: JoineryKit
+        product: JoineryKit
+      - package: JoineryKit
+        product: JoineryDNSFilterKit
+      - target: ScrollDaddyTunnel
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.scrolldaddy.ios
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_CFBundleDisplayName: ScrollDaddy
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        CODE_SIGN_ENTITLEMENTS: ScrollDaddy.entitlements
+
+  # Phase 4 — strict-mode packet tunnel (device-only; needs the paid program).
+  ScrollDaddyTunnel:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources: [PacketTunnel]
+    dependencies:
+      - package: JoineryKit
+        product: JoineryDNSFilterKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.scrolldaddy.ios.tunnel
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        CODE_SIGN_ENTITLEMENTS: PacketTunnel/ScrollDaddyTunnel.entitlements
+        INFOPLIST_FILE: PacketTunnel/Info.plist
+
+  ScrollDaddyUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources: [UITests]
+    dependencies:
+      - target: ScrollDaddy
