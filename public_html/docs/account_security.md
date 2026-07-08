@@ -41,12 +41,33 @@ must still produce a different credential to get a session at all.
 
 ## Step-up confirmation
 
-Any feature can demand "re-confirm with your passkey before this" via
-`PasskeyService::getStepUpOptions()` / `verifyStepUp()` — a short-lived
-verified marker (5 minutes, session-bound, stored server-side in
-`pks_passkey_ceremonies`) that `hasRecentStepUp()` checks. Step-up proves the
-account owner is present at *this* keyboard *now*; a stolen session cookie
-cannot mint one.
+Any feature can demand "re-confirm your second factor before this". Passkey and
+TOTP step-ups share **one** short-lived verified marker (session-bound, stored
+server-side in `pks_passkey_ceremonies`, kind `stepup`): a passkey step-up writes
+it via `PasskeyService::verifyStepUp()`, a TOTP step-up via
+`SessionControl::stamp_second_factor()`. Step-up proves the account owner is
+present at *this* keyboard *now*; a stolen session cookie cannot mint one.
+
+`SessionControl::require_recent_second_factor($return_url)` is the shared gate a
+sensitive **administration** action calls: it returns a redirect to the
+`/verify-stepup` ceremony (which confirms with a passkey or a TOTP/backup code,
+stamps the marker, and returns to `$return_url`) when no recent confirmation
+exists, or proceeds otherwise. It is a no-op for an account with no second
+factor enrolled — there is nothing to step up with. The line the gate draws:
+**the vault gates plaintext redirection; the second factor gates
+administration.** Domain security-level changes are gated this way today; the
+same helper is how the remaining sensitive-administration actions adopt the gate.
+
+## Fortress mandatory two-factor enrollment
+
+A user who owns or holds a grant on a **Fortress**-level domain
+(`InboundEmailDomain::maxSecurityLevelForUser()`) must have a second factor
+enrolled. Until they do, `SessionControl::must_enroll_2fa_for_fortress()` blocks
+every page behind a redirect to `/profile/security` (the same session-cached,
+enrollment-surface pattern the admin-2FA requirement uses) — exempting only that
+page and `/logout` to avoid a loop. Enrolling any second factor (a passkey or
+TOTP) clears the gate immediately. The posture lookup is cached per session and
+dropped when the acting user changes a domain's level.
 
 ## Enrollment is guarded
 
@@ -70,14 +91,58 @@ One unlocker ceremony opens the vault for a bounded window
   (default 30).
 - **Ends** at the idle timeout, on the explicit Lock control, or with the
   browser session — the window is keyed to the session and never survives
-  it. `VaultUnlock::lock()` / `lockAll()` are the generic wipe surface any
-  future policy event calls.
+  it. `VaultUnlock::lock()` / `lockAll()` are the generic wipe surface policy
+  events call.
+- **Presence beacon.** Presence means "on Joinery": every page includes
+  `assets/js/vault-presence.js` for signed-in users, and while a window is open
+  it stamps `vault_heartbeat` every ~25s (hidden tabs keep beating at the
+  browser's throttled cadence). `PublicPageBase` emits a
+  `joinery-vault-window` meta flag when a window is open at render time;
+  in-page unlock ceremonies start the beacon via `JoineryVaultPresence.start()`
+  or a `joinery:vault-unlocked` event. A read that finds the beat stale beyond
+  `VaultUnlock::HEARTBEAT_MAX_STALE_SECONDS` (300s, sized above worst-case
+  background-tab throttling) ends the window — checked at read time, no cron.
+  So navigating anywhere on the site keeps the window alive; only a browser
+  that is genuinely gone (closed, asleep, machine off) goes stale.
+- **Network identity change.** The existing IP-change guard that zeroes elevated
+  permissions on a major address jump also ends that session's window.
+- **Per-level caps.** Beyond the idle timeout, a window carries caps by the
+  user's highest mail level (`VaultUnlock::capsForUser()`, recorded with the
+  window and checked at read time): **Fortress** ends 2h after the last content
+  decrypt (idle) and unconditionally 24h after arming (absolute); **Private**
+  carries a 7-day absolute backstop.
+- **Credential events end every window everywhere** (`lockAll()`) — the remote
+  kill switch. A password change, a 2FA method change (disabling TOTP),
+  app-session revocation, and a recovery-code unlock all wipe every session's
+  window for the account and alert it. So a user whose laptop just walked away
+  changes their password from their phone and every window dies with it.
+
+## Two-factor cadence
+
+One account setting, two values (`usr_2fa_cadence`, `User::two_factor_cadence()`):
+
+- **`every_login`** (default) — the second factor is asked on each password
+  sign-in.
+- **`sensitive_only`** — sign-in is password-only; the factor is asked at
+  sensitive actions instead (the step-up gate above). Sound, not a loophole,
+  because every escalation from a bare session is independently gated: sealed
+  content needs the vault; password/email/2FA changes and recovery-code use
+  need a step-up; routing changes need an open window. A phished password on
+  this posture sees the mailbox's shape — counts, times, labels, placeholders —
+  and opens nothing. The setting's own change is a step-up action, and choosing
+  it carries the one-line consequence.
 
 ## Unlockers, ranked
 
 - **Passkey** — the everyday unlocker: one tap, user verification required.
-- **Recovery codes** — one-time, for disasters. Consuming one to unlock is
-  always allowed, but drops the vault into a *regenerate recommended* state
+- **Recovery codes** — one-time, for disasters, so the strictest path: when the
+  account has a second factor, a recovery-code unlock requires a recent step-up
+  **regardless of the 2FA cadence** (the API returns a `second_factor_required`
+  flag that routes the user through `/verify-stepup` first). On use it **ends
+  every open window everywhere** (`VaultUnlock::lockAll()`) and then opens one
+  only for the recovering session, and emails a security alert to the account —
+  so a *stolen* code lands the thief in a re-locked vault while the owner is
+  notified. Consuming one drops the vault into a *regenerate recommended* state
   once fewer than 3 remain unused. **Recovery codes are vault-only**: they
   answer "give me my data," never "log me in."
 - **Passphrase** — optional fallback (Argon2id-derived), for accounts that
@@ -97,7 +162,16 @@ A password reset re-issues the **session, never the vault**: the reset link
 proves control of the account email and yields a signed-in session, but
 sealed content still demands an unlocker ceremony the resetter cannot fake.
 An admin-assisted reset has the same shape — it can restore the account, and
-structurally cannot open the vault.
+structurally cannot open the vault. Every reset is a **credential event**: on
+completion it ends every open window everywhere (`lockAll()`) and alerts the
+account — so even a hostile reset lands the attacker in a re-locked vault.
+
+**Population 2 — the login email is a hosted mailbox (the circular case).**
+Making one of the user's own hosted addresses the account (login) email would
+send every future reset link into the very inbox a locked-out user cannot
+reach. So the account-email change requires holding a **non-email reset path**
+first (a passkey or TOTP today) — enforced in `account_edit_logic.php`, stated
+at the moment the address is chosen, not during the crisis.
 
 ## Vault-gated routing settings
 
@@ -120,10 +194,15 @@ satisfied by the owner's own logged-in session — an admin managing someone
 else's sealed mailbox structurally cannot open that owner's vault, so the
 mutation is refused with a clear message rather than a raw permission error.
 A domain-wide filter scope (no single owner) and a brand-new alias (no
-established owner/grant relationship yet) are never gated. Outbound relay SMTP
-settings (`mailbox_forwarding_smtp_*`) are a known gap: they render through
-the generic settings-save mechanism, which has no per-field save hook to gate
-on today.
+established owner/grant relationship yet) are never gated. **Outbound relay SMTP
+settings** (`mailbox_forwarding_smtp_*`) — repointing the relay routes future
+outbound plaintext through an attacker's box — are gated too: the core
+settings-save (`adm/logic/admin_settings_logic.php`) refuses a change to any
+setting a plugin declares in its `vaultGatedSettings` manifest list
+(`VaultGatedSettings`) while the acting account holds a vault with no open
+window, saving the rest and prompting the user to unlock and save again. The
+list is plugin-declared, so the closed set of reroute settings never becomes a
+core dependency on any one plugin.
 
 ## What each action requires
 
@@ -138,6 +217,13 @@ on today.
 | Revoke a passkey | Session; refused if it breaks the unlocker floor |
 | Rotate the vault key | Live PRF assertion from an enrolled passkey |
 | Password reset | Control of the account email; never opens a vault |
+| Change the account password | Session + recent step-up; ends all windows + alerts |
+| Change the account (login) email | Session + recent step-up; a hosted address needs a non-email reset path first |
+| Regenerate 2FA backup codes | Session + recent step-up |
+| Disable 2FA | Session + a current TOTP/backup code; ends all windows |
+| Change 2FA cadence | Session + recent step-up |
+| Change a domain's security level | Session + recent second-factor step-up |
+| Unlock the vault with a recovery code | Session + recent step-up (if a factor is enrolled); ends all other windows + alerts |
 | Change a sealed mailbox's filters or alias routing | Session + open unlock window (the owner's own) |
 | Send as a protected identity domain | Open unlock window, via the mailbox compose path only — ambient/transactional senders are refused outright |
 | Protect a domain / stage or cut over a DKIM rotation | Admin session + open unlock window (the key seals to the owner's vault) |

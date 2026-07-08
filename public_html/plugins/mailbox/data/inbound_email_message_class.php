@@ -114,6 +114,23 @@ class InboundEmailMessage extends SystemBase {
 	// sealed row) — see the iem_direction check in decryptSealedField() below.
 	public static $sealed_fields = array('iem_sender', 'iem_subject', 'iem_body_plain', 'iem_body_html', 'iem_recipient', 'iem_ai_summary');
 
+	// AI surface (docs/example_class.php § AI): recipes may read mail through the
+	// query_model tool. On a protected domain a locked row is EXCLUDED from
+	// results (never a placeholder) and stays pending for post-unlock catch-up —
+	// ModelQueryExecutor::decryptSealedFields() enforces this against $sealed_fields.
+	// Message content is untrusted input (anyone can mail you), so the executor
+	// wraps sender/subject/body with the per-run injection nonce.
+	//
+	// Member read-scope: a non-admin member's AI reads are contained to rows they
+	// own by iem_sealed_owner_user_id — so a member's recipe reads their OWN
+	// sealed mail (in-window), never anyone else's. Standard (unsealed) rows carry
+	// no owner in that column, so they stay invisible to members' recipes; admins
+	// always read cross-user.
+	public static $ai_readable = true;
+	public static $ai_description = 'Received and sent email messages (subject, sender, body, AI triage summary).';
+	public static $ai_owner_field = 'iem_sealed_owner_user_id';
+	public static $ai_untrusted_fields = array('iem_sender', 'iem_subject', 'iem_body_plain');
+
 	protected static $foreign_key_actions = [
 		'iem_ied_inbound_email_domain_id' => ['action' => 'cascade'],
 		'iem_iea_inbound_email_alias_id'  => ['action' => 'null'],

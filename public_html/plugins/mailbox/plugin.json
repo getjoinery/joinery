@@ -131,6 +131,12 @@
             }
         }
     ],
+    "vaultGatedSettings": [
+        "mailbox_forwarding_smtp_host",
+        "mailbox_forwarding_smtp_port",
+        "mailbox_forwarding_smtp_username",
+        "mailbox_forwarding_smtp_password"
+    ],
     "settings": [
         {
             "name": "mailbox_enabled",

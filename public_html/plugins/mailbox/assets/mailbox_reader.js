@@ -75,10 +75,73 @@
 		}).then(function (r) { return r.json(); });
 	}
 
+	// ---- vault unlock (locked-state contract) ----
+	// A locked/pending row arrives with cleartext metadata and a neutral "Sealed
+	// message" placeholder; any content action (open a thread, search, download,
+	// Fortress compose) runs the built passkey ceremony and then re-runs the
+	// original request without navigation (specs/mailbox_security_levels.md § 4).
+	function apiV1(action, payload) {
+		var meta = document.querySelector('meta[name="joinery-api-csrf"]');
+		var csrf = meta ? meta.content : '';
+		return fetch('/api/v1/action/' + action, {
+			method: 'POST',
+			credentials: 'same-origin',
+			headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': csrf }
+		, body: JSON.stringify(payload || {}) }).then(function (r) { return r.json(); });
+	}
+
+	// Run the passkey unlock ceremony; resolves true on success. Reveals the
+	// Lock control once a window is open.
+	async function unlockVault() {
+		if (!window.JoineryPasskeys) { alert('Unlocking is unavailable on this page.'); return false; }
+		try {
+			var opt = await apiV1('vault_unlock_options', {});
+			if (!opt || !opt.data || !opt.data.options) {
+				throw new Error((opt && (opt.message || opt.error)) || 'Could not start unlock.');
+			}
+			var credential = (await JoineryPasskeys.derive(opt.data.options)).response;
+			var res = await apiV1('vault_unlock_passkey', { credential: credential });
+			if (res && (res.error || res.success === false)) {
+				throw new Error(res.message || 'Unlock failed.');
+			}
+			showLockControl(true);
+			startHeartbeat();
+			return true;
+		} catch (e) {
+			alert(e.message || 'Could not unlock your vault.');
+			return false;
+		}
+	}
+
+	function showLockControl(on) {
+		var btn = document.getElementById('mbx-lock');
+		if (btn) btn.hidden = !on;
+	}
+
+	// Presence is site-wide, not mail-page-only: the vault-presence beacon
+	// (assets/js/vault-presence.js, included by the page header for signed-in
+	// users) beats vault_heartbeat from EVERY Joinery page while a window is
+	// open, so navigating away from the reader never ends the window. The
+	// reader only announces state changes to it. With the beacon absent the
+	// window simply stays unmonitored (idle TTL + caps still apply) — never a
+	// false lock.
+	function startHeartbeat() {
+		if (window.JoineryVaultPresence) JoineryVaultPresence.start();
+	}
+	function stopHeartbeat() {
+		if (window.JoineryVaultPresence) JoineryVaultPresence.stop();
+	}
+
 	// ---- mailbox switcher (left rail) ----
 	function renderMailboxes(data) {
 		state.allAccess = !!data.all_access;
 		state.mailboxes = data.mailboxes || [];
+		// Reveal the explicit Lock control when a sealed mailbox currently has an
+		// open window (sealed but not locked) — there is something to lock.
+		var anyOpen = state.mailboxes.some(function (m) {
+			return m.security_level && m.security_level !== 'standard' && !m.locked;
+		});
+		if (anyOpen) { showLockControl(true); startHeartbeat(); }
 		var list = $('#mbx-mailboxes');
 		list.innerHTML = '';
 
@@ -257,6 +320,20 @@
 				}
 				listEl.appendChild(threadRow(t));
 			});
+			if (data.search_locked) {
+				// A search over a sealed mailbox with no open window — prompt unlock,
+				// then re-run the same query.
+				var row = el('li', 'mbx-unlock-banner');
+				row.appendChild(el('span', 'mbx-unlock-text', 'Unlock to search sealed mail.'));
+				var sbtn = el('button', 'mbx-unlock-btn', 'Unlock');
+				sbtn.type = 'button';
+				sbtn.addEventListener('click', async function () {
+					sbtn.disabled = true;
+					if (await unlockVault()) { loadThreads(true); } else { sbtn.disabled = false; }
+				});
+				row.appendChild(sbtn);
+				listEl.insertBefore(row, listEl.firstChild);
+			}
 			if (!listEl.children.length) {
 				listEl.appendChild(emptyRow('No conversations.'));
 			}
@@ -352,7 +429,26 @@
 		var url = CFG.threadUrl + '?thread_key=' + encodeURIComponent(t.thread_key)
 			+ (state.aliasId != null ? '&alias_id=' + encodeURIComponent(state.aliasId) : '');
 		apiGet(url).then(function (data) {
+			// Track the thread's locked state so content actions within it (e.g. an
+			// attachment download) can prompt one-tap unlock first (§ 4.1).
+			state.threadLocked = !!data.locked;
 			renderThread(t, data.messages || [], data.folders || []);
+			if (data.locked) {
+				// Sealed thread: metadata rendered, content is placeholders. Offer a
+				// one-tap unlock that re-runs this exact open on success — no navigation.
+				var banner = el('div', 'mbx-unlock-banner');
+				banner.appendChild(el('span', 'mbx-unlock-text', 'This mail is sealed.'));
+				var btn = el('button', 'mbx-unlock-btn', 'Unlock to read');
+				btn.type = 'button';
+				btn.addEventListener('click', async function () {
+					btn.disabled = true;
+					if (await unlockVault()) { openThread(t, rowEl); }
+					else { btn.disabled = false; }
+				});
+				banner.appendChild(btn);
+				pane.insertBefore(banner, pane.firstChild);
+				showLockControl(true);
+			}
 			// Opening marks the whole thread read (shared per mailbox).
 			if (t.unread_count > 0) {
 				apiAction({ action: 'mark_read', threadKey: t.thread_key, aliasId: state.aliasId })
@@ -683,6 +779,16 @@
 			chip.target = '_blank';
 			chip.rel = 'noopener';
 			chip.title = name + ' (' + size + ')';
+
+			// Downloading a sealed attachment is a content action: while the thread
+			// is locked, prompt one-tap unlock, then open the download (§ 4.1).
+			chip.addEventListener('click', function (ev) {
+				if (!state.threadLocked) return; // unlocked / Standard — download directly
+				ev.preventDefault();
+				unlockVault().then(function (ok) {
+					if (ok) { state.threadLocked = false; window.open(chip.href, '_blank', 'noopener'); }
+				});
+			});
 
 			chip.appendChild(fileIcon(a.content_type, name));
 			var meta = el('div', 'mbx-attachment-meta');
@@ -1033,7 +1139,7 @@
 			credentials: 'same-origin',
 			headers: { 'X-CSRF-Token': CFG.csrf || '' },
 			body: body
-		}).then(function (r) { return r.json(); }).then(function (data) {
+		}).then(function (r) { return r.json(); }).then(async function (data) {
 			if (btn) btn.disabled = false;
 			if (data && data.ok) {
 				closeCompose();
@@ -1046,6 +1152,12 @@
 					loadThreads(true);
 				}
 				refreshMailboxes();
+			} else if (data && data.locked) {
+				// Fortress compose while locked: one-tap unlock, then resubmit the
+				// same draft without re-navigation (specs/mailbox_security_levels.md § 4.1).
+				showComposeError('Your vault is locked. Unlocking…');
+				if (await unlockVault()) { hideComposeError(); submitCompose(e); }
+				else { showComposeError('Unlock is needed to send from this address.'); }
 			} else {
 				showComposeError((data && data.error) || 'The message could not be sent.');
 			}
@@ -1088,6 +1200,25 @@
 
 		$('#mbx-refresh').addEventListener('click', function () { refreshMailboxes(); loadThreads(true); });
 		$('#mbx-more').addEventListener('click', function () { state.page += 1; loadThreads(false); });
+
+		// Explicit lock (specs/mailbox_security_levels.md § The Unlock Window):
+		// end the vault window now, then re-read so sealed rows re-seal to
+		// placeholders and the Lock control hides itself.
+		var lockBtn = document.getElementById('mbx-lock');
+		if (lockBtn) lockBtn.addEventListener('click', async function () {
+			lockBtn.disabled = true;
+			try { await apiV1('vault_lock', {}); } catch (e) {}
+			stopHeartbeat();
+			showLockControl(false);
+			lockBtn.disabled = false;
+			refreshMailboxes();
+			loadThreads(true);
+			// Collapse any open sealed thread back to placeholders.
+			if (state.threadKey) {
+				var open = state.openThread || { thread_key: state.threadKey, subject: '' };
+				openThread(open, null);
+			}
+		});
 
 		var newMsgBtn = $('#mbx-new-message');
 		if (newMsgBtn) newMsgBtn.addEventListener('click', openComposeNew);

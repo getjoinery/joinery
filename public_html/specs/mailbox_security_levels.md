@@ -1,7 +1,9 @@
 # Mailbox — Security Levels (Per-Domain Protection Posture)
 
 **Status:** Draft / awaiting implementation
-**Version:** 1.5
+**Version:** 1.6 — § The Unlock Window event 3: presence is site-wide ("on
+Joinery"), not mail-page-only; grace threshold ~5 min to tolerate
+background-tab throttling.
 **Unifies:** `specs/mailbox_encryption_at_rest.md`,
 `specs/mailbox_outbound_send_protection.md`,
 `specs/mailbox_hardened_ingest_relay.md`. Those specs define the
@@ -293,14 +295,19 @@ the APCu entry:
    phone* — see 7.
 2. **Session end.** Logout, session expiry, or session destruction for any
    reason. The window never outlives its session.
-3. **Browser gone.** The unlocked mail page maintains a heartbeat while
-   visible-or-recently-active; the window ends after one missed grace
-   interval (60 s). Closing the tab/browser, killing the machine, or system
-   sleep all stop the heartbeat.
+3. **Browser gone.** Presence means **on Joinery, not on the mail page**:
+   every page carries a presence beacon while a window is open, so moving
+   between site pages — mail to calendar to admin — never ends the window,
+   and a Joinery tab left in the background still counts as present (the
+   browser throttles its beat; the grace threshold sits above the worst
+   throttle interval, ~5 minutes). Only a browser that is genuinely gone —
+   tab closed, browser quit, machine off — goes silent past the grace
+   threshold, and the window ends at the next read. Staleness is hygiene,
+   not a security boundary: the hard stops are events 2, 5, 6, and 7.
 4. **Machine asleep or locked.** Lid close and system sleep stop the
-   heartbeat (see 3). Where the browser exposes screen-lock/idle signals
+   beacon (see 3). Where the browser exposes screen-lock/idle signals
    (Idle Detection API), the page reports lock immediately rather than
-   waiting out the grace interval — a progressive enhancement, not the
+   waiting out the grace threshold — a progressive enhancement, not the
    mechanism of record.
 5. **Network identity change.** The platform's existing IP-change guard
    already zeroes elevated session permissions when a session's address

@@ -535,7 +535,15 @@ class InboundEmailSetupCheck {
 		// forwarding subdomain's SPF must authorize the box, and the domain must
 		// not be relay-provider-verified. Non-protected domains keep the ambient
 		// shape below.
-		$protected = ($model && $model->is_protected_identity());
+		//
+		// The security level is the single branching key
+		// (specs/mailbox_security_levels.md § Setup/health branching): a Fortress
+		// domain expects the protected shape from the moment the level is chosen —
+		// before the verify-gated protect ceremony flips ied_is_protected_identity —
+		// so the Setup tab guides the operator to publish the inverted records and
+		// reads as incomplete until the ceremony verifies.
+		$protected = ($model && ($model->is_protected_identity()
+			|| $model->security_level() === InboundEmailDomain::LEVEL_FORTRESS));
 
 		// SPF — fetch the domain's TXT once; both branches read it.
 		list($txt, $txtOk) = $this->dns(function () use ($domain) { return DnsResolver::getTxt($domain); });

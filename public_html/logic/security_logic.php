@@ -27,6 +27,8 @@ function security_logic(array $input): LogicResult{
 	$page_vars['provisioning_uri'] = null;
 	$page_vars['backup_codes'] = null;
 	$page_vars['just_enabled'] = false;
+	$page_vars['has_second_factor'] = $session->user_has_second_factor($user);
+	$page_vars['cadence'] = $user->two_factor_cadence();
 
 	$msgtxt_from_get = $input['msgtext'] ?? null;
 	if ($msgtxt_from_get) {
@@ -37,6 +39,26 @@ function security_logic(array $input): LogicResult{
 	}
 
 	$action = $input['action'] ?? '';
+
+	if ($action === 'set_cadence') {
+		// 2FA cadence (specs/mailbox_security_levels.md § 5.2). Changing it is a
+		// sensitive action — re-confirm the second factor first.
+		$stepup = $session->require_recent_second_factor('/profile/security');
+		if ($stepup !== null) {
+			return $stepup;
+		}
+		$new_cadence = ($input['cadence'] ?? '') === 'sensitive_only' ? 'sensitive_only' : 'every_login';
+		$user->set('usr_2fa_cadence', $new_cadence);
+		$user->save();
+		$page_vars['cadence'] = $new_cadence;
+		$msgtxt = $new_cadence === 'sensitive_only'
+			? 'Sign-in is now password-only. Your second factor is asked at sensitive actions. Note: a phished password can then see your Standard mail and mailbox metadata.'
+			: 'Your second factor is now asked at every sign-in.';
+		$message = new DisplayMessage($msgtxt, 'Two-factor cadence updated', '/\/profile\/security.*/',
+			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'securitybox', TRUE);
+		$session->save_message($message);
+		return LogicResult::redirect('/profile/security');
+	}
 
 	if ($action === 'start_enable' && !$page_vars['totp_enabled']) {
 		$totp = \OTPHP\TOTP::generate();
@@ -106,6 +128,12 @@ function security_logic(array $input): LogicResult{
 	}
 
 	if ($action === 'regenerate_backup_codes' && $page_vars['totp_enabled']) {
+		// Sensitive action (specs/mailbox_security_levels.md § 5.5): new backup
+		// codes are a persistence mechanism, so re-confirm the second factor first.
+		$stepup = $session->require_recent_second_factor('/profile/security');
+		if ($stepup !== null) {
+			return $stepup;
+		}
 		$backup_codes = $user->generate_backup_codes();
 		$page_vars['backup_codes'] = $backup_codes;
 		$msgtxt = 'New backup codes have been generated. Your previous codes are no longer valid.';
@@ -140,6 +168,10 @@ function security_logic(array $input): LogicResult{
 
 		$user->disable_totp();
 		$session->delete_trusted_device_cookie();
+		// Credential event (specs/mailbox_security_levels.md § 6.6): a 2FA method
+		// change ends every vault window everywhere.
+		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+		VaultUnlock::lockAll($user->key);
 		$page_vars['totp_enabled'] = false;
 		$page_vars['totp_enabled_time'] = null;
 		$msgtxt = 'Two-factor authentication has been disabled.';
@@ -166,6 +198,10 @@ function security_logic(array $input): LogicResult{
 
 	if ($action === 'revoke_all_app_sessions') {
 		ApiKey::RevokeSessionKeysForUser($user->key);
+		// Credential event (specs/mailbox_security_levels.md § 6.6): revoking app
+		// sessions ends every vault window with them.
+		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+		VaultUnlock::lockAll($user->key);
 		$message = new DisplayMessage('All app sessions have been signed out.', 'Sessions revoked',
 			'/\/profile\/security.*/', DisplayMessage::MESSAGE_ANNOUNCEMENT,
 			DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'securitybox', TRUE);

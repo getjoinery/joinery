@@ -78,14 +78,49 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		
 
 		if(isset($input['usr_email_new']) && $input['usr_email_new'] != $user->get('usr_email')) {
-			
-			if (User::GetByEmail(trim($input['usr_email_new']))) {
+
+			// Changing the account (login) email is a sensitive action
+			// (specs/mailbox_security_levels.md § 5.5): re-confirm the second factor.
+			$stepup = $session->require_recent_second_factor('/profile/account_edit');
+			if ($stepup !== null) {
+				return $stepup;
+			}
+
+			// Population-2 precondition (§ 7): making one of the user's OWN hosted
+			// mailboxes the login email would send every future reset link into the
+			// very inbox a locked-out user cannot reach. So it requires holding at
+			// least one non-email reset path first (a passkey or TOTP today; an
+			// external recovery address joins this list with Phase 7). State the
+			// locked-out floor now, not during the crisis.
+			$new_email_addr = trim($input['usr_email_new']);
+			$at = strrpos($new_email_addr, '@');
+			$new_domain = $at !== false ? strtolower(substr($new_email_addr, $at + 1)) : '';
+			$is_user_hosted = false;
+			$domain_class = PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php');
+			if ($new_domain !== '' && is_file($domain_class)) {
+				require_once($domain_class);
+				if (class_exists('InboundEmailDomain')) {
+					// Owned OR grant-reached — a grant-reached mailbox is just as
+					// circular (the reset link still lands where the user is locked out).
+					$is_user_hosted = in_array($new_domain,
+						InboundEmailDomain::userHostedDomainNames((int)$user->key), true);
+				}
+			}
+			$precondition_ok = !($is_user_hosted && !$session->user_has_second_factor($user));
+
+			if (!$precondition_ok) {
+				$msgtxt = 'Before using a hosted address as your login email, set up a passkey or an authenticator app. '
+					. 'Otherwise a forgotten password would send the reset link into the very inbox you would be locked out of.';
+				$message = new DisplayMessage($msgtxt, 'Set up a recovery method first', '/\/profile\/account_edit.*/', DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'userbox', TRUE);
+				$session->save_message($message);
+			}
+			else if (User::GetByEmail(trim($input['usr_email_new']))) {
 				$msgtxt = 'An account has already been registered with the email address '. htmlspecialchars($input['usr_email_new']) .'.';
 				$message = new DisplayMessage($msgtxt, 'Account already registered', '/\/profile\/account_edit.*/', DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'userbox', TRUE);
-				$session->save_message($message);			
-			
-			} 
-			else {			
+				$session->save_message($message);
+
+			}
+			else {
 				Activation::email_change_send($user->key, trim($input['usr_email_new']));
 
 				$msgtxt = 'To complete your email change, please click the activation link that we sent you at '. htmlspecialchars($input['usr_email_new']) .'.';

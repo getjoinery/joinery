@@ -31,7 +31,7 @@
  * at pull. Catch-all recipients have no single owner, so they are always
  * transport-sealed.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
@@ -170,7 +170,7 @@ class RelayMapExporter {
 				$address = $local . '@' . $domain_name;
 				$recipient_access[] = $address . "\tOK";
 
-				list($public_key, $key_kind) = $this->sealTargetForAlias($alias);
+				list($public_key, $key_kind) = $this->sealTargetForAlias($alias, $domain);
 
 				$routing['recipients'][$address] = array(
 					'public_key'        => $public_key,
@@ -219,16 +219,23 @@ class RelayMapExporter {
 	}
 
 	/**
-	 * The (public_key, key_kind) an alias's mail is sealed to. Fortress (single
-	 * grantee with a vault) → the user's vault key; everyone else → the ambient
-	 * transport key.
+	 * The (public_key, key_kind) an alias's mail is sealed to. Only a Fortress
+	 * domain seals to the owner's vault key (key_kind=user → sealed-to-owner,
+	 * pending-parse at unlock); every other posture — including a Private domain
+	 * whose owner holds a vault — seals to the ambient transport key, which
+	 * Joinery opens at pull and re-seals at ingest per its own level
+	 * (specs/mailbox_security_levels.md § Level → mechanism-branch switch, point
+	 * 2). A key_kind=user blob therefore exists only for Fortress, so the
+	 * pending-parse path needs no level check of its own.
 	 */
-	private function sealTargetForAlias($alias): array {
-		$owner_id = InboundEmailMessage::singleOwnerUserId(intval($alias->key));
-		if ($owner_id !== null) {
-			$vault_pk = $this->vaultPublicKey($owner_id);
-			if ($vault_pk !== null) {
-				return array($vault_pk, 'user');
+	private function sealTargetForAlias($alias, $domain): array {
+		if ($domain->security_level() === InboundEmailDomain::LEVEL_FORTRESS) {
+			$owner_id = InboundEmailMessage::singleOwnerUserId(intval($alias->key));
+			if ($owner_id !== null) {
+				$vault_pk = $this->vaultPublicKey($owner_id);
+				if ($vault_pk !== null) {
+					return array($vault_pk, 'user');
+				}
 			}
 		}
 		return array($this->transport_public_key, 'transport');

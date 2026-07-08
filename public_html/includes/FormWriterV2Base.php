@@ -3265,6 +3265,11 @@ document.addEventListener("DOMContentLoaded", function() {
             'helptext' => $options['helptext'] ?? '',
             'visibility_rules' => $options['visibility_rules'] ?? null,
             'custom_script' => $options['custom_script'] ?? null,
+            // Card layout: 'descriptions' maps each option value to outcome
+            // language (a string, or an array of lines) shown under the option
+            // label; 'card' renders each option as a selectable card.
+            'descriptions' => $options['descriptions'] ?? [],
+            'card' => !empty($options['card']),
         ];
     }
 

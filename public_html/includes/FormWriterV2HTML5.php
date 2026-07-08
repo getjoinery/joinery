@@ -269,10 +269,20 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
             $html .= '</label>';
         }
 
+        $is_card = !empty($data['card']);
+        $descriptions = $data['descriptions'] ?? [];
+        if ($is_card) {
+            $html .= '<div class="jy-radio-cards">';
+        }
+
         foreach ($data['options_list'] as $opt_value => $opt_label) {
             $id = $data['name'] . '_' . $opt_value;
 
-            $html .= '<div class="form-check">';
+            // In card mode each card carries an addressable id ({name}_{value}_card)
+            // so a field-visibility rule on another control can show/hide a single
+            // option (e.g. hiding the Fortress card for an IMAP-source domain).
+            $html .= '<div class="form-check' . ($is_card ? ' jy-radio-card' : '') . '"'
+                . ($is_card ? ' id="' . htmlspecialchars($id . '_card') . '"' : '') . '>';
             $html .= '<input type="radio"';
             $html .= ' name="' . htmlspecialchars($data['name']) . '"';
             $html .= ' id="' . htmlspecialchars($id) . '"';
@@ -299,8 +309,23 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
 
             $html .= '>';
 
-            $html .= '<label for="' . htmlspecialchars($id) . '" class="form-check-label">' . htmlspecialchars($opt_label) . '</label>';
+            $html .= '<label for="' . htmlspecialchars($id) . '" class="form-check-label">' . htmlspecialchars($opt_label);
 
+            if (isset($descriptions[$opt_value])) {
+                $lines = is_array($descriptions[$opt_value]) ? $descriptions[$opt_value] : [$descriptions[$opt_value]];
+                $html .= '<span class="jy-radio-card-desc">';
+                foreach ($lines as $line) {
+                    $html .= '<span>' . htmlspecialchars($line) . '</span>';
+                }
+                $html .= '</span>';
+            }
+
+            $html .= '</label>';
+
+            $html .= '</div>';
+        }
+
+        if ($is_card) {
             $html .= '</div>';
         }
 

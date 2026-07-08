@@ -106,10 +106,30 @@ function admin_settings_logic(array $input): LogicResult {
 			NULL);
 		$user_settings->load();
 
+		// Vault-gated settings (specs/mailbox_security_levels.md § Vault-Gated
+		// Settings): a change to a setting that redirects protected mail's
+		// plaintext is refused unless the acting account holds an open unlock
+		// window. Resolve the acting user's vault state once.
+		require_once(PathHelper::getIncludePath('includes/VaultGatedSettings.php'));
+		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
+		$acting_uid = (int)$session->get_user_id();
+		$acting_has_vault = ($acting_uid > 0) && (UserEncryptionVault::loadForUser($acting_uid) !== null);
+		$vault_window_open = $acting_has_vault && VaultUnlock::isOpen($acting_uid);
+		$vault_blocked_settings = array();
+
 		foreach($user_settings as $user_setting) {
 			if(isset($input[$user_setting->get('stg_name')])){
-				$value = $input[$user_setting->get('stg_name')];
-				if ($user_setting->get('stg_name') === 'webDir') {
+				$stg_name = $user_setting->get('stg_name');
+				$value = $input[$stg_name];
+				// Only gate a genuine change (unchanged value re-submitted is a no-op).
+				if ($acting_has_vault && !$vault_window_open
+						&& VaultGatedSettings::isGated($stg_name)
+						&& (string)$value !== (string)$user_setting->get('stg_value')) {
+					$vault_blocked_settings[] = $stg_name;
+					continue;
+				}
+				if ($stg_name === 'webDir') {
 					$value = rtrim(preg_replace('#^https?://#i', '', $value), '/');
 				}
 				$user_setting->set('stg_value', $value);
@@ -118,6 +138,19 @@ function admin_settings_logic(array $input): LogicResult {
 				$user_setting->prepare();
 				$user_setting->save();
 			}
+		}
+
+		if (!empty($vault_blocked_settings)) {
+			require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+			$session->save_message(new DisplayMessage(
+				'Unlock your vault to change these protected settings, then save again: '
+					. htmlspecialchars(implode(', ', $vault_blocked_settings)) . '. '
+					. 'Other settings were saved.',
+				'Unlock required',
+				'~/admin/admin_settings~',
+				DisplayMessage::MESSAGE_WARNING,
+				DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+			));
 		}
 
 		// Track which settings we've processed

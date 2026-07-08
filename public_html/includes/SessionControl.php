@@ -721,6 +721,17 @@ class SessionControl{
 			}
 		}
 
+		// End this session's vault window on logout (specs/mailbox_security_levels.md
+		// § The Unlock Window: session end — the window never outlives its session).
+		if ($this->get_user_id()) {
+			try {
+				require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+				VaultUnlock::close($this->get_user_id());
+			} catch (\Throwable $e) {
+				error_log('logout: vault window close failed: ' . $e->getMessage());
+			}
+		}
+
 		$_SESSION = array();
 
 		if (isset($_COOKIE[session_name()])) {
@@ -1038,6 +1049,96 @@ class SessionControl{
 	}
 
 
+	// ====================================================================
+	// Second-factor step-up (specs/mailbox_security_levels.md § 5.5)
+	//
+	// A sensitive ADMINISTRATION action re-confirms the account's second factor
+	// (TOTP or passkey) and stamps a session-scoped marker. Distinct from the
+	// vault unlock window: the vault gates plaintext redirection; the second
+	// factor gates administration. Passkey and TOTP step-ups share ONE marker
+	// (pks_passkey_ceremonies kind='stepup'), so one recency check covers both —
+	// a passkey step-up already writes it (PasskeyService::verifyStepUp); a TOTP
+	// step-up writes it via stamp_second_factor().
+	// ====================================================================
+
+	/** True when the user holds a usable second factor (TOTP or ≥1 live passkey). */
+	function user_has_second_factor($user): bool {
+		if (!$user || !$user->key) {
+			return false;
+		}
+		if ($user->has_totp_enabled()) {
+			return true;
+		}
+		require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+		$creds = new MultiPasskey(array('user_id' => (int)$user->key));
+		$creds->load();
+		return count($creds) > 0;
+	}
+
+	/** True when THIS session re-confirmed a second factor within $ttl seconds. */
+	function has_recent_second_factor(int $ttl = 300): bool {
+		$sid = session_id();
+		if (!$sid) {
+			return false;
+		}
+		require_once(PathHelper::getIncludePath('data/passkey_ceremonies_class.php'));
+		$markers = new MultiPasskeyCeremony(array('session_id' => $sid, 'kind' => 'stepup'));
+		$markers->load();
+		$cutoff = time() - $ttl;
+		foreach ($markers as $m) {
+			$t = strtotime($m->get('pks_created_time') . ' UTC');
+			if ($t && $t >= $cutoff) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Stamp a fresh second-factor confirmation for this session (the TOTP path;
+	 *  the passkey path stamps its own via PasskeyService::verifyStepUp). */
+	function stamp_second_factor(string $purpose = 'stepup_verified'): void {
+		$sid = session_id();
+		if (!$sid) {
+			return;
+		}
+		require_once(PathHelper::getIncludePath('data/passkey_ceremonies_class.php'));
+		$marker = new PasskeyCeremony(NULL);
+		$marker->set('pks_session_id', $sid);
+		$marker->set('pks_kind', 'stepup');
+		$marker->set('pks_purpose', $purpose);
+		$marker->set('pks_expires_time', gmdate('Y-m-d H:i:s', time() + 3600));
+		$marker->save();
+	}
+
+	/**
+	 * Gate a sensitive action on a recent second-factor step-up. Returns a
+	 * LogicResult redirect to the step-up ceremony (which returns to $return_url)
+	 * when confirmation is needed, or NULL to proceed. A no-op for an account
+	 * with no second factor — there is nothing to step up with (2FA is optional
+	 * below Fortress); the action's own enrollment rules decide whether a factor
+	 * must exist. When $force is true (e.g. recovery-code unlock) the gate fires
+	 * regardless of cadence but still only when a factor is enrolled.
+	 *
+	 * @return LogicResult|null
+	 */
+	function require_recent_second_factor(string $return_url, int $ttl = 300) {
+		require_once(PathHelper::getIncludePath('data/users_class.php'));
+		$uid = $this->get_user_id();
+		$user = $uid ? new User($uid, TRUE) : null;
+		if (!$this->user_has_second_factor($user)) {
+			return null;
+		}
+		if ($this->has_recent_second_factor($ttl)) {
+			return null;
+		}
+		require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+		// Only same-site relative returns (leading single slash) — never an open redirect.
+		if ($return_url === '' || $return_url[0] !== '/' || (isset($return_url[1]) && $return_url[1] === '/')) {
+			$return_url = '/profile';
+		}
+		return LogicResult::redirect('/verify-stepup?return=' . rawurlencode($return_url));
+	}
+
 	function get_permission() {
 		if (!$this->get_user_id()) {
 			return 0;
@@ -1054,6 +1155,15 @@ class SessionControl{
 					$client_ip,
 					$_SERVER['REQUEST_URI'] ?? ''
 				));
+				// Network identity change also ends this session's vault window
+				// (specs/mailbox_security_levels.md § The Unlock Window): a laptop that
+				// leaves the cafe re-locks when it reappears on another network.
+				if (!empty($_SESSION['usr_user_id'])) {
+					try {
+						require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+						VaultUnlock::close((int)$_SESSION['usr_user_id']);
+					} catch (\Throwable $e) {}
+				}
 				return 0;
 			}
 		}
@@ -1159,11 +1269,32 @@ class SessionControl{
 			}
 
 			// Enforce 2FA on admin accounts when totp_require_admins is set.
-			// Exempt /profile/security (where they enable it) and /logout to avoid loops.
+			// Exempt /profile/security (where they enable it) and /logout to avoid
+			// loops, and ALL /api/v1/ requests: the gate governs page navigation,
+			// but the security page does its enrollment through /api/v1 fetches
+			// (passkey_register_*, TOTP setup) that call check_permission()
+			// themselves — an HTML redirect inside a JSON fetch would make
+			// enrollment impossible. Protected content over the API is already
+			// independently vault-gated.
 			if ($this->must_enable_totp_for_admin()) {
 				$current_path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-				if ($current_path !== '/profile/security' && $current_path !== '/logout') {
+				if ($current_path !== '/profile/security' && $current_path !== '/logout'
+						&& strpos((string)$current_path, '/api/v1/') !== 0) {
 					$msgtxt = urlencode('Your administrator account requires two-factor authentication.');
+					header('Location: /profile/security?msgtext=' . $msgtxt);
+					exit();
+				}
+			}
+
+			// Fortress mandatory-2FA enrollment (specs/mailbox_security_levels.md § 5.3):
+			// a user who owns or holds a grant on a Fortress domain is blocked until a
+			// second factor is enrolled. Same surface + exemptions as the admin gate
+			// (including the /api/v1/ exemption, so passkey/TOTP enrollment works).
+			if ($this->must_enroll_2fa_for_fortress()) {
+				$current_path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+				if ($current_path !== '/profile/security' && $current_path !== '/logout'
+						&& strpos((string)$current_path, '/api/v1/') !== 0) {
+					$msgtxt = urlencode('A domain on your account uses the Fortress level, which requires two-factor authentication. Enroll a second factor to continue.');
 					header('Location: /profile/security?msgtext=' . $msgtxt);
 					exit();
 				}
@@ -1190,6 +1321,40 @@ class SessionControl{
 		require_once(PathHelper::getIncludePath('data/users_class.php'));
 		$user = new User($_SESSION['usr_user_id'], true);
 		return !$user->has_totp_enabled();
+	}
+
+	/**
+	 * True when the current user touches a Fortress-level domain (owns one or
+	 * holds a grant on one) but has no second factor enrolled — the Fortress
+	 * mandatory-2FA gate (specs/mailbox_security_levels.md § 5.3). The heavy
+	 * posture lookup is cached in session; the factor check stays live so
+	 * enrolling clears the gate immediately without busting the cache.
+	 */
+	function must_enroll_2fa_for_fortress() {
+		if (!isset($_SESSION['usr_user_id'])) {
+			return false;
+		}
+		if (!isset($_SESSION['max_security_level'])) {
+			$_SESSION['max_security_level'] = 'standard';
+			$domain_class = PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php');
+			if (is_file($domain_class)) {
+				require_once($domain_class);
+				if (class_exists('InboundEmailDomain')) {
+					try {
+						$_SESSION['max_security_level'] =
+							InboundEmailDomain::maxSecurityLevelForUser((int)$_SESSION['usr_user_id']);
+					} catch (\Throwable $e) {
+						$_SESSION['max_security_level'] = 'standard';
+					}
+				}
+			}
+		}
+		if ($_SESSION['max_security_level'] !== 'fortress') {
+			return false;
+		}
+		require_once(PathHelper::getIncludePath('data/users_class.php'));
+		$user = new User($_SESSION['usr_user_id'], true);
+		return !$this->user_has_second_factor($user);
 	}
 
 	/**

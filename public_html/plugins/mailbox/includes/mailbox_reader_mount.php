@@ -20,7 +20,7 @@
  * mailbox list for reply/forward modes) and clears the recipient/subject/body
  * fields. See specs/implemented/inbound_email_new_message_compose.md.
  *
- * @version 1.2.0
+ * @version 1.3.0
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSender.php'));
@@ -139,6 +139,10 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 				<span id="mbx-list-title" class="mbx-list-title">All mail</span>
 				<div class="mbx-list-header-actions">
 					<button type="button" id="mbx-new-message" class="mbx-new-btn" hidden>+ New message</button>
+					<!-- Explicit lock (specs/mailbox_security_levels.md § The Unlock Window):
+					     ends the vault window from any mail surface. Hidden until an
+					     unlock window is known to be open (the reader reveals it). -->
+					<button type="button" id="mbx-lock" class="mbx-iconbtn" title="Lock your vault" hidden>&#128274;</button>
 					<button type="button" id="mbx-refresh" class="mbx-iconbtn" title="Refresh">&#8635;</button>
 				</div>
 			</div>
@@ -153,6 +157,10 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 		</div>
 	</section>
 </div>
+<!-- WebAuthn helper for the in-reader vault unlock ceremony (locked-state contract).
+     Not deferred: it must define window.JoineryPasskeys before the reader script
+     below runs. Same include convention as views/login.php and profile/security.php. -->
+<script src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
 <script src="<?php echo htmlspecialchars($asset_ver('mailbox_reader.js')); ?>"></script>
 	<?php
 }

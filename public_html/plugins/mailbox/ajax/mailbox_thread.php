@@ -42,4 +42,8 @@ echo json_encode(array(
 	'messages' => $messages,
 	// Folder ids this thread currently belongs to — pre-checks the move/labels control.
 	'folders'  => $service->threadFolderIds($alias_id, $thread_key),
+	// Locked-state contract (specs/mailbox_security_levels.md § 4.1): the thread
+	// rendered a sealed placeholder for a locked/pending row — the reader offers
+	// one-tap unlock, then re-runs this fetch.
+	'locked'   => $service->contentLocked(),
 ));

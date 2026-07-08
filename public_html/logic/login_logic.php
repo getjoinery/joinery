@@ -143,8 +143,16 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 
 		// 2FA check: if user has TOTP enabled and no valid trusted-device cookie,
-		// stash a pending state and redirect to /verify-totp instead of completing login
-		if ($user->has_totp_enabled() && !$session->has_valid_trusted_device_cookie($user)) {
+		// stash a pending state and redirect to /verify-totp instead of completing login.
+		// The 2FA cadence (specs/mailbox_security_levels.md § 5.2) decides whether the
+		// factor is asked at sign-in: 'every_login' asks it here; 'sensitive_only'
+		// signs in password-only and defers the factor to sensitive actions (step-up).
+		// This is sound because every escalation from a bare session — password/email
+		// change, 2FA changes, recovery-code use, protected-mail routing — is
+		// independently gated; a phished password on 'sensitive_only' sees the
+		// mailbox's shape and opens nothing.
+		if ($user->has_totp_enabled() && $user->two_factor_cadence() === 'every_login'
+				&& !$session->has_valid_trusted_device_cookie($user)) {
 			session_regenerate_id(true);
 			$_SESSION['totp_pending_user_id']  = $user->key;
 			$_SESSION['totp_pending_remember'] = !empty($input['setcookie']) || !empty($input['lbx_setcookie']);

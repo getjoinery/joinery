@@ -34,6 +34,16 @@ function passkey_register_options_logic(array $input): LogicResult {
 		}
 	}
 
+	// Beyond the per-case proof above, an account that already holds a second
+	// factor (e.g. a TOTP user enrolling their FIRST passkey) must have a recent
+	// second-factor step-up (specs/mailbox_security_levels.md § 5.5). Returning
+	// the flag before the WebAuthn dialog means the prompt precedes the ceremony
+	// rather than rejecting it after. A no-op when no factor is enrolled.
+	if ($session->user_has_second_factor($user) && !$session->has_recent_second_factor()) {
+		return LogicResult::render(['second_factor_required' => true,
+			'error' => 'Confirm your identity with your second factor, then try again.']);
+	}
+
 	try {
 		$options = $service->getRegistrationOptions($user, !empty($input['prf_capable_requested']));
 	} catch (Exception $e) {

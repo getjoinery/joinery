@@ -204,6 +204,28 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		}
 	}
 
+	// --- Level-guided setup (specs/mailbox_security_levels.md § Phase 3) ---
+	// The chosen level drives the next steps shown below the checks: Private adds
+	// the one-time vault ceremony; Fortress adds the protect ceremony, the relay,
+	// and the session-gated-send confirmation. Reuse the built flows — link, never
+	// reimplement.
+	$focus_domain_model = null;
+	$security_level     = InboundEmailDomain::LEVEL_STANDARD;
+	$focus_domain_id    = 0;
+	$focus_is_protected = false;
+	$acting_has_vault   = false;
+	if ($selected && $arrival !== 'imap' && $focus_domain !== '') {
+		$focus_domain_model = InboundEmailDomain::GetByDomain($focus_domain);
+		if ($focus_domain_model) {
+			$security_level     = $focus_domain_model->security_level();
+			$focus_domain_id    = (int)$focus_domain_model->key;
+			$focus_is_protected = $focus_domain_model->is_protected_identity();
+		}
+		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
+		$uid = (int)$session->get_user_id();
+		$acting_has_vault = $uid > 0 && (UserEncryptionVault::loadForUser($uid) !== null);
+	}
+
 	// --- Advanced (server-wide) — only run the full suite when expanded ---
 	$results     = array();
 	$dns_records = array();
@@ -241,6 +263,11 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		'receiving_rows'             => $receiving_rows,
 		'forwarding_rows'            => $forwarding_rows,
 		'selected_imap'              => $selected_imap,
+		// Level-guided setup (Phase 3)
+		'security_level'             => $security_level,
+		'focus_domain_id'            => $focus_domain_id,
+		'focus_is_protected'         => $focus_is_protected,
+		'acting_has_vault'           => $acting_has_vault,
 		// Advanced
 		'advanced'                   => $advanced,
 		'results'                    => $results,

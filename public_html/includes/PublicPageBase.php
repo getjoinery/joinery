@@ -578,6 +578,19 @@ abstract class PublicPageBase {
 		if ($session->is_logged_in()) {
 			echo '<meta name="joinery-api-csrf" content="'
 				. htmlspecialchars($session->get_api_csrf_token(), ENT_QUOTES, 'UTF-8') . '" />' . "\n";
+
+			// Vault presence (specs/mailbox_security_levels.md § The Unlock Window):
+			// while an unlock window is open, every page beats vault_heartbeat so
+			// presence means "on Joinery", not "on the mail page". The meta flag
+			// tells the beacon a window was open at render time (a cheap APCu
+			// check); the script itself is inert without the flag or a
+			// 'joinery:vault-unlocked' event from an in-page unlock ceremony.
+			require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+			if (VaultUnlock::isOpen((int)$session->get_user_id())) {
+				echo '<meta name="joinery-vault-window" content="open" />' . "\n";
+			}
+			echo '<script src="/assets/js/vault-presence.js?v='
+				. $this->asset_mtime('assets/js/vault-presence.js') . '"></script>' . "\n";
 		}
 
 		$this->render_base_assets();

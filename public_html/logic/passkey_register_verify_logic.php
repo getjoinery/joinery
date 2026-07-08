@@ -13,6 +13,18 @@ function passkey_register_verify_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
 	$session->check_permission(0);
 
+	// Enrolling a passkey is a sensitive action (specs/mailbox_security_levels.md
+	// § 5.5): the account's second factor must have been re-confirmed recently.
+	// A no-op for a first passkey (no factor yet — the first-passkey ceremony
+	// gates on the account password instead). API surface, so it returns a flag
+	// the client uses to run the step-up ceremony and retry, not a redirect.
+	require_once(PathHelper::getIncludePath('data/users_class.php'));
+	$user = new User($session->get_user_id(), TRUE);
+	if ($session->user_has_second_factor($user) && !$session->has_recent_second_factor()) {
+		return LogicResult::render(['second_factor_required' => true,
+			'error' => 'Confirm your identity with your second factor, then try again.']);
+	}
+
 	$credential = $input['credential'] ?? null;
 	if (!is_array($credential)) {
 		return LogicResult::error('Missing passkey credential response.');

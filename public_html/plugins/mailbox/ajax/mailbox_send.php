@@ -69,6 +69,11 @@ $sender = new MailboxSender($viewer);
 try {
 	$result = $sender->send($params, $files);
 	echo json_encode(array('ok' => true, 'outbound_id' => $result['outbound_id']));
+} catch (MailboxLockedException $e) {
+	// Fortress compose while locked (specs/mailbox_security_levels.md § 4.1): flag
+	// it so the reader runs the one-tap unlock ceremony and resubmits the draft,
+	// rather than only showing the error.
+	echo json_encode(array('ok' => false, 'locked' => true, 'error' => $e->getMessage()));
 } catch (MailboxSenderException $e) {
 	echo json_encode(array('ok' => false, 'error' => $e->getMessage()));
 } catch (Throwable $e) {

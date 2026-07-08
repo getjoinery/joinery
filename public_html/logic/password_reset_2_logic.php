@@ -79,6 +79,28 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 		$user->save();
 
+		// A password reset re-issues the SESSION, never the vault
+		// (specs/mailbox_security_levels.md § Password reset): it is a credential
+		// event, so every open unlock window everywhere ends and the account is
+		// alerted. Sealed content still demands an unlocker ceremony the resetter
+		// cannot fake — so reset stays humane, not a total-takeover event.
+		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+		VaultUnlock::lockAll($user->key);
+		try {
+			require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+			$to = (string)$user->get('usr_email');
+			if ($to !== '') {
+				EmailSender::quickSend(
+					$to,
+					trim((string)$settings->get_setting('site_name') . ' security alert'),
+					"Your account password was just reset. If this was you, no action is needed. "
+					. "If this was NOT you, contact us immediately."
+				);
+			}
+		} catch (\Throwable $e) {
+			error_log('password_reset_2: alert email failed for user ' . $user->key . ': ' . $e->getMessage());
+		}
+
 		// Now delete the code
 		Activation::deleteTempCode($act_code);
 		$page_vars['message_type'] = 'success';

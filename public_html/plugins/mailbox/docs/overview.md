@@ -663,6 +663,91 @@ message reclaims its attachment `File`s **and** any stored raw through the messa
 hard-delete hook (the single reclaim path); soft delete leaves everything in place (the
 row is recoverable).
 
+## Security levels
+
+Each **domain** carries a security level (`ied_security_level`), the single switch
+that selects each mechanism's plaintext-vs-sealed branch. Every mailbox and alias on
+the domain inherits it — MX, SPF, DMARC, and DKIM are domain-level facts, so the level
+attaches to the domain, never to an individual mailbox. It is chosen on the domain
+editor as a required three-card picker (outcome language only, default **Standard**).
+
+| | **Standard** | **Private** | **Fortress** |
+|---|---|---|---|
+| Meaning | The server manages this mailbox for you | Only you can read stored mail | Even a fully hacked server can't read new mail or send as you |
+| Stored bodies/subjects/attachments/search index | plaintext | sealed at rest | sealed at rest |
+| Fresh inbound sealed before reaching Joinery (relay) | — | — | ✓ (pending-parse until unlock) |
+| Outbound signing | ambient (opendkim) | ambient | in-app, session-gated |
+| Automated sends (no login) | ✓ | ✓ | ✗ — sending is session-gated |
+| Search | SQL | in-window FTS | in-window FTS |
+| Best for | club signups, newsletters | mail worth keeping private, automation still runs | the address that *is* you |
+
+**Where the level switches behavior:**
+
+- **Ingest** — `InboundEmailRouter::storeMessage()` seals only when the owner holds a
+  vault **and** `$domain->seals_content()` (Private or Fortress). A Standard domain
+  stores plaintext even when its owner has a vault.
+- **Relay seal target** — `RelayMapExporter::sealTargetForAlias()` seals to the owner's
+  vault key (`key_kind=user`, producing Fortress pending-parse rows) **only** for a
+  Fortress domain; every other posture seals to the ambient transport key, which
+  Joinery opens at pull and re-seals per the domain's own level.
+- **Setup/health DNS shape** — `InboundEmailSetupCheck` expects the inverted protected
+  shape (SPF without the box, `p=reject; aspf=s; adkim=s`, DKIM matching the sealed
+  key) for any Fortress domain, from the moment the level is chosen — before the
+  protect ceremony flips `ied_is_protected_identity`.
+
+**Rows are sealed per-row** (`iem_content_sealed`): mail sealed under one posture stays
+readable after the domain's level changes — the read hooks key off the row, not the
+domain. Lowering a level changes future ingest only.
+
+**IMAP-source domains** offer Standard and Private only — the remote provider holds the
+plaintext and the sending identity, and there is no MX to move, so the picker hides the
+Fortress card for them. **Group-collaboration mailboxes are Standard-only** (the
+one-operator/one-key model every protected level rests on doesn't cover multi-reader
+sealing); the domain editor refuses to raise a domain whose alias has more than one
+live grant.
+
+**Automated mail on a Fortress domain** uses the subdomain pattern: put the automated
+senders on `mail.<domain>` at Standard. Under Fortress's strict DMARC alignment the
+Standard subdomain's keys cannot sign as the bare domain, so the split is safe by
+construction.
+
+### The locked-state surface contract
+
+Logged in but locked is the state a Private/Fortress user sees most often, so it is
+defined once for every surface: **every surface shows cleartext metadata; every content
+action becomes a one-tap unlock prompt, and the original action resumes after unlock
+without re-navigation.** A sealed or Fortress-pending row renders the neutral
+placeholder `Sealed message` (`MailboxService::SEALED_PLACEHOLDER`) — never a visible
+third state — while threading, unread, labels, folders, times, and sizes render
+normally.
+
+- **Web reader** (`mailbox_reader.js`) — `listThreads()`/`getThread()` carry a top-level
+  `locked` flag; opening a sealed thread or searching sealed mail shows an inline
+  *Unlock to read* button that runs the passkey ceremony
+  (`vault_unlock_options` → `vault_unlock_passkey`) and re-runs the original request. A
+  header **Lock** control ends the window from the reader.
+- **Native `/api/v1`** — `mailbox/thread_list`, `mailbox/thread`, and `mailbox/mailboxes`
+  return metadata plus `locked` (per-mailbox on the switcher, with each mailbox's
+  `security_level`); `mailbox/send` returns `locked: true` instead of sending when a
+  Fortress compose has no open window (`MailboxLockedException`); `mailbox/thread_action`
+  (mark/star/delete) is cleartext metadata and keeps working while locked.
+
+### AI processing
+
+Recipes read mail through the `query_model` tool (`InboundEmailMessage` is
+`$ai_readable`, with sender/subject/body wrapped as untrusted input). On a protected
+domain a locked row is **excluded** from AI results (never a placeholder) and stays
+pending for post-unlock catch-up; `query_model` reports the excluded count so the model
+knows the result set is partial. The LLM provider is a disclosure, not a level gate.
+
+### Notifications & offline cache (native contract)
+
+Push content is set by when plaintext legally exists: Standard = full (sender/subject/
+snippet); Private = sender + subject (generated at the ingest moment, pre-seal), with an
+optional per-mailbox generic-notifications toggle; Fortress = generic by construction
+("New mail to `user@domain`"). Native offline cache defaults on for Standard/Private and
+off for Fortress. (These ride the native app + push packages.)
+
 ## Encryption at rest
 
 A mailbox seals when its **single owner** (the alias's one grantee — a shared or
