@@ -53,6 +53,23 @@ class Passkey extends SystemBase {
 	function __construct($key, $and_load = FALSE) {
 		parent::__construct($key, $and_load);
 	}
+
+	/**
+	 * Owner-ONLY read — tighter than the platform's owner-or-staff default.
+	 * Passkeys are authentication credentials (credential id, AAGUID, sign
+	 * counts, PRF capability): no one but the owner has a reason to read them,
+	 * staff included. Admin support surfaces manage users, not credentials;
+	 * revocation flows act on the session user's own rows. On the API's
+	 * collection path a non-owned row throws here and is skipped, so any
+	 * caller — any permission — only ever receives their own passkeys.
+	 */
+	function authenticate_read($data) {
+		$owner_matches = $this->get('pkc_usr_user_id') == $data['current_user_id'];
+		if (!$owner_matches) {
+			throw new SystemAuthenticationError(
+				'Passkeys are readable only by their owner.');
+		}
+	}
 }
 
 class MultiPasskey extends SystemMultiBase {

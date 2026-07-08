@@ -31,7 +31,7 @@
  * at pull. Catch-all recipients have no single owner, so they are always
  * transport-sealed.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
@@ -103,9 +103,16 @@ class RelayMapExporter {
 		$srs_on = (bool)$this->settings->get_setting('mailbox_srs_enabled');
 		$forwarding_domains = array();
 
-		foreach ($domains->results as $domain) {
+		foreach ($domains as $domain) {
 			$domain_name = strtolower(trim((string)$domain->get('ied_domain')));
 			if ($domain_name === '') {
+				continue;
+			}
+			// IMAP-source domains (mail pulled by IMAP poll, no MX at the relay) are
+			// not fronted by the relay. Including them in relay_domains makes the relay
+			// wrongly authoritative for e.g. gmail.com, so a forward to any address
+			// there loops back into the sealer instead of leaving over SMTP.
+			if ((bool)$domain->get('ied_is_imap_source')) {
 				continue;
 			}
 			$relay_domains[] = $domain_name . "\tOK";
@@ -155,7 +162,7 @@ class RelayMapExporter {
 			));
 			$aliases->load();
 
-			foreach ($aliases->results as $alias) {
+			foreach ($aliases as $alias) {
 				$local = strtolower(trim((string)$alias->get('iea_alias')));
 				if ($local === '') {
 					continue;

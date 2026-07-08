@@ -27,15 +27,28 @@ do not improvise architecture changes.
 
 ## What the user provides (ask for all of it up front, once)
 
-1. A fresh minimal **Debian 12** VPS: public IP, root SSH access. Get the key
-   onto the dev box at a path the web user can read (e.g.
-   `/var/www/html/joinerytest/config/relay_test_key`, mode 640, group www-data)
-   — the pull consumer and map sync run as the web user and need it too.
-2. A **mail hostname** for the relay (e.g. `mx-test.getjoinery.com`) and DNS
-   control to create: `A mx-test → <VPS IP>`, and
-   `MX relaytest.dev.getjoinery.com → mx-test.getjoinery.com`
-   (`relaytest.dev.getjoinery.com` is the throwaway inbound test domain; any name
-   works, keep it consistent). PTR on the VPS IP is nice-to-have, not gating.
+1. A fresh minimal **Debian 12** VPS: public IP, root SSH access. The admin key
+   for the managed node lives at a path the GO AGENT's user can read (e.g.
+   `/var/www/html/joinerytest/config/relay_test_key`, owner `user1`, mode 600)
+   — provisioning jobs run through the Go agent as that user. It must be a
+   DEDICATED throwaway key, never the user's main all-access key. Do NOT make
+   it web-user readable: the web user's steady-state connections (spool pull,
+   map push, health battery) use the separate relay pull key
+   (`RelaySsh::pullKeyPath()` = `{site root}/config/relay_pull_key`), which
+   `provision_relay_main.sh` generates and the provision job authorizes on the
+   relay automatically.
+2. DNS records (all in the getjoinery.com zone, DNS-only / grey cloud — a
+   Cloudflare-proxied A record breaks SMTP):
+   - `A mx-test.dev.getjoinery.com → <VPS public IP>` (the relay's mail hostname)
+   - `MX relaytest.dev.getjoinery.com → mx-test.dev.getjoinery.com` (prio 10) —
+     the throwaway inbound test domain; leave its per-domain forwarding
+     subdomain EMPTY so SRS bounces return here and this one MX covers them
+   - `TXT relaytest.dev.getjoinery.com → v=spf1 ip4:<VPS public IP> ~all` —
+     forwarded mail (G6) leaves the relay with an SRS envelope sender at this
+     domain; without SPF Gmail may hard-reject instead of spam-foldering
+   - PTR on the VPS IP → `mx-test.dev.getjoinery.com`, set at the VPS provider's
+     panel — no reverse DNS risks outright rejection on the outbound legs
+     (G6/G7/G10; spam-foldering is fine, rejection blocks the gate)
 3. Confirmation that port 25 inbound is open on the VPS (some providers block it
    by default — Hetzner/DO usually fine, new accounts sometimes not).
 
@@ -49,8 +62,10 @@ Verify each; if one fails, ask the user to do the named action, then re-check.
 - **Main WG bootstrap done:** setting `mailbox_relay_wg_public_key` is non-empty
   (read via a settings lookup, don't print the key) AND interface `jyrelay0`
   exists (`ip link show jyrelay0`) AND `/usr/local/sbin/joinery-relay-peer`
-  exists. Missing → user runs
-  `sudo bash plugins/mailbox/provisioning/provision_relay_main.sh`.
+  exists AND the relay pull key exists web-user-owned mode 600
+  (`stat -c '%A %U' {site root}/config/relay_pull_key`). Any missing → user runs
+  `sudo bash plugins/mailbox/provisioning/provision_relay_main.sh` (idempotent —
+  re-running adds whatever is absent).
 - **server_manager plugin active**, and the tasks **PullRelaySpool** /
   **SyncRelayMap** ACTIVATED on `/admin/admin_scheduled_tasks` — they ship as
   discovered "Available Tasks" and do nothing until the Activate button creates
@@ -81,10 +96,13 @@ Verify each; if one fails, ask the user to do the named action, then re-check.
      — check the error log, have the user re-run `provision_relay_main.sh`.
    - Tunnel is up end-to-end: `ping -c2 10.99.0.1` from the main box (a
      handshake may need first traffic; ping IS that traffic).
-   - Key-only SSH over the tunnel works as the web-user-readable key allows:
-     `ssh -i <key> root@10.99.0.1 true` (the pull path uses the tunnel address —
-     confirm `mrl_host` matches what RelaySsh will dial; read the row via the
-     admin page).
+   - The relay row's `mrl_ssh_key_path` points at the PULL key
+     (`{site root}/config/relay_pull_key`), not the node admin key, and the
+     provision job log shows the `PULL_KEY_AUTHORIZED` marker. The pull path
+     dials the tunnel address — confirm `mrl_host` is `10.99.0.1` via the
+     admin page. (Direct verification of the pull key needs a web-user shell,
+     which needs root; skip it — the first health battery / SyncRelayMap run
+     proves it end-to-end.)
 5. **Enable** the relay on the relay admin page (explicit act — this makes it
    authoritative). Within one cron pass SyncRelayMap must push the map: on the
    VPS check `/etc/postfix/joinery-relay-domains`, `joinery-recipients`,

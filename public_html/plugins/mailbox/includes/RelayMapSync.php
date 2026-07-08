@@ -14,7 +14,7 @@
  * periodic reconcile (SyncRelayMap scheduled task), so freshness beats the
  * reject_unmatched gate.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayMapExporter.php'));
@@ -107,7 +107,16 @@ class RelayMapSync {
 			// routing.json carries the SRS secret + public keys; keep it readable by
 			// the unprivileged sealer user (the Postfix pipe runs as joinery-relay)
 			// but nobody else.
+			// rsync -az preserves the staging files' owner (the main box's web
+			// user, uid 33) on the relay. postmap set_eugid()s to the source
+			// file's owner, so as uid 33 it cannot write the root-owned .db
+			// (Permission denied). Reclaim the map files to root before postmap
+			// so it runs privileged and can rebuild the hashes.
 			$remote_cmd = 'set -e; '
+				. 'chown root:root ' . self::REMOTE_POSTFIX_DIR . '/joinery-relay-domains '
+					. self::REMOTE_POSTFIX_DIR . '/joinery-recipients '
+					. self::REMOTE_POSTFIX_DIR . '/joinery-transport '
+					. self::REMOTE_POSTFIX_DIR . '/joinery-srs; '
 				. 'postmap ' . self::REMOTE_POSTFIX_DIR . '/joinery-relay-domains; '
 				. 'postmap ' . self::REMOTE_POSTFIX_DIR . '/joinery-recipients; '
 				. 'postmap ' . self::REMOTE_POSTFIX_DIR . '/joinery-transport; '

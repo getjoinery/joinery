@@ -593,3 +593,41 @@ relay deployments (Fix 6), the outbound DKIM rule for standard vs protected
 hosted domains (Fix 4), and push-on-change map sync (Fix 7). Server manager
 overview gains the provision/rebuild job types if job types are enumerated
 there.
+
+## R3-1 — Relay row inherits the node admin key; every steady-state connection fails (CRITICAL, found in live VPS setup)
+
+**Problem:** `register_relay_row` copied `mgn_ssh_key_path` into
+`mrl_ssh_key_path`. The node key drives provisioning through the Go agent,
+which runs as the interactive user — but the spool pull, map push, and health
+battery run as the WEB USER (cron + admin page), and ssh refuses any key file
+not owned by its caller with mode 600. One file cannot satisfy both users, so
+on a real deployment the relay provisions successfully and then every pull,
+push, and health check fails with a key-permission error. Undetectable in
+code review or unit tests; surfaced by the first live VPS setup. Worse, the
+"fix" of making the admin key web-readable would hand the web user a
+credential valid on every managed node.
+
+**Fix:** a dedicated **relay pull key** owned by the web user:
+- `RelaySsh::pullKeyPath()` — the canonical location,
+  `{site root}/config/relay_pull_key`.
+- `provision_relay_main.sh` generates it (ed25519, no passphrase, web-user
+  owner, 600) alongside the WireGuard bootstrap; idempotent, re-run safe.
+- `build_provision_relay` pre-flights the `.pub` (clear error naming the
+  bootstrap script if absent) and adds an idempotent step authorizing it in
+  the relay root's `authorized_keys`.
+- `register_relay_row` points `mrl_ssh_key_path` at the pull key (node-key
+  fallback only when the pull key file is absent).
+
+Security posture improves: the web user holds an identity valid ONLY on the
+disposable relay; the powerful node admin key never becomes web-readable.
+
+## R3-2 — every_run task JSONs declare empty default_time; activation crashes (found in live setup)
+
+**Problem:** `PullRelaySpool.json`, `SyncRelayMap.json` (and the pre-existing
+`PollImapAccounts.json`) declared `"default_time": ""`. The activation logic
+writes the value verbatim into `sct_schedule_time` (a `time` column) —
+PostgreSQL rejects `''` with 22P02, so Activate crashed with a
+DatabaseException. Working `every_run` tasks omit the key entirely.
+
+**Fix:** removed the empty `default_time` from all three task JSONs; the
+column default applies (irrelevant for every_run scheduling).

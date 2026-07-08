@@ -358,8 +358,8 @@ to allow. (An explicit `false` return is also treated as denial.) It composes wi
 shapes: a **single** `GET /{Class}/{id}` of an unauthorized row returns an error, while a
 **collection** `GET /{Class}s` simply **skips** rows the caller isn't authorized to see.
 
-You override `authenticate_read` only to make a resource **public** — there is a declarative flag
-for the common case:
+You override `authenticate_read` in two directions. To make a resource **public** there is a
+declarative flag for the common case:
 
 ```php
 public static $api_public_read = true;   // catalog content: world-readable over the API
@@ -369,6 +369,11 @@ When `$api_public_read` is true, the read surface skips the per-record scope **a
 collection owner-filter — the rows are the same for everyone (Events, Products, Posts, Pages).
 When false (the default), reads are owner-or-staff. Audit/log/credential tables simply stay
 unexposed (`$api_readable = false`).
+
+The rare opposite is tightening to **owner-only**: a model whose rows are personal credential
+material overrides `authenticate_read` to throw for everyone but the owner, staff included
+(`Passkey` does this — admin surfaces manage users, not credentials). On the collection path
+unauthorized rows are skipped, so any caller at any permission receives only their own rows.
 
 **Ownership integrity.** Three rules keep the owner column itself trustworthy on writes:
 

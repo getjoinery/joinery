@@ -10,7 +10,7 @@
 # recipient's public key at acceptance, and spools ciphertext; the main Joinery
 # box dials out over WireGuard and pulls the sealed blobs.
 #
-# Version: 1.0 - Initial relay provisioner.
+# Version: 1.1 - /etc/opendkim creation + IPv4-only outbound (no v6 PTR on throwaway VPSes).
 #
 # What it configures (all fixed / deployment-independent):
 #   - Installs postfix, opendkim, opendkim-tools, opendmarc, wireguard, rsync and
@@ -168,6 +168,12 @@ postconf -e "myhostname = ${MAIL_HOSTNAME}"
 postconf -e "inet_interfaces = all"
 postconf -e "mydestination = localhost, localhost.localdomain"
 
+# Prefer IPv4 for outbound (forward + SRS bounce legs). A fresh VPS gets an IPv6
+# address whose PTR is almost never set, and big receivers (Gmail) hard-reject
+# IPv6 mail without a matching PTR + authentication (550 IPv6AuthError). The
+# IPv4 PTR is what the provisioning DNS sets, so send from IPv4.
+postconf -e "smtp_address_preference = ipv4"
+
 # The main Joinery box submits outbound compose through this relay over the tunnel
 # (smarthost — Phase 7), so the WireGuard subnet is trusted to relay anywhere.
 # permit_mynetworks in smtpd_recipient_restrictions then accepts those sends.
@@ -189,6 +195,7 @@ echo "main.cf: relay_domains, transport, recipient validation, RBL set"
 AUTHSERV_ID="${MAIL_HOSTNAME}"
 mkdir -p /run/opendkim
 chown opendkim:opendkim /run/opendkim 2>/dev/null || true
+mkdir -p /etc/opendkim
 [[ -f /etc/opendkim/key.table ]]     || : > /etc/opendkim/key.table
 [[ -f /etc/opendkim/signing.table ]] || : > /etc/opendkim/signing.table
 [[ -f /etc/opendkim/trusted.hosts ]] || printf '127.0.0.1\n::1\nlocalhost\n' > /etc/opendkim/trusted.hosts

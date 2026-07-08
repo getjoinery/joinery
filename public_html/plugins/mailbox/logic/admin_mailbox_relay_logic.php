@@ -65,7 +65,7 @@ function admin_mailbox_relay_logic(array $input): LogicResult {
 	$active = MailboxRelay::active();
 	$active_health = ($active !== null) ? admin_mailbox_relay_health() : null;
 	$relays = array();
-	foreach ($relays_multi->results as $relay) {
+	foreach ($relays_multi as $relay) {
 		$is_active = ($active !== null && intval($relay->key) === intval($active->key));
 		$relays[] = array(
 			'model'   => $relay,
@@ -79,7 +79,7 @@ function admin_mailbox_relay_logic(array $input): LogicResult {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
 		$node_multi = new MultiManagedNode(array('enabled' => true, 'deleted' => false));
 		$node_multi->load();
-		foreach ($node_multi->results as $node) {
+		foreach ($node_multi as $node) {
 			$nodes[] = $node;
 		}
 	}

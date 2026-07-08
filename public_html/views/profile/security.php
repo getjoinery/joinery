@@ -226,7 +226,7 @@
                 }
 
                 function loadPasskeys() {
-                    return apiFetch('/api/v1/Passkeys').then(function (json) {
+                    return apiFetch('/api/v1/Passkeys?user_id=<?php echo (int)SessionControl::get_instance()->get_user_id(); ?>').then(function (json) {
                         var credentials = json.data || [];
                         credentialCount = credentials.length;
                         tableBody.innerHTML = '';

@@ -5,7 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
- * @version 1.3
+ * @version 1.4
  */
 
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
@@ -19,8 +19,19 @@ class JobResultProcessor {
 	public static function process($job) {
 		$type = $job->get('mjb_job_type');
 		$method = 'process_' . $type;
-		if (method_exists(self::class, $method)) {
+		if (!method_exists(self::class, $method)) {
+			return;
+		}
+		// The Go agent marks jobs completed by writing the DB directly, so result
+		// processing runs lazily on the first PHP view of the finished job — often
+		// a GET (job detail page, status poll). These writes are intentional
+		// server-side reconciliation, not user mutations: opt in explicitly so the
+		// GET-mutation guard doesn't flag them.
+		SystemBase::$allow_get_mutation = true;
+		try {
 			self::$method($job);
+		} finally {
+			SystemBase::$allow_get_mutation = false;
 		}
 	}
 
@@ -401,7 +412,13 @@ class JobResultProcessor {
 			if ($public_ip !== '') { $relay->set('mrl_public_ip', $public_ip); }
 			$relay->set('mrl_ssh_user', 'root');
 			$relay->set('mrl_ssh_port', intval($node->get('mgn_ssh_port')) ?: 22);
-			$relay->set('mrl_ssh_key_path', (string)$node->get('mgn_ssh_key_path'));
+			// The relay's steady-state connections run as the WEB USER (cron tasks,
+			// health battery), so the row points at the web-user-owned pull key the
+			// provision job authorized — never the node's admin key, which the web
+			// user cannot read (ssh demands caller-owned mode-600 key files).
+			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySsh.php'));
+			$pull_key = RelaySsh::pullKeyPath();
+			$relay->set('mrl_ssh_key_path', is_file($pull_key) ? $pull_key : (string)$node->get('mgn_ssh_key_path'));
 			$relay->set('mrl_spool_path', '/var/spool/joinery-relay');
 			if ($wg_pubkey !== '') { $relay->set('mrl_wg_public_key', substr($wg_pubkey, 0, 255)); }
 			$relay->set('mrl_wg_endpoint', (string)$node->get('mgn_wg_endpoint'));

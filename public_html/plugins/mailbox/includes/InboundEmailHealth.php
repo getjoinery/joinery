@@ -13,7 +13,7 @@
  * provider-aware: they consult InboundProviderRegistry::active() and dispatch
  * accordingly.
  *
- * @version 1.6
+ * @version 1.7
  */
 
 require_once(PathHelper::getIncludePath('includes/ProvisioningCheckFailed.php'));
@@ -344,7 +344,7 @@ class InboundEmailHealth {
         $domains = new MultiInboundEmailDomain(array('enabled' => true, 'deleted' => false));
         $domains->load();
         $leaks = array();
-        foreach ($domains->results as $domain) {
+        foreach ($domains as $domain) {
             $name = trim((string)$domain->get('ied_domain'));
             if ($name === '') {
                 continue;

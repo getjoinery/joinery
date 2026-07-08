@@ -930,7 +930,10 @@ pipe on the MX path as the Postfix `joinery` transport (raw on stdin,
 
 The relay holds no database, so `RelayMapExporter` compiles the routing from the
 enabled domains/aliases + each recipient's public key into static files, and
-`RelayMapSync` pushes them over the tunnel: the Postfix `relay_domains`,
+`RelayMapSync` pushes them over the tunnel. IMAP-source domains are excluded —
+their mail arrives by IMAP poll, not MX, and listing them would make the relay
+wrongly authoritative for e.g. `gmail.com`, looping forwards to addresses there
+back into the sealer instead of out over SMTP. The artifacts: the Postfix `relay_domains`,
 `check_recipient_access` (preserving `reject_unmatched` — listed aliases match
 before a domain REJECT, so no backscatter), `transport_maps`, and the SRS-bounce
 accept `regexp` map, plus the sealer's `routing.json`. Each rsync's exit code is
@@ -969,7 +972,12 @@ transports. Because the main box's opendkim milter is decommissioned,
 relay-fronted box: a protected domain with its vault-sealed key, and a standard
 domain with the same filesystem key opendkim would have used (colocated, it stays
 null and opendkim signs, avoiding a double signature). The relay trusts the
-WireGuard subnet (`mynetworks`) to relay out.
+WireGuard subnet (`mynetworks`) to relay out. The smarthost hop is deliberately
+plaintext SMTP — the WireGuard tunnel already encrypts it — so
+`SmtpConfig::fromRelaySmarthost()` sets `encryption = 'none'` and `SmtpMailer`
+disables PHPMailer's opportunistic auto-STARTTLS for an explicit `'none'`
+(otherwise it would upgrade into the relay's self-signed cert and fail the
+handshake); the auto-detect path keeps opportunistic TLS.
 
 ### Provisioning
 
@@ -984,10 +992,20 @@ The main box's half of the tunnel is `provisioning/provision_relay_main.sh`
 (root, once per deployment): it generates the box's WireGuard keypair (private
 key root-only in `/etc/wireguard`), writes the `jyrelay0` dial-out interface,
 installs the `joinery-relay-peer` root helper plus the sudoers rule that lets
-the provision job peer a freshly built relay automatically, and registers the
-public key in settings (`mailbox_relay_wg_public_key`). The Relay tab's
-provision form stays gated — showing the exact command to run — until that key
-exists.
+the provision job peer a freshly built relay automatically, generates the
+**relay pull key** (`{site root}/config/relay_pull_key`, `RelaySsh::pullKeyPath()`),
+and registers the public key in settings (`mailbox_relay_wg_public_key`). The
+Relay tab's provision form stays gated — showing the exact command to run —
+until that key exists.
+
+The pull key is a dedicated SSH identity owned by the web user, because every
+steady-state relay connection — the spool pull and map-push cron tasks and the
+admin page's health battery — runs as the web user, and ssh only accepts a key
+file its caller owns with mode 600. The provision job authorizes the pull key's
+public half on the relay and points the relay row's `mrl_ssh_key_path` at it,
+so the managed node's admin key (which drives provisioning through the Go
+agent) never has to be readable by the web user, and it only grants access to
+the disposable relay.
 
 The **Relay** admin tab (`admin_mailbox_relay`) is the dashboard: it lists each
 relay with the four provisioning checks (tunnel, spool draining, map fresh, origin

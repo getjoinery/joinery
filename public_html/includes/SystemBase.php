@@ -1646,9 +1646,10 @@ abstract class SystemBase {
 	 * a caller may touch this row only if they own it (the conventional
 	 * {prefix}_usr_user_id column matches current_user_id) or they are staff
 	 * (permission >= 5). Models with no owner column fall to staff-only — safe for
-	 * tables with no per-user ownership. A model that should be publicly readable
-	 * (posts, pages) overrides authenticate_read to a no-op: you override to *open*,
-	 * never to close. The contract is throw-to-deny.
+	 * tables with no per-user ownership. Overrides go both ways: a publicly
+	 * readable model (posts, pages) overrides authenticate_read to a no-op, and a
+	 * personal-credential model (Passkey) tightens it to owner-ONLY, no staff
+	 * bypass. The contract is throw-to-deny.
 	 */
 	/**
 	 * The platform ownership rule, shared by the record gates

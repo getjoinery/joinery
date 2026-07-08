@@ -89,9 +89,12 @@ sign-in is withdrawn.
   `pkc_created_time`, `pkc_last_used_time` — denormalized-on-write conveniences
   for lookup and UI display.
 
-The model is API-readable (owner-or-staff, the `SystemBase` default from the
-conventional `pkc_usr_user_id` column) but not API-writable — rename and revoke
-are actions with their own authorization and side effects, not raw CRUD.
+The model is API-readable **owner-only** — `Passkey::authenticate_read` is
+tightened past the owner-or-staff default because passkeys are authentication
+credentials: no one but the owner has a reason to read them, staff included
+(admin surfaces manage users, not credentials). Any caller's collection read
+returns only their own rows. Not API-writable — rename and revoke are actions
+with their own authorization and side effects, not raw CRUD.
 
 ## Consumer contract
 
