@@ -497,6 +497,74 @@ Accessibility ids follow each screen's own prefix: `profile_*`, `orders_*`,
 `security_*`. `settings_security`, `settings_address_edit`, and
 `settings_phone_numbers_edit` are the new Settings rows.
 
+## JoineryDNSFilterKit (native DNS-filtering module)
+
+**JoineryDNSFilterKit** is the native DNS-filtering surface — same package
+repo, sixth product (`ios/joinery-kit/Sources/JoineryDNSFilterKit`, depends on
+JoineryKit). It is brand-neutral: any ScrollDaddy-style deployment (ScrollDaddy
+today, a future NetworkSentry with only branding changed) reuses it. The
+ScrollDaddy app (`ios/scrolldaddy-ios`) is the reference consumer; it calls
+`JoineryDNSFilter.registerScreens(config:)` in its init, passing a
+`DNSFilterConfig` (deployment origin, brand name, packet-tunnel bundle id) so
+the kit carries no brand knowledge.
+
+Two navigation destinations resolve to native screens; the
+`/profile/dns_filtering/*` webviews are the version-skew fallback for builds
+that don't link the module (`nativeScreen` on the dns_filtering plugin's
+`profileMenu` entries):
+
+- **Protection** (`ProtectionScreen` + `ProtectionStore`, registry name
+  `dns_protection`) — the app's home. Resolves *this phone's* device row
+  (pinned locally per deployment via `PhoneDeviceStore`), guides the
+  one-time registration and the standard-mode activation, and offers the single
+  Standard / Strict protection-level control. It reads the
+  `dns_filtering/devices` and `account_summary` actions.
+- **Devices** (`DevicesScreen` + `DeviceListStore`, registry name
+  `dns_devices`) — every device on the account, each opening its always-on
+  policy editor. Editing policy is shared with the web devices page (same
+  actions), while *applying configuration* is this-phone-only (the Protection
+  screen).
+- **Always-On editor** (`AlwaysOnEditorScreen` + `BlockEditorStore`, reached
+  from both screens, not a menu entry) — general category filters (the free
+  floor), tier-gated advanced filters, service toggles, and custom domain
+  rules. Every toggle is save-on-change through `block_filter_set`; "off"
+  submits as *removing the row* (Allow = no row), keeping the resolver-merge
+  invariant server-side. Custom rules add/delete through `block_rule_add` /
+  `block_rule_delete`, and offer the hard-block flag (Strict mode) — the server
+  re-enforces the always-on/block-action constraint. Tier gates render as
+  locked/upsell states from the `account_summary` feature flags, but the
+  server rejects gated writes regardless.
+
+The typed API face (`DNSFilterAPI`) and models (`DNSDevice`, `DNSBlockContents`,
+`DNSCatalog`, `DNSAccountSummary`) sit over the `dns_filtering/` action
+namespace — no new server work beyond what the plugin already exposes.
+
+**Config delivery — `NEDNSSettingsManager`.** Standard mode saves the device's
+`doh_url` as a system-wide encrypted-DNS (DoH) configuration
+(`DNSActivationManager`), the same mechanism NextDNS/AdGuard use. iOS layers it
+over the network's DNS non-destructively — disabling, removing, or uninstalling
+reverts losslessly, so there is nothing to save or restore. The one manual step
+is the OS security gate (enable once in Settings → General → VPN, DNS & Device
+Management → DNS); the app detects `isEnabled` and shows a guided one-tap step.
+The DNS Settings entitlement requires a paid Apple Developer Program membership.
+
+**Strict mode — packet tunnel (Phase 4).** An on-device
+`NEPacketTunnelProvider` (in the app's `ScrollDaddyTunnel` extension target)
+adds connection-level hard blocking: in-tunnel DNS forwards to the deployment's
+DoH resolver, and each new TLS flow's SNI is matched against the synced
+hard-block list — a connection to a blocked host is dropped even when the app
+resolved the IP through its own hardcoded DoH. The security-critical inspection
+(`HardBlockList`, `TLSClientHello`) lives in the kit and is unit-tested
+off-device (`Tests/JoineryDNSFilterKitTests`); the extension owns only the
+NetworkExtension plumbing. `StrictModeManager` installs/starts the tunnel and
+pushes hard-block list changes live. One VPN at a time — the manager detects a
+foreign active VPN and surfaces the conflict rather than failing silently.
+
+Accessibility ids: `protection_*`, `devices_*` / `device_*`, `editor_*`,
+`filter_*`, `service_*`, `rule_*`. Billing is login-only at launch
+(`registrationEnabled` false); see `specs/implemented/scrolldaddy_ios_app.md`
+for the phasing.
+
 ## joinery-android (Android client core)
 
 The native Android core is **joinery-android**, a Kotlin + Jetpack Compose

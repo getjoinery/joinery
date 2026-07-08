@@ -94,6 +94,30 @@ The web AJAX endpoints (`ajax/block_rule_add.php`, `block_rule_delete.php`, `blo
 - Device API responses (`devices`, `block_list`) include `hard_block_hostnames`: the de-duplicated active, block-action, hard-block hostnames on the always-on block (`ScrollDaddyHelper::getHardBlockHostnames()`) — the list apps sync into their tunnel extensions.
 - The web editor does not expose the flag; it is app-driven.
 
+## Config Delivery Channels
+
+A device is filtered once it queries the resolver by its UID. That UID reaches
+the device two ways, both pointing at the same per-device DoH/DoT endpoints
+(`https://{dns_host}/resolve/{resolver_uid}`):
+
+- **Configuration profile (`.mobileconfig`)** — `logic/mobileconfig_logic.php`
+  emits a downloadable profile the user installs from the web devices page.
+  This is the path for laptops, other phones, and any device the app doesn't
+  run on.
+- **Native app (`NEDNSSettingsManager`)** — the ScrollDaddy iOS app
+  (`ios/scrolldaddy-ios`, on JoineryDNSFilterKit) saves the same DoH URL
+  directly as a system encrypted-DNS configuration on the phone it runs on — no
+  download, no copy/paste. It reads the URL from the `devices` action's
+  `doh_url` (the identical string the `.mobileconfig` generator emits) and,
+  after a one-time OS enable, applies every later change (new UID, server
+  switch) silently. Strict mode adds a local packet tunnel that also enforces
+  the `hard_block_hostnames` list at the connection level. See
+  `docs/mobile_apps.md` § JoineryDNSFilterKit and
+  `specs/implemented/scrolldaddy_ios_app.md`.
+
+Both channels are pure delivery of the same server-side policy; the resolver
+behaves identically regardless of how the UID reached the device.
+
 ## DNS Resolver Flow
 
 The Go resolver (`/home/user1/scrolldaddy-dns/`) reads all block data from PostgreSQL every ~60 seconds via `LightReload()`. On each DNS query:
