@@ -1,0 +1,5 @@
+<resources>
+    <!-- Compose owns all UI; the platform NoActionBar theme just gives the
+         Activity a chromeless window with no XML theming dependency. -->
+    <style name="Theme.ScrollDaddy" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

@@ -925,6 +925,62 @@ Stable `testTag` values use a `member_*` prefix for the module's screens
 prefix: `settings_address_edit`, `settings_phone_numbers_edit`,
 `settings_security`.
 
+## joinery-android-dnsfilter (native DNS-filtering module)
+
+**joinery-android-dnsfilter** is the Android native DNS-filtering surface
+(`android/joinery-android-dnsfilter`, namespace `com.getjoinery.dnsfilter`,
+depends on `:joinery-android`), the platform counterpart to JoineryDNSFilterKit.
+It is brand-neutral — any ScrollDaddy-style deployment reuses it with only
+branding changed. An app adds the module and calls
+`JoineryDnsFilter.registerScreens(config)` before mounting the root, passing a
+`DnsFilterConfig` (deployment origin, brand name, strict-mode availability); the
+server's `dns_protection` and `dns_devices` navigation destinations then render
+these screens, and builds without the module keep the `/profile/dns_filtering/…`
+web pages via each entry's fallback URL. The ScrollDaddy app
+(`android/scrolldaddy-android`, application id `app.scrolldaddy.android`,
+`client_app` `scrolldaddy-android`, login-only) is the reference consumer.
+
+The screens consume the same `dns_filtering/` action surface as iOS — `devices`,
+`account_summary`, `catalog`, `scheduled_block_edit`, `device_edit`,
+`block_filter_set`, `block_rule_add`, `block_rule_delete` — with models parsed
+by the core `JsonValue` parser and stores following the established conventions
+(a `DnsPhase` and a `loadGeneration` stale-load guard). The iOS
+JoineryDNSFilterKit sources are the behavioral contract.
+
+- **Protection** (`ProtectionScreen` + `ProtectionStore`, registry name
+  `dns_protection`) — this phone's home: registers the handset as a device
+  (`device_edit`, pinned locally by `device_id`), one-tap enable through a single
+  in-app VPN consent dialog, and Turn Off. "Protected" reflects the live
+  `VpnService` status.
+- **Devices** (`DevicesScreen` + `DeviceListStore`, registry name
+  `dns_devices`) — every device on the account, each opening its always-on
+  editor.
+- **Always-On editor** (`AlwaysOnEditorScreen` + `BlockEditorStore`) — category
+  filters (general are the free floor; advanced are tier-gated), service
+  toggles, and custom domain rules. Every toggle is save-on-change through
+  `block_filter_set`; "Allow" submits as removing the row (the resolver-merge
+  "Allow = no row" invariant lives server-side). Tier gates render locked; the
+  server re-enforces every one.
+
+The filtering itself is a local `VpnService` (`DnsFilterVpnService`). Standard
+mode claims only DNS: it advertises a virtual resolver address, routes just that
+address into the tun, and forwards every captured query (IPv4 and IPv6) to the
+device's `doh_url` over DNS-over-HTTPS — the resolver applies this device's
+server-side policy. The IP/UDP framing (`DnsPacket`) and the DoH client
+(`DohClient`) are pure and unit-tested; a foreground-service notification runs
+while filtering, `START_STICKY` plus a boot receiver restore it after a
+restart, and stopping the service or uninstalling reverts the device's DNS
+automatically. The strict-mode datapath (all-traffic routing + connection-level
+SNI/IP dropping via the unit-tested `HardBlockList` / `TlsClientHello` engine) is
+the deferred Phase 4 work: the engine is present and tested but not wired into
+the live service, and `DnsFilterConfig.strictModeAvailable` gates the Strict
+control off until it ships.
+
+Stable `testTag` values use screen-scoped names (`protection_list`,
+`protection_status_label`, `protection_register`, `protection_enable`,
+`protection_edit_rules`, `protection_turn_off`, `devices_list`, `editor_list`,
+`filter_{key}`, `service_{key}`, `rule_add_button`).
+
 ## Standing up a new branded app
 
 1. Pick a `client_app` identifier (e.g. `joinery-member-ios`); the app sends

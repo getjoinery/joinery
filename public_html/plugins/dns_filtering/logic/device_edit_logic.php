@@ -81,6 +81,15 @@ function device_edit_logic(array $input): LogicResult{
 			$empty_device->load();
 
 			$device = SdDevice::createDevice($empty_device, $user, $_POST);
+
+			// A native app creates a device to apply configuration to the phone
+			// it runs on. The web redirect gives it no way to learn which row it
+			// just made, so in API context return the new device directly —
+			// device_id and the DoH/DoT endpoints the app needs to activate.
+			if($session->is_api_context()){
+				require_once(PathHelper::getIncludePath('plugins/dns_filtering/includes/ScrollDaddyHelper.php'));
+				return LogicResult::render(ScrollDaddyHelper::exportDevice($device, $settings));
+			}
 		}
 
 		return LogicResult::redirect('/profile/dns_filtering/devices');

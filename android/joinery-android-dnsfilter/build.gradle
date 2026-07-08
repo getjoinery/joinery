@@ -1,0 +1,82 @@
+// joinery-android-dnsfilter: the native DNS-filtering surface for any
+// ScrollDaddy-style Joinery deployment (ScrollDaddy today, a future
+// NetworkSentry with only branding changed). Layered on joinery-android exactly
+// like joinery-android-member: the app depends on this module and calls
+// JoineryDnsFilter.registerScreens(config) at launch; the server's navigation
+// entries (nativeScreen dns_protection / dns_devices) then render natively,
+// with the /profile/dns_filtering/* webviews as the version-skew fallback.
+//
+// Brand-free — the DNS layer (models, API, VpnService, hard-block engine) holds
+// no ScrollDaddy imports; the app injects a DnsFilterConfig with the origin,
+// display name, and VPN service class.
+plugins {
+    id "com.android.library"
+    id "org.jetbrains.kotlin.android"
+}
+
+android {
+    // Distinct from any brand APP module — AGP forbids two modules sharing a
+    // namespace. Mirrors the iOS "JoineryDNSFilterKit".
+    namespace "com.getjoinery.dnsfilter"
+    compileSdk 35
+
+    defaultConfig {
+        minSdk 24
+        targetSdk 35
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    buildFeatures {
+        compose true
+    }
+    composeOptions {
+        // Kotlin 1.9.24 -> Compose compiler 1.5.14.
+        kotlinCompilerExtensionVersion "1.5.14"
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
+    testOptions {
+        unitTests {
+            includeAndroidResources = true
+            returnDefaultValues = true
+        }
+    }
+}
+
+dependencies {
+    api project(":joinery-android")
+
+    def composeBom = platform("androidx.compose:compose-bom:2024.06.00")
+    implementation composeBom
+    androidTestImplementation composeBom
+
+    implementation "androidx.core:core-ktx:1.13.1"
+    implementation "androidx.activity:activity-compose:1.9.0"
+    implementation "androidx.compose.ui:ui"
+    implementation "androidx.compose.foundation:foundation"
+    implementation "androidx.compose.material3:material3"
+    implementation "androidx.compose.material:material-icons-extended"
+
+    // DoH forwarding: the standard-mode VpnService POSTs captured DNS queries as
+    // application/dns-message to the device's resolver. Same OkHttp the core
+    // ApiClient uses.
+    implementation "com.squareup.okhttp3:okhttp:4.12.0"
+
+    testImplementation "junit:junit:4.13.2"
+    testImplementation "org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1"
+    // The store tests construct a DnsFilterApi (which wraps ApiClient →
+    // OkHttpClient); OkHttp must be on the unit-test classpath to resolve it.
+    testImplementation "com.squareup.okhttp3:okhttp:4.12.0"
+
+    androidTestImplementation "androidx.test.ext:junit:1.2.1"
+    androidTestImplementation "androidx.compose.ui:ui-test-junit4"
+    debugImplementation "androidx.compose.ui:ui-tooling"
+    debugImplementation "androidx.compose.ui:ui-test-manifest"
+}
