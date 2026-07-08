@@ -31,6 +31,23 @@ final class DNSFilterModelParsingTests: XCTestCase {
         XCTAssertEqual(device?.alwaysOnBlock?.blockID, 7)
         XCTAssertEqual(device?.scheduledBlocks.count, 1)
         XCTAssertEqual(device?.scheduledBlocks.first?.schedule.days, [1, 2, 3])
+        // The fixture's last_seen is the bare-string form.
+        XCTAssertEqual(device?.lastSeen, "2026-07-08 12:00:00")
+    }
+
+    func testDeviceLastSeenObjectAndNull() {
+        // The live devices action proxies last_seen from the DNS server as an
+        // object ({seen: ...}) or null; both must fold correctly.
+        func device(_ lastSeen: String) -> DNSDevice? {
+            DNSDevice(json: json("""
+            {"device_id":1,"name":"d","device_name":"d","device_type":"phone",
+             "timezone":"UTC","is_active":true,"log_queries":false,"filters_editable":true,
+             "resolver_uid":"u","doh_url":"https://x/resolve/u","dot_hostname":"u.x",
+             "hard_block_hostnames":[],"last_seen":\(lastSeen),"blocks":[]}
+            """))
+        }
+        XCTAssertEqual(device("{\"seen\":\"2026-07-08 12:00:00\"}")?.lastSeen, "2026-07-08 12:00:00")
+        XCTAssertNil(device("null")?.lastSeen)
     }
 
     func testBlockContentsFiltersAsMap() {

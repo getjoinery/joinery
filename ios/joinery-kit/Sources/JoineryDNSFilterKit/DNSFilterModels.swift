@@ -53,7 +53,9 @@ public struct DNSDevice: Identifiable, Equatable, Sendable {
         dohURL = json["doh_url"]?.stringValue ?? ""
         dotHostname = json["dot_hostname"]?.stringValue ?? ""
         hardBlockHostnames = (json["hard_block_hostnames"]?.arrayValue ?? []).compactMap(\.stringValue)
-        lastSeen = json["last_seen"]?.stringValue
+        // `last_seen` arrives as an object ({seen: ...}) proxied from the DNS
+        // server, as a bare string, or null. Fold all three to the timestamp.
+        lastSeen = json["last_seen"]?["seen"]?.stringValue ?? json["last_seen"]?.stringValue
         blocks = (json["blocks"]?.arrayValue ?? []).compactMap(DNSBlockSummary.init(json:))
     }
 }
