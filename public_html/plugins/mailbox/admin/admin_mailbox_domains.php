@@ -6,7 +6,7 @@
  * list). DNS and host verification live on the Setup tab
  * (admin_mailbox_setup), driven by InboundEmailSetupCheck.
  *
- * @version 2.2
+ * @version 2.3
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -49,6 +49,13 @@ if ($show_form) {
 	// A new domain defaults to enabled (the common case).
 	if (!$form_domain->key) {
 		$form_domain->set('ied_is_enabled', true);
+		// Pre-fill the domain name when arriving from the Fortress "add a Standard
+		// subdomain for automated mail" action (specs/mailbox_security_levels.md
+		// Phase 3). Level defaults to Standard (the picker default), which is what
+		// an automated-mail subdomain wants.
+		if (!empty($_GET['prefill_domain'])) {
+			$form_domain->set('ied_domain', strtolower(trim((string)$_GET['prefill_domain'])));
+		}
 	}
 
 	$page->begin_box(array('title' => $form_title));
@@ -62,15 +69,15 @@ if ($show_form) {
 
 	// IMAP-source presets hide the domain-name field (the domain is implied); the
 	// catch-all block only applies to a hosted (Custom) domain.
-	$imap_hide = ['ied_domain', 'ied_catch_all_mode', 'ied_catch_all_address', 'ied_reject_unmatched'];
+	$imap_hide = ['ied_domain', 'ied_catch_all_mode', 'ied_catch_all_address', 'ied_reject_unmatched', 'ied_security_level_fortress_card'];
 	$type_visibility = [
-		'custom'         => ['show' => ['ied_domain', 'ied_catch_all_mode'], 'hide' => []],
+		'custom'         => ['show' => ['ied_domain', 'ied_catch_all_mode', 'ied_security_level_fortress_card'], 'hide' => []],
 		'imap_gmail'     => ['show' => [], 'hide' => $imap_hide],
 		'imap_microsoft' => ['show' => [], 'hide' => $imap_hide],
 		'imap_yahoo'     => ['show' => [], 'hide' => $imap_hide],
 		'imap_icloud'    => ['show' => [], 'hide' => $imap_hide],
 		'imap_fastmail'  => ['show' => [], 'hide' => $imap_hide],
-		'imap_generic'   => ['show' => ['ied_domain'], 'hide' => ['ied_catch_all_mode', 'ied_catch_all_address', 'ied_reject_unmatched']],
+		'imap_generic'   => ['show' => ['ied_domain'], 'hide' => ['ied_catch_all_mode', 'ied_catch_all_address', 'ied_reject_unmatched', 'ied_security_level_fortress_card']],
 	];
 
 	$formwriter->dropinput('domain_type', 'Type', [
@@ -92,6 +99,38 @@ if ($show_form) {
 	]);
 
 	$formwriter->checkboxinput('ied_is_enabled', 'Enabled', []);
+
+	// Security level — the per-domain protection posture. Outcome language only
+	// (no mechanism names at the point of choice); defaults to Standard. The
+	// Fortress card is hidden for IMAP-source domains via the domain_type
+	// visibility rule above.
+	$formwriter->radioinput('ied_security_level', 'Security level', [
+		'card' => true,
+		'required' => true,
+		'value' => $form_domain->get('ied_security_level') ?: InboundEmailDomain::LEVEL_STANDARD,
+		'options' => [
+			InboundEmailDomain::LEVEL_STANDARD => 'Standard',
+			InboundEmailDomain::LEVEL_PRIVATE  => 'Private',
+			InboundEmailDomain::LEVEL_FORTRESS => 'Fortress',
+		],
+		'descriptions' => [
+			InboundEmailDomain::LEVEL_STANDARD => [
+				'The server manages this mailbox for you.',
+				'Best for club signups, newsletters, and low-stakes addresses.',
+				'Nothing extra to set up. Stored mail is not protected at rest.',
+			],
+			InboundEmailDomain::LEVEL_PRIVATE => [
+				'Only you can read your stored mail.',
+				'Best for mail worth keeping private, where automation must keep working.',
+				'You unlock to read. Lose every unlocker and the mail is gone for good.',
+			],
+			InboundEmailDomain::LEVEL_FORTRESS => [
+				'Even a fully hacked server cannot read new mail or send as you.',
+				'Best for the address that is you — banking, identity, primary correspondence.',
+				'This domain can only send mail while you are signed in.',
+			],
+		],
+	]);
 
 	$formwriter->dropinput('ied_catch_all_mode', 'Catch-All Mode', [
 		'options' => [

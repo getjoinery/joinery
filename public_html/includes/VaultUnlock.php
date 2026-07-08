@@ -31,6 +31,26 @@ class VaultUnlock {
 
 	const DEFAULT_IDLE_MINUTES = 30;
 
+	// Window end-event policy (specs/mailbox_security_levels.md § The Unlock Window).
+	// Presence means "on Joinery": every page carries the vault-presence beacon
+	// (assets/js/vault-presence.js) while a window is open, so moving between
+	// site pages never ends the window — only a browser that is genuinely gone
+	// (closed, asleep, machine off) goes stale. Beats arrive every ~25s from a
+	// visible tab; hidden tabs keep beating at whatever cadence the browser's
+	// background throttling allows (typically ~1/min, worst ~1/5min), so the
+	// stale threshold sits above the worst throttle interval. Staleness is
+	// hygiene, not a security boundary — the hard stops are session end,
+	// IP change, credential events, and the per-level caps.
+	const HEARTBEAT_MAX_STALE_SECONDS = 300;
+	// Per-level caps — the mail consumer's window policy, applied generically here
+	// as numbers passed to open(). Fortress: end after 2h without a content decrypt
+	// (idle) and unconditionally 24h after arming (absolute). Private: a 7-day
+	// absolute backstop only. Defaults in code; they become settings only if tuning
+	// is ever needed.
+	const FORTRESS_IDLE_CAP_SECONDS = 7200;      // 2 hours
+	const FORTRESS_ABSOLUTE_CAP_SECONDS = 86400; // 24 hours
+	const PRIVATE_ABSOLUTE_CAP_SECONDS = 604800; // 7 days
+
 	/** @var callable[] consulted, in registration order, by the rotation ceremony. */
 	private static $reseal_callbacks = array();
 
@@ -76,30 +96,149 @@ class VaultUnlock {
 		}
 	}
 
-	/** Unwrap and open the window for the current session. */
-	public static function open(int $user_id, string $secret_key, string $scope = 'user'): void {
-		apcu_store(self::apcuKey(self::currentSessionId(), $user_id, $scope), $secret_key, self::idleSeconds());
+	/**
+	 * Unwrap and open the window for the current session. $caps carries the
+	 * end-event policy for this window: ['idle'=>?seconds, 'absolute'=>?seconds,
+	 * 'heartbeat'=>bool]. When null it is resolved from the user's max mail
+	 * security level (capsForUser) — the mail consumer's window policy — so every
+	 * existing caller gets the caps automatically. Records the arming metadata a
+	 * read-time check enforces.
+	 */
+	public static function open(int $user_id, string $secret_key, string $scope = 'user', ?array $caps = null): void {
+		if ($caps === null) {
+			$caps = self::capsForUser($user_id);
+		}
+		$sid = self::currentSessionId();
+		$now = time();
+		apcu_store(self::apcuKey($sid, $user_id, $scope), $secret_key, self::idleSeconds());
+		apcu_store(self::metaKey($sid, $user_id, $scope), array(
+			'armed'      => $now,
+			'content'    => $now,           // last content decrypt (idle cap basis)
+			'hb'         => null,           // heartbeat: null until a surface monitors
+			'idle_cap'   => $caps['idle'] ?? null,
+			'abs_cap'    => $caps['absolute'] ?? null,
+		), self::idleSeconds());
 		self::touchWindowMarker($user_id, $scope);
 	}
 
+	/**
+	 * The end-event caps for a user, by their highest mail security level
+	 * (specs/mailbox_security_levels.md § The Unlock Window). Guarded: with the
+	 * mailbox plugin absent it returns no caps, so this class stays generic.
+	 *
+	 * @return array{idle:?int, absolute:?int}
+	 */
+	public static function capsForUser(int $user_id): array {
+		$domain_class = PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php');
+		if (is_file($domain_class)) {
+			require_once($domain_class);
+			if (class_exists('InboundEmailDomain')) {
+				try {
+					$level = InboundEmailDomain::maxSecurityLevelForUser($user_id);
+					if ($level === 'fortress') {
+						return array('idle' => self::FORTRESS_IDLE_CAP_SECONDS, 'absolute' => self::FORTRESS_ABSOLUTE_CAP_SECONDS);
+					}
+					if ($level === 'private') {
+						return array('idle' => null, 'absolute' => self::PRIVATE_ABSOLUTE_CAP_SECONDS);
+					}
+				} catch (\Throwable $e) {
+					// fall through to no caps
+				}
+			}
+		}
+		return array('idle' => null, 'absolute' => null);
+	}
+
 	public static function isOpen(int $user_id, string $scope = 'user'): bool {
-		return (bool)apcu_exists(self::apcuKey(self::currentSessionId(), $user_id, $scope));
+		$sid = self::currentSessionId();
+		if (!apcu_exists(self::apcuKey($sid, $user_id, $scope))) {
+			return false;
+		}
+		return !self::endedByPolicy($sid, $user_id, $scope);
 	}
 
 	/**
 	 * The in-window secret key, or null when locked. Every content read calls
 	 * this and treats null as "locked" — a one-tap unlock prompt, never an
-	 * error. Re-stores on every fetch (activity extension).
+	 * error. Re-stores on every fetch (activity extension) and stamps the
+	 * content-decrypt time the Fortress idle cap measures from.
 	 */
 	public static function secretKey(int $user_id, string $scope = 'user'): ?string {
-		$key = self::apcuKey(self::currentSessionId(), $user_id, $scope);
+		$sid = self::currentSessionId();
+		$key = self::apcuKey($sid, $user_id, $scope);
 		$value = apcu_fetch($key, $success);
 		if (!$success) {
 			return null;
 		}
+		if (self::endedByPolicy($sid, $user_id, $scope)) {
+			return null;
+		}
 		apcu_store($key, $value, self::idleSeconds());
 		self::touchWindowMarker($user_id, $scope);
+		self::stampMeta($sid, $user_id, $scope, 'content'); // this fetch IS a content decrypt
 		return $value;
+	}
+
+	/**
+	 * Heartbeat from a visible mail surface (specs/mailbox_security_levels.md
+	 * § The Unlock Window). Marks the window monitored and fresh; once monitored,
+	 * a read that finds the heartbeat stale beyond the grace interval ends it.
+	 * Returns false when there is no window to beat (so the client stops).
+	 */
+	public static function heartbeat(int $user_id, string $scope = 'user'): bool {
+		$sid = self::currentSessionId();
+		if (!apcu_exists(self::apcuKey($sid, $user_id, $scope))) {
+			return false;
+		}
+		if (self::endedByPolicy($sid, $user_id, $scope)) {
+			return false;
+		}
+		self::stampMeta($sid, $user_id, $scope, 'hb');
+		self::touchWindowMarker($user_id, $scope);
+		return true;
+	}
+
+	/** APCu key for a window's arming/heartbeat metadata (companion to apcuKey). */
+	private static function metaKey(string $session_id, int $user_id, string $scope): string {
+		return 'vaultmeta:' . $session_id . ':' . $user_id . ':' . $scope;
+	}
+
+	/** Update one metadata timestamp field to now, preserving the rest + TTL. */
+	private static function stampMeta(string $sid, int $user_id, string $scope, string $field): void {
+		$mkey = self::metaKey($sid, $user_id, $scope);
+		$meta = apcu_fetch($mkey, $ok);
+		if (!$ok || !is_array($meta)) {
+			return;
+		}
+		$meta[$field] = time();
+		apcu_store($mkey, $meta, self::idleSeconds());
+	}
+
+	/**
+	 * True when a policy end-event (absolute cap, Fortress idle cap, or a stale
+	 * heartbeat) has fired for this window — a READ-TIME check, no cron. Wipes the
+	 * window when it fires so the caller sees it closed. No metadata → no policy
+	 * (a legacy window or a non-capped consumer is never force-ended here).
+	 */
+	private static function endedByPolicy(string $sid, int $user_id, string $scope): bool {
+		$meta = apcu_fetch(self::metaKey($sid, $user_id, $scope), $ok);
+		if (!$ok || !is_array($meta)) {
+			return false;
+		}
+		$now = time();
+		$ended = false;
+		if (!empty($meta['abs_cap']) && ($now - (int)($meta['armed'] ?? $now)) > (int)$meta['abs_cap']) {
+			$ended = true;
+		} elseif (!empty($meta['idle_cap']) && ($now - (int)($meta['content'] ?? $now)) > (int)$meta['idle_cap']) {
+			$ended = true;
+		} elseif (isset($meta['hb']) && $meta['hb'] !== null
+				&& ($now - (int)$meta['hb']) > self::HEARTBEAT_MAX_STALE_SECONDS) {
+			$ended = true;
+		}
+		if ($ended) {
+			self::lock($user_id, $sid, $scope);
+		}
+		return $ended;
 	}
 
 	/** Close the current session's window. */
@@ -114,13 +253,15 @@ class VaultUnlock {
 	 */
 	public static function lock(int $user_id, string $session_id, string $scope = 'user'): void {
 		apcu_delete(self::apcuKey($session_id, $user_id, $scope));
+		apcu_delete(self::metaKey($session_id, $user_id, $scope));
 		self::runWipeCallbacks($user_id, $scope);
 	}
 
 	/** Wipe every scope's window, across every session, for a user (e.g. on password change). */
 	public static function lockAll(int $user_id): void {
 		if (class_exists('APCUIterator')) {
-			$pattern = '/^vault:[^:]*:' . preg_quote((string)$user_id, '/') . ':[^:]*$/';
+			// Both the window keys (vault:) and their metadata (vaultmeta:).
+			$pattern = '/^vault(?:meta)?:[^:]*:' . preg_quote((string)$user_id, '/') . ':[^:]*$/';
 			foreach (new APCUIterator($pattern) as $entry) {
 				apcu_delete($entry['key']);
 			}

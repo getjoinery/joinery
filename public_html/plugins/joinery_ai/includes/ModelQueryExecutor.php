@@ -172,30 +172,53 @@ class ModelQueryExecutor {
         return self::wrapUntrustedFields($rows, $info, $select_fields, $ctx);
     }
 
+    /** Rows dropped from the most recent query() because their vault was locked. */
+    private static $last_locked_excluded = 0;
+
+    /** How many rows the last query() excluded as locked (partial-result signal). */
+    public static function lastLockedExcluded(): int {
+        return self::$last_locked_excluded;
+    }
+
     /**
      * Sealed Vault generic read hook (docs/sealed_vault.md) for the raw-row
      * path: this reads models by SQL, never instantiating them, so it cannot
      * go through SystemBase::get()'s decrypt hook. A model declaring
      * $sealed_fields gets each one run through its own
-     * decryptSealedFieldStatic() override; a locked vault (VaultLockedException)
-     * becomes a placeholder, never raw ciphertext or a thrown error.
+     * decryptSealedFieldStatic() override.
+     *
+     * A locked row is EXCLUDED from AI results, never substituted with
+     * placeholder text (specs/mailbox_security_levels.md § AI Processing): an
+     * AI recipe must not "process" a placeholder as if it were content. The row
+     * stays pending — durable, ciphertext at rest — and catches up after the
+     * next unlock. The count of dropped rows is surfaced so the model knows the
+     * result set is partial.
      */
     private static function decryptSealedFields(array $rows, string $class): array {
+        self::$last_locked_excluded = 0;
         $sealed = $class::$sealed_fields;
         if (empty($sealed)) return $rows;
 
         require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
-        foreach ($rows as &$row) {
+        $out = [];
+        foreach ($rows as $row) {
+            $locked = false;
             foreach ($sealed as $field) {
                 if (!array_key_exists($field, $row) || $row[$field] === null) continue;
                 try {
                     $row[$field] = $class::decryptSealedFieldStatic($field, $row[$field], $row);
                 } catch (VaultLockedException $e) {
-                    $row[$field] = '[locked - unlock your vault to view]';
+                    $locked = true;
+                    break;
                 }
             }
+            if ($locked) {
+                self::$last_locked_excluded++;
+                continue; // drop the whole row — it stays pending for post-unlock catch-up
+            }
+            $out[] = $row;
         }
-        return $rows;
+        return $out;
     }
 
     /**

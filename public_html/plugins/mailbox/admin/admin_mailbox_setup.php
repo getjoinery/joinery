@@ -136,6 +136,52 @@ if ($selected) {
 	$recheck_url = $base . '?alias_id=' . (int)$selected_alias_id;
 	echo '<p><a href="' . htmlspecialchars($recheck_url) . '" class="btn btn-sm btn-outline-secondary">Re-check</a></p>';
 
+	// ---- Guided setup for this domain's security level (Phase 3) ----
+	// Standard needs nothing beyond the checks below; Private and Fortress add the
+	// one-time vault ceremony and (Fortress) the protect ceremony, relay, and the
+	// session-gated-send confirmation. These reuse the built flows — link, never
+	// reimplement.
+	$level        = $security_level ?? 'standard';
+	$dom_id       = (int)($focus_domain_id ?? 0);
+	$has_vault    = !empty($acting_has_vault);
+	$is_protected = !empty($focus_is_protected);
+	if ($level === 'private' || $level === 'fortress') {
+		$level_name = $level === 'fortress' ? 'Fortress' : 'Private';
+		$page->begin_box(array('title' => 'Protected setup — ' . $level_name));
+		echo '<ol class="mb-0">';
+
+		// Step 1 (both): the vault, once across all protected domains.
+		if ($has_vault) {
+			echo '<li class="mb-2">Your vault is ready — new mail to this domain is sealed the moment it arrives. '
+				. 'Existing mail converges to sealed form the first time you unlock.</li>';
+		} else {
+			echo '<li class="mb-2"><strong>Set up your vault</strong> — a one-time step for every protected domain. '
+				. 'Enroll a passkey and print your recovery codes: lose every unlocker and the mail is gone for good. '
+				. '<a class="btn btn-sm btn-primary" href="/profile/security">Set up your vault</a></li>';
+		}
+
+		// Fortress-only steps: protect ceremony, relay, session-gated send.
+		if ($level === 'fortress') {
+			if ($is_protected) {
+				echo '<li class="mb-2">Outbound protection is <strong>active</strong> — a compromised, locked server cannot send DMARC-passing mail as this domain.</li>';
+			} else {
+				echo '<li class="mb-2"><strong>Publish the protected DNS shape and activate outbound protection</strong> '
+					. '(the checks below show it as incomplete until this verifies): forwarding subdomain, sealed DKIM key, '
+					. 'strict DMARC. <a class="btn btn-sm btn-primary" href="/plugins/mailbox/admin/admin_mailbox_protect?ied_inbound_email_domain_id='
+					. $dom_id . '">Manage outbound protection</a></li>';
+			}
+			echo '<li class="mb-2"><strong>The relay</strong> fronts every Fortress domain and seals fresh mail before it reaches Joinery. '
+				. 'Provision it once (shared by all Fortress domains). '
+				. '<a class="btn btn-sm btn-outline-secondary" href="/plugins/mailbox/admin/admin_mailbox_relay">Relay setup</a></li>';
+			echo '<li class="mb-0"><strong>This domain cannot send mail unless you are signed in.</strong> '
+				. 'For automated mail (confirmations, notifications), add a Standard subdomain: '
+				. '<a class="btn btn-sm btn-outline-secondary" href="/plugins/mailbox/admin/admin_mailbox_domains?action=add&prefill_domain='
+				. rawurlencode('mail.' . $focus_domain) . '">Add a Standard subdomain for automated mail</a></li>';
+		}
+		echo '</ol>';
+		$page->end_box();
+	}
+
 	$page->begin_box(array('title' => 'Receiving — ' . $address));
 	echo '<p class="text-muted small mb-3">Mail for this address is ' . htmlspecialchars($arrival_label) . '.</p>';
 	if (empty($receiving_rows)) {

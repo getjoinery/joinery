@@ -21,6 +21,14 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	if (!empty($_POST)) {
 
+		// Sensitive identity action (specs/mailbox_security_levels.md § 5.5):
+		// re-confirm the second factor before changing the password. A no-op for
+		// an account with no second factor (e.g. a first-time password set).
+		$stepup = $session->require_recent_second_factor('/profile/password_edit');
+		if ($stepup !== null) {
+			return $stepup;
+		}
+
 		if(!isset($input['usr_password']) || !isset($input['usr_password_again'])){
 			return LogicResult::error('The following required fields were not set: passwords');
 		}
@@ -41,6 +49,29 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		else {
 			$user->set('usr_password', User::GeneratePassword($input['usr_password']));
 			$user->save();
+
+			// Credential event (specs/mailbox_security_levels.md § 6.6): a password
+			// change ends EVERY vault window on every session everywhere and alerts
+			// the account — the remote kill switch (change your password from your
+			// phone and every window dies with it). Best-effort alert.
+			require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+			VaultUnlock::lockAll($user->key);
+			try {
+				require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+				$to = (string)$user->get('usr_email');
+				if ($to !== '') {
+					$settings = Globalvars::get_instance();
+					EmailSender::quickSend(
+						$to,
+						trim((string)$settings->get_setting('site_name') . ' security alert'),
+						"Your account password was just changed. If this was you, no action is needed. "
+						. "If this was NOT you, reset your password immediately and review your account security."
+					);
+				}
+			} catch (\Throwable $e) {
+				error_log('password_edit: alert email failed for user ' . $user->key . ': ' . $e->getMessage());
+			}
+
 			$msgtext = '<p>Your password has been updated!</p>';
 			$message = new DisplayMessage($msgtxt, 'Success', '/\/profile\/password_edit.*/', DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, "addressbox", TRUE);
 			$session->save_message($message);

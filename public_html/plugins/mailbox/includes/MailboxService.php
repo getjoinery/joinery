@@ -90,11 +90,30 @@ class MailboxService {
 	/** SQL expression for a row's grouping key (real thread key, or m:<id>). */
 	const GROUP_KEY_SQL = "COALESCE(NULLIF(iem_thread_key,''), 'm:' || iem_inbound_email_message_id)";
 
+	/**
+	 * Neutral product placeholder shown wherever sealed content cannot be read
+	 * — a locked vault, or a Fortress pending-parse row still sealed to the
+	 * owner (specs/mailbox_security_levels.md § The Locked-State Surface
+	 * Contract). One string, no bracket syntax; the reader keys off the result's
+	 * `locked` flag to offer a one-tap unlock, never a third visible state.
+	 */
+	const SEALED_PLACEHOLDER = 'Sealed message';
+
 	/** @var MailboxViewer */
 	private $viewer;
 
+	/** Set true whenever the most recent listThreads()/getThread() substituted a
+	 *  sealed placeholder (locked window or pending-parse row). Read via
+	 *  contentLocked() to raise the result's top-level `locked` flag. */
+	private $content_locked = false;
+
 	public function __construct(MailboxViewer $viewer) {
 		$this->viewer = $viewer;
+	}
+
+	/** True when the last read substituted a sealed placeholder for any row. */
+	public function contentLocked(): bool {
+		return $this->content_locked;
 	}
 
 	// ---------------------------------------------------------------- scope
@@ -178,9 +197,16 @@ class MailboxService {
 			$domains = new MultiInboundEmailDomain(array());
 			$domains->load();
 			$domain_map = array();
+			$level_map = array();
 			foreach ($domains as $d) {
 				$domain_map[intval($d->key)] = $d->get('ied_domain');
+				$level_map[intval($d->key)] = $d->security_level();
 			}
+			// A mailbox is `locked` for the switcher when its domain seals content
+			// and the viewer holds no open unlock window — the native switcher then
+			// shows the sealed placeholder and offers a one-tap unlock. The window
+			// is per-user (the viewer's), so one check covers every mailbox.
+			$viewer_unlocked = VaultUnlock::isOpen($this->viewer->getUserId());
 
 			$aliases = new MultiInboundEmailAlias(array('deleted' => false),
 				array('iea_alias' => 'ASC'));
@@ -190,14 +216,19 @@ class MailboxService {
 				if (!in_array($aid, array_map('intval', $alias_ids), true)) {
 					continue;
 				}
-				$domain = $domain_map[intval($a->get('iea_ied_inbound_email_domain_id'))] ?? '?';
+				$domain_id = intval($a->get('iea_ied_inbound_email_domain_id'));
+				$domain = $domain_map[$domain_id] ?? '?';
+				$level = $level_map[$domain_id] ?? InboundEmailDomain::LEVEL_STANDARD;
+				$seals = in_array($level, array(InboundEmailDomain::LEVEL_PRIVATE, InboundEmailDomain::LEVEL_FORTRESS), true);
 				$row = $agg[$aid] ?? null;
 				$mailboxes[] = array(
-					'alias_id'    => $aid,
-					'address'     => $a->get('iea_alias') . '@' . $domain,
-					'domain'      => $domain,
-					'unread'      => $row ? intval($row['unread']) : 0,
-					'total'       => $row ? intval($row['total']) : 0,
+					'alias_id'       => $aid,
+					'address'        => $a->get('iea_alias') . '@' . $domain,
+					'domain'         => $domain,
+					'security_level' => $level,
+					'locked'         => ($seals && !$viewer_unlocked),
+					'unread'         => $row ? intval($row['unread']) : 0,
+					'total'          => $row ? intval($row['total']) : 0,
 				);
 				// Tracked membership folders for the reader's folder rail + the move/
 				// labels control; the \All coverage view is excluded (the mailbox root
@@ -435,6 +466,7 @@ class MailboxService {
 	 * @return array  ['threads'=>[...], 'has_more'=>bool, 'page'=>int]
 	 */
 	public function listThreads(?int $aliasId, array $filters = array(), int $page = 1, int $perpage = 50, ?int $folderId = null): array {
+		$this->content_locked = false;
 		$db = $this->db();
 		$page = max(1, $page);
 		$perpage = max(1, min(200, $perpage));
@@ -638,6 +670,12 @@ class MailboxService {
 			// reader prompts to unlock rather than showing an empty result forever.
 			$result['search_locked'] = true;
 		}
+		if ($this->content_locked) {
+			// At least one row rendered a sealed placeholder (locked window or a
+			// Fortress pending-parse row). The reader shows metadata now and turns
+			// any content action into a one-tap unlock prompt.
+			$result['locked'] = true;
+		}
 		return $result;
 	}
 
@@ -657,7 +695,7 @@ class MailboxService {
 		}
 		$in = implode(',', array_map('intval', $ids));
 		$sql = "SELECT iem_inbound_email_message_id, iem_iea_inbound_email_alias_id, iem_direction,
-					iem_content_sealed, iem_sealed_key, iem_sealed_owner_user_id,
+					iem_content_sealed, iem_sealed_key, iem_sealed_owner_user_id, iem_pending_parse,
 					iem_sender, iem_subject, iem_body_plain, iem_body_html, iem_ai_summary
 				FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id IN ($in)";
 		$rows = $this->db()->query($sql)->fetchAll(PDO::FETCH_ASSOC);
@@ -668,13 +706,23 @@ class MailboxService {
 		foreach ($rows as $row) {
 			$mid = intval($row['iem_inbound_email_message_id']);
 			$entry = array();
+			// A Fortress pending-parse row is sealed to the owner and not yet
+			// parsed — its content columns are empty. It renders the SAME
+			// placeholder as a locked sealed row, never a visible third state.
+			$pending = $this->pgBool($row['iem_pending_parse'] ?? false);
 			foreach ($fields as $col => $key) {
+				if ($pending) {
+					$entry[$key] = self::SEALED_PLACEHOLDER;
+					$this->content_locked = true;
+					continue;
+				}
 				$value = $row[$col];
 				if ($value !== null && $value !== '') {
 					try {
 						$value = InboundEmailMessage::decryptSealedFieldStatic($col, $value, $row);
 					} catch (VaultLockedException $e) {
-						$value = '[locked - unlock your vault to view]';
+						$value = self::SEALED_PLACEHOLDER;
+						$this->content_locked = true;
 					}
 				}
 				$entry[$key] = (string)$value;
@@ -764,6 +812,7 @@ class MailboxService {
 	}
 
 	public function getThread(?int $aliasId, string $thread_key): array {
+		$this->content_locked = false;
 		$ids = $this->messageIdsInThread($aliasId, $thread_key);
 		if (!count($ids)) {
 			return array();
@@ -776,7 +825,7 @@ class MailboxService {
 					iem_spf_result, iem_dmarc_result, iem_auth_source, iem_spam_score,
 					iem_size_bytes, iem_message_id_header, iem_direction,
 					iem_body_plain, iem_body_html, iem_content_sealed, iem_sealed_key,
-					iem_sealed_owner_user_id, iem_ai_danger_score, iem_ai_scan, iem_ai_scan_time,
+					iem_sealed_owner_user_id, iem_pending_parse, iem_ai_danger_score, iem_ai_scan, iem_ai_scan_time,
 					iem_ai_summary
 				FROM iem_inbound_email_messages
 				WHERE iem_inbound_email_message_id IN ($in)
@@ -840,14 +889,26 @@ class MailboxService {
 	 */
 	private function decryptThreadRow(array $row): array {
 		$fields = array('iem_sender', 'iem_recipient', 'iem_subject', 'iem_body_plain', 'iem_body_html', 'iem_ai_summary');
+		// A Fortress pending-parse row is sealed to the owner and not yet parsed —
+		// its content columns are empty. Recipient stays cleartext metadata; the
+		// content fields render the same placeholder as a locked sealed row.
+		$pending = $this->pgBool($row['iem_pending_parse'] ?? false);
+		$content_fields = array('iem_sender' => true, 'iem_subject' => true,
+			'iem_body_plain' => true, 'iem_body_html' => true, 'iem_ai_summary' => true);
 		$out = array();
 		foreach ($fields as $col) {
+			if ($pending && isset($content_fields[$col])) {
+				$out[$col] = self::SEALED_PLACEHOLDER;
+				$this->content_locked = true;
+				continue;
+			}
 			$value = $row[$col];
 			if ($value !== null && $value !== '') {
 				try {
 					$value = InboundEmailMessage::decryptSealedFieldStatic($col, $value, $row);
 				} catch (VaultLockedException $e) {
-					$value = '[locked - unlock your vault to view]';
+					$value = self::SEALED_PLACEHOLDER;
+					$this->content_locked = true;
 				}
 			}
 			$out[$col] = (string)$value;

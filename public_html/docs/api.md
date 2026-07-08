@@ -93,6 +93,35 @@ Keys are scoped per credential (API key, or user for browser sessions), so key s
 
 Stored outcomes live in `aik_api_idempotency_keys` (the raw key is never stored, only its SHA-256) and are purged past the 24-hour window by the **Purge Idempotency Keys** scheduled task.
 
+### Locked state (sealed mailboxes)
+
+Mailbox actions over a protected (Private/Fortress) domain follow the
+locked-state contract (`plugins/mailbox/docs/overview.md` § Security levels):
+they return **cleartext metadata plus a `locked` flag**, never an error, so a
+client renders sealed placeholders and triggers the native unlock ceremony
+rather than a failure state.
+
+- `mailbox/thread_list` and `mailbox/thread` include `locked: true` when any row
+  in the payload is sealed-and-unreadable (a locked window or a Fortress
+  pending-parse row). Threading, unread, labels, folders, times, and sizes stay
+  populated; sender/subject/body render a neutral placeholder.
+- `mailbox/mailboxes` carries each mailbox's `security_level` and current
+  `locked` state for the switcher.
+- `mailbox/send` returns `locked: true` instead of sending when a Fortress
+  compose has no open window — run the unlock ceremony, then resend.
+- `mailbox/thread_action` (mark/star/delete) operates on cleartext metadata and
+  keeps working while locked.
+
+The unlock ceremony is the platform passkey `vault-kek` derivation over
+`/api/v1` (`vault_unlock_options` → `vault_unlock_passkey`), opening the same
+server-side window. **`vault_heartbeat`** keeps that window alive: the site-wide
+presence beacon (`assets/js/vault-presence.js`, included on every page for
+signed-in users) posts it on a ~25s interval while a window is open, so the
+window survives navigation anywhere on Joinery; it returns `{"alive": false}`
+once no window is open (the client then stops). The window also ends on explicit
+`vault_lock`, session end, network-identity change, and the per-level
+idle/absolute caps.
+
 ### What is *not* contract
 
 An action's `data` is contract only where its keys are documented (in this file or the owning plugin's docs). Several actions serve web pages first and return their page variables — live PHP objects that JSON-serialize as `{"key": N}` husks. Those husks, and any undocumented key, carry no compatibility promise; each action's payload becomes contract when it is documented as an API surface. The management namespace (`/api/v1/management/*`) is an internal control plane consumed only by server_manager and is versioned with it, not with app clients.

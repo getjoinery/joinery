@@ -54,6 +54,11 @@ function send_logic(array $input): LogicResult {
 
 	try {
 		$result = $sender->send($params, $files);
+	} catch (MailboxLockedException $e) {
+		// Fortress compose while locked (specs/mailbox_security_levels.md § 4.2):
+		// return locked instead of erroring so the native client runs the unlock
+		// ceremony and resumes the send, rather than showing a failure.
+		return LogicResult::render(array('locked' => true, 'message' => $e->getMessage()));
 	} catch (MailboxSenderException $e) {
 		return LogicResult::error($e->getMessage());
 	} catch (Throwable $e) {

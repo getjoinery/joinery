@@ -62,6 +62,15 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_at
 /** A user-facing send failure (bad input, transport unavailable, original gone). */
 class MailboxSenderException extends Exception {}
 
+/**
+ * A send blocked because the vault window is closed — a content action under the
+ * locked-state contract (specs/mailbox_security_levels.md § 4.2). Distinct from a
+ * plain send failure so the native API can return `locked: true` (prompt one-tap
+ * unlock, then resume) rather than an error; the web reader's existing
+ * MailboxSenderException catch still surfaces the message.
+ */
+class MailboxLockedException extends MailboxSenderException {}
+
 class MailboxSender {
 
 	const MODE_REPLY      = 'reply';
@@ -152,7 +161,7 @@ class MailboxSender {
 				$source !== null ? (string)$source->get('iem_subject') : '');
 			$body_html = $this->buildBody($mode, (string)($params['body'] ?? ''), $source);
 		} catch (VaultLockedException $e) {
-			throw new MailboxSenderException('Your vault is locked — unlock it to reply to or forward this message.');
+			throw new MailboxLockedException('Your vault is locked — unlock it to reply to or forward this message.');
 		}
 		$message_id = $this->generateMessageId($from_address);
 
@@ -190,7 +199,7 @@ class MailboxSender {
 			// is a content action under the locked-state contract: a closed window
 			// (never opened, or lapsed mid-compose) prompts the same one-tap unlock
 			// rather than escaping an unsigned/ambient send.
-			throw new MailboxSenderException('Your vault is locked — unlock it to send from this address.');
+			throw new MailboxLockedException('Your vault is locked — unlock it to send from this address.');
 		} catch (Throwable $e) {
 			error_log('MailboxSender: send threw for alias ' . $alias_id . ': ' . $e->getMessage());
 			throw new MailboxSenderException('The message could not be sent: ' . $e->getMessage());

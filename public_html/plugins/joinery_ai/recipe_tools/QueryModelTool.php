@@ -84,11 +84,22 @@ class QueryModelTool implements RecipeToolInterface {
             return ['content' => 'Query failed: ' . $e->getMessage(), 'is_error' => true];
         }
 
+        // Locked (sealed, no open window) rows are excluded from AI results and
+        // stay pending for post-unlock catch-up (specs/mailbox_security_levels.md
+        // § AI Processing). Report the count so the model knows results are partial.
+        $locked_excluded = ModelQueryExecutor::lastLockedExcluded();
+        $partial_note = $locked_excluded > 0
+            ? ' (' . $locked_excluded . ' sealed row' . ($locked_excluded === 1 ? '' : 's')
+                . ' excluded while locked — results are partial)'
+            : '';
+
         if (empty($rows)) {
-            return 'No rows match.';
+            return $locked_excluded > 0
+                ? 'No readable rows match' . $partial_note . '.'
+                : 'No rows match.';
         }
         $count = count($rows);
-        $header = $count . ' row' . ($count === 1 ? '' : 's') . ' returned:';
+        $header = $count . ' row' . ($count === 1 ? '' : 's') . ' returned' . $partial_note . ':';
         return $header . "\n\n" . json_encode($rows, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
     }
 

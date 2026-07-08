@@ -19,7 +19,13 @@
  * the live key keeps signing; cutover (pending → live) happens only after the
  * pending selector's DNS record verifies. Signing always reads the live columns.
  *
- * @version 1.6
+ * ied_security_level is the per-domain protection posture
+ * (specs/mailbox_security_levels.md): 'standard' (server-managed plaintext),
+ * 'private' (sealed at rest), or 'fortress' (sealed at the edge + session-gated
+ * sending identity). It is the single switch that selects each mechanism's
+ * plaintext-vs-sealed branch; mailboxes and aliases inherit it by design.
+ *
+ * @version 1.7
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -38,6 +44,14 @@ class InboundEmailDomain extends SystemBase {
 	const CATCHALL_FORWARD = 'forward';
 	const CATCHALL_STORE = 'store';
 
+	// Security levels (specs/mailbox_security_levels.md). The single source of
+	// truth for a domain's protection posture; every mailbox/alias inherits.
+	// Standard = server-managed plaintext; Private = sealed at rest; Fortress =
+	// sealed at the edge + session-gated sending identity.
+	const LEVEL_STANDARD = 'standard';
+	const LEVEL_PRIVATE  = 'private';
+	const LEVEL_FORTRESS = 'fortress';
+
 	public static $field_specifications = array(
 		'ied_inbound_email_domain_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'ied_domain'            => array('type'=>'varchar(255)', 'required'=>true, 'is_nullable'=>false),
@@ -46,6 +60,9 @@ class InboundEmailDomain extends SystemBase {
 		'ied_catch_all_address' => array('type'=>'varchar(500)'),
 		'ied_reject_unmatched'  => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),
 		'ied_is_imap_source'    => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+		// Security posture (specs/mailbox_security_levels.md): the single switch
+		// that selects each mechanism's plaintext-vs-sealed branch.
+		'ied_security_level'    => array('type'=>'varchar(10)', 'is_nullable'=>false, 'default'=>'standard'), // 'standard' | 'private' | 'fortress'
 		// Outbound send protection (specs/mailbox_outbound_send_protection.md).
 		'ied_is_protected_identity' => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		'ied_owner_usr_user_id'     => array('type'=>'int8', 'is_nullable'=>true),   // whose vault seals the DKIM key
@@ -134,6 +151,117 @@ class InboundEmailDomain extends SystemBase {
 		return false;
 	}
 
+	/**
+	 * This domain's security level (specs/mailbox_security_levels.md) — the
+	 * single switch selecting each mechanism's plaintext-vs-sealed branch.
+	 * Falls back to Standard for any unrecognized or empty stored value.
+	 */
+	function security_level() {
+		$v = strtolower(trim((string)$this->get('ied_security_level')));
+		if (!in_array($v, array(self::LEVEL_STANDARD, self::LEVEL_PRIVATE, self::LEVEL_FORTRESS), true)) {
+			return self::LEVEL_STANDARD;
+		}
+		return $v;
+	}
+
+	/** True when this domain seals stored content at rest (Private or Fortress). */
+	function seals_content() {
+		return in_array($this->security_level(), array(self::LEVEL_PRIVATE, self::LEVEL_FORTRESS), true);
+	}
+
+	/**
+	 * The highest security level across every domain the user has a stake in —
+	 * one they own (ied_owner_usr_user_id) or hold a mailbox grant on (a grant
+	 * on one of its aliases). Drives the per-level unlock-window caps
+	 * (specs/mailbox_security_levels.md § The Unlock Window) and the Fortress
+	 * mandatory-2FA enrollment gate. Returns 'standard' when the user touches
+	 * no protected domain.
+	 */
+	static function maxSecurityLevelForUser(int $user_id): string {
+		$rank = array(self::LEVEL_STANDARD => 0, self::LEVEL_PRIVATE => 1, self::LEVEL_FORTRESS => 2);
+		$best = self::LEVEL_STANDARD;
+
+		$consider = function($domain) use (&$best, $rank) {
+			if (!$domain || !$domain->key) {
+				return;
+			}
+			$level = $domain->security_level();
+			if (($rank[$level] ?? 0) > $rank[$best]) {
+				$best = $level;
+			}
+		};
+
+		// Domains the user owns outright.
+		$owned = new MultiInboundEmailDomain(array('owner_id' => $user_id, 'deleted' => false));
+		$owned->load();
+		foreach ($owned as $d) {
+			$consider($d);
+		}
+
+		// Domains reached through a mailbox grant on one of their aliases.
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+		$alias_ids = InboundEmailMailboxGrant::alias_ids_for_user($user_id);
+		$seen_domains = array();
+		foreach ($alias_ids as $alias_id) {
+			$alias = new InboundEmailAlias($alias_id, true);
+			if (!$alias->key) {
+				continue;
+			}
+			$domain_id = intval($alias->get('iea_ied_inbound_email_domain_id'));
+			if ($domain_id <= 0 || isset($seen_domains[$domain_id])) {
+				continue;
+			}
+			$seen_domains[$domain_id] = true;
+			$consider(new InboundEmailDomain($domain_id, true));
+		}
+
+		return $best;
+	}
+
+	/**
+	 * Lowercased names of every domain the user has a stake in — one they own
+	 * (ied_owner_usr_user_id) or hold a mailbox grant on (a grant on one of its
+	 * aliases). Used by the Population-2 precondition
+	 * (specs/mailbox_security_levels.md § Password reset): making ANY of these the
+	 * account login email would send reset links into an inbox the user could be
+	 * locked out of — a grant-reached mailbox is exactly as circular as an owned
+	 * one. Mirrors maxSecurityLevelForUser()'s traversal.
+	 *
+	 * @return string[] distinct lowercase domain names
+	 */
+	static function userHostedDomainNames(int $user_id): array {
+		$names = array();
+
+		$owned = new MultiInboundEmailDomain(array('owner_id' => $user_id, 'deleted' => false));
+		$owned->load();
+		foreach ($owned as $d) {
+			$names[strtolower((string)$d->get('ied_domain'))] = true;
+		}
+
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+		$alias_ids = InboundEmailMailboxGrant::alias_ids_for_user($user_id);
+		$seen_domains = array();
+		foreach ($alias_ids as $alias_id) {
+			$alias = new InboundEmailAlias($alias_id, true);
+			if (!$alias->key) {
+				continue;
+			}
+			$domain_id = intval($alias->get('iea_ied_inbound_email_domain_id'));
+			if ($domain_id <= 0 || isset($seen_domains[$domain_id])) {
+				continue;
+			}
+			$seen_domains[$domain_id] = true;
+			$domain = new InboundEmailDomain($domain_id, true);
+			if ($domain->key) {
+				$names[strtolower((string)$domain->get('ied_domain'))] = true;
+			}
+		}
+
+		return array_keys($names);
+	}
+
 	/** True when this domain is an enforced protected sending identity. */
 	function is_protected_identity() {
 		$v = $this->get('ied_is_protected_identity');
@@ -185,6 +313,10 @@ class MultiInboundEmailDomain extends SystemMultiBase {
 
 		if (isset($this->options['protected'])) {
 			$filters['ied_is_protected_identity'] = $this->options['protected'] ? "= true" : "= false";
+		}
+
+		if (isset($this->options['security_level'])) {
+			$filters['ied_security_level'] = [$this->options['security_level'], PDO::PARAM_STR];
 		}
 
 		if (isset($this->options['enabled'])) {

@@ -40,6 +40,10 @@ function thread_logic(array $input): LogicResult {
 	return LogicResult::render(array(
 		'messages' => $messages,
 		'folders'  => $service->threadFolderIds($alias_id, $thread_key),
+		// Locked-state contract (specs/mailbox_security_levels.md § 4.2): metadata
+		// plus a `locked` flag rather than an error, so the client renders sealed
+		// placeholders and triggers the native unlock ceremony on a content action.
+		'locked'   => $service->contentLocked(),
 	));
 }
 

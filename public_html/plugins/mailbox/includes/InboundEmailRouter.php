@@ -377,7 +377,11 @@ class InboundEmailRouter {
 		// start — no plaintext is ever written, even transiently.
 		$owner_id = $this->attachmentOwnerId($alias);
 		$vault = ($owner_id !== User::USER_SYSTEM) ? $this->loadOwnerVault($owner_id) : null;
-		$sealing = ($vault !== null);
+		// Sealing is capability-based (a single owner who holds a vault) AND
+		// posture-based: the domain's security level must opt into sealing
+		// (specs/mailbox_security_levels.md § Level → mechanism-branch switch).
+		// A Standard domain stores plaintext even when its owner holds a vault.
+		$sealing = ($vault !== null && $domain->seals_content());
 
 		$row = [
 			'iem_ied_inbound_email_domain_id' => $domain->key,

@@ -141,6 +141,10 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	    'usr_totp_enabled_time' => array('type'=>'timestamp(6)'),
 	    'usr_totp_last_used_step' => array('type'=>'int8'),
 	    'usr_totp_hmac_key' => array('type'=>'varchar(128)'),
+	    // 2FA cadence (specs/mailbox_security_levels.md § 5.2): 'every_login' asks
+	    // the second factor on each password sign-in; 'sensitive_only' signs in
+	    // password-only and defers the factor to sensitive actions (step-up).
+	    'usr_2fa_cadence' => array('type'=>'varchar(20)', 'default'=>'every_login'),
 	);
 
 private static function UcName($string) {
@@ -688,6 +692,17 @@ private static function UcName($string) {
 	 */
 	function has_totp_enabled() {
 		return !empty($this->get('usr_totp_enabled_time'));
+	}
+
+	/**
+	 * The account's 2FA cadence (specs/mailbox_security_levels.md § 5.2):
+	 * 'every_login' (the second factor is asked on each password sign-in) or
+	 * 'sensitive_only' (sign-in is password-only; the factor is deferred to
+	 * sensitive actions). Defaults to 'every_login' for any unrecognized value.
+	 */
+	function two_factor_cadence() {
+		$v = strtolower(trim((string)$this->get('usr_2fa_cadence')));
+		return $v === 'sensitive_only' ? 'sensitive_only' : 'every_login';
 	}
 
 	/**

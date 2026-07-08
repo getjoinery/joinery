@@ -138,6 +138,27 @@
 
             </div>
 
+            <?php if (!empty($page_vars['has_second_factor'])): $cadence = $page_vars['cadence'] ?? 'every_login'; ?>
+            <div class="jy-panel jy-mt-4">
+                <h2>When your second factor is asked</h2>
+                <form action="/profile/security" method="POST" class="jy-mt-2">
+                    <input type="hidden" name="action" value="set_cadence">
+                    <label class="jy-block jy-mt-2">
+                        <input type="radio" name="cadence" value="every_login" <?php echo $cadence === 'every_login' ? 'checked' : ''; ?>>
+                        At every sign-in
+                    </label>
+                    <label class="jy-block jy-mt-2">
+                        <input type="radio" name="cadence" value="sensitive_only" <?php echo $cadence === 'sensitive_only' ? 'checked' : ''; ?>>
+                        Only at sensitive actions (password-only sign-in)
+                        <small class="jy-auth-hint jy-block">Faster sign-in, but a phished password can then see your Standard mail and mailbox metadata until a sensitive action asks for your factor.</small>
+                    </label>
+                    <div class="jy-mt-2">
+                        <button type="submit" class="btn btn-secondary">Save</button>
+                    </div>
+                </form>
+            </div>
+            <?php endif; ?>
+
             <?php if ($page_vars['settings']->get_setting('passkeys_enabled')): ?>
             <div class="jy-panel jy-mt-4 d-none" id="passkeys-panel">
                 <h2>Passkeys</h2>
@@ -185,6 +206,15 @@
                     return fetch(url, options).then(async function (res) {
                         var json = await res.json();
                         if (!res.ok) throw new Error(json.error || 'Request failed.');
+                        // Sensitive action needs a fresh second-factor step-up (a 2xx
+                        // render carrying the flag, not an error): confirm identity, then
+                        // return here to retry (specs/mailbox_security_levels.md § 5.5).
+                        // Halt the chain with a never-resolving promise — the page is
+                        // navigating away, so no caller's catch should fire an alert.
+                        if (json.data && json.data.second_factor_required) {
+                            window.location = '/verify-stepup?return=' + encodeURIComponent('/profile/security');
+                            return new Promise(function () {});
+                        }
                         return json;
                     });
                 }
@@ -253,6 +283,9 @@
                 async function revokePasskey(passkey) {
                     if (!confirm('Revoke "' + (passkey.pkc_label || 'this passkey') + '"? It will no longer be able to sign in to this account.')) return;
                     try {
+                        // Revoking is a sensitive action — re-confirm the second factor
+                        // first (the server also enforces this).
+                        await stepUp();
                         await apiFetch('/api/v1/action/passkey_revoke', {
                             method: 'POST',
                             body: JSON.stringify({ credential_id: passkey.pkc_passkey_credential_id }),
@@ -398,6 +431,13 @@
                             err.data = json.data || {};
                             throw err;
                         }
+                        // Shared second-factor step-up handling (§ 5.5): a 2xx render
+                        // carrying the flag redirects to the ceremony, then back here.
+                        // Never-resolving promise halts the chain during navigation.
+                        if (json.data && json.data.second_factor_required) {
+                            window.location = '/verify-stepup?return=' + encodeURIComponent('/profile/security');
+                            return new Promise(function () {});
+                        }
                         return json;
                     });
                 }
@@ -431,6 +471,13 @@
                 function refresh() {
                     return apiFetch('/api/v1/action/vault_status', { method: 'POST', body: '{}' }).then(function (json) {
                         var status = json.data;
+                        // Presence beacon (assets/js/vault-presence.js): follow the
+                        // window state, so an unlock on this page starts site-wide
+                        // presence without a reload and a lock stops it.
+                        if (window.JoineryVaultPresence) {
+                            if (status.set_up && status.unlocked) { JoineryVaultPresence.start(); }
+                            else { JoineryVaultPresence.stop(); }
+                        }
                         codesDisplay.classList.add('d-none');
                         if (!status.set_up) {
                             notSetUp.classList.remove('d-none');
@@ -489,6 +536,9 @@
                     var code = prompt('Enter a recovery code:', '');
                     if (!code) return;
                     try {
+                        // A second_factor_required render (§ 5.6, recovery-code unlock)
+                        // is handled centrally by apiFetch (redirects to the step-up
+                        // ceremony), so it never resolves here.
                         var result = await apiFetch('/api/v1/action/vault_unlock_recovery', { method: 'POST', body: JSON.stringify({ code: code }) });
                         if (result.data && result.data.regenerate_recommended) {
                             alert('Unlocked. Fewer than 3 unused recovery codes remain - consider regenerating them.');

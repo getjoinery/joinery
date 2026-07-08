@@ -16,6 +16,14 @@ function passkey_revoke_logic(array $input): LogicResult {
 	$session->check_permission(0);
 	$user = new User($session->get_user_id(), TRUE);
 
+	// Revoking a passkey is a sensitive action (specs/mailbox_security_levels.md
+	// § 5.5): re-confirm the second factor first. Returns a flag the client uses
+	// to run the step-up ceremony and retry (API surface — no redirect).
+	if ($session->user_has_second_factor($user) && !$session->has_recent_second_factor()) {
+		return LogicResult::render(['second_factor_required' => true,
+			'error' => 'Confirm your identity with your second factor, then try again.']);
+	}
+
 	$credential_id = (int)($input['credential_id'] ?? 0);
 
 	// The vault's unlocker floor vetoes a revocation that would strand a

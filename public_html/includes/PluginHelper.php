@@ -350,6 +350,17 @@ class PluginHelper extends ComponentBase {
     protected function getApiEndpoints() {
         return $this->manifestData['apiEndpoints'] ?? [];
     }
+
+    /**
+     * Setting names this plugin declares as vault-gated — changing them redirects
+     * protected mail's plaintext, so the core settings-save refuses them without
+     * an open unlock window (specs/mailbox_security_levels.md § Vault-Gated
+     * Settings). Declared in plugin.json under `vaultGatedSettings`.
+     * @return string[]
+     */
+    public function getVaultGatedSettings() {
+        return $this->manifestData['vaultGatedSettings'] ?? [];
+    }
     
     /**
      * Get all available plugins with their helpers
