@@ -22,19 +22,23 @@
  * alias, so nothing here can select real mail). Run:
  *   php tests/integration/email_security_scan_job_test.php
  *
- * @version 1.0
+ * @version 1.1
+ */
+/** @joinery-test
+ * name: email_security_scan_job
+ * tier: db
+ * env: dev-only
+ * needs: []
  */
 
-require_once(__DIR__ . '/../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
-require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(__DIR__ . '/../lib/harness.php');
+harness_boot();
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineRunner.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/DescriptorValidator.php'));
+require_once(PathHelper::getIncludePath('includes/DescriptorValidator.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunContext.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_class.php'));
@@ -44,12 +48,6 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alia
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
 
-$pass = 0; $fail = 0;
-function ok($label, $cond) {
-    global $pass, $fail;
-    if ($cond) { $pass++; echo "  ok   $label\n"; }
-    else       { $fail++; echo "  FAIL $label\n"; }
-}
 /** Returns true if calling $fn throws InvalidArgumentException. */
 function throws_invalid(callable $fn) {
     try { $fn(); return false; }
@@ -86,12 +84,11 @@ class FakeVerdictProvider implements LlmProviderInterface {
 $db = DbConnector::get_instance()->get_db_link();
 $owner_uid = (int)$db->query("SELECT usr_user_id FROM usr_users WHERE usr_permission >= 10 AND usr_delete_time IS NULL ORDER BY usr_user_id LIMIT 1")->fetchColumn();
 if ($owner_uid <= 0) {
-    echo "SKIP: need at least one active permission-10 admin to own the test recipe.\n";
-    exit(0);
+    harness_skip('needs an active permission-10 admin to own the test recipe');
+    harness_finish();
 }
 
-echo "EmailSecurityScanJob — pipeline job contract\n";
-echo "owner_uid=$owner_uid\n\n";
+echo "EmailSecurityScanJob — pipeline job contract (owner_uid=$owner_uid)\n";
 
 // --- Isolated test domain/alias — nothing here can select real mail --------
 $suffix = gmdate('His') . '-' . mt_rand(1000, 9999);
@@ -113,19 +110,19 @@ $address = 'zzscan@' . $domain->get('ied_domain');
 echo "test alias: $address (id={$alias->key})\n\n";
 
 // --- 1. Registry discovery ---------------------------------------------------
-echo "1. registry discovery\n";
+section("1. registry discovery");
 $job = PipelineJobRegistry::get('email_security_scan');
 ok('job resolves via the real filesystem scan (no manual injection)', $job instanceof EmailSecurityScanJob);
 ok('label is non-empty', trim((string)$job->label()) !== '');
 
 // --- 2. configDescriptor() lists the test alias -----------------------------
-echo "\n2. configDescriptor\n";
+section("2. configDescriptor");
 $descriptor = $job->configDescriptor();
 $options = $descriptor['input']['mailbox_alias']['options'] ?? [];
 ok('test alias appears in the option list', array_key_exists($address, $options));
 
 // --- 3. validateConfig(): grant required ------------------------------------
-echo "\n3. validateConfig\n";
+section("3. validateConfig");
 $recipe = new Recipe(NULL);
 $recipe->set('rcp_name', "email-security-scan-test-{$suffix}");
 $recipe->set('rcp_mode', Recipe::MODE_PIPELINE);
@@ -159,7 +156,7 @@ ok('save succeeds once the owner holds a grant', $prepare_ok);
 $recipe->save();
 
 // --- 4. nextItem(): oldest non-spam, not-yet-logged, on the configured alias
-echo "\n4. nextItem\n";
+section("4. nextItem");
 function make_message(int $domain_id, int $alias_id, string $subject, string $body,
         ?string $spam_verdict, string $received_offset_minutes) {
     $msg = new InboundEmailMessage(NULL);
@@ -204,7 +201,7 @@ $item2 = $job->nextItem($config, $recipe);
 ok('spam-verdict message is skipped; the newer message is next', $item2 !== null && $item2['item_key'] === (string)$msg_newer->key);
 
 // --- 5. validateVerdict(): score/verdict band agreement ---------------------
-echo "\n5. validateVerdict\n";
+section("5. validateVerdict");
 ok('mismatched band (score 9, verdict safe) is rejected',
     throws_invalid(fn() => $job->validateVerdict(['score' => 9, 'verdict' => 'safe'])));
 $band_ok = true;
@@ -212,7 +209,7 @@ try { $job->validateVerdict(['score' => 9, 'verdict' => 'dangerous']); } catch (
 ok('agreeing band (score 9, verdict dangerous) passes', $band_ok);
 
 // --- 6. recordVerdict(): writes the fields; refuses a wrong-mailbox message -
-echo "\n6. recordVerdict\n";
+section("6. recordVerdict");
 // recordVerdict() authenticates against the current session, normally set
 // to the recipe owner by RecipeRunner::setupActorSession() before the job
 // ever runs. Replicate that here since this test calls the job directly.
@@ -261,7 +258,7 @@ ok('recordVerdict refuses a message outside the configured mailbox', throws_inva
 ));
 
 // --- 7. Full PipelineRunner::run() pass, real job, real digest --------------
-echo "\n7. full pipeline run\n";
+section("7. full pipeline run");
 $run = new RecipeRun(NULL);
 $run->set('rcr_rcp_recipe_id', (int)$recipe->key);
 $run->set('rcr_status', RecipeRun::STATUS_RUNNING);
@@ -323,6 +320,4 @@ $logs->load();
 foreach ($logs as $l) { $l->permanent_delete(); }
 $recipe->permanent_delete();
 
-echo "\n--------------------------------------------\n";
-echo "PASS: $pass   FAIL: $fail\n";
-exit($fail === 0 ? 0 : 1);
+harness_finish();

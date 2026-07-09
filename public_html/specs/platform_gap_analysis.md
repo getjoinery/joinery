@@ -16,7 +16,7 @@ Checklist of platform-level work that has no implementation yet. When you pick o
 ## Ready to build now (spec exists / unblocked)
 
 - **`scaffolding_code_generator.md`** — declarative manifest + `php utils/scaffold.php` emits the data/logic/view/admin file set. Prerequisite for the Plugin Builder. Now also carries the FormWriter `fromDescriptor()` work (formerly `FUTURE_formwriter_descriptors.md`, Step 6 of `logic_code_refactor.md`) — the generator is its forcing function.
-- **`FUTURE_descriptor_consumers.md`** — REST API + AI tools read logic descriptors instead of duplicated `_logic_api()`. 5 files still need descriptors: `booking_logic`, `event_sessions_logic`, `cart_logic`, `event_sessions_course_logic`, `survey_logic`.
+- **`logic_api_descriptor_migration.md`** — the REST API and AI tools consume descriptors natively (`implemented/descriptor_rest_api_core.md`); this drains the legacy estate: author descriptors for the ~45 `_logic_api()`-only logic files, then retire `_logic_api()` in one sweep.
 - **`component_version_integrity.md`** — fixes a live manifest/DB version-drift bug; publish-time version bumping is missing.
 - **`sms_messaging.md`** — harden the rough 3-phase outline; prerequisite for `uptime_monitor.md` alerts, `scheduling_system.md` reminders, and 2FA-over-SMS.
 - **`geolocation_postgis_spec.md`** — specced standalone; hard dependency of the dating distance/discovery engine. Land PostGIS once, first.

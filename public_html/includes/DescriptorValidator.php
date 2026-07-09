@@ -18,10 +18,15 @@
  * specific message naming the failing field on a hard failure (missing
  * required, wrong type that can't be coerced, out of bounds, not in enum).
  *
- * This is a v1 minimal validator scoped to AI write tools. It overlaps
- * conceptually with the broader DescriptorValidator described in
- * FUTURE_descriptor_consumers.md. When that lands, this can become a
- * thin wrapper or be replaced outright.
+ * Consumers: the REST API action boundary (ApiLogicEndpoint validates a
+ * request body against the action's _logic_descriptor() input schema before
+ * the logic runs) and the joinery_ai plugin (ActionInvoker, PipelineRunner).
+ * The logic file's own validation still runs as the backstop — this is the
+ * fast first-pass at the boundary, not a replacement.
+ *
+ * @version 1.1
+ * @changelog 1.1 - Promoted to core includes/: consumed by the REST API
+ *   action endpoint as well as joinery_ai.
  */
 class DescriptorValidator {
 

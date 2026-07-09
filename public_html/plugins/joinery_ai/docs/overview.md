@@ -570,6 +570,6 @@ SELECT rcr_tool_calls FROM rcr_recipe_runs WHERE rcr_run_id = ?;
 - [`specs/implemented/joinery_ai.md`](../../../specs/implemented/joinery_ai.md) — original system spec
 - [`specs/implemented/joinery_ai_autodiscovery.md`](../../../specs/implemented/joinery_ai_autodiscovery.md) — auto-discovery read-side design and threat model
 - [`specs/implemented/joinery_ai_write_tools.md`](../../../specs/implemented/joinery_ai_write_tools.md) — write-tool design covering both direct-model and logic-file paths
-- [`specs/FUTURE_descriptor_consumers.md`](../../../specs/FUTURE_descriptor_consumers.md) — Step 7: API + AI consume `_logic_descriptor()` natively
+- [`specs/implemented/descriptor_rest_api_core.md`](../../../specs/implemented/descriptor_rest_api_core.md) — Step 7 core: API + AI consume `_logic_descriptor()` natively (migration continues in [`specs/logic_api_descriptor_migration.md`](../../../specs/logic_api_descriptor_migration.md))
 - [Plugin Developer Guide](/docs/plugin_developer_guide.md) — plugin architecture and routing
 - [Logic Architecture](/docs/logic_architecture.md) — business logic layer

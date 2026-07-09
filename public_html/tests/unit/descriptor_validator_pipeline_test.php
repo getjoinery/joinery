@@ -1,4 +1,10 @@
 <?php
+/** @joinery-test
+ * name: descriptor_validator_pipeline
+ * tier: safe
+ * env: any
+ * needs: []
+ */
 /**
  * Unit test for the DescriptorValidator extensions added for pipeline-mode
  * verdicts (specs/joinery_ai_item_pipeline.md § DescriptorValidator
@@ -10,17 +16,10 @@
  * @version 1.0
  */
 
-require_once(__DIR__ . '/../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/DescriptorValidator.php'));
+require_once(__DIR__ . '/../lib/harness.php');
+harness_boot();
+require_once(PathHelper::getIncludePath('includes/DescriptorValidator.php'));
 
-$tests = 0;
-$failures = 0;
-function check($label, $condition) {
-    global $tests, $failures;
-    $tests++;
-    echo ($condition ? '  PASS  ' : '  FAIL  ') . $label . "\n";
-    if (!$condition) { $GLOBALS['failures']++; }
-}
 /** Returns true if calling $fn throws InvalidArgumentException. */
 function throws_invalid(callable $fn) {
     try { $fn(); return false; }
@@ -31,29 +30,29 @@ function throws_invalid(callable $fn) {
 $enum_descriptor = ['input' => [
     'verdict' => ['type' => 'string', 'required' => true, 'enum' => ['keep', 'flag']],
 ]];
-check('enum: valid value coerces through',
+ok('enum: valid value coerces through',
     DescriptorValidator::coerce($enum_descriptor, ['verdict' => 'keep']) === ['verdict' => 'keep']);
-check('enum: value outside the list throws',
+ok('enum: value outside the list throws',
     throws_invalid(fn() => DescriptorValidator::coerce($enum_descriptor, ['verdict' => 'delete'])));
 
 // --- min / max ------------------------------------------------------------
 $bounds_descriptor = ['input' => [
     'score' => ['type' => 'int', 'required' => true, 'min' => 1, 'max' => 10],
 ]];
-check('min/max: in-range value passes',
+ok('min/max: in-range value passes',
     DescriptorValidator::coerce($bounds_descriptor, ['score' => 5]) === ['score' => 5]);
-check('min/max: below minimum throws',
+ok('min/max: below minimum throws',
     throws_invalid(fn() => DescriptorValidator::coerce($bounds_descriptor, ['score' => 0])));
-check('min/max: above maximum throws',
+ok('min/max: above maximum throws',
     throws_invalid(fn() => DescriptorValidator::coerce($bounds_descriptor, ['score' => 11])));
 
 // --- max_length ------------------------------------------------------------
 $length_descriptor = ['input' => [
     'reason' => ['type' => 'string', 'max_length' => 5],
 ]];
-check('max_length: short string passes',
+ok('max_length: short string passes',
     DescriptorValidator::coerce($length_descriptor, ['reason' => 'ok']) === ['reason' => 'ok']);
-check('max_length: over-length string throws',
+ok('max_length: over-length string throws',
     throws_invalid(fn() => DescriptorValidator::coerce($length_descriptor, ['reason' => 'way too long'])));
 
 // --- type 'array' (nested items + max_items) ------------------------------
@@ -71,40 +70,38 @@ $valid_array_input = ['flags' => [
     ['code' => 'a', 'weight' => 50],
     ['code' => 'b'],
 ]];
-check('array: nested objects coerce, missing optional field omitted',
+ok('array: nested objects coerce, missing optional field omitted',
     DescriptorValidator::coerce($array_descriptor, $valid_array_input) === [
         'flags' => [['code' => 'a', 'weight' => 50], ['code' => 'b']],
     ]);
-check('array: a bad nested enum value throws',
+ok('array: a bad nested enum value throws',
     throws_invalid(fn() => DescriptorValidator::coerce($array_descriptor, [
         'flags' => [['code' => 'z']],
     ])));
-check('array: exceeding max_items throws',
+ok('array: exceeding max_items throws',
     throws_invalid(fn() => DescriptorValidator::coerce($array_descriptor, [
         'flags' => [['code' => 'a'], ['code' => 'a'], ['code' => 'a']],
     ])));
-check('array: a non-object element throws',
+ok('array: a non-object element throws',
     throws_invalid(fn() => DescriptorValidator::coerce($array_descriptor, [
         'flags' => ['not-an-object'],
     ])));
-check('array: absent (no default) omits the field rather than erroring',
+ok('array: absent (no default) omits the field rather than erroring',
     DescriptorValidator::coerce($array_descriptor, []) === []);
 
 // --- renderOutputInstruction() --------------------------------------------
 $instruction = DescriptorValidator::renderOutputInstruction($enum_descriptor);
-check('renderOutputInstruction: names the field',
+ok('renderOutputInstruction: names the field',
     strpos($instruction, '"verdict"') !== false);
-check('renderOutputInstruction: surfaces the enum values',
+ok('renderOutputInstruction: surfaces the enum values',
     strpos($instruction, 'keep') !== false && strpos($instruction, 'flag') !== false);
-check('renderOutputInstruction: instructs a single JSON object',
+ok('renderOutputInstruction: instructs a single JSON object',
     strpos($instruction, 'JSON object') !== false);
 
 $array_instruction = DescriptorValidator::renderOutputInstruction($array_descriptor);
-check('renderOutputInstruction: nested array field names its item fields',
+ok('renderOutputInstruction: nested array field names its item fields',
     strpos($array_instruction, 'code') !== false && strpos($array_instruction, 'weight') !== false);
-check('renderOutputInstruction: surfaces max_items',
+ok('renderOutputInstruction: surfaces max_items',
     strpos($array_instruction, 'max_items 2') !== false);
 
-echo "\n--------------------------------------------\n";
-echo "Tests: $tests   Failures: $failures\n";
-exit($failures === 0 ? 0 : 1);
+harness_finish();

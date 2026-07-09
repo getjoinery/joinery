@@ -167,7 +167,7 @@ The cookie proves who the user is; the header proves the call came from our own 
 
 Mechanics worth knowing: the API only ever *reads* the session (the session lock is released as soon as identity is resolved, so parallel page JS calls do not serialize, and nothing an action does can mutate the web session); browser-session requests carry no `client_app` headers, so client version minimums never apply to them; requests without any credential fail exactly as key-less requests always have.
 
-**Forward rule:** new features expose their logic as API actions (`_logic_api()` opt-in) and page JavaScript calls `/api/v1` with this credential. `/ajax/` is legacy — no new endpoints there; existing ones migrate opportunistically when touched.
+**Forward rule:** new features expose their logic as API actions (`_logic_descriptor()` opt-in) and page JavaScript calls `/api/v1` with this credential. `/ajax/` is legacy — no new endpoints there; existing ones migrate opportunistically when touched.
 
 ### Key Properties
 
@@ -281,7 +281,7 @@ Both axes live in one class, `ApiAuth` (`includes/ApiAuth.php`), which owns the 
 Action, form, and management endpoints may declare their authorization contract in their descriptor's optional `auth` block. Each field falls back to the router's default (which equals that surface's standard requirement) when omitted, so most endpoints declare nothing:
 
 ```php
-function catalog_logic_api() {
+function catalog_logic_descriptor(): array {
     return [
         'description' => 'List blockable categories',
         'auth' => [
@@ -682,24 +682,48 @@ Referrer-Policy: no-referrer
 
 ## Action Endpoints
 
-Actions execute multi-step business logic (registration, event signup, payments, etc.) rather than raw CRUD operations. All logic functions that have been opted in via a companion `_api()` function are available.
+Actions execute multi-step business logic (registration, event signup, payments, etc.) rather than raw CRUD operations. All logic functions that have been opted in via a metadata companion function are available.
 
 ### Making a Logic Function Available via API
 
-Add a companion function to your logic file:
+Add a descriptor companion function to your logic file:
 
 ```php
 // In logic/your_action_logic.php
 
-function your_action_logic_api() {
+function your_action_logic_descriptor(): array {
     return [
+        'description'      => 'What this action does',
         'requires_session' => true,   // default: true
-        'description' => 'What this action does',
+        'mutates'          => true,
+        'input'            => [
+            'email'   => ['type' => 'email', 'required' => true],
+            'message' => ['type' => 'text',  'required' => false],
+        ],
     ];
 }
 ```
 
-That's it — no registry file or mapping needed.
+That's it — no registry file or mapping needed. The one declaration drives the
+discovery endpoint (including the typed `input` schema), boundary validation,
+and the AI action surface (`describe_actions` / `invoke_action`).
+
+**Boundary validation.** When the descriptor declares an `input` schema, the
+request body is coerced and validated against it (`DescriptorValidator`)
+before the logic runs: a hard failure — missing required field, uncoercible
+type, out-of-bounds value — returns `422` with errortype `ValidationError`
+and the logic never executes, without consuming an `Idempotency-Key`. Coerced
+values (typed, defaults applied) overlay the raw input; fields the schema
+doesn't declare pass through untouched. The logic file's own validation
+remains the backstop. See `includes/DescriptorValidator.php` for the type
+vocabulary (`string`, `int`, `float`, `bool`, `email`, `text`, `password`,
+`date`, `datetime`, `array`) and per-field options (`enum`, `min`/`max`,
+`max_length`, `items`).
+
+**Legacy companion.** A minimal `{action}_logic_api()` returning only
+`description` and `requires_session` also opts an action in; it carries no
+input schema, so no boundary validation applies. When both companions exist,
+the descriptor wins. New actions declare `_logic_descriptor()`.
 
 ### Action Request Format
 
@@ -732,7 +756,7 @@ POST /api/v1/action/dns_filtering/device_edit
 GET  /api/v1/form/dns_filtering/device_edit
 ```
 
-The name resolves directly to `plugins/{plugin}/logic/{action}_logic.php` (no theme chain — themes do not override plugin logic) and follows the same `_logic_api()` opt-in contract as core actions. Only **active** plugins resolve; an inactive or unknown plugin returns the same `Unknown action` 404 as a missing action, so responses do not reveal which plugins are installed. The namespace makes collisions structurally impossible — a plugin action can never shadow a core action or another plugin's.
+The name resolves directly to `plugins/{plugin}/logic/{action}_logic.php` (no theme chain — themes do not override plugin logic) and follows the same metadata-companion opt-in contract as core actions. Only **active** plugins resolve; an inactive or unknown plugin returns the same `Unknown action` 404 as a missing action, so responses do not reveal which plugins are installed. The namespace makes collisions structurally impossible — a plugin action can never shadow a core action or another plugin's.
 
 Request logs and error messages use the full namespaced name (e.g. `action dns_filtering/device_edit`). See [Plugin Developer Guide](plugin_developer_guide.md) for the plugin-side conventions.
 
@@ -847,18 +871,26 @@ Returns a list of all available actions with descriptions. Useful for API consum
         "register": {
             "description": "Register a new user account",
             "requires_session": false,
+            "input": null,
             "has_form": true
         },
-        "event_register": {
-            "description": "Register for an event",
+        "event_withdraw": {
+            "description": "Withdraw the current user from an event registration.",
             "requires_session": true,
+            "input": {
+                "evr_event_registrant_id": {"type": "int", "required": true, "label": "Event registrant ID"},
+                "confirm": {"type": "bool", "required": true, "label": "Confirmation flag"}
+            },
             "has_form": false
         }
     }
 }
 ```
 
-`has_form` indicates whether the action exposes a server-driven form definition (below).
+`input` is the action's typed input schema from its descriptor — the same
+schema the action endpoint validates against; `null` when the action only has
+the legacy `_logic_api()` companion. `has_form` indicates whether the action
+exposes a server-driven form definition (below).
 
 ## Form Definition Endpoint
 
@@ -870,7 +902,7 @@ Returns the action's form as a JSON **definition** — fields, labels, prefilled
 
 `visibility_rules` may appear on `drop`, `checkbox`, `radio`, and radio `checkbox_list` fields. The native renderer reads the current rule key by the trigger's type — a `drop`/`radio` keys on the selected option value, a `checkbox` keys on `checked`/`unchecked` — matching web behavior exactly (see [FormWriter §6](formwriter.md#6-field-visibility--custom-scripts)).
 
-A form is served iff the action's logic file defines **both** `{action_name}_logic_api()` and `{action_name}_logic_form()` (reflected in the discovery endpoint's `has_form` flag).
+A form is served iff the action's logic file defines **both** a metadata companion (`{action_name}_logic_descriptor()` or legacy `{action_name}_logic_api()`) and `{action_name}_logic_form()` (reflected in the discovery endpoint's `has_form` flag).
 
 **Authentication mirrors the action's `requires_session` declaration:**
 

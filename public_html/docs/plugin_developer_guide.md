@@ -458,18 +458,24 @@ Key points for plugin logic files:
 
 ### Exposing API Actions
 
-A plugin logic function becomes a REST API action by adding the same `_logic_api()` companion core logic files use:
+A plugin logic function becomes a REST API action by adding the same `_logic_descriptor()` companion core logic files use:
 
 ```php
 // plugins/my-plugin/logic/my_feature_logic.php
 
-function my_feature_logic_api() {
+function my_feature_logic_descriptor(): array {
     return [
+        'description'      => 'What this action does',
         'requires_session' => true,   // default: true
-        'description' => 'What this action does',
+        'mutates'          => true,
+        'input'            => [
+            'device_id' => ['type' => 'int', 'required' => true],
+        ],
     ];
 }
 ```
+
+The `input` schema drives boundary validation and appears in discovery — see [docs/api.md](api.md#making-a-logic-function-available-via-api) for the field types and the legacy `_logic_api()` companion.
 
 The action is addressed under the plugin's namespace — `POST /api/v1/action/my-plugin/my_feature` — and listed in `GET /api/v1/actions` as `my-plugin/my_feature`. Resolution goes directly to `plugins/{plugin}/logic/{action}_logic.php`; only active plugins resolve, and the namespace means a plugin action can never collide with a core action or another plugin's.
 

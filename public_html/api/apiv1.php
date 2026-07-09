@@ -2,7 +2,12 @@
 /**
  * API v1 Endpoint
  *
- * @version 2.11
+ * @version 2.12
+ * @changelog 2.12 - Descriptor consumption: action discovery and the action/
+ *   form endpoints resolve metadata from _logic_descriptor() first with
+ *   _logic_api() as the legacy fallback; discovery exposes each action's
+ *   typed input schema; descriptor-declared input is validated at the action
+ *   boundary (DescriptorValidator, 422 ValidationError on hard failure).
  * @changelog 2.11 - App platform endpoints (/api/v1/app/*, ApiAppEndpoint) and
  *   auth/web_session (ApiAuthEndpoint): the navigation routing table and the
  *   web-session bridge consumed by native apps. See docs/mobile_apps.md.
@@ -616,18 +621,28 @@ if (in_array($operation, $classes)) {
 		foreach (glob($logic_dir . '/*_logic.php') as $file) {
 			$basename = basename($file, '.php');           // e.g., "register_logic"
 			$action_name = substr($basename, 0, -6);       // e.g., "register" (strip "_logic")
-			$api_meta_function = $basename . '_api';        // e.g., "register_logic_api"
+			$descriptor_function = $basename . '_descriptor'; // canonical metadata
+			$api_meta_function = $basename . '_api';        // legacy fallback
 
-			// Check file contents for the _api() function without including
+			// Check file contents for a metadata companion without including
 			// (some legacy files have top-level code that would execute on include)
 			$contents = file_get_contents($file);
-			if (preg_match('/function\s+' . preg_quote($api_meta_function, '/') . '\s*\(/', $contents)) {
+			$declares = function ($fn) use ($contents) {
+				return (bool) preg_match('/function\s+' . preg_quote($fn, '/') . '\s*\(/', $contents);
+			};
+			if ($declares($descriptor_function) || $declares($api_meta_function)) {
 				require_once($file);
-				if (function_exists($api_meta_function)) {
-					$meta = call_user_func($api_meta_function);
+				$meta_function = function_exists($descriptor_function)
+					? $descriptor_function
+					: (function_exists($api_meta_function) ? $api_meta_function : null);
+				if ($meta_function) {
+					$meta = call_user_func($meta_function);
 					$found[$name_prefix . $action_name] = [
 						'description' => $meta['description'] ?? '',
-						'requires_session' => $meta['requires_session'] ?? true,
+						'requires_session' => $meta['auth']['requires_session'] ?? $meta['requires_session'] ?? true,
+						// Typed input schema from the descriptor; null when the
+						// action only has the legacy _logic_api() companion
+						'input' => (isset($meta['input']) && is_array($meta['input'])) ? $meta['input'] : null,
 						// Form builder companion → GET /api/v1/form/{action} works
 						'has_form' => function_exists($basename . '_form'),
 					];
