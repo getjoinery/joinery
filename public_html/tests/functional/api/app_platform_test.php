@@ -14,10 +14,16 @@
  * Run: php tests/functional/api/app_platform_test.php [base_url] [origin_ip]
  */
 
+/** @joinery-test
+ * name: api_app_platform
+ * tier: db
+ * env: dev-only
+ * needs: []
+ */
 require_once(__DIR__ . '/api_test_harness.php');
 require_once(PathHelper::getIncludePath('data/app_bridge_tokens_class.php'));
 
-harness_boot($argv);
+api_test_boot($argv);
 
 /**
  * Plain web request (not /api/v1): returns status, headers, body. Pins DNS to

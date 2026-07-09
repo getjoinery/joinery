@@ -1,10 +1,15 @@
 <?php
-// tests/email/email_pattern_test.php
+/** @joinery-test
+ * name: email_pattern_send
+ * tier: live
+ * env: prod-verify
+ * needs: [mailgun]
+ * timeout: 600
+ */
 // Comprehensive email pattern test - sends one email for each pattern found in the codebase
 
-require_once(__DIR__ . '/../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));  
+require_once(__DIR__ . '/../lib/harness.php');
+require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
 require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('data/emails_class.php'));
@@ -357,50 +362,28 @@ class EmailPatternTest {
     }
 }
 
-// Run the test if called directly
-if (basename(__FILE__) == basename($_SERVER['SCRIPT_NAME'])) {
-    echo "Email Pattern Test - Testing all email code patterns found in codebase\n";
-    echo "====================================================================\n\n";
-    
-    // Configuration
-    $config = [
-        'test_email' => 'test@example.com' // Change this to your test email
-    ];
-    
-    // Allow override from command line
-    if (isset($argv[1])) {
-        $config['test_email'] = $argv[1];
-    }
-    
-    echo "Test email address: {$config['test_email']}\n\n";
-    
-    try {
-        $tester = new EmailPatternTest($config);
-        $results = $tester->run();
-        
-        echo "\n" . str_repeat("=", 60) . "\n";
-        echo "SUMMARY\n";
-        echo str_repeat("=", 60) . "\n";
-        
-        $summary = $tester->getSummary();
-        echo "Total patterns tested: {$summary['total_patterns']}\n";
-        echo "Successful: {$summary['successful']}\n";
-        echo "Failed: {$summary['failed']}\n";
-        echo "Success rate: {$summary['success_rate']}%\n";
-        
-        if ($summary['failed'] > 0) {
-            echo "\nFailed patterns:\n";
-            foreach ($results as $result) {
-                if (!$result['success']) {
-                    echo "- {$result['pattern']} ({$result['source']}): {$result['error']}\n";
-                }
-            }
-        }
-        
-    } catch (Exception $e) {
-        echo "ERROR: {$e->getMessage()}\n";
-        exit(1);
-    }
+harness_boot();
+
+// Recipient resolution: first non-flag positional arg, else the
+// email_test_recipient setting, else a safe placeholder. A --flag is never a
+// recipient (so the runner's `--json` is not treated as an address).
+$recipient = 'test@example.com';
+$positional = array_values(array_filter(array_slice($argv, 1), function ($a) { return strpos($a, '--') !== 0; }));
+if (!empty($positional[0])) {
+    $recipient = $positional[0];
+} else {
+    $configured = Globalvars::get_instance()->get_setting('email_test_recipient');
+    if (!empty($configured)) $recipient = $configured;
 }
 
-?>
+if (!harness_wants_json()) echo "Test email address: {$recipient}\n\n";
+
+section('Email pattern sends to ' . $recipient);
+$tester = new EmailPatternTest(['test_email' => $recipient]);
+$results = $tester->run();
+foreach ($results as $result) {
+    check(!empty($result['success']), ($result['pattern'] ?? 'pattern') . ' (' . ($result['source'] ?? '') . ')',
+        empty($result['success']) ? ($result['error'] ?? 'send failed') : '');
+}
+
+harness_finish();

@@ -1,4 +1,10 @@
 <?php
+/** @joinery-test
+ * name: imap_poller
+ * tier: db
+ * env: dev-only
+ * needs: []
+ */
 /**
  * Tests for the IMAP ingest store path + poller task, without a live IMAP server.
  *
@@ -18,9 +24,8 @@
  * @version 1.0
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+require_once(__DIR__ . '/../../../tests/lib/harness.php');
+harness_boot();
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
@@ -29,8 +34,6 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRo
 require_once(PathHelper::getIncludePath('plugins/mailbox/tasks/PollImapAccounts.php'));
 
 class ImapPollerTest {
-	private $pass = 0;
-	private $fail = 0;
 	private $db;
 	private $suffix;
 	private $domain_id;
@@ -41,12 +44,11 @@ class ImapPollerTest {
 
 	private function out($m) { echo (php_sapi_name() === 'cli' ? '' : '<br>') . $m . "\n"; }
 	private function ok($c, $l) {
-		if ($c) { $this->pass++; $this->out('  PASS: ' . $l); }
-		else { $this->fail++; $this->out('  FAIL: ' . $l); }
+		return check((bool)$c, $l);
 	}
 
 	function run() {
-		$this->out('=== IMAP poller / store-path tests ===');
+		section('IMAP poller / store-path tests');
 		try {
 			$this->setUp();
 			$this->testReferenceBackedStore();
@@ -54,13 +56,10 @@ class ImapPollerTest {
 			$this->testLargeSizeStillStored();
 			$this->testPollerSummary();
 		} catch (\Throwable $e) {
-			$this->fail++;
-			$this->out('  EXCEPTION: ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
+			check(false, 'EXCEPTION', $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
 		} finally {
 			$this->tearDown();
 		}
-		$this->out("=== {$this->pass} passed, {$this->fail} failed ===");
-		return $this->fail === 0;
 	}
 
 	private function setUp() {
@@ -229,6 +228,5 @@ class ImapPollerTest {
 }
 
 $test = new ImapPollerTest();
-$ok = $test->run();
-exit($ok ? 0 : 1);
-?>
+$test->run();
+harness_finish();

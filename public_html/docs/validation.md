@@ -922,7 +922,7 @@ fail **closed**.
 **Testability.** `DnsResolver::setBackend($double)` swaps the raw-DNS layer for
 a test double (`clearBackend()` restores it in teardown). The seam sits at the
 bottom of the stack, so one `setBackend()` call also makes every consumer —
-including `DnsAuthChecker` — testable. See `tests/unit/dns_resolver_test.php`.
+including `DnsAuthChecker` — testable. See `tests/unit/dns_resolver_test.php` and [Testing](testing.md).
 
 ```php
 // Production code just calls it — no setup needed:

@@ -29,67 +29,30 @@
  * - Error handling for missing pages
  */
 
-// Browser-only HTTP routing test - designed for web access only
+/** @joinery-test
+ * name: routing
+ * tier: safe
+ * env: any
+ * needs: []
+ */
+require_once(__DIR__ . '/../lib/harness.php');
+harness_boot();
 
-// HTML output functions
-function output_pass($text) {
-    echo '<li style="color: #16a34a; font-family: monospace; margin: 8px 0; padding: 8px; background: #f0fdf4; border-left: 4px solid #16a34a; border-radius: 4px;">✅ PASS: ' . htmlspecialchars($text) . '</li>';
-}
+// Result helpers funnel into the shared harness. A pass/fail becomes a recorded
+// check; an info line opens a new section (its label groups the checks below it).
+function output_pass($text) { check(true, $text); }
+function output_fail($text) { check(false, $text); }
+function output_info($text) { section($text); }
 
-function output_fail($text) {
-    echo '<li style="color: #dc2626; font-family: monospace; margin: 8px 0; padding: 8px; background: #fef2f2; border-left: 4px solid #dc2626; border-radius: 4px;">❌ FAIL: ' . htmlspecialchars($text) . '</li>';
-}
-
-function output_info($text) {
-    echo '<li style="color: #7c3aed; font-family: monospace; margin: 8px 0; padding: 8px; background: #faf5ff; border-left: 4px solid #7c3aed; border-radius: 4px;">📝 ' . htmlspecialchars($text) . '</li>';
-}
-
-// Start HTML output
-echo '<!DOCTYPE html><html><head>';
-echo '<title>HTTP Routing Test Results</title>';
-echo '<meta charset="UTF-8">';
-echo '<style>';
-echo 'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 40px; background: #fff; }';
-echo 'h1 { color: #1e293b; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }';
-echo 'h2 { color: #475569; margin-top: 30px; }';
-echo 'h3 { color: #2563eb; margin: 20px 0 10px 0; }';
-echo '.test-section { background: #f8fafc; padding: 20px; margin: 20px 0; border-radius: 8px; border-left: 4px solid #3b82f6; }';
-echo 'ul { list-style: none; padding: 0; margin: 0; }';
-echo 'li { margin: 8px 0; padding: 8px; border-radius: 4px; font-family: monospace; }';
-echo 'div { line-height: 1.6; }';
-echo '.results-section { background: #fefce8; border: 1px solid #facc15; padding: 15px; margin: 20px 0; border-radius: 6px; }';
-echo '.detail-item { margin: 4px 0 4px 20px; padding: 4px 8px; background: #fef2f2; border-left: 2px solid #dc2626; font-size: 12px; }';
-echo '</style>';
-echo '</head><body>';
-
-echo '<h1>🚀 HTTP Routing System Test</h1>';
-echo '<div style="background: #eff6ff; padding: 15px; border-radius: 6px; margin-bottom: 20px;">';
-echo '<strong>Environment:</strong> Browser-Only Mode<br>';
-echo '<strong>Server:</strong> ' . htmlspecialchars($_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? 'Unknown') . '<br>';
-echo '<strong>Timestamp:</strong> ' . date('Y-m-d H:i:s T');
-echo '</div>';
-
-// Include system dependencies
-require_once(__DIR__ . '/../../includes/PathHelper.php');
-
+// System dependencies ($settings + $dblink are used throughout). The harness has
+// already loaded Globalvars/DbConnector; these require_once calls are no-ops.
 try {
-    require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-    require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
     $settings = Globalvars::get_instance();
     $dbconnector = DbConnector::get_instance();
     $dblink = $dbconnector->get_db_link();
 } catch (Exception $e) {
-    if ($is_browser) {
-        echo '<div style="background: #fef2f2; border: 2px solid #dc2626; padding: 20px; border-radius: 8px; color: #991b1b;">';
-        echo '<h3>❌ System Error</h3>';
-        echo '<p><strong>Could not load system settings.</strong></p>';
-        echo '<p><strong>Error:</strong> ' . htmlspecialchars($e->getMessage()) . '</p>';
-        echo '</div></body></html>';
-    } else {
-        echo "❌ ERROR: Could not load system settings.\n";
-        echo "Error: " . $e->getMessage() . "\n";
-    }
-    exit(1);
+    check(false, 'load system settings', $e->getMessage());
+    harness_finish();
 }
 
 // HTTP Testing Class
@@ -103,8 +66,11 @@ class HttpTester {
             $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] ? 'https' : 'http';
             self::$base_url = $protocol . '://' . $_SERVER['HTTP_HOST'];
         } else {
-            // Try to get from settings or use fallback
-            $host = $settings->get_setting('site_domain') ?? 'dev.getjoinery.com';
+            // Try to get from settings or use fallback. Empty (not just null)
+            // must fall back too, so a CLI run with no site_domain still targets
+            // a real host instead of degrading to "https://".
+            $host = $settings->get_setting('site_domain');
+            if (empty($host)) $host = 'dev.getjoinery.com';
             self::$base_url = 'https://' . $host;
         }
         
@@ -217,13 +183,7 @@ class HttpRoutingTestRunner {
     public function runAllTests() {
         // Initialize HTTP tester first
         HttpTester::init($this->settings);
-        
-        echo '<h2>🌐 HTTP Response Testing</h2>';
-        echo '<div style="background: #f1f5f9; padding: 10px; border-radius: 6px; margin: 15px 0;">';
-        echo '<strong>Testing Mode:</strong> Browser Display with Enhanced Troubleshooting<br>';
-        echo '<strong>Base URL:</strong> ' . htmlspecialchars(HttpTester::getBaseUrl()) . '<br>';
-        echo '</div>';
-        
+
         // Test Categories
         $this->testPublicPages();
         $this->testStaticFiles();
@@ -237,13 +197,10 @@ class HttpRoutingTestRunner {
         $this->testContentRoutes();
         $this->testErrorPages();
         $this->testRedirects();
-        
-        // Summary
-        $this->displaySummary();
     }
     
     private function testPublicPages() {
-        echo '<div class="test-section"><h3>1. TESTING PUBLIC PAGES</h3><ul>';
+        section('1. TESTING PUBLIC PAGES');
         
         $test_cases = [
             // Homepage - always test this
@@ -280,11 +237,10 @@ class HttpRoutingTestRunner {
             }
         }
         
-        echo '</ul></div>';
     }
     
     private function testStaticFiles() {
-        echo '<div class="test-section"><h3>2. TESTING STATIC FILES</h3><ul>';
+        section('2. TESTING STATIC FILES');
         
         $test_cases = [];
         
@@ -337,11 +293,10 @@ class HttpRoutingTestRunner {
             }
         }
         
-        echo '</ul></div>';
     }
     
     private function testThemeFiles() {
-        echo '<div class="test-section"><h3>3. TESTING THEME FILES</h3><ul>';
+        section('3. TESTING THEME FILES');
         
         // Get current theme using ThemeHelper
         $current_theme = 'falcon'; // Default fallback
@@ -405,11 +360,10 @@ class HttpRoutingTestRunner {
             }
         }
         
-        echo '</ul></div>';
     }
     
     private function testThemeViews() {
-        echo '<div class="test-section"><h3>4. TESTING THEME VIEW FILES</h3><ul>';
+        section('4. TESTING THEME VIEW FILES');
         
         // Get current theme using ThemeHelper
         $current_theme = 'falcon';
@@ -482,11 +436,10 @@ class HttpRoutingTestRunner {
             // Silently skip if events can't be loaded
         }
         
-        echo '</ul></div>';
     }
     
     private function testPluginFiles() {
-        echo '<div class="test-section"><h3>5. TESTING PLUGIN FILES</h3><ul>';
+        section('5. TESTING PLUGIN FILES');
 		//Currently, there are no plugins that have assets
         
             //removed: echo "5. TESTING PLUGIN FILES\n";
@@ -509,12 +462,11 @@ class HttpRoutingTestRunner {
             }
         }
         
-        echo '</ul></div>';
     }
     
     
     private function testPluginViews() {
-        echo '<div class="test-section"><h3>6. TESTING PLUGIN VIEW AUTO-DISCOVERY</h3><ul>';
+        section('6. TESTING PLUGIN VIEW AUTO-DISCOVERY');
 
         $doc_root = PathHelper::getRootDir();
 
@@ -542,13 +494,11 @@ class HttpRoutingTestRunner {
             $active_plugins = PluginHelper::getActivePlugins();
         } catch (Exception $e) {
             output_info('Could not load active plugins: ' . $e->getMessage());
-            echo '</ul></div>';
             return;
         }
 
         if (empty($active_plugins)) {
             output_info('No active plugins found — skipping plugin view tests');
-            echo '</ul></div>';
             return;
         }
 
@@ -636,11 +586,10 @@ class HttpRoutingTestRunner {
             }
         }
 
-        echo '</ul></div>';
     }
 
     private function testAdminAccess() {
-        echo '<div class="test-section"><h3>7. TESTING ADMIN ACCESS</h3><ul>';
+        section('7. TESTING ADMIN ACCESS');
         
             //removed: echo "7. TESTING ADMIN ACCESS\n";
         
@@ -662,11 +611,10 @@ class HttpRoutingTestRunner {
             }
         }
         
-        echo '</ul></div>';
     }
     
     private function testAjaxEndpoints() {
-        echo '<div class="test-section"><h3>8. TESTING AJAX ENDPOINTS</h3><ul>';
+        section('8. TESTING AJAX ENDPOINTS');
         
             //removed: echo "8. TESTING AJAX ENDPOINTS\n";
         
@@ -688,17 +636,16 @@ class HttpRoutingTestRunner {
             }
         }
         
-        echo '</ul></div>';
     }
     
     private function testUtilityPages() {
-        echo '<div class="test-section"><h3>9. TESTING UTILITY PAGES</h3><ul>';
+        section('9. TESTING UTILITY PAGES');
         
             //removed: echo "9. TESTING UTILITY PAGES\n";
         
         $test_cases = [
             // Existing utility (avoid sync scripts)
-            ['/utils/forms_example_bootstrapv2', [200, 301, 302, 401, 403], 'Existing utility page'],
+            ['/utils/component_preview', [200, 301, 302, 401, 403], 'Existing utility page'],
 
             // Utility page that doesn't exist
             ['/utils/definitely-fake-utility', [302, 404, 401, 403], 'Utility page (does not exist)'],
@@ -714,11 +661,10 @@ class HttpRoutingTestRunner {
             }
         }
         
-        echo '</ul></div>';
     }
     
     private function testContentRoutes() {
-        echo '<div class="test-section"><h3>10. TESTING CONTENT ROUTES</h3><ul>';
+        section('10. TESTING CONTENT ROUTES');
         
             //removed: echo "10. TESTING CONTENT ROUTES\n";
         
@@ -783,9 +729,7 @@ class HttpRoutingTestRunner {
             output_info("No content found in database to test");
         } else {
             // Close the list before adding info, then reopen
-            echo '</ul>';
             output_info("Testing " . count($test_cases) . " content items from database");
-            echo '<ul>';
         }
         
         // Always test nonexistent content
@@ -801,11 +745,10 @@ class HttpRoutingTestRunner {
             }
         }
         
-        echo '</ul></div>';
     }
     
     private function testErrorPages() {
-        echo '<div class="test-section"><h3>11. TESTING ERROR PAGES</h3><ul>';
+        section('11. TESTING ERROR PAGES');
         
             //removed: echo "11. TESTING ERROR PAGES\n";
         
@@ -824,11 +767,10 @@ class HttpRoutingTestRunner {
             }
         }
         
-        echo '</ul></div>';
     }
     
     private function testRedirects() {
-        echo '<div class="test-section"><h3>12. TESTING URL REDIRECTS</h3><ul>';
+        section('12. TESTING URL REDIRECTS');
         
             //removed: echo "12. TESTING URL REDIRECTS\n";
         
@@ -865,19 +807,13 @@ class HttpRoutingTestRunner {
                 }
                 
                 if (!$found_redirect) {
-                    echo '</ul>';
                     output_info("Found " . $count . " URLs but none have redirect_url set");
-                    echo '<ul>';
                 }
             } else {
-                echo '</ul>';
                 output_info("No URLs found in database");
-                echo '<ul>';
             }
         } catch (Exception $e) {
-            echo '</ul>';
             output_info("Could not load URLs: " . $e->getMessage());
-            echo '<ul>';
         }
         
         // Always test a URL that should not redirect
@@ -893,7 +829,6 @@ class HttpRoutingTestRunner {
             }
         }
         
-        echo '</ul></div>';
     }
     
     private function pass($message) {
@@ -937,16 +872,9 @@ class HttpRoutingTestRunner {
             }
         }
         
-        // Output the main failure message
-        output_fail($enhanced_message);
-        
-        // Output troubleshooting details on separate lines for better readability
-        if (!empty($troubleshooting_details)) {
-            foreach ($troubleshooting_details as $detail) {
-                echo '<li class="detail-item">' . htmlspecialchars($detail) . '</li>';
-            }
-        }
-        
+        // Record the failing check, folding the troubleshooting context into
+        // the check's detail so it survives into the harness result.
+        check(false, $enhanced_message, implode('  ', $troubleshooting_details));
         $this->failed++;
     }
     
@@ -965,45 +893,10 @@ class HttpRoutingTestRunner {
         return $explanations[$status] ?? null;
     }
     
-    private function displaySummary() {
-        $total = $this->passed + $this->failed;
-        $color = ($this->failed == 0) ? '#16a34a' : '#dc2626';
-        $icon = ($this->failed == 0) ? '✅' : '❌';
-        
-        echo '<div style="background: #f8fafc; border: 2px solid ' . $color . '; padding: 20px; margin: 20px 0; border-radius: 8px;">';
-        echo '<h3 style="color: ' . $color . '; margin: 0 0 10px 0;">' . $icon . ' TEST SUMMARY</h3>';
-        echo '<div style="font-family: monospace; font-size: 14px;">';
-        echo "<div>PASSED: <strong style='color: #16a34a;'>{$this->passed}</strong></div>";
-        echo "<div>FAILED: <strong style='color: #dc2626;'>{$this->failed}</strong></div>";
-        echo "<div>TOTAL: <strong>{$total}</strong></div>";
-        echo '</div>';
-        
-        if ($this->failed == 0) {
-            echo '<p style="margin: 10px 0 0 0; color: ' . $color . ';">🎉 All HTTP responses are working correctly!</p>';
-        } else {
-            echo '<p style="margin: 10px 0 0 0; color: ' . $color . ';">⚠️ Some URLs returned unexpected responses. Review failures above.</p>';
-        }
-        echo '</div>';
-        
-        // Display HTTP test results
-        if (!empty(HttpTester::$test_results)) {
-            echo '<div class="results-section">';
-            echo '<h3>📋 HTTP TEST DETAILS</h3>';
-            foreach (HttpTester::$test_results as $result) {
-                echo '<div style="font-family: monospace; font-size: 14px; margin: 5px 0;">' . htmlspecialchars($result) . '</div>';
-            }
-            echo '</div>';
-        }
-    }
 }
 
 // Run the tests
 $runner = new HttpRoutingTestRunner($settings, $dblink);
 $runner->runAllTests();
 
-// Close HTML output
-echo '<div style="margin-top: 40px; padding: 20px; background: #f8fafc; border-radius: 8px; color: #64748b; text-align: center;">';
-echo 'HTTP test completed at ' . date('Y-m-d H:i:s T') . ' on ' . htmlspecialchars($_SERVER['HTTP_HOST'] ?? 'Unknown');
-echo '</div>';
-echo '</body></html>';
-?>
+harness_finish();

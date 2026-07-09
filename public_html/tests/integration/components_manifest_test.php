@@ -1,18 +1,22 @@
 <?php
-/**
- * Pre-Phase 2 Validation Script and Component System Test
- * Ensures all themes and plugins have valid manifests before Phase 2 deployment
- * Run: php utils/test_components.php
+/** @joinery-test
+ * name: components_manifest
+ * tier: safe            # read-only manifest validation, no DB writes
+ * env: any
+ * needs: []
  */
 
-if (php_sapi_name() !== 'cli') {
-	http_response_code(403);
-	die('This script can only be run from the command line.');
-}
+/**
+ * Component System / manifest validation test.
+ * Ensures every theme and plugin has a valid manifest.
+ * Run: php tests/integration/components_manifest_test.php
+ */
 
-require_once(__DIR__ . '/../includes/PathHelper.php');
+require_once(__DIR__ . '/../lib/harness.php');
 require_once(PathHelper::getIncludePath('includes/ThemeHelper.php'));
 require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
+
+harness_boot();
 
 echo "Phase 2 Pre-Deployment Validation & Component System Test\n";
 echo "=========================================================\n\n";
@@ -37,14 +41,8 @@ foreach($directory_themes as $theme_name => $theme_helper) {
     );
 }
 
-// Add plugin themes
-foreach($plugins as $plugin_name => $plugin) {
-    $themes[] = array(
-        'name' => $plugin_name,
-        'type' => 'plugin', 
-        'path' => PathHelper::getIncludePath('plugins/' . $plugin_name)
-    );
-}
+// Plugins are validated as plugins (plugin.json) in section 2 below — they are
+// not themes and do not carry theme.json, so they are not added to the theme list.
 
 if (count($themes) > 0) {
     foreach ($themes as $theme) {
@@ -217,5 +215,14 @@ if (empty($errors)) {
 
 echo "\nValidation complete.\n";
 
-// Exit with error code if there are blocking issues
-exit(empty($errors) ? 0 : 1);
+// Route the collected results through the shared harness: each blocking issue is
+// a failing check, each warning a skipped check, and a clean run is one pass.
+section('Manifest validation');
+if (empty($errors)) {
+	check(true, 'all theme and plugin manifests valid');
+} else {
+	foreach ($errors as $err) check(false, $err);
+}
+foreach ($warnings as $warn) harness_skip($warn);
+
+harness_finish();

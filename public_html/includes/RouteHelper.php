@@ -439,6 +439,8 @@ class RouteHelper {
             $pattern_prefix = rtrim(str_replace('*', '', $pattern), '/');
             $remaining_path = substr($path, strlen($pattern_prefix));
             $remaining_path = ltrim($remaining_path, '/');
+            // A bare wildcard request ('/tests/', '/tests') serves the index view.
+            if ($remaining_path === '') $remaining_path = 'index';
             $view_path = str_replace('{path}', $remaining_path, $view_path);
         }
 

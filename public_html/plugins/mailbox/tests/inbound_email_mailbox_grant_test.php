@@ -1,4 +1,10 @@
 <?php
+/** @joinery-test
+ * name: inbound_email_mailbox_grant
+ * tier: db
+ * env: dev-only
+ * needs: []
+ */
 /**
  * Tests for InboundEmailMailboxGrant — the user↔mailbox access grant.
  *
@@ -12,17 +18,14 @@
  * @version 1.0
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+require_once(__DIR__ . '/../../../tests/lib/harness.php');
+harness_boot();
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 class InboundEmailMailboxGrantTest {
-	private $pass = 0;
-	private $fail = 0;
 	private $db;
 
 	// fixtures
@@ -40,12 +43,11 @@ class InboundEmailMailboxGrantTest {
 		echo (php_sapi_name() === 'cli' ? '' : '<br>') . $msg . "\n";
 	}
 	private function ok($cond, $label) {
-		if ($cond) { $this->pass++; $this->out('  PASS: ' . $label); }
-		else { $this->fail++; $this->out('  FAIL: ' . $label); }
+		return check((bool)$cond, $label);
 	}
 
 	function run() {
-		$this->out('=== InboundEmailMailboxGrant tests ===');
+		section('InboundEmailMailboxGrant tests');
 		try {
 			$this->setUp();
 			$this->testCrudAndUnique();
@@ -53,13 +55,10 @@ class InboundEmailMailboxGrantTest {
 			$this->testDeletedAliasGuard();
 			$this->testCascadeUser();
 		} catch (\Throwable $e) {
-			$this->fail++;
-			$this->out('  EXCEPTION: ' . $e->getMessage());
+			check(false, 'EXCEPTION', $e->getMessage());
 		} finally {
 			$this->tearDown();
 		}
-		$this->out("=== {$this->pass} passed, {$this->fail} failed ===");
-		return $this->fail === 0;
 	}
 
 	private function preClean() {
@@ -226,7 +225,5 @@ class InboundEmailMailboxGrantTest {
 }
 
 $tester = new InboundEmailMailboxGrantTest();
-$ok = $tester->run();
-if (php_sapi_name() === 'cli') {
-	exit($ok ? 0 : 1);
-}
+$tester->run();
+harness_finish();

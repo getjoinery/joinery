@@ -1,4 +1,10 @@
 <?php
+/** @joinery-test
+ * name: mailbox_reader
+ * tier: db
+ * env: dev-only
+ * needs: []
+ */
 /**
  * Tests for the Mailbox Reader service + viewer scope + thread-key computation.
  *
@@ -15,9 +21,8 @@
  * @version 1.0
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+require_once(__DIR__ . '/../../../tests/lib/harness.php');
+harness_boot();
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
@@ -27,8 +32,6 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRo
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 class MailboxReaderTest {
-	private $pass = 0;
-	private $fail = 0;
 	private $db;
 
 	private $suffix;
@@ -44,13 +47,9 @@ class MailboxReaderTest {
 	function __construct() { $this->db = DbConnector::get_instance()->get_db_link(); }
 
 	private function out($m) { echo (php_sapi_name() === 'cli' ? '' : '<br>') . $m . "\n"; }
-	private function ok($c, $l) {
-		if ($c) { $this->pass++; $this->out('  PASS: ' . $l); }
-		else { $this->fail++; $this->out('  FAIL: ' . $l); }
-	}
+	private function ok($c, $l) { return check((bool)$c, $l); }
 
 	function run() {
-		$this->out('=== Mailbox Reader tests ===');
 		try {
 			$this->setUp();
 			$this->testThreadKey();
@@ -60,13 +59,10 @@ class MailboxReaderTest {
 			$this->testSearch();
 			$this->testMutations();
 		} catch (\Throwable $e) {
-			$this->fail++;
-			$this->out('  EXCEPTION: ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
+			check(false, 'uncaught exception', $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
 		} finally {
 			$this->tearDown();
 		}
-		$this->out("=== {$this->pass} passed, {$this->fail} failed ===");
-		return $this->fail === 0;
 	}
 
 	private function setUp() {
@@ -196,7 +192,7 @@ class MailboxReaderTest {
 
 	// ---- thread key precedence ----
 	private function testThreadKey() {
-		$this->out('-- computeThreadKey --');
+		section('computeThreadKey');
 		$r = new InboundEmailRouter();
 
 		$refs = ['headers' => ['references' => '<root@a> <mid@b>']];
@@ -214,7 +210,7 @@ class MailboxReaderTest {
 
 	// ---- viewer scope ----
 	private function testScope() {
-		$this->out('-- viewer scope --');
+		section('viewer scope');
 		$beth = $this->bethViewer();
 		$bob = $this->bobViewer();
 		$super = $this->superViewer();
@@ -248,7 +244,7 @@ class MailboxReaderTest {
 
 	// ---- list / grouping ----
 	private function testListThreads() {
-		$this->out('-- listThreads grouping --');
+		section('listThreads grouping');
 		$svc = new MailboxService($this->bethViewer());
 
 		$all = $svc->listThreads(null, array(), 1, 50);
@@ -289,7 +285,7 @@ class MailboxReaderTest {
 
 	// ---- unmatched ----
 	private function testUnmatched() {
-		$this->out('-- unmatched mail --');
+		section('unmatched mail');
 		$super = new MailboxService($this->superViewer());
 		$keys = $this->threadKeys($super->listThreads(null, array(), 1, 50));
 		$this->ok(in_array('<u1@x>', $keys, true), 'superadmin All mail includes unmatched');
@@ -301,7 +297,7 @@ class MailboxReaderTest {
 
 	// ---- search ----
 	private function testSearch() {
-		$this->out('-- search --');
+		section('search');
 		$svc = new MailboxService($this->bethViewer());
 		$res = $svc->listThreads(null, array('q' => 'invoice'), 1, 50);
 		$keys = $this->threadKeys($res);
@@ -316,7 +312,7 @@ class MailboxReaderTest {
 
 	// ---- mutations ----
 	private function testMutations() {
-		$this->out('-- mutations + shared state + scope --');
+		section('mutations + shared state + scope');
 		$beth = new MailboxService($this->bethViewer());
 		$bob = new MailboxService($this->bobViewer());
 
@@ -390,7 +386,5 @@ class MailboxReaderTest {
 }
 
 $tester = new MailboxReaderTest();
-$ok = $tester->run();
-if (php_sapi_name() === 'cli') {
-	exit($ok ? 0 : 1);
-}
+$tester->run();
+harness_finish();

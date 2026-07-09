@@ -19,19 +19,17 @@
  *
  * Run:  php tests/scaffold/scaffold_hardening_test.php
  *
- * @version 1.0
+ * @version 1.1
  */
-require_once(__DIR__ . '/../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+/** @joinery-test
+ * name: scaffold_hardening
+ * tier: safe
+ * env: dev-only
+ * needs: []
+ */
+require_once(__DIR__ . '/../lib/harness.php');
+harness_boot();
 require_once(PathHelper::getIncludePath('includes/scaffold/ScaffoldGenerator.php'));
-
-$tests = 0; $failures = 0;
-function check($label, $cond) {
-    global $tests, $failures; $tests++;
-    echo ($cond ? "  PASS: " : "  FAIL: ") . "$label\n";
-    if (!$cond) { $failures++; }
-}
 
 /**
  * A manifest that trips every shakedown bug at once: a `time` column, a soft
@@ -61,49 +59,49 @@ function probe_manifest(array $overrides = []): array {
     ], $overrides);
 }
 
-echo "Scaffold generator hardening — regression fixture\n\n";
+section('Scaffold generator hardening — generated output');
 
 // ── Generated output (no DB needed) ──────────────────────────────────────────
 $gen   = new ScaffoldGenerator(probe_manifest());
 $files = $gen->files();
 $data  = $files['data/scaffold_hardening_probe_class.php'] ?? '';
 
-check('data class source was produced', $data !== '');
+ok('data class source was produced', $data !== '');
 
 // bug 4 — primary key name follows {prefix}_{singular}_id
-check('bug 4: PK named zqx_scaffold_hardening_probe_id',
+ok('bug 4: PK named zqx_scaffold_hardening_probe_id',
     strpos($data, "'zqx_scaffold_hardening_probe_id' =>") !== false);
 
 // bug 3 — PK shape is int8 + serial=>true (NOT bigserial)
-check('bug 3: PK emits int8 + serial=>true',
+ok('bug 3: PK emits int8 + serial=>true',
     preg_match("/'zqx_scaffold_hardening_probe_id'\s*=>\s*array\('type'=>'int8'.*'serial'=>true/", $data) === 1);
-check('bug 3: PK is not bigserial',
+ok('bug 3: PK is not bigserial',
     stripos($data, 'bigserial') === false);
 
 // bug 1 — time column survived generation
-check('bug 1: time column present',
+ok('bug 1: time column present',
     strpos($data, "'zqx_started_at' => array('type'=>'time'") !== false);
 
 // bug 2 — soft-delete column resolves to timestamp(6)
-check('bug 2: delete column is timestamp(6)',
+ok('bug 2: delete column is timestamp(6)',
     strpos($data, "'zqx_delete_time' => array('type'=>'timestamp(6)'") !== false);
-check('bug 2: delete column is not timestamp with time zone',
+ok('bug 2: delete column is not timestamp with time zone',
     stripos($data, 'timestamp with time zone') === false);
 
 // item 4 — non-standard owner_field emits a flagged, working owner-check
-check('item 4: non-standard owner emits authenticate_read()',
+ok('item 4: non-standard owner emits authenticate_read()',
     strpos($data, 'function authenticate_read') !== false);
-check('item 4: non-standard owner emits authenticate_write()',
+ok('item 4: non-standard owner emits authenticate_write()',
     strpos($data, 'function authenticate_write') !== false);
-check('item 4: owner-check is flagged with a TODO',
+ok('item 4: owner-check is flagged with a TODO',
     strpos($data, 'TODO: confirm this row-scope rule is correct') !== false);
-check('item 4: owner-check references the declared owner column',
+ok('item 4: owner-check references the declared owner column',
     strpos($data, "\$this->get('zqx_account_id')") !== false);
 
 // item 4 — standard owner_field emits NO custom auth
 $std = (new ScaffoldGenerator(probe_manifest(['owner_field' => 'zqx_usr_user_id'])))
     ->files()['data/scaffold_hardening_probe_class.php'] ?? '';
-check('item 4: standard owner_field emits no authenticate_read()',
+ok('item 4: standard owner_field emits no authenticate_read()',
     strpos($std, 'function authenticate_read') === false);
 
 // item 4 — omitted owner_field emits NO custom auth
@@ -111,10 +109,11 @@ $none_manifest = probe_manifest();
 unset($none_manifest['owner_field']);
 $none = (new ScaffoldGenerator($none_manifest))
     ->files()['data/scaffold_hardening_probe_class.php'] ?? '';
-check('item 4: omitted owner_field emits no authenticate_read()',
+ok('item 4: omitted owner_field emits no authenticate_read()',
     strpos($none, 'function authenticate_read') === false);
 
 // ── Validation rules ─────────────────────────────────────────────────────────
+section('Validation rules');
 
 // item 2 — serial / bigserial cannot be declared on a field
 foreach (['bigserial', 'serial', 'smallserial', 'serial8'] as $serial_type) {
@@ -123,7 +122,7 @@ foreach (['bigserial', 'serial', 'smallserial', 'serial8'] as $serial_type) {
     $errs = (new ScaffoldGenerator($m))->validate();
     $hit = false;
     foreach ($errs as $e) { if (strpos($e, 'serial types are managed') !== false) { $hit = true; } }
-    check("item 2: '$serial_type' field is rejected with the serial message", $hit);
+    ok("item 2: '$serial_type' field is rejected with the serial message", $hit);
 }
 
 // item 5b — every column type the platform's own data classes use is accepted.
@@ -147,20 +146,18 @@ foreach ($platform_types as $i => $t) {
         if (strpos($e, 'not a supported column type') !== false
             || strpos($e, 'serial types are managed') !== false) { $type_err = true; }
     }
-    check("item 5b: platform type '$t' is accepted", !$type_err);
+    ok("item 5b: platform type '$t' is accepted", !$type_err);
 }
 
 // ── Database roundtrip (the core acceptance gate) ────────────────────────────
+section('Database roundtrip');
 $rt = $gen->verifyDatabaseRoundtrip();
 if (!$rt['ran']) {
-    echo "  SKIP: database roundtrip (" . $rt['skipped_reason'] . ")\n";
+    harness_skip('database roundtrip', $rt['skipped_reason']);
 } else {
-    check('bug 3: data class round-trips through the database (insert + canonical-sequence PK + read-back)',
-        empty($rt['failures']));
-    if (!empty($rt['failures'])) {
-        foreach ($rt['failures'] as $f) { echo "        - $f\n"; }
-    }
+    ok('bug 3: data class round-trips through the database (insert + canonical-sequence PK + read-back)',
+        empty($rt['failures']),
+        empty($rt['failures']) ? '' : implode('; ', $rt['failures']));
 }
 
-echo "\n" . ($tests - $failures) . "/" . $tests . " passed\n";
-exit($failures ? 1 : 0);
+harness_finish();

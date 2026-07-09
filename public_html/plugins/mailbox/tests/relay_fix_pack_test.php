@@ -1,4 +1,10 @@
 <?php
+/** @joinery-test
+ * name: relay_fix_pack
+ * tier: db
+ * env: dev-only
+ * needs: []
+ */
 /**
  * Tests for the relay fix pack's Round 2 regressions
  * (specs/mailbox_relay_fix_pack.md § Round 2):
@@ -22,42 +28,32 @@
  * @version 1.0
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
+require_once(__DIR__ . '/../../../tests/lib/harness.php');
+harness_boot();
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/SRSRewriter.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayMapSync.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
 
 class RelayFixPackTest {
-	private $pass = 0;
-	private $fail = 0;
 
 	private function out($msg) {
 		echo (php_sapi_name() === 'cli' ? '' : '<br>') . $msg . "\n";
 	}
-	private function ok($cond, $label) {
-		if ($cond) { $this->pass++; $this->out('  PASS: ' . $label); }
-		else { $this->fail++; $this->out('  FAIL: ' . $label); }
-	}
+	private function ok($cond, $label) { return check((bool)$cond, $label); }
 
 	function run() {
-		$this->out('=== Relay fix pack (Round 2) tests ===');
 		try {
 			$this->testContentHashCoversEveryArtifact();
 			$this->testSrsCaseSensitivity();
 			$this->testUpdateColumnsTypedBinding();
 		} catch (\Throwable $e) {
-			$this->fail++;
-			$this->out('  FAIL: uncaught ' . get_class($e) . ': ' . $e->getMessage());
+			check(false, 'uncaught ' . get_class($e), $e->getMessage());
 		}
-		$this->out(sprintf('=== %d passed, %d failed ===', $this->pass, $this->fail));
-		return $this->fail === 0;
 	}
 
 	// R2-8 — one formula, every artifact.
 	private function testContentHashCoversEveryArtifact() {
-		$this->out('contentHash:');
+		section('contentHash');
 		$base = array(
 			'relay_domains' => 'a', 'recipients' => 'b', 'transport' => 'c',
 			'srs_access' => 'd', 'routing_json' => 'e',
@@ -74,7 +70,7 @@ class RelayFixPackTest {
 
 	// R2-3 — the SRS address is case-sensitive end to end.
 	private function testSrsCaseSensitivity() {
-		$this->out('SRS case:');
+		section('SRS case');
 		$srs = new SRSRewriter('test-secret-for-case-check');
 		$addr = $srs->rewrite('Alice.Smith@Gmail.com', 'fwd.example.com');
 
@@ -88,7 +84,7 @@ class RelayFixPackTest {
 
 	// R2-1 — updateColumns with boolean false must not throw 22P02 and must land.
 	private function testUpdateColumnsTypedBinding() {
-		$this->out('updateColumns typed binding:');
+		section('updateColumns typed binding');
 		$db = DbConnector::get_instance()->get_db_link();
 
 		$domain_id = $db->query(
@@ -96,7 +92,7 @@ class RelayFixPackTest {
 			  WHERE ied_delete_time IS NULL LIMIT 1"
 		)->fetchColumn();
 		if (!$domain_id) {
-			$this->out('  SKIP: no inbound domain to attach a scratch row to');
+			harness_skip('no inbound domain to attach a scratch row to');
 			return;
 		}
 
@@ -138,5 +134,5 @@ class RelayFixPackTest {
 }
 
 $test = new RelayFixPackTest();
-exit($test->run() ? 0 : 1);
-?>
+$test->run();
+harness_finish();

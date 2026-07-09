@@ -1,4 +1,10 @@
 <?php
+/** @joinery-test
+ * name: oauth2_client
+ * tier: safe
+ * env: any
+ * needs: []
+ */
 /**
  * OAuth2Client test (Layer 1, no network) - exchangeCode, refresh, ensureFresh,
  * non-2xx handling, and beginConsent URL assembly, all against Guzzle's
@@ -6,11 +12,11 @@
  *
  * Run: php tests/integration/oauth/oauth2_client_test.php
  *
- * @version 1.0
+ * @version 1.1
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+require_once(__DIR__ . '/../../lib/harness.php');
+harness_boot();
 require_once(PathHelper::getComposerAutoloadPath());
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Client.php'));
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Token.php'));
@@ -24,13 +30,8 @@ use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Psr7\Response;
 
 class OAuth2ClientTest {
-    private $pass = 0;
-    private $fail = 0;
-
-    private function out($m) { echo (php_sapi_name() === 'cli' ? '' : '<br>') . $m . "\n"; }
     private function ok($cond, $label) {
-        if ($cond) { $this->pass++; $this->out('  PASS: ' . $label); }
-        else { $this->fail++; $this->out('  FAIL: ' . $label); }
+        return check($cond, $label);
     }
 
     /** Build an OAuth2Client whose Guzzle returns the queued responses in order. */
@@ -45,7 +46,7 @@ class OAuth2ClientTest {
     }
 
     function run() {
-        $this->out('=== OAuth2Client tests ===');
+        section('OAuth2Client tests');
         if (session_status() !== PHP_SESSION_ACTIVE) { @session_start(); }
 
         // Make the test provider discoverable.
@@ -112,12 +113,9 @@ class OAuth2ClientTest {
         $this->ok(($q['access_type'] ?? '') === 'offline', 'consent URL merges provider extra params');
         $this->ok(!empty($q['state']) && strlen($q['state']) >= 32, 'consent URL carries an unguessable state nonce');
         $this->ok(($q['redirect_uri'] ?? '') === OAuth2Client::redirectUri(), 'consent URL redirect_uri matches canonical');
-
-        $this->out('');
-        $this->out('Results: ' . $this->pass . ' passed, ' . $this->fail . ' failed');
-        return $this->fail === 0;
     }
 }
 
 $t = new OAuth2ClientTest();
-exit($t->run() ? 0 : 1);
+$t->run();
+harness_finish();

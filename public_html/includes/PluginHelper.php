@@ -112,7 +112,6 @@ class PluginHelper extends ComponentBase {
         // Validate admin menu items if present
         $menuItems = $this->getAdminMenuItems();
         $seen_slugs = [];
-        $plugin_slug_prefix = $this->name . '-';
         foreach ($menuItems as $index => $item) {
             $prefix = "adminMenu[{$index}]";
 
@@ -197,8 +196,6 @@ class PluginHelper extends ComponentBase {
                 $errors[] = "{$prefix}: slug exceeds 32 characters";
             } elseif (strpos($item['slug'], 'core-') === 0) {
                 $errors[] = "{$prefix}: slug must not start with 'core-' (reserved for core menu items)";
-            } elseif (strpos($item['slug'], $plugin_slug_prefix) !== 0) {
-                $errors[] = "{$prefix}: slug must start with '{$plugin_slug_prefix}' (the plugin's directory name)";
             } elseif (in_array($item['slug'], $seen_slugs)) {
                 $errors[] = "{$prefix}: duplicate slug '{$item['slug']}'";
             } else {

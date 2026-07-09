@@ -1,4 +1,10 @@
 <?php
+/** @joinery-test
+ * name: authentication_results
+ * tier: safe
+ * env: any
+ * needs: []
+ */
 /**
  * Tests for AuthenticationResults — reading SPF/DKIM/DMARC verdicts off a
  * message's Authentication-Results header.
@@ -13,21 +19,18 @@
  * @version 1.0
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
+require_once(__DIR__ . '/../../../tests/lib/harness.php');
+harness_boot();
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/AuthenticationResults.php'));
 
 class AuthenticationResultsTest {
-	private $pass = 0;
-	private $fail = 0;
-
 	const AUTHSERV = 'devmail.getjoinery.com';
 
 	private function out($msg) {
 		echo (php_sapi_name() === 'cli' ? '' : '<br>') . $msg . "\n";
 	}
 	private function ok($cond, $label) {
-		if ($cond) { $this->pass++; $this->out('  PASS: ' . $label); }
-		else { $this->fail++; $this->out('  FAIL: ' . $label); }
+		return check((bool)$cond, $label);
 	}
 	private function eq($expected, $actual, $label) {
 		$this->ok($expected === $actual, $label . ' (expected ' . var_export($expected, true)
@@ -40,7 +43,7 @@ class AuthenticationResultsTest {
 	}
 
 	function run() {
-		$this->out('=== AuthenticationResults tests ===');
+		section('AuthenticationResults tests');
 		try {
 			$this->testSingleLineAllMethods();
 			$this->testOversignedMultiDkim();
@@ -51,11 +54,8 @@ class AuthenticationResultsTest {
 			$this->testForeignOnlyIsNull();
 			$this->testMethodAbsentIsNull();
 		} catch (\Throwable $e) {
-			$this->fail++;
-			$this->out('  EXCEPTION: ' . $e->getMessage());
+			check(false, 'EXCEPTION', $e->getMessage());
 		}
-		$this->out("=== {$this->pass} passed, {$this->fail} failed ===");
-		return $this->fail === 0;
 	}
 
 	private function testSingleLineAllMethods() {
@@ -154,5 +154,5 @@ class AuthenticationResultsTest {
 }
 
 $test = new AuthenticationResultsTest();
-$ok = $test->run();
-exit($ok ? 0 : 1);
+$test->run();
+harness_finish();

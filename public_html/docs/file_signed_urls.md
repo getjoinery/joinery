@@ -60,5 +60,5 @@ nothing else — a non-event given short TTLs.
 
 ## Tests
 
-`tests/functional/files/signed_urls_test.php` (CLI) — covers no-session
+`tests/functional/files/signed_urls_test.php` (see [Testing](testing.md)) — covers no-session
 serving, expiry, tamper, size-key binding, and the ownership-gate fallback.

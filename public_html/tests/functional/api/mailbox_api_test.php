@@ -53,8 +53,14 @@
  * @version 1.0.0
  */
 
+/** @joinery-test
+ * name: api_mailbox
+ * tier: db
+ * env: dev-only
+ * needs: []
+ */
 require_once(__DIR__ . '/api_test_harness.php');
-harness_boot($argv);
+api_test_boot($argv);
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));

@@ -1,4 +1,10 @@
 <?php
+/** @joinery-test
+ * name: provider_auth
+ * tier: safe
+ * env: any
+ * needs: []
+ */
 /**
  * Tests for webhook-provider authentication verdicts — the verdict mapping each
  * inbound provider performs in handleInbound(), and the router precedence that
@@ -22,8 +28,8 @@
  * @version 1.1
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+require_once(__DIR__ . '/../../../tests/lib/harness.php');
+harness_boot();
 require_once(PathHelper::getIncludePath('includes/EmailServiceProvider.php'));
 require_once(PathHelper::getIncludePath('includes/InboundEmailProvider.php'));
 require_once(PathHelper::getIncludePath('includes/email_providers/MailgunProvider.php'));
@@ -32,19 +38,14 @@ require_once(PathHelper::getIncludePath('includes/email_providers/SesProvider.ph
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/AuthenticationResults.php'));
 
 class ProviderAuthTest {
-	private $pass = 0;
-	private $fail = 0;
 
 	private function out($msg) {
 		echo (php_sapi_name() === 'cli' ? '' : '<br>') . $msg . "\n";
 	}
-	private function ok($cond, $label) {
-		if ($cond) { $this->pass++; $this->out('  PASS: ' . $label); }
-		else { $this->fail++; $this->out('  FAIL: ' . $label); }
-	}
+	private function ok($cond, $label) { return check((bool)$cond, $label); }
 	private function eq($expected, $actual, $label) {
-		$this->ok($expected === $actual, $label . ' (expected ' . var_export($expected, true)
-			. ', got ' . var_export($actual, true) . ')');
+		return check($expected === $actual, $label, 'expected ' . var_export($expected, true)
+			. ', got ' . var_export($actual, true));
 	}
 
 	/** Invoke a private static method by reflection. */
@@ -55,7 +56,6 @@ class ProviderAuthTest {
 	}
 
 	function run() {
-		$this->out('=== Provider auth verdict tests ===');
 		try {
 			$this->testMailgun();
 			$this->testMailgunFailSafe();
@@ -69,11 +69,8 @@ class ProviderAuthTest {
 			$this->testRouterPrecedence();
 			$this->testProviderSpamSignals();
 		} catch (\Throwable $e) {
-			$this->fail++;
-			$this->out('  EXCEPTION: ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
+			check(false, 'uncaught exception', $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
 		}
-		$this->out("=== {$this->pass} passed, {$this->fail} failed ===");
-		return $this->fail === 0;
 	}
 
 	private function testMailgun() {
@@ -234,7 +231,7 @@ class ProviderAuthTest {
 			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
 			$router = new InboundEmailRouter();
 		} catch (\Throwable $e) {
-			$this->out('  SKIP: router not loadable in this bootstrap (' . $e->getMessage() . ')');
+			harness_skip('router not loadable in this bootstrap', $e->getMessage());
 			return;
 		}
 
@@ -298,5 +295,5 @@ class ProviderAuthTest {
 }
 
 $test = new ProviderAuthTest();
-$ok = $test->run();
-exit($ok ? 0 : 1);
+$test->run();
+harness_finish();

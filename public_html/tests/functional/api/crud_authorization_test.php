@@ -41,8 +41,14 @@
  * Creates its own users / keys / rows and removes them afterwards.
  */
 
+/** @joinery-test
+ * name: api_crud_authorization
+ * tier: db
+ * env: dev-only
+ * needs: []
+ */
 require_once(__DIR__ . '/api_test_harness.php');
-harness_boot($argv);
+api_test_boot($argv);
 
 // Model fixtures driven over CRUD.
 require_once(PathHelper::getIncludePath('data/address_class.php'));  // Bucket B, owner usa_usr_user_id

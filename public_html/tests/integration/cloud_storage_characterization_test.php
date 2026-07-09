@@ -1,4 +1,10 @@
 <?php
+/** @joinery-test
+ * name: cloud_storage_characterization
+ * tier: db
+ * env: dev-only
+ * needs: []
+ */
 /**
  * Characterization test — current cloud-offload behavior (PIN)
  *
@@ -27,23 +33,15 @@
  * @version 1.1
  */
 
-require_once(__DIR__ . '/../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
+require_once(__DIR__ . '/../lib/harness.php');
+harness_boot();
+
 require_once(PathHelper::getIncludePath('data/files_class.php'));
 require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriver.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudOffloadEngine.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_storage/FileStorageProfile.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageLifecycle.php'));
-
-$pass = 0;
-$fail = 0;
-function ok($label, $cond) {
-	global $pass, $fail;
-	if ($cond) { echo "PASS: $label\n"; $pass++; }
-	else       { echo "FAIL: $label\n"; $fail++; }
-}
 
 /**
  * In-memory mock driver. Records every call; behavior is overridable via
@@ -121,7 +119,7 @@ $sync_row->setAccessible(true);
 $pull_row = new ReflectionMethod('CloudOffloadEngine', '_pull_row');
 $pull_row->setAccessible(true);
 
-echo "=== Cloud storage characterization (pins current behavior) ===\n";
+section('Cloud storage characterization (pins current behavior)');
 
 try {
 	// -------------------------------------------------------------------
@@ -251,5 +249,4 @@ try {
 	}
 }
 
-echo "\n=== $pass passed, $fail failed ===\n";
-exit($fail > 0 ? 1 : 0);
+harness_finish();

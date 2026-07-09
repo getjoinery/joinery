@@ -1,4 +1,10 @@
 <?php
+/** @joinery-test
+ * name: inbound_raw_storage
+ * tier: db
+ * env: dev-only
+ * needs: []
+ */
 /**
  * Inbound raw-storage + lean-record ingest + accessor tests (push transport, no live IMAP).
  *
@@ -19,8 +25,8 @@
  * @version 2.0
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+require_once(__DIR__ . '/../../../tests/lib/harness.php');
+harness_boot();
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriver.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
 require_once(PathHelper::getIncludePath('data/files_class.php'));
@@ -50,8 +56,6 @@ class RawIngestMockDriver implements CloudStorageDriver {
 }
 
 class InboundRawStorageTest {
-	private $pass = 0;
-	private $fail = 0;
 	private $db;
 	private $suffix;
 	private $domain_id;
@@ -68,13 +72,12 @@ class InboundRawStorageTest {
 
 	private function out($m) { echo (php_sapi_name() === 'cli' ? '' : '<br>') . $m . "\n"; }
 	private function ok($c, $l) {
-		if ($c) { $this->pass++; $this->out('  PASS: ' . $l); }
-		else    { $this->fail++; $this->out('  FAIL: ' . $l); }
+		return check((bool)$c, $l);
 	}
-	private function skip($l) { $this->pass++; $this->out('  SKIP: ' . $l); }
+	private function skip($l) { return harness_skip($l); }
 
 	function run() {
-		$this->out('=== Inbound raw-storage + lean-record ingest + accessor tests ===');
+		section('Inbound raw-storage + lean-record ingest + accessor tests');
 		try {
 			$this->setUp();
 			$this->testIngestLeanRecordExtractsFiles();
@@ -85,13 +88,10 @@ class InboundRawStorageTest {
 			$this->testAccessorCloud();
 			$this->testPermanentDeleteReclaimsFiles();
 		} catch (\Throwable $e) {
-			$this->fail++;
-			$this->out('  EXCEPTION: ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
+			check(false, 'EXCEPTION', $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
 		} finally {
 			$this->tearDown();
 		}
-		$this->out("=== {$this->pass} passed, {$this->fail} failed ===");
-		return $this->fail === 0;
 	}
 
 	private function setUp() {
@@ -409,6 +409,5 @@ class InboundRawStorageTest {
 }
 
 $test = new InboundRawStorageTest();
-$ok = $test->run();
-exit($ok ? 0 : 1);
-?>
+$test->run();
+harness_finish();

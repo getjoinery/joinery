@@ -424,27 +424,32 @@ $page_vars = process_logic(some_logic(array_merge($_GET, $_POST)));
 
 ## Testing Logic Files
 
-Because logic files return `LogicResult` objects and never `exit()` or `throw`, they can be tested directly:
+Because logic files return `LogicResult` objects and never `exit()` or `throw`,
+they can be called directly and asserted against with the shared test harness
+(see **📖 [Testing](testing.md)** for the harness API, tiers, and how to run):
 
 ```php
-// tests/logic/test_product_logic.php
-function test_product_logic() {
-    // Test render case
-    $result = product_logic(['id' => 1]);
-    assert($result instanceof LogicResult);
-    assert($result->redirect === null);
-    assert(!empty($result->data['product']));
+/** @joinery-test
+ * name: product_logic
+ * tier: db
+ * env: dev-only
+ */
+require_once(__DIR__ . '/../lib/harness.php');
+harness_boot();
 
-    // Test redirect case
-    $result = product_logic(['delete' => 1]);
-    assert($result instanceof LogicResult);
-    assert($result->redirect === '/products');
+section('render / redirect / error paths');
 
-    // Test error case
-    $result = product_logic(['id' => 999999]);
-    assert($result instanceof LogicResult);
-    assert($result->error !== null);
-}
+$result = product_logic(['id' => 1]);
+check($result instanceof LogicResult && $result->redirect === null, 'render returns data');
+check(!empty($result->data['product']), 'product is present');
+
+$result = product_logic(['delete' => 1]);
+check($result->redirect === '/products', 'delete redirects to /products');
+
+$result = product_logic(['id' => 999999]);
+check($result->error !== null, 'missing id returns an error result');
+
+harness_finish();
 ```
 
 ## Plugin Logic Files

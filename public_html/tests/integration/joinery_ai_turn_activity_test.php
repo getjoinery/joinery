@@ -1,4 +1,10 @@
 <?php
+/** @joinery-test
+ * name: joinery_ai_turn_activity
+ * tier: db
+ * env: dev-only
+ * needs: []
+ */
 /**
  * Turn-activity lifecycle — the live "what's happening" line on a running
  * chat turn (specs/ai_chat_turn_activity.md).
@@ -20,23 +26,15 @@
  * @version 1.0
  */
 
-require_once(__DIR__ . '/../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
-require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(__DIR__ . '/../lib/harness.php');
+harness_boot();
+
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatTurnContext.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatAsync.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatTurn.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSerializer.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AgentLoop.php'));
-
-$pass = 0; $fail = 0;
-function ok($label, $cond) {
-    global $pass, $fail;
-    if ($cond) { $pass++; echo "  ok   $label\n"; }
-    else       { $fail++; echo "  FAIL $label\n"; }
-}
 
 /** Scripted provider: each createMessageStreamed() call shifts the next
  *  response off the queue, streaming its text through the sink first. */
@@ -65,7 +63,7 @@ class FakeActivityProvider implements LlmProviderInterface {
     }
 }
 
-echo "joinery_ai turn-activity lifecycle\n";
+section('joinery_ai turn-activity lifecycle');
 
 // --- fixtures: a throwaway conversation + running assistant row -------------
 
@@ -168,5 +166,4 @@ try {
     $conversation->permanent_delete();
 }
 
-echo "\n$pass passed, $fail failed\n";
-exit($fail ? 1 : 0);
+harness_finish();

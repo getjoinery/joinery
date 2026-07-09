@@ -1,4 +1,11 @@
 #!/bin/bash
+# @joinery-test
+# name: android_member_gate
+# tier: live
+# env: dev-only
+# needs: [macmini]
+# timeout: 900
+#
 # Android member gate runner — specs/implemented/android_native_member_screens.md.
 #
 # Drives the joinery-member-android Compose instrumented suites on the Android

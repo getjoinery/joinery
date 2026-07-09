@@ -1,25 +1,26 @@
 <?php
+/** @joinery-test
+ * name: secret_box
+ * tier: safe
+ * env: any
+ * needs: []
+ */
 /**
  * SecretBox test - encrypt/decrypt round-trip, ciphertext properties, tamper
  * detection, and missing-key fail-closed.
  *
  * Run: php tests/integration/oauth/secret_box_test.php
  *
- * @version 1.0
+ * @version 1.1
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+require_once(__DIR__ . '/../../lib/harness.php');
+harness_boot();
 require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
 
 class SecretBoxTest {
-    private $pass = 0;
-    private $fail = 0;
-
-    private function out($m) { echo (php_sapi_name() === 'cli' ? '' : '<br>') . $m . "\n"; }
     private function ok($cond, $label) {
-        if ($cond) { $this->pass++; $this->out('  PASS: ' . $label); }
-        else { $this->fail++; $this->out('  FAIL: ' . $label); }
+        return check($cond, $label);
     }
 
     /** Temporarily override the in-memory secret_box_key. */
@@ -42,7 +43,7 @@ class SecretBoxTest {
     }
 
     function run() {
-        $this->out('=== SecretBox tests ===');
+        section('SecretBox tests');
 
         $box = new SecretBox();
 
@@ -77,12 +78,9 @@ class SecretBoxTest {
             try { new SecretBox(); } catch (Throwable $e) { $threw = true; }
             $this->ok($threw, 'wrong-length key throws on construction');
         });
-
-        $this->out('');
-        $this->out('Results: ' . $this->pass . ' passed, ' . $this->fail . ' failed');
-        return $this->fail === 0;
     }
 }
 
 $t = new SecretBoxTest();
-exit($t->run() ? 0 : 1);
+$t->run();
+harness_finish();
