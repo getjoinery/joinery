@@ -30,6 +30,8 @@ Docker site images build `FROM joinery-base:VERSION` rather than `FROM ubuntu:24
 
 `install.sh site` refuses to run if `joinery-base:VERSION` is missing and tells you to run `build-base` first.
 
+Site image builds also install every PHP extension the site's source declares (root `composer.json` `ext-*` plus each plugin's `requires.extensions`): a `Dockerfile.template` build step runs `utils/list_dependencies.php --apt` against the copied source and apt-installs the result. The base image carries the heavy shared stack; declared extensions ride the site layer, so they can never drift from the code.
+
 **`BASE_IMAGE_VERSION`** is a constant at the top of `install.sh`. Bump it and run `build-base` again whenever the system stack changes:
 
 - Ubuntu base version changes
@@ -56,7 +58,8 @@ Cloudflare-fronted sites are partial: the container sees Cloudflare's edge IP, n
 This is the behavioural change most likely to trip up an operator who remembers the pre-shared-base model:
 
 - **Code / theme / plugin changes** (PHP files under `public_html/`, migrations, settings) — deliver via the existing publish/upgrade pipeline (`publish_upgrade.php` + `upgrade.php`). **No base image work required.** Nothing changes here.
-- **System stack changes** (new apt package, new PHP extension, Ubuntu bump, PHP bump, anything in `do_server_setup`) — now require **base rebuild + container rebuild**, not just `upgrade.php`. `upgrade.php` refreshes the application layer only; it cannot modify a running container's system packages. Operators must:
+- **Declared PHP extensions** (root `composer.json` `ext-*`, plugin `requires.extensions`) — travel with the code: `upgrade.php` installs them post-swap and reloads web PHP, and site image rebuilds install them at build time. No base image work required.
+- **Other system stack changes** (new apt package outside the declared-extension mechanism, Ubuntu bump, PHP bump, anything in `do_server_setup`) — require **base rebuild + container rebuild**, not just `upgrade.php`. Operators must:
   1. Bump `BASE_IMAGE_VERSION` in `install.sh`
   2. Run `./install.sh build-base` on the host
   3. Rebuild each site container (see migration steps in `specs/implemented/docker_shared_base_image.md`)
@@ -146,6 +149,7 @@ php /var/www/html/joinerytest/public_html/utils/upgrade.php --verbose
 - Preserves extensions marked `receives_upgrades: false`
 - Enhanced rollback (preserves failed deployments with timestamps)
 - Database migrations and composer integration
+- **Declared-dependency install** — after the file swap, installs any PHP extension the new code declares (root `composer.json` `ext-*` + plugin `requires.extensions`, resolved by `utils/list_dependencies.php --apt`) and reloads web PHP. Needs root (Docker `docker exec` has it; a non-root run degrades to a warning naming the manual `apt-get install`). Then runs every active plugin's declared `host_installer` via `_plugin_installers_start.sh` so new host requirements land with the deploy.
 - **Graceful handling of missing archives** — if a theme or plugin archive returns 404, the upgrade warns and skips it instead of aborting. The core upgrade and all other themes/plugins proceed normally. A summary of skipped items is shown at the end.
 
 **Plugin refresh scope:** the upgrade download loop iterates **plugins that are installed** (rows in `plg_plugins`) and attempts an archive fetch for each. Plugins published by the source succeed; plugins not in the source's catalog 404 at the upgrade endpoint (they were never packaged because they have `included_in_publish: false` — see [Extension Distribution Flags](#extension-distribution-flags) below) and are skipped via the warning path above. Uninstalling a plugin removes its row, so an uninstalled plugin is not re-downloaded on subsequent upgrades — the operator's removal sticks. Conversely, a new upstream plugin won't auto-appear on existing sites; the operator gets it via the admin Plugins page (install a plugin already on disk) or a plugin upload.

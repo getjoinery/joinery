@@ -330,9 +330,11 @@ and opendkim restart on boot automatically — nothing else is needed.
 
 A **Docker container** has no systemd; its `CMD` is the init. The Joinery site
 image handles the mail stack the same way it handles PostgreSQL and cron — by
-(re)starting it on every container start. When the Mailbox plugin is
-active, the `CMD` runs `_mail_stack_start.sh`, which re-applies the Postfix /
-opendkim configuration and starts both daemons (via the idempotent
+(re)starting it on every container start. The plugin declares
+`install_email.sh` as its `host_installer` in `plugin.json`, and the `CMD`
+runs `_plugin_installers_start.sh`, which executes every active plugin's
+declared host installer — for Mailbox that re-applies the Postfix / opendkim
+configuration and starts both daemons (via the idempotent
 `install_email.sh`). The mail packages themselves are baked into the base
 image. So in a container the mail stack survives a `docker stop`/`start` and
 an image rebuild with no manual step.

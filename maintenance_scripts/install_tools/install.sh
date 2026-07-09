@@ -1,4 +1,13 @@
 #!/usr/bin/env bash
+#VERSION 2.22 - Declared-dependency install (spec plugin_dependency_installation):
+#               new install_declared_dependencies() reads the deployed source's
+#               dependency declarations via utils/list_dependencies.php --apt and
+#               installs the PHP extensions it emits, replacing reliance on the
+#               hardcoded bootstrap list for anything the code declares. Wired
+#               into the bare-metal site path (the Docker path gets the same
+#               step at image build via Dockerfile.template). Bare-metal site
+#               builds also run _plugin_installers_start.sh (the generalized
+#               successor of _mail_stack_start.sh) after _site_init.sh.
 #VERSION 2.21 - Add www redirect vhost to all generated proxy configs so that
 #               www.domain requests redirect to https://domain instead of
 #               falling through to the default vhost (wrong site).
@@ -650,6 +659,48 @@ deploy_application_code() {
     fi
 
     print_success "Application code deployed to $site_root"
+}
+
+# Install every PHP extension the deployed source declares (root composer.json
+# ext-* plus plugin requires.extensions), resolved by utils/list_dependencies.php.
+# The resolver emits "primary|fallback" apt package pairs; a package that
+# installs from neither name is a warning, not a failure - the plugin
+# activation gate is the runtime backstop.
+# Usage: install_declared_dependencies /var/www/html/SITENAME/public_html
+install_declared_dependencies() {
+    local public_html="$1"
+    local resolver="$public_html/utils/list_dependencies.php"
+
+    if [ ! -f "$resolver" ]; then
+        print_warning "Dependency resolver not found at $resolver - skipping declared-dependency install"
+        return 0
+    fi
+
+    print_step "Installing declared PHP extensions..."
+    local specs
+    specs=$(php "$resolver" --apt 2>/dev/null || true)
+    if [ -z "$specs" ]; then
+        print_info "No installable declared extensions."
+        return 0
+    fi
+
+    apt-get update -qq
+    local spec primary fallback
+    for spec in $specs; do
+        primary="${spec%%|*}"
+        fallback="${spec##*|}"
+        if dpkg -s "$primary" > /dev/null 2>&1 || dpkg -s "$fallback" > /dev/null 2>&1; then
+            print_info "Already installed: $primary"
+            continue
+        fi
+        if apt-get install -y "$primary" > /dev/null 2>&1; then
+            print_success "Installed $primary"
+        elif apt-get install -y "$fallback" > /dev/null 2>&1; then
+            print_success "Installed $fallback"
+        else
+            print_warning "Could not install $primary (or $fallback) - a plugin requiring it will refuse activation"
+        fi
+    done
 }
 
 #==============================================================================
@@ -2634,6 +2685,9 @@ do_site_baremetal() {
     # Deploy application code
     deploy_application_code "$SITENAME" "$ARCHIVE_ROOT"
 
+    # Install PHP extensions the deployed source declares
+    install_declared_dependencies "/var/www/html/$SITENAME/public_html"
+
     # Verify _site_init.sh exists
     if [ ! -f "${SCRIPT_DIR}/_site_init.sh" ]; then
         print_error "Cannot find _site_init.sh in $SCRIPT_DIR"
@@ -2663,6 +2717,10 @@ do_site_baremetal() {
         print_error "_site_init.sh failed"
         exit 1
     fi
+
+    # Run active plugins' declared host installers (idempotent; matters when
+    # cloning from a site with active plugins that need host services)
+    bash "$SCRIPT_DIR/_plugin_installers_start.sh" "$SITENAME" || true
 
     # Create test site if requested
     if [ "$WITH_TEST_SITE" = true ]; then

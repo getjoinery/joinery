@@ -240,11 +240,13 @@ Routes outside the namespace are dropped with a logged warning.
     "requires": {
         "php": ">=8.0",
         "joinery": ">=1.0",
-        "extensions": ["pdo", "json", "curl"]
+        "extensions": ["pdo", "json", "curl"],
+        "composer": { "vendor/package": "^2.0" }
     },
     "depends": {
         "core-plugin": ">=1.0"
     },
+    "host_installer": "provisioning/install_myplugin.sh",
     "provides": ["api-endpoint", "widget-support"],
     "tags": ["utility", "api", "backend"]
 }
@@ -256,7 +258,7 @@ Routes outside the namespace are dropped with a logged warning.
 > declaring `provides: ["widget-support"]` does not make another plugin able to `depends` on it.
 > The keys the loader actually consumes are `name`, `version`, `description`, `requires`,
 > `depends`/`conflicts`, `settings`, `adminMenu`, `profileMenu`, `provisioners`,
-> `receives_upgrades`, `included_in_publish`, and `deprecated`/`superseded_by`.
+> `host_installer`, `receives_upgrades`, `included_in_publish`, and `deprecated`/`superseded_by`.
 
 #### Component Versioning
 
@@ -267,6 +269,25 @@ The `version` field is the source of truth for a component's released identity, 
 - **Activation is gated on `requires`** for plugins *and* themes. A component whose `requires.joinery` / `requires.php` / `requires.extensions` are not satisfied is refused activation with the specific failure reported. The gate runs only on activation, so an already-active component that newly fails requirements keeps running.
 
 **Dependency version constraints** (`depends`) are evaluated against the dependency's **live manifest** version, read from its `plugin.json` on disk — not a cached copy. A constraint like `"depends": {"mailbox": ">=1.10.0"}` is satisfied whenever the installed `mailbox` manifest reports a version that meets it.
+
+#### Declaring Dependencies
+
+A plugin that needs something installed on the host declares it; the platform installs it at the moments that have the privileges to do so. There are three tiers, matched to what each dependency kind needs:
+
+**1. PHP extensions — `requires.extensions`.** Declare the extension name (e.g. `"extensions": ["imagick"]`). The install tooling reads every bundled plugin's declarations via `utils/list_dependencies.php` and apt-installs the union at the root moments: Docker image build, `install.sh` site build, and `upgrade.php` on nodes. Activation checks `extension_loaded()` and refuses with the specific missing extension when the host somehow lacks it — the same gate applies to themes via `theme.json` `requires.extensions`. Core's own extension requirements live as `ext-*` entries in root `composer.json`, not in any plugin manifest.
+
+**2. Composer libraries — `requires.composer`.** Declare `{"vendor/package": "constraint"}`. This is the one tier that installs **at activation**: `PluginManager` runs a reconcile (owned by `ComposerValidator::reconcilePluginPackages()`) that `composer require`s anything missing into the single root `composer.json` — there is one manifest, one vendor dir, one autoloader. Composer resolves each constraint; an unsatisfiable one refuses activation with composer's output. Because the root manifest holds one constraint per package, two plugins declaring the **same package with different constraints** is detected before composer runs and refuses activation naming both plugins (identical constraints are fine — declare what you need even if another plugin already ships it). The reconcile also runs at `update_database` time, covering deploys that add a dependency to an already-active plugin. Reconciled packages are recorded in `composer.json` `extra.joinery-plugin-packages`; `utils/list_dependencies.php --orphans` lists recorded packages no plugin declares anymore (deactivation never removes packages). Activation-time reconcile needs network access to the composer registry.
+
+**3. Host services and system packages — `host_installer`.** For anything with real host-level complexity (daemons, config files, apt packages beyond PHP extensions), the plugin ships its own installer script and declares its path: `"host_installer": "provisioning/install_myplugin.sh"`. The path must stay inside the plugin directory. The script's contract:
+
+- **Idempotent** — it runs on every container start; re-running must be safe and cheap.
+- **Root** — it may `apt-get install` and edit `/etc`; it should verify root and refuse otherwise.
+- **Non-interactive** — set `DEBIAN_FRONTEND=noninteractive`; never prompt.
+- **Exit 0 when not-applicable** — plugin inactive for the site, feature setting off, wrong platform.
+
+The runner `maintenance_scripts/install_tools/_plugin_installers_start.sh` executes every **active** plugin's declared installer at the root moments without systemd: the container `CMD` (every start), `install.sh` site builds, and `upgrade.php`. The runner is fail-safe — an installer failure logs a warning and never blocks container start. The Mailbox plugin's `provisioning/install_email.sh` is the reference implementation.
+
+Activation cannot run a `host_installer` (web requests lack root) — pair the installer with `provisioners` entries (below) so the admin UI detects missing host state and points at the fix; on Docker nodes a container restart runs the installer automatically.
 
 #### Deprecation Fields
 
@@ -972,7 +993,7 @@ function my_plugin_uninstall() {
 
 `update_database` handles the *database* side of plugin setup. **Provisioners** handle the other side: the external runtime resources a plugin needs that the database system knows nothing about — mail servers, relays, services, extensions, APIs.
 
-A plugin can be installed and activated while one of these resources is missing or misconfigured, so the feature silently fails. Provisioning checks detect that on demand and surface it on the admin Plugins page (`/admin/admin_plugins`), with the command that fixes it where one exists. The system **only detects and reports — it never runs a fix.**
+A plugin can be installed and activated while one of these resources is missing or misconfigured, so the feature silently fails. Provisioning checks detect that on demand and surface it on the admin Plugins page (`/admin/admin_plugins`), with the command that fixes it where one exists. The provisioning check itself **only detects and reports — it never runs a fix.** Installation is the job of the plugin's declared `host_installer` (see [Declaring Dependencies](#declaring-dependencies)), which the platform runs automatically at container start, site build, and upgrade; a provisioner's `script` field typically points at that same installer so the admin UI names the fix.
 
 ### Declaration
 
