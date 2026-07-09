@@ -668,6 +668,18 @@ class PluginManager extends AbstractExtensionManager {
             throw new Exception("Cannot activate plugin '$name': " . implode('; ', $validation['errors']));
         }
 
+        // Reconcile the plugin's declared composer packages (requires.composer)
+        // into the root install. Composer is userland, so this is the one
+        // dependency tier that genuinely installs at activation; a failed
+        // resolve (conflict, no network) refuses activation with composer's
+        // output. Spec plugin_dependency_installation.
+        require_once(PathHelper::getIncludePath('includes/ComposerValidator.php'));
+        $composer_validator = new ComposerValidator();
+        if (!$composer_validator->reconcilePluginPackages([$name])) {
+            throw new Exception("Cannot activate plugin '$name': composer dependency reconcile failed. "
+                . implode('; ', $composer_validator->getErrors()));
+        }
+
         // Run plugin table updates — picks up schema changes since install
         require_once(PathHelper::getIncludePath('includes/DatabaseUpdater.php'));
         $database_updater = new DatabaseUpdater();

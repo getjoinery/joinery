@@ -104,7 +104,17 @@ abstract class ComponentBase {
                 $errors[] = "Joinery {$requirements['joinery']} required, currently {$joineryVersion}";
             }
         }
-        
+
+        // Check required PHP extensions (requires.extensions) so themes get
+        // the same activation gate plugins have via PluginManager::validatePlugin.
+        if (isset($requirements['extensions']) && is_array($requirements['extensions'])) {
+            foreach ($requirements['extensions'] as $extension) {
+                if (is_string($extension) && $extension !== '' && !extension_loaded($extension)) {
+                    $errors[] = "PHP extension '{$extension}' is required but not loaded";
+                }
+            }
+        }
+
         return empty($errors) ? true : $errors;
     }
     

@@ -1038,6 +1038,62 @@
 			}
 
 		// ============================================
+		// DECLARED PHP EXTENSIONS
+		// ============================================
+		// The new code may declare extensions the host doesn't have yet (root
+		// composer.json ext-* / plugin requires.extensions). This is the root
+		// moment that converges existing nodes (spec plugin_dependency_installation).
+		// Runs before composer validation so ComposerValidator's ext-* checks
+		// see the newly installed extensions. Failure never rolls back — the
+		// plugin activation gate is the runtime backstop.
+		out_step('Installing Declared PHP Extensions');
+
+		$resolver_script = $live_directory . '/utils/list_dependencies.php';
+		if (!file_exists($resolver_script)) {
+			echo "⚠ Dependency resolver not found (skipping)<br>";
+		} else {
+			$resolver_output = [];
+			exec('/usr/bin/php ' . escapeshellarg($resolver_script) . ' --apt 2>/dev/null', $resolver_output);
+			$resolver_output = array_filter(array_map('trim', $resolver_output));
+			$is_root = (function_exists('posix_getuid') ? posix_getuid() === 0 : trim(shell_exec('id -u') ?? '') === '0');
+			$installed_any = false;
+			foreach ($resolver_output as $apt_spec) {
+				[$apt_primary, $apt_fallback] = array_pad(explode('|', $apt_spec, 2), 2, '');
+				$check_cmd = 'dpkg -s ' . escapeshellarg($apt_primary) . ' >/dev/null 2>&1'
+					. ($apt_fallback ? ' || dpkg -s ' . escapeshellarg($apt_fallback) . ' >/dev/null 2>&1' : '');
+				exec($check_cmd, $unused_out, $pkg_missing);
+				if ($pkg_missing === 0) {
+					continue; // already installed under either name
+				}
+				if (!$is_root) {
+					out_alert('warning', 'PHP extension package ' . htmlspecialchars($apt_primary) . ' is declared but not installed',
+						'This process lacks root, so it cannot install packages. Install manually: '
+						. 'apt-get install ' . htmlspecialchars($apt_primary) . ' (or ' . htmlspecialchars($apt_fallback) . ')');
+					continue;
+				}
+				exec('apt-get update -qq 2>&1 && (apt-get install -y ' . escapeshellarg($apt_primary) . ' 2>&1'
+					. ' || apt-get install -y ' . escapeshellarg($apt_fallback) . ' 2>&1)', $apt_out, $apt_return);
+				if ($apt_return === 0) {
+					echo '✓ Installed ' . htmlspecialchars($apt_primary) . "<br>";
+					$installed_any = true;
+				} else {
+					out_alert('warning', 'Could not install declared extension package ' . htmlspecialchars($apt_primary),
+						'A plugin requiring it will refuse activation. apt output tail: '
+						. htmlspecialchars(implode(' ', array_slice($apt_out, -3))));
+				}
+			}
+			if ($installed_any) {
+				// Web PHP won't see a new extension until its process reloads.
+				// Graceful reload only — never a stop/start from inside the box.
+				exec('apache2ctl graceful 2>/dev/null');
+				exec('service php8.3-fpm reload 2>/dev/null');
+				if ($verbose) upgrade_echo('Reloaded web PHP after extension install<br>');
+			} else if ($verbose) {
+				upgrade_echo('All declared extensions already present<br>');
+			}
+		}
+
+		// ============================================
 		// COMPOSER VALIDATION
 		// ============================================
 		out_step('Validating Composer Dependencies');
@@ -1215,6 +1271,20 @@
 					'Error: ' . htmlspecialchars($e->getMessage()) . '<br>'
 					. 'To retry: run update_database from the admin utilities page.');
 			}
+
+		// ============================================
+		// PLUGIN HOST INSTALLERS
+		// ============================================
+		// Run every active plugin's declared host_installer (idempotent by
+		// contract) so a plugin's new host requirements land with the deploy.
+		// Non-fatal: the runner itself always exits 0.
+		$installers_runner = $full_site_dir . '/maintenance_scripts/install_tools/_plugin_installers_start.sh';
+		if (file_exists($installers_runner)) {
+			out_step('Running Plugin Host Installers');
+			$runner_output = [];
+			exec('bash ' . escapeshellarg($installers_runner) . ' ' . escapeshellarg($site_template) . ' 2>&1', $runner_output);
+			echo nl2br(htmlspecialchars(implode("\n", $runner_output))) . "<br>\n";
+		}
 
 		// Flush static page cache so new code's renders aren't masked by
 		// pre-deploy cached pages. See specs/upgrade_pipeline_rename_gap.md.

@@ -1,13 +1,14 @@
 {
     "name": "Mailbox",
     "description": "Self-hosted email: receiving, forwarding, local mailboxes, webmail reader, IMAP sync, DKIM/SRS",
-    "version": "1.36.2",
+    "version": "1.37.0",
     "author": "Joinery",
     "receives_upgrades": true,
     "included_in_publish": true,
     "requires": {
         "php": ">=8.0"
     },
+    "host_installer": "provisioning/install_email.sh",
     "tags": [
         "email",
         "mailbox",

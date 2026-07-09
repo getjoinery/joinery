@@ -1,4 +1,15 @@
 # Joinery Docker Template
+# VERSION 4.0 - Declared-dependency install at build + generic plugin host
+#               installers at start (spec plugin_dependency_installation).
+#               A build step installs every PHP extension the source declares
+#               (root composer.json ext-* + plugin requires.extensions) via
+#               utils/list_dependencies.php --apt, so the hardcoded base list
+#               can no longer drift from the code. The CMD now runs
+#               _plugin_installers_start.sh, which executes EVERY active
+#               plugin's declared host_installer (replaces the mailbox-only
+#               _mail_stack_start.sh). The start-time chown now also covers
+#               vendor/ so activation-time composer reconcile (www-data) can
+#               write it.
 # VERSION 3.9 - Re-assert the Inbound Email mail stack on every container start
 #               via _mail_stack_start.sh - postfix/opendkim have no systemd here,
 #               so the CMD is what brings them back after a stop/start or rebuild.
@@ -66,6 +77,20 @@ COPY maintenance_scripts/ /var/www/html/${SITENAME}/maintenance_scripts/
 # filesystem and execute bits may not carry over consistently).
 RUN chmod +x /var/www/html/${SITENAME}/maintenance_scripts/install_tools/*.sh
 
+# Install every PHP extension the source declares (root composer.json ext-*
+# plus plugin requires.extensions). The resolver emits "primary|fallback" apt
+# package pairs; a missing package is a warning, not a build failure - the
+# plugin activation gate is the runtime backstop.
+RUN if [ -f "/var/www/html/${SITENAME}/public_html/utils/list_dependencies.php" ]; then \
+        apt-get update -qq && \
+        for spec in $(php "/var/www/html/${SITENAME}/public_html/utils/list_dependencies.php" --apt); do \
+            primary="${spec%%|*}"; fallback="${spec##*|}"; \
+            apt-get install -y "$primary" 2>/dev/null || apt-get install -y "$fallback" || \
+                echo "WARNING: could not install $primary (or $fallback)"; \
+        done && \
+        rm -rf /var/lib/apt/lists/*; \
+    fi
+
 # Install Composer dependencies (vendor-dir is ../vendor relative to public_html per composer.json)
 RUN if [ -f "/var/www/html/${SITENAME}/public_html/composer.json" ]; then \
         cd /var/www/html/${SITENAME}/public_html && composer install --no-dev --no-interaction 2>/dev/null || true; \
@@ -125,6 +150,7 @@ CMD set +H && \
         (cd "/var/www/html/${SITENAME}/maintenance_scripts/install_tools" && \
         ./_site_init.sh "${SITENAME}" "${POSTGRES_PASSWORD}" "${DOMAIN_NAME}" --docker-mode ${CLONE_OPTS})) && \
     chown -R www-data:www-data "/var/www/html/${SITENAME}/public_html" "/var/www/html/${SITENAME}/maintenance_scripts" "/var/www/html/${SITENAME}/cache" && \
+    ([ -d "/var/www/html/${SITENAME}/vendor" ] && chown -R www-data:www-data "/var/www/html/${SITENAME}/vendor" || true) && \
     find "/var/www/html/${SITENAME}/public_html" -type d -exec chmod 755 {} + && \
     find "/var/www/html/${SITENAME}/public_html" -type f -exec chmod 644 {} + && \
     php "/var/www/html/${SITENAME}/public_html/utils/update_database.php" 2>/dev/null || true && \
@@ -138,5 +164,5 @@ CMD set +H && \
     sed "s|{{SITE_ROOT}}|/var/www/html/${SITENAME}|g" "/var/www/html/${SITENAME}/maintenance_scripts/install_tools/logrotate_joinery.conf" > "/etc/logrotate.d/joinery-${SITENAME}" && \
     chmod 644 "/etc/logrotate.d/joinery-${SITENAME}" && \
     service cron start && \
-    bash "/var/www/html/${SITENAME}/maintenance_scripts/install_tools/_mail_stack_start.sh" "${SITENAME}" || true && \
+    bash "/var/www/html/${SITENAME}/maintenance_scripts/install_tools/_plugin_installers_start.sh" "${SITENAME}" || true && \
     apache2ctl -D FOREGROUND
