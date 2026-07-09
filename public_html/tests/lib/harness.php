@@ -1,0 +1,517 @@
+<?php
+/**
+ * Shared test harness — one assertion surface, one result contract, one runner.
+ *
+ * Generalized from tests/functional/api/api_test_harness.php. Any test requires
+ * this file, calls harness_boot(), builds sections of check() assertions, and
+ * lets the registered shutdown reporter (or an explicit harness_finish()) emit
+ * the result. The API suites layer their HTTP-specific helpers on top of this in
+ * api_test_harness.php.
+ *
+ * Metadata lives in a parseable header comment on every runnable test so the
+ * discovery runner (tests/run.php) can read a test's tier and env WITHOUT
+ * executing it, and refuse to run it in the wrong environment. harness_boot()
+ * reads that same header from the calling file — one source of truth:
+ *
+ *   /** @joinery-test
+ *    * name: cloud_offload_engine
+ *    * tier: safe            # safe | db | test-db | live      (blast radius)
+ *    * env: dev-only         # any | prod-verify | dev-only    (where it may run)
+ *    * needs: []             # e.g. [stripe-test-keys, macmini, mailgun]
+ *    * /
+ *
+ * Result contract (consumed by run.php and the dashboard, nothing else):
+ *   {name, tier, stats: {total, passed, failed, skipped},
+ *    sections: [{title, checks: [{label, passed, detail?}]}], duration_ms}
+ */
+
+if (!defined('JOINERY_HARNESS_LOADED')) {
+	define('JOINERY_HARNESS_LOADED', 1);
+	// Marks the start of the JSON result contract on a CLI --json run, so the
+	// discovery runner can locate it even after fatal-error output pollution.
+	define('JOINERY_RESULT_SENTINEL', '@@JOINERY_TEST_RESULT@@');
+
+	// ---- bootstrap ---------------------------------------------------------
+	// PathHelper cannot be located through PathHelper; find it relative to this
+	// file (tests/lib/harness.php → public_html root is two directories up).
+	require_once(dirname(__DIR__, 2) . '/includes/PathHelper.php');
+	require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+	require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+
+	// ---- shared mutable state (global script scope) ------------------------
+	$GLOBALS['__harness'] = array(
+		'meta'      => array('name' => '', 'tier' => 'safe', 'env' => 'dev-only', 'needs' => array()),
+		'sections'  => array(),   // [{title, checks: [{label, passed, detail}]}]
+		'current'   => null,      // index into sections of the open section
+		'passed'    => 0,
+		'failed'    => 0,
+		'skipped'   => 0,
+		'deferred'  => array(),   // LIFO teardown callables
+		'started'   => microtime(true),
+		'finished'  => false,
+		'booted'    => false,
+	);
+}
+
+// ==========================================================================
+// Metadata header parsing (no execution — safe to run over any file)
+// ==========================================================================
+
+/**
+ * Parse the @joinery-test header of a file into
+ * ['name','tier','env','needs'], or null if the file carries no header.
+ *
+ * Handles both PHP block comments (`* key: value`) and shell comments
+ * (`# key: value`). Inline `# ...` comments after a value are stripped, so the
+ * annotated examples in the spec parse cleanly.
+ */
+function harness_parse_metadata($filepath) {
+	if (!is_readable($filepath)) return null;
+	// Only the head of the file can carry the header; cap the read.
+	$head = (string)file_get_contents($filepath, false, null, 0, 4096);
+	if (strpos($head, '@joinery-test') === false) return null;
+
+	// timeout_explicit records whether the header actually declared a timeout —
+	// the dashboard only marks a test CLI-only when its author explicitly set a
+	// long cap, so default-cap tests stay web-runnable.
+	$meta = array('name' => '', 'tier' => 'safe', 'env' => 'dev-only', 'needs' => array(),
+		'timeout' => 180, 'timeout_explicit' => false);
+	$after = substr($head, strpos($head, '@joinery-test'));
+	$lines = preg_split('/\r\n|\r|\n/', $after);
+	foreach ($lines as $i => $raw) {
+		if ($i === 0) continue; // the marker line itself
+		// Normalize away comment framing: leading *, #, / and whitespace.
+		$line = ltrim($raw, " \t*#/");
+		if ($line === '' ) continue;
+		// End of the comment block.
+		if (strpos($raw, '*/') !== false && strpos($raw, ':') === false) break;
+		if (!preg_match('/^(name|tier|env|needs|timeout)\s*:\s*(.*)$/i', $line, $m)) {
+			// A non key:value line ends the header region (blank framing aside).
+			if (strpos($line, '@') === 0) continue;
+			break;
+		}
+		$key = strtolower($m[1]);
+		$val = $m[2];
+		// Strip a trailing inline comment (the "# safe | db | ..." annotations).
+		$hash = strpos($val, '#');
+		if ($hash !== false) $val = substr($val, 0, $hash);
+		$val = trim($val);
+		if ($key === 'needs') {
+			$val = trim($val, "[] \t");
+			$meta['needs'] = $val === '' ? array()
+				: array_values(array_filter(array_map('trim', explode(',', $val))));
+		} elseif ($key === 'timeout') {
+			// Per-test wall-clock cap (seconds). Non-numeric → default; clamp 1–1800.
+			$meta['timeout'] = is_numeric($val) ? max(1, min(1800, (int)$val)) : 180;
+			$meta['timeout_explicit'] = true;
+		} else {
+			$meta[$key] = $val;
+		}
+	}
+
+	// Fail closed: an unparseable/blank env is treated as dev-only, an unknown
+	// tier as safe (tier only drives batching; env is the safety axis).
+	if (!in_array($meta['env'], array('any', 'prod-verify', 'dev-only'), true)) $meta['env'] = 'dev-only';
+	if (!in_array($meta['tier'], array('safe', 'db', 'test-db', 'live'), true)) $meta['tier'] = 'safe';
+	if ($meta['name'] === '') $meta['name'] = pathinfo($filepath, PATHINFO_FILENAME);
+	return $meta;
+}
+
+// ==========================================================================
+// Boot / environment enforcement
+// ==========================================================================
+
+/**
+ * Bootstrap a test run. Reads the calling file's @joinery-test header (so tier
+ * and env are declared exactly once, in the header the runner also reads),
+ * enforces the env gate, and registers the shutdown reporter.
+ *
+ * $overrides lets a caller that has no file header (or wants to override it)
+ * supply name/tier/env/needs directly.
+ */
+function harness_boot(array $overrides = array()) {
+	$h = &$GLOBALS['__harness'];
+
+	$caller = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 1);
+	$file = $caller[0]['file'] ?? '';
+	$parsed = $file ? harness_parse_metadata($file) : null;
+	if ($parsed) $h['meta'] = $parsed;
+	if ($overrides) $h['meta'] = array_merge($h['meta'], $overrides);
+
+	$h['started'] = microtime(true);
+	$h['booted'] = true;
+
+	harness_enforce_env();
+
+	register_shutdown_function('harness_shutdown_report');
+
+	// Graceful SIGTERM handling (CLI only): the runner wraps each test in
+	// `timeout -k 5s`, which sends SIGTERM then SIGKILL 5s later. On plain
+	// SIGKILL, register_shutdown_function never runs and teardown is skipped —
+	// stranding fixtures / Stripe objects / emulator processes. Converting
+	// SIGTERM into exit(1) lets the shutdown reporter run teardown and emit a
+	// failing contract inside the 5s grace window. Needs the pcntl extension.
+	if (php_sapi_name() === 'cli' && function_exists('pcntl_signal')) {
+		pcntl_async_signals(true);
+		pcntl_signal(SIGTERM, function () {
+			$GLOBALS['__harness']['sigterm'] = true;
+			exit(1);
+		});
+	}
+}
+
+/**
+ * Runtime env enforcement — the second layer behind run.php's pre-spawn gate,
+ * so invoking a dev-only test directly by path on production still refuses.
+ *
+ * The `debug` setting is the platform's master dev/prod discriminator (1 on
+ * dev, 0 on prod; StripeHelper keys live-vs-test payments off it). `dev-only`
+ * tests refuse unless it is on. `any` (read-only/pure) and `prod-verify`
+ * (deliberately prod-runnable, self-cleaning) pass.
+ */
+function harness_enforce_env() {
+	$h = &$GLOBALS['__harness'];
+	$env = $h['meta']['env'];
+	if ($env === 'any' || $env === 'prod-verify') return;
+
+	// dev-only
+	if (Globalvars::get_instance()->get_setting('debug')) return;
+
+	$reason = "dev-only test '" . $h['meta']['name'] . "' refuses to run: the 'debug' setting is off "
+		. "(this looks like production). No fixtures, rate limits, test-DB, or Stripe test keys are touched.";
+	if (harness_wants_json()) {
+		$h['skipped']++;
+		harness_emit_json(array(array('title' => 'Environment', 'checks' => array(
+			array('label' => 'env gate (dev-only)', 'passed' => false, 'detail' => $reason),
+		))));
+	} else {
+		echo "SKIP: $reason\n";
+	}
+	$h['finished'] = true;
+	exit(0);
+}
+
+// ==========================================================================
+// Assertions
+// ==========================================================================
+
+/** Open a named section; subsequent check()s are grouped under it. */
+function section($title) {
+	$h = &$GLOBALS['__harness'];
+	$h['sections'][] = array('title' => (string)$title, 'checks' => array());
+	$h['current'] = count($h['sections']) - 1;
+	if (!harness_wants_json() && php_sapi_name() === 'cli') echo "\n== $title ==\n";
+}
+
+/** The single assertion. Records the check into the open section (creating a
+ *  default one if none is open) and updates the pass/fail counters. */
+function check($condition, $label, $detail = '') {
+	$h = &$GLOBALS['__harness'];
+	if ($h['current'] === null) section('Tests');
+	$passed = (bool)$condition;
+	$h['sections'][$h['current']]['checks'][] = array(
+		'label' => (string)$label, 'passed' => $passed, 'detail' => (string)$detail,
+	);
+	if ($passed) $h['passed']++; else $h['failed']++;
+	if (!harness_wants_json() && php_sapi_name() === 'cli') {
+		echo '  ' . ($passed ? 'PASS' : 'FAIL') . ": $label" . ($detail !== '' && !$passed ? " — $detail" : '') . "\n";
+	}
+	return $passed;
+}
+
+/**
+ * Label-first assertion alias: ok($label, $condition, $detail=''). Many
+ * hand-rolled suites wrote their pass/fail counter as ok($label, $cond); this
+ * lets those bodies migrate to the shared harness unchanged.
+ */
+function ok($label, $condition, $detail = '') {
+	return check($condition, $label, $detail);
+}
+
+/** Record a skipped check (e.g. an unmet `needs` prerequisite). */
+function harness_skip($label, $detail = '') {
+	$h = &$GLOBALS['__harness'];
+	if ($h['current'] === null) section('Tests');
+	$h['sections'][$h['current']]['checks'][] = array(
+		'label' => (string)$label, 'passed' => null, 'detail' => (string)$detail,
+	);
+	$h['skipped']++;
+	if (!harness_wants_json() && php_sapi_name() === 'cli') echo "  SKIP: $label" . ($detail !== '' ? " — $detail" : '') . "\n";
+}
+
+// ==========================================================================
+// Fixtures + LIFO teardown
+// ==========================================================================
+
+/** Register an arbitrary teardown callable; run in LIFO order at finish. */
+function harness_defer(callable $fn) {
+	$GLOBALS['__harness']['deferred'][] = $fn;
+}
+
+/**
+ * Create a test user at the given permission level, registered for cleanup.
+ * Email is unique per $suffix so concurrent suites never collide.
+ */
+function make_user($suffix, $permission = 0) {
+	require_once(PathHelper::getIncludePath('data/users_class.php'));
+	$user = new User(NULL);
+	$user->set('usr_first_name', 'HarnessTest');
+	$user->set('usr_last_name', 'User' . $suffix);
+	$user->set('usr_email', 'harnesstest_' . strtolower($suffix) . '@getjoinery.com');
+	$user->set('usr_password', User::GeneratePassword('TestPassword_' . $suffix));
+	$user->set('usr_permission', $permission);
+	$user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
+	$user->save();
+	$user->load();
+	harness_register_user($user);
+	return $user;
+}
+
+/**
+ * Create a machine API key for $user_id ($permission: 1=read, 2=write, 3=r+w,
+ * 4=+delete), registered for cleanup. Returns ['api_key'=>ApiKey,'secret_key'=>plaintext].
+ */
+function make_machine_key($user_id, $name, $permission = 4) {
+	require_once(PathHelper::getIncludePath('data/api_keys_class.php'));
+	$secret_plaintext = 'secret_' . LibraryFunctions::random_string(16);
+	$key = new ApiKey(NULL);
+	$key->set('apk_usr_user_id', $user_id);
+	$key->set('apk_name', $name);
+	$key->set('apk_public_key', 'public_' . LibraryFunctions::random_string(16));
+	$key->set('apk_secret_key', ApiKey::GenerateKey($secret_plaintext));
+	$key->set('apk_type', ApiKey::TYPE_MACHINE);
+	$key->set('apk_permission', $permission);
+	$key->set('apk_is_active', TRUE);
+	$key->save();
+	$key->load();
+	harness_register_key_id($key->key);
+	return array('api_key' => $key, 'secret_key' => $secret_plaintext);
+}
+
+/** Register a created row for teardown (deleted LIFO with everything else). */
+function harness_register_row($table, $pkey_column, $id) {
+	harness_defer(function () use ($table, $pkey_column, $id) {
+		$db = DbConnector::get_instance()->get_db_link();
+		try {
+			$q = $db->prepare("DELETE FROM $table WHERE $pkey_column = ?");
+			$q->execute(array($id));
+		} catch (Exception $e) {
+			echo "  WARNING: could not delete $table row $id: " . $e->getMessage() . "\n";
+		}
+	});
+}
+
+function harness_register_key_id($id) {
+	harness_defer(function () use ($id) {
+		$db = DbConnector::get_instance()->get_db_link();
+		try {
+			$q = $db->prepare("DELETE FROM apk_api_keys WHERE apk_api_key_id = ?");
+			$q->execute(array($id));
+		} catch (Exception $e) {
+			echo "  WARNING: could not delete api key $id: " . $e->getMessage() . "\n";
+		}
+	});
+}
+
+/**
+ * Register a User object for teardown: permanent_delete with a soft-delete
+ * fallback so a test account can never be logged into even if the FK sweep fails.
+ */
+function harness_register_user($user) {
+	harness_defer(function () use ($user) {
+		$db = DbConnector::get_instance()->get_db_link();
+		try {
+			$user->permanent_delete();
+		} catch (Exception $e) {
+			echo "  WARNING: could not permanently delete user " . $user->key . " (" . $e->getMessage() . "); soft-deleting\n";
+			if ($db->inTransaction()) $db->rollBack();
+			try {
+				$q = $db->prepare("UPDATE usr_users SET usr_delete_time = now() WHERE usr_user_id = ?");
+				$q->execute(array($user->key));
+			} catch (Exception $e2) {
+				echo "  WARNING: soft delete also failed for user " . $user->key . ": " . $e2->getMessage() . "\n";
+			}
+		}
+	});
+}
+
+/** Run every deferred teardown callable in LIFO order. Safe after an exception. */
+function harness_teardown_data() {
+	$h = &$GLOBALS['__harness'];
+	foreach (array_reverse($h['deferred']) as $fn) {
+		try { $fn(); } catch (Exception $e) { echo "  WARNING: teardown step failed: " . $e->getMessage() . "\n"; }
+	}
+	$h['deferred'] = array();
+}
+
+// ==========================================================================
+// Settings — raw DB accessors and in-memory (this-process-only) overrides
+// ==========================================================================
+
+function get_setting_raw($name) {
+	$db = DbConnector::get_instance()->get_db_link();
+	$q = $db->prepare("SELECT stg_value FROM stg_settings WHERE stg_name = ?");
+	$q->execute(array($name));
+	$row = $q->fetch(PDO::FETCH_ASSOC);
+	return $row ? $row['stg_value'] : null;
+}
+
+function set_setting_raw($name, $value) {
+	$db = DbConnector::get_instance()->get_db_link();
+	$q = $db->prepare("UPDATE stg_settings SET stg_value = ? WHERE stg_name = ?");
+	$q->execute(array($value, $name));
+}
+
+/** Snapshot the Globalvars in-memory settings cache (for restore below). */
+function harness_settings_snapshot() {
+	$gv = Globalvars::get_instance();
+	$ref = new ReflectionProperty('Globalvars', 'settings');
+	$ref->setAccessible(true);
+	$arr = $ref->getValue($gv);
+	return is_array($arr) ? $arr : array();
+}
+
+/** Restore a snapshot taken by harness_settings_snapshot(). */
+function harness_settings_restore($snapshot) {
+	$gv = Globalvars::get_instance();
+	$ref = new ReflectionProperty('Globalvars', 'settings');
+	$ref->setAccessible(true);
+	$ref->setValue($gv, $snapshot);
+}
+
+/**
+ * Override one setting in the Globalvars in-memory cache only — never persisted,
+ * scoped to this process. On first use it snapshots the cache and defers a
+ * restore, so overrides evaporate at teardown.
+ */
+function harness_set_setting_mem($key, $value) {
+	static $snapshotted = false;
+	if (!$snapshotted) {
+		$snapshot = harness_settings_snapshot();
+		harness_defer(function () use ($snapshot) { harness_settings_restore($snapshot); });
+		$snapshotted = true;
+	}
+	$gv = Globalvars::get_instance();
+	$ref = new ReflectionProperty('Globalvars', 'settings');
+	$ref->setAccessible(true);
+	$arr = $ref->getValue($gv);
+	if (!is_array($arr)) $arr = array();
+	$arr[$key] = $value;
+	$ref->setValue($gv, $arr);
+}
+
+// ==========================================================================
+// Test-database mode
+// ==========================================================================
+
+/**
+ * Switch DbConnector to the copied test database and defer the close, replacing
+ * the copy-pasted set_test_mode()/close_test_mode() ctor/dtor pairs and the
+ * "which DB am I on" banner. Emits the banner on CLI human runs.
+ */
+function harness_test_mode() {
+	$db = DbConnector::get_instance();
+	$db->set_test_mode();
+	harness_defer(function () use ($db) { $db->close_test_mode(); });
+
+	if (!harness_wants_json() && php_sapi_name() === 'cli') {
+		$name = $db->get_db_link()->query('SELECT current_database()')->fetchColumn();
+		echo "  Test database: $name\n";
+	}
+}
+
+// ==========================================================================
+// Output + finish
+// ==========================================================================
+
+/** Whether JSON output is requested (CLI --json, or web ?json=1 / ?ajax=1). */
+function harness_wants_json() {
+	if (php_sapi_name() === 'cli') {
+		return in_array('--json', $GLOBALS['argv'] ?? array(), true);
+	}
+	return (isset($_GET['json']) && $_GET['json']) || (isset($_GET['ajax']) && $_GET['ajax']);
+}
+
+/**
+ * Assemble and print the JSON result contract.
+ *
+ * On CLI the contract is prefixed with a sentinel on its own line so run.php
+ * can extract it unambiguously even when a fatal error made the platform error
+ * handler print its own blob to stdout first. On the web it is emitted as pure
+ * application/json for direct debugging.
+ */
+function harness_emit_json($sections = null) {
+	$h = &$GLOBALS['__harness'];
+	$sections = $sections === null ? $h['sections'] : $sections;
+	$contract = array(
+		'name'  => $h['meta']['name'],
+		'tier'  => $h['meta']['tier'],
+		'env'   => $h['meta']['env'],
+		'needs' => $h['meta']['needs'],
+		'stats' => array(
+			'total'   => $h['passed'] + $h['failed'],
+			'passed'  => $h['passed'],
+			'failed'  => $h['failed'],
+			'skipped' => $h['skipped'],
+		),
+		'sections'    => $sections,
+		'duration_ms' => (int)round((microtime(true) - $h['started']) * 1000),
+	);
+	$json = json_encode($contract);
+	if (php_sapi_name() === 'cli') {
+		echo "\n" . JOINERY_RESULT_SENTINEL . $json . "\n";
+	} else {
+		header('Content-Type: application/json');
+		echo $json;
+	}
+}
+
+/** Print the human summary (CLI) or emit the JSON contract, then exit. */
+function harness_finish() {
+	$h = &$GLOBALS['__harness'];
+	$h['finished'] = true;
+
+	if (harness_wants_json()) {
+		harness_emit_json();
+	} else {
+		$total = $h['passed'] + $h['failed'];
+		echo "\n================================\n";
+		echo $h['meta']['name'] . " [" . $h['meta']['tier'] . "]\n";
+		echo "PASSED: {$h['passed']}   FAILED: {$h['failed']}"
+			. ($h['skipped'] ? "   SKIPPED: {$h['skipped']}" : '')
+			. "   ($total checks)\n";
+	}
+	exit($h['failed'] > 0 ? 1 : 0);
+}
+
+/**
+ * Shutdown reporter and the contract's crash-safety net.
+ *
+ * Every test MUST end by calling harness_finish() (which sets finished=true and
+ * exits). If this reporter fires with finished=false, the script died before
+ * finishing — a fatal error, an uncaught exception, or an early exit() — which
+ * is always a failure. We record it as a failing check (the platform's own
+ * fatal handler runs first and overwrites error_get_last() with its own
+ * warnings, so we cannot rely on the error type; the absence of a clean finish
+ * is the signal), run teardown, and emit a failing contract so a crash can
+ * never be misread as a pass.
+ */
+function harness_shutdown_report() {
+	$h = &$GLOBALS['__harness'];
+	if ($h['finished'] || !$h['booted']) return;
+
+	if (!empty($h['sigterm'])) {
+		// timeout(1) sent SIGTERM (the test exceeded its wall-clock cap); our
+		// handler exit()ed here so teardown could still run before SIGKILL.
+		check(false, 'killed by timeout before harness_finish()',
+			'the test exceeded its declared timeout and was terminated');
+	} else {
+		$err = error_get_last();
+		$detail = $err ? ($err['message'] . ' at ' . $err['file'] . ':' . $err['line']) : 'no error captured';
+		check(false, 'test crashed before harness_finish()', $detail);
+	}
+	harness_teardown_data();
+	harness_finish();
+}

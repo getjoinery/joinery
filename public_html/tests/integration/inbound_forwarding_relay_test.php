@@ -1,4 +1,10 @@
 <?php
+/** @joinery-test
+ * name: inbound_forwarding_relay
+ * tier: safe
+ * env: dev-only
+ * needs: []
+ */
 /**
  * Tests for inbound forwarding relay resolution (spec: route inbound forwarding
  * through the selected outbound provider).
@@ -24,21 +30,18 @@
  * @version 1.0
  */
 
-require_once(__DIR__ . '/../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+require_once(__DIR__ . '/../lib/harness.php');
+harness_boot();
+
 require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
 
 class InboundForwardingRelayTest {
-	private $pass = 0;
-	private $fail = 0;
-
 	private function out($msg) {
 		echo (php_sapi_name() === 'cli' ? '' : '<br>') . $msg . "\n";
 	}
 	private function ok($cond, $label) {
-		if ($cond) { $this->pass++; $this->out('  PASS: ' . $label); }
-		else { $this->fail++; $this->out('  FAIL: ' . $label); }
+		return check((bool)$cond, $label);
 	}
 
 	/** Override a setting in the Globalvars in-memory cache for this process. */
@@ -62,10 +65,6 @@ class InboundForwardingRelayTest {
 		$this->testResolverProviderPath();
 		$this->testResolverNonSupportingFallback();
 		$this->testResolverOverrideForcesSmtp();
-
-		$this->out('');
-		$this->out('Results: ' . $this->pass . ' passed, ' . $this->fail . ' failed');
-		return $this->fail === 0;
 	}
 
 	/** The spec's provider inventory, asserted against the actual classes. */
@@ -137,5 +136,5 @@ class InboundForwardingRelayTest {
 }
 
 $test = new InboundForwardingRelayTest();
-$success = $test->run();
-exit($success ? 0 : 1);
+$test->run();
+harness_finish();

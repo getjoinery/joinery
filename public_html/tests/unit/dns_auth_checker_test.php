@@ -1,4 +1,10 @@
 <?php
+/** @joinery-test
+ * name: dns_auth_checker
+ * tier: safe
+ * env: any
+ * needs: []
+ */
 /**
  * Unit test for DnsAuthChecker.
  *
@@ -11,7 +17,8 @@
  * @version 1.0
  */
 
-require_once(__DIR__ . '/../../includes/PathHelper.php');
+require_once(__DIR__ . '/../lib/harness.php');
+harness_boot();
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
 require_once(PathHelper::getIncludePath('includes/DnsAuthChecker.php'));
 
@@ -26,15 +33,6 @@ class FakeDnsBackend {
         $key = $name . '|' . $type;
         return array_key_exists($key, $this->data) ? $this->data[$key] : [];
     }
-}
-
-$tests = 0;
-$failures = 0;
-function check($label, $condition) {
-    global $tests, $failures;
-    $tests++;
-    echo ($condition ? '  PASS  ' : '  FAIL  ') . $label . "\n";
-    if (!$condition) { $GLOBALS['failures']++; }
 }
 
 // A DKIM TXT value with a public key long enough to satisfy isDKIMRecord().
@@ -61,34 +59,33 @@ DnsResolver::setBackend(new FakeDnsBackend([
 ]));
 
 // ── checkSPF ─────────────────────────────────────────────────────────────
-check('checkSPF pass on -all',        DnsAuthChecker::checkSPF('pass.example.com')['status'] === 'pass');
-check('checkSPF warn on +all',        DnsAuthChecker::checkSPF('weak.example.com')['status'] === 'warn');
-check('checkSPF warn on ?all',        DnsAuthChecker::checkSPF('neutral.example.com')['status'] === 'warn');
-check('checkSPF warn on multiple',    DnsAuthChecker::checkSPF('multi.example.com')['status'] === 'warn');
-check('checkSPF fail when no TXT',    DnsAuthChecker::checkSPF('notxt.example.com')['status'] === 'fail');
-check('checkSPF fail when TXT but no SPF', DnsAuthChecker::checkSPF('hastxt.example.com')['detail'] === 'No SPF record found');
-check('checkSPF fail-open: resolver failure reads as no record',
+ok('checkSPF pass on -all',        DnsAuthChecker::checkSPF('pass.example.com')['status'] === 'pass');
+ok('checkSPF warn on +all',        DnsAuthChecker::checkSPF('weak.example.com')['status'] === 'warn');
+ok('checkSPF warn on ?all',        DnsAuthChecker::checkSPF('neutral.example.com')['status'] === 'warn');
+ok('checkSPF warn on multiple',    DnsAuthChecker::checkSPF('multi.example.com')['status'] === 'warn');
+ok('checkSPF fail when no TXT',    DnsAuthChecker::checkSPF('notxt.example.com')['status'] === 'fail');
+ok('checkSPF fail when TXT but no SPF', DnsAuthChecker::checkSPF('hastxt.example.com')['detail'] === 'No SPF record found');
+ok('checkSPF fail-open: resolver failure reads as no record',
       DnsAuthChecker::checkSPF('broken.example.com')['status'] === 'fail');
 
 // ── checkDKIM ────────────────────────────────────────────────────────────
 $dkim_ok = DnsAuthChecker::checkDKIM('dkimok.example.com', ['mail']);
-check('checkDKIM pass via TXT',        $dkim_ok['status'] === 'pass' && $dkim_ok['selector'] === 'mail');
+ok('checkDKIM pass via TXT',        $dkim_ok['status'] === 'pass' && $dkim_ok['selector'] === 'mail');
 $dkim_cname = DnsAuthChecker::checkDKIM('dkimcname.example.com', ['mail']);
-check('checkDKIM pass via CNAME',      $dkim_cname['status'] === 'pass');
-check('checkDKIM fail when absent',    DnsAuthChecker::checkDKIM('dkimnone.example.com', ['mail'])['status'] === 'fail');
+ok('checkDKIM pass via CNAME',      $dkim_cname['status'] === 'pass');
+ok('checkDKIM fail when absent',    DnsAuthChecker::checkDKIM('dkimnone.example.com', ['mail'])['status'] === 'fail');
 
 // ── checkDMARC ───────────────────────────────────────────────────────────
-check('checkDMARC pass on p=reject',   DnsAuthChecker::checkDMARC('reject.example.com')['status'] === 'pass');
+ok('checkDMARC pass on p=reject',   DnsAuthChecker::checkDMARC('reject.example.com')['status'] === 'pass');
 $dmarc_mon = DnsAuthChecker::checkDMARC('monitor.example.com');
-check('checkDMARC warn on p=none',     $dmarc_mon['status'] === 'warn' && $dmarc_mon['policy'] === 'none');
-check('checkDMARC fail when absent',   DnsAuthChecker::checkDMARC('dmarcmissing.example.com')['status'] === 'fail');
+ok('checkDMARC warn on p=none',     $dmarc_mon['status'] === 'warn' && $dmarc_mon['policy'] === 'none');
+ok('checkDMARC fail when absent',   DnsAuthChecker::checkDMARC('dmarcmissing.example.com')['status'] === 'fail');
 
 // ── quickCheck rolls all three up ────────────────────────────────────────
 $quick = DnsAuthChecker::quickCheck('pass.example.com', ['mail']);
-check('quickCheck returns spf/dkim/dmarc keys',
+ok('quickCheck returns spf/dkim/dmarc keys',
       isset($quick['spf'], $quick['dkim'], $quick['dmarc']));
 
 DnsResolver::clearBackend();
 
-echo "\n$tests run, $failures failed.\n";
-exit($failures === 0 ? 0 : 1);
+harness_finish();

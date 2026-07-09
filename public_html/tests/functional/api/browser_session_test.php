@@ -20,9 +20,15 @@
  * @version 1.0.0
  */
 
+/** @joinery-test
+ * name: api_browser_session
+ * tier: db
+ * env: dev-only
+ * needs: []
+ */
 require_once(__DIR__ . '/api_test_harness.php');
 
-harness_boot($argv);
+api_test_boot($argv);
 
 /**
  * Curl with a cookie jar. Form-encodes $body when $form, else JSON. Does not

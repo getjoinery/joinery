@@ -1,4 +1,10 @@
 <?php
+/** @joinery-test
+ * name: spam_filtering
+ * tier: safe
+ * env: any
+ * needs: []
+ */
 /**
  * Tests for inbound spam classification (specs/inbound_email_spam_filtering.md).
  *
@@ -22,27 +28,19 @@
  * @version 1.1
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+require_once(__DIR__ . '/../../../tests/lib/harness.php');
+harness_boot();
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
 
 class SpamFilteringTest {
-	private $pass = 0;
-	private $fail = 0;
 
 	private function out($msg) {
 		echo (php_sapi_name() === 'cli' ? '' : '<br>') . $msg . "\n";
 	}
 	private function eq($expected, $actual, $label) {
-		if ($expected === $actual) {
-			$this->pass++;
-			$this->out('  PASS: ' . $label);
-		} else {
-			$this->fail++;
-			$this->out('  FAIL: ' . $label . ' (expected ' . var_export($expected, true)
-				. ', got ' . var_export($actual, true) . ')');
-		}
+		return check($expected === $actual, $label, 'expected ' . var_export($expected, true)
+			. ', got ' . var_export($actual, true));
 	}
 
 	/** Set one Globalvars setting by injecting into the singleton's private settings. */
@@ -95,7 +93,7 @@ class SpamFilteringTest {
 	}
 
 	function run() {
-		$this->out('=== Spam classification tests ===');
+		section('Spam classification');
 
 		$HAM  = InboundEmailMessage::SPAM_VERDICT_HAM;
 		$SPAM = InboundEmailMessage::SPAM_VERDICT_SPAM;
@@ -148,7 +146,7 @@ class SpamFilteringTest {
 		$this->setGate(true);
 
 		// --- readSpamHeader() (Postfix milter path) ---
-		$this->out('--- readSpamHeader ---');
+		section('readSpamHeader');
 		$spamRaw = "From: a@b.com\nX-Spam: Yes\nX-Spam-Status: Yes, score=7.31 required=6.00\nSubject: hi\n\nbody";
 		$r = $this->readSpamHeader($spamRaw);
 		$this->eq('spam', $r['signal'], 'X-Spam: Yes → spam signal');
@@ -168,7 +166,7 @@ class SpamFilteringTest {
 		$this->eq('none', $this->readSpamHeader($noRaw)['signal'], 'X-Spam: No → none (header never asserts ham)');
 
 		// --- resolveContentSpam() gating + provider branch ---
-		$this->out('--- resolveContentSpam ---');
+		section('resolveContentSpam');
 		$this->setContentGate(false);
 		$this->eq('none', $this->resolveContentSpam($spamRaw)['signal'],
 			'content gate off → none even with X-Spam: Yes present');
@@ -183,12 +181,9 @@ class SpamFilteringTest {
 		$this->eq('none', $provNone['signal'], 'provider result=none → none (score recorded, no flag)');
 		$this->eq(1.0, $provNone['score'], 'provider score still recorded');
 		$this->setContentGate(false);
-
-		$this->out('');
-		$this->out('=== Result: ' . $this->pass . ' passed, ' . $this->fail . ' failed ===');
-		return $this->fail === 0 ? 0 : 1;
 	}
 }
 
 $test = new SpamFilteringTest();
-exit($test->run());
+$test->run();
+harness_finish();

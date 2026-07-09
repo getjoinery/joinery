@@ -1,4 +1,10 @@
 <?php
+/** @joinery-test
+ * name: formwriter_json
+ * tier: safe
+ * env: any
+ * needs: []
+ */
 /**
  * PURPOSE: This test pins the JSON form-definition schema (schema_version 1)
  * served by GET /api/v1/form/{action_name} and consumed by the mobile apps'
@@ -33,22 +39,11 @@
  * @version 1.1
  */
 
-require_once(__DIR__ . '/../../includes/PathHelper.php');
-// Core classes the web front controller preloads — needed explicitly in CLI
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
-require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(__DIR__ . '/../lib/harness.php');
+harness_boot();
 require_once(PathHelper::getIncludePath('includes/FormWriterV2JSON.php'));
 require_once(PathHelper::getIncludePath('includes/FormWriterV2HTML5.php'));
 
-$tests = 0;
-$failures = 0;
-function check($label, $condition) {
-    global $tests, $failures;
-    $tests++;
-    echo ($condition ? '  PASS  ' : '  FAIL  ') . $label . "\n";
-    if (!$condition) { $GLOBALS['failures']++; }
-}
 /** Returns the exception message if $fn throws, or null if it doesn't. */
 function thrown(callable $fn) {
     try { $fn(); return null; }
@@ -110,77 +105,77 @@ $fw->end_form();
 $output = ob_get_clean();
 $def = $fw->getDefinition();
 
-check('no output in JSON mode (begin_form/fields/end_form echo nothing)', $output === '');
-check('schema_version is 1', $def['schema_version'] === 1);
-check('form name and submit_to derive from form id',
+ok('no output in JSON mode (begin_form/fields/end_form echo nothing)', $output === '');
+ok('schema_version is 1', $def['schema_version'] === 1);
+ok('form name and submit_to derive from form id',
       $def['form']['name'] === 'test_form' && $def['form']['submit_to'] === '/api/v1/action/test_form');
-check('submitbutton label becomes form submit_label', $def['form']['submit_label'] === 'Save Changes');
+ok('submitbutton label becomes form submit_label', $def['form']['submit_label'] === 'Save Changes');
 
 $f = field($def, 'usr_first_name');
-check('text field shape', $f && $f['type'] === 'text' && $f['label'] === 'First Name'
+ok('text field shape', $f && $f['type'] === 'text' && $f['label'] === 'First Name'
       && $f['required'] === true && $f['maxlength'] === 32);
-check('text validation includes required', isset($f['validation']['required']));
+ok('text validation includes required', isset($f['validation']['required']));
 
 $f = field($def, 'usr_email');
-check('email subtype serialized as input_type hint', $f && ($f['input_type'] ?? '') === 'email');
+ok('email subtype serialized as input_type hint', $f && ($f['input_type'] ?? '') === 'email');
 
 $f = field($def, 'usr_password');
-check('password field never carries a value', $f && $f['type'] === 'password' && !array_key_exists('value', $f));
+ok('password field never carries a value', $f && $f['type'] === 'password' && !array_key_exists('value', $f));
 
 $f = field($def, 'quantity');
-check('number field min/max/value', $f && $f['type'] === 'number' && $f['min'] === 1 && $f['max'] === 10 && $f['value'] === '3');
+ok('number field min/max/value', $f && $f['type'] === 'number' && $f['min'] === 1 && $f['max'] === 10 && $f['value'] === '3');
 
 $f = field($def, 'notes');
-check('textarea shape', $f && $f['type'] === 'textarea' && $f['maxlength'] === 500);
+ok('textarea shape', $f && $f['type'] === 'textarea' && $f['maxlength'] === 500);
 
 $f = field($def, 'color');
-check('drop options/value/empty_option', $f && $f['type'] === 'drop'
+ok('drop options/value/empty_option', $f && $f['type'] === 'drop'
       && $f['options'] === ['r' => 'Red', 'b' => 'Blue'] && $f['value'] === 'b' && $f['empty_option'] === 'Select...');
-check('visibility_rules serialized verbatim',
+ok('visibility_rules serialized verbatim',
       $f && $f['visibility_rules'] === ['r' => ['show' => ['notes']], 'b' => ['hide' => ['notes']]]);
 
 $f = field($def, 'agree');
-check('checkbox checked_value + is_checked', $f && $f['type'] === 'checkbox'
+ok('checkbox checked_value + is_checked', $f && $f['type'] === 'checkbox'
       && $f['checked_value'] === '1' && $f['is_checked'] === true);
 
 $f = field($def, 'size');
-check('radio options/value', $f && $f['type'] === 'radio' && $f['options'] === ['s' => 'Small', 'l' => 'Large'] && $f['value'] === 's');
+ok('radio options/value', $f && $f['type'] === 'radio' && $f['options'] === ['s' => 'Small', 'l' => 'Large'] && $f['value'] === 's');
 
 $f = field($def, 'repeats');
-check('checkbox trigger serializes visibility_rules (checked/unchecked keys)',
+ok('checkbox trigger serializes visibility_rules (checked/unchecked keys)',
       $f && $f['type'] === 'checkbox' && $f['visibility_rules'] === [
           'checked'   => ['show' => ['notes']],
           'unchecked' => ['hide' => ['notes']],
       ]);
 
 $f = field($def, 'ends');
-check('radio trigger serializes visibility_rules (option-value keys)',
+ok('radio trigger serializes visibility_rules (option-value keys)',
       $f && $f['type'] === 'radio' && $f['visibility_rules'] === [
           'never' => ['hide' => ['start_date']],
           'date'  => ['show' => ['start_date']],
       ]);
 
 $f = field($def, 'toppings');
-check('checkbox_list options/checked/disabled_values', $f && $f['type'] === 'checkbox_list'
+ok('checkbox_list options/checked/disabled_values', $f && $f['type'] === 'checkbox_list'
       && $f['checked'] === ['2'] && $f['disabled_values'] === ['1'] && $f['list_type'] === 'checkbox');
 
 $f = field($def, 'start_date');
-check('date value', $f && $f['type'] === 'date' && $f['value'] === '2026-06-11');
+ok('date value', $f && $f['type'] === 'date' && $f['value'] === '2026-06-11');
 
 $f = field($def, 'start_time');
-check('time value (single submit key, HH:MM)', $f && $f['type'] === 'time' && $f['value'] === '14:30');
+ok('time value (single submit key, HH:MM)', $f && $f['type'] === 'time' && $f['value'] === '14:30');
 
 $f = field($def, 'token_field');
-check('hidden value round-trips', $f && $f['type'] === 'hidden' && $f['value'] === 'abc123');
+ok('hidden value round-trips', $f && $f['type'] === 'hidden' && $f['value'] === 'abc123');
 
-check('definition is JSON-encodable', json_encode($def) !== false);
+ok('definition is JSON-encodable', json_encode($def) !== false);
 
 // ── Datetime compound submit contract ─────────────────────────────────────
 
 $f = field($def, 'evt_start');
-check('datetime prefill split into date/hour/minute/ampm',
+ok('datetime prefill split into date/hour/minute/ampm',
       $f && $f['date_value'] === '2026-06-11' && $f['hour'] === '02' && $f['minute'] === '30' && $f['ampm'] === 'PM');
-check('datetime submit_parts use the process_datetimeinput key names',
+ok('datetime submit_parts use the process_datetimeinput key names',
       $f && $f['submit_parts'] === [
           'date' => 'evt_start_dateinput',
           'hour' => 'evt_start_timeinput_hour',
@@ -196,13 +191,13 @@ $post = [
     $f['submit_parts']['minute'] => '30',
     $f['submit_parts']['ampm'] => 'PM',
 ];
-check('submit_parts body accepted by process_datetimeinput()',
+ok('submit_parts body accepted by process_datetimeinput()',
       FormWriterV2Base::process_datetimeinput($post, 'evt_start', false) === '2026-06-11 14:30:00');
 
 // ── CSRF is off ────────────────────────────────────────────────────────────
 
-check('no CSRF field in definition', field($def, '_csrf_token') === null);
-check('validateCSRF passes with no token (CSRF disabled)', $fw->validateCSRF([]) === true);
+ok('no CSRF field in definition', field($def, '_csrf_token') === null);
+ok('validateCSRF passes with no token (CSRF disabled)', $fw->validateCSRF([]) === true);
 
 // ── edit_primary_key_value ─────────────────────────────────────────────────
 
@@ -210,7 +205,7 @@ $fw2 = new FormWriterV2JSON('edit_form', ['edit_primary_key_value' => 123]);
 $fw2->textinput('name', 'Name');
 $fw2->submitbutton('btn_submit', 'Save');
 $def2 = $fw2->getDefinition();
-check('edit_primary_key_value emitted as first hidden field',
+ok('edit_primary_key_value emitted as first hidden field',
       $def2['fields'][0] === ['type' => 'hidden', 'name' => 'edit_primary_key_value', 'value' => '123']);
 
 // ── set_values / set_model ─────────────────────────────────────────────────
@@ -218,7 +213,7 @@ check('edit_primary_key_value emitted as first hidden field',
 $fw3 = new FormWriterV2JSON('values_form');
 $fw3->set_values(['city' => 'Austin']);
 $fw3->textinput('city', 'City');
-check('set_values prefills later fields', field($fw3->getDefinition(), 'city')['value'] === 'Austin');
+ok('set_values prefills later fields', field($fw3->getDefinition(), 'city')['value'] === 'Austin');
 
 $stub = new class {
     public function export_as_array() { return ['city' => 'Dallas']; }
@@ -226,40 +221,40 @@ $stub = new class {
 $fw4 = new FormWriterV2JSON('model_form');
 $fw4->set_model($stub);
 $fw4->textinput('city', 'City');
-check('set_model prefills from export_as_array()', field($fw4->getDefinition(), 'city')['value'] === 'Dallas');
+ok('set_model prefills from export_as_array()', field($fw4->getDefinition(), 'city')['value'] === 'Dallas');
 
-check('set_model rejects objects without export_as_array()',
+ok('set_model rejects objects without export_as_array()',
       thrown(function () { (new FormWriterV2JSON('bad'))->set_model(new stdClass()); }) !== null);
 
 // ── Loud failure on unsupported constructs ─────────────────────────────────
 
-check('custom_script on dropinput throws',
+ok('custom_script on dropinput throws',
       thrown(function () {
           $fw = new FormWriterV2JSON('f');
           $fw->dropinput('x', 'X', ['options' => ['a' => 'A'], 'custom_script' => 'alert(1);']);
       }) !== null);
 
-check('onchange on textinput throws',
+ok('onchange on textinput throws',
       thrown(function () {
           $fw = new FormWriterV2JSON('f');
           $fw->textinput('x', 'X', ['onchange' => 'doThing()']);
       }) !== null);
 
-check('fileinput throws',
+ok('fileinput throws',
       thrown(function () { (new FormWriterV2JSON('f'))->fileinput('x', 'X'); }) !== null);
-check('imageinput throws',
+ok('imageinput throws',
       thrown(function () { (new FormWriterV2JSON('f'))->imageinput('x', 'X'); }) !== null);
-check('textbox (rich text) throws',
+ok('textbox (rich text) throws',
       thrown(function () { (new FormWriterV2JSON('f'))->textbox('x', 'X'); }) !== null);
-check('repeater throws',
+ok('repeater throws',
       thrown(function () { (new FormWriterV2JSON('f'))->repeater('x', 'X'); }) !== null);
-check('second submit button throws',
+ok('second submit button throws',
       thrown(function () {
           $fw = new FormWriterV2JSON('f');
           $fw->submitbutton('btn_a', 'A');
           $fw->submitbutton('btn_b', 'B');
       }) !== null);
-check('web bot defences throw (keep them in web views)',
+ok('web bot defences throw (keep them in web views)',
       thrown(function () { (new FormWriterV2JSON('f'))->honeypot_hidden_input(); }) !== null
       && thrown(function () { (new FormWriterV2JSON('f'))->captcha_hidden_input(); }) !== null
       && thrown(function () { (new FormWriterV2JSON('f'))->antispam_question_input(); }) !== null);
@@ -279,10 +274,7 @@ $fields_prop->setAccessible(true);
 $html5_names = array_keys($fields_prop->getValue($html5));
 $json_names = array_keys($fields_prop->getValue($json));
 
-check('account_edit builder registers identical field names in identical order via HTML5 and JSON',
+ok('account_edit builder registers identical field names in identical order via HTML5 and JSON',
       $html5_names === $json_names && count($json_names) >= 3);
 
-// ── Summary ────────────────────────────────────────────────────────────────
-
-echo "\n" . ($tests - $failures) . "/" . $tests . " passed\n";
-exit($failures ? 1 : 0);
+harness_finish();

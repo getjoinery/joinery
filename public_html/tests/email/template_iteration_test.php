@@ -1,23 +1,25 @@
 <?php
-// tests/email/template_iteration_test.php
-//
+/** @joinery-test
+ * name: email_template_iteration
+ * tier: safe            # pure reflection over EmailTemplate; no DB, no mail
+ * env: any
+ * needs: []
+ */
 // Phase 1 of receipts_refactor.md: verify {loop X as Y}...{end} iteration
 // in EmailTemplate. Exercises the engine directly via reflection so the test
 // doesn't depend on database fixtures or a working email pipeline.
 //
 // Usage: php tests/email/template_iteration_test.php
 
-require_once(__DIR__ . '/../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+require_once(__DIR__ . '/../lib/harness.php');
 require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
+harness_boot();
 
 class EmailTemplateIterationTest {
     private $instance;
     private $renderString;
     private $expandLoops;
     private $substituteVariables;
-    private $passed = 0;
-    private $failed = 0;
 
     public function __construct() {
         $reflection = new ReflectionClass('EmailTemplate');
@@ -42,19 +44,12 @@ class EmailTemplateIterationTest {
     }
 
     private function assertEquals($name, $expected, $actual) {
-        if ($expected === $actual) {
-            $this->passed++;
-            echo "  ✓ $name\n";
-        } else {
-            $this->failed++;
-            echo "  ✗ $name\n";
-            echo "    expected: " . var_export($expected, true) . "\n";
-            echo "    actual:   " . var_export($actual, true) . "\n";
-        }
+        check($expected === $actual, $name,
+            $expected === $actual ? '' : 'expected ' . var_export($expected, true) . ', got ' . var_export($actual, true));
     }
 
     public function run() {
-        echo "=== EmailTemplate {loop X as Y} iteration tests ===\n\n";
+        section('EmailTemplate {loop X as Y} iteration');
 
         $this->testNoOpForTemplatesWithoutLoops();
         $this->testSimpleLoop();
@@ -68,12 +63,6 @@ class EmailTemplateIterationTest {
         $this->testLoopLocalVariableReference();
         $this->testMultiLevelObjectResolution();
         $this->testMultipleLoopsSequential();
-
-        echo "\n=== Summary ===\n";
-        echo "Passed: $this->passed\n";
-        echo "Failed: $this->failed\n";
-
-        return $this->failed === 0;
     }
 
     // --- Test cases -----------------------------------------------------
@@ -223,5 +212,5 @@ class EmailTemplateIterationTest {
 }
 
 $test = new EmailTemplateIterationTest();
-$ok = $test->run();
-exit($ok ? 0 : 1);
+$test->run();
+harness_finish();

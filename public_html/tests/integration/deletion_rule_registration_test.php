@@ -23,25 +23,19 @@
  * prefixed zzfix_, never used by a real model). Run:
  *   php tests/integration/deletion_rule_registration_test.php
  *
- * @version 1.0
+ * @version 1.1
+ */
+/** @joinery-test
+ * name: deletion_rule_registration
+ * tier: db
+ * env: dev-only
+ * needs: []
  */
 
-require_once(__DIR__ . '/../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-Globalvars::get_instance();
-require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
-require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(__DIR__ . '/../lib/harness.php');
+harness_boot();
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 require_once(PathHelper::getIncludePath('data/deletion_rule_class.php'));
-
-$tests = 0;
-$failures = 0;
-function check($label, $condition) {
-    global $tests, $failures;
-    $tests++;
-    echo ($condition ? '  PASS  ' : '  FAIL  ') . $label . "\n";
-    if (!$condition) { $GLOBALS['failures']++; }
-}
 
 // --- Fixture "model" classes - plain classes with just the statics
 // registerModelRules() reads via reflection. None of these tablenames are
@@ -121,42 +115,42 @@ try {
     // --- Explicit source_table override ------------------------------------
     $warnings = DeletionRule::registerModelRules('ZZFixtureOverrideModel');
     $rows = rules_for_target($db, 'zzfix_override_target');
-    check('explicit source_table override: no warnings', empty($warnings));
-    check('explicit source_table override: exactly one rule registered', count($rows) === 1);
-    check('explicit source_table override: registers against the declared source table',
+    ok('explicit source_table override: no warnings', empty($warnings));
+    ok('explicit source_table override: exactly one rule registered', count($rows) === 1);
+    ok('explicit source_table override: registers against the declared source table',
         count($rows) === 1 && $rows[0]['del_source_table'] === 'usr_users');
-    check('explicit source_table override: uses the declared action',
+    ok('explicit source_table override: uses the declared action',
         count($rows) === 1 && $rows[0]['del_action'] === 'cascade');
 
     // --- Convention-based resolution against a REAL model prefix -----------
     $warnings = DeletionRule::registerModelRules('ZZFixtureConventionModel');
     $rows = rules_for_target($db, 'zzfix_convention_target');
-    check('convention resolution via real "usr" prefix: no warnings', empty($warnings));
-    check('convention resolution via real "usr" prefix: exactly one rule registered', count($rows) === 1);
-    check('convention resolution via real "usr" prefix: resolves to usr_users',
+    ok('convention resolution via real "usr" prefix: no warnings', empty($warnings));
+    ok('convention resolution via real "usr" prefix: exactly one rule registered', count($rows) === 1);
+    ok('convention resolution via real "usr" prefix: resolves to usr_users',
         count($rows) === 1 && $rows[0]['del_source_table'] === 'usr_users');
-    check('convention resolution with no declared override: default action is cascade',
+    ok('convention resolution with no declared override: default action is cascade',
         count($rows) === 1 && $rows[0]['del_action'] === 'cascade');
 
     // --- Declared override that resolves neither by convention nor source_table
     $warnings = DeletionRule::registerModelRules('ZZFixtureWarnModel');
     $rows = rules_for_target($db, 'zzfix_warn_target');
-    check('unresolvable declared override: produces exactly one warning', count($warnings) === 1);
-    check('unresolvable declared override: names the column in the warning',
+    ok('unresolvable declared override: produces exactly one warning', count($warnings) === 1);
+    ok('unresolvable declared override: names the column in the warning',
         count($warnings) === 1 && strpos($warnings[0], 'zzw_mystery_thing') !== false);
-    check('unresolvable declared override: registers nothing', count($rows) === 0);
+    ok('unresolvable declared override: registers nothing', count($rows) === 0);
 
     // --- FK-shaped column with no declaration at all, unresolvable by convention
     $warnings = DeletionRule::registerModelRules('ZZFixtureSkipModel');
     $rows = rules_for_target($db, 'zzfix_skip_target');
-    check('undeclared unresolvable column: no warning (not a configuration bug)', empty($warnings));
-    check('undeclared unresolvable column: registers nothing', count($rows) === 0);
+    ok('undeclared unresolvable column: no warning (not a configuration bug)', empty($warnings));
+    ok('undeclared unresolvable column: registers nothing', count($rows) === 0);
 
     // --- Primary key is never treated as a foreign key ----------------------
     $warnings = DeletionRule::registerModelRules('ZZFixturePkeyModel');
     $rows = rules_for_target($db, 'zzfix_pkey_target');
-    check('primary key column: no warnings', empty($warnings));
-    check('primary key column: registers nothing', count($rows) === 0);
+    ok('primary key column: no warnings', empty($warnings));
+    ok('primary key column: registers nothing', count($rows) === 0);
 
     // --- pruneOrphanedRules() ------------------------------------------------
     // Freshly (re-)register a real, on-disk model (Order's ord_usr_user_id ->
@@ -171,29 +165,27 @@ try {
     );
     $stmt->execute();
     $control_id = $stmt->fetchColumn();
-    check('sanity: control rule (usr_users -> ord_orders) registered', $control_id !== false);
+    ok('sanity: control rule (usr_users -> ord_orders) registered', $control_id !== false);
 
     $fixture_rows_before = count(rules_for_target($db, 'zzfix_override_target'))
         + count(rules_for_target($db, 'zzfix_convention_target'));
-    check('sanity: fixture rows exist before pruning', $fixture_rows_before === 2);
+    ok('sanity: fixture rows exist before pruning', $fixture_rows_before === 2);
 
     $prune_messages = DeletionRule::pruneOrphanedRules();
 
     $stmt = $db->prepare("SELECT COUNT(*) FROM del_deletion_rules WHERE del_id = ?");
     $stmt->execute([$control_id]);
-    check('pruneOrphanedRules: a real usr_users -> ord_orders rule survives pruning',
+    ok('pruneOrphanedRules: a real usr_users -> ord_orders rule survives pruning',
         (int)$stmt->fetchColumn() === 1);
 
-    check('pruneOrphanedRules: removes rules for fixture (non-real) tables',
+    ok('pruneOrphanedRules: removes rules for fixture (non-real) tables',
         count(rules_for_target($db, 'zzfix_override_target')) === 0
         && count(rules_for_target($db, 'zzfix_convention_target')) === 0);
 
-    check('pruneOrphanedRules: reports what it pruned', count($prune_messages) >= 2);
+    ok('pruneOrphanedRules: reports what it pruned', count($prune_messages) >= 2);
 
 } finally {
     cleanup_fixture_rows($db);
 }
 
-echo "\n--------------------------------------------\n";
-echo "Tests: $tests   Failures: $failures\n";
-exit($failures === 0 ? 0 : 1);
+harness_finish();

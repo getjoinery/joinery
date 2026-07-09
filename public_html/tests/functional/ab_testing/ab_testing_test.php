@@ -1,4 +1,11 @@
 <?php
+/** @joinery-test
+ * name: ab_testing
+ * tier: db              # creates test + variant rows in the dev DB, self-cleans
+ * env: dev-only
+ * needs: []
+ */
+
 /**
  * A/B testing end-to-end harness.
  *
@@ -6,66 +13,45 @@
  * disposable Page fixture. Creates fresh test + variant rows, exercises every
  * behavior, cleans up after itself. Re-run safe.
  *
- * Usage: php utils/test_ab_testing.php
+ * Usage: php tests/functional/ab_testing/ab_testing_test.php
  */
 
-require_once(__DIR__ . '/../includes/PathHelper.php');
+require_once(__DIR__ . '/../../lib/harness.php');
 
-if (php_sapi_name() !== 'cli') {
-	fwrite(STDERR, "CLI only.\n"); exit(1);
-}
+// Test fixtures need a request context. Establish it BEFORE harness_boot() so
+// SessionControl captures the test's request environment (short user agent,
+// query string) rather than a stale/real one when it is first instantiated.
+$_SERVER['REQUEST_URI'] = '/page/ab-test-fixture';
+$_SERVER['QUERY_STRING'] = '';
+$_SERVER['REMOTE_ADDR'] = '127.0.0.1';
+$_SERVER['HTTP_USER_AGENT'] = 'Mozilla/5.0 (TestRunner; real browser)';
+// Visitor id must fit vse_visitor_id varchar(20): 'abt' + 8 hex = 11 chars.
+$_SESSION = ['uniqid' => 'abt' . bin2hex(random_bytes(4))];
 
 // Buffer stdout so PHP doesn't think "headers already sent" when apply_variant()
 // calls setcookie(). Output drains at the end of the run.
 ob_start();
 
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
-require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+harness_boot();
+
 require_once(PathHelper::getIncludePath('data/pages_class.php'));
 require_once(PathHelper::getIncludePath('data/abt_tests_class.php'));
 require_once(PathHelper::getIncludePath('data/visitor_events_class.php'));
 
-// Test fixtures need a request context
-$_SERVER['REQUEST_URI'] = '/page/ab-test-fixture';
-$_SERVER['REMOTE_ADDR'] = '127.0.0.1';
-$_SERVER['HTTP_USER_AGENT'] = 'Mozilla/5.0 (TestRunner; real browser)';
-$_SESSION = ['uniqid' => 'abtestharness' . bin2hex(random_bytes(4))];
-
-$results = ['pass' => 0, 'fail' => 0, 'failures' => []];
-
+// Assertion helpers delegate to the shared harness recorder; section() comes
+// from the harness itself.
 function assert_eq($expected, $actual, $label) {
-	global $results;
-	if ($expected === $actual) {
-		$results['pass']++;
-		echo "  ✓ {$label}\n";
-	} else {
-		$results['fail']++;
-		$results['failures'][] = $label;
-		echo "  ✗ {$label}\n";
-		echo "      expected: " . var_export($expected, true) . "\n";
-		echo "      actual:   " . var_export($actual, true) . "\n";
-	}
+	return check($expected === $actual, $label,
+		$expected === $actual ? '' : 'expected ' . var_export($expected, true) . ', got ' . var_export($actual, true));
 }
 
 function assert_true($cond, $label) {
-	assert_eq(true, (bool)$cond, $label);
+	return assert_eq(true, (bool)$cond, $label);
 }
 
 function assert_between($low, $high, $actual, $label) {
-	global $results;
-	if ($actual >= $low && $actual <= $high) {
-		$results['pass']++;
-		echo "  ✓ {$label} ({$actual} in [{$low},{$high}])\n";
-	} else {
-		$results['fail']++;
-		$results['failures'][] = $label;
-		echo "  ✗ {$label}: got {$actual}, expected in [{$low},{$high}]\n";
-	}
-}
-
-function section($name) {
-	echo "\n=== {$name} ===\n";
+	return check($actual >= $low && $actual <= $high, $label,
+		($actual >= $low && $actual <= $high) ? '' : "got {$actual}, expected in [{$low},{$high}]");
 }
 
 // Reflect to read / reset the private request_assignments stash
@@ -437,15 +423,10 @@ assert_eq(0, (int)$vB->get('abv_rewards'), 'Variant B rewards zeroed');
 }
 
 // ---------------------------------------------------------------------------
-// SUMMARY
+// SUMMARY — drain the buffered progress output (human runs) and let the harness
+// print its summary / emit the JSON contract.
 // ---------------------------------------------------------------------------
-echo "\n" . str_repeat('=', 50) . "\n";
-echo sprintf("RESULTS: %d passed, %d failed\n", $results['pass'], $results['fail']);
-if (!empty($results['failures'])) {
-	echo "Failures:\n";
-	foreach ($results['failures'] as $f) echo "  - {$f}\n";
-	exit(1);
-}
-echo "All green.\n";
-exit(0);
-?>
+$buffered = ob_get_clean();
+if (!harness_wants_json()) echo $buffered;
+
+harness_finish();

@@ -1,4 +1,11 @@
 #!/bin/bash
+# @joinery-test
+# name: ios_phase2_gate
+# tier: live
+# env: dev-only
+# needs: [macmini]
+# timeout: 900
+#
 # Phase 2 gate runner — specs/ios_app_platform.md § Phase 2.
 #
 # Drives the JoineryMember XCUITest suites in the iOS Simulator on the Mac

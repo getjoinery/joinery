@@ -1,4 +1,10 @@
 <?php
+/** @joinery-test
+ * name: cloud_storage_live_b2
+ * tier: live
+ * env: prod-verify
+ * needs: [b2]
+ */
 /**
  * COMPREHENSIVE integration test — real S3 driver + real bucket + real DB.
  *
@@ -28,9 +34,9 @@
  * @version 2.0
  */
 
-require_once(__DIR__ . '/../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
+require_once(__DIR__ . '/../lib/harness.php');
+harness_boot();
+
 require_once(PathHelper::getIncludePath('data/files_class.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriver.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
@@ -38,10 +44,6 @@ require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudOffloadEngi
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageLifecycle.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_storage/StorageProfileRegistry.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_storage/FileStorageProfile.php'));
-
-$pass = 0; $fail = 0; $skip = 0;
-function ok($label, $cond) { global $pass, $fail; if ($cond) { echo "PASS: $label\n"; $pass++; } else { echo "FAIL: $label\n"; $fail++; } }
-function skip($label, $why) { global $skip; echo "SKIP: $label — $why\n"; $skip++; }
 
 function set_enabled_mem($value) {
 	$gv = Globalvars::get_instance();
@@ -55,8 +57,8 @@ function set_enabled_mem($value) {
 
 $opts = CloudStorageDriverFactory::bindingFor('public');
 if (empty($opts['bucket']) || empty($opts['access_key'])) {
-	echo "SKIP: no bucket configured; nothing to test.\n";
-	exit(0);
+	harness_skip('bucket configured', 'no bucket configured; nothing to test');
+	harness_finish();
 }
 
 $RUN    = bin2hex(random_bytes(4));
@@ -132,7 +134,7 @@ class NoopDriver implements CloudStorageDriver {
 $drvflag = function($table, $id) use ($dblink) { $q = $dblink->prepare("SELECT drv FROM $table WHERE id=?"); $q->execute([$id]); return $q->fetchColumn(); };
 
 try {
-	echo "=== A. Real driver round-trip ===\n";
+	section('A. Real driver round-trip');
 	ok('ping (HeadBucket) ok', $driver->ping()['ok'] === true);
 	$local_a = $BASE . '/a.txt'; file_put_contents($local_a, "live-a-$RUN\n");
 	$key_a = $PREFIX . '/a.txt';
@@ -154,7 +156,7 @@ try {
 	ok('get after delete fails (object gone)', $threw);
 	$created_keys = array_values(array_diff($created_keys, [$key_a]));
 
-	echo "\n=== B. Full offload cycle through the engine + real driver ===\n";
+	section('B. Full offload cycle through the engine + real driver');
 	$TABLE = 'cloud_live_rows_' . $RUN; $temp_tables[] = $TABLE;
 	$dblink->exec("CREATE TABLE $TABLE (id BIGSERIAL PRIMARY KEY, drv VARCHAR(32), failed INT DEFAULT 0, last_attempt TIMESTAMP, eligible BOOLEAN DEFAULT TRUE)");
 	$ids = [];
@@ -178,22 +180,22 @@ try {
 	ok('reverse(fallback): rows flipped back to local', $drvflag($TABLE, $ids[0]) === 'local' && $drvflag($TABLE, $ids[1]) === 'local');
 	ok('reverse(fallback): bytes pulled back from bucket', file_exists("$BASE/restore/{$ids[0]}/original") && file_get_contents("$BASE/restore/{$ids[0]}/original") === "row-{$ids[0]}-$RUN\n");
 
-	echo "\n=== C. Privacy gate DENY path end-to-end (real anonymous read) ===\n";
+	section('C. Privacy gate DENY path end-to-end (real anonymous read)');
 	$gate = CloudStorageLifecycle::testConnection($opts, 'private');
 	$vstep = null; foreach ($gate['steps'] as $s) { if ($s['label'] === 'Verify NOT publicly readable') $vstep = $s; }
 	ok('gate: overall ok (bucket is private)', $gate['ok'] === true);
 	ok('gate: anonymous read DENIED ⇒ pass', $vstep && $vstep['status'] === 'pass');
 
-	echo "\n=== D. Privacy gate FAIL pipeline (real anonymous 2xx stand-in) ===\n";
+	section('D. Privacy gate FAIL pipeline (real anonymous 2xx stand-in)');
 	$anon = new ReflectionMethod('CloudStorageLifecycle', '_anonymous_status'); $anon->setAccessible(true);
 	$status = $anon->invoke(null, 'https://www.google.com/generate_204');
-	if ($status === 0) { skip('FAIL pipeline', 'no outbound network to the 2xx stand-in URL'); }
+	if ($status === 0) { harness_skip('FAIL pipeline', 'no outbound network to the 2xx stand-in URL'); }
 	else {
 		ok('real anonymous fetch parses a 2xx status', $status >= 200 && $status < 300);
 		ok('a 2xx anonymous read ⇒ gate FAILS', CloudStorageLifecycle::privacyVerdict($status)['pass'] === false);
 	}
 
-	echo "\n=== E. Image rows: multi-object (original + variants) through the bucket ===\n";
+	section('E. Image rows: multi-object (original + variants) through the bucket');
 	$ITABLE = 'cloud_live_img_' . $RUN; $temp_tables[] = $ITABLE;
 	$dblink->exec("CREATE TABLE $ITABLE (id BIGSERIAL PRIMARY KEY, drv VARCHAR(32), failed INT DEFAULT 0, last_attempt TIMESTAMP, eligible BOOLEAN DEFAULT TRUE)");
 	$iid = (int)$dblink->query("INSERT INTO $ITABLE (drv) VALUES ('local') RETURNING id")->fetchColumn();
@@ -211,7 +213,7 @@ try {
 	CloudOffloadEngine::reverseBatch($iprofile);
 	ok('image: all 3 objects pulled back to local', file_exists("$BASE/restore/$iid/original") && file_exists("$BASE/restore/$iid/avatar") && file_exists("$BASE/restore/$iid/content"));
 
-	echo "\n=== F. FileStorageProfile real variant enumeration ===\n";
+	section('F. FileStorageProfile real variant enumeration');
 	$upload_dir = $settings->get_setting('upload_dir');
 	$fast_dir   = dirname($upload_dir) . '/static_files/uploads';
 	$fname = '_varprofiletest_' . $RUN . '.png';
@@ -231,7 +233,7 @@ try {
 	ok('FileProfile.reverseItemsForRow: enumerates original + all 5 sizes from scheme', count($rev_items) === 6);
 	ok('FileProfile.reverseItemsForRow: public placement to fast dir w/ size subpath', ($rev_by_key["avatar/$fname"] ?? '') === "$fast_dir/avatar/$fname" && ($rev_by_key[$fname] ?? '') === "$fast_dir/$fname");
 
-	echo "\n=== G. Per-row advisory-lock SKIP ===\n";
+	section('G. Per-row advisory-lock SKIP');
 	$GTABLE = 'cloud_live_lock_' . $RUN; $temp_tables[] = $GTABLE;
 	$dblink->exec("CREATE TABLE $GTABLE (id BIGSERIAL PRIMARY KEY, drv VARCHAR(32), failed INT DEFAULT 0, last_attempt TIMESTAMP, eligible BOOLEAN DEFAULT TRUE)");
 	$gid = (int)$dblink->query("INSERT INTO $GTABLE (drv) VALUES ('local') RETURNING id")->fetchColumn();
@@ -254,10 +256,10 @@ try {
 	$gres2 = CloudOffloadEngine::syncBatch($gprofile, $noop);
 	ok('lock released ⇒ row now pushed (cloud)', $drvflag($GTABLE, $gid) === 'cloud' && count($noop->puts) === 1);
 
-	echo "\n=== H. Time-budget bound ===\n";
-	skip('TIME_BUDGET_SECONDS break', 'would require a 60s run or a production testability seam; verified by code review only');
+	section('H. Time-budget bound');
+	harness_skip('TIME_BUDGET_SECONDS break', 'would require a 60s run or a production testability seam; verified by code review only');
 
-	echo "\n=== I. persistSettings + setEnabled round-trip (public, snapshot-restore) ===\n";
+	section('I. persistSettings + setEnabled round-trip (public, snapshot-restore)');
 	// Read straight from the DB: persistSettings writes the row but (correctly)
 	// does not refresh the in-memory singleton — the admin flow redirects.
 	$read_enabled = function() use ($dblink) { $q = $dblink->query("SELECT stg_value FROM stg_settings WHERE stg_name='cloud_storage_enabled'"); return (string)$q->fetchColumn(); };
@@ -267,7 +269,7 @@ try {
 	CloudStorageLifecycle::setEnabled('public', false, null);
 	ok('setEnabled(public,false) wrote 0', $read_enabled() === '0');
 
-	echo "\n=== J. Declarative registry + multi-profile guard-1 (on-disk, un-activated plugin) ===\n";
+	section('J. Declarative registry + multi-profile guard-1 (on-disk, un-activated plugin)');
 	$pname = '_tmpstoragetest_' . $RUN;
 	$temp_plugin_dir = PathHelper::getIncludePath('plugins/' . $pname);
 	$cls = 'TmpStoreProfile_' . $RUN;
@@ -329,5 +331,4 @@ try {
 	$rrm($BASE);
 }
 
-echo "\n=== $pass passed, $fail failed, $skip skipped ===\n";
-exit($fail > 0 ? 1 : 0);
+harness_finish();

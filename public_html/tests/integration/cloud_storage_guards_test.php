@@ -1,4 +1,10 @@
 <?php
+/** @joinery-test
+ * name: cloud_storage_guards
+ * tier: db
+ * env: dev-only
+ * needs: []
+ */
 /**
  * Guards / offload-mode test.
  *
@@ -19,39 +25,22 @@
  * @version 2.0
  */
 
-require_once(__DIR__ . '/../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
+require_once(__DIR__ . '/../lib/harness.php');
+harness_boot();
+
 require_once(PathHelper::getIncludePath('data/files_class.php'));
 require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageLifecycle.php'));
-
-$pass = 0; $fail = 0;
-function ok($label, $cond) {
-	global $pass, $fail;
-	if ($cond) { echo "PASS: $label\n"; $pass++; }
-	else       { echo "FAIL: $label\n"; $fail++; }
-}
-
-function set_setting_mem($key, $value) {
-	$gv = Globalvars::get_instance();
-	$ref = new ReflectionProperty('Globalvars', 'settings');
-	$ref->setAccessible(true);
-	$arr = $ref->getValue($gv);
-	if (!is_array($arr)) $arr = [];
-	$arr[$key] = $value;
-	$ref->setValue($gv, $arr);
-}
 
 $dblink = DbConnector::get_instance()->get_db_link();
 $cloud_fixture_id = null;
 
 try {
-	echo "=== Guard 1 — binding immutability ===\n";
+	section('Guard 1 — binding immutability');
 
 	// 0 cloud rows for the private store → change allowed.
-	set_setting_mem('cloud_storage_endpoint', 'ep1.example.com');
-	set_setting_mem('cloud_storage_private_bucket', 'priv-alpha');
+	harness_set_setting_mem('cloud_storage_endpoint', 'ep1.example.com');
+	harness_set_setting_mem('cloud_storage_private_bucket', 'priv-alpha');
 	$r = CloudStorageLifecycle::assertBindingMutable(['endpoint' => 'ep1.example.com', 'bucket' => 'priv-beta'], 'private');
 	ok('private: 0 cloud rows ⇒ bucket change allowed', $r['ok'] === true);
 
@@ -60,7 +49,7 @@ try {
 	ok('private: same (endpoint,bucket) ⇒ allowed (key rotation)', $r['ok'] === true);
 
 	// Now a public store WITH a cloud row (no restrictions ⇒ public-owned).
-	set_setting_mem('cloud_storage_bucket', 'pub-A');
+	harness_set_setting_mem('cloud_storage_bucket', 'pub-A');
 	$f = new File(NULL);
 	$f->set('fil_name', '_guardtest_' . bin2hex(random_bytes(5)) . '.bin');
 	$f->set('fil_type', 'application/octet-stream');
@@ -80,36 +69,36 @@ try {
 	$r = CloudStorageLifecycle::assertBindingMutable(['endpoint' => 'ep1.example.com', 'bucket' => 'pub-A'], 'public');
 	ok('public: cloud rows + same binding ⇒ allowed (key rotation)', $r['ok'] === true);
 
-	echo "\n=== Offload mode dispatch (modeForVisibility) ===\n";
+	section('Offload mode dispatch (modeForVisibility)');
 
 	// Enabled latch on ⇒ offload (takes precedence over any draining flag).
-	set_setting_mem('cloud_storage_enabled', '1');
-	set_setting_mem('cloud_storage_draining', '1');
+	harness_set_setting_mem('cloud_storage_enabled', '1');
+	harness_set_setting_mem('cloud_storage_draining', '1');
 	ok('public: enabled ⇒ offload (precedence over draining)', CloudStorageLifecycle::modeForVisibility('public') === 'offload');
 
 	// Disabled + draining ⇒ drain.
-	set_setting_mem('cloud_storage_enabled', '0');
-	set_setting_mem('cloud_storage_draining', '1');
+	harness_set_setting_mem('cloud_storage_enabled', '0');
+	harness_set_setting_mem('cloud_storage_draining', '1');
 	ok('public: disabled + draining ⇒ drain', CloudStorageLifecycle::modeForVisibility('public') === 'drain');
 
 	// Disabled + not draining ⇒ idle (paused: keep serving, do nothing).
-	set_setting_mem('cloud_storage_enabled', '0');
-	set_setting_mem('cloud_storage_draining', '0');
+	harness_set_setting_mem('cloud_storage_enabled', '0');
+	harness_set_setting_mem('cloud_storage_draining', '0');
 	ok('public: disabled + not draining ⇒ idle', CloudStorageLifecycle::modeForVisibility('public') === 'idle');
 
 	// The private store reads its own latch/flag, independently.
-	set_setting_mem('cloud_storage_private_enabled', '0');
-	set_setting_mem('cloud_storage_private_draining', '1');
+	harness_set_setting_mem('cloud_storage_private_enabled', '0');
+	harness_set_setting_mem('cloud_storage_private_draining', '1');
 	ok('private: own draining flag ⇒ drain (independent of public)', CloudStorageLifecycle::modeForVisibility('private') === 'drain');
 
-	set_setting_mem('cloud_storage_private_enabled', '1');
+	harness_set_setting_mem('cloud_storage_private_enabled', '1');
 	ok('private: own enabled latch ⇒ offload', CloudStorageLifecycle::modeForVisibility('private') === 'offload');
 
 	// With every store idle, the tick is a no-op that asks to self-deactivate.
-	set_setting_mem('cloud_storage_enabled', '0');
-	set_setting_mem('cloud_storage_draining', '0');
-	set_setting_mem('cloud_storage_private_enabled', '0');
-	set_setting_mem('cloud_storage_private_draining', '0');
+	harness_set_setting_mem('cloud_storage_enabled', '0');
+	harness_set_setting_mem('cloud_storage_draining', '0');
+	harness_set_setting_mem('cloud_storage_private_enabled', '0');
+	harness_set_setting_mem('cloud_storage_private_draining', '0');
 	$tick = CloudStorageLifecycle::runOffloadTick();
 	ok('runOffloadTick: all stores idle ⇒ deactivate signal', !empty($tick['deactivate']));
 	ok('runOffloadTick: status success when idle', ($tick['status'] ?? '') === 'success');
@@ -121,5 +110,4 @@ try {
 	}
 }
 
-echo "\n=== $pass passed, $fail failed ===\n";
-exit($fail > 0 ? 1 : 0);
+harness_finish();

@@ -1,4 +1,10 @@
 <?php
+/** @joinery-test
+ * name: filter_import
+ * tier: safe
+ * env: any
+ * needs: []
+ */
 /**
  * Tests for Gmail filter import (specs/inbound_email_filter_import.md).
  *
@@ -18,12 +24,11 @@
  * @version 1.0
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
+require_once(__DIR__ . '/../../../tests/lib/harness.php');
+harness_boot();
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_filter_class.php'));
 
 class FilterImportTest {
-	private $pass = 0;
-	private $fail = 0;
 	private $fixture;
 
 	function __construct() {
@@ -34,16 +39,10 @@ class FilterImportTest {
 		echo (php_sapi_name() === 'cli' ? '' : '<br>') . $msg . "\n";
 	}
 	private function eq($expected, $actual, $label) {
-		if ($expected === $actual) {
-			$this->pass++;
-			$this->out('  PASS: ' . $label);
-		} else {
-			$this->fail++;
-			$this->out('  FAIL: ' . $label . ' (expected ' . var_export($expected, true)
-				. ', got ' . var_export($actual, true) . ')');
-		}
+		return check($expected === $actual, $label, 'expected ' . var_export($expected, true)
+			. ', got ' . var_export($actual, true));
 	}
-	private function ok($cond, $label) { $this->eq(true, (bool)$cond, $label); }
+	private function ok($cond, $label) { return $this->eq(true, (bool)$cond, $label); }
 
 	/** Find the first candidate whose mapped fields contain $col == $val. */
 	private function candWith(array $cands, string $col, $val) {
@@ -56,7 +55,7 @@ class FilterImportTest {
 	// --------------------------------------------------------- fixture parse
 
 	function testFixtureParses() {
-		$this->out("\n# Real Gmail export fixture");
+		section('Real Gmail export fixture');
 		$xml = file_get_contents($this->fixture);
 		$cands = InboundEmailFilter::parseGmailExport($xml);
 
@@ -103,7 +102,7 @@ class FilterImportTest {
 	// --------------------------------------------------------- size mapping
 
 	function testSizeMapping() {
-		$this->out("\n# Size mapping (with a real value)");
+		section('Size mapping (with a real value)');
 		$units = array('s_sb' => 1, 's_skb' => 1024, 's_smb' => 1048576);
 		foreach ($units as $unit => $mult) {
 			foreach (array('s_sl' => 'lt', 's_sg' => 'gt') as $op => $expectOp) {
@@ -131,7 +130,7 @@ class FilterImportTest {
 	// --------------------------------------------------------- importable test
 
 	function testImportableTest() {
-		$this->out("\n# Importable floor (>=1 criterion AND >=1 action)");
+		section('Importable floor (>=1 criterion AND >=1 action)');
 
 		// hasAttachment criterion + label-only action -> importable.
 		$attach = InboundEmailFilter::parseGmailExport($this->feed(
@@ -163,7 +162,7 @@ class FilterImportTest {
 	// --------------------------------------------------------- skip + multi-label
 
 	function testSkipAndMultiLabel() {
-		$this->out("\n# Skipped properties and multi-label");
+		section('Skipped properties and multi-label');
 
 		$c = InboundEmailFilter::parseGmailExport($this->feed(
 			"<apps:property name='from' value='x'/>" .
@@ -188,7 +187,7 @@ class FilterImportTest {
 	// --------------------------------------------------------- malformed input
 
 	function testMalformed() {
-		$this->out("\n# Malformed input");
+		section('Malformed input');
 		$this->threw('not xml at all', 'non-XML throws');
 		$this->threw('<other><foo/></other>', 'wrong-root XML throws');
 		$this->threw('', 'empty string throws');
@@ -211,7 +210,7 @@ class FilterImportTest {
 	// --------------------------------------------------------- DB-backed (opt-in)
 
 	function testLabelResolutionAndDedup() {
-		$this->out("\n# Label resolution + dedup signature (DB)");
+		section('Label resolution + dedup signature (DB)');
 		require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_labels_class.php'));
 		require_once(PathHelper::getIncludePath('plugins/mailbox/logic/admin_mailbox_filters_logic.php'));
@@ -249,7 +248,6 @@ class FilterImportTest {
 	}
 
 	function run(bool $withDb) {
-		$this->out('=== Gmail filter import tests ===');
 		$this->testFixtureParses();
 		$this->testSizeMapping();
 		$this->testImportableTest();
@@ -260,11 +258,9 @@ class FilterImportTest {
 		} else {
 			$this->out("\n# (skipping DB-backed label/dedup tests; pass --db to run them)");
 		}
-		$this->out("\n=== " . $this->pass . ' passed, ' . $this->fail . ' failed ===');
-		return $this->fail === 0;
 	}
 }
 
 $withDb = in_array('--db', $argv ?? array(), true);
-$ok = (new FilterImportTest())->run($withDb);
-exit($ok ? 0 : 1);
+(new FilterImportTest())->run($withDb);
+harness_finish();

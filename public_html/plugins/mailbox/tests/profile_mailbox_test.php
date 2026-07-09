@@ -1,4 +1,10 @@
 <?php
+/** @joinery-test
+ * name: profile_mailbox
+ * tier: live
+ * env: dev-only
+ * needs: [dev-web]
+ */
 /**
  * Tests for the member mailbox mount (specs: inbound_email_profile_mailbox).
  *
@@ -19,9 +25,8 @@
  * @version 1.0.0
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+require_once(__DIR__ . '/../../../tests/lib/harness.php');
+harness_boot();
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
@@ -35,8 +40,6 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('data/files_class.php'));
 
 class ProfileMailboxTest {
-	private $pass = 0;
-	private $fail = 0;
 	private $db;
 
 	private $base_url;
@@ -63,13 +66,9 @@ class ProfileMailboxTest {
 	}
 
 	private function out($m) { echo (php_sapi_name() === 'cli' ? '' : '<br>') . $m . "\n"; }
-	private function ok($c, $l) {
-		if ($c) { $this->pass++; $this->out('  PASS: ' . $l); }
-		else { $this->fail++; $this->out('  FAIL: ' . $l); }
-	}
+	private function ok($c, $l) { return check((bool)$c, $l); }
 
 	function run() {
-		$this->out('=== Member mailbox tests ===');
 		try {
 			$this->setUp();
 			$this->testMemberScope();
@@ -81,8 +80,6 @@ class ProfileMailboxTest {
 		} finally {
 			$this->tearDown();
 		}
-		$this->out("=== {$this->pass} passed, {$this->fail} failed ===");
-		return $this->fail === 0;
 	}
 
 	private function setUp() {
@@ -203,7 +200,7 @@ class ProfileMailboxTest {
 	// ── sections ────────────────────────────────────────────────────────────
 
 	private function testMemberScope() {
-		$this->out('-- member scope (permission 1)');
+		section('member scope (permission 1)');
 		$svc = new MailboxService($this->memberViewer());
 
 		$result = $svc->listMailboxes();
@@ -233,7 +230,7 @@ class ProfileMailboxTest {
 	}
 
 	private function testGrantless() {
-		$this->out('-- grantless signed-in user');
+		section('grantless signed-in user');
 		$svc = new MailboxService($this->lonelyViewer());
 		$result = $svc->listMailboxes();
 		$this->ok(count($result['mailboxes'] ?? array()) === 0 && empty($result['all_access']),
@@ -245,14 +242,14 @@ class ProfileMailboxTest {
 	}
 
 	private function testCanCompose() {
-		$this->out('-- canCompose');
+		section('canCompose');
 		$this->ok($this->memberViewer()->canCompose() === true, 'granted member can compose');
 		$this->ok($this->lonelyViewer()->canCompose() === false, 'grantless member cannot compose');
 		$this->ok($this->superViewer()->canCompose() === true, 'superadmin can compose');
 	}
 
 	private function testSendScope() {
-		$this->out('-- send-as scope (MailboxSender)');
+		section('send-as scope (MailboxSender)');
 		$denied = 'You do not have access to this mailbox.';
 
 		// Non-granted member replying to a message in an alias they lack: the
@@ -277,7 +274,7 @@ class ProfileMailboxTest {
 	}
 
 	private function testAttachmentAccess() {
-		$this->out('-- attachment access (member endpoint rule + shared retrieval)');
+		section('attachment access (member endpoint rule + shared retrieval)');
 		$att = new InboundMessageAttachment($this->att_id, TRUE);
 		$message = new InboundEmailMessage($this->msg_mine, TRUE);
 
@@ -299,7 +296,7 @@ class ProfileMailboxTest {
 	}
 
 	private function testAnonymousHttp() {
-		$this->out('-- anonymous HTTP: all five endpoints reject');
+		section('anonymous HTTP: all five endpoints reject');
 		$endpoints = array(
 			'/ajax/mailbox_mailboxes' => 'GET',
 			'/ajax/mailbox_list'      => 'GET',
@@ -343,4 +340,5 @@ $base_url  = isset($argv[1]) ? rtrim($argv[1], '/') : 'https://dev.getjoinery.co
 $origin_ip = isset($argv[2]) ? $argv[2] : '69.164.209.253';
 
 $t = new ProfileMailboxTest($base_url, $origin_ip);
-exit($t->run() ? 0 : 1);
+$t->run();
+harness_finish();

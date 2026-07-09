@@ -1,4 +1,10 @@
 <?php
+/** @joinery-test
+ * name: joinery_ai_owner_scope
+ * tier: safe
+ * env: dev-only
+ * needs: []
+ */
 /**
  * Owner-scoped reads — member vs. admin containment in ModelQueryExecutor.
  *
@@ -17,19 +23,12 @@
  * @version 1.0
  */
 
-require_once(__DIR__ . '/../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
+require_once(__DIR__ . '/../lib/harness.php');
+harness_boot();
+
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ToolContext.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelQueryExecutor.php'));
-
-$pass = 0; $fail = 0;
-function ok($label, $cond) {
-    global $pass, $fail;
-    if ($cond) { $pass++; echo "  ok   $label\n"; }
-    else       { $fail++; echo "  FAIL $label\n"; }
-}
 
 /** Minimal ToolContext stub. ownerScopedReads() and actingUserId() are the only
  *  knobs the read fence consults; allowedModels() returns every readable model
@@ -66,8 +65,8 @@ $db = DbConnector::get_instance()->get_db_link();
 $uids = $db->query("SELECT usr_user_id FROM usr_users ORDER BY usr_user_id LIMIT 2")
            ->fetchAll(PDO::FETCH_COLUMN);
 if (count($uids) < 2) {
-    echo "SKIP: need at least two users in usr_users to test scoping.\n";
-    exit(0);
+    harness_skip('user scoping', 'need at least two users in usr_users to test scoping');
+    harness_finish();
 }
 $member_uid = (int)$uids[0];
 $other_uid  = (int)$uids[1];
@@ -80,7 +79,7 @@ echo "Owner-scoped reads — member vs admin\n";
 echo "member_uid=$member_uid other_uid=$other_uid\n\n";
 
 // --- 1. Owner-scoped model (users): member sees only their own row ----------
-echo "users (owner-scoped on the pk):\n";
+section('users (owner-scoped on the pk)');
 $member = new StubReadContext($member_uid, true);
 $admin  = new StubReadContext($member_uid, false);
 
@@ -98,7 +97,7 @@ ok('member cannot fetch another user by explicit filter', count($forced) === 0);
 
 // --- 2. Ownerless catalog (products): member is unfiltered ------------------
 if ($Product !== null) {
-    echo "\nproducts (ownerless catalog, \$ai_owner_field = false):\n";
+    section('products (ownerless catalog, $ai_owner_field = false)');
     $m = ModelQueryExecutor::query($Product, [], [], 200, [$Product::$prefix . '_product_id'], new StubReadContext($member_uid, true));
     $a = ModelQueryExecutor::query($Product, [], [], 200, [$Product::$prefix . '_product_id'], new StubReadContext($member_uid, false));
     ok('member reads the same catalog rows as an admin', count($m) === count($a));
@@ -108,7 +107,7 @@ if ($Product !== null) {
 
 // --- 3. Unresolvable ownership (conversations): hidden from members ---------
 if ($Conversation !== null) {
-    echo "\nconversations (ownership via join — hidden from members):\n";
+    section('conversations (ownership via join — hidden from members)');
     $threw = false;
     try {
         ModelQueryExecutor::query($Conversation, [], [], 10, null, new StubReadContext($member_uid, true));
@@ -124,6 +123,4 @@ if ($Conversation !== null) {
     echo "\n(skipping conversations — class not registered)\n";
 }
 
-echo "\n--------------------------------------------\n";
-echo "PASS: $pass   FAIL: $fail\n";
-exit($fail === 0 ? 0 : 1);
+harness_finish();

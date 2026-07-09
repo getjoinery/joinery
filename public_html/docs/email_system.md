@@ -339,14 +339,20 @@ email_test_redirect = "test@example.com"
 
 ### Email Testing System
 
-**Web Interface:**
-- URL: `/tests/email/`
-- Admin link: Admin Panel → Email Tools → Email System Testing
+The email suites run from the unified test dashboard at `/tests/` and on the
+CLI through `tests/email/email_suite_test.php` — see **📖 [Testing](testing.md)**
+for tiers, the runner, and how to run. The suites send real mail, so they carry
+tier `live` / env `prod-verify`.
 
 **Test Types:**
 - **ServiceTests**: SMTP/Mailgun configuration validation
 - **TemplateTests**: Template processing and variable replacement
 - **DeliveryTests**: End-to-end sending simulation (test mode)
+
+The email pattern test (`tests/email/email_pattern_test.php`) resolves its
+recipient in order: the first non-flag command-line argument, then the
+`email_test_recipient` setting, then a `test@example.com` placeholder — so it
+never sends to a runner flag such as `--json`.
 
 ### Debug Tools
 

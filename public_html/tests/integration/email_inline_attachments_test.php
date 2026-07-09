@@ -12,8 +12,15 @@
  *
  * Run: php tests/integration/email_inline_attachments_test.php
  */
+/** @joinery-test
+ * name: email_inline_attachments
+ * tier: safe
+ * env: any
+ * needs: []
+ */
 
-require_once(__DIR__ . '/../../includes/PathHelper.php');
+require_once(__DIR__ . '/../lib/harness.php');
+harness_boot();
 require_once(PathHelper::getComposerAutoloadPath());
 require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
 require_once(PathHelper::getIncludePath('includes/SmtpMailer.php'));
@@ -22,13 +29,7 @@ require_once(PathHelper::getIncludePath('includes/email_providers/BrevoProvider.
 
 use PHPMailer\PHPMailer\PHPMailer;
 
-$pass = 0;
-$fail = 0;
-function check($label, $value) {
-    global $pass, $fail;
-    if ($value) { echo "PASS: $label\n"; $pass++; }
-    else        { echo "FAIL: $label\n"; $fail++; }
-}
+section('Inline (embedded) attachments for outgoing email');
 
 // Distinct, greppable bytes so we can find each part in the MIME.
 $inline_bytes  = 'INLINE-IMAGE-BYTES-' . str_repeat('A', 8);
@@ -54,30 +55,30 @@ foreach ($atts as $a) {
     if (!empty($a['cid'])) { $inline_entry = $a; }
     elseif (isset($a['data'])) { $regular_entry = $a; }
 }
-check('EmailMessage records an inline entry', $inline_entry !== null);
-check('inline entry carries the bare cid token', ($inline_entry['cid'] ?? null) === $cid);
-check('inline entry is flagged inline', !empty($inline_entry['inline']));
-check('inline entry keeps content type', ($inline_entry['type'] ?? null) === 'image/png');
-check('regular entry has no cid', $regular_entry !== null && empty($regular_entry['cid']));
+ok('EmailMessage records an inline entry', $inline_entry !== null);
+ok('inline entry carries the bare cid token', ($inline_entry['cid'] ?? null) === $cid);
+ok('inline entry is flagged inline', !empty($inline_entry['inline']));
+ok('inline entry keeps content type', ($inline_entry['type'] ?? null) === 'image/png');
+ok('regular entry has no cid', $regular_entry !== null && empty($regular_entry['cid']));
 
 // Build the actual MIME through the shared SMTP chokepoint.
 $mailer = new SmtpMailer();
 $mailer->applyMessage($message);
 $built = $mailer->preSend();
-check('preSend() built the message', $built === true);
+ok('preSend() built the message', $built === true);
 $mime = $mailer->getSentMIMEMessage();
 
-check('MIME embeds the inline part with Content-ID: <cid>',
+ok('MIME embeds the inline part with Content-ID: <cid>',
     strpos($mime, 'Content-ID: <' . $cid . '>') !== false);
-check('MIME marks the inline part inline disposition',
+ok('MIME marks the inline part inline disposition',
     (bool)preg_match('/Content-Disposition:\s*inline/i', $mime));
-check('MIME carries the regular part as an attachment',
+ok('MIME carries the regular part as an attachment',
     (bool)preg_match('/Content-Disposition:\s*attachment/i', $mime));
 // Both distinct byte payloads survive into the wire message (base64-encoded).
-check('inline image bytes present in MIME',
+ok('inline image bytes present in MIME',
     strpos($mime, chunk_split(base64_encode($inline_bytes))) !== false
     || strpos($mime, base64_encode($inline_bytes)) !== false);
-check('regular file bytes present in MIME',
+ok('regular file bytes present in MIME',
     strpos($mime, chunk_split(base64_encode($regular_bytes))) !== false
     || strpos($mime, base64_encode($regular_bytes)) !== false);
 
@@ -102,8 +103,8 @@ foreach ($resend_atts as $a) {
         $found_degraded = true;
     }
 }
-check('Resend degrades inline part to a regular attachment', $found_degraded);
-check('Resend still sends both parts as attachments', count($resend_atts) === 2);
+ok('Resend degrades inline part to a regular attachment', $found_degraded);
+ok('Resend still sends both parts as attachments', count($resend_atts) === 2);
 
 // Brevo — call its base-email builder to trigger the same degrade + log marker.
 $brevo = new BrevoProvider();
@@ -117,18 +118,16 @@ try {
     // marker fires during attachment assembly regardless.
     $brevo_ran = true;
 }
-check('Brevo builder ran', $brevo_ran);
+ok('Brevo builder ran', $brevo_ran);
 
 // Flush and inspect the captured log for both distinct markers.
 ini_set('error_log', $orig_log);
 $logged = file_exists($log_file) ? file_get_contents($log_file) : '';
 @unlink($log_file);
-check('Resend logged the inline-degrade marker',
+ok('Resend logged the inline-degrade marker',
     strpos($logged, '[ResendProvider] Inline attachment degraded') !== false);
-check('Brevo logged the inline-degrade marker',
+ok('Brevo logged the inline-degrade marker',
     strpos($logged, '[BrevoProvider] Inline attachment degraded') !== false);
 
 // ---------------------------------------------------------------------------
-echo "\n----------------------------------------\n";
-echo "Passed: $pass   Failed: $fail\n";
-exit($fail === 0 ? 0 : 1);
+harness_finish();

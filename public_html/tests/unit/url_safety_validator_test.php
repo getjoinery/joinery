@@ -1,4 +1,10 @@
 <?php
+/** @joinery-test
+ * name: url_safety_validator
+ * tier: safe
+ * env: any
+ * needs: []
+ */
 /**
  * Unit test for UrlSafetyValidator::checkAndResolve() — the SSRF guard that
  * also returns validated IPs for connection pinning (the DNS-rebinding fix).
@@ -9,7 +15,8 @@
  * @version 1.0
  */
 
-require_once(__DIR__ . '/../../includes/PathHelper.php');
+require_once(__DIR__ . '/../lib/harness.php');
+harness_boot();
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/UrlSafetyValidator.php'));
 
@@ -22,14 +29,6 @@ class FakeDnsBackend {
     }
 }
 
-$tests = 0;
-$failures = 0;
-function check($label, $condition) {
-    global $tests, $failures;
-    $tests++;
-    echo ($condition ? '  PASS  ' : '  FAIL  ') . $label . "\n";
-    if (!$condition) { $GLOBALS['failures']++; }
-}
 /** Returns true if calling $fn throws UnsafeUrlException. */
 function throws_unsafe(callable $fn) {
     try { $fn(); return false; }
@@ -48,40 +47,39 @@ DnsResolver::setBackend(new FakeDnsBackend([
 
 // ── checkAndResolve returns validated IPs for a public host ──────────────
 $pin = UrlSafetyValidator::checkAndResolve('https://pub.example.com/path');
-check('public host: returns host/port/ips',
+ok('public host: returns host/port/ips',
       $pin['host'] === 'pub.example.com' && $pin['port'] === 443 && $pin['ips'] === ['93.184.216.34']);
 
 // ── a private IP anywhere in the resolved set fails the URL ──────────────
-check('host resolving to a private IP is rejected',
+ok('host resolving to a private IP is rejected',
       throws_unsafe(function () { UrlSafetyValidator::checkAndResolve('http://mixed.example.com/'); }));
 
 // ── IP literals: validated directly, no pin set (no DNS happens) ─────────
 $lit = UrlSafetyValidator::checkAndResolve('https://93.184.216.34/');
-check('public IP literal: allowed, ips empty (nothing to pin)', $lit['ips'] === []);
-check('private IP literal is rejected',
+ok('public IP literal: allowed, ips empty (nothing to pin)', $lit['ips'] === []);
+ok('private IP literal is rejected',
       throws_unsafe(function () { UrlSafetyValidator::checkAndResolve('http://127.0.0.1/'); }));
 
 // ── scheme / port / hostname gates ───────────────────────────────────────
-check('non-http scheme is rejected',
+ok('non-http scheme is rejected',
       throws_unsafe(function () { UrlSafetyValidator::checkAndResolve('ftp://pub.example.com/'); }));
-check('non-allowed port is rejected',
+ok('non-allowed port is rejected',
       throws_unsafe(function () { UrlSafetyValidator::checkAndResolve('http://pub.example.com:8080/'); }));
-check('blocked hostname (localhost) is rejected',
+ok('blocked hostname (localhost) is rejected',
       throws_unsafe(function () { UrlSafetyValidator::checkAndResolve('http://localhost/'); }));
 
 // ── fail-closed behaviour ────────────────────────────────────────────────
-check('resolver failure fails closed (rejected)',
+ok('resolver failure fails closed (rejected)',
       throws_unsafe(function () { UrlSafetyValidator::checkAndResolve('http://broken.example.com/'); }));
-check('host with no records fails closed (rejected)',
+ok('host with no records fails closed (rejected)',
       throws_unsafe(function () { UrlSafetyValidator::checkAndResolve('http://norecords.example.com/'); }));
 
 // ── check() still works as the void-returning wrapper ────────────────────
 $ok = true;
 try { UrlSafetyValidator::check('https://pub.example.com/'); }
 catch (UnsafeUrlException $e) { $ok = false; }
-check('check() wrapper passes a safe URL silently', $ok);
+ok('check() wrapper passes a safe URL silently', $ok);
 
 DnsResolver::clearBackend();
 
-echo "\n$tests run, $failures failed.\n";
-exit($failures === 0 ? 0 : 1);
+harness_finish();

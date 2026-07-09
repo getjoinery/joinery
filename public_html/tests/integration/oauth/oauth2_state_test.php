@@ -1,4 +1,10 @@
 <?php
+/** @joinery-test
+ * name: oauth2_state
+ * tier: safe
+ * env: any
+ * needs: []
+ */
 /**
  * OAuth2State + generic-callback control-flow test (no network).
  *
@@ -10,13 +16,12 @@
  *
  * Run: php tests/integration/oauth/oauth2_state_test.php
  *
- * @version 1.0
+ * @version 1.1
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+require_once(__DIR__ . '/../../lib/harness.php');
+harness_boot();
 require_once(PathHelper::getComposerAutoloadPath());
-require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2State.php'));
 require_once(PathHelper::getIncludePath('logic/oauth_callback_logic.php'));
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2ProviderRegistry.php'));
@@ -30,13 +35,8 @@ use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Psr7\Response;
 
 class OAuth2StateTest {
-    private $pass = 0;
-    private $fail = 0;
-
-    private function out($m) { echo (php_sapi_name() === 'cli' ? '' : '<br>') . $m . "\n"; }
     private function ok($cond, $label) {
-        if ($cond) { $this->pass++; $this->out('  PASS: ' . $label); }
-        else { $this->fail++; $this->out('  FAIL: ' . $label); }
+        return check($cond, $label);
     }
 
     private function mockClient(array $responses): OAuth2Client {
@@ -45,7 +45,7 @@ class OAuth2StateTest {
     }
 
     function run() {
-        $this->out('=== OAuth2State + callback tests ===');
+        section('OAuth2State + callback tests');
         if (session_status() !== PHP_SESSION_ACTIVE) { @session_start(); }
         $_SESSION['oauth_flows'] = [];
 
@@ -104,12 +104,9 @@ class OAuth2StateTest {
         $record = TestEchoConsumer::lastRecord();
         $this->ok($record !== null && $record['access_token'] === 'echo-at', 'consumer received the granted access token');
         $this->ok($record !== null && ($record['payload']['account_id'] ?? null) === 9, 'consumer received the flow payload');
-
-        $this->out('');
-        $this->out('Results: ' . $this->pass . ' passed, ' . $this->fail . ' failed');
-        return $this->fail === 0;
     }
 }
 
 $t = new OAuth2StateTest();
-exit($t->run() ? 0 : 1);
+$t->run();
+harness_finish();

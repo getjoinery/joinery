@@ -1,4 +1,10 @@
 <?php
+/** @joinery-test
+ * name: cloud_file_private_offload
+ * tier: db
+ * env: dev-only
+ * needs: []
+ */
 /**
  * Private-File offload test — the pieces file_private_storage.md adds on top of
  * the unified offload layer.
@@ -20,19 +26,12 @@
  * @version 1.0
  */
 
-require_once(__DIR__ . '/../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
+require_once(__DIR__ . '/../lib/harness.php');
+harness_boot();
+
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriver.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudOffloadEngine.php'));
 require_once(PathHelper::getIncludePath('data/files_class.php'));
-
-$pass = 0; $fail = 0;
-function ok($label, $cond) {
-	global $pass, $fail;
-	if ($cond) { echo "PASS: $label\n"; $pass++; }
-	else       { echo "FAIL: $label\n"; $fail++; }
-}
 
 $TABLE = 'cloud_file_private_test_rows';
 $dblink = DbConnector::get_instance()->get_db_link();
@@ -96,7 +95,7 @@ $BASE = sys_get_temp_dir() . '/cloud_file_priv_' . bin2hex(random_bytes(4));
 mkdir($BASE . '/disk', 0777, true);
 
 try {
-	echo "=== A. Reverse ownership-gate partition (shared table) ===\n";
+	section('A. Reverse ownership-gate partition (shared table)');
 	$dblink->exec("DROP TABLE IF EXISTS $TABLE");
 	$dblink->exec("CREATE TABLE $TABLE (
 		id BIGSERIAL PRIMARY KEY, drv VARCHAR(32), failed INT DEFAULT 0,
@@ -136,7 +135,7 @@ try {
 	ok('public drain: still had the public row (no premature deactivate)', empty($pubres['deactivate']));
 	ok('public drain: public row now local', $drvflag($pub1) === 'local');
 
-	echo "\n=== B. File::get_url() never emits a bucket URL for a private cloud file ===\n";
+	section('B. File::get_url() never emits a bucket URL for a private cloud file');
 	// Restricted (min_permission) cloud file → must return the local /uploads path.
 	$priv_file = new File(NULL);
 	$priv_file->set('fil_name', 'secret-doc.pdf', false);
@@ -165,5 +164,4 @@ try {
 	$rrmdir($BASE);
 }
 
-echo "\n=== $pass passed, $fail failed ===\n";
-exit($fail > 0 ? 1 : 0);
+harness_finish();

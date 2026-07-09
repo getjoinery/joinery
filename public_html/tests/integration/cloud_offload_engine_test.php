@@ -1,4 +1,10 @@
 <?php
+/** @joinery-test
+ * name: cloud_offload_engine
+ * tier: db
+ * env: dev-only
+ * needs: []
+ */
 /**
  * Engine parity test — CloudOffloadEngine over a mock profile + mock driver.
  *
@@ -15,18 +21,11 @@
  * @version 1.0
  */
 
-require_once(__DIR__ . '/../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
+require_once(__DIR__ . '/../lib/harness.php');
+harness_boot();
+
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriver.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudOffloadEngine.php'));
-
-$pass = 0; $fail = 0;
-function ok($label, $cond) {
-	global $pass, $fail;
-	if ($cond) { echo "PASS: $label\n"; $pass++; }
-	else       { echo "FAIL: $label\n"; $fail++; }
-}
 
 $TABLE = 'cloud_offload_engine_test_rows';
 $BASE  = sys_get_temp_dir() . '/cloud_engine_test_' . bin2hex(random_bytes(4));
@@ -130,7 +129,7 @@ try {
 		$q = $dblink->prepare("SELECT failed FROM $TABLE WHERE id = ?"); $q->execute([$id]); return (int)$q->fetchColumn();
 	};
 
-	echo "=== CloudOffloadEngine parity (mock profile + mock driver) ===\n";
+	section('CloudOffloadEngine parity (mock profile + mock driver)');
 
 	// --- FORWARD ---------------------------------------------------------
 	$ok1  = $ins('local'); make_disk_file($BASE, $ok1);   // pushes
@@ -192,5 +191,4 @@ try {
 	$rrmdir($BASE);
 }
 
-echo "\n=== $pass passed, $fail failed ===\n";
-exit($fail > 0 ? 1 : 0);
+harness_finish();

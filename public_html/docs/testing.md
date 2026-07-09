@@ -1,0 +1,199 @@
+# Testing
+
+The platform's tests share one harness library, one discovery runner, and one
+web dashboard. Every test declares a small metadata header that says what it
+touches and where it may run; the runner reads that header to decide what to
+execute, and both the CLI and the dashboard consume the same result contract.
+
+## The two axes: tier and env
+
+Every test declares a **tier** (blast radius — what it touches) and an **env**
+(where it is allowed to run). They are separate on purpose.
+
+**tier** — drives which batch a test runs in:
+
+| tier | meaning |
+|---|---|
+| `safe` | Pure, mocked, or rolled back. No persistent side effects. |
+| `db` | Writes the dev database and self-cleans. |
+| `test-db` | Runs against the copied **test** database (`DbConnector::set_test_mode()`). |
+| `live` | Real external effects — sends mail, hits a storage bucket, uses Stripe test keys, drives a remote host. |
+
+**env** — where a test may execute:
+
+| env | meaning |
+|---|---|
+| `any` | Read-only or pure; safe even on production. |
+| `prod-verify` | Mutative but deliberately prod-runnable and self-cleaning — its job is to verify the production environment itself (real deliverability sends, a bucket round-trip, the inbound loopback). Never part of a batch run. |
+| `dev-only` | Writes fixtures, trips rate limits, uses the test database, or uses Stripe test keys. Hard-blocked when the `debug` setting is off. |
+
+Enforcement is two-layer: the runner reads the header and refuses to spawn a
+`dev-only` test when `debug` is off, and the harness re-checks at runtime, so
+invoking a test directly by path offers no bypass. A missing or unparseable
+`env` fails closed to `dev-only`.
+
+## The metadata header
+
+Every runnable test (`.php` or a `.sh` gate) carries a header comment. It is
+read **without executing the file**, so the runner can enforce tiers before
+running anything:
+
+```php
+/** @joinery-test
+ * name: cloud_offload_engine
+ * tier: safe            # safe | db | test-db | live
+ * env: dev-only         # any | prod-verify | dev-only
+ * needs: []             # e.g. [stripe-test-keys, macmini, mailgun, b2]
+ * timeout: 180          # optional wall-clock cap in seconds (default 180, max 1800)
+ */
+```
+
+Set `timeout:` only when a suite genuinely needs longer than the 180-second
+default — a multi-minute build gate or a live third-party flow. The runner kills
+a test that exceeds its cap and marks it failed. Tests that explicitly declare a
+timeout beyond the web request window run from the CLI only (see the dashboard
+section).
+
+A file that looks like a test (`*_test.php`, `test_*.php`, or a `*_gate.sh`) but
+has no header is listed as **undeclared** in the runner's summary — never
+silently skipped.
+
+## Running tests
+
+From the command line:
+
+```bash
+php tests/run.php              # the safe tier
+php tests/run.php db           # safe + db
+php tests/run.php test-db      # only the test-database suite (never implied)
+php tests/run.php live         # only live tests (never implied)
+php tests/run.php db --filter=api   # narrow by name or path substring
+php tests/run.php --list       # list discovered tests, run nothing
+php tests/run.php --json       # emit the aggregate JSON contract (for CI)
+```
+
+`safe` and `db` are cumulative; `test-db` and `live` run only when named and
+never pull in the others. Each test runs in its own subprocess, so a fatal in
+one file cannot take down the run. The runner exits non-zero if any test
+failed — it is the pre-deploy gate and the CI entry point.
+
+Any single test also runs on its own and prints a human summary, or emits the
+contract with `--json`:
+
+```bash
+php tests/unit/dns_resolver_test.php
+php tests/unit/dns_resolver_test.php --json
+```
+
+### The dashboard
+
+`/tests/` (superadmin, permission 10) lists every discovered test grouped by
+tier with its env and `needs`, plus per-tier "Run all" controls. Runs execute
+through the `tests_run` API action, which spawns the runner with `--json`;
+page JS calls `/api/v1` with the browser-session credential. On production
+(`debug` off) `dev-only` tests render locked; `live` and `prod-verify` tests
+require a confirm naming the side effect before they run.
+
+"Run all" runs a tier's tests one request at a time, client-side, rendering each
+result as it lands — so no single request spans a whole tier and results are
+never lost to a proxy timeout. It runs exactly the tests the section shows (the
+CLI keeps cumulative safe+db semantics; the dashboard does not). A test that
+declares a `timeout:` beyond the web request window renders a disabled **CLI**
+button — run it via `php tests/run.php`.
+
+## Writing a test
+
+Require the shared harness, declare the header, build sections of assertions,
+and finish. The harness bootstraps PathHelper, Globalvars, SessionControl,
+DbConnector, and LibraryFunctions for you.
+
+```php
+<?php
+/** @joinery-test
+ * name: my_feature
+ * tier: db
+ * env: dev-only
+ * needs: []
+ */
+require_once(__DIR__ . '/../lib/harness.php');   // path is relative to your test
+harness_boot();
+
+section('Creation');
+$user = make_user('MyFeature');                  // auto-cleaned at finish
+check($user->key > 0, 'user was created');
+ok('email is set', $user->get('usr_email') !== ''); // label-first alias
+
+section('Behaviour');
+harness_set_setting_mem('some_flag', '1');       // in-memory only, auto-restored
+check(do_the_thing() === 'expected', 'thing does the thing');
+
+harness_finish();                                 // MUST be last — prints/emits + exits
+```
+
+The assertion surface:
+
+- `check($condition, $label, $detail = '')` — condition-first.
+- `ok($label, $condition, $detail = '')` — label-first alias (same recorder).
+- `section($title)` — group the checks that follow.
+- `harness_skip($label, $detail = '')` — a skipped check (e.g. an unmet `needs`).
+
+Fixtures and teardown (all LIFO, run automatically at finish or on crash):
+
+- `make_user($suffix, $permission = 0)` — a test user, registered for cleanup.
+- `make_machine_key($user_id, $name, $permission = 4)` — an API key.
+- `harness_register_row($table, $pkey_col, $id)` / `harness_register_user($user)`
+  / `harness_register_key_id($id)`.
+- `harness_defer(callable)` — any custom teardown.
+
+Settings and databases:
+
+- `get_setting_raw($name)` / `set_setting_raw($name, $value)` — persisted DB settings.
+- `harness_set_setting_mem($key, $value)` — override a setting in the Globalvars
+  in-memory cache only, restored at teardown. Never persisted.
+- `harness_test_mode()` — switch to the copied test database and close it at
+  teardown; use with tier `test-db`.
+
+**`harness_finish()` is mandatory.** If the script ends without it — a fatal
+error, an uncaught exception, an early `exit()` — the harness records a failing
+check so a crash can never be misread as a pass. Do not scatter bare `exit()`
+calls in a test body; return, or reach `harness_finish()`.
+
+## The result contract
+
+A declared `.php` test **must** emit this contract. If it doesn't — it crashed,
+or was never converted to the harness — the runner marks it failed regardless of
+its exit code (a script that prints "Failed" but exits 0 must never read as
+green). Only `.sh` gates are exit-code-only; that is their contract.
+
+Every test emits the same JSON contract on a `--json` run (prefixed on the CLI
+by the sentinel `@@JOINERY_TEST_RESULT@@` so the runner can locate it even after
+error output). The runner and the dashboard consume only this:
+
+```json
+{
+  "name": "cloud_offload_engine",
+  "tier": "safe",
+  "stats": { "total": 12, "passed": 12, "failed": 0, "skipped": 0 },
+  "sections": [
+    { "title": "Creation", "checks": [ { "label": "…", "passed": true, "detail": "" } ] }
+  ],
+  "duration_ms": 8
+}
+```
+
+## The test database
+
+`test-db` tests run against a copy of the dev database so CRUD is isolated from
+live data. Manage the copy — create it, sync its schema with the live database —
+from `/admin/admin_test_database`. The model CRUD suite
+(`tests/models/models_test.php`, tier `test-db`) drives every data model's
+generic CRUD/validation against that copy; if it reports schema errors, sync the
+test database first.
+
+## Plugin tests
+
+A plugin's tests live in `plugins/{plugin}/tests/` and carry the same header.
+They are discovered and listed alongside core tests (the dashboard includes
+them), and are reachable directly at `/plugins/{plugin}/tests/{page}`
+(superadmin). Follow the same harness conventions; the relative path to the
+harness from a plugin test is `__DIR__ . '/../../../tests/lib/harness.php'`.

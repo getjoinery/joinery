@@ -40,8 +40,14 @@
  */
 
 
+/** @joinery-test
+ * name: api_session_keys
+ * tier: db
+ * env: dev-only
+ * needs: []
+ */
 require_once(__DIR__ . '/api_test_harness.php');
-harness_boot($argv);
+api_test_boot($argv);
 
 $settings = Globalvars::get_instance();
 $saved_min_versions = null;

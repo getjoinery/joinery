@@ -1,4 +1,10 @@
 <?php
+/** @joinery-test
+ * name: inbound_imap_account
+ * tier: db
+ * env: dev-only
+ * needs: []
+ */
 /**
  * Tests for InboundImapAccount: CRUD, encrypted-secret round-trips, the preset
  * catalog mapping, the UID cursor, and the enabled/due/provider_key filters.
@@ -9,9 +15,8 @@
  * @version 1.0
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+require_once(__DIR__ . '/../../../tests/lib/harness.php');
+harness_boot();
 require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Token.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
@@ -19,8 +24,6 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alia
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
 
 class InboundImapAccountTest {
-	private $pass = 0;
-	private $fail = 0;
 	private $db;
 	private $suffix;
 	private $domain_id;
@@ -30,13 +33,9 @@ class InboundImapAccountTest {
 	function __construct() { $this->db = DbConnector::get_instance()->get_db_link(); }
 
 	private function out($m) { echo (php_sapi_name() === 'cli' ? '' : '<br>') . $m . "\n"; }
-	private function ok($c, $l) {
-		if ($c) { $this->pass++; $this->out('  PASS: ' . $l); }
-		else { $this->fail++; $this->out('  FAIL: ' . $l); }
-	}
+	private function ok($c, $l) { return check((bool)$c, $l); }
 
 	function run() {
-		$this->out('=== InboundImapAccount tests ===');
 		try {
 			$this->setUp();
 			$this->testPresets();
@@ -45,13 +44,10 @@ class InboundImapAccountTest {
 			$this->testFilters();
 			$this->testCursor();
 		} catch (\Throwable $e) {
-			$this->fail++;
-			$this->out('  EXCEPTION: ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
+			check(false, 'uncaught exception', $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
 		} finally {
 			$this->tearDown();
 		}
-		$this->out("=== {$this->pass} passed, {$this->fail} failed ===");
-		return $this->fail === 0;
 	}
 
 	private function setUp() {
@@ -111,6 +107,7 @@ class InboundImapAccountTest {
 	}
 
 	private function testPresets() {
+		section('Presets');
 		$gmail = $this->makeAccount('imap_gmail');
 		$this->ok($gmail->get('iia_auth_method') === 'oauth2', 'Gmail preset → oauth2 auth');
 		$this->ok($gmail->isOAuth(), 'Gmail isOAuth() true');
@@ -136,6 +133,7 @@ class InboundImapAccountTest {
 	}
 
 	private function testPasswordRoundTrip() {
+		section('Password round-trip');
 		$acct = $this->makeAccount('imap_fastmail');
 		$secret = 'app-pw-' . $this->suffix . '-SECRET';
 		$acct->setPassword($secret);
@@ -158,6 +156,7 @@ class InboundImapAccountTest {
 	}
 
 	private function testOAuthTokenRoundTrip() {
+		section('OAuth token round-trip');
 		$acct = $this->makeAccount('imap_gmail');
 		$expires = gmdate('Y-m-d H:i:s', time() + 3600);
 		$token = new OAuth2Token('ACCESS-' . $this->suffix, 'REFRESH-' . $this->suffix, $expires);
@@ -178,6 +177,7 @@ class InboundImapAccountTest {
 	}
 
 	private function testFilters() {
+		section('Filters');
 		// Disabled account should be excluded by the enabled filter.
 		$this->makeAccount('imap_generic', false);
 
@@ -196,6 +196,7 @@ class InboundImapAccountTest {
 	}
 
 	private function testCursor() {
+		section('Cursor');
 		$acct = $this->makeAccount('imap_generic');
 		$acct->set('iia_uidvalidity', 123456);
 		$acct->set('iia_last_seen_uid', 42);
@@ -231,6 +232,5 @@ class InboundImapAccountTest {
 $session = SessionControl::get_instance();
 if (method_exists($session, 'set_test_permission')) { $session->set_test_permission(10); }
 $test = new InboundImapAccountTest();
-$ok = $test->run();
-exit($ok ? 0 : 1);
-?>
+$test->run();
+harness_finish();

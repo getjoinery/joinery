@@ -1,4 +1,10 @@
 <?php
+/** @joinery-test
+ * name: joinery_ai_pipeline_runner
+ * tier: db
+ * env: dev-only
+ * needs: []
+ */
 /**
  * Item-pipeline mode — PipelineRunner's per-item loop end-to-end
  * (specs/joinery_ai_item_pipeline.md).
@@ -27,10 +33,9 @@
  * @version 1.1
  */
 
-require_once(__DIR__ . '/../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
-require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(__DIR__ . '/../lib/harness.php');
+harness_boot();
+
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobInterface.php'));
@@ -40,13 +45,6 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunCo
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/aip_recipe_item_log_class.php'));
-
-$pass = 0; $fail = 0;
-function ok($label, $cond) {
-    global $pass, $fail;
-    if ($cond) { $pass++; echo "  ok   $label\n"; }
-    else       { $fail++; echo "  FAIL $label\n"; }
-}
 
 /** Scripted provider: each createMessage() call shifts the next canned
  *  response off the queue. A missing queue entry returns an empty '{}'. */
@@ -126,8 +124,8 @@ $jobs_prop->setValue(null, ['test_fixture_job' => 'FixtureJudgeJob']);
 $db = DbConnector::get_instance()->get_db_link();
 $owner_uid = (int)$db->query("SELECT usr_user_id FROM usr_users WHERE usr_permission >= 10 AND usr_delete_time IS NULL ORDER BY usr_user_id LIMIT 1")->fetchColumn();
 if ($owner_uid <= 0) {
-    echo "SKIP: need at least one active permission-10 admin to own the test recipe.\n";
-    exit(0);
+    harness_skip('recipe owner', 'need at least one active permission-10 admin to own the test recipe');
+    harness_finish();
 }
 
 echo "PipelineRunner — item pipeline loop\n";
@@ -160,7 +158,7 @@ function make_recipe_and_run(int $owner_uid, int $max_iterations, int $token_bud
 }
 
 // --- 1. Happy path: two items, each valid on the first try -----------------
-echo "1. happy path\n";
+section('1. happy path');
 FixtureJudgeJob::$items = [
     ['item_key' => 'a1', 'digest' => 'item A', 'label' => 'Item A'],
     ['item_key' => 'a2', 'digest' => 'item B', 'label' => 'Item B'],
@@ -179,7 +177,7 @@ $log_count1 = (new MultiAipRecipeItemLog(['recipe_id' => (int)$recipe1->key]))->
 ok('2 log rows written', $log_count1 === 2);
 
 // --- 2. Invalid verdict, then a valid retry ---------------------------------
-echo "\n2. invalid-verdict retry\n";
+section('2. invalid-verdict retry');
 FixtureJudgeJob::$items = [['item_key' => 'b1', 'digest' => 'item B1', 'label' => 'Item B1']];
 FixtureJudgeJob::$recorded = [];
 [$recipe2, $run2, $ctx2] = make_recipe_and_run($owner_uid, 5, 5000);
@@ -197,7 +195,7 @@ foreach ($logged2 as $row) { $status2[] = $row->get('aip_status'); }
 ok('item logged done (retry recovered)', $status2 === ['done']);
 
 // --- 3. Still invalid after the retry: skip, log 'error', keep going -------
-echo "\n3. skip-on-error\n";
+section('3. skip-on-error');
 FixtureJudgeJob::$items = [
     ['item_key' => 'c1', 'digest' => 'item C1', 'label' => 'Item C1'],
     ['item_key' => 'c2', 'digest' => 'item C2', 'label' => 'Item C2'],
@@ -220,7 +218,7 @@ foreach ($logged3 as $row) { $rows3[$row->get('aip_item_key')] = $row->get('aip_
 ok('c1 logged error, c2 logged done', $rows3 === ['c1' => 'error', 'c2' => 'done']);
 
 // --- 3b. Three consecutive item errors abort the run ------------------------
-echo "\n3b. three consecutive item errors abort the run\n";
+section('3b. three consecutive item errors abort the run');
 FixtureJudgeJob::$items = [
     ['item_key' => 'd1', 'digest' => 'd1', 'label' => 'D1'],
     ['item_key' => 'd2', 'digest' => 'd2', 'label' => 'D2'],
@@ -237,7 +235,7 @@ $logged4 = (new MultiAipRecipeItemLog(['recipe_id' => (int)$recipe4->key]))->cou
 ok('3 items logged (d4 never attempted)', $logged4 === 3);
 
 // --- 4. Kill switch: no provider calls at all -------------------------------
-echo "\n4. kill switch\n";
+section('4. kill switch');
 FixtureJudgeJob::$items = [['item_key' => 'e1', 'digest' => 'e1', 'label' => 'E1']];
 [$recipe5, $run5, $ctx5] = make_recipe_and_run($owner_uid, 5, 5000);
 $q = $db->prepare("UPDATE rcr_recipe_runs SET rcr_kill_requested = TRUE WHERE rcr_run_id = ?");
@@ -249,7 +247,7 @@ ok('provider never called', $provider5->calls === 0);
 ok('nothing logged', (new MultiAipRecipeItemLog(['recipe_id' => (int)$recipe5->key]))->count_all() === 0);
 
 // --- 5. Budget stop: one item processes, then the budget halts the run -----
-echo "\n5. budget stop\n";
+section('5. budget stop');
 FixtureJudgeJob::$items = [
     ['item_key' => 'f1', 'digest' => 'f1', 'label' => 'F1'],
     ['item_key' => 'f2', 'digest' => 'f2', 'label' => 'F2'],
@@ -279,6 +277,4 @@ foreach ($created_recipes as $r) {
     $r->permanent_delete();
 }
 
-echo "\n--------------------------------------------\n";
-echo "PASS: $pass   FAIL: $fail\n";
-exit($fail === 0 ? 0 : 1);
+harness_finish();

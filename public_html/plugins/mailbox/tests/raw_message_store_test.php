@@ -1,4 +1,10 @@
 <?php
+/** @joinery-test
+ * name: raw_message_store
+ * tier: db
+ * env: dev-only
+ * needs: []
+ */
 /**
  * RawMessageStore tests — the mail StorageProfile's key scheme + request-time I/O.
  *
@@ -15,8 +21,8 @@
  * @version 1.0
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+require_once(__DIR__ . '/../../../tests/lib/harness.php');
+harness_boot();
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriver.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
@@ -42,8 +48,6 @@ class RawStoreMockDriver implements CloudStorageDriver {
 }
 
 class RawMessageStoreTest {
-	private $pass = 0;
-	private $fail = 0;
 	private $db;
 	private $suffix;
 	private $domain_id;
@@ -54,13 +58,9 @@ class RawMessageStoreTest {
 	function __construct() { $this->db = DbConnector::get_instance()->get_db_link(); }
 
 	private function out($m) { echo (php_sapi_name() === 'cli' ? '' : '<br>') . $m . "\n"; }
-	private function ok($c, $l) {
-		if ($c) { $this->pass++; $this->out('  PASS: ' . $l); }
-		else    { $this->fail++; $this->out('  FAIL: ' . $l); }
-	}
+	private function ok($c, $l) { return check((bool)$c, $l); }
 
 	function run() {
-		$this->out('=== RawMessageStore tests ===');
 		try {
 			$this->setUp();
 			$this->testKeyLayout();
@@ -70,13 +70,10 @@ class RawMessageStoreTest {
 			$this->testCloudRoundTrip();
 			$this->testDeleteNoOps();
 		} catch (\Throwable $e) {
-			$this->fail++;
-			$this->out('  EXCEPTION: ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
+			check(false, 'uncaught exception', $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
 		} finally {
 			$this->tearDown();
 		}
-		$this->out("=== {$this->pass} passed, {$this->fail} failed ===");
-		return $this->fail === 0;
 	}
 
 	private function setUp() {
@@ -124,6 +121,7 @@ class RawMessageStoreTest {
 	}
 
 	private function testKeyLayout() {
+		section('Key layout');
 		$key = RawMessageStore::keyFor($this->message_id);
 		$this->ok($key === 'mailbox/2026/03/' . $this->message_id . '.eml',
 			'keyFor lays out mailbox/{yyyy}/{mm}/{id}.eml (' . $key . ')');
@@ -133,6 +131,7 @@ class RawMessageStoreTest {
 	}
 
 	private function testLocalRoundTrip() {
+		section('Local round-trip');
 		$raw = "From: a@b\r\nSubject: hi\r\n\r\nbody bytes " . $this->suffix;
 		$descriptor = RawMessageStore::write($this->message_id, $raw);
 		$this->ok($descriptor['driver'] === 'local', 'write() returns driver=local');
@@ -148,6 +147,7 @@ class RawMessageStoreTest {
 	}
 
 	private function testProfileEnumeration() {
+		section('Profile enumeration');
 		$profile = new RawMessageStore();
 		$this->ok($profile->visibility() === 'private', 'profile visibility is private');
 		$this->ok($profile->table() === 'iem_inbound_email_messages', 'profile targets the messages table');
@@ -165,6 +165,7 @@ class RawMessageStoreTest {
 	}
 
 	private function testMissingObject() {
+		section('Missing object');
 		$profile = new RawMessageStore();
 		// Point the row at a key whose file does not exist.
 		$this->db->prepare("UPDATE iem_inbound_email_messages
@@ -185,6 +186,7 @@ class RawMessageStoreTest {
 	}
 
 	private function testCloudRoundTrip() {
+		section('Cloud round-trip');
 		$mock = new RawStoreMockDriver();
 		$key = RawMessageStore::keyFor($this->message_id);
 		$raw = "From: c@d\r\nSubject: cloud\r\n\r\ncloud bytes " . $this->suffix;
@@ -200,6 +202,7 @@ class RawMessageStoreTest {
 	}
 
 	private function testDeleteNoOps() {
+		section('Delete no-ops');
 		// inline / remote own no platform object — delete must not throw or touch fs.
 		$threw = false;
 		try {
@@ -234,6 +237,5 @@ class RawMessageStoreTest {
 }
 
 $test = new RawMessageStoreTest();
-$ok = $test->run();
-exit($ok ? 0 : 1);
-?>
+$test->run();
+harness_finish();

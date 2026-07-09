@@ -24,8 +24,14 @@
  * Creates its own users / keys / rows and removes them afterwards.
  */
 
+/** @joinery-test
+ * name: api_idempotency
+ * tier: db
+ * env: dev-only
+ * needs: []
+ */
 require_once(__DIR__ . '/api_test_harness.php');
-harness_boot($argv);
+api_test_boot($argv);
 
 require_once(PathHelper::getIncludePath('data/api_idempotency_keys_class.php'));
 require_once(PathHelper::getIncludePath('tasks/PurgeIdempotencyKeys.php'));

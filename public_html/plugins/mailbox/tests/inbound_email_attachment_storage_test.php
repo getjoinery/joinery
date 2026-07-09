@@ -1,4 +1,10 @@
 <?php
+/** @joinery-test
+ * name: inbound_email_attachment_storage
+ * tier: db
+ * env: dev-only
+ * needs: []
+ */
 /**
  * Lean-record attachment storage tests (specs/implemented/inbound_email_attachment_storage.md)
  * — the file-backed path, testable without a live IMAP server.
@@ -15,8 +21,8 @@
  * @version 1.0
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+require_once(__DIR__ . '/../../../tests/lib/harness.php');
+harness_boot();
 require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
 require_once(PathHelper::getIncludePath('data/files_class.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
@@ -30,8 +36,6 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxViewer.
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSender.php'));
 
 class InboundAttachmentStorageTest {
-	private $pass = 0;
-	private $fail = 0;
 	private $db;
 	private $suffix;
 	private $domain_id;
@@ -47,25 +51,21 @@ class InboundAttachmentStorageTest {
 
 	private function out($m) { echo (php_sapi_name() === 'cli' ? '' : '<br>') . $m . "\n"; }
 	private function ok($c, $l) {
-		if ($c) { $this->pass++; $this->out('  PASS: ' . $l); }
-		else    { $this->fail++; $this->out('  FAIL: ' . $l); }
+		return check((bool)$c, $l);
 	}
 
 	function run() {
-		$this->out('=== Lean-record attachment storage tests ===');
+		section('Lean-record attachment storage tests');
 		try {
 			$this->setUp();
 			$this->testSingleGranteeOwnsAttachment();
 			$this->testSharedMailboxOwnedBySystem();
 			$this->testForwardReEmbedsInline();
 		} catch (\Throwable $e) {
-			$this->fail++;
-			$this->out('  EXCEPTION: ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
+			check(false, 'EXCEPTION', $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
 		} finally {
 			$this->tearDown();
 		}
-		$this->out("=== {$this->pass} passed, {$this->fail} failed ===");
-		return $this->fail === 0;
 	}
 
 	private function setUp() {
@@ -296,6 +296,5 @@ class InboundAttachmentStorageTest {
 }
 
 $test = new InboundAttachmentStorageTest();
-$ok = $test->run();
-exit($ok ? 0 : 1);
-?>
+$test->run();
+harness_finish();

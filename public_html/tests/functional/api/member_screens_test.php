@@ -16,6 +16,12 @@
  * removes them afterwards (LIFO via harness_register_row).
  */
 
+/** @joinery-test
+ * name: api_member_screens
+ * tier: db
+ * env: dev-only
+ * needs: []
+ */
 require_once(__DIR__ . '/api_test_harness.php');
 require_once(PathHelper::getIncludePath('data/events_class.php'));
 require_once(PathHelper::getIncludePath('data/event_registrants_class.php'));
@@ -25,7 +31,7 @@ require_once(PathHelper::getIncludePath('data/products_class.php'));
 require_once(PathHelper::getIncludePath('data/conversations_class.php'));
 require_once(PathHelper::getIncludePath('data/conversation_participants_class.php'));
 
-harness_boot($argv);
+api_test_boot($argv);
 $settings = Globalvars::get_instance();
 
 function session_login($email, $password) {
