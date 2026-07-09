@@ -3,7 +3,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.p
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/aip_recipe_item_log_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunContext.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobRegistry.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/DescriptorValidator.php'));
+require_once(PathHelper::getIncludePath('includes/DescriptorValidator.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AiPromptBuilder.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AgentLoop.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderInterface.php'));

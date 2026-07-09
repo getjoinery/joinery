@@ -83,7 +83,7 @@ class Recipe extends SystemBase {
         if ((string)$this->get('rcp_mode') !== self::MODE_PIPELINE) return;
 
         require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobRegistry.php'));
-        require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/DescriptorValidator.php'));
+        require_once(PathHelper::getIncludePath('includes/DescriptorValidator.php'));
 
         $job_id = (string)$this->get('rcp_pipeline_job');
         $job = PipelineJobRegistry::get($job_id);

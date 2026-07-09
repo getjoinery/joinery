@@ -404,7 +404,7 @@ echo '</div>'; // #rcp_agent_fields_group_container
 
 // --- Pipeline-mode fields (job + its config) ---
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobRegistry.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/DescriptorValidator.php'));
+require_once(PathHelper::getIncludePath('includes/DescriptorValidator.php'));
 
 echo '<div id="rcp_pipeline_fields_group_container">';
 

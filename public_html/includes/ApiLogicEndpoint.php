@@ -3,13 +3,19 @@
  * API Logic Endpoint
  *
  * Dispatches the two HTTP faces of an action's logic function, both opted in by
- * the same {action}_logic_api() companion:
+ * the same metadata companion — {action}_logic_descriptor() (canonical; rich
+ * metadata including a typed `input` schema) or {action}_logic_api() (legacy
+ * minimal form, honored until every action carries a descriptor):
  *
  *   - Action  — POST /api/v1/action/{name}: runs {action}_logic() and returns
- *               the translated LogicResult.
+ *               the translated LogicResult. When the metadata declares an
+ *               `input` schema, the request body is coerced and validated
+ *               against it (DescriptorValidator) before the logic runs —
+ *               a hard failure is a 422 ValidationError and the logic never
+ *               executes. The logic file's own validation remains the backstop.
  *   - Form    — GET  /api/v1/form/{name}:  builds {action}_logic_form() through
  *               FormWriterV2JSON and returns the JSON form definition. Exposed
- *               iff both _logic_api() and _logic_form() exist.
+ *               iff a metadata companion and _logic_form() both exist.
  *
  * Both faces share one dispatch skeleton: a sessionless request (register,
  * password_reset_1/2) is handled before key authentication — a first-launch
@@ -25,7 +31,11 @@
  * actions via the theme chain; {plugin}/{action} names resolve to a plugin's
  * logic directory).
  *
- * @version 1.1.0
+ * @version 1.2.0
+ * @changelog 1.2.0 - Descriptor consumption (specs/implemented/descriptor_rest_api_core.md):
+ *   metadata resolves from _logic_descriptor() first, _logic_api()
+ *   as fallback; a descriptor-declared input schema is validated at the
+ *   boundary via DescriptorValidator before the logic runs (422 on failure).
  * @changelog 1.1.0 - Idempotent writes (specs/implemented/api_contract_and_idempotency.md
  *   § Change 2): an authenticated action request carrying an Idempotency-Key
  *   header executes once — a retry with the same key and body replays the
@@ -48,6 +58,22 @@ class ApiLogicEndpoint {
 		return $meta['auth']['requires_session'] ?? $meta['requires_session'] ?? true;
 	}
 
+	/**
+	 * Resolve an action's metadata array from its companion function —
+	 * {action}_logic_descriptor() when it exists, {action}_logic_api() as the
+	 * legacy fallback. Returns null when the action declares neither (not
+	 * exposed to the API). Shared by both faces.
+	 */
+	protected static function resolveMeta($action_name) {
+		if (function_exists($action_name . '_logic_descriptor')) {
+			return call_user_func($action_name . '_logic_descriptor');
+		}
+		if (function_exists($action_name . '_logic_api')) {
+			return call_user_func($action_name . '_logic_api');
+		}
+		return null;
+	}
+
 	// ====================================================================
 	// Action face — POST /api/v1/action/{name}
 	// ====================================================================
@@ -67,19 +93,18 @@ class ApiLogicEndpoint {
 
 		list($action_label, $action_name) = api_resolve_logic_path($url_segments, 'action');
 
-		// Check for opt-in: the logic file must define {action_name}_logic_api()
-		$api_meta_function = $action_name . '_logic_api';
+		// Check for opt-in: the logic file must define a metadata companion
+		// ({action_name}_logic_descriptor() or legacy {action_name}_logic_api())
 		$logic_function = $action_name . '_logic';
+		$meta = self::resolveMeta($action_name);
 
-		if (!function_exists($api_meta_function)) {
+		if ($meta === null) {
 			api_error('Unknown action: ' . $action_label, 'ActionError', 404);
 		}
 
 		if (!function_exists($logic_function)) {
 			api_error('Action is misconfigured: ' . $action_label, 'ActionError', 500);
 		}
-
-		$meta = call_user_func($api_meta_function);
 
 		return array($action_label, $meta, $logic_function);
 	}
@@ -96,7 +121,7 @@ class ApiLogicEndpoint {
 			return;
 		}
 
-		self::executeAction($action_label, $logic_function, NULL);
+		self::executeAction($action_label, $meta, $logic_function, NULL);
 	}
 
 	/**
@@ -117,20 +142,51 @@ class ApiLogicEndpoint {
 		// the same way regardless.
 		$acting_user = self::requiresSession($meta) ? $api_user : NULL;
 
-		self::executeAction($action_label, $logic_function, $acting_user, $api_entry);
+		self::executeAction($action_label, $meta, $logic_function, $acting_user, $api_entry);
 	}
 
 	/**
 	 * Run the logic function and send the translated result. Always exits.
 	 *
 	 * @param string $action_label Full action name for logs ('{plugin}/{action}' or '{action}')
+	 * @param array $meta Metadata from the action's companion function
 	 * @param string $logic_function
 	 * @param User|null $api_user Acting user for session simulation (null = sessionless)
 	 * @param ApiKey|null $api_entry Presented key, when one was (browser sessions: null)
 	 */
-	protected static function executeAction($action_label, $logic_function, $api_user, $api_entry = NULL) {
+	protected static function executeAction($action_label, $meta, $logic_function, $api_user, $api_entry = NULL) {
 		$user_id = $api_user ? $api_user->key : NULL;
 		$raw_input = file_get_contents('php://input');
+
+		// Build parameters from JSON request body or form data
+		$get_params = $_GET;
+		$json_params = json_decode($raw_input, true);
+		$post_params = is_array($json_params) ? $json_params : $_POST;
+
+		// Boundary validation: when the metadata declares an input schema
+		// (descriptors do; legacy _logic_api() has none), coerce and validate
+		// the request against it before anything else — an invalid request
+		// exits 422 without claiming an Idempotency-Key or simulating a
+		// session. Coerced values (typed, defaults applied) overlay the raw
+		// ones; fields the schema doesn't declare pass through untouched, so
+		// a partial schema never strips input the logic reads. The logic
+		// file's own validation remains the backstop.
+		if (!empty($meta['input']) && is_array($meta['input'])) {
+			require_once(PathHelper::getIncludePath('includes/DescriptorValidator.php'));
+			try {
+				$coerced = DescriptorValidator::coerce(['input' => $meta['input']],
+					array_merge($get_params, $post_params));
+			} catch (InvalidArgumentException $e) {
+				RequestLogger::log('api', 'action ' . $action_label, false, [
+					'user_id' => $user_id,
+					'status_code' => 422,
+					'error_type' => 'ValidationError',
+					'note' => $e->getMessage()
+				]);
+				api_error($e->getMessage(), 'ValidationError', 422);
+			}
+			$post_params = array_merge($post_params, $coerced);
+		}
 
 		// Idempotency (docs/api.md § Contract): a replay or conflict exits here,
 		// before session simulation and before any side effect. Returns the
@@ -143,11 +199,6 @@ class ApiLogicEndpoint {
 		if ($api_user) {
 			$session->set_api_user($api_user->key, $api_entry ? $api_entry->key : null);
 		}
-
-		// Build parameters from JSON request body or form data
-		$get_params = $_GET;
-		$json_params = json_decode($raw_input, true);
-		$post_params = is_array($json_params) ? $json_params : $_POST;
 
 		// Populate $_POST from JSON body so logic files can use !empty($_POST)
 		// to detect submission consistently across browser POSTs and JSON API calls.
@@ -355,14 +406,12 @@ class ApiLogicEndpoint {
 
 		list($action_label, $action_name) = api_resolve_logic_path($url_segments, 'form');
 
-		$api_meta_function = $action_name . '_logic_api';
 		$form_function = $action_name . '_logic_form';
+		$meta = self::resolveMeta($action_name);
 
-		if (!function_exists($api_meta_function) || !function_exists($form_function)) {
+		if ($meta === null || !function_exists($form_function)) {
 			api_error('Unknown form: ' . $action_label, 'ActionError', 404);
 		}
-
-		$meta = call_user_func($api_meta_function);
 
 		return array($action_label, $action_name, $meta, $form_function);
 	}

@@ -1669,7 +1669,7 @@ function account_edit_logic_form($formwriter, $user = null, $input = []) {
 
 Keep web-only concerns **out of the builder** and in the web view: bot defences (`antispam_question_input()`, `honeypot_hidden_input()`, `captcha_hidden_input()`), layout markup, and links. `FormWriterV2JSON` throws if a builder uses them.
 
-The exposure rule: `GET /api/v1/form/{action}` serves the form iff both `{action}_logic_api()` and `{action}_logic_form()` exist.
+The exposure rule: `GET /api/v1/form/{action}` serves the form iff both a metadata companion (`{action}_logic_descriptor()` or legacy `{action}_logic_api()`) and `{action}_logic_form()` exist.
 
 ### Post-Construction Value Binding
 
