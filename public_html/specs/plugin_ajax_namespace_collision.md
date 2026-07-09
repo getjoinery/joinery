@@ -5,6 +5,13 @@
 endpoints (`server_manager`, `dns_filtering`, `mailbox`, `bookings`) and
 their JS callers, `docs/routing.md`, `docs/plugin_developer_guide.md`.
 
+**Partial delivery via another spec:** the sync-time collision validator (item 1)
+and the store/event endpoint treatments (`checkout_ajax` → store API actions,
+`session_search_ajax` → event_manager API action, Stripe/PayPal webhooks staying
+flat from `plugins/store/ajax/`) ship with
+[`store_and_event_manager_plugin_extraction.md`](store_and_event_manager_plugin_extraction.md).
+Remaining scope here: the four plugins' page-JS migrations below.
+
 ## The decision
 
 **Isolation is an addressing question; override is a resolution question — and the
