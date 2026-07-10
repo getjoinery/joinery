@@ -15,6 +15,24 @@
  * unchanged.
  */
 
+/**
+ * The user's registrant collection, loaded once per request. Both providers
+ * below run back-to-back on every dashboard render and iterate the identical
+ * collection — this keeps it a single query.
+ */
+function event_manager_dashboard_registrants($user) {
+	static $cache = array();
+	if (!array_key_exists($user->key, $cache)) {
+		$regs = new MultiEventRegistrant(
+			array('user_id' => $user->key, 'deleted' => false),
+			array('evr_create_time' => 'DESC')
+		);
+		$regs->load();
+		$cache[$user->key] = $regs;
+	}
+	return $cache[$user->key];
+}
+
 /** Upcoming (active, non-expired) event registrations — first 3, with a count stat. */
 function event_manager_dashboard_upcoming_events($user) {
 	$settings = Globalvars::get_instance();
@@ -28,11 +46,7 @@ function event_manager_dashboard_upcoming_events($user) {
 	$session = SessionControl::get_instance();
 	$now_utc = gmdate('Y-m-d H:i:s');
 
-	$regs = new MultiEventRegistrant(
-		array('user_id' => $user->key, 'deleted' => false),
-		array('evr_create_time' => 'DESC')
-	);
-	$regs->load();
+	$regs = event_manager_dashboard_registrants($user);
 
 	$active = array();
 	$active_count = 0;
@@ -116,11 +130,7 @@ function event_manager_dashboard_pending_surveys($user) {
 
 	$now_utc = gmdate('Y-m-d H:i:s');
 
-	$regs = new MultiEventRegistrant(
-		array('user_id' => $user->key, 'deleted' => false),
-		array('evr_create_time' => 'DESC')
-	);
-	$regs->load();
+	$regs = event_manager_dashboard_registrants($user);
 
 	$items = array();
 	foreach ($regs as $reg) {

@@ -14,8 +14,15 @@
 interface AdminUserPanel {
     /** Stable id for this panel. */
     public function id(): string;
-    /** Render the panel HTML for a user. Build via output buffering if using the AdminPage table API. */
-    public function render(User $user, AdminPage $page): string;
+    /**
+     * Render the panel HTML for a user. Build via output buffering if using
+     * the AdminPage table API. $context carries the page-level list state the
+     * hosting page derived once (admin_user_logic): `show_all` (bool),
+     * `list_limit` (int|null — null means unlimited), `show_all_url`
+     * (?string). Panels read these instead of the request superglobals so all
+     * panels paginate consistently.
+     */
+    public function render(User $user, AdminPage $page, array $context = []): string;
     /** POST action names this panel handles. */
     public function actions(): array;
     /** Handle one of this panel's POST actions; returns a LogicResult (typically a redirect). */

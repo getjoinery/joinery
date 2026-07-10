@@ -24,16 +24,17 @@ class SubscriptionsPanel implements AdminUserPanel {
 		return LogicResult::redirect('/admin/admin_user?usr_user_id=' . $user->key);
 	}
 
-	public function render(User $user, AdminPage $page): string {
+	public function render(User $user, AdminPage $page, array $context = []): string {
 		require_once(PathHelper::getIncludePath('plugins/store/data/order_items_class.php'));
 		require_once(PathHelper::getIncludePath('plugins/store/includes/StripeHelper.php'));
 		require_once(PathHelper::getIncludePath('includes/Pager.php'));
 
 		$session = SessionControl::get_instance();
 
-		$show_all = isset($_GET['show_all']) && $_GET['show_all'] == '1';
-		$list_limit = $show_all ? NULL : 10;
-		$show_all_url = !$show_all ? '/admin/admin_user?usr_user_id=' . $user->key . '&show_all=1' : null;
+		// Page-level list state, derived once by admin_user_logic and passed in.
+		$show_all = !empty($context['show_all']);
+		$list_limit = array_key_exists('list_limit', $context) ? $context['list_limit'] : 10;
+		$show_all_url = $context['show_all_url'] ?? null;
 
 		$active_subscriptions = new MultiOrderItem(
 			array('user_id' => $user->key, 'is_active_subscription' => true),
