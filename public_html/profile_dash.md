@@ -1,0 +1,185 @@
+- generic [active] [ref=f101e1]:
+  - generic [ref=f101e2]:
+    - generic [ref=f101e3]:
+      - generic [ref=f101e4]: J
+      - link "Joinery Test" [ref=f101e5] [cursor=pointer]:
+        - /url: /
+      - generic [ref=f101e6]: + New
+    - generic [ref=f101e8]:
+      - generic [ref=f101e9]: "Theme: getjoinery ▼"
+      - link "Dashboard" [ref=f101e11] [cursor=pointer]:
+        - /url: /admin/admin_users
+      - generic [ref=f101e12]: Unnamed User (10)
+  - navigation [ref=f101e13]:
+    - generic [ref=f101e14]:
+      - link "Joinery" [ref=f101e15] [cursor=pointer]:
+        - /url: /
+      - generic [ref=f101e16]:
+        - link "Features" [ref=f101e17] [cursor=pointer]:
+          - /url: /features
+        - link "Pricing" [ref=f101e18] [cursor=pointer]:
+          - /url: /pricing
+        - button "Developers" [ref=f101e20] [cursor=pointer]
+        - link "Showcase" [ref=f101e23] [cursor=pointer]:
+          - /url: /showcase
+        - link "Philosophy" [ref=f101e24] [cursor=pointer]:
+          - /url: /philosophy
+        - link "About" [ref=f101e25] [cursor=pointer]:
+          - /url: /about
+  - generic [ref=f101e28]:
+    - generic [ref=f101e30]:
+      - heading "Dashboard" [level=1] [ref=f101e31]
+      - navigation "breadcrumb" [ref=f101e32]:
+        - list [ref=f101e33]:
+          - listitem [ref=f101e34]:
+            - link "Home" [ref=f101e35] [cursor=pointer]:
+              - /url: /
+          - listitem [ref=f101e36]: › Dashboard
+    - link [ref=f101e41] [cursor=pointer]:
+      - /url: /notifications
+      - strong [ref=f101e42]: "14"
+      - text: new notifications
+    - generic [ref=f101e43]:
+      - link "0 Upcoming Events" [ref=f101e44] [cursor=pointer]:
+        - /url: /profile/events
+        - generic [ref=f101e45]:
+          - generic [ref=f101e46]: "0"
+          - generic [ref=f101e47]: Upcoming Events
+      - link "1 Active subscriptions" [ref=f101e48] [cursor=pointer]:
+        - /url: /profile/subscriptions
+        - generic [ref=f101e49]:
+          - generic [ref=f101e50]: "1"
+          - generic [ref=f101e51]: Active subscriptions
+      - link "0 Unread Messages" [ref=f101e52] [cursor=pointer]:
+        - /url: /profile/conversations
+        - generic [ref=f101e53]:
+          - generic [ref=f101e54]: "0"
+          - generic [ref=f101e55]: Unread Messages
+      - link "14 Notifications" [ref=f101e56] [cursor=pointer]:
+        - /url: /notifications
+        - generic [ref=f101e57]:
+          - generic [ref=f101e58]: "14"
+          - generic [ref=f101e59]: Notifications
+    - generic [ref=f101e60]:
+      - generic [ref=f101e61]:
+        - generic [ref=f101e62]:
+          - generic [ref=f101e63]:
+            - heading "Upcoming Events" [level=6] [ref=f101e64]
+            - link "View all" [ref=f101e65] [cursor=pointer]:
+              - /url: /profile/events
+          - paragraph [ref=f101e67]: No upcoming events.
+        - generic [ref=f101e68]:
+          - generic [ref=f101e69]:
+            - heading "Recent Orders" [level=6] [ref=f101e70]
+            - link "View all" [ref=f101e71] [cursor=pointer]:
+              - /url: /profile/orders
+          - generic [ref=f101e72]:
+            - generic [ref=f101e74]:
+              - 'link "Order #6462" [ref=f101e75] [cursor=pointer]':
+                - /url: /profile/orders
+              - generic [ref=f101e76]: Jul 10, 2026
+              - generic [ref=f101e77]: $5.00
+            - generic [ref=f101e79]:
+              - 'link "Order #6460" [ref=f101e80] [cursor=pointer]':
+                - /url: /profile/orders
+              - generic [ref=f101e81]: Jul 10, 2026
+              - generic [ref=f101e82]: $5.00
+            - generic [ref=f101e84]:
+              - 'link "Order #6457" [ref=f101e85] [cursor=pointer]':
+                - /url: /profile/orders
+              - generic [ref=f101e86]: May 5, 2026
+              - generic [ref=f101e87]: $20.00
+        - generic [ref=f101e88]:
+          - generic [ref=f101e89]:
+            - heading "Subscriptions" [level=6] [ref=f101e90]
+            - link "View all" [ref=f101e91] [cursor=pointer]:
+              - /url: /profile/subscriptions
+          - generic [ref=f101e92]:
+            - generic [ref=f101e94]:
+              - link "Basic plan" [ref=f101e95] [cursor=pointer]:
+                - /url: /profile/subscriptions
+              - generic [ref=f101e96]: Active
+              - generic [ref=f101e97]: $29.99
+            - generic [ref=f101e99]:
+              - link "Test Plan" [ref=f101e100] [cursor=pointer]:
+                - /url: /profile/subscriptions
+              - generic [ref=f101e101]: Active
+              - generic [ref=f101e102]: $0.00
+            - generic [ref=f101e103]:
+              - generic [ref=f101e104]:
+                - link "Test Plan" [ref=f101e105] [cursor=pointer]:
+                  - /url: /profile/subscriptions
+                - generic [ref=f101e106]: Cancelled
+                - generic [ref=f101e107]: $2.99
+              - generic [ref=f101e108]: Cancelled
+        - generic [ref=f101e110]:
+          - generic [ref=f101e111]:
+            - heading "Recent Notifications" [level=6] [ref=f101e112]
+            - link "View all" [ref=f101e113] [cursor=pointer]:
+              - /url: /notifications
+          - generic [ref=f101e114]:
+            - generic [ref=f101e121]:
+              - 'link "Your purchase is confirmed: Shadow Webinar Level 3" [ref=f101e122] [cursor=pointer]':
+                - /url: /profile#orders
+              - generic [ref=f101e123]: "Order #6427"
+            - link "You're registered for Shadow Webinar Level 3 - State Shadows" [ref=f101e130] [cursor=pointer]:
+              - /url: /event/shadow-webinar-level-3---state-shadows
+            - generic [ref=f101e135]:
+              - link "Your Test Plan subscription is active" [ref=f101e136] [cursor=pointer]:
+                - /url: /profile#orders
+              - generic [ref=f101e137]: "Order #6428"
+            - generic [ref=f101e144]:
+              - 'link "Your purchase is confirmed: Shadow Webinar Level 2" [ref=f101e145] [cursor=pointer]':
+                - /url: /profile#orders
+              - generic [ref=f101e146]: "Order #6430"
+            - generic [ref=f101e153]:
+              - 'link "Your purchase is confirmed: Shadow Webinar Level 3" [ref=f101e154] [cursor=pointer]':
+                - /url: /profile#orders
+              - generic [ref=f101e155]: "Order #6426"
+        - generic [ref=f101e156]:
+          - generic [ref=f101e157]:
+            - heading "Recent Messages" [level=6] [ref=f101e158]
+            - link "View all" [ref=f101e159] [cursor=pointer]:
+              - /url: /profile/conversations
+          - generic [ref=f101e166]:
+            - generic [ref=f101e167]:
+              - link "Jeremy Tunnell" [ref=f101e168] [cursor=pointer]:
+                - /url: /profile/conversation?id=2
+              - generic [ref=f101e169]: Mar 24
+            - generic [ref=f101e170]: Second message to test AJAX append
+      - generic [ref=f101e171]:
+        - generic [ref=f101e173]:
+          - heading "Claude Account" [level=5] [ref=f101e175]
+          - paragraph [ref=f101e176]: jeremy.tunnell+claude@gmail.com
+          - paragraph [ref=f101e177]: 123 Main St, Nashville, TN 37201
+          - link "Edit Account" [ref=f101e178] [cursor=pointer]:
+            - /url: /profile/account_edit
+        - generic [ref=f101e179]:
+          - heading "Mailing Lists" [level=6] [ref=f101e181]
+          - paragraph [ref=f101e183]: Weekly Digest Test
+  - contentinfo [ref=f101e184]:
+    - generic [ref=f101e185]:
+      - generic [ref=f101e186]:
+        - link "Features" [ref=f101e187] [cursor=pointer]:
+          - /url: /features
+        - link "Pricing" [ref=f101e188] [cursor=pointer]:
+          - /url: /pricing
+        - link "Developers" [ref=f101e189] [cursor=pointer]:
+          - /url: /developers
+        - link "Showcase" [ref=f101e190] [cursor=pointer]:
+          - /url: /showcase
+        - link "Philosophy" [ref=f101e191] [cursor=pointer]:
+          - /url: /philosophy
+        - link "About" [ref=f101e192] [cursor=pointer]:
+          - /url: /about
+        - link "Docs" [ref=f101e193] [cursor=pointer]:
+          - /url: /documentation
+        - link "GitHub" [ref=f101e194] [cursor=pointer]:
+          - /url: https://github.com/getjoinery/joinery
+      - generic [ref=f101e195]: © 2026 Joinery. All rights reserved.
+  - dialog "Cookie consent" [ref=f101e196]:
+    - paragraph [ref=f101e197]: We use cookies to improve your experience and analyze site traffic.
+    - generic [ref=f101e198]:
+      - button "Accept All" [ref=f101e199] [cursor=pointer]
+      - button "Reject All" [ref=f101e200] [cursor=pointer]
+      - button "Manage" [ref=f101e201] [cursor=pointer]

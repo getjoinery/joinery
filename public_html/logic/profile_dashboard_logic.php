@@ -19,8 +19,6 @@ function profile_dashboard_logic(array $input): LogicResult {
 
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('data/address_class.php'));
-	require_once(PathHelper::getIncludePath('data/events_class.php'));
-	require_once(PathHelper::getIncludePath('data/event_registrants_class.php'));
 	require_once(PathHelper::getIncludePath('data/notifications_class.php'));
 	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
 	require_once(PathHelper::getIncludePath('data/mailing_list_registrants_class.php'));
@@ -53,69 +51,8 @@ function profile_dashboard_logic(array $input): LogicResult {
 		'address'     => $address_string,
 	);
 
-	// ---------------------------------------------------------------
-	// PENDING SURVEYS
-	// ---------------------------------------------------------------
-	$pending_surveys = array();
-	$user_registrations = new MultiEventRegistrant(
-		array('user_id' => $user->key, 'deleted' => false),
-		array('evr_create_time' => 'DESC')
-	);
-	$user_registrations->load();
-	foreach ($user_registrations as $reg) {
-		if ($reg->get('evr_survey_completed')) continue;
-		$event = new Event($reg->get('evr_evt_event_id'), TRUE);
-		if (!$event->get('evt_svy_survey_id')) continue;
-		$display = $event->get('evt_survey_display');
-		if ($display === 'optional_at_confirmation' || $display === 'after_event') {
-			if ($display === 'after_event') {
-				$end_time = $event->get('evt_end_time') ?: $event->get('evt_start_time');
-				if ($end_time > $now_utc) continue;
-			}
-			$pending_surveys[] = array(
-				'survey_id'  => (int)$event->get('evt_svy_survey_id'),
-				'event_id'   => (int)$event->key,
-				'event_name' => $event->get('evt_name'),
-			);
-		}
-	}
-	$out['pending_surveys'] = $pending_surveys;
-
-	// ---------------------------------------------------------------
-	// EVENTS — active only, upcoming 3
-	// ---------------------------------------------------------------
-	$active_events = array();
-	$active_event_count = 0;
-	foreach ($user_registrations as $event_registrant) {
-		$event = new Event($event_registrant->get('evr_evt_event_id'), TRUE);
-		if (!$event || $event->get('evt_delete_time')) continue;
-
-		$is_expired = $event_registrant->get('evr_expires_time') && $event_registrant->get('evr_expires_time') < $now_utc;
-		$is_active = !$is_expired && $event->get('evt_status') == Event::STATUS_ACTIVE;
-		if (!$is_active) continue;
-		$active_event_count++;
-		if (count($active_events) >= 3) continue;
-
-		$next_session = $event->get_next_session();
-		$session_url = $event->get('evt_session_display_type') == 2
-			? '/profile/event_sessions_course?evt_event_id=' . $event->key
-			: '/profile/event_sessions?evt_event_id=' . $event->key;
-
-		$active_events[] = array(
-			'registrant_id'    => (int)$event_registrant->key,
-			'event_id'         => (int)$event->key,
-			'event_name'       => $event->get('evt_name'),
-			'next_session_time'=> $next_session ? $next_session->get('evs_start_time') : ($event->get('evt_start_time') ?: null),
-			'expires_time'     => $event_registrant->get('evr_expires_time') ?: null,
-			'web_url'          => $session_url,
-			'sort_time'        => $next_session ? $next_session->get('evs_start_time') : ($event->get('evt_start_time') ?: '9999-12-31'),
-		);
-	}
-	usort($active_events, function($a, $b) { return strcmp($a['sort_time'], $b['sort_time']); });
-	foreach ($active_events as &$e) { unset($e['sort_time']); }
-	unset($e);
-	$out['upcoming_events'] = $active_events;
-	$out['upcoming_event_count'] = $active_event_count;
+	// Upcoming events + pending surveys are contributed by the event_manager
+	// profile-dashboard providers via the registry loop below.
 
 	// ---------------------------------------------------------------
 	// MESSAGING (gated)
@@ -151,13 +88,13 @@ function profile_dashboard_logic(array $input): LogicResult {
 	// ORDERS (gated)
 	// ---------------------------------------------------------------
 	// ---------------------------------------------------------------
-	// PLUGIN-CONTRIBUTED SECTIONS (store: recent orders + subscriptions)
-	// The store registers these from its serve.php; with the store inactive
-	// nothing is contributed and the keys are simply absent — a client renders
-	// strictly from present keys. Each section's items are serialized to their
-	// raw native `data` payloads; each stat becomes a top-level count key.
-	// (Event sections — upcoming_events / pending_surveys — are still built
-	// inline above while events are core; they move to a provider in phase 4.)
+	// PLUGIN-CONTRIBUTED SECTIONS
+	//   store:         recent_orders + subscriptions
+	//   event_manager: upcoming_events + pending_surveys
+	// Each active plugin registers its providers from serve.php; with a plugin
+	// inactive nothing is contributed and its keys are simply absent — a client
+	// renders strictly from present keys. Each section's items are serialized to
+	// their raw native `data` payloads; each stat becomes a top-level count key.
 	// ---------------------------------------------------------------
 	require_once(PathHelper::getIncludePath('includes/ProfileDashboardRegistry.php'));
 	foreach (ProfileDashboardRegistry::sections($user) as $section) {

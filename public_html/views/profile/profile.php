@@ -51,6 +51,59 @@ function dashboard_notification_icon_svg($type) {
 	$default = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>';
 	return $icons[$type] ?? $default;
 }
+
+/**
+ * Render one plugin-contributed dashboard section (recent orders, subscriptions,
+ * upcoming events, ...) as a list card. `meta` may carry safe HTML; every other
+ * field is escaped.
+ */
+function dashboard_render_section($section) {
+	// An empty section with no empty_message renders no card at all (its stat
+	// still feeds the grid); a section with an empty_message shows that message.
+	if (empty($section->items) && ($section->empty_message ?? null) === null) {
+		return '';
+	}
+	ob_start();
+	?>
+	<div class="card">
+		<div class="card-header d-flex justify-content-between align-items-center">
+			<h6 class="jy-tight"><?php echo htmlspecialchars($section->title); ?></h6>
+			<?php if ($section->view_all_url): ?>
+			<a href="<?php echo htmlspecialchars($section->view_all_url); ?>" class="text-sm">View all</a>
+			<?php endif; ?>
+		</div>
+		<div class="card-body">
+			<?php if (empty($section->items)): ?>
+				<p class="muted jy-tight"><?php echo htmlspecialchars($section->empty_message); ?></p>
+			<?php else: ?>
+				<?php foreach ($section->items as $i => $item): ?>
+				<div class="jy-profile-evrow<?php echo $i > 0 ? ' is-divided' : ''; ?>">
+					<div class="jy-flex1min">
+						<?php if ($item->url): ?>
+						<a href="<?php echo htmlspecialchars($item->url); ?>" class="jy-fw-600"><?php echo htmlspecialchars($item->title); ?></a>
+						<?php else: ?>
+						<span class="jy-fw-600"><?php echo htmlspecialchars($item->title); ?></span>
+						<?php endif; ?>
+						<?php if ($item->subtitle): ?>
+						<div class="muted text-sm jy-mt-1"><?php echo htmlspecialchars($item->subtitle); ?></div>
+						<?php endif; ?>
+						<?php if ($item->meta): ?>
+						<div class="muted text-sm jy-mt-1"><?php echo $item->meta; ?></div>
+						<?php endif; ?>
+					</div>
+					<?php if ($item->badge): ?>
+					<div class="jy-noshrink">
+						<span class="badge badge-success"><?php echo htmlspecialchars($item->badge); ?></span>
+					</div>
+					<?php endif; ?>
+				</div>
+				<?php endforeach; ?>
+			<?php endif; ?>
+		</div>
+	</div>
+	<?php
+	return ob_get_clean();
+}
 ?>
 <div class="jy-ui">
 <section class="jy-content-section">
@@ -103,12 +156,14 @@ function dashboard_notification_icon_svg($type) {
         <?php endif; ?>
 
         <div class="stats-grid jy-mb-5">
-            <a href="/profile/events" class="card jy-profile-statcard">
+            <?php foreach ($page_vars['dashboard_stats'] as $stat): ?>
+            <a href="<?php echo htmlspecialchars($stat->link ?: '#'); ?>" class="card jy-profile-statcard">
                 <div class="card-body jy-profile-statbody">
-                    <div class="jy-profile-statnum"><?php echo (int)$page_vars['active_event_count']; ?></div>
-                    <div class="muted text-sm">Upcoming Events</div>
+                    <div class="jy-profile-statnum"><?php echo (int)$stat->count; ?></div>
+                    <div class="muted text-sm"><?php echo htmlspecialchars($stat->label); ?></div>
                 </div>
             </a>
+            <?php endforeach; ?>
             <?php if ($settings->get_setting('messaging_active')): ?>
             <a href="/profile/conversations" class="card jy-profile-statcard">
                 <div class="card-body jy-profile-statbody">
@@ -123,49 +178,15 @@ function dashboard_notification_icon_svg($type) {
                     <div class="muted text-sm">Notifications</div>
                 </div>
             </a>
-            <?php if ($settings->get_setting('products_active') && $settings->get_setting('subscriptions_active')): ?>
-            <a href="/profile/subscriptions" class="card jy-profile-statcard">
-                <div class="card-body jy-profile-statbody">
-                    <div class="jy-profile-statnum"><?php echo (int)$page_vars['active_subscription_count']; ?></div>
-                    <div class="muted text-sm">Active Subscriptions</div>
-                </div>
-            </a>
-            <?php endif; ?>
         </div>
 
         <div class="jy-profile-cols">
             <!-- Main content column -->
             <div class="jy-profile-main">
 
-                <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <h6 class="jy-tight">Upcoming Events</h6>
-                        <a href="/profile/events" class="text-sm">View all</a>
-                    </div>
-                    <div class="card-body">
-                        <?php if (empty($page_vars['event_registrations'])): ?>
-                            <p class="muted jy-tight">No upcoming events.</p>
-                        <?php else: ?>
-                            <?php foreach ($page_vars['event_registrations'] as $i => $event): ?>
-                            <div class="jy-profile-evrow<?php echo $i > 0 ? ' is-divided' : ''; ?>">
-                                <div class="jy-flex1min">
-                                    <a href="<?php echo htmlspecialchars($event['event_link']); ?>" class="jy-fw-600"><?php echo htmlspecialchars($event['event_name']); ?></a>
-                                    <?php if ($event['event_time']): ?>
-                                    <div class="muted text-sm jy-mt-1"><?php echo $event['event_time']; ?></div>
-                                    <?php endif; ?>
-                                </div>
-                                <div class="jy-noshrink">
-                                    <?php if ($event['event_expires']): ?>
-                                        <span class="badge badge-success">Expires <?php echo htmlspecialchars($event['event_expires']); ?></span>
-                                    <?php else: ?>
-                                        <span class="badge badge-success">Active</span>
-                                    <?php endif; ?>
-                                </div>
-                            </div>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </div>
-                </div>
+                <?php foreach ($page_vars['dashboard_sections'] as $section): ?>
+                    <?php echo dashboard_render_section($section); ?>
+                <?php endforeach; ?>
 
                 <div class="card">
                     <div class="card-header d-flex justify-content-between align-items-center">
@@ -241,27 +262,6 @@ function dashboard_notification_icon_svg($type) {
                 </div>
                 <?php endif; ?>
 
-                <?php if ($settings->get_setting('products_active')): ?>
-                <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <h6 class="jy-tight">Recent Orders</h6>
-                        <a href="/profile/orders" class="text-sm">View all</a>
-                    </div>
-                    <div class="card-body">
-                        <?php if (!$page_vars['orders'] || $page_vars['numorders'] == 0): ?>
-                            <p class="muted jy-tight">No orders yet.</p>
-                        <?php else: ?>
-                            <?php $oi = 0; foreach ($page_vars['orders'] as $order): ?>
-                            <div class="jy-profile-orderrow<?php echo $oi > 0 ? ' is-divided' : ''; ?>">
-                                <p class="jy-profile-amt">Order #<?php echo htmlspecialchars($order->key); ?> &mdash; $<?php echo htmlspecialchars($order->get('ord_total_cost')); ?></p>
-                                <p class="muted text-sm jy-tight"><?php echo LibraryFunctions::convert_time($order->get('ord_timestamp'), 'UTC', $session->get_timezone(), 'M j, Y'); ?></p>
-                            </div>
-                            <?php $oi++; endforeach; ?>
-                        <?php endif; ?>
-                    </div>
-                </div>
-                <?php endif; ?>
-
             </div>
 
             <!-- Sidebar column -->
@@ -289,32 +289,6 @@ function dashboard_notification_icon_svg($type) {
                         <a href="/profile/account_edit" class="btn btn-primary btn-block">Edit Account</a>
                     </div>
                 </div>
-
-                <?php if ($settings->get_setting('products_active') && $settings->get_setting('subscriptions_active') && $page_vars['active_subscription_count'] > 0 && $page_vars['subscriptions']): ?>
-                <div class="card">
-                    <div class="card-header">
-                        <h6 class="jy-tight">Subscriptions</h6>
-                    </div>
-                    <div class="card-body">
-                        <?php foreach ($page_vars['subscriptions'] as $subscription): ?>
-                        <?php
-                        if ($subscription->get('odi_subscription_cancelled_time')) {
-                            $sub_status = 'Canceled';
-                            $sub_badge_class = 'badge-muted';
-                        } else {
-                            $sub_status = $subscription->get('odi_subscription_status') ?: 'Active';
-                            $sub_badge_class = 'badge-success';
-                        }
-                        ?>
-                        <div class="jy-profile-subrow">
-                            <span class="text-sm jy-fw-600">$<?php echo htmlspecialchars($subscription->get('odi_price')); ?>/mo</span>
-                            <span class="badge <?php echo $sub_badge_class; ?>"><?php echo htmlspecialchars($sub_status); ?></span>
-                        </div>
-                        <?php endforeach; ?>
-                        <a href="/profile/subscriptions" class="text-sm jy-profile-managelink">Manage subscriptions</a>
-                    </div>
-                </div>
-                <?php endif; ?>
 
                 <div class="card">
                     <div class="card-header">

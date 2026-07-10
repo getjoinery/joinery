@@ -221,12 +221,19 @@ class ScheduledTask extends SystemBase {
 			return $core_path;
 		}
 
-		// Check /plugins/*/tasks/
+		// Check /plugins/*/tasks/ — but only for ACTIVE plugins, so a deactivated
+		// plugin's tasks stop resolving (and thus stop running) even if their
+		// scheduled_tasks rows linger.
 		$plugins_dir = PathHelper::getIncludePath('plugins');
 		if (is_dir($plugins_dir)) {
 			$plugin_dirs = glob($plugins_dir . '/*/tasks/' . $class_name . '.php');
-			if (!empty($plugin_dirs)) {
-				return $plugin_dirs[0];
+			foreach ($plugin_dirs as $path) {
+				if (preg_match('#/plugins/([^/]+)/tasks/#', $path, $m)
+					&& class_exists('PluginHelper')
+					&& !PluginHelper::isPluginActive($m[1])) {
+					continue;
+				}
+				return $path;
 			}
 		}
 

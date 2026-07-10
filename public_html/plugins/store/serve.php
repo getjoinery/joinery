@@ -17,7 +17,7 @@ require_once(PathHelper::getIncludePath('data/seo_page_metadata_class.php'));
 SeoPageMetadata::register_entity_class(
 	'product', 'Product', 'MultiProduct',
 	'plugins/store/data/products_class.php', 'product',
-	'/admin/admin_product_edit?pro_product_id=', 'product'
+	'/plugins/store/admin/admin_product_edit?pro_product_id=', 'product'
 );
 
 // ---- Tier gated-content summary: Products (moved out of core defaults) ----
@@ -42,10 +42,14 @@ require_once(PathHelper::getIncludePath('plugins/store/includes/profile_dashboar
 ProfileDashboardRegistry::register('recent_orders', 'store_dashboard_recent_orders');
 ProfileDashboardRegistry::register('subscriptions', 'store_dashboard_subscriptions');
 
-// ---- Admin-user detail panels (point 4/5) ----
-// The admin-user Orders/Subscriptions panels are still built inline in
-// adm/admin_user.php (setting-gated, so a store-inactive install shows nothing).
-// Their provider conversion + AdminUserPanelRegistry registration land next.
+// ---- Admin-user detail panels: Orders + Subscriptions ----
+// The admin user-detail page (adm/admin_user.php) iterates AdminUserPanelRegistry;
+// with the store inactive these panels are simply absent.
+require_once(PathHelper::getIncludePath('includes/AdminUserPanelRegistry.php'));
+require_once(PathHelper::getIncludePath('plugins/store/includes/admin_user_panels/OrdersPanel.php'));
+require_once(PathHelper::getIncludePath('plugins/store/includes/admin_user_panels/SubscriptionsPanel.php'));
+AdminUserPanelRegistry::register(new OrdersPanel());
+AdminUserPanelRegistry::register(new SubscriptionsPanel());
 
 // ---- Marketing-coupon capture (?coupon=CODE) ----
 // Owned by the store now — moved out of SessionControl / RouteHelper.

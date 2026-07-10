@@ -6,8 +6,6 @@ function admin_file_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('data/files_class.php'));
-	require_once(PathHelper::getIncludePath('data/events_class.php'));
-	require_once(PathHelper::getIncludePath('data/event_sessions_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
@@ -27,18 +25,6 @@ function admin_file_logic(array $input): LogicResult {
 		$file->permanent_delete();
 
 		return LogicResult::redirect('/admin/admin_files');
-	}
-	else if($post_action == 'fileremove'){
-		$event_session = new EventSession($input['evs_event_session_id'], TRUE);
-		$event_session->remove_file($input['fil_file_id']);
-
-		return LogicResult::redirect('/admin/admin_file?fil_file_id='.$file->key);
-	}
-	else if($post_action == 'fileadd'){
-		$event_session = new EventSession($input['evs_event_session_id'], TRUE);
-		$event_session->add_file($input['fil_file_id']);
-
-		return LogicResult::redirect('/admin/admin_file?fil_file_id='.$file->key);
 	}
 	else if($get_action == 'delete'){
 		$file->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));

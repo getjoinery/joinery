@@ -104,7 +104,6 @@ switch ($action) {
         require_once(PathHelper::getIncludePath('data/survey_questions_class.php'));
         require_once(PathHelper::getIncludePath('data/questions_class.php'));
         require_once(PathHelper::getIncludePath('data/survey_answers_class.php'));
-        require_once(PathHelper::getIncludePath('data/event_registrants_class.php'));
 
         $survey_id = isset($_POST['survey_id']) ? intval($_POST['survey_id']) : 0;
         $event_id = isset($_POST['event_id']) ? intval($_POST['event_id']) : 0;
@@ -139,8 +138,11 @@ switch ($action) {
                 }
             }
 
-            // Mark survey completed on event registrant
-            if ($event_id) {
+            // Mark survey completed on the event registrant. The EventRegistrant
+            // class belongs to event_manager, so only touch it when that plugin
+            // is active — a posted event_id with the plugin inactive is skipped.
+            if ($event_id && PluginHelper::isPluginActive('event_manager')) {
+                require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_registrants_class.php'));
                 $registrant = EventRegistrant::check_if_registrant_exists($user_id, $event_id);
                 if ($registrant) {
                     $registrant->set('evr_survey_completed', true);

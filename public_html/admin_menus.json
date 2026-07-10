@@ -10,15 +10,6 @@
             "icon": "users"
         },
         {
-            "slug": "events",
-            "title": "Events",
-            "url": "",
-            "order": 5,
-            "permission": 8,
-            "icon": "calendar",
-            "settingActivate": "events_active"
-        },
-        {
             "slug": "videos",
             "title": "Videos",
             "url": "admin_videos",
@@ -95,15 +86,6 @@
             "parent": "emails"
         },
         {
-            "slug": "events-list",
-            "title": "Events List",
-            "url": "admin_events",
-            "order": 1,
-            "permission": 5,
-            "settingActivate": "events_active",
-            "parent": "events"
-        },
-        {
             "slug": "pages",
             "title": "Pages",
             "url": "",
@@ -174,15 +156,6 @@
             "parent": "blog"
         },
         {
-            "slug": "event-bundles",
-            "title": "Event Bundles",
-            "url": "admin_event_bundles",
-            "order": 10,
-            "permission": 8,
-            "settingActivate": "events_active",
-            "parent": "events"
-        },
-        {
             "slug": "email-debug-logs",
             "title": "Email debug logs",
             "url": "admin_debug_email_logs",
@@ -232,15 +205,6 @@
             "order": 2,
             "permission": 5,
             "parent": "statistics"
-        },
-        {
-            "slug": "locations",
-            "title": "Locations",
-            "url": "admin_locations",
-            "order": 5,
-            "permission": 5,
-            "settingActivate": "events_active",
-            "parent": "events"
         },
         {
             "slug": "funnels",
@@ -297,7 +261,7 @@
             "order": 10,
             "permission": 5,
             "settingActivate": "subscriptions_active",
-            "parent": "products"
+            "parent": "users"
         },
         {
             "slug": "contact-types",
@@ -357,15 +321,6 @@
             "permission": 9,
             "icon": "puzzle-piece",
             "parent": "system"
-        },
-        {
-            "slug": "event-types",
-            "title": "Event Types",
-            "url": "admin_event_types",
-            "order": 5,
-            "permission": 8,
-            "settingActivate": "events_active",
-            "parent": "events"
         },
         {
             "slug": "scheduled-tasks",
@@ -448,15 +403,6 @@
             "permission": 0,
             "icon": "calendar",
             "nativeScreen": "calendar"
-        },
-        {
-            "slug": "core-events",
-            "title": "My Events",
-            "url": "/profile/events",
-            "order": 80,
-            "permission": 0,
-            "icon": "calendar",
-            "nativeScreen": "events"
         },
         {
             "slug": "core-admin-dashboard",

@@ -1,0 +1,164 @@
+{
+    "name": "Event Manager",
+    "version": "1.0.0",
+    "description": "Events toolkit: events, locations, event sessions and waiting lists, with store integration for ticketed events and event surveys at checkout",
+    "author": "Joinery",
+    "receives_upgrades": true,
+    "included_in_publish": true,
+    "requires": {
+        "php": ">=8.0"
+    },
+    "depends": {
+        "store": ">=1.0.0"
+    },
+    "adminMenu": [
+        {
+            "slug": "events",
+            "title": "Events",
+            "icon": "calendar",
+            "order": 5,
+            "permission": 8,
+            "settingActivate": "events_active",
+            "items": [
+                {
+                    "slug": "events-list",
+                    "title": "Events List",
+                    "url": "/plugins/event_manager/admin/admin_events",
+                    "order": 1,
+                    "permission": 5,
+                    "settingActivate": "events_active"
+                },
+                {
+                    "slug": "event-bundles",
+                    "title": "Event Bundles",
+                    "url": "/plugins/event_manager/admin/admin_event_bundles",
+                    "order": 10,
+                    "permission": 8,
+                    "settingActivate": "events_active"
+                },
+                {
+                    "slug": "event-types",
+                    "title": "Event Types",
+                    "url": "/plugins/event_manager/admin/admin_event_types",
+                    "order": 5,
+                    "permission": 8,
+                    "settingActivate": "events_active"
+                },
+                {
+                    "slug": "locations",
+                    "title": "Locations",
+                    "url": "/plugins/event_manager/admin/admin_locations",
+                    "order": 5,
+                    "permission": 5,
+                    "settingActivate": "events_active"
+                }
+            ]
+        }
+    ],
+    "profileMenu": [
+        {
+            "slug": "event-manager-events",
+            "title": "My Events",
+            "url": "/profile/events",
+            "order": 80,
+            "permission": 0,
+            "icon": "calendar",
+            "nativeScreen": "events",
+            "settingActivate": "events_active"
+        }
+    ],
+    "settings": [
+        {
+            "name": "events_active",
+            "default": "1",
+            "legacy_core": true
+        },
+        {
+            "name": "events_label",
+            "default": "",
+            "legacy_core": true
+        },
+        {
+            "name": "products_list_events_active",
+            "default": "1",
+            "legacy_core": true
+        },
+        {
+            "name": "event_email_inner_template",
+            "default": "blank_template",
+            "legacy_core": true
+        },
+        {
+            "name": "event_email_outer_template",
+            "default": "default_outer_template",
+            "legacy_core": true
+        },
+        {
+            "name": "event_email_footer_template",
+            "default": "event_bulk_footer",
+            "legacy_core": true
+        }
+    ],
+    "signals": {
+        "event.registered": {
+            "label": "Event registration",
+            "description": "Someone registered for an event.",
+            "category": "Events",
+            "payload": {
+                "event_id": "Event id",
+                "product_id": "Product id",
+                "product_name": "Product display name",
+                "user_id": "Registrant user id",
+                "registrant_name": "Registrant display name",
+                "order_id": "Order id",
+                "source_user_id": "Acting user id (the buyer)"
+            },
+            "notify": {
+                "ntf_type": "event",
+                "supports_topic": true,
+                "default_email": true,
+                "title_template": "Event registration",
+                "body_template": "{registrant_name} registered for {product_name}.",
+                "link_template": "/plugins/event_manager/admin/admin_events"
+            }
+        },
+        "event.waitlisted": {
+            "label": "Event waiting list join",
+            "description": "Someone joined an event waiting list.",
+            "category": "Events",
+            "payload": {
+                "event_id": "Event id",
+                "event_name": "Event name",
+                "user_id": "User id",
+                "source_user_id": "Acting user id"
+            },
+            "notify": {
+                "ntf_type": "event",
+                "supports_topic": true,
+                "default_email": true,
+                "title_template": "Waiting list join: {event_name}",
+                "body_template": "Someone joined the waiting list for {event_name}.",
+                "link_template": "/plugins/event_manager/admin/admin_events"
+            }
+        },
+        "event.withdrawn": {
+            "label": "Event withdrawal",
+            "description": "Someone withdrew from an event.",
+            "category": "Events",
+            "payload": {
+                "event_id": "Event id",
+                "event_name": "Event name",
+                "user_id": "Withdrawing user id",
+                "source_user_id": "Acting user id"
+            },
+            "notify": {
+                "ntf_type": "event",
+                "supports_topic": true,
+                "default_email": true,
+                "title_template": "Event withdrawal: {event_name}",
+                "body_template": "A registrant withdrew from {event_name}.",
+                "link_template": "/plugins/event_manager/admin/admin_events"
+            }
+        }
+    }
+}

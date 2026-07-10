@@ -23,8 +23,8 @@
  * needs: []
  */
 require_once(__DIR__ . '/api_test_harness.php');
-require_once(PathHelper::getIncludePath('data/events_class.php'));
-require_once(PathHelper::getIncludePath('data/event_registrants_class.php'));
+require_once(PathHelper::getIncludePath('plugins/event_manager/data/events_class.php'));
+require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_registrants_class.php'));
 require_once(PathHelper::getIncludePath('plugins/store/data/orders_class.php'));
 require_once(PathHelper::getIncludePath('plugins/store/data/order_items_class.php'));
 require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php'));
@@ -64,7 +64,7 @@ try {
 	echo "  Created users " . $user_a->key . " (A), " . $user_b->key . " (B)\n";
 
 	$new_actions = array(
-		'profile_dashboard', 'order_list', 'subscription_summary', 'my_events',
+		'profile_dashboard', 'store/order_list', 'store/subscription_summary', 'event_manager/my_events',
 		'conversation_list', 'conversation_thread', 'security_overview',
 		'conversation_send', 'conversation_action',
 	);
@@ -120,14 +120,14 @@ try {
 	$order_b1->save();
 	harness_register_row('ord_orders', 'ord_order_id', $order_b1->key);
 
-	$r = api_request('POST', '/api/v1/action/order_list', $headers_a, array());
+	$r = api_request('POST', '/api/v1/action/store/order_list', $headers_a, array());
 	check($r['status'] === 200, 'order_list 200', $r['raw']);
 	$data = $r['json']['data'] ?? array();
 	check(($data['total_count'] ?? null) === 2, 'user A sees exactly their 2 orders', json_encode($data['total_count'] ?? null));
 	$seen_ids = array_column($data['orders'] ?? array(), 'order_id');
 	check(!in_array((int)$order_b1->key, $seen_ids, true), 'user A\'s order list does not include user B\'s order');
 
-	$r = api_request('POST', '/api/v1/action/order_list', $headers_b, array());
+	$r = api_request('POST', '/api/v1/action/store/order_list', $headers_b, array());
 	$data = $r['json']['data'] ?? array();
 	check(($data['total_count'] ?? null) === 1, 'user B sees exactly their 1 order');
 
@@ -136,12 +136,12 @@ try {
 	$was_subscriptions_active = get_setting_raw('subscriptions_active');
 	set_setting_raw('subscriptions_active', '0');
 	try {
-		$r = api_request('POST', '/api/v1/action/subscription_summary', $headers_a, array());
+		$r = api_request('POST', '/api/v1/action/store/subscription_summary', $headers_a, array());
 		check(!empty($r['json']['error']), 'subscription_summary errors when subscriptions_active is off');
 	} finally {
 		set_setting_raw('subscriptions_active', $was_subscriptions_active);
 	}
-	$r = api_request('POST', '/api/v1/action/subscription_summary', $headers_a, array());
+	$r = api_request('POST', '/api/v1/action/store/subscription_summary', $headers_a, array());
 	check($r['status'] === 200, 'subscription_summary 200 when enabled', $r['raw']);
 	check(array_key_exists('active_subscriptions', $r['json']['data'] ?? array()), 'active_subscriptions key present');
 
@@ -159,18 +159,18 @@ try {
 	$registrant_a->save();
 	harness_register_row('evr_event_registrants', 'evr_event_registrant_id', $registrant_a->key);
 
-	$r = api_request('POST', '/api/v1/action/my_events', $headers_a, array('status' => 'active'));
+	$r = api_request('POST', '/api/v1/action/event_manager/my_events', $headers_a, array('status' => 'active'));
 	check($r['status'] === 200, 'my_events 200', $r['raw']);
 	$data = $r['json']['data'] ?? array();
 	$names = array_column($data['registrations'] ?? array(), 'event_name');
 	check(in_array($event->get('evt_name'), $names, true), 'user A sees their active registration under status=active');
 
-	$r = api_request('POST', '/api/v1/action/my_events', $headers_a, array('status' => 'completed'));
+	$r = api_request('POST', '/api/v1/action/event_manager/my_events', $headers_a, array('status' => 'completed'));
 	$data = $r['json']['data'] ?? array();
 	$names = array_column($data['registrations'] ?? array(), 'event_name');
 	check(!in_array($event->get('evt_name'), $names, true), 'active registration excluded under status=completed');
 
-	$r = api_request('POST', '/api/v1/action/my_events', $headers_b, array('status' => 'all'));
+	$r = api_request('POST', '/api/v1/action/event_manager/my_events', $headers_b, array('status' => 'all'));
 	$data = $r['json']['data'] ?? array();
 	$names = array_column($data['registrations'] ?? array(), 'event_name');
 	check(!in_array($event->get('evt_name'), $names, true), 'user B does not see user A\'s registration');

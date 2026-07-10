@@ -1,0 +1,185 @@
+- generic [active] [ref=f80e1]:
+  - generic [ref=f80e2]:
+    - generic [ref=f80e3]:
+      - generic [ref=f80e4]: J
+      - link "Joinery Test" [ref=f80e5] [cursor=pointer]:
+        - /url: /
+      - generic [ref=f80e6]: + New
+    - generic [ref=f80e8]:
+      - generic [ref=f80e9]: "Theme: getjoinery ▼"
+      - link "Dashboard" [ref=f80e11] [cursor=pointer]:
+        - /url: /admin/admin_users
+      - generic [ref=f80e12]: Unnamed User (10)
+  - generic [ref=f80e13]:
+    - complementary [ref=f80e14]:
+      - link "Joinery Test" [ref=f80e16] [cursor=pointer]:
+        - /url: /
+        - img [ref=f80e17]:
+          - generic [ref=f80e19]: J
+      - navigation [ref=f80e21]:
+        - list [ref=f80e22]:
+          - listitem [ref=f80e23]:
+            - link "Users" [ref=f80e24] [cursor=pointer]:
+              - /url: "#"
+            - list [ref=f80e32]:
+              - listitem [ref=f80e33]
+              - listitem [ref=f80e35]
+              - listitem [ref=f80e37]
+          - listitem [ref=f80e39]:
+            - link "Emails" [ref=f80e40] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f80e46]
+              - listitem [ref=f80e48]
+              - listitem [ref=f80e50]
+              - listitem [ref=f80e52]
+              - listitem [ref=f80e54]
+          - listitem [ref=f80e56]:
+            - link "Products" [ref=f80e57] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f80e62]
+              - listitem [ref=f80e64]
+              - listitem [ref=f80e66]
+          - listitem [ref=f80e68]:
+            - link "Orders" [ref=f80e69] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f80e76]
+              - listitem [ref=f80e78]
+              - listitem [ref=f80e80]
+          - listitem [ref=f80e82]:
+            - link "Events" [ref=f80e83] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f80e89]
+              - listitem [ref=f80e91]
+              - listitem [ref=f80e93]
+              - listitem [ref=f80e95]
+          - listitem [ref=f80e97]:
+            - link "Files" [ref=f80e98] [cursor=pointer]:
+              - /url: /admin/admin_files
+          - listitem [ref=f80e105]:
+            - link "Videos" [ref=f80e106] [cursor=pointer]:
+              - /url: /admin/admin_videos
+          - listitem [ref=f80e112]:
+            - link "Bookings" [ref=f80e113] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f80e119]
+              - listitem [ref=f80e121]
+          - listitem [ref=f80e123]:
+            - link "Surveys" [ref=f80e124] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f80e128]
+              - listitem [ref=f80e130]
+          - listitem [ref=f80e132]:
+            - link "Pages" [ref=f80e133] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f80e139]
+              - listitem [ref=f80e141]
+          - listitem [ref=f80e143]:
+            - link "Blog" [ref=f80e144] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f80e150]
+              - listitem [ref=f80e152]
+          - listitem [ref=f80e154]:
+            - link "Server Manager" [ref=f80e155] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f80e159]
+              - listitem [ref=f80e161]
+              - listitem [ref=f80e163]
+              - listitem [ref=f80e165]
+              - listitem [ref=f80e167]
+              - listitem [ref=f80e169]
+          - listitem [ref=f80e171]:
+            - link "Statistics" [ref=f80e172] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f80e176]
+              - listitem [ref=f80e178]
+              - listitem [ref=f80e180]
+              - listitem [ref=f80e182]
+              - listitem [ref=f80e184]
+              - listitem [ref=f80e186]
+              - listitem [ref=f80e188]
+              - listitem [ref=f80e190]
+          - listitem [ref=f80e192]:
+            - link "Joinery AI" [ref=f80e193] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f80e197]
+              - listitem [ref=f80e199]
+              - listitem [ref=f80e201]
+              - listitem [ref=f80e203]
+              - listitem [ref=f80e205]
+          - listitem [ref=f80e207]:
+            - link "Urls" [ref=f80e208] [cursor=pointer]:
+              - /url: /admin/admin_urls
+          - listitem [ref=f80e214]:
+            - link "System" [ref=f80e215] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f80e221]
+              - listitem [ref=f80e223]
+              - listitem [ref=f80e225]
+              - listitem [ref=f80e227]
+              - listitem [ref=f80e229]
+              - listitem [ref=f80e231]
+              - listitem [ref=f80e233]
+              - listitem [ref=f80e235]
+              - listitem [ref=f80e237]
+              - listitem [ref=f80e239]
+    - generic [ref=f80e241]:
+      - banner [ref=f80e242]:
+        - button "Toggle sidebar" [ref=f80e243] [cursor=pointer]
+        - list [ref=f80e247]:
+          - listitem [ref=f80e248]:
+            - link "Admin" [ref=f80e249] [cursor=pointer]:
+              - /url: /admin
+          - listitem [ref=f80e250]: /
+          - listitem [ref=f80e251]: Users list
+        - list [ref=f80e252]:
+          - listitem [ref=f80e253]:
+            - link "13" [ref=f80e254] [cursor=pointer]:
+              - /url: /notifications
+          - listitem [ref=f80e258]:
+            - button "Admin menu" [ref=f80e259] [cursor=pointer]
+          - listitem [ref=f80e270]:
+            - button "US" [ref=f80e271] [cursor=pointer]
+      - main [ref=f80e273]:
+        - generic [ref=f80e275]:
+          - heading "Users" [level=2] [ref=f80e276]
+          - list [ref=f80e277]:
+            - listitem [ref=f80e278]:
+              - link "Admin" [ref=f80e279] [cursor=pointer]:
+                - /url: /admin
+            - listitem [ref=f80e280]: /
+            - listitem [ref=f80e281]: All Users
+        - generic [ref=f80e282]:
+          - generic [ref=f80e283]:
+            - heading "User list" [level=6] [ref=f80e284]
+            - generic [ref=f80e285]:
+              - link "Add User" [ref=f80e286] [cursor=pointer]:
+                - /url: /admin/admin_user_add
+              - generic [ref=f80e287]
+              - generic [ref=f80e293]
+          - generic [ref=f80e297]:
+            - table [ref=f80e299]:
+              - rowgroup [ref=f80e300]
+              - rowgroup [ref=f80e306]
+            - generic [ref=f80e487]:
+              - generic [ref=f80e488]: 4474 records — page 1 of 150
+              - generic [ref=f80e489]
+      - contentinfo [ref=f80e496]:
+        - generic [ref=f80e497]: v0.5.0
+  - dialog "Cookie consent" [ref=f80e498]:
+    - paragraph [ref=f80e499]: We use cookies to improve your experience and analyze site traffic.
+    - generic [ref=f80e500]:
+      - button "Accept All" [ref=f80e501] [cursor=pointer]
+      - button "Reject All" [ref=f80e502] [cursor=pointer]
+      - button "Manage" [ref=f80e503] [cursor=pointer]

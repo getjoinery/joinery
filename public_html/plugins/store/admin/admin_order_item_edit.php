@@ -7,8 +7,14 @@
 	require_once(PathHelper::getIncludePath('/plugins/store/data/order_items_class.php'));
 	require_once(PathHelper::getIncludePath('/plugins/store/data/orders_class.php'));
 	require_once(PathHelper::getIncludePath('/plugins/store/data/products_class.php'));
-	require_once(PathHelper::getIncludePath('/data/event_registrants_class.php'));
-	require_once(PathHelper::getIncludePath('/data/events_class.php'));
+
+	// Event-registrant management is event_manager-internal; only load its classes
+	// when that plugin is active so the store admin works event-less.
+	$event_manager_active = PluginHelper::isPluginActive('event_manager');
+	if($event_manager_active){
+		require_once(PathHelper::getIncludePath('/plugins/event_manager/data/event_registrants_class.php'));
+		require_once(PathHelper::getIncludePath('/plugins/event_manager/data/events_class.php'));
+	}
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
@@ -55,27 +61,28 @@
 
 		$product = new Product($_POST['odi_pro_product_id'], TRUE);
 		//IF PRODUCT REGISTERS THE BUYER FOR AN EVENT, KEEP THE REGISTRANT LINK IN SYNC.
-		//TODO(phase 3/4): this event-registrant management is event_manager-internal
-		//functionality; route it through an event_manager seam when this admin file
-		//moves to the store plugin (it must not reference Event/EventRegistrant then).
-		$fulfillment_event_id = ($product->get('pro_fulfillment_provider') === 'event_registration')
-			? (int)$product->get('pro_fulfillment_ref') : 0;
-		if($fulfillment_event_id){
-			$event_registrant = EventRegistrant::check_if_registrant_exists($user->key, $fulfillment_event_id);
-			if($event_registrant){
-				//CHANGE THE EXISTING ONE
-				$order_item->set('odi_evr_event_registrant_id', $event_registrant->key);
+		//Event-registrant management is event_manager-internal; skip it entirely when
+		//that plugin is inactive (leaves any existing registrant link untouched).
+		if($event_manager_active){
+			$fulfillment_event_id = ($product->get('pro_fulfillment_provider') === 'event_registration')
+				? (int)$product->get('pro_fulfillment_ref') : 0;
+			if($fulfillment_event_id){
+				$event_registrant = EventRegistrant::check_if_registrant_exists($user->key, $fulfillment_event_id);
+				if($event_registrant){
+					//CHANGE THE EXISTING ONE
+					$order_item->set('odi_evr_event_registrant_id', $event_registrant->key);
+				}
+				else{
+					//CREATE AN EVENT REGISTRANT IF DOESN'T EXIST
+					$event = new Event($fulfillment_event_id, TRUE);
+					$event_registrant = $event->add_registrant($user->key);
+					$order_item->set('odi_evr_event_registrant_id', $event_registrant->key);
+				}
 			}
 			else{
-				//CREATE AN EVENT REGISTRANT IF DOESN'T EXIST
-				$event = new Event($fulfillment_event_id, TRUE);
-				$event_registrant = $event->add_registrant($user->key);
-				$order_item->set('odi_evr_event_registrant_id', $event_registrant->key);
+				//JUST REMOVE THE EVENT REGISTRANT REFERENCE HERE
+				$order_item->set('odi_evr_event_registrant_id', NULL);
 			}
-		}
-		else{
-			//JUST REMOVE THE EVENT REGISTRANT REFERENCE HERE
-			$order_item->set('odi_evr_event_registrant_id', NULL);
 		}
 
 		$order_item->set('odi_comment', $_POST['odi_comment']);	
@@ -143,14 +150,16 @@
 		'validation' => ['required' => true]
 	]);
 
-	$event_registrants = new MultiEventRegistrant(array('user_id' => $order_item->get('odi_usr_user_id')), array('event_id'=> 'DESC'));
-	$num_events = $event_registrants->count_all();
-	if($num_events){
-		$event_registrants->load();
-		$optionvals = $event_registrants->get_dropdown_array();
-		$formwriter->dropinput('odi_evr_event_registrant_id', 'Event registration', [
-			'options' => $optionvals
-		]);
+	if($event_manager_active){
+		$event_registrants = new MultiEventRegistrant(array('user_id' => $order_item->get('odi_usr_user_id')), array('evr_evt_event_id'=> 'DESC'));
+		$num_events = $event_registrants->count_all();
+		if($num_events){
+			$event_registrants->load();
+			$optionvals = $event_registrants->get_dropdown_array();
+			$formwriter->dropinput('odi_evr_event_registrant_id', 'Event registration', [
+				'options' => $optionvals
+			]);
+		}
 	}
 
 	$formwriter->textinput('odi_comment', 'Comment/note');

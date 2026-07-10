@@ -70,11 +70,8 @@ class SeoPageMetadata extends SystemBase {
 		self::register_entity_class('page',         'Page',        'MultiPage',        'data/pages_class.php',         'page', '/admin/admin_page_edit?pag_page_id=', 'website');
 		self::register_entity_class('video',        'Video',       'MultiVideo',       'data/videos_class.php',        'video', '/admin/admin_video_edit?vid_video_id=', 'article');
 		self::register_entity_class('mailing_list', 'MailingList', 'MultiMailingList', 'data/mailing_lists_class.php', 'list', '/admin/admin_list_edit?mlt_mailing_list_id=', 'website');
-		// MOVED-TO-PLUGIN (phase 4): event/location move to event_manager
-		// serve.php once that plugin owns the tables. Kept here while the events
-		// code is still in core. (product moved to the store's serve.php in phase 3.)
-		self::register_entity_class('event',        'Event',       'MultiEvent',       'data/events_class.php',        'event', '/admin/admin_event_edit?evt_event_id=', 'article');
-		self::register_entity_class('location',     'Location',    'MultiLocation',    'data/locations_class.php',     'location', '/admin/admin_location_edit?loc_location_id=', 'website');
+		// event + location are registered from event_manager's serve.php;
+		// product from the store's serve.php.
 	}
 
 	private static $per_request_lookup_cache = array();

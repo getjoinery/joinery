@@ -18,17 +18,9 @@ function admin_user_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/log_form_errors_class.php'));
 	require_once(PathHelper::getIncludePath('data/emails_class.php'));
 	require_once(PathHelper::getIncludePath('data/email_recipients_class.php'));
-	require_once(PathHelper::getIncludePath('data/events_class.php'));
-	require_once(PathHelper::getIncludePath('data/event_logs_class.php'));
-	require_once(PathHelper::getIncludePath('data/event_sessions_class.php'));
-	// Orders/products belong to the store plugin. Only load its classes when it
-	// is active so this admin page still renders on a store-less install.
-	$store_active = class_exists('PluginHelper') && PluginHelper::isPluginActive('store');
-	if ($store_active) {
-		require_once(PathHelper::getIncludePath('plugins/store/data/orders_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/store/data/product_details_class.php'));
-	}
+	// Orders, subscriptions and event registrations are rendered by plugin-owned
+	// panels (AdminUserPanelRegistry) that load their own data — this page needs
+	// no store/event class here and renders on a store-less, event-less install.
 	require_once(PathHelper::getIncludePath('data/groups_class.php'));
 	require_once(PathHelper::getIncludePath('data/group_members_class.php'));
 	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
@@ -91,18 +83,14 @@ function admin_user_logic(array $input): LogicResult {
 			$groupmember->remove();
 			return LogicResult::redirect('/admin/admin_user?usr_user_id='.$user->key);
 		}
-		else if($input['action'] == 'add_to_event'){
-			//ADD THE USER TO AN EVENT
-			$event = new Event($input['evt_event_id'], TRUE);
-			$event->add_registrant($user->key);
-			return LogicResult::redirect('/admin/admin_user?usr_user_id='.$user->key);
-		}
-		else if($input['action'] == 'remove_from_event'){
-			$event = new Event($input['evt_event_id'], TRUE);
-			$event->remove_registrant($user->key);
-			return LogicResult::redirect('/admin/admin_user?usr_user_id='.$user->key);
-		}
 
+		// Plugin-contributed panels (orders, subscriptions, events) own their POST
+		// actions — dispatch through the registry before falling through.
+		require_once(PathHelper::getIncludePath('includes/AdminUserPanelRegistry.php'));
+		$panel_result = AdminUserPanelRegistry::handlePost($user, $input);
+		if ($panel_result) {
+			return $panel_result;
+		}
 	}
 
 	// Load phone numbers
@@ -122,58 +110,6 @@ function admin_user_logic(array $input): LogicResult {
 		0);
 	$numaddressrecords = $addresses->count_all();
 	$addresses->load();
-
-	// Load orders (store plugin only)
-	$orders = null;
-	$numorders = 0;
-	if ($store_active) {
-		$search_criteria = array();
-		$search_criteria['user_id'] = $user->key;
-		//$search_criteria['deleted'] = FALSE;
-
-		$orders = new MultiOrder(
-			$search_criteria,
-			array('ord_order_id'=>'DESC'),
-			$list_limit,
-			NULL);
-		$numorders = $orders->count_all();
-		$orders->load();
-	}
-
-	// Load event registrations
-	$searches['user_id'] = $user->key;
-	$event_registrations = new MultiEventRegistrant(
-		$searches,
-		NULL, //array('event_id'=>'DESC'),
-		$list_limit,
-		NULL);
-	$numeventsregistrations = $event_registrations->count_all();
-	$event_registrations->load();
-
-	// Load active + cancelled subscriptions (store plugin only)
-	$active_subscriptions = null;
-	$num_active_subscriptions = 0;
-	$cancelled_subscriptions = null;
-	$num_cancelled_subscriptions = 0;
-	if ($store_active) {
-		$active_subscriptions = new MultiOrderItem(
-		array('user_id' => $user->key, 'is_active_subscription' => true), //SEARCH CRITERIA
-		array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
-		$list_limit, //NUMBER PER PAGE
-		NULL //OFFSET
-		);
-		$num_active_subscriptions = $active_subscriptions->count_all();
-		$active_subscriptions->load();
-
-		$cancelled_subscriptions = new MultiOrderItem(
-		array('user_id' => $user->key, 'is_cancelled_subscription' => true), //SEARCH CRITERIA
-		array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
-		$list_limit, //NUMBER PER PAGE
-		NULL //OFFSET
-		);
-		$num_cancelled_subscriptions = $cancelled_subscriptions->count_all();
-		$cancelled_subscriptions->load();
-	}
 
 	// Get database connection for custom queries
 	$dbhelper = DbConnector::get_instance();
@@ -296,25 +232,7 @@ function admin_user_logic(array $input): LogicResult {
 		0);
 	$num_sent_emails = $sent_emails_count->count_all();
 
-	// Count session visits for this user
-	$num_session_visits = 0;
-	foreach ($event_registrations as $event_registration) {
-		$searches_count = array();
-		$searches_count['event_id'] = $event_registration->get('evr_evt_event_id');
-		$event_sessions_count = new MultiEventSessions(
-			$searches_count,
-			array('evs_session_number' => 'DESC', 'evs_title' => 'DESC'));
-		$event_sessions_count->load();
-
-		foreach ($event_sessions_count as $event_session_count) {
-			if ($event_session_count->get_last_visited_time_for_user($user->key)) {
-				$num_session_visits++;
-			}
-		}
-	}
-
 	// Prepare all data for view
-	$page_vars['store_active'] = $store_active;
 	$page_vars['user'] = $user;
 	$page_vars['show_all'] = $show_all;
 	$page_vars['list_limit'] = $list_limit;
@@ -322,14 +240,6 @@ function admin_user_logic(array $input): LogicResult {
 	$page_vars['numphonerecords'] = $numphonerecords;
 	$page_vars['addresses'] = $addresses;
 	$page_vars['numaddressrecords'] = $numaddressrecords;
-	$page_vars['orders'] = $orders;
-	$page_vars['numorders'] = $numorders;
-	$page_vars['event_registrations'] = $event_registrations;
-	$page_vars['numeventsregistrations'] = $numeventsregistrations;
-	$page_vars['active_subscriptions'] = $active_subscriptions;
-	$page_vars['num_active_subscriptions'] = $num_active_subscriptions;
-	$page_vars['cancelled_subscriptions'] = $cancelled_subscriptions;
-	$page_vars['num_cancelled_subscriptions'] = $num_cancelled_subscriptions;
 	$page_vars['logins'] = $logins;
 	$page_vars['num_logins'] = $num_logins;
 	$page_vars['dropdown_button'] = $dropdown_button;
@@ -341,7 +251,6 @@ function admin_user_logic(array $input): LogicResult {
 	$page_vars['num_groups'] = $num_groups;
 	$page_vars['num_received_emails'] = $num_received_emails;
 	$page_vars['num_sent_emails'] = $num_sent_emails;
-	$page_vars['num_session_visits'] = $num_session_visits;
 
 	// Return data for rendering
 	return LogicResult::render($page_vars);

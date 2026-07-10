@@ -7,7 +7,6 @@ require_once(PathHelper::getIncludePath('plugins/store/data/product_groups_class
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('plugins/store/data/orders_class.php'));
 require_once(PathHelper::getIncludePath('plugins/store/data/order_items_class.php'));
-require_once(PathHelper::getIncludePath('data/event_registrants_class.php'));
 
 class ShoppingCartException extends Exception {}
 

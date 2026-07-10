@@ -26,7 +26,6 @@ require_once(PathHelper::getIncludePath('/plugins/store/data/product_groups_clas
 require_once(PathHelper::getIncludePath('/plugins/store/data/product_requirements_class.php'));
 require_once(PathHelper::getIncludePath('/plugins/store/data/product_requirement_instances_class.php'));
 require_once(PathHelper::getIncludePath('/plugins/store/data/order_items_class.php'));
-require_once(PathHelper::getIncludePath('/data/events_class.php'));
 require_once(PathHelper::getIncludePath('/plugins/store/data/coupon_codes_class.php'));
 
 class ProductTester {

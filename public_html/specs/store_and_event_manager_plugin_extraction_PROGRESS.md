@@ -98,12 +98,95 @@ Registry CLASSES already built in includes/ (ProfileDashboardRegistry done; Admi
 - [x] VERIFIED store-ACTIVE (browser, logged in perm-10): /products /pricing /cart /checkout /product/{slug} all 200; admin_products list renders; admin_product_edit FULFILLMENT PICKER renders "Event registration: {event}" options (store↔event seam live); admin_subscription_tiers renders (gated-content registry, no raw-SQL fatal); safe tier 30/30 (622 checks); no new fatals in log.
     - [ ] NOT yet browser-verified (needs more time / guest-auth resolution): full checkout purchase flow, coupon apply/remove + check_email JS (still on unblocked /ajax/checkout_ajax), billing portal, tier purchase, orders admin, member API screens (need store/ prefix + session).
 
-## Phase 4 — Move event_manager
-- [ ] Create plugins/event_manager/
-- [ ] Move files, register providers
-- [ ] session_search -> deleted
-- [ ] event_manager activation upgrade step
-- [ ] update app endpoint constants (event actions)
+## Phase 4 — Move event_manager  (IN PROGRESS — code complete, pending active-state DB verification)
+### Task 0 (prerequisite): web consumers → registries  ✅
+- [x] ProfileDashboardRegistry web consumer: profile_logic.php iterates sections(); views/profile/profile.php renders a generic
+      section loop (dashboard_render_section helper) + stat-card loop; actions banner reads pending_surveys. Removed all inline
+      event/order/subscription blocks + event class requires. profile_dashboard_logic (native) drops inline events/pending_surveys
+      (registry loop already emits them).
+- [x] Store providers: OrdersPanel + SubscriptionsPanel (plugins/store/includes/admin_user_panels/); registered from store serve.php.
+      Store dashboard providers already existed (phase 3).
+- [x] AdminUserPanelRegistry web consumer: adm/admin_user.php renders panels loop (Orders/Subscriptions/Events); adm/logic/admin_user_logic.php
+      drops event/order/subscription loading + requires, dispatches POST via AdminUserPanelRegistry::handlePost. Tier/Groups stay core inline.
+      Session-visits card folded into EventsPanel. admin_user.php:303 tier-change order link gated on store-active.
+- [x] DRIVEN (store active, event_manager inactive): /admin/admin_user renders Orders + Subscriptions panels, NO events panel, no fatals.
+### event_manager plugin  ✅ (code)
+- [x] plugins/event_manager/ scaffold: plugin.json (depends store, legacy_core settings, verbatim event signals), serve.php (all
+      registrations), activate.php (sev backfill+drop + max_entity_photos JSON merge). Removed 6 event settings + 3 event signals +
+      event/location keys of max_entity_photos default from root settings.json/signals.json.
+- [x] MOVED all event files (git mv): 7 data classes (events/event_registrants/event_sessions/event_session_files/event_types/
+      event_waiting_lists/locations — event_logs + location_info_data + session_analytics STAY core), 10 logic, 4 top + 4 profile views,
+      13 admin + 6 admin/logic, 4 tasks, EventItemSource (calendar_item_sources/), 4 provider files, docs/recurring_events.md.
+- [x] REPOINTED all requires (perl, lookbehind-guarded): data classes → plugin paths; removed broken __DIR__ PathHelper bootstraps;
+      admin page → admin logic requires; view logic-loads get plugin param 'event_manager'; swept plugin-internal /admin/admin_event*
+      + /admin/admin_location* links → /plugins/event_manager/admin/* (fixed double-prefix collateral on hand-written files).
+- [x] Removed event core-default registrations (Task 4): SEO event/location, TierGatedContent Events, EntityPhoto event/location,
+      Recipient event+waitlist, AccessGate event_registration (registerCoreDefaults now empty → fail-closed), MessageContext event
+      resolver, FulfillmentRegistry event → all now register from event_manager serve.php. Latent-coupling cleanup: removed VESTIGIAL
+      event requires from store files (cart_charge/subscriptions/stripe_webhook/ShoppingCart/admin_product*_logic) + dead
+      get_event_sessions/fileadd/fileremove from files_class/admin_file_logic; gated live edges (SurveyRequirement registrant-mark,
+      admin_file_upload_process attach, admin_users_message) on isPluginActive('event_manager').
+- [x] serve.php ROUTES (@version 1.4.0): event view routes +plugin=event_manager; ICS closures → plugin handler files
+      (ics_event_route/ics_calendar_route) via handler-form routes (BEFORE /event/{slug}); added /event_waiting_list + 4 profile routes
+      (incl. /profile/event_sessions_course, missing from spec verbatim list) before /profile/* wildcard. Audited ALL moved views for coverage.
+- [x] sev generalization: session_analytics_class (core) drops old cols from spec + Multi filter uses entity pair; event_sessions_class
+      record_analytic + get_last_visited_* + get_number_visits rewritten to sev_entity_type/id (join evs to recover event). Backfill+drop
+      in activate.php.
+- [x] admin_users_message decouple: event requires + `new Event`/Multi* gated on plugin-active (error if event target w/o plugin); view
+      requires removed; return-link → plugin path. session_search already deleted (phase 3).
+- [x] Wiring: update_database auto-activation ALREADY covers event_manager (phase 3, store-before-events). App endpoints my_events →
+      event_manager/my_events (iOS MemberAPI.swift + Android MemberApi.kt + member_screens_test store/+event_manager/ prefixes).
+      theme requires_plugins reinstated on phillyzouk/zoukroom/devonnearhill (+version bump). Menu: removed 5 event adminMenu + core-events
+      profileMenu from admin_menus.json; removed imperative core-events/core-event-sessions seeds from migrations.php; prune migration v147
+      already lists event slugs. admin_survey Associated-Events card gated + link fixed.
+- [x] Cleared stale static_pages cache (events.html/event_*.html served /events as stale 200).
+- [x] Made calendar_core_test + routing_test event_manager-state-aware (mirror store-aware pattern).
+- [x] VERIFIED event_manager-INACTIVE: safe 30/30 (621 checks); all event URLs (/events,/event/x,/location,/events/calendar.ics,
+      /profile/events,/event_waiting_list) hard-404; core+store pages 200; ZERO warnings/fatals in log.
+- [x] **event_manager ACTIVATED on dev (2026-07-10, user-approved DB write)** via direct PluginManager sync+activate (marker
+      _store_event_autoactivate_v1 left UNSET so the deploy path stays testable). Verified: plg_active=1, store still active; sev old cols
+      DROPPED (0), 22530 rows backfilled to entity_id; max_entity_photos merged {user,mailing_list,event,location}; 6 event menu rows seeded.
+- [x] BUG FOUND+FIXED on activation (latent, cache-masked): events_class.php used MultiEventSessions/Location without requiring
+      event_sessions_class/locations_class (ambient-loaded pre-move) → /events 500. Added the two requires.
+- [x] BUG FOUND+FIXED: event_register_logic.php loaded event_logic via getThemeFilePath WITHOUT the plugin param → /api/v1/action/
+      event_manager/event_register 500. Added 'event_manager' param.
+- [x] Made calendar_core_test + routing_test (3 spots) event_manager-state-aware; cleared stale static_pages cache (served /events 200 stale then 500).
+- [x] DRIVEN active-state (browser, logged in):
+    * /events + /event/{slug} + /event/{slug}.ics + /events/calendar.ics all 200 (valid VCALENDAR); admin_events/admin_event(registrants)/
+      admin_locations render.
+    * **PAID-EVENT REGISTER THROUGH CART end-to-end**: product page (with required consent question) → add to cart → /cart → /checkout →
+      Complete Order → /cart_confirm "Purchase Confirmed!". DB: order 6461 status=2 PAID (no error); EventRegistrant 4325 created for
+      user164+event86 linked to order 6461 + item 6471; order_item 6471 odi_evr_event_registrant_id=4325 (fulfillment provider wrote the
+      event-internal column). The store↔event_manager FulfillmentRegistry seam works live.
+    * WEB PROFILE dashboard (user164) via registries: "4 Upcoming Events" + "0 Active subscriptions" stat cards; Upcoming Events section
+      (3 Active items) + Recent Orders + Subscriptions sections; all via the generic loop. No fatals.
+    * ADMIN-USER panels (user164) via registries: Orders + Subscriptions (store) + Events (table + Add-to-event + Session Visits) panels.
+    * admin_users_message?evt_event_id=86 renders "Send email to registrants of ...".
+    * plugin API actions reachable: event_manager/my_events + store/order_list + event_manager/event_register all 400 (no-creds), not 404.
+    * safe 30/30 (624 checks) active.
+- [x] UPGRADE SIMULATION on scratch DB joinery_upgradetest (cloned dev, reverted pre-phase-4: event_manager unregistered, sev old cols
+      re-added+populated + entity nulled, max_entity_photos stripped, marker unset, event menus removed). Ran REAL update_database via a
+      reflection wrapper repointing Globalvars dbname to the scratch DB with a HARD current_database() guard (dev never opened):
+        * WITHOUT --cleanup: migrations 2 run 0 failed; auto-activation ✓ "Activated plugin 'event_manager'" (store=yes,events=yes);
+          activate.php folded all 22530 sev rows old→entity + dropped old cols; max_entity_photos merged; 3+ event menus seeded. NO data loss.
+        * WITH --cleanup: same — 22530 sev rows backfilled, old cols gone, store stc 976 intact, chain 2 run 0 failed. Cleanup ordering safe.
+      Scratch DB dropped; dev verified untouched (event_manager active, 22530 sev rows).
+- [x] Inactive-state verified earlier (safe 30/30/621, all event URLs hard-404, zero fatals).
+
+### Phase-4 upgrade-sim finding (PHASE-3 gap, NOT fixed — flagged for decision):
+- update_database core menu seed warns: syncMenus('core') entry slug='subscription-tiers' references parent slug 'products' which does not
+  exist. Cause: phase 3 moved the `products` admin menu to the store plugin, but core admin_menus.json keeps `subscription-tiers`
+  (settingActivate=subscriptions_active) parented under `products`. Non-fatal on existing installs (row persists), but a FRESH install skips
+  seeding subscription-tiers (admin reachable only by URL). Needs a product decision on where subscription-tiers lives now (top-level core, or
+  under a core parent) — left unchanged to avoid an arbitrary nav change.
+
+### Phase-4 deviations / notes:
+- File↔event-session attach (point 7): gated-in-place on plugin-active rather than relocated to event_manager admin logic (get_event_sessions
+  + fileadd/fileremove were DEAD; only the upload-attach path is live and gated). Functionally equal (works active, absent inactive).
+- admin_users_message: gated-in-place rather than full provider-fed targeting refactor (secondary admin page; works active, errors cleanly inactive).
+- event_manager SEO admin_edit_url uses correct plugin path; store's still says /admin/admin_product_edit (pre-existing latent 404 — left per "don't touch store").
+- migrations.php still has core-orders/core-subscriptions imperative seeds (phase-3 gap; prune migration v147 cleans the DB rows).
+- /profile/event_register_finish (purchase-receipt email link) has no view file anywhere — pre-existing, not introduced by this move.
 
 ## Phase 5 — Finalize
 - [ ] Regenerate joinery-install.sql.gz
@@ -265,3 +348,144 @@ DRIVEN DB-WRITE VERIFICATIONS — ALL PASSED (2026-07-10, user authorized):
 
 ALL 10 FINDINGS FIXED + DRIVEN-VERIFIED. Ready for re-review; commit still HELD pending user's
 explicit go-ahead (per version-control rules).
+
+## Phase 4 code review (2026-07-10) — 10 CONFIRMED findings, FIX PACK PENDING
+
+High-effort workflow review of the working-tree diff vs e9cfc234 (phases 1-3 commit). 26 candidate
+findings, adversarial verify pass kept 25, deduped to 10 reported. Supervisor spot-verified the top
+findings in source. Ranked most-severe first:
+
+1. STORE ADMIN FATALS: plugins/store/admin/logic/admin_product_edit_logic.php:14 and
+   plugins/store/admin/admin_order_item_edit.php:10-11 still require deleted core paths
+   /data/events_class.php + /data/event_registrants_class.php; plugins/store/tests/products/
+   ProductTester.php:29 same. Product edit + order item edit pages are DOWN even with both
+   plugins active. (Executor's 6-file dead-require sweep missed these.)
+2. THEME EVENT PAGES 500: theme/zoukroom-html5/views/event.php:13 (event_logic.php) and
+   theme/phillyzouk-html5/views/events.php:3 (events_logic.php) load moved logic via
+   getThemeFilePath WITHOUT the 'event_manager' plugin argument → File not found on those themes.
+3. MOBILE WITHDRAW BROKEN: ios .../MemberAPI.swift:65 and android .../MemberApi.kt:60 still call
+   bare 'event_withdraw'; action now only resolves as 'event_manager/event_withdraw' (sibling
+   my_events call WAS renamed). Live-verified: bare name 404s.
+4. dns_filtering/logic/profile_logic.php:12-14: three UNGATED requires of event_manager data
+   classes that are NEVER USED in the file. Delete them (ScrollDaddy ships without event_manager).
+5. ajax/checkout_ajax.php:107 submit_survey: ungated require of event_registrants_class + ungated
+   EventRegistrant::check_if_registrant_exists when event_id posted. Gate like the
+   SurveyRequirement::afterPurchase path in the same diff.
+6. views/site-directory.php:18: fallback elseif file_exists(plugin path) always true → with
+   event_manager INACTIVE, loads plugin classes anyway and renders Events/Locations sections whose
+   links 404 (or 500s if tables absent). Delete the fallback branch; gate on plugin-active only.
+7. SCHEDULED TASKS NOT RE-ATTRIBUTED: sct_scheduled_tasks rows for WeeklyEventsDigest/
+   SendPostEventSurveys still have sct_plugin_name NULL (verified on dev) → deactivate/uninstall
+   never suspends them, and ScheduledTask::resolve_task_file globs plugins/*/tasks/ without a
+   plugin-active check so digests keep sending after deactivation. Re-attribute rows (activate.php)
+   + gate resolve_task_file on plugin-active.
+8. plugin.json:70 profileMenu re-seeds 'Event Sessions' → /profile/event_sessions with no event id —
+   the exact broken menu row migration v140 deleted (always errors). Verified re-seeded on dev.
+9. plugins/event_manager/activate.php:36: sev backfill guards only the OLD column existing, not the
+   NEW sev_entity_type/sev_entity_id → activation before core update_database fails with raw SQL
+   error. Guard on new columns too.
+10. views/profile/profile.php + store profile_dashboard_provider: Subscriptions card was
+    previously sidebar-only when active_subscription_count > 0; now renders unconditionally in main
+    column with 'Nothing here yet.' empty state. Provider should return null on empty to preserve
+    prior behavior.
+
+Also flagged by review (below cap, not in the 10): EventsPanel runs its registrations×sessions
+fan-out twice per render; store+event dashboard providers each load the same registrant collection
+(duplicate query); admin panels read $_GET['show_all'] directly; StaticPageCache serves cached
+anonymous event pages after plugin deactivation until cache expiry (self-healing). Refuted: the
+IcsHelper inactive-fallback claim (documented degrade-gracefully intent).
+
+Executor-flagged items awaiting user product decision: subscription-tiers menu parent on fresh
+installs; store SEO admin_edit_url retired-slug (phase-3 latent).
+
+COMMIT OF PHASE 4 IS HELD until this fix pack lands + independent re-verification.
+
+## Phase 4 code review FIX PACK — ALL 12 APPLIED + DRIVEN (2026-07-10)
+php -l + validate_php_file clean on every touched file. safe 30/30 in BOTH plugin states
+(624 checks event_manager-active, 621 inactive). No new fatals in log across all driving.
+
+1. [FIXED+DRIVEN] Store admin fatals. admin_product_edit_logic: removed the dead /data/events_class.php
+   require AND the dead MultiEvent load + events/numevents render vars (the fulfillment picker is
+   provider-fed, so the direct events dropdown was already vestigial). admin_order_item_edit: repointed
+   the two event requires to plugins/event_manager/data/*, gated on PluginHelper::isPluginActive('event_manager');
+   gated the POST registrant-sync block and the Event registration dropdown on the same flag.
+   ProductTester: deleted the dead events_class require (Event never used). Swept all of plugins/store/ —
+   only remaining data/event* refs are data/event_logs_class.php (event_logs STAYS core). SurveyRequirement
+   already gated (confirmed).
+   * SECOND LATENT BUG found while driving order_item_edit ACTIVE (500 the moment the require was fixed):
+     MultiEventRegistrant ORDER BY key 'event_id' → base prefixes to nonexistent 'evr_event_id'. Real
+     column is evr_evt_event_id. Fixed the caller's sort key. Page never worked post-move; now loads+saves.
+   DRIVEN (event_manager ACTIVE): admin_product_edit (load + SAVE→redirect) and admin_order_item_edit
+   (load with Event-registration dropdown + SAVE→redirect) both clean. DRIVEN (INACTIVE): both load+save
+   with no Event dropdown, no 500.
+2. [FIXED+PROVEN] Theme event views: added the 'event_manager' plugin arg (full 6-arg getThemeFilePath
+   form) to zoukroom-html5/views/event.php:13 (event_logic) + phillyzouk-html5/views/events.php:3
+   (events_logic). Swept every theme/*/views/ — only those two loaded moved logic without the arg
+   (zoukroom events.php is self-contained; scrolldaddy already had 'store'). PROVEN via CLI PathHelper
+   resolution: both resolve to plugins/event_manager/logic/*.
+3. [FIXED+DRIVEN] Mobile withdraw: iOS MemberAPI.swift:65 + Android MemberApi.kt:60 → event_manager/event_withdraw
+   (+ header-comment action names). Swept both kits + member_screens_test + gates: no other bare event
+   actions (my_events already prefixed; "events"/fixture matches are screen/fixture names). DRIVEN via API:
+   bare event_withdraw → 404 Unknown action; event_manager/event_withdraw → 400 auth (resolves).
+4. [FIXED] dns_filtering/logic/profile_logic.php: deleted the 3 unused event_manager requires (Event
+   classes never referenced; order_items IS used and store is a hard dep).
+5. [FIXED+DRIVEN] checkout_ajax submit_survey: moved the event_registrants require into the registrant
+   block and gated the block on isPluginActive('event_manager'). DRIVEN (event_manager INACTIVE): POST
+   with a posted event_id → 200 {"success":true}, survey answer saved, registrant check skipped, no 500.
+6. [FIXED+DRIVEN] site-directory: deleted the always-true file_exists fallback elseif; gate is now
+   plugin-active only. DRIVEN (INACTIVE): /site-directory 200, no Events/Locations sections, no 500.
+7. [FIXED+DRIVEN] Scheduled tasks two-layer: (a) ScheduledTask::resolve_task_file skips plugins/*/tasks/
+   whose owning plugin is inactive; (b) idempotent re-attribution UPDATE in event_manager/activate.php
+   (WeeklyEventsDigest/SendPostEventSurveys) + store/activate.php (ReconcileStripeSubscriptions/
+   SyncPaypalSubscriptions). Ran the event_manager UPDATE on dev (WeeklyEventsDigest → event_manager,
+   is_active left off). Store has no sct rows yet (no-op). PurgeOldErrors stays NULL (genuinely core).
+   DRIVEN: resolve_task_file returns NULL for both event tasks when event_manager inactive, resolves
+   when active.
+8. [FIXED+DRIVEN] Removed the 'Event Sessions' profileMenu entry from event_manager/plugin.json. syncMenus
+   metadata-diff prune could not recover dev (metadata had already advanced past the slug) — added
+   migration v148 drop_event_manager_event_sessions_menu.php (mirrors v140's drop_event_sessions_menu).
+   Ran update_database → row pruned (0 rows remain).
+9. [FIXED] sev backfill (event_manager/activate.php): now checks BOTH the old sev_evs_event_session_id
+   AND the new sev_entity_type; if old exists but new doesn't, throws a clear "run update_database first"
+   Exception (rolls back activation) instead of a raw SQL error.
+10.[FIXED+DRIVEN] Dashboard empty-state: added optional ProfileDashboardSection $empty_message. Web
+   renderer (profile.php) now: empty+no-message → NO card (stat still feeds the grid); empty+message →
+   shows the message. Events provider passes 'No upcoming events.'; subscriptions/recent_orders keep the
+   default (hidden when empty). Native (profile_dashboard_logic) untouched — still serializes items+stat,
+   so the app contract is unchanged (chosen over "return null" specifically to preserve the always-on
+   Active-Subscriptions stat AND the native keys). DRIVEN with a subscription-less member: NO Subscriptions
+   card, NO Recent Orders card, NO "Nothing here yet." anywhere; "0 Active subscriptions" stat still shows;
+   Upcoming Events card shows "No upcoming events."
+11.[FIXED+DRIVEN] admin_menus.json subscription-tiers parent products→users. Core menu seed is insert-only
+   (overwrite=false) so it won't re-parent an existing row; the store re-creates the 'products' parent with
+   a new id each sync, orphaning the FK. Added migration v149 reparent_subscription_tiers_menu.php (looks up
+   the users menu id). Ran update_database → subscription-tiers now parented under Users; DRIVEN in the
+   sidebar/DB (renders under Users).
+12.[FIXED] store serve.php product SEO admin_edit_url → /plugins/store/admin/admin_product_edit?pro_product_id=.
+
+Optional: [DONE] EventsPanel computes the visited-session rows once (was a double registrations×sessions
+fan-out + double last-visit lookup); render loop reuses the precomputed rows. Other below-cap items
+(duplicate registrant load across dashboard providers, $_GET['show_all'] in panels, stale static cache
+after deactivation) left as logged — not expanded.
+
+DB writes on dev (user-authorized batch): WeeklyEventsDigest re-attribution; update_database (ran v148+v149,
+0 failed; re-parented subscription-tiers, pruned Event Sessions row); event_manager plg_active flip
+0→drive→1 (reversible, restored; static cache cleared each way); one test-mode $5 purchase (order 6462,
+status=2 PAID, no error, no registrant — event_manager INACTIVE, closing the deferred "store purchase with
+event_manager inactive" gap); one survey-answer delete (to clear a prior duplicate so the survey POST could
+reach the event gate). Final dev state: store + event_manager both ACTIVE; /, /events, /products, /pricing,
+/site-directory all 200.
+
+DROVE vs INSPECTED split:
+- DROVE (browser/API/CLI, both plugin states): store admin_product_edit + admin_order_item_edit load+save
+  (active AND inactive); full store purchase end-to-end (inactive); checkout survey POST with event_id
+  (inactive); /site-directory (inactive); event cron resolve gate (both states via CLI); bare vs prefixed
+  event_withdraw API; theme event-view logic resolution (CLI); profile dashboard empty-states (member with
+  and without subs); event URLs 404 inactive / 200 active; safe 30/30 both states.
+- INSPECTED (code/DB, not separately driven): SendPostEventSurveys re-attribution (no dev row to drive —
+  the UPDATE is a guarded no-op); store activate.php task re-attribution (store has no sct rows yet);
+  the sev new-column activation guard (guard path only triggers pre-update_database — verified by reading,
+  not by reverting dev schema); iOS/Android withdraw rename verified by the API 404/400 split + grep sweep,
+  not by building the apps.
+
+COMMIT STILL HELD (per version-control rules) pending user go-ahead. Phase 5 NOT started.

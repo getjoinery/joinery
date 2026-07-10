@@ -9,8 +9,6 @@ require_once(PathHelper::getIncludePath('includes/SingleRowAccessor.php'));
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 require_once(PathHelper::getIncludePath('includes/Validator.php'));
 
-require_once(PathHelper::getIncludePath('data/event_sessions_class.php'));
-
 class FileException extends SystemBaseException {}
 
 /**
@@ -1294,26 +1292,6 @@ public static function get_by_name($name, $search_deleted = false) {
 			case IMAGETYPE_WEBP: if (function_exists('imagewebp')) { imagewebp($img, $path, $quality); } break;
 			case IMAGETYPE_AVIF: if (function_exists('imageavif')) { imageavif($img, $path, $quality); } break;
 		}
-	}
-
-	function get_event_sessions(){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		
-		$q = $dblink->prepare('SELECT esf_evs_event_session_id FROM esf_event_session_files WHERE esf_fil_file_id=?');
-		$q->bindValue(1, $this->key, PDO::PARAM_INT);
-		$q->execute();
-		
-		$results = $q->fetchAll();
-		
-		//CONVERT INTO A MULTI OBJECT
-		$event_sessions = new MultiEventSessions();
-		foreach ($results as $result){
-			$event_session = new EventSession($result['esf_evs_event_session_id'], TRUE);	
-			$event_sessions->add($event_session);
-		}
-		
-		return $event_sessions;
 	}
 
 	/**

@@ -668,8 +668,6 @@
 		array('slug'=>'core-profile',             'display'=>'My Profile',        'page'=>'/profile',                   'visibility'=>'in',   'permission'=>1, 'setting'=>'',                'icon'=>'user',           'order'=>50),
 		array('slug'=>'core-orders',              'display'=>'Orders',            'page'=>'/profile#orders',            'visibility'=>'in',   'permission'=>1, 'setting'=>'',                'icon'=>'shopping-bag',   'order'=>60),
 		array('slug'=>'core-subscriptions',       'display'=>'Subscriptions',     'page'=>'/profile/subscriptions',     'visibility'=>'in',   'permission'=>1, 'setting'=>'',                'icon'=>'refresh',        'order'=>70),
-		array('slug'=>'core-events',              'display'=>'My Events',         'page'=>'/profile#events',            'visibility'=>'in',   'permission'=>1, 'setting'=>'',                'icon'=>'calendar',       'order'=>80),
-		array('slug'=>'core-event-sessions',      'display'=>'Event Sessions',    'page'=>'/profile/event_sessions',    'visibility'=>'in',   'permission'=>1, 'setting'=>'',                'icon'=>'clock',          'order'=>90),
 		array('slug'=>'core-admin-dashboard',     'display'=>'Admin Dashboard',   'page'=>'/admin/admin_users',         'visibility'=>'in',   'permission'=>5, 'setting'=>'',                'icon'=>'dashboard',      'order'=>100),
 		array('slug'=>'core-admin-help',          'display'=>'Admin Help',        'page'=>'/admin/admin_help',          'visibility'=>'in',   'permission'=>5, 'setting'=>'',                'icon'=>'question-circle','order'=>110),
 		array('slug'=>'core-admin-settings',      'display'=>'Admin Settings',    'page'=>'/admin/admin_settings',      'visibility'=>'in',   'permission'=>6, 'setting'=>'',                'icon'=>'wrench',         'order'=>120),
@@ -986,6 +984,26 @@
 	$migration['database_version'] = '147';
 	$migration['test'] = NULL;
 	$migration['migration_file'] = 'prune_extracted_menu_rows.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
+	// Remove the plugin-seeded 'event-manager-event-sessions' profile menu row.
+	// event_manager no longer declares it; syncMenus can't prune an install whose
+	// stored _menu_slugs already advanced past the slug, so drop it here.
+	$migration = array();
+	$migration['database_version'] = '148';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'drop_event_manager_event_sessions_menu.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
+	// Re-parent the core Subscription Tiers admin menu under Users (its former
+	// 'products' parent now belongs to the store plugin and gets a new id each
+	// sync). Core menu seeding is insert-only, so realign the existing row.
+	$migration = array();
+	$migration['database_version'] = '149';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'reparent_subscription_tiers_menu.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
 

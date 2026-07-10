@@ -6,7 +6,6 @@ function admin_file_upload_process_logic(array $input): LogicResult {
 
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('data/files_class.php'));
-	require_once(PathHelper::getIncludePath('data/event_sessions_class.php'));
 	require_once(PathHelper::getIncludePath('includes/UploadHandler.php'));
 
 	$session = SessionControl::get_instance();
@@ -196,10 +195,12 @@ function admin_file_upload_process_logic(array $input): LogicResult {
 		// Add the file ID to the response object
 		$thisfile->file_id = $file->key;
 
-		if(isset($input['evs_event_session_id']) || isset($input['evs_event_session_id'])){
-			$evs_event_session_id = isset($input['evs_event_session_id']) ? $input['evs_event_session_id'] : $input['evs_event_session_id'];
-			//ATTACH THE FILE TO AN EVENT SESSION
-			$event_session = new EventSession($evs_event_session_id, TRUE);
+		// Attaching an uploaded file to an event session only happens from the
+		// event_manager session editor — gate on that plugin owning the class.
+		if(isset($input['evs_event_session_id'])
+			&& class_exists('PluginHelper') && PluginHelper::isPluginActive('event_manager')){
+			require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_sessions_class.php'));
+			$event_session = new EventSession($input['evs_event_session_id'], TRUE);
 			$event_session->add_file($file->key);
 		}
 

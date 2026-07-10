@@ -55,9 +55,12 @@ enrolled "unlocker":
   material — this is why codes work where TOTP-style 2FA structurally cannot
   (a server-verified check is bypassable by whoever owns the server; withheld
   key material is not).
-- **An optional passphrase** (Argon2id). Stated plainly: this is the one
-  unlocker whose strength the user chooses, and the system is exactly as
-  strong as its weakest enrolled wrapping. The enrollment UI says so.
+- **An optional passphrase** (Argon2id at the MODERATE cost profile — each
+  offline guess against a stolen database costs the attacker ~256 MB and real
+  CPU). Stated plainly: this is the one unlocker whose strength the user
+  chooses, and the system is exactly as strong as its weakest enrolled
+  wrapping. Every enrollment path enforces a 12-character minimum, and the
+  enrollment UI says why.
 
 Lose every unlocker and the mail is **permanently unreadable**. There is no
 admin override, no support recovery, no exception for the server operator —
@@ -80,6 +83,47 @@ you are actively reading mail* reads it with you. What the design removes is
 everything outside that window — which for a personal mailbox is almost all
 of the time — and a key-rotation ceremony exists so that a discovered breach
 does not convert into permanent future access.
+
+## The other failure mode: losing the key
+
+A system with no admin override must take key *loss* as seriously as key
+theft — "we can't read your mail" and "nobody can ever read your mail again"
+are one bad ceremony apart. Encryption bugs that destroy data pass every
+happy-path test; they live in state ordering across crash boundaries, not in
+the math. So the loss side is engineered explicitly:
+
+- **You cannot strip your last unlocker.** Every wrapping delete — revoking a
+  passkey, removing the passphrase — passes a floor check: at least one live
+  vault passkey or three unused recovery codes must survive the operation, or
+  it is refused and the refusal names what to enroll first. A revoked
+  passkey's wrapping is retired with it (its hardware-derived key can never
+  exist again), so a dead unlocker can't satisfy the floor by miscount.
+
+- **Using a recovery code is treated as a possible attack.** A consumed code
+  first ends every open unlock window on every session everywhere, then opens
+  one only for the session that presented it, then emails the account. If the
+  code was stolen rather than recovered, the thief's use of it evicts any
+  windows they already held — and the owner learns immediately, holding a
+  re-locked vault.
+
+- **Key rotation is ordered so a crash cannot strand content.** The new key
+  becomes durably recoverable — wrapped under every re-derivable unlocker, in
+  the same database transaction that publishes the new public key — before
+  anything can seal to it. Every consumer then re-seals its content off the
+  old key and must positively confirm; one failed item aborts the ceremony
+  with every old unlocker still working, and re-running it converges. Only
+  after every consumer confirms does the old key retire. Envelope encryption
+  makes the ceremony cheap enough to actually use post-breach: rotating a
+  10,000-message archive re-wraps 10,000 tiny per-message key envelopes, never
+  the messages themselves.
+
+- **Setup is atomic and acknowledged.** The ceremony cannot leave a vault with
+  zero unlockers (one transaction covers the keypair and every wrapping), and
+  it will not complete until the user acknowledges that losing every unlocker
+  is permanent. It also hands over a key file — the wrapped keys, public key,
+  and salt — useless to a thief without a live unlocker, sufficient to
+  reconstruct the wrappings if database rows are ever lost independently of a
+  backup.
 
 ## Why server-side decryption (and not a crypto SPA)
 

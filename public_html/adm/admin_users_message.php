@@ -3,11 +3,10 @@
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	require_once(PathHelper::getIncludePath('data/emails_class.php'));
 	require_once(PathHelper::getIncludePath('data/email_recipients_class.php'));
-	require_once(PathHelper::getIncludePath('data/events_class.php'));
 	require_once(PathHelper::getIncludePath('data/groups_class.php'));
 	require_once(PathHelper::getIncludePath('data/messages_class.php'));
-	require_once(PathHelper::getIncludePath('data/event_registrants_class.php'));
-	require_once(PathHelper::getIncludePath('data/event_waiting_lists_class.php'));
+	// The $event object (when present) is built and its class loaded by the logic,
+	// only for event targeting — which is reachable only when event_manager is active.
 	require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
 	require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
 	require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
@@ -32,7 +31,7 @@
 		);
 		$page->begin_box();
 		if($page_vars['event']){
-			echo '<p>Your email was successfully sent to '.$page_vars['numrecipients'].' recipients.  <a href="/admin/admin_event?evt_event_id='.$page_vars['event']->key.'">Return to the event registrants page</a>';
+			echo '<p>Your email was successfully sent to '.$page_vars['numrecipients'].' recipients.  <a href="/plugins/event_manager/admin/admin_event?evt_event_id='.$page_vars['event']->key.'">Return to the event registrants page</a>';
 		}
 		else if($page_vars['group']){
 			echo '<p>Your email was successfully sent to '.$page_vars['numrecipients'].' recipients.  <a href="/admin/admin_groups">Return to the groups page</a>';

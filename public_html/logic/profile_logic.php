@@ -17,17 +17,8 @@ function profile_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('data/address_class.php'));
 	require_once(PathHelper::getIncludePath('data/files_class.php'));
-	require_once(PathHelper::getIncludePath('data/events_class.php'));
-	require_once(PathHelper::getIncludePath('data/event_registrants_class.php'));
-	require_once(PathHelper::getIncludePath('data/event_sessions_class.php'));
-	// Orders/subscriptions belong to the store plugin. Only pull its classes in
-	// when it is active — a store-less install must still render /profile.
-	$store_active = class_exists('PluginHelper') && PluginHelper::isPluginActive('store');
-	if ($store_active) {
-		require_once(PathHelper::getIncludePath('plugins/store/data/orders_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/store/data/order_items_class.php'));
-	}
 	require_once(PathHelper::getIncludePath('data/notifications_class.php'));
+	require_once(PathHelper::getIncludePath('includes/ProfileDashboardRegistry.php'));
 
 	$page_vars = array();
 
@@ -55,79 +46,31 @@ function profile_logic(array $input): LogicResult{
 	$now_utc = gmdate('Y-m-d H:i:s');
 
 	// ---------------------------------------------------------------
-	// EVENTS — active only, limit 3, sorted soonest-first
+	// PLUGIN DASHBOARD SECTIONS
+	//   store:         recent_orders + subscriptions
+	//   event_manager: upcoming_events + pending_surveys
+	// Each active plugin registers its providers from serve.php. The list-card
+	// sections render in the main column; sections that carry a stat also feed
+	// the stat grid; the pending_surveys section drives the actions banner.
 	// ---------------------------------------------------------------
-	$event_registrants = new MultiEventRegistrant(
-		array('user_id' => $user->key, 'deleted' => false),
-		array('evr_create_time' => 'DESC')
-	);
-	$event_registrants->load();
-
-	$active_events = array();
-	$active_event_count = 0;
-
-	foreach ($event_registrants as $event_registrant) {
-		$event = new Event($event_registrant->get('evr_evt_event_id'), TRUE);
-		if (!$event || $event->get('evt_delete_time')) {
-			continue;
-		}
-
-		// Determine status
-		$is_expired = $event_registrant->get('evr_expires_time') && $event_registrant->get('evr_expires_time') < $now_utc;
-		$is_active = !$is_expired && $event->get('evt_status') == Event::STATUS_ACTIVE;
-
-		if (!$is_active) continue;
-		$active_event_count++;
-
-		// Only build detail for first 3
-		if (count($active_events) >= 3) continue;
-
-		$tevent = array();
-		$tevent['event_name'] = $event->get('evt_name');
-
-		$next_session = $event->get_next_session();
-		$time = '';
-		$tz = $event->get('evt_timezone');
-		if ($next_session) {
-			$time = '<b>Next session: ';
-			if ($tz != $session->get_timezone()) {
-				$time .= $next_session->get_time_string($session->get_timezone());
-			} else {
-				$time .= $next_session->get_time_string($tz);
+	$dashboard_sections = array();
+	$dashboard_stats = array();
+	$pending_surveys = array();
+	foreach (ProfileDashboardRegistry::sections($user) as $section) {
+		if ($section->id === 'pending_surveys') {
+			foreach ($section->items as $it) {
+				$pending_surveys[] = $it->data;
 			}
-			$time .= '</b>';
-			$tevent['sort_time'] = $next_session->get('evs_start_time');
-		} else {
-			if ($tz != $session->get_timezone()) {
-				$time .= $event->get_time_string($session->get_timezone());
-			} else {
-				$time .= $event->get_time_string($tz);
-			}
-			$tevent['sort_time'] = $event->get('evt_start_time') ?: '9999-12-31';
+			continue; // shown in the actions banner, not as a card
 		}
-		$tevent['event_time'] = $time;
-
-		$tevent['event_expires'] = '';
-		if ($event_registrant->get('evr_expires_time')) {
-			$tevent['event_expires'] = LibraryFunctions::convert_time($event_registrant->get('evr_expires_time'), 'UTC', $session->get_timezone());
+		$dashboard_sections[] = $section;
+		if ($section->stat) {
+			$dashboard_stats[] = $section->stat;
 		}
-		$tevent['event_status'] = 'Active';
-
-		if ($event->get('evt_session_display_type') == 2) {
-			$tevent['event_link'] = '/profile/event_sessions_course?evt_event_id=' . $event->key;
-		} else {
-			$tevent['event_link'] = '/profile/event_sessions?evt_event_id=' . $event->key;
-		}
-
-		$active_events[] = $tevent;
 	}
-
-	// Sort by soonest first
-	usort($active_events, function($a, $b) {
-		return strcmp($a['sort_time'] ?? '', $b['sort_time'] ?? '');
-	});
-	$page_vars['event_registrations'] = array_slice($active_events, 0, 3);
-	$page_vars['active_event_count'] = $active_event_count;
+	$page_vars['dashboard_sections'] = $dashboard_sections;
+	$page_vars['dashboard_stats'] = $dashboard_stats;
+	$page_vars['pending_surveys'] = $pending_surveys;
 
 	// ---------------------------------------------------------------
 	// NOTIFICATIONS — unread count + last 5
@@ -175,43 +118,6 @@ function profile_logic(array $input): LogicResult{
 	}
 
 	// ---------------------------------------------------------------
-	// ORDERS — last 3
-	// ---------------------------------------------------------------
-	$page_vars['orders'] = null;
-	$page_vars['numorders'] = 0;
-	if ($store_active && $settings->get_setting('products_active')) {
-		$orders = new MultiOrder(
-			array('user_id' => $session->get_user_id()),
-			array('ord_order_id' => 'DESC'),
-			3
-		);
-		$page_vars['numorders'] = $orders->count_all();
-		$orders->load();
-		$page_vars['orders'] = $orders;
-	}
-
-	// ---------------------------------------------------------------
-	// SUBSCRIPTIONS — for sidebar summary + count
-	// ---------------------------------------------------------------
-	$page_vars['subscriptions'] = null;
-	$page_vars['active_subscription_count'] = 0;
-	if ($store_active && $settings->get_setting('products_active') && $settings->get_setting('subscriptions_active')) {
-		$subscriptions = new MultiOrderItem(
-			array('user_id' => $user->key, 'is_subscription' => true),
-			array('order_item_id' => 'DESC'),
-			5
-		);
-		$subscriptions->load();
-		$page_vars['subscriptions'] = $subscriptions;
-
-		// Count active (non-canceled) subscriptions
-		$active_subs = new MultiOrderItem(
-			array('user_id' => $user->key, 'is_active_subscription' => true)
-		);
-		$page_vars['active_subscription_count'] = $active_subs->count_all();
-	}
-
-	// ---------------------------------------------------------------
 	// ADDRESS — for sidebar user card
 	// ---------------------------------------------------------------
 	$addresses = new MultiAddress(
@@ -237,34 +143,6 @@ function profile_logic(array $input): LogicResult{
 		$user_subscribed_list[] = $mailing_list->get('mlt_name');
 	}
 	$page_vars['user_subscribed_list'] = $user_subscribed_list;
-
-	// ---------------------------------------------------------------
-	// PENDING SURVEYS
-	// ---------------------------------------------------------------
-	$pending_surveys = array();
-	$user_registrations = new MultiEventRegistrant(
-		array('user_id' => $session->get_user_id(), 'deleted' => false),
-		array('evr_create_time' => 'DESC')
-	);
-	$user_registrations->load();
-	foreach ($user_registrations as $reg) {
-		if ($reg->get('evr_survey_completed')) continue;
-		$event = new Event($reg->get('evr_evt_event_id'), TRUE);
-		if (!$event->get('evt_svy_survey_id')) continue;
-		$display = $event->get('evt_survey_display');
-		if ($display === 'optional_at_confirmation' || $display === 'after_event') {
-			if ($display === 'after_event') {
-				$end_time = $event->get('evt_end_time') ?: $event->get('evt_start_time');
-				if ($end_time > $now_utc) continue;
-			}
-			$pending_surveys[] = array(
-				'survey_id' => $event->get('evt_svy_survey_id'),
-				'event_id' => $event->key,
-				'event_name' => $event->get('evt_name'),
-			);
-		}
-	}
-	$page_vars['pending_surveys'] = $pending_surveys;
 
 	// ---------------------------------------------------------------
 	// DISPLAY MESSAGES (session flash)

@@ -55,13 +55,21 @@ class ProfileDashboardSection {
     public ?ProfileDashboardStat $stat;
     /** @var ProfileDashboardItem[] */
     public array $items;
+    /**
+     * Web-only: what the card shows when it has no items. When null (default),
+     * an empty section renders NO card at all (the section's stat still feeds the
+     * stat grid). When a string, the card renders with that message. The native
+     * dashboard ignores this — it always serializes items + stat.
+     */
+    public ?string $empty_message;
 
-    public function __construct(string $id, string $title, ?string $view_all_url = null, ?ProfileDashboardStat $stat = null, array $items = []) {
-        $this->id           = $id;
-        $this->title        = $title;
-        $this->view_all_url = $view_all_url;
-        $this->stat         = $stat;
-        $this->items        = $items;
+    public function __construct(string $id, string $title, ?string $view_all_url = null, ?ProfileDashboardStat $stat = null, array $items = [], ?string $empty_message = null) {
+        $this->id            = $id;
+        $this->title         = $title;
+        $this->view_all_url  = $view_all_url;
+        $this->stat          = $stat;
+        $this->items         = $items;
+        $this->empty_message = $empty_message;
     }
 }
 
