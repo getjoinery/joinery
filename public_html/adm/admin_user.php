@@ -316,7 +316,11 @@ array(
 // Each panel renders its own section and loads its own data; absent when the
 // owning plugin is inactive.
 foreach (AdminUserPanelRegistry::panels() as $panel) {
-	echo $panel->render($user, $page);
+	echo $panel->render($user, $page, array(
+		'show_all'     => $show_all,
+		'list_limit'   => $list_limit,
+		'show_all_url' => $page_vars['show_all_url'],
+	));
 }
 ?>
 

@@ -119,6 +119,10 @@ abstract class AbstractExtensionManager {
         } catch (Exception $e) {
             error_log(ucfirst($this->extension_type) . " post-activation task failed for '$name': " . $e->getMessage());
         }
+
+        // Cached anonymous pages were rendered under the old active set —
+        // stale until dropped (the cache has no TTL, only random sampling).
+        $this->clearStaticPageCache();
     }
 
     /**
@@ -157,6 +161,25 @@ abstract class AbstractExtensionManager {
                 $dblink->rollBack();
             }
             throw $e;
+        }
+
+        // A deactivated extension's cached pages would keep serving from the
+        // static cache instead of 404ing — the route gate runs after the cache.
+        $this->clearStaticPageCache();
+    }
+
+    /**
+     * Drop the static page cache after an activation-state change. Cached
+     * anonymous pages bypass route matching entirely (StaticPageCache is
+     * checked before the plugin-inactive gate in RouteHelper), so any change
+     * to the active extension set invalidates every cached page. Non-fatal.
+     */
+    protected function clearStaticPageCache() {
+        try {
+            require_once(PathHelper::getIncludePath('includes/StaticPageCache.php'));
+            StaticPageCache::clearAll();
+        } catch (Exception $e) {
+            error_log(ucfirst($this->extension_type) . " static-cache clear failed: " . $e->getMessage());
         }
     }
 
