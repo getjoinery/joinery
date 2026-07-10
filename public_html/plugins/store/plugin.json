@@ -269,7 +269,7 @@
                 "default_email": true,
                 "title_template": "Sale completed: {product_name}",
                 "body_template": "{buyer_name} ({buyer_email}) completed a purchase — Order #{order_id}.",
-                "link_template": "/admin/admin_orders"
+                "link_template": "/plugins/store/admin/admin_orders"
             }
         },
         "payment.failed": {
@@ -287,7 +287,7 @@
                 "default_email": true,
                 "title_template": "Checkout payment failed",
                 "body_template": "A card charge failed at checkout (Order #{order_id}): {error_message}",
-                "link_template": "/admin/admin_orders"
+                "link_template": "/plugins/store/admin/admin_orders"
             }
         },
         "subscription.started": {
@@ -310,7 +310,7 @@
                 "default_email": true,
                 "title_template": "New subscription: {product_name}",
                 "body_template": "{buyer_name} ({buyer_email}) started a subscription — Order #{order_id}.",
-                "link_template": "/admin/admin_orders"
+                "link_template": "/plugins/store/admin/admin_orders"
             }
         },
         "subscription.cancelled": {
@@ -348,7 +348,7 @@
                 "default_email": true,
                 "title_template": "Subscription payment failed",
                 "body_template": "A recurring subscription payment failed ({provider} subscription {provider_subscription_id}).",
-                "link_template": "/admin/admin_orders"
+                "link_template": "/plugins/store/admin/admin_orders"
             }
         },
         "subscription.expired": {

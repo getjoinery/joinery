@@ -4,10 +4,12 @@ Findings from the guided code tour of the Sealed Vault (2026-07-10). Items
 are graded: **fix** (behavior should change), **consider** (a dial worth
 discussing), **note** (design tension to be aware of, may need no change).
 
-**Status: all items (1-11) are IMPLEMENTED (2026-07-10).** Item 3 was
+**Status: all items (1-13) are IMPLEMENTED (2026-07-10).** Item 3 was
 resolved as intended-behavior (heartbeat never extends the idle TTL —
 deliberate; comment aligned in `VaultUnlock.php`). The `uew_salt` column
-(item 9) is applied to the dev database via `update_database`.
+(item 9) is applied to the dev database via `update_database`. Items 12-13
+were found while building the test estate (specs/vault_testing.md) — the
+tests that exposed them are the regression coverage.
 
 ## 1. Recovery-code normalization should map Crockford confusables — fix
 
@@ -164,3 +166,33 @@ response didn't include one. Implemented: rotation now returns the same
 structure as setup, and both now include each wrapping's `salt` and
 `key_generation` (per #9/#10 the wrapping rows are self-describing, so the
 backup must carry those fields to actually reconstruct them).
+
+## 12. Rotation retries split the vault across generations forever — fix (critical)
+
+Found while designing the R3 crash test. After a re-seal failure the vault
+legitimately holds two live generations, and a retried rotation ALWAYS
+minted generation N+1: it drained and retired only the lowest generation,
+so every retry retired one generation and created another — the vault never
+converged below two live generations, items stayed split across two secrets,
+and any single unlock window could read only half the content, permanently.
+
+Fix (implemented): when the authorizing wrapping's generation is below the
+vault row's (the interrupted-rotation signature), the ceremony runs in
+**completion mode** — no new keypair/wrappings/salt; drain the old
+generation to the vault's EXISTING current key, retire it, converge to one
+live generation. Response: `completed_pending = true`, no codes (the current
+generation's were never shown), `regenerate_recommended = true`. Covered by
+the rotation crash suite's completion-convergence scenario.
+
+## 13. Vault reads and lockAll fatal in session-less / APCu-less processes — fix
+
+Found by the test estate. `VaultUnlock::secretKey()/isOpen()/heartbeat()`
+threw a RuntimeException where no session exists (a cron task reading a
+sealed field), and `lockAll()` fataled where APCu is disabled
+(`APCUIterator`'s constructor throws under CLI without `apc.enable_cli`) —
+so a credential event handled from CLI, or a sealed read from a scheduled
+task, crashed instead of behaving. Fix (implemented): read paths treat "no
+session" as locked (a session-less process can never hold a window — null,
+not an error; only `open()` demands a real session), and `lockAll()` skips
+the APCu sweep where the store is disabled (a disabled store holds no
+windows to wipe).

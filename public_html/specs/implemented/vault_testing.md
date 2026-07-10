@@ -5,6 +5,15 @@ ceremonies, and the mailbox consumer's re-seal path. Companion to
 `specs/vault_code_tour_fixes.md` (the code-tour findings these tests must
 pin down) and `docs/sealed_vault.md` (the behavior under test).
 
+**Status: IMPLEMENTED (2026-07-10).** All eight files landed and green
+(126 checks). Shared fixtures live in `tests/lib/vault_fixtures.php` (the
+runner discovers every `.php` under `tests/{area}/`, so helpers belong in
+`tests/lib/`). Building the estate surfaced findings #12 and #13 in the
+fixes spec — rotation retries now run in **completion mode** (drain to the
+existing current key; converge to one generation) rather than minting a new
+generation per retry, and the completion-convergence scenario below is their
+regression test.
+
 ## Philosophy
 
 The code tour proved the point: every real bug found was in **state ordering
@@ -174,13 +183,14 @@ per-item generation, mirroring the consumer contract.
   vault row, salt, generation, and every original wrapping are byte-for-byte
   untouched — the ceremony left no trace.
 - **R3 re-seal failure (the two-generation state)**: consumer armed to throw.
-  Assert: ceremony returns an error; `uev` is at generation 2 but BOTH
-  generations' wrappings are live; the authorizing passkey still unlocks (and
-  unwraps the gen-1 secret on a rotation retry — lowest-generation
-  selection); a gen-1 recovery code STILL UNLOCKS via its per-wrapping salt;
-  enrollment cores refuse (mixed generations); then disarm the consumer,
-  re-run the rotation, and assert convergence — the retry drains generation
-  1, retires it, and exactly one generation remains live.
+  Assert: ceremony returns an error; `uev` is at the new generation but BOTH
+  generations' wrappings are live; every item still opens under the
+  old-generation secret; an old-generation recovery code STILL UNLOCKS via
+  its per-wrapping salt; then disarm the consumer, re-run the rotation, and
+  assert convergence — the retry runs in COMPLETION MODE (`completed_pending
+  = true`, same key_generation, no new codes, `regenerate_recommended`),
+  drains the old generation to the existing current key, retires it, and
+  exactly one generation remains live.
 - **R4 orphan cleanup**: fabricate a wrapping tagged generation 3 while `uev`
   says 2; run a rotation; assert the orphan was soft-deleted before anything
   else and the ceremony completed normally.

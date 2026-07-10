@@ -117,10 +117,30 @@ URL placeholders (`{slug}`, `{id}`, etc.) are extracted into a `$params` array t
 
 | Option | Required | Description |
 |--------|----------|-------------|
-| `view` | Yes | View file path, no `.php`. Supports `{path}`, `{file}`, `{slug}` placeholders |
+| `view` | Yes* | View file path, no `.php`. Supports `{path}`, `{file}`, `{slug}` placeholders |
+| `handler` | Yes* | Alternative to `view`: a handler file (no `.php`) that fully serves the response itself (e.g. ICS downloads) — no view/theme resolution runs |
+| `plugin` | No | Plugin name that owns this route. View/handler and auto-loaded logic resolve from the plugin's directory; the route hard-404s while the plugin is inactive. See below |
 | `check_setting` | No | Setting name — route only serves if setting is truthy |
 | `min_permission` | No | Minimum permission level required (uses `SessionControl::check_permission()`). **See the ladder below — note `0` requires login; *omit* the key for a truly public page.** |
 | `valid_page` | No | Set `false` to exclude from page statistics (default: `true`) |
+
+*Exactly one of `view` or `handler`.
+
+#### Plugin-delegated routes
+
+A core-declared route can be owned by a plugin: the URL stays a first-class core URL (`/cart`, `/event/{slug}`), but its view (or handler) and auto-loaded logic resolve from the plugin's directory.
+
+```php
+'/cart'             => ['view' => 'views/cart', 'plugin' => 'store', 'check_setting' => 'products_active'],
+'/event/{slug}.ics' => ['handler' => 'includes/ics_event_route', 'plugin' => 'event_manager', 'check_setting' => 'events_active'],
+```
+
+Two guarantees:
+
+- **Inactive plugin → hard 404.** A plugin-delegated route is exclusively owned by its plugin. When the plugin is inactive or absent, the URL 404s outright — it never falls through to a theme or base view of the same name.
+- **The plugin gate runs before `check_setting`.** The gating setting row is seeded at plugin activation, so on a never-activated install it does not exist; checking the plugin first is what keeps that case a 404 instead of a silent fall-through.
+
+Use plugin delegation for top-level URLs a plugin owns. Plugin pages under the plugin's own namespace (`/plugins/{plugin}/...`, `/profile/{plugin}/...`) need no serve.php entry — they auto-discover.
 
 #### Permission levels and the `min_permission => 0` gotcha
 

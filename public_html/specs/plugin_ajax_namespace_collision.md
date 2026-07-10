@@ -1,16 +1,14 @@
 # Plugin `ajax/` / `utils/` / `tests/` — collision vs. override
 
-**Status:** Active — **decision settled**, ready to implement.
-**Touches:** `PluginManager` sync validation, the four plugins with flat-namespace
-endpoints (`server_manager`, `dns_filtering`, `mailbox`, `bookings`) and
-their JS callers, `docs/routing.md`, `docs/plugin_developer_guide.md`.
-
-**Partial delivery via another spec:** the sync-time collision validator (item 1)
-and the store/event endpoint treatments (`checkout_ajax` → store API actions,
-`session_search_ajax` → event_manager API action, Stripe/PayPal webhooks staying
-flat from `plugins/store/ajax/`) ship with
-[`store_and_event_manager_plugin_extraction.md`](store_and_event_manager_plugin_extraction.md).
-Remaining scope here: the four plugins' page-JS migrations below.
+**Status:** Active — decision settled. The guardrail and the store/event endpoint
+treatments shipped with
+[`store_and_event_manager_plugin_extraction.md`](implemented/store_and_event_manager_plugin_extraction.md):
+the sync-time collision validator runs in `PluginManager::sync()`, `checkout_ajax`'s
+successor surface is store API actions, `session_search` was deleted, and the
+Stripe/PayPal webhooks stay flat from `plugins/store/ajax/`.
+**Remaining scope here:** the four plugins' page-JS migrations below.
+**Touches:** `server_manager`, `dns_filtering`, `mailbox`, `bookings` and their JS
+callers; `docs/routing.md`, `docs/plugin_developer_guide.md`.
 
 ## The decision
 
@@ -18,7 +16,7 @@ Remaining scope here: the four plugins' page-JS migrations below.
 platform already answers both correctly everywhere except the legacy flat
 namespace.** No new namespaced `/ajax/` routing will be built. The cure is the
 surface that already exists: plugin endpoints are API actions at
-`/api/v1/action/{plugin}/{action}`. The legacy flat namespace gets a sync-time
+`/api/v1/action/{plugin}/{action}`. The legacy flat namespace has a sync-time
 collision validator for the remainder of its life, and its page-JS endpoints
 migrate to API actions.
 
@@ -58,22 +56,19 @@ Two facts seal it:
   — fully isolated from `joinery_ai`, whose chat endpoints are namespaced under
   `views/admin/` today and have the same API-action future home.
 
-## What to build
+## The shipped guardrail (context, not scope)
 
-### 1. Sync-time collision validator (guardrail)
-
-Plugin sync (`PluginManager::sync()`, which also runs as `update_database`'s final
-step and on plugin activation) validates the flat namespace: collect every
-`ajax/`, `utils/`, and `tests/` basename across all **active** plugins plus the
-corresponding core directory, and **fail the sync with a named-file error** when
+`PluginManager::sync()` (which also runs as `update_database`'s plugin step and on
+plugin activation) validates the flat namespace: it collects every `ajax/`,
+`utils/`, and `tests/` top-level basename across all **active** plugins plus the
+corresponding core directory, and **fails the sync with a named-file error** when
 two participants declare the same basename in the same directory type. Silent
-shadowing becomes an explicit error.
+shadowing is an explicit error. This permanently covers `utils/` and `tests/`,
+which have no API-action analog and stay flat.
 
-This is not a band-aid: it surfaces the collision rather than hiding it, and it
-permanently covers `utils/` and `tests/`, which have no API-action analog and
-stay flat.
+## What remains to build
 
-### 2. Migrate plugin page-JS `ajax/` endpoints to API actions
+### Migrate plugin page-JS `ajax/` endpoints to API actions
 
 Each browser-facing endpoint becomes a logic action in
 `plugins/{plugin}/logic/{action}_logic.php` with the `_logic_api()` opt-in, and
@@ -97,27 +92,21 @@ pressure — under `/api/v1/action/mailbox/...` the plugin owns its names.
 **Stays flat (validator-guarded):**
 
 - `mailbox/ajax/inbound_email_webhook.php` — called by external providers,
-  not page JS; webhooks live in the flat namespace alongside core's Stripe
-  webhooks.
+  not page JS; webhooks live in the flat namespace alongside the store's
+  Stripe/PayPal webhooks.
 - `mailbox/utils/inbound_email_handler` and the 12 `tests/*_test` files —
   `utils/` and `tests/` have no API-action analog.
 
-### 3. Documentation
+### Documentation
 
-- `docs/routing.md` — document the end state: plugin browser endpoints are API
-  actions (namespaced by address); flat `ajax/`/`utils/`/`tests/` resolution
-  exists for webhooks, utils, and tests, with basenames validated unique at
-  plugin sync.
-- `docs/plugin_developer_guide.md` — plugin endpoint guidance points at API
-  actions; note the sync validator and the flat namespace's remaining legitimate
-  uses (webhooks, utils, tests).
+As each plugin migrates: `docs/plugin_developer_guide.md`'s endpoint guidance
+points at API actions, noting the sync validator and the flat namespace's
+remaining legitimate uses (webhooks, utils, tests).
 
 ## Sequencing
 
-The validator (item 1) ships first and independently — it is cheap and stops any
-new silent collision immediately. The per-plugin migrations (item 2) can then
-land one plugin at a time in any order; each is self-contained (logic file + JS
-callers + delete old file). Docs (item 3) update as each piece lands.
+The per-plugin migrations land one plugin at a time in any order; each is
+self-contained (logic file + JS callers + delete old file).
 
 ## Notes
 

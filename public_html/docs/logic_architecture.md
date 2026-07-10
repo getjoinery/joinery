@@ -492,11 +492,13 @@ Instead of completely replacing core logic, themes can create focused logic file
 
 ```php
 // /theme/phillyzouk/logic/index_logic.php
+// (this theme declares "requires_plugins": ["event_manager"] in theme.json,
+//  so the plugin's classes are guaranteed present)
 <?php
 
 function index_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('data/posts_class.php'));
-    require_once(PathHelper::getIncludePath('data/events_class.php'));
+    require_once(PathHelper::getIncludePath('plugins/event_manager/data/events_class.php'));
 
     $page_vars = array();
 

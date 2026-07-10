@@ -183,7 +183,7 @@ function admin_event_edit_logic(array $input): LogicResult {
         // ... set other fields ...
         $event->prepare();
         $event->save();
-        return LogicResult::redirect('/admin/admin_event?evt_event_id=' . $event->key);
+        return LogicResult::redirect('/plugins/event_manager/admin/admin_event?evt_event_id=' . $event->key);
     }
 
     return LogicResult::render(['event' => $event]);
