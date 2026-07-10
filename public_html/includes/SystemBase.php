@@ -1864,6 +1864,15 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 	protected $cached_references;
 	protected static $default_options = array();
 
+	public $loaded;
+	public $loadable;
+	public $options;
+	public $order_by;
+	public $limit;
+	public $offset;
+	public $operation;
+	public $write_lock;
+
 	/**
 	 * API collection owner-scope (§4.5). When set to [column, value] by the REST
 	 * collection endpoint for a non-staff caller, _get_resultsv2() ANDs
@@ -2172,11 +2181,11 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 		$this->multi_data = array_values($this->multi_data);
 	}
 
-	function count() {
+	function count(): int {
 		return count($this->multi_data);
 	}
 
-	function getIterator() {
+	function getIterator(): Traversable {
 		return new ArrayIterator($this->multi_data);
 	}
 
@@ -2186,6 +2195,13 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 }
 
 class SystemMultiBaseIncremental implements Iterator {
+
+	private $overall_position;
+	private $incremental_position;
+	private $multi_base;
+	private $original_limit;
+	private $original_offset;
+	private $current_segment;
 
 	function __construct($multi_base, $incremental_limit=200) {
 		$this->overall_position = 0;
@@ -2205,14 +2221,14 @@ class SystemMultiBaseIncremental implements Iterator {
 		$this->current_segment = NULL;
 	}
 
-	function rewind() {
+	function rewind(): void {
 	}
 
-	function key() {
+	function key(): mixed {
 		return $this->overall_position;
 	}
 
-	function next() {
+	function next(): void {
 		$this->incremental_position++;
 		$this->overall_position++;
 
@@ -2223,12 +2239,12 @@ class SystemMultiBaseIncremental implements Iterator {
 		}
 	}
 
-	function current() {
+	function current(): mixed {
 		return $this->multi_base->get($this->incremental_position);
 	}
 
-	function valid() {
-		return ($this->original_limit === NULL || $this->overall_position < $this->original_limit) && 
+	function valid(): bool {
+		return ($this->original_limit === NULL || $this->overall_position < $this->original_limit) &&
 			$this->multi_base->is_valid($this->incremental_position);
 	}
 

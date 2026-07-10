@@ -272,6 +272,7 @@ function get_embed($vidwidth = 560, $vidheight = 315) {
 		// Provider-based access gate (event registration, or any future gate kind).
 		// Ungated → allowed; a gate whose provider is absent → denied (fail-closed).
 		require_once(PathHelper::getIncludePath('includes/AccessGateRegistry.php'));
+require_once(PathHelper::getIncludePath('data/users_class.php'));
 		if (!AccessGateRegistry::userMayAccess($this->get('vid_access_provider'), $this->get('vid_access_ref'), $session->get_user_id())){
 			return false;
 		}

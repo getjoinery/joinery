@@ -8,6 +8,7 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/SingleRowAccessor.php'));
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 require_once(PathHelper::getIncludePath('includes/Validator.php'));
+require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 class FileException extends SystemBaseException {}
 

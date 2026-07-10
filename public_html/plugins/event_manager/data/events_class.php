@@ -17,6 +17,7 @@ require_once(PathHelper::getIncludePath('includes/calendar-links/Generators/Goog
 require_once(PathHelper::getIncludePath('includes/calendar-links/Generators/Ics.php'));
 require_once(PathHelper::getIncludePath('includes/calendar-links/Generators/Yahoo.php'));
 require_once(PathHelper::getIncludePath('includes/calendar-links/Generators/WebOutlook.php'));
+require_once(PathHelper::getIncludePath('data/users_class.php'));
 use Spatie\CalendarLinks\Link;
 
 class EventException extends SystemBaseException {}

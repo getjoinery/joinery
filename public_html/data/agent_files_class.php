@@ -7,6 +7,7 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/SingleRowAccessor.php'));
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 require_once(PathHelper::getIncludePath('includes/Validator.php'));
+require_once(PathHelper::getIncludePath('data/content_versions_class.php'));
 
 class AgentFileException extends SystemBaseException {}
 
@@ -150,7 +151,7 @@ class AgentFile extends SystemBase {
 
 		$result = parent::save($debug);
 
-		if ($needs_version && $this->key && class_exists('ContentVersion')) {
+		if ($needs_version && $this->key) {
 			try {
 				$description = ($previous_content === '') ? 'Created' : 'Updated';
 				ContentVersion::NewVersion(

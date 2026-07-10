@@ -86,7 +86,7 @@ A mutating action request may carry an `Idempotency-Key` header (hyphen form, li
 
 - The first request with a key executes normally; its response (status + body) is stored for 24 hours.
 - A retry with the same key and same body receives the stored response verbatim, without re-executing — safe to fire blindly after a timeout or lost response.
-- The same key with a different body or different action is a client bug and gets **409** `ActionError`; so does a retry that arrives while the original is still executing.
+- The same key with a different body or different action is a client bug and gets **409** `ActionError`; so does a retry that arrives while the original is still executing. The key check answers before boundary validation, so the 409 wins even when the mismatched body would also fail validation.
 - No header → no idempotency behavior; the request is processed exactly as always.
 
 Keys are scoped per credential (API key, or user for browser sessions), so key strings never collide across callers, and both credential types behave identically. Sessionless actions (`register`, password resets) have no credential to scope to and ignore the header. The replayed body is a snapshot of the original outcome — a retried `cart` add returns the cart as it looked at execution time. Client convention: attach the header in the networking layer for every mutating action call, generating a fresh key per logical operation and reusing it only for retries of that operation.
@@ -714,7 +714,8 @@ and the AI action surface (`describe_actions` / `invoke_action`).
 request body is coerced and validated against it (`DescriptorValidator`)
 before the logic runs: a hard failure — missing required field, uncoercible
 type, out-of-bounds value — returns `422` with errortype `ValidationError`
-and the logic never executes, without consuming an `Idempotency-Key`. Coerced
+and the logic never executes, without claiming an `Idempotency-Key` (though a
+key that already conflicts or replays resolves first, before validation). Coerced
 values (typed, defaults applied) overlay the raw input; fields the schema
 doesn't declare pass through untouched. The logic file's own validation
 remains the backstop. See `includes/DescriptorValidator.php` for the type

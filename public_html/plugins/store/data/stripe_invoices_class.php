@@ -6,6 +6,7 @@ require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 require_once(PathHelper::getIncludePath('includes/SingleRowAccessor.php'));
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 require_once(PathHelper::getIncludePath('includes/Validator.php'));
+require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 class StripeInvoiceException extends SystemBaseException {}
 

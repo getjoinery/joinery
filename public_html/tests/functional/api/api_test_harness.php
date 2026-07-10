@@ -53,6 +53,14 @@ function api_test_boot($argv) {
 	$caller = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 1);
 	$meta = ($caller[0]['file'] ?? '') ? (harness_parse_metadata($caller[0]['file']) ?: array()) : array();
 	harness_boot($meta);
+
+	// The API's failed-auth limiter counts credential-less requests per IP in a
+	// shared window (api_auth_rate_limit_requests per api_auth_rate_limit_window).
+	// Suites probe unauthenticated paths deliberately, so an earlier suite — or an
+	// earlier run — would exhaust the budget and turn every later check into a 429.
+	// Each suite starts with a clean counter.
+	$db = DbConnector::get_instance()->get_db_link();
+	$db->prepare("DELETE FROM rql_request_logs WHERE rql_feature = 'api_auth'")->execute();
 }
 
 /**

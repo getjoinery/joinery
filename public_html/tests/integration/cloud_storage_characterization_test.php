@@ -160,9 +160,10 @@ try {
 		"SELECT fil_file_id FROM fil_files
 		 WHERE (fil_storage_driver IS NULL OR fil_storage_driver = 'local')
 		   AND fil_delete_time IS NULL
+		   AND (fil_private IS NULL OR fil_private = false)
 		   AND (fil_min_permission IS NULL OR fil_min_permission = 0)
 		   AND (fil_grp_group_id IS NULL OR fil_grp_group_id = 0)
-		   AND (fil_evt_event_id IS NULL OR fil_evt_event_id = 0)
+		   AND fil_access_provider IS NULL
 		   AND (fil_tier_min_level IS NULL OR fil_tier_min_level = 0)
 		   AND COALESCE(fil_sync_failed_count, 0) < :cap
 		   AND fil_file_id = ANY(:ids)");

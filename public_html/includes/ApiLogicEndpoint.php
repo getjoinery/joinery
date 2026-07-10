@@ -31,7 +31,12 @@
  * actions via the theme chain; {plugin}/{action} names resolve to a plugin's
  * logic directory).
  *
- * @version 1.2.0
+ * @version 1.3.0
+ * @changelog 1.3.0 - Idempotency resolves before boundary validation: a key
+ *   reused with a different body is a 409 even when the new body would not
+ *   validate (the retry mismatch outranks the validation detail). Claiming
+ *   still happens only after validation passes — an invalid request never
+ *   claims a key.
  * @changelog 1.2.0 - Descriptor consumption (specs/implemented/descriptor_rest_api_core.md):
  *   metadata resolves from _logic_descriptor() first, _logic_api()
  *   as fallback; a descriptor-declared input schema is validated at the
@@ -163,14 +168,23 @@ class ApiLogicEndpoint {
 		$json_params = json_decode($raw_input, true);
 		$post_params = is_array($json_params) ? $json_params : $_POST;
 
+		// Idempotency, phase 1 (docs/api.md § Contract): resolve the key against
+		// stored outcomes FIRST — a replay or conflict exits here, before
+		// validation, session simulation, and any side effect. A key reused with
+		// a different body is a 409 even when the new body would not validate:
+		// the retry mismatch is the more important thing to tell the caller.
+		// Returns the resolution context, or null when the request carries no
+		// Idempotency-Key (or no credential to scope it to).
+		$idem_ctx = self::idempotencyResolve($action_label, $api_user, $api_entry, $raw_input);
+
 		// Boundary validation: when the metadata declares an input schema
 		// (descriptors do; legacy _logic_api() has none), coerce and validate
-		// the request against it before anything else — an invalid request
-		// exits 422 without claiming an Idempotency-Key or simulating a
-		// session. Coerced values (typed, defaults applied) overlay the raw
-		// ones; fields the schema doesn't declare pass through untouched, so
-		// a partial schema never strips input the logic reads. The logic
-		// file's own validation remains the backstop.
+		// the request against it — an invalid request exits 422 without
+		// claiming an Idempotency-Key or simulating a session. Coerced values
+		// (typed, defaults applied) overlay the raw ones; fields the schema
+		// doesn't declare pass through untouched, so a partial schema never
+		// strips input the logic reads. The logic file's own validation
+		// remains the backstop.
 		if (!empty($meta['input']) && is_array($meta['input'])) {
 			require_once(PathHelper::getIncludePath('includes/DescriptorValidator.php'));
 			try {
@@ -188,11 +202,10 @@ class ApiLogicEndpoint {
 			$post_params = array_merge($post_params, $coerced);
 		}
 
-		// Idempotency (docs/api.md § Contract): a replay or conflict exits here,
-		// before session simulation and before any side effect. Returns the
-		// in-flight row to finalize after the action runs, or null when the
-		// request carries no Idempotency-Key (or no credential to scope it to).
-		$idem_record = self::idempotencyBegin($action_label, $api_user, $api_entry, $raw_input);
+		// Idempotency, phase 2: the request is valid, so claim the key now
+		// (insert the in-flight row). Returns the row to finalize after the
+		// action runs, or null when no key is in play.
+		$idem_record = $idem_ctx ? self::idempotencyClaim($idem_ctx, $action_label, $user_id) : null;
 
 		// Set up session simulation if needed
 		$session = SessionControl::get_instance();
@@ -280,13 +293,14 @@ class ApiLogicEndpoint {
 	}
 
 	/**
-	 * Resolve an Idempotency-Key request against the stored outcomes. Four
-	 * possible results:
+	 * Resolve an Idempotency-Key request against the stored outcomes — the
+	 * read-only phase, run BEFORE boundary validation. Four possible results:
 	 *
 	 *   - no header, or no credential to scope to (sessionless) → null; the
 	 *     action runs exactly as it always has.
-	 *   - first sighting of the key → claim it (insert an in-flight row) and
-	 *     return the row for idempotencyFinalize().
+	 *   - first sighting of the key → return the context for
+	 *     idempotencyClaim() (nothing persisted yet — an invalid request must
+	 *     never claim a key).
 	 *   - key already finalized with the same action + body → replay the
 	 *     stored response verbatim and EXIT.
 	 *   - key seen with a different action or body, or the original is still
@@ -294,12 +308,8 @@ class ApiLogicEndpoint {
 	 *     5 minutes is treated as an abandoned original (the request died
 	 *     before storing its outcome) and is taken over instead of blocking
 	 *     the client until the purge.
-	 *
-	 * Claiming is insert-first against the (key_hash, credential_scope)
-	 * unique pair, so two concurrent originals cannot both execute — the
-	 * loser of the race re-reads the winner's row and resolves against it.
 	 */
-	protected static function idempotencyBegin($action_label, $api_user, $api_entry, $raw_input) {
+	protected static function idempotencyResolve($action_label, $api_user, $api_entry, $raw_input) {
 		$raw_key = self::idempotencyKeyHeader();
 		if ($raw_key === '') {
 			return null;
@@ -314,26 +324,52 @@ class ApiLogicEndpoint {
 		$user_id = $api_user ? $api_user->key : NULL;
 		$key_hash = hash('sha256', $raw_key);
 		$body_hash = hash('sha256', (string) $raw_input);
+		$ctx = array('key_hash' => $key_hash, 'scope' => $scope, 'body_hash' => $body_hash, 'row' => null);
 
 		$row = ApiIdempotencyKey::find($key_hash, $scope);
 		if ($row === null) {
-			$row = new ApiIdempotencyKey(NULL);
-			$row->set('aik_key_hash', $key_hash);
-			$row->set('aik_credential_scope', $scope);
-			$row->set('aik_action', $action_label);
-			$row->set('aik_body_hash', $body_hash);
-			try {
-				$row->save();
-				return $row;
-			} catch (Exception $e) {
-				// Lost the unique race — a concurrent original claimed the key.
-				$row = ApiIdempotencyKey::find($key_hash, $scope);
-				if ($row === null) {
-					throw $e; // not the race: a genuine storage failure
-				}
+			return $ctx; // fresh key: claim after validation
+		}
+		$ctx['row'] = self::idempotencyResolveExisting($row, $action_label, $user_id, $body_hash);
+		return $ctx;
+	}
+
+	/**
+	 * Claim the key — the write phase, run after boundary validation passes.
+	 * Claiming is insert-first against the (key_hash, credential_scope)
+	 * unique pair, so two concurrent originals cannot both execute — the
+	 * loser of the race re-reads the winner's row and resolves against it
+	 * (which replays or 409s exactly as if the row had existed at resolve
+	 * time). Returns the row for idempotencyFinalize().
+	 */
+	protected static function idempotencyClaim($ctx, $action_label, $user_id) {
+		if ($ctx['row'] !== null) {
+			return $ctx['row']; // abandoned original taken over at resolve time
+		}
+		$row = new ApiIdempotencyKey(NULL);
+		$row->set('aik_key_hash', $ctx['key_hash']);
+		$row->set('aik_credential_scope', $ctx['scope']);
+		$row->set('aik_action', $action_label);
+		$row->set('aik_body_hash', $ctx['body_hash']);
+		try {
+			$row->save();
+			return $row;
+		} catch (Exception $e) {
+			// Lost the unique race — a concurrent original claimed the key.
+			$row = ApiIdempotencyKey::find($ctx['key_hash'], $ctx['scope']);
+			if ($row === null) {
+				throw $e; // not the race: a genuine storage failure
 			}
 		}
+		return self::idempotencyResolveExisting($row, $action_label, $user_id, $ctx['body_hash']);
+	}
 
+	/**
+	 * Resolve against an existing row: conflict → 409 EXIT, finalized same
+	 * request → replay EXIT, fresh in-flight original → 409 EXIT, abandoned
+	 * in-flight original → returned for takeover.
+	 */
+	protected static function idempotencyResolveExisting($row, $action_label, $user_id, $body_hash) {
 		if ($row->get('aik_action') !== $action_label || $row->get('aik_body_hash') !== $body_hash) {
 			RequestLogger::log('api', 'action ' . $action_label, false, [
 				'user_id' => $user_id,
