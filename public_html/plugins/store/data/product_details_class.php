@@ -3,6 +3,7 @@
 require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
+require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 class ProductDetailException extends SystemBaseException {}
 class ProductDetailNotSentException extends ProductDetailException {};

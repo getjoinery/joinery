@@ -7,6 +7,7 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/SingleRowAccessor.php'));
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 require_once(PathHelper::getIncludePath('includes/Validator.php'));
+require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 class GeneralErrorException extends SystemBaseException {}
 
@@ -82,7 +83,7 @@ function display_time($session) {
 		$safe_request = self::sanitizeSessionData($request);
 		
 		$error_context = $exception->getTraceAsString() . "\r\n \r\n REQUEST_URI: " .
-		                 $_SERVER['REQUEST_URI'] . "\r\n \r\n \$_SESSION: " .
+		                 ($_SERVER['REQUEST_URI'] ?? '(cli)') . "\r\n \r\n \$_SESSION: " .
 		                 print_r($safe_session, true) . ' $_REQUEST: ' . 
 		                 print_r($safe_request, true);
 		

@@ -101,6 +101,7 @@ class VisitorEvent extends SystemBase {
 
 			// Check consent before tracking (analytics tracking requires consent)
 			require_once(PathHelper::getIncludePath('includes/ConsentHelper.php'));
+require_once(PathHelper::getIncludePath('data/users_class.php'));
 			$consent = ConsentHelper::get_instance();
 			if ($consent->isEnabled() && !$consent->allowsAnalytics()) {
 				return; // Don't track without consent

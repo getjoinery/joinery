@@ -9,6 +9,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 require_once(PathHelper::getIncludePath('includes/Validator.php'));
 
 require_once(PathHelper::getIncludePath('data/page_contents_class.php'));
+require_once(PathHelper::getIncludePath('data/content_versions_class.php'));
 
 class PageException extends SystemBaseException {}
 

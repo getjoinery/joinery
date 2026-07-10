@@ -8,6 +8,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 require_once(PathHelper::getIncludePath('includes/Validator.php'));
 require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
 require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('plugins/store/includes/StripeHelper.php'));
 
 require_once(PathHelper::getIncludePath('data/address_class.php'));

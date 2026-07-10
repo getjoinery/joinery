@@ -119,9 +119,10 @@ try {
 		if ($e['slug'] === 'core-profile') $profile_entry = $e;
 	}
 	check($profile_entry !== null
-		&& ($profile_entry['destination']['type'] ?? '') === 'web'
-		&& ($profile_entry['destination']['url'] ?? '') === '/profile',
-		'core-profile destination is {type: web, url: /profile}',
+		&& ($profile_entry['destination']['type'] ?? '') === 'native'
+		&& ($profile_entry['destination']['screen'] ?? '') === 'profile'
+		&& ($profile_entry['destination']['fallback_url'] ?? '') === '/profile',
+		'core-profile destination is {type: native, screen: profile, fallback_url: /profile}',
 		json_encode($profile_entry));
 
 	$res = api_request('GET', '/api/v1/app/navigation', $admin_headers);
