@@ -38,15 +38,31 @@ function vault_unlock_passphrase_logic(array $input): LogicResult {
 	if ($wrappings->count() === 0) {
 		return LogicResult::error('No vault passphrase is enrolled.');
 	}
-	$wrapping = $wrappings->get(0);
 
 	$box = new SealedBox();
-	$kek = $box->kekFromPassphrase($passphrase, $vault->get('uev_salt'));
 
-	try {
-		$ad = UserEncryptionWrapping::adFor($vault->key, $wrapping->key);
-		$secret_key = $box->unwrapKey($wrapping->get('uew_wrapped_secret_key'), $kek, $ad);
-	} catch (Exception $e) {
+	// Each wrapping records the salt its KEK was derived under (a rotation
+	// replaces uev_salt). The passphrase KDF is deliberately expensive, so
+	// derive once per distinct salt — normally exactly one derivation.
+	$keks = [];
+	$secret_key = null;
+	foreach ($wrappings as $wrapping) {
+		$salt = (string)$wrapping->get('uew_salt');
+		if ($salt === '') {
+			$salt = (string)$vault->get('uev_salt'); // legacy row predating uew_salt
+		}
+		if (!isset($keks[$salt])) {
+			$keks[$salt] = $box->kekFromPassphrase($passphrase, $salt);
+		}
+		try {
+			$ad = UserEncryptionWrapping::adFor($vault->key, $wrapping->key);
+			$secret_key = $box->unwrapKey($wrapping->get('uew_wrapped_secret_key'), $keks[$salt], $ad);
+			break;
+		} catch (Exception $e) {
+			continue;
+		}
+	}
+	if ($secret_key === null) {
 		RequestLogger::log('vault_unlock_passphrase', 'verify', false, ['user_id' => $user->key]);
 		return LogicResult::error('Incorrect vault passphrase.');
 	}

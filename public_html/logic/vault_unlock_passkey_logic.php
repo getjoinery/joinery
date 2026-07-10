@@ -46,7 +46,22 @@ function vault_unlock_passkey_logic(array $input): LogicResult {
 	if ($wrappings->count() === 0) {
 		return LogicResult::error('This passkey does not unlock your vault.');
 	}
-	$wrapping = $wrappings->get(0);
+	// Normally one live wrapping per credential. After a partial rotation
+	// (re-seal failure) two generations are live — prefer the CURRENT
+	// generation deterministically (new arrivals seal to it), falling back to
+	// the lowest; either way the state converges when the rotation is re-run.
+	$current_generation = (int)$vault->get('uev_key_generation');
+	$wrapping = null;
+	foreach ($wrappings as $w) {
+		$generation = (int)$w->get('uew_key_generation');
+		if ($generation === $current_generation) {
+			$wrapping = $w;
+			break;
+		}
+		if ($wrapping === null || $generation < (int)$wrapping->get('uew_key_generation')) {
+			$wrapping = $w;
+		}
+	}
 
 	try {
 		$box = new SealedBox();

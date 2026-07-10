@@ -23,7 +23,13 @@ class UserEncryptionWrappingException extends SystemBaseException {}
  * delete (`uew_delete_time`) is how a wrapping is retired — regenerated
  * codes, a removed passphrase, or a revoked passkey's wrapping.
  *
- * @version 1.0
+ * Every wrapping is self-contained: `uew_key_generation` says which vault
+ * generation's secret it wraps, and `uew_salt` records the KDF salt its KEK
+ * was derived under (recovery/passphrase wrappings only; passkey PRF KEKs are
+ * salt-independent and store null). Unlock paths read the wrapping's own
+ * salt, so a rotation replacing `uev_salt` never strands a live wrapping.
+ *
+ * @version 1.1
  */
 class UserEncryptionWrapping extends SystemBase {
 	public static $prefix = 'uew';
@@ -44,6 +50,7 @@ class UserEncryptionWrapping extends SystemBase {
 		'uew_unlocker_type'      => array('type'=>'varchar(16)', 'is_nullable'=>false),
 		'uew_pkc_credential_id'  => array('type'=>'int8', 'is_nullable'=>true, 'index'=>true),
 		'uew_wrapped_secret_key' => array('type'=>'text', 'is_nullable'=>false),
+		'uew_salt'               => array('type'=>'varchar(64)', 'is_nullable'=>true),
 		'uew_key_generation'     => array('type'=>'int4', 'is_nullable'=>false, 'default'=>1),
 		'uew_is_used'            => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		'uew_label'              => array('type'=>'varchar(255)', 'is_nullable'=>true),
@@ -69,13 +76,21 @@ class UserEncryptionWrapping extends SystemBase {
 	 * the AD binds in the wrapping's own id, which only exists after the
 	 * first save(), so it saves once to allocate the row then again with the
 	 * real ciphertext. $key_generation tags which vault generation the
-	 * wrapped secret belongs to (defaults to 1 - the pre-rotation generation
-	 * every consumer of this method other than key rotation is creating
-	 * wrappings for); rotation passes the new generation explicitly.
+	 * wrapped secret belongs to; null resolves to the vault's CURRENT
+	 * generation (correct for every enrollment ceremony — the in-window
+	 * secret being wrapped is the current generation's). Rotation passes its
+	 * computed new generation explicitly. $salt records the KDF salt the KEK
+	 * was derived under (recovery/passphrase only; null for passkeys).
 	 */
-	public static function createWrapped(int $vault_id, string $unlocker_type, string $secret_key, string $kek, $credential_id = null, $label = null, int $key_generation = 1): UserEncryptionWrapping {
+	public static function createWrapped(int $vault_id, string $unlocker_type, string $secret_key, string $kek, $credential_id = null, $label = null, ?int $key_generation = null, ?string $salt = null): UserEncryptionWrapping {
 		require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
+		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 		$box = new SealedBox();
+
+		if ($key_generation === null) {
+			$vault = new UserEncryptionVault($vault_id, TRUE);
+			$key_generation = (int)$vault->get('uev_key_generation');
+		}
 
 		$wrapping = new UserEncryptionWrapping(NULL);
 		$wrapping->set('uew_uev_user_encryption_vault_id', $vault_id);
@@ -86,6 +101,9 @@ class UserEncryptionWrapping extends SystemBase {
 		if ($label !== null) {
 			$wrapping->set('uew_label', $label);
 		}
+		if ($salt !== null) {
+			$wrapping->set('uew_salt', $salt);
+		}
 		$wrapping->set('uew_key_generation', $key_generation);
 		$wrapping->set('uew_wrapped_secret_key', '');
 		$wrapping->save();
@@ -95,6 +113,25 @@ class UserEncryptionWrapping extends SystemBase {
 		$wrapping->save();
 
 		return $wrapping;
+	}
+
+	/**
+	 * The distinct key generations with at least one live wrapping on this
+	 * vault. More than one entry means a partially-completed rotation whose
+	 * only exit is re-running the rotation — enrollment ceremonies check this
+	 * and refuse, since a wrapping they created could not be tagged with a
+	 * single truthful generation.
+	 *
+	 * @return int[]
+	 */
+	public static function liveGenerations(int $vault_id): array {
+		$wrappings = new MultiUserEncryptionWrapping(['vault_id' => $vault_id]);
+		$wrappings->load();
+		$generations = [];
+		foreach ($wrappings as $wrapping) {
+			$generations[(int)$wrapping->get('uew_key_generation')] = true;
+		}
+		return array_keys($generations);
 	}
 }
 

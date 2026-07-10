@@ -67,28 +67,41 @@ onto a different row and still decrypt.
 ## Key hierarchy
 
 - **`uev_user_encryption_vaults`** (`UserEncryptionVault`) — one row per
-  (user, scope): `uev_public_key` (cleartext), `uev_salt` (shared KDF salt for
-  the recovery/passphrase unlockers), `uev_custody` (`server` here; `client`
-  is the future drive/passwords shape), `uev_key_generation`.
+  (user, scope): `uev_public_key` (cleartext), `uev_salt` (the current
+  generation's KDF salt for the recovery/passphrase unlockers), `uev_custody`
+  (`server` here; `client` is the future drive/passwords shape),
+  `uev_key_generation`.
 - **`uew_user_encryption_wrappings`** (`UserEncryptionWrapping`) — one row per
   enrolled unlocker: `uew_unlocker_type` (`passkey`/`recovery`/`passphrase`),
   `uew_wrapped_secret_key` (AEAD-wrapped, AD = `vault:{vault_id}:{wrapping_id}`
-  via `UserEncryptionWrapping::adFor()`), `uew_is_used` (recovery codes are
-  one-time), `uew_delete_time` (soft delete retires a wrapping).
+  via `UserEncryptionWrapping::adFor()`), `uew_salt` (the KDF salt this
+  wrapping's KEK was derived under — recovery/passphrase only, null for
+  passkeys — so a rotation replacing `uev_salt` never strands a live
+  wrapping), `uew_key_generation` (which generation's secret it wraps),
+  `uew_is_used` (recovery codes are one-time), `uew_delete_time` (soft delete
+  retires a wrapping).
 
 `UserEncryptionWrapping::createWrapped($vault_id, $type, $secret_key, $kek,
-$credential_id = null, $label = null, $key_generation = 1)` is the one place
-a wrapping gets created — it two-phase-inserts (the AD needs the row's own
-id) so every wrapping is sealed the same way. `$key_generation` defaults to 1
-(every enrollment ceremony except rotation targets a not-yet-rotated vault);
-rotation passes its computed `new_key_generation` explicitly.
+$credential_id = null, $label = null, $key_generation = null, $salt = null)`
+is the one place a wrapping gets created — it two-phase-inserts (the AD needs
+the row's own id) so every wrapping is sealed the same way. `$key_generation`
+null resolves to the vault's current generation (correct for every enrollment
+ceremony — the in-window secret being wrapped is the current generation's);
+rotation passes its computed `new_key_generation` explicitly. Unlock paths
+derive each wrapping's KEK from the wrapping's own `uew_salt` (falling back
+to `uev_salt` for a null), so codes and passphrases from a not-yet-drained
+generation keep working in a two-generation state.
 
 Neither table is an API resource; consumers never touch them directly.
 
 ## Enrollment
 
 All in `logic/vault_*_logic.php`, gated on `passkeys_enabled` and a signed-in
-session. Every vault endpoint declares `requires_browser_session` (see
+session. Every enrollment ceremony (add passkey, enroll passphrase,
+regenerate codes) refuses while the vault has live wrappings in more than one
+generation — an unfinished rotation, whose only exit is re-running the
+rotation — because a wrapping it created could not be tagged with a single
+truthful generation. Every vault endpoint declares `requires_browser_session` (see
 [API § Authentication](api.md#authentication)): the unlock window is keyed to
 the browser session id, so these actions are reachable only through the
 browser-session credential, never an API key — the boundary is stated in the

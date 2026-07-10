@@ -17,12 +17,18 @@
  * tampered ciphertext, or an AD mismatch all raise RuntimeException; nothing
  * is ever returned half-verified.
  *
- * @version 1.1
+ * @version 1.2
  */
 class SealedBox {
 
 	const RECOVERY_CODE_BYTES = 16;   // 128 bits, encoded to 26 Crockford-base32 chars
 	const CROCKFORD_ALPHABET  = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+
+	// Minimum length for a vault passphrase, enforced by EVERY enrollment path
+	// (setup, enroll, rotation resupply). The vault is exactly as strong as its
+	// weakest wrapping; a short passphrase is an offline-guessable unlocker for
+	// anyone holding a copy of the database.
+	const PASSPHRASE_MIN_CHARS = 12;
 
 	public function __construct() {
 		if (!extension_loaded('sodium')) {
@@ -158,9 +164,12 @@ class SealedBox {
 	}
 
 	/**
-	 * Derive a KEK from a user passphrase via Argon2id, at least the
-	 * INTERACTIVE cost profile (a passphrase is much lower entropy than a
-	 * recovery code, so it needs a deliberately slow KDF).
+	 * Derive a KEK from a user passphrase via Argon2id at the MODERATE cost
+	 * profile (~256 MB, noticeably slow — a passphrase is much lower entropy
+	 * than a recovery code, and its threat model is offline guessing against a
+	 * stolen database, so each guess must cost real memory and CPU). The cost
+	 * runs only on the passphrase unlock/enroll paths; passkey and
+	 * recovery-code unlocks never pay it.
 	 */
 	public function kekFromPassphrase(string $passphrase, string $salt): string {
 		$salt_raw = self::b64url_decode($salt);
@@ -172,8 +181,8 @@ class SealedBox {
 			SODIUM_CRYPTO_AEAD_XCHACHA20POLY1305_IETF_KEYBYTES,
 			$passphrase,
 			$salt_raw,
-			SODIUM_CRYPTO_PWHASH_OPSLIMIT_INTERACTIVE,
-			SODIUM_CRYPTO_PWHASH_MEMLIMIT_INTERACTIVE,
+			SODIUM_CRYPTO_PWHASH_OPSLIMIT_MODERATE,
+			SODIUM_CRYPTO_PWHASH_MEMLIMIT_MODERATE,
 			SODIUM_CRYPTO_PWHASH_ALG_ARGON2ID13
 		);
 	}
@@ -198,9 +207,17 @@ class SealedBox {
 		return implode('-', str_split($raw, 5));
 	}
 
-	/** Strip grouping/whitespace and uppercase, so entry format never matters for hashing. */
+	/**
+	 * Strip grouping/whitespace and uppercase, so entry format never matters
+	 * for hashing — then apply Crockford base32's canonical read-side
+	 * substitutions (O reads as 0, I and L read as 1; U is excluded from the
+	 * alphabet entirely). Generated codes never contain the confusable
+	 * letters, so the mapping only converts a mistranscribed code into the
+	 * one that was actually printed.
+	 */
 	public static function normalizeRecoveryCode(string $code): string {
-		return strtoupper(preg_replace('/[^0-9A-Za-z]/', '', $code));
+		$stripped = strtoupper(preg_replace('/[^0-9A-Za-z]/', '', $code));
+		return strtr($stripped, array('O' => '0', 'I' => '1', 'L' => '1'));
 	}
 
 	private static function crockfordEncode(string $bytes): string {

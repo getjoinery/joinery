@@ -35,8 +35,14 @@ function vault_passphrase_enroll_logic(array $input): LogicResult {
 	}
 
 	$passphrase = isset($input['passphrase']) ? (string)$input['passphrase'] : '';
-	if (strlen($passphrase) < 12) {
-		return LogicResult::error('Your vault passphrase must be at least 12 characters.');
+	if (strlen($passphrase) < SealedBox::PASSPHRASE_MIN_CHARS) {
+		return LogicResult::error('Your vault passphrase must be at least ' . SealedBox::PASSPHRASE_MIN_CHARS . ' characters.');
+	}
+
+	// A wrapping must be tagged with a single truthful generation, and in a
+	// partially-rotated vault the in-window secret's generation is ambiguous.
+	if (count(UserEncryptionWrapping::liveGenerations((int)$vault->key)) > 1) {
+		return LogicResult::error('Your vault has an unfinished key rotation. Run the rotation again to complete it, then enroll your passphrase.');
 	}
 
 	$existing = new MultiUserEncryptionWrapping(['vault_id' => $vault->key, 'unlocker_type' => UserEncryptionWrapping::TYPE_PASSPHRASE]);
@@ -46,8 +52,9 @@ function vault_passphrase_enroll_logic(array $input): LogicResult {
 	}
 
 	$box = new SealedBox();
-	$kek = $box->kekFromPassphrase($passphrase, $vault->get('uev_salt'));
-	UserEncryptionWrapping::createWrapped($vault->key, UserEncryptionWrapping::TYPE_PASSPHRASE, $secret_key, $kek);
+	$salt = (string)$vault->get('uev_salt');
+	$kek = $box->kekFromPassphrase($passphrase, $salt);
+	UserEncryptionWrapping::createWrapped($vault->key, UserEncryptionWrapping::TYPE_PASSPHRASE, $secret_key, $kek, null, null, (int)$vault->get('uev_key_generation'), $salt);
 
 	return LogicResult::render(['enrolled' => true]);
 }

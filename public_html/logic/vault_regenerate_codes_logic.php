@@ -34,6 +34,12 @@ function vault_regenerate_codes_logic(array $input): LogicResult {
 		return LogicResult::error('Unlock your vault before regenerating your recovery codes.', ['locked' => true]);
 	}
 
+	// A wrapping must be tagged with a single truthful generation, and in a
+	// partially-rotated vault the in-window secret's generation is ambiguous.
+	if (count(UserEncryptionWrapping::liveGenerations((int)$vault->key)) > 1) {
+		return LogicResult::error('Your vault has an unfinished key rotation. Run the rotation again to complete it, then regenerate your codes.');
+	}
+
 	$code_count = isset($input['recovery_code_count']) ? (int)$input['recovery_code_count'] : 10;
 	$code_count = max(5, min(20, $code_count));
 
@@ -44,12 +50,14 @@ function vault_regenerate_codes_logic(array $input): LogicResult {
 	}
 
 	$box = new SealedBox();
+	$salt = (string)$vault->get('uev_salt');
+	$generation = (int)$vault->get('uev_key_generation');
 	$recovery_codes = [];
 	for ($i = 0; $i < $code_count; $i++) {
 		$code = $box->generateRecoveryCode();
 		$recovery_codes[] = $code;
-		$kek = $box->kekFromRecoveryCode($code, $vault->get('uev_salt'));
-		UserEncryptionWrapping::createWrapped($vault->key, UserEncryptionWrapping::TYPE_RECOVERY, $secret_key, $kek);
+		$kek = $box->kekFromRecoveryCode($code, $salt);
+		UserEncryptionWrapping::createWrapped($vault->key, UserEncryptionWrapping::TYPE_RECOVERY, $secret_key, $kek, null, null, $generation, $salt);
 	}
 
 	return LogicResult::render(['recovery_codes' => $recovery_codes]);

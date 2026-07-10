@@ -48,6 +48,9 @@ function vault_rotate_verify_logic(array $input): LogicResult {
 		return LogicResult::error('Missing passkey credential response.');
 	}
 	$passphrase = isset($input['passphrase']) ? (string)$input['passphrase'] : '';
+	if ($passphrase !== '' && strlen($passphrase) < SealedBox::PASSPHRASE_MIN_CHARS) {
+		return LogicResult::error('Your vault passphrase must be at least ' . SealedBox::PASSPHRASE_MIN_CHARS . ' characters.');
+	}
 
 	try {
 		$service = new PasskeyService();
@@ -62,13 +65,29 @@ function vault_rotate_verify_logic(array $input): LogicResult {
 	$all_wrappings = new MultiUserEncryptionWrapping(['vault_id' => $vault->key]);
 	$all_wrappings->load();
 
+	// Orphan cleanup: a wrapping tagged with a generation NEWER than the uev
+	// row's can only come from a crash between persisting wrappings and
+	// flipping the row (the ceremony's two-phase order below). Its keypair was
+	// never advertised, so nothing is sealed to it — but left live it would
+	// miscount in the unlocker floor and could hand an unlock a secret that
+	// opens nothing. Retire them before choosing anything.
+	$current_generation = (int)$vault->get('uev_key_generation');
+	$live_wrappings = [];
+	foreach ($all_wrappings as $wrapping) {
+		if ((int)$wrapping->get('uew_key_generation') > $current_generation) {
+			$wrapping->soft_delete();
+			continue;
+		}
+		$live_wrappings[] = $wrapping;
+	}
+
 	// The authorizing wrapping is the presented credential's LOWEST-generation
 	// live wrapping. Normally there is exactly one; after a partial rotation
 	// failure both generations' wrappings are live, and the retry must unwrap
 	// the OLDEST secret — that is the generation still holding un-resealed
 	// content, and the one this ceremony drains.
 	$authorizing_wrapping = null;
-	foreach ($all_wrappings as $wrapping) {
+	foreach ($live_wrappings as $wrapping) {
 		if ($wrapping->get('uew_unlocker_type') !== UserEncryptionWrapping::TYPE_PASSKEY
 				|| (int)$wrapping->get('uew_pkc_credential_id') !== (int)$passkey->key) {
 			continue;
@@ -87,7 +106,7 @@ function vault_rotate_verify_logic(array $input): LogicResult {
 	// generation except the authorizing passkey) — surfaced so the user knows
 	// what to re-add.
 	$dropped_passkeys = [];
-	foreach ($all_wrappings as $wrapping) {
+	foreach ($live_wrappings as $wrapping) {
 		if ($wrapping->get('uew_unlocker_type') === UserEncryptionWrapping::TYPE_PASSKEY
 				&& (int)$wrapping->get('uew_key_generation') === $old_generation
 				&& (int)$wrapping->get('uew_pkc_credential_id') !== (int)$passkey->key) {
@@ -107,38 +126,55 @@ function vault_rotate_verify_logic(array $input): LogicResult {
 	$salt = $box->generateSalt();
 	$new_generation = (int)$vault->get('uev_key_generation') + 1;
 
-	// Crash-safety order: persist every new-generation wrapping AND flip the
-	// uev row FIRST, while the old wrappings are still live. A crash anywhere
-	// before the final soft-delete step leaves BOTH generations' wrappings
-	// live and BOTH secrets recoverable - the old wrappings still unwrap the
-	// old secret, and each wrapping's own uew_key_generation says which
-	// secret it belongs to. Only after the new generation is durable do we
-	// run consumer re-seal callbacks (old secret still in hand), and only
-	// after those succeed do we retire the previous generation.
-	$vault->set('uev_public_key', $keypair['public']);
-	$vault->set('uev_salt', $salt);
-	$vault->set('uev_key_generation', $new_generation);
-	$vault->set('uev_updated_time', gmdate('Y-m-d H:i:s'));
-	$vault->save();
-
-	UserEncryptionWrapping::createWrapped(
-		$vault->key, UserEncryptionWrapping::TYPE_PASSKEY, $keypair['secret'], $prf_output,
-		$passkey->key, $passkey->get('pkc_label'), $new_generation
-	);
-
+	// Crash-safety order: persist every new-generation WRAPPING first, and
+	// flip the uev row (public key, salt, generation) only after — the whole
+	// phase inside one transaction. The moment the flip is visible, content
+	// seals to the new public key, so the new secret must already be
+	// recoverable from durable wrappings; the reverse order would let a crash
+	// orphan a live public key whose secret died with this request, and
+	// everything sealed to it thereafter would be unrecoverable. A crash
+	// anywhere in this phase rolls back to the untouched old state; a crash
+	// after it leaves BOTH generations' wrappings live and BOTH secrets
+	// recoverable. Only after the new generation is durable do we run
+	// consumer re-seal callbacks (old secret still in hand), and only after
+	// those succeed do we retire the previous generation.
+	$db = DbConnector::get_instance()->get_db_link();
 	$recovery_codes = [];
-	for ($i = 0; $i < 10; $i++) {
-		$code = $box->generateRecoveryCode();
-		$recovery_codes[] = $code;
-		$kek = $box->kekFromRecoveryCode($code, $salt);
-		UserEncryptionWrapping::createWrapped($vault->key, UserEncryptionWrapping::TYPE_RECOVERY, $keypair['secret'], $kek, null, null, $new_generation);
-	}
-
 	$passphrase_reenrolled = false;
-	if ($passphrase !== '') {
-		$kek = $box->kekFromPassphrase($passphrase, $salt);
-		UserEncryptionWrapping::createWrapped($vault->key, UserEncryptionWrapping::TYPE_PASSPHRASE, $keypair['secret'], $kek, null, null, $new_generation);
-		$passphrase_reenrolled = true;
+	try {
+		$db->beginTransaction();
+
+		UserEncryptionWrapping::createWrapped(
+			$vault->key, UserEncryptionWrapping::TYPE_PASSKEY, $keypair['secret'], $prf_output,
+			$passkey->key, $passkey->get('pkc_label'), $new_generation
+		);
+
+		for ($i = 0; $i < 10; $i++) {
+			$code = $box->generateRecoveryCode();
+			$recovery_codes[] = $code;
+			$kek = $box->kekFromRecoveryCode($code, $salt);
+			UserEncryptionWrapping::createWrapped($vault->key, UserEncryptionWrapping::TYPE_RECOVERY, $keypair['secret'], $kek, null, null, $new_generation, $salt);
+		}
+
+		if ($passphrase !== '') {
+			$kek = $box->kekFromPassphrase($passphrase, $salt);
+			UserEncryptionWrapping::createWrapped($vault->key, UserEncryptionWrapping::TYPE_PASSPHRASE, $keypair['secret'], $kek, null, null, $new_generation, $salt);
+			$passphrase_reenrolled = true;
+		}
+
+		$vault->set('uev_public_key', $keypair['public']);
+		$vault->set('uev_salt', $salt);
+		$vault->set('uev_key_generation', $new_generation);
+		$vault->set('uev_updated_time', gmdate('Y-m-d H:i:s'));
+		$vault->save();
+
+		$db->commit();
+	} catch (Throwable $e) {
+		if ($db->inTransaction()) {
+			$db->rollBack();
+		}
+		error_log('Vault rotation: could not persist the new generation for user ' . $user->key . ': ' . $e->getMessage());
+		return LogicResult::error('Key rotation could not start safely - nothing was changed and every unlocker you had still works. Try again.');
 	}
 
 	// Consumer packages: re-seal callbacks are scoped to the generation being
@@ -162,7 +198,7 @@ function vault_rotate_verify_logic(array $input): LogicResult {
 	// its content is re-sealed off it, so that secret is no longer needed.
 	// Wrappings of any OTHER live generation (a partially-failed earlier
 	// rotation) are left alone; a later rotation drains and retires them.
-	foreach ($all_wrappings as $wrapping) {
+	foreach ($live_wrappings as $wrapping) {
 		if ((int)$wrapping->get('uew_key_generation') === $old_generation) {
 			$wrapping->soft_delete();
 		}
@@ -170,12 +206,34 @@ function vault_rotate_verify_logic(array $input): LogicResult {
 
 	VaultUnlock::open($user->key, $keypair['secret'], UserEncryptionVault::SCOPE_USER);
 
+	// The key_file backup payload, same shape as setup's: the new generation's
+	// wrapped-key rows plus the public key and salt they belong to.
+	$live = new MultiUserEncryptionWrapping(['vault_id' => $vault->key]);
+	$live->load();
+	$wrapping_rows = [];
+	foreach ($live as $w) {
+		$wrapping_rows[] = [
+			'id'             => (int)$w->key,
+			'unlocker_type'  => $w->get('uew_unlocker_type'),
+			'wrapped_secret' => $w->get('uew_wrapped_secret_key'),
+			'salt'           => $w->get('uew_salt'),
+			'key_generation' => (int)$w->get('uew_key_generation'),
+		];
+	}
+	$key_file = [
+		'vault_id'   => (int)$vault->key,
+		'public_key' => $keypair['public'],
+		'salt'       => $salt,
+		'wrappings'  => $wrapping_rows,
+	];
+
 	return LogicResult::render([
 		'rotated'               => true,
 		'key_generation'        => $new_generation,
 		'recovery_codes'        => $recovery_codes,
 		'passphrase_reenrolled' => $passphrase_reenrolled,
 		'dropped_passkeys'      => $dropped_passkeys,
+		'key_file'              => $key_file,
 	]);
 }
 

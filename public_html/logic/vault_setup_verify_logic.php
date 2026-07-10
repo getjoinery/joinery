@@ -42,6 +42,9 @@ function vault_setup_verify_logic(array $input): LogicResult {
 		return LogicResult::error('Missing passkey credential response.');
 	}
 	$passphrase = isset($input['passphrase']) ? (string)$input['passphrase'] : '';
+	if ($passphrase !== '' && strlen($passphrase) < SealedBox::PASSPHRASE_MIN_CHARS) {
+		return LogicResult::error('Your vault passphrase must be at least ' . SealedBox::PASSPHRASE_MIN_CHARS . ' characters.');
+	}
 	$code_count = isset($input['recovery_code_count']) ? (int)$input['recovery_code_count'] : 10;
 	$code_count = max(5, min(20, $code_count));
 
@@ -59,36 +62,48 @@ function vault_setup_verify_logic(array $input): LogicResult {
 	$keypair = $box->generateKeypair();
 	$salt = $box->generateSalt();
 
-	$vault = new UserEncryptionVault(NULL);
-	$vault->set('uev_usr_user_id', $user->key);
-	$vault->set('uev_scope', UserEncryptionVault::SCOPE_USER);
-	$vault->set('uev_custody', UserEncryptionVault::CUSTODY_SERVER);
-	$vault->set('uev_public_key', $keypair['public']);
-	$vault->set('uev_salt', $salt);
-	$vault->set('uev_key_generation', 1);
-	try {
-		$vault->save();
-	} catch (Exception $e) {
-		return LogicResult::error('Could not create your vault: ' . $e->getMessage());
-	}
-
-	$passkey_kek = $prf_output;
-	UserEncryptionWrapping::createWrapped(
-		$vault->key, UserEncryptionWrapping::TYPE_PASSKEY, $keypair['secret'], $passkey_kek,
-		$passkey->key, $passkey->get('pkc_label')
-	);
-
+	// One transaction for the vault row AND every wrapping: a vault must never
+	// become visible with zero unlockers (setup would refuse to re-run against
+	// it and no unlock could ever open it).
+	$db = DbConnector::get_instance()->get_db_link();
 	$recovery_codes = [];
-	for ($i = 0; $i < $code_count; $i++) {
-		$code = $box->generateRecoveryCode();
-		$recovery_codes[] = $code;
-		$kek = $box->kekFromRecoveryCode($code, $salt);
-		UserEncryptionWrapping::createWrapped($vault->key, UserEncryptionWrapping::TYPE_RECOVERY, $keypair['secret'], $kek);
-	}
+	try {
+		$db->beginTransaction();
 
-	if ($passphrase !== '') {
-		$kek = $box->kekFromPassphrase($passphrase, $salt);
-		UserEncryptionWrapping::createWrapped($vault->key, UserEncryptionWrapping::TYPE_PASSPHRASE, $keypair['secret'], $kek);
+		$vault = new UserEncryptionVault(NULL);
+		$vault->set('uev_usr_user_id', $user->key);
+		$vault->set('uev_scope', UserEncryptionVault::SCOPE_USER);
+		$vault->set('uev_custody', UserEncryptionVault::CUSTODY_SERVER);
+		$vault->set('uev_public_key', $keypair['public']);
+		$vault->set('uev_salt', $salt);
+		$vault->set('uev_key_generation', 1);
+		$vault->save();
+
+		$passkey_kek = $prf_output;
+		UserEncryptionWrapping::createWrapped(
+			$vault->key, UserEncryptionWrapping::TYPE_PASSKEY, $keypair['secret'], $passkey_kek,
+			$passkey->key, $passkey->get('pkc_label'), 1
+		);
+
+		for ($i = 0; $i < $code_count; $i++) {
+			$code = $box->generateRecoveryCode();
+			$recovery_codes[] = $code;
+			$kek = $box->kekFromRecoveryCode($code, $salt);
+			UserEncryptionWrapping::createWrapped($vault->key, UserEncryptionWrapping::TYPE_RECOVERY, $keypair['secret'], $kek, null, null, 1, $salt);
+		}
+
+		if ($passphrase !== '') {
+			$kek = $box->kekFromPassphrase($passphrase, $salt);
+			UserEncryptionWrapping::createWrapped($vault->key, UserEncryptionWrapping::TYPE_PASSPHRASE, $keypair['secret'], $kek, null, null, 1, $salt);
+		}
+
+		$db->commit();
+	} catch (Throwable $e) {
+		if ($db->inTransaction()) {
+			$db->rollBack();
+		}
+		error_log('Vault setup: could not persist the vault for user ' . $user->key . ': ' . $e->getMessage());
+		return LogicResult::error('Could not create your vault - nothing was saved. Try again.');
 	}
 
 	VaultUnlock::open($user->key, $keypair['secret'], UserEncryptionVault::SCOPE_USER);
@@ -101,6 +116,8 @@ function vault_setup_verify_logic(array $input): LogicResult {
 			'id'             => (int)$w->key,
 			'unlocker_type'  => $w->get('uew_unlocker_type'),
 			'wrapped_secret' => $w->get('uew_wrapped_secret_key'),
+			'salt'           => $w->get('uew_salt'),
+			'key_generation' => (int)$w->get('uew_key_generation'),
 		];
 	}
 	$key_file = [
