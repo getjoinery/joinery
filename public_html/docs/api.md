@@ -364,10 +364,12 @@ Both default `false` on `SystemBase`. Read and write are separate, so a model ca
 read-only (`$api_readable = true; $api_writable = false;`). A class that is not exposed for a
 given verb is indistinguishable from one that does not exist — the request gets a **404**.
 
-> **Plugin models are not exposed via CRUD.** The CRUD surface enumerates core
-> `data/*_class.php` models only — a plugin's own data classes are unreachable through
-> `/api/v1/{Class}`. Plugins expose behaviour through [Action Endpoints](#action-endpoints)
-> instead.
+> **Plugin models participate on the same terms as core models.** Discovery enumerates
+> core `data/*_class.php` plus every **active** plugin's `plugins/{plugin}/data/*_class.php`;
+> a plugin model that sets the opt-in flags is a CRUD resource like any other. Deactivating
+> the plugin removes its models from the surface — requests to them 404. Behavioural
+> endpoints (anything beyond CRUD) remain [Action Endpoints](#action-endpoints), namespaced
+> `{plugin}/{action}`.
 
 ### Per-record authorization
 

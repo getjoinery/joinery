@@ -153,17 +153,29 @@ existing web pages in the app's authenticated webview instead.
 - `/data/subscription_tiers_class.php` - `SubscriptionTier` and `MultiSubscriptionTier`
 
 **Admin Pages:**
-- `/adm/admin_subscription_tiers.php` - List tiers
+- `/adm/admin_subscription_tiers.php` - List tiers (under Users in the admin menu)
 - `/adm/admin_subscription_tier_edit.php` - Create/edit tier
 - `/adm/admin_subscription_tier_members.php` - View members
 
-**User Pages:**
-- `/views/change-subscription.php` - Subscription management UI
-- `/logic/change_subscription_logic.php` - Business logic
+**Billing (store plugin):**
+- `plugins/store/includes/TierBilling.php` - Purchase-driven tier grants, upgrade options, renewal/expiry
+- `plugins/store/views/profile/change-tier.php` + `plugins/store/logic/change_tier_logic.php` - Self-serve plan change UI
 
 **Feature Definitions:**
 - `/includes/core_tier_features.json` - Core features
 - `/plugins/{plugin}/tier_features.json` - Plugin features
+
+### Core/Billing Split (the TierBilling seam)
+
+Tiers themselves are **core**: the model, tier levels, group membership (`grp_category = 'subscription_tier'`), feature flags, and content gating all work with no store present. What *sells* tiers is the **store plugin**: purchase-driven tier assignment, upgrades, renewals, and expiry live behind `TierBilling` in `plugins/store/includes/`.
+
+Where a gate prompt sends a user to upgrade is controlled by the core `tier_upgrade_url` setting:
+
+- **Set** — the prompt links there (point it at any external or custom purchase flow).
+- **Empty (default), store active** — the prompt offers the store's tier-granting products via `TierBilling::getUpgradeOptions()`.
+- **Empty, store inactive** — the prompt falls back to a contact-us message.
+
+Core code never calls `TierBilling` without a store-active guard; everything core needs from billing flows through that setting and the gate prompt component.
 
 ### Database Structure
 
@@ -376,6 +388,11 @@ foreach ($all_tiers as $tier) {
 $formwriter->dropinput('{prefix}_tier_min_level', 'Minimum Tier Required', [
     'options' => $tier_options
 ]);
+```
+
+6. Register the entity so the tier admin page's gated-content summary counts it. Core entity types register in `TierGatedContentRegistry::registerCoreDefaults()` (bottom of `includes/TierGatedContentRegistry.php`); a plugin's types register from its `serve.php`:
+```php
+TierGatedContentRegistry::register('Events', 'evt_events', 'evt_tier_min_level', 'evt_delete_time');
 ```
 
 ### Gate Prompt Component

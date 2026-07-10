@@ -186,14 +186,14 @@ require_once(PathHelper::getIncludePath('includes/PhotoHelper.php'));
 
 // In the page body: render the photo card
 PhotoHelper::render_photo_card('grid', 'event', $event->key, $event_photos, [
-    'set_primary_url' => '/admin/admin_event?evt_event_id=' . $event->key,
+    'set_primary_url' => '/plugins/event_manager/admin/admin_event?evt_event_id=' . $event->key,
     'card_title' => 'Event Photos',
     'editable' => $can_edit,
 ]);
 
 // Before </body> or in script section: render the JavaScript
 PhotoHelper::render_photo_scripts('grid', 'event', $event->key, [
-    'set_primary_url' => '/admin/admin_event?evt_event_id=' . $event->key,
+    'set_primary_url' => '/plugins/event_manager/admin/admin_event?evt_event_id=' . $event->key,
     'confirm_delete_msg' => 'Remove this photo from the event?',
 ]);
 ```
@@ -302,7 +302,17 @@ function get_primary_photo() { ... }
 function get_picture_link($size_key = 'content') { ... }
 ```
 
-### 2. Add set_primary POST handler to the page's logic file
+### 2. Register the entity type
+
+`ajax/entity_photos_ajax.php` only serves registered entity types — an unregistered type is rejected. Core types register in `EntityPhotoRegistry::registerCoreDefaults()` (bottom of `includes/EntityPhotoRegistry.php`); a plugin's types register from its `serve.php`:
+
+```php
+EntityPhotoRegistry::register('event', 'Event', 'plugins/event_manager/data/events_class.php');
+```
+
+The arguments are the entity type string, the model class name, and the class file path (used to lazy-load the model when syncing primary photos).
+
+### 3. Add set_primary POST handler to the page's logic file
 
 ```php
 if (isset($post_vars['action']) && $post_vars['action'] == 'set_primary_photo') {
@@ -318,13 +328,13 @@ if (isset($post_vars['action']) && $post_vars['action'] == 'clear_primary_photo'
 }
 ```
 
-### 3. Load photos in the logic file
+### 4. Load photos in the logic file
 
 ```php
 $page_vars['entity_photos'] = $entity->get_photos();
 ```
 
-### 4. Add PhotoHelper to the view
+### 5. Add PhotoHelper to the view
 
 ```php
 require_once(PathHelper::getIncludePath('includes/PhotoHelper.php'));
@@ -341,15 +351,15 @@ PhotoHelper::render_photo_scripts('grid', 'my_entity', $entity->key, [
 ]);
 ```
 
-### 5. Update max_entity_photos setting (if needed)
+### 6. Update max_entity_photos setting (if needed)
 
-The `max_entity_photos` setting is a JSON object. Add a key for the new entity type:
+The `max_entity_photos` setting is a JSON object. Core entity types add a key to the core default in `settings.json`; plugin-owned types merge their keys into the stored value from the plugin's activation hook (see `plugins/event_manager/activate.php` for the pattern):
 
 ```json
-{"user": 6, "event": 10, "location": 10, "my_entity": 10}
+{"user": 6, "my_entity": 10}
 ```
 
-### 6. Run data migration (if the entity has existing photos in a legacy FK column)
+### 7. Run data migration (if the entity has existing photos in a legacy FK column)
 
 Create a migration that copies existing FK references into `eph_entity_photos` rows.
 
@@ -359,7 +369,7 @@ Create a migration that copies existing FK references into `eph_entity_photos` r
 
 | Page | Mode | Entity Type | File |
 |------|------|-------------|------|
-| Admin Event | `grid` | `event` | `adm/admin_event.php` |
+| Admin Event | `grid` | `event` | `plugins/event_manager/admin/admin_event.php` |
 | Account Edit (public) | `grid` | `user` | `views/profile/account_edit.php` |
 
-Future candidates: `admin_location.php` (single), `admin_mailing_list.php` (single), dating profile edit (grid).
+Future candidates: `plugins/event_manager/admin/admin_location.php` (single), `admin_mailing_list.php` (single), dating profile edit (grid).

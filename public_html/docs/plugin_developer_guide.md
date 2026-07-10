@@ -738,12 +738,15 @@ Plugin default settings are declared in `plugin.json` under an optional `setting
 
 | Field | Required | Default | Description |
 |---|---|---|---|
-| `name` | Yes | — | Setting key. Must start with the plugin's directory name. |
+| `name` | Yes | — | Setting key. Must start with the plugin's directory name (unless `legacy_core`). |
 | `default` | No | `""` | String value stored in `stg_value`. Always a string — use `"0"`/`"1"` for booleans, `"42"` for numbers. JSON-native booleans/numbers are rejected at validation time. |
+| `legacy_core` | No | `false` | Opts this one setting out of the prefix rule so it keeps an unprefixed core-era name. See below. |
 
 **Validation rules** (enforced on activate and sync):
-1. Every declared `name` must start with the plugin's directory name (e.g., a plugin at `/plugins/bookings/` must declare settings named `bookings_*`).
+1. Every declared `name` must start with the plugin's directory name (e.g., a plugin at `/plugins/bookings/` must declare settings named `bookings_*`) — unless the entry sets `"legacy_core": true`.
 2. No declared `name` may collide with a core setting in `settings.json` at the `public_html/` root.
+
+**`legacy_core` — carrying a core setting into a plugin.** When a feature moves from core into a plugin, its settings keep their original unprefixed names on purpose — menu `settingActivate` keys, existing `stg_settings` rows, and code all reference the old name. Mark each such entry `"legacy_core": true` to opt out of the prefix rule (the store and event_manager plugins do this for `products_active`, `events_active`, etc.). The collision and string-default rules still apply: the name must have been **removed** from core `settings.json` when it moved. New settings never use this — it exists only for extractions.
 
 Validation failures throw. On `activate()` the plugin does not activate; on `sync()` the offending plugin is skipped with a logged error and other plugins continue.
 

@@ -103,7 +103,7 @@ bus never looks at it):
         "default_email": true,
         "title_template": "Sale completed: {product_name}",
         "body_template": "Order #{order_id} completed.",
-        "link_template": "/admin/admin_orders"
+        "link_template": "/plugins/store/admin/admin_orders"
     }
 }
 ```

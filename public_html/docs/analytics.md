@@ -52,9 +52,9 @@ This means conversion counts and revenue can be grouped directly by `vse_source`
 
 | Event | Canonical site | Reference columns |
 |---|---|---|
-| `CART_ADD` | `ShoppingCart::add_item()` after the item is pushed | — |
-| `CHECKOUT_START` | `views/cart.php` when the checkout form renders, guarded by `$_SESSION['checkout_started']` | — |
-| `PURCHASE` | `logic/cart_charge_logic.php` after `STATUS_PAID` | `ref_type='order'`, `ref_id=ord_order_id` |
+| `CART_ADD` | `ShoppingCart::add_item()` (store plugin) after the item is pushed | — |
+| `CHECKOUT_START` | `plugins/store/views/cart.php` when the checkout form renders, guarded by `$_SESSION['checkout_started']` | — |
+| `PURCHASE` | `plugins/store/logic/cart_charge_logic.php` after `STATUS_PAID` | `ref_type='order'`, `ref_id=ord_order_id` |
 | `SIGNUP` | `User::CreateCompleteNew()` when a genuinely new user is created | `ref_type='user'`, `ref_id=usr_user_id` |
 | `LIST_SIGNUP` | `User::add_user_to_mailing_lists()` after each successful subscription | `ref_type='mailing_list'`, `ref_id=mlt_mailing_list_id` |
 | `COUPON_ATTEMPT` | `SessionControl::capture_marketing_coupon()` for both valid and invalid codes | `vse_meta=<code>` (never in `vse_source`) |

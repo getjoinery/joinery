@@ -288,6 +288,24 @@ Three ways to set subject (priority order):
    <p>Email body...</p>
    ```
 
+## Bulk Email Recipient Targeting (Recipient-Group Providers)
+
+Admin bulk emails target **recipient groups**: each targeting row (`erg_email_recipient_groups`) stores a provider key (`erg_provider`) plus a reference id (`erg_reference_id`), with an add/remove direction. The final recipient list is (union of all *add* groups) minus (union of all *remove* groups), deduplicated at queue time.
+
+Providers are the pluggable half — `includes/RecipientGroupProviderRegistry.php` defines the `RecipientGroupProvider` interface:
+
+| Method | Role |
+|--------|------|
+| `key()` | Stable string stored in `erg_provider` |
+| `label()` | Human label in the targeting UI |
+| `options()` | `reference_id => label` choices for the admin picker |
+| `resolve(int $reference_id)` | The reference expanded to a user-id list (`[]` if unresolvable) |
+| `reference_label(int $reference_id)` | Display label for a saved targeting row |
+
+Core ships the `group` provider (`includes/recipient_group_providers/GroupRecipientProvider.php`); event_manager registers `event` and `event_waiting_list` from its `serve.php`. A row whose provider is unregistered (e.g. its plugin is inactive) resolves to an empty group — the email simply targets no one from that row, never errors.
+
+To add a targeting source, implement the interface and call `RecipientGroupProviderRegistry::register(new YourProvider())` — from `registerCoreDefaults()` for core, or from your plugin's `serve.php`.
+
 ## Service Configuration
 
 ### Email Services
