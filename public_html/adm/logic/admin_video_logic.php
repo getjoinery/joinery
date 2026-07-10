@@ -73,9 +73,12 @@ function admin_video_logic(array $input): LogicResult {
 		$permission_text .= 'Only logged in users in the "'.$group->get('grp_name').'" group ';
 		$group_or_event = true;
 	}
-	if($video->get('vid_evt_event_id')){
-		$event = new Event($video->get('vid_evt_event_id'), TRUE);
-		$permission_text .= 'Only logged in users registered for the "'.$event->get('evt_name').'" event ';
+	if($video->get('vid_access_provider')){
+		require_once(PathHelper::getIncludePath('includes/AccessGateRegistry.php'));
+		$gate = AccessGateRegistry::get($video->get('vid_access_provider'));
+		$gate_ref_label = $gate ? ($gate->options()[$video->get('vid_access_ref')] ?? $video->get('vid_access_ref')) : $video->get('vid_access_ref');
+		$gate_kind = $gate ? $gate->label() : $video->get('vid_access_provider');
+		$permission_text .= 'Only logged in users passing the '.$gate_kind.' gate for "'.$gate_ref_label.'" ';
 		$group_or_event = true;
 	}
 	if($group_or_event){
@@ -96,6 +99,18 @@ function admin_video_logic(array $input): LogicResult {
 	}
 	$permission_text .= 'can access this video.';
 
+	$access_gate_label = null;
+	if($video->get('vid_access_provider')){
+		require_once(PathHelper::getIncludePath('includes/AccessGateRegistry.php'));
+		$gate = AccessGateRegistry::get($video->get('vid_access_provider'));
+		if($gate){
+			$ref_label = $gate->options()[$video->get('vid_access_ref')] ?? $video->get('vid_access_ref');
+			$access_gate_label = $gate->label().': '.$ref_label;
+		} else {
+			$access_gate_label = $video->get('vid_access_provider').' #'.$video->get('vid_access_ref');
+		}
+	}
+
 	$page_vars = array(
 		'session' => $session,
 		'video' => $video,
@@ -104,7 +119,7 @@ function admin_video_logic(array $input): LogicResult {
 		'permission_text' => $permission_text,
 		'group_or_event' => $group_or_event,
 		'group' => $group,
-		'event' => $event,
+		'access_gate_label' => $access_gate_label,
 	);
 
 	return LogicResult::render($page_vars);

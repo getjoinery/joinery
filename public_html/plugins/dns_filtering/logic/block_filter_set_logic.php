@@ -62,7 +62,7 @@ function block_filter_set_logic(array $input): LogicResult{
 		// Tier-gate advanced filters: only writes/changes are blocked. Removing a row
 		// is allowed (option-C escape hatch for downgraded users — see editor docs).
 		if (in_array($key, ScrollDaddyHelper::getRestrictedFilters(), true) && $action !== '') {
-			if (!SubscriptionTier::getUserFeature($session->get_user_id(), 'scrolldaddy_advanced_filters', false)) {
+			if (!SubscriptionTier::getUserFeature($session->get_user_id(), 'dns_filtering_scrolldaddy_advanced_filters', false)) {
 				return LogicResult::error('Advanced filters require Premium or Pro.');
 			}
 		}

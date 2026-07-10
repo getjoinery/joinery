@@ -59,7 +59,6 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	public static $ai_excluded_fields = [
 		'usr_totp_last_used_step', 'usr_signup_ip', 'usr_allowed_ips',
 		'usr_force_password_change', 'usr_password_recovery_disabled',
-		'usr_stripe_customer_id', 'usr_stripe_customer_id_test',
 		'usr_mailing_list_provider_id',
 	];
 	public static $ai_untrusted_fields = [
@@ -121,14 +120,12 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	    'usr_disabled_time' => array('type'=>'timestamp(6)'),
 	    'usr_nickname' => array('type'=>'varchar(32)'),
 	    'usr_authhash' => array('type'=>'varchar(32)'),
-	    'usr_stripe_customer_id' => array('type'=>'varchar(32)'),
 	    'usr_mailing_list_provider_id' => array('type'=>'varchar(64)'),
 	    'usr_signup_ip' => array('type'=>'varchar(64)'),
 	    'usr_contact_preference_last_changed' => array('type'=>'timestamp(6)'),
 	    'usr_organization_name' => array('type'=>'varchar(32)'),
 	    'usr_delete_time' => array('type'=>'timestamp(6)'),
 	    'usr_password_recovery_disabled' => array('type'=>'bool'),
-	    'usr_stripe_customer_id_test' => array('type'=>'varchar(32)'),
 	    'usr_allowed_ips' => array('type'=>'jsonb'),
 	    'usr_remember_tokens' => array('type'=>'jsonb', 'is_nullable'=>true),
 	    'usr_force_password_change' => array('type'=>'bool', 'default'=>false),
@@ -614,19 +611,6 @@ private static function UcName($string) {
 	public static function GetByEmail($email) {
 		$data = SingleRowFetch('usr_users', 'LOWER(usr_email)',
 			trim(strtolower($email)), PDO::PARAM_STR, SINGLE_ROW_ALL_COLUMNS);
-
-		if ($data === NULL) {
-			return NULL;
-		}
-
-		$user = new User($data->usr_user_id);
-		$user->load_from_data($data, array_keys(User::$field_specifications));
-		return $user;
-	}
-
-	public static function GetByStripeCustomerId($id) {
-		$data = SingleRowFetch('usr_users', 'usr_stripe_customer_id',
-			$id, PDO::PARAM_STR, SINGLE_ROW_ALL_COLUMNS);
 
 		if ($data === NULL) {
 			return NULL;

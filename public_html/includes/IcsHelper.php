@@ -201,8 +201,16 @@ class IcsHelper {
 		}
 
 		$location_id = self::getField($event, 'evt_loc_location_id');
-		if ($location_id) {
-			require_once(PathHelper::getIncludePath('data/locations_class.php'));
+		// Location enrichment depends on event_manager (which owns locations).
+		// Degrade to no-location output when the plugin is absent.
+		if ($location_id && !class_exists('Location')) {
+			if (PluginHelper::isPluginActive('event_manager')) {
+				require_once(PathHelper::getThemeFilePath('locations_class.php', 'data', 'system', null, 'event_manager', false));
+			} elseif (file_exists(PathHelper::getIncludePath('data/locations_class.php'))) {
+				require_once(PathHelper::getIncludePath('data/locations_class.php'));
+			}
+		}
+		if ($location_id && class_exists('Location')) {
 			if (Location::check_if_exists($location_id)) {
 				$location = new Location($location_id, TRUE);
 				$loc_address = $location->get('loc_address');

@@ -19,7 +19,7 @@ $page_vars = process_logic(scheduled_block_edit_logic(array_merge($_GET, $_POST,
 
 	$is_edit = $block->key ? true : false;
 	$is_always_on = $is_edit && $block->get('sdb_is_always_on');
-	$has_custom_rules = $tier ? $tier->getFeature('scrolldaddy_custom_rules', false) : false;
+	$has_custom_rules = $tier ? $tier->getFeature('dns_filtering_scrolldaddy_custom_rules', false) : false;
 
 	// Title/breadcrumb differs between always-on and scheduled
 	if($is_always_on){
@@ -133,7 +133,7 @@ $page_vars = process_logic(scheduled_block_edit_logic(array_merge($_GET, $_POST,
 	// Scheduled blocks are an overrides list — only the rows the user has chosen to
 	// override against the always-on baseline are shown; "Add override" appends new rows.
 	$can_edit_main = $device->are_filters_editable();
-	$has_advanced = SubscriptionTier::getUserFeature($session->get_user_id(), 'scrolldaddy_advanced_filters', false);
+	$has_advanced = SubscriptionTier::getUserFeature($session->get_user_id(), 'dns_filtering_scrolldaddy_advanced_filters', false);
 
 	// Curated category metadata. Each entry: 'type' => 'filter'|'service' tells us which
 	// rules table the key belongs to (drives lookup in $filter_rules vs $service_rules).

@@ -28,51 +28,6 @@
             "settingActivate": "videos_active"
         },
         {
-            "slug": "orders",
-            "title": "Orders",
-            "url": "",
-            "order": 4,
-            "permission": 5,
-            "icon": "shopping-cart",
-            "settingActivate": "products_active"
-        },
-        {
-            "slug": "products",
-            "title": "Products",
-            "url": "",
-            "order": 3,
-            "permission": 8,
-            "icon": "box",
-            "settingActivate": "products_active"
-        },
-        {
-            "slug": "product-groups",
-            "title": "Product Groups",
-            "url": "admin_product_groups",
-            "order": 2,
-            "permission": 9,
-            "settingActivate": "products_active",
-            "parent": "products"
-        },
-        {
-            "slug": "stripe-payments",
-            "title": "Stripe Payments",
-            "url": "admin_stripe_orders",
-            "order": 2,
-            "permission": 5,
-            "settingActivate": "products_active",
-            "parent": "orders"
-        },
-        {
-            "slug": "shadow-sessions",
-            "title": "Shadow Sessions",
-            "url": "admin_shadow_sessions",
-            "order": 15,
-            "permission": 5,
-            "settingActivate": "products_active",
-            "parent": "orders"
-        },
-        {
             "slug": "files-parent",
             "title": "Files",
             "url": "admin_files",
@@ -129,24 +84,6 @@
             "order": 1,
             "permission": 5,
             "parent": "users"
-        },
-        {
-            "slug": "products-list",
-            "title": "Products list",
-            "url": "admin_products",
-            "order": 1,
-            "permission": 8,
-            "settingActivate": "products_active",
-            "parent": "products"
-        },
-        {
-            "slug": "orders-list",
-            "title": "Orders list",
-            "url": "admin_orders",
-            "order": 1,
-            "permission": 5,
-            "settingActivate": "products_active",
-            "parent": "orders"
         },
         {
             "slug": "emails-list",
@@ -252,15 +189,6 @@
             "order": 10,
             "permission": 10,
             "parent": "statistics"
-        },
-        {
-            "slug": "coupon-codes",
-            "title": "Coupon codes",
-            "url": "admin_coupon_codes",
-            "order": 10,
-            "permission": 5,
-            "settingActivate": "products_active",
-            "parent": "products"
         },
         {
             "slug": "surveys-parent",
@@ -520,24 +448,6 @@
             "permission": 0,
             "icon": "calendar",
             "nativeScreen": "calendar"
-        },
-        {
-            "slug": "core-orders",
-            "title": "Orders",
-            "url": "/profile/orders",
-            "order": 60,
-            "permission": 0,
-            "icon": "shopping-bag",
-            "nativeScreen": "orders"
-        },
-        {
-            "slug": "core-subscriptions",
-            "title": "Subscriptions",
-            "url": "/profile/subscriptions",
-            "order": 70,
-            "permission": 0,
-            "icon": "refresh",
-            "nativeScreen": "subscriptions"
         },
         {
             "slug": "core-events",

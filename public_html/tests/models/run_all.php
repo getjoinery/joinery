@@ -62,7 +62,7 @@
 	}
 	
 	// Discover all model classes using centralized method
-	$classes = LibraryFunctions::discover_model_classes();
+	$classes = LibraryFunctions::discover_model_classes(['include_plugins' => true]);
 	echo 'Found ' . count($classes) . ' model classes<br>';
 	echo '<p><em>Running single model tests (CRUD, validation, constraints). For Multi class tests, use <a href="run_multi">run_multi</a></em></p><br>';
 	

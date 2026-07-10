@@ -122,19 +122,15 @@ switch ($action) {
 			$photo->set('eph_sort_order', $next_order);
 			$photo->save();
 
-			// If first photo, set as primary via entity model (syncs legacy FK column)
+			// If first photo, set as primary via entity model (syncs primary-photo FK).
+			// Which entity types map to which model is contributed by the active
+			// plugins: core registers user/mailing_list/post/page, store registers
+			// product, event_manager registers event/location. Unregistered types
+			// skip the sync (the photo row is still created).
 			if ($is_first_photo) {
-				$entity_class_map = [
-					'event' => ['class' => 'Event', 'file' => 'data/events_class.php'],
-					'user' => ['class' => 'User', 'file' => 'data/users_class.php'],
-					'location' => ['class' => 'Location', 'file' => 'data/locations_class.php'],
-					'mailing_list' => ['class' => 'MailingList', 'file' => 'data/mailing_lists_class.php'],
-					'post' => ['class' => 'Post', 'file' => 'data/posts_class.php'],
-					'page' => ['class' => 'Page', 'file' => 'data/pages_class.php'],
-					'product' => ['class' => 'Product', 'file' => 'data/products_class.php'],
-				];
-				if (isset($entity_class_map[$entity_type])) {
-					$map = $entity_class_map[$entity_type];
+				require_once(PathHelper::getIncludePath('includes/EntityPhotoRegistry.php'));
+				$map = EntityPhotoRegistry::get($entity_type);
+				if ($map) {
 					require_once(PathHelper::getIncludePath($map['file']));
 					$entity = new $map['class']($entity_id, TRUE);
 					if (method_exists($entity, 'set_primary_photo')) {

@@ -15,7 +15,7 @@ array(
 	'page_title' => 'Event Types',
 	'readable_title' => 'Event Types',
 	'breadcrumbs' => array(
-		'Events'=>'/admin/admin_products',
+		'Events'=>'/plugins/store/admin/admin_products',
 		'Event Types' => '',
 	),
 	'session' => $session,

@@ -4,9 +4,24 @@
     require_once(PathHelper::getIncludePath('data/users_class.php'));
     require_once(PathHelper::getIncludePath('data/pages_class.php'));
     require_once(PathHelper::getIncludePath('data/posts_class.php'));
-    require_once(PathHelper::getIncludePath('data/events_class.php'));
-    require_once(PathHelper::getIncludePath('data/locations_class.php'));
     require_once(PathHelper::getIncludePath('data/videos_class.php'));
+    // Event/location classes are only needed for the events_active sections
+    // below; load them behind the plugin-active check so this core view keeps
+    // working when the event_manager plugin is absent. $events_available gates
+    // the Events/Locations sections on both the setting and class availability.
+    $events_available = false;
+    if (Globalvars::get_instance()->get_setting('events_active')) {
+        if (PluginHelper::isPluginActive('event_manager')) {
+            require_once(PathHelper::getThemeFilePath('events_class.php', 'data', 'system', null, 'event_manager', false));
+            require_once(PathHelper::getThemeFilePath('locations_class.php', 'data', 'system', null, 'event_manager', false));
+            $events_available = class_exists('MultiEvent');
+        } elseif (file_exists(PathHelper::getIncludePath('data/events_class.php'))) {
+            // Pre-extraction: classes still live in core.
+            require_once(PathHelper::getIncludePath('data/events_class.php'));
+            require_once(PathHelper::getIncludePath('data/locations_class.php'));
+            $events_available = true;
+        }
+    }
 
     $paged = new PublicPage();
     $paged->public_header([
@@ -54,7 +69,7 @@
         </div>
         <?php endif; ?>
 
-        <?php if ($settings->get_setting('events_active')): ?>
+        <?php if ($events_available): ?>
         <div class="col-lg-6">
             <div class="card shadow-sm rounded-4 h-100">
                 <div class="card-header bg-success text-white">

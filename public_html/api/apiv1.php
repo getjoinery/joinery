@@ -347,7 +347,7 @@ if (strtolower($url_segments[2] ?? '') === 'action') {
 // Discover all model classes, then apply the Layer 1 exposure opt-in. discover_model_classes()
 // must keep returning ALL models (shared with schema/deletion subsystems); the CRUD surface is
 // the filtered subset. An unexposed class is indistinguishable from a nonexistent one (404).
-$classes = LibraryFunctions::discover_model_classes();
+$classes = LibraryFunctions::discover_model_classes(['include_plugins' => true, 'plugin_status' => 'active']);
 $readable_classes = array_values(array_filter($classes, fn($c) => api_flag($c, 'api_readable')));
 $writable_classes = array_values(array_filter($classes, fn($c) => api_flag($c, 'api_writable')));
 

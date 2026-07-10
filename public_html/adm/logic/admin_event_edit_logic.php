@@ -7,7 +7,7 @@ function admin_event_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('includes/FormWriterV2Base.php'));
 	require_once(PathHelper::getIncludePath('data/events_class.php'));
-	require_once(PathHelper::getIncludePath('data/products_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php'));
 	require_once(PathHelper::getIncludePath('data/files_class.php'));
 	require_once(PathHelper::getIncludePath('data/event_types_class.php'));
 	require_once(PathHelper::getIncludePath('data/surveys_class.php'));
@@ -118,7 +118,7 @@ function admin_event_edit_logic(array $input): LogicResult {
 
 		if($input['evt_is_accepting_signups'] && !$input['evt_external_register_link']){
 			//CHECK THAT THERE IS AN ASSOCIATED PRODUCT
-			$products = new MultiProduct(array('event_id'=> $event->key));
+			$products = new MultiProduct(array('fulfillment_provider' => 'event_registration', 'fulfillment_ref' => $event->key));
 			$numproducts = $products->count_all();
 			if(!$numproducts){
 				$input['evt_is_accepting_signups'] = 0;

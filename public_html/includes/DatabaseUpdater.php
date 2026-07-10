@@ -234,7 +234,14 @@ class DatabaseUpdater {
      * @param array $classes Array of model classes
      * @return array Results
      */
-    public function processAdvancedColumnOperations($classes) {
+    /**
+     * @param array $classes
+     * @param bool  $include_cleanup When false, column-drop cleanup is skipped and
+     *   only in-place modifications (type/length/constraint) run. Cleanup is run
+     *   separately (see runColumnCleanup) AFTER migrations so a not-yet-migrated
+     *   column isn't dropped before its backfill migration executes.
+     */
+    public function processAdvancedColumnOperations($classes, $include_cleanup = true) {
         $results = [
             'success' => true,
             'columns_modified' => [],
@@ -243,39 +250,78 @@ class DatabaseUpdater {
             'warnings' => [],
             'messages' => []
         ];
-        
+
         try {
             $dblink = $this->dbconnector->get_db_link();
             $tables_and_columns = LibraryFunctions::get_tables_and_columns();
-            
+
             foreach ($classes as $class) {
                 $table_name = $class::$tablename;
                 $live_table_columns = $tables_and_columns[$table_name] ?? [];
-                
+
                 if (empty($live_table_columns)) {
                     continue; // Skip if table doesn't exist
                 }
-                
-                // Process column modifications and cleanup
-                $this->processTableColumns($class, $table_name, $dblink, $results);
+
+                // Process column modifications and (optionally) cleanup
+                $this->processTableColumns($class, $table_name, $dblink, $results, $include_cleanup);
             }
-            
+
         } catch (Exception $e) {
             $results['success'] = false;
             $results['errors'][] = "Advanced column processing error: " . $e->getMessage();
         }
-        
+
         return $results;
     }
-    
+
+    /**
+     * Column-drop cleanup pass, isolated so it can run AFTER the migrations step.
+     * Only drops columns absent from specifications; safe to run once migrations
+     * have backfilled and dropped any renamed columns themselves.
+     */
+    public function runColumnCleanup($classes) {
+        $results = [
+            'success' => true,
+            'columns_dropped' => [],
+            'errors' => [],
+            'warnings' => [],
+            'messages' => []
+        ];
+
+        if (!$this->cleanup) {
+            return $results;
+        }
+
+        try {
+            $dblink = $this->dbconnector->get_db_link();
+            $tables_and_columns = LibraryFunctions::get_tables_and_columns();
+
+            foreach ($classes as $class) {
+                $table_name = $class::$tablename;
+                if (empty($tables_and_columns[$table_name] ?? [])) {
+                    continue; // Skip if table doesn't exist
+                }
+                $live_columns = $this->getDetailedColumnInfo($table_name, $dblink);
+                $field_specifications = $class::$field_specifications ?? [];
+                $this->processColumnCleanup($table_name, $field_specifications, $live_columns, $dblink, $results);
+            }
+        } catch (Exception $e) {
+            $results['success'] = false;
+            $results['errors'][] = "Column cleanup error: " . $e->getMessage();
+        }
+
+        return $results;
+    }
+
     /**
      * Process columns for a single table - handle modifications and cleanup
      */
-    private function processTableColumns($class, $table_name, $dblink, &$results) {
+    private function processTableColumns($class, $table_name, $dblink, &$results, $include_cleanup = true) {
         // Get detailed column information
         $live_columns = $this->getDetailedColumnInfo($table_name, $dblink);
         $field_specifications = $class::$field_specifications ?? [];
-        
+
         // Handle column modifications if upgrade OR cleanup mode is enabled
         if ($this->upgrade || $this->cleanup) {
             foreach ($field_specifications as $field_name => $field_specs) {
@@ -284,9 +330,9 @@ class DatabaseUpdater {
                 }
             }
         }
-        
-        // Handle column cleanup if cleanup mode is enabled
-        if ($this->cleanup) {
+
+        // Handle column cleanup if cleanup mode is enabled and not deferred
+        if ($this->cleanup && $include_cleanup) {
             $this->processColumnCleanup($table_name, $field_specifications, $live_columns, $dblink, $results);
         }
     }

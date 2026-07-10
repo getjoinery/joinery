@@ -5,15 +5,27 @@
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-require_once(PathHelper::getIncludePath('includes/ShoppingCart.php'));
+
+// Cart/coupon actions belong to the store plugin. With the store inactive (or
+// absent), this endpoint must 404 rather than fatal on the store requires below
+// or expose a live surface for a disabled plugin.
+if (!class_exists('PluginHelper')) {
+	require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
+}
+if (!PluginHelper::isPluginActive('store')) {
+	http_response_code(404);
+	exit;
+}
+
+require_once(PathHelper::getIncludePath('plugins/store/includes/ShoppingCart.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
-require_once(PathHelper::getIncludePath('data/coupon_codes_class.php'));
+require_once(PathHelper::getIncludePath('plugins/store/data/coupon_codes_class.php'));
 
 header('Content-Type: application/json');
 
 $session = SessionControl::get_instance();
 $settings = Globalvars::get_instance();
-$cart = $session->get_shopping_cart();
+$cart = ShoppingCart::current();
 
 $action = isset($_POST['action']) ? $_POST['action'] : (isset($_GET['action']) ? $_GET['action'] : '');
 
@@ -57,7 +69,7 @@ switch ($action) {
 
         $result = $cart->add_coupon($code);
         if ($result === 1) {
-            $currency_symbol = \Product::$currency_symbols[$settings->get_setting('site_currency')];
+            $currency_symbol = CurrencyHelper::symbol($settings->get_setting('site_currency'));
             echo json_encode(array(
                 'success' => true,
                 'coupon_codes' => $cart->coupon_codes,
@@ -71,7 +83,7 @@ switch ($action) {
     case 'remove_coupon':
         $code = isset($_POST['coupon_code']) ? trim($_POST['coupon_code']) : '';
         $cart->remove_coupon($code);
-        $currency_symbol = \Product::$currency_symbols[$settings->get_setting('site_currency')];
+        $currency_symbol = CurrencyHelper::symbol($settings->get_setting('site_currency'));
         echo json_encode(array(
             'success' => true,
             'coupon_codes' => $cart->coupon_codes,

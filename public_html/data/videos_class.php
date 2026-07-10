@@ -53,7 +53,8 @@ class Video extends SystemBase {	public static $prefix = 'vid';
 	    'vid_delete_time' => array('type'=>'timestamp(6)'),
 	    'vid_min_permission' => array('type'=>'int2'),
 	    'vid_grp_group_id' => array('type'=>'int4'),
-	    'vid_evt_event_id' => array('type'=>'int4'),
+	    'vid_access_provider' => array('type'=>'varchar(32)', 'is_nullable'=>true),
+	    'vid_access_ref' => array('type'=>'int4', 'is_nullable'=>true),
 	    'vid_tier_min_level' => array('type'=>'int4', 'is_nullable'=>true),
 	);
 
@@ -268,22 +269,11 @@ function get_embed($vidwidth = 560, $vidheight = 315) {
 			}
 		}
 		
-		if ($event_id = $this->get('vid_evt_event_id')){
-			require_once(PathHelper::getIncludePath('data/event_registrants_class.php'));
-			//CHECK TO SEE IF USER IS IN AUTHORIZED EVENT
-			$searches['user_id'] = $session->get_user_id();
-			$searches['event_id'] = $event_id;
-			$searches['expired'] = false;
-			$event_registrations = new MultiEventRegistrant(
-				$searches,
-				NULL, //array('event_id'=>'DESC'),
-				NULL,
-				NULL);
-			$numeventsregistrations = $event_registrations->count_all();	
-
-			if(!$numeventsregistrations){
-				return false;
-			}
+		// Provider-based access gate (event registration, or any future gate kind).
+		// Ungated → allowed; a gate whose provider is absent → denied (fail-closed).
+		require_once(PathHelper::getIncludePath('includes/AccessGateRegistry.php'));
+		if (!AccessGateRegistry::userMayAccess($this->get('vid_access_provider'), $this->get('vid_access_ref'), $session->get_user_id())){
+			return false;
 		}
 
 		// Tier gating check
@@ -323,10 +313,6 @@ class MultiVideo extends SystemMultiBase {
 
         if (isset($this->options['group_id'])) {
             $filters['vid_grp_group_id'] = [$this->options['group_id'], PDO::PARAM_INT];
-        }
-
-        if (isset($this->options['event_id'])) {
-            $filters['vid_evt_event_id'] = [$this->options['event_id'], PDO::PARAM_INT];
         }
 
         if (isset($this->options['link'])) {

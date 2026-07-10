@@ -21,8 +21,6 @@ function profile_dashboard_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/address_class.php'));
 	require_once(PathHelper::getIncludePath('data/events_class.php'));
 	require_once(PathHelper::getIncludePath('data/event_registrants_class.php'));
-	require_once(PathHelper::getIncludePath('data/orders_class.php'));
-	require_once(PathHelper::getIncludePath('data/order_items_class.php'));
 	require_once(PathHelper::getIncludePath('data/notifications_class.php'));
 	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
 	require_once(PathHelper::getIncludePath('data/mailing_list_registrants_class.php'));
@@ -152,52 +150,20 @@ function profile_dashboard_logic(array $input): LogicResult {
 	// ---------------------------------------------------------------
 	// ORDERS (gated)
 	// ---------------------------------------------------------------
-	if ($settings->get_setting('products_active')) {
-		$orders = new MultiOrder(
-			array('user_id' => $user->key),
-			array('ord_order_id' => 'DESC'),
-			3
-		);
-		$orders->load();
-
-		$orders_out = array();
-		foreach ($orders as $order) {
-			$orders_out[] = array(
-				'order_id' => (int)$order->key,
-				'total'    => $order->get('ord_total_cost'),
-				'date'     => $order->get('ord_timestamp'),
-			);
-		}
-		$out['recent_orders'] = $orders_out;
-
-		// -----------------------------------------------------------
-		// SUBSCRIPTIONS (gated within products)
-		// -----------------------------------------------------------
-		if ($settings->get_setting('subscriptions_active')) {
-			require_once(PathHelper::getIncludePath('data/products_class.php'));
-			require_once(PathHelper::getIncludePath('data/product_versions_class.php'));
-
-			$subscriptions = new MultiOrderItem(
-				array('user_id' => $user->key, 'is_subscription' => true),
-				array('order_item_id' => 'DESC'),
-				5
-			);
-			$subscriptions->load();
-
-			$subs_out = array();
-			foreach ($subscriptions as $sub) {
-				$product = new Product($sub->get('odi_pro_product_id'), TRUE);
-				$subs_out[] = array(
-					'order_item_id' => (int)$sub->key,
-					'product_name'  => $product ? $product->get('pro_name') : '',
-					'price'         => $sub->get('odi_price'),
-					'status'        => $sub->get('odi_subscription_cancelled_time') ? 'cancelled' : ($sub->get('odi_subscription_status') ?: 'active'),
-				);
-			}
-			$out['subscriptions'] = $subs_out;
-
-			$active_subs = new MultiOrderItem(array('user_id' => $user->key, 'is_active_subscription' => true));
-			$out['active_subscription_count'] = $active_subs->count_all();
+	// ---------------------------------------------------------------
+	// PLUGIN-CONTRIBUTED SECTIONS (store: recent orders + subscriptions)
+	// The store registers these from its serve.php; with the store inactive
+	// nothing is contributed and the keys are simply absent — a client renders
+	// strictly from present keys. Each section's items are serialized to their
+	// raw native `data` payloads; each stat becomes a top-level count key.
+	// (Event sections — upcoming_events / pending_surveys — are still built
+	// inline above while events are core; they move to a provider in phase 4.)
+	// ---------------------------------------------------------------
+	require_once(PathHelper::getIncludePath('includes/ProfileDashboardRegistry.php'));
+	foreach (ProfileDashboardRegistry::sections($user) as $section) {
+		$out[$section->id] = array_map(function ($i) { return $i->data; }, $section->items);
+		if ($section->stat) {
+			$out[$section->stat->key] = $section->stat->count;
 		}
 	}
 

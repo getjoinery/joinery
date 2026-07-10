@@ -1,0 +1,373 @@
+{
+    "name": "Store",
+    "version": "1.0.0",
+    "description": "Sell products: cart, checkout, orders, coupons, Stripe/PayPal, recurring subscriptions, billing portal, and product requirements",
+    "author": "Joinery",
+    "receives_upgrades": true,
+    "included_in_publish": true,
+    "requires": {
+        "php": ">=8.0"
+    },
+    "adminMenu": [
+        {
+            "slug": "orders",
+            "title": "Orders",
+            "icon": "shopping-cart",
+            "order": 4,
+            "permission": 5,
+            "settingActivate": "products_active",
+            "items": [
+                {
+                    "slug": "orders-list",
+                    "title": "Orders list",
+                    "url": "/plugins/store/admin/admin_orders",
+                    "order": 1,
+                    "permission": 5,
+                    "settingActivate": "products_active"
+                },
+                {
+                    "slug": "stripe-payments",
+                    "title": "Stripe Payments",
+                    "url": "/plugins/store/admin/admin_stripe_orders",
+                    "order": 2,
+                    "permission": 5,
+                    "settingActivate": "products_active"
+                },
+                {
+                    "slug": "shadow-sessions",
+                    "title": "Shadow Sessions",
+                    "url": "/plugins/store/admin/admin_shadow_sessions",
+                    "order": 15,
+                    "permission": 5,
+                    "settingActivate": "products_active"
+                }
+            ]
+        },
+        {
+            "slug": "products",
+            "title": "Products",
+            "icon": "box",
+            "order": 3,
+            "permission": 8,
+            "settingActivate": "products_active",
+            "items": [
+                {
+                    "slug": "products-list",
+                    "title": "Products list",
+                    "url": "/plugins/store/admin/admin_products",
+                    "order": 1,
+                    "permission": 8,
+                    "settingActivate": "products_active"
+                },
+                {
+                    "slug": "product-groups",
+                    "title": "Product Groups",
+                    "url": "/plugins/store/admin/admin_product_groups",
+                    "order": 2,
+                    "permission": 9,
+                    "settingActivate": "products_active"
+                },
+                {
+                    "slug": "coupon-codes",
+                    "title": "Coupon codes",
+                    "url": "/plugins/store/admin/admin_coupon_codes",
+                    "order": 10,
+                    "permission": 5,
+                    "settingActivate": "products_active"
+                }
+            ]
+        }
+    ],
+    "profileMenu": [
+        {
+            "slug": "store-orders",
+            "title": "Orders",
+            "url": "/profile/orders",
+            "order": 60,
+            "permission": 0,
+            "icon": "shopping-bag",
+            "nativeScreen": "orders",
+            "settingActivate": "products_active"
+        },
+        {
+            "slug": "store-subscriptions",
+            "title": "Subscriptions",
+            "url": "/profile/subscriptions",
+            "order": 70,
+            "permission": 0,
+            "icon": "refresh",
+            "nativeScreen": "subscriptions",
+            "settingActivate": "subscriptions_active"
+        }
+    ],
+    "settings": [
+        {
+            "name": "products_active",
+            "default": "1",
+            "legacy_core": true
+        },
+        {
+            "name": "products_list_items_active",
+            "default": "1",
+            "legacy_core": true
+        },
+        {
+            "name": "coupons_active",
+            "default": "1",
+            "legacy_core": true
+        },
+        {
+            "name": "subscriptions_active",
+            "default": "1",
+            "legacy_core": true
+        },
+        {
+            "name": "checkout_type",
+            "default": "stripe_regular",
+            "legacy_core": true
+        },
+        {
+            "name": "cart_intermediate_page",
+            "default": "1",
+            "legacy_core": true
+        },
+        {
+            "name": "site_currency",
+            "default": "US Dollar",
+            "legacy_core": true
+        },
+        {
+            "name": "use_paypal_checkout",
+            "default": "0",
+            "legacy_core": true
+        },
+        {
+            "name": "use_venmo_checkout",
+            "default": "0",
+            "legacy_core": true
+        },
+        {
+            "name": "pricing_page",
+            "default": "1",
+            "legacy_core": true
+        },
+        {
+            "name": "max_subscriptions_per_user",
+            "default": "10",
+            "legacy_core": true
+        },
+        {
+            "name": "subscription_cancellation_enabled",
+            "default": "1",
+            "legacy_core": true
+        },
+        {
+            "name": "subscription_cancellation_prorate",
+            "default": "1",
+            "legacy_core": true
+        },
+        {
+            "name": "subscription_cancellation_timing",
+            "default": "Immediate",
+            "legacy_core": true
+        },
+        {
+            "name": "subscription_downgrade_prorate",
+            "default": "1",
+            "legacy_core": true
+        },
+        {
+            "name": "subscription_downgrade_timing",
+            "default": "Immediate",
+            "legacy_core": true
+        },
+        {
+            "name": "subscription_downgrades_enabled",
+            "default": "1",
+            "legacy_core": true
+        },
+        {
+            "name": "subscription_reactivation_enabled",
+            "default": "1",
+            "legacy_core": true
+        },
+        {
+            "name": "subscription_upgrade_prorate",
+            "default": "1",
+            "legacy_core": true
+        },
+        {
+            "name": "stripe_api_key",
+            "default": "",
+            "legacy_core": true
+        },
+        {
+            "name": "stripe_api_key_test",
+            "default": "",
+            "legacy_core": true
+        },
+        {
+            "name": "stripe_api_pkey",
+            "default": "",
+            "legacy_core": true
+        },
+        {
+            "name": "stripe_api_pkey_test",
+            "default": "",
+            "legacy_core": true
+        },
+        {
+            "name": "stripe_endpoint_secret",
+            "default": "",
+            "legacy_core": true
+        },
+        {
+            "name": "connected_account_id",
+            "default": "",
+            "legacy_core": true
+        },
+        {
+            "name": "paypal_api_key",
+            "default": "",
+            "legacy_core": true
+        },
+        {
+            "name": "paypal_api_key_test",
+            "default": "",
+            "legacy_core": true
+        },
+        {
+            "name": "paypal_api_secret",
+            "default": "",
+            "legacy_core": true
+        },
+        {
+            "name": "paypal_api_secret_test",
+            "default": "",
+            "legacy_core": true
+        }
+    ],
+    "signals": {
+        "purchase.completed": {
+            "label": "Sale completed",
+            "description": "A purchase or order was completed successfully.",
+            "category": "Orders",
+            "payload": {
+                "order_id": "Order id",
+                "user_id": "Buyer user id",
+                "source_user_id": "Acting user id (the buyer)",
+                "product_id": "Product id",
+                "product_name": "Product display name",
+                "buyer_name": "Buyer display name",
+                "buyer_email": "Buyer email address",
+                "amount": "Order total, decimal string",
+                "currency": "Configured site currency"
+            },
+            "notify": {
+                "ntf_type": "order",
+                "supports_topic": true,
+                "default_email": true,
+                "title_template": "Sale completed: {product_name}",
+                "body_template": "{buyer_name} ({buyer_email}) completed a purchase — Order #{order_id}.",
+                "link_template": "/admin/admin_orders"
+            }
+        },
+        "payment.failed": {
+            "label": "Payment failed",
+            "description": "A checkout payment was declined or failed.",
+            "category": "Orders",
+            "payload": {
+                "order_id": "Order id",
+                "user_id": "Billing user id",
+                "error_message": "Failure reason (truncated at the call site)"
+            },
+            "notify": {
+                "ntf_type": "order",
+                "supports_topic": true,
+                "default_email": true,
+                "title_template": "Checkout payment failed",
+                "body_template": "A card charge failed at checkout (Order #{order_id}): {error_message}",
+                "link_template": "/admin/admin_orders"
+            }
+        },
+        "subscription.started": {
+            "label": "New subscription",
+            "description": "A new subscriber signed up for a subscription or tier.",
+            "category": "Subscriptions",
+            "payload": {
+                "order_id": "Order id",
+                "order_item_id": "Order item id",
+                "user_id": "Subscriber user id",
+                "source_user_id": "Acting user id (the subscriber)",
+                "product_id": "Product id",
+                "product_name": "Product display name",
+                "buyer_name": "Subscriber display name",
+                "buyer_email": "Subscriber email address"
+            },
+            "notify": {
+                "ntf_type": "subscription",
+                "supports_topic": true,
+                "default_email": true,
+                "title_template": "New subscription: {product_name}",
+                "body_template": "{buyer_name} ({buyer_email}) started a subscription — Order #{order_id}.",
+                "link_template": "/admin/admin_orders"
+            }
+        },
+        "subscription.cancelled": {
+            "label": "Subscription cancelled",
+            "description": "A subscription was cancelled by the user or the provider.",
+            "category": "Subscriptions",
+            "payload": {
+                "order_item_id": "Order item id",
+                "user_id": "Subscriber user id",
+                "provider": "Payment provider (stripe / paypal)",
+                "provider_subscription_id": "Provider-side subscription id"
+            },
+            "notify": {
+                "ntf_type": "subscription",
+                "supports_topic": true,
+                "default_email": true,
+                "title_template": "Subscription cancelled",
+                "body_template": "A subscription was cancelled ({provider} subscription {provider_subscription_id}).",
+                "link_template": "/admin/admin_subscription_tiers"
+            }
+        },
+        "subscription.payment_failed": {
+            "label": "Subscription payment failed",
+            "description": "A recurring subscription charge failed or went past-due.",
+            "category": "Subscriptions",
+            "payload": {
+                "order_item_id": "Order item id",
+                "user_id": "Subscriber user id",
+                "provider": "Payment provider (stripe / paypal)",
+                "provider_subscription_id": "Provider-side subscription id"
+            },
+            "notify": {
+                "ntf_type": "subscription",
+                "supports_topic": true,
+                "default_email": true,
+                "title_template": "Subscription payment failed",
+                "body_template": "A recurring subscription payment failed ({provider} subscription {provider_subscription_id}).",
+                "link_template": "/admin/admin_orders"
+            }
+        },
+        "subscription.expired": {
+            "label": "Subscription expired",
+            "description": "A subscription or tier lapsed.",
+            "category": "Subscriptions",
+            "payload": {
+                "user_id": "Subscriber user id",
+                "tier_id": "Subscription tier id",
+                "tier_name": "Subscription tier name"
+            },
+            "notify": {
+                "ntf_type": "subscription",
+                "supports_topic": true,
+                "default_email": true,
+                "title_template": "Subscription expired",
+                "body_template": "A {tier_name} subscription has expired.",
+                "link_template": "/admin/admin_subscription_tiers"
+            }
+        }
+    }
+}

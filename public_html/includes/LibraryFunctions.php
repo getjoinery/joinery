@@ -4,6 +4,7 @@ require_once('SystemBase.php');
 require_once('ThemeHelper.php');
 require_once('PluginHelper.php');
 require_once('DnsResolver.php');
+require_once('CurrencyHelper.php');
 
 class LibraryFunctions {
 
@@ -1164,6 +1165,11 @@ class LibraryFunctions {
 			'base_class' => 'SystemBase',
 			'include_plugins' => false,
 			'plugin_filter' => null,
+			// 'all'    → every plugin dir on disk (maintenance/schema/deletion callers
+			//            that must see inactive-plugin tables too — the default).
+			// 'active' → only currently-active plugins (the REST API, so deactivating
+			//            a plugin removes its endpoints).
+			'plugin_status' => 'all',
 			'verbose' => false
 		);
 		$options = array_merge($defaults, $options);
@@ -1187,7 +1193,16 @@ class LibraryFunctions {
 			} else {
 				$plugins = LibraryFunctions::list_plugins($plugin_dir);
 			}
-			
+
+			// Active-only callers (the REST API) drop inactive plugins so a
+			// deactivated plugin no longer exposes its models.
+			if ($options['plugin_status'] === 'active') {
+				require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
+				$plugins = array_values(array_filter($plugins, function ($plugin) {
+					return PluginHelper::isPluginActive($plugin);
+				}));
+			}
+
 			foreach ($plugins as $plugin) {
 				$plugin_data_dir = $plugin_dir . '/' . $plugin . '/data';
 				if ($options['verbose']) {
@@ -1279,7 +1294,11 @@ class LibraryFunctions {
 						}
 					}
 				}
-			} catch (Exception $e) {
+			} catch (\Throwable $e) {
+				// A plugin model that can't load standalone (missing parent
+				// class, dependency require) throws a fatal Error, not an
+				// Exception. Catch Throwable so one bad file skips itself
+				// instead of killing the whole discovery pass (and the API).
 				if ($options['verbose']) {
 					echo "    Error loading $filepath: " . $e->getMessage() . "<br>\n";
 				}

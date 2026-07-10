@@ -44,7 +44,7 @@ function block_rule_delete_logic(array $input): LogicResult{
 	}
 
 	// Feature gate (delete is also gated, mirroring add)
-	if (!SubscriptionTier::getUserFeature($session->get_user_id(), 'scrolldaddy_custom_rules', false)) {
+	if (!SubscriptionTier::getUserFeature($session->get_user_id(), 'dns_filtering_scrolldaddy_custom_rules', false)) {
 		return LogicResult::error('Custom rules are available on Premium and Pro plans.');
 	}
 

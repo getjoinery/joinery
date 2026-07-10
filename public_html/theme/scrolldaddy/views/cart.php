@@ -2,7 +2,7 @@
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	// PathHelper is already loaded
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-	require_once(PathHelper::getThemeFilePath('cart_logic.php', 'logic'));
+	require_once(PathHelper::getThemeFilePath('cart_logic.php', 'logic', 'system', null, 'store', false));
 
 	$page_vars = process_logic(cart_logic(array_merge($_GET, $_POST)));
 	$cart = $page_vars['cart'];

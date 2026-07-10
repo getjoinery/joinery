@@ -91,7 +91,7 @@ $page_vars = process_logic(device_edit_logic(array_merge($_GET, $_POST, $params 
 	]);
 
 	if ($device->key) {
-		$can_log = $tier && $tier->getFeature('scrolldaddy_query_logging', false);
+		$can_log = $tier && $tier->getFeature('dns_filtering_scrolldaddy_query_logging', false);
 		if ($can_log) {
 			$formwriter->dropinput('sdd_log_queries', 'Query Logging', [
 				'options' => array('0' => 'Off', '1' => 'On'),

@@ -90,7 +90,7 @@ else{
 	}
 	
 	$session = SessionControl::get_instance();
-	$has_custom_rules = SubscriptionTier::getUserFeature($user->key, 'scrolldaddy_custom_rules', false);
+	$has_custom_rules = SubscriptionTier::getUserFeature($user->key, 'dns_filtering_scrolldaddy_custom_rules', false);
 
 	foreach($devices as $device){
 
@@ -168,7 +168,7 @@ else{
 								}
 							}
 
-							$max_blocks = $tier ? $tier->getFeature('scrolldaddy_max_scheduled_blocks', 1) : 1;
+							$max_blocks = $tier ? $tier->getFeature('dns_filtering_scrolldaddy_max_scheduled_blocks', 1) : 1;
 							$block_count = $device_blocks ? count($device_blocks) : 0;
 							$add_block_btn = ($block_count >= $max_blocks)
 								? '<span class="dnsf-note">Upgrade to add more</span>'
@@ -223,7 +223,7 @@ else{
 	}
 
 	// Check if user can add more devices based on tier limit
-	$max_devices = $tier->getFeature('scrolldaddy_max_devices', 0);
+	$max_devices = $tier->getFeature('dns_filtering_scrolldaddy_max_devices', 0);
 
 	if($num_devices < $max_devices){
 		?>

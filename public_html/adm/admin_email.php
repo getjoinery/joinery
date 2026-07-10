@@ -1,4 +1,5 @@
 <?php
+	require_once(PathHelper::getIncludePath('includes/RecipientGroupProviderRegistry.php'));
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	require_once(PathHelper::getIncludePath('adm/logic/admin_email_logic.php'));
@@ -80,23 +81,12 @@
 				$rowvalues=array();
 
 				$add_user_list = array();
-				if($recipient_group->get('erg_grp_group_id')){
-					$group = new Group($recipient_group->get('erg_grp_group_id'), TRUE);
-					$members = $group->get_member_list();
-					foreach($members as $member){
-						$add_user_list[] = $member->get('grm_foreign_key_id');
-					}
-					$label = $group->get('grp_name');
-				}
-				else if($recipient_group->get('erg_evt_event_id')){
-					$event = new Event($recipient_group->get('erg_evt_event_id'), TRUE);
-					$event_registrants = new MultiEventRegistrant(array('event_id' => $recipient_group->get('erg_evt_event_id'), 'expired' => false), NULL);
-					//$numregistrants = $event_registrants->count_all();
-					$event_registrants->load();
-					foreach($event_registrants as $event_registrant){
-						$add_user_list[] = $event_registrant->get('evr_usr_user_id');
-					}
-					$label = $event->get('evt_name');
+				$label = '(none)';
+				$provider = RecipientGroupProviderRegistry::get($recipient_group->get('erg_provider'));
+				if($provider){
+					$ref_id = (int)$recipient_group->get('erg_reference_id');
+					$add_user_list = $provider->resolve($ref_id);
+					$label = $provider->reference_label($ref_id);
 				}
 
 				$num_total = 0;

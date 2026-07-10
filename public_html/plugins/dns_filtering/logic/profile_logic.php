@@ -13,7 +13,7 @@ function profile_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('data/event_registrants_class.php'));
 	require_once(PathHelper::getIncludePath('data/event_sessions_class.php'));
 	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
-	require_once(PathHelper::getIncludePath('data/order_items_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/store/data/order_items_class.php'));
 
 	$page_vars = array();
 

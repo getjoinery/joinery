@@ -92,7 +92,8 @@ function admin_users_message_logic(array $input): LogicResult {
 			$message = new Message(NULL);
 			$message->set('msg_usr_user_id_sender', $sender->key);
 			$message->set('msg_usr_user_id_recipient', NULL);
-			$message->set('msg_evt_event_id', $event->key);
+			$message->set('msg_context_type', 'event');
+			$message->set('msg_context_id', $event->key);
 			$message->set('msg_body', $input['eml_message']);
 			$message->set('msg_sent_time', 'now()');
 			$message->save();
@@ -133,7 +134,8 @@ function admin_users_message_logic(array $input): LogicResult {
 				$message->set('msg_usr_user_id_sender', $sender->key);
 				$message->set('msg_usr_user_id_recipient', $recipient_user->key);
 				if($event){
-					$message->set('msg_evt_event_id', $event->key);
+					$message->set('msg_context_type', 'event');
+					$message->set('msg_context_id', $event->key);
 				}
 				$message->set('msg_body', $input['eml_message']);
 				$message->set('msg_sent_time', 'now()');
@@ -210,7 +212,8 @@ function admin_users_message_logic(array $input): LogicResult {
 			$message = new Message(NULL);
 			$message->set('msg_usr_user_id_sender', $sender->key);
 			$message->set('msg_usr_user_id_recipient', NULL);
-			$message->set('msg_evt_event_id', $event->key);
+			$message->set('msg_context_type', 'event');
+			$message->set('msg_context_id', $event->key);
 			$message->set('msg_body', $input['eml_message']);
 			$message->set('msg_sent_time', 'now()');
 			$message->save();
@@ -246,7 +249,8 @@ function admin_users_message_logic(array $input): LogicResult {
 				$message->set('msg_usr_user_id_sender', $sender->key);
 				$message->set('msg_usr_user_id_recipient', $recipient_user->key);
 				if($event){
-					$message->set('msg_evt_event_id', $event->key);
+					$message->set('msg_context_type', 'event');
+					$message->set('msg_context_id', $event->key);
 				}
 				$message->set('msg_body', $input['eml_message']);
 				$message->set('msg_sent_time', 'now()');
@@ -321,7 +325,8 @@ function admin_users_message_logic(array $input): LogicResult {
 				$message->set('msg_usr_user_id_sender', $sender->key);
 				$message->set('msg_usr_user_id_recipient', $recipient->key);
 				if($event){
-					$message->set('msg_evt_event_id', $event->key);
+					$message->set('msg_context_type', 'event');
+					$message->set('msg_context_id', $event->key);
 				}
 				$message->set('msg_body', $input['eml_message']);
 				$message->set('msg_sent_time', 'now()');

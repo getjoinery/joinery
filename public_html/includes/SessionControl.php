@@ -6,7 +6,6 @@ TO A LOGIN PAGE IF NOT
 require_once ('PathHelper.php');
 require_once ('DbConnector.php');
 require_once ('LibraryFunctions.php');
-require_once ('ShoppingCart.php');
 
 require_once(PathHelper::getIncludePath('data/login_class.php'));
 
@@ -54,9 +53,6 @@ class SessionControl{
 	// on page-view vs conversion without requiring the VisitorEvent class here
 	// (SessionControl is always pre-loaded; VisitorEvent is not).
 	const TYPE_PAGE_VIEW = 1;
-
-	const COUPON_PENDING_KEY = 'pending_coupon';
-	const COUPON_FLASH_KEY   = 'pending_coupon_flash';
 
 	private static $instance;
 	var $currpermissioncheck;
@@ -229,18 +225,7 @@ class SessionControl{
 		return array();
 	}
 
-	public function get_shopping_cart() {
-		if (!isset($_SESSION['shopping_cart'])) {
-			$_SESSION['shopping_cart'] = new ShoppingCart();
-		}
-		return $_SESSION['shopping_cart'];
-	}
-
-	public function save_shopping_cart($cart) {
-		$_SESSION['shopping_cart'] = $cart;
-	}
-
-	static function getOS() { 
+	static function getOS() {
 
 		$user_agent = $_SERVER['HTTP_USER_AGENT'];
 
@@ -488,72 +473,6 @@ class SessionControl{
 		if (class_exists('AbTest', false)) {
 			AbTest::flush_request_accounting($type);
 		}
-	}
-
-	/**
-	 * Marketing-coupon intake — sibling to UTM capture above. Reads ?coupon=CODE
-	 * from the query string, validates against CouponCode, stashes a pending code
-	 * in session for the next cart, and logs every attempt (valid or invalid) to
-	 * vse_visitor_events for attribution. Invalid codes fail silently so stale
-	 * marketing links don't surface errors on the homepage.
-	 */
-	public function capture_marketing_coupon() {
-		$code = isset($_GET['coupon']) ? trim(strtolower($_GET['coupon'])) : '';
-		if ($code === '' || strlen($code) > 64) {
-			return;
-		}
-
-		require_once(PathHelper::getIncludePath('data/coupon_codes_class.php'));
-		require_once(PathHelper::getIncludePath('data/visitor_events_class.php'));
-
-		$coupon = CouponCode::GetByColumn('ccd_code', $code);
-		$valid  = $coupon && $coupon->is_valid();
-
-		try {
-			$this->save_visitor_event(VisitorEvent::TYPE_COUPON_ATTEMPT, FALSE, NULL, NULL, $code);
-		} catch (Exception $e) {
-			error_log('capture_marketing_coupon log error: ' . $e->getMessage());
-		}
-
-		if (!$valid) {
-			return;
-		}
-
-		$_SESSION[self::COUPON_PENDING_KEY] = $code;
-		$_SESSION[self::COUPON_FLASH_KEY]   = 'Coupon <strong>' . htmlspecialchars(strtoupper($code), ENT_QUOTES, 'UTF-8') . '</strong> will be applied at checkout.';
-
-		$cart = $this->get_shopping_cart();
-		if ($cart && $cart->count_items() > 0) {
-			$this->apply_pending_coupon_to_cart($cart);
-		}
-	}
-
-	/**
-	 * Apply a previously-captured pending coupon to a cart. Called from
-	 * ShoppingCart::add_item() so newly-added items pick up the discount.
-	 * Clears the pending key on success so manual removal sticks.
-	 */
-	public function apply_pending_coupon_to_cart($cart) {
-		if (empty($_SESSION[self::COUPON_PENDING_KEY])) {
-			return;
-		}
-		$result = $cart->add_coupon($_SESSION[self::COUPON_PENDING_KEY]);
-		if ($result === 1) {
-			unset($_SESSION[self::COUPON_PENDING_KEY]);
-		}
-	}
-
-	/**
-	 * Flash message for pricing/cart views after a ?coupon= URL lands a valid code.
-	 * Returns HTML string or null; clears on read so it shows once.
-	 */
-	public function get_pending_coupon_flash() {
-		if (empty($_SESSION[self::COUPON_FLASH_KEY])) {
-			return null;
-		}
-		$msg = $_SESSION[self::COUPON_FLASH_KEY];
-		unset($_SESSION[self::COUPON_FLASH_KEY]);
-		return $msg;
 	}
 
 	public function get_user_from_cookie() {

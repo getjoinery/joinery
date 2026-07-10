@@ -4,6 +4,7 @@
 	require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
 	
 	require_once(PathHelper::getIncludePath('data/emails_class.php'));
+	require_once(PathHelper::getIncludePath('includes/RecipientGroupProviderRegistry.php'));
 	require_once(PathHelper::getIncludePath('data/email_recipients_class.php'));
 	require_once(PathHelper::getIncludePath('data/groups_class.php'));
 	require_once(PathHelper::getIncludePath('data/group_members_class.php'));
@@ -55,24 +56,12 @@
 		//ADD THE *ADD* LISTS TOGETHER
 		$queued_recipients = array();
 		foreach($recipient_groups as $recipient_group){
-			
-			if($recipient_group->get('erg_grp_group_id')){
-				$group = new Group($recipient_group->get('erg_grp_group_id'), TRUE);
-				$members = $group->get_member_list();
-				foreach($members as $member){
-					$user= new User($member->get('grm_foreign_key_id'), TRUE);
-					$queued_recipients[] = $user->key;
+			$provider = RecipientGroupProviderRegistry::get($recipient_group->get('erg_provider'));
+			if($provider){
+				foreach($provider->resolve((int)$recipient_group->get('erg_reference_id')) as $uid){
+					$queued_recipients[] = $uid;
 				}
 			}
-			else{
-				$event_registrants = new MultiEventRegistrant(array('event_id' => $recipient_group->get('erg_evt_event_id'), 'expired' => false), NULL);
-				//$numregistrants = $event_registrants->count_all();
-				$event_registrants->load();
-				foreach($event_registrants as $event_registrant){
-					$queued_recipients[] = $event_registrant->get('evr_usr_user_id');
-				}			
-			}
-				
 		}
 
 		//NOW REMOVE THE RECIPIENTS WHO NEED TO BE REMOVED
@@ -80,25 +69,13 @@
 		
 		$removal_list = array();
 		foreach($recipient_groups as $recipient_group){
-
-			if($recipient_group->get('erg_grp_group_id')){
-				$group = new Group($recipient_group->get('erg_grp_group_id'), TRUE);
-				$members = $group->get_member_list();
-				foreach($members as $member){
-					$user= new User($member->get('grm_foreign_key_id'), TRUE);
-					$removal_list[] = $user->key;
+			$provider = RecipientGroupProviderRegistry::get($recipient_group->get('erg_provider'));
+			if($provider){
+				foreach($provider->resolve((int)$recipient_group->get('erg_reference_id')) as $uid){
+					$removal_list[] = $uid;
 				}
 			}
-			else{
-				$event_registrants = new MultiEventRegistrant(array('event_id' => $recipient_group->get('erg_evt_event_id'), 'expired' => false), NULL);
-				//$numregistrants = $event_registrants->count_all();
-				$event_registrants->load();
-				foreach($event_registrants as $event_registrant){
-					$removal_list[] = $event_registrant->get('evr_usr_user_id');
-				}			
-			}
-				
-		}	
+		}
 		
 		//REMOVE DUPLICATES
 		$queued_recipients = array_unique($queued_recipients);

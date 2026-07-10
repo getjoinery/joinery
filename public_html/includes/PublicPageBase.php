@@ -3,7 +3,6 @@ require_once(__DIR__ . '/PathHelper.php');
 
 require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
-require_once(PathHelper::getIncludePath('includes/ShoppingCart.php'));
 require_once(PathHelper::getIncludePath('includes/ThemeHelper.php'));
 require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
 
@@ -13,6 +12,21 @@ require_once(PathHelper::getIncludePath('data/public_menus_class.php'));
 abstract class PublicPageBase {
 
 	protected $rowcount;
+
+	/**
+	 * Header-menu providers, keyed by the $menu_data key they populate (e.g.
+	 * 'cart'). A provider is `function(SessionControl $session): ?array` and is
+	 * registered from a plugin's request bootstrap. Returning null contributes
+	 * nothing. Last registration wins per key (idempotent).
+	 *
+	 * @var array<string,callable>
+	 */
+	protected static $header_menu_providers = array();
+
+	/** Register a header-menu provider (e.g. the store's cart). */
+	public static function register_header_menu_provider(string $key, callable $provider): void {
+		self::$header_menu_providers[$key] = $provider;
+	}
 
 	protected static $header_defaults = array(
 		//'title' => '',
@@ -242,30 +256,21 @@ abstract class PublicPageBase {
 			$menu_data['user_menu']['items'] = [];
 		}
 
-		// 3. Process shopping cart data
-		// Shopping cart is always available - no setting controls it
-		$cart = null;
-		$item_count = 0;
-
-		try {
-			$cart = $session->get_shopping_cart();
-			if ($cart) {
-				$item_count = $cart->count_items();
+		// 3. Header menu providers (cart, etc.)
+		// Plugins contribute header menu payloads (the store contributes the
+		// cart) by registering a provider from their request bootstrap. With no
+		// provider registered — e.g. store inactive — the key simply isn't set,
+		// and themes fall back via isset($menu_data['cart']).
+		foreach (self::$header_menu_providers as $key => $provider) {
+			try {
+				$data = $provider($session);
+				if ($data !== null) {
+					$menu_data[$key] = $data;
+				}
+			} catch (Exception $e) {
+				// A misbehaving provider must not take down the page header.
 			}
-		} catch (Exception $e) {
-			// Cart not available
-			$item_count = 0;
 		}
-
-		$menu_data['cart'] = [
-			'enabled' => true, // Cart is always enabled in the system
-			'count' => $item_count, // Primary count field for themes
-			'item_count' => $item_count,
-			'total_items' => $item_count, // Could be different if we track quantity
-			'subtotal' => null, // Future: calculate subtotal
-			'link' => '/cart',
-			'has_items' => ($item_count > 0)
-		];
 
 		// 4. Notifications
 		$menu_data['notifications'] = [

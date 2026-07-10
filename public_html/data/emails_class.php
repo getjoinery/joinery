@@ -92,30 +92,25 @@ public function __construct($key, $load=FALSE) {
 		//$this->webdir = $settings->get_setting('webDir');
 	}
 
-	//THIS ADDS AN ENTRY TO THE RECIPIENT GROUPS TABLE WITH THE EVENT OR GROUP TO ADD
+	//THIS ADDS AN ENTRY TO THE RECIPIENT GROUPS TABLE NAMING A TARGET PROVIDER + REFERENCE
 	//THE OP FIELD TELLS THE MAILER WHETHER TO ADD THESE RECIPIENTS TO THE EMAIL OR SUBTRACT THEM WHEN IT'S TIME TO QUEUE THE EMAIL
-	function add_recipient_group($evt_event_id, $grp_group_id, $op='add'){
-		
+	function add_recipient_group($provider, $reference_id, $op='add'){
+
 		//MAKE SURE THERE'S ONLY TWO OPERATIONS
-		if($op == 'remove'){
-			$op == 'remove';
-		}
-		else{
-			$op == 'add';
-		}
-		
+		$op = ($op === 'remove') ? 'remove' : 'add';
+
 		$email_recipient_group = new EmailRecipientGroup(NULL);
 		$email_recipient_group->set('erg_eml_email_id', $this->key);
-		$email_recipient_group->set('erg_evt_event_id', $evt_event_id);
-		$email_recipient_group->set('erg_grp_group_id', $grp_group_id);
+		$email_recipient_group->set('erg_provider', $provider);
+		$email_recipient_group->set('erg_reference_id', $reference_id);
 		$email_recipient_group->set('erg_operation', $op);
-		
+
 		//DON'T ADD IT AGAIN IF IT'S ALREADY THERE
-		if(!$email_recipient_group->check_for_duplicate(array('erg_grp_group_id', 'erg_evt_event_id', 'erg_eml_email_id', 'erg_operation'))){
+		if(!$email_recipient_group->check_for_duplicate(array('erg_provider', 'erg_reference_id', 'erg_eml_email_id', 'erg_operation'))){
 			$email_recipient_group->prepare();
 			$email_recipient_group->save();
 		}
-		
+
 		return true;
 	}
 	

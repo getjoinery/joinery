@@ -32,7 +32,7 @@ class AutomatedTestRunner {
      */
     public function discover_models() {
         // Use centralized discovery method
-        return LibraryFunctions::discover_model_classes();
+        return LibraryFunctions::discover_model_classes(['include_plugins' => true]);
     }
     
     /**

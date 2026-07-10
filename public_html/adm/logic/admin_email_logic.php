@@ -5,6 +5,7 @@ function admin_email_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/Activation.php'));
 	require_once(PathHelper::getIncludePath('data/emails_class.php'));
+	require_once(PathHelper::getIncludePath('includes/RecipientGroupProviderRegistry.php'));
 	require_once(PathHelper::getIncludePath('data/email_recipient_groups_class.php'));
 	require_once(PathHelper::getIncludePath('data/groups_class.php'));
 	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
@@ -40,21 +41,15 @@ function admin_email_logic(array $input): LogicResult {
 		return LogicResult::redirect('/admin/admin_emails');
 	}
 
-	if($input['action'] == 'addgroup'){
-		//ADD GROUP TO EMAIL
-		$email->add_recipient_group(NULL, $input['grp_group_id']);
+	if($input['action'] == 'add_recipient'){
+		//ADD A PROVIDER-RESOLVED RECIPIENT GROUP TO THE EMAIL
+		$email->add_recipient_group($input['provider'], $input['reference_id']);
 		$returnurl = $session->get_return();
 		return LogicResult::redirect($returnurl);
 	}
 	else if($input['action'] == 'remove'){
 		$email_recipient_group = new EmailRecipientGroup($input['erg_email_recipient_group_id'], TRUE);
 		$email_recipient_group->permanent_delete();
-		$returnurl = $session->get_return();
-		return LogicResult::redirect($returnurl);
-	}
-	else if($input['action'] == 'addevent'){
-		//ADD GROUP TO EMAIL
-		$email->add_recipient_group($input['evt_event_id'], NULL);
 		$returnurl = $session->get_return();
 		return LogicResult::redirect($returnurl);
 	}

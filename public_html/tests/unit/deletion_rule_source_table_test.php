@@ -58,7 +58,7 @@ ok('a self-referential parent column resolves to null absent an explicit source_
     resolve('evt_parent_event_id', 'evt') === null);
 
 ok('an external id column (not an internal FK) resolves to null',
-    resolve('usr_stripe_customer_id', 'usr') === null);
+    resolve('usr_mailing_list_provider_id', 'usr') === null);
 
 ok('a column not prefixed with the given own_prefix resolves to null',
     resolve('evt_svy_survey_id', 'xyz') === null);

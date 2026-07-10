@@ -193,7 +193,7 @@ try {
 
     // Find the model class for this table
     output("Looking for model class for table '$table_name'...", 'header');
-    $classes = LibraryFunctions::discover_model_classes(['require_tablename' => true]);
+    $classes = LibraryFunctions::discover_model_classes(['require_tablename' => true, 'include_plugins' => true]);
 
     $model_class = null;
     $pkey_column = null;

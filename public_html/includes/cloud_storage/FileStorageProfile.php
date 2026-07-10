@@ -7,7 +7,7 @@
  * only re-expresses those methods through the StorageProfile seam so the shared
  * offload engine + lifecycle can drive the public-files offload.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('includes/cloud_storage/StorageProfile.php'));
@@ -34,7 +34,7 @@ class FileStorageProfile implements StorageProfile {
 			AND (fil_private IS NULL OR fil_private = false)
 			AND (fil_min_permission IS NULL OR fil_min_permission = 0)
 			AND (fil_grp_group_id IS NULL OR fil_grp_group_id = 0)
-			AND (fil_evt_event_id IS NULL OR fil_evt_event_id = 0)
+			AND fil_access_provider IS NULL
 			AND (fil_tier_min_level IS NULL OR fil_tier_min_level = 0)";
 	}
 

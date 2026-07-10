@@ -1,6 +1,7 @@
 <?php
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getThemeFilePath('pricing_logic.php', 'logic'));
+	require_once(PathHelper::getIncludePath('plugins/store/includes/ShoppingCart.php'));
+	require_once(PathHelper::getThemeFilePath('pricing_logic.php', 'logic', 'system', null, 'store', false));
 	// PathHelper is already loaded
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
@@ -15,7 +16,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	echo PublicPage::BeginPage('Pricing');
 
 	// Campaign coupon flash — shown once when a valid ?coupon= URL lands the visitor here
-	$coupon_flash = SessionControl::get_instance()->get_pending_coupon_flash();
+	$coupon_flash = ShoppingCart::pending_coupon_flash();
 	if ($coupon_flash) {
 		echo '<div class="container" style="margin-top:1rem;"><div style="background:#d4edda;color:#155724;padding:0.875rem 1.25rem;border-radius:8px;border:1px solid #c3e6cb;" role="status">'.$coupon_flash.'</div></div>';
 	}

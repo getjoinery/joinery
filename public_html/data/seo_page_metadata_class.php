@@ -33,15 +33,49 @@ class SeoPageMetadata extends SystemBase {
 
 	const TITLE_FORMAT = '{title} | {site_name}';
 
-	const ENTITY_CLASSES = array(
-		'post'         => array('class'=>'Post',        'multi'=>'MultiPost',        'file'=>'data/posts_class.php',         'namespace'=>'post'),
-		'event'        => array('class'=>'Event',       'multi'=>'MultiEvent',       'file'=>'data/events_class.php',        'namespace'=>'event'),
-		'product'      => array('class'=>'Product',     'multi'=>'MultiProduct',     'file'=>'data/products_class.php',      'namespace'=>'product'),
-		'page'         => array('class'=>'Page',        'multi'=>'MultiPage',        'file'=>'data/pages_class.php',         'namespace'=>'page'),
-		'location'     => array('class'=>'Location',    'multi'=>'MultiLocation',    'file'=>'data/locations_class.php',     'namespace'=>'location'),
-		'video'        => array('class'=>'Video',       'multi'=>'MultiVideo',       'file'=>'data/videos_class.php',        'namespace'=>'video'),
-		'mailing_list' => array('class'=>'MailingList', 'multi'=>'MultiMailingList', 'file'=>'data/mailing_lists_class.php', 'namespace'=>'list'),
-	);
+	// Which entity types have public, indexable pages (used by the sitemap,
+	// public-path enumeration, and the admin SEO pages) is contributed by the
+	// active plugins: core registers post/page/video/mailing_list, store
+	// registers product, event_manager registers event/location. Each
+	// registration carries the model class + Multi class, the file that defines
+	// them, the URL namespace, the admin edit-URL prefix (id appended), and the
+	// Open Graph type.
+	private static $entity_classes = array();
+
+	/**
+	 * Register a public entity type. Idempotent (last-wins by type).
+	 *
+	 * @param string $admin_edit_url id-append prefix, e.g. '/admin/admin_post_edit?pst_post_id='
+	 * @param string $og_type        Open Graph type for the entity's pages
+	 */
+	public static function register_entity_class(string $type, string $class, string $multi, string $file, string $namespace, string $admin_edit_url, string $og_type = 'website'): void {
+		self::$entity_classes[$type] = array(
+			'class'         => $class,
+			'multi'         => $multi,
+			'file'          => $file,
+			'namespace'     => $namespace,
+			'admin_edit_url'=> $admin_edit_url,
+			'og_type'       => $og_type,
+		);
+	}
+
+	/** All registered entity types, keyed by type. */
+	public static function entity_classes(): array {
+		return self::$entity_classes;
+	}
+
+	/** Register the core-owned public entity types. */
+	public static function register_core_entity_classes(): void {
+		self::register_entity_class('post',         'Post',        'MultiPost',        'data/posts_class.php',         'post', '/admin/admin_post_edit?pst_post_id=', 'article');
+		self::register_entity_class('page',         'Page',        'MultiPage',        'data/pages_class.php',         'page', '/admin/admin_page_edit?pag_page_id=', 'website');
+		self::register_entity_class('video',        'Video',       'MultiVideo',       'data/videos_class.php',        'video', '/admin/admin_video_edit?vid_video_id=', 'article');
+		self::register_entity_class('mailing_list', 'MailingList', 'MultiMailingList', 'data/mailing_lists_class.php', 'list', '/admin/admin_list_edit?mlt_mailing_list_id=', 'website');
+		// MOVED-TO-PLUGIN (phase 4): event/location move to event_manager
+		// serve.php once that plugin owns the tables. Kept here while the events
+		// code is still in core. (product moved to the store's serve.php in phase 3.)
+		self::register_entity_class('event',        'Event',       'MultiEvent',       'data/events_class.php',        'event', '/admin/admin_event_edit?evt_event_id=', 'article');
+		self::register_entity_class('location',     'Location',    'MultiLocation',    'data/locations_class.php',     'location', '/admin/admin_location_edit?loc_location_id=', 'website');
+	}
 
 	private static $per_request_lookup_cache = array();
 
@@ -146,7 +180,7 @@ class SeoPageMetadata extends SystemBase {
 	}
 
 	public static function is_entity_path($canonical) {
-		foreach (self::ENTITY_CLASSES as $info) {
+		foreach (self::entity_classes() as $info) {
 			$ns = '/' . $info['namespace'] . '/';
 			if (strpos($canonical, $ns) === 0) {
 				return true;
@@ -303,16 +337,8 @@ class SeoPageMetadata extends SystemBase {
 		}
 		$type = $options['entity_type'] ?? null;
 		if (!$type) return 'website';
-		switch ($type) {
-			case 'post':
-			case 'event':
-			case 'video':
-				return 'article';
-			case 'product':
-				return 'product';
-			default:
-				return 'website';
-		}
+		$info = self::entity_classes()[$type] ?? null;
+		return $info['og_type'] ?? 'website';
 	}
 
 	// --- Enumeration (Layer 2c + sitemap shared source) ---
@@ -324,7 +350,7 @@ class SeoPageMetadata extends SystemBase {
 			$records[] = $rec;
 		}
 
-		foreach (self::ENTITY_CLASSES as $type_key => $info) {
+		foreach (self::entity_classes() as $type_key => $info) {
 			foreach (self::enumerate_entity_records($type_key, $info) as $rec) {
 				$records[] = $rec;
 			}
@@ -486,7 +512,7 @@ class SeoPageMetadata extends SystemBase {
 		$records = self::enumerate_public_paths();
 
 		$entity_ids_seen = array();
-		foreach (self::ENTITY_CLASSES as $type_key => $_info) {
+		foreach (self::entity_classes() as $type_key => $_info) {
 			$entity_ids_seen[$type_key] = array();
 		}
 
@@ -583,7 +609,7 @@ class SeoPageMetadata extends SystemBase {
 			}
 		}
 
-		$known_types = array_keys(self::ENTITY_CLASSES);
+		$known_types = array_keys(self::entity_classes());
 		$placeholders = implode(',', array_fill(0, count($known_types), '?'));
 		$sql = "SELECT spm_seo_page_metadata_id, spm_path, spm_entity_type, spm_entity_id
 		        FROM spm_seo_page_metadata
@@ -656,5 +682,9 @@ class MultiSeoPageMetadata extends SystemMultiBase {
 		return $this->_get_resultsv2('spm_seo_page_metadata', $filters, $this->order_by, $only_count, $debug);
 	}
 }
+
+// Register the core-owned public entity types when this file is loaded.
+// Store and event_manager add their own from their serve.php.
+SeoPageMetadata::register_core_entity_classes();
 
 ?>

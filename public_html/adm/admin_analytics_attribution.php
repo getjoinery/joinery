@@ -10,8 +10,8 @@ $page_vars = process_logic(admin_analytics_attribution_logic(array_merge($_GET, 
 
 $settings = Globalvars::get_instance();
 $currency = $settings->get_setting('site_currency');
-require_once(PathHelper::getIncludePath('data/products_class.php'));
-$currency_symbol = isset(Product::$currency_symbols[$currency]) ? Product::$currency_symbols[$currency] : '';
+require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php'));
+$currency_symbol = CurrencyHelper::symbol($currency);
 
 $page = new AdminPage();
 $page->admin_header(array(

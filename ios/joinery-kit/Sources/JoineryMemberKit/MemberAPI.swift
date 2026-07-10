@@ -22,7 +22,7 @@ public struct MemberAPI: Sendable {
     }
 
     public func orders(offset: Int) async throws -> OrderPage {
-        let envelope = try await client.submitAction("order_list", body: .object([
+        let envelope = try await client.submitAction("store/order_list", body: .object([
             (key: "offset", value: .number(Double(offset))),
         ]))
         guard let page = OrderPage(data: envelope["data"]) else {
@@ -32,7 +32,7 @@ public struct MemberAPI: Sendable {
     }
 
     public func subscriptions() async throws -> SubscriptionSummaryPayload {
-        let envelope = try await client.submitAction("subscription_summary", body: .object([]))
+        let envelope = try await client.submitAction("store/subscription_summary", body: .object([]))
         guard let payload = SubscriptionSummaryPayload(data: envelope["data"]) else {
             throw JoineryAPIError.malformedResponse
         }
@@ -43,7 +43,7 @@ public struct MemberAPI: Sendable {
     /// once called (there is no server-side confirm step) — the confirmation
     /// is the client's alert before this call, matching the web page's flow.
     public func cancelSubscription(orderItemID: Int) async throws {
-        _ = try await client.submitAction("orders_recurring_action", body: .object([
+        _ = try await client.submitAction("store/orders_recurring_action", body: .object([
             (key: "order_item_id", value: .number(Double(orderItemID))),
         ]))
     }

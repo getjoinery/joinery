@@ -88,9 +88,12 @@ function admin_file_logic(array $input): LogicResult {
 		$permission_text .= 'Only logged in users in the "'.$group->get('grp_name').'" group ';
 		$group_or_event = true;
 	}
-	if($file->get('fil_evt_event_id')){
-		$event = new Event($file->get('fil_evt_event_id'), TRUE);
-		$permission_text .= 'Only logged in users registered for the "'.$event->get('evt_name').'" event ';
+	if($file->get('fil_access_provider')){
+		require_once(PathHelper::getIncludePath('includes/AccessGateRegistry.php'));
+		$gate = AccessGateRegistry::get($file->get('fil_access_provider'));
+		$gate_ref_label = $gate ? ($gate->options()[$file->get('fil_access_ref')] ?? $file->get('fil_access_ref')) : $file->get('fil_access_ref');
+		$gate_kind = $gate ? $gate->label() : $file->get('fil_access_provider');
+		$permission_text .= 'Only logged in users passing the '.$gate_kind.' gate for "'.$gate_ref_label.'" ';
 		$group_or_event = true;
 	}
 	if($group_or_event){
@@ -111,14 +114,21 @@ function admin_file_logic(array $input): LogicResult {
 	}
 	$permission_text .= 'can access this file.';
 
-	// Load group and event if they exist
+	// Load group if it exists; resolve the access gate to a display label.
 	$group = null;
-	$event = null;
 	if($file->get('fil_grp_group_id')){
 		$group = new Group($file->get('fil_grp_group_id'), TRUE);
 	}
-	if($file->get('fil_evt_event_id')){
-		$event = new Event($file->get('fil_evt_event_id'), TRUE);
+	$access_gate_label = null;
+	if($file->get('fil_access_provider')){
+		require_once(PathHelper::getIncludePath('includes/AccessGateRegistry.php'));
+		$gate = AccessGateRegistry::get($file->get('fil_access_provider'));
+		if($gate){
+			$ref_label = $gate->options()[$file->get('fil_access_ref')] ?? $file->get('fil_access_ref');
+			$access_gate_label = $gate->label().': '.$ref_label;
+		} else {
+			$access_gate_label = $file->get('fil_access_provider').' #'.$file->get('fil_access_ref');
+		}
 	}
 
 	$page_vars = array(
@@ -130,7 +140,7 @@ function admin_file_logic(array $input): LogicResult {
 		'permission_text' => $permission_text,
 		'group_or_event' => $group_or_event,
 		'group' => $group,
-		'event' => $event,
+		'access_gate_label' => $access_gate_label,
 	);
 
 	return LogicResult::render($page_vars);

@@ -79,7 +79,8 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	    'fil_delete_time' => array('type'=>'timestamp(6)'),
 	    'fil_min_permission' => array('type'=>'int2'),
 	    'fil_grp_group_id' => array('type'=>'int4'),
-	    'fil_evt_event_id' => array('type'=>'int4'),
+	    'fil_access_provider' => array('type'=>'varchar(32)', 'is_nullable'=>true),
+	    'fil_access_ref' => array('type'=>'int4', 'is_nullable'=>true),
 	    'fil_tier_min_level' => array('type'=>'int4', 'is_nullable'=>true),
 	    'fil_private' => array('type'=>'bool', 'is_nullable'=>false, 'default'=>'false'),
 	    'fil_storage_driver' => array('type'=>'varchar(32)', 'is_nullable'=>false, 'default'=>'local'),
@@ -474,7 +475,7 @@ public static function get_by_name($name, $search_deleted = false) {
 		if ($this->_is_private()) return false;
 		if ($this->get('fil_min_permission')) return false;
 		if ($this->get('fil_grp_group_id')) return false;
-		if ($this->get('fil_evt_event_id')) return false;
+		if ($this->get('fil_access_provider')) return false;
 		if ($this->get('fil_tier_min_level')) return false;
 		return true;
 	}
@@ -1549,22 +1550,11 @@ public static function get_by_name($name, $search_deleted = false) {
 			}
 		}
 		
-		if ($event_id = $this->get('fil_evt_event_id')){
-			require_once(PathHelper::getIncludePath('data/event_registrants_class.php'));
-			//CHECK TO SEE IF USER IS IN AUTHORIZED EVENT
-			$searches['user_id'] = $session->get_user_id();
-			$searches['event_id'] = $event_id;
-			$searches['expired'] = false;
-			$event_registrations = new MultiEventRegistrant(
-				$searches,
-				NULL, //array('event_id'=>'DESC'),
-				NULL,
-				NULL);
-			$numeventsregistrations = $event_registrations->count_all();	
-
-			if(!$numeventsregistrations){
-				return false;
-			}
+		// Provider-based access gate (event registration, or any future gate kind).
+		// Ungated → allowed; a gate whose provider is absent → denied (fail-closed).
+		require_once(PathHelper::getIncludePath('includes/AccessGateRegistry.php'));
+		if (!AccessGateRegistry::userMayAccess($this->get('fil_access_provider'), $this->get('fil_access_ref'), $session->get_user_id())){
+			return false;
 		}
 
 		// Tier gating check
@@ -1614,10 +1604,6 @@ class MultiFile extends SystemMultiBase {
 
 		if (isset($this->options['group_id'])) {
 			$filters['fil_grp_group_id'] = [$this->options['group_id'], PDO::PARAM_INT];
-		}
-
-		if (isset($this->options['event_id'])) {
-			$filters['fil_evt_event_id'] = [$this->options['event_id'], PDO::PARAM_INT];
 		}
 
 		if (isset($this->options['deleted'])) {

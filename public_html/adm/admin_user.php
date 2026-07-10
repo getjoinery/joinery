@@ -21,6 +21,7 @@ $phone_numbers = $page_vars['phone_numbers'];
 $numphonerecords = $page_vars['numphonerecords'];
 $addresses = $page_vars['addresses'];
 $numaddressrecords = $page_vars['numaddressrecords'];
+$store_active = $page_vars['store_active'] ?? false;
 $orders = $page_vars['orders'];
 $numorders = $page_vars['numorders'];
 $event_registrations = $page_vars['event_registrations'];
@@ -299,7 +300,7 @@ array(
 									<?php if($reason): ?>
 										(<?php echo htmlspecialchars($reason); ?>
 										<?php if($reason === 'purchase' && $change->get('cht_reference_id')): ?>
-											- <a href="/admin/admin_order?ord_order_id=<?php echo $change->get('cht_reference_id'); ?>">Order #<?php echo $change->get('cht_reference_id'); ?></a>
+											- <a href="/plugins/store/admin/admin_order?ord_order_id=<?php echo $change->get('cht_reference_id'); ?>">Order #<?php echo $change->get('cht_reference_id'); ?></a>
 										<?php elseif($reason === 'manual' && $change->get('cht_changed_by_usr_user_id')): ?>
 											<?php
 												try {
@@ -318,6 +319,7 @@ array(
 			</div>
 		</div>
 
+		<?php if ($store_active): // Subscriptions belong to the store plugin ?>
 		<!-- Active Subscriptions -->
 		<div class="card mt-3">
 			<div class="card-header bg-body-tertiary">
@@ -326,7 +328,7 @@ array(
 			<div class="card-body">
 				<?php if($active_subscriptions->count() > 0): ?>
 					<?php
-					require_once(PathHelper::getIncludePath('includes/StripeHelper.php'));
+					require_once(PathHelper::getIncludePath('plugins/store/includes/StripeHelper.php'));
 					foreach($active_subscriptions as $subscription): ?>
 						<?php
 							$stripe_helper = new StripeHelper();
@@ -335,7 +337,7 @@ array(
 						?>
 						<div class="mb-3 p-2 bg-body-tertiary rounded">
 							<div class="fw-semi-bold">
-								<a href="/admin/admin_order?ord_order_id=<?php echo $subscription->get('odi_ord_order_id'); ?>">
+								<a href="/plugins/store/admin/admin_order?ord_order_id=<?php echo $subscription->get('odi_ord_order_id'); ?>">
 									Order <?php echo $subscription->get('odi_ord_order_id'); ?>
 								</a> - $<?php echo number_format($subscription->get('odi_price'), 2); ?>/month
 							</div>
@@ -365,7 +367,7 @@ array(
 					<?php foreach($cancelled_subscriptions as $subscription): ?>
 						<div class="mb-2 p-2 bg-body-tertiary rounded">
 							<div class="fw-semi-bold">
-								<a href="/admin/admin_order?ord_order_id=<?php echo $subscription->get('odi_ord_order_id'); ?>">
+								<a href="/plugins/store/admin/admin_order?ord_order_id=<?php echo $subscription->get('odi_ord_order_id'); ?>">
 									Order <?php echo $subscription->get('odi_ord_order_id'); ?>
 								</a> - $<?php echo number_format($subscription->get('odi_price'), 2); ?>/month
 							</div>
@@ -383,6 +385,7 @@ array(
 			</div>
 			<?php echo $cancelled_subscriptions_pager->record_count_info($cancelled_subscriptions->count(), array('show_all_url' => $show_all_url)); ?>
 		</div>
+		<?php endif; // store_active ?>
 	</div>
 </div>
 
@@ -448,9 +451,10 @@ echo '<tr><td colspan="4" class="pt-3">'.$add_form.'</td></tr>';
 
 $page->endtable($events_pager);
 
-// Orders Table
-require_once(PathHelper::getIncludePath('data/orders_class.php'));
-require_once(PathHelper::getIncludePath('data/products_class.php'));
+// Orders Table (store plugin only)
+if ($store_active):
+require_once(PathHelper::getIncludePath('plugins/store/data/orders_class.php'));
+require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php'));
 $headers = array('Order ID', 'Order Time', 'Products', 'Status', 'Total');
 $table_options = array('title' => 'Orders', 'card' => true);
 $page->tableheader($headers, $table_options, $orders_pager);
@@ -481,7 +485,7 @@ foreach($orders as $order):
 		$order_items_out[] = $this_out;
 	endforeach;
 
-	$order_id_cell = '<a href="/admin/admin_order?ord_order_id='.$order->key.'">Order '.$order->key.'</a>';
+	$order_id_cell = '<a href="/plugins/store/admin/admin_order?ord_order_id='.$order->key.'">Order '.$order->key.'</a>';
 	$order_time_cell = LibraryFunctions::convert_time($order->get('ord_timestamp'), "UTC", $session->get_timezone());
 	$products_cell = implode('<br>', $order_items_out);
 
@@ -501,6 +505,7 @@ foreach($orders as $order):
 endforeach;
 
 $page->endtable($orders_pager);
+endif; // store_active
 ?>
 
 <!-- Email and Login Activity Side by Side -->

@@ -19,6 +19,11 @@ function migrate_entity_photos() {
 	];
 
 	foreach ($entity_maps as $map) {
+		// Skip entity types whose table is absent (evt_events / loc_locations are
+		// plugin tables now and may not exist on a store/event-less install).
+		if (!$dblink->query("SELECT to_regclass('public.{$map['table']}')")->fetchColumn()) {
+			continue;
+		}
 		$sql = "INSERT INTO eph_entity_photos (eph_entity_type, eph_entity_id, eph_fil_file_id, eph_is_primary, eph_sort_order)
 				SELECT :type, {$map['pkey']}, {$map['fk']}, true, 0
 				FROM {$map['table']}

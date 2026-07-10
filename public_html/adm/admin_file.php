@@ -131,11 +131,11 @@
 								</td>
 							</tr>
 							<?php endif; ?>
-							<?php if($file->get('fil_evt_event_id')): ?>
+							<?php if($access_gate_label): ?>
 							<tr>
-								<td class="p-1 text-800 fw-semi-bold">Restricted to Event</td>
+								<td class="p-1 text-800 fw-semi-bold">Access gate</td>
 								<td class="p-1 text-600">
-									<a href="/admin/admin_event?evt_event_id=<?php echo $file->get('fil_evt_event_id'); ?>" class="badge badge-subtle-info"><?php echo htmlspecialchars($event->get('evt_name')); ?></a>
+									<span class="badge badge-subtle-info"><?php echo htmlspecialchars($access_gate_label); ?></span>
 								</td>
 							</tr>
 							<?php endif; ?>

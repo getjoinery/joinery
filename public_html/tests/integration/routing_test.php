@@ -210,11 +210,10 @@ class HttpRoutingTestRunner {
         // Check for actual view files that exist
         $view_files_to_check = [
             '/login' => 'Login page',
-            '/events' => 'Events page', 
+            '/events' => 'Events page',
             '/register' => 'Register page',
-            '/products' => 'Products page',
         ];
-        
+
         foreach ($view_files_to_check as $path => $description) {
             $view_file = PathHelper::getRootDir() . "/views" . $path . ".php";
             if (file_exists($view_file)) {
@@ -223,6 +222,12 @@ class HttpRoutingTestRunner {
                 $test_cases[] = [$path, 404, "{$description} (not found)"];
             }
         }
+
+        // The products listing is a store-plugin route now — 200 when the store
+        // plugin is active, 404 (route gated off) when it isn't.
+        $store_active = PluginHelper::isPluginActive('store');
+        $test_cases[] = ['/products', $store_active ? 200 : 404,
+            'Products page (store ' . ($store_active ? 'active' : 'inactive') . ')'];
         
         // Test nonexistent root view
         $test_cases[] = ['/definitely-fake-page-12345', 404, 'Root view (does not exist)'];
@@ -706,16 +711,18 @@ class HttpRoutingTestRunner {
             // Pages model might not exist
         }
         
-        // Test real product URLs from database
+        // Test real product URLs from database. Product pages are store-plugin
+        // routes: 200 when the store is active, 404 (route gated off) otherwise.
         try {
-            require_once(PathHelper::getIncludePath('data/products_class.php'));
+            require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php'));
+            $product_status = PluginHelper::isPluginActive('store') ? 200 : 404;
             $products = new MultiProduct(['deleted' => false], ['pro_product_id' => 'DESC'], 2);
             if ($products->count_all() > 0) {
                 $products->load();
                 $index = 1;
                 foreach ($products as $product) {
                     if ($product->get('pro_link')) {
-                        $test_cases[] = [$product->get_url(), 200, 'Product #' . $index . ' from database'];
+                        $test_cases[] = [$product->get_url(), $product_status, 'Product #' . $index . ' from database'];
                         $index++;
                     }
                 }

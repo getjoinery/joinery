@@ -59,11 +59,12 @@
 	}
 
 	// Tab menu for settings pages
-	$tab_menus = array(
-		'General Settings' => '/admin/admin_settings',
-		'Payment Settings' => '/admin/admin_settings_payments',
-		'Email Settings' => '/admin/admin_settings_email',
-	);
+	$tab_menus = array('General Settings' => '/admin/admin_settings');
+	// Payment settings live in the store plugin — only offer the tab when active.
+	if (PluginHelper::isPluginActive('store')) {
+		$tab_menus['Payment Settings'] = '/plugins/store/admin/admin_settings_payments';
+	}
+	$tab_menus['Email Settings'] = '/admin/admin_settings_email';
 	echo AdminPage::tab_menu($tab_menus, 'General Settings');
 
 	$formwriter = $page->getFormWriter('form1');

@@ -39,11 +39,16 @@
 			$file->set('fil_grp_group_id', $_POST['fil_grp_group_id']);
 		}
 
-		if($_POST['fil_evt_event_id'] === NULL || $_POST['fil_evt_event_id'] === ''){
-			$file->set('fil_evt_event_id', NULL);
+		// Access gate: value is "" (ungated) or "{provider}:{ref}".
+		$access_gate = $_POST['access_gate'] ?? '';
+		if($access_gate === ''){
+			$file->set('fil_access_provider', NULL);
+			$file->set('fil_access_ref', NULL);
 		}
 		else{
-			$file->set('fil_evt_event_id', $_POST['fil_evt_event_id']);
+			list($gate_provider, $gate_ref) = array_pad(explode(':', $access_gate, 2), 2, NULL);
+			$file->set('fil_access_provider', $gate_provider);
+			$file->set('fil_access_ref', ($gate_ref === NULL || $gate_ref === '') ? NULL : (int)$gate_ref);
 		}
 
 		$editable_fields = array('fil_description', 'fil_title','fil_gal_gallery_id');
@@ -106,18 +111,19 @@
 		'options' => $optionvals
 	]);
 
-	$events = new MultiEvent(
-		array(),  //SEARCH
-		NULL,		//SORT BY => DIRECTION
-		NULL,  //NUM PER PAGE
-		NULL);  //OFFSET
-	$events->load();
-
-	$optionvals1[NULL] = 'All';
-	$optionvals2 = $events->get_dropdown_array();
-	$optionvals = array_merge($optionvals1, $optionvals2);
-	$formwriter->dropinput("fil_evt_event_id", "Event can access", [
-		'options' => $optionvals
+	// Access gate picker: "All" plus, per registered gate provider, each of
+	// its references. Value encodes "{provider}:{ref}".
+	require_once(PathHelper::getIncludePath('includes/AccessGateRegistry.php'));
+	$gate_options = ['' => 'All'];
+	foreach(AccessGateRegistry::all() as $gate){
+		foreach($gate->options() as $ref => $ref_label){
+			$gate_options[$gate->key().':'.$ref] = $gate->label().': '.$ref_label;
+		}
+	}
+	$current_gate = $file->get('fil_access_provider') ? $file->get('fil_access_provider').':'.$file->get('fil_access_ref') : '';
+	$formwriter->dropinput("access_gate", "Access restricted to", [
+		'options' => $gate_options,
+		'value'   => $current_gate
 	]);
 
 	// Tier Gating

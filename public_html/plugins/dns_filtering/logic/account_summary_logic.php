@@ -24,7 +24,7 @@ function account_summary_logic(array $input): LogicResult{
 
 	$tier = SubscriptionTier::GetUserTier($user_id);
 
-	$max_devices = (int)SubscriptionTier::getUserFeature($user_id, 'scrolldaddy_max_devices', 0);
+	$max_devices = (int)SubscriptionTier::getUserFeature($user_id, 'dns_filtering_scrolldaddy_max_devices', 0);
 
 	$devices = new MultiSdDevice(array(
 		'user_id' => $user_id,
@@ -36,10 +36,10 @@ function account_summary_logic(array $input): LogicResult{
 		'tier_name' => $tier ? $tier->get('sbt_name') : null,
 		'features' => array(
 			'scrolldaddy_max_devices' => $max_devices,
-			'scrolldaddy_max_scheduled_blocks' => (int)SubscriptionTier::getUserFeature($user_id, 'scrolldaddy_max_scheduled_blocks', 1),
-			'scrolldaddy_custom_rules' => (bool)SubscriptionTier::getUserFeature($user_id, 'scrolldaddy_custom_rules', false),
-			'scrolldaddy_advanced_filters' => (bool)SubscriptionTier::getUserFeature($user_id, 'scrolldaddy_advanced_filters', false),
-			'scrolldaddy_query_logging' => (bool)SubscriptionTier::getUserFeature($user_id, 'scrolldaddy_query_logging', false),
+			'scrolldaddy_max_scheduled_blocks' => (int)SubscriptionTier::getUserFeature($user_id, 'dns_filtering_scrolldaddy_max_scheduled_blocks', 1),
+			'scrolldaddy_custom_rules' => (bool)SubscriptionTier::getUserFeature($user_id, 'dns_filtering_scrolldaddy_custom_rules', false),
+			'scrolldaddy_advanced_filters' => (bool)SubscriptionTier::getUserFeature($user_id, 'dns_filtering_scrolldaddy_advanced_filters', false),
+			'scrolldaddy_query_logging' => (bool)SubscriptionTier::getUserFeature($user_id, 'dns_filtering_scrolldaddy_query_logging', false),
 		),
 		'device_count' => $device_count,
 		'device_max' => $max_devices,

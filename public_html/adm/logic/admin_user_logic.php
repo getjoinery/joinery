@@ -21,9 +21,14 @@ function admin_user_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/events_class.php'));
 	require_once(PathHelper::getIncludePath('data/event_logs_class.php'));
 	require_once(PathHelper::getIncludePath('data/event_sessions_class.php'));
-	require_once(PathHelper::getIncludePath('data/orders_class.php'));
-	require_once(PathHelper::getIncludePath('data/products_class.php'));
-	require_once(PathHelper::getIncludePath('data/product_details_class.php'));
+	// Orders/products belong to the store plugin. Only load its classes when it
+	// is active so this admin page still renders on a store-less install.
+	$store_active = class_exists('PluginHelper') && PluginHelper::isPluginActive('store');
+	if ($store_active) {
+		require_once(PathHelper::getIncludePath('plugins/store/data/orders_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/store/data/product_details_class.php'));
+	}
 	require_once(PathHelper::getIncludePath('data/groups_class.php'));
 	require_once(PathHelper::getIncludePath('data/group_members_class.php'));
 	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
@@ -118,18 +123,22 @@ function admin_user_logic(array $input): LogicResult {
 	$numaddressrecords = $addresses->count_all();
 	$addresses->load();
 
-	// Load orders
-	$search_criteria = array();
-	$search_criteria['user_id'] = $user->key;
-	//$search_criteria['deleted'] = FALSE;
+	// Load orders (store plugin only)
+	$orders = null;
+	$numorders = 0;
+	if ($store_active) {
+		$search_criteria = array();
+		$search_criteria['user_id'] = $user->key;
+		//$search_criteria['deleted'] = FALSE;
 
-	$orders = new MultiOrder(
-		$search_criteria,
-		array('ord_order_id'=>'DESC'),
-		$list_limit,
-		NULL);
-	$numorders = $orders->count_all();
-	$orders->load();
+		$orders = new MultiOrder(
+			$search_criteria,
+			array('ord_order_id'=>'DESC'),
+			$list_limit,
+			NULL);
+		$numorders = $orders->count_all();
+		$orders->load();
+	}
 
 	// Load event registrations
 	$searches['user_id'] = $user->key;
@@ -141,25 +150,30 @@ function admin_user_logic(array $input): LogicResult {
 	$numeventsregistrations = $event_registrations->count_all();
 	$event_registrations->load();
 
-	// Load active subscriptions
-	$active_subscriptions = new MultiOrderItem(
-	array('user_id' => $user->key, 'is_active_subscription' => true), //SEARCH CRITERIA
-	array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
-	$list_limit, //NUMBER PER PAGE
-	NULL //OFFSET
-	);
-	$num_active_subscriptions = $active_subscriptions->count_all();
-	$active_subscriptions->load();
+	// Load active + cancelled subscriptions (store plugin only)
+	$active_subscriptions = null;
+	$num_active_subscriptions = 0;
+	$cancelled_subscriptions = null;
+	$num_cancelled_subscriptions = 0;
+	if ($store_active) {
+		$active_subscriptions = new MultiOrderItem(
+		array('user_id' => $user->key, 'is_active_subscription' => true), //SEARCH CRITERIA
+		array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
+		$list_limit, //NUMBER PER PAGE
+		NULL //OFFSET
+		);
+		$num_active_subscriptions = $active_subscriptions->count_all();
+		$active_subscriptions->load();
 
-	// Load cancelled subscriptions
-	$cancelled_subscriptions = new MultiOrderItem(
-	array('user_id' => $user->key, 'is_cancelled_subscription' => true), //SEARCH CRITERIA
-	array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
-	$list_limit, //NUMBER PER PAGE
-	NULL //OFFSET
-	);
-	$num_cancelled_subscriptions = $cancelled_subscriptions->count_all();
-	$cancelled_subscriptions->load();
+		$cancelled_subscriptions = new MultiOrderItem(
+		array('user_id' => $user->key, 'is_cancelled_subscription' => true), //SEARCH CRITERIA
+		array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
+		$list_limit, //NUMBER PER PAGE
+		NULL //OFFSET
+		);
+		$num_cancelled_subscriptions = $cancelled_subscriptions->count_all();
+		$cancelled_subscriptions->load();
+	}
 
 	// Get database connection for custom queries
 	$dbhelper = DbConnector::get_instance();
@@ -201,8 +215,8 @@ function admin_user_logic(array $input): LogicResult {
 	if(!$user->get('usr_delete_time')) {
 		if($_SESSION['permission'] > 7){
 			$options['altlinks']['Edit User'] = '/admin/admin_users_edit?usr_user_id='.$user->key;
-			if($settings->get_setting('checkout_type')){
-				$options['altlinks']['Payment Methods'] = '/admin/admin_user_payment_methods?usr_user_id='.$user->key;
+			if(PluginHelper::isPluginActive('store') && $settings->get_setting('checkout_type')){
+				$options['altlinks']['Payment Methods'] = '/plugins/store/admin/admin_user_payment_methods?usr_user_id='.$user->key;
 			}
 			if(!$user->get('usr_email_is_verified')){
 				$options['altlinks']['Resend activation email'] = '/admin/admin_email_verify?usr_user_id='.$user->key;
@@ -300,6 +314,7 @@ function admin_user_logic(array $input): LogicResult {
 	}
 
 	// Prepare all data for view
+	$page_vars['store_active'] = $store_active;
 	$page_vars['user'] = $user;
 	$page_vars['show_all'] = $show_all;
 	$page_vars['list_limit'] = $list_limit;

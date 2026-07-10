@@ -32,8 +32,8 @@ class EmailRecipientGroup extends SystemBase {	public static $prefix = 'erg';
 	 */
 	public static $field_specifications = array(
 	    'erg_email_recipient_group_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
-	    'erg_grp_group_id' => array('type'=>'int4'),
-	    'erg_evt_event_id' => array('type'=>'int4'),
+	    'erg_provider' => array('type'=>'varchar(32)', 'is_nullable'=>true),
+	    'erg_reference_id' => array('type'=>'int4', 'is_nullable'=>true),
 	    'erg_eml_email_id' => array('type'=>'int4', 'required'=>true),
 	    'erg_operation' => array('type'=>'varchar(6)'),
 	);
@@ -53,18 +53,18 @@ class MultiEmailRecipientGroup extends SystemMultiBase {
 	protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
 
-        if (isset($this->options['group_id'])) {
-            $filters['erg_grp_group_id'] = [$this->options['group_id'], PDO::PARAM_INT];
+        if (isset($this->options['provider'])) {
+            $filters['erg_provider'] = [$this->options['provider'], PDO::PARAM_STR];
+        }
+
+        if (isset($this->options['reference_id'])) {
+            $filters['erg_reference_id'] = [$this->options['reference_id'], PDO::PARAM_INT];
         }
 
         if (isset($this->options['email_id'])) {
             $filters['erg_eml_email_id'] = [$this->options['email_id'], PDO::PARAM_INT];
         }
-        
-        if (isset($this->options['event_id'])) {
-            $filters['erg_evt_event_id'] = [$this->options['event_id'], PDO::PARAM_INT];
-        }
-        
+
         if (isset($this->options['operation'])) {
             $filters['erg_operation'] = [$this->options['operation'], PDO::PARAM_STR];
         }

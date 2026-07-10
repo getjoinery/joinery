@@ -1,7 +1,7 @@
 <?php
 // serve.php - Hybrid routing system with RouteHelper
 // Core dependencies (PathHelper, Globalvars, SessionControl) are loaded by RouteHelper after static route check
-// @version 1.2.0
+// @version 1.3.0
 
 // RouteHelper handles all routing and dependency loading
 require_once(__DIR__ . '/includes/RouteHelper.php');
@@ -105,11 +105,22 @@ $routes = [
         '/event/{slug}/{date}' => ['view' => 'views/event', 'check_setting' => 'events_active'],
         '/event/{slug}'        => ['view' => 'views/event', 'check_setting' => 'events_active'],
         '/location/{slug}'     => ['view' => 'views/location', 'check_setting' => 'events_active'],
-        '/product/{slug}'      => ['view' => 'views/product', 'check_setting' => 'products_active'],
+        '/product/{slug}'      => ['view' => 'views/product', 'plugin' => 'store', 'check_setting' => 'products_active'],
         '/list/{slug}'         => ['view' => 'views/list'],
         '/video/{slug}'        => ['view' => 'views/video', 'check_setting' => 'videos_active'],
         '/book/{slug}'         => ['view' => 'views/book', 'check_setting' => 'bookings_active'],
         '/booking/manage'      => ['view' => 'views/booking_manage', 'check_setting' => 'bookings_active'],
+
+        // ---- store: view routes (files live in plugins/store/views) ----
+        '/products'    => ['view' => 'views/products',    'plugin' => 'store', 'check_setting' => 'products_list_items_active'],
+        '/cart'        => ['view' => 'views/cart',        'plugin' => 'store', 'check_setting' => 'products_active'],
+        '/checkout'    => ['view' => 'views/checkout',    'plugin' => 'store', 'check_setting' => 'products_active'],
+        '/pricing'     => ['view' => 'views/pricing',     'plugin' => 'store', 'check_setting' => 'subscriptions_active'],
+        // Purchase-flow endpoints — Stripe success_url / card-form POST land on
+        // /cart_charge, which redirects to /cart_confirm; /cart_clear empties the cart.
+        '/cart_charge'  => ['view' => 'views/cart_charge',  'plugin' => 'store', 'check_setting' => 'products_active'],
+        '/cart_confirm' => ['view' => 'views/cart_confirm', 'plugin' => 'store', 'check_setting' => 'products_active'],
+        '/cart_clear'   => ['view' => 'views/cart_clear',   'plugin' => 'store', 'check_setting' => 'products_active'],
 
         // Simple view routes (explicit view files)
         '/robots.txt' => ['view' => 'views/robots'],
@@ -133,6 +144,12 @@ $routes = [
         // Recurring calendar occurrence edit — must precede the wildcard.
         '/profile/calendar/entry/{parent_id}/occurrence/{occurrence_date}' => ['view' => 'views/profile/calendar'],
         '/profile/calendar/entry/{entry_id}' => ['view' => 'views/profile/calendar'],
+        // ---- store: profile view routes (BEFORE the /profile/* wildcard) ----
+        '/profile/orders'                  => ['view' => 'views/profile/orders',                  'plugin' => 'store', 'check_setting' => 'products_active'],
+        '/profile/billing'                 => ['view' => 'views/profile/billing',                 'plugin' => 'store', 'check_setting' => 'subscriptions_active'],
+        '/profile/subscriptions'           => ['view' => 'views/profile/subscriptions',           'plugin' => 'store', 'check_setting' => 'subscriptions_active'],
+        '/profile/change-tier'             => ['view' => 'views/profile/change-tier',             'plugin' => 'store', 'check_setting' => 'subscriptions_active'],
+        '/profile/orders_recurring_action' => ['view' => 'views/profile/orders_recurring_action', 'plugin' => 'store', 'check_setting' => 'subscriptions_active'],
         '/profile/*' => ['view' => 'views/profile/{path}'],
         '/events' => ['view' => 'views/events', 'check_setting' => 'events_active'],
         
