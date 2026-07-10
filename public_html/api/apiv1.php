@@ -364,6 +364,15 @@ $api_entry = $principal['api_entry'];
 $api_user  = $principal['api_user'];
 $auth_data = $principal['auth_data'];
 
+// The anonymous browser-session principal (valid CSRF proof, no logged-in
+// user — api_user === null) may only reach action dispatch, where
+// ApiAuth::authorize() enforces the per-action allow_guest contract. Every
+// other route family (CRUD verbs, forms, auth, app, management, backups)
+// reads $api_user unconditionally and has no guest vocabulary.
+if ($api_user === null && strtolower($url_segments[2] ?? '') !== 'action') {
+	api_error('Authentication required', 'AuthenticationError', 401);
+}
+
 // URL segments were parsed above the pre-auth dispatches
 $operation = isset($url_segments[2]) ? ucwords($url_segments[2]) : '';
 $entity_id = isset($url_segments[3]) ? $url_segments[3] : null;

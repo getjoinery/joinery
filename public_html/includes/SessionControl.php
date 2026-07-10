@@ -93,6 +93,7 @@ class SessionControl{
 		}
 		
 		$this->get_uniqid();
+		$this->sync_api_csrf_cookie();
 
 		if (isset($_SESSION['loggedin']) && $_SESSION['loggedin']) {
 			// If the user is logged in, don't do anything else
@@ -102,12 +103,46 @@ class SessionControl{
 			$this->get_user_from_cookie();
 		}
 	}
-	
+
 	public function get_uniqid(){
 		if(!isset($_SESSION['uniqid']) || !$_SESSION['uniqid']){
 			$_SESSION['uniqid'] = uniqid();
-		}	
+		}
 		return $_SESSION['uniqid'];
+	}
+
+	/**
+	 * Mirror the session's API CSRF token into a JS-readable cookie. Pages
+	 * served from the static page cache are shared HTML with no per-visitor
+	 * meta tag, so guest-reachable page JS reads the token from this cookie
+	 * instead (docs/api.md § Authentication). Distribution only — ApiAuth
+	 * validates the X-Joinery-Csrf header against the raw session value,
+	 * never against this cookie, so the cookie is not a trust anchor.
+	 */
+	private function sync_api_csrf_cookie() {
+		if (headers_sent()) {
+			return;
+		}
+		$token = $this->get_api_csrf_token();
+		if (!isset($_COOKIE['joinery_api_csrf']) || $_COOKIE['joinery_api_csrf'] !== $token) {
+			$this->set_secure_cookie('joinery_api_csrf', $token, 0, false, 'Lax');
+			$_COOKIE['joinery_api_csrf'] = $token;
+		}
+	}
+
+	/**
+	 * Re-open a session previously released with session_write_close() so
+	 * $_SESSION writes persist again. Used by API actions declaring
+	 * auth.session_write (the browser credential releases the session lock
+	 * right after reading identity — see ApiAuth::authenticateBrowserSession).
+	 * The restart reuses the request's existing session id; use_cookies is
+	 * suppressed so no redundant session-id Set-Cookie is emitted.
+	 */
+	public function reopen() {
+		if (php_sapi_name() === 'cli' || session_status() === PHP_SESSION_ACTIVE) {
+			return;
+		}
+		session_start(['use_cookies' => 0]);
 	}
 
 	public function send_emails() {
@@ -726,9 +761,12 @@ class SessionControl{
 	 * survives session_regenerate_id() because session data carries over.
 	 * Separate from FormWriter's per-form tokens, which are unchanged.
 	 *
-	 * Mint from page-render context only (PublicPageBase emits it as a meta
-	 * tag). ApiAuth validates by reading the raw session value — it never
-	 * mints, so an API request cannot create a token for itself.
+	 * Minted at session construction (sync_api_csrf_cookie) so every web
+	 * request — including cache HITs served by RouteHelper — carries the
+	 * mirror cookie; PublicPageBase additionally emits it as a meta tag for
+	 * logged-in pages. Minting during an API request is harmless: ApiAuth
+	 * validates the presented header against this stored value, and a
+	 * cross-site attacker can read neither the session nor the cookie.
 	 *
 	 * @return string 64-char hex token
 	 */

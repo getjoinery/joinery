@@ -547,22 +547,38 @@
         applyCouponCode(code);
     }
 
+    // API CSRF token. Cookie first: the joinery_api_csrf mirror cookie tracks
+    // the CURRENT session (resynced on every response, including after a
+    // logout in another tab or session expiry), while the meta tag is frozen
+    // at page render — it is only the fallback for cookie-less edge cases.
+    function jyApiCsrf() {
+        var c = document.cookie.match(/(?:^|; )joinery_api_csrf=([^;]+)/);
+        if (c) return decodeURIComponent(c[1]);
+        var m = document.querySelector('meta[name="joinery-api-csrf"]');
+        return (m && m.content) || '';
+    }
+
+    function jyApiAction(action, body) {
+        return fetch('/api/v1/action/' + action, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': jyApiCsrf() },
+            body: JSON.stringify(body)
+        }).then(function(r) {
+            return r.json().then(function(payload) { return { ok: r.ok, payload: payload }; });
+        });
+    }
+
     function applyCouponCode(code) {
         var errorEl = document.getElementById('coupon_error');
         if (errorEl) errorEl.style.display = 'none';
 
-        var formData = new FormData();
-        formData.append('action', 'apply_coupon');
-        formData.append('coupon_code', code);
-
-        fetch('/ajax/checkout_ajax', { method: 'POST', body: formData })
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-                if (data.success) {
+        jyApiAction('store/checkout_apply_coupon', { coupon_code: code })
+            .then(function(res) {
+                if (res.ok) {
                     // Reload to reflect updated prices in order summary
                     window.location.reload();
                 } else {
-                    if (errorEl) { errorEl.textContent = data.error; errorEl.style.display = 'block'; }
+                    if (errorEl) { errorEl.textContent = res.payload.error || 'Unable to apply coupon.'; errorEl.style.display = 'block'; }
                 }
             })
             .catch(function() {
@@ -571,14 +587,9 @@
     }
 
     function removeCoupon(code) {
-        var formData = new FormData();
-        formData.append('action', 'remove_coupon');
-        formData.append('coupon_code', code);
-
-        fetch('/ajax/checkout_ajax', { method: 'POST', body: formData })
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-                if (data.success) {
+        jyApiAction('store/checkout_remove_coupon', { coupon_code: code })
+            .then(function(res) {
+                if (res.ok) {
                     window.location.reload();
                 }
             });
@@ -594,10 +605,9 @@
                 if (existsEl) existsEl.style.display = 'none';
                 return;
             }
-            fetch('/ajax/checkout_ajax?action=check_email&email=' + encodeURIComponent(email))
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    if (data.exists && existsEl) {
+            jyApiAction('store/checkout_check_email', { email: email })
+                .then(function(res) {
+                    if (res.ok && res.payload.data && res.payload.data.exists && existsEl) {
                         existsEl.style.display = 'block';
                     } else if (existsEl) {
                         existsEl.style.display = 'none';

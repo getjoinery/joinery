@@ -153,6 +153,41 @@ class StaticPageCache {
     }
 
     /**
+     * Whether a request path is categorically excluded from the page cache
+     * (dynamic/personalized pages). Each pattern excludes the bare path AND
+     * everything under it: the store pages are served at the bare path
+     * ('/checkout', '/cart'), and their content is session state — one
+     * guest's render must never be cached for the next. Enforced on both the
+     * store side (shouldCache) and the serve side (checkCache), so an entry
+     * cached before a path joined this list can never be served.
+     */
+    public static function isExcludedPath($request_path) {
+        $excluded_patterns = [
+            '/login',
+            '/logout',
+            '/register',
+            '/reset-password',
+            '/ajax',
+            '/api',
+            '/admin',
+            '/utils',
+            '/test',
+            '/account',
+            '/profile',
+            '/checkout',
+            '/cart',
+            '/cart_confirm',
+            '/cart_charge'
+        ];
+        foreach ($excluded_patterns as $pattern) {
+            if ($request_path === $pattern || strpos($request_path, $pattern . '/') === 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Check if a URL is cached and return the file path if it exists
      * @return string|false Returns file path if cached, 'nostatic' if marked non-cacheable, or false if not cached
      */
@@ -172,6 +207,18 @@ class StaticPageCache {
         }
 
         $hash = self::generateCacheKey($url, $params);
+
+        // Serve-side exclusion: an excluded path must never be served from
+        // cache even when an entry exists — entries created before a path
+        // joined the exclusion list (or under an older matching rule) would
+        // otherwise keep serving one visitor's session-state HTML to everyone.
+        // Drop any such stale entry so the index self-heals on every deploy.
+        if (self::isExcludedPath($url)) {
+            if (isset($index[$hash])) {
+                self::invalidateUrl($url, $params);
+            }
+            return 'nostatic';
+        }
 
         // Check index status
         if (isset($index[$hash]) && is_array($index[$hash])) {
@@ -382,37 +429,15 @@ class StaticPageCache {
             $reasons[] = '✅ HTTP status code is 200';
         }
 
-        // 2. Check excluded URL patterns (truly dynamic/personalized pages)
-        $excluded_patterns = [
-            '/login',
-            '/logout',
-            '/register',
-            '/reset-password',
-            '/ajax/',
-            '/api/',
-            '/admin/',
-            '/utils/',
-            '/test/',
-            '/account/',
-            '/profile/',
-            '/checkout/',
-            '/cart/'
-        ];
-
-        $path_excluded = false;
-        foreach ($excluded_patterns as $pattern) {
-            if (strpos($request_path, $pattern) === 0) {
-                if ($detailed) {
-                    $reasons[] = "❌ Path matches excluded pattern: $pattern";
-                    $passed = false;
-                    $path_excluded = true;
-                    break;
-                } else {
-                    return false;
-                }
+        // 2. Check excluded URL patterns (truly dynamic/personalized pages).
+        if (self::isExcludedPath($request_path)) {
+            if ($detailed) {
+                $reasons[] = "❌ Path matches an excluded pattern";
+                $passed = false;
+            } else {
+                return false;
             }
-        }
-        if ($detailed && !$path_excluded) {
+        } else if ($detailed) {
             $reasons[] = '✅ Path does not match any excluded patterns';
         }
 
@@ -576,8 +601,13 @@ class StaticPageCache {
 
             // Check if setting NEW cookies (not just passing existing session)
             if (stripos($header, 'Set-Cookie:') === 0) {
-                // Check if it's just refreshing existing session vs creating new data
-                if (strpos($header, 'PHPSESSID') === false) {
+                // Check if it's just refreshing existing session vs creating new data.
+                // joinery_api_csrf is per-visitor transport like the session cookie
+                // itself (the CSRF mirror SessionControl sets so cached pages can
+                // call /api/v1) — it never appears in the cached body, so it must
+                // not disqualify the page.
+                if (strpos($header, 'PHPSESSID') === false
+                    && strpos($header, 'joinery_api_csrf=') === false) {
                     // Non-session cookie being set - don't cache
                     if ($detailed) {
                         $cookie_name = trim(substr($header, 11)); // Remove 'Set-Cookie: '

@@ -137,14 +137,20 @@ class ApiLogicEndpoint {
 
 		// Authorization: actions are POST (mutating), so they require the write
 		// capability by default — equivalent to the historical apk_permission < 2
-		// gate. A descriptor may override via its ['auth'] block.
+		// gate. A descriptor may override via its ['auth'] block. A null user
+		// permission signals the anonymous browser-session principal —
+		// authorize() denies it 401 unless the contract declares allow_guest.
 		require_once(PathHelper::getIncludePath('includes/ApiAuth.php'));
 		$auth = ($meta['auth'] ?? []) + ['capability' => ApiAuth::CAP_WRITE];
-		ApiAuth::authorize($auth, $api_entry, $api_user->get('usr_permission'), 'Action');
+		ApiAuth::authorize($auth, $api_entry,
+			$api_user ? $api_user->get('usr_permission') : null, 'Action');
 
 		// Sessionless actions were executed pre-auth; anything reaching here
 		// with requires_session=false would be a dispatch-order bug, so run it
-		// the same way regardless.
+		// the same way regardless. An anonymous principal reaches here with
+		// $api_user null: the action runs without session simulation and the
+		// logic sees the visitor's natural (not-logged-in) session — which is
+		// where the state guest actions operate on (e.g. the cart) lives.
 		$acting_user = self::requiresSession($meta) ? $api_user : NULL;
 
 		self::executeAction($action_label, $meta, $logic_function, $acting_user, $api_entry);
@@ -207,8 +213,21 @@ class ApiLogicEndpoint {
 		// action runs, or null when no key is in play.
 		$idem_record = $idem_ctx ? self::idempotencyClaim($idem_ctx, $action_label, $user_id) : null;
 
-		// Set up session simulation if needed
+		// auth.session_write: this action mutates $_SESSION state (e.g. the
+		// cart) and runs on the browser credential, which released the session
+		// lock right after reading identity (ApiAuth::authenticateBrowserSession)
+		// — re-open so logic-layer writes persist to the store at shutdown.
+		// Per-action opt-in, so ordinary actions keep the early lock release.
+		// Key-authenticated requests are session-free and unaffected. Re-open
+		// BEFORE session simulation: reopening re-reads the store and would
+		// otherwise clobber the simulated values.
 		$session = SessionControl::get_instance();
+		if (!empty($meta['auth']['session_write']) && $api_entry === NULL
+			&& !empty($_COOKIE[session_name()])) {
+			$session->reopen();
+		}
+
+		// Set up session simulation if needed
 		if ($api_user) {
 			$session->set_api_user($api_user->key, $api_entry ? $api_entry->key : null);
 		}
@@ -222,9 +241,6 @@ class ApiLogicEndpoint {
 		try {
 			$result = call_user_func($logic_function, array_merge($get_params, $post_params));
 		} catch (Exception $e) {
-			if ($api_user) {
-				$session->clear_api_user();
-			}
 			RequestLogger::log('api', 'action ' . $action_label, false, [
 				'user_id' => $user_id,
 				'status_code' => 422,
@@ -232,11 +248,16 @@ class ApiLogicEndpoint {
 				'note' => $e->getMessage()
 			]);
 			$result = LogicResult::error($e->getMessage());
-		}
-
-		// Clean up session simulation
-		if ($api_user) {
-			$session->clear_api_user();
+		} finally {
+			// Clean up session simulation. Must be finally, not post-try: with
+			// auth.session_write the session is open through logic execution,
+			// so an uncaught PHP Error escaping here would otherwise persist
+			// the simulated values (permission, api_key_id) into the caller's
+			// real web session at shutdown. The Error still propagates (500);
+			// finally only guarantees the restore happens first.
+			if ($api_user) {
+				$session->clear_api_user();
+			}
 		}
 
 		// Translate LogicResult to API response

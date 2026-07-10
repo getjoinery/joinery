@@ -164,27 +164,43 @@ function submitConfirmSurvey(surveyId, eventId) {
     var form = document.getElementById('survey-form-' + surveyId);
     if (!form) return;
 
-    // Collect all question answers from the form
+    // Collect all question answers from the form. Inputs named "field[]"
+    // (checkbox lists) accumulate into a JSON array under "field" — the same
+    // shape PHP produced when this was a form-encoded POST.
     var inputs = form.querySelectorAll('input, select, textarea');
-    var formData = new FormData();
-    formData.append('action', 'submit_survey');
-    formData.append('survey_id', surveyId);
-    formData.append('event_id', eventId);
+    var payload = { survey_id: surveyId, event_id: eventId };
 
     inputs.forEach(function(input) {
-        if (input.type === 'checkbox') {
-            formData.append(input.name, input.checked ? input.value || '1' : '');
+        if (!input.name) return;
+        var isList = input.name.slice(-2) === '[]';
+        var key = isList ? input.name.slice(0, -2) : input.name;
+        if (isList) {
+            if (!(key in payload)) payload[key] = [];
+            if ((input.type !== 'checkbox' && input.type !== 'radio') || input.checked) {
+                payload[key].push(input.value);
+            }
+        } else if (input.type === 'checkbox') {
+            payload[key] = input.checked ? (input.value || '1') : '';
         } else if (input.type === 'radio') {
-            if (input.checked) formData.append(input.name, input.value);
+            if (input.checked) payload[key] = input.value;
         } else {
-            formData.append(input.name, input.value);
+            payload[key] = input.value;
         }
     });
 
-    fetch('/ajax/checkout_ajax', { method: 'POST', body: formData })
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            if (data.success) {
+    // Cookie first — it tracks the current session; the render-time meta tag
+    // is only the cookie-less fallback.
+    var csrfCookie = document.cookie.match(/(?:^|; )joinery_api_csrf=([^;]+)/);
+    var csrfMeta = document.querySelector('meta[name="joinery-api-csrf"]');
+    var csrf = (csrfCookie ? decodeURIComponent(csrfCookie[1]) : '') || (csrfMeta && csrfMeta.content) || '';
+
+    fetch('/api/v1/action/event_manager/checkout_submit_survey', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': csrf },
+        body: JSON.stringify(payload)
+    })
+        .then(function(r) {
+            if (r.ok) {
                 document.getElementById('survey-form-' + surveyId).hidden = true;
                 document.getElementById('survey-thanks-' + surveyId).hidden = false;
             }
