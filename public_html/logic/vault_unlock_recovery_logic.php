@@ -47,19 +47,29 @@ function vault_unlock_recovery_logic(array $input): LogicResult {
 	}
 
 	$box = new SealedBox();
-	$kek = $box->kekFromRecoveryCode($code, $vault->get('uev_salt'));
 
 	$wrappings = new MultiUserEncryptionWrapping([
 		'vault_id' => $vault->key, 'unlocker_type' => UserEncryptionWrapping::TYPE_RECOVERY, 'is_used' => false,
 	]);
 	$wrappings->load();
 
+	// Each wrapping records the salt its KEK was derived under (a rotation
+	// replaces uev_salt, and in a two-generation state both salts' codes are
+	// live). Derive per distinct salt — the recovery KDF is a fast keyed hash.
+	$keks = [];
 	$secret_key = null;
 	$matched = null;
 	foreach ($wrappings as $wrapping) {
+		$salt = (string)$wrapping->get('uew_salt');
+		if ($salt === '') {
+			$salt = (string)$vault->get('uev_salt'); // legacy row predating uew_salt
+		}
+		if (!isset($keks[$salt])) {
+			$keks[$salt] = $box->kekFromRecoveryCode($code, $salt);
+		}
 		try {
 			$ad = UserEncryptionWrapping::adFor($vault->key, $wrapping->key);
-			$secret_key = $box->unwrapKey($wrapping->get('uew_wrapped_secret_key'), $kek, $ad);
+			$secret_key = $box->unwrapKey($wrapping->get('uew_wrapped_secret_key'), $keks[$salt], $ad);
 			$matched = $wrapping;
 			break;
 		} catch (Exception $e) {

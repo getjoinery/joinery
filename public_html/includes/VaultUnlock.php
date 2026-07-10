@@ -19,7 +19,7 @@
  * heartbeat/IP-change policy, a permission cap — is always a consumer
  * *policy* decision; this class only makes wiping callable (lock/lockAll).
  *
- * @version 1.1
+ * @version 1.2
  */
 
 /** Thrown by a consumer's decrypt path when it needs the vault open but the
@@ -41,6 +41,13 @@ class VaultUnlock {
 	// stale threshold sits above the worst throttle interval. Staleness is
 	// hygiene, not a security boundary — the hard stops are session end,
 	// IP change, credential events, and the per-level caps.
+	//
+	// A beat only proves presence — it can END a window early (staleness) but
+	// never EXTENDS one: the idle TTL is refreshed exclusively by content
+	// decrypts (secretKey()), so a visible-but-idle tab still locks at
+	// vault_unlock_idle_minutes and re-unlocking is a one-tap prompt. This
+	// asymmetry is deliberate: presence is cheap to fake for a resident
+	// attacker and must never be what keeps a key in RAM.
 	const HEARTBEAT_MAX_STALE_SECONDS = 300;
 	// Per-level caps — the mail consumer's window policy, applied generically here
 	// as numbers passed to open(). Fortress: end after 2h without a content decrypt
@@ -142,7 +149,14 @@ class VaultUnlock {
 						return array('idle' => null, 'absolute' => self::PRIVATE_ABSOLUTE_CAP_SECONDS);
 					}
 				} catch (\Throwable $e) {
-					// fall through to no caps
+					// Fail CLOSED: an error resolving the level must never grant an
+					// uncapped window to a user who may have configured the strictest
+					// policy — apply the Fortress caps and let a real Fortress user
+					// see no difference, a lower-level user a tighter-than-usual
+					// window until the fault clears.
+					error_log('VaultUnlock::capsForUser: level lookup failed for user '
+						. $user_id . ' - applying Fortress caps: ' . $e->getMessage());
+					return array('idle' => self::FORTRESS_IDLE_CAP_SECONDS, 'absolute' => self::FORTRESS_ABSOLUTE_CAP_SECONDS);
 				}
 			}
 		}

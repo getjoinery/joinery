@@ -50,9 +50,15 @@ function vault_add_passkey_verify_logic(array $input): LogicResult {
 		return LogicResult::error('This passkey already unlocks your vault.');
 	}
 
+	// A wrapping must be tagged with a single truthful generation, and in a
+	// partially-rotated vault the in-window secret's generation is ambiguous.
+	if (count(UserEncryptionWrapping::liveGenerations((int)$vault->key)) > 1) {
+		return LogicResult::error('Your vault has an unfinished key rotation. Run the rotation again to complete it, then add this passkey.');
+	}
+
 	$wrapping = UserEncryptionWrapping::createWrapped(
 		$vault->key, UserEncryptionWrapping::TYPE_PASSKEY, $secret_key, $prf_output,
-		$passkey->key, $passkey->get('pkc_label')
+		$passkey->key, $passkey->get('pkc_label'), (int)$vault->get('uev_key_generation')
 	);
 
 	return LogicResult::render(['wrapping_id' => (int)$wrapping->key]);
