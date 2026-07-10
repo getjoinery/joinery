@@ -357,7 +357,7 @@ class PublicPageTailwind extends PublicPageBase {
 			</a>
 			<?php } ?>
 
-			<?php if($menu_data['cart']['has_items']){ ?>
+			<?php if(!empty($menu_data['cart']['has_items'])){ ?>
 			<a href="<?php echo htmlspecialchars($menu_data['cart']['link']); ?>" class="ml-5 flex-shrink-0 bg-white rounded-full p-1 text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-rose-500">
             <span class="sr-only">Cart</span>
             <!-- Heroicon name: outline/bell -->
@@ -524,7 +524,7 @@ class PublicPageTailwind extends PublicPageBase {
 			?>
 
 			<?php
-			if($menu_data['cart']['has_items']){
+			if(!empty($menu_data['cart']['has_items'])){
 				echo ' <a href="' . htmlspecialchars($menu_data['cart']['link']) . '" class="text-base font-medium text-gray-900 hover:text-gray-700">Cart (' . $menu_data['cart']['item_count'] . ')</a>';
 			}
 			?>

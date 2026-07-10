@@ -34,7 +34,7 @@ define('MULTI_TESTS_ONLY', true);
 require_once(__DIR__ . '/MultiModelTester.php');
 
 // Discover all model classes using centralized method
-$classes = LibraryFunctions::discover_model_classes();
+$classes = LibraryFunctions::discover_model_classes(['include_plugins' => true]);
 
 // Load all classes to ensure Multi classes are available for class_exists() checks
 foreach($classes as $class) {

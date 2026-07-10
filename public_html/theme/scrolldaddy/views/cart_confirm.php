@@ -1,5 +1,5 @@
 <?php
-	require_once(PathHelper::getIncludePath('includes/ShoppingCart.php'));
+	require_once(PathHelper::getIncludePath('plugins/store/includes/ShoppingCart.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	// PathHelper is already loaded
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
@@ -14,7 +14,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	$settings = Globalvars::get_instance();
 
-	$cart = $session->get_shopping_cart();
+	$cart = ShoppingCart::current();
 	$receipts = $cart->last_receipt;
 	
 	$page = new PublicPage(TRUE);

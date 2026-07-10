@@ -2,6 +2,10 @@
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	require_once(PathHelper::getIncludePath('adm/logic/admin_event_logic.php'));
+	// The registrants panel renders the linked order (event→store). Load the
+	// store order classes explicitly since they live in the store plugin now.
+	require_once(PathHelper::getIncludePath('plugins/store/data/orders_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/store/data/order_items_class.php'));
 
 	$page_vars = process_logic(admin_event_logic(array_merge($_GET, $_POST)));
 	extract($page_vars);
@@ -515,7 +519,7 @@
 		$row = '';
 		$total_paid = 0;
 		foreach ($order_items as $order_item){
-			$row .= '<a href="/admin/admin_order?ord_order_id=' . $order_item->get('odi_ord_order_id') . '">Order# '.$order_item->get('odi_ord_order_id').'</a> ($'. $order_item->get('odi_price'). ')';
+			$row .= '<a href="/plugins/store/admin/admin_order?ord_order_id=' . $order_item->get('odi_ord_order_id') . '">Order# '.$order_item->get('odi_ord_order_id').'</a> ($'. $order_item->get('odi_price'). ')';
 			//ADD AN ASTERISK IF THE ORDER HAS A REFUND
 			$order = $order_item->get_order();
 			if($order->get('ord_refund_amount')){

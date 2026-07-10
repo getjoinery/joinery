@@ -1,0 +1,123 @@
+<?php
+
+function admin_product_version_edit_logic(array $input): LogicResult {
+	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+	require_once(PathHelper::getIncludePath('plugins/store/includes/StripeHelper.php'));
+	require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/store/data/product_versions_class.php'));
+
+	$session = SessionControl::get_instance();
+	$session->check_permission(8);
+	$session->set_return();
+
+	$settings = Globalvars::get_instance();
+	$currency_code = $settings->get_setting('site_currency');
+	$currency_symbol = CurrencyHelper::symbol(strtolower($currency_code)) ?? '$';
+
+	// Load product
+	if (!isset($input['product_id']) && !isset($input['product_id'])) {
+		return LogicResult::redirect('/plugins/store/admin/admin_products');
+	}
+	$product_id = isset($input['product_id']) ? $input['product_id'] : $input['product_id'];
+	$product = new Product($product_id, TRUE);
+
+	// Load or create product version
+	// CRITICAL: Check edit_primary_key_value (form submission first), fallback to GET
+	if (isset($input['edit_primary_key_value'])) {
+		$product_version = new ProductVersion($input['edit_primary_key_value'], TRUE);
+	} elseif (isset($input['product_version_id'])) {
+		$product_version = new ProductVersion($input['product_version_id'], TRUE);
+	} else {
+		$product_version = new ProductVersion(NULL);
+	}
+
+	// Check if any orders reference this product version
+	$has_orders = false;
+	if ($product_version->key) {
+		$dbconnector = DbConnector::get_instance();
+		$dblink = $dbconnector->get_db_link();
+		$q = $dblink->prepare("SELECT COUNT(*) FROM odi_order_items WHERE odi_prv_product_version_id = ?");
+		$q->execute([$product_version->key]);
+		$has_orders = $q->fetchColumn() > 0;
+	}
+
+	// Process POST actions
+	// CRITICAL: Check for POST submission
+	if (LibraryFunctions::isFormSubmission()) {
+		$product_version->set('prv_version_name', $input['version_name']);
+
+		if(isset($input['prv_display_priority'])){
+			$product_version->set('prv_display_priority', $input['prv_display_priority']);
+		}
+
+		// Set price fields for new versions, or existing versions with no orders
+		if((!$product_version->key || !$has_orders) && isset($input['version_price'])){
+			$product_version->set('prv_pro_product_id', $product->key);
+			$product_version->set('prv_version_price', $input['version_price']);
+			$product_version->set('prv_price_type', $input['prv_price_type']);
+			$product_version->set('prv_trial_period_days', $input['prv_trial_period_days']);
+			if(!$product_version->key){
+				$product_version->set('prv_status', 1);
+			}
+		}
+
+		$product_version->prepare();
+		$product_version->save();
+
+		// Sync Stripe price when editing
+		if($settings->get_setting('checkout_type') != 'none'){
+			try {
+				$stripe_helper = new StripeHelper();
+				$stripe_price = $stripe_helper->get_or_create_price($product_version, NULL);
+			} catch (Exception $e) {
+				error_log('StripeHelper::get_or_create_price failed for product version ' . $product_version->key . ': ' . $e->getMessage());
+			}
+		}
+
+		return LogicResult::redirect('/plugins/store/admin/admin_product?pro_product_id='. $product->key);
+	}
+
+	// Handle GET actions for version management.
+	// Intentional GET-action mutations — opt in to the GET-is-read-only tripwire.
+	if (($input['action'] ?? '') == 'remove_version') {
+		$product_version = new ProductVersion($input['product_version_id'], TRUE);
+		$product_version->set('prv_status', 0);
+		SystemBase::$allow_get_mutation = true;
+		try { $product_version->prepare(); $product_version->save(); }
+		finally { SystemBase::$allow_get_mutation = false; }
+		return LogicResult::redirect('/plugins/store/admin/admin_product?pro_product_id='. $product->key);
+	}
+	else if (($input['action'] ?? '') == 'activate_version') {
+		$product_version = new ProductVersion($input['product_version_id'], TRUE);
+		$product_version->set('prv_status', 1);
+		SystemBase::$allow_get_mutation = true;
+		try { $product_version->prepare(); $product_version->save(); }
+		finally { SystemBase::$allow_get_mutation = false; }
+		return LogicResult::redirect('/plugins/store/admin/admin_product?pro_product_id='. $product->key);
+	}
+
+	// Load data for display
+	$options = [];
+	if ($product_version->key) {
+		$options['title'] = 'Product Version Edit - '. $product_version->get('prv_version_name');
+		$breadcrumb = 'Product '.$product->get('pro_name');
+	}
+	else{
+		$options['title'] = 'New Product Version';
+		$breadcrumb = 'New Product Version';
+	}
+
+	// Return page variables for rendering
+	return LogicResult::render(array(
+		'product_version' => $product_version,
+		'product' => $product,
+		'pageoptions' => $options,
+		'breadcrumb' => $breadcrumb,
+		'currency_symbol' => $currency_symbol,
+		'has_orders' => $has_orders,
+		'session' => $session,
+		'settings' => $settings,
+	));
+}
+
+?>

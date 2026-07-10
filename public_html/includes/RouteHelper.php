@@ -412,7 +412,34 @@ class RouteHelper {
         $pattern = $route['pattern'];
         $path = $route['path'];
 
-        // Check setting requirement if specified
+        // Plugin-delegated route: a core-declared route whose view/handler and
+        // auto-loaded logic resolve from a plugin directory. This is the
+        // authoritative inactivity guard, and it MUST run before check_setting:
+        // the gating setting row is seeded at plugin activation, so on a fresh
+        // (never-activated) install it does not exist. If check_setting ran
+        // first it would soft-fall-through to the theme view fallback and leak a
+        // store/event page. Inactive/absent plugin 404s here instead.
+        $forced_plugin = null;
+        if (!empty($route['plugin'])) {
+            if (!class_exists('PluginHelper')) {
+                require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
+            }
+            if (!PluginHelper::isPluginActive($route['plugin'])) {
+                // A plugin-delegated route is exclusively owned by its plugin. With
+                // the plugin inactive the URL must 404 outright — it must NOT fall
+                // through to a theme/base view of the same name (which would leak a
+                // store/event page on a plugin-less install). Match-only callers
+                // (route introspection) just get a non-match.
+                if (self::$match_only_mode) {
+                    return false;
+                }
+                self::show404('Plugin-delegated route: plugin \'' . $route['plugin'] . '\' is inactive');
+            }
+            $forced_plugin = $route['plugin'];
+        }
+
+        // Check setting requirement if specified. For plugin-delegated routes this
+        // now runs only after the plugin is confirmed active (so its settings exist).
         if (!empty($route['check_setting'])) {
             $settings = Globalvars::get_instance();
             if (!$settings->get_setting($route['check_setting'])) {
@@ -425,6 +452,23 @@ class RouteHelper {
         // request-segment array passed in by processRoutes().
         $route_params = self::extractRouteParams($pattern, $path);
         $params = $route_params;
+
+        // Handler form of a plugin-delegated route: resolve a handler file from the
+        // plugin directory (theme → plugins/{plugin}/ → core chain) and run it. The
+        // handler reads its named params from the rebound $params ($params['slug'],
+        // $params['date']). Used by the ICS endpoints.
+        if (!empty($route['handler'])) {
+            $handler_path = $route['handler'];
+            if (substr($handler_path, -4) !== '.php') {
+                $handler_path .= '.php';
+            }
+            $handler_full = PathHelper::getThemeFilePath(basename($handler_path), dirname($handler_path), 'system', null, $forced_plugin, false, false);
+            if ($handler_full) {
+                require_once($handler_full);
+                return true;
+            }
+            return false;
+        }
 
         // DETERMINE VIEW PATH
         if (empty($route['view'])) {
@@ -516,7 +560,9 @@ class RouteHelper {
         // Include view with explicit variables.
         // Extract plugin name from URL pattern so getThemeFilePath can look in the
         // correct plugin directory — no plugin_specify field needed.
-        $plugin_name_for_view = self::extractPluginNameFromPattern($pattern);
+        // A `plugin`-delegated route names its owning plugin explicitly; otherwise
+        // fall back to inferring it from the URL pattern.
+        $plugin_name_for_view = $forced_plugin ?: self::extractPluginNameFromPattern($pattern);
         $full_path = PathHelper::getThemeFilePath(basename($view_path), dirname($view_path), 'system', null, $plugin_name_for_view, false, false);
         if ($full_path) {
             extract([
@@ -974,6 +1020,7 @@ class RouteHelper {
         require_once(__DIR__ . '/PathHelper.php');
         require_once(__DIR__ . '/Globalvars.php');
         require_once(__DIR__ . '/SessionControl.php');
+        require_once(__DIR__ . '/CurrencyHelper.php');
 
         // Register ErrorManager for comprehensive error handling (exceptions + fatal errors)
         require_once(PathHelper::getIncludePath('includes/ErrorHandler.php'));
@@ -1063,11 +1110,9 @@ class RouteHelper {
         $settings = Globalvars::get_instance();
         $session = SessionControl::get_instance();
 
-        // Marketing coupon auto-apply — gated so zero overhead on requests without ?coupon=
-        if (isset($_GET['coupon'])) {
-            $session->capture_marketing_coupon();
-        }
-        
+        // Marketing-coupon auto-apply is owned by the store plugin now — it runs
+        // ShoppingCart::capture_marketing_coupon() from its own request bootstrap.
+
         // Build complete route array with proper priority
         $all_routes = ['static' => [], 'custom' => [], 'dynamic' => []];
         $original_routes = $routes; // Save the original routes passed to this method

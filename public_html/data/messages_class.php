@@ -50,7 +50,8 @@ class Message extends SystemBase {	public static $prefix = 'msg';
 	    'msg_message_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 	    'msg_usr_user_id_recipient' => array('type'=>'int4'),
 	    'msg_usr_user_id_sender' => array('type'=>'int4'),
-	    'msg_evt_event_id' => array('type'=>'int4'),
+	    'msg_context_type' => array('type'=>'varchar(32)', 'is_nullable'=>true),
+	    'msg_context_id' => array('type'=>'int4', 'is_nullable'=>true),
 	    'msg_cnv_conversation_id' => array('type'=>'int8'),
 	    'msg_body' => array('type'=>'text', 'required'=>true),
 	    'msg_sent_time' => array('type'=>'timestamp(6)', 'required'=>true),
@@ -110,12 +111,16 @@ class MultiMessage extends SystemMultiBase {
 			$filters['msg_usr_user_id_sender'] = [$this->options['user_id_sender'], PDO::PARAM_INT];
 		}
 
-		if (isset($this->options['event_id'])) {
-			$filters['msg_evt_event_id'] = [$this->options['event_id'], PDO::PARAM_INT];
+		if (isset($this->options['context_type'])) {
+			$filters['msg_context_type'] = [$this->options['context_type'], PDO::PARAM_STR];
 		}
 
-		if (isset($this->options['event_id_only'])) {
-			$filters['msg_evt_event_id'] = '= '.$this->options['event_id_only'].' AND msg_usr_user_id_recipient IS NULL';
+		if (isset($this->options['context_id'])) {
+			$filters['msg_context_id'] = [$this->options['context_id'], PDO::PARAM_INT];
+		}
+
+		if (isset($this->options['context_id_only'])) {
+			$filters['msg_context_id'] = '= '.intval($this->options['context_id_only']).' AND msg_usr_user_id_recipient IS NULL';
 		}
 
 		if (isset($this->options['conversation_id'])) {

@@ -3,42 +3,39 @@
 	
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
-	require_once(PathHelper::getIncludePath('data/item_relations_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/items/data/item_relation_types_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(7);
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
-		'menu-id'=> 'product-groups',
-		'page_title' => 'Product Groups',
-		'readable_title' => 'Product Groups',
+		'menu-id'=> 'items-list',
+		'page_title' => 'Item Relation Types',
+		'readable_title' => 'Item Relation Types',
 		'breadcrumbs' => array(
-			'Items'=>'/admin/admin_items', 
-			'Item Relations' => '',
+			'Items'=>'/plugins/items/admin/admin_items',
+			'Item Relation Types' => '',
 		),
 		'session' => $session,
 	)
 	);
 
-	$item_relations = new MultiProductGroup();
-	$item_relations->load();
+	$relation_types = new MultiItemRelationType();
+	$relation_types->load();
 
-	$headers = array('Product Group Name');
+	$headers = array('Relation Type Name');
 	$altlinks = array();
-	if($_SESSION['permission'] > 7){
-		$altlinks['New Product Group'] = '/admin/admin_item_relation_edit';
-	}
 	$box_vars =	array(
 		'altlinks' => $altlinks,
-		'title' => 'Product Groups'
+		'title' => 'Item Relation Types'
 	);
 	$page->tableheader($headers, $box_vars);
 
-	foreach($item_relations as $item_relation) {
+	foreach($relation_types as $relation_type) {
 		$rowvalues=array();
-		array_push($rowvalues, $item_relation->get('itr_name'));
+		array_push($rowvalues, $relation_type->get('itt_name'));
 		$page->disprow($rowvalues);
 	}
 

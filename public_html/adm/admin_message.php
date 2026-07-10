@@ -6,7 +6,7 @@
 
 	require_once(PathHelper::getIncludePath('/data/users_class.php'));
 	require_once(PathHelper::getIncludePath('/data/messages_class.php'));
-	require_once(PathHelper::getIncludePath('/data/events_class.php'));
+	require_once(PathHelper::getIncludePath('/includes/MessageContextRegistry.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
@@ -17,8 +17,9 @@
 	if($message->get('msg_usr_user_id_recipient')){
 		$recipient = new User($message->get('msg_usr_user_id_recipient'), TRUE);
 	}
-	if($message->get('msg_evt_event_id')){
-		$event = new Event($message->get('msg_evt_event_id'), TRUE);
+	$context = null;
+	if($message->get('msg_context_type') && $message->get('msg_context_id')){
+		$context = MessageContextRegistry::resolve($message->get('msg_context_type'), (int)$message->get('msg_context_id'));
 	}
 
 	if($_REQUEST['action'] == 'delete'){
@@ -69,8 +70,14 @@
 	if($message->get('msg_usr_user_id_recipient')){
 		echo '<strong>To:</strong> ('.$recipient->key.') <a href="/admin/admin_user?usr_user_id='.$recipient->key.'">'.$recipient->display_name() .'</a><br />';
 	}
-	if($event){
-		echo '<strong>Event:</strong> ('.$event->key.') <a href="/admin/admin_event?evt_event_id='.$event->key.'">'.$event->get('evt_name') .'</a><br />';
+	if($message->get('msg_context_type') && $message->get('msg_context_id')){
+		if($context && !empty($context['url'])){
+			echo '<strong>Context:</strong> <a href="'.htmlspecialchars($context['url']).'">'.htmlspecialchars($context['label']).'</a><br />';
+		} elseif($context){
+			echo '<strong>Context:</strong> '.htmlspecialchars($context['label']).'<br />';
+		} else {
+			echo '<strong>Context:</strong> '.htmlspecialchars($message->get('msg_context_type').' #'.$message->get('msg_context_id')).'<br />';
+		}
 	}
 	echo '<strong>Sent:</strong> '.LibraryFunctions::convert_time($message->get('msg_sent_time'), 'UTC', $session->get_timezone()) .'<br />';
 	if($message->get('msg_cnv_conversation_id')){

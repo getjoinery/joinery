@@ -5,7 +5,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	require_once(PathHelper::getIncludePath('data/page_contents_class.php'));
 
-	require_once(PathHelper::getIncludePath('logic/pricing_logic.php'));
+	require_once(PathHelper::getIncludePath('plugins/store/logic/pricing_logic.php'));
 
 	$page_vars = process_logic(pricing_logic(array_merge($_GET, $_POST)));
 	$page_choice = $page_vars['page_choice'];

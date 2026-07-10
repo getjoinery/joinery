@@ -28,7 +28,7 @@ set_time_limit(120);
 if (!defined('SINGLE_TESTS_ONLY')) define('SINGLE_TESTS_ONLY', true);
 if (!defined('TEST_MULTI')) define('TEST_MULTI', false);
 
-$classes = LibraryFunctions::discover_model_classes();
+$classes = LibraryFunctions::discover_model_classes(['include_plugins' => true]);
 section('Model CRUD (' . count($classes) . ' classes, test database)');
 
 foreach ($classes as $class) {

@@ -5,6 +5,7 @@
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
 	require_once(PathHelper::getIncludePath('data/emails_class.php'));
+	require_once(PathHelper::getIncludePath('includes/RecipientGroupProviderRegistry.php'));
 	require_once(PathHelper::getIncludePath('data/groups_class.php'));
 
 	$session = SessionControl::get_instance();
@@ -22,9 +23,9 @@
 
 	$recipient_groups = $email->get_recipient_groups();
 
-	if($_REQUEST['action'] == 'addgroup'){
-		//ADD GROUP TO EMAIL
-		$email->add_recipient_group(NULL, $_POST['grp_group_id'], $op);
+	if($_REQUEST['action'] == 'add_recipient'){
+		//ADD A PROVIDER-RESOLVED RECIPIENT GROUP TO THE EMAIL
+		$email->add_recipient_group($_POST['provider'], $_POST['reference_id'], $op);
 		$returnurl = $session->get_return();
 		header("Location: /admin/admin_email_recipients_modify?eml_email_id=".$email->key);
 		exit();
@@ -32,13 +33,6 @@
 	else if($_REQUEST['action'] == 'remove'){
 		$email_recipient_group = new EmailRecipientGroup($_POST['erg_email_recipient_group_id'], TRUE);
 		$email_recipient_group->permanent_delete();
-		$returnurl = $session->get_return();
-		header("Location: /admin/admin_email_recipients_modify?eml_email_id=".$email->key);
-		exit();
-	}
-	else if($_REQUEST['action'] == 'addevent'){
-		//ADD GROUP TO EMAIL
-		$email->add_recipient_group($_POST['evt_event_id'], NULL, $op);
 		$returnurl = $session->get_return();
 		header("Location: /admin/admin_email_recipients_modify?eml_email_id=".$email->key);
 		exit();
@@ -79,23 +73,12 @@
 			$rowvalues=array();
 
 			$add_user_list = array();
-			if($recipient_group->get('erg_grp_group_id')){
-				$group = new Group($recipient_group->get('erg_grp_group_id'), TRUE);
-				$members = $group->get_member_list();
-				foreach($members as $member){
-					$add_user_list[] = $member->get('grm_foreign_key_id');
-				}
-				$label = $group->get('grp_name');
-			}
-			else if($recipient_group->get('erg_evt_event_id')){
-				$event = new Event($recipient_group->get('erg_evt_event_id'), TRUE);
-				$event_registrants = new MultiEventRegistrant(array('event_id' => $recipient_group->get('erg_evt_event_id'), 'expired' => false), NULL);
-				//$numregistrants = $event_registrants->count_all();
-				$event_registrants->load();
-				foreach($event_registrants as $event_registrant){
-					$add_user_list[] = $event_registrant->get('evr_usr_user_id');
-				}
-				$label = $event->get('evt_name');
+			$label = '(none)';
+			$provider = RecipientGroupProviderRegistry::get($recipient_group->get('erg_provider'));
+			if($provider){
+				$ref_id = (int)$recipient_group->get('erg_reference_id');
+				$add_user_list = $provider->resolve($ref_id);
+				$label = $provider->reference_label($ref_id);
 			}
 
 			$num_total = 0;
@@ -131,65 +114,27 @@
 		}
 
 		echo '<tr><td colspan="3">';
-		$formwriter = $page->getFormWriter('form3', ['action' => '/admin/admin_email_recipients_modify', 'method' => 'POST']);
-		$formwriter->begin_form();
 
-		$groups = new MultiGroup(
-			array('category'=>'user', 'deleted'=>false),
-			array('group_name' => 'ASC'),		//SORT BY => DIRECTION
-			NULL,  //NUM PER PAGE
-			NULL);  //OFFSET
-		$groups->load();
-
-		$optionvals = $groups->get_dropdown_array();
-		$formwriter->hiddeninput('action', '', ['value' => 'addgroup']);
-		$formwriter->hiddeninput('eml_email_id', '', ['value' => $email->key]);
-		$formwriter->hiddeninput('op', '', ['value' => $op]);
-		if($op == 'add'){
-			$formwriter->dropinput('grp_group_id', 'Add group members', [
-				'options' => $optionvals,
+		// One form per registered recipient-group provider (group, event,
+		// waiting list, …). Each posts a generic add_recipient action carrying
+		// the provider key + the chosen reference id.
+		$verb = ($op == 'add') ? 'Add' : 'Exclude';
+		$form_index = 3;
+		foreach(RecipientGroupProviderRegistry::all() as $provider){
+			$formwriter = $page->getFormWriter('form'.$form_index, ['action' => '/admin/admin_email_recipients_modify', 'method' => 'POST']);
+			$formwriter->begin_form();
+			$formwriter->hiddeninput('action', '', ['value' => 'add_recipient']);
+			$formwriter->hiddeninput('eml_email_id', '', ['value' => $email->key]);
+			$formwriter->hiddeninput('op', '', ['value' => $op]);
+			$formwriter->hiddeninput('provider', '', ['value' => $provider->key()]);
+			$formwriter->dropinput('reference_id', $verb.' '.strtolower($provider->label()), [
+				'options' => $provider->options(),
 				'empty_option' => '-- Select --'
 			]);
-			echo $formwriter->submitbutton('btn_submit', 'Add group members', ['class' => 'btn btn-primary']);
+			echo $formwriter->submitbutton('btn_submit', $verb.' '.strtolower($provider->label()), ['class' => 'btn btn-primary']);
+			$formwriter->end_form();
+			$form_index++;
 		}
-		else{
-			$formwriter->dropinput('grp_group_id', 'Exclude group members', [
-				'options' => $optionvals,
-				'empty_option' => '-- Select --'
-			]);
-			echo $formwriter->submitbutton('btn_submit', 'Exclude group members', ['class' => 'btn btn-primary']);
-		}
-		$formwriter->end_form();
-
-		$events = new MultiEvent(
-			array(),  //SEARCH
-			array('start_time' => 'DESC'),		//SORT BY => DIRECTION
-			NULL,  //NUM PER PAGE
-			NULL);  //OFFSET
-		$events->load();
-
-		$formwriter = $page->getFormWriter('form4', ['action' => '/admin/admin_email_recipients_modify', 'method' => 'POST']);
-		$formwriter->begin_form();
-		$optionvals = $events->get_dropdown_array();
-
-		$formwriter->hiddeninput('action', '', ['value' => 'addevent']);
-		$formwriter->hiddeninput('eml_email_id', '', ['value' => $email->key]);
-		$formwriter->hiddeninput('op', '', ['value' => $op]);
-		if($op == 'add'){
-			$formwriter->dropinput('evt_event_id', 'Add event attendees', [
-				'options' => $optionvals,
-				'empty_option' => '-- Select --'
-			]);
-			echo $formwriter->submitbutton('btn_submit', 'Add event attendees', ['class' => 'btn btn-primary']);
-		}
-		else{
-			$formwriter->dropinput('evt_event_id', 'Exclude event attendees', [
-				'options' => $optionvals,
-				'empty_option' => '-- Select --'
-			]);
-			echo $formwriter->submitbutton('btn_submit', 'Exclude event attendees', ['class' => 'btn btn-primary']);
-		}
-		$formwriter->end_form();
 		echo '</td></tr>';
 
 		$page->endtable();

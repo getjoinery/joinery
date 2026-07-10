@@ -156,12 +156,13 @@ class PublicPageFalcon extends PublicPageBase {
 	public function top_right_menu(){
 		// Get all menu data from centralized function
 		$menu_data = $this->get_menu_data();
-		$cart = $menu_data['cart'];
+		$cart = $menu_data['cart'] ?? null;
 		$user_menu = $menu_data['user_menu'];
 		$notifications = $menu_data['notifications'];
 
 		// SHOPPING CART MENU ITEM - Falcon theme specific styling
-		if($cart['has_items']){
+		// (only when the store plugin registered a cart provider)
+		if(!empty($cart['has_items'])){
 			echo '<li class="nav-item d-none d-sm-block">
 			  <a class="nav-link px-0 notification-indicator notification-indicator-warning notification-indicator-fill fa-icon-wait" href="' . $cart['link'] . '">
 			    <span class="fas fa-shopping-cart" data-fa-transform="shrink-7" style="font-size: 33px;"></span>

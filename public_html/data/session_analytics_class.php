@@ -48,6 +48,8 @@ class SessionAnalytic extends SystemBase {	public static $prefix = 'sev';
 	    'sev_usr_user_id' => array('type'=>'int4'),
 	    'sev_evt_event_id' => array('type'=>'int4'),
 	    'sev_evs_event_session_id' => array('type'=>'int4'),
+	    'sev_entity_type' => array('type'=>'varchar(32)', 'is_nullable'=>true),
+	    'sev_entity_id' => array('type'=>'int4', 'is_nullable'=>true),
 	    'sev_type' => array('type'=>'int2'),
 	    'sev_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);

@@ -651,8 +651,14 @@ abstract class FormWriterV2Base {
         if (self::$model_prefix_map === null) {
             self::$model_prefix_map = [];
 
-            // Auto-discover by scanning /data directory
+            // Auto-discover by scanning the core /data directory plus every plugin's
+            // data/ directory, so prefix-based field validation keeps working for
+            // model fields owned by plugin data classes (e.g. pro_/ord_/evt_/loc_).
             $data_files = glob(PathHelper::getIncludePath('data/*_class.php'));
+            $plugin_data_files = glob(PathHelper::getIncludePath('plugins/*/data/*_class.php'));
+            if (!empty($plugin_data_files)) {
+                $data_files = array_merge($data_files, $plugin_data_files);
+            }
 
             foreach ($data_files as $file) {
                 // Extract class name from filename

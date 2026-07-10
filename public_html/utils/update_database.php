@@ -157,9 +157,11 @@
 		$db_structure_hash = md5($db_structure_contents);
 		echo 'DB Hash: '. $db_structure_hash."<br>\n";
 		
-		// Step 2: Process advanced column operations (modifications, cleanup) if requested
+		// Step 2: Process advanced column operations (modifications only) if requested.
+		// Column-drop cleanup is DEFERRED to run after the migrations step (Step 4.5)
+		// so a not-yet-migrated column isn't dropped before its backfill migration.
 		if ($upgrade || $cleanup) {
-			$advanced_result = $database_updater->processAdvancedColumnOperations($classes);
+			$advanced_result = $database_updater->processAdvancedColumnOperations($classes, false);
 			
 			if (!$advanced_result['success']) {
 				echo 'Advanced column operations failed:<br>' . implode('<br>', $advanced_result['errors']) . "<br>\n";
@@ -504,6 +506,15 @@
 		echo "#Failed: ".$migration_fail_count."<br>\n";
 		echo "#Skipped: ".$migration_skip_count."<br>\n";
 
+		// Column-drop cleanup (--cleanup mode) is DEFERRED to the very end of this
+		// function — after plugin sync AND the store/event auto-activation step.
+		// A plugin's activation hook backfills data out of columns that are absent
+		// from core specs (e.g. usr_stripe_customer_id / pro_evt_event_id migrating
+		// into plugin-owned tables). Dropping spec-absent columns here would erase
+		// that data before the backfill runs. Making cleanup the last schema step
+		// closes this ordering hazard for good. See "DEFERRED COLUMN CLEANUP" below.
+		$cleanup_result = ['errors' => [], 'warnings' => [], 'messages' => []];
+
 		// Step 5: Sync all serial sequences to their max values
 		// This prevents primary key collisions after data imports or migrations
 		echo "-----SEQUENCE SYNC-----<br>\n";
@@ -567,16 +578,18 @@
 		$all_errors = array_merge(
 			$table_result['errors'] ?? [],
 			$advanced_result['errors'] ?? [],
+			$cleanup_result['errors'] ?? [],
 			$constraint_result['errors'] ?? []
 		);
-		
+
 		// Remove duplicate error messages
 		$all_errors = array_unique($all_errors);
-		
+
 		// Also collect warnings for informational purposes (but don't count as failures)
 		$all_warnings = array_merge(
 			$table_result['warnings'] ?? [],
 			$advanced_result['warnings'] ?? [],
+			$cleanup_result['warnings'] ?? [],
 			$constraint_result['warnings'] ?? []
 		);
 		
@@ -732,6 +745,97 @@
 		} catch (Exception $e) {
 			echo "⚠️  Plugin/Theme sync failed: " . htmlspecialchars($e->getMessage()) . "<br>\n";
 			// Non-fatal — core DB update already succeeded
+		}
+
+		// Step: One-time conditional store / event_manager activation (upgrade path).
+		// Existing installs carrying orders/events data would silently lose checkout,
+		// webhooks and event pages when the new plugins register inactive on upgrade.
+		// A numbered migration can't fix this (migrations run before plugin sync above),
+		// so it's inline here, right after the sync. One-time via a marker setting;
+		// deliberately NOT state-idempotent — an admin who later deactivates the store
+		// must not have it re-activated by the next deploy.
+		echo "<br>\n<strong>Store / Event Manager Auto-Activation</strong><br>\n";
+		try {
+			$dblink = DbConnector::get_instance()->get_db_link();
+			$marker_present = $dblink->query(
+				"SELECT 1 FROM stg_settings WHERE stg_name = '_store_event_autoactivate_v1' LIMIT 1"
+			)->fetchColumn();
+
+			if (!$marker_present) {
+				$count_rows = function($table) use ($dblink) {
+					if (!$dblink->query("SELECT to_regclass('public.$table')")->fetchColumn()) return 0;
+					return (int)$dblink->query("SELECT count(*) FROM $table")->fetchColumn();
+				};
+				$setting_set = function($name) use ($dblink) {
+					$q = $dblink->prepare("SELECT stg_value FROM stg_settings WHERE stg_name = ?");
+					$q->execute([$name]);
+					$v = $q->fetchColumn();
+					return ($v !== false && $v !== null && $v !== '');
+				};
+
+				$activate_store  = $count_rows('pro_products') > 0 || $count_rows('ord_orders') > 0
+					|| $setting_set('stripe_api_key') || $setting_set('paypal_api_key');
+				$activate_events = $count_rows('evt_events') > 0;
+				if ($activate_events) { $activate_store = true; } // depends: store first
+
+				require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
+				$pm = PluginManager::getInstance();
+				$activate_if_present_inactive = function($name) use ($pm, $dblink) {
+					$q = $dblink->prepare("SELECT plg_active FROM plg_plugins WHERE plg_name = ?");
+					$q->execute([$name]);
+					$active = $q->fetchColumn();
+					if ($active !== false && (int)$active === 0) {
+						$pm->activate($name);   // enforces depends, runs tables/settings/activate.php/menus
+						echo "✓ Activated plugin '$name'<br>\n";
+					}
+				};
+
+				if ($activate_store)  { $activate_if_present_inactive('store'); }
+				if ($activate_events) { $activate_if_present_inactive('event_manager'); }
+
+				$dblink->prepare(
+					"INSERT INTO stg_settings (stg_name, stg_value) VALUES ('_store_event_autoactivate_v1', '1')
+					 ON CONFLICT (stg_name) DO NOTHING"
+				)->execute();
+				echo "✓ Store/event auto-activation evaluated (store=" . ($activate_store ? 'yes' : 'no')
+					. ", events=" . ($activate_events ? 'yes' : 'no') . ")<br>\n";
+			} else {
+				echo "✓ Store/event auto-activation already ran (marker present)<br>\n";
+			}
+		} catch (\Throwable $e) {
+			echo "⚠️  Store/event auto-activation failed: " . htmlspecialchars($e->getMessage()) . "<br>\n";
+			// Non-fatal, like the surrounding steps.
+		}
+
+		// ===== DEFERRED COLUMN CLEANUP (--cleanup mode only) =====
+		// The LAST schema step, on purpose. It drops columns absent from class
+		// specs; the plugin activation hooks that ran just above backfill data OUT
+		// of some of those columns into plugin-owned tables (usr_stripe_customer_id
+		// -> stc_stripe_customers, pro_evt_event_id -> pro_fulfillment_*). Running
+		// cleanup last guarantees the backfill has already read them.
+		if ($cleanup) {
+			echo "<br>\n-----COLUMN CLEANUP (deferred)-----<br>\n";
+			$cleanup_result = $database_updater->runColumnCleanup($classes);
+
+			if (!empty($cleanup_result['messages'])) {
+				echo implode('<br>', $cleanup_result['messages']) . "<br>\n";
+			}
+			foreach ($cleanup_result['warnings'] as $warning) {
+				echo 'WARNING: ' . $warning . "<br>\n";
+			}
+			foreach ($cleanup_result['errors'] as $error) {
+				echo 'ERROR: ' . $error . "<br>\n";
+			}
+
+			// The run summary and migration_log row were written before this
+			// deferred step, so fold any cleanup errors back into the persisted
+			// log — a failed drop must still mark the run unsuccessful.
+			if (!empty($cleanup_result['errors']) && isset($migration_log)) {
+				$prior_output = (string)$migration_log->get('mig_output');
+				$migration_log->set('mig_output', trim($prior_output . "\n" . implode("\n", $cleanup_result['errors'])));
+				$migration_log->set('mig_success', 0);
+				$migration_log->save();
+			}
 		}
 
 		// Step: Seed SEO page metadata inventory (enumeration).

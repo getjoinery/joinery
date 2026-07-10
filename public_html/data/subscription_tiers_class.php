@@ -168,85 +168,7 @@ class SubscriptionTier extends SystemBase {
         return $current_tier;
     }
 
-    /**
-     * Check if user has an active subscription (separate from tier check)
-     */
-    public static function userHasActiveSubscription($user_id) {
-        require_once(PathHelper::getIncludePath('data/order_items_class.php'));
-        $subscriptions = new MultiOrderItem(
-            array('user_id' => $user_id, 'is_active_subscription' => true)
-        );
-        $subscriptions->load();
 
-        if ($subscriptions->count() > 0) {
-            foreach ($subscriptions as $subscription) {
-                if ($subscription->check_subscription_status()) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Remove tier from user due to subscription expiration
-     * Called from Stripe webhook when subscription is cancelled/expired
-     */
-    public static function handleSubscriptionExpired($user_id) {
-        $current_tier = self::GetUserTier($user_id);
-        if ($current_tier) {
-            $old_tier_level = $current_tier->get('sbt_tier_level');
-            self::removeUserFromAllTiers($user_id);
-
-            ChangeTracking::logChange(
-                'subscription_tier',
-                null,
-                $user_id,
-                'tier_removed',
-                $old_tier_level,
-                null,
-                'subscription_expired'
-            );
-
-            // Send expiration email
-            try {
-                require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
-                require_once(PathHelper::getIncludePath('data/users_class.php'));
-                $user = new User($user_id, TRUE);
-                if ($user->key) {
-                    EmailSender::sendTemplate('subscription_expired', $user->get('usr_email'), [
-                        'recipient' => $user->export_as_array(),
-                        'tier_name' => $current_tier->get('sbt_display_name'),
-                    ]);
-                }
-            } catch (Exception $e) {
-                error_log('Subscription expiration email failed: ' . $e->getMessage());
-            }
-
-            // In-app notification: subscription expired
-            try {
-                require_once(PathHelper::getIncludePath('data/notifications_class.php'));
-                Notification::create_notification(
-                    $user_id,
-                    'subscription',
-                    'Your ' . $current_tier->get('sbt_name') . ' subscription has expired',
-                    'Your subscription tier access has been removed.',
-                    '/pricing',
-                    null
-                );
-            } catch (Exception $e) { /* notification system not available */ }
-
-            // Admin alert: a subscription lapsed.
-            require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
-            SignalBus::dispatch('subscription.expired', array(
-                'user_id'   => $user_id,
-                'tier_id'   => $current_tier->key,
-                'tier_name' => $current_tier->get('sbt_name'),
-            ));
-
-            self::clearUserCache($user_id);
-        }
-    }
 
     /**
      * Check if user meets minimum tier level
@@ -257,35 +179,6 @@ class SubscriptionTier extends SystemBase {
         return $user_tier->get('sbt_tier_level') >= $minimum_tier_level;
     }
 
-    /**
-     * Handle subscription tier assignment when a product is purchased
-     * Called from cart_charge_logic.php
-     */
-    public static function handleProductPurchase($user, $product, $order_item, $order) {
-        // Check if product has a subscription tier
-        if (!$product->get('pro_sbt_subscription_tier_id')) {
-            return false;
-        }
-
-        try {
-            $tier = new SubscriptionTier($product->get('pro_sbt_subscription_tier_id'), TRUE);
-
-            // Add user to tier with purchase context
-            $result = $tier->addUser(
-                $user->key,
-                'purchase',
-                'order',
-                $order->key,
-                null  // No admin user for purchases
-            );
-
-            return true;
-
-        } catch (Exception $e) {
-            // Log error but don't break checkout
-            return false;
-        }
-    }
 
     /**
      * Check if user has minimum tier level and redirect if not
@@ -310,48 +203,6 @@ class SubscriptionTier extends SystemBase {
         return htmlspecialchars($tier->get('sbt_display_name'));
     }
 
-    /**
-     * Get available upgrade options for a user
-     */
-    public static function getUpgradeOptions($user_id) {
-        $current_tier = self::GetUserTier($user_id);
-        $current_level = $current_tier ? $current_tier->get('sbt_tier_level') : 0;
-
-        $all_tiers = MultiSubscriptionTier::GetAllActive();
-        $upgrade_options = [];
-
-        foreach ($all_tiers as $tier) {
-            if ($tier->get('sbt_tier_level') > $current_level) {
-                // Find products that grant this tier using models
-                $products_with_tier = new MultiProduct([
-                    'pro_sbt_subscription_tier_id' => $tier->key,
-                    'pro_is_active' => true,
-                    'pro_delete_time' => 'IS NULL'
-                ]);
-
-                if ($products_with_tier->count_all() > 0) {
-                    $products_with_tier->load();
-                    $products = [];
-
-                    foreach ($products_with_tier as $product) {
-                        $products[] = [
-                            'pro_product_id' => $product->key,
-                            'pro_name' => $product->get('pro_name')
-                        ];
-                    }
-
-                    if (count($products) > 0) {
-                        $upgrade_options[] = [
-                            'tier' => $tier,
-                            'products' => $products
-                        ];
-                    }
-                }
-            }
-        }
-
-        return $upgrade_options;
-    }
 
     /**
      * Get a specific feature value for this tier

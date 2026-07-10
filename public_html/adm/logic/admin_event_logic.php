@@ -11,7 +11,7 @@ function admin_event_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/emails_class.php'));
 	require_once(PathHelper::getIncludePath('data/email_recipients_class.php'));
 	require_once(PathHelper::getIncludePath('data/event_logs_class.php'));
-	require_once(PathHelper::getIncludePath('data/orders_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/store/data/orders_class.php'));
 	require_once(PathHelper::getIncludePath('data/messages_class.php'));
 	require_once(PathHelper::getIncludePath('data/event_waiting_lists_class.php'));
 	require_once(PathHelper::getIncludePath('data/locations_class.php'));
@@ -205,7 +205,8 @@ function admin_event_logic(array $input): LogicResult {
 	$msdirection = LibraryFunctions::fetch_variable('msdirection', 'DESC', 0, '');
 	$msearchterm = LibraryFunctions::fetch_variable('msearchterm', '', 0, '');
 	$msearch_criteria = array();
-	$msearch_criteria['event_id_only'] = $event->key;
+	$msearch_criteria['context_type'] = 'event';
+	$msearch_criteria['context_id_only'] = $event->key;
 	$messages = new MultiMessage(
 		$msearch_criteria,
 		array($msort=>$msdirection),

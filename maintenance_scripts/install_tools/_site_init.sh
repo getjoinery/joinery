@@ -334,7 +334,7 @@ if [ "$SKIP_DB_VALIDATION" = false ] && [ "$DB_EXISTS" = false ]; then
     VALIDATION_FAILED=false
 
     # Check that key tables exist
-    REQUIRED_TABLES="usr_users stg_settings evt_events pro_products"
+    REQUIRED_TABLES="usr_users stg_settings"
     for table in $REQUIRED_TABLES; do
         TABLE_EXISTS=$(psql -U postgres -d "$SITENAME" -tAc \
             "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = '$table');" 2>/dev/null)
@@ -355,7 +355,7 @@ if [ "$SKIP_DB_VALIDATION" = false ] && [ "$DB_EXISTS" = false ]; then
     fi
 
     # Check for critical settings (these are always present in fresh installs)
-    CRITICAL_SETTINGS="blog_active theme_template events_active"
+    CRITICAL_SETTINGS="blog_active theme_template"
     for setting in $CRITICAL_SETTINGS; do
         SETTING_EXISTS=$(psql -U postgres -d "$SITENAME" -tAc \
             "SELECT COUNT(*) FROM stg_settings WHERE stg_name = '$setting';" 2>/dev/null)

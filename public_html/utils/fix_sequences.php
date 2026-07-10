@@ -158,7 +158,7 @@ try {
 
     // Get all model classes to map sequences to tables correctly
     output("Discovering model classes...", 'header');
-    $classes = LibraryFunctions::discover_model_classes(['require_tablename' => true]);
+    $classes = LibraryFunctions::discover_model_classes(['require_tablename' => true, 'include_plugins' => true]);
     output("Found " . count($classes) . " model classes", 'info');
 
     $stats = [

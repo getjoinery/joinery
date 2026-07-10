@@ -158,7 +158,7 @@ try {
     // this fix) as a control: both sides are real tables, so this row must
     // survive pruning untouched. Idempotent and safe - this is exactly what
     // any normal sync already does for the Order model.
-    require_once(PathHelper::getIncludePath('data/orders_class.php'));
+    require_once(PathHelper::getIncludePath('plugins/store/data/orders_class.php'));
     DeletionRule::registerModelRules('Order');
     $stmt = $db->prepare(
         "SELECT del_id FROM del_deletion_rules WHERE del_target_table = 'ord_orders' AND del_source_table = 'usr_users'"

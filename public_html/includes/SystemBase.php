@@ -1692,7 +1692,6 @@ abstract class SystemBase {
 	 *     'required_level'   => int|null,
 	 *     'user_level'       => int|null,
 	 *     'required_tier'    => SubscriptionTier|null,
-	 *     'upgrade_options'  => array,
 	 * ]
 	 */
 	public function authenticate_tier($session) {
@@ -1743,7 +1742,6 @@ abstract class SystemBase {
 				'required_level' => $min_level,
 				'user_level' => null,
 				'required_tier' => SubscriptionTier::GetByColumn('sbt_tier_level', $min_level),
-				'upgrade_options' => [],
 			];
 		}
 
@@ -1760,7 +1758,6 @@ abstract class SystemBase {
 			'required_level' => $min_level,
 			'user_level' => $user_tier ? $user_tier->get('sbt_tier_level') : 0,
 			'required_tier' => SubscriptionTier::GetByColumn('sbt_tier_level', $min_level),
-			'upgrade_options' => SubscriptionTier::getUpgradeOptions($user_id),
 		];
 	}
 

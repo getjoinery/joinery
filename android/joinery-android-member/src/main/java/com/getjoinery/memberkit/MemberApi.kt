@@ -21,14 +21,14 @@ open class MemberApi(val client: ApiClient) {
 
     suspend fun orders(offset: Int): OrderPage {
         val envelope = client.submitAction(
-            "order_list",
+            "store/order_list",
             JsonValue.obj("offset" to JsonValue.Num(offset.toDouble())),
         )
         return OrderPage.from(envelope["data"]) ?: throw JoineryApiError.Malformed
     }
 
     suspend fun subscriptions(): SubscriptionSummaryPayload {
-        val envelope = client.submitAction("subscription_summary", JsonValue.Obj(emptyList()))
+        val envelope = client.submitAction("store/subscription_summary", JsonValue.Obj(emptyList()))
         return SubscriptionSummaryPayload.from(envelope["data"]) ?: throw JoineryApiError.Malformed
     }
 
@@ -37,7 +37,7 @@ open class MemberApi(val client: ApiClient) {
      *  client's dialog before this call, matching the web page's flow. */
     suspend fun cancelSubscription(orderItemId: Int) {
         client.submitAction(
-            "orders_recurring_action",
+            "store/orders_recurring_action",
             JsonValue.obj("order_item_id" to JsonValue.Num(orderItemId.toDouble())),
         )
     }

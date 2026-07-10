@@ -1,0 +1,373 @@
+- generic [active] [ref=f9e1]:
+  - generic [ref=f9e2]:
+    - generic [ref=f9e3]:
+      - generic [ref=f9e4]: J
+      - link "Joinery Test" [ref=f9e5] [cursor=pointer]:
+        - /url: /
+      - generic [ref=f9e6]: + New
+    - generic [ref=f9e8]:
+      - generic [ref=f9e9]: "Theme: getjoinery ▼"
+      - link "Dashboard" [ref=f9e11] [cursor=pointer]:
+        - /url: /admin/admin_users
+      - generic [ref=f9e12]: Unnamed User (10)
+  - generic [ref=f9e13]:
+    - complementary [ref=f9e14]:
+      - link "Joinery Test" [ref=f9e16] [cursor=pointer]:
+        - /url: /
+        - img [ref=f9e17]:
+          - generic [ref=f9e19]: J
+      - navigation [ref=f9e21]:
+        - list [ref=f9e22]:
+          - listitem [ref=f9e23]:
+            - link "Users" [ref=f9e24] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f9e32]:
+                - link "Users list" [ref=f9e33] [cursor=pointer]:
+                  - /url: /admin/admin_users
+              - listitem [ref=f9e34]:
+                - link "Groups" [ref=f9e35] [cursor=pointer]:
+                  - /url: /admin/admin_groups
+          - listitem [ref=f9e36]:
+            - link "Emails" [ref=f9e37] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f9e43]:
+                - link "Emails list" [ref=f9e44] [cursor=pointer]:
+                  - /url: /admin/admin_emails
+              - listitem [ref=f9e45]:
+                - link "Contact Types" [ref=f9e46] [cursor=pointer]:
+                  - /url: /admin/admin_contact_types
+              - listitem [ref=f9e47]:
+                - link "Email Templates" [ref=f9e48] [cursor=pointer]:
+                  - /url: /admin/admin_email_templates
+              - listitem [ref=f9e49]:
+                - link "Mailing Lists" [ref=f9e50] [cursor=pointer]:
+                  - /url: /admin/admin_mailing_lists
+              - listitem [ref=f9e51]:
+                - link "Mailbox" [ref=f9e52] [cursor=pointer]:
+                  - /url: /plugins/mailbox/admin/admin_mailbox_reader
+          - listitem [ref=f9e53]:
+            - link "Products" [ref=f9e54] [cursor=pointer]:
+              - /url: "#"
+            - list [ref=f9e59]:
+              - listitem [ref=f9e60]:
+                - link "Products list" [ref=f9e61] [cursor=pointer]:
+                  - /url: /plugins/store/admin/admin_products
+              - listitem [ref=f9e62]:
+                - link "Product Groups" [ref=f9e63] [cursor=pointer]:
+                  - /url: /plugins/store/admin/admin_product_groups
+              - listitem [ref=f9e64]:
+                - link "Coupon codes" [ref=f9e65] [cursor=pointer]:
+                  - /url: /plugins/store/admin/admin_coupon_codes
+              - listitem [ref=f9e66]:
+                - link "Subscription Tiers" [ref=f9e67] [cursor=pointer]:
+                  - /url: /admin/admin_subscription_tiers
+          - listitem [ref=f9e68]:
+            - link "Orders" [ref=f9e69] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f9e76]:
+                - link "Orders list" [ref=f9e77] [cursor=pointer]:
+                  - /url: /plugins/store/admin/admin_orders
+              - listitem [ref=f9e78]:
+                - link "Stripe Payments" [ref=f9e79] [cursor=pointer]:
+                  - /url: /plugins/store/admin/admin_stripe_orders
+              - listitem [ref=f9e80]:
+                - link "Shadow Sessions" [ref=f9e81] [cursor=pointer]:
+                  - /url: /plugins/store/admin/admin_shadow_sessions
+          - listitem [ref=f9e82]:
+            - link "Files" [ref=f9e83] [cursor=pointer]:
+              - /url: /admin/admin_files
+          - listitem [ref=f9e90]:
+            - link "Events" [ref=f9e91] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f9e97]:
+                - link "Events List" [ref=f9e98] [cursor=pointer]:
+                  - /url: /admin/admin_events
+              - listitem [ref=f9e99]:
+                - link "Locations" [ref=f9e100] [cursor=pointer]:
+                  - /url: /admin/admin_locations
+              - listitem [ref=f9e101]:
+                - link "Event Types" [ref=f9e102] [cursor=pointer]:
+                  - /url: /admin/admin_event_types
+              - listitem [ref=f9e103]:
+                - link "Event Bundles" [ref=f9e104] [cursor=pointer]:
+                  - /url: /admin/admin_event_bundles
+          - listitem [ref=f9e105]:
+            - link "Bookings" [ref=f9e106] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f9e112]:
+                - link "Bookings" [ref=f9e113] [cursor=pointer]:
+                  - /url: /plugins/bookings/admin/admin_bookings
+              - listitem [ref=f9e114]:
+                - link "Booking Types" [ref=f9e115] [cursor=pointer]:
+                  - /url: /plugins/bookings/admin/admin_booking_types
+          - listitem [ref=f9e116]:
+            - link "Videos" [ref=f9e117] [cursor=pointer]:
+              - /url: /admin/admin_videos
+          - listitem [ref=f9e123]:
+            - link "Surveys" [ref=f9e124] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f9e128]:
+                - link "Surveys" [ref=f9e129] [cursor=pointer]:
+                  - /url: /admin/admin_surveys
+              - listitem [ref=f9e130]:
+                - link "Survey questions" [ref=f9e131] [cursor=pointer]:
+                  - /url: /admin/admin_questions
+          - listitem [ref=f9e132]:
+            - link "Pages" [ref=f9e133] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f9e139]:
+                - link "Pages list" [ref=f9e140] [cursor=pointer]:
+                  - /url: /admin/admin_pages
+              - listitem [ref=f9e141]:
+                - link "Page Components" [ref=f9e142] [cursor=pointer]:
+                  - /url: /admin/admin_components
+          - listitem [ref=f9e143]:
+            - link "Blog" [ref=f9e144] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f9e150]:
+                - link "Blog Posts" [ref=f9e151] [cursor=pointer]:
+                  - /url: /admin/admin_posts
+              - listitem [ref=f9e152]:
+                - link "Comments" [ref=f9e153] [cursor=pointer]:
+                  - /url: /admin/admin_comments
+          - listitem [ref=f9e154]:
+            - link "Server Manager" [ref=f9e155] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f9e159]:
+                - link "Dashboard" [ref=f9e160] [cursor=pointer]:
+                  - /url: /admin/server_manager
+              - listitem [ref=f9e161]:
+                - link "Upgrades" [ref=f9e162] [cursor=pointer]:
+                  - /url: /admin/server_manager/publish_upgrade
+              - listitem [ref=f9e163]:
+                - link "Remote Backup" [ref=f9e164] [cursor=pointer]:
+                  - /url: /admin/server_manager/targets
+              - listitem [ref=f9e165]:
+                - link "Marketplace" [ref=f9e166] [cursor=pointer]:
+                  - /url: /admin/server_manager/marketplace
+              - listitem [ref=f9e167]:
+                - link "Jobs" [ref=f9e168] [cursor=pointer]:
+                  - /url: /admin/server_manager/jobs
+              - listitem [ref=f9e169]:
+                - link "Specifications" [ref=f9e170] [cursor=pointer]:
+                  - /url: /admin/server_manager/specs
+          - listitem [ref=f9e171]:
+            - link "Statistics" [ref=f9e172] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f9e176]:
+                - link "Web Statistics" [ref=f9e177] [cursor=pointer]:
+                  - /url: /admin/admin_analytics_stats
+              - listitem [ref=f9e178]:
+                - link "Email Statistics" [ref=f9e179] [cursor=pointer]:
+                  - /url: /admin/admin_analytics_email_stats
+              - listitem [ref=f9e180]:
+                - link "Funnels" [ref=f9e181] [cursor=pointer]:
+                  - /url: /admin/admin_analytics_funnels
+              - listitem [ref=f9e182]:
+                - link "Attribution" [ref=f9e183] [cursor=pointer]:
+                  - /url: /admin/admin_analytics_attribution
+              - listitem [ref=f9e184]:
+                - link "Signups by Date" [ref=f9e185] [cursor=pointer]:
+                  - /url: /admin/admin_analytics_activitybydate
+              - listitem [ref=f9e186]:
+                - link "Email debug logs" [ref=f9e187] [cursor=pointer]:
+                  - /url: /admin/admin_debug_email_logs
+              - listitem [ref=f9e188]:
+                - link "Email Deliverability" [ref=f9e189] [cursor=pointer]:
+                  - /url: /admin/admin_analytics_users
+              - listitem [ref=f9e190]:
+                - link "Errors" [ref=f9e191] [cursor=pointer]:
+                  - /url: /admin/admin_errors
+          - listitem [ref=f9e192]:
+            - link "Joinery AI" [ref=f9e193] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f9e197]:
+                - link "Chat" [ref=f9e198] [cursor=pointer]:
+                  - /url: /admin/joinery_ai/chat
+              - listitem [ref=f9e199]:
+                - link "Recipes" [ref=f9e200] [cursor=pointer]:
+                  - /url: /admin/joinery_ai
+              - listitem [ref=f9e201]:
+                - link "Run History" [ref=f9e202] [cursor=pointer]:
+                  - /url: /admin/joinery_ai/runs
+              - listitem [ref=f9e203]:
+                - link "Notes" [ref=f9e204] [cursor=pointer]:
+                  - /url: /admin/joinery_ai/notes
+              - listitem [ref=f9e205]:
+                - link "Deleted Chats" [ref=f9e206] [cursor=pointer]:
+                  - /url: /admin/joinery_ai/deleted_conversations
+          - listitem [ref=f9e207]:
+            - link "Urls" [ref=f9e208] [cursor=pointer]:
+              - /url: /admin/admin_urls
+          - listitem [ref=f9e214]:
+            - link "System" [ref=f9e215] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f9e221]:
+                - link "Plugins" [ref=f9e222] [cursor=pointer]:
+                  - /url: /admin/admin_plugins
+              - listitem [ref=f9e223]:
+                - link "Themes" [ref=f9e224] [cursor=pointer]:
+                  - /url: /admin/admin_themes
+              - listitem [ref=f9e225]:
+                - link "Static Cache" [ref=f9e226] [cursor=pointer]:
+                  - /url: /admin/admin_static_cache
+              - listitem [ref=f9e227]:
+                - link "API Keys" [ref=f9e228] [cursor=pointer]:
+                  - /url: /admin/admin_api_keys
+              - listitem [ref=f9e229]:
+                - link "OAuth Providers" [ref=f9e230] [cursor=pointer]:
+                  - /url: /admin/admin_oauth_providers
+              - listitem [ref=f9e231]:
+                - link "Test Database" [ref=f9e232] [cursor=pointer]:
+                  - /url: /admin/admin_test_database
+              - listitem [ref=f9e233]:
+                - link "Agent Files" [ref=f9e234] [cursor=pointer]:
+                  - /url: /admin/admin_agent_files
+              - listitem [ref=f9e235]:
+                - link "Component Types" [ref=f9e236] [cursor=pointer]:
+                  - /url: /admin/admin_component_types
+              - listitem [ref=f9e237]:
+                - link "Scheduled Tasks" [ref=f9e238] [cursor=pointer]:
+                  - /url: /admin/admin_scheduled_tasks
+              - listitem [ref=f9e239]:
+                - link "Notification Prefs" [ref=f9e240] [cursor=pointer]:
+                  - /url: /admin/admin_notification_preferences
+    - generic [ref=f9e241]:
+      - banner [ref=f9e242]:
+        - button "Toggle sidebar" [ref=f9e243] [cursor=pointer]
+        - list [ref=f9e247]:
+          - listitem [ref=f9e248]:
+            - link "Admin" [ref=f9e249] [cursor=pointer]:
+              - /url: /admin
+          - listitem [ref=f9e250]: /
+          - listitem [ref=f9e251]: Subscription Tiers
+        - list [ref=f9e252]:
+          - listitem [ref=f9e253]:
+            - link "12" [ref=f9e254] [cursor=pointer]:
+              - /url: /notifications
+          - listitem [ref=f9e258]:
+            - button "Admin menu" [ref=f9e259] [cursor=pointer]
+          - listitem [ref=f9e270]:
+            - button "US" [ref=f9e271] [cursor=pointer]
+      - main [ref=f9e273]:
+        - generic [ref=f9e275]:
+          - heading "Subscription Tier Management" [level=2] [ref=f9e276]
+          - list [ref=f9e277]:
+            - listitem [ref=f9e278]:
+              - link "Admin" [ref=f9e279] [cursor=pointer]:
+                - /url: /admin
+            - listitem [ref=f9e280]: /
+            - listitem [ref=f9e281]: Subscription Tiers
+        - generic [ref=f9e283]:
+          - generic [ref=f9e284]:
+            - heading "Subscription Tiers" [level=6] [ref=f9e285]
+            - link "Add Subscription Tier" [ref=f9e287] [cursor=pointer]:
+              - /url: /admin/admin_subscription_tier_edit
+          - table [ref=f9e290]:
+            - rowgroup [ref=f9e291]:
+              - row [ref=f9e292]:
+                - columnheader "ID" [ref=f9e293]
+                - columnheader "Level" [ref=f9e294]
+                - columnheader "Name" [ref=f9e295]
+                - columnheader "Display Name" [ref=f9e296]
+                - columnheader "Members" [ref=f9e297]
+                - columnheader "Actions" [ref=f9e298]
+            - rowgroup [ref=f9e299]:
+              - row [ref=f9e300]:
+                - cell "1" [ref=f9e301]
+                - cell "10" [ref=f9e302]
+                - cell "Test tier 1a" [ref=f9e303]
+                - cell "Test tier 1a" [ref=f9e304]
+                - cell "0" [ref=f9e305]
+                - cell [ref=f9e306]:
+                  - link "Edit" [ref=f9e307] [cursor=pointer]:
+                    - /url: /admin/admin_subscription_tier_edit?id=1
+                  - link "View Members" [ref=f9e308] [cursor=pointer]:
+                    - /url: /admin/admin_subscription_tier_members?id=1
+              - row [ref=f9e309]:
+                - cell "2" [ref=f9e310]
+                - cell "10" [ref=f9e311]
+                - cell "Basic Plan" [ref=f9e312]
+                - cell "Basic Plan" [ref=f9e313]
+                - cell "1" [ref=f9e314]
+                - cell [ref=f9e315]:
+                  - link "Edit" [ref=f9e316] [cursor=pointer]:
+                    - /url: /admin/admin_subscription_tier_edit?id=2
+                  - link "View Members" [ref=f9e317] [cursor=pointer]:
+                    - /url: /admin/admin_subscription_tier_members?id=2
+              - row [ref=f9e318]:
+                - cell "3" [ref=f9e319]
+                - cell "20" [ref=f9e320]
+                - cell "Premium plan" [ref=f9e321]
+                - cell "Premium plan" [ref=f9e322]
+                - cell "0" [ref=f9e323]
+                - cell [ref=f9e324]:
+                  - link "Edit" [ref=f9e325] [cursor=pointer]:
+                    - /url: /admin/admin_subscription_tier_edit?id=3
+                  - link "View Members" [ref=f9e326] [cursor=pointer]:
+                    - /url: /admin/admin_subscription_tier_members?id=3
+              - row [ref=f9e327]:
+                - cell "4" [ref=f9e328]
+                - cell "30" [ref=f9e329]
+                - cell "Family/Pro plan" [ref=f9e330]
+                - cell "Family/Pro plan" [ref=f9e331]
+                - cell "0" [ref=f9e332]
+                - cell [ref=f9e333]:
+                  - link "Edit" [ref=f9e334] [cursor=pointer]:
+                    - /url: /admin/admin_subscription_tier_edit?id=4
+                  - link "View Members" [ref=f9e335] [cursor=pointer]:
+                    - /url: /admin/admin_subscription_tier_members?id=4
+          - generic [ref=f9e336]:
+            - heading "Gated Content by Tier" [level=3] [ref=f9e338]
+            - paragraph [ref=f9e340]: No content is currently tier-gated.
+          - generic [ref=f9e341]:
+            - heading "Products Granting Tiers" [level=3] [ref=f9e343]
+            - table [ref=f9e345]:
+              - rowgroup [ref=f9e346]:
+                - row [ref=f9e347]:
+                  - columnheader "Product ID" [ref=f9e348]
+                  - columnheader "Product Name" [ref=f9e349]
+                  - columnheader "Grants Tier" [ref=f9e350]
+                  - columnheader "Actions" [ref=f9e351]
+              - rowgroup [ref=f9e352]:
+                - row [ref=f9e353]:
+                  - cell "73" [ref=f9e354]
+                  - cell "Basic plan" [ref=f9e355]
+                  - cell "Basic Plan" [ref=f9e356]
+                  - cell [ref=f9e357]:
+                    - link "Edit Product" [ref=f9e358] [cursor=pointer]:
+                      - /url: /admin/admin_product_edit?pro_product_id=73
+                - row [ref=f9e359]:
+                  - cell "74" [ref=f9e360]
+                  - cell "Premium plan" [ref=f9e361]
+                  - cell "Premium plan" [ref=f9e362]
+                  - cell [ref=f9e363]:
+                    - link "Edit Product" [ref=f9e364] [cursor=pointer]:
+                      - /url: /admin/admin_product_edit?pro_product_id=74
+                - row [ref=f9e365]:
+                  - cell "75" [ref=f9e366]
+                  - cell "Family/Pro plan" [ref=f9e367]
+                  - cell "Family/Pro plan" [ref=f9e368]
+                  - cell [ref=f9e369]:
+                    - link "Edit Product" [ref=f9e370] [cursor=pointer]:
+                      - /url: /admin/admin_product_edit?pro_product_id=75
+      - contentinfo [ref=f9e371]:
+        - generic [ref=f9e372]: v0.5.0
+  - dialog "Cookie consent" [ref=f9e373]:
+    - paragraph [ref=f9e374]: We use cookies to improve your experience and analyze site traffic.
+    - generic [ref=f9e375]:
+      - button "Accept All" [ref=f9e376] [cursor=pointer]
+      - button "Reject All" [ref=f9e377] [cursor=pointer]
+      - button "Manage" [ref=f9e378] [cursor=pointer]

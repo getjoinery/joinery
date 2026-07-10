@@ -20,8 +20,13 @@ function profile_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('data/events_class.php'));
 	require_once(PathHelper::getIncludePath('data/event_registrants_class.php'));
 	require_once(PathHelper::getIncludePath('data/event_sessions_class.php'));
-	require_once(PathHelper::getIncludePath('data/orders_class.php'));
-	require_once(PathHelper::getIncludePath('data/order_items_class.php'));
+	// Orders/subscriptions belong to the store plugin. Only pull its classes in
+	// when it is active — a store-less install must still render /profile.
+	$store_active = class_exists('PluginHelper') && PluginHelper::isPluginActive('store');
+	if ($store_active) {
+		require_once(PathHelper::getIncludePath('plugins/store/data/orders_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/store/data/order_items_class.php'));
+	}
 	require_once(PathHelper::getIncludePath('data/notifications_class.php'));
 
 	$page_vars = array();
@@ -174,7 +179,7 @@ function profile_logic(array $input): LogicResult{
 	// ---------------------------------------------------------------
 	$page_vars['orders'] = null;
 	$page_vars['numorders'] = 0;
-	if ($settings->get_setting('products_active')) {
+	if ($store_active && $settings->get_setting('products_active')) {
 		$orders = new MultiOrder(
 			array('user_id' => $session->get_user_id()),
 			array('ord_order_id' => 'DESC'),
@@ -190,7 +195,7 @@ function profile_logic(array $input): LogicResult{
 	// ---------------------------------------------------------------
 	$page_vars['subscriptions'] = null;
 	$page_vars['active_subscription_count'] = 0;
-	if ($settings->get_setting('products_active') && $settings->get_setting('subscriptions_active')) {
+	if ($store_active && $settings->get_setting('products_active') && $settings->get_setting('subscriptions_active')) {
 		$subscriptions = new MultiOrderItem(
 			array('user_id' => $user->key, 'is_subscription' => true),
 			array('order_item_id' => 'DESC'),

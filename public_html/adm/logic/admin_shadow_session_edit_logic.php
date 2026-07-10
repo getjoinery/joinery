@@ -5,7 +5,7 @@
  */
 
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-require_once(PathHelper::getIncludePath('data/product_details_class.php'));
+require_once(PathHelper::getIncludePath('plugins/store/data/product_details_class.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 function admin_shadow_session_edit_logic(array $input): LogicResult {
@@ -19,10 +19,10 @@ function admin_shadow_session_edit_logic(array $input): LogicResult {
         try {
             $product_detail = new ProductDetail($product_detail_id, TRUE);
             if (!$product_detail || $product_detail->get('prd_delete_time')) {
-                return LogicResult::redirect('/admin/admin_shadow_sessions?error=not_found');
+                return LogicResult::redirect('/plugins/store/admin/admin_shadow_sessions?error=not_found');
             }
         } catch (Exception $e) {
-            return LogicResult::redirect('/admin/admin_shadow_sessions?error=not_found');
+            return LogicResult::redirect('/plugins/store/admin/admin_shadow_sessions?error=not_found');
         }
     } else {
         $product_detail = new ProductDetail(NULL);
@@ -51,7 +51,7 @@ function admin_shadow_session_edit_logic(array $input): LogicResult {
             $product_detail->prepare();
             $product_detail->save();
 
-            return LogicResult::redirect('/admin/admin_shadow_sessions?success=1');
+            return LogicResult::redirect('/plugins/store/admin/admin_shadow_sessions?success=1');
         } catch (Exception $e) {
             $error_message = $e->getMessage();
         }

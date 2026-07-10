@@ -56,7 +56,7 @@ function scheduled_block_edit_logic(array $input): LogicResult{
 		else{
 			// Create new scheduled block — the always-on block is auto-created per device
 			// so this path is exclusively for scheduled blocks. Check the limit against non-always-on blocks only.
-			$max_blocks = SubscriptionTier::getUserFeature($user->key, 'scrolldaddy_max_scheduled_blocks', 1);
+			$max_blocks = SubscriptionTier::getUserFeature($user->key, 'dns_filtering_scrolldaddy_max_scheduled_blocks', 1);
 			$existing_blocks = new MultiSdScheduledBlock(['device_id' => $device->key, 'is_always_on' => false]);
 			if($existing_blocks->count_all() >= $max_blocks){
 				return LogicResult::error("Your plan allows {$max_blocks} scheduled filter(s) per device. Upgrade to add more.");
@@ -100,7 +100,7 @@ function scheduled_block_edit_logic(array $input): LogicResult{
 		// Explicit removal flows through the remove_advanced_keys[] path below.
 		require_once(PathHelper::getIncludePath('plugins/dns_filtering/includes/ScrollDaddyHelper.php'));
 		$skip_keys = array();
-		if(!SubscriptionTier::getUserFeature($user->key, 'scrolldaddy_advanced_filters', false)){
+		if(!SubscriptionTier::getUserFeature($user->key, 'dns_filtering_scrolldaddy_advanced_filters', false)){
 			$skip_keys = ScrollDaddyHelper::getRestrictedFilters();
 
 			// Allow the user to delete an existing advanced override even without the

@@ -792,7 +792,7 @@
 	// admin_settings.php had the dropdown options array keys/values reversed
 	// (display name as key, code as value) so any save through that page wrote
 	// the display name into stg_settings. Stripe and code that indexes
-	// Product::$currency_symbols both expect the ISO code. Convert any rows
+	// CurrencyHelper both expect the ISO code. Convert any rows
 	// that hold a display name back to its code; leave correct values alone.
 	$migration = array();
 	$migration['database_version'] = '130';
@@ -926,6 +926,66 @@
 	$migration['database_version'] = '140';
 	$migration['test'] = NULL;
 	$migration['migration_file'] = 'drop_event_sessions_menu.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
+	// ========== Generalize event FKs into polymorphic provider columns (v141-145) ==========
+	// Each of these backfills the new provider/reference columns from the old
+	// event FK and drops the old column. Self-guarded on information_schema so
+	// they no-op once the column is gone. See the store/event_manager plugin
+	// extraction spec, § Schema-change mechanics.
+	$migration = array();
+	$migration['database_version'] = '141';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'generalize_msg_event_context.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
+	$migration = array();
+	$migration['database_version'] = '142';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'generalize_erg_recipient_provider.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
+	$migration = array();
+	$migration['database_version'] = '143';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'generalize_vid_access_gate.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
+	$migration = array();
+	$migration['database_version'] = '144';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'generalize_fil_access_gate.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
+	$migration = array();
+	$migration['database_version'] = '145';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'generalize_pro_fulfillment.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
+	// Rename ScrollDaddy tier-feature keys to the plugin-namespaced form so stored
+	// values line up with what the admin form posts and every runtime read expects.
+	$migration = array();
+	$migration['database_version'] = '146';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'rename_scrolldaddy_tier_feature_keys.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
+	// Prune the admin/profile menu rows for the store + event_manager extractions.
+	// Core menu seeding never prunes, so removing entries from admin_menus.json /
+	// the imperative profile seeds would orphan the old rows; this removes them.
+	// The plugins re-seed their own (renamed) menus on activation.
+	$migration = array();
+	$migration['database_version'] = '147';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'prune_extracted_menu_rows.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
 

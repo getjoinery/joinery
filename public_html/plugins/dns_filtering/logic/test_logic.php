@@ -40,7 +40,7 @@ function test_logic(array $input): LogicResult {
 	$tier = SubscriptionTier::GetUserTier($session->get_user_id());
 	$page_vars['tier'] = $tier;
 	$page_vars['can_add_rules'] = $tier
-		&& $tier->getFeature('scrolldaddy_custom_rules', false)
+		&& $tier->getFeature('dns_filtering_scrolldaddy_custom_rules', false)
 		&& $device->are_filters_editable();
 
 	return LogicResult::render($page_vars);

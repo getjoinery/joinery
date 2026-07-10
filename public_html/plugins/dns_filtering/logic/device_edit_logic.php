@@ -58,7 +58,7 @@ function device_edit_logic(array $input): LogicResult{
 			$device->set('sdd_timezone', strip_tags($_POST['sdd_timezone']));
 			$device->set('sdd_device_name', $device_name);
 			$device->set('sdd_allow_device_edits', $_POST['sdd_allow_device_edits']);
-			$can_log = SubscriptionTier::getUserFeature($user->key, 'scrolldaddy_query_logging', false);
+			$can_log = SubscriptionTier::getUserFeature($user->key, 'dns_filtering_scrolldaddy_query_logging', false);
 			$device->set('sdd_log_queries', $can_log && isset($_POST['sdd_log_queries']) && $_POST['sdd_log_queries'] === '1');
 			$device->prepare();
 			$device->save();
@@ -67,7 +67,7 @@ function device_edit_logic(array $input): LogicResult{
 		}
 		else{
 			// Create new device — check device limit
-			$max_devices = SubscriptionTier::getUserFeature($user->key, 'scrolldaddy_max_devices', 0);
+			$max_devices = SubscriptionTier::getUserFeature($user->key, 'dns_filtering_scrolldaddy_max_devices', 0);
 			$current_devices = new MultiSdDevice([
 				'user_id' => $user->key,
 				'deleted' => false

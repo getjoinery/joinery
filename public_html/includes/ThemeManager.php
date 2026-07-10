@@ -177,6 +177,23 @@ class ThemeManager extends AbstractExtensionManager {
             throw new Exception("Cannot activate theme '$name': " . implode('; ', $requirements));
         }
 
+        // requires_plugins: the theme's views/logic are coupled to these plugins,
+        // so they must already be active. Mirrors the plugin-deactivation guard
+        // (PluginManager blocks deactivating a plugin the active theme requires).
+        $required_plugins = $theme_helper->get('requires_plugins', []);
+        if (!empty($required_plugins)) {
+            require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
+            $missing = [];
+            foreach ($required_plugins as $req_plugin) {
+                if (!PluginHelper::isPluginActive($req_plugin)) {
+                    $missing[] = $req_plugin;
+                }
+            }
+            if (!empty($missing)) {
+                throw new Exception("Cannot activate theme '$name': it requires these plugins to be active first: " . implode(', ', $missing));
+            }
+        }
+
         // Deactivate all other themes
         $q = $dblink->prepare(
             "UPDATE thm_themes SET thm_is_active = false, thm_status = 'installed' WHERE thm_is_active = true"

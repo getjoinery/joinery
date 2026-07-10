@@ -26,11 +26,11 @@ class PublicPage extends PublicPageBase {
 
     public function top_right_menu() {
         $menu_data  = $this->get_menu_data();
-        $cart       = $menu_data['cart'];
+        $cart       = $menu_data['cart'] ?? null;
         $user_menu  = $menu_data['user_menu'];
 
-        // Cart
-        if ($cart['has_items']) {
+        // Cart (only when the store plugin registered a cart provider)
+        if (!empty($cart['has_items'])) {
             echo '<a href="' . htmlspecialchars($cart['link'], ENT_QUOTES, 'UTF-8') . '" class="jy-header-cart-link" title="Cart (' . (int)$cart['item_count'] . ' items)">';
             echo '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>';
             echo '<span class="jy-cart-count">' . (int)$cart['item_count'] . '</span>';

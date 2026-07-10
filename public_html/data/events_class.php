@@ -222,8 +222,15 @@ function get_leader() {
 	}
 	
 	function get_register_url() {
+		// Purchasable registration lives in the store plugin. With the store
+		// inactive (or absent), fall back to any external registration link the
+		// event carries, else no registration URL — never require store classes.
+		if (!class_exists('PluginHelper') || !PluginHelper::isPluginActive('store')) {
+			return $this->get('evt_external_register_link') ?: null;
+		}
+		require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php'));
 		$products = new MultiProduct(
-		array('event_id' => $this->get('evt_event_id'), 'is_active' => true));
+		array('fulfillment_provider' => 'event_registration', 'fulfillment_ref' => $this->get('evt_event_id'), 'is_active' => true));
 		$numproducts = $products->count_all();
 
 		if($this->get('evt_external_register_link')){
@@ -458,7 +465,7 @@ function get_leader() {
 
 
 	function output_product_dropdown($formwriter, $currentvalue, $extra_data=array()) {
-		require_once(PathHelper::getIncludePath('data/products_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php'));
 
 		$products = new MultiProduct(
 			array(

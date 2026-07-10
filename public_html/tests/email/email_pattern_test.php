@@ -125,11 +125,11 @@ class EmailPatternTest {
         ];
         
         // Pattern 6: Event bundle email
-        // Copied from: logic/cart_charge_logic.php:457 (event_bundle_content)
+        // Copied from: plugins/store/logic/cart_charge_logic.php:457 (event_bundle_content)
         // Exact copy of: $final_fill = array_merge($default_fill, $email_fill);
         $this->patterns[] = [
             'name' => 'event_bundle_content_pattern',
-            'source' => 'logic/cart_charge_logic.php:457',
+            'source' => 'plugins/store/logic/cart_charge_logic.php:457',
             'method' => 'sendTemplate',
             'template' => 'event_bundle_content',
             'variables' => [
@@ -148,11 +148,11 @@ class EmailPatternTest {
         ];
         
         // Pattern 7: Subscription receipt (with typo preserved from source)
-        // Copied from: logic/cart_charge_logic.php:470 (subscription_reciept)  
+        // Copied from: plugins/store/logic/cart_charge_logic.php:470 (subscription_reciept)  
         // Note: This code is commented out in production, but pattern preserved
         $this->patterns[] = [
             'name' => 'subscription_reciept_pattern', 
-            'source' => 'logic/cart_charge_logic.php:470',
+            'source' => 'plugins/store/logic/cart_charge_logic.php:470',
             'method' => 'sendTemplate',
             'template' => 'subscription_reciept',
             'variables' => [
@@ -189,12 +189,12 @@ class EmailPatternTest {
         // DeliveryTests.php:98 is actually incorrect test code, not a production pattern.
         
         // Pattern 9: Dynamic template from settings (individual_email_inner_template)
-        // Copied from: data/order_items_class.php:263 (dynamic template loading)
+        // Copied from: plugins/store/data/order_items_class.php:263 (dynamic template loading)
         $settings = Globalvars::get_instance();
         $individual_template = $settings->get_setting('individual_email_inner_template') ?: 'blank_template';
         $this->patterns[] = [
             'name' => 'individual_email_inner_template_pattern',
-            'source' => 'data/order_items_class.php:263',
+            'source' => 'plugins/store/data/order_items_class.php:263',
             'method' => 'sendTemplate',
             'template' => $individual_template,
             'variables' => [

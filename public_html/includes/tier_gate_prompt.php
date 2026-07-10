@@ -55,17 +55,48 @@ function render_tier_gate_prompt($access, $options = []) {
 				}
 				?>
 			</p>
-			<?php if (!empty($access['upgrade_options'])): ?>
+			<?php
+			$tier_upgrade_url = Globalvars::get_instance()->get_setting('tier_upgrade_url');
+			// When no explicit upgrade URL is configured, offer the products that
+			// grant a higher tier directly (the store seam). If none exist, degrade
+			// to the contact message. Once the store is a plugin, an absent
+			// TierBilling naturally leaves only the contact fallback.
+			$upgrade_products = [];
+			// Only reach into the store's billing helper when the store plugin is
+			// actually active — its tables (pro_products) exist only then. With the
+			// store inactive this leaves the contact-us fallback (or tier_upgrade_url).
+			if (empty($tier_upgrade_url) && PluginHelper::isPluginActive('store')) {
+				$tier_billing_path = PathHelper::getIncludePath('plugins/store/includes/TierBilling.php');
+				if (file_exists($tier_billing_path)) {
+					require_once($tier_billing_path);
+				}
+			}
+			if (empty($tier_upgrade_url) && class_exists('TierBilling')) {
+				$upgrade_user_id = SessionControl::get_instance()->get_user_id();
+				if ($upgrade_user_id) {
+					foreach (TierBilling::getUpgradeOptions($upgrade_user_id) as $option) {
+						foreach ($option['products'] as $product) {
+							$upgrade_products[] = $product;
+						}
+					}
+				}
+			}
+			?>
+			<?php if (!empty($tier_upgrade_url)): ?>
 			<div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;">
-				<?php foreach ($access['upgrade_options'] as $option):
-					$tier_display = htmlspecialchars($option['tier']->get('sbt_display_name'));
-					foreach ($option['products'] as $product): ?>
-					<a href="/product/<?php echo urlencode($product['pro_product_id']); ?>"
-					   style="display: inline-block; padding: 0.625rem 1.5rem; background: var(--color-primary, #0d6efd); color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600;">
-						Upgrade to <?php echo $tier_display; ?>
-					</a>
-					<?php endforeach;
-				endforeach; ?>
+				<a href="<?php echo htmlspecialchars($tier_upgrade_url); ?>"
+				   style="display: inline-block; padding: 0.625rem 1.5rem; background: var(--color-primary, #0d6efd); color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600;">
+					Upgrade your subscription
+				</a>
+			</div>
+			<?php elseif (!empty($upgrade_products)): ?>
+			<div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;">
+				<?php foreach ($upgrade_products as $product): ?>
+				<a href="<?php echo htmlspecialchars($product['pro_url']); ?>"
+				   style="display: inline-block; padding: 0.625rem 1.5rem; background: var(--color-primary, #0d6efd); color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600;">
+					<?php echo htmlspecialchars($product['pro_name']); ?>
+				</a>
+				<?php endforeach; ?>
 			</div>
 			<?php else: ?>
 			<p style="color: #6c757d; font-size: 0.875rem;">Contact us to learn about upgrading your subscription.</p>

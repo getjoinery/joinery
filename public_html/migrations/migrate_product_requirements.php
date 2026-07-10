@@ -13,10 +13,10 @@
  * @version 1.0
  */
 function migrate_product_requirements() {
-    require_once(PathHelper::getIncludePath('data/products_class.php'));
+    require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php'));
     require_once(PathHelper::getIncludePath('data/questions_class.php'));
-    require_once(PathHelper::getIncludePath('data/product_requirements_class.php'));
-    require_once(PathHelper::getIncludePath('data/product_requirement_instances_class.php'));
+    require_once(PathHelper::getIncludePath('plugins/store/data/product_requirements_class.php'));
+    require_once(PathHelper::getIncludePath('plugins/store/data/product_requirement_instances_class.php'));
 
     $migrated_count = 0;
 

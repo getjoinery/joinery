@@ -1,0 +1,587 @@
+- generic [active] [ref=f8e1]:
+  - generic [ref=f8e2]:
+    - generic [ref=f8e3]:
+      - generic [ref=f8e4]: J
+      - link "Joinery Test" [ref=f8e5] [cursor=pointer]:
+        - /url: /
+      - generic [ref=f8e6]: + New
+    - generic [ref=f8e8]:
+      - generic [ref=f8e9]: "Theme: getjoinery ▼"
+      - link "Dashboard" [ref=f8e11] [cursor=pointer]:
+        - /url: /admin/admin_users
+      - generic [ref=f8e12]: Unnamed User (10)
+  - generic [ref=f8e13]:
+    - complementary [ref=f8e14]:
+      - link "Joinery Test" [ref=f8e16] [cursor=pointer]:
+        - /url: /
+        - img [ref=f8e17]:
+          - generic [ref=f8e19]: J
+      - navigation [ref=f8e21]:
+        - list [ref=f8e22]:
+          - listitem [ref=f8e23]:
+            - link "Users" [ref=f8e24] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f8e32]:
+                - link "Users list" [ref=f8e33] [cursor=pointer]:
+                  - /url: /admin/admin_users
+              - listitem [ref=f8e34]:
+                - link "Groups" [ref=f8e35] [cursor=pointer]:
+                  - /url: /admin/admin_groups
+          - listitem [ref=f8e36]:
+            - link "Emails" [ref=f8e37] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f8e43]:
+                - link "Emails list" [ref=f8e44] [cursor=pointer]:
+                  - /url: /admin/admin_emails
+              - listitem [ref=f8e45]:
+                - link "Contact Types" [ref=f8e46] [cursor=pointer]:
+                  - /url: /admin/admin_contact_types
+              - listitem [ref=f8e47]:
+                - link "Email Templates" [ref=f8e48] [cursor=pointer]:
+                  - /url: /admin/admin_email_templates
+              - listitem [ref=f8e49]:
+                - link "Mailing Lists" [ref=f8e50] [cursor=pointer]:
+                  - /url: /admin/admin_mailing_lists
+              - listitem [ref=f8e51]:
+                - link "Mailbox" [ref=f8e52] [cursor=pointer]:
+                  - /url: /plugins/mailbox/admin/admin_mailbox_reader
+          - listitem [ref=f8e53]:
+            - link "Products" [ref=f8e54] [cursor=pointer]:
+              - /url: "#"
+            - list [ref=f8e59]:
+              - listitem [ref=f8e60]:
+                - link "Products list" [ref=f8e61] [cursor=pointer]:
+                  - /url: /plugins/store/admin/admin_products
+              - listitem [ref=f8e62]:
+                - link "Product Groups" [ref=f8e63] [cursor=pointer]:
+                  - /url: /plugins/store/admin/admin_product_groups
+              - listitem [ref=f8e64]:
+                - link "Coupon codes" [ref=f8e65] [cursor=pointer]:
+                  - /url: /plugins/store/admin/admin_coupon_codes
+              - listitem [ref=f8e66]:
+                - link "Subscription Tiers" [ref=f8e67] [cursor=pointer]:
+                  - /url: /admin/admin_subscription_tiers
+          - listitem [ref=f8e68]:
+            - link "Orders" [ref=f8e69] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f8e76]:
+                - link "Orders list" [ref=f8e77] [cursor=pointer]:
+                  - /url: /plugins/store/admin/admin_orders
+              - listitem [ref=f8e78]:
+                - link "Stripe Payments" [ref=f8e79] [cursor=pointer]:
+                  - /url: /plugins/store/admin/admin_stripe_orders
+              - listitem [ref=f8e80]:
+                - link "Shadow Sessions" [ref=f8e81] [cursor=pointer]:
+                  - /url: /plugins/store/admin/admin_shadow_sessions
+          - listitem [ref=f8e82]:
+            - link "Files" [ref=f8e83] [cursor=pointer]:
+              - /url: /admin/admin_files
+          - listitem [ref=f8e90]:
+            - link "Events" [ref=f8e91] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f8e97]:
+                - link "Events List" [ref=f8e98] [cursor=pointer]:
+                  - /url: /admin/admin_events
+              - listitem [ref=f8e99]:
+                - link "Locations" [ref=f8e100] [cursor=pointer]:
+                  - /url: /admin/admin_locations
+              - listitem [ref=f8e101]:
+                - link "Event Types" [ref=f8e102] [cursor=pointer]:
+                  - /url: /admin/admin_event_types
+              - listitem [ref=f8e103]:
+                - link "Event Bundles" [ref=f8e104] [cursor=pointer]:
+                  - /url: /admin/admin_event_bundles
+          - listitem [ref=f8e105]:
+            - link "Bookings" [ref=f8e106] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f8e112]:
+                - link "Bookings" [ref=f8e113] [cursor=pointer]:
+                  - /url: /plugins/bookings/admin/admin_bookings
+              - listitem [ref=f8e114]:
+                - link "Booking Types" [ref=f8e115] [cursor=pointer]:
+                  - /url: /plugins/bookings/admin/admin_booking_types
+          - listitem [ref=f8e116]:
+            - link "Videos" [ref=f8e117] [cursor=pointer]:
+              - /url: /admin/admin_videos
+          - listitem [ref=f8e123]:
+            - link "Surveys" [ref=f8e124] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f8e128]:
+                - link "Surveys" [ref=f8e129] [cursor=pointer]:
+                  - /url: /admin/admin_surveys
+              - listitem [ref=f8e130]:
+                - link "Survey questions" [ref=f8e131] [cursor=pointer]:
+                  - /url: /admin/admin_questions
+          - listitem [ref=f8e132]:
+            - link "Pages" [ref=f8e133] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f8e139]:
+                - link "Pages list" [ref=f8e140] [cursor=pointer]:
+                  - /url: /admin/admin_pages
+              - listitem [ref=f8e141]:
+                - link "Page Components" [ref=f8e142] [cursor=pointer]:
+                  - /url: /admin/admin_components
+          - listitem [ref=f8e143]:
+            - link "Blog" [ref=f8e144] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f8e150]:
+                - link "Blog Posts" [ref=f8e151] [cursor=pointer]:
+                  - /url: /admin/admin_posts
+              - listitem [ref=f8e152]:
+                - link "Comments" [ref=f8e153] [cursor=pointer]:
+                  - /url: /admin/admin_comments
+          - listitem [ref=f8e154]:
+            - link "Server Manager" [ref=f8e155] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f8e159]:
+                - link "Dashboard" [ref=f8e160] [cursor=pointer]:
+                  - /url: /admin/server_manager
+              - listitem [ref=f8e161]:
+                - link "Upgrades" [ref=f8e162] [cursor=pointer]:
+                  - /url: /admin/server_manager/publish_upgrade
+              - listitem [ref=f8e163]:
+                - link "Remote Backup" [ref=f8e164] [cursor=pointer]:
+                  - /url: /admin/server_manager/targets
+              - listitem [ref=f8e165]:
+                - link "Marketplace" [ref=f8e166] [cursor=pointer]:
+                  - /url: /admin/server_manager/marketplace
+              - listitem [ref=f8e167]:
+                - link "Jobs" [ref=f8e168] [cursor=pointer]:
+                  - /url: /admin/server_manager/jobs
+              - listitem [ref=f8e169]:
+                - link "Specifications" [ref=f8e170] [cursor=pointer]:
+                  - /url: /admin/server_manager/specs
+          - listitem [ref=f8e171]:
+            - link "Statistics" [ref=f8e172] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f8e176]:
+                - link "Web Statistics" [ref=f8e177] [cursor=pointer]:
+                  - /url: /admin/admin_analytics_stats
+              - listitem [ref=f8e178]:
+                - link "Email Statistics" [ref=f8e179] [cursor=pointer]:
+                  - /url: /admin/admin_analytics_email_stats
+              - listitem [ref=f8e180]:
+                - link "Funnels" [ref=f8e181] [cursor=pointer]:
+                  - /url: /admin/admin_analytics_funnels
+              - listitem [ref=f8e182]:
+                - link "Attribution" [ref=f8e183] [cursor=pointer]:
+                  - /url: /admin/admin_analytics_attribution
+              - listitem [ref=f8e184]:
+                - link "Signups by Date" [ref=f8e185] [cursor=pointer]:
+                  - /url: /admin/admin_analytics_activitybydate
+              - listitem [ref=f8e186]:
+                - link "Email debug logs" [ref=f8e187] [cursor=pointer]:
+                  - /url: /admin/admin_debug_email_logs
+              - listitem [ref=f8e188]:
+                - link "Email Deliverability" [ref=f8e189] [cursor=pointer]:
+                  - /url: /admin/admin_analytics_users
+              - listitem [ref=f8e190]:
+                - link "Errors" [ref=f8e191] [cursor=pointer]:
+                  - /url: /admin/admin_errors
+          - listitem [ref=f8e192]:
+            - link "Joinery AI" [ref=f8e193] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f8e197]:
+                - link "Chat" [ref=f8e198] [cursor=pointer]:
+                  - /url: /admin/joinery_ai/chat
+              - listitem [ref=f8e199]:
+                - link "Recipes" [ref=f8e200] [cursor=pointer]:
+                  - /url: /admin/joinery_ai
+              - listitem [ref=f8e201]:
+                - link "Run History" [ref=f8e202] [cursor=pointer]:
+                  - /url: /admin/joinery_ai/runs
+              - listitem [ref=f8e203]:
+                - link "Notes" [ref=f8e204] [cursor=pointer]:
+                  - /url: /admin/joinery_ai/notes
+              - listitem [ref=f8e205]:
+                - link "Deleted Chats" [ref=f8e206] [cursor=pointer]:
+                  - /url: /admin/joinery_ai/deleted_conversations
+          - listitem [ref=f8e207]:
+            - link "Urls" [ref=f8e208] [cursor=pointer]:
+              - /url: /admin/admin_urls
+          - listitem [ref=f8e214]:
+            - link "System" [ref=f8e215] [cursor=pointer]:
+              - /url: "#"
+            - list:
+              - listitem [ref=f8e221]:
+                - link "Plugins" [ref=f8e222] [cursor=pointer]:
+                  - /url: /admin/admin_plugins
+              - listitem [ref=f8e223]:
+                - link "Themes" [ref=f8e224] [cursor=pointer]:
+                  - /url: /admin/admin_themes
+              - listitem [ref=f8e225]:
+                - link "Static Cache" [ref=f8e226] [cursor=pointer]:
+                  - /url: /admin/admin_static_cache
+              - listitem [ref=f8e227]:
+                - link "API Keys" [ref=f8e228] [cursor=pointer]:
+                  - /url: /admin/admin_api_keys
+              - listitem [ref=f8e229]:
+                - link "OAuth Providers" [ref=f8e230] [cursor=pointer]:
+                  - /url: /admin/admin_oauth_providers
+              - listitem [ref=f8e231]:
+                - link "Test Database" [ref=f8e232] [cursor=pointer]:
+                  - /url: /admin/admin_test_database
+              - listitem [ref=f8e233]:
+                - link "Agent Files" [ref=f8e234] [cursor=pointer]:
+                  - /url: /admin/admin_agent_files
+              - listitem [ref=f8e235]:
+                - link "Component Types" [ref=f8e236] [cursor=pointer]:
+                  - /url: /admin/admin_component_types
+              - listitem [ref=f8e237]:
+                - link "Scheduled Tasks" [ref=f8e238] [cursor=pointer]:
+                  - /url: /admin/admin_scheduled_tasks
+              - listitem [ref=f8e239]:
+                - link "Notification Prefs" [ref=f8e240] [cursor=pointer]:
+                  - /url: /admin/admin_notification_preferences
+    - generic [ref=f8e241]:
+      - banner [ref=f8e242]:
+        - button "Toggle sidebar" [ref=f8e243] [cursor=pointer]
+        - list [ref=f8e247]:
+          - listitem [ref=f8e248]:
+            - link "Admin" [ref=f8e249] [cursor=pointer]:
+              - /url: /admin
+          - listitem [ref=f8e250]: /
+          - listitem [ref=f8e251]: Products list
+        - list [ref=f8e252]:
+          - listitem [ref=f8e253]:
+            - link "12" [ref=f8e254] [cursor=pointer]:
+              - /url: /notifications
+          - listitem [ref=f8e258]:
+            - button "Admin menu" [ref=f8e259] [cursor=pointer]
+          - listitem [ref=f8e270]:
+            - button "US" [ref=f8e271] [cursor=pointer]
+      - main [ref=f8e273]:
+        - generic [ref=f8e275]:
+          - heading "Products" [level=2] [ref=f8e276]
+          - list [ref=f8e277]:
+            - listitem [ref=f8e278]:
+              - link "Admin" [ref=f8e279] [cursor=pointer]:
+                - /url: /admin
+            - listitem [ref=f8e280]: /
+            - listitem [ref=f8e281]:
+              - link "Products" [ref=f8e282] [cursor=pointer]:
+                - /url: /admin/admin_products
+            - listitem [ref=f8e283]: /
+            - listitem [ref=f8e284]: Product Test single product
+            - listitem [ref=f8e285]: Product Edit
+        - generic [ref=f8e286]:
+          - heading "Product Edit - Test single product" [level=6] [ref=f8e288]
+          - generic [ref=f8e290]:
+            - generic [ref=f8e291]:
+              - generic [ref=f8e292]: Product Name
+              - textbox "Product Name" [ref=f8e293]: Test single product
+            - generic [ref=f8e294]:
+              - generic [ref=f8e295]: Active?
+              - combobox "Active?" [ref=f8e296]:
+                - option "Disabled"
+                - option "Active" [selected]
+            - generic [ref=f8e297]:
+              - generic [ref=f8e298]: Short Description
+              - textbox "Short Description" [ref=f8e299]: Test single product
+            - generic [ref=f8e300]:
+              - generic [ref=f8e301]: Description
+              - generic [ref=f8e302]:
+                - generic [ref=f8e303]:
+                  - button "View HTML" [ref=f8e305] [cursor=pointer]
+                  - generic [ref=f8e308]:
+                    - button "Undo (Ctrl + Z)" [ref=f8e309] [cursor=pointer]
+                    - button "Redo (Ctrl + Y)" [ref=f8e312] [cursor=pointer]
+                  - button "Formatting" [ref=f8e316] [cursor=pointer]
+                  - generic [ref=f8e319]:
+                    - button "Strong (Ctrl + B)" [ref=f8e320] [cursor=pointer]
+                    - button "Emphasis (Ctrl + I)" [ref=f8e323] [cursor=pointer]
+                    - button "Deleted" [ref=f8e326] [cursor=pointer]
+                  - generic [ref=f8e329]:
+                    - button "Superscript" [ref=f8e330] [cursor=pointer]
+                    - button "Subscript" [ref=f8e333] [cursor=pointer]
+                  - button "Link" [ref=f8e337] [cursor=pointer]
+                  - button "Insert Image" [ref=f8e341] [cursor=pointer]
+                  - button "Code sample <pre>" [ref=f8e345] [cursor=pointer]
+                  - generic [ref=f8e348]:
+                    - button "Align Left" [ref=f8e349] [cursor=pointer]
+                    - button "Align Center" [ref=f8e352] [cursor=pointer]
+                    - button "Align Right" [ref=f8e355] [cursor=pointer]
+                    - button "Align Justify" [ref=f8e358] [cursor=pointer]
+                  - generic [ref=f8e361]:
+                    - button "Unordered list" [ref=f8e362] [cursor=pointer]
+                    - button "Ordered list" [ref=f8e365] [cursor=pointer]
+                  - button "Insert horizontal rule" [ref=f8e369] [cursor=pointer]
+                  - button "Remove format" [ref=f8e373] [cursor=pointer]
+                  - button "Fullscreen" [ref=f8e377] [cursor=pointer]
+                - paragraph [ref=f8e382]: Test single productTest single productTest single productTest single productTest single productTest single product
+                - textbox "Description" [ref=f8e383]: <p>Test single productTest single productTest single productTest single productTest single productTest single product</p>
+            - generic [ref=f8e384]:
+              - generic [ref=f8e385]: Purchase grants
+              - combobox "Purchase grants" [ref=f8e386]:
+                - option "-- None --" [selected]
+                - 'option "Event registration: The Whole Spectrum of Shadows Self-paced Course Level 01 Integral Framework"'
+                - 'option "Event registration: TEST Online Course"'
+                - 'option "Event registration: Test Event Without Event Type"'
+                - 'option "Event registration: Shadow for Beginners Self-paced Course"'
+                - 'option "Event registration: Shadow and Integral Theory Fundamentals Self-paced Course"'
+                - 'option "Event registration: TEST event pay-what-you-want"'
+                - 'option "Event registration: TEST event pay-what-you-want"'
+                - 'option "Event registration: Introduction to Meditation Self-paced Course"'
+                - 'option "Event registration: TEST event pay-what-you-want"'
+                - 'option "Event registration: TEST event pay-what-you-want"'
+                - 'option "Event registration: TEST event pay-what-you-want"'
+                - 'option "Event registration: Online Course Level 5 - Collective Shadows"'
+                - 'option "Event registration: Integral Zen Meditation for Beginners Series June 2021"'
+                - 'option "Event registration: Mar 7, 2026 Test Weekly Recurring Class"'
+                - 'option "Event registration: Mar 4, 2026 Test Weekly Recurring Class"'
+                - 'option "Event registration: Mar 3, 2026 Test Weekly Recurring Class"'
+                - 'option "Event registration: Feb 21, 2026 Friday Night Social Dance"'
+                - 'option "Event registration: Feb 20, 2026 Beginner Zouk Workshop"'
+                - 'option "Event registration: Feb 17, 2026 Test Community Workshop"'
+                - 'option "Event registration: Nov 4, 2025 Integral Zen Healing Workshop at Vajra Vidya Retreat Center, Crestone Colorado, Nov 4th-9th, 2025"'
+                - 'option "Event registration: Oct 12, 2025 Integral Zen Healing Webinar 4, The Upper Chakras - Gateways to Transcendence and Liberation"'
+                - 'option "Event registration: Jul 27, 2025 Five Elements, Three Poisons: healing, awakening & shadow, 4 week webinar, 7/27, 8/3, 8/10, 8/17, 2025, 12pm-2pm MT"'
+                - 'option "Event registration: Jun 25, 2025 Integral Zen Life and Death Cafe"'
+                - 'option "Event registration: Jun 4, 2025 Sweden Integral Zen Healing Workshop June 4-8, 2025"'
+                - 'option "Event registration: May 21, 2025 Vast Open Sky - Monthly Healing Wednesdays"'
+                - 'option "Event registration: May 12, 2025 Integral Zen 7 Day Zen Healing Retreat, Vajra Vidya Retreat Center, Crestone, CO Spring 2025, Recorded Event"'
+                - 'option "Event registration: Jan 12, 2025 The Setting Sun : Practice and Preparation for End of Life transitioning, for self and other"'
+                - 'option "Event registration: Dec 28, 2024 Zazenkai Day Long One Day Retreat with Doshin Roshi"'
+                - 'option "Event registration: Nov 3, 2024 Integral Zen Healing - An Online Webinar, The Heart Chakra"'
+                - 'option "Event registration: Oct 1, 2024 Integral Zen - Zen Healing Workshop Oct 1-6, 2024, Crestone Colorado"'
+                - 'option "Event registration: Aug 18, 2024 Integral Zen 7 Day Silent Retreat Creighton University, Iowa August 18-25, 2024"'
+                - 'option "Event registration: Aug 8, 2024 TEST event pay-what-you-want"'
+                - 'option "Event registration: May 11, 2024 Integral Zen Healing - An Online Webinar Part One - Context and Introduction"'
+                - 'option "Event registration: Mar 18, 2024 Integral Zen 7 Day Zen Healing Retreat, Franciscan Retreat Center, Colorado Springs, CO March 18-25, 2024"'
+                - 'option "Event registration: Jan 14, 2024 Integral Zen Healing - An Online Webinar, Foundations, the early chakras"'
+                - 'option "Event registration: Nov 14, 2023 Integral Zen - Zen Healing Workshop November 14-19, 2023, Crestone Colorado"'
+                - 'option "Event registration: Aug 13, 2023 Integral Zen 7 Day Retreat Creighton University, Iowa 2023"'
+                - 'option "Event registration: Jul 5, 2023 Sweden Retreat 2023"'
+                - 'option "Event registration: Jun 8, 2023 Integral Zen 7 Day Retreats in Europe 2023"'
+                - 'option "Event registration: May 9, 2023 Apprentice Group Touching the True Face 2.0"'
+                - 'option "Event registration: Mar 13, 2023 Integral Zen 7 Day Zen Healing Retreat, Franciscan Retreat Center, Colorado Springs, CO March 13-20, 2023"'
+                - 'option "Event registration: Oct 21, 2022 Integral Zen 7 Day Retreat (New Hampshire)"'
+                - 'option "Event registration: Sep 18, 2022 Integral Zen 7 Day Retreat (Los Angeles)"'
+                - 'option "Event registration: Aug 14, 2022 Integral Zen 7 Day Retreat Creighton University, Iowa"'
+                - 'option "Event registration: May 20, 2022 Integral Zen Meditation for Beginners Series May 2022"'
+                - 'option "Event registration: Mar 6, 2022 Integral Zen 7 Day Retreat in Arizona"'
+                - 'option "Event registration: Mar 6, 2022 Integral Zen 7 Day Retreat - Arizona"'
+                - 'option "Event registration: Feb 18, 2022 Integral Zen Meditation for Beginners Series February 2022"'
+                - 'option "Event registration: Nov 5, 2021 Integral Zen 7 Day Retreat (New Hampshire)"'
+                - 'option "Event registration: Oct 10, 2021 Integral Zen 7 Day Retreat (Poland)"'
+                - 'option "Event registration: Sep 20, 2021 Integral Zen 7 Day Retreat, Yokoji Zen Mountain Center"'
+                - 'option "Event registration: Aug 15, 2021 Integral Zen 7 Day Retreat (Iowa)"'
+                - 'option "Event registration: May 21, 2021 Integral Zen 3 Day Retreat"'
+                - 'option "Event registration: May 8, 2021 The Whole Spectrum of Shadows - Level 4 - What Color are Your Individual Shadows"'
+                - 'option "Event registration: Apr 28, 2021 Video limited access"'
+                - 'option "Event registration: Apr 23, 2021 Integral Zen Meditation for Beginners Series April 2021"'
+                - 'option "Event registration: Apr 23, 2021 Awakening Through Dying, 3 day Workshop, EU Time Zone"'
+                - 'option "Event registration: Apr 9, 2021 Awakening Through Dying, 3 day Workshop, US Time Zone"'
+                - 'option "Event registration: Mar 30, 2021 Touching the True Face Apprentice Group (Group A)"'
+                - 'option "Event registration: Feb 19, 2021 Integral Zen Meditation for Beginners Series February 2021"'
+                - 'option "Event registration: Jan 23, 2021 The Whole Spectrum of Shadows - Level 3 -State Shadows"'
+                - 'option "Event registration: Jan 8, 2021 Integral Zen Meditation for Beginners January 2021"'
+                - 'option "Event registration: Dec 29, 2020 Cultures Cults and Conflicts"'
+                - 'option "Event registration: Nov 19, 2020 4-Day Awakening Through Dying Zen Retreat"'
+                - 'option "Event registration: Nov 6, 2020 Integral Zen Meditation for Beginners"'
+                - 'option "Event registration: Oct 28, 2020 TEST retreat deposits"'
+                - 'option "Event registration: Oct 17, 2020 The Whole Spectrum of Shadows - Level 2"'
+                - 'option "Event registration: Oct 17, 2020 Integral Zen 7 Day Retreat"'
+                - 'option "Event registration: Oct 5, 2020 Integral Zen 7 Day Retreat"'
+                - 'option "Event registration: Sep 25, 2020 Enlightening Your Shadows - A Path to Waking Up [4 Day Retreat]"'
+                - 'option "Event registration: Sep 24, 2020 Shadow Working Group B"'
+                - 'option "Event registration: Sep 17, 2020 4 Day Integral Zen Retreat"'
+                - 'option "Event registration: Sep 10, 2020 Meet Doshin (2nd session)"'
+                - 'option "Event registration: Sep 3, 2020 Meet Doshin"'
+                - 'option "Event registration: Aug 25, 2020 Shadow Working Group A"'
+                - 'option "Event registration: Aug 22, 2020 The Whole Spectrum of Shadows - Level 1"'
+                - 'option "Event registration: Aug 21, 2020 Integral Zen 7 Day Retreat"'
+                - 'option "Event registration: Aug 17, 2020 Integral Zen Online Meditation Workshop"'
+                - 'option "Event registration: Aug 8, 2020 Weekly Chi Gong practice"'
+                - 'option "Event registration: Jul 25, 2020 Integral Zen 7 Day Retreat"'
+                - 'option "Event registration: Jul 6, 2020 The Sacred Secret of Silence"'
+                - 'option "Event registration: Apr 20, 2020 Integrating Your Shadows - a Path of Liberation [8 Day Retreat]"'
+                - 'option "Event registration: Apr 15, 2020 US Shadow Working Group Tuesday Nights"'
+                - 'option "Event registration: Apr 14, 2020 EU Shadow Working Group Thursday Nights"'
+                - 'option "Event registration: Mar 30, 2020 Daily Group Meditation"'
+                - 'option "Event registration: Mar 29, 2020 Sangha & Dharma Community - Invitation Only"'
+                - 'option "Event registration: Mar 22, 2020 Sunday Integral Dharma Calls"'
+                - 'option "Event registration: Mar 16, 2020 Silent Zen Retreat"'
+                - 'option "Event registration: Mar 5, 2020 Enlightening Your Shadows - A Path to Waking Up [4 Day Retreat]"'
+                - 'option "Event registration: Feb 13, 2020 Shadow Webinar Level 3 - State Shadows [EU]"'
+                - 'option "Event registration: Feb 12, 2020 Shadow Webinar Level 3 - State Shadows"'
+                - 'option "Event registration: Nov 14, 2019 Shadow Webinar Level 2 - Collective Shadows [EU]"'
+                - 'option "Event registration: Nov 13, 2019 Shadow Webinar Level 2 - Collective Shadows"'
+                - 'option "Event registration: Oct 26, 2019 7-Day Integral Zen Shadow Integration Retreat"'
+                - 'option "Event registration: Oct 14, 2019 Integral Zen Retreat"'
+                - 'option "Event registration: Oct 11, 2019 Hollow Bones Mondo Zen Sesshin"'
+                - 'option "Event registration: Oct 10, 2019 Zen. The Posture Embodied"'
+                - 'option "Event registration: Aug 28, 2019 TEST retreat plain"'
+            - generic [ref=f8e387]:
+              - generic [ref=f8e388]: Product Group
+              - combobox "Product Group" [ref=f8e389]:
+                - option "-- Select --" [selected]
+                - option "Retreats"
+                - option "Online Courses"
+                - option "Other Products"
+                - option "One time donation"
+                - option "Recurring donation"
+                - option "asdf"
+            - generic [ref=f8e390]:
+              - generic [ref=f8e391]: Info to collect before purchase
+              - generic [ref=f8e392] [cursor=pointer]:
+                - checkbox "Name" [ref=f8e393]
+                - generic [ref=f8e394]: Name
+              - generic [ref=f8e395] [cursor=pointer]:
+                - checkbox "Email" [ref=f8e396]
+                - generic [ref=f8e397]: Email
+              - generic [ref=f8e398] [cursor=pointer]:
+                - checkbox "Phone Number" [ref=f8e399]
+                - generic [ref=f8e400]: Phone Number
+              - generic [ref=f8e401] [cursor=pointer]:
+                - checkbox "Date of Birth" [ref=f8e402]
+                - generic [ref=f8e403]: Date of Birth
+              - generic [ref=f8e404] [cursor=pointer]:
+                - checkbox "Address" [ref=f8e405]
+                - generic [ref=f8e406]: Address
+              - generic [ref=f8e407] [cursor=pointer]:
+                - checkbox "User Chooses Price" [ref=f8e408]
+                - generic [ref=f8e409]: User Chooses Price
+              - generic [ref=f8e410] [cursor=pointer]:
+                - checkbox "Newsletter Signup" [ref=f8e411]
+                - generic [ref=f8e412]: Newsletter Signup
+            - generic [ref=f8e413]:
+              - generic [ref=f8e414]:
+                - generic [ref=f8e415]: Activates Subscription
+                - combobox "Activates Subscription" [ref=f8e416]:
+                  - option "-- Select --"
+                  - option "-- None --" [selected]
+                  - option "Test tier 1a (Level 10)"
+                  - option "Basic Plan (Level 10)"
+                  - option "Premium plan (Level 20)"
+                  - option "Family/Pro plan (Level 30)"
+              - generic [ref=f8e417]:
+                - generic [ref=f8e418]: Minimum Tier to View
+                - combobox "Minimum Tier to View" [ref=f8e419]:
+                  - option "Anyone can view" [selected]
+                  - option "Basic Plan (Level 10)"
+                  - option "Premium plan (Level 20)"
+                  - option "Family/Pro plan (Level 30)"
+                - text: Restrict viewing/purchasing this product to users with this subscription tier or higher
+              - generic [ref=f8e420]:
+                - generic [ref=f8e421]: Total Number available for purchase (0 for unlimited)
+                - textbox "Total Number available for purchase (0 for unlimited)" [ref=f8e422]: "0"
+              - generic [ref=f8e423]:
+                - generic [ref=f8e424]: Max Number that can be added to cart per user (0 for unlimited)
+                - textbox "Max Number that can be added to cart per user (0 for unlimited)" [ref=f8e425]: "0"
+              - generic [ref=f8e426]:
+                - generic [ref=f8e427]: Purchase expires after (days, 0 for never)
+                - textbox "Purchase expires after (days, 0 for never)" [ref=f8e428]: "0"
+              - generic [ref=f8e429]:
+                - generic [ref=f8e430]: "Link (optional): dev.getjoinery.com/product/"
+                - 'textbox "Link (optional): dev.getjoinery.com/product/" [ref=f8e431]': test-single-product
+              - generic [ref=f8e432]:
+                - generic [ref=f8e433]: Digital item link
+                - textbox "Digital item link" [ref=f8e434]
+              - generic [ref=f8e435]:
+                - generic [ref=f8e436]: Receipt template (override)
+                - combobox "Receipt template (override)" [ref=f8e437]:
+                  - option "-- Use system default --" [selected]
+                  - option "activation_content"
+                  - option "blank_footer"
+                  - option "blank_template"
+                  - option "default_footer"
+                  - option "default_outer_template"
+                  - option "email_change_content"
+                  - option "event_bulk_footer"
+                  - option "forgotpw_content"
+                  - option "mailing_list_subscribe"
+                  - option "new_account_content"
+                  - option "newsletter-1"
+                  - option "purchase_receipt_default"
+                  - option "purchase_receipt_product_default"
+                  - option "subscription_cancelled"
+                  - option "subscription_downgraded"
+                  - option "subscription_expired"
+                  - option "subscription_payment_failed"
+                  - option "subscription_reactivated"
+                  - option "subscription_upgraded"
+                - text: Optional. When set, the per-product receipt email uses this template. Leave empty for the system default.
+              - generic [ref=f8e438]:
+                - generic [ref=f8e439]: After-purchase message
+                - generic [ref=f8e440]:
+                  - generic [ref=f8e441]:
+                    - button "View HTML" [ref=f8e443] [cursor=pointer]
+                    - generic [ref=f8e446]:
+                      - button "Undo (Ctrl + Z)" [ref=f8e447] [cursor=pointer]
+                      - button "Redo (Ctrl + Y)" [ref=f8e450] [cursor=pointer]
+                    - button "Formatting" [ref=f8e454] [cursor=pointer]
+                    - generic [ref=f8e457]:
+                      - button "Strong (Ctrl + B)" [ref=f8e458] [cursor=pointer]
+                      - button "Emphasis (Ctrl + I)" [ref=f8e461] [cursor=pointer]
+                      - button "Deleted" [ref=f8e464] [cursor=pointer]
+                    - generic [ref=f8e467]:
+                      - button "Superscript" [ref=f8e468] [cursor=pointer]
+                      - button "Subscript" [ref=f8e471] [cursor=pointer]
+                    - button "Link" [ref=f8e475] [cursor=pointer]
+                    - button "Insert Image" [ref=f8e479] [cursor=pointer]
+                    - button "Code sample <pre>" [ref=f8e483] [cursor=pointer]
+                    - generic [ref=f8e486]:
+                      - button "Align Left" [ref=f8e487] [cursor=pointer]
+                      - button "Align Center" [ref=f8e490] [cursor=pointer]
+                      - button "Align Right" [ref=f8e493] [cursor=pointer]
+                      - button "Align Justify" [ref=f8e496] [cursor=pointer]
+                    - generic [ref=f8e499]:
+                      - button "Unordered list" [ref=f8e500] [cursor=pointer]
+                      - button "Ordered list" [ref=f8e503] [cursor=pointer]
+                    - button "Insert horizontal rule" [ref=f8e507] [cursor=pointer]
+                    - button "Remove format" [ref=f8e511] [cursor=pointer]
+                    - button "Fullscreen" [ref=f8e515] [cursor=pointer]
+                  - textbox "After-purchase message" [ref=f8e520]
+                - text: Shown on the confirmation page; also triggers a separate per-product email after purchase.
+              - generic [ref=f8e521]:
+                - generic [ref=f8e522]: Questions to ask before purchase
+                - generic [ref=f8e523] [cursor=pointer]:
+                  - checkbox "Short test question" [ref=f8e524]
+                  - generic [ref=f8e525]: Short test question
+                - generic [ref=f8e526] [cursor=pointer]:
+                  - checkbox "Short test questionb" [checked] [ref=f8e527]
+                  - generic [ref=f8e528]: Short test questionb
+                - generic [ref=f8e529] [cursor=pointer]:
+                  - checkbox "Short test questionc" [ref=f8e530]
+                  - generic [ref=f8e531]: Short test questionc
+                - generic [ref=f8e532] [cursor=pointer]:
+                  - checkbox "test drop" [ref=f8e533]
+                  - generic [ref=f8e534]: test drop
+                - generic [ref=f8e535] [cursor=pointer]:
+                  - checkbox "test drop" [ref=f8e536]
+                  - generic [ref=f8e537]: test drop
+                - generic [ref=f8e538] [cursor=pointer]:
+                  - checkbox "Comment" [ref=f8e539]
+                  - generic [ref=f8e540]: Comment
+                - generic [ref=f8e541] [cursor=pointer]:
+                  - checkbox "GDPR Notice" [ref=f8e542]
+                  - generic [ref=f8e543]: GDPR Notice
+                - generic [ref=f8e544] [cursor=pointer]:
+                  - checkbox "Consent to Record" [ref=f8e545]
+                  - generic [ref=f8e546]: Consent to Record
+            - button "Submit" [ref=f8e547] [cursor=pointer]
+          - generic [ref=f8e548]:
+            - generic [ref=f8e549]:
+              - heading "Product Photos" [level=6] [ref=f8e550]
+              - button "Upload" [ref=f8e555] [cursor=pointer]
+            - generic [ref=f8e557]: No photos yet
+      - contentinfo [ref=f8e564]:
+        - generic [ref=f8e565]: v0.5.0
+  - dialog "Cookie consent" [ref=f8e566]:
+    - paragraph [ref=f8e567]: We use cookies to improve your experience and analyze site traffic.
+    - generic [ref=f8e568]:
+      - button "Accept All" [ref=f8e569] [cursor=pointer]
+      - button "Reject All" [ref=f8e570] [cursor=pointer]
+      - button "Manage" [ref=f8e571] [cursor=pointer]

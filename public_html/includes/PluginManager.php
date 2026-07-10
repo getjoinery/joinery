@@ -1144,8 +1144,63 @@ class PluginManager extends AbstractExtensionManager {
      *
      * @return array Sync result with keys: added, updated, total, table_messages, migration_messages
      */
+    /**
+     * Fail the sync when two active participants (core or an active plugin) declare
+     * the same basename inside a flat, globally-resolved directory (ajax/, utils/,
+     * tests/). Those files resolve at a shared global URL, so their basenames must be
+     * unique across core and every active plugin. Newly discovered plugins register
+     * inactive and therefore never trip this check until they are activated.
+     *
+     * @throws Exception on the first duplicate found, naming both participants.
+     */
+    protected function validateFlatNamespaceCollisions(): void {
+        require_once(PathHelper::getIncludePath('data/plugins_class.php'));
+
+        $dir_types = ['ajax', 'utils', 'tests'];
+        $base = PathHelper::getIncludePath('');
+        // Map "{dir_type}/{basename}" => owning participant name.
+        $seen = [];
+
+        $collect = function (string $participant, string $dir_abs) use (&$seen, $dir_types) {
+            foreach ($dir_types as $dir_type) {
+                $dir = rtrim($dir_abs, '/') . '/' . $dir_type;
+                if (!is_dir($dir)) {
+                    continue;
+                }
+                foreach (glob($dir . '/*.php') as $file) {
+                    $key = $dir_type . '/' . basename($file);
+                    if (isset($seen[$key]) && $seen[$key] !== $participant) {
+                        throw new Exception(
+                            "Plugin sync aborted: flat-namespace collision on {$key} — declared by both "
+                            . "'{$seen[$key]}' and '{$participant}'. Files in ajax/, utils/, and tests/ resolve "
+                            . "at a shared global URL, so their basenames must be unique across core and all "
+                            . "active plugins. Rename one file."
+                        );
+                    }
+                    $seen[$key] = $participant;
+                }
+            }
+        };
+
+        // Core first, then each active plugin.
+        $collect('core', $base);
+
+        $active_plugins = new MultiPlugin(['plg_active' => 1]);
+        $active_plugins->load();
+        foreach ($active_plugins as $plugin) {
+            $plugin_name = $plugin->get('plg_name');
+            $collect($plugin_name, $base . 'plugins/' . $plugin_name);
+        }
+    }
+
     public function sync(array $options = array()) {
         $result = parent::sync($options);
+
+        // Guard the flat global namespace (ajax/, utils/, tests/) against basename
+        // collisions across core and all active plugins BEFORE any schema mutation.
+        // The active-plugin set is fresh here and nothing has been written yet, so a
+        // collision aborts the whole sync with no partial state.
+        $this->validateFlatNamespaceCollisions();
 
         // Update database tables and run migrations for all active plugins.
         //
@@ -1350,8 +1405,16 @@ class PluginManager extends AbstractExtensionManager {
             }
             $name = $entry['name'];
 
-            if (strpos($name, $prefix) !== 0) {
-                throw new Exception("Plugin '$plugin_name' declares setting '$name' — must start with the plugin's directory name ('$prefix').");
+            // Settings carried over from core by a plugin extraction keep their
+            // original (unprefixed) names on purpose — menu settingActivate keys,
+            // existing stg_settings rows, and code all reference the old name. Such
+            // an entry opts out of the prefix rule with "legacy_core": true. It is
+            // still subject to the settings.json collision + string-default rules
+            // (the name must have been REMOVED from settings.json when it moved).
+            $legacy_core = !empty($entry['legacy_core']);
+
+            if (!$legacy_core && strpos($name, $prefix) !== 0) {
+                throw new Exception("Plugin '$plugin_name' declares setting '$name' — must start with the plugin's directory name ('$prefix') or be marked \"legacy_core\": true.");
             }
 
             if (isset($core_names[$name])) {

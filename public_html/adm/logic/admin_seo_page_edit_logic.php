@@ -54,7 +54,7 @@ function admin_seo_page_edit_logic(array $input): LogicResult {
 	if ($spm->key && $spm->get('spm_entity_type') && $spm->get('spm_entity_id')) {
 		$type = $spm->get('spm_entity_type');
 		$id   = (int)$spm->get('spm_entity_id');
-		$entity_info = SeoPageMetadata::ENTITY_CLASSES[$type] ?? null;
+		$entity_info = SeoPageMetadata::entity_classes()[$type] ?? null;
 		if ($entity_info && file_exists(PathHelper::getIncludePath($entity_info['file']))) {
 			require_once(PathHelper::getIncludePath($entity_info['file']));
 			$class = $entity_info['class'];
@@ -74,17 +74,8 @@ function admin_seo_page_edit_logic(array $input): LogicResult {
 					$entity_options['entity_type'] = $type;
 					$entity_options['og_type'] = SeoPageMetadata::infer_og_type('', array('entity_type'=>$type));
 
-					$admin_edit_map = array(
-						'post'         => '/admin/admin_post_edit?pst_post_id=',
-						'event'        => '/admin/admin_event_edit?evt_event_id=',
-						'product'      => '/admin/admin_product_edit?pro_product_id=',
-						'page'         => '/admin/admin_page_edit?pag_page_id=',
-						'location'     => '/admin/admin_location_edit?loc_location_id=',
-						'video'        => '/admin/admin_video_edit?vid_video_id=',
-						'mailing_list' => '/admin/admin_list_edit?mlt_mailing_list_id=',
-					);
-					if (isset($admin_edit_map[$type])) {
-						$entity_edit_link = $admin_edit_map[$type] . $id;
+					if (!empty($entity_info['admin_edit_url'])) {
+						$entity_edit_link = $entity_info['admin_edit_url'] . $id;
 					}
 				} catch (\Throwable $e) {
 					// entity missing or broken — leave placeholders to fall through to static inference

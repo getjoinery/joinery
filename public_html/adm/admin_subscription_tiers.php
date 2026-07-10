@@ -84,22 +84,17 @@ $headers = array('ID', 'Level', 'Name', 'Display Name', 'Members', 'Actions');
                 $level = $tier->get('sbt_tier_level');
                 $counts = [];
 
-                $tables = [
-                    'Posts' => ['pst_posts', 'pst_tier_min_level', 'pst_delete_time'],
-                    'Pages' => ['pag_pages', 'pag_tier_min_level', 'pag_delete_time'],
-                    'Events' => ['evt_events', 'evt_tier_min_level', 'evt_delete_time'],
-                    'Files' => ['fil_files', 'fil_tier_min_level', 'fil_delete_time'],
-                    'Videos' => ['vid_videos', 'vid_tier_min_level', 'vid_delete_time'],
-                    'Products' => ['pro_products', 'pro_tier_min_level', 'pro_delete_time'],
-                ];
-
-                foreach ($tables as $label => $info) {
-                    $sql = "SELECT count(1) as cnt FROM {$info[0]} WHERE {$info[1]} = ? AND {$info[2]} IS NULL";
+                // Which content types can be tier-gated is contributed by the active
+                // plugins: core registers posts/pages/files/videos, store adds
+                // products, event_manager adds events. See TierGatedContentRegistry.
+                require_once(PathHelper::getIncludePath('includes/TierGatedContentRegistry.php'));
+                foreach (TierGatedContentRegistry::all() as $info) {
+                    $sql = "SELECT count(1) as cnt FROM {$info['table']} WHERE {$info['level_column']} = ? AND {$info['delete_column']} IS NULL";
                     $q = $dblink->prepare($sql);
                     $q->execute([$level]);
                     $row = $q->fetch(PDO::FETCH_ASSOC);
                     if ($row['cnt'] > 0) {
-                        $counts[] = $row['cnt'] . ' ' . strtolower($label);
+                        $counts[] = $row['cnt'] . ' ' . strtolower($info['label']);
                     }
                 }
 
@@ -125,10 +120,13 @@ $headers = array('ID', 'Level', 'Name', 'Display Name', 'Members', 'Actions');
         </div>
         <div class="card-body">
             <?php
-            // Get all products that have subscription tiers
+            // Get all products that have subscription tiers. Products belong to
+            // the store plugin; with the store inactive the "Edit Product" links
+            // would 404, so leave this list empty (the panel shows its empty
+            // state) rather than link into a disabled plugin.
             $products_with_tiers = [];
 
-            foreach ($tiers as $tier) {
+            foreach (PluginHelper::isPluginActive('store') ? $tiers : [] as $tier) {
                 // Only get products that have this specific tier ID set
                 $dbconnector = DbConnector::get_instance();
                 $dblink = $dbconnector->get_db_link();
@@ -180,7 +178,7 @@ $headers = array('ID', 'Level', 'Name', 'Display Name', 'Members', 'Actions');
                                 <td><?php echo htmlspecialchars($product['pro_name']); ?></td>
                                 <td><?php echo htmlspecialchars($product['sbt_display_name']); ?></td>
                                 <td>
-                                    <a href="/admin/admin_product_edit?pro_product_id=<?php echo $product['pro_product_id']; ?>"
+                                    <a href="/plugins/store/admin/admin_product_edit?pro_product_id=<?php echo $product['pro_product_id']; ?>"
                                        class="btn btn-sm btn-primary">Edit Product</a>
                                 </td>
                             </tr>
