@@ -6,8 +6,8 @@ import com.getjoinery.android.JsonValue
 
 /**
  * Thin typed face over the dashboard/orders/subscriptions/events read actions
- * plus the two reused mutations that back them (`orders_recurring_action`,
- * `event_withdraw`). Every call rides the app's session key through ApiClient;
+ * plus the two reused mutations that back them (`store/orders_recurring_action`,
+ * `event_manager/event_withdraw`). Every call rides the app's session key through ApiClient;
  * scoping is entirely server-side — same query paths as the web profile pages.
  */
 // `open` so a test can subclass and control call timing for the stale-load
@@ -44,7 +44,7 @@ open class MemberApi(val client: ApiClient) {
 
     open suspend fun events(status: EventStatusFilter, offset: Int): EventPage {
         val envelope = client.submitAction(
-            "my_events",
+            "event_manager/my_events",
             JsonValue.obj(
                 "status" to JsonValue.Str(status.slug),
                 "offset" to JsonValue.Num(offset.toDouble()),
@@ -57,7 +57,7 @@ open class MemberApi(val client: ApiClient) {
      *  confirmation form's required field. */
     suspend fun withdraw(registrantId: Int) {
         client.submitAction(
-            "event_withdraw",
+            "event_manager/event_withdraw",
             JsonValue.obj(
                 "evr_event_registrant_id" to JsonValue.Num(registrantId.toDouble()),
                 "confirm" to JsonValue.Bool(true),

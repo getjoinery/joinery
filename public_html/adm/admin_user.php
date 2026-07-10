@@ -21,15 +21,6 @@ $phone_numbers = $page_vars['phone_numbers'];
 $numphonerecords = $page_vars['numphonerecords'];
 $addresses = $page_vars['addresses'];
 $numaddressrecords = $page_vars['numaddressrecords'];
-$store_active = $page_vars['store_active'] ?? false;
-$orders = $page_vars['orders'];
-$numorders = $page_vars['numorders'];
-$event_registrations = $page_vars['event_registrations'];
-$numeventsregistrations = $page_vars['numeventsregistrations'];
-$active_subscriptions = $page_vars['active_subscriptions'];
-$num_active_subscriptions = $page_vars['num_active_subscriptions'];
-$cancelled_subscriptions = $page_vars['cancelled_subscriptions'];
-$num_cancelled_subscriptions = $page_vars['num_cancelled_subscriptions'];
 $logins = $page_vars['logins'];
 $num_logins = $page_vars['num_logins'];
 $dropdown_button = $page_vars['dropdown_button'];
@@ -41,18 +32,16 @@ $groups = $page_vars['groups'];
 $num_groups = $page_vars['num_groups'];
 $num_received_emails = $page_vars['num_received_emails'];
 $num_sent_emails = $page_vars['num_sent_emails'];
-$num_session_visits = $page_vars['num_session_visits'];
+
+// Orders, subscriptions and event registrations are rendered by plugin-owned
+// panels (AdminUserPanelRegistry) further down.
+require_once(PathHelper::getIncludePath('includes/AdminUserPanelRegistry.php'));
 
 // Create Pager objects for record count display
-$events_pager = new Pager(array('numrecords' => $numeventsregistrations, 'numperpage' => $list_limit ?: $numeventsregistrations));
-$orders_pager = new Pager(array('numrecords' => $numorders, 'numperpage' => $list_limit ?: $numorders));
 $groups_pager = new Pager(array('numrecords' => $num_groups, 'numperpage' => $list_limit ?: $num_groups));
-$active_subscriptions_pager = new Pager(array('numrecords' => $num_active_subscriptions, 'numperpage' => $list_limit ?: $num_active_subscriptions));
-$cancelled_subscriptions_pager = new Pager(array('numrecords' => $num_cancelled_subscriptions, 'numperpage' => $list_limit ?: $num_cancelled_subscriptions));
 $received_emails_pager = new Pager(array('numrecords' => $num_received_emails, 'numperpage' => $list_limit ?: $num_received_emails));
 $sent_emails_pager = new Pager(array('numrecords' => $num_sent_emails, 'numperpage' => $list_limit ?: $num_sent_emails));
 $logins_pager = new Pager(array('numrecords' => $num_logins, 'numperpage' => $list_limit ?: $num_logins));
-$session_visits_pager = new Pager(array('numrecords' => $num_session_visits, 'numperpage' => $list_limit ?: $num_session_visits));
 
 // AdminPage setup (display only)
 $page = new AdminPage();
@@ -299,7 +288,7 @@ array(
 									• <?php echo $change_time; ?>: <?php echo $old_value; ?> → <?php echo $new_value; ?>
 									<?php if($reason): ?>
 										(<?php echo htmlspecialchars($reason); ?>
-										<?php if($reason === 'purchase' && $change->get('cht_reference_id')): ?>
+										<?php if($reason === 'purchase' && $change->get('cht_reference_id') && PluginHelper::isPluginActive('store')): ?>
 											- <a href="/plugins/store/admin/admin_order?ord_order_id=<?php echo $change->get('cht_reference_id'); ?>">Order #<?php echo $change->get('cht_reference_id'); ?></a>
 										<?php elseif($reason === 'manual' && $change->get('cht_changed_by_usr_user_id')): ?>
 											<?php
@@ -319,193 +308,16 @@ array(
 			</div>
 		</div>
 
-		<?php if ($store_active): // Subscriptions belong to the store plugin ?>
-		<!-- Active Subscriptions -->
-		<div class="card mt-3">
-			<div class="card-header bg-body-tertiary">
-				<h6 class="mb-0"><span class="fas fa-credit-card me-2"></span>Active Subscriptions</h6>
-			</div>
-			<div class="card-body">
-				<?php if($active_subscriptions->count() > 0): ?>
-					<?php
-					require_once(PathHelper::getIncludePath('plugins/store/includes/StripeHelper.php'));
-					foreach($active_subscriptions as $subscription): ?>
-						<?php
-							$stripe_helper = new StripeHelper();
-							$stripe_helper->update_subscription_in_order_item($subscription);
-							$status_words = $subscription->get('odi_subscription_status') ? $subscription->get('odi_subscription_status') : 'active';
-						?>
-						<div class="mb-3 p-2 bg-body-tertiary rounded">
-							<div class="fw-semi-bold">
-								<a href="/plugins/store/admin/admin_order?ord_order_id=<?php echo $subscription->get('odi_ord_order_id'); ?>">
-									Order <?php echo $subscription->get('odi_ord_order_id'); ?>
-								</a> - $<?php echo number_format($subscription->get('odi_price'), 2); ?>/month
-							</div>
-							<div class="fs-11 text-600 mt-1">
-								Status: <span class="text-success"><?php echo htmlspecialchars($status_words); ?></span><br>
-								<?php if($subscription->get('odi_subscription_period_end')): ?>
-									Period ends: <?php echo LibraryFunctions::convert_time($subscription->get('odi_subscription_period_end'), 'UTC', $session->get_timezone()); ?><br>
-								<?php endif; ?>
-								<a href="/profile/orders_recurring_action?order_item_id=<?php echo $subscription->key; ?>" class="text-danger">cancel</a>
-							</div>
-						</div>
-					<?php endforeach; ?>
-				<?php else: ?>
-					<p class="text-600 mb-0">No active subscriptions</p>
-				<?php endif; ?>
-			</div>
-			<?php echo $active_subscriptions_pager->record_count_info($active_subscriptions->count(), array('show_all_url' => $show_all_url)); ?>
-		</div>
-
-		<!-- Cancelled Subscriptions -->
-		<div class="card mt-3">
-			<div class="card-header bg-body-tertiary">
-				<h6 class="mb-0"><span class="fas fa-ban me-2"></span>Cancelled Subscriptions</h6>
-			</div>
-			<div class="card-body">
-				<?php if($cancelled_subscriptions->count() > 0): ?>
-					<?php foreach($cancelled_subscriptions as $subscription): ?>
-						<div class="mb-2 p-2 bg-body-tertiary rounded">
-							<div class="fw-semi-bold">
-								<a href="/plugins/store/admin/admin_order?ord_order_id=<?php echo $subscription->get('odi_ord_order_id'); ?>">
-									Order <?php echo $subscription->get('odi_ord_order_id'); ?>
-								</a> - $<?php echo number_format($subscription->get('odi_price'), 2); ?>/month
-							</div>
-							<div class="fs-11 text-600 mt-1">
-								Canceled: <?php echo LibraryFunctions::convert_time($subscription->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone()); ?>
-								<?php if($subscription->get('odi_subscription_period_end')): ?>
-									<br>Last day: <?php echo LibraryFunctions::convert_time($subscription->get('odi_subscription_period_end'), 'UTC', $session->get_timezone()); ?>
-								<?php endif; ?>
-							</div>
-						</div>
-					<?php endforeach; ?>
-				<?php else: ?>
-					<p class="text-600 mb-0">No cancelled subscriptions</p>
-				<?php endif; ?>
-			</div>
-			<?php echo $cancelled_subscriptions_pager->record_count_info($cancelled_subscriptions->count(), array('show_all_url' => $show_all_url)); ?>
-		</div>
-		<?php endif; // store_active ?>
 	</div>
 </div>
 
 <?php
-
-// Events Table
-require_once(PathHelper::getIncludePath('data/events_class.php'));
-$headers = array('Event', 'Added', 'Expires', 'Action');
-$table_options = array('title' => 'Events', 'card' => true);
-$page->tableheader($headers, $table_options, $events_pager);
-
-$event_ids_for_user = array();
-foreach ($event_registrations as $event_registration):
-	$event = new Event($event_registration->get('evr_evt_event_id'), TRUE);
-	$event_ids_for_user[] = $event->key;
-
-	$event_cell = '<a href="/admin/admin_event?evt_event_id='.$event->key.'">'.
-		LibraryFunctions::convert_time($event->get('evt_start_time'), "UTC", "UTC", 'M j, Y').' '.
-		'<strong>'.htmlspecialchars($event->getString('evt_name', 50)).'</strong> '.
-		htmlspecialchars($event->get('evt_location')).
-		'</a>';
-
-	$added_cell = LibraryFunctions::convert_time($event_registration->get('evr_create_time'), 'UTC', $session->get_timezone(), 'M j');
-	$expires_cell = LibraryFunctions::convert_time($event_registration->get('evr_expires_time'), 'UTC', $session->get_timezone(), 'M j');
-
-	$action_cell = AdminPage::action_button('Remove', '/admin/admin_user', [
-		'hidden'  => ['action' => 'remove_from_event', 'evt_event_id' => $event->key, 'usr_user_id' => $user->key],
-		'confirm' => 'Remove user from this event?',
-	]);
-
-	$page->disprow(array($event_cell, $added_cell, $expires_cell, $action_cell));
-endforeach;
-
-// Add event form row
-$formwriter = $page->getFormWriter('form3', [
-	'deferred_output' => true
-]);
-
-$events = new MultiEvent(
-	array('deleted'=>false),
-	array('start_time'=>'DESC'),
-	NULL,
-	NULL);
-$events->load();
-
-foreach($event_ids_for_user as $event_id) {
-	if($events->contains_key($event_id)){
-		$events->remove_by_key($event_id);
-	}
+// ---- Plugin-contributed panels: Orders, Subscriptions (store), Events (event_manager) ----
+// Each panel renders its own section and loads its own data; absent when the
+// owning plugin is inactive.
+foreach (AdminUserPanelRegistry::panels() as $panel) {
+	echo $panel->render($user, $page);
 }
-
-$optionvals = $events->get_dropdown_array();
-$formwriter->hiddeninput('action', '', ['value' => 'add_to_event']);
-$formwriter->hiddeninput('usr_user_id', '', ['value' => $user->key]);
-$formwriter->dropinput('evt_event_id', 'Add to event', [
-	'options' => $optionvals,
-	'validation' => ['required' => true]
-]);
-$formwriter->submitbutton('submit_button', 'Add');
-$add_form = $formwriter->getFieldsHTML();
-
-echo '<tr><td colspan="4" class="pt-3">'.$add_form.'</td></tr>';
-
-$page->endtable($events_pager);
-
-// Orders Table (store plugin only)
-if ($store_active):
-require_once(PathHelper::getIncludePath('plugins/store/data/orders_class.php'));
-require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php'));
-$headers = array('Order ID', 'Order Time', 'Products', 'Status', 'Total');
-$table_options = array('title' => 'Orders', 'card' => true);
-$page->tableheader($headers, $table_options, $orders_pager);
-
-$PRODUCT_ID_TO_NAME_CACHE = array();
-foreach($orders as $order):
-	$order_items = $order->get_order_items();
-	$order_items_out = array();
-	foreach($order_items as $order_item):
-		if (array_key_exists($order_item->get('odi_pro_product_id'), $PRODUCT_ID_TO_NAME_CACHE)) {
-			$title = $PRODUCT_ID_TO_NAME_CACHE[$order_item->get('odi_pro_product_id')];
-		} else {
-			$product = new Product($order_item->get('odi_pro_product_id'), TRUE);
-			$title = $product->get('pro_name');
-			$PRODUCT_ID_TO_NAME_CACHE[$product->key] = $title;
-		}
-
-		$this_out = htmlspecialchars($title) . ' ($'. number_format($order_item->get('odi_price'), 2) .')';
-
-		if($order_item->get('odi_subscription_cancelled_time')){
-			$status_words = $order_item->get('odi_subscription_status') ? $order_item->get('odi_subscription_status') : 'canceled';
-			$this_out .= '<br><span class="fs-11 text-600">'. htmlspecialchars($status_words). ' at '.LibraryFunctions::convert_time($order_item->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone()).'</span>';
-		}
-		else if($order_item->get('odi_subscription_status')){
-			$this_out .=  '<br><span class="fs-11 text-600">STATUS: '. htmlspecialchars($order_item->get('odi_subscription_status')).'</span>';
-		}
-
-		$order_items_out[] = $this_out;
-	endforeach;
-
-	$order_id_cell = '<a href="/plugins/store/admin/admin_order?ord_order_id='.$order->key.'">Order '.$order->key.'</a>';
-	$order_time_cell = LibraryFunctions::convert_time($order->get('ord_timestamp'), "UTC", $session->get_timezone());
-	$products_cell = implode('<br>', $order_items_out);
-
-	// Determine status display
-	$status_cell = '';
-	if($order->get('ord_status') == Order::STATUS_UNPAID) {
-		$status_cell = '<span class="badge badge-subtle-warning">Unpaid</span>';
-	} elseif($order->get('ord_status') == Order::STATUS_PAID) {
-		$status_cell = '<span class="badge badge-subtle-success">Paid</span>';
-	} elseif($order->get('ord_status') == Order::STATUS_ERROR) {
-		$status_cell = '<span class="badge badge-subtle-danger">Error</span>';
-	}
-
-	$total_cell = '$'.number_format($order->get('ord_total_cost'), 2);
-
-	$page->disprow(array($order_id_cell, $order_time_cell, $products_cell, $status_cell, $total_cell));
-endforeach;
-
-$page->endtable($orders_pager);
-endif; // store_active
 ?>
 
 <!-- Email and Login Activity Side by Side -->
@@ -599,58 +411,10 @@ endif; // store_active
 		<?php endif; ?>
 	</div>
 
-	<!-- Right Column: Session Visits and Logins -->
+	<!-- Right Column: Logins -->
 	<div class="col-lg-6">
-		<!-- Session Visits -->
-		<div class="card">
-			<div class="card-header bg-body-tertiary">
-				<h6 class="mb-0"><span class="fas fa-eye me-2"></span>Event Session Visits</h6>
-			</div>
-			<div class="card-body p-0">
-				<div class="table-responsive">
-					<table class="table mb-0">
-						<thead>
-							<tr>
-								<th>Session</th>
-								<th class="text-center">Last Viewed</th>
-								<th class="text-center"># Views</th>
-							</tr>
-						</thead>
-						<tbody>
-							<?php
-								require_once(PathHelper::getIncludePath('data/event_sessions_class.php'));
-								foreach ($event_registrations as $event_registration):
-									$event = new Event($event_registration->get('evr_evt_event_id'), TRUE);
-									$searches = array();
-									$searches['event_id'] = $event_registration->get('evr_evt_event_id');
-									$event_sessions = new MultiEventSessions(
-										$searches,
-										array('evs_session_number' => 'DESC', 'evs_title' => 'DESC'));
-									$event_sessions->load();
-
-									foreach ($event_sessions as $event_session):
-										if($visit_time = $event_session->get_last_visited_time_for_user($user->key)):
-											$session_num = $event_session->get('evs_session_number') ? 'Session '.$event_session->get('evs_session_number'). ' - ' : '';
-							?>
-								<tr>
-									<td><?php echo htmlspecialchars($event->get('evt_name') . ' - '. $session_num . $event_session->get('evs_title')); ?></td>
-									<td class="text-center"><?php echo LibraryFunctions::convert_time($visit_time, 'UTC', $session->get_timezone()); ?></td>
-									<td class="text-center"><?php echo $event_session->get_number_visits_for_user($user->key); ?></td>
-								</tr>
-							<?php
-										endif;
-									endforeach;
-								endforeach;
-							?>
-						</tbody>
-					</table>
-				</div>
-				<?php echo $session_visits_pager->record_count_info($num_session_visits, array('show_all_url' => $show_all_url)); ?>
-			</div>
-		</div>
-
 		<!-- Recent Logins -->
-		<div class="card mt-3">
+		<div class="card">
 			<div class="card-header bg-body-tertiary">
 				<h6 class="mb-0"><span class="fas fa-sign-in-alt me-2"></span>Recent Logins</h6>
 			</div>

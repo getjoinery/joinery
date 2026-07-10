@@ -5,7 +5,6 @@ function admin_product_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php'));
-	require_once(PathHelper::getIncludePath('data/events_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/store/data/orders_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/store/data/order_items_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/store/data/product_groups_class.php'));

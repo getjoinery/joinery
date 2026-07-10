@@ -109,9 +109,9 @@ $total_responses = 0;
     <div class="col-xxl-6">
         <!-- Associated Events Card (if applicable) -->
         <?php
-        // Check if survey is associated with events
+        // Check if survey is associated with events (event_manager only)
         $associated_events = array(); // Would need to implement this relationship
-        if (!empty($associated_events)):
+        if (!empty($associated_events) && PluginHelper::isPluginActive('event_manager')):
         ?>
             <div class="card mb-3">
                 <div class="card-header bg-body-tertiary">
@@ -120,7 +120,7 @@ $total_responses = 0;
                 <div class="card-body">
                     <div class="list-group list-group-flush">
                         <?php foreach ($associated_events as $event): ?>
-                            <a href="/admin/admin_event?evt_event_id=<?php echo $event->key; ?>" class="list-group-item list-group-item-action px-0">
+                            <a href="/plugins/event_manager/admin/admin_event?evt_event_id=<?php echo $event->key; ?>" class="list-group-item list-group-item-action px-0">
                                 <div class="d-flex justify-content-between align-items-center">
                                     <div>
                                         <h6 class="mb-0"><?php echo htmlspecialchars($event->get('evt_name')); ?></h6>

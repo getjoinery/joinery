@@ -10,17 +10,11 @@
     // working when the event_manager plugin is absent. $events_available gates
     // the Events/Locations sections on both the setting and class availability.
     $events_available = false;
-    if (Globalvars::get_instance()->get_setting('events_active')) {
-        if (PluginHelper::isPluginActive('event_manager')) {
-            require_once(PathHelper::getThemeFilePath('events_class.php', 'data', 'system', null, 'event_manager', false));
-            require_once(PathHelper::getThemeFilePath('locations_class.php', 'data', 'system', null, 'event_manager', false));
-            $events_available = class_exists('MultiEvent');
-        } elseif (file_exists(PathHelper::getIncludePath('data/events_class.php'))) {
-            // Pre-extraction: classes still live in core.
-            require_once(PathHelper::getIncludePath('data/events_class.php'));
-            require_once(PathHelper::getIncludePath('data/locations_class.php'));
-            $events_available = true;
-        }
+    if (Globalvars::get_instance()->get_setting('events_active')
+        && PluginHelper::isPluginActive('event_manager')) {
+        require_once(PathHelper::getThemeFilePath('events_class.php', 'data', 'system', null, 'event_manager', false));
+        require_once(PathHelper::getThemeFilePath('locations_class.php', 'data', 'system', null, 'event_manager', false));
+        $events_available = class_exists('MultiEvent');
     }
 
     $paged = new PublicPage();

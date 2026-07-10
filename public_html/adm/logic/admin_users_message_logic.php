@@ -6,11 +6,10 @@ function admin_users_message_logic(array $input): LogicResult {
 
 	require_once(PathHelper::getIncludePath('data/emails_class.php'));
 	require_once(PathHelper::getIncludePath('data/email_recipients_class.php'));
-	require_once(PathHelper::getIncludePath('data/events_class.php'));
 	require_once(PathHelper::getIncludePath('data/groups_class.php'));
 	require_once(PathHelper::getIncludePath('data/messages_class.php'));
-	require_once(PathHelper::getIncludePath('data/event_registrants_class.php'));
-	require_once(PathHelper::getIncludePath('data/event_waiting_lists_class.php'));
+	// Event classes belong to event_manager; they are loaded only when targeting
+	// an event (which is only reachable while that plugin is active).
 	require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
 	require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
 	require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
@@ -38,6 +37,12 @@ function admin_users_message_logic(array $input): LogicResult {
 	$recipient = NULL;
 
 	if($evt_event_id){
+		if (!PluginHelper::isPluginActive('event_manager')) {
+			return LogicResult::error('Event messaging requires the Event Manager plugin.');
+		}
+		require_once(PathHelper::getIncludePath('plugins/event_manager/data/events_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_registrants_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_waiting_lists_class.php'));
 		$event = new Event($evt_event_id, TRUE);
 	}
 	else if($grp_group_id){

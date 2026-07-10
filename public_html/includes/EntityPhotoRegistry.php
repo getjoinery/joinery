@@ -42,11 +42,8 @@ class EntityPhotoRegistry {
         self::register('mailing_list', 'MailingList', 'data/mailing_lists_class.php');
         self::register('post', 'Post', 'data/posts_class.php');
         self::register('page', 'Page', 'data/pages_class.php');
-        // MOVED-TO-PLUGIN (phase 4): event/location → event_manager serve.php.
-        // Kept here while the events tables are still core. (product moved to
-        // the store's serve.php in phase 3.)
-        self::register('event', 'Event', 'data/events_class.php');
-        self::register('location', 'Location', 'data/locations_class.php');
+        // event + location register from event_manager's serve.php; product
+        // from the store's.
     }
 
     /** Clear the registry (tests only). */

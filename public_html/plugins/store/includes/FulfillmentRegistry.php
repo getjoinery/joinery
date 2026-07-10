@@ -60,11 +60,8 @@ class FulfillmentRegistry {
 
     /** Register core-visible fulfillment providers. */
     public static function registerCoreDefaults(): void {
-        // MOVED-TO-PLUGIN (phase 4): the event_registration provider moves to
-        // event_manager serve.php once events are a plugin. Kept here while the
-        // events tables are still core so ticket fulfillment keeps working.
-        require_once(PathHelper::getIncludePath('includes/fulfillment_providers/EventRegistrationFulfillment.php'));
-        self::register(new EventRegistrationFulfillment());
+        // No core fulfillment providers. The event_registration provider
+        // registers from event_manager's serve.php when that plugin is active.
     }
 
     /** Clear the registry (tests only). */

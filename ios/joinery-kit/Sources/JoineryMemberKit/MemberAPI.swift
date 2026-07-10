@@ -3,7 +3,7 @@ import JoineryKit
 
 /// Thin typed face over the dashboard/orders/subscriptions/events read
 /// actions plus the two reused mutations that back them
-/// (`orders_recurring_action`, `event_withdraw`). Every call rides the
+/// (`store/orders_recurring_action`, `event_manager/event_withdraw`). Every call rides the
 /// app's session key through APIClient; scoping is entirely server-side —
 /// same query paths as the web profile pages.
 public struct MemberAPI: Sendable {
@@ -49,7 +49,7 @@ public struct MemberAPI: Sendable {
     }
 
     public func events(status: EventStatusFilter, offset: Int) async throws -> EventPage {
-        let envelope = try await client.submitAction("my_events", body: .object([
+        let envelope = try await client.submitAction("event_manager/my_events", body: .object([
             (key: "status", value: .string(status.rawValue)),
             (key: "offset", value: .number(Double(offset))),
         ]))
@@ -62,7 +62,7 @@ public struct MemberAPI: Sendable {
     /// Withdraw from an event registration. `confirm: true` matches the web
     /// confirmation form's required field.
     public func withdraw(registrantID: Int) async throws {
-        _ = try await client.submitAction("event_withdraw", body: .object([
+        _ = try await client.submitAction("event_manager/event_withdraw", body: .object([
             (key: "evr_event_registrant_id", value: .number(Double(registrantID))),
             (key: "confirm", value: .bool(true)),
         ]))

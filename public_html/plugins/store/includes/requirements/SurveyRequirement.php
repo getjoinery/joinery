@@ -120,9 +120,13 @@ class SurveyRequirement extends AbstractProductRequirement {
             }
         }
 
-        // Mark survey completed on event registrant if applicable
-        if (!empty($this->config['event_id']) && $user) {
-            require_once(PathHelper::getIncludePath('data/event_registrants_class.php'));
+        // Mark survey completed on the event registrant if applicable. The
+        // evr_survey_completed column and the EventRegistrant class belong to the
+        // event_manager plugin, so this only runs when that plugin is active —
+        // which is exactly when a product carries an event survey requirement.
+        if (!empty($this->config['event_id']) && $user
+            && class_exists('PluginHelper') && PluginHelper::isPluginActive('event_manager')) {
+            require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_registrants_class.php'));
             $registrant = EventRegistrant::check_if_registrant_exists($user->key, $this->config['event_id']);
             if ($registrant) {
                 $registrant->set('evr_survey_completed', true);

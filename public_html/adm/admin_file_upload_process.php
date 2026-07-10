@@ -2,7 +2,6 @@
 
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('data/files_class.php'));
-	require_once(PathHelper::getIncludePath('data/event_sessions_class.php'));
 	require_once(PathHelper::getIncludePath('includes/UploadHandler.php'));
 
 	require_once(PathHelper::getIncludePath('adm/logic/admin_file_upload_process_logic.php'));

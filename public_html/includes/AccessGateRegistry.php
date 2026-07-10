@@ -70,11 +70,10 @@ class AccessGateRegistry {
 
     /** Register core-owned access-gate providers. */
     public static function registerCoreDefaults(): void {
-        // MOVED-TO-PLUGIN (phase 4): the event_registration gate moves to
-        // event_manager serve.php once events are a plugin. Kept here while the
-        // events tables are still core so gated files/videos keep enforcing.
-        require_once(PathHelper::getIncludePath('includes/access_gate_providers/EventRegistrationGate.php'));
-        self::register(new EventRegistrationGate());
+        // No core gate providers. The event_registration gate registers from
+        // event_manager's serve.php; with that plugin absent, files/videos gated
+        // on it fail closed (userMayAccess returns false for an unregistered
+        // provider), which is the intended deny-when-plugin-missing behavior.
     }
 
     /** Clear the registry (tests only). */

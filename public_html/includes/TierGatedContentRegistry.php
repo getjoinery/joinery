@@ -46,10 +46,7 @@ class TierGatedContentRegistry {
         self::register('Pages', 'pag_pages', 'pag_tier_min_level', 'pag_delete_time');
         self::register('Files', 'fil_files', 'fil_tier_min_level', 'fil_delete_time');
         self::register('Videos', 'vid_videos', 'vid_tier_min_level', 'vid_delete_time');
-        // MOVED-TO-PLUGIN (phase 4): Events → event_manager serve.php. Kept here
-        // while the events tables are still core. (Products moved to the store's
-        // serve.php in phase 3.)
-        self::register('Events', 'evt_events', 'evt_tier_min_level', 'evt_delete_time');
+        // Events register from event_manager's serve.php; Products from the store's.
     }
 
     /** Clear the registry (tests only). */

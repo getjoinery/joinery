@@ -58,8 +58,15 @@ ok('zero-length / invalid ranges dropped', count(CalendarItemSourceRegistry::mer
 
 section('1.2 registry discovery');
 $sources = CalendarItemSourceRegistry::getSources();
-ok('EventItemSource discovered under key "events"', isset($sources['events']));
-ok('discovered entries implement the contract', isset($sources['events']) && $sources['events'] instanceof CalendarItemSource);
+// EventItemSource belongs to the event_manager plugin, so it is only discovered
+// when that plugin is active. With it inactive the calendar simply has no event source.
+$event_manager_active = class_exists('PluginHelper') && PluginHelper::isPluginActive('event_manager');
+if ($event_manager_active) {
+    ok('EventItemSource discovered under key "events"', isset($sources['events']));
+    ok('discovered entries implement the contract', isset($sources['events']) && $sources['events'] instanceof CalendarItemSource);
+} else {
+    ok('EventItemSource absent when event_manager inactive', !isset($sources['events']));
+}
 
 section('1.1 CalendarSubject resolution');
 $dblink = DbConnector::get_instance()->get_db_link();

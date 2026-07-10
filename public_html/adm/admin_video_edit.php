@@ -4,7 +4,6 @@
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('data/videos_class.php'));
 	require_once(PathHelper::getIncludePath('data/groups_class.php'));
-	require_once(PathHelper::getIncludePath('data/events_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);

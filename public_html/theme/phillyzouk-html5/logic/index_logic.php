@@ -4,7 +4,7 @@ function index_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
     require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
     require_once(PathHelper::getIncludePath('data/posts_class.php'));
-    require_once(PathHelper::getIncludePath('data/events_class.php'));
+    require_once(PathHelper::getIncludePath('plugins/event_manager/data/events_class.php'));
 
     $page_vars = array();
 

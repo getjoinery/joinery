@@ -210,7 +210,6 @@ class HttpRoutingTestRunner {
         // Check for actual view files that exist
         $view_files_to_check = [
             '/login' => 'Login page',
-            '/events' => 'Events page',
             '/register' => 'Register page',
         ];
 
@@ -228,7 +227,13 @@ class HttpRoutingTestRunner {
         $store_active = PluginHelper::isPluginActive('store');
         $test_cases[] = ['/products', $store_active ? 200 : 404,
             'Products page (store ' . ($store_active ? 'active' : 'inactive') . ')'];
-        
+
+        // The events listing is an event_manager-plugin route now — 200 when the
+        // plugin is active, 404 (route gated off) when it isn't.
+        $event_manager_active = PluginHelper::isPluginActive('event_manager');
+        $test_cases[] = ['/events', $event_manager_active ? 200 : 404,
+            'Events page (event_manager ' . ($event_manager_active ? 'active' : 'inactive') . ')'];
+
         // Test nonexistent root view
         $test_cases[] = ['/definitely-fake-page-12345', 404, 'Root view (does not exist)'];
         
@@ -391,10 +396,18 @@ class HttpRoutingTestRunner {
         ];
         
         foreach ($theme_views_to_check as $route => $description) {
+            // /events is an event_manager-delegated route (its view lives in the
+            // plugin, not core/theme): 200 when the plugin is active, else 404.
+            if ($route === '/events') {
+                $em = PluginHelper::isPluginActive('event_manager');
+                $test_cases[] = [$route, $em ? 200 : 404,
+                    'Events listing (event_manager ' . ($em ? 'active' : 'inactive') . ')'];
+                continue;
+            }
             // Check if theme has this view file
             $theme_view_path = PathHelper::getRootDir() . "/theme/{$current_theme}/views{$route}.php";
             $base_view_path = PathHelper::getRootDir() . "/views{$route}.php";
-            
+
             if (file_exists($theme_view_path)) {
                 $test_cases[] = [$route, 200, "{$description} (exists)"];
             } elseif (file_exists($base_view_path)) {
@@ -419,17 +432,20 @@ class HttpRoutingTestRunner {
             }
         }
         
-        // Test actual event page with real slug from database
+        // Test actual event page with real slug from database. Event pages are
+        // owned by event_manager, so they load only when that plugin is active.
         try {
-            require_once(PathHelper::getIncludePath('data/events_class.php'));
+            $event_manager_active = PluginHelper::isPluginActive('event_manager');
+            require_once(PathHelper::getIncludePath('plugins/event_manager/data/events_class.php'));
             $events = new MultiEvent(['deleted' => false], ['evt_event_id' => 'DESC'], 1);
             if ($events->count_all() > 0) {
                 $events->load();
                 $event = $events->get(0);
                 if ($event && $event->get('evt_link')) {
                     $event_url = $event->get_url();
-                    $result = HttpTester::testUrl($event_url, 200, 'Actual event from database');
-                    
+                    $expected = $event_manager_active ? 200 : 404;
+                    $result = HttpTester::testUrl($event_url, $expected, 'Actual event from database');
+
                     if ($result['success']) {
                         $this->pass("Actual event from database: {$event_url} -> {$result['actual_status']}");
                     } else {
@@ -675,16 +691,18 @@ class HttpRoutingTestRunner {
         
         $test_cases = [];
         
-        // Test real event URLs from database
+        // Test real event URLs from database. Event pages resolve only when the
+        // event_manager plugin is active; otherwise they hard-404.
         try {
-            require_once(PathHelper::getIncludePath('data/events_class.php'));
+            $event_status = PluginHelper::isPluginActive('event_manager') ? 200 : 404;
+            require_once(PathHelper::getIncludePath('plugins/event_manager/data/events_class.php'));
             $events = new MultiEvent(['deleted' => false], ['evt_event_id' => 'DESC'], 2);
             if ($events->count_all() > 0) {
                 $events->load();
                 $index = 1;
                 foreach ($events as $event) {
                     if ($event->get('evt_link')) {
-                        $test_cases[] = [$event->get_url(), 200, 'Event #' . $index . ' from database'];
+                        $test_cases[] = [$event->get_url(), $event_status, 'Event #' . $index . ' from database'];
                         $index++;
                     }
                 }

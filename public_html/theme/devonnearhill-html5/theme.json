@@ -1,7 +1,8 @@
 {
     "name": "devonnearhill-html5",
     "display_name": "Devon Near Hill HTML5",
-    "version": "1.0.1",
+    "version": "1.0.2",
+    "requires_plugins": ["event_manager"],
     "description": "Zero-dependency HTML5 version of the Devon Near Hill Tailwind theme",
     "author": "Joinery Team",
     "receives_upgrades": true,

@@ -55,12 +55,8 @@ class RecipientGroupProviderRegistry {
     public static function registerCoreDefaults(): void {
         require_once(PathHelper::getIncludePath('includes/recipient_group_providers/GroupRecipientProvider.php'));
         self::register(new GroupRecipientProvider());
-        // MOVED-TO-PLUGIN (phase 4): the event providers move to event_manager
-        // serve.php once events are a plugin. Kept here while events are core.
-        require_once(PathHelper::getIncludePath('includes/recipient_group_providers/EventRecipientProvider.php'));
-        require_once(PathHelper::getIncludePath('includes/recipient_group_providers/EventWaitingListRecipientProvider.php'));
-        self::register(new EventRecipientProvider());
-        self::register(new EventWaitingListRecipientProvider());
+        // The event + event_waiting_list providers register from event_manager's
+        // serve.php when that plugin is active.
     }
 
     /** Clear the registry (tests only). */

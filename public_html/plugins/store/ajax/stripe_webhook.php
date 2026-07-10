@@ -1,6 +1,5 @@
 <?php
 require_once(PathHelper::getIncludePath('plugins/store/includes/StripeHelper.php'));
-require_once(PathHelper::getIncludePath('data/events_class.php'));
 require_once(PathHelper::getIncludePath('plugins/store/data/orders_class.php'));
 require_once(PathHelper::getIncludePath('plugins/store/data/order_items_class.php'));
 require_once(PathHelper::getIncludePath('data/webhook_logs_class.php'));

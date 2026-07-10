@@ -46,8 +46,9 @@ class SessionAnalytic extends SystemBase {	public static $prefix = 'sev';
 	public static $field_specifications = array(
 	    'sev_session_analytic_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 	    'sev_usr_user_id' => array('type'=>'int4'),
-	    'sev_evt_event_id' => array('type'=>'int4'),
-	    'sev_evs_event_session_id' => array('type'=>'int4'),
+	    // Generic entity reference: sev_entity_type ('event' | 'event_session') +
+	    // sev_entity_id. event_manager writes these; the old sev_evt_event_id /
+	    // sev_evs_event_session_id columns fold into them at plugin activation.
 	    'sev_entity_type' => array('type'=>'varchar(32)', 'is_nullable'=>true),
 	    'sev_entity_id' => array('type'=>'int4', 'is_nullable'=>true),
 	    'sev_type' => array('type'=>'int2'),
@@ -63,7 +64,8 @@ class MultiSessionAnalytic extends SystemMultiBase {
 		$filters = [];
 
 		if (isset($this->options['session_id'])) {
-			$filters['sev_evs_event_session_id'] = [$this->options['session_id'], PDO::PARAM_INT];
+			$filters['sev_entity_type'] = "= 'event_session'";
+			$filters['sev_entity_id'] = [$this->options['session_id'], PDO::PARAM_INT];
 		}
 
 		return $this->_get_resultsv2('sev_session_analytics', $filters, $this->order_by, $only_count, $debug);

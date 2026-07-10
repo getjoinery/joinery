@@ -1,0 +1,237 @@
+<?php
+/**
+ * WeeklyEventsDigest
+ *
+ * Scheduled task that queries upcoming events for the next 7 days,
+ * builds an HTML email, and queues it through the existing bulk email pipeline.
+ *
+ * @version 1.7
+ */
+
+require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
+require_once(PathHelper::getIncludePath('plugins/event_manager/data/events_class.php'));
+require_once(PathHelper::getIncludePath('data/emails_class.php'));
+require_once(PathHelper::getIncludePath('data/email_recipients_class.php'));
+require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
+require_once(PathHelper::getIncludePath('data/mailing_list_registrants_class.php'));
+require_once(PathHelper::getIncludePath('data/users_class.php'));
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+
+class WeeklyEventsDigest implements ScheduledTaskInterface, ScheduledTaskDryRunnable {
+
+	/**
+	 * Run the weekly events digest.
+	 *
+	 * @param array $config  Task-specific configuration (expects 'mailing_list_id')
+	 * @return array  Status array with 'status' and 'message'
+	 */
+	public function run(array $config) {
+		// 1. Read mailing_list_id from config
+		$mailing_list_id = $config['mailing_list_id'] ?? null;
+		if (!$mailing_list_id) {
+			return array('status' => 'skipped', 'message' => 'Mailing list not configured');
+		}
+
+		// Verify mailing list exists
+		if (!MailingList::check_if_exists($mailing_list_id)) {
+			return array('status' => 'skipped', 'message' => 'Mailing list ID ' . $mailing_list_id . ' not found');
+		}
+
+		$mailing_list = new MailingList($mailing_list_id, true);
+
+		// Build the digest HTML
+		$build = $this->buildDigestHtml();
+		if ($build['status'] !== 'success') {
+			return $build;
+		}
+
+		$html = $build['html'];
+		$event_count = $build['event_count'];
+
+		// Create Email record
+		$email = new Email(null);
+		$email->set('eml_subject', 'Upcoming Events This Week');
+		$email->set('eml_message_html', $html);
+		$email->set('eml_message_template_html', 'blank_template');
+		$email->set('eml_status', Email::EMAIL_QUEUED);
+		$email->set('eml_type', Email::TYPE_MARKETING);
+		$email->set('eml_mlt_mailing_list_id', $mailing_list_id);
+		$email->set('eml_scheduled_time', 'now()');
+		$email->save();
+
+		// Populate EmailRecipient records from mailing list subscribers
+		$subscribers = $mailing_list->get_subscribed_users('object');
+		$recipient_count = 0;
+
+		foreach ($subscribers as $user) {
+			$user_email = $user->get('usr_email');
+			if (!$user_email) {
+				continue;
+			}
+
+			$recipient = new EmailRecipient(null);
+			$recipient->set('erc_eml_email_id', $email->key);
+			$recipient->set('erc_usr_user_id', $user->key);
+			$recipient->set('erc_email', $user_email);
+			$recipient->set('erc_name', $user->get('usr_first_name') . ' ' . $user->get('usr_last_name'));
+			$recipient->save();
+			$recipient_count++;
+		}
+
+		if ($recipient_count === 0) {
+			// No recipients - clean up the email record
+			$email->permanent_delete();
+			return array('status' => 'skipped', 'message' => 'Mailing list has no subscribers with email addresses');
+		}
+
+		return array('status' => 'success', 'message' => 'Queued digest with ' . $event_count . ' event(s) to ' . $recipient_count . ' recipient(s)');
+	}
+
+	/**
+	 * Dry run: build and return the digest HTML without sending.
+	 *
+	 * @param array $config  Task-specific configuration (expects 'mailing_list_id')
+	 * @return array  Array with 'status', 'message', and 'html'
+	 */
+	public function dryRun(array $config) {
+		$mailing_list_id = $config['mailing_list_id'] ?? null;
+
+		// Build the digest HTML
+		$build = $this->buildDigestHtml();
+		if ($build['status'] !== 'success') {
+			return $build;
+		}
+
+		// Count recipients without creating records
+		$recipient_count = 0;
+		if ($mailing_list_id && MailingList::check_if_exists($mailing_list_id)) {
+			$mailing_list = new MailingList($mailing_list_id, true);
+			$subscribers = $mailing_list->get_subscribed_users('object');
+			foreach ($subscribers as $user) {
+				if ($user->get('usr_email')) {
+					$recipient_count++;
+				}
+			}
+		}
+
+		return array(
+			'status' => 'success',
+			'message' => 'Would send ' . $build['event_count'] . ' event(s) to ' . $recipient_count . ' recipient(s)',
+			'html' => $build['html'],
+		);
+	}
+
+	/**
+	 * Build the digest HTML from upcoming events. No side effects.
+	 *
+	 * @return array  'status', 'message', 'html', 'event_count'
+	 */
+	private function buildDigestHtml() {
+		$settings = Globalvars::get_instance();
+		$site_tz_string = $settings->get_setting('default_timezone');
+		if (!$site_tz_string) {
+			$site_tz_string = 'America/New_York';
+		}
+
+		$range_end = date('Y-m-d', strtotime('+7 days'));
+		$all_events = MultiEvent::getWithRepeatingEvents(
+			['upcoming' => true, 'deleted' => false, 'status_not_cancelled' => true, 'visibility' => 1],
+			$range_end
+		);
+
+		// Filter to events starting within the next 7 days
+		$utc_tz = new DateTimeZone('UTC');
+		$cutoff = new DateTime('+7 days', $utc_tz);
+		$upcoming_events = [];
+		foreach ($all_events as $event) {
+			$is_virtual = is_object($event) && isset($event->is_virtual) && $event->is_virtual;
+			$start_raw = $is_virtual ? $event->evt_start_time : $event->get('evt_start_time');
+			if (!$start_raw) continue;
+			$event_start = new DateTime($start_raw, $utc_tz);
+			if ($event_start <= $cutoff) {
+				$upcoming_events[] = $event;
+			}
+		}
+
+		if (empty($upcoming_events)) {
+			return array('status' => 'success', 'message' => 'No upcoming events in the next 7 days', 'html' => '', 'event_count' => 0);
+		}
+
+		// Build HTML for each event
+		$site_url = LibraryFunctions::get_absolute_url('');
+		$event_blocks = array();
+
+		foreach ($upcoming_events as $event) {
+			$is_virtual = is_object($event) && isset($event->is_virtual) && $event->is_virtual;
+
+			$name = htmlspecialchars($is_virtual ? $event->evt_name : $event->get('evt_name'));
+
+			if ($is_virtual) {
+				$event_url = $site_url . '/event/' . ($event->evt_link ?: $event->parent_event_id);
+			} else {
+				$event_url = $event->get_url('full');
+			}
+
+			// Format date/time in site timezone
+			if ($is_virtual) {
+				$start_raw = $event->evt_start_time;
+				$date_time = LibraryFunctions::convert_time($start_raw, 'UTC', $site_tz_string, 'D, M j, g:i a T');
+				if ($event->evt_end_time) {
+					$end_time = LibraryFunctions::convert_time($event->evt_end_time, 'UTC', $site_tz_string, 'g:i a');
+					$end_day = LibraryFunctions::convert_time($event->evt_end_time, 'UTC', $site_tz_string, 'D, M j,');
+					$start_day = LibraryFunctions::convert_time($start_raw, 'UTC', $site_tz_string, 'D, M j,');
+					if ($start_day == $end_day) {
+						$date_time = LibraryFunctions::convert_time($start_raw, 'UTC', $site_tz_string, 'D, M j, g:i a')
+							. ' - ' . $end_time . ' '
+							. LibraryFunctions::convert_time($start_raw, 'UTC', $site_tz_string, 'T');
+					}
+				}
+			} else {
+				$date_time = $event->get_time_string($site_tz_string);
+			}
+
+			// Prefer Location object address over evt_location text field
+			$location = '';
+			$loc_id = $is_virtual ? ($event->evt_loc_location_id ?? null) : $event->get('evt_loc_location_id');
+			if ($loc_id) {
+				require_once(PathHelper::getIncludePath('plugins/event_manager/data/locations_class.php'));
+				if (Location::check_if_exists($loc_id)) {
+					$loc_obj = new Location($loc_id, TRUE);
+					$location = $loc_obj->get('loc_name');
+					if ($loc_obj->get('loc_address')) {
+						$location .= ' — ' . $loc_obj->get('loc_address');
+					}
+				}
+			}
+			if (!$location) {
+				$location = $is_virtual ? ($event->evt_location ?? '') : $event->get('evt_location');
+			}
+			$short_desc = $is_virtual ? ($event->evt_short_description ?? '') : $event->get('evt_short_description');
+
+			$block = '<div style="margin-bottom: 20px; padding: 15px; border: 1px solid #e0e0e0; border-radius: 4px;">';
+			$block .= '<h3 style="margin: 0 0 8px 0;"><a href="' . htmlspecialchars($event_url) . '" style="color: #2563eb; text-decoration: none;">' . $name . '</a></h3>';
+			$block .= '<p style="margin: 0 0 4px 0; color: #555;">' . htmlspecialchars($date_time) . '</p>';
+
+			if ($location) {
+				$block .= '<p style="margin: 0 0 4px 0; color: #555;">' . htmlspecialchars($location) . '</p>';
+			}
+
+			if ($short_desc) {
+				$block .= '<p style="margin: 8px 0 0 0;">' . htmlspecialchars($short_desc) . '</p>';
+			}
+
+			$block .= '</div>';
+			$event_blocks[] = $block;
+		}
+
+		$event_count = count($upcoming_events);
+		$html = '<h2 style="margin-bottom: 16px;">Upcoming Events This Week</h2>';
+		$html .= '<p style="margin-bottom: 20px;">Here are the upcoming events for the next 7 days:</p>';
+		$html .= implode('', $event_blocks);
+		$html .= '<div style="text-align: center; margin-top: 24px;">';
+		$html .= '<a href="' . htmlspecialchars($site_url) . '/events" style="display: inline-block; padding: 12px 24px; background-color: #2563eb; color: #ffffff; text-decoration: none; border-radius: 4px; font-weight: bold;">View All Events</a>';
+		$html .= '</div>';
+
+		return array('status' => 'success', 'message' => '', 'html' => $html, 'event_count' => $event_count);
+	}
+}

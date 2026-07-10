@@ -37,24 +37,9 @@ class MessageContextRegistry {
 
     /** Register core-owned context resolvers. */
     public static function registerCoreDefaults(): void {
-        // MOVED-TO-PLUGIN (phase 4): the `event` resolver moves to
-        // event_manager serve.php once events are a plugin. Kept here while the
-        // events table is still core so message context still resolves.
-        self::register('event', function (int $id): ?array {
-            require_once(PathHelper::getIncludePath('data/events_class.php'));
-            try {
-                $event = new Event($id, TRUE);
-            } catch (\Throwable $e) {
-                return null;
-            }
-            if (!$event->key) {
-                return null;
-            }
-            return [
-                'label' => '(' . $event->key . ') ' . $event->get('evt_name'),
-                'url'   => '/admin/admin_event?evt_event_id=' . $event->key,
-            ];
-        });
+        // No core context resolvers. The `event` resolver registers from
+        // event_manager's serve.php; with that plugin absent, an event-context
+        // message renders as plain "event #id" text.
     }
 
     /** Clear the registry (tests only). */

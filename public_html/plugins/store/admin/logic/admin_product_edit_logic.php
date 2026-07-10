@@ -11,7 +11,6 @@ function admin_product_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('/plugins/store/data/product_requirements_class.php'));
 	require_once(PathHelper::getIncludePath('/plugins/store/data/product_requirement_instances_class.php'));
 	require_once(PathHelper::getIncludePath('/plugins/store/data/order_items_class.php'));
-	require_once(PathHelper::getIncludePath('/data/events_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
@@ -217,17 +216,6 @@ function admin_product_edit_logic(array $input): LogicResult {
 		$breadcrumb = 'New Product';
 	}
 
-	// Load events for dropdown
-	$events = new MultiEvent(
-		array('deleted'=>false, 'past'=>false),
-		NULL,
-		NULL,
-		NULL);
-	$numevents = $events->count_all();
-	if($numevents){
-		$events->load();
-	}
-
 	// Load groups (bundles) for dropdown
 	$groups = new MultiGroup(
 		array('category'=>'event'),
@@ -291,8 +279,6 @@ function admin_product_edit_logic(array $input): LogicResult {
 		'breadcrumb' => $breadcrumb,
 		'currency_code' => $currency_code,
 		'currency_symbol' => $currency_symbol,
-		'events' => $events,
-		'numevents' => $numevents,
 		'groups' => $groups,
 		'numbundles' => $numbundles,
 		'subscription_tiers' => $subscription_tiers,

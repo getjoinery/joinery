@@ -1,0 +1,80 @@
+- generic [active] [ref=f84e1]:
+  - generic [ref=f84e2]:
+    - generic [ref=f84e3]:
+      - generic [ref=f84e4]: J
+      - link "Joinery Test" [ref=f84e5] [cursor=pointer]:
+        - /url: /
+      - generic [ref=f84e6]: + New
+    - generic [ref=f84e8]:
+      - generic [ref=f84e9]: "Theme: getjoinery ▼"
+      - link "Dashboard" [ref=f84e11] [cursor=pointer]:
+        - /url: /admin/admin_users
+      - generic [ref=f84e12]: Unnamed User (10)
+  - navigation [ref=f84e13]:
+    - generic [ref=f84e14]:
+      - link "Joinery" [ref=f84e15] [cursor=pointer]:
+        - /url: /
+      - generic [ref=f84e16]:
+        - link "Features" [ref=f84e17] [cursor=pointer]:
+          - /url: /features
+        - link "Pricing" [ref=f84e18] [cursor=pointer]:
+          - /url: /pricing
+        - button "Developers" [ref=f84e20] [cursor=pointer]
+        - link "Showcase" [ref=f84e23] [cursor=pointer]:
+          - /url: /showcase
+        - link "Philosophy" [ref=f84e24] [cursor=pointer]:
+          - /url: /philosophy
+        - link "About" [ref=f84e25] [cursor=pointer]:
+          - /url: /about
+  - generic [ref=f84e26]:
+    - generic [ref=f84e29]:
+      - heading "Test single product" [level=1] [ref=f84e31]
+      - navigation "breadcrumb" [ref=f84e32]:
+        - list [ref=f84e33]:
+          - listitem [ref=f84e34]:
+            - link "Home" [ref=f84e35] [cursor=pointer]:
+              - /url: /
+          - listitem [ref=f84e36]:
+            - text: /
+            - link "Products" [ref=f84e37] [cursor=pointer]:
+              - /url: /products
+          - listitem [ref=f84e38]: / Test single product
+    - generic [ref=f84e41]:
+      - generic [ref=f84e42]:
+        - generic [ref=f84e43]: 🛒
+        - generic [ref=f84e45]: $5.00
+        - paragraph [ref=f84e48]: Test single productTest single productTest single productTest single productTest single productTest single product
+      - generic [ref=f84e49]:
+        - generic [ref=f84e50]:
+          - generic [ref=f84e51]:
+            - generic [ref=f84e52]: Short test questionb
+            - textbox "Short test questionb" [ref=f84e53]
+          - button "Add to Cart" [ref=f84e55] [cursor=pointer]
+        - link "← Back to Products" [ref=f84e57] [cursor=pointer]:
+          - /url: /products
+  - contentinfo [ref=f84e58]:
+    - generic [ref=f84e59]:
+      - generic [ref=f84e60]:
+        - link "Features" [ref=f84e61] [cursor=pointer]:
+          - /url: /features
+        - link "Pricing" [ref=f84e62] [cursor=pointer]:
+          - /url: /pricing
+        - link "Developers" [ref=f84e63] [cursor=pointer]:
+          - /url: /developers
+        - link "Showcase" [ref=f84e64] [cursor=pointer]:
+          - /url: /showcase
+        - link "Philosophy" [ref=f84e65] [cursor=pointer]:
+          - /url: /philosophy
+        - link "About" [ref=f84e66] [cursor=pointer]:
+          - /url: /about
+        - link "Docs" [ref=f84e67] [cursor=pointer]:
+          - /url: /documentation
+        - link "GitHub" [ref=f84e68] [cursor=pointer]:
+          - /url: https://github.com/getjoinery/joinery
+      - generic [ref=f84e69]: © 2026 Joinery. All rights reserved.
+  - dialog "Cookie consent" [ref=f84e70]:
+    - paragraph [ref=f84e71]: We use cookies to improve your experience and analyze site traffic.
+    - generic [ref=f84e72]:
+      - button "Accept All" [ref=f84e73] [cursor=pointer]
+      - button "Reject All" [ref=f84e74] [cursor=pointer]
+      - button "Manage" [ref=f84e75] [cursor=pointer]

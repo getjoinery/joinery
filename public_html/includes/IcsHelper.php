@@ -206,8 +206,8 @@ class IcsHelper {
 		if ($location_id && !class_exists('Location')) {
 			if (PluginHelper::isPluginActive('event_manager')) {
 				require_once(PathHelper::getThemeFilePath('locations_class.php', 'data', 'system', null, 'event_manager', false));
-			} elseif (file_exists(PathHelper::getIncludePath('data/locations_class.php'))) {
-				require_once(PathHelper::getIncludePath('data/locations_class.php'));
+			} elseif (file_exists(PathHelper::getIncludePath('plugins/event_manager/data/locations_class.php'))) {
+				require_once(PathHelper::getIncludePath('plugins/event_manager/data/locations_class.php'));
 			}
 		}
 		if ($location_id && class_exists('Location')) {
