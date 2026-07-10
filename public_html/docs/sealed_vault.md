@@ -256,10 +256,14 @@ provides only the hook.
 `logic/vault_rotate_options_logic.php` / `vault_rotate_verify_logic.php`: a
 fresh PRF assertion from an already-enrolled passkey both proves possession
 (unwrapping the current secret) and supplies a KEK the ceremony can act on
-immediately. The authorizing wrapping is the presented credential's
-**lowest-generation** live wrapping — after a partial failure both
-generations' wrappings are live, and a retry must unwrap the oldest secret,
-the one still holding un-resealed content. From there, in crash-safety order:
+immediately. (The ceremony bodies for setup, rotation, and the
+recovery/passphrase unlocks live in `includes/VaultCeremonies.php` — the
+logic files are shells owning gates and WebAuthn; the cores are driven by
+tests with synthetic KEKs.) The authorizing wrapping is the presented
+credential's **lowest-generation** live wrapping — after a partial failure
+both generations' wrappings are live, and a retry must unwrap the oldest
+secret, the one still holding un-resealed content. From there, in
+crash-safety order:
 
 1. Generate a new keypair and salt; compute `new_key_generation` (`uev_key_generation + 1`);
    note `old_key_generation` (the authorizing wrapping's generation).
@@ -286,11 +290,23 @@ the one still holding un-resealed content. From there, in crash-safety order:
 A crash or callback failure at any point up through step 3 leaves both
 generations' wrappings live and both secrets recoverable — old wrappings
 still unwrap the old secret, and each wrapping's own `uew_key_generation`
-says which secret it belongs to. This is the resumability guarantee expressed
-as an ordering constraint, not a resume endpoint; a consumer's re-seal
-callback is idempotent because it selects by per-item generation — a retry
-after a partial crash skips items already flipped rather than re-sealing them
-again.
+says which secret it belongs to (recovery/passphrase wrappings also carry
+their own `uew_salt`, so they stay derivable after the vault row's salt has
+moved on).
+
+**Re-running the rotation completes it rather than repeating it.** When the
+authorizing wrapping's generation is BELOW the vault row's — the signature of
+an interrupted rotation — the ceremony runs in completion mode: no new
+keypair, no new wrappings, no salt change. It drains the old generation to
+the vault's existing current key and retires it, converging to a single live
+generation. (Minting a fresh generation on every retry would instead leave
+the vault permanently split across two generations — each pass retiring one
+and creating another — with every unlock able to read only half the
+content.) The completion response carries `completed_pending = true`, no
+recovery codes (the current generation's were minted by the interrupted
+attempt and never shown), and `regenerate_recommended = true`. Enrollment
+ceremonies refuse while two generations are live, so completion is the one
+road out of the interrupted state.
 
 **Every wrapping not re-derivable during this same request is invalidated**,
 not left dangling — a KEK for another enrolled passkey can only come from
@@ -357,6 +373,15 @@ enforcement — the options-side check is only an earlier, friendlier rejection
 for the common case). Passkey-as-step-up and passkey-as-vault-unlock remain
 available on every account regardless of vault status — only passwordless
 sign-in is withdrawn.
+
+## Tests
+
+The vault test estate lives in `tests/vault/` (crypto refusals, the unlock
+window, ceremony state machines, rotation crash-injection) plus
+`plugins/mailbox/tests/mailbox_reseal_test.php` (the consumer contract
+against real rows); shared fixtures in `tests/lib/vault_fixtures.php`. The
+window suite exercises APCu and skips under plain CLI — run it directly with
+`php -d apc.enable_cli=1 tests/vault/vault_unlock_window_test.php`.
 
 ## Settings
 

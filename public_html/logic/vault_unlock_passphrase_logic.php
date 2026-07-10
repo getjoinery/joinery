@@ -4,10 +4,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 function vault_unlock_passphrase_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
-	require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
-	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
-	require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
-	require_once(PathHelper::getIncludePath('data/user_encryption_wrappings_class.php'));
+	require_once(PathHelper::getIncludePath('includes/VaultCeremonies.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 	$settings = Globalvars::get_instance();
@@ -29,42 +26,13 @@ function vault_unlock_passphrase_logic(array $input): LogicResult {
 	}
 
 	$passphrase = isset($input['passphrase']) ? (string)$input['passphrase'] : '';
-	if ($passphrase === '') {
-		return LogicResult::error('Enter your vault passphrase.');
-	}
 
-	$wrappings = new MultiUserEncryptionWrapping(['vault_id' => $vault->key, 'unlocker_type' => UserEncryptionWrapping::TYPE_PASSPHRASE]);
-	$wrappings->load();
-	if ($wrappings->count() === 0) {
-		return LogicResult::error('No vault passphrase is enrolled.');
-	}
-
-	$box = new SealedBox();
-
-	// Each wrapping records the salt its KEK was derived under (a rotation
-	// replaces uev_salt). The passphrase KDF is deliberately expensive, so
-	// derive once per distinct salt — normally exactly one derivation.
-	$keks = [];
-	$secret_key = null;
-	foreach ($wrappings as $wrapping) {
-		$salt = (string)$wrapping->get('uew_salt');
-		if ($salt === '') {
-			$salt = (string)$vault->get('uev_salt'); // legacy row predating uew_salt
-		}
-		if (!isset($keks[$salt])) {
-			$keks[$salt] = $box->kekFromPassphrase($passphrase, $salt);
-		}
-		try {
-			$ad = UserEncryptionWrapping::adFor($vault->key, $wrapping->key);
-			$secret_key = $box->unwrapKey($wrapping->get('uew_wrapped_secret_key'), $keks[$salt], $ad);
-			break;
-		} catch (Exception $e) {
-			continue;
-		}
-	}
-	if ($secret_key === null) {
+	try {
+		$ceremonies = new VaultCeremonies();
+		$secret_key = $ceremonies->unlockWithPassphrase($user, $vault, $passphrase);
+	} catch (VaultCeremonyException $e) {
 		RequestLogger::log('vault_unlock_passphrase', 'verify', false, ['user_id' => $user->key]);
-		return LogicResult::error('Incorrect vault passphrase.');
+		return LogicResult::error($e->getMessage());
 	}
 
 	VaultUnlock::open($user->key, $secret_key, UserEncryptionVault::SCOPE_USER);

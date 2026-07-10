@@ -164,8 +164,8 @@ class VaultUnlock {
 	}
 
 	public static function isOpen(int $user_id, string $scope = 'user'): bool {
-		$sid = self::currentSessionId();
-		if (!apcu_exists(self::apcuKey($sid, $user_id, $scope))) {
+		$sid = self::currentSessionIdOrNull();
+		if ($sid === null || !apcu_exists(self::apcuKey($sid, $user_id, $scope))) {
 			return false;
 		}
 		return !self::endedByPolicy($sid, $user_id, $scope);
@@ -178,7 +178,10 @@ class VaultUnlock {
 	 * content-decrypt time the Fortress idle cap measures from.
 	 */
 	public static function secretKey(int $user_id, string $scope = 'user'): ?string {
-		$sid = self::currentSessionId();
+		$sid = self::currentSessionIdOrNull();
+		if ($sid === null) {
+			return null; // no session (a CLI/cron reader) can never hold a window - locked, not an error
+		}
 		$key = self::apcuKey($sid, $user_id, $scope);
 		$value = apcu_fetch($key, $success);
 		if (!$success) {
@@ -200,8 +203,8 @@ class VaultUnlock {
 	 * Returns false when there is no window to beat (so the client stops).
 	 */
 	public static function heartbeat(int $user_id, string $scope = 'user'): bool {
-		$sid = self::currentSessionId();
-		if (!apcu_exists(self::apcuKey($sid, $user_id, $scope))) {
+		$sid = self::currentSessionIdOrNull();
+		if ($sid === null || !apcu_exists(self::apcuKey($sid, $user_id, $scope))) {
 			return false;
 		}
 		if (self::endedByPolicy($sid, $user_id, $scope)) {
@@ -273,7 +276,10 @@ class VaultUnlock {
 
 	/** Wipe every scope's window, across every session, for a user (e.g. on password change). */
 	public static function lockAll(int $user_id): void {
-		if (class_exists('APCUIterator')) {
+		// APCUIterator's constructor THROWS where APCu is disabled (a CLI
+		// process without apc.enable_cli) — and a disabled store holds no
+		// windows to wipe, so skipping it is correct, not lossy.
+		if (class_exists('APCUIterator') && function_exists('apcu_enabled') && apcu_enabled()) {
 			// Both the window keys (vault:) and their metadata (vaultmeta:).
 			$pattern = '/^vault(?:meta)?:[^:]*:' . preg_quote((string)$user_id, '/') . ':[^:]*$/';
 			foreach (new APCUIterator($pattern) as $entry) {
@@ -497,12 +503,19 @@ class VaultUnlock {
 
 	/** Ensures the session exists (SessionControl starts an anonymous one pre-login). */
 	private static function currentSessionId(): string {
-		SessionControl::get_instance();
-		$session_id = session_id();
-		if (!$session_id) {
+		$session_id = self::currentSessionIdOrNull();
+		if ($session_id === null) {
 			throw new RuntimeException('VaultUnlock: a browser session is required.');
 		}
 		return $session_id;
+	}
+
+	/** The session id, or null where none exists (a CLI/cron process). Readers
+	 *  treat null as locked; only open() demands a real session. */
+	private static function currentSessionIdOrNull(): ?string {
+		SessionControl::get_instance();
+		$session_id = session_id();
+		return $session_id ?: null;
 	}
 }
 ?>
