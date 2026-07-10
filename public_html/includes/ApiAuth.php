@@ -38,7 +38,11 @@
  * The user role axis (usr_permission) is a simple floor (e.g. management = 10).
  * See specs/implemented/api_auth_gate_unification.md for the equivalence table.
  *
- * @version 1.1.0
+ * @version 1.2.0
+ * @changelog 1.2.0 - Anonymous browser-session principal: a session cookie with
+ *   a valid X-Joinery-Csrf proof but no logged-in user authenticates as an
+ *   anonymous principal (api_user === null). authorize() denies it 401 unless
+ *   the contract declares allow_guest; apiv1.php confines it to action dispatch.
  * @changelog 1.1.0 - Browser-session credential: a logged-in web session cookie
  *   plus a matching X-Joinery-Csrf header authenticates as that user when no
  *   key headers are present. Keys take precedence; the management API's
@@ -156,22 +160,32 @@ class ApiAuth {
 	/**
 	 * Authenticate a keyless request from its web session: session cookie plus
 	 * an X-Joinery-Csrf header matching the session's API CSRF token (minted at
-	 * page render — see SessionControl::get_api_csrf_token()). On success the
-	 * principal has api_entry === null; identity and permission come from the
-	 * session exactly as web pages see them (so login-as and the IP-change
-	 * guard behave identically to the web surface).
+	 * session construction — see SessionControl::get_api_csrf_token()). On
+	 * success the principal has api_entry === null; identity and permission
+	 * come from the session exactly as web pages see them (so login-as and the
+	 * IP-change guard behave identically to the web surface).
+	 *
+	 * A session with a valid CSRF proof but no logged-in user authenticates as
+	 * the ANONYMOUS principal (api_user === null): the proof establishes
+	 * "same-origin JS running in this visitor's browser", nothing more.
+	 * authorize() denies anonymous principals everywhere an action does not
+	 * declare allow_guest, and apiv1.php blocks them from every route family
+	 * except action dispatch.
 	 *
 	 * The API only ever READS session state: the session file lock is released
 	 * via session_write_close() as soon as identity is read, so parallel page
-	 * JS calls are not serialized and nothing an action does can mutate the
-	 * web session ($_SESSION writes after close are per-request memory only).
+	 * JS calls are not serialized. Actions that must persist $_SESSION writes
+	 * (e.g. the cart) declare auth.session_write, which re-opens the session
+	 * in ApiLogicEndpoint::executeAction() — see SessionControl::reopen().
 	 *
-	 * Failure shapes: a request with no session cookie fails exactly as a
-	 * keyless request always has (400, no oracle for whether sessions are
-	 * accepted); a logged-in session with a missing/wrong token is 403.
+	 * Failure shapes: a request with no session cookie — or a session with
+	 * neither user nor CSRF header — fails exactly as a keyless request always
+	 * has (400, no oracle for whether sessions are accepted); a session
+	 * presenting a wrong/missing token where one was expected is 403.
 	 *
 	 * @param array $headers Lowercased-underscore header map (x_joinery_csrf).
-	 * @return array Same principal shape as authenticate(), api_entry = null.
+	 * @return array Same principal shape as authenticate(), api_entry = null;
+	 *               api_user is null for the anonymous principal.
 	 */
 	private static function authenticateBrowserSession(array $headers) {
 		// No session cookie → plain anonymous keyless request; fail as always.
@@ -187,14 +201,34 @@ class ApiAuth {
 		$session_permission = $session->get_permission();
 		session_write_close();
 
-		if (!$user_id) {
-			// Stale/anonymous session cookie — same shape as no credential at all.
+		$csrf_header = isset($headers['x_joinery_csrf']) ? (string) $headers['x_joinery_csrf'] : '';
+
+		if (!$user_id && $csrf_header === '') {
+			// Stale/anonymous session cookie with no CSRF attempt — same shape
+			// as no credential at all.
 			self::auth_failure(400, 'Browser session not logged in', 'Public/secret keys not present');
 		}
 
-		$csrf_header = isset($headers['x_joinery_csrf']) ? (string) $headers['x_joinery_csrf'] : '';
 		if (!$session_token || $csrf_header === '' || !hash_equals($session_token, $csrf_header)) {
 			self::auth_failure(403, 'Browser session CSRF token missing or invalid', 'Invalid or missing X-Joinery-Csrf token');
+		}
+
+		if (!$user_id) {
+			// Anonymous principal: valid same-origin proof, no user. Carries no
+			// identity and no permission; allow_guest actions are its entire
+			// reachable surface. Permission is null, not 0 — null is the one
+			// anonymity signal (authorize() keys on it), so the guest can never
+			// be mistaken for an authenticated permission-0 user by anything
+			// that consumes auth_data.
+			RequestLogger::set_api_key_type('guest');
+			return array(
+				'api_entry' => null,
+				'api_user'  => null,
+				'auth_data' => array(
+					'current_user_id'         => null,
+					'current_user_permission' => null,
+				),
+			);
 		}
 
 		try {
@@ -253,13 +287,28 @@ class ApiAuth {
 	 *                                (e.g. a Sealed Vault unlock window keyed to the
 	 *                                session id) so the boundary is declared, not
 	 *                                left to incidental session-plumbing behavior.
+	 *   'allow_guest'             => bool (default false) — accept the anonymous
+	 *                                browser-session principal (valid CSRF proof,
+	 *                                no logged-in user). Without this flag an
+	 *                                anonymous principal is denied 401 before any
+	 *                                other check, so every contract that does not
+	 *                                opt in stays guest-free with no audit needed.
 	 *   'min_user_permission'     => int  (default 0)
 	 * @param ApiKey $api_entry       The authenticated key.
-	 * @param int    $user_permission The owning user's usr_permission.
+	 * @param int|null $user_permission The owning user's usr_permission, or null
+	 *                                for the anonymous browser-session principal
+	 *                                (null is the anonymity signal — never pass
+	 *                                null for a real user).
 	 * @param string $message_prefix  Surface label for the 403 body.
 	 * @return void Returns when authorized; otherwise exits.
 	 */
 	public static function authorize(array $auth, $api_entry, $user_permission, $message_prefix = 'Endpoint') {
+		// Anonymous gate first — fails closed before every other check. The
+		// 401 body matches the missing-credential shape: no oracle separating
+		// "this action exists but needs login" from "no credential presented".
+		if ($user_permission === null && empty($auth['allow_guest'])) {
+			api_error($message_prefix . ' requires authentication', 'AuthenticationError', 401);
+		}
 		// Machine-key gate first — fails closed before any finer-grained check.
 		// Null-safe: a missing key is, by definition, not a machine key.
 		if (!empty($auth['requires_machine_key'])

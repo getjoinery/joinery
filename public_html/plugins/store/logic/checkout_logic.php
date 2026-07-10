@@ -235,35 +235,6 @@ function checkout_logic(array $input): LogicResult{
 	return LogicResult::render($page_vars);
 }
 
-/**
- * Validate a single checkout section. Used by checkout_ajax.php.
- */
-function validate_checkout_section($section, $data) {
-	$errors = array();
-
-	switch ($section) {
-		case 'contact':
-			if (empty($data['email']) || !filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
-				$errors['email'] = 'Please enter a valid email address.';
-			}
-			break;
-
-		case 'billing':
-			if (empty($data['billing_first_name'])) {
-				$errors['billing_first_name'] = 'First name is required.';
-			}
-			if (empty($data['billing_last_name'])) {
-				$errors['billing_last_name'] = 'Last name is required.';
-			}
-			if (empty($data['billing_email']) || !filter_var($data['billing_email'], FILTER_VALIDATE_EMAIL)) {
-				$errors['billing_email'] = 'A valid email address is required.';
-			}
-			break;
-	}
-
-	return $errors;
-}
-
 function checkout_logic_api() {
     return [
         'requires_session' => true,

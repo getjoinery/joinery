@@ -152,10 +152,15 @@ A password change revokes **all** of the user's session keys (the lost-phone pat
 
 ### Browser sessions (page JavaScript)
 
-Page JavaScript calls `/api/v1` with the web session it already has — no key provisioning. The server prints a session-wide CSRF token into every page for signed-in users; JS reads it and sends it back as a header:
+Page JavaScript calls `/api/v1` with the web session it already has — no key provisioning. The session's CSRF token reaches the page two ways: a `<meta name="joinery-api-csrf">` tag on signed-in pages, and the `joinery_api_csrf` mirror cookie on every response (signed-in or not). The cookie exists because anonymous pages can be served from the static page cache — shared HTML that must never embed a per-visitor token — while cookies are per-visitor regardless of how the HTML was produced. Validation always compares the header against the raw session value; the cookie is distribution, never the trust anchor. JS reads whichever is available:
 
 ```js
-const csrf = document.querySelector('meta[name="joinery-api-csrf"]').content;
+// Cookie first: it tracks the CURRENT session (resynced on every response,
+// including after a logout in another tab); the meta tag is frozen at page
+// render and serves only as the cookie-less fallback.
+const cookie = document.cookie.match(/(?:^|; )joinery_api_csrf=([^;]+)/);
+const meta = document.querySelector('meta[name="joinery-api-csrf"]');
+const csrf = (cookie ? decodeURIComponent(cookie[1]) : '') || (meta && meta.content) || '';
 const r = await fetch('/api/v1/action/contact_preferences', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': csrf },
@@ -163,9 +168,11 @@ const r = await fetch('/api/v1/action/contact_preferences', {
 });
 ```
 
-The cookie proves who the user is; the header proves the call came from our own page (an attacker's page cannot read the meta tag). Missing or wrong token → 403 even with a valid cookie. The token is session-wide and distinct from FormWriter's per-form CSRF tokens.
+The session cookie proves who the visitor is; the header proves the call came from our own page (an attacker's page can read neither the meta tag nor the cookie). Missing or wrong token → 403 even with a valid cookie. The token is session-wide and distinct from FormWriter's per-form CSRF tokens.
 
-Mechanics worth knowing: the API only ever *reads* the session (the session lock is released as soon as identity is resolved, so parallel page JS calls do not serialize, and nothing an action does can mutate the web session); browser-session requests carry no `client_app` headers, so client version minimums never apply to them; requests without any credential fail exactly as key-less requests always have.
+**Guests (the anonymous principal).** A session with a valid CSRF proof but no signed-in user authenticates as the *anonymous principal*: same-origin page JS, no identity. It is denied 401 everywhere except actions whose descriptor declares `allow_guest` (see [Metadata contract](#metadata-contract)) — every other route family (CRUD, forms, auth, app, management) refuses it outright. This is how session-state pages like guest checkout call the API: the logic runs without session simulation and sees the visitor's natural session, where state like the cart lives. Guest requests have no idempotency scope, so an `Idempotency-Key` header is ignored for them.
+
+Mechanics worth knowing: the API *reads* the session and releases the session lock as soon as identity is resolved, so parallel page JS calls do not serialize; an action that must persist `$_SESSION` writes (the cart) declares `session_write` in its `auth` block, which re-opens the session for that action only. Browser-session requests carry no `client_app` headers, so client version minimums never apply to them; requests without any credential fail exactly as key-less requests always have.
 
 **Forward rule:** new features expose their logic as API actions (`_logic_descriptor()` opt-in) and page JavaScript calls `/api/v1` with this credential. `/ajax/` is legacy — no new endpoints there; existing ones migrate opportunistically when touched.
 
@@ -289,6 +296,8 @@ function catalog_logic_descriptor(): array {
             'requires_session'         => true,    // run under session simulation as the key's user
             'requires_machine_key'     => false,   // require apk_type = machine
             'requires_browser_session' => false,   // inverse of machine_key: refuse ALL API keys, browser-session credential only
+            'allow_guest'              => false,   // accept the anonymous browser principal (valid CSRF, no signed-in user)
+            'session_write'            => false,   // re-open the session so the action's $_SESSION writes persist (browser credential only)
             'min_user_permission'      => 0,       // usr_permission floor
         ],
     ];
@@ -305,6 +314,8 @@ Resolution order for each field: explicit `auth` value → router default → `A
 | Management (`/api/v1/management/*`) | `requires_machine_key: true, min_user_permission: 10` (no `apk_permission` check) |
 
 `requires_machine_key` and `requires_browser_session` are mutually exclusive opposites: the first admits only machine keys, the second refuses every API key so the action is reachable only through the browser-session credential (session cookie + CSRF; native apps ride the same bridge). Session-bound operations whose state is keyed to the session id — Sealed Vault and passkey management — set `requires_browser_session` so the boundary is declared, not left to incidental session-plumbing behavior.
+
+`allow_guest` admits the anonymous browser principal (see [Browser sessions](#browser-sessions-page-javascript)); without it, `ApiAuth::authorize()` denies anonymous callers 401 before any other check, so contracts that never think about guests stay guest-free. Guest-reachable actions whose state lives in the web session (the cart) pair it with `requires_browser_session` — an API key has no session to act on — and with `session_write` when they mutate that state, since the browser credential otherwise releases the session lock after reading identity and later `$_SESSION` writes would not persist.
 
 A management handler's `auth` block may **tighten** the default (e.g. raise the user floor or add a capability) but cannot loosen it — the machine-key + superadmin default is enforced before the handler resolves so unknown paths still fail closed.
 
@@ -669,7 +680,7 @@ https://example.com,https://app.example.com
 
 Preflight `OPTIONS` requests are handled automatically when CORS is configured.
 
-The `X-Joinery-Csrf` header is deliberately absent from the CORS allow-list: the browser-session credential is same-origin by design (the token comes from a meta tag only same-origin pages can read). Cross-origin callers use API keys.
+The `X-Joinery-Csrf` header is deliberately absent from the CORS allow-list: the browser-session credential is same-origin by design (the token comes from a meta tag or the `joinery_api_csrf` cookie, both readable only by same-origin pages). Cross-origin callers use API keys.
 
 ## Security Headers
 
