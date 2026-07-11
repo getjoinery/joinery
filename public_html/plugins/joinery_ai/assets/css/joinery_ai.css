@@ -157,8 +157,14 @@ select.joai-chat-control { cursor: pointer; }
 .joai-chat-body h2 { font-size: 1.05rem; }
 .joai-chat-body h3 { font-size: 0.98rem; }
 .joai-chat-body h4, .joai-chat-body h5, .joai-chat-body h6 { font-size: 0.92rem; }
-.joai-chat-body ul, .joai-chat-body ol { margin: 0 0 0.9rem; padding-left: 1.5rem; }
-.joai-chat-body li { margin: 0.3rem 0; }
+/* The admin theme resets list-style globally (for nav menus); chat replies
+   are documents, so restore real markers — quiet ones. */
+.joai-chat-body ul, .joai-chat-body ol { margin: 0 0 0.9rem; padding-left: 1.6rem; }
+.joai-chat-body ul { list-style: disc; }
+.joai-chat-body ol { list-style: decimal; }
+.joai-chat-body li { margin: 0.35rem 0; list-style: inherit; }
+.joai-chat-body li::marker { color: #9aa1ab; }
+.joai-chat-body li > ul { list-style: circle; }
 .joai-chat-body li > ul, .joai-chat-body li > ol { margin: 0.3rem 0 0.4rem; }
 .joai-chat-body code { background: rgba(0,0,0,0.06); padding: 0.1rem 0.3rem;
                        border-radius: 4px; font-size: 0.88em; }
@@ -167,10 +173,13 @@ select.joai-chat-control { cursor: pointer; }
 .joai-chat-body pre code { background: none; padding: 0; }
 .joai-chat-body blockquote { margin: 0 0 0.9rem; padding: 0.1rem 0 0.1rem 0.9rem;
                              border-left: 3px solid #ddd; color: #555; }
-.joai-chat-body table { border-collapse: collapse; margin: 0 0 0.9rem; font-size: 0.9em;
+.joai-chat-body table { border-collapse: collapse; margin: 1.4rem 0; font-size: 0.9em;
                         display: block; max-width: 100%; overflow-x: auto; }
 .joai-chat-body th, .joai-chat-body td { border: 1px solid #ddd; padding: 0.4rem 0.65rem; text-align: left; }
 .joai-chat-body th { font-weight: 600; }
+/* The admin theme drops the last row's bottom border on .table (card-embedded
+   data tables); chat tables draw a full grid, so put it back. */
+.joai-chat-body table tbody tr:last-child td { border-bottom: 1px solid #ddd; }
 .joai-chat-time { font-size: 0.72rem; color: #999; margin-top: 0.3rem; }
 /* Per-turn actions (copy / delete) — reveal on hover or keyboard focus of a turn. */
 .joai-chat-actions { display: flex; gap: 0.3rem; margin-top: 0.35rem; opacity: 0; transition: opacity 0.12s; }
