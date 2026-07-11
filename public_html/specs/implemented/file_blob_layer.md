@@ -98,6 +98,16 @@ driver delete with the existing `CLOUD_STORAGE_ORPHAN` retry/log behavior) and
 the blob row. `FileBlob::retain($blob_id)` is the increment twin. Both use
 `inTransaction()` guards per house convention.
 
+The transaction guard covers only the refcount decrement; it does **not**
+serialize the physical byte deletion against a concurrent `CloudOffloadEngine`
+push of the same blob. Correctness against that race rests on the engine's
+`rowExists()` → PUT → reload → re-check-eligibility → flip invariant (a row
+deleted mid-push is caught at the post-PUT recheck, and the partial cloud push
+is deleted — no orphan). To also close the narrow window where `release()`
+unlinks a local original the engine is mid-read, the at-zero delete acquires the
+engine's per-row advisory lock (`pg_try_advisory_lock(-42, $blob_id)`, same
+namespace the offload engine uses) before removing bytes.
+
 ## Visibility invariant
 
 Public vs private is physical placement (fast-serve dir vs restricted dir; public
@@ -232,8 +242,14 @@ untouched).
 ## Open decisions (resolve at implementation)
 
 - Whether `FileBlob::release()` deletes bytes inline or marks the blob
-  (`fbb_reference_count = 0`) for a sweep task (inline proposed — matches
-  today's `permanent_delete()` behavior; the engine's advisory locks prevent
-  offload races on the row).
-- Whether cloud-resident backfilled rows get a lazy-hash task or hash only on
-  drain (lazy task proposed, piggybacking `CloudOffloadRun`'s tick budget).
+  (`fbb_reference_count = 0`) for a sweep task. **Decided: inline** — it matches
+  today's `permanent_delete()` behavior; the at-zero delete takes the offload
+  engine's per-row advisory lock and relies on the engine's post-PUT reload
+  invariant for the rest (see Deletion rules above). A sweep task adds a
+  no-referrer limbo state for no gain.
+- Hashing cloud-resident backfilled rows. **Decided: hash only when bytes are
+  already local** (on drain, or any read that pulls bytes back), never as a
+  proactive task — hashing a still-offloaded row would mean downloading it
+  purely to hash, defeating the offload. Rows never touched stay
+  `fbb_sha256 = NULL` indefinitely, which is harmless: dedup is an optimization,
+  so an un-hashed blob simply never matches (the safe default).

@@ -73,27 +73,29 @@ switch ($action) {
 			exit;
 		}
 
-		$settings = Globalvars::get_instance();
-		$upload_dir = $settings->get_setting('upload_dir');
-
 		$uploaded_file = $_FILES['file'];
-		$file_name = time() . '_' . preg_replace('/[^a-zA-Z0-9._-]/', '', basename($uploaded_file['name']));
-		$target_path = $upload_dir . '/' . $file_name;
+		if (empty($uploaded_file['tmp_name']) || !is_uploaded_file($uploaded_file['tmp_name'])) {
+			http_response_code(400);
+			echo json_encode(['error' => 'No valid uploaded file']);
+			exit;
+		}
 
-		if (!move_uploaded_file($uploaded_file['tmp_name'], $target_path)) {
+		// Create the File through the one blob-backed ingestion path: it stages
+		// the uploaded temp, dedups on content, and detects the honest MIME type
+		// from the bytes (the client type is only a fallback).
+		try {
+			$file = File::createFromUpload(
+				$uploaded_file['tmp_name'],
+				$uploaded_file['name'],
+				$uploaded_file['type'],
+				$session->get_user_id(),
+				['fil_source' => File::SOURCE_ENTITY_PHOTO]
+			);
+		} catch (Exception $e) {
 			http_response_code(500);
 			echo json_encode(['error' => 'Failed to save uploaded file']);
 			exit;
 		}
-
-		// Create File record
-		$file = new File(NULL);
-		$file->set('fil_name', $file_name);
-		$file->set('fil_title', pathinfo($uploaded_file['name'], PATHINFO_FILENAME));
-		$file->set('fil_type', $uploaded_file['type']);
-		$file->set('fil_usr_user_id', $session->get_user_id());
-		$file->set('fil_source', File::SOURCE_ENTITY_PHOTO);
-		$file->save();
 
 		// Generate resized versions
 		$file->resize();

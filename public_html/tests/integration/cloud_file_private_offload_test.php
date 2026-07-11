@@ -32,6 +32,7 @@ harness_boot();
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriver.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudOffloadEngine.php'));
 require_once(PathHelper::getIncludePath('data/files_class.php'));
+require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
 
 $TABLE = 'cloud_file_private_test_rows';
 $dblink = DbConnector::get_instance()->get_db_link();
@@ -58,7 +59,7 @@ class PrivMockDriver implements CloudStorageDriver {
 /**
  * Two mock profiles over the SAME scratch table, distinguished by a `kind`
  * column ('pub' | 'priv'), each owning its slice via reverseEligibilityWhere().
- * This mirrors how FileStorageProfile / FilePrivateStorageProfile share fil_files.
+ * This mirrors how BlobStorageProfile / BlobPrivateStorageProfile share fbb_file_blobs.
  */
 class PartProfile implements StorageProfile {
 	public $table; public $base; public $own;
@@ -93,6 +94,7 @@ class PartProfile implements StorageProfile {
 
 $BASE = sys_get_temp_dir() . '/cloud_file_priv_' . bin2hex(random_bytes(4));
 mkdir($BASE . '/disk', 0777, true);
+$blob_fixture_ids = array();
 
 try {
 	section('A. Reverse ownership-gate partition (shared table)');
@@ -136,25 +138,40 @@ try {
 	ok('public drain: public row now local', $drvflag($pub1) === 'local');
 
 	section('B. File::get_url() never emits a bucket URL for a private cloud file');
-	// Restricted (min_permission) cloud file → must return the local /uploads path.
+	// Restricted (min_permission) file over a PRIVATE cloud blob → get_url must
+	// return the local /uploads path, never the bucket URL (the "never url()" rule).
+	$secret_name = 'secret-doc_' . bin2hex(random_bytes(4)) . '.pdf';
+	$priv_blob = new FileBlob(NULL);
+	$priv_blob->set('fbb_stored_name', $secret_name);
+	$priv_blob->set('fbb_size_bytes', 100);
+	$priv_blob->set('fbb_mime_type', 'application/pdf');
+	$priv_blob->set('fbb_is_private', true);
+	$priv_blob->set('fbb_reference_count', 1);
+	$priv_blob->set('fbb_storage_driver', 'cloud');
+	$priv_blob->save();
+	$blob_fixture_ids[] = $priv_blob->key;
+
 	$priv_file = new File(NULL);
-	$priv_file->set('fil_name', 'secret-doc.pdf', false);
+	$priv_file->set('fil_name', $secret_name, false);
 	$priv_file->set('fil_type', 'application/pdf', false);
-	$priv_file->set('fil_storage_driver', 'cloud', false);
 	$priv_file->set('fil_min_permission', 5, false);
+	$priv_file->set('fil_fbb_file_blob_id', $priv_blob->key, false);
+	ok('private cloud storage_driver == cloud (via blob)', $priv_file->storage_driver() === 'cloud');
 	$url = $priv_file->get_url('original', 'short');
 	ok('private cloud get_url: not a bucket URL', strpos($url, 'http') !== 0 && strpos($url, 'mock-bucket') === false);
-	ok('private cloud get_url: routes through /uploads or upload_web_dir', strpos($url, 'secret-doc.pdf') !== false);
+	ok('private cloud get_url: routes through /uploads or upload_web_dir', strpos($url, $secret_name) !== false);
 	ok('private cloud is_public() == false', $priv_file->is_public() === false);
 
 	// A file with no restrictions is public → is_public() true (would take the
 	// bucket-URL branch when a driver is configured).
 	$pub_file = new File(NULL);
 	$pub_file->set('fil_name', 'open.png', false);
-	$pub_file->set('fil_storage_driver', 'cloud', false);
 	ok('unrestricted file is_public() == true', $pub_file->is_public() === true);
 
 } finally {
+	foreach ($blob_fixture_ids as $bid) {
+		$dblink->prepare("DELETE FROM fbb_file_blobs WHERE fbb_file_blob_id = ?")->execute([$bid]);
+	}
 	$dblink->exec("DROP TABLE IF EXISTS $TABLE");
 	$rrmdir = function($dir) use (&$rrmdir) {
 		if (!is_dir($dir)) return;

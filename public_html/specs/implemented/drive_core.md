@@ -1,15 +1,15 @@
 # Drive Core — Personal File Storage on the Platform
 
-## Status: active — design
+## Status: implemented (phases 2–6; phase 7 deferred) — see drive_core_fix_pack.md for the post-review corrections
 
 The file-storage leg of the self-hosted Google-suite replacement, alongside
-mail (built), calendar (`specs/scheduling_system.md`), and the vault
-(`specs/password_vault.md`). Folders, quotas, versioning, sharing, share
-links, trash, a member Drive UI at `/drive`, a resumable upload API, and a
-change feed.
+mail (built), calendar (built — `specs/implemented/scheduling_system.md`), and
+the vault (`specs/password_vault.md`). Folders, quotas, versioning, sharing,
+share links, trash, a member Drive UI at `/drive`, a resumable upload API, and
+a change feed.
 
-**Depends on `specs/file_blob_layer.md`** (physical bytes as refcounted
-`fbb_file_blobs`; ships first). Client-side encryption layers on top of this
+**Depends on `specs/implemented/file_blob_layer.md`** (physical bytes as
+refcounted `fbb_file_blobs`; shipped). Client-side encryption layers on top of this
 spec separately (`specs/drive_encryption.md`). In-browser Office editing stays
 in `specs/cloud_drive_office_suite.md`; this spec is the "Drive layer" that
 spec sketches, and `FileVersion` below is the never-overwrite-the-only-copy
@@ -225,11 +225,14 @@ part-files purged by task after 24 h without `fup_update_time` movement.
 
 ## API surface
 
-Per the API rules: JSON logic goes through `_logic_api()` actions; the chunk
-transport is the one deliberate exception (raw body), built into the API
-front controller — **not** `/ajax/` (closed to new endpoints).
+Per the API rules: JSON logic goes through descriptor-declared actions
+(`{name}_logic_descriptor()` opt-in with a typed `input` schema, per
+docs/api.md § Making a Logic Function Available via API — boundary
+validation comes free); the chunk transport is the one deliberate exception
+(raw body), built into the API front controller — **not** `/ajax/` (closed
+to new endpoints).
 
-### Actions (core, flat names; `logic/{name}_logic.php` + `{name}_logic_api()`)
+### Actions (core, flat names; `logic/{name}_logic.php` + `{name}_logic_descriptor()`)
 
 All sessioned (`requires_session` true), all returning `LogicResult`, all
 receiving merged JSON-body input per `ApiLogicEndpoint::executeAction`
@@ -331,9 +334,9 @@ left rail — My Drive / Shared with me / Starred / Trash / storage meter
 `render_tier_gate_prompt()` when full).
 
 - **Starred** = `Reaction::toggle($me, 'file', $id)` — `entity_type` is a
-  free string, zero registration; the existing `ajax/reaction_ajax.php`
-  contract (`action=toggle|status|count`) is reused as-is (existing
-  endpoint, not a new one).
+  free string, zero registration; the existing `reaction_toggle` /
+  `reaction_status` / `reaction_count` API actions are reused as-is
+  (existing actions, not new ones).
 - **Trash** = listings with `deleted => true`; restore honors the
   parent-capture recipe; "Delete forever" runs `permanent_delete_dry_run()`
   first and shows the impact summary.
@@ -417,7 +420,8 @@ House style (CLI, `check()`, fixtures inline, `finally` teardown, exit code):
 
 ## Phases
 
-1. **Blob layer** — `specs/file_blob_layer.md`, ships and stabilizes first.
+1. **Blob layer** — **shipped** (`specs/implemented/file_blob_layer.md`);
+   implementation starts at phase 2.
 2. **Folders + quotas + trash** — Folder, DriveUsage, tier features,
    settings, menu entry, `drive_active`, purge/reconcile tasks.
 3. **Drive UI** — `/drive` browser + starred + trash views on the existing
@@ -434,9 +438,10 @@ Each phase ships independently useful.
 
 ## Docs
 
-On ship (current-state voice only): new `docs/drive.md` (data model,
+On ship (current-state voice only): extend the existing `docs/drive.md`
+(today it covers the blob layer) with the Drive layer — data model,
 access/grant semantics, upload protocol with the sequential-chunk rule,
-change feed contract, quota accounting); update `docs/api.md` (upload
+change feed contract, quota accounting; update `docs/api.md` (upload
 actions + binary endpoint + the `api_upload` rate bucket),
 `docs/subscription_tiers.md` (core drive feature keys — first non-empty
 `core_tier_features.json` entries), `docs/file_signed_urls.md` (share-link
@@ -452,12 +457,14 @@ composition note), `docs/deletion_system.md` (trash retention example),
 - Real-time push (websockets/APNS/FCM) — clients poll the change feed.
 - Content-text search, comment/activity UI, team spaces, per-user buckets.
 
-## Open decisions (resolve at implementation)
+## Decisions
 
-- `drive_upload_chunk_bytes` default (8 MiB proposed) vs. typical
-  proxy/Cloudflare body limits on target deployments.
-- Whether `drive_list` pagination is needed at v1 for pathological folders
-  (proposed: cap listing at 2,000 children, no pagination).
-- Whether editor-role grantees may create share links (proposed: no —
-  owner-only, matches the delete/share restriction).
-- Trash/changes retention defaults (30/90 proposed).
+- `drive_upload_chunk_bytes` default is **8 MiB** — comfortably under the
+  100 MB Cloudflare free-tier body limit and typical proxy limits; the
+  setting exists for deployments that need smaller.
+- `drive_list` does **not** paginate at v1 — listings cap at 2,000 children
+  (return a `truncated` flag past the cap).
+- Editor-role grantees may **not** create share links — owner-only, matching
+  the delete/share restriction.
+- Trash retention **30 days**, change-feed retention **90 days** (the task
+  `config_fields` defaults above).

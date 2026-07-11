@@ -119,10 +119,14 @@ class InboundRawStorageTest {
 
 	private function recipient() { return 'box' . $this->suffix . '@irs-test-' . $this->suffix . '.example'; }
 
-	/** Build a multipart/mixed raw: a text/plain body (section 1) + a pdf attachment (section 2). */
-	private function buildRaw($message_id_token) {
+	/** Build a multipart/mixed raw: a text/plain body (section 1) + a pdf attachment (section 2).
+	 *  $pdf_override supplies distinct attachment bytes when a fixture must NOT
+	 *  content-dedup onto another (attachment Files share one refcounted blob when
+	 *  their bytes match). */
+	private function buildRaw($message_id_token, $pdf_override = null) {
 		$b = 'BND' . $this->suffix;
-		$pdf_b64 = chunk_split(base64_encode($this->pdf_bytes));
+		$pdf = ($pdf_override !== null) ? $pdf_override : $this->pdf_bytes;
+		$pdf_b64 = chunk_split(base64_encode($pdf));
 		$lines = array(
 			'From: Sender <sender@example.com>',
 			'To: ' . $this->recipient(),
@@ -147,8 +151,8 @@ class InboundRawStorageTest {
 		return implode("\r\n", $lines);
 	}
 
-	private function ingest($message_id_token) {
-		$raw = $this->buildRaw($message_id_token);
+	private function ingest($message_id_token, $pdf_override = null) {
+		$raw = $this->buildRaw($message_id_token, $pdf_override);
 		$parsed = $this->router->parseEmail($raw);
 		$auth = array('dkim' => 'unverified', 'spf' => 'unverified', 'dmarc' => 'unverified', 'source' => 'none');
 		$res = $this->router->storeMessage($raw, $parsed, $this->alias, $this->domain, $this->recipient(), $auth);
@@ -310,7 +314,10 @@ class InboundRawStorageTest {
 	}
 
 	private function testPermanentDeleteReclaimsFiles() {
-		$r = $this->ingest('delete-' . $this->suffix);
+		// Distinct attachment bytes so this fixture's File owns its blob outright
+		// (refcount 1): permanent_delete then reclaims the physical bytes. Sharing
+		// bytes with another fixture would (correctly) keep them for that sibling.
+		$r = $this->ingest('delete-' . $this->suffix, '%PDF-1.4 delete-only payload ' . $this->suffix);
 		$id = $r['id'];
 
 		$manifest = new MultiInboundMessageAttachment(array('message_id' => $id, 'file_backed' => true));

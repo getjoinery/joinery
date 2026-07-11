@@ -487,9 +487,9 @@ class AiAttachment {
     }
 
     /** Local filesystem path to the stored original, or null for cloud-stored
-     *  bytes / a file not on disk. Guards get_filesystem_path()'s cloud warning. */
+     *  bytes / a file not on disk. */
     private static function localPath(File $file): ?string {
-        if ($file->get('fil_storage_driver') === 'cloud') return null;
+        if ($file->storage_driver() === 'cloud') return null;
         $path = $file->get_filesystem_path('original');
         return (is_string($path) && is_file($path)) ? $path : null;
     }
