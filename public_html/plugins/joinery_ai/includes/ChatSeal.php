@@ -396,8 +396,9 @@ class ChatSeal {
             $sealed = self::sealAttachmentUnderMessage($msg, (int)$link->key,
                 $text !== '' ? $text : null, ($bytes === false ? null : $bytes));
             if ($file->key && $sealed['bytes'] !== null) {
-                $path = $file->get_filesystem_path('original');
-                if ($path && @file_put_contents($path, $sealed['bytes']) !== false) {
+                // replace_bytes() splits a dedup-shared blob before rewriting, so a
+                // sibling file that deduped onto the same original is never sealed over.
+                if ($file->replace_bytes($sealed['bytes'])) {
                     $file->set('fil_type', substr((string)$file->get('fil_type'), 0, 128));
                     $file->save();
                 }
@@ -419,12 +420,13 @@ class ChatSeal {
             $plain_text = (string)$link->get('aia_extracted_text');   // get() decrypts in-window
             $file = new File((int)$link->get('aia_fil_file_id'), true);
             if ($file->key) {
-                $path = $file->get_filesystem_path('original');
-                $cipher = ($path && is_file($path)) ? @file_get_contents($path) : false;
-                if ($cipher !== false && $cipher !== '') {
+                $cipher = $file->read_bytes('original');
+                if ($cipher !== null && $cipher !== false && $cipher !== '') {
                     try {
                         $plain_bytes = self::openAttachmentBytes($msg, (int)$link->key, $cipher);
-                        @file_put_contents($path, $plain_bytes);
+                        // replace_bytes() writes through the blob (cloud-aware) and
+                        // splits a shared blob first, mirroring the seal path.
+                        $file->replace_bytes($plain_bytes);
                     } catch (Throwable $e) { /* leave as-is on failure */ }
                 }
             }

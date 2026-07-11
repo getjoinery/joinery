@@ -1,7 +1,7 @@
 {
   "_comment": "Core storage-offload profile manifest, read by StorageProfileRegistry. Each entry is the class name of a StorageProfile implementation living at includes/cloud_storage/<ClassName>.php. Plugins declare their own profiles under a 'storage_profiles' key in plugin.json (resolved from plugins/<plugin>/includes/<ClassName>.php). The profile's visibility() — not this manifest — is the single source of truth for which store an object belongs to. See specs/cloud_offload_unification.md and docs/cloud_storage.md.",
   "storage_profiles": [
-    "FileStorageProfile",
-    "FilePrivateStorageProfile"
+    "BlobStorageProfile",
+    "BlobPrivateStorageProfile"
   ]
 }

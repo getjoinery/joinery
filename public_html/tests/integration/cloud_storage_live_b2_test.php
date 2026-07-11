@@ -17,7 +17,7 @@
  *   C. Privacy gate DENY path end-to-end (real anonymous read, private bucket).
  *   D. Privacy gate FAIL pipeline (real anonymous 2xx → reject) via a stand-in.
  *   E. Image rows: multi-object (original + variants) push + pull through bucket.
- *   F. FileStorageProfile's real variant enumeration (forward + reverse).
+ *   F. BlobStorageProfile's real variant enumeration (forward + reverse).
  *   G. Per-row advisory-lock SKIP (a held lock makes the engine skip the row).
  *   H. Time-budget bound (skipped — would need a 60s run or a prod seam).
  *   I. persistSettings + setEnabled round-trip (guard-1 inside, latch, restore).
@@ -43,7 +43,8 @@ require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriv
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudOffloadEngine.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageLifecycle.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_storage/StorageProfileRegistry.php'));
-require_once(PathHelper::getIncludePath('includes/cloud_storage/FileStorageProfile.php'));
+require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
+require_once(PathHelper::getIncludePath('includes/cloud_storage/BlobStorageProfile.php'));
 
 function set_enabled_mem($value) {
 	$gv = Globalvars::get_instance();
@@ -76,6 +77,7 @@ $dblink        = DbConnector::get_instance()->get_db_link();
 $created_keys     = [];
 $temp_tables      = [];
 $created_file_ids = [];
+$created_blob_ids = [];
 $file_disk_paths  = [];
 $temp_plugin_dir  = null;
 $lock_conn        = null;
@@ -213,25 +215,28 @@ try {
 	CloudOffloadEngine::reverseBatch($iprofile);
 	ok('image: all 3 objects pulled back to local', file_exists("$BASE/restore/$iid/original") && file_exists("$BASE/restore/$iid/avatar") && file_exists("$BASE/restore/$iid/content"));
 
-	section('F. FileStorageProfile real variant enumeration');
+	section('F. BlobStorageProfile real variant enumeration');
 	$upload_dir = $settings->get_setting('upload_dir');
 	$fast_dir   = dirname($upload_dir) . '/static_files/uploads';
 	$fname = '_varprofiletest_' . $RUN . '.png';
-	$f = new File(NULL);
-	$f->set('fil_name', $fname); $f->set('fil_type', 'image/png'); $f->set('fil_storage_driver', 'local');
-	$f->save(); $created_file_ids[] = $f->key;
-	// Place original + 2 of the 5 variants on disk (leave 'hero' absent).
-	$paths = [$upload_dir . '/' . $fname, $upload_dir . '/avatar/' . $fname, $upload_dir . '/content/' . $fname];
+	$vb = new FileBlob(NULL);
+	$vb->set('fbb_stored_name', $fname); $vb->set('fbb_size_bytes', 10);
+	$vb->set('fbb_mime_type', 'image/png'); $vb->set('fbb_is_private', false);
+	$vb->set('fbb_reference_count', 1); $vb->set('fbb_storage_driver', 'local');
+	$vb->save(); $created_blob_ids[] = $vb->key;
+	// A public blob's bytes live in the fast-serve dir. Place original + 2 of the
+	// 5 variants on disk (leave 'hero' absent), keyed on the stored name.
+	$paths = [$fast_dir . '/' . $fname, $fast_dir . '/avatar/' . $fname, $fast_dir . '/content/' . $fname];
 	foreach ($paths as $p) { if (!is_dir(dirname($p))) @mkdir(dirname($p), 0777, true); file_put_contents($p, "png-bytes\n"); $file_disk_paths[] = $p; }
-	$fp = new FileStorageProfile();
-	$fwd_items = $fp->itemsForRow((int)$f->key);
+	$fp = new BlobStorageProfile();
+	$fwd_items = $fp->itemsForRow((int)$vb->key);
 	$fwd_keys  = array_map(fn($i) => $i['remote_key'], $fwd_items);
-	ok('FileProfile.itemsForRow: original + present variants only', in_array($fname, $fwd_keys) && in_array("avatar/$fname", $fwd_keys) && in_array("content/$fname", $fwd_keys));
-	ok('FileProfile.itemsForRow: absent variant excluded', !in_array("hero/$fname", $fwd_keys));
-	$rev_items = $fp->reverseItemsForRow((int)$f->key);
+	ok('BlobProfile.itemsForRow: original + present variants only', in_array($fname, $fwd_keys) && in_array("avatar/$fname", $fwd_keys) && in_array("content/$fname", $fwd_keys));
+	ok('BlobProfile.itemsForRow: absent variant excluded', !in_array("hero/$fname", $fwd_keys));
+	$rev_items = $fp->reverseItemsForRow((int)$vb->key);
 	$rev_by_key = []; foreach ($rev_items as $i) { $rev_by_key[$i['remote_key']] = $i['local_path']; }
-	ok('FileProfile.reverseItemsForRow: enumerates original + all 5 sizes from scheme', count($rev_items) === 6);
-	ok('FileProfile.reverseItemsForRow: public placement to fast dir w/ size subpath', ($rev_by_key["avatar/$fname"] ?? '') === "$fast_dir/avatar/$fname" && ($rev_by_key[$fname] ?? '') === "$fast_dir/$fname");
+	ok('BlobProfile.reverseItemsForRow: enumerates original + all 5 sizes from scheme', count($rev_items) === 6);
+	ok('BlobProfile.reverseItemsForRow: public placement to fast dir w/ size subpath', ($rev_by_key["avatar/$fname"] ?? '') === "$fast_dir/avatar/$fname" && ($rev_by_key[$fname] ?? '') === "$fast_dir/$fname");
 
 	section('G. Per-row advisory-lock SKIP');
 	$GTABLE = 'cloud_live_lock_' . $RUN; $temp_tables[] = $GTABLE;
@@ -298,7 +303,7 @@ try {
 	$classes = array_map('get_class', StorageProfileRegistry::all());
 	ok('registry sees on-disk profile from an UN-activated plugin (deactivation hole closed)', in_array($cls, $classes));
 	$pub_classes = array_map('get_class', StorageProfileRegistry::forVisibility('public'));
-	ok('registry groups it under its declared visibility', in_array($cls, $pub_classes) && in_array('FileStorageProfile', $pub_classes));
+	ok('registry groups it under its declared visibility', in_array($cls, $pub_classes) && in_array('BlobStorageProfile', $pub_classes));
 
 	$baseline = CloudStorageLifecycle::cloudRowCount('public');
 	$dblink->exec("INSERT INTO $JTABLE (drv) VALUES ('cloud')");
@@ -324,6 +329,7 @@ try {
 	// Fixture File rows + their disk files.
 	foreach ($file_disk_paths as $p) { if (is_file($p)) @unlink($p); }
 	foreach ($created_file_ids as $id) { try { $dblink->prepare("DELETE FROM fil_files WHERE fil_file_id = ?")->execute([$id]); } catch (Exception $e) {} }
+	foreach ($created_blob_ids as $id) { try { $dblink->prepare("DELETE FROM fbb_file_blobs WHERE fbb_file_blob_id = ?")->execute([$id]); } catch (Exception $e) {} }
 	// Temp plugin dir.
 	$rrm = function($d) use (&$rrm) { if (!is_dir($d)) return; foreach (scandir($d) as $e) { if ($e === '.' || $e === '..') continue; $p = "$d/$e"; is_dir($p) ? $rrm($p) : @unlink($p); } @rmdir($d); };
 	if ($temp_plugin_dir) $rrm($temp_plugin_dir);

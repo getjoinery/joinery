@@ -889,10 +889,18 @@
 	// predicate (driver IS NULL OR driver = 'local'), so they silently never
 	// offload. The spec is fixed to plain form; this repairs rows already
 	// written. Idempotent; hash-tracked.
+	// Guarded on column existence: fil_storage_driver has since moved to the
+	// blob layer (fbb_file_blobs) and is dropped from fil_files, so on any DB
+	// created after that change the column is absent and this repair is a no-op.
 	$migration = array();
 	$migration['database_version'] = '137';
 	$migration['test'] = NULL;
-	$migration['migration_sql'] = "UPDATE fil_files SET fil_storage_driver = 'local' WHERE fil_storage_driver = '''local'''";
+	$migration['migration_sql'] = "DO \$\$ BEGIN
+		IF EXISTS (SELECT 1 FROM information_schema.columns
+		           WHERE table_name = 'fil_files' AND column_name = 'fil_storage_driver') THEN
+			UPDATE fil_files SET fil_storage_driver = 'local' WHERE fil_storage_driver = '''local''';
+		END IF;
+	END \$\$;";
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 

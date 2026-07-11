@@ -25,28 +25,31 @@ files consumer never uses it (private files stay on local disk).
 ## Architecture
 
 ```
-Upload arrives → UploadHandler → File row created (fil_storage_driver='local')
+Upload arrives → File row + FileBlob created (fbb_storage_driver='local')
                                                      │
                                                      ▼
                                     Cron tick (every 15 min)
                                                      │
                                                      ▼
-                            CloudOffloadRun (offload mode) iterates eligible rows:
-                              - public per is_public()
-                              - fil_storage_driver = 'local'
-                              - fil_sync_failed_count < 5
+                            CloudOffloadRun (offload mode) iterates eligible blobs:
+                              - public per fbb_is_private = FALSE
+                              - fbb_storage_driver = 'local'
+                              - fbb_sync_failed_count < 5
                                                      │
                             Push original + variants concurrently
-                            Re-check is_public()
+                            Re-check eligibility
                               ├── still public → flip flag to 'cloud',
                               │                  delete local copies
                               └── went private → undo bucket pushes,
-                                                 leave row at 'local'
+                                                 leave blob at 'local'
 ```
 
-The per-row `fil_storage_driver` flag is the source of truth. A
-misconfigured global setting cannot strand existing files because each
-row independently records where its bytes live.
+Physical bytes live in a **`FileBlob`** (`fbb_file_blobs`), which a `File`
+references; the storage driver, offload counters, and visibility class are blob
+properties, shared by every file that references the blob. The per-blob
+`fbb_storage_driver` flag is the source of truth. A misconfigured global setting
+cannot strand existing bytes because each blob independently records where its
+bytes live.
 
 ## Unified offload architecture
 
@@ -68,8 +71,8 @@ do the work for every consumer:
   `eligibilityWhere()` SQL gate, and the per-row object enumeration
   (`itemsForRow` for forward, `reverseItemsForRow` for pull-back — the latter
   computed from the row's key scheme **without** needing local bytes, since on
-  pull-back none exist yet). `FileStorageProfile` is the public-files adapter
-  over the existing `File` methods.
+  pull-back none exist yet). `BlobStorageProfile` is the public-files adapter
+  over the `FileBlob` methods (keyed on `fbb_stored_name`).
 
 A single scheduled task — **`CloudOffloadRun`** — drives offload for the whole
 platform. Each tick it walks every declared `StorageProfile` (the registry) and
@@ -180,8 +183,8 @@ its own permission check.
 **Sharing a table between two stores.** A profile may also implement an optional
 `reverseEligibilityWhere(): string` — a SQL fragment naming which `cloud` rows of
 its table physically live in **its** bucket. It is needed only when more than one
-profile shares a table (the public and private `File` profiles both live on
-`fil_files`); the engine and the binding-immutability count probe it via
+profile shares a table (the public and private blob profiles both live on
+`fbb_file_blobs`); the engine and the binding-immutability count probe it via
 `method_exists()`, so a profile that owns its table outright simply omits it. The
 forward offload is already partitioned by `eligibilityWhere()`; this gate
 partitions the reverse/drain and the cloud-row count.
@@ -189,20 +192,23 @@ partitions the reverse/drain and the cloud-row count.
 ### Private files
 
 Any file that carries a restriction — `fil_min_permission`, `fil_grp_group_id`,
-`fil_evt_event_id`, `fil_tier_min_level`, or `fil_private` — is private (the
-inverse of `File::is_public()`). Two `File` profiles share the `fil_files`
-table: `FileStorageProfile` (`visibility = public`) drains world-readable files
-to the public bucket; `FilePrivateStorageProfile` (`visibility = private`)
-drains restricted files to the verified-private bucket. So a group doc, event
-handout, tier-gated download, or email attachment offloads to the bucket like
-any public upload instead of pinning to local disk — draining a small VPS that
-would otherwise fill with private uploads.
+`fil_access_provider`, `fil_tier_min_level`, or `fil_private` — is private (the
+inverse of `File::is_public()`). A file's visibility is recorded on its blob as
+`fbb_is_private` (kept in step with the referencing files by the dedup scoping
+and copy-on-write split — see [File Signed URLs](file_signed_urls.md) and the
+blob layer). Two blob profiles share the `fbb_file_blobs` table:
+`BlobStorageProfile` (`visibility = public`) drains world-readable blobs to the
+public bucket; `BlobPrivateStorageProfile` (`visibility = private`) drains
+restricted blobs to the verified-private bucket. So a group doc, event handout,
+tier-gated download, or email attachment offloads to the bucket like any public
+upload instead of pinning to local disk — draining a small VPS that would
+otherwise fill with private uploads.
 
 Serving stays gated: a private file's `get_url()` returns the local
 `/uploads/...` path (never a bucket URL), and `serve.php` runs
 `File::is_viewable()` before streaming the bytes from the private bucket through
-PHP. No new column drives placement — the store a `cloud` row belongs to is
-derived from `is_public()`.
+PHP. No File column drives placement — the store a `cloud` blob belongs to is
+`fbb_is_private`.
 
 `fil_private` is a distinct restriction mode from the other four: it isn't a
 threshold or membership check, it's an **owner-or-admin** rule — only the
@@ -218,22 +224,25 @@ admins (any admin can view any owner-or-admin private file) and it can't
 express sharing among several non-admin users — a consumer needing that would
 require a heavier per-set membership mechanism this platform doesn't build.
 
-Because both profiles live on `fil_files`, each declares a
-`reverseEligibilityWhere()` ownership gate (`public` = `is_public()`; `private` =
-its complement, including soft-deleted rows, which are kept in the private bucket
-and never served) so the reverse/drain path and the binding-immutability count
-touch only the cloud rows in their own bucket. Enabling or draining a store acts
-on every profile of that visibility, so the private `File` store and the
+Because both profiles live on `fbb_file_blobs`, each declares a
+`reverseEligibilityWhere()` ownership gate (`public` = `fbb_is_private = FALSE`;
+`private` = its complement) so the reverse/drain path and the binding-immutability
+count touch only the cloud rows in their own bucket. Enabling or draining a store
+acts on every profile of that visibility, so the private blob store and the
 inbound-mail raw store light up together. No per-store task is involved — the
-single `CloudOffloadRun` tick drives the private `File` profile by mode like
+single `CloudOffloadRun` tick drives the private blob profile by mode like
 every other store.
 
 ## Bucket Layout
 
 ```
-<site_template>/<filename>            ← original
-<site_template>/<size>/<filename>     ← variants (thumb, avatar, ...)
+<site_template>/<stored_name>            ← original
+<site_template>/<size>/<stored_name>     ← variants (thumb, avatar, ...)
 ```
+
+`<stored_name>` is the blob's `fbb_stored_name` — the physical identity shared
+by every file that references the blob (files reference it by `fil_name`, which
+is the URL identity and equals the stored name for a fresh, non-deduped upload).
 
 The `<site_template>` prefix is derived automatically from the
 `site_template` setting (e.g. `joinerytest`). Multiple Joinery instances
@@ -347,9 +356,9 @@ Migration starts on the next regular cron tick (within 15 minutes). To
 start sooner, click "Run Now" on the Scheduled Tasks admin page.
 
 The task is bounded per run (50 rows or 60 seconds, whichever first).
-Failures increment `fil_sync_failed_count`; after 5 consecutive failures
-a row is excluded from the batch query and surfaces in the admin UI as
-"stuck." The "Retry" button resets the counter and re-queues the row.
+Failures increment `fbb_sync_failed_count`; after 5 consecutive failures
+a blob is excluded from the batch query and surfaces in the admin UI as
+"stuck." The "Retry" button resets the counter and re-queues the blob.
 
 ### Reverse (bucket → local)
 
@@ -358,8 +367,8 @@ Local" button (which sets the store's draining flag). `CloudOffloadRun` then pul
 that store's cloud rows back. Per-row, three phases:
 
 1. Pull bytes to a temp dir.
-2. Place files into the correct local dir (re-evaluated against
-   `is_public()` per row), commit `fil_storage_driver = 'local'`.
+2. Place files into the correct local dir (per the blob's `fbb_is_private`),
+   commit `fbb_storage_driver = 'local'`.
 3. Best-effort bucket delete. Failures here are logged with
    `CLOUD_STORAGE_ORPHAN: bucket=<name> keys=<...>`; the row is
    correctly served locally regardless. Manual cleanup with `aws s3 rm`
@@ -376,11 +385,13 @@ world-readable URL.
 
 ### A cloud-stored file whose visibility flips
 
-`File::save()` / `soft_delete()` / `undelete()` capture the row's persisted
-(pre-change) visibility, then `move_to_correct_directory()` compares it to the
-new one. On a flip the bytes are pulled back to local **from the store that still
-holds them** (`_pull_back_from_cloud_to_local($source_visibility)`), three
-explicit phases:
+`File::save()` / `soft_delete()` / `undelete()` call `move_to_correct_directory()`,
+which compares the file's desired visibility class to its blob's current one
+(`fbb_is_private`). When the blob is referenced by exactly one file (refcount 1)
+and cloud-resident, its bytes are pulled back to local **from the store that still
+holds them** (`FileBlob::flipVisibility()` → the cloud pull-back), three
+explicit phases (when the blob is shared, a copy-on-write split gives the changed
+file its own blob instead):
 
 1. **Pull all bytes to a temp dir.** Failure: drop temps, leave bucket and DB
    unchanged, throw.
@@ -391,7 +402,7 @@ explicit phases:
    `CLOUD_STORAGE_PARTIAL_FLIP`. If re-PUT also fails, the row is genuinely
    broken; the log marker is the breadcrumb.
 
-The row is now `'local'`; the next offload tick re-evaluates eligibility and
+The blob is now `'local'`; the next offload tick re-evaluates eligibility and
 pushes it to the **now-correct** store via the matching profile. Bytes touch
 local disk briefly during the flip — simpler and safer than a bucket-to-bucket
 transfer. Invariants: bucket is authoritative until DB commit; temps live until
@@ -406,17 +417,16 @@ store matching its new visibility. No request blocks on bucket I/O.
 
 ## URL Generation
 
-`File::get_url($size_key, $format)` dispatches on the row's flag and visibility:
+`File::get_url($size_key, $format)` dispatches on the blob's driver
+(`File::storage_driver()`) and the file's visibility:
 
-- `fil_storage_driver = 'local'` — the `/uploads/...` URL, served by the fast
-  path (public) or the auth route (restricted).
-- `fil_storage_driver = 'cloud'` **and public** — `driver->url(<remote_key>)`,
-  the world-readable CDN/bucket URL. The browser hits the bucket directly; PHP is
-  not in the loop.
-- `fil_storage_driver = 'cloud'` **and restricted** — the local `/uploads/...`
-  path, **never** a bucket URL. `serve.php` resolves the bytes from the private
-  bucket behind the permission gate (below). The "never `url()`" rule, enforced
-  at the model.
+- driver `local` — the `/uploads/...` URL, served by the fast path (public) or
+  the auth route (restricted).
+- driver `cloud` **and public** — `driver->url(<remote_key>)`, the world-readable
+  CDN/bucket URL. The browser hits the bucket directly; PHP is not in the loop.
+- driver `cloud` **and restricted** — the local `/uploads/...` path, **never** a
+  bucket URL. `serve.php` resolves the bytes from the private bucket behind the
+  permission gate (below). The "never `url()`" rule, enforced at the model.
 
 ### /uploads/* serving
 
@@ -510,7 +520,7 @@ SVG can never render inline from our origin.
 
 | Mode | Behavior | Recovery |
 |------|----------|----------|
-| Sync push fails | `fil_sync_failed_count` increments; next cron tick retries. After 5 failures the row is excluded and surfaces as "stuck". | Click Retry on the stuck-files list. |
+| Sync push fails | `fbb_sync_failed_count` increments; next cron tick retries. After 5 failures the blob is excluded and surfaces as "stuck". | Click Retry on the stuck-files list. |
 | Credentials become invalid | Driver health-check goes red; the offload tick fails every row. New uploads keep landing locally. | Save again with fixed creds. |
 | Bucket runs out of quota / billing failure | Sync task fails; uploads continue locally. | Resolve at the provider; sync resumes. |
 | `permanent_delete` bucket-delete fails | Logged as `CLOUD_STORAGE_ORPHAN`; row is still deleted. | Manual cleanup via `aws s3 rm` or equivalent. |
@@ -526,17 +536,18 @@ SVG can never render inline from our origin.
 | `includes/cloud_storage/CloudStorageDriverFactory.php` | `default()`/`forVisibility()` return a configured driver or `null`; `forVisibilityUnlatched()` builds from the raw binding for pull-back; `bindingFor()` is the per-visibility setting map; `fromOptions()` builds from explicit settings. |
 | `includes/cloud_storage/StorageProfile.php` | The per-consumer seam interface. |
 | `includes/cloud_storage/StorageProfileRegistry.php` | Reads `storage_profiles.json` + every plugin's `plugin.json` `storage_profiles` (on disk, active or not); instantiates and groups by visibility. |
-| `storage_profiles.json` | Core profile manifest (declares `FileStorageProfile` + `FilePrivateStorageProfile`). |
+| `storage_profiles.json` | Core profile manifest (declares `BlobStorageProfile` + `BlobPrivateStorageProfile`). |
 | `includes/cloud_storage/CloudOffloadEngine.php` | Table-agnostic forward/reverse batch + per-row logic; reverse/count honour the optional `reverseEligibilityWhere()` ownership gate for shared tables. |
 | `includes/cloud_storage/CloudStorageLifecycle.php` | Shared admin save/test/health + the binding-immutability guard + per-visibility bindings + the privacy gate verdict; owns the offload modes (`modeForVisibility`, `startDrain`/`stopDrain`, `ensureTickActive`) and the `runOffloadTick()` orchestration; cloud-row counts scoped per store via the ownership gate. |
-| `includes/cloud_storage/FileStorageProfile.php` | Public-files adapter over the existing `File` methods (`visibility=public`). |
-| `includes/cloud_storage/FilePrivateStorageProfile.php` | Restricted-files adapter (`visibility=private`); extends `FileStorageProfile`, overriding visibility, eligibility, and the ownership gate. |
-| `data/files_class.php` | Visibility-aware cloud methods: `get_url()` (private → local gated path, never a bucket URL), `permanent_delete()`, `delete_resized()`, `resize()`, `move_to_correct_directory()` (visibility-flip pull-back via `_pull_back_from_cloud_to_local()`). |
+| `includes/cloud_storage/BlobStorageProfile.php` | Public-blob adapter over the `FileBlob` methods (`visibility=public`). |
+| `includes/cloud_storage/BlobPrivateStorageProfile.php` | Restricted-blob adapter (`visibility=private`); extends `BlobStorageProfile`, overriding visibility, eligibility, and the ownership gate. |
+| `data/file_blobs_class.php` | The physical `FileBlob` (`fbb_file_blobs`): stored bytes, refcount, offload state, visibility flip / copy-on-write split, and all cloud methods (`resize()`, `delete_resized()`, pull-back, cloud delete). |
+| `data/files_class.php` | The logical `File`: identity, ownership, visibility gates, signed URLs. Physical operations delegate to its `FileBlob` (`get_url()`, `permanent_delete()` → `FileBlob::release()`, `move_to_correct_directory()` → flip / copy-on-write split). |
 | `tasks/CloudOffloadRun.php` | The one offload task for the whole platform. Calls `CloudStorageLifecycle::runOffloadTick()`, which drives every store by mode (offload/drain/idle); self-deactivates when nothing is offloading or draining. |
 | `adm/admin_cloud_storage.php` | Admin UI. Save = test + persist + activate; carries the private-bucket field + privacy-gate results. |
 | `adm/logic/admin_cloud_storage_logic.php` | Thin caller over `CloudStorageLifecycle`, per store; Save/Pause/Disable-and-Pull/Retry handlers. |
-| `serve.php` | `/uploads/*` route: 302-redirects public cloud rows; gate-streams private cloud rows through PHP after `is_viewable()`. |
-| `includes/UploadHandler.php` | `get_unique_filename()` consults `fil_files` so dedup works after locals are deleted. |
+| `serve.php` | `/uploads/*` route: resolves the file's blob, 302-redirects public cloud bytes, gate-streams private cloud bytes through PHP after `is_viewable()`; resolves the local path through the blob (so a dedup secondary finds the shared bytes). |
+| `includes/UploadHandler.php` | `get_unique_filename()` consults active `fil_name` rows and `fbb_stored_name` so a landing name never collides with a live file or an offloaded blob object. |
 | `utils/process_scheduled_tasks.php` | Per-task advisory locking (prereq for the offload tick — prevents tick-overlap races). |
 
 ## Out of Scope (v1)

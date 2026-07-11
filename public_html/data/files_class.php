@@ -16,7 +16,7 @@ class FileException extends SystemBaseException {}
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
- * @version 1.3.0
+ * @version 1.4.0
  */
 class File extends SystemBase {	public static $prefix = 'fil';
 	public static $tablename = 'fil_files';
@@ -82,9 +82,13 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	    'fil_access_ref' => array('type'=>'int4', 'is_nullable'=>true),
 	    'fil_tier_min_level' => array('type'=>'int4', 'is_nullable'=>true),
 	    'fil_private' => array('type'=>'bool', 'is_nullable'=>false, 'default'=>'false'),
-	    'fil_storage_driver' => array('type'=>'varchar(32)', 'is_nullable'=>false, 'default'=>'local'),
-	    'fil_sync_failed_count' => array('type'=>'int4', 'is_nullable'=>false, 'default'=>'0'),
-	    'fil_sync_last_attempt' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
+	    // Physical bytes live in a FileBlob (fbb_file_blobs), referenced here.
+	    // Nullable at the schema layer, but always set by the single ingestion
+	    // path (File::createFromUpload → FileBlob::createFromPath): a File without
+	    // a blob is never created. The storage driver + offload counters that used
+	    // to sit on fil_files now live on the blob and are shared by every file
+	    // that references it.
+	    'fil_fbb_file_blob_id' => array('type'=>'int8', 'is_nullable'=>true, 'index'=>true),
 	    'fil_source' => array('type'=>'varchar(64)', 'is_nullable'=>true),
 	);
 
@@ -117,65 +121,134 @@ public static function get_by_name($name, $search_deleted = false) {
 	}
 	
 	/**
-	 * Mint a File from in-memory bytes — a generated, received, or fetched blob
-	 * that never passed through a $_FILES upload. General-purpose: any caller
-	 * that holds the content directly rather than an uploaded temp file (inbound
-	 * email attachments are the first consumer). Writes the bytes into upload_dir
-	 * under a collision-free on-disk name, keeps $filename as the display title,
-	 * applies the given restriction columns, saves (save() relocates a public
-	 * file to the fast-serve dir; a restricted one stays in upload_dir), and
-	 * returns the loaded File. No image variants are generated — a caller that
+	 * Mint a File from bytes staged at a path — the one byte-ingestion path every
+	 * caller routes through ($_FILES uploads, generated/received content). The
+	 * physical bytes become (or dedup onto) a FileBlob; this File is the logical
+	 * record pointing at it.
+	 *
+	 * A collision-free name is minted from $display_name and used both as the
+	 * URL identity (fil_name) and — for a freshly-stored blob — the blob's
+	 * physical stored name, so the two are equal for a fresh upload and diverge
+	 * only under dedup. The blob detects the honest MIME type from the bytes;
+	 * that becomes fil_type. No image variants are generated — a caller that
 	 * wants them calls resize() itself.
 	 *
-	 * @param string $bytes        the file content
-	 * @param string $filename     original/display name, e.g. "invoice.pdf" (kept as fil_title)
-	 * @param string $content_type MIME type (stored in fil_type)
+	 * @param string $src_path     bytes to ingest (consumed: moved into place or
+	 *                             discarded on a dedup hit)
+	 * @param string $display_name original/display name, e.g. "invoice.pdf" (kept as fil_title)
+	 * @param string $content_type MIME hint (fallback; the blob's magic-byte detection wins)
 	 * @param int    $owner_id     fil_usr_user_id — the honest owner
 	 * @param array  $restrictions extra columns to set at creation, e.g. ['fil_private' => true]
 	 * @return File the saved, reloaded File
-	 * @throws FileException when the bytes cannot be written to disk
+	 * @throws FileException when the bytes cannot be placed
 	 */
-	public static function createFromBytes($bytes, $filename, $content_type, $owner_id, array $restrictions = array()) {
-		$settings = Globalvars::get_instance();
-		$upload_dir = $settings->get_setting('upload_dir');
+	public static function createFromUpload($src_path, $display_name, $content_type, $owner_id, array $restrictions = array()) {
+		require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
 
-		if (!is_dir($upload_dir)) {
-			@mkdir($upload_dir, 0777, true);
+		if (!is_file($src_path)) {
+			throw new FileException('createFromUpload: source not found: ' . $src_path);
 		}
 
-		// Collision-free on-disk name: a random token inserted before the
-		// extension, then sanitized — the same scheme the $_FILES upload flow
-		// uses, so two files sharing a display name never share a fil_name.
-		$base = ($filename !== null && $filename !== '') ? $filename : 'attachment';
-		if (strpos($base, '.') === false) {
-			$base .= '.bin';
+		// Desired visibility class from the restriction columns, before any bytes
+		// are placed (the blob must land in the matching store).
+		$probe = new File(NULL);
+		$probe->set('fil_usr_user_id', $owner_id);
+		foreach ($restrictions as $col => $val) {
+			$probe->set($col, $val);
 		}
-		$rand_string = '_' . LibraryFunctions::random_string(8) . '.';
-		$dotpos = strrpos($base, '.');
-		$new_name = substr($base, 0, $dotpos) . $rand_string . substr($base, $dotpos + 1);
-		$new_name = str_replace(' ', '_', $new_name);
-		$new_name = preg_replace('/[^A-Za-z0-9\.\-\_]/', '', $new_name);
-		$new_name = preg_replace('/_+/', '_', $new_name);
+		$is_private = !$probe->is_public();
 
-		$target = $upload_dir . '/' . $new_name;
-		if (file_put_contents($target, $bytes) === false) {
-			throw new FileException('createFromBytes: unable to write bytes to ' . $target);
+		// Mint the URL-and-physical name, unique among active files and stored
+		// blob names, then stage the bytes under it so a fresh blob adopts it.
+		$name = self::_mint_unique_name($display_name);
+		$stage_dir = sys_get_temp_dir() . '/fil_stage_' . bin2hex(random_bytes(4));
+		@mkdir($stage_dir, 0777, true);
+		$staged = $stage_dir . '/' . $name;
+		if (!@rename($src_path, $staged)) {
+			if (!@copy($src_path, $staged)) {
+				@rmdir($stage_dir);
+				throw new FileException('createFromUpload: unable to stage bytes at ' . $staged);
+			}
+			@unlink($src_path);
 		}
-		@chmod($target, 0666);
 
-		// The caller's content type is only a fallback: save() detects the real
-		// type from the written bytes' magic numbers on insert and that wins.
+		try {
+			$blob = FileBlob::createFromPath($staged, $content_type, $is_private);
+		} finally {
+			if (is_file($staged)) {
+				@unlink($staged);
+			}
+			@rmdir($stage_dir);
+		}
+
 		$file = new File(NULL);
-		$file->set('fil_name', $new_name);
-		$file->set('fil_title', substr((string)$filename, 0, 255));
-		$file->set('fil_type', substr((string)$content_type, 0, 128));
+		$file->set('fil_name', $name);
+		$file->set('fil_title', substr((string)$display_name, 0, 255));
+		$file->set('fil_type', $blob->get('fbb_mime_type'));
 		$file->set('fil_usr_user_id', $owner_id);
+		$file->set('fil_fbb_file_blob_id', $blob->key);
 		foreach ($restrictions as $col => $val) {
 			$file->set($col, $val);
 		}
 		$file->save();
 		$file->load();
 		return $file;
+	}
+
+	/**
+	 * Mint a File from in-memory bytes — a generated, received, or fetched blob
+	 * that never passed through a $_FILES upload (inbound email attachments are a
+	 * consumer). Writes the bytes to a temp file and routes through
+	 * createFromUpload(), so it shares the one blob-backed ingestion path.
+	 *
+	 * @param string $bytes        the file content
+	 * @param string $filename     original/display name, e.g. "invoice.pdf"
+	 * @param string $content_type MIME hint (fallback; magic-byte detection wins)
+	 * @param int    $owner_id     fil_usr_user_id — the honest owner
+	 * @param array  $restrictions extra columns to set at creation, e.g. ['fil_private' => true]
+	 * @return File the saved, reloaded File
+	 * @throws FileException when the bytes cannot be written to disk
+	 */
+	public static function createFromBytes($bytes, $filename, $content_type, $owner_id, array $restrictions = array()) {
+		$tmp = tempnam(sys_get_temp_dir(), 'fil_bytes_');
+		if ($tmp === false || file_put_contents($tmp, $bytes) === false) {
+			if ($tmp !== false) { @unlink($tmp); }
+			throw new FileException('createFromBytes: unable to write bytes to temp file');
+		}
+		@chmod($tmp, 0666);
+		try {
+			return self::createFromUpload($tmp, ($filename !== null && $filename !== '') ? $filename : 'attachment', $content_type, $owner_id, $restrictions);
+		} finally {
+			if (is_file($tmp)) {
+				@unlink($tmp);
+			}
+		}
+	}
+
+	/**
+	 * A collision-free file name (URL identity): a random token inserted before
+	 * the extension, sanitized, and checked unique among active fil_name rows and
+	 * stored blob names. Used for both fil_name and — via staging — a fresh
+	 * blob's fbb_stored_name.
+	 */
+	private static function _mint_unique_name($display_name) {
+		require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
+		$base = ($display_name !== null && $display_name !== '') ? $display_name : 'attachment';
+		if (strpos($base, '.') === false) {
+			$base .= '.bin';
+		}
+		for ($i = 0; $i < 12; $i++) {
+			$rand = '_' . LibraryFunctions::random_string(8) . '.';
+			$dotpos = strrpos($base, '.');
+			$name = substr($base, 0, $dotpos) . $rand . substr($base, $dotpos + 1);
+			$name = str_replace(' ', '_', $name);
+			$name = preg_replace('/[^A-Za-z0-9\.\-\_]/', '', $name);
+			$name = preg_replace('/_+/', '_', $name);
+			if (!self::get_by_name($name) && !FileBlob::stored_name_exists($name)) {
+				return $name;
+			}
+		}
+		return preg_replace('/[^A-Za-z0-9\.\-\_]/', '', LibraryFunctions::random_string(24)) . '.bin';
 	}
 
 	/**
@@ -190,33 +263,85 @@ public static function get_by_name($name, $search_deleted = false) {
 	 * @return string|null
 	 */
 	function read_bytes($size_key = 'original') {
-		if ($this->get('fil_storage_driver') === 'cloud') {
-			$driver = $this->_cloud_driver();
-			if (!$driver) {
-				return null;
-			}
-			$tmp = tempnam(sys_get_temp_dir(), 'fil_read_');
-			if ($tmp === false) {
-				return null;
-			}
-			try {
-				$driver->get($this->remote_key_for($size_key), $tmp);
-				$bytes = file_get_contents($tmp);
-				@unlink($tmp);
-				return $bytes === false ? null : $bytes;
-			} catch (Exception $e) {
-				@unlink($tmp);
-				error_log('File::read_bytes cloud GET failed fil=' . $this->key . ': ' . $e->getMessage());
-				return null;
-			}
-		}
+		$blob = $this->_blob();
+		return $blob ? $blob->read_bytes($size_key) : null;
+	}
 
-		$path = $this->get_filesystem_path($size_key);
-		if (!file_exists($path)) {
+	/**
+	 * Replace this file's stored bytes in place — for a consumer that rewrites one
+	 * file's content (sealing/unsealing a protected attachment's ciphertext). The
+	 * new bytes become private to THIS file: if dedup gave the underlying blob more
+	 * than one reference, it is first copy-on-write split into a fresh
+	 * single-reference blob and this file repointed, so siblings — and any future
+	 * identical upload that deduped onto the shared original — are never touched.
+	 * The write itself (hash-clear, size update, stale-variant drop) is delegated
+	 * to the now-exclusive blob.
+	 *
+	 * @param string $new_bytes replacement content
+	 * @return bool whether the bytes were written
+	 */
+	function replace_bytes($new_bytes) {
+		require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
+		$blob_id = (int)$this->get('fil_fbb_file_blob_id');
+		if (!$blob_id) {
+			// Legacy blob-less row owns its bytes 1:1 — write straight through.
+			$path = $this->get_filesystem_path('original');
+			return ($path !== '' && $path !== null && @file_put_contents($path, $new_bytes) !== false);
+		}
+		// Load fresh (not the memoized copy) so the reference count is current.
+		$blob = new FileBlob($blob_id, true);
+		if (!$blob->key) {
+			return false;
+		}
+		if ((int)$blob->get('fbb_reference_count') > 1) {
+			// Shared bytes: split off a private copy before mutating, so no sibling
+			// or future dedup candidate sees this file's rewritten content.
+			$copy = $blob->splitCopy($blob->is_private_bool());
+			$dblink = DbConnector::get_instance()->get_db_link();
+			$q = $dblink->prepare("UPDATE fil_files SET fil_fbb_file_blob_id = ? WHERE fil_file_id = ?");
+			$q->execute([$copy->key, $this->key]);
+			$this->set('fil_fbb_file_blob_id', $copy->key, false);
+			FileBlob::release($blob->key);
+			$blob = $copy;
+		}
+		$this->_blob_cache = $blob;
+		$this->_blob_cache_id = (int)$blob->key;
+		return $blob->overwriteBytes($new_bytes);
+	}
+
+	/** @var FileBlob|null Memoized blob for this file's physical bytes. */
+	private $_blob_cache = null;
+	private $_blob_cache_id = null;
+
+	/**
+	 * The FileBlob holding this file's physical bytes, or null when the file has
+	 * no blob (a not-yet-backfilled legacy row). Memoized. Physical operations
+	 * (paths, reads, resize, offload, deletion) delegate here — File owns only
+	 * identity, ownership and visibility.
+	 */
+	function _blob() {
+		$id = $this->get('fil_fbb_file_blob_id');
+		if (!$id) {
 			return null;
 		}
-		$bytes = file_get_contents($path);
-		return $bytes === false ? null : $bytes;
+		if ($this->_blob_cache !== null && $this->_blob_cache_id === (int)$id) {
+			return $this->_blob_cache;
+		}
+		require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
+		$blob = new FileBlob((int)$id, true);
+		$this->_blob_cache = $blob;
+		$this->_blob_cache_id = (int)$id;
+		return $blob;
+	}
+
+	/**
+	 * This file's storage driver ('local' | 'cloud'), read from its blob. Null
+	 * when the file has no blob. The serving path and cloud-aware consumers
+	 * branch on this instead of a former fil_files column.
+	 */
+	function storage_driver() {
+		$blob = $this->_blob();
+		return $blob ? $blob->get('fbb_storage_driver') : null;
 	}
 
 	function get_name() {
@@ -441,17 +566,6 @@ public static function get_by_name($name, $search_deleted = false) {
 	}
 
 	/**
-	 * Get the fast-serve directory path, derived from existing upload_dir setting.
-	 * Public files (no permission restrictions) are served from this directory.
-	 *
-	 * @return string Filesystem path to static_files/uploads directory
-	 */
-	private static function get_fast_serve_dir() {
-		$settings = Globalvars::get_instance();
-		return dirname($settings->get_setting('upload_dir')) . '/static_files/uploads';
-	}
-
-	/**
 	 * Determine whether this file should be in the public (fast-serve) directory.
 	 * A file is public when it has no permission restrictions and is not deleted.
 	 *
@@ -480,256 +594,176 @@ public static function get_by_name($name, $search_deleted = false) {
 	}
 
 	/**
-	 * Bucket object key (without the driver-applied path prefix) for a given
-	 * size variant of this file. 'original' → "<filename>"; otherwise
-	 * "<size>/<filename>".
+	 * Bucket object key (without the driver-applied path prefix) for a size
+	 * variant — resolved through the blob (keyed on fbb_stored_name), so files
+	 * sharing a blob share its keys. Falls back to fil_name for a blob-less row.
 	 */
 	function remote_key_for($size_key = 'original') {
-		$filename = $this->get('fil_name');
-		if ($size_key === 'original') {
-			return $filename;
+		$blob = $this->_blob();
+		if ($blob) {
+			return $blob->remote_key_for($size_key);
 		}
-		return $size_key . '/' . $filename;
+		$filename = $this->get('fil_name');
+		return ($size_key === 'original') ? $filename : $size_key . '/' . $filename;
 	}
 
 	/**
-	 * Get the actual filesystem path for this file, checking both directories.
-	 * Checks fast-serve directory first since most files are public.
-	 *
-	 * Defensive instrumentation: emits a warning if called on a 'cloud' row,
-	 * so any caller we missed during the cloud-storage rollout is surfaced
-	 * without breaking them. Callers that are cloud-aware dispatch on
-	 * fil_storage_driver before calling this method.
+	 * On-disk path for a size variant, resolved through the blob (keyed on
+	 * fbb_stored_name). Falls back to fil_name-based lookup for a blob-less row.
 	 *
 	 * @param string $size_key Size key from ImageSizeRegistry, or 'original'
-	 * @return string Filesystem path (may not exist if file is missing from disk)
+	 * @return string Filesystem path (may not exist if the bytes are cloud-resident or missing)
 	 */
 	function get_filesystem_path($size_key = 'original') {
-		if ($this->get('fil_storage_driver') === 'cloud') {
-			error_log('CLOUD_STORAGE_UNEXPECTED_LOCAL_PATH_QUERY: fil=' . $this->key . ' size=' . $size_key);
+		$blob = $this->_blob();
+		if ($blob) {
+			return $blob->filesystem_path($size_key);
 		}
-
+		// Blob-less (not-yet-backfilled) row: the bytes still live under fil_name.
+		// A public legacy file sits in the fast-serve dir, a restricted one in the
+		// upload dir — search both (as the pre-blob code did), falling back to the
+		// upload dir's expected path.
 		$settings = Globalvars::get_instance();
-		$filename = $this->get('fil_name');
-
-		$dirs = [
-			self::get_fast_serve_dir(),
-			$settings->get_setting('upload_dir')
-		];
-
-		foreach ($dirs as $dir) {
-			if ($size_key === 'original') {
-				$path = $dir . '/' . $filename;
-			} else {
-				$path = $dir . '/' . $size_key . '/' . $filename;
-			}
+		$filename  = $this->get('fil_name');
+		$upload_dir = $settings->get_setting('upload_dir');
+		$fast_dir   = dirname($upload_dir) . '/static_files/uploads';
+		foreach (array($fast_dir, $upload_dir) as $dir) {
+			$path = ($size_key === 'original') ? $dir . '/' . $filename : $dir . '/' . $size_key . '/' . $filename;
 			if (file_exists($path)) {
 				return $path;
 			}
 		}
-
-		// Fallback: return expected path in normal upload_dir
-		$fallback_dir = $settings->get_setting('upload_dir');
-		if ($size_key === 'original') {
-			return $fallback_dir . '/' . $filename;
-		}
-		return $fallback_dir . '/' . $size_key . '/' . $filename;
+		return ($size_key === 'original') ? $upload_dir . '/' . $filename : $upload_dir . '/' . $size_key . '/' . $filename;
 	}
 
 	/**
-	 * Move the file (and all resized versions) to the correct directory based
-	 * on current permissions. Public files go to static_files/uploads/,
-	 * restricted files go to uploads/.
+	 * Maintain the visibility invariant: every file referencing a blob must be in
+	 * the same visibility class. Called after save / soft_delete / undelete, i.e.
+	 * whenever this file's placement class may have changed.
 	 *
-	 * @throws FileException on duplicate filenames or move failures
-	 */
-	function move_to_correct_directory($old_visibility = null) {
-		// Cloud-stored row: the bytes already live in a bucket. Keep the
-		// security invariant true — a file's bytes must sit in the store that
-		// matches its CURRENT visibility (public bytes in the public bucket,
-		// restricted bytes in the verified-private bucket). A visibility flip
-		// after offload (old_visibility != current) leaves the bytes in the
-		// wrong bucket, so pull them back to local from the store that still
-		// holds them; the next offload tick re-places them in the now-correct
-		// store. No flip → bytes are correctly placed, nothing to do.
-		if ($this->get('fil_storage_driver') === 'cloud') {
-			$new_visibility = $this->_cloud_visibility();
-			$source = $old_visibility ?: $new_visibility;
-			if ($source !== $new_visibility) {
-				$this->_pull_back_from_cloud_to_local($source);
-			}
-			return;
-		}
-
-		$settings = Globalvars::get_instance();
-		$filename = $this->get('fil_name');
-
-		$fast_dir = self::get_fast_serve_dir();
-		$normal_dir = $settings->get_setting('upload_dir');
-
-		$in_fast = file_exists($fast_dir . '/' . $filename);
-		$in_normal = file_exists($normal_dir . '/' . $filename);
-
-		// Safety check: if file exists in BOTH directories, there are duplicate
-		// filenames across different records. Do not move — this would cause data loss.
-		if ($in_fast && $in_normal) {
-			throw new FileException("Cannot move file '$filename': duplicate filename exists in both upload directories.");
-		}
-
-		// Determine target based on permissions
-		$target_dir = $this->is_public() ? $fast_dir : $normal_dir;
-
-		// Determine source directory (where file actually is)
-		$source_dir = null;
-		if ($in_fast) {
-			$source_dir = $fast_dir;
-		} elseif ($in_normal) {
-			$source_dir = $normal_dir;
-		}
-
-		if (!$source_dir || $source_dir === $target_dir) {
-			return; // Already in correct location or file not found
-		}
-
-		// Ensure .htaccess exists in fast-serve directory for Tier 1 fallback
-		if ($target_dir === $fast_dir) {
-			$htaccess_path = $fast_dir . '/.htaccess';
-			if (!file_exists($htaccess_path)) {
-				if (!is_dir($fast_dir)) {
-					mkdir($fast_dir, 0777, true);
-				}
-				file_put_contents($htaccess_path, "RewriteEngine On\nRewriteCond %{REQUEST_FILENAME} !-f\nRewriteRule ^(.*)$ /uploads/\$1 [R=302,L]\n");
-			}
-		}
-
-		// Move original file
-		if (!$this->move_single_file($source_dir, $target_dir, $filename)) {
-			return; // Original failed to move, don't move resized versions
-		}
-
-		// Move all resized versions
-		if ($this->is_image()) {
-			require_once(PathHelper::getIncludePath('includes/ImageSizeRegistry.php'));
-			$sizes = ImageSizeRegistry::get_sizes();
-			foreach ($sizes as $key => $config) {
-				$this->move_single_file(
-					$source_dir . '/' . $key,
-					$target_dir . '/' . $key,
-					$filename
-				);
-			}
-		}
-	}
-
-	/**
-	 * Move a single file from source to target directory.
+	 * When the file's desired class already matches its blob's, nothing to do.
+	 * Otherwise, at refcount 1 the blob itself flips (bytes move between the
+	 * fast-serve and restricted dirs, or pull home from the wrong bucket); at
+	 * refcount > 1 the bytes copy-on-write into a fresh blob in the target class
+	 * and this file repoints, decrementing the old blob.
 	 *
-	 * @param string $source_dir Source directory
-	 * @param string $target_dir Target directory
-	 * @param string $filename File name
-	 * @return bool True on success or if nothing to move
-	 * @throws FileException on move failure or if target already exists
+	 * Soft-delete exception: deleting one of several references does NOT drag the
+	 * shared blob private — the deleted file's own URLs are already gated by
+	 * is_viewable(), and the siblings keep serving the public bytes.
 	 */
-	private function move_single_file($source_dir, $target_dir, $filename) {
-		$source = $source_dir . '/' . $filename;
-		$target = $target_dir . '/' . $filename;
-
-		if (!file_exists($source)) return true; // Nothing to move, not an error
-
-		// Don't overwrite an existing file at the target
-		if (file_exists($target)) {
-			throw new FileException("Cannot move file '$filename': file already exists at target '$target'.");
-		}
-
-		// Ensure target directory exists
-		if (!is_dir($target_dir)) {
-			mkdir($target_dir, 0777, true);
-		}
-
-		if (!rename($source, $target)) {
-			throw new FileException("Failed to move file '$filename' from '$source' to '$target'.");
-		}
-
-		return true;
-	}
-
-	/**
-	 * For an already-offloaded ('cloud') row, the visibility currently recorded
-	 * in the database — i.e. which bucket physically holds the bytes right now,
-	 * captured BEFORE a save/delete changes the in-memory permission fields.
-	 * Returns 'public'/'private', or null when the row isn't cloud-stored (no
-	 * bucket relocation is possible) or isn't persisted yet. Lets the post-change
-	 * move_to_correct_directory() detect a visibility flip and pull from the
-	 * right store.
-	 */
-	private function _offloaded_visibility() {
-		if (!$this->key || $this->get('fil_storage_driver') !== 'cloud') {
-			return null;
-		}
-		$persisted = new File($this->key, true);
-		if (!$persisted->key) {
-			return null;
-		}
-		return $persisted->is_public() ? 'public' : 'private';
-	}
-
-	/**
-	 * A File row is born with an honest fil_type. On insert, the type is
-	 * detected from the stored bytes' magic numbers and that detection wins
-	 * over whatever the caller set — the caller's value is client-supplied
-	 * (multipart Content-Type, email part header, extension guess) and
-	 * spoofable, while the serve-back inline allowlist trusts fil_type. The
-	 * caller's value survives only when the bytes aren't on local disk yet or
-	 * finfo can't decide.
-	 */
-	private function apply_detected_type() {
-		if (!$this->get('fil_name') || $this->get('fil_storage_driver') === 'cloud') {
+	function move_to_correct_directory() {
+		$blob_id = $this->get('fil_fbb_file_blob_id');
+		if (!$blob_id) {
 			return;
 		}
-		$path = $this->get_filesystem_path('original');
-		if (!file_exists($path)) {
+		// Load the blob FRESH (not the memoized copy): a concurrent dedup may have
+		// bumped its reference count since this file last read it, and the
+		// flip-vs-split decision below hinges on the current count.
+		require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
+		$blob = new FileBlob((int)$blob_id, true);
+		if (!$blob->key) {
 			return;
 		}
-		$detected = self::detect_mime_file($path);
-		if ($detected !== null) {
-			$this->set('fil_type', substr($detected, 0, 128));
+		$this->_blob_cache = $blob;
+		$this->_blob_cache_id = (int)$blob_id;
+
+		$desired_private = !$this->is_public();
+		$current_private = $blob->is_private_bool();
+		if ($desired_private === $current_private) {
+			return; // invariant already holds
 		}
+
+		$refcount = (int)$blob->get('fbb_reference_count');
+		if ($refcount <= 1) {
+			$blob->flipVisibility($desired_private);
+			return;
+		}
+
+		// refcount > 1 and this file is being soft-deleted: the deleted file's own
+		// URLs are already gated, and a live public sibling still needs the bytes
+		// public — so leave the shared blob alone UNLESS this was the last public
+		// referrer. When no live file still needs these bytes world-served, flip the
+		// (now all-deleted / none-public) blob private so its bytes leave the
+		// Apache-served fast-serve dir instead of staying fetchable by stored name.
+		if ($this->get('fil_delete_time')) {
+			if ($desired_private && !$current_private
+					&& !self::blob_has_public_referrer((int)$blob->key, (int)$this->key)) {
+				$blob->flipVisibility(true);
+			}
+			return;
+		}
+
+		// A live restriction change on a shared blob: copy-on-write split.
+		$new = $blob->splitCopy($desired_private);
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$q = $dblink->prepare("UPDATE fil_files SET fil_fbb_file_blob_id = ? WHERE fil_file_id = ?");
+		$q->execute([$new->key, $this->key]);
+		$this->set('fil_fbb_file_blob_id', $new->key, false);
+		$this->_blob_cache = $new;
+		$this->_blob_cache_id = (int)$new->key;
+		FileBlob::release($blob->key);
 	}
 
 	/**
-	 * Save the file record and move to the correct directory based on
-	 * permissions. Insert-time saves run magic-byte type detection here, in
-	 * save(), so every ingest path — present and future — stores an honest
-	 * fil_type by construction rather than by caller discipline.
+	 * Does any live (non-deleted) file OTHER than $exclude_file_id reference this
+	 * blob and require it public? Used when soft-deleting one of several references
+	 * to decide whether the shared public bytes may leave the world-served dir.
+	 */
+	private static function blob_has_public_referrer($blob_id, $exclude_file_id) {
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$q = $dblink->prepare(
+			"SELECT fil_file_id FROM fil_files
+			 WHERE fil_fbb_file_blob_id = ? AND fil_file_id <> ? AND fil_delete_time IS NULL");
+		$q->execute([(int)$blob_id, (int)$exclude_file_id]);
+		$ids = $q->fetchAll(PDO::FETCH_COLUMN);
+		foreach ($ids as $id) {
+			$other = new File((int)$id, true);
+			if ($other->key && $other->is_public()) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Save the file record, then maintain the blob visibility invariant.
+	 *
+	 * On first insert of a blob-backed file, fil_type is forced to the blob's
+	 * magic-byte-detected type (fbb_mime_type). The sanctioned ingestion path
+	 * already sets it, but this closes the defense-in-depth gap for any caller that
+	 * builds a File directly and save()s with a spoofable client-supplied fil_type:
+	 * the served Content-Type is always the honest detected one, never trusted
+	 * caller input. Later saves (e.g. an attachment re-asserting its type after
+	 * sealing) are left untouched.
 	 */
 	function save($debug = false) {
-		$old_visibility = $this->_offloaded_visibility();
 		if (!$this->key) {
-			$this->apply_detected_type();
+			$blob = $this->_blob();
+			if ($blob && $blob->get('fbb_mime_type')) {
+				$this->set('fil_type', $blob->get('fbb_mime_type'));
+			}
 		}
 		$result = parent::save($debug);
-		$this->move_to_correct_directory($old_visibility);
+		$this->move_to_correct_directory();
 		return $result;
 	}
 
 	/**
-	 * Soft delete and move to restricted directory since deleted files
-	 * should not be publicly accessible.
+	 * Soft delete, then re-evaluate the blob's placement (a refcount-1 blob flips
+	 * private; a shared blob is left public — see move_to_correct_directory()).
 	 */
 	function soft_delete() {
-		$old_visibility = $this->_offloaded_visibility();
 		$result = parent::soft_delete();
-		$this->move_to_correct_directory($old_visibility);
+		$this->move_to_correct_directory();
 		return $result;
 	}
 
 	/**
-	 * Undelete and re-evaluate which directory the file belongs in.
+	 * Undelete and re-evaluate the blob's placement.
 	 */
 	function undelete() {
-		$old_visibility = $this->_offloaded_visibility();
 		$result = parent::undelete();
-		$this->move_to_correct_directory($old_visibility);
+		$this->move_to_correct_directory();
 		return $result;
 	}
 
@@ -748,7 +782,7 @@ public static function get_by_name($name, $search_deleted = false) {
 		// different domain.) PRIVATE files must NEVER expose a bucket URL — they
 		// fall through to the local /uploads/* pattern, which serve.php
 		// gate-streams from the verified-private bucket after is_viewable().
-		if ($this->get('fil_storage_driver') === 'cloud') {
+		if ($this->storage_driver() === 'cloud') {
 			if ($this->is_public()) {
 				require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
 				$driver = CloudStorageDriverFactory::default();
@@ -767,10 +801,24 @@ public static function get_by_name($name, $search_deleted = false) {
 		$settings = Globalvars::get_instance();
 		$upload_web_dir = $settings->get_setting('upload_web_dir');
 
+		// A public file's bytes are fetched straight from the fast-serve dir, where
+		// they live under the blob's stored name. Point the URL there so a dedup
+		// secondary (whose fil_name has no file of its own) is served directly by
+		// Apache with no serve.php round trip. Private files keep fil_name: their
+		// URLs route through serve.php's gate, which must resolve and authorize THIS
+		// file, not the blob's primary.
+		$url_name = $this->get('fil_name');
+		if ($this->is_public()) {
+			$blob = $this->_blob();
+			if ($blob && $blob->get('fbb_stored_name')) {
+				$url_name = $blob->get('fbb_stored_name');
+			}
+		}
+
 		if ($size_key === 'original') {
-			$file_path = $upload_web_dir . '/' . $this->get('fil_name');
+			$file_path = $upload_web_dir . '/' . $url_name;
 		} else {
-			$file_path = $upload_web_dir . '/' . $size_key . '/' . $this->get('fil_name');
+			$file_path = $upload_web_dir . '/' . $size_key . '/' . $url_name;
 		}
 
 		// Ensure leading slash
@@ -923,16 +971,6 @@ public static function get_by_name($name, $search_deleted = false) {
 	}
 
 	function permanent_delete($debug=false){
-		if ($this->get('fil_storage_driver') === 'cloud') {
-			$this->_permanent_delete_cloud();
-		} else {
-			$file_path = $this->get_filesystem_path('original');
-			if (file_exists($file_path)) {
-				@unlink($file_path);
-			}
-			$this->delete_resized();
-		}
-
 		// Clean up all entity_photos rows referencing this file
 		$dbconnector = DbConnector::get_instance();
 		$dblink = $dbconnector->get_db_link();
@@ -945,517 +983,35 @@ public static function get_by_name($name, $search_deleted = false) {
 			error_log('EntityPhoto cleanup on file delete: ' . $e->getMessage());
 		}
 
+		// Let go of the physical bytes: the blob decrements its reference count
+		// and, at zero, deletes the original + every variant (local or cloud) and
+		// its own row. A blob still referenced by another file is untouched.
+		$blob_id = $this->get('fil_fbb_file_blob_id');
+		if ($blob_id) {
+			require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
+			FileBlob::release((int)$blob_id);
+		}
+
 		parent::permanent_delete($debug);
 		return true;
 	}
 
 	/**
-	 * The visibility of this file's bytes for store resolution: 'public' when
-	 * the file has no restrictions, 'private' otherwise. Mirrors is_public(),
-	 * the single source of truth for which bucket a 'cloud' row belongs to.
-	 */
-	private function _cloud_visibility() {
-		return $this->is_public() ? 'public' : 'private';
-	}
-
-	/**
-	 * The cloud driver for the store matching this file's visibility (public →
-	 * public bucket, restricted → verified-private bucket). Falls back to the
-	 * unlatched binding so deletes/resizes still resolve a driver while a store
-	 * is mid-disable/drain. Null when that store is unconfigured. For a public
-	 * file this is exactly the legacy default() path (forVisibility('public')
-	 * === default()), so the public-files behaviour is unchanged.
-	 */
-	private function _cloud_driver() {
-		require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
-		return CloudStorageDriverFactory::forVisibilityWithFallback($this->_cloud_visibility());
-	}
-
-	/**
-	 * Delete original + every variant from the bucket. Best-effort: failures
-	 * are logged with CLOUD_STORAGE_ORPHAN so the admin can clean up manually,
-	 * then the row is deleted anyway. The orphan consumes a few KB-MB until
-	 * cleared with `aws s3 rm` or equivalent.
-	 */
-	private function _permanent_delete_cloud() {
-		$driver = $this->_cloud_driver();
-		if (!$driver) {
-			error_log('CLOUD_STORAGE_ORPHAN: bucket=unknown keys=' . $this->remote_key_for('original') . ' (driver unconfigured)');
-			return;
-		}
-
-		$keys = [$this->remote_key_for('original')];
-		if ($this->is_image()) {
-			require_once(PathHelper::getIncludePath('includes/ImageSizeRegistry.php'));
-			foreach (ImageSizeRegistry::get_sizes() as $size_key => $cfg) {
-				$keys[] = $this->remote_key_for($size_key);
-			}
-		}
-
-		$failed_keys = [];
-		foreach ($keys as $k) {
-			try {
-				$driver->delete($k);
-			} catch (Exception $e) {
-				// One brief retry — bucket DELETEs are rare and almost always succeed.
-				try {
-					usleep(500000);
-					$driver->delete($k);
-				} catch (Exception $e2) {
-					$failed_keys[] = $k;
-				}
-			}
-		}
-		if (!empty($failed_keys)) {
-			$bucket = Globalvars::get_instance()->get_setting('cloud_storage_bucket') ?: 'unknown';
-			error_log('CLOUD_STORAGE_ORPHAN: bucket=' . $bucket . ' keys=' . implode(',', $failed_keys));
-		}
-	}
-
-	/**
-	 * Delete resized versions of this image
-	 *
-	 * @param string $size_key Specific size key to delete, or 'all' for all sizes
-	 */
-	function delete_resized($size_key = 'all'){
-		if (!$this->is_image()) {
-			return false;
-		}
-
-		require_once(PathHelper::getIncludePath('includes/ImageSizeRegistry.php'));
-		$sizes = ImageSizeRegistry::get_sizes();
-
-		if ($this->get('fil_storage_driver') === 'cloud') {
-			$driver = $this->_cloud_driver();
-			if (!$driver) {
-				return false;
-			}
-			foreach ($sizes as $key => $config) {
-				if ($size_key !== 'all' && $size_key !== $key) {
-					continue;
-				}
-				try {
-					$driver->delete($this->remote_key_for($key));
-				} catch (Exception $e) {
-					error_log('delete_resized cloud: ' . $e->getMessage());
-				}
-			}
-			return;
-		}
-
-		foreach ($sizes as $key => $config) {
-			if ($size_key !== 'all' && $size_key !== $key) {
-				continue;
-			}
-			$file_path = $this->get_filesystem_path($key);
-			if (file_exists($file_path)) {
-				@unlink($file_path);
-			}
-		}
-	}
-	
-	/**
-	 * Generate resized versions using ImageSizeRegistry
-	 *
-	 * @param string $size_key Specific size key to generate, or 'all' for all registered sizes
+	 * Generate resized variants — delegated to the blob, which owns the physical
+	 * bytes and the <size>/<stored_name> variant layout shared by every file
+	 * that references it.
 	 */
 	function resize($size_key='all'){
-		if (!$this->is_image()) {
-			return false;
-		}
-
-		require_once(PathHelper::getIncludePath('includes/ImageSizeRegistry.php'));
-		$sizes = ImageSizeRegistry::get_sizes();
-
-		if ($this->get('fil_storage_driver') === 'cloud') {
-			$this->_resize_cloud($size_key, $sizes);
-			return;
-		}
-
-		$old_path = $this->get_filesystem_path('original');
-		if (!file_exists($old_path)) {
-			return false;
-		}
-
-		// Derive the base directory from where the original actually lives
-		$upload_dir = dirname($old_path);
-
-		// Ensure all resize subdirectories exist
-		foreach ($sizes as $key => $config) {
-			if ($size_key !== 'all' && $size_key !== $key) {
-				continue;
-			}
-			$dir_path = $upload_dir . '/' . $key;
-			if (!is_dir($dir_path)) {
-				if (mkdir($dir_path, 0777, true)) {
-					chmod($dir_path, 0777);
-				} else {
-					error_log("Failed to create resize directory: $dir_path");
-				}
-			}
-		}
-
-		foreach ($sizes as $key => $config) {
-			if ($size_key !== 'all' && $size_key !== $key) {
-				continue;
-			}
-			$new_path = $upload_dir . '/' . $key . '/' . $this->get('fil_name');
-			$this->generate_resized($old_path, $new_path, $config['width'], $config['height'], $config['crop'], $config['quality']);
-		}
+		$blob = $this->_blob();
+		return $blob ? $blob->resize($size_key) : false;
 	}
 
 	/**
-	 * Re-resize for a cloud-stored file: pull original to temp, generate
-	 * variants in temp dir, push each variant back to bucket, drop temp dir.
-	 * Used when ImageSizeRegistry gains a new size and existing files need
-	 * a new variant (§7).
+	 * Delete resized variants — delegated to the blob.
 	 */
-	private function _resize_cloud($size_key, $sizes) {
-		$driver = $this->_cloud_driver();
-		if (!$driver) {
-			throw new FileException('Cannot re-resize cloud file: cloud storage driver not configured.');
-		}
-
-		$filename = $this->get('fil_name');
-		$tmp_dir = sys_get_temp_dir() . '/cloud_resize_' . $this->key . '_' . uniqid();
-		if (!mkdir($tmp_dir, 0777, true)) {
-			throw new FileException('Failed to create temp dir for cloud resize: ' . $tmp_dir);
-		}
-
-		$cleanup = function() use ($tmp_dir) {
-			if (!is_dir($tmp_dir)) return;
-			$files = glob($tmp_dir . '/{,*/}{,.}*', GLOB_BRACE);
-			foreach ($files as $f) {
-				if (is_file($f)) @unlink($f);
-			}
-			foreach (glob($tmp_dir . '/*', GLOB_ONLYDIR) as $d) @rmdir($d);
-			@rmdir($tmp_dir);
-		};
-
-		try {
-			$tmp_original = $tmp_dir . '/' . $filename;
-			$driver->get($this->remote_key_for('original'), $tmp_original);
-
-			$content_type = $this->get('fil_type') ?: 'image/jpeg';
-
-			foreach ($sizes as $key => $config) {
-				if ($size_key !== 'all' && $size_key !== $key) {
-					continue;
-				}
-				$variant_dir = $tmp_dir . '/' . $key;
-				if (!is_dir($variant_dir)) {
-					mkdir($variant_dir, 0777, true);
-				}
-				$variant_path = $variant_dir . '/' . $filename;
-				$this->generate_resized($tmp_original, $variant_path, $config['width'], $config['height'], $config['crop'], $config['quality']);
-				if (file_exists($variant_path)) {
-					$driver->put($variant_path, $this->remote_key_for($key), $content_type);
-				}
-			}
-		} finally {
-			$cleanup();
-		}
-	}
-
-	/**
-	 * Generate a single resized version of an image
-	 *
-	 * @param string $old_path Source image path
-	 * @param string $new_path Destination path
-	 * @param int $width Target width (0 = auto from height)
-	 * @param int $height Target height (0 = auto from width)
-	 * @param bool $crop Whether to center-crop to exact dimensions
-	 * @param int $quality JPEG quality (1-100)
-	 */
-	private function generate_resized($old_path, $new_path, $width, $height, $crop, $quality = 85) {
-		try {
-			// Resizing runs on user-supplied bytes, so it uses GD, not
-			// ImageMagick: GD's decoder set is just the raster codecs
-			// (jpeg/png/gif/webp/avif) with no coders or delegates, so a
-			// malformed upload can't reach the Ghostscript/MVG/MSL surface that
-			// makes ImageMagick a native-RCE risk. All platform image formats
-			// are covered by GD.
-			$info = @getimagesize($old_path);
-			if ($info === false) {
-				error_log('File resize: unreadable image ' . basename($old_path));
-				return;
-			}
-			$type  = $info[2];   // IMAGETYPE_* constant, from the real bytes
-			$src_w = $info[0];
-			$src_h = $info[1];
-			if ($src_w < 1 || $src_h < 1) {
-				return;
-			}
-
-			$src = self::gd_read($old_path, $type);
-			if (!$src) {
-				error_log('File resize: unsupported image type (' . $type . ') for ' . basename($old_path));
-				return;
-			}
-
-			// Default source rectangle is the whole image; cropping narrows it.
-			$sx = 0; $sy = 0; $sw = $src_w; $sh = $src_h;
-
-			if ($crop && $width > 0 && $height > 0) {
-				// Center-crop the source to the target aspect ratio (identical
-				// geometry to the previous Imagick path), then downscale-fit.
-				if (($src_w / $width) < ($src_h / $height)) {
-					$sw = $src_w;
-					$sh = (int)floor($height * $src_w / $width);
-					$sx = 0;
-					$sy = (int)(($src_h - $sh) / 2);
-				} else {
-					$sw = (int)ceil($width * $src_h / $height);
-					$sh = $src_h;
-					$sx = (int)(($src_w - $sw) / 2);
-					$sy = 0;
-				}
-			}
-
-			// Downscale-only fit: never upscale (factor capped at 1.0). This
-			// reproduces Imagick's thumbnailImage(bestfit) across the crop,
-			// both-dimension, width-only and height-only cases.
-			$f = 1.0;
-			if ($width > 0 && $height > 0) {
-				$f = min($width / $sw, $height / $sh);
-			} elseif ($width > 0) {
-				$f = $width / $sw;
-			} elseif ($height > 0) {
-				$f = $height / $sh;
-			}
-			if ($f > 1.0) { $f = 1.0; }
-			$dw = max(1, (int)round($sw * $f));
-			$dh = max(1, (int)round($sh * $f));
-
-			$dst = imagecreatetruecolor($dw, $dh);
-			self::gd_preserve_alpha($dst, $type);
-			imagecopyresampled($dst, $src, 0, 0, $sx, $sy, $dw, $dh, $sw, $sh);
-
-			if ($type === IMAGETYPE_GIF) {
-				// GIF carries transparency as a single palette index, not an
-				// alpha channel: reduce to a palette, and re-mark a transparent
-				// index only when the source actually had one (so an opaque GIF
-				// doesn't get a real color wrongly turned transparent).
-				$src_transparent = imagecolortransparent($src);
-				imagetruecolortopalette($dst, false, 255);
-				if ($src_transparent >= 0) {
-					imagecolortransparent($dst, imagecolorclosestalpha($dst, 0, 0, 0, 127));
-				}
-			}
-
-			self::gd_write($dst, $new_path, $type, $quality);
-
-			imagedestroy($src);
-			imagedestroy($dst);
-		} catch (\Throwable $e) {
-			error_log('File resize generation failed for ' . basename($new_path) . ': ' . $e->getMessage());
-		}
-	}
-
-	/**
-	 * Decode an image with the GD reader matching its detected IMAGETYPE.
-	 * Returns a GD image resource, or false for a type GD cannot read.
-	 */
-	private static function gd_read($path, $type) {
-		switch ($type) {
-			case IMAGETYPE_JPEG: return @imagecreatefromjpeg($path);
-			case IMAGETYPE_PNG:  return @imagecreatefrompng($path);
-			case IMAGETYPE_GIF:  return @imagecreatefromgif($path);
-			case IMAGETYPE_WEBP: return function_exists('imagecreatefromwebp') ? @imagecreatefromwebp($path) : false;
-			case IMAGETYPE_AVIF: return function_exists('imagecreatefromavif') ? @imagecreatefromavif($path) : false;
-			default:             return false;
-		}
-	}
-
-	/**
-	 * Configure a destination canvas so alpha survives the resample for formats
-	 * that carry transparency (png/gif/webp/avif). No-op cost for jpeg.
-	 */
-	private static function gd_preserve_alpha($dst, $type) {
-		if ($type === IMAGETYPE_JPEG) {
-			return;
-		}
-		imagealphablending($dst, false);
-		imagesavealpha($dst, true);
-		$transparent = imagecolorallocatealpha($dst, 0, 0, 0, 127);
-		imagefill($dst, 0, 0, $transparent);
-	}
-
-	/**
-	 * Encode a GD canvas to $path in the same format as the source type.
-	 * $quality applies to the lossy encoders; png/gif ignore it.
-	 */
-	private static function gd_write($img, $path, $type, $quality) {
-		switch ($type) {
-			case IMAGETYPE_JPEG: imagejpeg($img, $path, $quality); break;
-			case IMAGETYPE_PNG:  imagepng($img, $path); break;   // lossless; zlib default
-			case IMAGETYPE_GIF:  imagegif($img, $path); break;
-			case IMAGETYPE_WEBP: if (function_exists('imagewebp')) { imagewebp($img, $path, $quality); } break;
-			case IMAGETYPE_AVIF: if (function_exists('imageavif')) { imageavif($img, $path, $quality); } break;
-		}
-	}
-
-	/**
-	 * Pull bucket bytes back to the restricted local directory and flip the
-	 * row to fil_storage_driver='local'. Called from move_to_correct_directory()
-	 * on a visibility flip, so the bytes land back on disk and the next offload
-	 * tick re-places them in the now-correct store.
-	 *
-	 * $source_visibility names the store the bytes are physically in (the row's
-	 * visibility BEFORE the flip), so the driver is resolved against the right
-	 * bucket — 'public' (default behaviour) or 'private'. Bytes always land in
-	 * the restricted dir; for a private→public flip the next public offload tick
-	 * moves them to the public bucket, and in the meantime is_viewable() returns
-	 * true for a now-public file, so serving is correct throughout.
-	 *
-	 * Three explicit phases with strict ordering:
-	 *
-	 *   Phase 1: pull every key (original + variants) to a temp dir. Failure
-	 *            → drop temps, leave bucket+DB unchanged, throw.
-	 *   Phase 2: delete keys from bucket (with brief retries). Any delete
-	 *            failure after retries → re-PUT successfully-deleted keys
-	 *            from temps (best-effort), drop temps, throw.
-	 *   Phase 3: copy temps to restricted dir, then BEGIN/UPDATE/COMMIT.
-	 *            Failure here → re-PUT all temps to bucket so the row's
-	 *            'cloud' flag stays truthful, log CLOUD_STORAGE_PARTIAL_FLIP.
-	 *
-	 * Invariants: bucket is authoritative until DB commit; temps live until
-	 * DB commit so they remain rollback material.
-	 */
-	private function _pull_back_from_cloud_to_local(string $source_visibility) {
-		require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
-		// Resolve the driver for the store that physically holds the bytes,
-		// working even mid-disable/drain (forVisibilityWithFallback).
-		$driver = CloudStorageDriverFactory::forVisibilityWithFallback($source_visibility);
-		if (!$driver) {
-			throw new FileException('Cannot pull file back from cloud: ' . $source_visibility . ' driver not configured.');
-		}
-
-		$filename = $this->get('fil_name');
-		$settings = Globalvars::get_instance();
-		$restricted_dir = $settings->get_setting('upload_dir');
-
-		// Build the list of keys to pull (original + variants for images).
-		$keys = ['original'];
-		if ($this->is_image()) {
-			require_once(PathHelper::getIncludePath('includes/ImageSizeRegistry.php'));
-			foreach (ImageSizeRegistry::get_sizes() as $size_key => $cfg) {
-				$keys[] = $size_key;
-			}
-		}
-
-		$tmp_dir = sys_get_temp_dir() . '/cloud_pullback_' . $this->key . '_' . uniqid();
-		if (!mkdir($tmp_dir, 0777, true)) {
-			throw new FileException('Failed to create temp dir for pull-back: ' . $tmp_dir);
-		}
-		$temp_paths = []; // size_key => temp filesystem path
-
-		$drop_temps = function() use (&$temp_paths, $tmp_dir) {
-			foreach ($temp_paths as $p) {
-				if (is_file($p)) @unlink($p);
-			}
-			foreach (glob($tmp_dir . '/*', GLOB_ONLYDIR) as $d) @rmdir($d);
-			@rmdir($tmp_dir);
-		};
-
-		// PHASE 1 — pull every key to temp.
-		try {
-			foreach ($keys as $size_key) {
-				$tmp_path = ($size_key === 'original')
-					? $tmp_dir . '/' . $filename
-					: $tmp_dir . '/' . $size_key . '/' . $filename;
-				$driver->get($this->remote_key_for($size_key), $tmp_path);
-				$temp_paths[$size_key] = $tmp_path;
-			}
-		} catch (Exception $e) {
-			$drop_temps();
-			throw new FileException('Phase 1 (pull from bucket) failed: ' . $e->getMessage(), 0, $e);
-		}
-
-		// PHASE 2 — delete from bucket with brief retries.
-		$deleted_keys = [];
-		$retry_delays = [0, 1, 2]; // ~3s window
-		foreach ($keys as $size_key) {
-			$delete_ok = false;
-			$last_err = null;
-			foreach ($retry_delays as $delay) {
-				if ($delay) sleep($delay);
-				try {
-					$driver->delete($this->remote_key_for($size_key));
-					$delete_ok = true;
-					break;
-				} catch (Exception $e) {
-					$last_err = $e;
-				}
-			}
-			if (!$delete_ok) {
-				// Roll back: re-PUT successfully-deleted keys from temps. Best-effort.
-				foreach ($deleted_keys as $rb_size) {
-					try {
-						$driver->put($temp_paths[$rb_size], $this->remote_key_for($rb_size), $this->get('fil_type') ?: 'application/octet-stream');
-					} catch (Exception $rb_err) {
-						// Swallow — original failure already indicates broader trouble.
-					}
-				}
-				$drop_temps();
-				throw new FileException('Phase 2 (bucket delete) failed for ' . $size_key . ': ' . ($last_err ? $last_err->getMessage() : 'unknown'), 0, $last_err);
-			}
-			$deleted_keys[] = $size_key;
-		}
-
-		// PHASE 3 — copy temps to restricted dir, then commit DB row.
-		$copied_paths = []; // restricted-dir paths actually written
-		try {
-			if (!is_dir($restricted_dir)) {
-				mkdir($restricted_dir, 0777, true);
-			}
-			foreach ($keys as $size_key) {
-				$dest = ($size_key === 'original')
-					? $restricted_dir . '/' . $filename
-					: $restricted_dir . '/' . $size_key . '/' . $filename;
-				$dest_parent = dirname($dest);
-				if (!is_dir($dest_parent)) {
-					mkdir($dest_parent, 0777, true);
-				}
-				if (!copy($temp_paths[$size_key], $dest)) {
-					throw new FileException('Phase 3 (local copy) failed for ' . $size_key);
-				}
-				$copied_paths[] = $dest;
-			}
-
-			$dbconnector = DbConnector::get_instance();
-			$dblink = $dbconnector->get_db_link();
-			$dblink->beginTransaction();
-			try {
-				$q = $dblink->prepare("UPDATE fil_files SET fil_storage_driver = 'local' WHERE fil_file_id = ?");
-				$q->execute([$this->key]);
-				$dblink->commit();
-			} catch (PDOException $e) {
-				$dblink->rollBack();
-				throw new FileException('Phase 3 (DB commit) failed: ' . $e->getMessage(), 0, $e);
-			}
-
-			// Refresh in-memory state to match committed DB.
-			$this->set('fil_storage_driver', 'local', false);
-		} catch (Exception $e) {
-			// Worst case: bucket empty, DB still 'cloud'. Best-effort: clean up
-			// any partial restricted-dir writes, then re-PUT all temps to bucket
-			// so the row's 'cloud' flag stays truthful.
-			foreach ($copied_paths as $p) @unlink($p);
-			foreach ($keys as $size_key) {
-				try {
-					$driver->put($temp_paths[$size_key], $this->remote_key_for($size_key), $this->get('fil_type') ?: 'application/octet-stream');
-				} catch (Exception $reput) {
-					// If re-PUT fails too, the row is genuinely broken (DB says
-					// 'cloud', bucket empty). Logged below; manual recovery required.
-				}
-			}
-			$drop_temps();
-			error_log('CLOUD_STORAGE_PARTIAL_FLIP: fil=' . $this->key . ' name=' . $filename . ' err=' . $e->getMessage());
-			throw $e;
-		}
-
-		$drop_temps();
+	function delete_resized($size_key = 'all'){
+		$blob = $this->_blob();
+		return $blob ? $blob->delete_resized($size_key) : false;
 	}
 
 	// authenticate_write() is inherited from SystemBase — it applies the shared
