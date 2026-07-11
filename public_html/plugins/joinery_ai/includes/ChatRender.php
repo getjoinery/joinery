@@ -213,13 +213,14 @@ class ChatRender {
              . ($count === 1 ? '' : 's') . '</summary><ul>' . $items . '</ul></details>';
     }
 
-    /** Markdown → HTML for assistant text. Falls back to escaped text if the
-     *  renderer isn't available. */
+    /** Markdown → HTML for assistant text, with chat-style soft breaks (a
+     *  single newline renders as a line break). Falls back to escaped text if
+     *  the renderer isn't available. */
     private static function renderMarkdown(string $md): string {
         if ($md === '') return '';
         try {
             require_once(PathHelper::getIncludePath('includes/MarkdownRenderer.php'));
-            return MarkdownRenderer::render($md);
+            return MarkdownRenderer::render($md, true);
         } catch (Throwable $e) {
             return nl2br(htmlspecialchars($md, ENT_QUOTES, 'UTF-8'));
         }

@@ -5,7 +5,7 @@
  * Extracted from adm/admin_spec_view.php for reuse across
  * the spec viewer and help documentation viewer.
  *
- * Version: 1.1
+ * Version: 1.3
  */
 
 class MarkdownRenderer {
@@ -13,8 +13,12 @@ class MarkdownRenderer {
     /**
      * Render markdown text to HTML.
      * Input is HTML-escaped first for XSS protection.
+     *
+     * $soft_breaks — when true, a single newline inside a paragraph renders as
+     * a line break (<br>) instead of collapsing to a space. Chat-style output
+     * (LLM replies) wants this; authored docs are hard-wrapped and don't.
      */
-    public static function render($text) {
+    public static function render($text, $soft_breaks = false) {
         $text = htmlspecialchars($text);
 
         // Extract fenced and inline code to placeholders BEFORE any other pass so
@@ -96,8 +100,8 @@ class MarkdownRenderer {
             return '<ol>' . $html . '</ol>';
         }, $text);
 
-        // Tables
-        $text = preg_replace_callback('/^\|(.+)\|\n\|[-| ]+\|\n((?:\|.+\|\n?)+)/m', function($matches) {
+        // Tables — separator row accepts alignment colons (:---, :---:, ---:)
+        $text = preg_replace_callback('/^\|(.+)\|\n\|[-:| ]+\|\n((?:\|.+\|\n?)+)/m', function($matches) {
             // Header row
             $headers = array_map('trim', explode('|', trim($matches[1], '|')));
             $header_html = '<tr>' . implode('', array_map(function($h) { return '<th>' . $h . '</th>'; }, $headers)) . '</tr>';
@@ -119,6 +123,19 @@ class MarkdownRenderer {
         $text = preg_replace('/\n\n+/', '</p><p>', $text);
         $text = '<p>' . $text . '</p>';
 
+        // Soft breaks: remaining newlines are single (the paragraph pass ate
+        // runs of 2+). Convert them to <br>, except where the newline touches
+        // a block element's boundary — a <br> there would add stray gaps.
+        // Code blocks are placeholders at this point, so their contents are
+        // safe; a <br> landing against a restored <pre> is stripped below.
+        if ($soft_breaks) {
+            $text = preg_replace(
+                '~(?<!</h1>|</h2>|</h3>|</h4>|</h5>|</h6>|</ul>|</ol>|</table>|<hr>)\n(?!<(?:h[1-6]|ul|ol|table|hr))~',
+                '<br>',
+                $text
+            );
+        }
+
         // Clean up empty paragraphs and fix nesting
         $text = preg_replace('/<p>\s*<(h[1-6]|ul|ol|pre|hr|table)/s', '<$1', $text);
         $text = preg_replace('/<\/(h[1-6]|ul|ol|pre|table)>\s*<\/p>/s', '</$1>', $text);
@@ -128,6 +145,12 @@ class MarkdownRenderer {
 
         if (!empty($placeholders)) {
             $text = strtr($text, $placeholders);
+        }
+
+        // A soft break that landed against a fenced code block (a placeholder
+        // until the line above) is a stray gap — drop it.
+        if ($soft_breaks) {
+            $text = str_replace(array('<br><pre>', '</pre><br>'), array('<pre>', '</pre>'), $text);
         }
 
         return $text;
