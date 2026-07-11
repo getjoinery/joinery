@@ -643,8 +643,9 @@ Outbound mail flows in exactly **two modes over one set of plumbing**:
   body from `from`/`to`/`subject`/`html|text` and lets the provider stamp our identity. This is
   the path for all transactional and composed mail.
 - **Raw relay** — `provider->relayRawMessage($raw_mime, $envelope_sender, $destinations)` ships
-  pre-formed bytes with an explicit `MAIL FROM`, preserving SPF/DKIM/SRS alignment to the original
-  sender. This is the path for inbound forwarding. See [Raw-MIME relay](#raw-mime-relay-optional-capability).
+  pre-formed bytes with an explicit `MAIL FROM`, preserving SPF/DKIM/SRS alignment. This is the path
+  for inbound forwarding and for the hidden-origin compose path on a relay-fronted deployment (the
+  latter over an `ApiSubmissionRelay` provider). See [Raw-MIME relay](#raw-mime-relay-optional-capability).
 
 Both modes share one SMTP construction model: `SmtpConfig` + a single `SmtpMailer`.
 
@@ -832,7 +833,7 @@ already-formed RFC 5322 message byte-for-byte to chosen envelope recipients
 with an explicit envelope sender (Return-Path / `MAIL FROM`):
 
 ```php
-class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, RawMessageRelay {
+class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubmissionRelay {
     // ...
     public function relayRawMessage(string $raw_mime, string $envelope_sender, array $destinations): array {
         // relay $raw_mime as-is to $destinations; returns ['dest@x' => bool]
@@ -842,22 +843,41 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Raw
 
 **What it is for.** The normal `send()` path rebuilds a message from
 `from`/`to`/`subject`/`html|text` and exposes no envelope-sender field, so it
-cannot relay original MIME faithfully or set a custom Return-Path. Inbound-email
-forwarding needs both, so it uses `RawMessageRelay` when the active outbound
-provider implements it, reusing that provider's existing credential.
+cannot relay original MIME faithfully or set a custom Return-Path. Two callers
+need both:
+
+- **Inbound-email forwarding** uses `RawMessageRelay` when the active outbound
+  provider implements it, reusing that provider's existing credential.
+- **The hidden-origin compose path** (`RawRelayComposeTransport`, on a
+  relay-fronted deployment with the relay smarthost off) builds a fully formed,
+  in-app-signed message and hands it to `relayRawMessage()` so the sent message's
+  `Received:` chain begins inside the provider and the main box IP is never
+  exposed. This path requires **`ApiSubmissionRelay`** — a sub-interface a
+  provider adds to self-declare that it submits over an HTTP API, not SMTP. SMTP
+  submission stamps the connecting client's IP into the first `Received:` header,
+  so `SmtpProvider` implements `RawMessageRelay` but **not** `ApiSubmissionRelay`
+  and is excluded from the compose path.
 
 **Which providers implement it.**
 
-| Provider | Raw-MIME path | Envelope sender |
-|---|---|---|
-| `mailgun` | `messages.mime` (SDK `sendMime`) | Mailgun owns bounces; best-effort sender |
-| `smtp` | Native raw SMTP | Full `MAIL FROM` control |
-| `ses` | SESv2 `sendEmail` with `Content.Raw.Data` | SES owns bounces; verified MAIL FROM domain |
+| Provider | Raw-MIME path | Envelope sender | API submission (`ApiSubmissionRelay`) |
+|---|---|---|---|
+| `mailgun` | `messages.mime` (SDK `sendMime`) | Mailgun owns bounces; best-effort sender | ✅ |
+| `ses` | SESv2 `sendEmail` with `Content.Raw.Data` | SES owns bounces; verified MAIL FROM domain | ✅ |
+| `smtp` | Native raw SMTP | Full `MAIL FROM` control | ❌ (SMTP submission) |
 
 The structured-only providers (`postmark`, `sendgrid`, `brevo`, `mailjet`,
 `resend`) deliberately **do not** implement it — they expose no faithful
 raw-MIME relay. A provider without the capability is detected via
-`instanceof RawMessageRelay` and the caller falls back to an SMTP relay, so
-forwarding never regresses. See
+`instanceof RawMessageRelay` (forwarding) or `instanceof ApiSubmissionRelay`
+(compose); forwarding falls back to an SMTP relay, and the compose path refuses
+a non-API provider with a message pointing to an API provider or the relay
+smarthost. See
 [Mailbox — Forwarding relay](../plugins/mailbox/docs/overview.md#forwarding-relay)
-for how the mailbox plugin resolves the relay path and handles SRS per path.
+and [Mailbox — Outbound sending](../plugins/mailbox/docs/overview.md#outbound-sending)
+for how the mailbox plugin resolves each path.
+
+Protected-domain `From` addresses remain usable only via the session-gated
+mailbox compose path (the injected transport), never by transactional senders —
+whether that transport submits directly, through the relay smarthost, or through
+the provider's raw-MIME API.

@@ -4,10 +4,12 @@
  *
  * Implements EmailServiceProvider using aws/aws-sdk-php's SESv2 client.
  * Batch sending is per-recipient since SES has no native non-templated bulk API.
- * Also implements RawMessageRelay via SESv2 sendEmail with Content.Raw so
- * inbound forwarding can relay raw MIME through the same AWS credential.
+ * Also implements ApiSubmissionRelay via SESv2 sendEmail with Content.Raw so
+ * inbound forwarding and the hidden-origin compose path can relay raw MIME
+ * through the same AWS credential — over an HTTP API, so the submitting box's
+ * IP never enters the delivered Received: chain.
  *
- * @version 1.3
+ * @version 1.4
  */
 
 require_once(PathHelper::getComposerAutoloadPath());
@@ -16,7 +18,7 @@ require_once(PathHelper::getIncludePath('includes/InboundEmailProvider.php'));
 use Aws\SesV2\SesV2Client;
 use Aws\Exception\AwsException;
 
-class SesProvider implements EmailServiceProvider, InboundEmailProvider, RawMessageRelay {
+class SesProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubmissionRelay {
 
     public static function getKey(): string {
         return 'ses';

@@ -4,11 +4,12 @@
  *
  * Implements EmailServiceProvider using the Mailgun PHP SDK (v3.x).
  * Supports batch sending in groups of 500 using Mailgun recipient-variables.
- * Also implements RawMessageRelay (messages.mime) so inbound forwarding can
- * relay raw MIME through the same mailgun_api_key, with no separate SMTP
- * credential.
+ * Also implements ApiSubmissionRelay (messages.mime) so inbound forwarding and
+ * the hidden-origin compose path can relay raw MIME through the same
+ * mailgun_api_key, with no separate SMTP credential — over an HTTP API, so the
+ * submitting box's IP never enters the delivered Received: chain.
  *
- * @version 1.3
+ * @version 1.4
  */
 
 require_once(PathHelper::getComposerAutoloadPath());
@@ -16,7 +17,7 @@ require_once(PathHelper::getIncludePath('includes/InboundEmailProvider.php'));
 
 use Mailgun\Mailgun;
 
-class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, RawMessageRelay {
+class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubmissionRelay {
 
     public static function getKey(): string {
         return 'mailgun';

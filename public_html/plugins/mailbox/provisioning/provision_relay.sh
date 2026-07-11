@@ -10,7 +10,8 @@
 # recipient's public key at acceptance, and spools ciphertext; the main Joinery
 # box dials out over WireGuard and pulls the sealed blobs.
 #
-# Version: 1.1 - /etc/opendkim creation + IPv4-only outbound (no v6 PTR on throwaway VPSes).
+# Version: 1.2 - inbound-only by default; the tunnel submission listener (smarthost)
+#                is opened only when opted in (specs/mailbox_relay_inbound_only.md).
 #
 # What it configures (all fixed / deployment-independent):
 #   - Installs postfix, opendkim, opendkim-tools, opendmarc, wireguard, rsync and
@@ -43,8 +44,15 @@
 #     known (by the provisioning job, or by hand from the printed values).
 #   - Let's Encrypt / inbound STARTTLS cert (out of scope, matches install_email.sh).
 #
-# Usage:  sudo bash provision_relay.sh <mail-hostname>
+# Usage:  sudo bash provision_relay.sh <mail-hostname> [smarthost]
 #         e.g. sudo bash provision_relay.sh mx.example.com
+#
+# By DEFAULT the relay is INBOUND-ONLY: it accepts/verifies/seals/spools inbound
+# mail and forwards inbound mail onward, but the tunnel submission listener that
+# lets the main box send compose mail THROUGH the relay (smarthost) is NOT opened.
+# Compose sends instead ride the deployment's outbound provider (hidden origin via
+# the provider's API). Pass a second argument "smarthost" (or set
+# JOINERY_RELAY_SMARTHOST=1) to opt in to the smarthost submission listener.
 set -euo pipefail
 
 # --- preconditions -----------------------------------------------------------
@@ -60,8 +68,15 @@ fi
 
 MAIL_HOSTNAME="${1:-}"
 if [[ -z "${MAIL_HOSTNAME}" || "${MAIL_HOSTNAME}" != *.* ]]; then
-    echo "Usage: sudo bash $0 <mail-hostname>   (a FQDN, e.g. mx.example.com)" >&2
+    echo "Usage: sudo bash $0 <mail-hostname> [smarthost]   (a FQDN, e.g. mx.example.com)" >&2
     exit 1
+fi
+
+# Smarthost (tunnel submission) opt-in: second positional arg "smarthost", or
+# JOINERY_RELAY_SMARTHOST=1. Default 0 = inbound-only (open nothing for it).
+SMARTHOST_MODE=0
+if [[ "${2:-}" == "smarthost" || "${JOINERY_RELAY_SMARTHOST:-0}" == "1" ]]; then
+    SMARTHOST_MODE=1
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -174,10 +189,21 @@ postconf -e "mydestination = localhost, localhost.localdomain"
 # IPv4 PTR is what the provisioning DNS sets, so send from IPv4.
 postconf -e "smtp_address_preference = ipv4"
 
-# The main Joinery box submits outbound compose through this relay over the tunnel
-# (smarthost — Phase 7), so the WireGuard subnet is trusted to relay anywhere.
-# permit_mynetworks in smtpd_recipient_restrictions then accepts those sends.
-postconf -e "mynetworks = 127.0.0.0/8, [::1]/128, 10.99.0.0/24"
+# Tunnel submission listener (smarthost) is OPT-IN. Only when opted in is the
+# WireGuard subnet trusted to relay outbound compose through the relay, and only
+# then does permit_mynetworks lead the recipient restrictions to accept those
+# sends. In the default inbound-only mode the tunnel carries no submission, so
+# mynetworks stays local and there is no permit_mynetworks — a compromised relay
+# in default mode can send only the inbound mail it forwards onward, nothing else.
+if [[ "${SMARTHOST_MODE}" -eq 1 ]]; then
+    postconf -e "mynetworks = 127.0.0.0/8, [::1]/128, 10.99.0.0/24"
+    RCPT_LEAD="permit_mynetworks, "
+    echo "smarthost: ENABLED — tunnel submission open (WG subnet trusted to relay outbound compose)"
+else
+    postconf -e "mynetworks = 127.0.0.0/8, [::1]/128"
+    RCPT_LEAD=""
+    echo "smarthost: DISABLED (inbound-only default) — no tunnel submission listener"
+fi
 
 # The relay is authoritative for the hosted domains (synced) and routes each to
 # the sealer pipe. reject_unauth_destination then accepts recipients in these and
@@ -187,8 +213,9 @@ postconf -e "transport_maps = hash:${MAP_TRANSPORT}"
 
 # RBL block — verbatim from install_email.sh — plus SMTP-time recipient
 # validation against the synced access map (preserving reject_unmatched: listed
-# aliases OK, unmatched under a reject domain REJECTed, no backscatter).
-postconf -e "smtpd_recipient_restrictions = permit_mynetworks, reject_unauth_destination, reject_rbl_client zen.spamhaus.org, reject_rbl_client bl.spamcop.net, reject_rbl_client b.barracudacentral.org, reject_rhsbl_helo dbl.spamhaus.org, reject_rhsbl_sender dbl.spamhaus.org, check_recipient_access regexp:${MAP_SRS}, check_recipient_access hash:${MAP_RECIPIENTS}, permit"
+# aliases OK, unmatched under a reject domain REJECTed, no backscatter). The
+# permit_mynetworks lead is present only in smarthost mode (see above).
+postconf -e "smtpd_recipient_restrictions = ${RCPT_LEAD}reject_unauth_destination, reject_rbl_client zen.spamhaus.org, reject_rbl_client bl.spamcop.net, reject_rbl_client b.barracudacentral.org, reject_rhsbl_helo dbl.spamhaus.org, reject_rhsbl_sender dbl.spamhaus.org, check_recipient_access regexp:${MAP_SRS}, check_recipient_access hash:${MAP_RECIPIENTS}, permit"
 echo "main.cf: relay_domains, transport, recipient validation, RBL set"
 
 # --- 6. opendkim + opendmarc (verify-mode, verbatim from install_email.sh) ----

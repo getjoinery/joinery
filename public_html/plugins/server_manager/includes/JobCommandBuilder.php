@@ -1704,6 +1704,13 @@ BASH;
 		}
 		$main_wg_pubkey = trim((string)($params['main_wg_public_key'] ?? ''));
 
+		// Relay outbound mode (specs/mailbox_relay_inbound_only.md): the relay is
+		// inbound-only by default; the tunnel submission listener (smarthost) is
+		// opened only when the deployment has opted in. Pass the opt-in through to
+		// provision_relay.sh as a positional arg so a rebuild preserves the choice.
+		$smarthost = (strtolower(trim((string)Globalvars::get_instance()->get_setting('mailbox_relay_outbound_mode'))) === 'smarthost');
+		$smarthost_arg = $smarthost ? ' smarthost' : '';
+
 		// The relay pull key's public half: installed on the relay so the web
 		// user's steady-state connections (spool pull, map push, health battery)
 		// authenticate with their own identity instead of this node's admin key,
@@ -1743,7 +1750,7 @@ BASH;
 		$steps[] = ['type' => 'ssh', 'label' => 'Run provision_relay.sh', 'on_host' => true,
 			'cmd' => "sudo rm -rf {$remote_dir_esc} && sudo mkdir -p {$remote_dir_esc} && "
 			       . "sudo tar xzf {$remote_tarball_esc} -C {$remote_dir_esc} && "
-			       . "cd {$remote_dir_esc} && sudo bash provision_relay.sh {$hostname_esc}",
+			       . "cd {$remote_dir_esc} && sudo bash provision_relay.sh {$hostname_esc}{$smarthost_arg}",
 			'timeout' => 1800];
 
 		// 4. Authorize the web user's pull key on the relay (idempotent) — the

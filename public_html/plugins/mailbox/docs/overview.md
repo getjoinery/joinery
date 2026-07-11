@@ -379,6 +379,7 @@ identity and provisioning (provider, mail hostname/IP, SRS, the relay) live on t
 | `mailbox_spam_filtering_enabled` | `0` | Act on auth verdicts to assign a spam verdict and split the inbox/Spam view. See [Spam filtering](#spam-filtering). |
 | `mailbox_content_spam_filtering_enabled` | `0` | Read the content scanner's signal (rspamd `X-Spam` header / webhook provider spam flag) into the spam verdict. Requires the master gate above. See [Content scanner](#content-scanner-rspamd). |
 | `mailbox_rspamd_controller_url` | `http://127.0.0.1:11334` | Loopback rspamd controller endpoint the spam/ham feedback loop POSTs learn requests to. No password (loopback-trusted). |
+| `mailbox_relay_outbound_mode` | `provider` | On a relay-fronted deployment, where compose sends leave: `provider` (default — the configured provider's raw-MIME API, hiding the origin) or `smarthost` (through the relay over the tunnel; the deployment owns the relay IP's sending reputation). See [Outbound sending](#outbound-sending). |
 
 ## Plugin Structure
 
@@ -1048,29 +1049,73 @@ by the time any mailbox view renders.
 Degradation is safe: relay down → senders' MTAs retry for days; tunnel down → the
 relay keeps spooling sealed blobs until the next pull. Neither loses mail.
 
-### Outbound smarthost
+### Outbound sending
 
-On a relay-fronted deployment, compose sends leave **through** the relay as
-smarthost over the tunnel — otherwise every sent message's `Received:` chain would
-leak the main box IP. `OutboundTransport` routes hosted-alias sends through
-`SmtpConfig::fromRelaySmarthost()`; DKIM signing stays in-app, the relay only
-transports. Because the main box's opendkim milter is decommissioned,
-`MailboxDkimSigner::resolveFor()` signs in-app for **both** postures on a
-relay-fronted box: a protected domain with its vault-sealed key, and a standard
-domain with the same filesystem key opendkim would have used (colocated, it stays
-null and opendkim signs, avoiding a double signature). The relay trusts the
-WireGuard subnet (`mynetworks`) to relay out. The smarthost hop is deliberately
-plaintext SMTP — the WireGuard tunnel already encrypts it — so
-`SmtpConfig::fromRelaySmarthost()` sets `encryption = 'none'` and `SmtpMailer`
-disables PHPMailer's opportunistic auto-STARTTLS for an explicit `'none'`
-(otherwise it would upgrade into the relay's self-signed cert and fail the
-handshake); the auto-detect path keeps opportunistic TLS.
+The relay is **inbound-only by default**: it accepts, verifies, seals, spools,
+and forwards inbound mail, and carries no compose sends. Compose sends leave
+through the deployment's configured outbound provider over an HTTP-API raw-message
+path. SMTP submission would stamp the main box IP into the sent message's first
+`Received:` header; an API submission's `Received:` chain begins inside the
+provider, so the origin stays hidden. `OutboundTransport` builds a fully formed,
+in-app-signed message (`RawRelayComposeTransport`) and hands it to the active
+provider's `relayRawMessage()` — the `ApiSubmissionRelay` capability (Mailgun's
+`messages.mime`, SES's `Content.Raw`). The provider must be API-class; an
+SMTP-only provider is refused with a message pointing to an API provider or the
+smarthost. DKIM signing stays in-app: a protected domain signs with its
+vault-sealed key, a standard domain with the filesystem key opendkim would have
+used, and the envelope (MAIL FROM) routes through the forwarding subdomain so the
+protected domain's own `v=spf1 -all` never touches the envelope. Generated
+headers (`Message-ID`, etc.) derive from the mail hostname — which points at the
+relay — never `gethostname()` or the box IP.
+
+Outbound confidentiality is bounded by the recipient's provider anyway: every
+message to an external address is delivered in plaintext to the recipient's
+mailbox provider, so a provider carrying it in transit adds a second reader to a
+set that already has one. Mail whose transit privacy genuinely matters is the
+encrypted-interop path, which is ciphertext before it leaves the box and stays
+ciphertext through any transport. The asymmetry lives on **inbound**, which lands
+in the operator's own archive under the user's keys — and inbound keeps the relay.
+
+The **relay smarthost** is the opt-in alternative (`mailbox_relay_outbound_mode =
+smarthost`, chosen on the Relay tab's "Sent mail leaves through" select). Compose
+sends then leave through the relay over the tunnel, so no third party carries
+outbound plaintext — in exchange the deployment owns the relay IP's sending
+reputation (warmup, blocklist monitoring, PTR hygiene). `OutboundTransport` routes
+hosted-alias sends through `SmtpConfig::fromRelaySmarthost()`; DKIM signing stays
+in-app, the relay only transports. The smarthost hop is deliberately plaintext
+SMTP — the WireGuard tunnel already encrypts it — so `fromRelaySmarthost()` sets
+`encryption = 'none'` and `SmtpMailer` disables PHPMailer's opportunistic
+auto-STARTTLS for an explicit `'none'` (otherwise it would upgrade into the
+relay's self-signed cert and fail the handshake). `provision_relay.sh` opens the
+tunnel submission listener (`permit_mynetworks` on the WireGuard subnet) only in
+this mode — pass `smarthost` as its second argument. The listener state is baked
+at provision time, so changing the outbound mode takes effect on the relay itself
+at its next Rebuild: switching to smarthost leaves compose sends refused (and the
+tunnel check failing) until the Rebuild opens the listener, and switching back to
+provider leaves the listener open until the next Rebuild closes it. The mode
+select's save message says so.
+
+The Relay tab's outbound checks match the chosen path, never showing an N/A row.
+Provider mode verifies the active provider is API-class and offers an out-and-back
+origin-leak probe: `sendOriginProbe()` sends a marked message from the first
+enabled store-mode alias on a Standard or Private domain to itself — a listed
+alias because the relay's SMTP-time recipient validation rejects anything else,
+store-mode so the delivered copy lands in `iem_inbound_email_messages`, and
+non-Fortress so that copy is server-readable — out via the provider, back via the
+relay MX, and `checkOutboundOriginLeak` scans the delivered headers for the box
+IP or hostname on token boundaries. Smarthost mode verifies compose submission
+with a live SMTP handshake over the tunnel (EHLO, `MAIL FROM:<>`, RCPT to a
+reserved `.invalid` recipient, QUIT — nothing is ever sent): port 25 answers in
+both modes, so only the relay *accepting* an external recipient proves the
+submission listener is open.
 
 ### Provisioning
 
 `provisioning/provision_relay.sh` is the self-contained installer: idempotent, one
-argument (the mail hostname), zero prompts, runnable as root on a fresh minimal
-Debian VPS. It builds the sealer, wires Postfix + opendkim(verify, `RemoveARFrom`
+required argument (the mail hostname) plus an optional `smarthost` second argument
+(default inbound-only opens no tunnel submission listener), zero prompts, runnable
+as root on a fresh minimal Debian VPS. It builds the sealer, wires Postfix +
+opendkim(verify, `RemoveARFrom`
 stripping forged Authentication-Results) + opendmarc(stamp) + rspamd(add-header
 spam scoring) + WireGuard + a default-deny firewall, and prints the relay public
 IP, WireGuard public key, and spool endpoint.
