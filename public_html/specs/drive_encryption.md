@@ -146,10 +146,13 @@ Inventoried up front — every server feature that interprets file content, and 
 
 ## Phases
 
-1. **Vault client-custody identity** — built by `specs/implemented/sealed_vault_core.md` (the shared browser
-   crypto module, keyring, passkey/recovery/passphrase unlock, auto-lock). Drive consumes it; it
-   is not rebuilt here. (Shares the browser crypto module with the password manager, but Drive
-   uses its **own** `drive` scope/keypair — separate from passwords.)
+1. **Vault client-custody identity** — built by the password manager build
+   (`specs/implemented/password_vault.md` Phase 1) as **core shared infrastructure**: the shared browser
+   crypto module, client-custody keyring actions, and the scope-parameterized
+   enrollment/recovery ceremony. (The sealed_vault_core package shipped server-custody only;
+   the client-custody layer ships with its first consumer.) Drive consumes it; it is not
+   rebuilt here. Drive uses its **own** `drive` scope/keypair and `vault-drive-kek` context —
+   separate from passwords.
 2. **Encrypted vault folders** — encrypt/decrypt pipeline over the drive_core upload API,
    encrypted metadata + client-side name search, client thumbnails, preview-in-browser,
    skip-list enforcement.

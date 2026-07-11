@@ -3,10 +3,11 @@
 A per-user encryption identity shared by every feature that seals content the
 server should only read while the user has proven presence. One lock (a
 passkey, a recovery code, or an optional passphrase), one bounded unlock
-window, and any number of consumers behind it — mail was the first, chat is
-the second, drive/passwords will be client-custody consumers later. The vault
-owns the identity and the lock; each consumer owns what it seals and how it
-presents locked state.
+window, and any number of consumers behind it — mail and chat seal server-custody
+content; the [password manager](../plugins/vault/docs/overview.md) is a
+client-custody consumer (its key is unwrapped only in the browser), and Drive is
+the next. The vault owns the identity and the lock; each consumer owns what it
+seals and how it presents locked state.
 
 ## The shape of it
 
@@ -69,7 +70,7 @@ onto a different row and still decrypt.
 - **`uev_user_encryption_vaults`** (`UserEncryptionVault`) — one row per
   (user, scope): `uev_public_key` (cleartext), `uev_salt` (the current
   generation's KDF salt for the recovery/passphrase unlockers), `uev_custody`
-  (`server` here; `client` is the future drive/passwords shape),
+  (`server` for mail/chat; `client` for the browser-only password/Drive scopes),
   `uev_key_generation`.
 - **`uew_user_encryption_wrappings`** (`UserEncryptionWrapping`) — one row per
   enrolled unlocker: `uew_unlocker_type` (`passkey`/`recovery`/`passphrase`),
@@ -391,11 +392,29 @@ window suite exercises APCu and skips under plain CLI — run it directly with
 No RP-ID, origin, or PRF-context setting here — see [Passkeys](passkeys.md)
 for those (the vault uses the `vault-kek` PRF context).
 
-## Client-custody scopes (not built here)
+## Client-custody scopes
 
-`uev_scope` (`drive`, `passwords`) and `uev_custody = 'client'` ship as
-columns now so the shape is fixed, but the browser-only unlock (a client
-crypto module, a vendored Argon2id WASM for the passphrase fallback, the
-`vault-drive-kek`/`vault-passwords-kek` PRF contexts) is built by those
-consumers when they land. This package never unwraps a `uev_custody =
-'client'` secret key server-side.
+A client-custody scope (`uev_custody = 'client'`) is unwrapped **only in the
+browser** — the server never holds the secret key and never sees plaintext. The
+shared client-custody layer lives in **core** so every consumer reuses it:
+
+- **`assets/js/vault-crypto.js`** — the browser crypto module: WebCrypto
+  AES-GCM/X25519, the vendored hash-pinned Argon2id WASM for the
+  passphrase-fallback KDF, KEK derivation (passkey PRF / recovery / passphrase),
+  wrap/unwrap of the vault secret key, ECIES seal/open of a data key, and the
+  `encrypt()→blob` / `blob→decrypt()` content contract.
+- **`assets/js/vault-keyring.js`** — the scope-parameterized enrollment, unlock,
+  and recovery ceremony, driving the crypto module against the server actions.
+- **`includes/VaultClientCustody.php`** + the core `logic/vault_client_*`
+  actions — custody-agnostic **opaque-blob storage**: create the keypair record,
+  return the keyring view (public key, KDF salt/params, wrapped-secret blobs),
+  add/remove/replace unlocker wrappings, consume a one-time recovery key (which
+  emails the account — the server can't verify code knowledge, so visibility is
+  the defense against a session-rider burning codes). The secret key is never
+  unwrapped server-side.
+
+Each client scope has its **own** keypair and its **own** PRF context
+(`vault-passwords-kek`, `vault-drive-kek`), so unlocking one never opens another.
+The [password manager](../plugins/vault/docs/overview.md) is the built consumer
+(scope `passwords`); Drive reuses this same layer with scope `drive`, adding only
+its file-content encryption on top.

@@ -1,0 +1,104 @@
+/* Password manager (client-custody Sealed Vault consumer).
+   Everything is scoped under .jy-vault so these rules never leak to the rest of
+   the site (the sheet loads globally while the plugin is active). */
+
+.jy-vault { --vlt-bg:#fff; --vlt-fg:#1c2430; --vlt-muted:#66748a; --vlt-line:#e2e7ef;
+	--vlt-accent:#2f6df6; --vlt-accent-fg:#fff; --vlt-danger:#c23b3b; --vlt-sel:#eef3ff;
+	color:var(--vlt-fg); }
+
+@media (prefers-color-scheme: dark) {
+	.jy-vault { --vlt-bg:#161b22; --vlt-fg:#e6edf3; --vlt-muted:#8b98a9; --vlt-line:#2a323d;
+		--vlt-accent:#4f8bff; --vlt-sel:#1d2735; }
+}
+
+/* The manager toggles sections/buttons via the hidden attribute, but any rule
+   here that sets display (flex on the manager, inline-flex on .jy-btn) would
+   out-rank the UA's [hidden]{display:none}. Re-assert it. */
+.jy-vault [hidden], .jy-vault[hidden] { display:none !important; }
+
+/* ---- shared controls ---- */
+.jy-vault .jy-btn { display:inline-flex; align-items:center; justify-content:center; gap:.4em;
+	font:inherit; font-weight:600; padding:.55em 1.1em; border-radius:8px; border:1px solid var(--vlt-line);
+	background:var(--vlt-bg); color:var(--vlt-fg); cursor:pointer; line-height:1.2; }
+.jy-vault .jy-btn:hover { border-color:var(--vlt-accent); }
+.jy-vault .jy-btn:disabled { opacity:.5; cursor:not-allowed; }
+.jy-vault .jy-btn-primary { background:var(--vlt-accent); color:var(--vlt-accent-fg); border-color:var(--vlt-accent); }
+.jy-vault .jy-btn-danger { color:var(--vlt-danger); border-color:transparent; background:transparent; }
+.jy-vault .jy-btn-link { border:none; background:none; color:var(--vlt-accent); padding:.4em .5em; font-weight:600; }
+.jy-vault .jy-btn-block { width:100%; }
+.jy-vault .jy-input { font:inherit; padding:.55em .75em; border-radius:8px; border:1px solid var(--vlt-line);
+	background:var(--vlt-bg); color:var(--vlt-fg); width:100%; }
+.jy-vault .jy-input:focus { outline:2px solid var(--vlt-accent); outline-offset:1px; }
+.jy-vault .jy-vault-actions { display:flex; flex-wrap:wrap; gap:.6em; align-items:center; margin-top:1em; }
+.jy-vault .jy-vault-error { color:var(--vlt-danger); margin-top:.8em; }
+
+/* ---- centered states ---- */
+.jy-vault-centered { text-align:center; padding:4em 1em; color:var(--vlt-muted); }
+.jy-vault-spinner { width:34px; height:34px; border:3px solid var(--vlt-line); border-top-color:var(--vlt-accent);
+	border-radius:50%; margin:0 auto 1em; animation:jy-vault-spin .8s linear infinite; }
+@keyframes jy-vault-spin { to { transform:rotate(360deg); } }
+
+/* ---- ceremony + unlock (centered card) ---- */
+.jy-vault-ceremony-inner, .jy-vault-unlock-inner { max-width:560px; margin:2em auto; padding:2em;
+	border:1px solid var(--vlt-line); border-radius:14px; background:var(--vlt-bg); }
+.jy-vault-ceremony h1, .jy-vault-unlock h1 { margin:0 0 .5em; }
+.jy-vault-steps { list-style:none; display:flex; gap:.5em; padding:0; margin:0 0 1.5em; font-size:.85em; color:var(--vlt-muted); }
+.jy-vault-steps li { flex:1; text-align:center; padding:.4em; border-bottom:2px solid var(--vlt-line); }
+.jy-vault-steps li.is-active { color:var(--vlt-accent); border-bottom-color:var(--vlt-accent); font-weight:600; }
+.jy-vault-recovery-codes { display:grid; grid-template-columns:repeat(2,1fr); gap:.5em; margin:1em 0;
+	padding:1em; background:var(--vlt-sel); border-radius:10px; }
+.jy-vault-recovery-code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.03em; user-select:all; }
+.jy-vault-proof { display:block; margin:1.2em 0 .4em; }
+.jy-vault-proof span { display:block; margin-bottom:.4em; color:var(--vlt-muted); }
+.jy-vault-unlock-alt { margin-top:1.2em; }
+.jy-vault-or { text-align:center; color:var(--vlt-muted); margin:1em 0 .5em; }
+.jy-vault-unlock-links { margin-top:1em; text-align:center; }
+
+/* ---- manager two-pane ---- */
+.jy-vault-manager { display:flex; flex-wrap:wrap; gap:0; border:1px solid var(--vlt-line); border-radius:14px; overflow:hidden;
+	min-height:520px; background:var(--vlt-bg); }
+.jy-vault-decrypt-warning { flex-basis:100%; margin:0; padding:.7em 1em; font-size:.92em;
+	color:var(--vlt-danger); border-bottom:1px solid var(--vlt-danger); background:color-mix(in srgb, var(--vlt-danger) 8%, var(--vlt-bg)); }
+.jy-vault-list-pane { width:320px; border-right:1px solid var(--vlt-line); display:flex; flex-direction:column; }
+.jy-vault-list-toolbar { display:flex; gap:.5em; padding:.8em; border-bottom:1px solid var(--vlt-line); }
+.jy-vault-list-toolbar .jy-input { flex:1; }
+.jy-vault-list-toolbar .jy-btn { flex:0 0 auto; width:2.6em; font-size:1.2em; padding:.3em; }
+.jy-vault-list { list-style:none; margin:0; padding:0; overflow-y:auto; flex:1; }
+.jy-vault-list-item { padding:.7em .9em; border-bottom:1px solid var(--vlt-line); cursor:pointer; }
+.jy-vault-list-item:hover { background:var(--vlt-sel); }
+.jy-vault-list-item.is-selected { background:var(--vlt-sel); box-shadow:inset 3px 0 0 var(--vlt-accent); }
+.jy-vault-item-title { font-weight:600; }
+.jy-vault-item-sub { font-size:.85em; color:var(--vlt-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.jy-vault-list-empty { padding:1.5em; text-align:center; color:var(--vlt-muted); }
+.jy-vault-list-footer { padding:.6em .8em; border-top:1px solid var(--vlt-line); display:flex; flex-direction:column; gap:.5em; }
+.jy-vault-autolock { display:flex; align-items:center; gap:.5em; font-size:.85em; color:var(--vlt-muted); }
+.jy-vault-autolock .jy-input { width:auto; padding:.3em .5em; }
+.jy-vault-tools { display:flex; gap:.3em; flex-wrap:wrap; justify-content:space-between; }
+.jy-vault-detail-pane { flex:1; padding:1.5em; overflow-y:auto; }
+.jy-vault-empty-detail { color:var(--vlt-muted); text-align:center; padding:4em 1em; }
+.jy-vault-detail-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:1em; gap:1em; }
+.jy-vault-detail-head h2 { margin:0; word-break:break-word; }
+.jy-vault-field { margin-bottom:1.1em; }
+.jy-vault-field-label { font-size:.8em; text-transform:uppercase; letter-spacing:.04em; color:var(--vlt-muted); margin-bottom:.25em; }
+.jy-vault-field-value { display:flex; align-items:center; gap:.5em; flex-wrap:wrap; }
+.jy-vault-field-text { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; word-break:break-all; }
+.jy-vault-field-text.is-masked { letter-spacing:.15em; }
+.jy-vault-notes { white-space:pre-wrap; word-break:break-word; background:var(--vlt-sel); padding:.8em; border-radius:8px; }
+.jy-vault-icon-btn { font-size:.78em; font-weight:600; color:var(--vlt-accent); background:none; border:1px solid var(--vlt-line);
+	border-radius:6px; padding:.15em .5em; cursor:pointer; }
+.jy-vault-icon-btn:hover { border-color:var(--vlt-accent); }
+.jy-vault-totp-code { font-family:ui-monospace,monospace; font-size:1.2em; letter-spacing:.08em; }
+.jy-vault-totp-ring { font-size:.8em; color:var(--vlt-muted); }
+.jy-vault-generate { margin-top:.3em; }
+
+/* ---- toast ---- */
+.jy-vault-toast { position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(10px);
+	background:#1c2430; color:#fff; padding:.7em 1.2em; border-radius:10px; opacity:0; transition:opacity .2s, transform .2s;
+	z-index:9999; }
+.jy-vault-toast.is-visible { opacity:1; transform:translateX(-50%) translateY(0); }
+
+@media (max-width:720px) {
+	.jy-vault-manager { flex-direction:column; }
+	.jy-vault-list-pane { width:auto; border-right:none; border-bottom:1px solid var(--vlt-line); max-height:40vh; }
+	.jy-vault-recovery-codes { grid-template-columns:1fr; }
+}

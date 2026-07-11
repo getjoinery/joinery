@@ -97,4 +97,8 @@ sibling one layer up: a per-*user* X25519 keypair whose secret half the
 server never holds at rest, behind the [Sealed Vault](sealed_vault.md)'s
 unlock window. Reach for SecretBox for server-held credentials (OAuth
 secrets, IMAP passwords); reach for the vault for user content the server
-should only read while the user has proven presence.
+should only read while the user has proven presence. For **client-custody**
+scopes — the [password manager](../plugins/vault/docs/overview.md) and Drive —
+even the vault's secret key is unwrapped only in the browser: SecretBox and
+server-side `SealedBox` are never in that path, because the server is never meant
+to decrypt that content at all.

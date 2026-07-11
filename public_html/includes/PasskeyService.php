@@ -74,8 +74,12 @@ class PasskeyService {
 	const STEPUP_MARKER_TTL_SECONDS = 3600;
 
 	/** PRF contexts a consumer may request. Add a new entry when a new
-	 *  client-held-key consumer enrolls (docs/passkeys.md). */
-	const ALLOWED_PRF_CONTEXTS = array('vault-kek');
+	 *  client-held-key consumer enrolls (docs/passkeys.md). One context per
+	 *  vault scope, so a KEK derived for one scope can never unwrap another's
+	 *  key: 'vault-kek' is server-custody (mail + chat, sent to the server);
+	 *  'vault-passwords-kek' and 'vault-drive-kek' are client-custody
+	 *  (browser-only, never transmitted). */
+	const ALLOWED_PRF_CONTEXTS = array('vault-kek', 'vault-passwords-kek', 'vault-drive-kek');
 
 	/** @var callable[] */
 	private static $pre_revoke_callbacks = array();

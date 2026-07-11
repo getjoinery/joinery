@@ -391,19 +391,23 @@ class VaultUnlock {
 	public static function assertRevocationSafe(int $user_id, int $credential_id): void {
 		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 
-		$vault = UserEncryptionVault::loadForUser($user_id, UserEncryptionVault::SCOPE_USER);
-		if (!$vault) {
-			return; // no vault - nothing to strand
-		}
-
-		try {
-			self::assertWrappingDeleteSafe((int)$vault->key, $credential_id);
-		} catch (RuntimeException $e) {
-			throw new PasskeyRevocationVetoException(
-				'Revoking this passkey would lock you out of your encrypted vault - add another '
-				. 'vault-enrolled passkey, or make sure you have at least 3 unused recovery codes, '
-				. 'before removing it.'
-			);
+		// Check EVERY scope's vault, not just the server-custody 'user' one — a
+		// passkey enrolls a wrapping in each scope it unlocks (mail/chat, drive,
+		// passwords), and revoking it must not strand any of them. The
+		// client-custody password vault is the crown jewels; being the last
+		// unlocker there is exactly the case the floor exists to catch.
+		$vaults = new MultiUserEncryptionVault(['user_id' => $user_id]);
+		$vaults->load();
+		foreach ($vaults as $vault) {
+			try {
+				self::assertWrappingDeleteSafe((int)$vault->key, $credential_id);
+			} catch (RuntimeException $e) {
+				throw new PasskeyRevocationVetoException(
+					'Revoking this passkey would lock you out of your encrypted vault - add another '
+					. 'vault-enrolled passkey, or make sure you have at least 3 unused recovery codes, '
+					. 'before removing it.'
+				);
+			}
 		}
 	}
 
@@ -419,8 +423,13 @@ class VaultUnlock {
 	 * Only a passkey wrapping whose credential row is still live
 	 * (pkc_delete_time IS NULL) counts - a wrapping left behind by a revoke
 	 * that predates cleanupRevokedCredential() must not satisfy the floor.
+	 *
+	 * $exclude_wrapping_id excludes one wrapping ROW from the count - the row
+	 * about to be deleted, whatever its type. Without it, removing a recovery
+	 * wrapping would count the doomed row toward its own floor (exactly 3
+	 * codes and no passkey would pass, then leave 2).
 	 */
-	public static function assertWrappingDeleteSafe(int $vault_id, ?int $exclude_credential_id = null): void {
+	public static function assertWrappingDeleteSafe(int $vault_id, ?int $exclude_credential_id = null, ?int $exclude_wrapping_id = null): void {
 		require_once(PathHelper::getIncludePath('data/user_encryption_wrappings_class.php'));
 
 		$wrappings = new MultiUserEncryptionWrapping(['vault_id' => $vault_id]);
@@ -434,6 +443,9 @@ class VaultUnlock {
 		$remaining_passkeys = 0;
 		$unused_recovery = 0;
 		foreach ($wrappings as $wrapping) {
+			if ($exclude_wrapping_id !== null && (int)$wrapping->key === $exclude_wrapping_id) {
+				continue;
+			}
 			$type = $wrapping->get('uew_unlocker_type');
 			if ($type === UserEncryptionWrapping::TYPE_PASSKEY) {
 				$cred_id = (int)$wrapping->get('uew_pkc_credential_id');

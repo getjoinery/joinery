@@ -126,12 +126,61 @@ protected); the keyring is hard-delete only. Both tables auto-created by `update
   the browser-session credential. The server treats every payload as opaque ciphertext: it stores
   and returns blobs and never inspects, validates, or logs their contents.
 
+## UX decisions (v1)
+
+**Visual/interaction reference: Proton Pass**, rendered within the joinery-system vanilla theme
+(FormWriter for all forms, no external frameworks). Follow the genre conventions — unlock screen,
+list + detail pane, per-field copy/reveal — and the reference where this section is silent. The
+manager lives under `/profile/vault/` (plugin-namespaced URLs).
+
+- **First-run ceremony (the one flow where sloppy UX loses data — get it right):** a guided,
+  full-screen setup on first visit. Step 1: enroll a passkey unlocker for the `passwords` scope
+  (with a PRF capability check; if the authenticator lacks PRF, fall back to requiring the master
+  passphrase as the primary unlocker instead). Step 2: generate the recovery key, display it
+  once, and require proof of custody before continuing — the user must download it or re-type a
+  fragment; a bare "I saved it" checkbox is not enough. Step 3: optionally set the master
+  passphrase fallback. Land in the empty vault with two calls to action: add first entry, or
+  import (Phase 3 — hidden until it exists).
+- **Entry types:** v1 ships **Login** (`username`, `password`, `url`, `totp_seed`, `notes`) and
+  **Secure Note** (`notes` only). The blob's `type` tag means later types (card, identity) add
+  without migration; don't scaffold them in v1.
+- **Layout:** one page, two panes — entry list left (search box autofocused on unlock, filter
+  as you type), detail pane right. Narrow screens collapse to list → detail navigation. The
+  locked state replaces the whole page with the unlock screen: passkey button primary,
+  passphrase form secondary (shown only if enrolled), recovery link last.
+- **Lock behavior:** keyboard/pointer activity anywhere in the manager defers the idle timer, so
+  the lock never fires mid-keystroke. When the lock does fire, **all plaintext is discarded,
+  including unsaved edits** — zero-knowledge wins over convenience; no plaintext survives a lock,
+  ever. Relocking shows the unlock screen in place.
+- **Field handling:** passwords and TOTP seeds render masked with a per-field reveal toggle;
+  every credential field gets a copy button with a toast confirming the copy. Copied secrets are
+  cleared from the clipboard after **30 seconds**, best-effort (the Clipboard API only permits
+  clearing while the page holds focus; clear only if the clipboard still contains the copied
+  value). TOTP entries show the current code with a countdown indicator; the code is
+  click-to-copy.
+
 ## Work
 
 ### Phase 1 — Crypto core + usable manager (the v1)
 
-The **vault's client-custody identity** (shared module, keyring, passkey/recovery/passphrase
-unlock, auto-lock) is built by `specs/implemented/sealed_vault_core.md` — this phase consumes it. On top:
+**This phase builds the vault's client-custody layer.** The sealed_vault_core build shipped
+server-custody only — the `uev_scope`/`uev_custody` columns exist, but the client side does not.
+This phase builds it **as core shared infrastructure, not vault-plugin-local**, per the vault
+spec's one-shared-client-module contract, so Drive (`specs/drive_encryption.md`) consumes it
+unchanged:
+
+- The **shared browser crypto module** (core asset, not under `plugins/vault/`): WebCrypto
+  AES-GCM/X25519, the vendored hash-pinned `argon2-browser` WASM, passkey PRF unlock taking the
+  scope's context as a parameter (`vault-passwords-kek` here, `vault-drive-kek` for Drive),
+  unwrap → non-extractable `CryptoKey` → idle auto-lock, and the `encrypt()→blob` /
+  `blob→decrypt()` contract.
+- The **client-custody enrollment and recovery ceremony** (per-scope passkey enroll, recovery
+  key generate/prove-custody, optional passphrase) — the shared keyring UX, parameterized by
+  scope; the first-run ceremony above is its `passwords` instantiation.
+- The client-custody `uev`/`uew` server actions (create keypair, fetch wrappings, rewrap) —
+  server-side but custody-agnostic storage; the secret key never unwraps server-side.
+
+On top:
 generate + seal the store DEK on first use; CRUD on encrypted entries (server stores/returns
 opaque blobs only); list view that decrypts in memory, in-memory search, copy-to-clipboard. A
 usable, zero-knowledge manager unlocked by a passkey tap.
