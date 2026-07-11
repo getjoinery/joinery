@@ -170,11 +170,24 @@ spools ciphertext; the main server dials out to collect. The archive box's IP
 appears in no mail DNS.
 
 Stated plainly, this is **trust relocation, not elimination**: whoever
-controls the relay (or hosts it) reads mail in its transit window — both
-directions, including what you send through it. What changes is what that
-position is worth: no archive, no history, no credentials, nothing readable
-at rest beyond queue metadata, and a box you rebuild from a script in
-minutes — on a schedule, so persistence there has a shelf life.
+controls the relay (or hosts it) reads **inbound** mail in its transit window —
+the moment it arrives, before it is sealed. By default the relay is
+**inbound-only**. Sent mail leaves through your ordinary email provider (over
+that provider's API, so the relay IP is absent from the sent `Received:` chain
+and the origin stays hidden), and the relay never touches it. That outbound
+reader is not new: every message you send to an external address is delivered
+in plaintext to the recipient's provider no matter what transport carried it,
+so a provider seeing it in transit adds a second reader to a set that already
+has one — sent-mail confidentiality is bounded by the recipient's side, not by
+which box relays it. Mail whose transit privacy genuinely matters is the
+encrypted-interop path, ciphertext before it leaves the box and through any
+transport. What changes about the relay position is what it is worth: no
+archive, no history, no credentials, nothing readable at rest beyond queue
+metadata, and a box you rebuild from a script in minutes — on a schedule, so
+persistence there has a shelf life. (An operator who wants no third party
+touching sent mail can opt the relay into carrying outbound too; then its
+window covers both directions and the deployment owns the relay IP's sending
+reputation.)
 
 ## What each attacker position actually gets
 
@@ -183,7 +196,7 @@ minutes — on a schedule, so persistence there has a shelf life.
 | Stolen database / leaked backup | everything | metadata only¹ | metadata only¹ |
 | Main box, no unlock window open (incl. root) | everything | stored mail unreadable; **new arrivals readable at ingest**; can send as you | stored + new mail unreadable; cannot send as you |
 | Main box, during an unlock window | everything | what the window decrypts + the key² | same² |
-| Relay box | n/a | n/a | mail in transit, both directions, until rebuild |
+| Relay box | n/a | n/a | inbound mail in transit until rebuild (also outbound only if the relay smarthost is opted in) |
 | Your DNS registrar account | full identity takeover — publish their own DKIM/MX. Off-box, out of scope, and the reason registrar 2FA matters more than anything here |||
 | Push notification channel | full previews | sender/subject (a toggle reduces to generic) | generic by construction — content doesn't exist unsealed to include |
 

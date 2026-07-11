@@ -80,6 +80,19 @@ class EmailSender {
     }
 
     /**
+     * The platform's active outbound provider instance (the configured
+     * email_service, default mailgun), or null when that key resolves to no
+     * provider. Exposed so the hidden-origin compose path
+     * (RawRelayComposeTransport) can reach the same provider a normal send()
+     * would use and submit an app-signed raw message through its API.
+     */
+    public static function getActiveProvider(): ?EmailServiceProvider {
+        $settings = Globalvars::get_instance();
+        $service = $settings->get_setting('email_service') ?: 'mailgun';
+        return self::getProvider($service);
+    }
+
+    /**
      * Return settings fields for a specific provider.
      */
     public static function getProviderSettings(string $key): array {

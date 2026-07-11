@@ -1,7 +1,7 @@
 {
     "name": "Mailbox",
     "description": "Self-hosted email: receiving, forwarding, local mailboxes, webmail reader, IMAP sync, DKIM/SRS",
-    "version": "1.37.0",
+    "version": "1.38.1",
     "author": "Joinery",
     "receives_upgrades": true,
     "included_in_publish": true,
@@ -97,7 +97,7 @@
         {
             "key": "relay_tunnel",
             "label": "Hardened relay tunnel",
-            "details": "On a relay-fronted deployment the MTA runs on a hardened relay VPS reached over WireGuard. Verifies the relay's SMTP port 25 is reachable over the tunnel. No-op on colocated deployments.",
+            "details": "In smarthost mode compose sends leave through the relay over WireGuard. Runs a real SMTP submission handshake over the tunnel (EHLO, MAIL FROM, RCPT to a reserved domain, QUIT — nothing is sent): port 25 listens in both modes, so only accepting relay of an external recipient proves the submission listener is open. Fails until a relay provisioned inbound-only is rebuilt in smarthost mode. No-op in provider mode and on colocated deployments.",
             "check": {
                 "type": "code",
                 "call": "InboundEmailHealth::checkRelayTunnel"
@@ -129,6 +129,24 @@
             "check": {
                 "type": "code",
                 "call": "InboundEmailHealth::checkOriginHidden"
+            }
+        },
+        {
+            "key": "outbound_transport_class",
+            "label": "Sent mail leaves via an API provider",
+            "details": "With the relay smarthost off (the default), compose sends leave through the configured provider's HTTP API so the box IP never enters the Received chain. Verifies that provider submits over an API, not SMTP. No-op in smarthost mode or on colocated deployments.",
+            "check": {
+                "type": "code",
+                "call": "InboundEmailHealth::checkOutboundTransportClass"
+            }
+        },
+        {
+            "key": "outbound_origin_leak",
+            "label": "No origin leak in sent mail",
+            "details": "Scans the delivered headers of the most recent out-and-back origin-leak probe for the main box IP or hostname. No-op in smarthost mode, on colocated deployments, or until a probe has been round-tripped (run one from the Relay tab).",
+            "check": {
+                "type": "code",
+                "call": "InboundEmailHealth::checkOutboundOriginLeak"
             }
         }
     ],
@@ -226,6 +244,10 @@
         {
             "name": "mailbox_relay_wg_public_key",
             "default": ""
+        },
+        {
+            "name": "mailbox_relay_outbound_mode",
+            "default": "provider"
         }
     ]
 }

@@ -22,7 +22,7 @@
  * `filesSent` is the PRESETS smtp_files_sent capability: true when the provider's
  * SMTP saves the sent copy itself; false when two-way sync must APPEND it.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/EmailServiceProvider.php'));
@@ -80,13 +80,37 @@ class OutboundTransport {
         $t->fromAddress = $aliasAddress;
         $t->filesSent = false; // no source mailbox to file a copy into
 
-        // Relay-fronted deployment (specs/…hardened_ingest_relay § Phase 7): every
-        // hosted-domain send leaves through the relay smarthost over the tunnel, so
-        // the sent message's Received: chain shows the relay, never the main box IP.
-        // SmtpProvider still runs the in-app DKIM signer; the relay only transports.
+        // Relay-fronted deployment. The relay defaults to INBOUND-ONLY
+        // (specs/mailbox_relay_inbound_only.md): compose sends leave through the
+        // deployment's configured provider over an API raw-message path, so the
+        // sent message's Received: chain begins inside the provider and the main
+        // box IP appears nowhere. The relay smarthost is the opt-in for operators
+        // who want no third party touching outbound plaintext and accept owning
+        // the relay IP's sending reputation.
         $relay = self::activeRelay();
         if ($relay !== null) {
-            $t->transport = new SmtpProvider(SmtpConfig::fromRelaySmarthost($relay));
+            if (self::relayOutboundMode() === 'smarthost') {
+                // Opt-in: relay smarthost over the tunnel — the sent Received: chain
+                // shows the relay. SmtpProvider still runs the in-app DKIM signer;
+                // the relay only transports.
+                $t->transport = new SmtpProvider(SmtpConfig::fromRelaySmarthost($relay));
+                return $t;
+            }
+
+            // Default: hand a fully formed, app-signed message to the active
+            // provider's API raw-message relay. It must be API-class — SMTP
+            // submission would stamp the box IP into the first Received: header
+            // and defeat the hidden origin.
+            require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+            $provider = EmailSender::getActiveProvider();
+            if (!($provider instanceof ApiSubmissionRelay)) {
+                $t->error = 'Sent mail cannot leave through the current email provider without exposing this '
+                    . 'server\'s address. Choose a provider that submits over an API (Mailgun or Amazon SES), '
+                    . 'or switch the relay to smarthost mode on the Relay tab.';
+                return $t;
+            }
+            require_once(PathHelper::getIncludePath('includes/RawRelayComposeTransport.php'));
+            $t->transport = new RawRelayComposeTransport(self::hostedEnvelopeSender($aliasAddress), $provider);
             return $t;
         }
 
@@ -104,6 +128,58 @@ class OutboundTransport {
 
         $t->transport = null;  // platform active provider via the default EmailSender path
         return $t;
+    }
+
+    /**
+     * The relay's outbound mode: 'provider' (default — compose rides the
+     * configured provider's API, hiding the origin) or 'smarthost' (opt-in —
+     * compose leaves through the relay smarthost over the tunnel). Reads the
+     * mailbox_relay_outbound_mode setting; anything but an explicit 'smarthost'
+     * is treated as 'provider'.
+     */
+    private static function relayOutboundMode(): string {
+        $mode = strtolower(trim((string)Globalvars::get_instance()->get_setting('mailbox_relay_outbound_mode')));
+        return $mode === 'smarthost' ? 'smarthost' : 'provider';
+    }
+
+    /**
+     * The envelope sender (MAIL FROM) for a hosted-alias raw-relay send. For a
+     * protected identity the envelope routes through the forwarding subdomain so
+     * the protected domain's own v=spf1 -all never touches the envelope (its
+     * aspf=s means the subdomain's SPF can never align the identity anyway). For a
+     * non-protected domain the envelope is just the From address. Defensive: any
+     * lookup failure falls back to the From address.
+     */
+    private static function hostedEnvelopeSender(string $aliasAddress): string {
+        $domain = MailIdentityGuard::domainOf($aliasAddress);
+        if ($domain === '' || !MailIdentityGuard::isProtectedDomain($domain)) {
+            return $aliasAddress;
+        }
+        $sub = self::forwardingSubdomainOf($domain);
+        $at = strpos($aliasAddress, '@');
+        if ($sub === '' || strcasecmp($sub, $domain) === 0 || $at === false) {
+            return $aliasAddress;
+        }
+        return substr($aliasAddress, 0, $at) . '@' . $sub;
+    }
+
+    /**
+     * The forwarding subdomain configured for a hosted domain, or '' when the
+     * mailbox plugin/domain is unavailable. Loaded defensively — a core send path
+     * must not fatal if the plugin class or table is absent.
+     */
+    private static function forwardingSubdomainOf(string $domain): string {
+        $path = PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php');
+        if (!is_file($path)) {
+            return '';
+        }
+        require_once($path);
+        try {
+            $model = InboundEmailDomain::GetByDomain($domain);
+            return $model ? (string)$model->forwarding_subdomain() : '';
+        } catch (\Throwable $e) {
+            return '';
+        }
     }
 
     /**

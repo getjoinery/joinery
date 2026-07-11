@@ -95,3 +95,24 @@ interface RawMessageRelay {
      */
     public function relayRawMessage(string $raw_mime, string $envelope_sender, array $destinations): array;
 }
+
+/**
+ * ApiSubmissionRelay - a raw-message relay that submits over an HTTP API rather
+ * than SMTP, so the delivered message's Received: chain begins inside the
+ * provider's infrastructure and the submitting client's IP appears nowhere.
+ *
+ * This is the property a relay-fronted deployment relies on to keep its origin
+ * hidden when the relay smarthost is off and compose sends leave through the
+ * provider (specs/mailbox_relay_inbound_only.md): SMTP submission stamps the
+ * connecting client's IP into the first Received: header, an API submission does
+ * not. It is a self-declaration, not something core can infer — a provider
+ * asserts it by adding this interface to its `implements` list.
+ *
+ * Providers that implement it: Mailgun (messages.mime), SES (SESv2 Content.Raw).
+ * SmtpProvider implements RawMessageRelay but NOT this — it is SMTP submission,
+ * so it is excluded from the hidden-origin compose path by design.
+ *
+ * @version 1.0
+ */
+interface ApiSubmissionRelay extends RawMessageRelay {
+}

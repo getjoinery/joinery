@@ -80,6 +80,56 @@ if (empty($relays)) {
 
 $page->end_box();
 
+// --- outbound: where sent mail leaves from -----------------------------------
+// Only meaningful once a relay fronts the deployment; colocated deployments never
+// had a hidden origin to protect (specs/mailbox_relay_inbound_only.md).
+if (!empty($has_active_relay)) {
+	$page->begin_box(array('title' => 'Outbound sending'));
+
+	require_once(PathHelper::getIncludePath('includes/FormWriterV2HTML5.php'));
+	$oform = $page->getFormWriter('outbound_mode');
+	echo $oform->begin_form();
+	$oform->hiddeninput('action', '', array('value' => 'set_outbound_mode'));
+
+	$is_smarthost = ($outbound_mode === 'smarthost');
+	$oform->dropinput('mailbox_relay_outbound_mode', 'Sent mail leaves through:', array(
+		'value'   => $outbound_mode,
+		'options' => array(
+			'provider'  => 'Your email provider (recommended)',
+			'smarthost' => 'The relay (advanced)',
+		),
+		'visibility_rules' => array(
+			'provider'  => array('show' => array('provider_note'),  'hide' => array('smarthost_note')),
+			'smarthost' => array('show' => array('smarthost_note'), 'hide' => array('provider_note')),
+		),
+	));
+
+	// One consequence line per option, shown one-at-a-time by the select above.
+	// Server-set initial display avoids a flash before the toggle script runs.
+	echo '<p class="text-muted small" id="provider_note" style="display:' . ($is_smarthost ? 'none' : '') . '">'
+		. 'Deliverability is your provider\'s job, and it carries the message in transit. '
+		. 'The sent message\'s Received chain begins inside the provider, so this server\'s address stays hidden.</p>';
+	echo '<p class="text-muted small" id="smarthost_note" style="display:' . ($is_smarthost ? '' : 'none') . '">'
+		. 'No third party carries sent mail — it leaves through the relay over the tunnel. In exchange this '
+		. 'deployment owns the relay IP\'s sending reputation: warmup, blocklist monitoring, and PTR hygiene.</p>';
+
+	$oform->submitbutton('btn_outbound', 'Save');
+	echo $oform->end_form();
+
+	// Provider mode: an out-and-back probe proves sent mail carries no origin leak.
+	if (!$is_smarthost) {
+		echo '<hr>';
+		echo '<form method="post" style="display:inline">';
+		echo '<input type="hidden" name="action" value="origin_probe">';
+		echo '<button type="submit" class="btn btn-sm btn-outline-secondary">Run origin-leak probe</button>';
+		echo '</form>';
+		echo ' <span class="text-muted small">Sends a marked message out through your provider and back via the '
+			. 'relay MX; the origin-leak check then scans the delivered headers.</span>';
+	}
+
+	$page->end_box();
+}
+
 // --- provision a new relay ---------------------------------------------------
 $page->begin_box(array('title' => 'Provision a relay'));
 

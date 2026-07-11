@@ -49,6 +49,41 @@ function admin_mailbox_relay_logic(array $input): LogicResult {
 			return LogicResult::redirect($self_url);
 		}
 
+		// Outbound mode: where compose sends leave from
+		// (specs/mailbox_relay_inbound_only.md). Provider (default) rides the
+		// configured email provider's API and hides the origin; smarthost routes
+		// compose through the relay over the tunnel.
+		if ($action === 'set_outbound_mode') {
+			$prior = (strtolower(trim((string)$settings->get_setting('mailbox_relay_outbound_mode'))) === 'smarthost')
+				? 'smarthost' : 'provider';
+			$mode = (($input['mailbox_relay_outbound_mode'] ?? 'provider') === 'smarthost') ? 'smarthost' : 'provider';
+			admin_mailbox_relay_write_setting('mailbox_relay_outbound_mode', $mode);
+			// The relay's Postfix submission listener is baked at provision time
+			// (provision_relay.sh's smarthost argument), so a mode switch takes
+			// effect on the relay itself only at the next Rebuild. The tunnel
+			// check does a real submission handshake, so it fails honestly until then.
+			if ($mode === 'smarthost') {
+				$flash('Sent mail now leaves through the relay smarthost. This deployment owns the relay IP\'s '
+					. 'sending reputation. Run Rebuild on the relay to open its tunnel submission listener — '
+					. 'until then compose sends are refused and the tunnel check fails.');
+			} else {
+				$flash('Sent mail now leaves through your email provider.'
+					. ($prior === 'smarthost'
+						? ' The relay\'s submission listener stays open until its next Rebuild.' : ''));
+			}
+			return LogicResult::redirect($self_url);
+		}
+
+		// Out-and-back origin-leak probe (provider mode): send a marked message
+		// from a hosted alias to itself; it returns via the relay MX and the
+		// origin-leak check scans the delivered headers.
+		if ($action === 'origin_probe') {
+			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailHealth.php'));
+			$res = InboundEmailHealth::sendOriginProbe();
+			$flash($res['message'], $res['ok'] ? 'Probe sent' : 'Probe not sent');
+			return LogicResult::redirect($self_url);
+		}
+
 		if (($action === 'provision' || $action === 'rebuild') && $server_manager_active) {
 			$result = admin_mailbox_relay_dispatch_job($action, $input, $session);
 			$flash($result['message'], $result['title']);
@@ -84,14 +119,37 @@ function admin_mailbox_relay_logic(array $input): LogicResult {
 		}
 	}
 
+	$outbound_mode = (strtolower(trim((string)$settings->get_setting('mailbox_relay_outbound_mode'))) === 'smarthost')
+		? 'smarthost' : 'provider';
+
 	return LogicResult::render(array(
 		'relays'                => $relays,
 		'nodes'                 => $nodes,
 		'server_manager_active' => $server_manager_active,
 		'main_wg_public_key'    => (string)$settings->get_setting('mailbox_relay_wg_public_key'),
+		'has_active_relay'      => ($active !== null),
+		'outbound_mode'         => $outbound_mode,
 		'session'               => $session,
 		'settings'              => $settings,
 	));
+}
+
+/**
+ * Upsert a single stg_settings row by name (there is no set_setting()) — the same
+ * model path the Setup/Settings tabs use. A missing row is created.
+ */
+function admin_mailbox_relay_write_setting(string $name, string $value): void {
+	require_once(PathHelper::getIncludePath('data/settings_class.php'));
+	$existing = new MultiSetting(array('setting_name' => $name));
+	$existing->load();
+	if (count($existing)) {
+		$setting = $existing->get(0);
+	} else {
+		$setting = new Setting(NULL);
+		$setting->set('stg_name', $name);
+	}
+	$setting->set('stg_value', $value);
+	$setting->save();
 }
 
 /**
@@ -102,12 +160,20 @@ function admin_mailbox_relay_logic(array $input): LogicResult {
  */
 function admin_mailbox_relay_health(): array {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailHealth.php'));
+	$mode = (strtolower(trim((string)Globalvars::get_instance()->get_setting('mailbox_relay_outbound_mode'))) === 'smarthost')
+		? 'smarthost' : 'provider';
+	// The check list matches the chosen outbound path — never an N/A row.
 	$run = array(
-		'checkRelayTunnel'        => 'Tunnel reachable (port 25)',
 		'checkRelaySpoolDraining' => 'Spool draining',
 		'checkRelayMapFresh'      => 'Alias map fresh',
 		'checkOriginHidden'       => 'Origin hidden in DNS',
 	);
+	if ($mode === 'smarthost') {
+		$run['checkRelayTunnel'] = 'Tunnel accepts compose submission';
+	} else {
+		$run['checkOutboundTransportClass'] = 'Sent mail leaves via provider API';
+		$run['checkOutboundOriginLeak']     = 'No origin leak in sent mail';
+	}
 	$out = array();
 	foreach ($run as $method => $label) {
 		$ok = true; $message = '';
