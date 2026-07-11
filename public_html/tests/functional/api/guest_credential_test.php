@@ -20,7 +20,7 @@
  *
  * Usage: php guest_credential_test.php [base_url] [origin_ip]
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 
 /** @joinery-test
@@ -219,12 +219,32 @@ try {
 	section('5. Mirror cookie survives the static page cache');
 	// Hard requirement, not a skip: token distribution on cache HITs is the
 	// whole reason the mirror cookie exists — the suite must observe a HIT.
+	//
+	// The static cache only *creates* an entry for a request whose User-Agent
+	// looks like a real browser: StaticPageCache::shouldCache() refuses to
+	// cache curl / empty-UA requests. Every request in this suite is curl, so
+	// on its own it can only ride an entry that real browser traffic happened
+	// to leave behind — and once that entry is gone (a deploy clear, the 1%
+	// serve-time freshness roll, or a nostatic marking) no curl fetch can
+	// rebuild it and the assertion flakes with no fault in the credential.
+	//
+	// So warm / with a single browser-UA GET first. It is served by the origin,
+	// so Apache writes the cache entry under its own ownership (no CLI-vs-web
+	// mismatch). Serving a HIT does not depend on the UA, so the warmed entry
+	// is then served to this visitor's normal jar too.
+	$browser_ua = 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+		. 'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36';
+	guest_request('GET', '/', $jar, array($browser_ua));
 	$hit = null;
-	for ($i = 0; $i < 5 && $hit === null; $i++) {
+	// 8, not 5: the entry is known to exist now, so this only has to absorb the
+	// 1% serve-time freshness roll, which an all-miss run across 8 fetches
+	// cannot realistically survive.
+	for ($i = 0; $i < 8 && $hit === null; $i++) {
 		$p = guest_request('GET', '/', $jar);
 		if (response_header_matches($p['headers'], '/^X-Cache:\s*HIT/i')) $hit = $p;
 	}
-	check($hit !== null, 'an X-Cache HIT was observed within 5 fetches of / (page cache must be live on dev)');
+	check($hit !== null,
+		'an X-Cache HIT was observed on / after warming the page cache (else the static cache is disabled on dev — see /admin/admin_static_cache)');
 	if ($hit !== null) {
 		check(strpos($hit['raw'], '<meta name="joinery-api-csrf"') === false,
 			'cached HTML carries no CSRF meta tag');
