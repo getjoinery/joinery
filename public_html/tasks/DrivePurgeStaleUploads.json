@@ -1,0 +1,9 @@
+{
+    "name": "Drive: Purge Stale Uploads",
+    "description": "Deletes pending Drive uploads and their scratch part-files that have gone idle beyond the window.",
+    "default_frequency": "daily",
+    "default_time": "03:15:00",
+    "config_fields": {
+        "hours_to_keep": {"type": "number", "label": "Hours before a pending upload is stale", "required": false}
+    }
+}

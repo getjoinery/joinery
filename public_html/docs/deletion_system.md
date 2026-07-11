@@ -442,6 +442,23 @@ $q->execute([$domain->key, $domain_delete_time]);
 - [ ] Consider whether logs/audit records should use `'action' => 'null'` to preserve history
 - [ ] Require appropriate permission level for permanent delete (typically 10)
 
+### Worked example: Drive trash retention
+
+The member Drive (see [Drive](drive.md)) is a full example of both halves plus a
+timed purge:
+
+- **Soft-delete cascade** stamps the folder *first* so it holds the earliest
+  `delete_time` in its cascade; every descendant folder and file follows.
+- **Selective restore** captures the folder's `delete_time` before `undelete()` and
+  restores only descendants with `delete_time >=` it — a child trashed
+  independently *earlier* stays in the trash.
+- **Timed purge** — the `DrivePurgeTrash` scheduled task calls `permanent_delete()`
+  on items trashed longer than its window (default 30 days); blob reference counts
+  reclaim the shared bytes. A file's `fil_fol_folder_id` uses `'action' => 'null'`
+  so a raw folder permanent-delete *orphans* files to the root rather than
+  destroying them — the destructive path goes through the trash logic, not the
+  bare deletion rule.
+
 ## Best Practices
 
 1. **Use constants for sentinel values**: `User::USER_DELETED` instead of hardcoded `3`

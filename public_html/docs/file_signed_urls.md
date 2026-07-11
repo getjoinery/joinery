@@ -58,6 +58,16 @@ deliberately separate from `secret_box_key` (key separation): deleting the
 row rotates the key, which invalidates every outstanding signed URL and
 nothing else — a non-event given short TTLs.
 
+## Composition: Drive share links
+
+A Drive public share link (`/s/{token}`, see [Drive](drive.md)) is the **durable,
+revocable grant**; the signed URL stays the **short-lived transport**. The share
+page authorizes the visitor against the link (live, not revoked, password
+satisfied), then mints a fresh signed URL per download. Revoking or expiring the
+link stops new signed URLs from being issued; any already-minted URL simply lapses
+at its short TTL. The two layers are independent — the link controls *whether* a
+visitor may fetch, the signed URL controls *this one fetch*.
+
 ## Tests
 
 `tests/functional/files/signed_urls_test.php` (see [Testing](testing.md)) — covers no-session

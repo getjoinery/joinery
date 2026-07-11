@@ -28,7 +28,7 @@ class FileBlobException extends SystemBaseException {}
  * pointing at a blob is in the same visibility class. Dedup scoping and the
  * flip / copy-on-write split in File::move_to_correct_directory() maintain it.
  *
- * @version 1.1.0
+ * @version 1.2.0
  */
 class FileBlob extends SystemBase {
 	public static $prefix = 'fbb';
@@ -253,23 +253,52 @@ class FileBlob extends SystemBase {
 	}
 
 	/**
+	 * Public dedup lookup for callers that already hold a content hash (Drive's
+	 * upload_init short-circuit): a live blob with matching (sha256, size,
+	 * visibility), or null. Does NOT retain — the caller retains on use.
+	 *
+	 * A client-claimed hash is not proof of possession, so when
+	 * $possessed_by_user_id is given the match is restricted to blobs that user
+	 * already references through their own files or file versions — a foreign
+	 * hash+size matches nothing (no content disclosure, no existence oracle).
+	 * Only a caller that hashed the bytes itself may pass 0.
+	 */
+	public static function find_dedup($sha, $size, $is_private, $possessed_by_user_id = 0) {
+		return self::_find_dedup($sha, $size, $is_private ? true : false, (int)$possessed_by_user_id);
+	}
+
+	/**
 	 * Dedup lookup: a live blob (refcount > 0) with matching hash, size and
 	 * visibility. Only non-null hashes ever match — a cloud-backfilled row with
 	 * a null hash simply never dedups, the safe default.
 	 */
-	private static function _find_dedup($sha, $size, $is_private) {
+	private static function _find_dedup($sha, $size, $is_private, $possessed_by_user_id = 0) {
 		if ($sha === null || $sha === false || $sha === '' || $size === false) {
 			return null;
+		}
+		$possession = '';
+		if ($possessed_by_user_id > 0) {
+			$possession =
+				" AND (EXISTS (SELECT 1 FROM fil_files pf
+			                    WHERE pf.fil_fbb_file_blob_id = fbb_file_blob_id
+			                      AND pf.fil_usr_user_id = :possessor)
+			       OR EXISTS (SELECT 1 FROM fvr_file_versions pv
+			                    JOIN fil_files pvf ON pvf.fil_file_id = pv.fvr_fil_file_id
+			                   WHERE pv.fvr_fbb_file_blob_id = fbb_file_blob_id
+			                     AND pvf.fil_usr_user_id = :possessor))";
 		}
 		$dblink = DbConnector::get_instance()->get_db_link();
 		$q = $dblink->prepare(
 			"SELECT fbb_file_blob_id FROM fbb_file_blobs
 			 WHERE fbb_sha256 = :sha AND fbb_size_bytes = :size AND fbb_is_private = :priv
-			   AND fbb_reference_count > 0
+			   AND fbb_reference_count > 0" . $possession . "
 			 ORDER BY fbb_file_blob_id ASC LIMIT 1");
 		$q->bindValue(':sha', $sha, PDO::PARAM_STR);
 		$q->bindValue(':size', $size, PDO::PARAM_INT);
 		$q->bindValue(':priv', $is_private, PDO::PARAM_BOOL);
+		if ($possessed_by_user_id > 0) {
+			$q->bindValue(':possessor', $possessed_by_user_id, PDO::PARAM_INT);
+		}
 		$q->execute();
 		$id = $q->fetchColumn();
 		return ($id === false) ? null : new self((int)$id, true);

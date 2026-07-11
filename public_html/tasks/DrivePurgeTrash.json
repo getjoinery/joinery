@@ -1,0 +1,9 @@
+{
+    "name": "Drive: Purge Trash",
+    "description": "Permanently deletes Drive files and folders that have been in the trash longer than the retention window.",
+    "default_frequency": "daily",
+    "default_time": "03:30:00",
+    "config_fields": {
+        "days_to_keep": {"type": "number", "label": "Days to keep trashed items", "required": true}
+    }
+}

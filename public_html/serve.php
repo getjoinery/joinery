@@ -102,6 +102,8 @@ $routes = [
         // Slug-based content routes
         '/post/{slug}'         => ['view' => 'views/post', 'check_setting' => 'blog_active'],
         '/page/{slug}'         => ['view' => 'views/page', 'check_setting' => 'page_contents_active'],
+        // Drive public share links (anonymous-safe; the link is the grant).
+        '/s/{token}'           => ['view' => 'views/share', 'check_setting' => 'drive_active'],
         // event_manager: ICS handler routes — MUST precede '/event/{slug}' (which
         // would otherwise capture the '.ics' URLs with the suffix in {slug}).
         '/event/{slug}/{date}.ics' => ['handler' => 'includes/ics_event_route',    'plugin' => 'event_manager', 'check_setting' => 'events_active'],

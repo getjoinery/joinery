@@ -2,7 +2,11 @@
 /**
  * API v1 Endpoint
  *
- * @version 2.12
+ * @version 2.13
+ * @changelog 2.13 - Drive chunk transport logs its OUTCOME: the api_upload
+ *   request-log row is written by DriveUploadTransport's response helpers
+ *   (success on 2xx, failure with status code otherwise) instead of a
+ *   pre-dispatch success stamp here. Rate-limit counting is unchanged.
  * @changelog 2.12 - Descriptor consumption: action discovery and the action/
  *   form endpoints resolve metadata from _logic_descriptor() first with
  *   _logic_api() as the legacy fallback; discovery exposes each action's
@@ -406,6 +410,20 @@ if (strtolower($url_segments[2] ?? '') === 'app') {
 	require_once(PathHelper::getIncludePath('includes/ApiAppEndpoint.php'));
 	ApiAppEndpoint::dispatchAuthenticated($url_segments, $api_entry, $api_user, $headers);
 	// dispatchAuthenticated() always exits.
+}
+
+// Drive chunk transport (PUT/GET /api/v1/drive_upload/{token}) — raw-body upload,
+// the inbound twin of management/backups/fetch. Its own rate-limit bucket keeps a
+// multi-GB upload from exhausting the general 1000/hr API budget for other calls.
+if (strtolower($url_segments[2] ?? '') === 'drive_upload') {
+	$up_limit  = (int)($settings->get_setting('api_upload_rate_limit_requests') ?: 10000);
+	$up_window = (int)($settings->get_setting('api_upload_rate_limit_window') ?: 3600);
+	if (!RequestLogger::check_rate_limit('api_upload', $up_limit, $up_window)) {
+		api_error('Upload rate limit exceeded. Please slow down.', 'RateLimitError', 429);
+	}
+	require_once(PathHelper::getIncludePath('includes/DriveUploadTransport.php'));
+	DriveUploadTransport::dispatch($url_segments, $auth_data, $request_method, $api_entry);
+	// dispatch() always exits, logging the api_upload outcome as it goes.
 }
 
 if (in_array($operation, $classes)) {
