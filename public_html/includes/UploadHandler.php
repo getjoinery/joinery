@@ -461,10 +461,12 @@ class UploadHandler
             }
             $name = $this->upcount_name($name);
         }
-        // Also consult fil_files: once cloud storage migrates a file's bytes
-        // off disk, the filesystem checks above would let a new upload reuse
-        // the same fil_name and overwrite the bucket object. (§3a)
-        while ($this->fil_files_has_active_row($name)) {
+        // Also consult the DB: a physical blob name (fbb_stored_name) may exist
+        // with no local file — its bytes are cloud-offloaded — and an active
+        // fil_name is a live URL identity. Reusing either landing name could
+        // overwrite an offloaded object or collide with a live file, so skip
+        // past both.
+        while ($this->fil_files_has_active_row($name) || $this->blob_stored_name_exists($name)) {
             $name = $this->upcount_name($name);
         }
         return $name;
@@ -482,6 +484,21 @@ class UploadHandler
         } catch (PDOException $e) {
             // Don't block uploads if fil_files isn't queryable.
             error_log('UploadHandler fil_files dedupe failed: ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    protected function blob_stored_name_exists($name) {
+        try {
+            $dbconnector = DbConnector::get_instance();
+            $dblink = $dbconnector->get_db_link();
+            $q = $dblink->prepare(
+                "SELECT 1 FROM fbb_file_blobs WHERE fbb_stored_name = ? LIMIT 1"
+            );
+            $q->execute([$name]);
+            return (bool)$q->fetchColumn();
+        } catch (PDOException $e) {
+            // Don't block uploads if the blob table isn't queryable.
             return false;
         }
     }

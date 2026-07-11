@@ -57,12 +57,14 @@ Files live in one of two local directories based on their permission settings:
 
 Both directories maintain the same internal structure (`original`, `thumb/`, `avatar/`, etc.). `File::save()` automatically moves files between directories when permissions change. `File::get_url()` always returns `/uploads/...` URLs regardless of which directory the file is in — RouteHelper checks `static_files/uploads/` first and serves the file without loading the PHP bootstrap if found there.
 
-**Public files may also live in a customer-owned cloud bucket.** When cloud storage is enabled (admin page at `/admin/admin_cloud_storage`), public files are asynchronously moved to a configured S3-compatible bucket; their bytes leave local disk and `fil_storage_driver` flips from `'local'` to `'cloud'`. URL generation, deletion, re-resize, and the public→private permission-flip pull-back all dispatch on the per-row driver flag. Private files stay local regardless. See [Cloud Storage](cloud_storage.md) for full architecture, settings, migration, and CDN recommendations.
+A file's physical bytes live in a **`FileBlob`** (`fbb_file_blobs`) that the `File` references; two files with identical bytes and the same visibility share one blob (content dedup). Physical operations — paths, reads, resize, offload, deletion — delegate to the blob; `File` owns only identity, ownership, and the visibility gates.
+
+**Public files may also live in a customer-owned cloud bucket.** When cloud storage is enabled (admin page at `/admin/admin_cloud_storage`), public blobs are asynchronously moved to a configured S3-compatible bucket; their bytes leave local disk and the blob's `fbb_storage_driver` flips from `'local'` to `'cloud'`. URL generation, deletion, re-resize, and the public→private permission-flip pull-back all dispatch on the per-blob driver flag. Private files stay local regardless. See [Cloud Storage](cloud_storage.md) for full architecture, settings, migration, and CDN recommendations.
 
 Key methods:
 - `File::is_public()` — checks if a file has no permission restrictions
-- `File::get_filesystem_path($size_key)` — finds the file in whichever directory it lives in
-- `File::move_to_correct_directory()` — moves file to the correct directory (called by `save()`); for cloud-stored rows that became private, executes the three-phase pull-back to local
+- `File::get_filesystem_path($size_key)` — finds the file's bytes (via its blob) in whichever directory they live in
+- `File::move_to_correct_directory()` — maintains the visibility invariant (called by `save()`): flips a refcount-1 blob's placement, or copy-on-write-splits a shared blob so the changed file gets its own
 
 See `specs/implemented/fast_serve_uploads.md` for the full specification.
 

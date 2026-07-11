@@ -157,39 +157,21 @@ function admin_file_upload_process_logic(array $input): LogicResult {
 			continue;
 		}
 
-		if($existing_id = File::get_by_name($thisfile->name)){
-			$file =	new File($existing_id, TRUE);
-			$file->set('fil_delete_time', NULL);
-		}
-		else{
-			//RENAME THE FILE
-			$settings = Globalvars::get_instance();
-			$upload_dir = $settings->get_setting('upload_dir');
+		// UploadHandler landed the bytes at upload_dir/<name>; the one blob-backed
+		// ingestion path takes over from there (it re-stages under a minted name,
+		// dedups on content, and detects the honest type from the bytes — the
+		// client Content-Type is only a fallback).
+		$settings = Globalvars::get_instance();
+		$upload_dir = $settings->get_setting('upload_dir');
+		$landed = $upload_dir . '/' . $thisfile->name;
 
-			$rand_string = '_'.LibraryFunctions::random_string(8).'.';
-			$new_name = str_replace('.', $rand_string, $thisfile->name);
-			$new_name = str_replace(' ', '_', $new_name);
-			// Removes special chars.
-			$new_name = preg_replace('/[^A-Za-z0-9\.\-\_]/', '', $new_name);
-			// Replaces multiple hyphens with single one.
-			$new_name = preg_replace('/_+/', '_', $new_name);
-
-			if(!rename($upload_dir.'/'.$thisfile->name, $upload_dir.'/'.$new_name)){
-				return LogicResult::error('Unable to save resized image.  Check file permissions.');
-			}
-
-			// The client Content-Type is only a fallback: File::save() detects
-			// the real type from the file's magic bytes on insert and that wins.
-			$file =	new File(NULL);
-			$file->set('fil_name', $new_name);
-			$file->set('fil_title', $thisfile->name);
-			$file->set('fil_type', substr((string)$thisfile->type,0,128));
-			$file->set('fil_usr_user_id', $session->get_user_id());
-			$file->set('fil_source', File::SOURCE_USER_UPLOAD);
-
-		}
-		$file->save();
-		$file->load();
+		$file = File::createFromUpload(
+			$landed,
+			$thisfile->name,
+			$thisfile->type,
+			$session->get_user_id(),
+			array('fil_source' => File::SOURCE_USER_UPLOAD)
+		);
 		$file->resize();
 
 		// Add the file ID to the response object

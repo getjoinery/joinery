@@ -114,10 +114,9 @@ class EmailAttachmentDigest {
 		try {
 			$file_id = (int)$att->get('ima_fil_file_id');
 			$file = new File($file_id, TRUE);
-			// fil_storage_driver is NOT NULL on every real row (defaults to
-			// 'local') — a load() that found no row leaves it unset, unlike
-			// $file->key, which SystemBase never resets on a failed load.
-			if ($file->get('fil_storage_driver') === null || $file->get('fil_delete_time')) {
+			// A real row has a key; a load() that found no row leaves $file->key
+			// falsy (SystemBase never resets it on a failed load).
+			if (!$file->key || $file->get('fil_delete_time')) {
 				throw new RuntimeException('attachment file is no longer available');
 			}
 			$bytes = $file->read_bytes('original');
