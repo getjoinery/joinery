@@ -3,6 +3,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRunner.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatAsync.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderException.php'));
 
 /**
@@ -21,11 +22,13 @@ class ChatTurn {
      */
     public static function runAndFinalize(AiConversation $conversation, int $uid,
             AiConversationMessage $assistant_msg): void {
+        $sealed = ChatSeal::isProtectedLevel($conversation->get('aic_security_level'));
         $stamper = ChatAsync::activityStamper($assistant_msg);
         $stamper('Starting…');
         try {
             $turn = ChatRunner::runTurn($conversation, $uid,
-                ChatAsync::streamSink($assistant_msg), $stamper);
+                ChatAsync::streamSink($assistant_msg, '', $sealed,
+                    (int)$conversation->get('aic_owner_user_id')), $stamper);
         } catch (LlmProviderException $e) {
             error_log('[joinery_ai chat] provider error: ' . $e->getMessage());
             self::markFailed($assistant_msg,
@@ -40,16 +43,20 @@ class ChatTurn {
         $result = $turn['result'];
         $ctx    = $turn['context'];
 
-        $assistant_msg->set('aim_content', ChatRunner::resolveAssistantText($result));
-        $assistant_msg->set('aim_tool_calls', $ctx->toolCalls());
-        if (!empty($result['pending_action'])) {
-            $assistant_msg->set('aim_pending_action', $result['pending_action']);
-        }
-        $assistant_msg->set('aim_input_tokens', (int)$result['input_tokens']);
-        $assistant_msg->set('aim_output_tokens', (int)$result['output_tokens']);
-        $assistant_msg->set('aim_status', AiConversationMessage::STATUS_COMPLETE);
-        $assistant_msg->set('aim_activity', null);
-        $assistant_msg->save();
+        // Content columns: json-encode the trace and seal every content column when
+        // protected (Standard stores plaintext). Persist via a targeted raw UPDATE
+        // — a sealed row must never be save()d (that would decrypt-and-rewrite,
+        // unsealing it or throwing when locked).
+        $cols = ChatSeal::turnColumns($conversation, (int)$assistant_msg->key,
+            ChatRunner::resolveAssistantText($result),
+            $ctx->toolCalls(),
+            !empty($result['pending_action']) ? $result['pending_action'] : null);
+        $cols['aim_input_tokens']  = (int)$result['input_tokens'];
+        $cols['aim_output_tokens'] = (int)$result['output_tokens'];
+        $cols['aim_status']        = AiConversationMessage::STATUS_COMPLETE;
+        $cols['aim_activity']      = null;
+        AiConversationMessage::updateColumns((int)$assistant_msg->key, $cols);
+        ChatAsync::clearScratch((int)$assistant_msg->key);   // the sealed content now lives in aim_content
 
         self::rollupUsage($conversation, (int)$result['input_tokens'], (int)$result['output_tokens']);
     }
@@ -61,11 +68,13 @@ class ChatTurn {
      */
     public static function resumeAndFinalize(AiConversation $conversation, int $uid,
             AiConversationMessage $msg, array $pending, string $lead_text, string $decision): void {
+        $sealed = ChatSeal::isProtectedLevel($conversation->get('aic_security_level'));
         $stamper = ChatAsync::activityStamper($msg);
         $stamper('Resuming…');
         try {
             $seed = $lead_text !== '' ? $lead_text . "\n\n" : '';
-            $sink = ChatAsync::streamSink($msg, $seed);
+            $sink = ChatAsync::streamSink($msg, $seed, $sealed,
+                (int)$conversation->get('aic_owner_user_id'));
             $turn = ChatRunner::resumeTurn($conversation, $uid, $pending, $lead_text, $decision,
                 $sink, $stamper);
         } catch (LlmProviderException $e) {
@@ -87,35 +96,43 @@ class ChatTurn {
             . (($lead_text !== '' && $resumed_text !== '') ? "\n\n" : '') . $resumed_text);
         if ($combined === '') $combined = ($decision === 'confirm') ? 'Done.' : 'Okay, I won’t do that.';
 
+        // The existing trace + tokens decrypt/read in-window BEFORE turnColumns
+        // re-seals the content under a fresh DEK.
         $merged_trace = array_merge(self::decodeTrace($msg->get('aim_tool_calls')), $ctx->toolCalls());
+        $prior_in  = (int)$msg->get('aim_input_tokens');
+        $prior_out = (int)$msg->get('aim_output_tokens');
 
-        $msg->set('aim_content', $combined);
-        $msg->set('aim_tool_calls', $merged_trace);
-        $msg->set('aim_pending_action', !empty($result['pending_action']) ? $result['pending_action'] : null);
-        $msg->set('aim_input_tokens', (int)$msg->get('aim_input_tokens') + (int)$result['input_tokens']);
-        $msg->set('aim_output_tokens', (int)$msg->get('aim_output_tokens') + (int)$result['output_tokens']);
-        $msg->set('aim_status', AiConversationMessage::STATUS_COMPLETE);
-        $msg->set('aim_activity', null);
-        $msg->save();
+        $cols = ChatSeal::turnColumns($conversation, (int)$msg->key, $combined, $merged_trace,
+            !empty($result['pending_action']) ? $result['pending_action'] : null);
+        $cols['aim_input_tokens']  = $prior_in + (int)$result['input_tokens'];
+        $cols['aim_output_tokens'] = $prior_out + (int)$result['output_tokens'];
+        $cols['aim_status']        = AiConversationMessage::STATUS_COMPLETE;
+        $cols['aim_activity']      = null;
+        AiConversationMessage::updateColumns((int)$msg->key, $cols);
+        ChatAsync::clearScratch((int)$msg->key);
 
         self::rollupUsage($conversation, (int)$result['input_tokens'], (int)$result['output_tokens']);
     }
 
-    /** Add a turn's tokens to the conversation totals and bump its update time. */
+    /** Add a turn's tokens to the conversation totals and bump its update time.
+     *  Token/time columns are cleartext; a targeted UPDATE leaves the sealed
+     *  title/instructions untouched (a full save() would decrypt-and-rewrite them). */
     private static function rollupUsage(AiConversation $conversation, int $in, int $out): void {
-        $conversation->set('aic_total_input_tokens',
-            (int)$conversation->get('aic_total_input_tokens') + $in);
-        $conversation->set('aic_total_output_tokens',
-            (int)$conversation->get('aic_total_output_tokens') + $out);
-        $conversation->set('aic_update_time', gmdate('Y-m-d H:i:s'));
-        $conversation->save();
+        AiConversation::updateColumns((int)$conversation->key, [
+            'aic_total_input_tokens'  => (int)$conversation->get('aic_total_input_tokens') + $in,
+            'aic_total_output_tokens' => (int)$conversation->get('aic_total_output_tokens') + $out,
+            'aic_update_time'         => gmdate('Y-m-d H:i:s'),
+        ]);
     }
 
     public static function markFailed(AiConversationMessage $msg, string $error): void {
-        $msg->set('aim_status', AiConversationMessage::STATUS_FAILED);
-        $msg->set('aim_error', $error);
-        $msg->set('aim_activity', null);
-        $msg->save();
+        // Seal the error on a protected conversation (it may echo provider detail);
+        // errorColumns resolves the conversation itself and no-ops for Standard.
+        $cols = ChatSeal::errorColumns($msg, $error);
+        $cols['aim_status']   = AiConversationMessage::STATUS_FAILED;
+        $cols['aim_activity'] = null;
+        AiConversationMessage::updateColumns((int)$msg->key, $cols);
+        ChatAsync::clearScratch((int)$msg->key);
     }
 
     /** A short thread title derived from the first user message. */
@@ -143,11 +160,15 @@ class ChatTurn {
         if (is_string($pending)) $pending = json_decode($pending, true);
         if (empty($pending)) return;
 
+        // get() decrypts the prior content in-window on a protected row; re-seal
+        // the amended content under the SAME per-message DEK, and clear the pending
+        // action (null needs no seal). Persist via a targeted UPDATE.
         $txt = (string)$last->get('aim_content');
         $note = '_(Proposed an action; you continued without confirming, so it was not run.)_';
-        $last->set('aim_content', $txt !== '' ? $txt . "\n\n" . $note : $note);
-        $last->set('aim_pending_action', null);
-        $last->save();
+        $cols = ChatSeal::resealMessageColumn($last, $conversation, 'aim_content',
+            $txt !== '' ? $txt . "\n\n" . $note : $note);
+        $cols['aim_pending_action'] = null;
+        AiConversationMessage::updateColumns((int)$last->key, $cols);
     }
 
     public static function decodeTrace($value): array {

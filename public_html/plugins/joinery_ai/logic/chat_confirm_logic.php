@@ -15,6 +15,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatWorkerS
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRender.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSerializer.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/CostGuard.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSend.php'));
 
 function chat_confirm_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -37,6 +38,17 @@ function chat_confirm_logic(array $input): LogicResult {
             || (int)$conversation->get('aic_owner_user_id') !== $uid
             || $conversation->get('aic_delete_time')) {
         return LogicResult::error('Conversation not found.');
+    }
+
+    // Unlock-first: resuming a protected turn reads its (sealed) pending action +
+    // lead text and re-seals the resumed reply — all in-window.
+    $protected = $conversation->isProtected();
+    if (ChatSend::lockedForWrite($uid, $protected)) {
+        return LogicResult::render([
+            'locked'          => true,
+            'conversation_id' => (int)$conversation->key,
+            'message'         => 'Unlock your vault to continue this protected chat.',
+        ]);
     }
 
     $msg = new AiConversationMessage($message_id, true);
@@ -63,9 +75,9 @@ function chat_confirm_logic(array $input): LogicResult {
     }
 
     // Flip the pending row to RUNNING so it can be polled (and a duplicate
-    // confirm sees no pending action to resolve).
-    $msg->set('aim_status', AiConversationMessage::STATUS_RUNNING);
-    $msg->save();
+    // confirm sees no pending action to resolve). Targeted UPDATE — the row is a
+    // sealed, finalized message on a protected chat; a full save() would unseal it.
+    AiConversationMessage::updateColumns((int)$msg->key, ['aim_status' => AiConversationMessage::STATUS_RUNNING]);
 
     $payload = [
         'conversation_id' => (int)$conversation->key,
@@ -74,8 +86,10 @@ function chat_confirm_logic(array $input): LogicResult {
 
     // Resume in a detached CLI worker; the client re-polls chat_poll on the same
     // message_id. The worker re-reads the pending action and lead text from the
-    // row, so only the message id and the decision need to cross the boundary.
-    if (ChatWorkerSpawner::spawn((int)$msg->key, $decision)) {
+    // row, so only the message id and the decision need to cross the boundary. A
+    // protected conversation must resume in-process (the CLI worker can't see the
+    // unlock window to decrypt/re-seal), so it falls through to the sync path.
+    if (!$protected && ChatWorkerSpawner::spawn((int)$msg->key, $decision)) {
         $payload['status'] = AiConversationMessage::STATUS_RUNNING;
         return LogicResult::render($payload);
     }

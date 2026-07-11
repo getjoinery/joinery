@@ -46,7 +46,12 @@ foreach ($conversations as $conversation) {
     $owner = new User((int)$conversation->get('aic_owner_user_id'), TRUE);
     $row[] = $owner->key ? htmlspecialchars($owner->display_name()) : '<em class="text-muted">unknown</em>';
 
-    $row[] = htmlspecialchars($conversation->get('aic_title') ?: '(untitled)');
+    // A sealed title is another user's protected content — get() would try to
+    // decrypt with the OWNER's vault window (never open in an admin's session)
+    // and throw VaultLockedException. Show a placeholder, never the content.
+    $row[] = $conversation->get('aic_content_sealed')
+        ? '<em class="text-muted">Protected chat (sealed)</em>'
+        : htmlspecialchars($conversation->get('aic_title') ?: '(untitled)');
 
     $when = $conversation->get('aic_delete_time')
         ? LibraryFunctions::convert_time(

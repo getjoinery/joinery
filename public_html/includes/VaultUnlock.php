@@ -74,7 +74,7 @@ class VaultUnlock {
 	 * and its onReseal()/onWipe() callbacks. Add a plugin name here when a new
 	 * consumer package lands (mail was the first; chat is the second).
 	 */
-	const CONSUMER_PLUGINS = array('mailbox');
+	const CONSUMER_PLUGINS = array('mailbox', 'joinery_ai');
 
 	/**
 	 * Load each active consumer's bootstrap file — lazy, once per request, called

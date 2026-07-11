@@ -51,17 +51,46 @@ if (!$conversation->key
     chat_cap_fail('Conversation not found.');
 }
 
-// Validate the field and compute the column + stored value. chat_field_value()
-// is shared with chat_send (new-chat seeding) so both validate identically.
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatControls.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatLevel.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
+
+// Changing the encryption level reseals/reveals stored content and enforces
+// prerequisites — its own operation, not a plain column write.
+if ($field === 'security_level') {
+    $result = ChatLevel::changeLevel($conversation, (string)$value, $uid);
+    if (!$result['ok']) chat_cap_fail($result['error']);
+    echo json_encode(['success' => true, 'field' => $field, 'security_level' => $result['level']]);
+    exit;
+}
+
+// Validate the field and compute the column + stored value.
 try {
     [$column, $stored] = ChatControls::validate($field, $value);
 } catch (InvalidArgumentException $e) {
     chat_cap_fail($e->getMessage());
 }
 
-$conversation->set($column, $stored);
-$conversation->save();
+// A Fortress chat pins inference to a local model — refuse a cloud model.
+if ($field === 'model' && (string)$conversation->get('aic_security_level') === AiConversation::LEVEL_FORTRESS
+        && $stored !== '' && !ChatLevel::isLocalModel((string)$stored)) {
+    chat_cap_fail('This is a Fortress chat — it can only use a local model. '
+        . 'Choose a local model, or lower the chat to Private/Standard first.');
+}
+
+// aic_instructions is content (sealed on a protected chat); every other control is
+// cleartext. Persist via a targeted UPDATE so a sealed row is never decrypt-rewritten.
+if ($column === 'aic_instructions' && $conversation->isProtected()) {
+    if (ChatSeal::lockedForContentEdit($conversation)) {
+        echo json_encode(['success' => true, 'locked' => true,
+            'message' => 'Unlock your vault to edit this protected chat’s instructions.']);
+        exit;
+    }
+    $cols = ChatSeal::resealConversationColumn($conversation, 'aic_instructions', $stored);
+} else {
+    $cols = [$column => $stored];
+}
+AiConversation::updateColumns((int)$conversation->key, $cols);
 
 echo json_encode(['success' => true, 'field' => $field]);
 exit;

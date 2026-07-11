@@ -21,12 +21,12 @@
  */
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatTurn.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatWorkerSpawner.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatControls.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRunner.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRender.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSerializer.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/CostGuard.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatAttachmentIngest.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSend.php'));
 
 function chat_send_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -54,6 +54,8 @@ function chat_send_logic(array $input): LogicResult {
     // (seeded from control fields) WITHOUT saving yet — so a rejected upload
     // doesn't leave an empty conversation behind.
     $is_new = false;
+    $new_title = '';
+    $new_instructions = '';
     if ($conversation_id > 0) {
         $conversation = new AiConversation($conversation_id, true);
         if (!$conversation->key
@@ -62,13 +64,24 @@ function chat_send_logic(array $input): LogicResult {
             return LogicResult::error('Conversation not found.');
         }
     } else {
-        $conversation = new AiConversation(NULL);
-        $conversation->set('aic_owner_user_id', $uid);
-        $conversation->set('aic_model', ChatRunner::defaultModel());
-        ChatControls::seedNewConversation($conversation, $input);
-        $title_seed = $message !== '' ? $message : 'New chat';
-        $conversation->set('aic_title', ChatTurn::deriveTitle($title_seed));
+        $built = ChatSend::buildNewConversation($uid, $input, $message);
+        $conversation     = $built['conversation'];
+        $new_title        = $built['title'];
+        $new_instructions = $built['instructions'];
         $is_new = true;
+    }
+
+    // Unlock-first: a protected conversation seals with the public key alone, but
+    // the turn must decrypt its history to build the model payload — so continuing
+    // (or starting) one requires an open vault window. Locked → prompt unlock
+    // before anything is persisted; the client unlocks then resubmits.
+    $protected = $conversation->isProtected();
+    if (ChatSend::lockedForWrite($uid, $protected)) {
+        return LogicResult::render([
+            'locked'          => true,
+            'conversation_id' => $conversation_id,
+            'message'         => 'Unlock your vault to continue this protected chat.',
+        ]);
     }
 
     // Validate uploads against the conversation's model + attachment mode BEFORE
@@ -78,11 +91,10 @@ function chat_send_logic(array $input): LogicResult {
     if (!$attach['ok']) return LogicResult::error($attach['error']);
     $prepared_attachments = $attach['prepared'];
 
-    // Everything validated — commit. Persist the (new) conversation first.
+    // Everything validated — commit. Persist the (new) conversation first, then
+    // seal its title/instructions (the id the AD binds to now exists).
     if ($is_new) {
-        $conversation->prepare();
-        $conversation->save();
-        $conversation->load();
+        ChatSend::persistNewConversation($conversation, $protected, $new_title, $new_instructions);
     }
 
     // Plugin-wide monthly ceiling (recipes + chat). Fail before spending tokens.
@@ -95,20 +107,14 @@ function chat_send_logic(array $input): LogicResult {
     // A prior unconfirmed proposal is abandoned by sending a new message.
     ChatTurn::clearDanglingPending($conversation);
 
-    // Persist the user's message (complete on insert). Content may be empty when
-    // the turn is attachments-only.
-    $user_msg = new AiConversationMessage(NULL);
-    $user_msg->set('aim_aic_conversation_id', (int)$conversation->key);
-    $user_msg->set('aim_role', AiConversationMessage::ROLE_USER);
-    $user_msg->set('aim_content', $message);
-    $user_msg->prepare();
-    $user_msg->save();
-    $user_msg->load();
+    // Persist the user's message (complete on insert; content may be empty when
+    // the turn is attachments-only). Protected chats seal the content afterward.
+    $user_msg = ChatSend::persistUserMessage($conversation, $protected, $message);
 
     // Store + link the validated attachments to this message. A file whose stored
     // type drifts from the validated one is dropped and reported so the response
     // can warn, rather than the model silently receiving nothing.
-    $attach_failures = ChatAttachmentIngest::commit($prepared_attachments, (int)$user_msg->key, $uid);
+    $attach_failures = ChatAttachmentIngest::commit($prepared_attachments, $user_msg, $conversation, $uid);
 
     $model_label = ChatRender::conversationModel($conversation);
 
@@ -135,7 +141,10 @@ function chat_send_logic(array $input): LogicResult {
 
     // Run the turn in a detached CLI worker and hand back the poll handle now;
     // the client polls chat_poll until the placeholder row is complete/failed.
-    if (ChatWorkerSpawner::spawn((int)$assistant_msg->key)) {
+    // A protected conversation must NOT go to the CLI worker: its unlock window
+    // lives in this web request's APCu segment (a separate CLI process can't see
+    // the secret key to decrypt history), so it runs in-process below.
+    if (!$protected && ChatWorkerSpawner::spawn((int)$assistant_msg->key)) {
         $payload['status'] = AiConversationMessage::STATUS_RUNNING;
         return LogicResult::render($payload);
     }

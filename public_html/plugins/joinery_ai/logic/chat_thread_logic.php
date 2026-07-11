@@ -13,6 +13,7 @@ function chat_thread_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRender.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSerializer.php'));
+    require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
 
     $session = SessionControl::get_instance();
     $uid = (int)$session->get_user_id();
@@ -24,6 +25,17 @@ function chat_thread_logic(array $input): LogicResult {
             || (int)$conversation->get('aic_owner_user_id') !== $uid
             || $conversation->get('aic_delete_time')) {
         return LogicResult::error('Conversation not found.');
+    }
+
+    // Locked protected conversation: return the header metadata + a `locked` flag,
+    // no turns. The client prompts unlock (the vault vault-kek ceremony), then
+    // re-loads. conversationSummary already withholds the title here.
+    if (ChatSeal::isLocked($conversation)) {
+        return LogicResult::render([
+            'conversation' => ChatSerializer::conversationSummary($conversation) + ['locked' => true],
+            'messages'     => [],
+            'locked'       => true,
+        ]);
     }
 
     $rows = new MultiAiConversationMessage(

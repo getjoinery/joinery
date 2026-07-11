@@ -24,6 +24,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRender.
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatAsync.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatTurn.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/CostGuard.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSend.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderException.php'));
 
 function chat_confirm_fail(string $msg): void {
@@ -53,6 +54,18 @@ if (!$conversation->key
     chat_confirm_fail('Conversation not found.');
 }
 
+// Unlock-first: resuming a protected turn reads its sealed pending action + lead
+// text and re-seals the reply — all in-window.
+if (ChatSend::lockedForWrite($uid, $conversation->isProtected())) {
+    echo json_encode([
+        'success'         => true,
+        'locked'          => true,
+        'conversation_id' => (int)$conversation->key,
+        'message'         => 'Unlock your vault to continue this protected chat.',
+    ]);
+    exit;
+}
+
 $msg = new AiConversationMessage($message_id, true);
 if (!$msg->key
         || (int)$msg->get('aim_aic_conversation_id') !== (int)$conversation->key
@@ -77,9 +90,9 @@ if ($decision === 'confirm') {
 }
 
 // Flip the pending row to RUNNING so the page can poll it (and a duplicate
-// confirm sees no pending action to resolve).
-$msg->set('aim_status', AiConversationMessage::STATUS_RUNNING);
-$msg->save();
+// confirm sees no pending action to resolve). Targeted UPDATE — a sealed,
+// finalized message must not be save()d (that would unseal it).
+AiConversationMessage::updateColumns((int)$msg->key, ['aim_status' => AiConversationMessage::STATUS_RUNNING]);
 
 $tz = $session->get_timezone();
 $payload = [

@@ -3,6 +3,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_message_attachments_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRender.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
 
 /**
  * Structured-JSON view of a chat conversation and its turns for the /api/v1
@@ -13,14 +14,28 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRender.
  */
 class ChatSerializer {
 
-    /** List-row summary: identity + sort/label state, no messages. */
+    /** List-row summary: identity + sort/label state, no messages. On a locked
+     *  protected conversation the title (content) is withheld — a placeholder and
+     *  a `locked` flag stand in, so the list still renders/sorts (times, pinned,
+     *  level are cleartext) and the client prompts unlock to read it. */
     public static function conversationSummary(AiConversation $c): array {
-        $title = trim((string)$c->get('aic_title'));
-        return [
-            'id'     => (int)$c->key,
-            'title'  => $title !== '' ? $title : 'Untitled',
-            'pinned' => (bool)$c->get('aic_pinned'),
+        $level  = (string)$c->get('aic_security_level');
+        $locked = ChatSeal::isLocked($c);
+        if ($locked) {
+            $title = ChatSeal::LOCKED_TITLE;
+        } else {
+            $title = trim((string)$c->get('aic_title'));
+            if ($title === '') $title = 'Untitled';
+        }
+        $out = [
+            'id'             => (int)$c->key,
+            'title'          => $title,
+            'pinned'         => (bool)$c->get('aic_pinned'),
+            'security_level' => $level ?: AiConversation::LEVEL_STANDARD,
+            'protected'      => ChatSeal::isProtectedLevel($level),
         ];
+        if ($locked) $out['locked'] = true;
+        return $out;
     }
 
     /** Full conversation header for a thread load: the summary plus the

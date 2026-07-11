@@ -163,7 +163,9 @@ class ChatRunner {
         $settings = Globalvars::get_instance();
 
         $model_pref = (string)$conversation->get('aic_model');
-        $provider = LlmProviderFactory::forModel($model_pref);
+        // forConversation enforces the Fortress local-only pin (Phase 5); Standard
+        // and Private route by the model id exactly as before.
+        $provider = LlmProviderFactory::forConversation($conversation);
         $model = $model_pref !== '' ? $model_pref : $provider->defaultModel();
 
         $system = self::buildSystemPrompt($conversation, $ctx);

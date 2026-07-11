@@ -143,6 +143,10 @@
             "default": ""
         },
         {
+            "name": "joinery_ai_default_chat_level",
+            "default": "standard"
+        },
+        {
             "name": "joinery_ai_default_temperature",
             "default": "0.3"
         },

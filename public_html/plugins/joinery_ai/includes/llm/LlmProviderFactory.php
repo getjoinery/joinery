@@ -33,6 +33,32 @@ class LlmProviderFactory {
     }
 
     /**
+     * Provider for a conversation, enforcing the Fortress contract
+     * (specs/joinery_ai_chat_encryption.md § Phase 5): a Fortress chat's content
+     * never leaves the box, so its turn MUST run on the local model — any cloud
+     * model (claude-* / Fireworks) is rejected here, the single choke point every
+     * turn passes through. Standard/Private route by the model id as usual.
+     *
+     * @throws LlmProviderException on a Fortress chat pinned to a cloud model, or
+     *         when the resolved provider's required setting is empty.
+     */
+    public static function forConversation(AiConversation $conversation): LlmProviderInterface {
+        $model = trim((string)$conversation->get('aic_model'));
+        if ((string)$conversation->get('aic_security_level') === AiConversation::LEVEL_FORTRESS) {
+            $is_cloud = $model !== '' && (preg_match('/^claude/i', $model) || FireworksProvider::owns($model));
+            if ($is_cloud) {
+                throw new LlmProviderException(
+                    'This is a Fortress chat — its content never leaves your hardware, so it can only run '
+                    . 'on a local model. The selected model “' . $model . '” is a cloud model. Switch to a '
+                    . 'local model in the chat settings, or a configured local model must be available.'
+                );
+            }
+            return self::local();   // pins to the local host (uses joinery_ai_local_model)
+        }
+        return self::forModel($model);
+    }
+
+    /**
      * The global-default provider, from joinery_ai_llm_provider. Used when
      * there is no model to route by.
      *
