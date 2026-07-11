@@ -28,7 +28,7 @@
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 
-require_once(PathHelper::getIncludePath('data/files_class.php'));
+require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
 require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageLifecycle.php'));
 
@@ -48,14 +48,17 @@ try {
 	$r = CloudStorageLifecycle::assertBindingMutable(['endpoint' => 'ep1.example.com', 'bucket' => 'priv-alpha'], 'private');
 	ok('private: same (endpoint,bucket) ⇒ allowed (key rotation)', $r['ok'] === true);
 
-	// Now a public store WITH a cloud row (no restrictions ⇒ public-owned).
+	// Now a public store WITH a cloud row (a public blob ⇒ public-owned).
 	harness_set_setting_mem('cloud_storage_bucket', 'pub-A');
-	$f = new File(NULL);
-	$f->set('fil_name', '_guardtest_' . bin2hex(random_bytes(5)) . '.bin');
-	$f->set('fil_type', 'application/octet-stream');
-	$f->set('fil_storage_driver', 'cloud');
-	$f->save();
-	$cloud_fixture_id = $f->key;
+	$b = new FileBlob(NULL);
+	$b->set('fbb_stored_name', '_guardtest_' . bin2hex(random_bytes(5)) . '.bin');
+	$b->set('fbb_size_bytes', 16);
+	$b->set('fbb_mime_type', 'application/octet-stream');
+	$b->set('fbb_is_private', false);
+	$b->set('fbb_reference_count', 1);
+	$b->set('fbb_storage_driver', 'cloud');
+	$b->save();
+	$cloud_fixture_id = $b->key;
 
 	$count = CloudStorageLifecycle::cloudRowCount('public');
 	ok('public: cloudRowCount sees the cloud row', $count >= 1);
@@ -105,7 +108,7 @@ try {
 
 } finally {
 	if ($cloud_fixture_id) {
-		$d = $dblink->prepare("DELETE FROM fil_files WHERE fil_file_id = ?");
+		$d = $dblink->prepare("DELETE FROM fbb_file_blobs WHERE fbb_file_blob_id = ?");
 		$d->execute([$cloud_fixture_id]);
 	}
 }

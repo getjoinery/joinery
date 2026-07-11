@@ -150,6 +150,25 @@ class CloudStorageS3Driver implements CloudStorageDriver {
 	}
 
 	/**
+	 * Byte size of a stored object via HeadObject — metadata only, no download.
+	 * Returns null when the object is missing or the head fails. Used by the
+	 * blob backfill to size cloud-resident rows without pulling their bytes.
+	 */
+	public function size(string $remote_key): ?int {
+		try {
+			$r = $this->client->headObject([
+				'Bucket' => $this->bucket,
+				'Key'    => self::pathPrefix() . '/' . ltrim($remote_key, '/'),
+			]);
+			$len = $r['ContentLength'] ?? null;
+			return ($len === null) ? null : (int)$len;
+		} catch (Exception $e) {
+			error_log('CloudStorageS3Driver::size head failed for ' . $remote_key . ': ' . $e->getMessage());
+			return null;
+		}
+	}
+
+	/**
 	 * Bucket key prefix derived from the site_template setting. Stable per
 	 * install — changing it would orphan every existing object in the bucket,
 	 * so the empty/slash guard hard-fails rather than silently re-deriving.

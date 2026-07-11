@@ -3,7 +3,7 @@
  * Cloud Storage Admin Logic
  *
  * Thin caller over the shared CloudStorageLifecycle. The page manages the
- * public-files store (FileStorageProfile) and, independently, the private
+ * public-blob store (BlobStorageProfile) and, independently, the private
  * store's bucket configuration + privacy gate. Save = test + persist +
  * activate, per store present in the form; each store's Save is validated
  * independently (a private-bucket failure never blocks the public Save, and
@@ -22,13 +22,13 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
 function admin_cloud_storage_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageLifecycle.php'));
-	require_once(PathHelper::getIncludePath('includes/cloud_storage/FileStorageProfile.php'));
+	require_once(PathHelper::getIncludePath('includes/cloud_storage/BlobStorageProfile.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);
 
 	$settings = Globalvars::get_instance();
-	$profile  = new FileStorageProfile();   // the public store this page manages
+	$profile  = new BlobStorageProfile();   // the public store this page manages
 
 	$test_results = null;          // public store
 	$errors = array();
@@ -186,10 +186,10 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 			));
 			return LogicResult::redirect('/admin/admin_cloud_storage');
 		}
-		elseif ($action === 'retry_stuck' && isset($input['fil_file_id'])) {
+		elseif ($action === 'retry_stuck' && isset($input['fbb_file_blob_id'])) {
 			$dblink = DbConnector::get_instance()->get_db_link();
-			$q = $dblink->prepare("UPDATE fil_files SET fil_sync_failed_count = 0 WHERE fil_file_id = ?");
-			$q->execute([(int)$input['fil_file_id']]);
+			$q = $dblink->prepare("UPDATE fbb_file_blobs SET fbb_sync_failed_count = 0 WHERE fbb_file_blob_id = ?");
+			$q->execute([(int)$input['fbb_file_blob_id']]);
 			return LogicResult::redirect('/admin/admin_cloud_storage');
 		}
 	}

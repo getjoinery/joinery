@@ -527,18 +527,17 @@ class CloudStorageLifecycle {
 			}
 		} catch (Exception $e) { /* schema might not be in place yet */ }
 
-		// Stuck rows list. The public files store carries a name column for the
+		// Stuck rows list. The file-blob store carries a stored-name column for the
 		// admin retry UI; a generic store returns id + counters only.
 		$h['stuck_rows'] = [];
 		if ($h['counts']['stuck'] > 0) {
 			try {
-				if ($profile->table() === 'fil_files') {
+				if ($profile->table() === 'fbb_file_blobs') {
 					$q = $dblink->prepare("
-						SELECT fil_file_id, fil_name, fil_sync_last_attempt, fil_sync_failed_count
-						FROM fil_files
-						WHERE COALESCE(fil_sync_failed_count, 0) >= " . CloudOffloadEngine::FAILED_COUNT_CAP . "
-						  AND fil_delete_time IS NULL
-						ORDER BY fil_sync_last_attempt DESC
+						SELECT fbb_file_blob_id, fbb_stored_name, fbb_sync_last_attempt, fbb_sync_failed_count
+						FROM fbb_file_blobs
+						WHERE COALESCE(fbb_sync_failed_count, 0) >= " . CloudOffloadEngine::FAILED_COUNT_CAP . "
+						ORDER BY fbb_sync_last_attempt DESC
 						LIMIT 25");
 					$q->execute();
 					$h['stuck_rows'] = $q->fetchAll(PDO::FETCH_ASSOC);

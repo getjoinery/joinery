@@ -295,7 +295,7 @@ $routes = [
                 $signed_ok = $file_obj->verify_signed_request($size_key, $_GET['expires'], $_GET['sig']);
             }
 
-            if ($file_obj && $file_obj->get('fil_storage_driver') === 'cloud') {
+            if ($file_obj && $file_obj->storage_driver() === 'cloud') {
                 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
 
                 if ($file_obj->is_public()) {
@@ -341,12 +341,23 @@ $routes = [
                 }
             }
 
-            // Check both directories for the file
+            // Resolve the local bytes through the blob (keyed on the physical
+            // stored name), so a dedup secondary — whose fil_name has no file of
+            // its own — still finds the shared bytes. Fall back to the raw URL
+            // subpath only when there is no File row to resolve through.
             $file = null;
-            if (file_exists($upload_dir . '/' . $subpath)) {
-                $file = $upload_dir . '/' . $subpath;
-            } elseif (file_exists($fast_dir . '/' . $subpath)) {
-                $file = $fast_dir . '/' . $subpath;
+            if ($file_obj) {
+                $candidate = $file_obj->get_filesystem_path($size_key);
+                if (file_exists($candidate)) {
+                    $file = $candidate;
+                }
+            }
+            if ($file === null) {
+                if (file_exists($upload_dir . '/' . $subpath)) {
+                    $file = $upload_dir . '/' . $subpath;
+                } elseif (file_exists($fast_dir . '/' . $subpath)) {
+                    $file = $fast_dir . '/' . $subpath;
+                }
             }
 
             if($file){

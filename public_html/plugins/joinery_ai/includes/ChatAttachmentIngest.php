@@ -187,9 +187,10 @@ class ChatAttachmentIngest {
                     // plaintext by createFromBytes an instant ago; the File is
                     // fil_private and this all runs inside the one send request),
                     // then restore the real content-type the detector lost.
+                    // replace_bytes() splits a dedup-shared blob first so an
+                    // identical sibling attachment is never overwritten.
                     if ($sealed['bytes'] !== null) {
-                        $path = $file->get_filesystem_path('original');
-                        if ($path && @file_put_contents($path, $sealed['bytes']) !== false) {
+                        if ($file->replace_bytes($sealed['bytes'])) {
                             $file->set('fil_type', substr((string)$p['mime'], 0, 128));
                             $file->save();
                         }

@@ -153,13 +153,13 @@ if (!empty($health['stuck_rows'])) {
 	echo '</tr></thead><tbody>';
 	foreach ($health['stuck_rows'] as $row) {
 		echo '<tr>';
-		echo '<td>' . htmlspecialchars($row['fil_name']) . ' <small class="text-muted">(#' . (int)$row['fil_file_id'] . ')</small></td>';
-		echo '<td>' . ($row['fil_sync_last_attempt'] ? htmlspecialchars(LibraryFunctions::convert_time($row['fil_sync_last_attempt'], 'UTC', $session->get_timezone())) : '—') . '</td>';
-		echo '<td>' . (int)$row['fil_sync_failed_count'] . '</td>';
+		echo '<td>' . htmlspecialchars($row['fbb_stored_name']) . ' <small class="text-muted">(#' . (int)$row['fbb_file_blob_id'] . ')</small></td>';
+		echo '<td>' . ($row['fbb_sync_last_attempt'] ? htmlspecialchars(LibraryFunctions::convert_time($row['fbb_sync_last_attempt'], 'UTC', $session->get_timezone())) : '—') . '</td>';
+		echo '<td>' . (int)$row['fbb_sync_failed_count'] . '</td>';
 		echo '<td>';
 		echo '<form method="post" action="/admin/admin_cloud_storage" style="display:inline;">';
 		echo '<input type="hidden" name="action" value="retry_stuck">';
-		echo '<input type="hidden" name="fil_file_id" value="' . (int)$row['fil_file_id'] . '">';
+		echo '<input type="hidden" name="fbb_file_blob_id" value="' . (int)$row['fbb_file_blob_id'] . '">';
 		echo '<button type="submit" class="btn btn-sm btn-outline-primary">Retry</button>';
 		echo '</form>';
 		echo '</td>';

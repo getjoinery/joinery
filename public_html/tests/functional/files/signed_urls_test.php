@@ -120,7 +120,7 @@ try {
 	ok('owner passes is_viewable regardless of signatures', $file->is_viewable($owner_session) == true);
 
 	// ---- Cloud-private never-302 note --------------------------------------
-	if ($file->get('fil_storage_driver') === 'cloud') {
+	if ($file->storage_driver() === 'cloud') {
 		$r = http_get($file->mintSignedUrl('original', 120));
 		ok('cloud-private signed response streams (no redirect)', $r['status'] == 200);
 	} else {

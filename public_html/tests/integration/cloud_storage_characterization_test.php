@@ -6,41 +6,29 @@
  * needs: []
  */
 /**
- * Characterization test — current cloud-offload behavior (PIN)
+ * Characterization test — cloud-offload per-row behavior (PIN)
  *
- * Written FIRST, against the UNREFACTORED CloudStorageSync /
- * CloudStorageReverseSync per-row logic and the admin task-transition
- * helpers, before the unification refactor touches any of that code. It is
- * the regression net for the destructive step (the forward path deletes
- * local files after flipping a row to 'cloud'); a transcription slip there
- * loses real user files silently.
- *
- * The per-row logic is driven through a mock driver via reflection on the
- * engine's private _sync_row / _pull_row, against a SINGLE real fil_files
- * fixture (never the batch entry, which would touch other rows). It uses the
- * real FileStorageProfile adapter, so it proves the relocated public-files
- * path behaves identically to the pre-refactor task.
- *
- * Parity note: this test was first written and run green against the
- * unrefactored CloudStorageSync::_sync_row / CloudStorageReverseSync::_pull_row.
- * The only change the refactor required here was repointing the reflected
- * method from the task to CloudOffloadEngine — which is precisely the
- * indirection the refactor introduced. The scenarios and assertions are
- * unchanged.
+ * The regression net for the destructive step: the forward path deletes local
+ * bytes after flipping a row to 'cloud', so a slip there loses real files
+ * silently. It drives the engine's private _sync_row / _pull_row through a mock
+ * driver via reflection, against a SINGLE real fbb_file_blobs fixture (never the
+ * batch entry, which would touch other rows), using the real BlobStorageProfile
+ * adapter — the offload descriptor now lives on the blob, shared by every file
+ * that references it.
  *
  * Run: php tests/integration/cloud_storage_characterization_test.php
  *
- * @version 1.1
+ * @version 2.0
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 
-require_once(PathHelper::getIncludePath('data/files_class.php'));
+require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
 require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriver.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudOffloadEngine.php'));
-require_once(PathHelper::getIncludePath('includes/cloud_storage/FileStorageProfile.php'));
+require_once(PathHelper::getIncludePath('includes/cloud_storage/BlobStorageProfile.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageLifecycle.php'));
 
 /**
@@ -92,28 +80,30 @@ $dblink    = DbConnector::get_instance()->get_db_link();
 $upload_dir = $settings->get_setting('upload_dir');
 $fast_dir   = dirname($upload_dir) . '/static_files/uploads';
 
-$created_file_ids = [];
+$created_blob_ids = [];
 $created_task_ids = [];
 $temp_paths = [];
 
-function make_file_row(array $overrides = []) {
-	global $created_file_ids;
+/** A real fbb_file_blobs fixture. Public + local by default. */
+function make_blob_row(array $overrides = []) {
+	global $created_blob_ids;
 	$name = '_chartest_' . bin2hex(random_bytes(6)) . '.bin';
-	$f = new File(NULL);
-	$f->set('fil_name', $name);
-	$f->set('fil_title', 'char test');
-	$f->set('fil_type', $overrides['fil_type'] ?? 'application/octet-stream');
-	$f->set('fil_storage_driver', $overrides['fil_storage_driver'] ?? 'local');
-	$f->set('fil_sync_failed_count', $overrides['fil_sync_failed_count'] ?? 0);
-	if (isset($overrides['fil_min_permission'])) $f->set('fil_min_permission', $overrides['fil_min_permission']);
-	$f->save();
-	$created_file_ids[] = $f->key;
-	return $f;
+	$b = new FileBlob(NULL);
+	$b->set('fbb_stored_name', $name);
+	$b->set('fbb_size_bytes', 16);
+	$b->set('fbb_mime_type', $overrides['fbb_mime_type'] ?? 'application/octet-stream');
+	$b->set('fbb_is_private', $overrides['fbb_is_private'] ?? false);
+	$b->set('fbb_reference_count', 1);
+	$b->set('fbb_storage_driver', $overrides['fbb_storage_driver'] ?? 'local');
+	$b->set('fbb_sync_failed_count', $overrides['fbb_sync_failed_count'] ?? 0);
+	$b->save();
+	$created_blob_ids[] = $b->key;
+	return $b;
 }
 
 // Reflection helpers to reach the engine's private per-row methods. Driving a
 // single fixture id (not syncBatch) keeps the test from touching other rows.
-$profile  = new FileStorageProfile();
+$profile  = new BlobStorageProfile();
 $sync_row = new ReflectionMethod('CloudOffloadEngine', '_sync_row');
 $sync_row->setAccessible(true);
 $pull_row = new ReflectionMethod('CloudOffloadEngine', '_pull_row');
@@ -125,87 +115,84 @@ try {
 	// -------------------------------------------------------------------
 	// 1. Forward happy path: push → flip to 'cloud' → local file deleted
 	// -------------------------------------------------------------------
-	$f = make_file_row();
-	$orig_path = $upload_dir . '/' . $f->get('fil_name');
+	$b = make_blob_row();
+	$orig_path = $fast_dir . '/' . $b->get('fbb_stored_name'); // public → fast dir
+	if (!is_dir($fast_dir)) { mkdir($fast_dir, 0777, true); }
 	file_put_contents($orig_path, "original-bytes\n");
 	$temp_paths[] = $orig_path;
 
 	$driver = new CharMockDriver();
-	$res = $sync_row->invoke(null, $profile, (int)$f->key, $driver);
-	$reloaded = new File($f->key, true);
+	$res = $sync_row->invoke(null, $profile, (int)$b->key, $driver);
+	$reloaded = new FileBlob($b->key, true);
 	ok('forward: returns pushed', $res === 'pushed');
-	ok('forward: pushed original key', count($driver->ops('put')) === 1 && $driver->calls[0]['key'] === $f->get('fil_name'));
-	ok('forward: row flipped to cloud', $reloaded->get('fil_storage_driver') === 'cloud');
-	ok('forward: failed_count reset to 0', (int)$reloaded->get('fil_sync_failed_count') === 0);
+	ok('forward: pushed original key', count($driver->ops('put')) === 1 && $driver->calls[0]['key'] === $b->get('fbb_stored_name'));
+	ok('forward: row flipped to cloud', $reloaded->get('fbb_storage_driver') === 'cloud');
+	ok('forward: failed_count reset to 0', (int)$reloaded->get('fbb_sync_failed_count') === 0);
 	ok('forward: local original deleted after flip', !file_exists($orig_path));
 
 	// -------------------------------------------------------------------
 	// 2. Missing-on-disk: failure recorded, counter increments, stays local
 	// -------------------------------------------------------------------
-	$f2 = make_file_row();   // no file placed on disk
+	$b2 = make_blob_row();   // no file placed on disk
 	$driver2 = new CharMockDriver();
-	$res2 = $sync_row->invoke(null, $profile, (int)$f2->key, $driver2);
-	$reloaded2 = new File($f2->key, true);
+	$res2 = $sync_row->invoke(null, $profile, (int)$b2->key, $driver2);
+	$reloaded2 = new FileBlob($b2->key, true);
 	ok('missing: returns failed', $res2 === 'failed');
 	ok('missing: nothing pushed', count($driver2->ops('put')) === 0);
-	ok('missing: failed_count incremented to 1', (int)$reloaded2->get('fil_sync_failed_count') === 1);
-	ok('missing: row stays local', $reloaded2->get('fil_storage_driver') === 'local');
+	ok('missing: failed_count incremented to 1', (int)$reloaded2->get('fbb_sync_failed_count') === 1);
+	ok('missing: row stays local', $reloaded2->get('fbb_storage_driver') === 'local');
 
 	// -------------------------------------------------------------------
 	// 2b. Cap: a row at FAILED_COUNT_CAP is excluded by the eligibility query
 	// -------------------------------------------------------------------
-	$f_cap = make_file_row(['fil_sync_failed_count' => CloudOffloadEngine::FAILED_COUNT_CAP]);
-	$f_elig = make_file_row(['fil_sync_failed_count' => 0]);
+	$b_cap = make_blob_row(['fbb_sync_failed_count' => CloudOffloadEngine::FAILED_COUNT_CAP]);
+	$b_elig = make_blob_row(['fbb_sync_failed_count' => 0]);
 	$q = $dblink->prepare(
-		"SELECT fil_file_id FROM fil_files
-		 WHERE (fil_storage_driver IS NULL OR fil_storage_driver = 'local')
-		   AND fil_delete_time IS NULL
-		   AND (fil_private IS NULL OR fil_private = false)
-		   AND (fil_min_permission IS NULL OR fil_min_permission = 0)
-		   AND (fil_grp_group_id IS NULL OR fil_grp_group_id = 0)
-		   AND fil_access_provider IS NULL
-		   AND (fil_tier_min_level IS NULL OR fil_tier_min_level = 0)
-		   AND COALESCE(fil_sync_failed_count, 0) < :cap
-		   AND fil_file_id = ANY(:ids)");
+		"SELECT fbb_file_blob_id FROM fbb_file_blobs
+		 WHERE (fbb_storage_driver IS NULL OR fbb_storage_driver = 'local')
+		   AND fbb_is_private = FALSE
+		   AND COALESCE(fbb_sync_failed_count, 0) < :cap
+		   AND fbb_file_blob_id = ANY(:ids)");
 	$q->bindValue(':cap', CloudOffloadEngine::FAILED_COUNT_CAP, PDO::PARAM_INT);
-	$q->bindValue(':ids', '{' . $f_cap->key . ',' . $f_elig->key . '}');
+	$q->bindValue(':ids', '{' . $b_cap->key . ',' . $b_elig->key . '}');
 	$q->execute();
 	$selected = $q->fetchAll(PDO::FETCH_COLUMN, 0);
-	ok('cap: capped row excluded', !in_array((string)$f_cap->key, array_map('strval', $selected), true));
-	ok('cap: eligible row included', in_array((string)$f_elig->key, array_map('strval', $selected), true));
+	ok('cap: capped row excluded', !in_array((string)$b_cap->key, array_map('strval', $selected), true));
+	ok('cap: eligible row included', in_array((string)$b_elig->key, array_map('strval', $selected), true));
 
 	// -------------------------------------------------------------------
 	// 3. Mid-flight ineligibility: push undone, row stays local
 	// -------------------------------------------------------------------
-	$f3 = make_file_row();
-	$orig3 = $upload_dir . '/' . $f3->get('fil_name');
+	$b3 = make_blob_row();
+	$orig3 = $fast_dir . '/' . $b3->get('fbb_stored_name');
 	file_put_contents($orig3, "original-bytes-3\n");
 	$temp_paths[] = $orig3;
 	$driver3 = new CharMockDriver();
-	$fid3 = (int)$f3->key;
-	// During the push, flip the row private so the post-push reload re-check fails.
+	$fid3 = (int)$b3->key;
+	// During the push, flip the blob private so the post-push reload re-check
+	// fails for the public profile (isEligibleRow → false).
 	$driver3->on_put = function($key) use ($dblink, $fid3) {
-		$u = $dblink->prepare("UPDATE fil_files SET fil_min_permission = 5 WHERE fil_file_id = ?");
+		$u = $dblink->prepare("UPDATE fbb_file_blobs SET fbb_is_private = TRUE WHERE fbb_file_blob_id = ?");
 		$u->execute([$fid3]);
 	};
 	$res3 = $sync_row->invoke(null, $profile, $fid3, $driver3);
-	$reloaded3 = new File($f3->key, true);
+	$reloaded3 = new FileBlob($b3->key, true);
 	ok('midflight: returns skipped', $res3 === 'skipped');
 	ok('midflight: pushed keys were deleted (undo)', count($driver3->ops('delete')) === count($driver3->ops('put')) && count($driver3->ops('put')) > 0);
-	ok('midflight: row stays local', $reloaded3->get('fil_storage_driver') === 'local');
+	ok('midflight: row stays local', $reloaded3->get('fbb_storage_driver') === 'local');
 	ok('midflight: local original NOT deleted', file_exists($orig3));
 
 	// -------------------------------------------------------------------
 	// 4. Reverse pull-back: 'cloud' → 'local', inverse ordering (get before delete)
 	// -------------------------------------------------------------------
-	$f4 = make_file_row(['fil_storage_driver' => 'cloud']);
+	$b4 = make_blob_row(['fbb_storage_driver' => 'cloud']);
 	$driver4 = new CharMockDriver();
-	$res4 = $pull_row->invoke(null, $profile, (int)$f4->key, $driver4);
-	$reloaded4 = new File($f4->key, true);
-	$local4 = $fast_dir . '/' . $f4->get('fil_name');
+	$res4 = $pull_row->invoke(null, $profile, (int)$b4->key, $driver4);
+	$reloaded4 = new FileBlob($b4->key, true);
+	$local4 = $fast_dir . '/' . $b4->get('fbb_stored_name');
 	$temp_paths[] = $local4;
 	ok('reverse: returns pulled', $res4 === 'pulled');
-	ok('reverse: row flipped to local', $reloaded4->get('fil_storage_driver') === 'local');
+	ok('reverse: row flipped to local', $reloaded4->get('fbb_storage_driver') === 'local');
 	ok('reverse: bytes placed in public fast dir', file_exists($local4));
 	$ops4 = array_map(fn($c) => $c['op'], $driver4->calls);
 	$first_get = array_search('get', $ops4, true);
@@ -214,7 +201,7 @@ try {
 
 	// -------------------------------------------------------------------
 	// 5. Admin task transitions: activate / deactivate (throwaway class,
-	//    via the relocated lifecycle helpers — no live task is touched)
+	//    via the lifecycle helpers — no live task is touched)
 	// -------------------------------------------------------------------
 	$activate   = new ReflectionMethod('CloudStorageLifecycle', '_activate_task');
 	$activate->setAccessible(true);
@@ -240,8 +227,8 @@ try {
 } finally {
 	// Teardown — remove every fixture this test created.
 	foreach ($temp_paths as $p) { if (is_file($p)) @unlink($p); }
-	foreach ($created_file_ids as $id) {
-		$d = $dblink->prepare("DELETE FROM fil_files WHERE fil_file_id = ?");
+	foreach ($created_blob_ids as $id) {
+		$d = $dblink->prepare("DELETE FROM fbb_file_blobs WHERE fbb_file_blob_id = ?");
 		$d->execute([$id]);
 	}
 	foreach ($created_task_ids as $id) {
