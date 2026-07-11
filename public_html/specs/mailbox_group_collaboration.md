@@ -156,18 +156,10 @@ mailbox-only:
 
 ## Carved out → individual track
 
-These were originally bundled here but are **individual webmail maturity**, not team
-features. They serve the near-term individual / Proton-replacement focus and are not
-gated on the team work above. They belong on the individual track:
-
-- **Compose maturity** — saved drafts (persist the ephemeral compose panel),
-  per-mailbox signatures (the alias editor; not DKIM signing), rich-text composer
-  (minimal `contenteditable`, no heavy editor dependency, vanilla per theme rules).
-- **Member-context panel** — beside an open conversation, show the linked member /
-  registration / order resolved from the sender address. This is the integration
-  differentiator and is valuable for a single user, so it moves to the individual
-  track rather than waiting on the team queue.
-- **Contacts / recipient autocomplete** — also individual-useful; moves with the above.
+The individual webmail maturity items that were originally bundled here (saved
+drafts, per-mailbox signatures, rich-text compose, contacts/recipient autocomplete,
+member-context panel) now have their own spec on the individual track:
+**`specs/mailbox_compose_maturity.md`**. They are not gated on the team work above.
 
 ## Docs
 
