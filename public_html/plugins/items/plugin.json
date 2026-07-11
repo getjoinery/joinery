@@ -1,6 +1,6 @@
 {
     "name": "Items Management",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "description": "Item tracking and relationship management system",
     "author": "System Developer",
     "receives_upgrades": true,

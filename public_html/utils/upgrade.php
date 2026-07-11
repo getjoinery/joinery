@@ -910,9 +910,10 @@
 				}
 				if($verbose) echo 'Backup area created<br>';
 			} else {
-				exec ("rm -rf $backup_directory".'/*');
-				exec ("rm -rf $backup_directory".'/.git');  //REMOVE LATENT GIT FILES
-				exec ("rm -rf $backup_directory".'/.gitignore');  //REMOVE LATENT GIT FILES
+				// Clear EVERYTHING including dotfiles (.htaccess, .gitattributes, …) —
+				// the live→backup move below carries dotfiles, so a glob-based clear
+				// would leave them behind and the is_dir_empty() check would abort.
+				exec('find ' . escapeshellarg($backup_directory) . ' -mindepth 1 -delete');
 			}
 			if(is_dir_empty($backup_directory)){
 				if($verbose) echo 'Backup area cleared<br>';
@@ -1196,80 +1197,86 @@
 		// ============================================
 		out_step('Syncing Themes and Plugins');
 
-			try {
-				require_once(PathHelper::getIncludePath('includes/ThemeManager.php'));
-				require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
+			// Run the sync as a SUBPROCESS for the same reason update_database
+			// runs as one: this process pre-loaded model classes from the
+			// PRE-swap tree, and when a class file moves between core and a
+			// plugin across versions, an in-process sync would load the same
+			// class from its new path and fatal with "Cannot declare class".
+			// source_manifest names are passed for stale reconciliation
+			// (see specs/upgrade_pipeline_rename_gap.md).
+			$sync_script = $live_directory . '/utils/sync_extensions.php';
+			if (file_exists($sync_script)) {
+				$sync_cmd = '/usr/bin/php ' . escapeshellarg($sync_script)
+					. ' --themes=' . escapeshellarg(implode(',', array_column($source_published_themes, 'name')))
+					. ' --plugins=' . escapeshellarg(implode(',', array_column($source_published_plugins, 'name')));
+				$sync_output = [];
+				$sync_return = 0;
+				exec($sync_cmd . ' 2>&1', $sync_output, $sync_return);
 
-				// Sync themes — pass source_manifest so the manager can mark
-				// any receives_upgrades=true theme no longer in the source as 'stale'.
-				$theme_manager = ThemeManager::getInstance();
-				$theme_result = $theme_manager->sync([
-					'source_manifest' => array_column($source_published_themes, 'name'),
-				]);
-				$theme_parts = array();
-				if (!empty($theme_result['added'])) {
-					$theme_parts[] = count($theme_result['added']) . " added";
-				}
-				if (!empty($theme_result['updated'])) {
-					$theme_parts[] = count($theme_result['updated']) . " updated";
-				}
-				if (empty($theme_parts)) {
-					upgrade_echo("✓ Themes synced (no changes)<br>");
-				} else {
-					upgrade_echo("✓ Themes synced: " . implode(", ", $theme_parts) . "<br>");
+				$sync_result = null;
+				foreach ($sync_output as $line) {
+					if (strpos($line, 'SYNC_RESULT: ') === 0) {
+						$sync_result = json_decode(substr($line, strlen('SYNC_RESULT: ')), true);
+					}
 				}
 
-				// Sync plugins — pass source_manifest so the manager can mark
-				// any receives_upgrades=true plugin no longer in the source as 'stale'.
-				$plugin_manager = PluginManager::getInstance();
-				$plugin_result = $plugin_manager->sync([
-					'source_manifest' => array_column($source_published_plugins, 'name'),
-				]);
-				$plugin_parts = array();
-				if (!empty($plugin_result['added'])) {
-					$plugin_parts[] = count($plugin_result['added']) . " added";
-				}
-				if (!empty($plugin_result['updated'])) {
-					$plugin_parts[] = count($plugin_result['updated']) . " updated";
-				}
-				if (!empty($plugin_result['table_messages'])) {
-					$plugin_parts[] = count($plugin_result['table_messages']) . " table change(s)";
-				}
-				if (!empty($plugin_result['migration_messages'])) {
-					$plugin_parts[] = count($plugin_result['migration_messages']) . " migration(s)";
-				}
-				if (empty($plugin_parts)) {
-					upgrade_echo("✓ Plugins synced (no changes)<br>");
-				} else {
-					upgrade_echo("✓ Plugins synced: " . implode(", ", $plugin_parts) . "<br>");
-				}
-				if (!empty($plugin_result['table_messages'])) {
-					foreach ($plugin_result['table_messages'] as $tm) {
+				if ($sync_return === 0 && is_array($sync_result)) {
+					$theme_parts = array();
+					if (!empty($sync_result['themes']['added'])) {
+						$theme_parts[] = $sync_result['themes']['added'] . " added";
+					}
+					if (!empty($sync_result['themes']['updated'])) {
+						$theme_parts[] = $sync_result['themes']['updated'] . " updated";
+					}
+					upgrade_echo(empty($theme_parts)
+						? "✓ Themes synced (no changes)<br>"
+						: "✓ Themes synced: " . implode(", ", $theme_parts) . "<br>");
+
+					$plugin_parts = array();
+					if (!empty($sync_result['plugins']['added'])) {
+						$plugin_parts[] = $sync_result['plugins']['added'] . " added";
+					}
+					if (!empty($sync_result['plugins']['updated'])) {
+						$plugin_parts[] = $sync_result['plugins']['updated'] . " updated";
+					}
+					if (!empty($sync_result['plugins']['table_messages'])) {
+						$plugin_parts[] = count($sync_result['plugins']['table_messages']) . " table change(s)";
+					}
+					if (!empty($sync_result['plugins']['migration_messages'])) {
+						$plugin_parts[] = count($sync_result['plugins']['migration_messages']) . " migration(s)";
+					}
+					upgrade_echo(empty($plugin_parts)
+						? "✓ Plugins synced (no changes)<br>"
+						: "✓ Plugins synced: " . implode(", ", $plugin_parts) . "<br>");
+					foreach (($sync_result['plugins']['table_messages'] ?? []) as $tm) {
 						upgrade_echo("  Table: " . htmlspecialchars($tm) . "<br>");
 					}
-				}
-				if (!empty($plugin_result['migration_messages'])) {
-					foreach ($plugin_result['migration_messages'] as $mm) {
+					foreach (($sync_result['plugins']['migration_messages'] ?? []) as $mm) {
 						upgrade_echo("  Migration: " . htmlspecialchars($mm) . "<br>");
 					}
+
+					// Stale reconciliation totals — plugins/themes this site is set
+					// to receive upgrades for, but that the source's published-archive
+					// manifest no longer advertises, were flagged 'stale' by sync().
+					$plugin_marked = (int)($sync_result['plugins']['stale_marked'] ?? 0);
+					$theme_marked  = (int)($sync_result['themes']['stale_marked'] ?? 0);
+					if ($plugin_marked > 0 || $theme_marked > 0) {
+						upgrade_echo("⚠ Stale: {$plugin_marked} plugin(s), {$theme_marked} theme(s) no longer in source manifest — preserved and flagged for admin review<br>");
+					} else if ($verbose) {
+						upgrade_echo("✓ No stale plugins/themes detected<br>");
+					}
+				} else {
+					// Sync is a post-deployment step — deployment and DB migration already succeeded.
+					// Do not roll back; just warn. Re-run update_database to retry sync.
+					out_alert('warning', 'Theme/Plugin sync failed (non-fatal — deployment and DB updates succeeded)',
+						nl2br(htmlspecialchars(implode("\n", array_slice($sync_output, -10)))) . '<br>'
+						. 'To retry: run update_database from the admin utilities page.');
 				}
-				// Stale reconciliation — see specs/upgrade_pipeline_rename_gap.md.
-				// Plugins/themes this site is set to receive upgrades for, but
-				// that the source's published-archive manifest no longer advertises
-				// were flagged 'stale' inside sync() above. Surface the totals.
-				$plugin_marked = (int)($plugin_result['stale_marked'] ?? 0);
-				$theme_marked  = (int)($theme_result['stale_marked']  ?? 0);
-				if ($plugin_marked > 0 || $theme_marked > 0) {
-					upgrade_echo("⚠ Stale: {$plugin_marked} plugin(s), {$theme_marked} theme(s) no longer in source manifest — preserved and flagged for admin review<br>");
-				} else if ($verbose) {
-					upgrade_echo("✓ No stale plugins/themes detected<br>");
-				}
-			} catch (\Throwable $e) {
-				// Sync is a post-deployment step — deployment and DB migration already succeeded.
-				// Do not roll back; just warn. Re-run update_database to retry sync.
-				out_alert('warning', 'Theme/Plugin sync failed (non-fatal — deployment and DB updates succeeded)',
-					'Error: ' . htmlspecialchars($e->getMessage()) . '<br>'
-					. 'To retry: run update_database from the admin utilities page.');
+			} else {
+				// Pre-sync_extensions archive (should not happen — the script ships
+				// with the same release as this code). update_database already ran
+				// its own sync pass, so this is informational only.
+				upgrade_echo("⚠ sync_extensions.php not found — relying on update_database sync pass<br>");
 			}
 
 		// ============================================

@@ -81,16 +81,22 @@ function rename_inbound_email_to_mailbox() {
     //    Only driver='local' rows reference files under {site_root}/storage/.
     //    inline/remote/cloud rows keep their stored keys (reads use the stored
     //    key verbatim, so old-prefix keys on other drivers remain valid).
-    $stmt = $dblink->prepare("
-        UPDATE iem_inbound_email_messages
-        SET iem_raw_storage_key = 'mailbox/' || substring(iem_raw_storage_key from 15)
-        WHERE iem_raw_storage_driver = 'local'
-          AND iem_raw_storage_key LIKE 'inbound\\_email/%'
-    ");
+    //    The messages table is plugin-owned — it only exists where the plugin
+    //    was ever installed, so guard before touching it.
+    $stmt = $dblink->prepare("SELECT to_regclass('iem_inbound_email_messages')");
     $stmt->execute();
-    $n = $stmt->rowCount();
-    if ($n > 0) echo "  iem raw storage keys: rewrote $n row(s)\n";
-    $total += $n;
+    if ($stmt->fetchColumn() !== null) {
+        $stmt = $dblink->prepare("
+            UPDATE iem_inbound_email_messages
+            SET iem_raw_storage_key = 'mailbox/' || substring(iem_raw_storage_key from 15)
+            WHERE iem_raw_storage_driver = 'local'
+              AND iem_raw_storage_key LIKE 'inbound\\_email/%'
+        ");
+        $stmt->execute();
+        $n = $stmt->rowCount();
+        if ($n > 0) echo "  iem raw storage keys: rewrote $n row(s)\n";
+        $total += $n;
+    }
 
     $site_root = rtrim(PathHelper::getSiteRoot(), '/');
     $old_dir = $site_root . '/storage/inbound_email';
