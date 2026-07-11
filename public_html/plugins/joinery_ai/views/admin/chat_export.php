@@ -14,9 +14,11 @@
 header('Content-Type: application/json');
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatExport.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
 
 function chat_export_fail(string $msg): void {
     echo json_encode(['success' => false, 'message' => $msg]);
@@ -40,6 +42,17 @@ if (!$conversation->key
     chat_export_fail('Conversation not found.');
 }
 
+// Locked-state contract: an export IS a content read (title + every message
+// decrypt) — a locked protected chat prompts unlock instead of assembling.
+function chat_export_locked(): void {
+    echo json_encode(['success' => false, 'locked' => true,
+        'message' => 'Unlock your vault to export this chat.']);
+    exit;
+}
+if (ChatSeal::isLocked($conversation)) {
+    chat_export_locked();
+}
+
 $rows = new MultiAiConversationMessage(
     ['conversation_id' => (int)$conversation->key, 'deleted' => false],
     ['aim_message_id' => 'ASC']
@@ -48,7 +61,12 @@ $rows->load();
 $messages = [];
 foreach ($rows as $row) $messages[] = $row;
 
-$export = ChatExport::assemble($conversation, $messages);
+try {
+    $export = ChatExport::assemble($conversation, $messages);
+} catch (VaultLockedException $e) {
+    // The window closed between the check above and the reads.
+    chat_export_locked();
+}
 
 echo json_encode([
     'success'  => true,

@@ -15,6 +15,7 @@ function chat_poll_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatAsync.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRender.php'));
+    require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSerializer.php'));
 
     $session = SessionControl::get_instance();
@@ -45,6 +46,15 @@ function chat_poll_logic(array $input): LogicResult {
     $status = (string)$msg->get('aim_status');
     $out = ['status' => $status];
 
+    // Locked-state contract: the window closed between turn start and this poll.
+    // Every branch below reads content (COMPLETE/FAILED decrypt sealed columns;
+    // the RUNNING scratch is plaintext) — withhold it and prompt unlock instead.
+    if (ChatSeal::isLocked($conversation)) {
+        $out['locked']  = true;
+        $out['message'] = 'Unlock your vault to view this reply.';
+        return LogicResult::render($out);
+    }
+
     if ($status === AiConversationMessage::STATUS_COMPLETE) {
         $model = ChatRender::conversationModel($conversation);
         $out['message']     = ChatSerializer::message($msg, $model);
@@ -52,10 +62,13 @@ function chat_poll_logic(array $input): LogicResult {
     } elseif ($status === AiConversationMessage::STATUS_FAILED) {
         $out['error'] = (string)$msg->get('aim_error') ?: 'The assistant could not complete this turn.';
     } else {
-        // Still running — the answer text written so far, for a live view,
-        // plus the runner's stage label and elapsed seconds so the client can
-        // show what's happening before the first token.
-        $out['partial_text'] = (string)$msg->get('aim_content');
+        // Still running — the answer text written so far, for a live view, plus
+        // the runner's stage label and elapsed seconds. A protected turn streams
+        // into a RAM/tmpfs scratch (never the plaintext DB column), so read the
+        // partial from there; a Standard turn reads it from aim_content.
+        $out['partial_text'] = $conversation->isProtected()
+            ? (string)(ChatAsync::readScratch((int)$msg->key) ?? '')
+            : (string)$msg->get('aim_content');
         $out += ChatSerializer::runningExtras($msg);
     }
 

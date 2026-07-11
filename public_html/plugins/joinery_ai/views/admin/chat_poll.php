@@ -17,6 +17,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRender.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatAsync.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSerializer.php'));
 
 function chat_poll_fail(string $msg): void {
@@ -59,6 +60,16 @@ if (ChatAsync::sweepMessage($msg)) {
 $status = (string)$msg->get('aim_status');
 $response = ['success' => true, 'status' => $status];
 
+// Locked-state contract: the window closed between turn start and this poll.
+// Every branch below reads content (COMPLETE/FAILED decrypt sealed columns; the
+// RUNNING scratch is plaintext) — withhold it and prompt unlock instead.
+if (ChatSeal::isLocked($conversation)) {
+    $response['locked']  = true;
+    $response['message'] = 'Unlock your vault to view this reply.';
+    echo json_encode($response);
+    exit;
+}
+
 if ($status === AiConversationMessage::STATUS_COMPLETE) {
     $model = ChatRender::conversationModel($conversation);
     $response['assistant_html'] = ChatRender::assistantBubble($msg, $session->get_timezone(), $model);
@@ -71,7 +82,11 @@ if ($status === AiConversationMessage::STATUS_COMPLETE) {
     // badly; the final swap to assistant_html does the markdown pass. The
     // runner's stage label + elapsed seconds ride along so the page can show
     // what's happening before the first token.
-    $response['partial_text'] = (string)$msg->get('aim_content');
+    // A protected turn streams into a RAM/tmpfs scratch (never the plaintext DB
+    // column); read the partial from there. Standard reads aim_content.
+    $response['partial_text'] = $conversation->isProtected()
+        ? (string)(ChatAsync::readScratch((int)$msg->key) ?? '')
+        : (string)$msg->get('aim_content');
     $response += ChatSerializer::runningExtras($msg);
 }
 

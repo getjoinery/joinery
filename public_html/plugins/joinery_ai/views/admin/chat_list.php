@@ -15,6 +15,7 @@ header('Content-Type: application/json');
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSerializer.php'));
 
 $session = SessionControl::get_instance();
 // Any logged-in user; the /admin/* route is permission-gated (5). Also backs
@@ -40,14 +41,17 @@ $conversations->load();
 
 $out = [];
 foreach ($conversations as $c) {
-    $title = trim((string)$c->get('aic_title'));
-    if ($title === '') $title = 'Untitled';
-    $out[] = [
-        'id'     => (int)$c->key,
-        'title'  => $title,
-        'pinned' => (bool)$c->get('aic_pinned'),
-    ];
+    // conversationSummary withholds the title (placeholder + locked flag) for a
+    // locked protected chat, so the list still renders while locked.
+    $out[] = ChatSerializer::conversationSummary($c);
 }
 
-echo json_encode(['success' => true, 'conversations' => $out]);
+$response = ['success' => true, 'conversations' => $out];
+// Searching while the vault is locked can't reach protected chats — flag it so
+// the client offers to unlock and re-search.
+if ($search !== '' && MultiAiConversation::ownerHasLockedProtected($uid)) {
+    $response['search_locked'] = true;
+}
+
+echo json_encode($response);
 exit;

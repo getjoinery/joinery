@@ -5,6 +5,8 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_message_atta
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AiAttachment.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatControls.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRunner.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderFactory.php'));
 
 /**
@@ -122,9 +124,20 @@ class ChatAttachmentIngest {
      * removed) and reported — never left as a half-stored attachment the send side
      * silently omits.
      *
+     * On a protected conversation the extracted text AND the stored bytes are
+     * sealed under the OWNING message's DEK (docs/sealed_vault.md) once the link
+     * row's id exists (the attachment AD binds to it): the File is written, then
+     * its bytes are re-written as ciphertext and fil_type restored (createFromBytes
+     * detects type from the on-disk bytes, which are then ciphertext) — the same
+     * fil_type-restore mail's sealed attachments use. $message is the (already
+     * sealed) user message; $conversation carries the level.
+     *
      * @return string[] display names that could NOT be stored (empty = all stored)
      */
-    public static function commit(array $prepared, int $message_id, int $uid): array {
+    public static function commit(array $prepared, AiConversationMessage $message,
+            AiConversation $conversation, int $uid): array {
+        $message_id = (int)$message->key;
+        $protected  = $conversation->isProtected();
         $failures = [];
         foreach ($prepared as $p) {
             $label = (string)$p['name'];
@@ -160,10 +173,43 @@ class ChatAttachmentIngest {
             $link = new AiMessageAttachment(NULL);
             $link->set('aia_aim_message_id', $message_id);
             $link->set('aia_fil_file_id', (int)$file->key);
-            $link->set('aia_extracted_text', $extract['text']);
+            $link->set('aia_extracted_text', (string)$extract['text']);
             $link->set('aia_extract_status', $extract['status']);
             $link->prepare();
             $link->save();
+            $link->load();
+
+            if ($protected) {
+                try {
+                    $sealed = ChatSeal::sealAttachmentUnderMessage($message, (int)$link->key,
+                        (string)$extract['text'] !== '' ? (string)$extract['text'] : null, $p['bytes']);
+                    // Re-write the on-disk bytes as ciphertext (they were written
+                    // plaintext by createFromBytes an instant ago; the File is
+                    // fil_private and this all runs inside the one send request),
+                    // then restore the real content-type the detector lost.
+                    if ($sealed['bytes'] !== null) {
+                        $path = $file->get_filesystem_path('original');
+                        if ($path && @file_put_contents($path, $sealed['bytes']) !== false) {
+                            $file->set('fil_type', substr((string)$p['mime'], 0, 128));
+                            $file->save();
+                        }
+                    }
+                    // Targeted UPDATE — a full save() would decrypt the now-sealed
+                    // aia_extracted_text via get() and write plaintext back.
+                    AiMessageAttachment::updateColumns((int)$link->key, [
+                        'aia_extracted_text' => $sealed['text'],
+                        'aia_sealed'         => true,
+                    ]);
+                } catch (Throwable $e) {
+                    // Sealing failed (locked mid-ingest / vault gone) — drop the
+                    // attachment rather than store its content unsealed on a
+                    // protected chat. The send still proceeds without this file.
+                    error_log('[joinery_ai chat] attachment seal failed for "' . $label . '": ' . $e->getMessage());
+                    try { $link->permanent_delete(); } catch (Throwable $ignore) {}
+                    $failures[] = $label;
+                    continue;
+                }
+            }
         }
         return $failures;
     }

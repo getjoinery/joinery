@@ -15,6 +15,7 @@ header('Content-Type: application/json');
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversations_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
 
 function chat_thread_fail(string $msg): void {
     echo json_encode(['success' => false, 'message' => $msg]);
@@ -43,9 +44,9 @@ if (!$conversation->key
 
 switch ($action) {
     case 'pin':
+        // aic_pinned is cleartext — a targeted UPDATE leaves a sealed title untouched.
         $pinned = !empty($value) && $value !== '0';
-        $conversation->set('aic_pinned', $pinned);
-        $conversation->save();
+        AiConversation::updateColumns((int)$conversation->key, ['aic_pinned' => $pinned]);
         echo json_encode(['success' => true, 'pinned' => $pinned]);
         break;
 
@@ -53,8 +54,15 @@ switch ($action) {
         $title = trim((string)$value);
         if ($title === '') chat_thread_fail('Title cannot be empty.');
         if (mb_strlen($title) > 255) $title = mb_substr($title, 0, 255);
-        $conversation->set('aic_title', $title);
-        $conversation->save();
+        // The title is content — on a protected chat it seals under the vault, so
+        // renaming while locked prompts unlock.
+        if (ChatSeal::lockedForContentEdit($conversation)) {
+            echo json_encode(['success' => true, 'locked' => true,
+                'message' => 'Unlock your vault to rename this protected chat.']);
+            break;
+        }
+        AiConversation::updateColumns((int)$conversation->key,
+            ChatSeal::resealConversationColumn($conversation, 'aic_title', $title));
         echo json_encode(['success' => true, 'title' => $title]);
         break;
 

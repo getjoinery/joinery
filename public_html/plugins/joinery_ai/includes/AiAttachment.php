@@ -274,6 +274,45 @@ class AiAttachment {
         return ['status' => self::EXTRACT_OK, 'text' => $text];
     }
 
+    // ---- Sealed-bytes read (send time) --------------------------------------
+
+    /**
+     * The stored original bytes, opened for use. On a protected chat the on-disk
+     * bytes are AEAD ciphertext sealed under the owning message's DEK
+     * (aia_sealed) — File::read_bytes() returns raw disk bytes, and the File
+     * decrypt hook only fires through serve_from_path(), so every model-payload
+     * read must open them here. Returns null when unreadable, when the vault is
+     * locked, or when opening fails — the block builders already emit an honest
+     * "could not be read" note for null.
+     */
+    public static function readOriginalBytes(File $file): ?string {
+        $bytes = $file->read_bytes('original');
+        if ($bytes === null) return null;
+        if ((string)$file->get('fil_source') !== File::SOURCE_AI_CHAT_UPLOAD) return $bytes;
+
+        require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
+        require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_message_attachments_class.php'));
+        require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
+        require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
+
+        $links = new MultiAiMessageAttachment(['file_id' => (int)$file->key, 'deleted' => false], []);
+        $links->load();
+        if (!count($links)) return $bytes;
+        $link = $links->get(0);
+        if (!$link->get('aia_sealed')) return $bytes;   // Standard-chat upload: stored plaintext
+
+        $msg = new AiConversationMessage((int)$link->get('aia_aim_message_id'), true);
+        if (!$msg->key) return null;
+        try {
+            return ChatSeal::openAttachmentBytes($msg, (int)$link->key, $bytes);
+        } catch (VaultLockedException $e) {
+            return null;
+        } catch (Throwable $e) {
+            error_log('[joinery_ai attach] sealed-bytes open failed for file ' . $file->key . ': ' . $e->getMessage());
+            return null;
+        }
+    }
+
     // ---- Block building (send time) ----------------------------------------
 
     /**
@@ -322,7 +361,7 @@ class AiAttachment {
                     return [self::note("An image attachment ($label) was omitted because the "
                         . 'current model cannot view images.')];
                 }
-                $bytes = $file->read_bytes('original');
+                $bytes = self::readOriginalBytes($file);
                 if ($bytes === null) {
                     return [self::note("An image attachment ($label) could not be read.")];
                 }
@@ -342,7 +381,7 @@ class AiAttachment {
                     || $extractStatus === self::EXTRACT_FAILED;
                 if ($wantDocument) {
                     if (!empty($caps['document'])) {
-                        $bytes = $file->read_bytes('original');
+                        $bytes = self::readOriginalBytes($file);
                         if ($bytes === null) {
                             return [self::note("A PDF attachment ($label) could not be read.")];
                         }
@@ -372,7 +411,7 @@ class AiAttachment {
 
             case 'html':
                 if ($mode === self::MODE_ORIGINAL) {
-                    $raw = $file->read_bytes('original');
+                    $raw = self::readOriginalBytes($file);
                     if ($raw === null) {
                         return [self::note("An HTML attachment ($label) could not be read.")];
                     }
@@ -390,7 +429,7 @@ class AiAttachment {
                     return [self::framedText($cachedText, $nonce, $label)];
                 }
                 // Plaintext with no cached text: read verbatim as a last resort.
-                $raw = $file->read_bytes('original');
+                $raw = self::readOriginalBytes($file);
                 if ($raw === null || trim($raw) === '') {
                     return [self::note("A text attachment ($label) was empty or unreadable.")];
                 }

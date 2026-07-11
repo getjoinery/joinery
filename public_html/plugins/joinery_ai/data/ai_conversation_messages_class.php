@@ -43,8 +43,24 @@ class AiConversationMessage extends SystemBase {
         'aim_aic_conversation_id' => array('type'=>'int8', 'required'=>true),
         'aim_role'                => array('type'=>'varchar(20)', 'required'=>true),
         'aim_content'             => array('type'=>'text'),
-        'aim_tool_calls'          => array('type'=>'jsonb'),
-        'aim_pending_action'      => array('type'=>'jsonb'),
+        // 'text' (not jsonb) so a sealed turn can hold ciphertext, which is not
+        // valid JSON — removed from $json_vars accordingly. A Standard turn stores
+        // plain JSON text; a Private/Fortress turn stores an AEAD blob. The seal/
+        // unseal path does the json_encode/json_decode around the ciphertext, and
+        // every reader already tolerates a string (json_decodes it).
+        'aim_tool_calls'          => array('type'=>'text'),
+        'aim_pending_action'      => array('type'=>'text'),
+        // Sealed Vault consumer columns (docs/sealed_vault.md). aim_sealed_key is
+        // the per-message DEK sealed to the owner's vault public key; the content
+        // columns (aim_content/aim_tool_calls/aim_pending_action/aim_error) seal
+        // under it. aim_key_generation matches the vault generation (rotation);
+        // aim_content_sealed marks a sealed row; aim_sealed_owner_user_id records
+        // WHOSE vault the row seals to (the conversation owner) so decryption is
+        // self-contained without re-reading the conversation.
+        'aim_sealed_key'          => array('type'=>'text', 'is_nullable'=>true),
+        'aim_key_generation'      => array('type'=>'int4', 'is_nullable'=>false, 'default'=>0),
+        'aim_content_sealed'      => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
+        'aim_sealed_owner_user_id'=> array('type'=>'int8', 'is_nullable'=>true),
         'aim_input_tokens'        => array('type'=>'int4', 'default'=>0),
         'aim_output_tokens'       => array('type'=>'int4', 'default'=>0),
         'aim_status'              => array('type'=>'varchar(20)', 'default'=>'complete'),
@@ -58,13 +74,63 @@ class AiConversationMessage extends SystemBase {
         'aim_delete_time'         => array('type'=>'timestamp(6)'),
     );
 
-    public static $json_vars = array('aim_tool_calls', 'aim_pending_action');
+    // aim_tool_calls / aim_pending_action were $json_vars (auto-encode/decode);
+    // they are plain 'text' now so a sealed turn can hold ciphertext (not valid
+    // JSON). The seal/unseal path json_encodes on write and readers json_decode.
+    public static $json_vars = array();
+
+    // Sealed Vault generic read hook (docs/sealed_vault.md): SystemBase::get()
+    // decrypts these automatically on a sealed row. aim_content is the user prompt
+    // / assistant reply; aim_tool_calls the per-turn tool trace (names+args+
+    // results); aim_pending_action a proposed mutating call's args; aim_error may
+    // echo provider/content detail. All cleartext on a Standard conversation.
+    public static $sealed_fields = array('aim_content', 'aim_tool_calls', 'aim_pending_action', 'aim_error');
 
     function authenticate_write($data) {
         if ($data['current_user_permission'] < 5) {
             throw new SystemAuthenticationError(
                 'Joinery AI chat messages require permission level 5 to write.');
         }
+    }
+
+    /**
+     * Sealed Vault read hook (docs/sealed_vault.md), the SystemBase::get() path.
+     * Decrypts only when the row is marked sealed AND the value carries the
+     * sealed-blob prefix — an empty/unsealed field on a protected row (e.g. a
+     * failed placeholder that only sealed aim_error) or any Standard row is
+     * returned untouched. Throws VaultLockedException when the window is closed.
+     */
+    protected function decryptSealedField($field, $ciphertext) {
+        if (!$this->get('aim_content_sealed') || !is_string($ciphertext)
+                || strpos($ciphertext, 'v1.aead.') !== 0) {
+            return $ciphertext;
+        }
+        $owner = (int)$this->get('aim_sealed_owner_user_id');
+        $sealed_key = (string)$this->get('aim_sealed_key');
+        if ($owner <= 0 || $sealed_key === '') {
+            require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+            throw new VaultLockedException();
+        }
+        require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
+        return ChatSeal::openMessageField((int)$this->key, $owner, $sealed_key, $field, $ciphertext);
+    }
+
+    /** Static half of the sealed-field contract (raw associative row). Chat
+     *  messages are not $ai_readable, so ModelQueryExecutor never calls this, but
+     *  the contract requires it rather than defaulting to the throwing base. */
+    public static function decryptSealedFieldStatic($field, $ciphertext, array $row) {
+        if (empty($row['aim_content_sealed']) || !is_string($ciphertext)
+                || strpos($ciphertext, 'v1.aead.') !== 0) {
+            return $ciphertext;
+        }
+        $owner = (int)($row['aim_sealed_owner_user_id'] ?? 0);
+        $sealed_key = (string)($row['aim_sealed_key'] ?? '');
+        if ($owner <= 0 || $sealed_key === '') {
+            require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+            throw new VaultLockedException();
+        }
+        require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
+        return ChatSeal::openMessageField((int)($row['aim_message_id'] ?? 0), $owner, $sealed_key, $field, $ciphertext);
     }
 
     /**
@@ -83,6 +149,51 @@ class AiConversationMessage extends SystemBase {
      * transaction (SystemBase::permanent_delete()), so an uncaught failure rolls
      * everything back instead of committing a partial delete.
      */
+    /**
+     * Targeted single-row UPDATE of exactly the given columns — never a full-row
+     * save(). A sealed row must NEVER be save()d: SystemBase::save() rebuilds every
+     * column through get(), which decrypts the sealed fields and would write
+     * plaintext back (unsealing them) or throw when the window is closed. Every
+     * write to a sealed message — seal-on-write, status/token/activity flips,
+     * re-seal — goes through this instead (mirrors InboundEmailMessage::updateColumns).
+     * $columns maps column name => value (null allowed).
+     */
+    public static function updateColumns(int $message_id, array $columns): void {
+        if ($message_id <= 0 || empty($columns)) return;
+        $sets = array();
+        $params = array();
+        foreach ($columns as $col => $value) {
+            if (!array_key_exists($col, static::$field_specifications)) continue;
+            $sets[] = $col . ' = ?';
+            $params[] = $value;
+        }
+        if (empty($sets)) return;
+        $params[] = $message_id;
+        $db = DbConnector::get_instance()->get_db_link();
+        $stmt = $db->prepare('UPDATE aim_conversation_messages SET ' . implode(', ', $sets)
+            . ' WHERE aim_message_id = ?');
+        foreach (array_values($params) as $i => $value) {
+            $type = PDO::PARAM_STR;
+            if (is_bool($value))     { $type = PDO::PARAM_BOOL; }
+            elseif ($value === null) { $type = PDO::PARAM_NULL; }
+            elseif (is_int($value))  { $type = PDO::PARAM_INT; }
+            $stmt->bindValue($i + 1, $value, $type);
+        }
+        $stmt->execute();
+    }
+
+    /**
+     * Soft-delete via a targeted UPDATE, not the base save() path: on a sealed
+     * message SystemBase::soft_delete()'s save() would decrypt the content columns
+     * and write them back as plaintext (unsealing a still-recoverable row) or throw
+     * when the vault is locked.
+     */
+    public function soft_delete() {
+        self::updateColumns((int)$this->key, ['aim_delete_time' => gmdate('Y-m-d H:i:s')]);
+        $this->set('aim_delete_time', gmdate('Y-m-d H:i:s'));
+        return true;
+    }
+
     public function permanent_delete($debug = false) {
         require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_message_attachments_class.php'));
         $links = new MultiAiMessageAttachment(['message_id' => (int)$this->key], []);

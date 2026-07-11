@@ -49,7 +49,12 @@ if (!$dry_run['can_delete']) {
     echo '<td>' . htmlspecialchars($dry_run['primary']['key_column']) . '</td>';
     echo '<td><span class="badge bg-danger">DELETE</span></td>';
     echo '<td>1</td>';
-    echo '<td>' . htmlspecialchars($conversation->get('aic_title') ?: '(untitled)') . ' (ID: ' . intval($dry_run['primary']['key']) . ')</td>';
+    // A sealed title is the owner's protected content — get() would throw
+    // VaultLockedException in the admin's session. Placeholder, never content.
+    $purge_title = $conversation->get('aic_content_sealed')
+        ? 'Protected chat (sealed)'
+        : ($conversation->get('aic_title') ?: '(untitled)');
+    echo '<td>' . htmlspecialchars($purge_title) . ' (ID: ' . intval($dry_run['primary']['key']) . ')</td>';
     echo '</tr>';
 
     foreach ($dry_run['dependencies'] as $dep) {

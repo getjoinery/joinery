@@ -16,6 +16,8 @@
  */
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRender.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatLevel.php'));
 
 $tz = $session->get_timezone();
 $selected_id = $selected ? (int)$selected->key : 0;
@@ -43,8 +45,14 @@ if (!function_exists('joai_pin_svg')) {
             <?php endif; ?>
             <?php foreach ($conversations as $c):
                 $cid = (int)$c->key;
-                $title = trim((string)$c->get('aic_title'));
-                if ($title === '') $title = 'Untitled';
+                // A locked protected chat withholds its title — a placeholder
+                // stands in until the owner unlocks (Phase 4 locked-state).
+                if (ChatSeal::isLocked($c)) {
+                    $title = ChatSeal::LOCKED_TITLE;
+                } else {
+                    $title = trim((string)$c->get('aic_title'));
+                    if ($title === '') $title = 'Untitled';
+                }
                 $active = $cid === $selected_id ? ' is-active' : '';
                 $pinned = (bool)$c->get('aic_pinned');
             ?>
@@ -93,9 +101,32 @@ if (!function_exists('joai_pin_svg')) {
                             <?php foreach ($model_options as $mid => $mlabel): ?>
                                 <option value="<?php echo htmlspecialchars((string)$mid, ENT_QUOTES, 'UTF-8'); ?>"
                                     data-private="<?php echo !empty($model_privacy[$mid]) ? '1' : '0'; ?>"
+                                    data-local="<?php echo ChatLevel::isLocalModel((string)$mid) ? '1' : '0'; ?>"
                                     <?php echo $mid === $active_model ? 'selected' : ''; ?>>
                                     <?php echo htmlspecialchars((string)$mlabel, ENT_QUOTES, 'UTF-8'); ?>
                                 </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+
+                    <?php
+                    // Privacy level. Standard is always offered; Private needs a
+                    // set-up vault; Fortress needs a vault + a configured local
+                    // model. A level the current chat already sits at stays
+                    // selectable even if a prerequisite later changed.
+                    $level_opts = ['standard' => 'Standard — server-managed'];
+                    if (!empty($private_available) || in_array($security_level, ['private', 'fortress'], true)) {
+                        $level_opts['private'] = 'Private — sealed, unlock to read';
+                    }
+                    if (!empty($fortress_available) || $security_level === 'fortress') {
+                        $level_opts['fortress'] = 'Fortress — sealed + local model only';
+                    }
+                    ?>
+                    <label>Privacy
+                        <select id="joai-security-level" class="joai-chat-control" data-field="security_level"
+                                title="How private this chat is (sealing + local-only inference)">
+                            <?php foreach ($level_opts as $lv => $lbl): ?>
+                                <option value="<?php echo $lv; ?>" <?php echo $lv === $security_level ? 'selected' : ''; ?>><?php echo htmlspecialchars($lbl, ENT_QUOTES, 'UTF-8'); ?></option>
                             <?php endforeach; ?>
                         </select>
                     </label>
@@ -167,9 +198,18 @@ if (!function_exists('joai_pin_svg')) {
             </button>
         </div>
 
-        <div class="joai-chat-transcript" id="joai-transcript">
+        <div class="joai-chat-transcript" id="joai-transcript"
+             data-locked="<?php echo (!empty($selected_locked)) ? '1' : '0'; ?>">
             <?php if (!$selected): ?>
                 <p class="joai-chat-empty" id="joai-blank">Start a new conversation below.</p>
+            <?php elseif (!empty($selected_locked)): ?>
+                <div class="joai-chat-locked" id="joai-locked-notice"
+                     style="margin:24px auto;max-width:420px;text-align:center;padding:20px;border:1px solid #d0d0d0;border-radius:8px;">
+                    <p style="margin:0 0 12px;font-weight:600;">🔒 This chat is protected</p>
+                    <p style="margin:0 0 16px;color:#555;font-size:14px;line-height:1.5;">
+                        Its messages are sealed. Unlock your vault to read and continue this conversation.</p>
+                    <button type="button" id="joai-unlock-btn" class="joai-btn joai-btn-primary">Unlock to read</button>
+                </div>
             <?php else: ?>
                 <?php foreach ($messages as $m): ?>
                     <?php if ($m->get('aim_role') === AiConversationMessage::ROLE_ASSISTANT): ?>
@@ -231,11 +271,55 @@ if (!function_exists('joai_pin_svg')) {
     </section>
 </div>
 
+<!-- WebAuthn/PRF helper for the vault unlock ceremony (must load before the inline script). -->
+<script src="/assets/js/passkeys.js"></script>
 <script>
 (function () {
     // Endpoint + link base for this surface (admin vs profile). Every fetch and
     // thread link is built from it, so this one value is the only difference.
     var JOAI_BASE = <?php echo json_encode($base); ?>;
+
+    // --- Vault unlock (protected chats) -----------------------------------
+    // Mirrors the mailbox reader: a protected chat's content actions prompt a
+    // one-tap passkey unlock, then re-run. The unlock ceremony hits the shared
+    // /api/v1 vault endpoints (session cookie + X-Joinery-Csrf), so unlocking
+    // here also opens mail's window and vice versa (one vault window per user).
+    function joaiCsrf() {
+        var meta = document.querySelector('meta[name="joinery-api-csrf"]');
+        if (meta && meta.content) return meta.content;
+        var m = document.cookie.match(/(?:^|;\s*)joinery_api_csrf=([^;]+)/);
+        return m ? decodeURIComponent(m[1]) : '';
+    }
+    function joaiApiV1(action, payload) {
+        return fetch('/api/v1/action/' + action, {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': joaiCsrf() },
+            body: JSON.stringify(payload || {})
+        }).then(function (r) { return r.json(); });
+    }
+    // Runs the passkey PRF unlock ceremony. Resolves to true on success.
+    function unlockVault() {
+        if (!window.JoineryPasskeys) { alert('Unlock is unavailable on this page.'); return Promise.resolve(false); }
+        return joaiApiV1('vault_unlock_options', {}).then(function (opt) {
+            var options = opt && opt.data ? opt.data.options : null;
+            if (!options) throw new Error('no unlock options');
+            return window.JoineryPasskeys.derive(options);
+        }).then(function (res) {
+            return joaiApiV1('vault_unlock_passkey', { credential: res.response });
+        }).then(function (res) {
+            return !!(res && res.data && res.data.unlocked);
+        }).catch(function () { return false; });
+    }
+    var unlockBtn = document.getElementById('joai-unlock-btn');
+    if (unlockBtn) {
+        unlockBtn.addEventListener('click', function () {
+            unlockBtn.disabled = true;
+            unlockVault().then(function (ok) {
+                if (ok) { location.reload(); }
+                else { unlockBtn.disabled = false; alert('Could not unlock the vault. Try again, or unlock from your security settings.'); }
+            });
+        });
+    }
 
     var transcript = document.getElementById('joai-transcript');
     var input = document.getElementById('joai-input');
@@ -327,6 +411,15 @@ if (!function_exists('joai_pin_svg')) {
                 .then(function (r) { return r.json(); })
                 .then(function (data) {
                     if (!data.success) { onFailed(data.message || 'Could not load the reply.'); return; }
+                    // Vault locked mid-turn (idle close, or a lock from another
+                    // tab): one-tap unlock, then resume polling where we left off.
+                    if (data.locked) {
+                        unlockVault().then(function (ok) {
+                            if (ok) { tick(); return; }
+                            onFailed(data.message || 'Unlock your vault to view this reply.');
+                        });
+                        return;
+                    }
                     if (data.status === 'complete') { onComplete(data.assistant_html, data.conversation_usage); return; }
                     if (data.status === 'failed') { onFailed(data.error || 'The assistant could not complete this turn.'); return; }
                     if (typeof data.partial_text === 'string') onPartial(data.partial_text, data);
@@ -416,17 +509,65 @@ if (!function_exists('joai_pin_svg')) {
     function wireField(el) {
         el.addEventListener('change', function () {
             if (!currentConversationId) return; // new chat: seeded on first send
-            var body = new FormData();
-            body.append('conversation_id', currentConversationId);
-            body.append('field', el.getAttribute('data-field'));
-            body.append('value', el.value);
-            fetch(JOAI_BASE + 'chat_set_capabilities', { method: 'POST', body: body })
-                .then(function (r) { return r.json(); })
-                .then(function (data) { if (!data.success) alert(data.message || 'Could not update.'); })
-                .catch(function () {});
+            var field = el.getAttribute('data-field');
+            function send(retried) {
+                var body = new FormData();
+                body.append('conversation_id', currentConversationId);
+                body.append('field', field);
+                body.append('value', el.value);
+                fetch(JOAI_BASE + 'chat_set_capabilities', { method: 'POST', body: body })
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        // Locked vault (a protected chat's instructions are sealed
+                        // content): one-tap unlock, then retry the same change.
+                        // A refused/failed unlock reloads so the control shows the
+                        // real stored value instead of an unsaved edit.
+                        if (data.locked && !retried) {
+                            unlockVault().then(function (ok) {
+                                if (ok) { send(true); return; }
+                                alert(data.message || 'Unlock your vault to edit this protected chat.');
+                                location.reload();
+                            });
+                            return;
+                        }
+                        if (!data.success || data.locked) {
+                            alert(data.message || 'Could not update.');
+                            location.reload();
+                            return;
+                        }
+                        // Changing the privacy level reseals/reveals stored content and
+                        // may re-pin the model — reload so the whole page reflects it.
+                        if (field === 'security_level') location.reload();
+                    })
+                    .catch(function () {});
+            }
+            send(false);
         });
     }
     controls.forEach(wireField);
+
+    // ----- Fortress model gate -----
+    // A Fortress chat pins inference to a local model: disable the cloud options
+    // in the picker when Privacy = Fortress, and switch off a cloud selection.
+    var levelSelect = document.getElementById('joai-security-level');
+    function applyFortressModelGate() {
+        if (!modelSelect || !levelSelect) return;
+        var fortress = levelSelect.value === 'fortress';
+        var firstLocal = null;
+        Array.prototype.forEach.call(modelSelect.options, function (opt) {
+            var isLocal = opt.getAttribute('data-local') === '1';
+            opt.disabled = fortress && !isLocal;
+            if (isLocal && firstLocal === null) firstLocal = opt.value;
+        });
+        if (fortress && modelSelect.selectedOptions[0]
+                && modelSelect.selectedOptions[0].getAttribute('data-local') !== '1'
+                && firstLocal !== null) {
+            modelSelect.value = firstLocal;
+        }
+        updateSettingsSummary();
+    }
+    if (levelSelect) levelSelect.addEventListener('change', applyFortressModelGate);
+    applyFortressModelGate();
 
     // --- File attachments ---------------------------------------------------
     // Files chosen in the composer, held client-side until send() posts them as
@@ -690,6 +831,18 @@ if (!function_exists('joai_pin_svg')) {
             .then(function (data) {
                 if (!data.success) { rejectSend(data.message); return; }
 
+                // Protected chat + locked vault: restore the composer, unlock, resend.
+                if (data.locked) {
+                    setBusy(false);
+                    if (mine && mine.parentNode) mine.parentNode.removeChild(mine);
+                    input.value = message; pendingFiles = files.slice(); renderAttachStrip(); updateSensitivityNotice();
+                    unlockVault().then(function (ok) {
+                        if (ok) send();
+                        else showSendNotice('Unlock your vault to send in this protected chat.');
+                    });
+                    return;
+                }
+
                 if (data.is_new) {
                     currentConversationId = data.conversation_id;
                     addThread(data.conversation_id, data.title);
@@ -827,11 +980,24 @@ if (!function_exists('joai_pin_svg')) {
             link.style.display = '';
             if (!commit || next === '' || next === current) return;
             titleSpan.textContent = next; // optimistic
-            threadAction(item.getAttribute('data-conversation-id'), 'rename', next)
+            var id = item.getAttribute('data-conversation-id');
+            function revert(msg) { titleSpan.textContent = current; if (msg) alert(msg); }
+            threadAction(id, 'rename', next)
                 .then(function (data) {
-                    if (!data.success) { titleSpan.textContent = current; alert(data.message || 'Rename failed.'); }
+                    // Locked vault (a protected chat's title is sealed content):
+                    // one-tap unlock, then retry the rename.
+                    if (data.locked) {
+                        unlockVault().then(function (ok) {
+                            if (!ok) { revert(data.message || 'Unlock your vault to rename this protected chat.'); return; }
+                            threadAction(id, 'rename', next).then(function (d2) {
+                                if (!d2.success || d2.locked) revert(d2.message || 'Rename failed.');
+                            }).catch(function () { revert(); });
+                        });
+                        return;
+                    }
+                    if (!data.success) revert(data.message || 'Rename failed.');
                 })
-                .catch(function () { titleSpan.textContent = current; });
+                .catch(function () { revert(); });
         }
         edit.addEventListener('keydown', function (e) {
             if (e.key === 'Enter') { e.preventDefault(); finish(true); }
@@ -937,11 +1103,20 @@ if (!function_exists('joai_pin_svg')) {
             ]
         });
     }
-    function doExport(item) {
+    function doExport(item, retried) {
         var id = item.getAttribute('data-conversation-id');
         fetch(JOAI_BASE + 'chat_export?conversation_id=' + encodeURIComponent(id))
             .then(function (r) { return r.json(); })
             .then(function (data) {
+                // Locked vault (an export is a content read): one-tap unlock,
+                // then retry the export.
+                if (data.locked && !retried) {
+                    unlockVault().then(function (ok) {
+                        if (ok) { doExport(item, true); return; }
+                        alert(data.message || 'Unlock your vault to export this chat.');
+                    });
+                    return;
+                }
                 if (!data.success) { alert(data.message || 'Export failed.'); return; }
                 openExportDialog(data);
             })
@@ -976,7 +1151,22 @@ if (!function_exists('joai_pin_svg')) {
                     .then(function (r) { return r.json(); })
                     .then(function (data) {
                         if (seq !== searchSeq) return; // a newer query superseded this one
-                        if (data && data.success) renderThreadList(data.conversations || []);
+                        if (!data || !data.success) return;
+                        renderThreadList(data.conversations || []);
+                        // Locked vault can't search sealed chats — offer to unlock.
+                        if (data.search_locked) {
+                            var b = document.createElement('button');
+                            b.type = 'button';
+                            b.className = 'joai-btn joai-chat-search-unlock';
+                            b.style.cssText = 'margin:8px;font-size:13px;';
+                            b.textContent = 'Unlock to search protected chats';
+                            b.addEventListener('click', function () {
+                                unlockVault().then(function (ok) {
+                                    if (ok) threadSearch.dispatchEvent(new Event('input'));
+                                });
+                            });
+                            threads.insertBefore(b, threads.firstChild);
+                        }
                     })
                     .catch(function () {});
             }, 250);
@@ -1107,6 +1297,15 @@ if (!function_exists('joai_pin_svg')) {
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 if (!data.success) { setBusy(false); alert(data.message || 'Action failed.'); return; }
+
+                // Protected chat + locked vault: unlock, then reload so the pending
+                // card re-renders for a fresh confirm.
+                if (data.locked) {
+                    setBusy(false);
+                    card.querySelectorAll('button').forEach(function (b) { b.disabled = false; });
+                    unlockVault().then(function (ok) { if (ok) location.reload(); });
+                    return;
+                }
 
                 // Non-fpm fallback may finish the resume inline.
                 if (data.status === 'complete') { replaceBubble(data.message_id, data.assistant_html); updateUsage(data.conversation_usage); return; }

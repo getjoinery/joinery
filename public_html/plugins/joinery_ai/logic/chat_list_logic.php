@@ -29,7 +29,14 @@ function chat_list_logic(array $input): LogicResult {
     $out = [];
     foreach ($conversations as $c) $out[] = ChatSerializer::conversationSummary($c);
 
-    return LogicResult::render(['conversations' => $out]);
+    $payload = ['conversations' => $out];
+    // Searching while locked can't reach protected chats — flag it so the native
+    // client offers to unlock and re-search (identical discipline to mail).
+    if ($search !== '' && MultiAiConversation::ownerHasLockedProtected($uid)) {
+        $payload['search_locked'] = true;
+    }
+
+    return LogicResult::render($payload);
 }
 
 function chat_list_logic_api() {

@@ -57,9 +57,34 @@ class AiMessageAttachment extends SystemBase {
         // (see AiAttachment::EXTRACT_*). Images/original-mode PDFs carry no text.
         'aia_extracted_text'  => array('type'=>'text'),
         'aia_extract_status'  => array('type'=>'varchar(10)'),
+        // Sealed Vault marker (specs/joinery_ai_chat_encryption.md). On a protected
+        // conversation the extracted text (aia_extracted_text) AND the uploaded
+        // File's bytes seal under the OWNING message's DEK (no per-attachment key).
+        // aia_sealed = true marks both sealed; the File decrypt hook and the
+        // extracted-text read path resolve the message DEK from aia_aim_message_id.
+        'aia_sealed'          => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
         'aia_create_time'     => array('type'=>'timestamp(6)', 'default'=>'now()'),
         'aia_delete_time'     => array('type'=>'timestamp(6)'),
     );
+
+    // Sealed Vault generic read hook (docs/sealed_vault.md): aia_extracted_text is
+    // decrypted transparently by SystemBase::get() on a sealed attachment.
+    public static $sealed_fields = array('aia_extracted_text');
+
+    /**
+     * Decrypt the extracted text in-window. Sealed under the OWNING message's DEK
+     * (resolved via aia_aim_message_id in ChatSeal), so decryption loads that
+     * message. Returns untouched for an unsealed attachment or a value without the
+     * sealed-blob prefix; throws VaultLockedException when the window is closed.
+     */
+    protected function decryptSealedField($field, $ciphertext) {
+        if (!$this->get('aia_sealed') || !is_string($ciphertext)
+                || strpos($ciphertext, 'v1.aead.') !== 0) {
+            return $ciphertext;
+        }
+        require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
+        return ChatSeal::openAttachmentText($this, $ciphertext);
+    }
 
     function authenticate_write($data) {
         if ($data['current_user_permission'] < 5) {
@@ -79,6 +104,32 @@ class AiMessageAttachment extends SystemBase {
      * the pair would come apart: an orphaned File with nothing pointing at it.
      * Let the exception propagate so link and File stay paired for a retry.
      */
+    /** Targeted raw UPDATE — never save() a sealed attachment (SystemBase::save()
+     *  would decrypt aia_extracted_text via get() and write plaintext back). */
+    public static function updateColumns(int $attachment_id, array $columns): void {
+        if ($attachment_id <= 0 || empty($columns)) return;
+        $sets = array();
+        $params = array();
+        foreach ($columns as $col => $value) {
+            if (!array_key_exists($col, static::$field_specifications)) continue;
+            $sets[] = $col . ' = ?';
+            $params[] = $value;
+        }
+        if (empty($sets)) return;
+        $params[] = $attachment_id;
+        $db = DbConnector::get_instance()->get_db_link();
+        $stmt = $db->prepare('UPDATE aia_message_attachments SET ' . implode(', ', $sets)
+            . ' WHERE aia_attachment_id = ?');
+        foreach (array_values($params) as $i => $value) {
+            $type = PDO::PARAM_STR;
+            if (is_bool($value))     { $type = PDO::PARAM_BOOL; }
+            elseif ($value === null) { $type = PDO::PARAM_NULL; }
+            elseif (is_int($value))  { $type = PDO::PARAM_INT; }
+            $stmt->bindValue($i + 1, $value, $type);
+        }
+        $stmt->execute();
+    }
+
     public function permanent_delete($debug = false) {
         $file_id = (int)$this->get('aia_fil_file_id');
         if ($file_id > 0) {

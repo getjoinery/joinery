@@ -149,4 +149,19 @@ $formwriter->textbox('joinery_ai_chat_system_prompt', 'Chat System Prompt', [
                 . 'The date/time, tool rules, and safety instructions are always added '
                 . 'automatically and cannot be removed here.',
 ]);
+
+$formwriter->dropinput('joinery_ai_default_chat_level', 'Default privacy for new chats', [
+    'value' => $settings->get_setting('joinery_ai_default_chat_level') ?: 'standard',
+    'options' => [
+        'standard' => 'Standard — the server manages the chat for you',
+        'private'  => 'Private — only you can read the stored chat (unlock required)',
+        'fortress' => 'Fortress — chat content never leaves your hardware (local model only)',
+    ],
+    'helptext' => 'Applied to every new chat; each chat can override it. Private and '
+                . 'Fortress seal the stored chat under your vault, so they need a set-up '
+                . 'vault to unlock — a chat falls back to Standard when you have none. '
+                . 'Fortress additionally pins a local model, so nothing is sent to a cloud '
+                . 'AI provider: chats send message text to your configured provider; '
+                . 'Fortress keeps that on the box.',
+]);
 ?>

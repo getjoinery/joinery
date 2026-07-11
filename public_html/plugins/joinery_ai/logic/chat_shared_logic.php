@@ -47,8 +47,14 @@ function joinery_ai_chat_page_logic(array $input, int $min_permission, string $l
         $selected = $conversations->get(0);
     }
 
+    // A locked protected conversation renders metadata only — its turns (and
+    // sealed controls like instructions) stay withheld until the user unlocks in
+    // the page. Skip loading messages so no sealed read throws on page load.
+    require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
+    $selected_locked = $selected ? ChatSeal::isLocked($selected) : false;
+
     $messages = [];
-    if ($selected) {
+    if ($selected && !$selected_locked) {
         $rows = new MultiAiConversationMessage(
             ['conversation_id' => (int)$selected->key, 'deleted' => false],
             ['aim_message_id' => 'ASC']
@@ -59,6 +65,7 @@ function joinery_ai_chat_page_logic(array $input, int $min_permission, string $l
 
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRunner.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AiAttachment.php'));
+    require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatLevel.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderFactory.php'));
 
     $active_model = $selected ? (string)$selected->get('aic_model') : '';
@@ -114,8 +121,18 @@ function joinery_ai_chat_page_logic(array $input, int $min_permission, string $l
         'temperature'    => $g('aic_temperature'),
         'top_p'          => $g('aic_top_p'),
         'max_tokens'     => $g('aic_max_tokens'),
-        'instructions'   => $g('aic_instructions'),
+        // aic_instructions is sealed — withheld (empty) while the chat is locked.
+        'instructions'   => $selected_locked ? '' : $g('aic_instructions'),
         'thinking_level' => $thinking_level,
+        // Per-conversation encryption level (cleartext) + the locked flag, and the
+        // levels the composer may offer for a NEW chat (gated by vault / local model).
+        'selected_locked'  => $selected_locked,
+        'security_level'   => $selected
+            ? ((string)$selected->get('aic_security_level') ?: AiConversation::LEVEL_STANDARD)
+            : ChatLevel::defaultLevel(),
+        'private_available'  => ChatLevel::privateAvailable($uid),
+        'fortress_available' => ChatLevel::fortressAvailable($uid),
+        'default_chat_level' => ChatLevel::defaultLevel(),
         'default_model'  => $default_model,
         'default_thinking_level' => $default_thinking_level,
         'default_web_search'     => $default_web_search,

@@ -1,5 +1,6 @@
 <?php
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
 
 /**
  * Asynchronous-chat plumbing shared by the chat send/confirm endpoints and the
@@ -57,34 +58,109 @@ class ChatAsync {
     const STREAM_FLUSH_CHARS = 80;
 
     /**
-     * A throttled text sink for streamed answer deltas. Accumulates fragments and
-     * writes the growing answer onto $msg->aim_content so the poll endpoint can
-     * return it; the row stays RUNNING and finalize later overwrites the content
-     * with the resolved text. $seed pre-loads the buffer (e.g. a resume's lead
-     * text) so partials read continuously. Returns a callable(string $delta).
+     * A throttled text sink for streamed answer deltas. $seed pre-loads the buffer
+     * (a resume's lead text) so partials read continuously. Returns a
+     * callable(string $delta).
+     *
+     * Standard conversation: writes the growing answer onto $msg->aim_content so
+     * the poll endpoint can return it; finalize later overwrites it. Protected
+     * conversation ($sealed = true): the partial must NOT land in the DB column as
+     * plaintext, so the buffer streams into a RAM/tmpfs scratch (see
+     * writeScratch()) that chat_poll reads instead; aim_content stays empty until
+     * finalize seals the complete buffer into it. Either way the stage flips to
+     * "Writing…" once text starts arriving.
+     *
+     * $owner_id (the conversation owner) gates every sealed flush on the vault
+     * window still being open: locking wipes the scratch (the bootstrap onWipe),
+     * and a flush after that must not recreate it — the buffer keeps accumulating
+     * in process RAM only, and finalize still seals the complete answer (sealing
+     * needs only the public key).
      */
-    public static function streamSink(AiConversationMessage $msg, string $seed = ''): callable {
+    public static function streamSink(AiConversationMessage $msg, string $seed = '',
+            bool $sealed = false, int $owner_id = 0): callable {
         $buffer  = $seed;
         $pending = 0;
         $last    = microtime(true);
         $stamped_writing = false;
-        return function (string $delta) use ($msg, &$buffer, &$pending, &$last, &$stamped_writing): void {
+        return function (string $delta) use ($msg, &$buffer, &$pending, &$last, &$stamped_writing, $sealed, $owner_id): void {
             $buffer  .= $delta;
             $pending += strlen($delta);
             $now = microtime(true);
             if ($pending >= self::STREAM_FLUSH_CHARS || ($now - $last) >= self::STREAM_FLUSH_SECONDS) {
-                $msg->set('aim_content', $buffer);
-                if (!$stamped_writing) {
-                    // Answer text has started arriving — the stage flips to
-                    // Writing on the same save, costing no extra write.
-                    $msg->set('aim_activity', 'Writing…');
-                    $stamped_writing = true;
+                // Targeted UPDATE (never save()): during a RESUME the row is already
+                // sealed, and a full save() would decrypt-and-rewrite its content.
+                if ($sealed) {
+                    if ($owner_id > 0 && !VaultUnlock::isOpen($owner_id)) {
+                        // Window closed mid-turn: honor the wipe — no plaintext
+                        // partial past the lock. Mop up any flush that raced the wipe.
+                        self::clearScratch((int)$msg->key);
+                    } else {
+                        self::writeScratch((int)$msg->key, $buffer);
+                    }
+                    if (!$stamped_writing) {
+                        AiConversationMessage::updateColumns((int)$msg->key, ['aim_activity' => 'Writing…']);
+                        $stamped_writing = true;
+                    }
+                } else {
+                    $cols = ['aim_content' => $buffer];
+                    if (!$stamped_writing) { $cols['aim_activity'] = 'Writing…'; $stamped_writing = true; }
+                    AiConversationMessage::updateColumns((int)$msg->key, $cols);
                 }
-                $msg->save();
                 $pending = 0;
                 $last = $now;
             }
         };
+    }
+
+    /**
+     * The streaming-partial scratch for a protected turn (Phase 2). A RAM-backed
+     * tmpfs file keyed to the assistant message id — every process on the host
+     * sees /dev/shm (the sealed turn runs in-process on the web SAPI and chat_poll
+     * reads it from another web request; the vault's window marker uses the same
+     * tmpfs discipline for the same cross-process reason). The partial is
+     * plaintext in RAM only, never at rest in the DB, and is cleared at finalize.
+     *
+     * FAIL CLOSED: with no writable tmpfs there is nowhere the plaintext partial
+     * may go — a disk-backed temp dir is exactly the at-rest plaintext this
+     * feature exists to prevent. Returns null; the turn still runs and finalizes
+     * sealed, the poll just shows no partial text until then.
+     */
+    private static function scratchDir(): ?string {
+        return (is_dir('/dev/shm') && is_writable('/dev/shm')) ? '/dev/shm' : null;
+    }
+
+    public static function scratchPath(int $message_id): ?string {
+        $dir = self::scratchDir();
+        return $dir === null ? null : $dir . '/aichat_partial_' . $message_id;
+    }
+
+    public static function writeScratch(int $message_id, string $buffer): void {
+        if ($message_id <= 0) return;
+        $path = self::scratchPath($message_id);
+        if ($path === null) {
+            static $warned = false;
+            if (!$warned) {
+                error_log('[joinery_ai chat] no writable /dev/shm — protected-turn partials stay in process RAM only (no live partial text)');
+                $warned = true;
+            }
+            return;
+        }
+        @file_put_contents($path, $buffer, LOCK_EX);
+        @chmod($path, 0600);
+    }
+
+    public static function readScratch(int $message_id): ?string {
+        if ($message_id <= 0) return null;
+        $path = self::scratchPath($message_id);
+        if ($path === null || !is_file($path)) return null;
+        $bytes = @file_get_contents($path);
+        return $bytes === false ? null : $bytes;
+    }
+
+    public static function clearScratch(int $message_id): void {
+        if ($message_id <= 0) return;
+        $path = self::scratchPath($message_id);
+        if ($path !== null) @unlink($path);
     }
 
     /**
@@ -99,8 +175,10 @@ class ChatAsync {
         return function (string $label) use ($msg, &$current): void {
             if ($label === $current) return;
             $current = $label;
-            $msg->set('aim_activity', $label !== '' ? $label : null);
-            $msg->save();
+            // Targeted UPDATE of the cleartext stage label only — safe on a sealed
+            // row (a resume stamps activity on an already-sealed message).
+            AiConversationMessage::updateColumns((int)$msg->key,
+                ['aim_activity' => $label !== '' ? $label : null]);
         };
     }
 
@@ -141,10 +219,14 @@ class ChatAsync {
         );
         if ($started > $cutoff) return false;   // still within its legitimate window
 
-        $msg->set('aim_status', AiConversationMessage::STATUS_FAILED);
-        $msg->set('aim_error', 'The turn did not finish (the worker process appears to have stopped).');
-        $msg->set('aim_activity', null);
-        $msg->save();
+        // Seal the error on a protected conversation (errorColumns resolves it and
+        // no-ops for Standard); persist via a targeted UPDATE (the row may be a
+        // sealed, finalized message being reaped). Clear any leftover scratch.
+        $cols = ChatSeal::errorColumns($msg, 'The turn did not finish (the worker process appears to have stopped).');
+        $cols['aim_status']   = AiConversationMessage::STATUS_FAILED;
+        $cols['aim_activity'] = null;
+        AiConversationMessage::updateColumns((int)$msg->key, $cols);
+        self::clearScratch((int)$msg->key);
         return true;
     }
 

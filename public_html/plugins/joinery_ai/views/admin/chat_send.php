@@ -21,10 +21,10 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRunner.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRender.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatAsync.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatControls.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatTurn.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/CostGuard.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatAttachmentIngest.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSend.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderException.php'));
 
 function chat_send_fail(string $msg): void {
@@ -56,6 +56,8 @@ if (mb_strlen($message) > 8000) chat_send_fail('Message is too long.');
 // memory but NOT saved until attachments validate, so a rejected upload never
 // leaves an empty thread behind.
 $is_new = false;
+$new_title = '';
+$new_instructions = '';
 if ($conversation_id > 0) {
     $conversation = new AiConversation($conversation_id, true);
     if (!$conversation->key
@@ -64,16 +66,25 @@ if ($conversation_id > 0) {
         chat_send_fail('Conversation not found.');
     }
 } else {
-    // New conversation — seed model + controls from the composer (capability
-    // toggles, model, temperature, etc.). Anything not sent keeps its column
-    // default and resolves to the plugin-setting default at run time.
-    $conversation = new AiConversation(NULL);
-    $conversation->set('aic_owner_user_id', $uid);
-    $conversation->set('aic_model', ChatRunner::defaultModel());
-    ChatControls::seedNewConversation($conversation, $_POST);
-    $title_seed = $message !== '' ? $message : 'New chat';
-    $conversation->set('aic_title', ChatTurn::deriveTitle($title_seed));
+    $built = ChatSend::buildNewConversation($uid, $_POST, $message);
+    $conversation     = $built['conversation'];
+    $new_title        = $built['title'];
+    $new_instructions = $built['instructions'];
     $is_new = true;
+}
+
+// Unlock-first: a protected conversation's turn must decrypt its history, so
+// continuing/starting one requires an open vault window. Locked → tell the page
+// to prompt unlock and resubmit, before anything is persisted.
+$protected = $conversation->isProtected();
+if (ChatSend::lockedForWrite($uid, $protected)) {
+    echo json_encode([
+        'success'         => true,
+        'locked'          => true,
+        'conversation_id' => $conversation_id,
+        'message'         => 'Unlock your vault to continue this protected chat.',
+    ]);
+    exit;
 }
 
 // Validate uploads against the conversation's model + attachment mode BEFORE
@@ -84,9 +95,7 @@ if (!$attach['ok']) chat_send_fail($attach['error']);
 $prepared_attachments = $attach['prepared'];
 
 if ($is_new) {
-    $conversation->prepare();
-    $conversation->save();
-    $conversation->load();
+    ChatSend::persistNewConversation($conversation, $protected, $new_title, $new_instructions);
 }
 
 // Plugin-wide monthly ceiling (recipes + chat). Fail before spending tokens.
@@ -102,20 +111,14 @@ try {
 ChatTurn::clearDanglingPending($conversation);
 
 // Persist the user's message (complete on insert; content may be empty when the
-// turn is attachments-only).
-$user_msg = new AiConversationMessage(NULL);
-$user_msg->set('aim_aic_conversation_id', (int)$conversation->key);
-$user_msg->set('aim_role', AiConversationMessage::ROLE_USER);
-$user_msg->set('aim_content', $message);
-$user_msg->prepare();
-$user_msg->save();
-$user_msg->load();
+// turn is attachments-only). Protected chats seal the content afterward.
+$user_msg = ChatSend::persistUserMessage($conversation, $protected, $message);
 
 // Store + link the validated attachments to this message (private File rows,
 // text extracted once in the subprocess). Any file whose stored type drifts from
 // the validated one is dropped and reported, so we can warn instead of letting
 // the model silently receive nothing.
-$attach_failures = ChatAttachmentIngest::commit($prepared_attachments, (int)$user_msg->key, $uid);
+$attach_failures = ChatAttachmentIngest::commit($prepared_attachments, $user_msg, $conversation, $uid);
 
 // Create the assistant placeholder the page will poll. It is RUNNING until the
 // turn (below) finalizes it.
