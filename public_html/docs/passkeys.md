@@ -98,11 +98,16 @@ with their own authorization and side effects, not raw CRUD.
 
 ## Consumer contract
 
-The one PRF consumer today is the [Sealed Vault](sealed_vault.md) (context
-`vault-kek`) — every derivation request it makes sets `userVerification:
-required` (not merely `preferred`, unlike sign-in/step-up), since a vault
-unlock demands device user verification. A feature that wants a client-held
-encryption key beyond the vault is a **PRF consumer** in the same shape:
+Every PRF consumer today is a [Sealed Vault](sealed_vault.md) scope, one context
+each (`ALLOWED_PRF_CONTEXTS`): `vault-kek` (server-custody mail + chat, whose KEK
+is sent to the server), and the two client-custody contexts `vault-passwords-kek`
+(the [password manager](../plugins/vault/docs/overview.md)) and `vault-drive-kek`
+(Drive), whose KEK is derived and used **only in the browser** and never
+transmitted. The distinct per-scope context is what guarantees one scope's KEK can
+never unwrap another's key. Every derivation request sets `userVerification:
+required` (not merely `preferred`, unlike sign-in/step-up), since a vault unlock
+demands device user verification. A feature that wants a client-held encryption
+key beyond the vault is a **PRF consumer** in the same shape:
 
 1. Call `PasskeyService::getDerivationOptions($user, $context)` /
    `verifyDerivation($client_response_json, $context)`. `$context` must be one of

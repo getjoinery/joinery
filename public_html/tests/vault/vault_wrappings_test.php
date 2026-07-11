@@ -74,6 +74,12 @@ $threw = false;
 try { VaultUnlock::assertWrappingDeleteSafe($vault_id, (int)$passkey->key); } catch (RuntimeException $e) { $threw = true; }
 check(!$threw, 'three unused codes allow revoking the last passkey');
 
+// Removing one of exactly-3 codes when no passkey backs the floor: the doomed
+// row itself must not count (it would pass with 3, then leave 2).
+$threw = false;
+try { VaultUnlock::assertWrappingDeleteSafe($vault_id, (int)$passkey->key, (int)$c3->key); } catch (RuntimeException $e) { $threw = true; }
+check($threw, 'the wrapping being removed is excluded from its own floor count');
+
 // A used code stops counting.
 $c3->set('uew_is_used', true);
 $c3->save();

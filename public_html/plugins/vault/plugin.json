@@ -1,0 +1,30 @@
+{
+    "name": "vault",
+    "version": "1.0.0",
+    "description": "Zero-knowledge password manager - a client-custody consumer of the Sealed Vault. Passwords are encrypted and decrypted only in the browser; the server stores opaque ciphertext and never holds the key.",
+    "author": "System Developer",
+    "receives_upgrades": true,
+    "included_in_publish": true,
+    "styles": [
+        "assets/css/vault.css"
+    ],
+    "requires": {
+        "php": ">=8.0",
+        "extensions": ["sodium"]
+    },
+    "settings": [
+        { "name": "vault_autolock_minutes", "default": "15" },
+        { "name": "vault_clipboard_clear_seconds", "default": "30" }
+    ],
+    "profileMenu": [
+        {
+            "slug": "vault-passwords",
+            "title": "Passwords",
+            "url": "/profile/vault",
+            "icon": "lock",
+            "visibility": "in",
+            "permission": 0,
+            "order": 70
+        }
+    ]
+}
