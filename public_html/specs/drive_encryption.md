@@ -2,8 +2,8 @@
 
 ## Status: active — design
 
-End-to-end encryption for Drive files, layered on `specs/drive_core.md` (and through it
-`specs/file_blob_layer.md` — ciphertext flows through the blob layer untouched). This is the
+End-to-end encryption for Drive files, layered on `specs/implemented/drive_core.md` (and through
+it `specs/implemented/file_blob_layer.md` — ciphertext flows through the blob layer untouched). This is the
 Proton-Drive-shaped feature: **client-side zero-knowledge**, the server never holds the key or
 sees plaintext. The product target is the single-user instance that opts in, but the design
 functions correctly multi-user (sharing encrypted files between users on the same instance
@@ -137,22 +137,25 @@ Inventoried up front — every server feature that interprets file content, and 
 - **Identity/keyring: none new** — the vault owns `uev`/`uew` and the keyring actions (create,
   unlock, rewrap on passphrase change, recovery). Drive reuses them.
 - **Drive-specific:** `FileKeyGrant` data class; `fol_encrypted`, `fil_encrypted`,
-  `fil_encrypted_metadata` columns. API actions (`logic/{name}_logic.php` + `{name}_logic_api()`):
-  `drive_public_keys` (batch fetch grantees' `uev_public_key` for share wraps),
-  `drive_key_grants_sync` (paired with `drive_share_sync`). Skip-resize/skip-AI/skip-editor
-  checks on `fil_encrypted`.
+  `fil_encrypted_metadata` columns. API actions (`logic/{name}_logic.php` +
+  `{name}_logic_descriptor()`, matching the drive_core actions): `drive_public_keys` (batch
+  fetch grantees' `uev_public_key` for share wraps), `drive_key_grants_sync` (paired with
+  `drive_share_sync`). `drive_upload_complete` accepts an optional client-encrypted thumbnail
+  payload, written into the blob's `thumb/` variant slot (the server resize pipeline skips
+  encrypted files, so the slot is otherwise empty). Skip-resize/skip-AI/skip-editor checks on
+  `fil_encrypted`.
 - **Opt-in UI** in `/drive` routes into the **vault's** enrollment ceremony if the user has no
   client-custody identity yet (passkey enroll + recovery key), then marks folders encrypted.
 
 ## Phases
 
-1. **Vault client-custody identity** — built by the password manager build
-   (`specs/implemented/password_vault.md` Phase 1) as **core shared infrastructure**: the shared browser
-   crypto module, client-custody keyring actions, and the scope-parameterized
-   enrollment/recovery ceremony. (The sealed_vault_core package shipped server-custody only;
-   the client-custody layer ships with its first consumer.) Drive consumes it; it is not
-   rebuilt here. Drive uses its **own** `drive` scope/keypair and `vault-drive-kek` context —
-   separate from passwords.
+1. **Vault client-custody identity — ALREADY BUILT** (shipped as core shared infrastructure by
+   the password manager build, `specs/implemented/password_vault.md`): the shared browser crypto
+   module (`assets/js/vault-crypto.js` — including `sealToPublicKey`/`openFromSecretKey`, the
+   FileKeyGrant wrap primitive; `assets/js/vault-keyring.js`, scope-parameterized), the
+   `vault_client_*` keyring actions, and the enrollment/recovery ceremony. The `drive` scope is
+   already registered in `VaultClientCustody::SCOPE_CONTEXTS` with PRF context `vault-drive-kek`,
+   separate from passwords. **Nothing to build in this phase — the executor starts at Phase 2.**
 2. **Encrypted vault folders** — encrypt/decrypt pipeline over the drive_core upload API,
    encrypted metadata + client-side name search, client thumbnails, preview-in-browser,
    skip-list enforcement.
