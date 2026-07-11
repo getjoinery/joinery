@@ -45,7 +45,7 @@ $formwriter->begin_form();
 $optionvals = $users->get_dropdown_array();
 $formwriter->dropinput('ord_usr_user_id', 'Billing User', [
 	'options' => $optionvals,
-	'ajaxendpoint' => '/ajax/user_search_ajax'
+	'ajaxendpoint' => '/api/v1/action/user_search'
 ]);
 
 //ALLOW THESE OTHER FIELDS IF IT IS A NEW ORDER OR NOT A STRIPE ORDER

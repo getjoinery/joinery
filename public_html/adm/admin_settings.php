@@ -479,7 +479,9 @@
 			'value' => $settings->get_setting('logo_link'),
 			'validation' => [
 				'remote' => [
-					'url' => '/ajax/validate_file_ajax',
+					'url' => '/api/v1/action/validate_server_file',
+					'dataFieldName' => 'value',
+					'data' => ['field' => 'logo_link'],
 					'message' => 'Must start with / and file must exist'
 				]
 			]
@@ -702,7 +704,9 @@
 			'value' => $settings->get_setting('apache_error_log'),
 			'validation' => [
 				'remote' => [
-					'url' => '/ajax/validate_file_ajax',
+					'url' => '/api/v1/action/validate_server_file',
+					'dataFieldName' => 'value',
+					'data' => ['field' => 'apache_error_log'],
 					'message' => 'File does not exist or is not readable'
 				]
 			]
@@ -863,7 +867,9 @@
 		'value' => $settings->get_setting('preview_image'),
 		'validation' => [
 			'remote' => [
-				'url' => '/ajax/validate_file_ajax',
+				'url' => '/api/v1/action/validate_server_file',
+				'dataFieldName' => 'value',
+				'data' => ['field' => 'preview_image'],
 				'message' => 'File does not exist or is not readable'
 			]
 		]

@@ -547,25 +547,13 @@
         applyCouponCode(code);
     }
 
-    // API CSRF token. Cookie first: the joinery_api_csrf mirror cookie tracks
-    // the CURRENT session (resynced on every response, including after a
-    // logout in another tab or session expiry), while the meta tag is frozen
-    // at page render — it is only the fallback for cookie-less edge cases.
-    function jyApiCsrf() {
-        var c = document.cookie.match(/(?:^|; )joinery_api_csrf=([^;]+)/);
-        if (c) return decodeURIComponent(c[1]);
-        var m = document.querySelector('meta[name="joinery-api-csrf"]');
-        return (m && m.content) || '';
-    }
-
+    // Shared transport (joineryApi), normalized back to this page's
+    // { ok, payload } shape.
     function jyApiAction(action, body) {
-        return fetch('/api/v1/action/' + action, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': jyApiCsrf() },
-            body: JSON.stringify(body)
-        }).then(function(r) {
-            return r.json().then(function(payload) { return { ok: r.ok, payload: payload }; });
-        });
+        return joineryApi.post(action, body).then(
+            function(data) { return { ok: true, payload: { data: data } }; },
+            function(err) { return { ok: false, payload: { error: err.message } }; }
+        );
     }
 
     function applyCouponCode(code) {

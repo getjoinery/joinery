@@ -6,7 +6,7 @@
  *
  * Input: device_id, url.
  *
- * Called from ajax/scan_url.php (web) and exposed as
+ * The web editor's page JS calls
  * POST /api/v1/action/dns_filtering/scan_url.
  *
  * SECURITY: scan_url_validate_target() is the SSRF boundary for this
@@ -461,10 +461,15 @@ function scan_url_logic(array $input): LogicResult{
 	));
 }
 
-function scan_url_logic_api() {
+function scan_url_logic_descriptor(): array {
 	return [
-		'requires_session' => true,
 		'description' => 'Fetch a page and test its external domains against a device\'s filter (device_id, url). Heavy: responses can take several seconds.',
+		'mutates'     => false,
+		'auth'        => ['requires_session' => true],
+		'input'       => [
+			'device_id' => ['type' => 'int',    'required' => false, 'label' => 'Device ID'],
+			'url'       => ['type' => 'string', 'required' => false, 'label' => 'URL to scan'],
+		],
 	];
 }
 

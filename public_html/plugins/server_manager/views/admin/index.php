@@ -377,6 +377,12 @@ function render_node_row($node, $db, $session) {
 
 	var colorClasses = ['bg-secondary','bg-success','bg-warning','bg-danger','bg-info','bg-primary'];
 
+	function smApiPost(action, params) {
+		// Error envelopes resolve {} (soft-failure shape); network errors reject.
+		return joineryApi.post('server_manager/' + action, params || {})
+			.catch(function(err) { if (err && err.status) return {}; throw err; });
+	}
+
 	rows.forEach(function(row) {
 		var nodeId = row.getAttribute('data-node-id');
 		var badge = row.querySelector('.js-status-badge');
@@ -384,8 +390,7 @@ function render_node_row($node, $db, $session) {
 		var lastCheckSpan = row.querySelector('.js-last-check');
 		if (badge) badge.style.opacity = '0.4';
 
-		fetch('/ajax/refresh_node_status?node_id=' + encodeURIComponent(nodeId), { credentials: 'same-origin' })
-			.then(function(r) { return r.json(); })
+		smApiPost('refresh_node_status', { node_id: nodeId })
 			.then(function(j) {
 				if (badge) badge.style.opacity = '';
 				if (!j.ok) return;

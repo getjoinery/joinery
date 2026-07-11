@@ -53,7 +53,7 @@ A single editor (`views/profile/scheduled_block_edit.php`) serves both always-on
 
 **Tier downgrade behavior** (option C): when a user with existing advanced-filter overrides (ads, malware, fakenews, typo — see `ScrollDaddyHelper::getRestrictedFilters()`) loses `scrolldaddy_advanced_filters`, the rows render in the override list with a **disabled** segmented radio (cannot edit action) but a **working** Remove button. Remove appends `<input name="remove_advanced_keys[]">` to the form so `scheduled_block_edit_logic.php` can explicitly delete the row even though `update_filters()` is called with `$skip_keys` to preserve untouched advanced rows. The picker excludes advanced filters for downgraded users, so they can't add new ones.
 
-Custom domain rules render at the bottom of the editor with inline AJAX add/delete (via `plugins/dns_filtering/ajax/block_rule_add.php` and `block_rule_delete.php`), decoupled from the main save button — adding rules is iterative, while category toggles are set-and-forget.
+Custom domain rules render at the bottom of the editor with inline add/delete via the `dns_filtering/block_rule_add` and `dns_filtering/block_rule_delete` API actions, decoupled from the main save button — adding rules is iterative, while category toggles are set-and-forget.
 
 ## Device Creation
 
@@ -161,7 +161,7 @@ See the resolver's `README.md` and `/etc/scrolldaddy/OPS_GUIDE.md` for ops detai
 - **Data model:** `plugins/dns_filtering/data/scheduled_blocks_class.php`, `scheduled_block_filters_class.php`, `scheduled_block_services_class.php`, `scheduled_block_rules_class.php`, `devices_class.php`, `profiles_class.php`
 - **UI:** `plugins/dns_filtering/views/profile/scheduled_block_edit.php`, `devices.php`
 - **Business logic:** `plugins/dns_filtering/logic/` — page logic (`scheduled_block_edit_logic.php`, `devices_logic.php`, …) plus the API action logic (`block_rule_add_logic.php`, `scan_url_logic.php`, `catalog_logic.php`, …)
-- **AJAX:** `plugins/dns_filtering/ajax/` — thin wrappers over the matching logic functions
+- **API actions:** `POST /api/v1/action/dns_filtering/{scan_url|test_domain|purge_querylog|block_rule_add|block_rule_delete|block_filter_set}` — the editor's page JS calls these with the browser-session credential; each has a `_logic_descriptor()` on its logic file
 - **Category list & API exports:** `plugins/dns_filtering/includes/ScrollDaddyHelper.php` (`$filters`, `$services`, `exportDevice()`, `exportBlock()`, `getHardBlockHostnames()`)
 - **DNS resolver source:** `/home/user1/scrolldaddy-dns/` (Go)
 

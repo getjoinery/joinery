@@ -121,33 +121,28 @@ echo PublicPage::EndPage();
 			resultDiv.style.display = 'block';
 			resultDiv.innerHTML = '<span class="dnsf-muted">Testing...</span>';
 
-			var xhr = new XMLHttpRequest();
-			xhr.open('GET', '/ajax/test_domain?device_id=' + deviceId + '&domain=' + encodeURIComponent(domain));
-			xhr.onload = function () {
-				if (xhr.status !== 200) { resultDiv.innerHTML = '<span class="dnsf-danger">Request failed. Please try again.</span>'; return; }
-				var data; try { data = JSON.parse(xhr.responseText); } catch (e) { resultDiv.innerHTML = '<span class="dnsf-danger">Invalid response.</span>'; return; }
+			dnsfApiPost('test_domain', { device_id: deviceId, domain: domain }).then(function (data) {
 				if (!data.success) { resultDiv.innerHTML = '<span class="dnsf-danger">' + escHtml(data.message) + '</span>'; return; }
 				resultDiv.innerHTML = formatDomainResult(data);
-			};
-			xhr.onerror = function () { resultDiv.innerHTML = '<span class="dnsf-danger">Network error. Please try again.</span>'; };
-			xhr.send();
+			}).catch(function () { resultDiv.innerHTML = '<span class="dnsf-danger">Network error. Please try again.</span>'; });
 
 		} else {
 			resultDiv.style.display = 'block';
 			resultDiv.innerHTML = '<span class="dnsf-muted">Fetching page\u2026 (this may take a few seconds)</span>';
 
-			var xhr2 = new XMLHttpRequest();
-			xhr2.open('POST', '/ajax/scan_url');
-			xhr2.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-			xhr2.onload = function () {
-				if (xhr2.status !== 200) { resultDiv.innerHTML = '<span class="dnsf-danger">Request failed. Please try again.</span>'; return; }
-				var data; try { data = JSON.parse(xhr2.responseText); } catch (e) { resultDiv.innerHTML = '<span class="dnsf-danger">Invalid response.</span>'; return; }
+			dnsfApiPost('scan_url', { device_id: deviceId, url: input }).then(function (data) {
 				if (!data.success) { resultDiv.innerHTML = '<span class="dnsf-danger">' + escHtml(data.message) + '</span>'; return; }
 				resultDiv.innerHTML = formatScanResult(data);
-			};
-			xhr2.onerror = function () { resultDiv.innerHTML = '<span class="dnsf-danger">Network error. Please try again.</span>'; };
-			xhr2.send('device_id=' + encodeURIComponent(deviceId) + '&url=' + encodeURIComponent(input));
+			}).catch(function () { resultDiv.innerHTML = '<span class="dnsf-danger">Network error. Please try again.</span>'; });
 		}
+	}
+
+	// POST a dns_filtering API action and normalize the envelope back to the
+	// legacy { success, ...data, message } shape the render helpers expect.
+	function dnsfApiPost(action, params) {
+		return joineryApi.post('dns_filtering/' + action, params || {})
+			.then(function (data) { return Object.assign({ success: true }, data || {}); })
+			.catch(function (err) { return { success: false, message: err.message || 'Request failed.' }; });
 	}
 
 	function formatDomainResult(data) {
@@ -273,12 +268,11 @@ echo PublicPage::EndPage();
 		if (!btn) return;
 		btn.disabled = true;
 		var feedback = btn.parentNode.querySelector('.scd-rule-feedback');
-		var xhr = new XMLHttpRequest();
-		xhr.open('POST', '/ajax/block_rule_add');
-		xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-		xhr.onload = function () {
-			var data;
-			try { data = JSON.parse(xhr.responseText); } catch (e) {}
+		dnsfApiPost('block_rule_add', {
+			device_id: btn.dataset.device,
+			sdr_hostname: btn.dataset.domain,
+			sdr_action: btn.dataset.action
+		}).then(function (data) {
 			if (data && data.success) {
 				btn.style.display = 'none';
 				feedback.style.display = 'inline';
@@ -290,19 +284,12 @@ echo PublicPage::EndPage();
 				feedback.style.color = '#dc3545';
 				feedback.textContent = (data && data.message) ? data.message : 'Failed to add rule.';
 			}
-		};
-		xhr.onerror = function () {
+		}).catch(function () {
 			btn.disabled = false;
 			feedback.style.display = 'inline';
 			feedback.style.color = '#dc3545';
 			feedback.textContent = 'Network error. Please try again.';
-		};
-		xhr.send(
-			'ajax=1' +
-			'&device_id='    + encodeURIComponent(btn.dataset.device) +
-			'&sdr_hostname=' + encodeURIComponent(btn.dataset.domain) +
-			'&sdr_action='   + encodeURIComponent(btn.dataset.action)
-		);
+		});
 	});
 })();
 </script>

@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.10
+ * No framework. @version 2.11
  *
  * Two-pane layout: the main pane swaps between the conversation list and an
  * opened conversation (toggled by the `reading` class on #mbx-reader); a back
@@ -50,29 +50,28 @@
 		return d.toLocaleString([], opts);
 	}
 
+	// The reader's endpoints are /api/v1 actions, called through the shared
+	// joineryApi transport. apiGet keeps its query-string call convention: it
+	// parses the query off the configured action URL into a JSON body. Errors
+	// resolve as {} so list/render callers degrade to an empty state.
 	function apiGet(url) {
-		return fetch(url, { credentials: 'same-origin', headers: { 'X-Requested-With': 'fetch' } })
-			.then(function (r) { return r.json(); });
+		var qpos = url.indexOf('?');
+		var base = qpos === -1 ? url : url.slice(0, qpos);
+		var payload = {};
+		if (qpos !== -1) {
+			new URLSearchParams(url.slice(qpos + 1)).forEach(function (v, k) { payload[k] = v; });
+		}
+		return joineryApi.post(base, payload).catch(function () { return {}; });
 	}
 	function apiAction(payload) {
-		var body = new URLSearchParams();
-		body.set('_csrf_token', CFG.csrf || '');
-		body.set('action', payload.action);
-		if (payload.aliasId != null) body.set('alias_id', String(payload.aliasId));
-		if (payload.threadKey != null) body.set('thread_key', payload.threadKey);
-		if (payload.ids) payload.ids.forEach(function (id) { body.append('ids[]', String(id)); });
-		if (payload.folderId != null) body.set('folder_id', String(payload.folderId));
-		if (payload.present != null) body.set('present', payload.present ? '1' : '0');
-		if (payload.name != null) body.set('name', String(payload.name));
-		return fetch(CFG.actionUrl, {
-			method: 'POST',
-			credentials: 'same-origin',
-			headers: {
-				'Content-Type': 'application/x-www-form-urlencoded',
-				'X-CSRF-Token': CFG.csrf || ''
-			},
-			body: body.toString()
-		}).then(function (r) { return r.json(); });
+		var body = { action: payload.action };
+		if (payload.aliasId != null) body.alias_id = String(payload.aliasId);
+		if (payload.threadKey != null) body.thread_key = payload.threadKey;
+		if (payload.ids) body.ids = payload.ids.map(function (id) { return String(id); });
+		if (payload.folderId != null) body.folder_id = String(payload.folderId);
+		if (payload.present != null) body.present = payload.present ? '1' : '0';
+		if (payload.name != null) body.name = String(payload.name);
+		return joineryApi.post(CFG.actionUrl, body).catch(function () { return {}; });
 	}
 
 	// ---- vault unlock (locked-state contract) ----
@@ -81,13 +80,7 @@
 	// Fortress compose) runs the built passkey ceremony and then re-runs the
 	// original request without navigation (specs/mailbox_security_levels.md § 4).
 	function apiV1(action, payload) {
-		var meta = document.querySelector('meta[name="joinery-api-csrf"]');
-		var csrf = meta ? meta.content : '';
-		return fetch('/api/v1/action/' + action, {
-			method: 'POST',
-			credentials: 'same-origin',
-			headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': csrf }
-		, body: JSON.stringify(payload || {}) }).then(function (r) { return r.json(); });
+		return joineryApi.post(action, payload || {});
 	}
 
 	// Run the passkey unlock ceremony; resolves true on success. Reveals the
@@ -96,12 +89,12 @@
 		if (!window.JoineryPasskeys) { alert('Unlocking is unavailable on this page.'); return false; }
 		try {
 			var opt = await apiV1('vault_unlock_options', {});
-			if (!opt || !opt.data || !opt.data.options) {
-				throw new Error((opt && (opt.message || opt.error)) || 'Could not start unlock.');
+			if (!opt || !opt.options) {
+				throw new Error('Could not start unlock.');
 			}
-			var credential = (await JoineryPasskeys.derive(opt.data.options)).response;
+			var credential = (await JoineryPasskeys.derive(opt.options)).response;
 			var res = await apiV1('vault_unlock_passkey', { credential: credential });
-			if (res && (res.error || res.success === false)) {
+			if (res && res.success === false) {
 				throw new Error(res.message || 'Unlock failed.');
 			}
 			showLockControl(true);
@@ -1134,14 +1127,17 @@
 		body.append('body', document.getElementById('mbx_body').value);
 		pendingFiles.forEach(function (f) { body.append('attachments[]', f, f.name); });
 
+		// Multipart send (attachments) — joineryApi.post is JSON-only, so this
+		// keeps a direct fetch and borrows only the shared CSRF read.
 		fetch(CFG.sendUrl, {
 			method: 'POST',
 			credentials: 'same-origin',
-			headers: { 'X-CSRF-Token': CFG.csrf || '' },
+			headers: { 'X-Joinery-Csrf': joineryApi.csrf() },
 			body: body
-		}).then(function (r) { return r.json(); }).then(async function (data) {
+		}).then(function (r) { return r.json(); }).then(async function (env) {
 			if (btn) btn.disabled = false;
-			if (data && data.ok) {
+			var data = (env && env.data) ? env.data : {};
+			if (!(env && env.errortype) && data.outbound_id) {
 				closeCompose();
 				if (state.threadKey != null) {
 					// Re-open the thread so the new outbound row renders in the dialog.
@@ -1152,14 +1148,14 @@
 					loadThreads(true);
 				}
 				refreshMailboxes();
-			} else if (data && data.locked) {
+			} else if (data.locked) {
 				// Fortress compose while locked: one-tap unlock, then resubmit the
 				// same draft without re-navigation (specs/mailbox_security_levels.md § 4.1).
 				showComposeError('Your vault is locked. Unlocking…');
 				if (await unlockVault()) { hideComposeError(); submitCompose(e); }
 				else { showComposeError('Unlock is needed to send from this address.'); }
 			} else {
-				showComposeError((data && data.error) || 'The message could not be sent.');
+				showComposeError((env && env.error) || 'The message could not be sent.');
 			}
 		}).catch(function () {
 			if (btn) btn.disabled = false;

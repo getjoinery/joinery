@@ -564,9 +564,14 @@ This is distinct from `mgn_ssl_state` / the SSL tile, which track certbot **prov
 
 6. **Remote credentials at runtime** -- Database credentials for backup/copy/restore are extracted from each node's `Globalvars_site.php` at execution time, never stored on the control plane.
 
-## AJAX Endpoints
+## API Actions
 
-### `/ajax/job_status`
+The dashboard's page JS calls these `POST /api/v1/action/server_manager/{name}`
+actions with the browser-session credential (superadmin only, floor 10) and
+reads the response envelope's `data`. The full set: `probe_api`, `job_status`,
+`discover_nodes`, `backup_actions`, `refresh_node_status`, `add_discovered_nodes`.
+
+### `server_manager/job_status`
 
 Polled by the job detail page for live output.
 
@@ -589,17 +594,17 @@ Response:
 
 The UI polls every 2 seconds while a job is running and stops when status is `completed` or `failed`.
 
-### `/ajax/backup_actions`
+### `server_manager/backup_actions`
 
 Used by the backup browser on the Backups tab.
 
 | Action | Method | Parameters | Returns |
 |--------|--------|------------|---------|
-| `refresh_list` | GET | `node_id` | `{success, job_id}` -- creates a `list_backups` job |
-| `delete_file` | GET | `node_id`, `target` (local/cloud/both), `local_path`, `cloud_path` | `{success, job_id}` -- creates a `delete_backup` job |
-| `list_status` | GET | `node_id`, `job_id` (optional) | `{success, status, backup_list, last_scan}` -- returns cached file listing |
+| `refresh_list` | POST | `node_id` | `{success, job_id}` -- creates a `list_backups` job |
+| `delete_file` | POST | `node_id`, `target` (local/cloud/both), `local_path`, `cloud_path` | `{success, job_id}` -- creates a `delete_backup` job |
+| `list_status` | POST | `node_id`, `job_id` (optional) | `{success, status, backup_list, last_scan}` -- returns cached file listing |
 
-### `/ajax/discover_nodes`
+### `server_manager/discover_nodes`
 
 Used by the auto-detect panel on the Add Node page. Creates and polls `discover_nodes` jobs.
 

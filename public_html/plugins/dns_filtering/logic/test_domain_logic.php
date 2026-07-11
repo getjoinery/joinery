@@ -5,7 +5,7 @@
  *
  * Input: device_id, domain.
  *
- * Called from ajax/test_domain.php (web, GET contract) and exposed as
+ * The web editor's page JS calls
  * POST /api/v1/action/dns_filtering/test_domain.
  *
  * @version 1.0
@@ -146,10 +146,15 @@ function test_domain_logic(array $input): LogicResult{
 	return LogicResult::render($result);
 }
 
-function test_domain_logic_api() {
+function test_domain_logic_descriptor(): array {
 	return [
-		'requires_session' => true,
 		'description' => 'Test one domain against a device\'s filter (device_id, domain)',
+		'mutates'     => false,
+		'auth'        => ['requires_session' => true],
+		'input'       => [
+			'device_id' => ['type' => 'int',    'required' => false, 'label' => 'Device ID'],
+			'domain'    => ['type' => 'string', 'required' => false, 'label' => 'Domain'],
+		],
 	];
 }
 

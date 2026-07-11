@@ -695,7 +695,7 @@ class PublicPageJoinerySystem extends PublicPageBase {
     </div><!-- .main-content -->
   </div><!-- .admin-layout -->
 
-  <script src="/assets/js/joinery-validate.js"></script>
+  <script src="/assets/js/joinery-validate.js?v=<?php echo $this->asset_mtime('assets/js/joinery-validate.js'); ?>"></script>
   <!-- Shared kit JS (JoineryModal etc.); admin provides its own CSS but uses the kit's JS -->
   <script defer src="/assets/js/base.js?v=<?php echo $this->asset_mtime('assets/js/base.js'); ?>"></script>
   <?php $_js_js_sys = PathHelper::getThemeFilePath('script.js', 'assets/js', 'system', 'joinery-system'); ?>

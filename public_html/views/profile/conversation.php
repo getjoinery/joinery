@@ -108,16 +108,6 @@ document.addEventListener('DOMContentLoaded', function() {
 	var isCompose = <?php echo $is_compose ? 'true' : 'false'; ?>;
 	var conversationId = <?php echo $conversation ? (int)$conversation->key : 'null'; ?>;
 	var recipientId = <?php echo $is_compose ? (int)$page_vars['recipient_id'] : 'null'; ?>;
-	var csrf = document.querySelector('meta[name="joinery-api-csrf"]').content;
-
-	function apiFetch(action, params) {
-		return fetch('/api/v1/action/' + action, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': csrf },
-			body: JSON.stringify(params)
-		}).then(function(r) { return r.json().then(function(json) { return { ok: r.ok, json: json }; }); });
-	}
-
 	// Scroll to bottom
 	if (messagesDiv) {
 		messagesDiv.scrollTop = messagesDiv.scrollHeight;
@@ -136,36 +126,31 @@ document.addEventListener('DOMContentLoaded', function() {
 			params.to = recipientId;
 		}
 
-		apiFetch('conversation_send', params).then(function(result) {
-			if (result.ok) {
-				var data = result.json.data;
-				if (!conversationId && data.conversation_id) {
-					// New conversation created — redirect to it
-					window.location.href = '/profile/conversation?id=' + data.conversation_id;
-					return;
-				}
-				// Append message to DOM
-				var placeholder = messagesDiv.querySelector('.jy-convo-placeholder');
-				if (placeholder) placeholder.remove();
-				var bubble = document.createElement('div');
-				bubble.className = 'message-bubble message-mine';
-				var bodyDiv = document.createElement('div');
-				bodyDiv.className = 'message-body';
-				bodyDiv.innerHTML = data.body.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
-				var timeDiv = document.createElement('div');
-				timeDiv.className = 'message-time';
-				timeDiv.textContent = new Date(data.sent_time + 'Z').toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-				bubble.appendChild(bodyDiv);
-				bubble.appendChild(timeDiv);
-				messagesDiv.appendChild(bubble);
-				messagesDiv.scrollTop = messagesDiv.scrollHeight;
-				input.value = '';
-			} else {
-				alert(result.json.error || 'Failed to send message');
+		joineryApi.post('conversation_send', params).then(function(data) {
+			if (!conversationId && data.conversation_id) {
+				// New conversation created — redirect to it
+				window.location.href = '/profile/conversation?id=' + data.conversation_id;
+				return;
 			}
+			// Append message to DOM
+			var placeholder = messagesDiv.querySelector('.jy-convo-placeholder');
+			if (placeholder) placeholder.remove();
+			var bubble = document.createElement('div');
+			bubble.className = 'message-bubble message-mine';
+			var bodyDiv = document.createElement('div');
+			bodyDiv.className = 'message-body';
+			bodyDiv.innerHTML = data.body.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+			var timeDiv = document.createElement('div');
+			timeDiv.className = 'message-time';
+			timeDiv.textContent = new Date(data.sent_time + 'Z').toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+			bubble.appendChild(bodyDiv);
+			bubble.appendChild(timeDiv);
+			messagesDiv.appendChild(bubble);
+			messagesDiv.scrollTop = messagesDiv.scrollHeight;
+			input.value = '';
 			sendBtn.disabled = false;
-		}).catch(function() {
-			alert('Failed to send message');
+		}).catch(function(err) {
+			alert(err.message || 'Failed to send message');
 			sendBtn.disabled = false;
 		});
 	}
@@ -195,16 +180,14 @@ document.addEventListener('DOMContentLoaded', function() {
 				if (!confirm('Delete this conversation? It will be removed from your inbox.')) return;
 			}
 
-			apiFetch('conversation_action', { conversation_id: cnvId, action: action }).then(function(result) {
-				if (result.ok) {
-					if (action === 'delete') {
-						window.location.href = '/profile/conversations';
-					} else {
-						window.location.reload();
-					}
+			joineryApi.post('conversation_action', { conversation_id: cnvId, action: action }).then(function() {
+				if (action === 'delete') {
+					window.location.href = '/profile/conversations';
 				} else {
-					alert(result.json.error || 'Action failed');
+					window.location.reload();
 				}
+			}).catch(function(err) {
+				alert(err.message || 'Action failed');
 			});
 		});
 	});

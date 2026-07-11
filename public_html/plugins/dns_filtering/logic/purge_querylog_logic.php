@@ -4,7 +4,7 @@
  *
  * Input: device_id.
  *
- * Called from ajax/purge_querylog.php (web) and exposed as
+ * The web editor's page JS calls
  * POST /api/v1/action/dns_filtering/purge_querylog.
  *
  * @version 1.0
@@ -77,10 +77,14 @@ function purge_querylog_logic(array $input): LogicResult{
 	return LogicResult::render(array());
 }
 
-function purge_querylog_logic_api() {
+function purge_querylog_logic_descriptor(): array {
 	return [
-		'requires_session' => true,
 		'description' => 'Truncate a device\'s DNS query log (device_id)',
+		'mutates'     => true,
+		'auth'        => ['requires_session' => true],
+		'input'       => [
+			'device_id' => ['type' => 'int', 'required' => false, 'label' => 'Device ID'],
+		],
 	];
 }
 

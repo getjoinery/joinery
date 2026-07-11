@@ -9,7 +9,7 @@
  * owner-only), with native items carrying entry_id / occurrence_date so a
  * client can open the right editor without parsing urls.
  *
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 require_once(__DIR__ . '/../includes/PathHelper.php');
@@ -26,17 +26,12 @@ function calendar_feed_logic(array $input): LogicResult {
 
 	$subject = CalendarSubject::user($session->get_user_id());
 
-	$today = gmdate('Y-m-d');
-	$start = isset($input['start']) ? (string)$input['start'] : gmdate('Y-m-d 00:00:00', strtotime($today . ' -7 days'));
-	$end   = isset($input['end'])   ? (string)$input['end']   : gmdate('Y-m-d 00:00:00', strtotime($today . ' +45 days'));
-
-	if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $start)) { $start .= ' 00:00:00'; }
-	if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $end))   { $end   .= ' 00:00:00'; }
-	if (!preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $start)
-		|| !preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $end)
-		|| $end <= $start) {
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	$range = LibraryFunctions::parse_utc_range($input);
+	if ($range === NULL) {
 		return LogicResult::error('Invalid date range.');
 	}
+	list($start, $end) = $range;
 
 	$items = CalendarItemSourceRegistry::getItems($subject, $start, $end, CalendarItem::VIS_DETAILS);
 	$out = array();
@@ -50,10 +45,18 @@ function calendar_feed_logic(array $input): LogicResult {
 	));
 }
 
-function calendar_feed_logic_api() {
+function calendar_feed_logic_descriptor(): array {
 	return [
-		'requires_session' => true,
-		'description' => 'Aggregated calendar items for the signed-in owner over a UTC range',
+		'description' => 'Aggregated calendar items for the signed-in owner over a UTC range.',
+		'mutates'     => false,
+		'auth'        => [
+			'capability'       => 'read',
+			'requires_session' => true,
+		],
+		'input'       => [
+			'start' => ['type' => 'string', 'required' => false, 'label' => 'Range start (UTC)'],
+			'end'   => ['type' => 'string', 'required' => false, 'label' => 'Range end (UTC)'],
+		],
 	];
 }
 

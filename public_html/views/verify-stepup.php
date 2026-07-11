@@ -72,28 +72,17 @@
     if (!btn) return;
     var errEl = document.getElementById('stepup-passkey-error');
     var RETURN = <?php echo json_encode($return); ?>;
-    function csrf() {
-        var m = document.querySelector('meta[name="joinery-api-csrf"]');
-        return m ? m.content : '';
-    }
-    function apiV1(action, payload) {
-        return fetch('/api/v1/action/' + action, {
-            method: 'POST', credentials: 'same-origin',
-            headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': csrf() },
-            body: JSON.stringify(payload || {})
-        }).then(function (r) { return r.json(); });
-    }
     btn.addEventListener('click', async function () {
         errEl.textContent = '';
         btn.disabled = true;
         try {
-            var opt = await apiV1('passkey_stepup_options', {});
-            if (!opt || !opt.data || !opt.data.options) {
-                throw new Error((opt && (opt.message || opt.error)) || 'Could not start confirmation.');
+            var opt = await joineryApi.post('passkey_stepup_options', {});
+            if (!opt || !opt.options) {
+                throw new Error('Could not start confirmation.');
             }
-            var credential = (await JoineryPasskeys.derive(opt.data.options)).response;
-            var res = await apiV1('passkey_stepup_verify', { credential: credential });
-            if (res && (res.error || res.success === false)) {
+            var credential = (await JoineryPasskeys.derive(opt.options)).response;
+            var res = await joineryApi.post('passkey_stepup_verify', { credential: credential });
+            if (res && res.success === false) {
                 throw new Error(res.message || 'Confirmation failed.');
             }
             // The passkey step-up stamped the shared marker server-side — return.

@@ -188,23 +188,12 @@ function submitConfirmSurvey(surveyId, eventId) {
         }
     });
 
-    // Cookie first — it tracks the current session; the render-time meta tag
-    // is only the cookie-less fallback.
-    var csrfCookie = document.cookie.match(/(?:^|; )joinery_api_csrf=([^;]+)/);
-    var csrfMeta = document.querySelector('meta[name="joinery-api-csrf"]');
-    var csrf = (csrfCookie ? decodeURIComponent(csrfCookie[1]) : '') || (csrfMeta && csrfMeta.content) || '';
-
-    fetch('/api/v1/action/event_manager/checkout_submit_survey', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': csrf },
-        body: JSON.stringify(payload)
-    })
-        .then(function(r) {
-            if (r.ok) {
-                document.getElementById('survey-form-' + surveyId).hidden = true;
-                document.getElementById('survey-thanks-' + surveyId).hidden = false;
-            }
-        });
+    joineryApi.post('event_manager/checkout_submit_survey', payload)
+        .then(function() {
+            document.getElementById('survey-form-' + surveyId).hidden = true;
+            document.getElementById('survey-thanks-' + surveyId).hidden = false;
+        })
+        .catch(function() {});
 }
 </script>
 

@@ -378,22 +378,25 @@ $page_vars = process_logic(scheduled_block_edit_logic(array_merge($_GET, $_POST,
 					errEl.style.display = 'none';
 				}
 
+				// POST a dns_filtering API action, normalizing the envelope back to
+				// the legacy { success, ...data, error } shape.
+				function dnsfApiPost(action, params){
+					return joineryApi.post('dns_filtering/' + action, params || {})
+						.then(function(data){ return Object.assign({ success: true }, data || {}); })
+						.catch(function(err){ return { success: false, error: err.message || 'Request failed.' }; });
+				}
+
 				addBtn.addEventListener('click', function(){
 					clearError();
 					var hostname = hostInput.value.trim();
 					if(!hostname){ showError('Enter a hostname.'); return; }
 					addBtn.disabled = true;
 
-					var fd = new FormData();
-					fd.append('block_id', blockId);
-					fd.append('hostname', hostname);
-					fd.append('action', actionSelect.value);
-
-					fetch('/ajax/block_rule_add', {
-						method: 'POST',
-						body: fd,
-						credentials: 'same-origin'
-					}).then(function(r){ return r.json(); }).then(function(data){
+					dnsfApiPost('block_rule_add', {
+						block_id: blockId,
+						hostname: hostname,
+						action: actionSelect.value
+					}).then(function(data){
 						addBtn.disabled = false;
 						if(!data.success){
 							showError(data.error || 'Could not add rule.');
@@ -420,14 +423,7 @@ $page_vars = process_logic(scheduled_block_edit_logic(array_merge($_GET, $_POST,
 					var ruleId = btn.getAttribute('data-rule-id');
 					btn.disabled = true;
 
-					var fd = new FormData();
-					fd.append('rule_id', ruleId);
-
-					fetch('/ajax/block_rule_delete', {
-						method: 'POST',
-						body: fd,
-						credentials: 'same-origin'
-					}).then(function(r){ return r.json(); }).then(function(data){
+					dnsfApiPost('block_rule_delete', { rule_id: ruleId }).then(function(data){
 						if(!data.success){
 							btn.disabled = false;
 							showError(data.error || 'Could not delete rule.');
@@ -481,6 +477,12 @@ $page_vars = process_logic(scheduled_block_edit_logic(array_merge($_GET, $_POST,
 		}
 	}
 
+	function dnsfApiPost(action, params){
+		return joineryApi.post('dns_filtering/' + action, params || {})
+			.then(function(data){ return Object.assign({ success: true }, data || {}); })
+			.catch(function(err){ return { success: false, error: err.message || 'Request failed.' }; });
+	}
+
 	rows.forEach(function(row){
 		var key = row.getAttribute('data-key');
 		var type = row.getAttribute('data-type');
@@ -488,15 +490,9 @@ $page_vars = process_logic(scheduled_block_edit_logic(array_merge($_GET, $_POST,
 			r.addEventListener('change', function(){
 				if(!r.checked){ return; }
 				flash(row, 'sd-saving');
-				var fd = new FormData();
-				fd.append('block_id', blockId);
-				fd.append('type', type);
-				fd.append('key', key);
-				fd.append('action', r.value);
-				fetch('/ajax/block_filter_set', {
-					method: 'POST', body: fd, credentials: 'same-origin'
+				dnsfApiPost('block_filter_set', {
+					block_id: blockId, type: type, key: key, action: r.value
 				})
-				.then(function(res){ return res.json(); })
 				.then(function(j){
 					flash(row, j.success ? 'sd-saved' : 'sd-save-error');
 					if(!j.success && j.error){ console.error('Save failed:', j.error); }

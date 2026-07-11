@@ -5,7 +5,7 @@
  * Input: rule_id. Ownership is verified through the rule → block → device
  * chain.
  *
- * Called from ajax/block_rule_delete.php (web editor) and exposed as
+ * The web editor's page JS calls
  * POST /api/v1/action/dns_filtering/block_rule_delete.
  *
  * @version 1.0
@@ -53,10 +53,14 @@ function block_rule_delete_logic(array $input): LogicResult{
 	return LogicResult::render(array());
 }
 
-function block_rule_delete_logic_api() {
+function block_rule_delete_logic_descriptor(): array {
 	return [
-		'requires_session' => true,
 		'description' => 'Delete a custom domain rule (rule_id)',
+		'mutates'     => true,
+		'auth'        => ['requires_session' => true],
+		'input'       => [
+			'rule_id' => ['type' => 'int', 'required' => false, 'label' => 'Rule ID'],
+		],
 	];
 }
 

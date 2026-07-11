@@ -818,8 +818,33 @@ class LibraryFunctions {
 		$dt->modify($interval);
 
 		return $dt->format($format);
-	}	
-	
+	}
+
+	/**
+	 * Parse a UTC date range from request input (the calendar/scheduling feed
+	 * contract): `start`/`end` accept 'Y-m-d' (midnight-extended) or
+	 * 'Y-m-d H:i:s'; a missing bound defaults to today UTC shifted by the given
+	 * DateTime::modify string. Returns [$start, $end] as 'Y-m-d H:i:s' strings,
+	 * or NULL when a bound is malformed or the range is empty/reversed — the
+	 * caller chooses its own failure shape (hard error vs fail-soft).
+	 */
+	public static function parse_utc_range(array $input, $default_start_shift = '-7 days', $default_end_shift = '+45 days') {
+		$today = gmdate('Y-m-d');
+		$start = isset($input['start']) ? (string) $input['start'] : gmdate('Y-m-d 00:00:00', strtotime($today . ' ' . $default_start_shift));
+		$end   = isset($input['end'])   ? (string) $input['end']   : gmdate('Y-m-d 00:00:00', strtotime($today . ' ' . $default_end_shift));
+
+		if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $start)) { $start .= ' 00:00:00'; }
+		if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $end))   { $end   .= ' 00:00:00'; }
+
+		if (!preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $start)
+			|| !preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $end)
+			|| $end <= $start) {
+			return NULL;
+		}
+
+		return array($start, $end);
+	}
+
 
 	//RETURN LAT/LONG FOR CURRENT USER
 	static function get_current_lat_lon(){

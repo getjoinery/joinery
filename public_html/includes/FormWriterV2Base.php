@@ -7,7 +7,9 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
- * @version 2.8.0
+ * @version 2.11.0
+ * @changelog 2.10.0 - buildAjaxSelectScript() speaks the /api/v1 action contract for /api/v1/ endpoints (POST {q, ...}, CSRF header, read data.items); query-string suffixes fold into the POST body. Legacy GET ?q= array contract retained for other URLs
+ * @changelog 2.9.0 - outputJavascriptValidation() emits `remote` rules (and `custom` rules carrying a url) to the client `remote` validator, which speaks the /api/v1 JSON-envelope contract for API-action URLs
  * @changelog 2.8.0 - Added fromDescriptor() to render a form body from a *_logic_descriptor() input map (scaffolding generator)
  * @changelog 2.7.0 - Added set_values()/set_model() for post-construction value binding (form builder functions)
  * @changelog 2.6.1 - prepareCheckboxData: use array_key_exists instead of isset so null 'checked' value is treated as unchecked (not missing)
@@ -1215,7 +1217,7 @@ abstract class FormWriterV2Base {
      *   - helptext: Help text
      *   - required: Boolean
      *   - placeholder: Placeholder text for search (default: 'Search images...')
-     *   - ajax_endpoint: Custom endpoint URL (default: '/ajax/image_list_ajax')
+     *   - ajax_endpoint: Custom endpoint URL (default: '/api/v1/action/image_list')
      *   - page_size: Images per AJAX load (default: 20)
      *
      *   Styling Options (all optional - sensible defaults provided):
@@ -1234,7 +1236,7 @@ abstract class FormWriterV2Base {
         $value = $options['value'] ?? '';
         $help = $options['helptext'] ?? '';
         $id = $options['id'] ?? preg_replace('/[^a-zA-Z0-9_]/', '_', $name);
-        $ajaxEndpoint = $options['ajax_endpoint'] ?? '/ajax/image_list_ajax';
+        $ajaxEndpoint = $options['ajax_endpoint'] ?? '/api/v1/action/image_list';
         $pageSize = $options['page_size'] ?? 20;
         $placeholder = $options['placeholder'] ?? 'Search images...';
 
@@ -1671,9 +1673,21 @@ abstract class FormWriterV2Base {
             var pageSize = parseInt(wrapper.dataset.pagesize) || 20;
             var searchValue = this.modal.querySelector(".imageselector-search-input").value;
 
-            var url = endpoint + "?limit=" + pageSize + "&offset=" + this.offset;
-            if (searchValue) {
-                url += "&q=" + encodeURIComponent(searchValue);
+            // API-action mode: an /api/v1/ endpoint speaks the JSON envelope —
+            // POST {q, offset, limit} with the browser-session CSRF header and
+            // read data.{images, total, hasMore}. Other endpoints keep the
+            // legacy GET query-string contract returning a bare payload.
+            var isApi = endpoint.indexOf("/api/v1/") === 0;
+            var fetchPromise;
+            if (isApi) {
+                fetchPromise = joineryApi.post(endpoint, { q: searchValue, offset: self.offset, limit: pageSize })
+                    .catch(function(err) { return { error: err.message || "Error loading images" }; });
+            } else {
+                var url = endpoint + "?limit=" + pageSize + "&offset=" + this.offset;
+                if (searchValue) {
+                    url += "&q=" + encodeURIComponent(searchValue);
+                }
+                fetchPromise = fetch(url).then(function(response) { return response.json(); });
             }
 
             // Show loading
@@ -1681,8 +1695,7 @@ abstract class FormWriterV2Base {
             this.modal.querySelector(".imageselector-empty").style.display = "none";
             this.modal.querySelector(".imageselector-load-more").style.display = "none";
 
-            fetch(url)
-                .then(function(response) { return response.json(); })
+            fetchPromise
                 .then(function(data) {
                     self.loading = false;
                     self.modal.querySelector(".imageselector-loading").style.display = "none";
@@ -2745,6 +2758,38 @@ abstract class FormWriterV2Base {
                             }
                         }
                         break;
+
+                    case 'remote':
+                        // Remote validation — passed to JoineryValidator's `remote`
+                        // validator verbatim. $param is a URL string or an object
+                        // {url, message, data, dataFieldName, method}. A /api/v1/
+                        // URL speaks the JSON-envelope action contract (data.valid);
+                        // any other URL keeps the legacy text ('true'/'false').
+                        if ($param) {
+                            $field_js_rules['remote'] = $param;
+                            if (is_array($param) && isset($param['message'])) {
+                                $field_js_messages['remote'] = $param['message'];
+                            } elseif (isset($fieldRules['messages']['remote'])) {
+                                $field_js_messages['remote'] = $fieldRules['messages']['remote'];
+                            }
+                        }
+                        break;
+
+                    case 'custom':
+                        // A custom rule carrying a `url` is remote validation in the
+                        // {rule, message, url} shape — route it to the same client
+                        // `remote` validator. Custom rules without a url are
+                        // server-side only (handled in validateField()).
+                        if (is_array($param) && !empty($param['url'])) {
+                            $remote = ['url' => $param['url']];
+                            if (isset($param['dataFieldName'])) { $remote['dataFieldName'] = $param['dataFieldName']; }
+                            if (isset($param['data'])) { $remote['data'] = $param['data']; }
+                            $field_js_rules['remote'] = $remote;
+                            if (isset($param['message'])) {
+                                $field_js_messages['remote'] = $param['message'];
+                            }
+                        }
+                        break;
                 }
             }
 
@@ -3061,7 +3106,8 @@ document.addEventListener("DOMContentLoaded", function() {
      * @return string Script HTML block
      */
     protected function buildAjaxSelectScript($id, $endpoint) {
-        return '<script>
+        $js = <<<'JS'
+<script>
 (function() {
   class AjaxSearchSelect {
     constructor(selectEl, ajaxUrl) {
@@ -3070,16 +3116,29 @@ document.addEventListener("DOMContentLoaded", function() {
       this.cache = {};
       this.debounceTimer = null;
 
-      const input = document.createElement(\'input\');
-      input.type = \'text\';
+      // API-action mode: an /api/v1/ endpoint speaks the JSON envelope — POST
+      // {q, ...} with the browser-session CSRF header and read data.items. Any
+      // query string on the configured URL (e.g. ?includenone=1) folds into the
+      // POST body. Other URLs keep the legacy GET ?q= contract returning a bare
+      // [{id, text}] array.
+      this.isApi = ajaxUrl.indexOf('/api/v1/') === 0;
+      var qpos = ajaxUrl.indexOf('?');
+      this.baseUrl = qpos === -1 ? ajaxUrl : ajaxUrl.slice(0, qpos);
+      this.extraParams = {};
+      if (qpos !== -1) {
+        new URLSearchParams(ajaxUrl.slice(qpos + 1)).forEach((v, k) => { this.extraParams[k] = v; });
+      }
+
+      const input = document.createElement('input');
+      input.type = 'text';
       input.className = selectEl.className;
-      input.placeholder = \'Type to search...\';
+      input.placeholder = 'Type to search...';
 
-      const list = document.createElement(\'datalist\');
-      list.id = selectEl.id + \'_list\';
-      input.setAttribute(\'list\', list.id);
+      const list = document.createElement('datalist');
+      list.id = selectEl.id + '_list';
+      input.setAttribute('list', list.id);
 
-      selectEl.style.display = \'none\';
+      selectEl.style.display = 'none';
       selectEl.parentNode.insertBefore(input, selectEl);
       selectEl.parentNode.insertBefore(list, selectEl);
 
@@ -3091,33 +3150,33 @@ document.addEventListener("DOMContentLoaded", function() {
         input.value = selectEl.options[selectEl.selectedIndex].text;
       }
 
-      input.addEventListener(\'input\', (e) => this.search(e.target.value));
-      input.addEventListener(\'change\', (e) => {
+      input.addEventListener('input', (e) => this.search(e.target.value));
+      input.addEventListener('change', (e) => {
         const inputVal = e.target.value.trim();
         if (!inputVal) {
-          selectEl.value = \'\';
+          selectEl.value = '';
         } else {
           const matching = this.data.find(item => item.text === inputVal);
           if (matching) {
-            let option = selectEl.querySelector(\'option[value="\' + matching.id + \'"]\');
+            let option = selectEl.querySelector('option[value="' + matching.id + '"]');
             if (!option) {
-              option = document.createElement(\'option\');
+              option = document.createElement('option');
               option.value = matching.id;
               option.textContent = matching.text;
-              selectEl.innerHTML = \'\';
+              selectEl.innerHTML = '';
               selectEl.appendChild(option);
             }
             selectEl.value = matching.id;
           }
         }
-        selectEl.dispatchEvent(new Event(\'change\', { bubbles: true }));
+        selectEl.dispatchEvent(new Event('change', { bubbles: true }));
       });
     }
 
     search(query) {
       clearTimeout(this.debounceTimer);
       if (query.length < 3) {
-        this.list.innerHTML = \'\';
+        this.list.innerHTML = '';
         this.data = [];
         return;
       }
@@ -3128,21 +3187,31 @@ document.addEventListener("DOMContentLoaded", function() {
       }
 
       this.debounceTimer = setTimeout(() => {
-        const separator = this.ajaxUrl.includes(\'?\') ? \'&\' : \'?\';
-        fetch(this.ajaxUrl + separator + \'q=\' + encodeURIComponent(query))
-          .then(r => r.json())
-          .then(data => {
-            this.cache[query] = data;
-            this.updateList(data);
-          });
+        if (this.isApi) {
+          joineryApi.post(this.baseUrl, Object.assign({}, this.extraParams, { q: query }))
+            .then(data => {
+              var items = (data && data.items) ? data.items : [];
+              this.cache[query] = items;
+              this.updateList(items);
+            })
+            .catch(() => {});
+        } else {
+          const separator = this.ajaxUrl.includes('?') ? '&' : '?';
+          fetch(this.ajaxUrl + separator + 'q=' + encodeURIComponent(query))
+            .then(r => r.json())
+            .then(data => {
+              this.cache[query] = data;
+              this.updateList(data);
+            });
+        }
       }, 250);
     }
 
     updateList(data) {
       this.data = data;
-      this.list.innerHTML = \'\';
+      this.list.innerHTML = '';
       data.forEach(item => {
-        const opt = document.createElement(\'option\');
+        const opt = document.createElement('option');
         opt.value = item.text;
         opt.dataset.id = item.id;
         this.list.appendChild(opt);
@@ -3150,14 +3219,20 @@ document.addEventListener("DOMContentLoaded", function() {
     }
   }
 
-  document.addEventListener(\'DOMContentLoaded\', () => {
-    const select = document.getElementById(\'' . htmlspecialchars($id) . '\');
+  document.addEventListener('DOMContentLoaded', () => {
+    const select = document.getElementById('__JOINERY_SELECT_ID__');
     if (select) {
-      new AjaxSearchSelect(select, \'' . htmlspecialchars($endpoint) . '\');
+      new AjaxSearchSelect(select, '__JOINERY_SELECT_ENDPOINT__');
     }
   });
 })();
-</script>';
+</script>
+JS;
+        return str_replace(
+            ['__JOINERY_SELECT_ID__', '__JOINERY_SELECT_ENDPOINT__'],
+            [htmlspecialchars($id), htmlspecialchars($endpoint)],
+            $js
+        );
     }
 
     // ── Prepare methods (behavioral logic) ───────────────────────────────────

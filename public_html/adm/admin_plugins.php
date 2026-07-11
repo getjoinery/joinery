@@ -439,13 +439,9 @@ function confirmPluginAction(action, pluginName, message) {
     var nodes = document.querySelectorAll('[data-provisioning-plugin]');
     if (!nodes.length) { return; }
 
-    fetch('/ajax/check_provisioning', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-        .then(function(r) {
-            if (!r.ok) { throw new Error('http ' + r.status); }
-            return r.json();
-        })
+    joineryApi.post('plugin_provisioning_check', {})
         .then(function(data) {
-            if (!data || !data.success) { throw new Error('bad response'); }
+            if (!data || !data.plugins) { throw new Error('bad response'); }
             nodes.forEach(function(node) {
                 var name = node.getAttribute('data-provisioning-plugin');
                 render(node, data.plugins[name] || {});

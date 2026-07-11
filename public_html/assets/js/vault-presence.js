@@ -17,27 +17,17 @@
  * alive:false stops the beacon (window ended elsewhere - explicit lock,
  * credential event, cap).
  *
- * @version 1.0
+ * @version 1.1
  */
 (function () {
 	'use strict';
 
 	var timer = null;
 
-	function csrf() {
-		var m = document.querySelector('meta[name="joinery-api-csrf"]');
-		return m ? m.content : '';
-	}
-
 	function beat() {
-		fetch('/api/v1/action/vault_heartbeat', {
-			method: 'POST',
-			credentials: 'same-origin',
-			headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': csrf() },
-			body: '{}'
-		}).then(function (r) { return r.json(); }).then(function (res) {
-			if (res && res.data && res.data.alive === false) { stop(); }
-		}).catch(function () { /* transient network failure - keep beating */ });
+		joineryApi.post('vault_heartbeat', {}).then(function (res) {
+			if (res && res.alive === false) { stop(); }
+		}).catch(function () { /* transient failure - keep beating */ });
 	}
 
 	function start() {

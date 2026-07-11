@@ -665,7 +665,7 @@ class PublicPageFalcon extends PublicPageBase {
     <!--    JavaScripts-->
     <!-- ===============================================-->
 	
-	<script src="/assets/js/joinery-validate.js"></script>
+	<script src="/assets/js/joinery-validate.js?v=<?php echo $this->asset_mtime('assets/js/joinery-validate.js'); ?>"></script>
 	<script src="<?php echo PathHelper::getThemeFilePath('popper.min.js', 'assets/vendors/popper', 'web', 'falcon'); ?>"></script>
 	<script src="<?php echo PathHelper::getThemeFilePath('bootstrap.min.js', 'assets/vendors/bootstrap', 'web', 'falcon'); ?>"></script>
 	<script src="<?php echo PathHelper::getThemeFilePath('all.min.js', 'assets/vendors/fontawesome', 'web', 'falcon'); ?>"></script>

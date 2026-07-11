@@ -8,7 +8,7 @@
  *   action '' = remove the row entirely (Allow on always-on means "no row";
  *   see the resolver-merge note in scheduled_block_edit.php).
  *
- * Called from ajax/block_filter_set.php (web editor) and exposed as
+ * The web editor's page JS calls
  * POST /api/v1/action/dns_filtering/block_filter_set.
  *
  * @version 1.0
@@ -123,10 +123,17 @@ function block_filter_set_logic(array $input): LogicResult{
 	return LogicResult::render(array());
 }
 
-function block_filter_set_logic_api() {
+function block_filter_set_logic_descriptor(): array {
 	return [
-		'requires_session' => true,
 		'description' => 'Set or clear one filter/service toggle on a block (block_id, type filter/service, key, action 0/1/empty-to-remove)',
+		'mutates'     => true,
+		'auth'        => ['requires_session' => true],
+		'input'       => [
+			'block_id' => ['type' => 'int',    'required' => false, 'label' => 'Block ID'],
+			'type'     => ['type' => 'string', 'required' => false, 'enum' => ['filter', 'service'], 'label' => 'Type'],
+			'key'      => ['type' => 'string', 'required' => false, 'label' => 'Filter/service key'],
+			'action'   => ['type' => 'string', 'required' => false, 'label' => '0/1/empty-to-remove'],
+		],
 	];
 }
 

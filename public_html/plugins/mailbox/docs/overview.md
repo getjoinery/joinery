@@ -1218,13 +1218,16 @@ enforced inside `MailboxSender`.
 
 ### Endpoints
 
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/ajax/mailbox_mailboxes` | GET | switcher: accessible mailboxes + unread |
-| `/ajax/mailbox_list` | GET | thread list (`alias_id`, filters, `page`) |
-| `/ajax/mailbox_thread` | GET | messages in a `thread_key` (with bodies) |
-| `/ajax/mailbox_action` | POST | mark read/unread, star/unstar, delete — CSRF-protected, accepts `ids[]` or a `thread_key` expanded server-side |
-| `/ajax/mailbox_send` | POST (multipart) | send a reply / reply-all / forward / new message AS the mailbox; stores the sent copy |
+All endpoints are `/api/v1` actions (POST, browser-session credential: session
+cookie + `X-Joinery-Csrf`). The reader consumes the response envelope's `data`.
+
+| Action | Purpose |
+|--------|---------|
+| `mailbox/mailboxes` | switcher: accessible mailboxes + unread |
+| `mailbox/thread_list` | thread list (`alias_id`, filters, `page`) |
+| `mailbox/thread` | messages in a `thread_key` (with bodies) |
+| `mailbox/thread_action` | mark read/unread, star/unstar, delete — accepts `ids[]` or a `thread_key` expanded server-side |
+| `mailbox/send` | multipart: send a reply / reply-all / forward / new message AS the mailbox; stores the sent copy |
 
 HTML bodies stay sandboxed (`<iframe sandbox="">`, no `allow-scripts`) exactly as
 the detail page does — stored mail is fully attacker-controlled.

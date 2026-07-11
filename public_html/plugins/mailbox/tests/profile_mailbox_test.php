@@ -297,29 +297,31 @@ class ProfileMailboxTest {
 
 	private function testAnonymousHttp() {
 		section('anonymous HTTP: all five endpoints reject');
+		// The reader's endpoints are /api/v1 actions (POST-only). An anonymous
+		// request carries no credential, so the API rejects it before the logic
+		// runs (400/401/403 — never a 200 with data).
 		$endpoints = array(
-			'/ajax/mailbox_mailboxes' => 'GET',
-			'/ajax/mailbox_list'      => 'GET',
-			'/ajax/mailbox_thread'    => 'GET',
-			'/ajax/mailbox_action'    => 'POST',
-			'/ajax/mailbox_send'      => 'POST',
+			'/api/v1/action/mailbox/mailboxes',
+			'/api/v1/action/mailbox/thread_list',
+			'/api/v1/action/mailbox/thread',
+			'/api/v1/action/mailbox/thread_action',
+			'/api/v1/action/mailbox/send',
 		);
 		$host = parse_url($this->base_url, PHP_URL_HOST);
-		foreach ($endpoints as $path => $method) {
+		foreach ($endpoints as $path) {
 			$ch = curl_init($this->base_url . $path);
 			curl_setopt_array($ch, array(
 				CURLOPT_RETURNTRANSFER => true,
 				CURLOPT_TIMEOUT        => 20,
 				CURLOPT_RESOLVE        => array($host . ':443:' . $this->origin_ip),
+				CURLOPT_POST           => true,
+				CURLOPT_POSTFIELDS     => '{}',
+				CURLOPT_HTTPHEADER     => array('Content-Type: application/json'),
 			));
-			if ($method === 'POST') {
-				curl_setopt($ch, CURLOPT_POST, true);
-				curl_setopt($ch, CURLOPT_POSTFIELDS, array());
-			}
 			curl_exec($ch);
 			$status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
 			curl_close($ch);
-			$this->ok($status == 403, "$method $path anonymous -> 403 (got $status)");
+			$this->ok(in_array($status, array(400, 401, 403), true), "POST $path anonymous rejected (got $status)");
 		}
 	}
 

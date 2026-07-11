@@ -152,20 +152,23 @@ A password change revokes **all** of the user's session keys (the lost-phone pat
 
 ### Browser sessions (page JavaScript)
 
-Page JavaScript calls `/api/v1` with the web session it already has — no key provisioning. The session's CSRF token reaches the page two ways: a `<meta name="joinery-api-csrf">` tag on signed-in pages, and the `joinery_api_csrf` mirror cookie on every response (signed-in or not). The cookie exists because anonymous pages can be served from the static page cache — shared HTML that must never embed a per-visitor token — while cookies are per-visitor regardless of how the HTML was produced. Validation always compares the header against the raw session value; the cookie is distribution, never the trust anchor. JS reads whichever is available:
+Page JavaScript calls `/api/v1` with the web session it already has — no key provisioning. The session's CSRF token reaches the page two ways: a `<meta name="joinery-api-csrf">` tag on signed-in pages, and the `joinery_api_csrf` mirror cookie on every response (signed-in or not). The cookie exists because anonymous pages can be served from the static page cache — shared HTML that must never embed a per-visitor token — while cookies are per-visitor regardless of how the HTML was produced. Validation always compares the header against the raw session value; the cookie is distribution, never the trust anchor.
+
+Page JS never hand-rolls this transport. `assets/js/joinery-api.js` is loaded on every page (`PublicPageBase::global_includes_top()`) and exposes the single implementation:
 
 ```js
-// Cookie first: it tracks the CURRENT session (resynced on every response,
-// including after a logout in another tab); the meta tag is frozen at page
-// render and serves only as the cookie-less fallback.
-const cookie = document.cookie.match(/(?:^|; )joinery_api_csrf=([^;]+)/);
-const meta = document.querySelector('meta[name="joinery-api-csrf"]');
-const csrf = (cookie ? decodeURIComponent(cookie[1]) : '') || (meta && meta.content) || '';
-const r = await fetch('/api/v1/action/contact_preferences', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': csrf },
-    body: JSON.stringify({ ... }),
-});
+// Resolves with the success envelope's `data`; rejects with an Error carrying
+// .status and .errorType on an error envelope or network failure. Logic-level
+// soft failures the action returns inside `data` (e.g. {ok: false}) resolve.
+const data = await joineryApi.post('contact_preferences', { ... });
+
+// Accepts '{plugin}/{action}' names and full endpoint URLs alike:
+await joineryApi.post('store/checkout_apply_coupon', { code: code });
+
+// joineryApi.csrf() exposes the token read (cookie first — it tracks the
+// CURRENT session, resynced on every response; the render-frozen meta tag is
+// the fallback) for the rare non-JSON call, e.g. a multipart upload:
+fetch(url, { method: 'POST', headers: { 'X-Joinery-Csrf': joineryApi.csrf() }, body: formData });
 ```
 
 The session cookie proves who the visitor is; the header proves the call came from our own page (an attacker's page can read neither the meta tag nor the cookie). Missing or wrong token → 403 even with a valid cookie. The token is session-wide and distinct from FormWriter's per-form CSRF tokens.

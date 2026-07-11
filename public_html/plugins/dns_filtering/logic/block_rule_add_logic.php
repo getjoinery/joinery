@@ -12,7 +12,7 @@
  * rule on a time-windowed scheduled block would be enforced 24/7 at the
  * connection level while staying scheduled at the DNS level.
  *
- * Called from ajax/block_rule_add.php (web editor) and exposed as
+ * The web editor's page JS calls
  * POST /api/v1/action/dns_filtering/block_rule_add.
  *
  * @version 1.0
@@ -98,10 +98,18 @@ function block_rule_add_logic(array $input): LogicResult{
 	));
 }
 
-function block_rule_add_logic_api() {
+function block_rule_add_logic_descriptor(): array {
 	return [
-		'requires_session' => true,
 		'description' => 'Add a custom domain rule to a block (block_id or device_id, hostname, action 0=block/1=allow, optional hard_block)',
+		'mutates'     => true,
+		'auth'        => ['requires_session' => true],
+		'input'       => [
+			'block_id'   => ['type' => 'int',    'required' => false, 'label' => 'Block ID'],
+			'device_id'  => ['type' => 'int',    'required' => false, 'label' => 'Device ID'],
+			'hostname'   => ['type' => 'string', 'required' => false, 'label' => 'Hostname'],
+			'action'     => ['type' => 'int',    'required' => false, 'label' => '0=block, 1=allow'],
+			'hard_block' => ['type' => 'bool',   'required' => false, 'label' => 'Hard block'],
+		],
 	];
 }
 
