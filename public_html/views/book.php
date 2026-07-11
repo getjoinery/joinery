@@ -54,7 +54,7 @@ echo PublicPage::BeginPage($title, array());
 
 	// Slot picker writes the chosen UTC slot into the hidden 'slot_start' field.
 	echo ComponentRenderer::render(null, 'slot_picker', [
-		'slots_url' => '/ajax/booking_slots?slug=' . rawurlencode($type->get('bkt_slug')),
+		'slots_url' => '/api/v1/action/bookings/booking_slots?slug=' . rawurlencode($type->get('bkt_slug')),
 		'field_name' => 'slot_start',
 	]);
 

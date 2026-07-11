@@ -6,7 +6,7 @@
  * Supports likes, favorites, bookmarks, passes, and any other reaction type.
  * Uses entity_type + entity_id pattern (same as EntityPhoto, ChangeTracking).
  *
- * @version 1.0
+ * @version 1.1
  * @see /specs/implemented/reaction_system_spec.md
  * @see /docs/social_features.md
  */
@@ -209,18 +209,13 @@ document.addEventListener("click", function(e) {
 	if (!btn) return;
 	e.preventDefault();
 	btn.disabled = true;
-	var formData = new FormData();
-	formData.append("action", "toggle");
-	formData.append("entity_type", btn.dataset.entityType);
-	formData.append("entity_id", btn.dataset.entityId);
-	formData.append("reaction_type", btn.dataset.reactionType);
-	fetch("/ajax/reaction_ajax", {
-		method: "POST",
-		body: formData
+	joineryApi.post("reaction_toggle", {
+		entity_type: btn.dataset.entityType,
+		entity_id: btn.dataset.entityId,
+		reaction_type: btn.dataset.reactionType
 	})
-	.then(function(r) { return r.json(); })
 	.then(function(data) {
-		if (data.success) {
+		if (data.action !== undefined) {
 			var isActive = (data.action === "reacted");
 			btn.dataset.active = isActive ? "true" : "false";
 			var icon = btn.querySelector("i");

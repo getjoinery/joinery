@@ -255,15 +255,8 @@ class ConsentHelper {
     }
 
     function recordConsent(data) {
-        // API CSRF token, cookie first — it tracks the current session; the
-        // render-time meta tag is only the cookie-less fallback.
-        var meta = document.querySelector('meta[name="joinery-api-csrf"]');
-        var csrf = getCookie('joinery_api_csrf') || (meta && meta.content) || '';
-        var xhr = new XMLHttpRequest();
-        xhr.open('POST', '/api/v1/action/consent_record', true);
-        xhr.setRequestHeader('Content-Type', 'application/json');
-        xhr.setRequestHeader('X-Joinery-Csrf', csrf);
-        xhr.send(JSON.stringify({ analytics: data.a === 1, marketing: data.m === 1 }));
+        joineryApi.post('consent_record', { analytics: data.a === 1, marketing: data.m === 1 })
+            .catch(function() {});
     }
 
     function updateScripts() {

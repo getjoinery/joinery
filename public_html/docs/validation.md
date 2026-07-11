@@ -179,7 +179,7 @@ For server-side validation like checking username uniqueness, add a `remote` rul
 'usr_username' => array(
     'type' => 'varchar(64)',
     'validation' => array(
-        'remote' => '/ajax/check_username',
+        'remote' => '/api/v1/action/username_available',
         'messages' => array('remote' => 'Username is already taken')
     )
 )

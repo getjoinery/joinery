@@ -50,11 +50,11 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 	// Config + seed data for the vanilla-JS reader.
 	$config = array(
 		'csrf'              => $csrf_token,
-		'mailboxesUrl'      => '/ajax/mailbox_mailboxes',
-		'listUrl'           => '/ajax/mailbox_list',
-		'threadUrl'         => '/ajax/mailbox_thread',
-		'actionUrl'         => '/ajax/mailbox_action',
-		'sendUrl'           => '/ajax/mailbox_send',
+		'mailboxesUrl'      => '/api/v1/action/mailbox/mailboxes',
+		'listUrl'           => '/api/v1/action/mailbox/thread_list',
+		'threadUrl'         => '/api/v1/action/mailbox/thread',
+		'actionUrl'         => '/api/v1/action/mailbox/thread_action',
+		'sendUrl'           => '/api/v1/action/mailbox/send',
 		'messageDetailBase' => $opts['message_detail_base'] ?? null,
 		'attachmentUrlBase' => (string)$opts['attachment_url_base'],
 		'initialMailboxes'  => $opts['initial_mailboxes'],
@@ -84,7 +84,7 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 	// reader — disabled (csrf => false); the endpoint validates the reader's
 	// persistent token instead. @see specs/outbound_reply_forward.md §4
 	$compose = $page->getFormWriter('mbx_compose_form', array(
-		'action'  => '/ajax/mailbox_send',
+		'action'  => '/api/v1/action/mailbox/send',
 		'method'  => 'POST',
 		'enctype' => 'multipart/form-data',
 		'csrf'    => false,

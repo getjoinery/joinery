@@ -24,7 +24,7 @@ $pageoptions['title'] = 'DebugEmailLog: '.$debug_email_log->get('del_subject');
 $altlinks = array();
 $pageoptions['altlinks'] = $altlinks;
 $page->begin_box($pageoptions);
-echo '<iframe src="/ajax/debug_email_log_preview_ajax?del_debug_email_log_id='.$debug_email_log->key.'" width="100%" height="300" style="border:1px solid gray;"></iframe>';
+echo '<iframe src="/admin/admin_debug_email_log_preview?del_debug_email_log_id='.$debug_email_log->key.'" width="100%" height="300" style="border:1px solid gray;"></iframe>';
 $page->end_box();
 
 $page->admin_footer();

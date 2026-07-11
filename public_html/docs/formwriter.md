@@ -307,6 +307,23 @@ $formwriter->dropinput('country', 'Country', [
 
 **Note:** The dropdown options format is: `'actual_value' => 'Display Text'` (value => label)
 
+### AJAX-backed fields — the API-action contract
+
+Three FormWriter surfaces call a server endpoint from the browser. Each speaks
+the `/api/v1` action contract: the field's JS POSTs JSON, sends the
+browser-session CSRF token from the `joinery_api_csrf` mirror cookie, and reads
+the response envelope's `data`.
+
+- **Remote validation** (`'validation' => ['remote' => ['url' => '/api/v1/action/{name}', ...]]`,
+  and the `'custom' => ['url' => ...]` shape): POSTs `{field: value}` (`dataFieldName`
+  and a `data` map override/extend the body) and reads `data.valid` (bool). The
+  action returns `LogicResult` success with `['valid' => bool]`.
+- **AJAX autocomplete select** (`dropinput` with `'ajaxendpoint' => '/api/v1/action/{name}'`):
+  POSTs `{q, ...}` (a query string on the configured URL folds into the body)
+  and reads `data.items` (`[{id, text}]`).
+- **Image selector** (`imageselector`, default endpoint `/api/v1/action/image_list`):
+  POSTs `{q, offset, limit}` and reads `data.{images, total, hasMore}`.
+
 ### Textarea
 
 ```php

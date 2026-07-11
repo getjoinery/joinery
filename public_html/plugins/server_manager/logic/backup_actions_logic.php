@@ -1,0 +1,125 @@
+<?php
+/**
+ * server_manager/backup_actions — backup browser actions.
+ *
+ * Input: action ∈ {refresh_list, delete_file, list_status} + node_id (+ target/
+ * local_path/cloud_path for delete_file, job_id for list_status). refresh_list
+ * and delete_file create jobs; list_status returns the cached backup list.
+ * Superadmin only (floor 10).
+ *
+ * @version 1.0.0
+ */
+
+require_once(__DIR__ . '/../../../includes/PathHelper.php');
+
+function backup_actions_logic(array $input): LogicResult {
+	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+	require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
+	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
+
+	$session = SessionControl::get_instance();
+
+	$action  = isset($input['action']) ? (string) $input['action'] : '';
+	$node_id = isset($input['node_id']) ? (int) $input['node_id'] : 0;
+
+	if (!$node_id) {
+		return LogicResult::render(['success' => false, 'message' => 'Missing node_id']);
+	}
+
+	try {
+		$node = new ManagedNode($node_id, TRUE);
+	} catch (Exception $e) {
+		return LogicResult::render(['success' => false, 'message' => 'Node not found']);
+	}
+
+	if ($action === 'refresh_list') {
+		$steps = JobCommandBuilder::build_list_backups($node);
+		$job = ManagementJob::createJob($node->key, 'list_backups', $steps, null, $session->get_user_id());
+		return LogicResult::render(['success' => true, 'job_id' => $job->key]);
+	}
+
+	if ($action === 'delete_file') {
+		$target     = isset($input['target']) ? (string) $input['target'] : 'local';
+		$local_path = isset($input['local_path']) ? (string) $input['local_path'] : '';
+		$cloud_path = isset($input['cloud_path']) ? (string) $input['cloud_path'] : '';
+
+		if (!$local_path && !$cloud_path) {
+			return LogicResult::render(['success' => false, 'message' => 'No file path provided']);
+		}
+		// Validate local_path is within /backups/ to prevent arbitrary file deletion.
+		if ($local_path && !preg_match('#^/backups/[^/]+$#', $local_path)) {
+			return LogicResult::render(['success' => false, 'message' => 'Invalid local path']);
+		}
+
+		$params = [
+			'target'     => $target,
+			'local_path' => $local_path,
+			'cloud_path' => $cloud_path,
+			'filename'   => basename($local_path ?: $cloud_path),
+		];
+
+		$steps = JobCommandBuilder::build_delete_backup($node, $params);
+		$job = ManagementJob::createJob($node->key, 'delete_backup', $steps, $params, $session->get_user_id());
+		return LogicResult::render(['success' => true, 'job_id' => $job->key]);
+	}
+
+	if ($action === 'list_status') {
+		$job_id = isset($input['job_id']) ? (int) $input['job_id'] : 0;
+
+		if ($job_id) {
+			try {
+				$job = new ManagementJob($job_id, TRUE);
+			} catch (Exception $e) {
+				return LogicResult::render(['success' => false, 'message' => 'Job not found']);
+			}
+			$status = $job->get('mjb_status');
+			if ($status === 'completed' && !$job->get('mjb_result')) {
+				JobResultProcessor::process($job);
+				$node->load(); // refresh cached data
+			}
+			if ($status !== 'pending' && $status !== 'running') {
+				require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupListHelper.php'));
+				$bl = BackupListHelper::get_for_node($node);
+				return LogicResult::render([
+					'success'     => true,
+					'status'      => 'complete',
+					'backup_list' => ['files' => $bl['files']],
+					'last_scan'   => $bl['last_scan'],
+					'cloud_error' => $bl['cloud_error'],
+				]);
+			}
+			return LogicResult::render(['success' => true, 'status' => $status]);
+		}
+
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupListHelper.php'));
+		$bl = BackupListHelper::get_for_node($node);
+		return LogicResult::render([
+			'success'     => true,
+			'status'      => 'cached',
+			'backup_list' => ['files' => $bl['files']],
+			'last_scan'   => $bl['last_scan'],
+			'cloud_error' => $bl['cloud_error'],
+		]);
+	}
+
+	return LogicResult::render(['success' => false, 'message' => 'Unknown action']);
+}
+
+function backup_actions_logic_descriptor(): array {
+	return [
+		'description' => 'Backup browser actions (refresh_list / delete_file / list_status) for a managed node.',
+		'mutates'     => true,
+		'auth'        => ['requires_session' => true, 'min_user_permission' => 10],
+		'input'       => [
+			'action'     => ['type' => 'string', 'required' => false, 'enum' => ['refresh_list', 'delete_file', 'list_status'], 'label' => 'Action'],
+			'node_id'    => ['type' => 'int',    'required' => false, 'label' => 'Node ID'],
+			'job_id'     => ['type' => 'int',    'required' => false, 'label' => 'Job ID (list_status)'],
+			'target'     => ['type' => 'string', 'required' => false, 'label' => 'Delete target'],
+			'local_path' => ['type' => 'string', 'required' => false, 'label' => 'Local path'],
+			'cloud_path' => ['type' => 'string', 'required' => false, 'label' => 'Cloud path'],
+		],
+	];
+}
+?>

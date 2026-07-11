@@ -87,15 +87,17 @@ Reaction::render_button('post', $post_id, [
 
 The button handles AJAX toggling and state updates automatically. User must be logged in.
 
-### AJAX Endpoint
+### API Actions
 
-**File:** `ajax/reaction_ajax.php`
+The button's JS calls these `POST /api/v1/action/{name}` actions with the
+browser-session credential; each returns its payload inside the response
+envelope's `data`. Logged-in only.
 
-| Action | Method | Params | Response |
-|--------|--------|--------|----------|
-| `toggle` | POST | `entity_type`, `entity_id`, `reaction_type` (opt) | `{success, action, count}` |
-| `status` | GET | `entity_type`, `entity_id` | `{reacted, count}` |
-| `count` | GET | `entity_type`, `entity_id` | `{count}` |
+| Action | Params | `data` payload |
+|--------|--------|----------------|
+| `reaction_toggle` | `entity_type`, `entity_id`, `reaction_type` (opt) | `{action, count}` |
+| `reaction_status` | `entity_type`, `entity_id` | `{reacted, count}` |
+| `reaction_count` | `entity_type`, `entity_id` | `{count}` |
 
 ### Entity Types
 

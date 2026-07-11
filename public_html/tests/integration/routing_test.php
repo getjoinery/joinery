@@ -640,9 +640,10 @@ class HttpRoutingTestRunner {
             //removed: echo "8. TESTING AJAX ENDPOINTS\n";
         
         $test_cases = [
-            // Existing AJAX endpoint
-            ['/ajax/theme_switch_ajax', [200, 400, 401, 403, 405], 'Existing AJAX endpoint'],
-            
+            // Existing flat endpoint — a surviving webhook (the flat /ajax/*
+            // namespace now hosts only external webhooks; page JS uses /api/v1).
+            ['/ajax/stripe_webhook', [200, 400, 401, 403, 405], 'Existing AJAX endpoint'],
+
             // AJAX endpoint that doesn't exist
             ['/ajax/definitely-fake-endpoint', [404, 401, 403], 'AJAX endpoint (does not exist)'],
         ];

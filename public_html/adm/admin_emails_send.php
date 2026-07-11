@@ -169,7 +169,7 @@
 				echo '<p><b>Cannot send test: no author user set on this email.</b></p>';
 			}
 			elseif(!$session->send_emails()){
-				echo '<p><b>Email sending is disabled, so the email is available <a href="/ajax/email_preview_ajax?eml_email_id='.$test_email->key.'">on the preview page</a></b></p>';
+				echo '<p><b>Email sending is disabled, so the email is available <a href="/admin/admin_email_preview?eml_email_id='.$test_email->key.'">on the preview page</a></b></p>';
 			}
 			else{
 				echo '<p><b>Sending test email to '.$sender->display_name().'</b></p>';

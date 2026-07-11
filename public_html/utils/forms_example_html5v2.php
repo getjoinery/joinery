@@ -300,7 +300,7 @@ $formwriter3->dropinput('country', 'Country (Static)', [
 $formwriter3->dropinput('user_lookup', 'User Lookup (AJAX Test - Requires Admin Login)', [
     'options' => [],
     'validation' => ['required' => false],
-    'ajaxendpoint' => '/ajax/user_search_ajax',
+    'ajaxendpoint' => '/api/v1/action/user_search',
     'empty_option' => '-- Type 3+ characters to search users --'
 ]);
 

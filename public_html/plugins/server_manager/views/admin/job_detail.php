@@ -258,10 +258,15 @@ if ($commands_data && isset($commands_data['steps'])) {
 	var offset = <?php echo strlen($job->get('mjb_output') ?: ''); ?>;
 	var polling = true;
 
+	function smApiPost(action, params) {
+		// Error envelopes resolve {} (soft-failure shape); network errors reject.
+		return joineryApi.post('server_manager/' + action, params || {})
+			.catch(function(err) { if (err && err.status) return {}; throw err; });
+	}
+
 	function poll() {
 		if (!polling) return;
-		fetch('/ajax/job_status?job_id=<?php echo $job->key; ?>&output_offset=' + offset)
-			.then(function(r) { return r.json(); })
+		smApiPost('job_status', { job_id: <?php echo (int)$job->key; ?>, output_offset: offset })
 			.then(function(data) {
 				if (!data.success) return;
 

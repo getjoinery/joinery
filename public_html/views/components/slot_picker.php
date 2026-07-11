@@ -9,11 +9,11 @@
  * HTML5 + vanilla JS.
  *
  * Config (via ComponentRenderer::render):
- *   'slots_url'    - JSON endpoint: GET ?start=&end= -> {slots:[{start,end}]} (UTC)
+ *   'slots_url'    - /api/v1 action endpoint (POST {slug?, start, end}) -> data.slots [{start,end}] (UTC)
  *   'field_name'   - hidden input name receiving the chosen UTC slot start (default 'slot_start')
  *   'initial_date' - Y-m-d to open on (default today)
  *
- * @version 1.0.0
+ * @version 1.2.0
  */
 
 $slots_url    = $component_config['slots_url'] ?? '';
@@ -106,10 +106,21 @@ $pid = 'slotpick_' . substr(md5(uniqid('', true)), 0, 8);
     SlotPicker.prototype.loadMonth = function(){
         var self = this;
         var r = this.monthRange();
-        var url = this.slotsUrl + (this.slotsUrl.indexOf('?') >= 0 ? '&' : '?') +
-            'start=' + encodeURIComponent(r[0]) + '&end=' + encodeURIComponent(r[1]);
-        fetch(url, {credentials: 'same-origin'}).then(function(res){ return res.json(); })
-            .then(function(j){ self.slots = (j && j.slots) ? j.slots : []; self.regroup(); self.renderMonth(); self.autoSelect(); })
+        // The feed is a sessionless /api/v1 action (POST-only, no CSRF header):
+        // any query string on the configured URL (e.g. ?slug=...) folds into the
+        // JSON body along with the range. Slots come from data.slots.
+        var qpos = this.slotsUrl.indexOf('?');
+        var base = qpos === -1 ? this.slotsUrl : this.slotsUrl.slice(0, qpos);
+        var body = {};
+        if (qpos !== -1) {
+            new URLSearchParams(this.slotsUrl.slice(qpos + 1)).forEach(function(v, k){ body[k] = v; });
+        }
+        body.start = r[0];
+        body.end = r[1];
+        joineryApi.post(base, body)
+            .then(function(j){
+                self.slots = (j && j.slots) ? j.slots : []; self.regroup(); self.renderMonth(); self.autoSelect();
+            })
             .catch(function(){ self.slots = []; self.regroup(); self.renderMonth(); });
     };
     SlotPicker.prototype.regroup = function(){

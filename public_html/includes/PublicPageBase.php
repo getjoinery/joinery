@@ -579,6 +579,13 @@ abstract class PublicPageBase {
 		// sends it as the X-Joinery-Csrf header to authenticate /api/v1 calls
 		// with the browser session (see ApiAuth). Session-wide token, distinct
 		// from FormWriter's per-form tokens.
+		//
+		// joinery-api.js (window.joineryApi) is the single transport for those
+		// calls — emitted on every page, before any inline page script, and
+		// outside render_base_assets() so themes that override that method
+		// still get it.
+		echo '<script src="/assets/js/joinery-api.js?v='
+			. $this->asset_mtime('assets/js/joinery-api.js') . '"></script>' . "\n";
 		$session = SessionControl::get_instance();
 		if ($session->is_logged_in()) {
 			echo '<meta name="joinery-api-csrf" content="'
@@ -779,36 +786,11 @@ abstract class PublicPageBase {
 				
 				// Add theme switcher functionality
 				window.joineryAdminBarSwitchTheme = function(theme) {
-					fetch("/ajax/theme_switch_ajax", {
-						method: "POST",
-						headers: {
-							"Content-Type": "application/x-www-form-urlencoded",
-						},
-						body: "theme=" + encodeURIComponent(theme),
-						credentials: "same-origin"
-					})
-					.then(response => {
-						if (!response.ok) {
-							throw new Error("Network response was not ok: " + response.status);
-						}
-						return response.text();
-					})
-					.then(text => {
-						try {
-							const data = JSON.parse(text);
-							if (data.success) {
-								window.location.reload();
-							} else {
-								alert("Failed to switch theme: " + (data.message || "Unknown error"));
-							}
-						} catch (e) {
-							console.error("Response was not JSON:", text);
-							alert("Server error: " + text.substring(0, 200));
-						}
-					})
-					.catch(error => {
+					joineryApi.post("theme_switch", { theme: theme })
+					.then(function() { window.location.reload(); })
+					.catch(function(error) {
 						console.error("Theme switch error:", error);
-						alert("Error switching theme: " + error.message);
+						alert("Failed to switch theme: " + error.message);
 					});
 				};
 

@@ -106,7 +106,7 @@ $impform->end_form();
 <?php
 echo ComponentRenderer::render(null, 'calendar_grid', [
     'view'         => 'month',
-    'feed_url'     => '/ajax/calendar_feed',
+    'feed_url'     => '/api/v1/action/calendar_feed',
     'initial_date' => $grid_initial,
 ]);
 ?>
@@ -346,7 +346,7 @@ if ($is_edit) {
     </div>
     <div class="cal-popup-error" id="cal-popup-error"></div>
 <?php
-$popwriter = $page->getFormWriter('cal-pop-form', ['action' => '/ajax/calendar_entry_quick_save']);
+$popwriter = $page->getFormWriter('cal-pop-form', ['action' => '/api/v1/action/calendar_entry_save']);
 $popwriter->begin_form();
 $popwriter->hiddeninput('action',   '', ['value' => 'save']);
 $popwriter->hiddeninput('entry_id', '', ['value' => '']);
@@ -532,24 +532,34 @@ $popwriter->checkboxinput('entry_blocks', 'Block this time (removes from booking
         clearError();
         var saveBtn=form.querySelector('.cal-popup-save');
         if(saveBtn){ saveBtn.disabled=true; saveBtn.textContent='Saving…'; }
-        var data=new FormData(form);
-        data.set('action','save');
+        // Map the popover fields onto the calendar_entry_save action's names.
+        // Checkbox presence semantics are preserved: all_day/blocks are only
+        // included when checked, mirroring how the form's FormData omitted an
+        // unchecked box (so blocks keeps its default-true behavior server-side).
+        var blocksEl = form.querySelector('[name="entry_blocks"]');
+        var body = {
+            entry_id:   getField('entry_id'),
+            date:       getField('entry_date'),
+            title:      getField('entry_title'),
+            start_time: getField('entry_start'),
+            end_time:   getField('entry_end')
+        };
+        if (allDayEl && allDayEl.checked) { body.all_day = true; }
+        if (blocksEl && blocksEl.checked) { body.blocks = true; }
         if(parsed){
-            data.set('entry_title',parsed.title);
-            data.set('entry_start',pad2(parsed.h)+':'+pad2(parsed.min));
-            data.set('entry_end',  pad2(parsed.h+1<24?parsed.h+1:23)+':'+pad2(parsed.h+1<24?parsed.min:59));
-            data.delete('entry_all_day');
+            body.title = parsed.title;
+            body.start_time = pad2(parsed.h)+':'+pad2(parsed.min);
+            body.end_time   = pad2(parsed.h+1<24?parsed.h+1:23)+':'+pad2(parsed.h+1<24?parsed.min:59);
+            delete body.all_day;
         }
-        fetch('/ajax/calendar_entry_quick_save',{method:'POST',body:data,credentials:'same-origin'})
-        .then(function(r){return r.json();})
-        .then(function(j){
+        joineryApi.post('calendar_entry_save', body)
+        .then(function(){
             if(saveBtn){saveBtn.disabled=false;saveBtn.textContent='Save';}
-            if(j.ok){ closePopup(); window.dispatchEvent(new Event('calendarentrychanged')); }
-            else { showError(j.error||'Save failed. Please try again.'); }
+            closePopup(); window.dispatchEvent(new Event('calendarentrychanged'));
         })
-        .catch(function(){
+        .catch(function(err){
             if(saveBtn){saveBtn.disabled=false;saveBtn.textContent='Save';}
-            showError('Network error. Please try again.');
+            showError(err.message||'Save failed. Please try again.');
         });
     });
 
@@ -557,15 +567,9 @@ $popwriter->checkboxinput('entry_blocks', 'Block this time (removes from booking
         var eid=getField('entry_id');
         if(!eid) return;
         JoineryModal.confirm('Delete this entry?', function(){
-            var data=new FormData();
-            data.set('action','delete'); data.set('entry_id',eid);
-            fetch('/ajax/calendar_entry_quick_save',{method:'POST',body:data,credentials:'same-origin'})
-            .then(function(r){return r.json();})
-            .then(function(j){
-                if(j.ok){ closePopup(); window.dispatchEvent(new Event('calendarentrychanged')); }
-                else { showError(j.error||'Delete failed.'); }
-            })
-            .catch(function(){ showError('Network error.'); });
+            joineryApi.post('calendar_entry_delete', {entry_id: eid})
+            .then(function(){ closePopup(); window.dispatchEvent(new Event('calendarentrychanged')); })
+            .catch(function(err){ showError(err.message||'Delete failed.'); });
         },{confirmLabel:'Delete'});
     });
 

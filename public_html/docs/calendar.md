@@ -60,7 +60,7 @@ These are two independent axes, not one. `cal_blocks_availability` says whether 
 
 ## Native entries and the personal calendar page
 
-`/profile/calendar` renders the `calendar_grid` component against the owner's aggregated item feed (`/ajax/calendar_feed`, `details` visibility). Native entries are created and edited there: click a day to start a new entry, click a native chip to edit it. A "blocking" entry removes its time from booking availability via the busy projection. Times are entered in the owner's timezone and stored as UTC.
+`/profile/calendar` renders the `calendar_grid` component against the owner's aggregated item feed (`/api/v1/action/calendar_feed`, `details` visibility). Native entries are created and edited there: click a day to start a new entry, click a native chip to edit it. A "blocking" entry removes its time from booking availability via the busy projection. Times are entered in the owner's timezone and stored as UTC.
 
 ## API surface (native apps and page JS)
 
@@ -80,7 +80,7 @@ path with the web form: the `_calendar_set_fields` / `_calendar_set_recurrence`
 The wall-clock → UTC conversion happens server-side in the declared
 `timezone`, so clients never do timezone math; "ends after N occurrences" is
 converted to a stored end date by the same `nth_occurrence_date()` engine as
-the web form. `/ajax/calendar_feed` and `/ajax/calendar_entry_quick_save`
+the web form. `/api/v1/action/calendar_feed` and the `calendar_entry_save`/`calendar_entry_delete` actions
 remain the web grid's endpoints.
 
 The native iOS surface consuming these actions is **JoineryCalendarKit** —

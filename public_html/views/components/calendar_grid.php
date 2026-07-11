@@ -12,7 +12,7 @@
  *   'feed_url'     - optional JSON endpoint; when set, paging refetches per range
  *   'initial_date' - Y-m-d to open on (default: today)
  *
- * @version 1.1.0
+ * @version 1.3.0
  */
 
 $items        = $component_config['items'] ?? [];
@@ -116,11 +116,9 @@ $cid = 'calgrid_' . substr(md5(uniqid('', true)), 0, 8);
         var self = this;
         if (this.feed) {
             var r = this.rangeFor();
-            var url = this.feed + (this.feed.indexOf('?') >= 0 ? '&' : '?') +
-                'start=' + encodeURIComponent(ymd(r[0]) + ' 00:00:00') +
-                '&end=' + encodeURIComponent(ymd(r[1]) + ' 00:00:00');
-            fetch(url, {credentials: 'same-origin'}).then(function(res){ return res.json(); })
-                .then(function(j){ self.items = (j && j.items) ? j.items : []; self.render(); })
+            // The feed is an /api/v1 action: POST the range, items from data.items.
+            joineryApi.post(this.feed, { start: ymd(r[0]) + ' 00:00:00', end: ymd(r[1]) + ' 00:00:00' })
+                .then(function(data){ self.items = (data && data.items) ? data.items : []; self.render(); })
                 .catch(function(){ self.render(); });
         } else {
             this.render();

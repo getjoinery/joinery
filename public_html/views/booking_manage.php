@@ -54,7 +54,7 @@ $tz = (!empty($booking) && $booking->get('bkn_invitee_timezone')) ? $booking->ge
 			$rf->hiddeninput('reschedule_booking', '', ['value' => '1']);
 			$rf->hiddeninput('token', '', ['value' => $booking->get('bkn_action_token')]);
 			echo ComponentRenderer::render(null, 'slot_picker', [
-				'slots_url' => '/ajax/booking_slots?slug=' . rawurlencode($type->get('bkt_slug')),
+				'slots_url' => '/api/v1/action/bookings/booking_slots?slug=' . rawurlencode($type->get('bkt_slug')),
 				'field_name' => 'slot_start',
 			]);
 			$rf->submitbutton('btn_resched', 'Reschedule to selected time');

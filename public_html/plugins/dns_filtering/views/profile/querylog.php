@@ -217,33 +217,13 @@ echo PublicPage::EndPage();
 		clearBtn.disabled = true;
 		statusEl.textContent = 'Clearing\u2026';
 
-		var xhr = new XMLHttpRequest();
-		xhr.open('POST', '/ajax/purge_querylog');
-		xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-		xhr.onload = function () {
-			if (xhr.status !== 200) {
-				statusEl.textContent = 'Error clearing log. Please try again.';
-				clearBtn.disabled = false;
-				return;
-			}
-			var data;
-			try { data = JSON.parse(xhr.responseText); } catch (e) {
-				statusEl.textContent = 'Error clearing log. Please try again.';
-				clearBtn.disabled = false;
-				return;
-			}
-			if (data.success) {
-				window.location.reload();
-			} else {
-				statusEl.textContent = data.message || 'Error clearing log.';
-				clearBtn.disabled = false;
-			}
-		};
-		xhr.onerror = function () {
-			statusEl.textContent = 'Network error. Please try again.';
+		joineryApi.post('dns_filtering/purge_querylog', { device_id: deviceId })
+		.then(function () {
+			window.location.reload();
+		}).catch(function (err) {
+			statusEl.textContent = err.message || 'Error clearing log.';
 			clearBtn.disabled = false;
-		};
-		xhr.send('device_id=' + encodeURIComponent(deviceId));
+		});
 	});
 })();
 </script>

@@ -36,7 +36,7 @@
 		$pageoptions['altlinks'] = $altlinks;
 		$page->begin_box($pageoptions);
 		echo '<b>'.$email->get_status_text().'</b><br /><br />';
-		echo '<iframe src="/ajax/email_preview_ajax?eml_email_id='.$email->key.'" width="100%" height="300" style="border:1px solid gray;"></iframe>';
+		echo '<iframe src="/admin/admin_email_preview?eml_email_id='.$email->key.'" width="100%" height="300" style="border:1px solid gray;"></iframe>';
 		$page->end_box();
 
 		$headers = array("Recipients", "Count", "Action");
@@ -145,7 +145,7 @@
 			$time = 'Scheduled: '. LibraryFunctions::convert_time($email->get('eml_scheduled_time'), "UTC", $session->get_timezone());
 		}
 		echo '<b>'.$time.'</b><br /><br />';
-		echo '<iframe src="/ajax/email_preview_ajax?eml_email_id='.$email->key.'" width="100%" height="300" style="border:1px solid gray;"></iframe>';
+		echo '<iframe src="/admin/admin_email_preview?eml_email_id='.$email->key.'" width="100%" height="300" style="border:1px solid gray;"></iframe>';
 		$page->end_box();
 
 		$headers = array("Recipient", "Recipient Email", "Status");

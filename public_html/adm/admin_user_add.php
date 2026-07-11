@@ -65,7 +65,8 @@ $session = SessionControl::get_instance();
 			'custom' => [
 				'rule' => 'email_check',
 				'message' => 'This email already exists.',
-				'url' => '/ajax/email_check_ajax'
+				'url' => '/api/v1/action/email_available',
+				'dataFieldName' => 'email'
 			]
 		]
 	]);

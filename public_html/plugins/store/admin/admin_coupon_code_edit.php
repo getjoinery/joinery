@@ -150,7 +150,7 @@
 	$formwriter->dropinput('ccd_usr_user_id_affiliate', 'Affiliate User for this coupon', [
 		'options' => $affiliate_options,
 		'validation' => ['required' => false],
-		'ajaxendpoint' => '/ajax/user_search_ajax?includenone=1',
+		'ajaxendpoint' => '/api/v1/action/user_search?includenone=1',
 		'empty_option' => '-- Type 3+ characters to search users --'
 	]);
 

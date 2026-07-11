@@ -205,11 +205,16 @@ Admin files live in `/adm/`, not `/admin/`. The wildcard route handles mapping:
 ```
 So `/admin/admin_users` loads `adm/admin_users.php`. Plugin admin pages auto-discover at `/plugins/{plugin}/admin/*`.
 
-### AJAX endpoint
+### Flat `/ajax/*` namespace (webhooks only)
 ```php
 '/ajax/*' => ['view' => 'ajax/{file}']
 ```
-Plugin ajax files are checked first automatically. Create `ajax/my_endpoint.php` and it's available at `/ajax/my_endpoint`.
+This route survives for **external webhooks** — the store's Stripe/PayPal
+handlers (`plugins/store/ajax/`) and the mailbox inbound-email webhook
+(`plugins/mailbox/ajax/inbound_email_webhook.php`). Page JavaScript does **not**
+use it: browser-facing endpoints are `/api/v1` actions
+(`_logic_descriptor()` opt-in, browser-session credential — see
+[API](api.md#authentication)). Do not add new `/ajax/` endpoints.
 
 ### Permission-protected route
 ```php

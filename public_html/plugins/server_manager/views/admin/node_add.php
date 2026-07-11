@@ -151,14 +151,7 @@ function detectServers() {
 	status.innerHTML = '<div class="text-muted"><span class="spinner-border spinner-border-sm me-2"></span>Creating discovery job... The agent will SSH to ' + host + ' and scan for Joinery instances.</div>';
 	results.innerHTML = '';
 
-	var formData = new FormData();
-	formData.append('host', host);
-	formData.append('ssh_user', user);
-	formData.append('ssh_key_path', key);
-	formData.append('ssh_port', port);
-
-	fetch('/ajax/discover_nodes', { method: 'POST', body: formData })
-		.then(function(r) { return r.json(); })
+	smApiPost('discover_nodes', { host: host, ssh_user: user, ssh_key_path: key, ssh_port: port })
 		.then(function(data) {
 			if (!data.success) {
 				btn.disabled = false;
@@ -176,13 +169,18 @@ function detectServers() {
 		});
 }
 
+function smApiPost(action, params) {
+	// Error envelopes resolve {} (soft-failure shape); network errors reject.
+	return joineryApi.post('server_manager/' + action, params || {})
+		.catch(function(err) { if (err && err.status) return {}; throw err; });
+}
+
 function pollDiscoveryJob(jobId, host) {
 	var btn = document.getElementById('detect_btn');
 	var status = document.getElementById('detect_status');
 	var results = document.getElementById('detect_results');
 
-	fetch('/ajax/discover_nodes?job_id=' + jobId)
-		.then(function(r) { return r.json(); })
+	smApiPost('discover_nodes', { job_id: jobId })
 		.then(function(data) {
 			if (!data.success) {
 				btn.disabled = false;
@@ -294,13 +292,7 @@ function addAllDetected(data) {
 		instances: unadded,
 	};
 
-	fetch('/ajax/add_discovered_nodes', {
-		method: 'POST',
-		credentials: 'same-origin',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(payload),
-	})
-		.then(function(r) { return r.json(); })
+	smApiPost('add_discovered_nodes', payload)
 		.then(function(j) {
 			if (!j.ok) {
 				status.innerHTML = '<div class="alert alert-danger">' + (j.message || 'Bulk add failed') + '</div>';

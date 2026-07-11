@@ -138,7 +138,7 @@
 	$optionvals = $users->get_dropdown_array();
 	$formwriter->dropinput('odi_usr_user_id', 'User', [
 		'options' => $optionvals,
-		'ajaxendpoint' => '/ajax/user_search_ajax',
+		'ajaxendpoint' => '/api/v1/action/user_search',
 		'validation' => ['required' => true]
 	]);
 

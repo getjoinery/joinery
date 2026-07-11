@@ -211,7 +211,7 @@ Routes outside the namespace are dropped with a logged warning.
 ├── data/                        # Data model classes
 ├── logic/                       # Business logic (LogicResult pattern)
 ├── admin/                       # Admin interface files (/adm/admin_*)
-├── ajax/                        # AJAX endpoints
+├── ajax/                        # External webhooks only (page JS uses /api/v1 actions)
 ├── includes/                    # Helper classes and libraries
 ├── migrations/                  # Database migrations
 └── uninstall.php               # (optional) external-cleanup hook — most plugins don't need one
@@ -1060,7 +1060,7 @@ Outcomes:
 
 ### Result states and the admin UI
 
-Checks run asynchronously (via `ajax/check_provisioning.php`) after the Plugins page renders, so a slow check never blocks the page. Each plugin with provisioners gets a rolled-up badge:
+Checks run asynchronously (via the `plugin_provisioning_check` API action) after the Plugins page renders, so a slow check never blocks the page. Each plugin with provisioners gets a rolled-up badge:
 
 | Rollup | Badge |
 |---|---|

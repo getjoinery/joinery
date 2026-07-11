@@ -65,10 +65,20 @@ function calendar_entry_delete_logic(array $input): LogicResult {
 	return LogicResult::render(array('deleted' => true));
 }
 
-function calendar_entry_delete_logic_api() {
+function calendar_entry_delete_logic_descriptor(): array {
+	// entry_id stays optional at the boundary so the logic's own "entry_id is
+	// required" ActionError remains the single source of that behavior.
 	return [
-		'requires_session' => true,
-		'description' => 'Delete a native calendar entry (scope aware for recurring series)',
+		'description' => 'Delete a native calendar entry (scope aware for recurring series).',
+		'mutates'     => true,
+		'auth'        => [
+			'requires_session' => true,
+		],
+		'input'       => [
+			'entry_id'        => ['type' => 'int',    'required' => false, 'label' => 'Entry ID'],
+			'scope'           => ['type' => 'string', 'required' => false, 'enum' => ['this', 'future', 'all'], 'label' => 'Recurring delete scope'],
+			'occurrence_date' => ['type' => 'string', 'required' => false, 'label' => 'Occurrence date (required for this/future)'],
+		],
 	];
 }
 

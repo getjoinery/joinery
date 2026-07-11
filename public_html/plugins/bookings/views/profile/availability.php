@@ -122,7 +122,7 @@ foreach ($overrides as $o) {
 require_once(PathHelper::getIncludePath('includes/ComponentRenderer.php'));
 echo ComponentRenderer::render(null, 'calendar_grid', [
     'view' => 'week',
-    'feed_url' => '/ajax/availability_preview',
+    'feed_url' => '/api/v1/action/availability_preview',
 ]);
 ?>
 </div>

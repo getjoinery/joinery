@@ -33,7 +33,7 @@ Per-period caps (max bookings/day/week) are **not** the generator's job — the 
 
 ## Availability editor
 
-`/profile/bookings/availability` (a bookings-plugin view over the core models) edits the subject's single schedule: weekly windows, date overrides, and timezone. It previews the resulting open availability (green) against existing commitments using the `calendar_grid` component, fed by `/ajax/availability_preview`.
+`/profile/bookings/availability` (a bookings-plugin view over the core models) edits the subject's single schedule: weekly windows, date overrides, and timezone. It previews the resulting open availability (green) against existing commitments using the `calendar_grid` component, fed by `/api/v1/action/availability_preview`.
 
 ## Calendar UI components
 

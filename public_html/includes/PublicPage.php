@@ -201,7 +201,7 @@ class PublicPage extends PublicPageBase {
             }
         }
 ?>
-    <script src="/assets/js/joinery-validate.js"></script>
+    <script src="/assets/js/joinery-validate.js?v=<?php echo $this->asset_mtime('assets/js/joinery-validate.js'); ?>"></script>
     <script src="/assets/js/script.js"></script>
 </body>
 </html>

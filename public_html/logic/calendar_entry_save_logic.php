@@ -24,7 +24,7 @@
  * logic/calendar_logic.php do the field/recurrence writes and the
  * scope-aware series splits.
  *
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 require_once(__DIR__ . '/../includes/PathHelper.php');
@@ -187,10 +187,33 @@ function _calendar_api_normalize_time($raw): string {
 	return '';
 }
 
-function calendar_entry_save_logic_api() {
+function calendar_entry_save_logic_descriptor(): array {
+	// Inputs are declared but left optional: the logic already validates date,
+	// times, and ownership and returns friendly ActionErrors, so boundary
+	// validation stays out of the way (no new rejections for existing callers).
 	return [
-		'requires_session' => true,
-		'description' => 'Create or update a native calendar entry (recurrence and scope aware)',
+		'description' => 'Create or update a native calendar entry (recurrence and scope aware).',
+		'mutates'     => true,
+		'auth'        => [
+			'requires_session' => true,
+		],
+		'input'       => [
+			'entry_id'        => ['type' => 'int',    'required' => false, 'label' => 'Entry ID (update when present)'],
+			'date'            => ['type' => 'string', 'required' => false, 'label' => 'Entry date (Y-m-d)'],
+			'title'           => ['type' => 'string', 'required' => false, 'label' => 'Title'],
+			'all_day'         => ['type' => 'bool',   'required' => false, 'label' => 'All-day'],
+			'blocks'          => ['type' => 'bool',   'required' => false, 'label' => 'Blocks booking availability'],
+			'start_time'      => ['type' => 'string', 'required' => false, 'label' => 'Start time (HH:MM)'],
+			'end_time'        => ['type' => 'string', 'required' => false, 'label' => 'End time (HH:MM)'],
+			'timezone'        => ['type' => 'string', 'required' => false, 'label' => 'IANA timezone of the wall-clock values'],
+			'occurrence_date' => ['type' => 'string', 'required' => false, 'label' => 'Occurrence date (recurring edit)'],
+			'scope'           => ['type' => 'string', 'required' => false, 'enum' => ['this', 'future', 'all'], 'label' => 'Recurring edit scope'],
+			// 'recurrence' is deliberately not declared: it is a single object
+			// ({type, interval, days_of_week, ...}), and the schema's 'array'
+			// type accepts only lists — declaring it rejects every recurring
+			// save with a 422. Undeclared fields pass through untouched and
+			// the logic validates the rule itself.
+		],
 	];
 }
 

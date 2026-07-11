@@ -21,7 +21,7 @@ Admin CRUD: `/plugins/bookings/admin/admin_booking_types` (list) and `admin_book
 ## Public booking flow
 
 - **Vanity URL** `/book/{slug}` (one `serve.php` placeholder route) resolves the type by its globally-unique slug.
-- **Slots endpoint** `/ajax/booking_slots?slug=…&start=…&end=…` — public, read-only JSON, computed by the provider from `SlotGenerator` + the busy projection (at `busy` visibility, so no item titles leak) + per-period caps.
+- **Slots endpoint** `POST /api/v1/action/bookings/booking_slots` (JSON `{slug, start, end}`, sessionless) — public, read-only JSON, computed by the provider from `SlotGenerator` + the busy projection (at `busy` visibility, so no item titles leak) + per-period caps.
 - **Booking page** renders the `slot_picker` from the slots endpoint plus a FormWriter form (name, email, notes) and the intake survey inline (`Question::output_question`). The invitee needs no account — an inactive user record is matched/created by email.
 - **Race-safe creation:** a transaction holding a per-host PostgreSQL advisory lock re-runs the slot conflict check before inserting, so two simultaneous submissions for one slot produce exactly one booking.
 - **Confirmation:** a BOOKED `bkn_bookings` row, confirmation emails to invitee + host (ICS attached, manage link carrying `bkn_action_token`), and an in-app notification to the host. The booking then appears on the host's personal calendar via `BookingItemSource`, which also removes the slot from future availability.

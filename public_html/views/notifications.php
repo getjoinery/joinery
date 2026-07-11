@@ -2,7 +2,7 @@
 /**
  * Notifications list page
  *
- * @version 2.0
+ * @version 2.1
  */
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('notifications_logic.php', 'logic'));
@@ -154,22 +154,13 @@ document.addEventListener('DOMContentLoaded', function() {
 		btn.addEventListener('click', function() {
 			var id = this.getAttribute('data-id');
 			var row = document.querySelector('.ntf-row[data-id="' + id + '"]');
-			var formData = new FormData();
-			formData.append('action', 'mark_read');
-			formData.append('notification_id', id);
-			fetch('/ajax/notifications_ajax', {
-				method: 'POST',
-				body: formData
-			}).then(function(r) { return r.json(); })
-			.then(function(data) {
-				if (data.success) {
-					row.classList.remove('ntf-row-unread');
-					var dot = row.querySelector('.ntf-unread-dot');
-					if (dot) dot.remove();
-					var markBtn = row.querySelector('.ntf-row-mark-btn');
-					if (markBtn) markBtn.remove();
-				}
-			});
+			joineryApi.post('notification_mark_read', { notification_id: id }).then(function() {
+				row.classList.remove('ntf-row-unread');
+				var dot = row.querySelector('.ntf-unread-dot');
+				if (dot) dot.remove();
+				var markBtn = row.querySelector('.ntf-row-mark-btn');
+				if (markBtn) markBtn.remove();
+			}).catch(function() {});
 		});
 	});
 
@@ -177,25 +168,17 @@ document.addEventListener('DOMContentLoaded', function() {
 	var markAllBtn = document.getElementById('mark-all-read-btn');
 	if (markAllBtn) {
 		markAllBtn.addEventListener('click', function() {
-			var formData = new FormData();
-			formData.append('action', 'mark_all_read');
-			fetch('/ajax/notifications_ajax', {
-				method: 'POST',
-				body: formData
-			}).then(function(r) { return r.json(); })
-			.then(function(data) {
-				if (data.success) {
-					document.querySelectorAll('.ntf-row-unread').forEach(function(el) {
-						el.classList.remove('ntf-row-unread');
-					});
-					document.querySelectorAll('.ntf-unread-dot').forEach(function(el) {
-						el.remove();
-					});
-					document.querySelectorAll('.ntf-row-mark-btn').forEach(function(el) {
-						el.remove();
-					});
-				}
-			});
+			joineryApi.post('notification_mark_all_read').then(function() {
+				document.querySelectorAll('.ntf-row-unread').forEach(function(el) {
+					el.classList.remove('ntf-row-unread');
+				});
+				document.querySelectorAll('.ntf-unread-dot').forEach(function(el) {
+					el.remove();
+				});
+				document.querySelectorAll('.ntf-row-mark-btn').forEach(function(el) {
+					el.remove();
+				});
+			}).catch(function() {});
 		});
 	}
 });

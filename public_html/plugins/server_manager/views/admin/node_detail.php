@@ -1305,6 +1305,12 @@ $backup_last_attempt_failed = ($bk_last && $bk_last['mjb_status'] === 'failed');
 ?>
 var backupLastAttemptFailed = <?php echo $backup_last_attempt_failed ? 'true' : 'false'; ?>;
 
+function smApiPost(action, params) {
+	// Error envelopes resolve {} (soft-failure shape); network errors reject.
+	return joineryApi.post('server_manager/' + action, params || {})
+		.catch(function(err) { if (err && err.status) return {}; throw err; });
+}
+
 function refreshBackupList() {
 	var btn = document.getElementById('refreshBackupsBtn');
 	var status = document.getElementById('backupScanStatus');
@@ -1313,8 +1319,7 @@ function refreshBackupList() {
 	status.style.display = 'block';
 	status.innerHTML = '<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span> Scanning backup files...</span>';
 
-	fetch('/ajax/backup_actions?action=refresh_list&node_id=' + backupNodeId)
-		.then(function(r) { return r.json(); })
+	smApiPost('backup_actions', { action: 'refresh_list', node_id: backupNodeId })
 		.then(function(data) {
 			if (!data.success) {
 				btn.disabled = false;
@@ -1341,8 +1346,7 @@ function pollBackupList(jobId) {
 	var btn = document.getElementById('refreshBackupsBtn');
 	var status = document.getElementById('backupScanStatus');
 
-	fetch('/ajax/backup_actions?action=list_status&node_id=' + backupNodeId + '&job_id=' + jobId)
-		.then(function(r) { return r.json(); })
+	smApiPost('backup_actions', { action: 'list_status', node_id: backupNodeId, job_id: jobId })
 		.then(function(data) {
 			if (data.status === 'pending' || data.status === 'running') {
 				setTimeout(function() { pollBackupList(jobId); }, 2000);
@@ -1420,13 +1424,10 @@ function deleteBackup(target, filename, localPath, cloudPath) {
 	else                         locations = 'the cloud copy';
 
 	JoineryModal.confirm('Delete ' + filename + '? This will remove ' + locations + '. This cannot be undone.', function() {
-		var url = '/ajax/backup_actions?action=delete_file&node_id=' + backupNodeId
-			+ '&target=' + encodeURIComponent(target)
-			+ '&local_path=' + encodeURIComponent(localPath)
-			+ '&cloud_path=' + encodeURIComponent(cloudPath);
-
-		fetch(url)
-			.then(function(r) { return r.json(); })
+		smApiPost('backup_actions', {
+			action: 'delete_file', node_id: backupNodeId, target: target,
+			local_path: localPath, cloud_path: cloudPath
+		})
 			.then(function(data) {
 				if (!data.success) {
 					alert('Delete failed: ' + data.message);
@@ -1772,8 +1773,7 @@ function deleteBackup(target, filename, localPath, cloudPath) {
 		var el = document.getElementById('apiProbeIndicator');
 		if (!el) return;
 		var nodeId = el.getAttribute('data-node-id');
-		fetch('/ajax/probe_api?node_id=' + encodeURIComponent(nodeId))
-			.then(function(r) { return r.json(); })
+		joineryApi.post('server_manager/probe_api', { node_id: nodeId })
 			.then(function(j) {
 				if (j.ok) {
 					el.className = 'ms-2 small text-success';

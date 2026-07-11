@@ -1,9 +1,9 @@
 /**
  * Joinery Validation System - Pure JavaScript validation library
  * No jQuery dependencies, works alongside jQuery validation if present
- * @version 1.0.10
+ * @version 1.0.12
  */
-console.log('%c=== JOINERY VALIDATION v1.0.10 ===', 'color: blue; font-weight: bold');
+console.log('%c=== JOINERY VALIDATION v1.0.12 ===', 'color: blue; font-weight: bold');
 
 (function() {
     'use strict';
@@ -697,6 +697,26 @@ console.log('%c=== JOINERY VALIDATION v1.0.10 ===', 'color: blue; font-weight: b
             if (this.debug) {
                 console.log(`[Remote validation] URL: ${url}, Field: ${dataFieldName}, Value: ${value}`);
                 console.log(`[Remote validation] Data being sent:`, data);
+            }
+
+            // API-action mode: a /api/v1/ endpoint speaks the JSON envelope, not
+            // the legacy 'true'/'false' text contract. POST the field data as
+            // JSON with the browser-session CSRF header and read data.valid.
+            if (typeof url === 'string' && url.indexOf('/api/v1/') === 0) {
+                try {
+                    const result = await joineryApi.post(url, data);
+                    if (this.debug) {
+                        console.log(`[Remote validation] API result:`, result);
+                    }
+                    return !!(result && result.valid);
+                } catch (e) {
+                    // An error envelope (401 expired session, 403, 422 boundary
+                    // rejection) or network failure is not a validity verdict —
+                    // fail open and let server-side validation decide, rather
+                    // than misreporting it as this field's error.
+                    console.error('Remote validation error:', e);
+                    return true;
+                }
             }
 
             try {
