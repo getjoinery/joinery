@@ -473,6 +473,11 @@ function harness_finish() {
 	$h = &$GLOBALS['__harness'];
 	$h['finished'] = true;
 
+	// Deferred fixture cleanup runs on BOTH exits: here on a clean finish, and
+	// in harness_shutdown_report() on a crash. Without this call a passing test
+	// leaks every harness_register_* fixture (rows, users, keys) into the dev DB.
+	harness_teardown_data();
+
 	if (harness_wants_json()) {
 		harness_emit_json();
 	} else {

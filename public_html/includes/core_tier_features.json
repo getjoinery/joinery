@@ -1,1 +1,10 @@
-{}
+{
+  "drive_storage_bytes":    { "label": "Drive Storage (bytes)", "type": "integer", "default": 0,
+                              "description": "Total Drive storage per member. 0 disables uploads." },
+  "drive_max_file_bytes":   { "label": "Drive Max File Size (bytes)", "type": "integer", "default": 0,
+                              "description": "Largest single file a member may upload to Drive. 0 disables uploads." },
+  "drive_share_links":      { "label": "Drive Share Links", "type": "boolean", "default": false,
+                              "description": "Allow members to mint public share links for Drive files and folders." },
+  "drive_versioning_depth": { "label": "Drive Versions Kept", "type": "integer", "default": 0,
+                              "description": "How many prior versions of each Drive file to retain. 0 keeps only the current version." }
+}

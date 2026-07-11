@@ -405,6 +405,16 @@
             "nativeScreen": "calendar"
         },
         {
+            "slug": "core-drive",
+            "title": "Drive",
+            "url": "/drive",
+            "order": 56,
+            "permission": 0,
+            "icon": "folder",
+            "settingActivate": "drive_active",
+            "visibility": "in"
+        },
+        {
             "slug": "core-admin-dashboard",
             "title": "Admin Dashboard",
             "url": "/admin/admin_users",

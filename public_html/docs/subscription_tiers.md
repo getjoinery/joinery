@@ -54,6 +54,20 @@ When you edit a tier, the admin UI automatically shows all available features fr
 
 **Note:** Plugin features are automatically prefixed with the plugin name (e.g., `max_devices` becomes `controld_max_devices`).
 
+**Core Features:** Core (non-plugin) features live in `/includes/core_tier_features.json`
+and are not prefixed. The member Drive defines four:
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `drive_storage_bytes` | integer | Total Drive storage per member. `0` disables uploads. |
+| `drive_max_file_bytes` | integer | Largest single file a member may upload. `0` disables uploads. |
+| `drive_share_links` | boolean | Whether the member may mint public share links. |
+| `drive_versioning_depth` | integer | Prior versions kept per file. `0` keeps only the current version. |
+
+Read at runtime with `SubscriptionTier::getUserFeature($user_id, $key, $default)`,
+which returns the default for a tierless member — so all four fail closed (no
+storage, no links, no history) until a tier is configured.
+
 ### 3. Linking Tiers to Products
 
 **Navigate:** Products → Edit Product

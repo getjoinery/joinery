@@ -16,7 +16,7 @@ class FileException extends SystemBaseException {}
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
- * @version 1.4.0
+ * @version 1.5.0
  */
 class File extends SystemBase {	public static $prefix = 'fil';
 	public static $tablename = 'fil_files';
@@ -29,7 +29,11 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	public static $ai_untrusted_fields = ['fil_title', 'fil_description', 'fil_name'];
 
 	protected static $foreign_key_actions = [
-		'fil_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
+		'fil_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED],
+		// A permanently deleted folder orphans its files to the drive root rather
+		// than destroying them. Normal folder deletion goes through the trash logic
+		// (soft-delete cascade), not raw permanent_delete.
+		'fil_fol_folder_id' => ['action' => 'null']
 	];
 
 	// Origin tags for fil_source: a short, self-describing key saying where a file
@@ -41,6 +45,7 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	const SOURCE_ENTITY_PHOTO     = 'entity_photo';      // avatar / event / location / gallery photo
 	const SOURCE_EMAIL_ATTACHMENT = 'email_attachment';  // inbound-email attachment
 	const SOURCE_AI_CHAT_UPLOAD   = 'ai_chat_upload';    // file uploaded into a joinery_ai chat
+	const SOURCE_DRIVE            = 'drive';             // member Drive item — the whole Drive surface (listings, trash, purge, quota) scopes to this tag
 	const SOURCE_MAILBOX_SEARCH_INDEX = 'mailbox_search_index'; // sealed FTS5 blob (MailboxIndex) — read server-side only, never streamed via serve_from_path
 
 	// MIME types safe to render inline in the browser. Only raster image
@@ -90,6 +95,10 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	    // that references it.
 	    'fil_fbb_file_blob_id' => array('type'=>'int8', 'is_nullable'=>true, 'index'=>true),
 	    'fil_source' => array('type'=>'varchar(64)', 'is_nullable'=>true),
+	    // Drive folder placement. NULL = the drive root (implicit, no root row).
+	    // A file only carries this when it lives in a user's Drive; every other
+	    // creation site leaves it NULL.
+	    'fil_fol_folder_id' => array('type'=>'int8', 'is_nullable'=>true, 'index'=>true),
 	);
 
 public static function get_by_name($name, $search_deleted = false) {
@@ -231,6 +240,41 @@ public static function get_by_name($name, $search_deleted = false) {
 	 * stored blob names. Used for both fil_name and — via staging — a fresh
 	 * blob's fbb_stored_name.
 	 */
+	/**
+	 * Create a logical File that references an already-stored blob, without
+	 * ingesting any bytes — the dedup short-circuit (Drive upload_init matches a
+	 * file's sha256 to an existing blob). The blob is retained (+1 refcount) and
+	 * the new file gets its own unique fil_name while sharing the physical bytes.
+	 * Returns the saved File, or FALSE if the blob was reclaimed out from under us
+	 * (the caller then falls back to a real ingest).
+	 *
+	 * @param FileBlob $blob          the existing blob to reference
+	 * @param string   $display_name  user-facing name (fil_title + fil_name seed)
+	 * @param string   $mime          fallback MIME (the blob's own type wins)
+	 * @param int      $owner_id
+	 * @param array    $restrictions  visibility columns (e.g. ['fil_private'=>true])
+	 * @return File|false
+	 */
+	public static function createFromExistingBlob(FileBlob $blob, $display_name, $mime, $owner_id, array $restrictions = array()) {
+		require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
+		if (!$blob->key || !FileBlob::retain($blob->key)) {
+			return false;
+		}
+		$name = self::_mint_unique_name($display_name);
+		$file = new File(NULL);
+		$file->set('fil_name', $name);
+		$file->set('fil_title', substr((string)($display_name !== '' ? $display_name : 'file'), 0, 255));
+		$file->set('fil_type', $blob->get('fbb_mime_type') ?: $mime);
+		$file->set('fil_usr_user_id', (int)$owner_id);
+		$file->set('fil_fbb_file_blob_id', (int)$blob->key);
+		foreach ($restrictions as $col => $val) {
+			$file->set($col, $val);
+		}
+		$file->save();
+		$file->load();
+		return $file;
+	}
+
 	private static function _mint_unique_name($display_name) {
 		require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
 		$base = ($display_name !== null && $display_name !== '') ? $display_name : 'attachment';
@@ -1053,6 +1097,20 @@ public static function get_by_name($name, $search_deleted = false) {
 	 * file" — attachment/consumption checks — use is_owned_by() instead;
 	 * "viewable" is strictly broader than "owned".
 	 */
+	/**
+	 * Does $user_id hold a Drive access grant that reaches this file — directly,
+	 * or via a grant on any ancestor folder? Delegates to the one grant-reach
+	 * implementation in DriveHelper.
+	 */
+	private function _has_drive_grant($user_id) {
+		$user_id = (int)$user_id;
+		if ($user_id <= 0) {
+			return false;
+		}
+		require_once(PathHelper::getIncludePath('includes/DriveHelper.php'));
+		return DriveHelper::grant_reaches(DriveHelper::ENTITY_FILE, $this, $user_id, array('viewer', 'editor'));
+	}
+
 	function is_viewable($session){
 		if(!$session){
 			throw new SystemDisplayablePermanentError("Session is not present to authenticate.");
@@ -1063,7 +1121,12 @@ public static function get_by_name($name, $search_deleted = false) {
 		}
 
 		if ($this->_is_private()) {
-			return $this->is_owner_or_admin($session->get_user_id(), $session->get_permission());
+			if ($this->is_owner_or_admin($session->get_user_id(), $session->get_permission())) {
+				return true;
+			}
+			// Drive sharing: a viewer/editor grant on this file, or on any ancestor
+			// folder, also grants view of a private Drive file.
+			return $this->_has_drive_grant($session->get_user_id());
 		}
 
 		if($this->get('fil_min_permission')){
@@ -1139,6 +1202,36 @@ class MultiFile extends SystemMultiBase {
 
 		if (isset($this->options['group_id'])) {
 			$filters['fil_grp_group_id'] = [$this->options['group_id'], PDO::PARAM_INT];
+		}
+
+		// Drive folder placement. An explicit NULL / 0 means the drive root
+		// (IS NULL); a positive id means that folder's direct files.
+		if (array_key_exists('folder_id', $this->options)) {
+			$fid = $this->options['folder_id'];
+			if ($fid === null || $fid === '' || (int)$fid === 0) {
+				$filters['fil_fol_folder_id'] = 'IS NULL';
+			} else {
+				$filters['fil_fol_folder_id'] = [(int)$fid, PDO::PARAM_INT];
+			}
+		}
+
+		// id-set restriction for "Shared with me" / grant listings.
+		if (isset($this->options['file_ids']) && is_array($this->options['file_ids'])) {
+			$ids = array_values(array_filter(array_map('intval', $this->options['file_ids'])));
+			$filters['fil_file_id'] = empty($ids) ? 'IN (NULL)' : 'IN (' . implode(',', $ids) . ')';
+		}
+
+		// folder-set restriction: files directly inside any of these folders
+		// (shared-folder search expands granted folders to their subtrees).
+		if (isset($this->options['folder_ids']) && is_array($this->options['folder_ids'])) {
+			$fids = array_values(array_filter(array_map('intval', $this->options['folder_ids'])));
+			$filters['fil_fol_folder_id'] = empty($fids) ? 'IN (NULL)' : 'IN (' . implode(',', $fids) . ')';
+		}
+
+		// Drive filename search (v1): match the display title, case-insensitive.
+		if (isset($this->options['title_like'])) {
+			$dblink = DbConnector::get_instance()->get_db_link();
+			$filters['fil_title'] = 'ILIKE ' . $dblink->quote('%' . $this->options['title_like'] . '%');
 		}
 
 		if (isset($this->options['deleted'])) {

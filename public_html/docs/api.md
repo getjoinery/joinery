@@ -869,6 +869,34 @@ Request logs and error messages use the full namespaced name (e.g. `action dns_f
 See [Passkeys](passkeys.md) for the WebAuthn ceremonies behind the `passkey_*` actions, and
 [Sealed Vault](sealed_vault.md) for the `vault_*` ones.
 
+### Drive actions and the chunk-upload endpoint
+
+The member Drive exposes its verbs as sessioned `drive_*` actions —
+`drive_folder_create`, `drive_rename`, `drive_move`, `drive_trash`,
+`drive_restore`, `drive_delete_forever`, `drive_list`, `drive_shares`,
+`drive_share_sync`, `drive_link_create`, `drive_link_revoke`, `drive_versions`,
+`drive_version_restore`, `drive_changes`, and the two upload actions below.
+Uploads use a resumable protocol rather than a single multipart POST:
+
+- **`drive_upload_init`** opens an upload (or dedup-completes immediately when the
+  client's `sha256` matches a blob the caller already possesses through their own
+  files/versions), returning `{upload_token, chunk_bytes}`.
+- **`PUT /api/v1/drive_upload/{token}`** — a raw-body binary endpoint (not an
+  action; a pre-CRUD branch in `apiv1.php`). Chunks are **sequential**: the request
+  carries `Content-Range: bytes <start>-<end>/<total>` and `<start>` must equal the
+  server's `received_bytes`, else **409** with `{received_bytes}` to resume. `GET`
+  returns `{received_bytes, expected_bytes}`. These requests use a dedicated
+  **`api_upload`** rate-limit bucket (`api_upload_rate_limit_requests` /
+  `api_upload_rate_limit_window`) so a multi-GB upload never exhausts the general
+  1,000/hr budget; the transport logs each request's actual outcome into that
+  bucket (success on 2xx, failure with status code otherwise).
+- **`drive_upload_complete`** verifies the bytes, enforces the storage quota at
+  the boundary, and ingests (retry-safe via `Idempotency-Key`).
+
+`drive_share_sync`'s `grants` body field is a JSON **object** (grantee → role), so
+it is validated in the logic and passes through the descriptor boundary untouched.
+See [Drive](drive.md) for the full protocol and access model.
+
 Plugin action surfaces are documented with their plugin (e.g. the DNS filtering surface in [plugins/dns_filtering/docs/overview.md](../plugins/dns_filtering/docs/overview.md)) and appear in the discovery endpoint below.
 
 ### Action Discovery Endpoint

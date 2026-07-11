@@ -189,6 +189,12 @@
     { "name": "social_twitch_link", "default": "" },
     { "name": "social_twitter_link", "default": "" },
     { "name": "social_whatsapp_link", "default": "" },
-    { "name": "social_youtube_link", "default": "" }
+    { "name": "social_youtube_link", "default": "" },
+
+    { "name": "drive_active", "default": "0", "helptext": "Master switch for the member Drive (/drive). Off by default; enable per instance." },
+    { "name": "drive_max_folder_depth", "default": "32", "helptext": "Maximum nesting depth for Drive folders." },
+    { "name": "drive_upload_chunk_bytes", "default": "8388608", "helptext": "Chunk size (bytes) the Drive resumable upload protocol requests. Default 8 MiB." },
+    { "name": "api_upload_rate_limit_requests", "default": "10000", "helptext": "Max Drive chunk-upload requests per window per IP (own bucket, not the general API limit)." },
+    { "name": "api_upload_rate_limit_window", "default": "3600", "helptext": "Window (seconds) for the Drive chunk-upload rate limit." }
   ]
 }
