@@ -25,6 +25,12 @@ class ChatTurn {
         $sealed = ChatSeal::isProtectedLevel($conversation->get('aic_security_level'));
         $stamper = ChatAsync::activityStamper($assistant_msg);
         $stamper('Starting…');
+        $unreachable = self::reachabilityError($conversation);
+        if ($unreachable !== null) {
+            error_log('[joinery_ai chat] preflight unreachable: ' . $unreachable);
+            self::markFailed($assistant_msg, LlmProviderException::friendlyMessage('api_network_error'));
+            return;
+        }
         try {
             $turn = ChatRunner::runTurn($conversation, $uid,
                 ChatAsync::streamSink($assistant_msg, '', $sealed,
@@ -71,6 +77,12 @@ class ChatTurn {
         $sealed = ChatSeal::isProtectedLevel($conversation->get('aic_security_level'));
         $stamper = ChatAsync::activityStamper($msg);
         $stamper('Resuming…');
+        $unreachable = self::reachabilityError($conversation);
+        if ($unreachable !== null) {
+            error_log('[joinery_ai chat] resume preflight unreachable: ' . $unreachable);
+            self::markFailed($msg, LlmProviderException::friendlyMessage('api_network_error'));
+            return;
+        }
         try {
             $seed = $lead_text !== '' ? $lead_text . "\n\n" : '';
             $sink = ChatAsync::streamSink($msg, $seed, $sealed,
@@ -123,6 +135,22 @@ class ChatTurn {
             'aic_total_output_tokens' => (int)$conversation->get('aic_total_output_tokens') + $out,
             'aic_update_time'         => gmdate('Y-m-d H:i:s'),
         ]);
+    }
+
+    /**
+     * A fast pre-turn reachability probe of the conversation's provider, so an
+     * offline or sleeping local model server fails the turn in a couple of seconds
+     * instead of stalling the full streaming call. Returns the probe's diagnostic
+     * message when the host is unreachable, or null when reachable / no probe
+     * applies (cloud providers). A provider that can't even be constructed returns
+     * null — the real call's exception path surfaces that with its own message.
+     */
+    private static function reachabilityError(AiConversation $conversation): ?string {
+        try {
+            return LlmProviderFactory::forConversation($conversation)->reachabilityProbe();
+        } catch (Throwable $e) {
+            return null;
+        }
     }
 
     public static function markFailed(AiConversationMessage $msg, string $error): void {

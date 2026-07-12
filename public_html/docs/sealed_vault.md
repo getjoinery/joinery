@@ -4,10 +4,10 @@ A per-user encryption identity shared by every feature that seals content the
 server should only read while the user has proven presence. One lock (a
 passkey, a recovery code, or an optional passphrase), one bounded unlock
 window, and any number of consumers behind it — mail and chat seal server-custody
-content; the [password manager](../plugins/vault/docs/overview.md) is a
-client-custody consumer (its key is unwrapped only in the browser), and Drive is
-the next. The vault owns the identity and the lock; each consumer owns what it
-seals and how it presents locked state.
+content; the [password manager](../plugins/vault/docs/overview.md) and
+[Drive encryption](drive_encryption.md) are client-custody consumers (their keys
+are unwrapped only in the browser). The vault owns the identity and the lock; each
+consumer owns what it seals and how it presents locked state.
 
 ## The shape of it
 
@@ -415,6 +415,7 @@ shared client-custody layer lives in **core** so every consumer reuses it:
 
 Each client scope has its **own** keypair and its **own** PRF context
 (`vault-passwords-kek`, `vault-drive-kek`), so unlocking one never opens another.
-The [password manager](../plugins/vault/docs/overview.md) is the built consumer
-(scope `passwords`); Drive reuses this same layer with scope `drive`, adding only
-its file-content encryption on top.
+The built consumers are the [password manager](../plugins/vault/docs/overview.md)
+(scope `passwords`) and [Drive encryption](drive_encryption.md) (scope `drive`,
+reusing this same layer and adding per-file content encryption and multi-user key
+sharing on top).

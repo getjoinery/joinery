@@ -99,6 +99,17 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	    // A file only carries this when it lives in a user's Drive; every other
 	    // creation site leaves it NULL.
 	    'fil_fol_folder_id' => array('type'=>'int8', 'is_nullable'=>true, 'index'=>true),
+	    // Client-side end-to-end encryption (docs/drive_encryption.md). When true
+	    // the stored bytes are ciphertext the server never interprets: no
+	    // thumbnails/previews/search/AI/office. fil_name/fil_title hold an opaque
+	    // identifier; the real name, MIME type, and thumbnail live in the
+	    // FK-encrypted metadata blob below. Set by the Drive upload path when the
+	    // destination folder is an encrypted vault folder.
+	    'fil_encrypted' => array('type'=>'bool', 'is_nullable'=>false, 'default'=>'false'),
+	    // Per-file metadata (name, mime, size, chunk size, content id, thumb flag)
+	    // JSON-encoded then encrypted under the file key, produced in the browser.
+	    // Opaque here.
+	    'fil_encrypted_metadata' => array('type'=>'text', 'is_nullable'=>true),
 	);
 
 public static function get_by_name($name, $search_deleted = false) {
@@ -406,7 +417,21 @@ public static function get_by_name($name, $search_deleted = false) {
 	 * inline-safe-set ever need to diverge, split the constant then.
 	 */
 	function is_image(){
+		if ($this->is_encrypted()) {
+			return false; // ciphertext is never a server-decodable image
+		}
 		return self::is_inline_safe_type($this->get('fil_type'));
+	}
+
+	/**
+	 * Is this file client-side end-to-end encrypted (docs/drive_encryption.md)?
+	 * The stored bytes are ciphertext the server never interprets — the skip-list
+	 * gate for every content-understanding feature (thumbnails, previews, search,
+	 * AI, photo eligibility, office editing).
+	 */
+	function is_encrypted(){
+		$v = $this->get('fil_encrypted');
+		return ($v === true || $v === 't' || $v === 'true' || $v === '1' || $v === 1);
 	}
 
 	/**
@@ -1046,6 +1071,9 @@ public static function get_by_name($name, $search_deleted = false) {
 	 * that references it.
 	 */
 	function resize($size_key='all'){
+		if ($this->is_encrypted()) {
+			return false; // skip-list: the server never decodes ciphertext to resize it
+		}
 		$blob = $this->_blob();
 		return $blob ? $blob->resize($size_key) : false;
 	}

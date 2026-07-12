@@ -43,6 +43,26 @@ function share_human_bytes($n) {
 			$fw->end_form();
 			?>
 
+		<?php elseif (($page_vars['entity_type'] ?? '') === 'file' && !empty($page_vars['file']['encrypted'])): $f = $page_vars['file']; ?>
+			<div class="jy-page-header"><div class="jy-page-header-bar"><h1 id="shareEncName">Encrypted file</h1></div></div>
+			<div class="share-file-card" style="border:1px solid rgba(127,127,127,.2);border-radius:12px;padding:1.5rem;text-align:center;">
+				<div id="shareEncThumb"></div>
+				<p style="opacity:.7;margin:.4rem 0;">🔒 <span id="shareEncMeta"><?php echo share_human_bytes($f['size']); ?> · encrypted</span></p>
+				<p id="shareEncStatus" style="opacity:.7;">This file is end-to-end encrypted. It is decrypted in your browser using the key in your link.</p>
+				<p><button type="button" class="jy-btn jy-btn-primary" id="shareEncDownload" disabled>Decrypt &amp; download</button></p>
+				<p id="shareEncError" style="color:#e0533d;" hidden></p>
+			</div>
+			<script>
+			window.SHARE_ENC = {
+				downloadUrl: <?php echo json_encode($f['download_url'], JSON_UNESCAPED_SLASHES); ?>,
+				metadata: <?php echo json_encode($f['encrypted_metadata'], JSON_UNESCAPED_SLASHES); ?>,
+				size: <?php echo (int)$f['size']; ?>
+			};
+			</script>
+			<script defer src="/assets/js/vault-crypto.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/vault-crypto.js')) ?: '1'; ?>"></script>
+			<script defer src="/assets/js/drive-crypto.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/drive-crypto.js')) ?: '1'; ?>"></script>
+			<script defer src="/assets/js/share-decrypt.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/share-decrypt.js')) ?: '1'; ?>"></script>
+
 		<?php elseif (($page_vars['entity_type'] ?? '') === 'file'): $f = $page_vars['file']; ?>
 			<div class="jy-page-header"><div class="jy-page-header-bar"><h1><?php echo htmlspecialchars($f['name']); ?></h1></div></div>
 			<div class="share-file-card" style="border:1px solid rgba(127,127,127,.2);border-radius:12px;padding:1.5rem;text-align:center;">

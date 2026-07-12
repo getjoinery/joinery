@@ -23,6 +23,11 @@ class LlmProviderException extends Exception {
         if (strpos($msg, 'not reachable') !== false) {
             return 'api_network_error';
         }
+        // Local provider: connected, but the model did not begin streaming within
+        // the first-token bound (cold model load / overloaded host).
+        if (strpos($msg, 'did not start responding') !== false) {
+            return 'api_no_response';
+        }
         if (strpos($msg, '4xx') !== false) {
             // Auth: Anthropic says "authentication_error / invalid x-api-key";
             // Fireworks/OpenAI-style say "unauthorized" / "the api key ... invalid".
@@ -58,6 +63,8 @@ class LlmProviderException extends Exception {
         switch ($code) {
             case 'api_network_error':
                 return 'Could not reach the AI provider. Check the provider settings (or that the local model server is running) and try again.';
+            case 'api_no_response':
+                return 'The model didn’t start responding in time — it may be loading a large model or under heavy load. Try again in a moment.';
             case 'api_auth_failed':
                 return 'The AI provider rejected the credentials. Check the API key in settings.';
             case 'api_quota_exceeded':

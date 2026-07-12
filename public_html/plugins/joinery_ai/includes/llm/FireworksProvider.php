@@ -93,6 +93,16 @@ class FireworksProvider extends OpenAiCompatibleProvider {
         return true;
     }
 
+    /** Remote cloud host — skip the local-style pre-flight probe; the real call handles transport errors. */
+    public function reachabilityProbe(): ?string {
+        return null;
+    }
+
+    /** A cloud API's first token is prompt — no tighter first-token phase; the per-call timeout governs. */
+    protected function firstTokenTimeoutSeconds(): int {
+        return 0;
+    }
+
     /**
      * The curated Fireworks catalog is text-only here: no image or native-PDF
      * ingest. Uploads to a Fireworks chat are refused at ingress with the

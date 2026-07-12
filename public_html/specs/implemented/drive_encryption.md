@@ -1,6 +1,6 @@
 # Drive Encryption — Client-Custody Vault Consumer
 
-## Status: active — design
+## Status: implemented (phases 2–4; phase 5 hardening deferred) — see docs/drive_encryption.md
 
 End-to-end encryption for Drive files, layered on `specs/implemented/drive_core.md` (and through
 it `specs/implemented/file_blob_layer.md` — ciphertext flows through the blob layer untouched). This is the
@@ -171,13 +171,33 @@ recovery honesty; the two-table access/readability model; the skip-list); update
 `docs/sealed_vault.md`'s consumer list; a contrast line in `docs/secret_box.md`; update
 `docs/drive.md` share-dialog section.
 
-## Open decisions (resolve at implementation)
+## Decisions taken at implementation
 
-- Chunk size for content encryption (align with the upload-API chunk size; likely 4 MiB).
-- Per-folder display-name encryption vs a single encrypted folder-manifest per subtree
-  (per-folder blobs proposed — simpler sync).
-- Video/audio streaming of encrypted media (MSE decrypt) in v1 or deferred (deferred proposed;
-  download-then-play works day one).
+- **Content chunk size: 4 MiB** (`DriveCrypto.CHUNK_BYTES`), independent of the transport chunk
+  size — the finished ciphertext blob is re-sliced for the resumable PUT protocol.
+- **Ciphertext container is self-delimiting** — `uint32be(blockLen) || IV[12] || AES-GCM(ct+tag)`
+  per chunk — so decryption needs no size metadata and an old version stays decryptable.
+- **Per-file encrypted metadata blob** (`fil_encrypted_metadata`), not a per-subtree manifest:
+  the metadata (name, mime, size, chunk size, content id, thumb flag) rides on each file's own
+  row — simpler sync, and it is what the listing hands the browser to decrypt names in place.
+- **AAD binds a client-generated per-file content id + the chunk index**, not the server file id
+  (which does not exist until after upload). The content id lives in the encrypted metadata; a
+  random per-file key already prevents cross-file transplant, and the content-id AAD adds
+  defense in depth and reorder protection.
+- **Encrypted thumbnail** is generated + encrypted in the browser and written into the blob's
+  existing thumb size-variant slot (the smallest configured image size), so it rides the normal
+  offload/serve machinery; when no image size is configured, no thumbnail is stored and the UI
+  falls back to a type icon.
+- **File keys and content ids are stable across versions** — a new version reuses the file's key
+  and content id, so the `FileKeyGrant` is untouched and prior versions stay decryptable; only
+  the head metadata follows the new content.
+- **Move across the encryption boundary is refused** (`drive_move`), since the server never
+  transforms bytes: plaintext-into-vault and vault-into-plaintext are blocked; an encrypted
+  vault folder may still sit at the Drive root or inside another vault. Conversion is a client
+  re-upload.
+- **Anonymous encrypted links are single-file** — the file key rides the URL fragment; an
+  encrypted folder's many keys can't ride one fragment, so folder links are plaintext-only.
+- **Video/audio MSE streaming of encrypted media: deferred** — download-then-play works day one.
 - ~~Drive/passwords one scope vs. separate~~ **Decided: separate** — Drive uses scope `drive`,
   passwords uses scope `passwords`, distinct keypairs and PRF contexts. Unlocking Drive never
   opens the password vault.

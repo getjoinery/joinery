@@ -5,8 +5,11 @@
  * (folders + files), or the Starred / Trash / Shared-with-me collections, plus
  * the breadcrumb and the storage meter. Read-only.
  *
- * Listings cap at DRIVE_LIST_CAP children and set 'truncated' past the cap
- * (v1 does not paginate).
+ * Listings cap at DRIVE_LIST_CAP children and set 'truncated' past the cap.
+ * `offset` skips that many children first (same deterministic ordering:
+ * folders by name, then files by name), so a caller that must enumerate a
+ * folder completely — the encrypted key-grant sync — pages with
+ * offset += returned count while 'truncated' stays true.
  */
 
 if (!defined('DRIVE_LIST_CAP')) {
@@ -21,6 +24,7 @@ function drive_list_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/drive_usage_class.php'));
 	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
 	require_once(PathHelper::getIncludePath('data/file_access_grants_class.php'));
+	require_once(PathHelper::getIncludePath('data/file_key_grants_class.php'));
 
 	$settings = Globalvars::get_instance();
 	$session  = SessionControl::get_instance();
@@ -36,6 +40,7 @@ function drive_list_logic(array $input): LogicResult {
 	$view      = (string)($input['view'] ?? 'mine');
 	$folder_id = (isset($input['folder_id']) && (int)$input['folder_id'] > 0) ? (int)$input['folder_id'] : 0;
 	$search    = trim((string)($input['search'] ?? ''));
+	$offset    = max(0, (int)($input['offset'] ?? 0));
 
 	$folders = array();
 	$files   = array();
@@ -126,21 +131,32 @@ function drive_list_logic(array $input): LogicResult {
 	}
 	$size_map    = DriveHelper::file_sizes($file_ids);
 	$starred_set = DriveHelper::starred_file_ids($user_id);
+	// Wrapped file keys for any encrypted files in the listing (one query): the
+	// caller's own FileKeyGrant blob, which their browser unwraps to read.
+	$key_map     = FileKeyGrant::wrapped_keys_for_user($file_ids, $user_id);
 
 	$items = array();
 	$count = 0;
+	$skipped = 0;
 	$truncated = false;
 
 	foreach ($folders as $fo) {
+		if ($skipped < $offset) { $skipped++; continue; }
 		if ($count >= DRIVE_LIST_CAP) { $truncated = true; break; }
 		$items[] = DriveHelper::folder_export($fo);
 		$count++;
 	}
 	if (!$truncated) {
 		foreach ($files as $f) {
+			if ($skipped < $offset) { $skipped++; continue; }
 			if ($count >= DRIVE_LIST_CAP) { $truncated = true; break; }
 			$fid = (int)$f->get('fil_file_id');
-			$items[] = DriveHelper::file_export($f, isset($size_map[$fid]) ? $size_map[$fid] : null, isset($starred_set[$fid]));
+			$items[] = DriveHelper::file_export(
+				$f,
+				isset($size_map[$fid]) ? $size_map[$fid] : null,
+				isset($starred_set[$fid]),
+				isset($key_map[$fid]) ? $key_map[$fid] : null
+			);
 			$count++;
 		}
 	}
@@ -282,6 +298,7 @@ function drive_list_logic_descriptor(): array {
 			'folder_id' => array('type' => 'int', 'required' => false, 'label' => 'Folder id (omit for root)'),
 			'view'      => array('type' => 'string', 'required' => false, 'enum' => array('mine', 'starred', 'trash', 'shared', 'folders'), 'label' => 'View'),
 			'search'    => array('type' => 'string', 'required' => false, 'max_length' => 255, 'label' => 'Filename search'),
+			'offset'    => array('type' => 'int', 'required' => false, 'min' => 0, 'label' => 'Children to skip (page while truncated is true)'),
 		),
 	);
 }

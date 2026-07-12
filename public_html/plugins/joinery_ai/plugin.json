@@ -1,6 +1,6 @@
 {
     "name": "Joinery AI",
-    "version": "0.9.1",
+    "version": "0.9.2",
     "description": "Scheduled LLM recipes that gather information, write to a workspace, and deliver results to a dashboard or email.",
     "author": "Joinery",
     "receives_upgrades": true,
@@ -85,6 +85,10 @@
         {
             "name": "joinery_ai_local_timeout_seconds",
             "default": "300"
+        },
+        {
+            "name": "joinery_ai_local_first_token_timeout_seconds",
+            "default": "60"
         },
         {
             "name": "joinery_ai_fireworks_api_key",

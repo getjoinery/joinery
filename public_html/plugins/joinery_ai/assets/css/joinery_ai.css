@@ -138,6 +138,16 @@ select.joai-chat-control { cursor: pointer; }
 /* Live turn-activity line under a streaming bubble ("Waiting for glm-5p2...
    - 2m 40s") - what the runner is doing before/while text arrives. */
 .joai-chat-activity { margin-top: 0.3rem; font-size: 0.8rem; color: #888; }
+/* A failed turn renders inline (never a popup): the assistant bubble becomes an
+   error card carrying the server's message, with a Retry that replays the turn. */
+.joai-chat-failed { padding: 0.7rem 0.9rem; background: #fdecea;
+                    border: 1px solid #f5c6cb; border-radius: 8px; }
+.joai-chat-failed .joai-chat-body { color: #b02a2a; }
+.joai-chat-failed-actions { margin-top: 0.55rem; }
+.joai-chat-retry { font: inherit; font-size: 0.82rem; font-weight: 600; color: #fff;
+                   background: #dc3545; border: 0; border-radius: 5px;
+                   padding: 0.35rem 0.8rem; cursor: pointer; }
+.joai-chat-retry:hover { background: #c0392b; }
 /* Markdown typography inside a bubble/body. */
 .joai-chat-body { word-wrap: break-word; overflow-wrap: anywhere; }
 .joai-chat-body > :first-child { margin-top: 0; }

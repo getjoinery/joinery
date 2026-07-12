@@ -6,7 +6,8 @@
  * methods through the StorageProfile seam so the shared CloudOffloadEngine +
  * CloudStorageLifecycle can drive the public-blob offload. No blob code moves
  * here — this only maps the fbb_ descriptor columns and enumerates the
- * original + ImageSizeRegistry variants per blob.
+ * original + FileBlob::variant_size_keys() slots per blob (registry sizes for
+ * images, the recorded encrypted-thumbnail slot for ciphertext blobs).
  *
  * fbb_file_blobs is shared by the public and private blob profiles, split by
  * fbb_is_private (the same shared-table mechanism the old File pair used). The
@@ -75,16 +76,14 @@ class BlobStorageProfile implements StorageProfile {
 			'remote_key'   => $blob->remote_key_for('original'),
 			'content_type' => $content_type,
 		]];
-		if ($blob->is_image()) {
-			foreach (ImageSizeRegistry::get_sizes() as $size_key => $cfg) {
-				$variant_path = $blob->filesystem_path($size_key);
-				if (file_exists($variant_path)) {
-					$items[] = [
-						'local_path'   => $variant_path,
-						'remote_key'   => $blob->remote_key_for($size_key),
-						'content_type' => $content_type,
-					];
-				}
+		foreach ($blob->variant_size_keys() as $size_key) {
+			$variant_path = $blob->filesystem_path($size_key);
+			if (file_exists($variant_path)) {
+				$items[] = [
+					'local_path'   => $variant_path,
+					'remote_key'   => $blob->remote_key_for($size_key),
+					'content_type' => $content_type,
+				];
 			}
 		}
 		return $items;
@@ -103,12 +102,7 @@ class BlobStorageProfile implements StorageProfile {
 		$stored_name  = $blob->get('fbb_stored_name');
 		$content_type = $blob->get('fbb_mime_type') ?: 'application/octet-stream';
 
-		$size_keys = ['original'];
-		if ($blob->is_image()) {
-			foreach (ImageSizeRegistry::get_sizes() as $size_key => $cfg) {
-				$size_keys[] = $size_key;
-			}
-		}
+		$size_keys = array_merge(['original'], $blob->variant_size_keys());
 
 		$items = [];
 		foreach ($size_keys as $size_key) {

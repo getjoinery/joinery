@@ -150,6 +150,38 @@ class DriveHelper {
 		return false;
 	}
 
+	/**
+	 * Every user who can read files in this folder: the owner plus all holders
+	 * of an access grant on the folder or any ancestor (grant reach, inverted).
+	 * Used to resolve the reader set an encrypted upload must seal its file key
+	 * to — see docs/drive_encryption.md.
+	 */
+	public static function reader_user_ids_for_folder($folder) {
+		require_once(PathHelper::getIncludePath('data/file_access_grants_class.php'));
+		$ids = array((int)$folder->get('fol_usr_user_id') => true);
+		$folder_id = (int)$folder->get('fol_folder_id');
+		$chain = array_merge(array($folder_id), self::ancestors($folder_id));
+		foreach ($chain as $anc_id) {
+			foreach (FileAccessGrant::user_ids_for_entity(self::ENTITY_FOLDER, $anc_id) as $uid) {
+				$ids[(int)$uid] = true;
+			}
+		}
+		return array_keys($ids);
+	}
+
+	/**
+	 * Largest legal ciphertext size for a plaintext cap. The client container
+	 * (assets/js/drive-crypto.js) adds 32 bytes per chunk — 4-byte length prefix
+	 * + 12-byte IV + 16-byte GCM tag — over 4 MiB chunks; these constants must
+	 * match CHUNK_BYTES there. Per-file tier caps mean plaintext bytes; uploads
+	 * into a vault folder are gated against this ceiling instead.
+	 */
+	public static function encrypted_size_ceiling($plain_cap) {
+		$plain_cap = (int)$plain_cap;
+		$chunk = 4 * 1024 * 1024;
+		return $plain_cap + 32 * max(1, (int)ceil($plain_cap / $chunk));
+	}
+
 	// ------------------------------------------------------------------
 	// JSON export for the UI / change clients
 	// ------------------------------------------------------------------
@@ -164,7 +196,14 @@ class DriveHelper {
 			'owner_id'    => (int)$folder->get('fol_usr_user_id'),
 			'create_time' => $folder->get('fol_create_time'),
 			'deleted'     => $folder->get('fol_delete_time') !== null && $folder->get('fol_delete_time') !== '',
+			'encrypted'   => self::folder_is_encrypted($folder),
 		);
+	}
+
+	/** True when a loaded folder is an encrypted vault folder. */
+	public static function folder_is_encrypted($folder) {
+		$v = $folder->get('fol_encrypted');
+		return ($v === true || $v === 't' || $v === 'true' || $v === '1' || $v === 1);
 	}
 
 	/**
@@ -173,8 +212,12 @@ class DriveHelper {
 	 * @param File     $file
 	 * @param int|null $size     precomputed blob size (avoids an extra load); null to look it up
 	 * @param bool|null $starred precomputed star flag; null to look it up
+	 * @param string|null $wrapped_file_key for an encrypted file, the calling
+	 *                    user's wrapped file key (from their FileKeyGrant); the
+	 *                    browser unwraps it with the unlocked drive vault. null
+	 *                    when the file is plaintext or the caller holds no key.
 	 */
-	public static function file_export($file, $size = null, $starred = null) {
+	public static function file_export($file, $size = null, $starred = null, $wrapped_file_key = null) {
 		self::require_classes();
 		$file_id = (int)$file->key;
 
@@ -195,8 +238,9 @@ class DriveHelper {
 			$starred = Reaction::has_reacted($uid, 'file', $file_id);
 		}
 
+		$encrypted = $file->is_encrypted();
 		$mime = $file->get('fil_type');
-		$is_image = File::is_inline_safe_type($mime);
+		$is_image = $encrypted ? false : File::is_inline_safe_type($mime);
 
 		$out = array(
 			'entity_type'  => self::ENTITY_FILE,
@@ -212,11 +256,25 @@ class DriveHelper {
 			'deleted'      => $file->get('fil_delete_time') !== null && $file->get('fil_delete_time') !== '',
 			'download_url' => $file->mintSignedUrl('original', 3600),
 		);
-		if ($is_image) {
+		if ($encrypted) {
+			// The stored bytes and the thumbnail slot are ciphertext; the browser
+			// decrypts them with the file key it unwraps from wrapped_file_key.
+			// The real name / mime / thumb flag live in encrypted_metadata.
+			$out['encrypted']          = true;
+			$out['encrypted_metadata'] = $file->get('fil_encrypted_metadata');
+			$out['wrapped_file_key']   = $wrapped_file_key;
 			$thumb = self::thumb_size_key();
 			if ($thumb !== null) {
 				$out['thumb_url'] = $file->mintSignedUrl($thumb, 3600);
 			}
+		} elseif ($is_image) {
+			$out['encrypted'] = false;
+			$thumb = self::thumb_size_key();
+			if ($thumb !== null) {
+				$out['thumb_url'] = $file->mintSignedUrl($thumb, 3600);
+			}
+		} else {
+			$out['encrypted'] = false;
 		}
 		return $out;
 	}

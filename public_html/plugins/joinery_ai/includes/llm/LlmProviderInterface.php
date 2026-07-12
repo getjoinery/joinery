@@ -57,6 +57,18 @@ interface LlmProviderInterface {
     public function isPrivate(): bool;
 
     /**
+     * Fast pre-turn reachability check. Returns null when the provider is
+     * reachable — or when no cheap probe applies, as for cloud providers whose
+     * own call path handles transport errors — and a short user-facing message
+     * when the host is definitively unreachable. Must be cheap and short-timeout:
+     * it runs on the turn's critical path so a sleeping/offline local model
+     * server fails the turn in a couple of seconds instead of stalling the full
+     * streaming call. The returned string is for logs; the caller maps the turn
+     * to the standard network-error message.
+     */
+    public function reachabilityProbe(): ?string;
+
+    /**
      * What attachment block kinds this model can consume, as
      *   ['vision' => bool, 'document' => bool]
      * where 'vision' means it accepts image blocks and 'document' means it accepts

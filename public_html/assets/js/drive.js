@@ -5,14 +5,24 @@
 
 	var api = window.joineryApi;
 	var CFG = window.DRIVE_CONFIG || {};
+	var DC = window.DriveCrypto;
+	var VK = window.VaultKeyring;
+	var SCOPE = CFG.vaultScope || 'drive';
 	var state = {
 		view: 'mine',
 		folderId: 0,
+		folderEncrypted: false,
 		viewMode: 'list',
 		items: [],
 		breadcrumb: [],
 		usage: null
 	};
+
+	// The unlocked drive vault session (VaultKeyring makeSession), held only in
+	// this tab's memory for the page lifetime — client-custody has no server
+	// unlock window. Per-file keys/metadata are cached after first decrypt.
+	var driveSession = null;
+	var fkCache = {}; // fileId -> { fkKey, fkBytes, meta }
 
 	// ---- tiny DOM helpers --------------------------------------------------
 	function $(id) { return document.getElementById(id); }
@@ -52,10 +62,140 @@
 		setTimeout(function () { t.remove(); }, 3200);
 	}
 
+	// ---- vault unlock (client-custody, scope 'drive') ----------------------
+	// One tab-lifetime unlocked session gates every encrypt/decrypt. The modal
+	// runs enrollment (first time) or unlock (locked) via the shared VaultKeyring.
+	var vaultError = function (msg) { var e = $('drvVaultError'); if (e) { e.textContent = msg || ''; e.hidden = !msg; } };
+
+	function ensureUnlocked() {
+		if (driveSession && !driveSession.locked()) return Promise.resolve(driveSession);
+		if (!DC || !VK) return Promise.reject(new Error('Encryption is unavailable in this browser.'));
+		return DC.isSupported().then(function (ok) {
+			if (!ok) throw new Error('This browser cannot open encrypted files (needs modern WebCrypto).');
+			return VK.status(SCOPE);
+		}).then(function (st) {
+			return new Promise(function (resolve, reject) {
+				openVaultDialog(st, resolve, reject);
+			});
+		});
+	}
+
+	var vaultResolve = null, vaultReject = null, pendingRecovery = null;
+	function openVaultDialog(st, resolve, reject) {
+		vaultResolve = resolve; vaultReject = reject; vaultError('');
+		var dlg = $('drvVaultDialog');
+		var setUp = st && st.set_up;
+		$('drvVaultSetup').hidden = setUp;
+		$('drvVaultUnlock').hidden = !setUp;
+		$('drvVaultRecovery').hidden = true;
+		$('drvVaultSetupPpWrap').hidden = true;
+		$('drvVaultSetupPpGo').hidden = true;
+		// Hide passkey buttons when passkeys aren't enabled on the instance.
+		$('drvVaultSetupPasskey').hidden = !CFG.passkeysEnabled;
+		$('drvVaultUnlockPasskey').hidden = !CFG.passkeysEnabled;
+		dlg.returnValue = '';
+		dlg.showModal();
+	}
+	function closeVaultDialog(ok) {
+		var dlg = $('drvVaultDialog');
+		if (dlg.open) dlg.close();
+		if (!ok && vaultReject) { vaultReject(new Error('Unlock cancelled.')); }
+		vaultResolve = null; vaultReject = null;
+	}
+	function vaultUnlocked(session) {
+		driveSession = session;
+		var r = vaultResolve; vaultResolve = null; vaultReject = null;
+		if ($('drvVaultDialog').open) $('drvVaultDialog').close();
+		if (r) r(session);
+	}
+
+	function wireVaultDialog() {
+		var g = function (id) { return $(id); };
+		if (g('drvVaultSetupPpToggle')) g('drvVaultSetupPpToggle').onclick = function () {
+			$('drvVaultSetupPpWrap').hidden = false; $('drvVaultSetupPpGo').hidden = false;
+		};
+		if (g('drvVaultSetupPasskey')) g('drvVaultSetupPasskey').onclick = function () { doSetup('passkey'); };
+		if (g('drvVaultSetupPpGo')) g('drvVaultSetupPpGo').onclick = function () { doSetup('passphrase'); };
+		if (g('drvVaultRecoveryDone')) g('drvVaultRecoveryDone').onclick = function () {
+			if (pendingRecovery) { vaultUnlocked(pendingRecovery.session); pendingRecovery = null; }
+		};
+		if (g('drvVaultUnlockPasskey')) g('drvVaultUnlockPasskey').onclick = function () { doUnlock('passkey'); };
+		if (g('drvVaultUnlockPpGo')) g('drvVaultUnlockPpGo').onclick = function () { doUnlock('passphrase'); };
+		if (g('drvVaultUnlockRecGo')) g('drvVaultUnlockRecGo').onclick = function () { doUnlock('recovery'); };
+		var dlg = $('drvVaultDialog');
+		if (dlg) dlg.addEventListener('cancel', function () { closeVaultDialog(false); });
+		dlg.querySelectorAll('[data-close]').forEach(function (b) { b.onclick = function () { closeVaultDialog(false); }; });
+	}
+
+	async function doSetup(method) {
+		vaultError('');
+		if (!$('drvVaultAck').checked) { vaultError('Please confirm you understand the recovery warning.'); return; }
+		try {
+			var opts = { acknowledged: true };
+			if (method === 'passkey') {
+				opts.passkey = await VK.derivePasskeyKek(SCOPE);
+			} else {
+				var pp = $('drvVaultSetupPp').value || '';
+				if (pp.length < 10) { vaultError('Use a passphrase of at least 10 characters.'); return; }
+				opts.passphrase = pp;
+			}
+			var res = await VK.setup(SCOPE, opts);
+			$('drvVaultSetupPp').value = '';
+			// Show recovery codes once, then finish.
+			pendingRecovery = res;
+			$('drvVaultRecoveryCodes').textContent = (res.recoveryCodes || []).join('\n');
+			$('drvVaultRecovery').hidden = false;
+			$('drvVaultSetup').querySelectorAll('button').forEach(function (b) {
+				if (b.id !== 'drvVaultRecoveryDone') b.disabled = true;
+			});
+		} catch (e) { vaultError(e.message || 'Setup failed.'); }
+	}
+
+	async function doUnlock(method) {
+		vaultError('');
+		try {
+			var session;
+			if (method === 'passkey') {
+				var d = await VK.derivePasskeyKek(SCOPE);
+				session = await VK.unlockWithPasskey(SCOPE, d.kek, d.credentialId);
+			} else if (method === 'passphrase') {
+				session = await VK.unlockWithPassphrase(SCOPE, $('drvVaultUnlockPp').value || '');
+				$('drvVaultUnlockPp').value = '';
+			} else {
+				var r = await VK.unlockWithRecovery(SCOPE, $('drvVaultUnlockRec').value || '');
+				session = r.session;
+				$('drvVaultUnlockRec').value = '';
+			}
+			vaultUnlocked(session);
+		} catch (e) { vaultError(e.message || 'Unlock failed.'); }
+	}
+
+	// ---- encrypted-file helpers --------------------------------------------
+	// Resolve a file's AES key + decrypted metadata (cached), unwrapping the
+	// caller's wrapped_file_key with the unlocked session.
+	async function fileKeyFor(it) {
+		if (fkCache[it.id]) return fkCache[it.id];
+		var session = await ensureUnlocked();
+		var wrapped = it.wrapped_file_key;
+		if (!wrapped) {
+			// Not in the listing (e.g. deep link) — fetch the caller's own grant.
+			var r = await api.post('drive_key_grants', { file_ids: [it.id] });
+			wrapped = r.keys && r.keys[it.id];
+			if (!wrapped) throw new Error('You do not hold a key for this file.');
+		}
+		var fkBytes = await DC.openWrappedFileKey(session, wrapped);
+		var fkKey = await DC.importFileKey(fkBytes);
+		var meta = it.encrypted_metadata ? await DC.decryptMetadata(it.encrypted_metadata, fkKey) : {};
+		var entry = { fkKey: fkKey, fkBytes: fkBytes, meta: meta };
+		fkCache[it.id] = entry;
+		return entry;
+	}
+
 	// ---- rendering ---------------------------------------------------------
 	function render(data) {
 		state.items = data.items || [];
 		state.breadcrumb = data.breadcrumb || [];
+		state.folderEncrypted = !!(data.folder && data.folder.encrypted);
 		if (data.usage) state.usage = data.usage;
 		if (typeof data.folder_id !== 'undefined') state.folderId = data.folder_id || 0;
 		renderBreadcrumb();
@@ -90,6 +230,58 @@
 		if (!state.items.length) { $('drvEmpty').hidden = false; return; }
 		$('drvEmpty').hidden = true;
 		state.items.forEach(function (it) { wrap.appendChild(renderItem(it)); });
+		maybeDecryptVisible();
+	}
+
+	// Decrypt names/thumbnails for the encrypted files on screen. Inside an
+	// encrypted folder we proactively unlock (the user came here to read them);
+	// elsewhere we only decrypt if the vault is already open, so a mixed listing
+	// never forces an unlock prompt.
+	function hasEncryptedItems() {
+		return state.items.some(function (it) { return it.entity_type === 'file' && it.encrypted; });
+	}
+	function maybeDecryptVisible() {
+		if (!hasEncryptedItems()) return;
+		if (driveSession && !driveSession.locked()) { decryptVisible(); return; }
+		if (state.folderEncrypted) {
+			ensureUnlocked().then(decryptVisible).catch(function () {/* left locked */});
+		}
+	}
+	function decryptVisible() {
+		state.items.forEach(function (it) {
+			if (it.entity_type !== 'file' || !it.encrypted) return;
+			var row = document.querySelector('.drv-item[data-id="' + it.id + '"][data-type="file"]');
+			if (!row) return;
+			fileKeyFor(it).then(function (entry) {
+				it._name = entry.meta.name || it.name;
+				it._mime = entry.meta.mime || '';
+				var nameEl = row.querySelector('.drv-item-name');
+				if (nameEl) nameEl.textContent = it._name;
+				// Type-aware icon + optional decrypted thumbnail.
+				var icon = row.querySelector('.drv-item-icon');
+				if (icon) {
+					var isImg = (it._mime || '').indexOf('image/') === 0;
+					icon.innerHTML = isImg ? ICONS.image : ICONS.file;
+					if (isImg && entry.meta.thumb && it.thumb_url) {
+						loadEncryptedThumb(it, entry, icon);
+					}
+				}
+			}).catch(function () {/* stays as a locked placeholder */});
+		});
+	}
+	function loadEncryptedThumb(it, entry, icon) {
+		fetch(it.thumb_url).then(function (r) { return r.ok ? r.arrayBuffer() : null; }).then(function (buf) {
+			if (!buf) return;
+			return DC.decryptThumbnail(new Uint8Array(buf), entry.fkKey, entry.meta.cid);
+		}).then(function (blob) {
+			if (!blob) return;
+			var img = new Image();
+			img.className = 'drv-item-thumb';
+			img.alt = '';
+			img.src = URL.createObjectURL(blob);
+			icon.innerHTML = '';
+			icon.appendChild(img);
+		}).catch(function () {/* keep the type icon */});
 	}
 
 	function renderItem(it) {
@@ -99,7 +291,11 @@
 		row.dataset.id = it.id;
 
 		var icon = el('div', 'drv-item-icon');
-		if (it.entity_type === 'file' && it.thumb_url) {
+		if (it.entity_type === 'file' && it.encrypted) {
+			// Ciphertext thumbnail can't be an <img src> — decryptVisible() fills
+			// the real name + thumb once the vault is open. Start with a file icon.
+			icon.innerHTML = ICONS.file;
+		} else if (it.entity_type === 'file' && it.thumb_url) {
 			var img = new Image();
 			img.className = 'drv-item-thumb';
 			img.alt = '';
@@ -112,7 +308,17 @@
 		}
 		row.appendChild(icon);
 
-		var name = el('div', 'drv-item-name', it.name);
+		// Encrypted files show a locked placeholder until decryptVisible() swaps in
+		// the real name; encrypted folders get a lock badge next to their name.
+		var displayName = (it.entity_type === 'file' && it.encrypted)
+			? (it._name || 'Encrypted file')
+			: it.name;
+		var name = el('div', 'drv-item-name', displayName);
+		if (it.encrypted) {
+			var lk = el('span', 'drv-item-lock', '🔒');
+			lk.title = 'Encrypted';
+			name.appendChild(lk);
+		}
 		row.appendChild(name);
 
 		var meta = el('div', 'drv-item-meta');
@@ -178,9 +384,30 @@
 		if (it.entity_type === 'folder') {
 			if (state.view === 'trash') return; // trashed folders are not browsable
 			openFolder(it.id);
+		} else if (it.encrypted) {
+			downloadEncrypted(it);
 		} else {
 			if (it.download_url) window.open(it.download_url, '_blank');
 		}
+	}
+
+	// Fetch ciphertext, decrypt in the browser, and hand the plaintext to the user
+	// as a download under its real name. The server never sees a key or plaintext.
+	async function downloadEncrypted(it) {
+		try {
+			var entry = await fileKeyFor(it);
+			toast('Decrypting ' + (entry.meta.name || 'file') + '…');
+			var resp = await fetch(it.download_url);
+			if (!resp.ok) throw new Error('Download failed.');
+			var buf = await resp.arrayBuffer();
+			var plain = await DC.decryptContent(buf, entry.fkKey, entry.meta.cid);
+			var blob = new Blob([plain], { type: entry.meta.mime || 'application/octet-stream' });
+			var url = URL.createObjectURL(blob);
+			var a = document.createElement('a');
+			a.href = url; a.download = entry.meta.name || 'download';
+			document.body.appendChild(a); a.click(); a.remove();
+			setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+		} catch (e) { toast(e.message || 'Could not decrypt file.'); }
 	}
 
 	function toggleStar(it, btn) {
@@ -202,7 +429,7 @@
 			opts.push(['Restore', function () { doRestore(it); }]);
 			opts.push(['Delete forever', function () { confirmDelete(it); }, true]);
 		} else {
-			if (it.entity_type === 'file') opts.push(['Download', function () { if (it.download_url) window.open(it.download_url, '_blank'); }]);
+			if (it.entity_type === 'file') opts.push(['Download', function () { if (it.encrypted) { downloadEncrypted(it); } else if (it.download_url) { window.open(it.download_url, '_blank'); } }]);
 			opts.push(['Rename', function () { openRename(it); }]);
 			opts.push(['Move to…', function () { openMove(it); }]);
 			if (it.entity_type === 'file') opts.push([it.starred ? 'Unstar' : 'Star', function () { toggleStar(it, {classList:{toggle:function(){}}}); }]);
@@ -254,9 +481,42 @@
 	// ---- dialogs -----------------------------------------------------------
 	function dialogForm(dlg) { return dlg.querySelector('form'); }
 
+	// Take over a FormWriter dialog form's submission. The form's
+	// JoineryValidator owns the submit event and re-submits natively via
+	// form.submit() when valid (a full-page POST) — so the handler must be
+	// installed as its submitHandler, not as a second submit listener that the
+	// native re-submit would navigate over. The listener path is the fallback
+	// for a form without a validator.
+	function interceptSubmit(form, handler) {
+		if (!form) return;
+		var wrapped = function (e) { if (e && e.preventDefault) e.preventDefault(); handler(e || { preventDefault: function () {} }); };
+		var attach = function () {
+			if (form.joineryValidator) {
+				form.joineryValidator.submitHandler = function () { wrapped(null); };
+			} else {
+				form.addEventListener('submit', wrapped);
+			}
+		};
+		// This script is deferred, so it runs before the FormWriter inline
+		// scripts' DOMContentLoaded handlers create the validators — wait for
+		// them, or the takeover would land on a form whose validator then
+		// native-submits right past it.
+		if (form.joineryValidator || document.readyState === 'complete') attach();
+		else document.addEventListener('DOMContentLoaded', attach);
+	}
+
 	function openNewFolder() {
 		var dlg = $('drvNewFolderDialog');
 		$('drvNewFolderName').value = '';
+		// A vault is a top-level tree: inside an encrypted folder a new subfolder
+		// is always encrypted (inherited — force the box on, hide the choice);
+		// the opt-in checkbox is offered only at the root; inside a plaintext
+		// folder there is no choice to make (the server refuses encrypted there).
+		var enc = $('drvNewFolderEnc');
+		var wrap = $('drvNewFolderEncWrap');
+		if (state.folderEncrypted) { enc.checked = true; enc.disabled = true; wrap.hidden = true; }
+		else if (state.view === 'mine' && state.folderId) { enc.checked = false; enc.disabled = true; wrap.hidden = true; }
+		else { enc.checked = false; enc.disabled = false; wrap.hidden = false; }
 		dlg.showModal();
 		setTimeout(function () { $('drvNewFolderName').focus(); }, 30);
 	}
@@ -266,15 +526,24 @@
 		if (!name) return;
 		var body = { name: name };
 		if (state.view === 'mine' && state.folderId) body.parent_id = state.folderId;
-		api.post('drive_folder_create', body)
-			.then(function () { $('drvNewFolderDialog').close(); load(); })
-			.catch(function (e) { toast(e.message || 'Could not create folder.'); });
+		if ($('drvNewFolderEnc').checked || state.folderEncrypted) body.encrypted = true;
+		var proceed = function () {
+			api.post('drive_folder_create', body)
+				.then(function () { $('drvNewFolderDialog').close(); load(); })
+				.catch(function (e) { toast(e.message || 'Could not create folder.'); });
+		};
+		// Creating an encrypted folder requires the vault to exist (enroll on first
+		// use), so the owner has a key to seal files to.
+		if (body.encrypted) { ensureUnlocked().then(proceed).catch(function (e) { toast(e.message || 'Vault unlock needed.'); }); }
+		else proceed();
 	}
 
 	var renameTarget = null;
 	function openRename(it) {
 		renameTarget = it;
-		$('drvRenameName').value = it.name;
+		// An encrypted file's real name is the decrypted metadata name, not the
+		// opaque fil_title.
+		$('drvRenameName').value = (it.entity_type === 'file' && it.encrypted) ? (it._name || '') : it.name;
 		$('drvRenameDialog').showModal();
 		setTimeout(function () { $('drvRenameName').select(); }, 30);
 	}
@@ -283,8 +552,22 @@
 		if (!renameTarget) return;
 		var name = $('drvRenameName').value.trim();
 		if (!name) return;
-		api.post('drive_rename', { entity_type: renameTarget.entity_type, entity_id: renameTarget.id, name: name })
-			.then(function () { $('drvRenameDialog').close(); load(); })
+		var it = renameTarget;
+		var post;
+		if (it.entity_type === 'file' && it.encrypted) {
+			// The name lives INSIDE the encrypted metadata: decrypt, swap the
+			// name, re-encrypt with the same file key, submit the opaque blob —
+			// the plaintext name never reaches the server (which refuses one).
+			post = fileKeyFor(it).then(function (entry) {
+				entry.meta.name = name; // cache mutates too, so listings show it
+				return DC.encryptMetadata(entry.meta, entry.fkKey);
+			}).then(function (blob) {
+				return api.post('drive_rename', { entity_type: 'file', entity_id: it.id, encrypted_metadata: blob });
+			});
+		} else {
+			post = api.post('drive_rename', { entity_type: it.entity_type, entity_id: it.id, name: name });
+		}
+		post.then(function () { $('drvRenameDialog').close(); load(); })
 			.catch(function (e) { toast(e.message || 'Rename failed.'); });
 	}
 
@@ -325,12 +608,19 @@
 	}
 
 	function loadShares() {
-		api.post('drive_shares', { entity_type: shareTarget.entity_type, entity_id: shareTarget.id })
+		// Returned so syncGrants can await the refreshed shareGrants before the
+		// key-grant sync reads it — syncing the stale list would skip new
+		// grantees' keys and silently re-write removed users' (no revocation).
+		return api.post('drive_shares', { entity_type: shareTarget.entity_type, entity_id: shareTarget.id })
 			.then(function (r) {
 				shareGrants = r.grants || [];
 				renderGrants();
 				renderLinks(r.links || []);
-				$('drvShareLinksSection').hidden = !r.share_links_enabled;
+				// Public links can't carry an encrypted folder's many keys, so the
+				// section is hidden for encrypted folders (files are fine — one key
+				// rides the URL fragment).
+				var noFolderLink = shareTarget.encrypted && shareTarget.entity_type === 'folder';
+				$('drvShareLinksSection').hidden = !r.share_links_enabled || noFolderLink;
 			})
 			.catch(function (e) { toast(e.message || 'Could not load sharing.'); });
 	}
@@ -348,7 +638,84 @@
 					toast('No member found for: ' + r.skipped.join(', '));
 				}
 				return loadShares();
-			}).catch(function (e) { toast(e.message || 'Update failed.'); });
+			})
+			.then(function () {
+				// For an encrypted entity, keep the key grants aligned with access:
+				// re-wrap the file key(s) to exactly the current set of grantees.
+				if (shareTarget.encrypted) { return syncEncryptedKeys(); }
+			})
+			.catch(function (e) { toast(e.message || 'Update failed.'); });
+	}
+
+	// Re-wrap encrypted file keys to the current grantee set (file, or every
+	// encrypted file in a shared folder subtree). The owner's browser unwraps each
+	// file key once and seals it to each recipient's drive vault public key.
+	async function syncEncryptedKeys() {
+		try {
+			var session = await ensureUnlocked();
+			var granteeIds = shareGrants.map(function (g) { return g.user_id; });
+
+			// Resolve recipients' public keys (members without a Drive vault can't
+			// receive encrypted files — surfaced, not silently dropped).
+			var pubByUser = {};
+			if (granteeIds.length) {
+				var pk = await api.post('drive_public_keys', { identifiers: granteeIds });
+				var missing = [];
+				(pk.keys || []).forEach(function (k) {
+					if (k.user_id && k.public_key) pubByUser[k.user_id] = k.public_key;
+					else if (k.user_id) missing.push(k.identifier);
+				});
+				if (missing.length) toast('These members have no Drive vault yet and can\'t open shared encrypted files.');
+			}
+
+			// Gather the target encrypted files (a file, or a folder subtree).
+			var files = shareTarget.entity_type === 'file'
+				? [shareTarget]
+				: await collectEncryptedFiles(shareTarget.id);
+
+			var fileKeys = {};
+			for (var i = 0; i < files.length; i++) {
+				var f = files[i];
+				if (!f.encrypted || !f.wrapped_file_key) continue;
+				var fkBytes = await session.openSealed(f.wrapped_file_key);
+				var perUser = {};
+				for (var uid in pubByUser) {
+					perUser[uid] = await DC.wrapFileKeyTo(fkBytes, pubByUser[uid]);
+				}
+				fileKeys[f.id] = perUser; // owner's own key is preserved server-side
+			}
+			if (Object.keys(fileKeys).length) {
+				await api.post('drive_key_grants_sync', { file_keys: fileKeys });
+			}
+		} catch (e) { toast(e.message || 'Could not update encrypted access.'); }
+	}
+
+	// Walk a folder subtree, collecting every encrypted file (with the caller's
+	// own wrapped key) via repeated listings, paging past the listing cap with
+	// `offset`. Completeness is load-bearing: any file this walk misses would be
+	// granted ACCESS by the share sync but no KEY — so on any gap (guard tripped,
+	// listing failed) it throws and the caller aborts the whole key sync loudly.
+	async function collectEncryptedFiles(rootFolderId) {
+		var out = [];
+		var queue = [rootFolderId];
+		var guard = 0;
+		while (queue.length) {
+			var fid = queue.shift();
+			var offset = 0, more = true;
+			while (more) {
+				if (++guard > 5000) throw new Error('This folder is too large to sync encrypted access for.');
+				var r = await api.post('drive_list', { view: 'mine', folder_id: fid, offset: offset });
+				var items = r.items || [];
+				items.forEach(function (it) {
+					if (it.entity_type === 'folder') queue.push(it.id);
+					else if (it.encrypted) out.push(it);
+				});
+				more = !!r.truncated;
+				if (more && !items.length) throw new Error('Could not fully enumerate the folder.');
+				offset += items.length;
+			}
+		}
+		return out;
 	}
 
 	function renderGrants() {
@@ -398,23 +765,46 @@
 		syncGrants(grantMap(extra));
 	}
 
+	// Raw bytes -> base64url (no padding), for the URL fragment key.
+	function bytesToB64url(bytes) {
+		var bin = '';
+		for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+		return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+	}
+
 	function submitCreateLink(e) {
 		e.preventDefault();
 		var days = parseInt($('drvLinkExpires').value, 10) || 0;
 		var pw = $('drvLinkPw').value;
 		var body = { entity_type: shareTarget.entity_type, entity_id: shareTarget.id, expires_days: days };
 		if (pw) body.password = pw;
-		api.post('drive_link_create', body).then(function (r) {
-			$('drvLinkPw').value = '';
-			var nl = $('drvNewLink');
-			nl.hidden = false;
-			nl.innerHTML = '<div>Link created — copy it now, it won\'t be shown again:</div>';
-			var inp = document.createElement('input');
-			inp.type = 'text'; inp.readOnly = true; inp.value = r.url || r.path;
-			inp.onclick = function () { inp.select(); };
-			nl.appendChild(inp);
-			loadShares();
-		}).catch(function (e) { toast(e.message || 'Could not create link.'); });
+
+		var mint = function (fragment) {
+			api.post('drive_link_create', body).then(function (r) {
+				$('drvLinkPw').value = '';
+				var nl = $('drvNewLink');
+				nl.hidden = false;
+				nl.innerHTML = '<div>Link created — copy it now, it won\'t be shown again:</div>';
+				var inp = document.createElement('input');
+				inp.type = 'text'; inp.readOnly = true;
+				inp.value = (r.url || r.path) + (fragment || '');
+				inp.onclick = function () { inp.select(); };
+				nl.appendChild(inp);
+				loadShares();
+			}).catch(function (e) { toast(e.message || 'Could not create link.'); });
+		};
+
+		// For an encrypted file the link must carry the file key in its fragment
+		// (never sent to the server). Unwrap our own key, encode it, append it.
+		if (shareTarget.encrypted && shareTarget.entity_type === 'file') {
+			ensureUnlocked().then(function (session) {
+				return session.openSealed(shareTarget.wrapped_file_key);
+			}).then(function (fkBytes) {
+				mint('#' + bytesToB64url(fkBytes));
+			}).catch(function (e) { toast(e.message || 'Could not prepare the encrypted link.'); });
+		} else {
+			mint('');
+		}
 	}
 
 	// ---- version history ---------------------------------------------------
@@ -480,28 +870,66 @@
 
 		if (file.size > CFG.maxFileBytes) { fail('too large'); return; }
 
+		var encrypted = state.view === 'mine' && state.folderId && state.folderEncrypted;
+
 		try {
-			// Hash small/medium files client-side to enable the dedup short-circuit.
-			var sha = file.size <= 64 * 1024 * 1024 ? await sha256Hex(file) : null;
-			var initBody = { name: file.name, size_bytes: file.size, mime_type: file.type || 'application/octet-stream' };
-			if (sha) initBody.sha256 = sha;
+			var body;          // upload body (Blob): ciphertext when encrypted, else the file
+			var initBody = { size_bytes: file.size, mime_type: file.type || 'application/octet-stream' };
+			var completeExtra = {};
+
+			if (encrypted) {
+				var session = await ensureUnlocked();
+				var packed = await DC.encryptFile(file);
+				// Seal the file key to the destination's FULL reader set — the
+				// folder owner plus every grantee — so the file lands readable by
+				// everyone who can already reach it (an uploader-only key would
+				// permanently lock the owner out of a file in their own vault;
+				// the server requires the owner's entry).
+				var pk = await api.post('drive_public_keys', { folder_id: state.folderId });
+				var wrappedKeys = {};
+				var haveSelf = false, missingVault = 0;
+				var readers = pk.keys || [];
+				for (var ri = 0; ri < readers.length; ri++) {
+					var rk = readers[ri];
+					if (!rk.user_id) continue;
+					if (!rk.public_key) { missingVault++; continue; }
+					wrappedKeys[rk.user_id] = await DC.wrapFileKeyTo(packed.fkBytes, rk.public_key);
+					if (rk.user_id === CFG.userId) haveSelf = true;
+				}
+				if (!haveSelf) wrappedKeys[CFG.userId] = await session.sealTo(packed.fkBytes);
+				if (missingVault) toast('Some members of this folder have no Drive vault yet and can\'t open this file.');
+				body = packed.blob;
+				initBody.name = 'enc-' + packed.contentId;      // opaque; real name is in metadata
+				initBody.size_bytes = body.size;                 // ciphertext size (billed)
+				initBody.mime_type = 'application/octet-stream';
+				completeExtra.encrypted_metadata = await DC.encryptMetadata(packed.meta, packed.fkKey);
+				completeExtra.wrapped_file_keys = wrappedKeys;
+				if (packed.thumbB64) completeExtra.encrypted_thumbnail = packed.thumbB64;
+			} else {
+				body = file;
+				initBody.name = file.name;
+				// Hash small/medium files client-side to enable the dedup short-circuit.
+				var sha = file.size <= 64 * 1024 * 1024 ? await sha256Hex(file) : null;
+				if (sha) initBody.sha256 = sha;
+			}
 			if (state.view === 'mine' && state.folderId) initBody.folder_id = state.folderId;
 
 			var init = await api.post('drive_upload_init', initBody);
 			if (init.deduped) { done(); return; }
 
 			var token = init.upload_token, chunkBytes = init.chunk_bytes || 8388608;
+			var total = body.size;
 			var offset = 0;
-			while (offset < file.size) {
-				var end = Math.min(offset + chunkBytes, file.size);
-				var resp = await putChunk(token, file.slice(offset, end), offset, end - 1, file.size);
+			while (offset < total) {
+				var end = Math.min(offset + chunkBytes, total);
+				var resp = await putChunk(token, body.slice(offset, end), offset, end - 1, total);
 				if (resp.status === 409) { var j = await resp.json(); offset = (j.data && j.data.received_bytes) || 0; continue; }
 				if (!resp.ok) { fail('chunk failed'); return; }
 				var ok = await resp.json();
 				offset = ok.data.received_bytes;
-				progress(offset / file.size);
+				progress(offset / total);
 			}
-			await api.post('drive_upload_complete', { upload_token: token });
+			await api.post('drive_upload_complete', Object.assign({ upload_token: token }, completeExtra));
 			done();
 		} catch (e) {
 			fail((e && e.message) ? e.message : 'failed');
@@ -557,11 +985,11 @@
 		$('drvViewToggle').onclick = toggleViewMode;
 		$('drvSearch').oninput = onSearch;
 
-		dialogForm($('drvNewFolderDialog')).addEventListener('submit', submitNewFolder);
-		dialogForm($('drvRenameDialog')).addEventListener('submit', submitRename);
-		dialogForm($('drvMoveDialog')).addEventListener('submit', submitMove);
-		$('drvShareEmail').closest('form').addEventListener('submit', submitAddPerson);
-		$('drvLinkExpires').closest('form').addEventListener('submit', submitCreateLink);
+		interceptSubmit(dialogForm($('drvNewFolderDialog')), submitNewFolder);
+		interceptSubmit(dialogForm($('drvRenameDialog')), submitRename);
+		interceptSubmit(dialogForm($('drvMoveDialog')), submitMove);
+		interceptSubmit($('drvShareEmail').closest('form'), submitAddPerson);
+		interceptSubmit($('drvLinkExpires').closest('form'), submitCreateLink);
 		document.querySelectorAll('.drv-dialog [data-close]').forEach(function (b) {
 			b.onclick = function () { b.closest('dialog').close(); };
 		});
@@ -587,6 +1015,7 @@
 	function init() {
 		if (!api) { console.error('joineryApi missing'); return; }
 		wire();
+		wireVaultDialog();
 		if (window.DRIVE_INITIAL && window.DRIVE_INITIAL.items) {
 			render(window.DRIVE_INITIAL);
 		} else {
