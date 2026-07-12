@@ -2810,6 +2810,11 @@ abstract class FormWriterV2Base {
         echo '            messages: ' . json_encode($js_messages, JSON_UNESCAPED_SLASHES) . ',';
         echo '            debug: true';  // Always enable debug
         echo '        });';
+        // Expose the instance so page JS can take over submission (set
+        // validator.submitHandler) — the validator otherwise re-submits the
+        // form natively via form.submit() when valid, which bypasses and
+        // navigates over any page-level submit interception.
+        echo '        form.joineryValidator = validator;';
 
         // Add AJAX submission handler if needed
         if (isset($this->options['data-ajax']) && $this->options['data-ajax'] === 'true') {

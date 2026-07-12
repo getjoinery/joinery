@@ -72,6 +72,50 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
     }
 
     /**
+     * A short GET {base_url}/models. Any HTTP answer (even a 4xx/5xx) proves the
+     * host is up — we only care that the TCP/HTTP layer is alive, not that the
+     * models endpoint is perfectly healthy — so it returns null. A ConnectException
+     * (connection refused / DNS / connect-timeout to a sleeping Tailscale peer)
+     * returns the unreachable message so the turn fails in a couple of seconds
+     * instead of stalling the full streaming call. Any other error is treated as
+     * reachable-enough, leaving a precise diagnosis to the real call.
+     */
+    public function reachabilityProbe(): ?string {
+        try {
+            $this->http->get($this->base_url . '/models', [
+                'connect_timeout' => 2,
+                'timeout'         => 3,
+                'http_errors'     => false,
+            ]);
+            return null;
+        } catch (ConnectException $e) {
+            return $this->unreachableMessage();
+        } catch (Exception $e) {
+            return null;
+        }
+    }
+
+    /**
+     * Time-to-first-token bound for the streamed read: how long to wait for the
+     * model to *start* responding before giving up, separate from the between-token
+     * inactivity bound (the per-call timeout). A cold or overloaded local model can
+     * sit silent for a while before its first token; this fails that fast and
+     * legibly rather than waiting out the full per-call timeout. 0 disables the
+     * tighter first phase (the per-call timeout governs the whole read). Remote
+     * subclasses override to 0 — a cloud API's first token is prompt.
+     */
+    protected function firstTokenTimeoutSeconds(): int {
+        $v = (int)Globalvars::get_instance()->get_setting('joinery_ai_local_first_token_timeout_seconds');
+        return $v > 0 ? $v : 0;
+    }
+
+    /** Message for a first-token timeout; phrased so classify() reads it as a network error. */
+    protected function firstTokenTimeoutMessage(): string {
+        return $this->providerLabel() . ' did not start responding in time — the model may be '
+            . 'loading or the host is overloaded (first-token timeout).';
+    }
+
+    /**
      * The local host's vision support is host-dependent (a multimodal model like
      * llava/qwen-vl accepts images; a text-only one does not), so it is declared
      * by the joinery_ai_local_vision setting rather than assumed. Native PDF
@@ -141,7 +185,7 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
                 'timeout'      => 0,                  // local generation can run long
                 'read_timeout' => $this->read_timeout, // bound inactivity instead
             ]);
-            return $this->consumeStream($response->getBody(), $onTextDelta);
+            return $this->consumeStream($response->getBody(), $onTextDelta, $this->firstTokenTimeoutSeconds());
         } catch (ConnectException $e) {
             // Connection refused / DNS / timeout — the server isn't reachable.
             // Keep "not reachable" in the message so classify() reads it as a
@@ -173,51 +217,82 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
      * deltas pass through the think-filter before reaching $onTextDelta and the
      * accumulated answer; tool-call argument fragments accumulate per index.
      */
-    private function consumeStream($body, callable $onTextDelta): array {
+    private function consumeStream($body, callable $onTextDelta, int $firstTokenTimeout = 0): array {
         $text = '';
         $tool_calls = [];   // index => ['id'=>,'name'=>,'args'=>'']
         $finish = 'stop';
         $usage = ['prompt_tokens' => 0, 'completion_tokens' => 0, 'cached_tokens' => 0];
         $think = ['in' => false, 'carry' => '']; // <think> filter state
 
+        // Drive the raw socket so the first-token wait can be bounded tighter than
+        // the between-token read timeout. detach() yields the underlying PHP stream
+        // resource; fread() reads are byte-identical to the PSR-7 stream's read().
+        $res = (is_object($body) && method_exists($body, 'detach')) ? $body->detach()
+             : (is_resource($body) ? $body : null);
+        if (!is_resource($res)) {
+            throw new LlmProviderException($this->providerLabel() . ' returned no readable stream (network error).', 0);
+        }
+        // Phase 1: wait at most $firstTokenTimeout for the model to *start* (a cold
+        // or overloaded local model can sit silent). 0 disables the tighter phase.
+        $started = false;
+        stream_set_timeout($res, max(1, $firstTokenTimeout > 0 ? $firstTokenTimeout : (int)$this->read_timeout));
+
         $buffer = '';
-        while (!$body->eof()) {
-            $buffer .= $body->read(8192);
-            while (($pos = strpos($buffer, "\n")) !== false) {
-                $line = rtrim(substr($buffer, 0, $pos), "\r");
-                $buffer = substr($buffer, $pos + 1);
-                if (strncmp($line, 'data:', 5) !== 0) continue; // skip blanks / comments
-                $payload = ltrim(substr($line, 5));
-                if ($payload === '' || $payload === '[DONE]') continue;
-
-                $chunk = json_decode($payload, true);
-                if (!is_array($chunk)) continue;
-
-                $choice = $chunk['choices'][0] ?? null;
-                if (is_array($choice)) {
-                    $delta = $choice['delta'] ?? [];
-                    if (isset($delta['content']) && is_string($delta['content']) && $delta['content'] !== '') {
-                        $clean = $this->thinkPush($think, $delta['content']);
-                        if ($clean !== '') { $text .= $clean; $onTextDelta($clean); }
-                    }
-                    foreach (($delta['tool_calls'] ?? []) as $tc) {
-                        $idx = (int)($tc['index'] ?? 0);
-                        if (!isset($tool_calls[$idx])) $tool_calls[$idx] = ['id' => '', 'name' => '', 'args' => ''];
-                        if (isset($tc['id'])) $tool_calls[$idx]['id'] = (string)$tc['id'];
-                        $fn = $tc['function'] ?? [];
-                        if (isset($fn['name']))      $tool_calls[$idx]['name'] .= (string)$fn['name'];
-                        if (isset($fn['arguments'])) $tool_calls[$idx]['args'] .= (string)$fn['arguments'];
-                    }
-                    if (!empty($choice['finish_reason'])) $finish = (string)$choice['finish_reason'];
+        try {
+            while (!feof($res)) {
+                $data = fread($res, 8192);
+                $meta = stream_get_meta_data($res);
+                if (($data === '' || $data === false) && !empty($meta['timed_out'])) {
+                    if (!$started) throw new LlmProviderException($this->firstTokenTimeoutMessage(), 0);
+                    throw new LlmProviderException($this->providerLabel()
+                        . ' stopped responding mid-stream (connection timeout).', 0);
                 }
-                if (isset($chunk['usage']) && is_array($chunk['usage'])) {
-                    $usage['prompt_tokens']     = (int)($chunk['usage']['prompt_tokens'] ?? $usage['prompt_tokens']);
-                    $usage['completion_tokens'] = (int)($chunk['usage']['completion_tokens'] ?? $usage['completion_tokens']);
-                    // Standard OpenAI cached-prompt count (Fireworks sends it; Ollama
-                    // doesn't). prompt_tokens already includes these.
-                    $usage['cached_tokens'] = (int)($chunk['usage']['prompt_tokens_details']['cached_tokens'] ?? $usage['cached_tokens']);
+                if ($data === '' || $data === false) continue;
+                if (!$started) {
+                    // Phase 2: first bytes arrived — relax to the full between-token
+                    // timeout so a long generation is never cut mid-answer.
+                    $started = true;
+                    stream_set_timeout($res, max(1, (int)$this->read_timeout));
+                }
+                $buffer .= $data;
+                while (($pos = strpos($buffer, "\n")) !== false) {
+                    $line = rtrim(substr($buffer, 0, $pos), "\r");
+                    $buffer = substr($buffer, $pos + 1);
+                    if (strncmp($line, 'data:', 5) !== 0) continue; // skip blanks / comments
+                    $payload = ltrim(substr($line, 5));
+                    if ($payload === '' || $payload === '[DONE]') continue;
+
+                    $chunk = json_decode($payload, true);
+                    if (!is_array($chunk)) continue;
+
+                    $choice = $chunk['choices'][0] ?? null;
+                    if (is_array($choice)) {
+                        $delta = $choice['delta'] ?? [];
+                        if (isset($delta['content']) && is_string($delta['content']) && $delta['content'] !== '') {
+                            $clean = $this->thinkPush($think, $delta['content']);
+                            if ($clean !== '') { $text .= $clean; $onTextDelta($clean); }
+                        }
+                        foreach (($delta['tool_calls'] ?? []) as $tc) {
+                            $idx = (int)($tc['index'] ?? 0);
+                            if (!isset($tool_calls[$idx])) $tool_calls[$idx] = ['id' => '', 'name' => '', 'args' => ''];
+                            if (isset($tc['id'])) $tool_calls[$idx]['id'] = (string)$tc['id'];
+                            $fn = $tc['function'] ?? [];
+                            if (isset($fn['name']))      $tool_calls[$idx]['name'] .= (string)$fn['name'];
+                            if (isset($fn['arguments'])) $tool_calls[$idx]['args'] .= (string)$fn['arguments'];
+                        }
+                        if (!empty($choice['finish_reason'])) $finish = (string)$choice['finish_reason'];
+                    }
+                    if (isset($chunk['usage']) && is_array($chunk['usage'])) {
+                        $usage['prompt_tokens']     = (int)($chunk['usage']['prompt_tokens'] ?? $usage['prompt_tokens']);
+                        $usage['completion_tokens'] = (int)($chunk['usage']['completion_tokens'] ?? $usage['completion_tokens']);
+                        // Standard OpenAI cached-prompt count (Fireworks sends it; Ollama
+                        // doesn't). prompt_tokens already includes these.
+                        $usage['cached_tokens'] = (int)($chunk['usage']['prompt_tokens_details']['cached_tokens'] ?? $usage['cached_tokens']);
+                    }
                 }
             }
+        } finally {
+            if (is_resource($res)) fclose($res);
         }
         $tail = $this->thinkFlush($think);
         if ($tail !== '') { $text .= $tail; $onTextDelta($tail); }

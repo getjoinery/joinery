@@ -37,6 +37,7 @@ function drive_logic(array $input): LogicResult {
 	$page_vars['max_file_bytes']     = (int)SubscriptionTier::getUserFeature($user_id, 'drive_max_file_bytes', 0);
 	$page_vars['quota_bytes']        = (int)SubscriptionTier::getUserFeature($user_id, 'drive_storage_bytes', 0);
 	$page_vars['chunk_bytes']        = (int)$settings->get_setting('drive_upload_chunk_bytes');
+	$page_vars['passkeys_enabled']   = (bool)$settings->get_setting('passkeys_enabled');
 	$page_vars['session']            = $session;
 
 	return LogicResult::render($page_vars);

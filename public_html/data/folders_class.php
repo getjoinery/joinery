@@ -38,6 +38,10 @@ class Folder extends SystemBase {
 		'fol_usr_user_id'      => array('type' => 'int4', 'is_nullable' => false, 'required' => true, 'index' => true),
 		'fol_parent_folder_id' => array('type' => 'int8', 'is_nullable' => true, 'index' => true),
 		'fol_name'             => array('type' => 'varchar(255)', 'is_nullable' => false, 'required' => true),
+		// An encrypted vault folder (docs/drive_encryption.md): every file created
+		// inside is client-side end-to-end encrypted. Encryption is a property of
+		// the subtree — a folder created under an encrypted parent inherits it.
+		'fol_encrypted'        => array('type' => 'bool', 'is_nullable' => false, 'default' => 'false'),
 		'fol_create_time'      => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()'),
 		'fol_delete_time'      => array('type' => 'timestamp(6)', 'is_nullable' => true),
 	);

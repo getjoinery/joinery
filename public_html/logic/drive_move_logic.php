@@ -49,6 +49,27 @@ function drive_move_logic(array $input): LogicResult {
 		}
 	}
 
+	// Encryption-boundary guard. The server never transforms bytes, so a move that
+	// would cross the plaintext/encrypted line — a plaintext file into a vault, or
+	// an encrypted file out of one — is refused (the client re-uploads to convert,
+	// per docs/drive_encryption.md). An encrypted vault folder may still move to
+	// the root (a top-level vault); only plaintext-into-vault and vault-into-plain
+	// are broken states.
+	$dest_encrypted = ($parent_id > 0) ? DriveHelper::folder_is_encrypted($target) : false;
+	if ($entity_type === DriveHelper::ENTITY_FILE) {
+		if ($entity->is_encrypted() !== $dest_encrypted) {
+			return LogicResult::error('Move an encrypted file by re-uploading it; it can\'t cross an encryption boundary in place.');
+		}
+	} else {
+		$item_encrypted = DriveHelper::folder_is_encrypted($entity);
+		if ($dest_encrypted && !$item_encrypted) {
+			return LogicResult::error('A plaintext folder can\'t move into an encrypted vault.');
+		}
+		if (!$dest_encrypted && $item_encrypted && $parent_id > 0) {
+			return LogicResult::error('An encrypted vault folder can only sit at the Drive root or inside another vault.');
+		}
+	}
+
 	if ($entity_type === DriveHelper::ENTITY_FOLDER) {
 		if (DriveHelper::would_create_cycle($entity_id, $parent_id)) {
 			return LogicResult::error('You cannot move a folder into itself or one of its subfolders.');

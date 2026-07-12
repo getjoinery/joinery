@@ -27,6 +27,14 @@ function drive_folder_create_logic(array $input): LogicResult {
 
 	$parent_id = (isset($input['parent_id']) && (int)$input['parent_id'] > 0) ? (int)$input['parent_id'] : 0;
 
+	// Encryption is a property of the subtree, and a vault is a top-level tree:
+	// under an encrypted parent it is always inherited; at the root the caller
+	// opts in with `encrypted`; under a plaintext parent it is refused (so a
+	// plaintext folder can never contain an encrypted descendant — which is what
+	// lets a public link on a plaintext folder trust its whole subtree, and
+	// matches the move-boundary rule in drive_move).
+	$encrypted = !empty($input['encrypted']);
+
 	if ($parent_id > 0) {
 		$parent = DriveHelper::load_folder($parent_id);
 		if (!$parent) {
@@ -37,6 +45,11 @@ function drive_folder_create_logic(array $input): LogicResult {
 		}
 		if (DriveHelper::depth($parent_id) + 1 > DriveHelper::max_depth()) {
 			return LogicResult::error('Maximum folder depth reached.');
+		}
+		if (DriveHelper::folder_is_encrypted($parent)) {
+			$encrypted = true; // inherited — a vault subtree stays a vault
+		} elseif ($encrypted) {
+			return LogicResult::error('An encrypted folder can only be created at the Drive root or inside another encrypted folder.');
 		}
 	}
 
@@ -50,6 +63,9 @@ function drive_folder_create_logic(array $input): LogicResult {
 		$folder->set('fol_parent_folder_id', $parent_id);
 	}
 	$folder->set('fol_name', $name);
+	if ($encrypted) {
+		$folder->set('fol_encrypted', true);
+	}
 	$folder->save();
 	$folder->load(); // repopulate serial pkey + default columns for the export
 
@@ -63,12 +79,13 @@ function drive_folder_create_logic(array $input): LogicResult {
 
 function drive_folder_create_logic_descriptor(): array {
 	return array(
-		'description'      => 'Create a folder in the current user\'s Drive.',
+		'description'      => 'Create a folder in the current user\'s Drive. `encrypted` is accepted only at the root (folders under an encrypted parent inherit it; under a plaintext parent it is refused — a vault is a top-level tree).',
 		'requires_session' => true,
 		'mutates'          => true,
 		'input'            => array(
 			'name'      => array('type' => 'string', 'required' => true, 'max_length' => 255, 'label' => 'Folder name'),
 			'parent_id' => array('type' => 'int', 'required' => false, 'label' => 'Parent folder id (omit for root)'),
+			'encrypted' => array('type' => 'bool', 'required' => false, 'label' => 'Create as an encrypted vault folder'),
 		),
 	);
 }

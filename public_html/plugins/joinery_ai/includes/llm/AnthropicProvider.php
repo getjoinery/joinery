@@ -95,6 +95,11 @@ class AnthropicProvider implements LlmProviderInterface {
         return false;
     }
 
+    /** No cheap pre-flight probe for a cloud provider — the real call handles transport errors. */
+    public function reachabilityProbe(): ?string {
+        return null;
+    }
+
     /** Image + native-PDF capable across the catalog; unknown ids fall to false. */
     public function modelCapabilities(string $model): array {
         return self::MODEL_CAPABILITIES[$model] ?? ['vision' => false, 'document' => false];

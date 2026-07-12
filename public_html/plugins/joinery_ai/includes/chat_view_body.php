@@ -480,7 +480,7 @@ if (!function_exists('joai_pin_svg')) {
                 scrollToBottom();
             },
             function (html, usage) { replaceBubble(messageId, html); updateUsage(usage); },
-            function (err) { setBusy(false); alert(err || 'The turn could not be completed.'); });
+            function (err) { renderFailedBubble(messageId, err); });
     }
 
     // Capability toggles. On an existing chat, persist immediately; on a new
@@ -757,6 +757,18 @@ if (!function_exists('joai_pin_svg')) {
     });
     updateSettingsSummary();
 
+    // The last message actually submitted, so an inline failed bubble can offer a
+    // Retry that replays it (the File objects stay valid — they aren't revoked).
+    var lastTurn = null;
+    function retryLastTurn() {
+        if (!lastTurn) return;
+        input.value = lastTurn.message;
+        pendingFiles = lastTurn.files.slice();
+        renderAttachStrip();
+        updateSensitivityNotice();
+        send();
+    }
+
     function send() {
         var message = input.value.trim();
         var files = pendingFiles.slice();
@@ -764,6 +776,7 @@ if (!function_exists('joai_pin_svg')) {
         if (!message && !files.length) return;
         clearBlankNotice();
         hideSendNotice();
+        lastTurn = { message: message, files: files.slice() };
 
         // Optimistically show the user's message (server returns canonical HTML
         // on the next load; here we echo the text + any attachment names).
@@ -855,7 +868,7 @@ if (!function_exists('joai_pin_svg')) {
 
                 // Non-fpm fallback may finish the turn inline.
                 if (data.status === 'complete') { appendReply(data.assistant_html); updateUsage(data.conversation_usage); return; }
-                if (data.status === 'failed') { setBusy(false); alert(data.error || 'Send failed.'); return; }
+                if (data.status === 'failed') { renderFailedBubble(data.message_id, data.error || 'Send failed.'); return; }
 
                 // Async: stream the reply into a live bubble, then swap in the
                 // final markdown bubble on completion.
@@ -1309,7 +1322,7 @@ if (!function_exists('joai_pin_svg')) {
 
                 // Non-fpm fallback may finish the resume inline.
                 if (data.status === 'complete') { replaceBubble(data.message_id, data.assistant_html); updateUsage(data.conversation_usage); return; }
-                if (data.status === 'failed') { setBusy(false); alert(data.error || 'Action failed.'); return; }
+                if (data.status === 'failed') { renderFailedBubble(data.message_id, data.error || 'Action failed.'); return; }
 
                 // Async: reuse the pending bubble as the live bubble, stream the
                 // resumed reply into it, then swap in the final markdown bubble.
@@ -1325,6 +1338,41 @@ if (!function_exists('joai_pin_svg')) {
         setBusy(false);
         var bubble = transcript.querySelector('.joai-chat-msg[data-message-id="' + messageId + '"]');
         if (bubble) bubble.outerHTML = html;
+        scrollToBottom();
+    }
+
+    // A failed turn renders inline in the transcript (never a popup): the live
+    // bubble for this message becomes an error card carrying the server's message
+    // text, with a Retry that replays the last submitted turn. The error string is
+    // set via textContent — provider error text is not trusted markup.
+    function renderFailedBubble(messageId, errorText) {
+        setBusy(false);
+        var el = transcript.querySelector('.joai-chat-msg[data-message-id="' + messageId + '"]');
+        if (!el) {
+            el = document.createElement('div');
+            el.setAttribute('data-message-id', messageId);
+            transcript.appendChild(el);
+        }
+        el.className = 'joai-chat-msg joai-chat-assistant joai-chat-failed';
+        el.textContent = '';
+        var body = document.createElement('div');
+        body.className = 'joai-chat-body';
+        body.textContent = errorText || 'The turn could not be completed.';
+        el.appendChild(body);
+        if (lastTurn) {
+            var actions = document.createElement('div');
+            actions.className = 'joai-chat-failed-actions';
+            var retry = document.createElement('button');
+            retry.type = 'button';
+            retry.className = 'joai-chat-retry';
+            retry.textContent = 'Retry';
+            retry.addEventListener('click', function () {
+                if (el.parentNode) el.parentNode.removeChild(el);
+                retryLastTurn();
+            });
+            actions.appendChild(retry);
+            el.appendChild(actions);
+        }
         scrollToBottom();
     }
 

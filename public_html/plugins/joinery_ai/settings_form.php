@@ -20,14 +20,17 @@ $formwriter->dropinput('joinery_ai_llm_provider', 'LLM Provider', [
         'local' => ['show' => [
             'joinery_ai_local_base_url', 'joinery_ai_local_model',
             'joinery_ai_local_api_key', 'joinery_ai_local_timeout_seconds',
+            'joinery_ai_local_first_token_timeout_seconds',
         ], 'hide' => ['joinery_ai_fireworks_base_url']],
         'fireworks' => ['show' => ['joinery_ai_fireworks_base_url'], 'hide' => [
             'joinery_ai_local_base_url', 'joinery_ai_local_model',
             'joinery_ai_local_api_key', 'joinery_ai_local_timeout_seconds',
+            'joinery_ai_local_first_token_timeout_seconds',
         ]],
         'anthropic' => ['hide' => [
             'joinery_ai_local_base_url', 'joinery_ai_local_model',
             'joinery_ai_local_api_key', 'joinery_ai_local_timeout_seconds',
+            'joinery_ai_local_first_token_timeout_seconds',
             'joinery_ai_fireworks_base_url',
         ]],
     ],
@@ -59,7 +62,16 @@ $formwriter->passwordinput('joinery_ai_local_api_key', 'Local API Key', [
 $formwriter->numberinput('joinery_ai_local_timeout_seconds', 'Local Timeout (s)', [
     'value' => $settings->get_setting('joinery_ai_local_timeout_seconds'),
     'min' => 1,
-    'helptext' => 'Per-call HTTP timeout. CPU-only local generation is slow — keep this high.',
+    'helptext' => 'Per-call HTTP timeout — the max quiet gap between tokens once the model is '
+                . 'generating. CPU-only local generation is slow — keep this high.',
+]);
+
+$formwriter->numberinput('joinery_ai_local_first_token_timeout_seconds', 'Local First-Token Timeout (s)', [
+    'value' => $settings->get_setting('joinery_ai_local_first_token_timeout_seconds'),
+    'min' => 1,
+    'helptext' => 'How long to wait for the model to *start* responding before failing the turn. '
+                . 'Bounds a cold model load or an overloaded host so a stalled request fails fast '
+                . 'instead of waiting out the full per-call timeout above.',
 ]);
 
 $formwriter->textinput('joinery_ai_fireworks_base_url', 'Fireworks Base URL', [

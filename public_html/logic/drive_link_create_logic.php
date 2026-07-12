@@ -42,6 +42,15 @@ function drive_link_create_logic(array $input): LogicResult {
 		return LogicResult::error('Only the owner can create a share link.');
 	}
 
+	// Anonymous encrypted links carry the file key in the URL fragment (never sent
+	// to the server) — a single-file mechanism. An encrypted folder holds a
+	// distinct key per file, which one fragment can't carry, so folder links are
+	// offered only for plaintext folders. (Share encrypted folders to members,
+	// who unwrap per-file keys with their own vault.)
+	if ($entity_type === DriveHelper::ENTITY_FOLDER && DriveHelper::folder_is_encrypted($entity)) {
+		return LogicResult::error('Encrypted folders can\'t use public links. Share them with members instead.');
+	}
+
 	$expires_time = null;
 	$expires_days = (int)($input['expires_days'] ?? 0);
 	if ($expires_days > 0) {

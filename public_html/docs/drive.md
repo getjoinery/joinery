@@ -184,6 +184,17 @@ files through a short-lived signed URL and renders folders as a read-only listin
 scoped to the shared subtree; the link is the durable revocable grant, the signed
 URL is the transport. `drive_link_revoke` stamps `fsl_revoked_time`.
 
+**Encrypted files** (files inside an encrypted vault folder) add a second layer to
+the share dialog: a `FileAccessGrant` grants access, and a `FileKeyGrant` grants
+readability — the owner's browser wraps the file key to each recipient's Drive
+vault public key, and an upload seals the new file's key to the destination's
+full reader set. An encrypted vault folder exists only at the Drive root or
+inside another vault, so a plaintext subtree never hides encrypted content.
+Encrypted files rename via their re-encrypted metadata (`drive_rename` with
+`encrypted_metadata`), never a plaintext `name`. Public links carry the file key
+in the URL fragment and are single-file only (encrypted folders can't use them).
+See [Drive Encryption](drive_encryption.md).
+
 ## Upload protocol (resumable, sequential chunks)
 
 Uploads never overwrite bytes directly — they flow through the one blob-ingestion
@@ -192,7 +203,10 @@ contract for sync clients:
 
 1. **`drive_upload_init`** — `{name, folder_id?, file_id?, size_bytes, sha256?,
    mime_type?}`. Gates folder/file write access, then the per-file size
-   (`drive_max_file_bytes`) and quota (`bytes_used + size_bytes <=
+   (`drive_max_file_bytes`; for an encrypted destination the gate is
+   `DriveHelper::encrypted_size_ceiling()` — the cap plus the client
+   container's fixed per-chunk overhead, since the cap means plaintext bytes
+   and the upload arrives as ciphertext) and quota (`bytes_used + size_bytes <=
    drive_storage_bytes`) **of the owner who will be billed** — the target
    file's owner, else the destination folder's owner, else the actor. If
    `sha256` matches a private blob **the actor already possesses** it
@@ -229,7 +243,10 @@ contract for sync clients:
    hashed the actual bytes), creates the `File` owned by the folder owner — or
    a new `FileVersion` when the upload targeted an existing file — recomputes
    the owner's usage, records the change, and clears the pending row. Safe to
-   retry, and covered by the standard `Idempotency-Key` machinery.
+   retry, and covered by the standard `Idempotency-Key` machinery. For an
+   encrypted destination the complete also carries the opaque key/metadata
+   payloads, and an encrypted **version** upload must reuse the file's key —
+   see [Drive Encryption](drive_encryption.md) for that contract.
 
 Chunk size is `drive_upload_chunk_bytes` (8 MiB). Abandoned uploads (rows + part
 files idle > 24h) are swept by the `DrivePurgeStaleUploads` task.

@@ -20,6 +20,8 @@ $config = array(
 	'quotaBytes'        => (int)($page_vars['quota_bytes'] ?? 0),
 	'chunkBytes'        => (int)($page_vars['chunk_bytes'] ?? 8388608),
 	'userId'            => (int)SessionControl::get_instance()->get_user_id(),
+	'passkeysEnabled'   => (bool)($page_vars['passkeys_enabled'] ?? false),
+	'vaultScope'        => 'drive',
 );
 
 // Dialog forms are FormWriter-built; drive.js intercepts submit and calls the API.
@@ -90,11 +92,52 @@ $move_fw       = $page->getFormWriter('drive_move', array('action' => '/drive', 
 	$new_folder_fw->begin_form();
 	$new_folder_fw->textinput('drv_new_folder_name', 'Folder name', array('id' => 'drvNewFolderName', 'required' => true, 'maxlength' => 255));
 	?>
+	<label class="drv-enc-opt" id="drvNewFolderEncWrap">
+		<input type="checkbox" id="drvNewFolderEnc">
+		<span>Encrypted vault folder — files inside are end-to-end encrypted in your browser. Lose every unlocker and they are unrecoverable.</span>
+	</label>
 	<div class="drv-dialog-actions">
 		<button type="button" class="jy-btn jy-btn-secondary" data-close>Cancel</button>
 		<button type="submit" class="jy-btn jy-btn-primary">Create</button>
 	</div>
 	<?php $new_folder_fw->end_form(); ?>
+</dialog>
+
+<dialog id="drvVaultDialog" class="drv-dialog">
+	<div id="drvVaultSetup" hidden>
+		<h3>Set up your Drive vault</h3>
+		<p style="font-size:.9rem;opacity:.85;">Encrypted files are locked with a key only your devices ever hold. Choose how you'll unlock it. If you lose every unlocker, encrypted files are permanently gone — there is no recovery.</p>
+		<label class="drv-enc-opt"><input type="checkbox" id="drvVaultAck"> <span>I understand encrypted files are unrecoverable if I lose all unlockers.</span></label>
+		<div id="drvVaultSetupPpWrap" hidden style="margin-top:.5rem;">
+			<input type="password" id="drvVaultSetupPp" class="drv-search" style="width:100%;" placeholder="Passphrase (min 10 chars)" autocomplete="new-password">
+		</div>
+		<div class="drv-dialog-actions" style="justify-content:flex-start;flex-wrap:wrap;">
+			<button type="button" class="jy-btn jy-btn-primary" id="drvVaultSetupPasskey">Set up with a passkey</button>
+			<button type="button" class="jy-btn jy-btn-secondary" id="drvVaultSetupPpToggle">Use a passphrase</button>
+			<button type="button" class="jy-btn jy-btn-primary" id="drvVaultSetupPpGo" hidden>Set up with passphrase</button>
+		</div>
+		<div id="drvVaultRecovery" hidden style="margin-top:.6rem;">
+			<p style="font-size:.9rem;"><strong>Save your recovery keys</strong> — shown once. They are the only way back in if you lose your passkey and passphrase.</p>
+			<pre id="drvVaultRecoveryCodes" style="white-space:pre-wrap;font-size:.8rem;background:rgba(127,127,127,.1);padding:.6rem;border-radius:8px;"></pre>
+			<button type="button" class="jy-btn jy-btn-primary" id="drvVaultRecoveryDone">I've saved them — continue</button>
+		</div>
+	</div>
+	<div id="drvVaultUnlock" hidden>
+		<h3>Unlock your Drive vault</h3>
+		<button type="button" class="jy-btn jy-btn-primary jy-btn-block" id="drvVaultUnlockPasskey" style="width:100%;margin-bottom:.5rem;">Unlock with a passkey</button>
+		<div style="margin:.4rem 0;">
+			<input type="password" id="drvVaultUnlockPp" class="drv-search" style="width:100%;" placeholder="Passphrase" autocomplete="current-password">
+			<button type="button" class="jy-btn jy-btn-secondary" id="drvVaultUnlockPpGo" style="margin-top:.35rem;">Unlock with passphrase</button>
+		</div>
+		<div style="margin:.4rem 0;">
+			<input type="text" id="drvVaultUnlockRec" class="drv-search" style="width:100%;" placeholder="Recovery key" autocomplete="off">
+			<button type="button" class="jy-btn jy-btn-secondary" id="drvVaultUnlockRecGo" style="margin-top:.35rem;">Unlock with recovery key</button>
+		</div>
+	</div>
+	<p class="drv-vault-error" id="drvVaultError" role="alert" hidden style="color:#e0533d;font-size:.85rem;"></p>
+	<div class="drv-dialog-actions">
+		<button type="button" class="jy-btn jy-btn-secondary" data-close>Cancel</button>
+	</div>
 </dialog>
 
 <dialog id="drvRenameDialog" class="drv-dialog">
@@ -248,6 +291,11 @@ $move_fw       = $page->getFormWriter('drive_move', array('action' => '/drive', 
 .drv-new-link{background:rgba(80,120,255,.08);border-radius:8px;padding:.5rem;margin-bottom:.5rem;word-break:break-all;font-size:.82rem}
 .drv-new-link input{width:100%;font:inherit;padding:.3rem;border:1px solid rgba(127,127,127,.3);border-radius:6px}
 .drv-link-del{background:transparent;border:0;color:#e0533d;cursor:pointer}
+.drv-enc-opt{display:flex;gap:.5rem;align-items:flex-start;margin:.6rem 0;font-size:.82rem;opacity:.9;cursor:pointer}
+.drv-enc-opt input{margin-top:.15rem}
+.drv-item-lock{margin-left:.35rem;opacity:.6;font-size:.85em}
+.drv-crumb-lock{opacity:.7}
+.jy-btn-block{display:block;width:100%}
 @media(max-width:720px){.drv-app{flex-direction:column}.drv-rail{position:static;width:100%;flex-basis:auto}.drv-nav{flex-direction:row;flex-wrap:wrap}}
 </style>
 
@@ -255,6 +303,10 @@ $move_fw       = $page->getFormWriter('drive_move', array('action' => '/drive', 
 window.DRIVE_INITIAL = <?php echo json_encode($initial, JSON_UNESCAPED_SLASHES); ?>;
 window.DRIVE_CONFIG = <?php echo json_encode($config, JSON_UNESCAPED_SLASHES); ?>;
 </script>
+<script defer src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
+<script defer src="/assets/js/vault-crypto.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/vault-crypto.js')) ?: '1'; ?>"></script>
+<script defer src="/assets/js/vault-keyring.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/vault-keyring.js')) ?: '1'; ?>"></script>
+<script defer src="/assets/js/drive-crypto.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/drive-crypto.js')) ?: '1'; ?>"></script>
 <script defer src="/assets/js/drive.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/drive.js')) ?: '1'; ?>"></script>
 
 <?php

@@ -62,6 +62,27 @@ function share_logic(array $input): LogicResult {
 			$q->execute(array($blob_id));
 			$size = (int)$q->fetchColumn();
 		}
+		// An encrypted file is decrypted in the browser with the key carried in the
+		// URL fragment (never sent here). Serve ciphertext + the encrypted metadata
+		// blob and let the page do the rest — no server preview, opaque name.
+		if ($file->is_encrypted()) {
+			return LogicResult::render(array(
+				'title'        => 'Encrypted file',
+				'token'        => $token,
+				'entity_type'  => 'file',
+				'file'         => array(
+					'name'               => 'Encrypted file',
+					'size'               => $size,
+					'mime'               => 'application/octet-stream',
+					'is_image'           => false,
+					'encrypted'          => true,
+					'encrypted_metadata' => $file->get('fil_encrypted_metadata'),
+					'download_url'       => $file->mintSignedUrl('original', 900),
+					'preview_url'        => null,
+				),
+			));
+		}
+
 		$is_image = File::is_inline_safe_type($file->get('fil_type'));
 		return LogicResult::render(array(
 			'title'        => $file->get('fil_title'),
@@ -72,6 +93,7 @@ function share_logic(array $input): LogicResult {
 				'size'         => $size,
 				'mime'         => $file->get('fil_type'),
 				'is_image'     => $is_image,
+				'encrypted'    => false,
 				'download_url' => $file->mintSignedUrl('original', 900),
 				'preview_url'  => $is_image ? $file->mintSignedUrl('original', 900) : null,
 			),

@@ -48,6 +48,11 @@ class FileBlob extends SystemBase {
 		'fbb_is_private'        => array('type'=>'bool','is_nullable'=>false,'default'=>'false'),
 		'fbb_reference_count'   => array('type'=>'int4','is_nullable'=>false,'default'=>1),
 		'fbb_storage_driver'    => array('type'=>'varchar(32)','is_nullable'=>false,'default'=>'local'),
+		// Size key written by store_encrypted_variant (a ciphertext blob's
+		// client-produced thumbnail). Durable variant inventory: cloud-side
+		// lifecycle ops can't scan a disk, and the value must survive later
+		// image-size-registry changes. Null for every other blob.
+		'fbb_encrypted_variant_key' => array('type'=>'varchar(32)','is_nullable'=>true),
 		'fbb_sync_failed_count' => array('type'=>'int4','is_nullable'=>false,'default'=>0,'zero_on_create'=>true),
 		'fbb_sync_last_attempt' => array('type'=>'timestamp(6)','is_nullable'=>true),
 		'fbb_create_time'       => array('type'=>'timestamp(6)','is_nullable'=>false,'default'=>'now()'),
@@ -91,6 +96,29 @@ class FileBlob extends SystemBase {
 	public function is_image() {
 		require_once(PathHelper::getIncludePath('data/files_class.php'));
 		return File::is_inline_safe_type($this->get('fbb_mime_type'));
+	}
+
+	/**
+	 * Size keys that may hold a variant for this blob (original excluded) — the
+	 * single source of truth every lifecycle path enumerates variants from
+	 * (offload, cloud delete, splitCopy, visibility move, pull-back). Images may
+	 * carry every registered size; a ciphertext blob carries the one slot
+	 * store_encrypted_variant recorded (its MIME is octet-stream, so is_image()
+	 * alone would hide it).
+	 */
+	public function variant_size_keys() {
+		$keys = array();
+		if ($this->is_image()) {
+			require_once(PathHelper::getIncludePath('includes/ImageSizeRegistry.php'));
+			foreach (ImageSizeRegistry::get_sizes() as $size_key => $cfg) {
+				$keys[] = $size_key;
+			}
+		}
+		$enc = (string)$this->get('fbb_encrypted_variant_key');
+		if ($enc !== '' && !in_array($enc, $keys, true)) {
+			$keys[] = $enc;
+		}
+		return $keys;
 	}
 
 	/**
@@ -489,11 +517,8 @@ class FileBlob extends SystemBase {
 		}
 
 		$keys = array($this->remote_key_for('original'));
-		if ($this->is_image()) {
-			require_once(PathHelper::getIncludePath('includes/ImageSizeRegistry.php'));
-			foreach (ImageSizeRegistry::get_sizes() as $size_key => $cfg) {
-				$keys[] = $this->remote_key_for($size_key);
-			}
+		foreach ($this->variant_size_keys() as $size_key) {
+			$keys[] = $this->remote_key_for($size_key);
 		}
 
 		$failed_keys = array();
@@ -552,13 +577,7 @@ class FileBlob extends SystemBase {
 			self::_ensure_fast_htaccess($target_dir);
 		}
 
-		$size_keys = array('original');
-		if ($this->is_image()) {
-			require_once(PathHelper::getIncludePath('includes/ImageSizeRegistry.php'));
-			foreach (ImageSizeRegistry::get_sizes() as $size_key => $cfg) {
-				$size_keys[] = $size_key;
-			}
-		}
+		$size_keys = array_merge(array('original'), $this->variant_size_keys());
 
 		$is_cloud = ($this->get('fbb_storage_driver') === 'cloud');
 		$driver   = $is_cloud ? $this->_cloud_driver() : null;
@@ -687,11 +706,8 @@ class FileBlob extends SystemBase {
 
 		if ($source_dir && $source_dir !== $target_dir) {
 			if ($this->_move_single($source_dir, $target_dir, $name)) {
-				if ($this->is_image()) {
-					require_once(PathHelper::getIncludePath('includes/ImageSizeRegistry.php'));
-					foreach (ImageSizeRegistry::get_sizes() as $size_key => $cfg) {
-						$this->_move_single($source_dir . '/' . $size_key, $target_dir . '/' . $size_key, $name);
-					}
+				foreach ($this->variant_size_keys() as $size_key) {
+					$this->_move_single($source_dir . '/' . $size_key, $target_dir . '/' . $size_key, $name);
 				}
 			}
 		}
@@ -740,13 +756,7 @@ class FileBlob extends SystemBase {
 		$name = $this->get('fbb_stored_name');
 		$target_dir = $to_private ? self::restricted_dir() : self::fast_serve_dir();
 
-		$keys = array('original');
-		if ($this->is_image()) {
-			require_once(PathHelper::getIncludePath('includes/ImageSizeRegistry.php'));
-			foreach (ImageSizeRegistry::get_sizes() as $size_key => $cfg) {
-				$keys[] = $size_key;
-			}
-		}
+		$keys = array_merge(array('original'), $this->variant_size_keys());
 
 		$tmp_dir = sys_get_temp_dir() . '/fbb_pullback_' . $this->key . '_' . uniqid();
 		if (!mkdir($tmp_dir, 0777, true)) {
@@ -857,6 +867,39 @@ class FileBlob extends SystemBase {
 	// ==================================================================
 	// Image variants — resize / delete, keyed on fbb_stored_name.
 	// ==================================================================
+
+	/**
+	 * Write already-encrypted variant bytes into a size slot (docs/drive_encryption.md).
+	 * An encrypted Drive file's thumbnail is generated and encrypted in the
+	 * browser, then dropped into the blob's <size_key>/<stored_name> slot verbatim
+	 * — the server resize pipeline skips ciphertext, so the slot is otherwise
+	 * empty. Only ever called on a fresh, local blob at upload_complete. The size
+	 * key is recorded on the row (fbb_encrypted_variant_key) so
+	 * variant_size_keys() surfaces the slot to every lifecycle path — offload,
+	 * cloud delete, splitCopy, visibility move, pull-back — which all skip
+	 * non-image blobs otherwise.
+	 *
+	 * @return bool true on write
+	 */
+	public function store_encrypted_variant($size_key, $bytes) {
+		if ($size_key === '' || $size_key === 'original' || $bytes === null || $bytes === '') {
+			return false;
+		}
+		$dir = $this->local_dir() . '/' . $size_key;
+		if (!is_dir($dir)) {
+			@mkdir($dir, 0777, true);
+		}
+		$path = $dir . '/' . $this->get('fbb_stored_name');
+		if (@file_put_contents($path, $bytes) === false) {
+			return false;
+		}
+		@chmod($path, 0666);
+		if ((string)$this->get('fbb_encrypted_variant_key') !== (string)$size_key) {
+			$this->set('fbb_encrypted_variant_key', $size_key);
+			$this->save();
+		}
+		return true;
+	}
 
 	public function resize($size_key = 'all') {
 		if (!$this->is_image()) {
