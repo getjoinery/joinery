@@ -59,6 +59,9 @@ class ChatTurn {
             !empty($result['pending_action']) ? $result['pending_action'] : null);
         $cols['aim_input_tokens']  = (int)$result['input_tokens'];
         $cols['aim_output_tokens'] = (int)$result['output_tokens'];
+        if (isset($result['context_window']) && $result['context_window'] !== null) {
+            $cols['aim_context_window'] = (int)$result['context_window'];
+        }
         $cols['aim_status']        = AiConversationMessage::STATUS_COMPLETE;
         $cols['aim_activity']      = null;
         AiConversationMessage::updateColumns((int)$assistant_msg->key, $cols);
@@ -118,6 +121,9 @@ class ChatTurn {
             !empty($result['pending_action']) ? $result['pending_action'] : null);
         $cols['aim_input_tokens']  = $prior_in + (int)$result['input_tokens'];
         $cols['aim_output_tokens'] = $prior_out + (int)$result['output_tokens'];
+        if (isset($result['context_window']) && $result['context_window'] !== null) {
+            $cols['aim_context_window'] = (int)$result['context_window'];   // fresh window for the resumed turn
+        }
         $cols['aim_status']        = AiConversationMessage::STATUS_COMPLETE;
         $cols['aim_activity']      = null;
         AiConversationMessage::updateColumns((int)$msg->key, $cols);

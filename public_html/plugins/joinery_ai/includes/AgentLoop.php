@@ -256,7 +256,23 @@ class AgentLoop {
             'stop_reason'        => $stop_reason,
             'detail'             => $detail,
             'pending_action'     => $pending_action,
+            // The model's real context window, read from the host just after the
+            // turn (model still loaded). Colors the per-reply context number by how
+            // close it is to the limit. Best-effort, non-blocking — null for remote
+            // models or an unreachable host.
+            'context_window'     => self::sampleContextWindow($provider, $model),
         ];
+    }
+
+    /**
+     * The operative context window for a local turn, used to color the per-reply
+     * context number by proximity. Null for remote providers (no /api/ps) or when
+     * the host didn't answer — the number then renders uncolored. Never throws or
+     * blocks: hostContextWindow() bounds its own timeouts.
+     */
+    private static function sampleContextWindow($provider, string $model): ?int {
+        if ($provider->id() !== 'local' || !method_exists($provider, 'hostContextWindow')) return null;
+        return $provider->hostContextWindow($model);
     }
 
     /**
