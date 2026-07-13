@@ -63,6 +63,10 @@ class AiConversationMessage extends SystemBase {
         'aim_sealed_owner_user_id'=> array('type'=>'int8', 'is_nullable'=>true),
         'aim_input_tokens'        => array('type'=>'int4', 'default'=>0),
         'aim_output_tokens'       => array('type'=>'int4', 'default'=>0),
+        // The model's real context window (tokens) when this turn ran, read from
+        // the local host's /api/ps. Colors the per-reply context number by how close
+        // it is to the limit. NULL for remote models or an unreachable host.
+        'aim_context_window'      => array('type'=>'int4', 'is_nullable'=>true),
         'aim_status'              => array('type'=>'varchar(20)', 'default'=>'complete'),
         // Live one-line stage label while the row is RUNNING ("Waiting for
         // {model}…", "Running tool: web_search…"); NULL once the turn

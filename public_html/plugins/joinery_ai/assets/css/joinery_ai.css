@@ -190,26 +190,35 @@ select.joai-chat-control { cursor: pointer; }
 /* The admin theme drops the last row's bottom border on .table (card-embedded
    data tables); chat tables draw a full grid, so put it back. */
 .joai-chat-body table tbody tr:last-child td { border-bottom: 1px solid #ddd; }
-.joai-chat-time { font-size: 0.72rem; color: #999; margin-top: 0.3rem; }
+/* Per-turn footer: one muted line — the tool trace (left), then time · context ·
+   cost, with the hover-only Copy/Delete actions pushed to the right. */
+.joai-chat-foot { display: flex; flex-wrap: wrap; align-items: baseline;
+                  gap: 0.15rem 0.5rem; margin-top: 0.35rem; }
+.joai-chat-meta-line { margin-left: auto; font-size: 0.72rem; color: #999; white-space: nowrap; }
+.joai-chat-time { color: inherit; }
+.joai-chat-usage-cost { color: #bbb; }
+/* Context-size flag — a rough "how full is it getting" gauge (gray < 32k,
+   amber 32–64k, red 64k+). */
+.joai-ctx-ok   { color: #999; }
+.joai-ctx-warn { color: #c77d0a; }
+.joai-ctx-high { color: #c0392b; font-weight: 600; }
 /* Per-turn actions (copy / delete) — reveal on hover or keyboard focus of a turn. */
-.joai-chat-actions { display: flex; gap: 0.3rem; margin-top: 0.35rem; opacity: 0; transition: opacity 0.12s; }
+.joai-chat-actions { display: flex; gap: 0.3rem; opacity: 0; transition: opacity 0.12s; }
 .joai-chat-msg:hover .joai-chat-actions,
 .joai-chat-msg:focus-within .joai-chat-actions { opacity: 1; }
 .joai-chat-action { background: none; border: 0; padding: 0.1rem 0.4rem; font-size: 0.72rem;
                     color: #888; cursor: pointer; border-radius: 4px; line-height: 1.4; }
 .joai-chat-action:hover { background: rgba(0,0,0,0.06); color: #222; }
 .joai-chat-action-danger:hover { background: #fdecea; color: #c0392b; }
-/* On the blue user bubble the toolbar sits right-aligned in light ink. */
-.joai-chat-mine .joai-chat-actions { justify-content: flex-end; }
+/* On the blue user bubble the meta + toolbar sit in light ink. */
+.joai-chat-mine .joai-chat-meta-line { color: rgba(255,255,255,0.8); }
 .joai-chat-mine .joai-chat-action { color: rgba(255,255,255,0.85); }
 .joai-chat-mine .joai-chat-action:hover { background: rgba(255,255,255,0.2); color: #fff; }
 .joai-chat-mine .joai-chat-action-danger:hover { background: rgba(255,255,255,0.25); color: #fff; }
-/* Per-turn token + cost line at the bottom of an assistant reply. Muted and
-   small — present but never competing with the answer. */
-.joai-chat-usage { font-size: 0.7rem; color: #aaa; margin-top: 0.3rem; }
-.joai-chat-usage-cost { color: #999; }
-.joai-chat-trace { font-size: 0.78rem; color: #666; margin-top: 0.4rem; }
-.joai-chat-trace ul { margin: 0.3rem 0 0; padding-left: 1.1rem; }
+/* Collapsed tool trace sits inline in the footer; opening it drops the list below. */
+.joai-chat-trace { font-size: 0.72rem; color: #666; }
+.joai-chat-trace summary { cursor: pointer; }
+.joai-chat-trace ul { margin: 0.3rem 0 0; padding-left: 1.1rem; flex-basis: 100%; }
 .joai-chat-tool-error { color: #dc3545; }
 .joai-chat-confirm { margin-top: 0.6rem; padding: 0.6rem 0.7rem; border: 1px solid #f0c36d;
                      background: #fff8e6; border-radius: 8px; }
@@ -304,13 +313,6 @@ body.joai-fullscreen-lock { overflow: hidden; }
     /* Icon-only on mobile: drop the "Settings" and "Minimize" words. */
     .joai-chat-settings-gear-label,
     .joai-chat-wrap.joai-fullscreen .joai-chat-fullscreen-toggle .joai-fs-label { display: none; }
-
-    /* Per-reply meta on one row, time first then the token/cost usage. */
-    .joai-chat-msg-meta { display: flex; flex-wrap: wrap; align-items: baseline;
-        gap: 0.1rem 0.5rem; margin-top: 0.3rem; }
-    .joai-chat-msg-meta .joai-chat-usage,
-    .joai-chat-msg-meta .joai-chat-time { margin-top: 0; }
-    .joai-chat-msg-meta .joai-chat-time { order: -1; }
 
     /* Maximized: the chat fills the viewport, above the site header/footer.
        100dvh tracks the dynamic viewport so the composer clears the mobile

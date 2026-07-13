@@ -26,8 +26,7 @@ class ChatRender {
         return '<div class="joai-chat-msg joai-chat-mine"' . $id_attr . ' data-raw="' . $raw . '">'
              . $body
              . $attachments
-             . ($message_id ? self::actionsHtml() : '')
-             . '<div class="joai-chat-time">' . htmlspecialchars($time, ENT_QUOTES, 'UTF-8') . '</div>'
+             . self::footHtml('', $time, [], (bool)$message_id)
              . '</div>';
     }
 
@@ -114,19 +113,71 @@ class ChatRender {
         return ['label' => self::conversationUsageLabel($in, $out, $usd)];
     }
 
-    /** Per-turn token + cost line shown at the bottom of an assistant reply.
-     *  "context" is everything fed to the model this turn (system prompt, history,
-     *  and any tool/web results across the tool loop — often far larger than the
-     *  reply); "reply" is the generated output the Max-reply-length cap governs. */
-    public static function turnUsageHtml(int $in, int $out, float $usd): string {
-        if ($in === 0 && $out === 0) return '';
+    /** Token count in ≈2 significant figures: 780, 3.6k, 78k, 120k, 1.2M. Keeps
+     *  the footer legible — the exact count is never the point, the magnitude is. */
+    public static function compactTokens(int $n): string {
+        if ($n < 1000) return (string)$n;
+        // One decimal only below 10 of a unit (3.6k), whole numbers above (78k,
+        // 120k) — and a lone decimal digit is trimmed when it's a zero (3.0k → 3k).
+        if ($n < 1000000) {
+            $k = $n / 1000;
+            $s = $k < 10 ? rtrim(rtrim(number_format($k, 1), '0'), '.') : number_format($k, 0);
+            return $s . 'k';
+        }
+        $m = $n / 1000000;
+        return rtrim(rtrim(number_format($m, 1), '0'), '.') . 'M';
+    }
+
+    /** Color band for the context number by how close it is to the model's real
+     *  context window (captured per turn from the host): amber "approaching the
+     *  limit" at 70%, red "extremely close" at 90% — past the window a local model
+     *  starts dropping the oldest turns. Gray when the window is unknown (remote
+     *  models, or the host didn't report one) — a plain count, nothing to grade. */
+    public static function contextBand(int $in, ?int $window): string {
+        if ($window === null || $window <= 0 || $in <= 0) return 'joai-ctx-ok';
+        $frac = $in / $window;
+        if ($frac >= 0.90) return 'joai-ctx-high';
+        if ($frac >= 0.70) return 'joai-ctx-warn';
+        return 'joai-ctx-ok';
+    }
+
+    /** The metadata pieces for a turn's footer line: the context size (color-flagged
+     *  by how full the model's window is) and the estimated cost, each dropped when
+     *  it would read as zero. "context" is everything fed to the model this turn
+     *  (system prompt, history, and any tool/web results across the tool loop). */
+    public static function turnUsageParts(int $in, float $usd, ?int $window = null): array {
+        $parts = [];
+        if ($in > 0) {
+            $title = ($window !== null && $window > 0)
+                ? self::compactTokens($in) . ' of the model\'s ' . self::compactTokens($window)
+                    . ' context window (' . (int)round($in / $window * 100) . '%). Amber/red as it fills'
+                    . ' — past the window the model drops the oldest turns.'
+                : 'Size of everything fed to the model this turn.';
+            $parts[] = '<span class="joai-ctx ' . self::contextBand($in, $window) . '" title="'
+                . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '">'
+                . self::compactTokens($in) . ' ctx</span>';
+        }
         $cost = self::formatCost($usd);
-        $cost_html = $cost !== ''
-            ? ' · <span class="joai-chat-usage-cost">' . htmlspecialchars($cost, ENT_QUOTES, 'UTF-8') . '</span>'
-            : '';
-        return '<div class="joai-chat-usage" title="Context fed to the model this turn, then the reply it generated, with estimated cost">'
-             . number_format($in) . ' context · ' . number_format($out) . ' reply'
-             . $cost_html . '</div>';
+        if ($cost !== '') {
+            $parts[] = '<span class="joai-chat-usage-cost">'
+                . htmlspecialchars($cost, ENT_QUOTES, 'UTF-8') . '</span>';
+        }
+        return $parts;
+    }
+
+    /** The single footer row under a bubble: an optional tool trace on the left,
+     *  then time · context · cost, with the hover-only Copy/Delete actions pushed
+     *  right. `$meta_extra` are the turn-usage parts (empty for user bubbles). */
+    public static function footHtml(string $trace, string $time, array $meta_extra, bool $with_actions): string {
+        $meta = array_merge(
+            ['<span class="joai-chat-time">' . htmlspecialchars($time, ENT_QUOTES, 'UTF-8') . '</span>'],
+            $meta_extra
+        );
+        return '<div class="joai-chat-foot">'
+             . $trace
+             . '<span class="joai-chat-meta-line">' . implode(' · ', $meta) . '</span>'
+             . ($with_actions ? self::actionsHtml() : '')
+             . '</div>';
     }
 
     /** Per-turn action toolbar (copy / delete). Shared by both bubble kinds; the
@@ -155,7 +206,9 @@ class ChatRender {
 
         $in  = (int)$msg->get('aim_input_tokens');
         $out = (int)$msg->get('aim_output_tokens');
-        $usage = self::turnUsageHtml($in, $out, self::estimateCost($model, $in, $out));
+        $win_raw = $msg->get('aim_context_window');
+        $window = ($win_raw === null || $win_raw === '') ? null : (int)$win_raw;
+        $meta_extra = self::turnUsageParts($in, self::estimateCost($model, $in, $out), $window);
 
         $pending = $msg->get('aim_pending_action');
         if (is_string($pending)) $pending = json_decode($pending, true);
@@ -171,13 +224,8 @@ class ChatRender {
         return '<div class="joai-chat-msg joai-chat-assistant" data-message-id="' . (int)$msg->key . '"'
              . ' data-raw="' . htmlspecialchars($body_md, ENT_QUOTES, 'UTF-8') . '">'
              . '<div class="joai-chat-body">' . $body_html . '</div>'
-             . $trace
              . $card
-             . self::actionsHtml()
-             . '<div class="joai-chat-msg-meta">'
-             . $usage
-             . '<div class="joai-chat-time">' . htmlspecialchars($time, ENT_QUOTES, 'UTF-8') . '</div>'
-             . '</div>'
+             . self::footHtml($trace, $time, $meta_extra, true)
              . '</div>';
     }
 

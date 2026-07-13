@@ -96,6 +96,45 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
     }
 
     /**
+     * The operative context window (in tokens) the host is enforcing for $model,
+     * read from Ollama's native /api/ps. This is the real window the runner honors
+     * — whether it comes from a Modelfile num_ctx or the server-global default — so
+     * it needs no per-model config from the operator. Only reported while the model
+     * is loaded, which it is right after a turn; null otherwise.
+     *
+     * A health *hint* used to color the per-reply context number — never load-
+     * bearing. Tight timeouts and a catch-all keep it non-blocking: any failure,
+     * timeout, or unexpected shape returns null and the number renders uncolored.
+     */
+    public function hostContextWindow(string $model): ?int {
+        try {
+            $root = preg_replace('#/v1$#', '', $this->base_url);
+            $res = $this->http->get($root . '/api/ps', [
+                'connect_timeout' => 1,
+                'timeout'         => 2,
+                'http_errors'     => false,
+            ]);
+            $data = json_decode((string)$res->getBody(), true);
+            if (!is_array($data) || empty($data['models'])) return null;
+            foreach ($data['models'] as $m) {
+                if (($m['name'] ?? $m['model'] ?? '') === $model) {
+                    $w = (int)($m['context_length'] ?? 0);
+                    return $w > 0 ? $w : null;
+                }
+            }
+            // One model loaded at a time (OLLAMA_MAX_LOADED_MODELS) — if the name
+            // didn't match exactly, the sole loaded model is still the right one.
+            if (count($data['models']) === 1) {
+                $w = (int)($data['models'][0]['context_length'] ?? 0);
+                return $w > 0 ? $w : null;
+            }
+            return null;
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
      * Time-to-first-token bound for the streamed read: how long to wait for the
      * model to *start* responding before giving up, separate from the between-token
      * inactivity bound (the per-call timeout). A cold or overloaded local model can
