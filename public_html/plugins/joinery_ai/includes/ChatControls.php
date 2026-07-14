@@ -13,6 +13,7 @@ class ChatControls {
     const COLUMNS = [
         'data_access'    => 'aic_data_access',
         'web_search'     => 'aic_web_search',
+        'history_access' => 'aic_history_access',
         'model'          => 'aic_model',
         'temperature'    => 'aic_temperature',
         'top_p'          => 'aic_top_p',
@@ -39,6 +40,7 @@ class ChatControls {
         switch ($field) {
             case 'data_access':
             case 'web_search':
+            case 'history_access':
                 return [$col, self::truthy($value) ? 't' : 'f'];
 
             case 'model':

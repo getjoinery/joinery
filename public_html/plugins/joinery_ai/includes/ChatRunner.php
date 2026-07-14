@@ -362,6 +362,13 @@ class ChatRunner {
             $tools = array_merge($tools, $web);
         }
 
+        // History access: search across the owner's own past conversations. Its own
+        // gate (not Data access) — a deliberate, standalone opt-in to let the
+        // assistant range over the ambient record of everything they've discussed.
+        if ($conversation->get('aic_history_access')) {
+            $tools[] = 'search_conversations';
+        }
+
         // On-demand attachment escalation: when the chat sends stripped text by
         // default but the model may pull a specific file's full original, offer
         // view_attachment — but only when the model can actually consume the full

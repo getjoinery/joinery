@@ -4,13 +4,13 @@
  * URL: /admin/joinery_ai/chat_set_capabilities  (POST)
  *
  * Writes one per-conversation control on an existing chat: the capability
- * toggles (data_access / web_search) and the model controls (model, temperature,
- * top_p, max_tokens, instructions, thinking_level). New chats carry their initial
- * state on the first chat_send instead. Takes effect on the conversation's next
- * turn.
+ * toggles (data_access / web_search / history_access) and the model controls
+ * (model, temperature, top_p, max_tokens, instructions, thinking_level). New chats
+ * carry their initial state on the first chat_send instead. Takes effect on the
+ * conversation's next turn.
  *
  * Two request shapes are accepted:
- *   - legacy toggle: { capability: data_access|web_search, enabled: 0|1 }
+ *   - legacy toggle: { capability: data_access|web_search|history_access, enabled: 0|1 }
  *   - generic field: { field: <name>, value: <raw> }
  */
 header('Content-Type: application/json');

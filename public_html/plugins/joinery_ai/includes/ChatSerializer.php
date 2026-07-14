@@ -60,6 +60,7 @@ class ChatSerializer {
             'model'          => (string)$c->get('aic_model'),
             'data_access'    => (bool)$c->get('aic_data_access'),
             'web_search'     => (bool)$c->get('aic_web_search'),
+            'history_access' => (bool)$c->get('aic_history_access'),
             'thinking_level' => (string)$c->get('aic_thinking_level'),
             'temperature'    => $numOrNull($c->get('aic_temperature')),
             'top_p'          => $numOrNull($c->get('aic_top_p')),
