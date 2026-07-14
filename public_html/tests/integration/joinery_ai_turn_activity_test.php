@@ -58,6 +58,7 @@ class FakeActivityProvider implements LlmProviderInterface {
     public function defaultModel(): string { return 'fake/test-model'; }
     public function id(): string { return 'fake'; }
     public function isPrivate(): bool { return true; }
+    public function reachabilityProbe(): ?string { return null; }   // an in-memory fake is always reachable
     public function modelCapabilities(string $model): array {
         return ['vision' => false, 'document' => false];
     }

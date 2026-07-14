@@ -54,6 +54,7 @@ plugins/joinery_ai/
     DescribeModelsTool.php     # describe_models — lazy schema discovery
     GetMyNotesTool.php
     SaveNoteTool.php
+    SearchConversationsTool.php # search_conversations — search the owner's own past chats (chat-only)
     GetWorkspaceTool.php
     SetWorkspaceTool.php
     GetRecentOutputsTool.php
@@ -241,14 +242,15 @@ The interactive surface lives at `/admin/joinery_ai/chat` (permission 5). It is 
 - **The turn runs off the request** (see [Asynchronous turns](#asynchronous-turns)) — a slow local model never trips a proxy timeout.
 - **In-memory trace** flushed to `aim_tool_calls` on the assistant message by the endpoint.
 
-**Capability toggles.** A new conversation is a plain conversational assistant. Two independent per-chat switches (status strip) turn capabilities on, **both default off**:
+**Capability toggles.** A new conversation is a plain conversational assistant. Three independent per-chat switches (status strip) turn capabilities on, **all default off**:
 
 - **Data access** (`aic_data_access`) — the site-data tool group (`query_model`, `describe_models`, `create_model`, `update_model`, `delete_model`, `invoke_action`, `describe_actions`, `get_my_notes`, `save_note`) plus model scope (all `$ai_readable` models). Off → none of those tools exist and **no model information enters the prompt**. (Writes still pass the confirmation boundary regardless — this gates tool *availability*, not whether writes confirm.)
 - **Web search** (`aic_web_search`) — the web group (`web_search`, `fetch_url`, `get_stock_data`). `web_search` additionally needs the global `joinery_ai_brave_search_api_key`; the toggle is disabled in the UI when the key is unset.
+- **History search** (`aic_history_access`) — the `search_conversations` tool, which searches the owner's **own past chat conversations** by keyword. Its own gate, deliberately not part of Data access: searching the ambient record of everything the user has discussed is broader and more sensitive than reading a business table, so it is opted into separately. Owner-scoped (user A never sees user B's threads). Protected (Private/Fortress) chats respect the encryption boundary — their decrypted content is surfaced **only** when the current turn runs on a local model with the owner's vault open; on a remote model or a locked vault the tool returns a fixed, query-independent, count-free note that protected history was skipped and how to include it, never the content and never a per-query count (which would leak keyword presence over sealed data). The standard-vs-protected split, the surface gate, and all ciphertext handling live behind `MultiAiConversation::searchForTool()`; see [Sealed Vault](../../../docs/sealed_vault.md) for the encryption model.
 
-`ChatRunner::resolveAllowedTools()` derives the effective tool list from the two flags; `ChatTurnContext::allowedModels()` / `allowedActions()` return all readable models / all agent-callable actions when Data access is on, `[]` when off. New chats carry their initial toggle state on the first `chat_send`; existing chats persist a flip via `chat_set_capabilities.php`.
+`ChatRunner::resolveAllowedTools()` derives the effective tool list from the three flags; `ChatTurnContext::allowedModels()` / `allowedActions()` return all readable models / all agent-callable actions when Data access is on, `[]` when off. New chats carry their initial toggle state on the first `chat_send`; existing chats persist a flip via `chat_set_capabilities.php`.
 
-**Data model.** `AiConversation` (`aic_conversations`) is one thread — owner, model, the two capability flags (`aic_data_access`, `aic_web_search`), and running token totals. `AiConversationMessage` (`aim_conversation_messages`) is one turn; assistant rows carry the tool trace, token counts, any `aim_pending_action`, and the turn lifecycle (`aim_status` = `running` → `complete` | `failed`, with `aim_error` on failure). (Named `Ai*` because core messaging already owns `Conversation` / `Message`.) Neither is `$ai_readable`.
+**Data model.** `AiConversation` (`aic_conversations`) is one thread — owner, model, the three capability flags (`aic_data_access`, `aic_web_search`, `aic_history_access`), and running token totals. `AiConversationMessage` (`aim_conversation_messages`) is one turn; assistant rows carry the tool trace, token counts, any `aim_pending_action`, and the turn lifecycle (`aim_status` = `running` → `complete` | `failed`, with `aim_error` on failure). (Named `Ai*` because core messaging already owns `Conversation` / `Message`.) Neither is `$ai_readable`.
 
 **Engine.** `ChatRunner` builds the system prompt + history and drives the loop:
 

@@ -118,6 +118,7 @@ function joinery_ai_chat_page_logic(array $input, int $min_permission, string $l
         'model_privacy'  => $model_privacy,
         'data_access'    => $selected ? (bool)$selected->get('aic_data_access') : false,
         'web_search'     => $selected ? (bool)$selected->get('aic_web_search') : $default_web_search,
+        'history_access' => $selected ? (bool)$selected->get('aic_history_access') : false,
         'temperature'    => $g('aic_temperature'),
         'top_p'          => $g('aic_top_p'),
         'max_tokens'     => $g('aic_max_tokens'),

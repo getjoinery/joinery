@@ -66,11 +66,14 @@ class AiConversation extends SystemBase {
         // Pinned threads sort above the rest in the chat list. Non-nullable so the
         // ORDER BY aic_pinned DESC is clean (NULL would sort ahead of true).
         'aic_pinned'             => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
-        // Per-chat capability toggles (both default off → a plain conversational
+        // Per-chat capability toggles (all default off → a plain conversational
         // assistant). Data access gates the site-data tool group + model scope;
-        // web search gates the web tool group. See the chat-capabilities spec.
+        // web search gates the web tool group; history access gates the
+        // search_conversations tool (search across the owner's own past chats).
+        // See the chat-capabilities spec and specs/chat_search_past_conversations_tool.md.
         'aic_data_access'        => array('type'=>'bool', 'default'=>false),
         'aic_web_search'         => array('type'=>'bool', 'default'=>false),
+        'aic_history_access'     => array('type'=>'bool', 'default'=>false),
         // Per-chat model controls (NULL = fall back to the plugin-setting default,
         // then the provider/floor). See the chat-model-control spec.
         'aic_temperature'        => array('type'=>'numeric(3,2)'),   // NULL = use setting
@@ -321,11 +324,249 @@ class MultiAiConversation extends SystemMultiBase {
         if ($owner_id <= 0) return false;
         require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
         if (ChatSeal::windowOpenFor($owner_id)) return false;
+        return self::ownerHasProtected($owner_id);
+    }
+
+    /** Whether the owner has any non-deleted protected conversation at all —
+     *  a cheap, query-independent existence check (no content, no ciphertext read).
+     *  This is the only probe the withheld path runs (§4.4). */
+    public static function ownerHasProtected(int $owner_id): bool {
+        if ($owner_id <= 0) return false;
         $q = DbConnector::get_instance()->get_db_link()->prepare(
             'SELECT 1 FROM aic_conversations WHERE aic_owner_user_id = ? AND aic_delete_time IS NULL '
             . "AND aic_security_level IN ('private','fortress') LIMIT 1");
         $q->execute([$owner_id]);
         return (bool)$q->fetchColumn();
+    }
+
+    /** Most-recent protected conversations decrypt-scanned per search on the
+     *  surfaced (local + vault-open) path. Beyond this the scan stops and the
+     *  caller reports `protected_capped` rather than imply a complete result. The
+     *  cap is a local-turn concern only — the withheld path never scans (§4.4/§7). */
+    const PROTECTED_SCAN_CAP = 50;
+
+    /** Half-width (chars) of the context window pulled around a snippet match. */
+    const SNIPPET_RADIUS = 90;
+
+    /**
+     * The search seam behind the `search_conversations` chat tool
+     * (specs/chat_search_past_conversations_tool.md §4.4). Everything that touches
+     * ciphertext, a vault window, or the surface-or-acknowledge gate lives here, so
+     * the tool never handles crypto and this stays the single swap point for a
+     * future sealed FTS index (§9).
+     *
+     * Returns:
+     *   ['matches' => [ {id, level, title, snippet, date} ... ],  // standard always;
+     *                                                             // protected only when surfaced
+     *    'protected_withheld' => bool,   // owner HAS protected chats not searched this turn
+     *    'protected_capped'   => bool,   // (surfaced path only) more protected chats than the scan cap
+     *    'locked'             => bool ]  // owner has protected chats but the vault is locked
+     *
+     * $surface_protected true (the turn is on a local model AND the vault window is
+     * open) decrypt-scans protected chats in-window and surfaces their matches;
+     * false (remote model, or vault locked) NEVER decrypts or scans — it runs only
+     * the query-independent existence check, so there is no per-query count to leak
+     * as a metadata oracle (§3).
+     *
+     * $exclude_id (> 0) drops that conversation from both scans — the caller passes
+     * the active chat so the tool never "finds" the thread it is already in (§7).
+     * Standard and surfaced-protected matches are merged into a single list ordered
+     * the way the chat list is (pinned first, then newest) and capped once at $limit,
+     * so a recent protected match is never crowded out by older standard ones.
+     */
+    public static function searchForTool(int $owner_id, string $query, int $limit, bool $surface_protected, int $exclude_id = 0): array {
+        $out = ['matches' => [], 'protected_withheld' => false, 'protected_capped' => false, 'locked' => false];
+        $query = trim($query);
+        if ($owner_id <= 0 || $query === '' || $limit < 1) return $out;
+
+        $db = DbConnector::get_instance()->get_db_link();
+        $like = '%' . addcslashes($query, '\\%_') . '%';
+        $excl = $exclude_id > 0 ? ' AND aic_conversation_id <> :excl' : '';
+
+        // 1. Standard chats — plaintext at rest, matched by SQL ILIKE (title OR any
+        //    non-deleted message body). Fetch up to $limit candidates; the merge
+        //    below ranks them against any surfaced protected matches and caps once.
+        $sql = "SELECT aic_conversation_id,
+                       CASE WHEN aic_pinned THEN 1 ELSE 0 END AS pinned_rank,
+                       aic_title,
+                       COALESCE(aic_update_time, aic_create_time) AS aic_when
+                  FROM aic_conversations
+                 WHERE aic_owner_user_id = :owner AND aic_delete_time IS NULL
+                   AND aic_security_level = 'standard'$excl
+                   AND (aic_title ILIKE :t OR EXISTS (
+                        SELECT 1 FROM aim_conversation_messages
+                         WHERE aim_aic_conversation_id = aic_conversation_id
+                           AND aim_delete_time IS NULL AND aim_content ILIKE :b))
+                 ORDER BY pinned_rank DESC, aic_when DESC
+                 LIMIT :lim";
+        $q = $db->prepare($sql);
+        $q->bindValue(':owner', $owner_id, PDO::PARAM_INT);
+        $q->bindValue(':t', $like, PDO::PARAM_STR);
+        $q->bindValue(':b', $like, PDO::PARAM_STR);
+        $q->bindValue(':lim', $limit, PDO::PARAM_INT);
+        if ($exclude_id > 0) $q->bindValue(':excl', $exclude_id, PDO::PARAM_INT);
+        $q->execute();
+        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $cid = (int)$row['aic_conversation_id'];
+            $out['matches'][] = [
+                'id'      => $cid,
+                'level'   => 'standard',
+                'title'   => (string)$row['aic_title'],
+                'snippet' => self::standardSnippet($db, $cid, $query, $like),
+                'date'    => (string)$row['aic_when'],
+                '_pinned' => (int)$row['pinned_rank'],
+            ];
+        }
+
+        // 2. Protected chats.
+        require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
+        if ($surface_protected && ChatSeal::windowOpenFor($owner_id)) {
+            // Surfaced path (already-trusted local turn): decrypt-scan in-window,
+            // bounded by the candidate cap so an owner with many protected chats
+            // can't turn one tool call into an unbounded decrypt loop. Collect every
+            // match (not stopping at $limit) so the merge below can rank a recent
+            // protected chat above older standard ones.
+            $psql = "SELECT aic_conversation_id FROM aic_conversations
+                      WHERE aic_owner_user_id = :owner AND aic_delete_time IS NULL
+                        AND aic_security_level IN ('private','fortress')$excl
+                      ORDER BY aic_pinned DESC, aic_update_time DESC
+                      LIMIT :lim";
+            $pq = $db->prepare($psql);
+            $pq->bindValue(':owner', $owner_id, PDO::PARAM_INT);
+            $pq->bindValue(':lim', self::PROTECTED_SCAN_CAP + 1, PDO::PARAM_INT);
+            if ($exclude_id > 0) $pq->bindValue(':excl', $exclude_id, PDO::PARAM_INT);
+            $pq->execute();
+            $pids = array_map('intval', $pq->fetchAll(PDO::FETCH_COLUMN));
+            if (count($pids) > self::PROTECTED_SCAN_CAP) {
+                $out['protected_capped'] = true;
+                $pids = array_slice($pids, 0, self::PROTECTED_SCAN_CAP);
+            }
+            foreach ($pids as $pid) {
+                $c = new AiConversation($pid, true);
+                if (!$c->key) continue;
+                $hit = self::protectedSnippet($c, $query);
+                if ($hit !== null) {
+                    $out['matches'][] = [
+                        'id'      => $pid,
+                        'level'   => (string)$c->get('aic_security_level'),
+                        'title'   => $hit['title'],
+                        'snippet' => $hit['snippet'],
+                        'date'    => (string)($c->get('aic_update_time') ?: $c->get('aic_create_time')),
+                        '_pinned' => (bool)$c->get('aic_pinned') ? 1 : 0,
+                    ];
+                }
+            }
+        } else {
+            // Withheld path: NEVER decrypt or scan. Only the query-independent
+            // existence check, so nothing here reads content or the query — no count
+            // to leak, no oracle to probe (§3).
+            if (self::ownerHasProtected($owner_id)) {
+                $out['protected_withheld'] = true;
+                $out['locked'] = !ChatSeal::windowOpenFor($owner_id);
+            }
+        }
+
+        // Merge standard + surfaced-protected into one list, ranked pinned-first
+        // then newest (DB times are ISO UTC strings, so strcmp is chronological),
+        // and cap once at $limit. The scan cost is still bounded by the candidate
+        // cap above, never by $limit (§7).
+        usort($out['matches'], function ($a, $b) {
+            if ($a['_pinned'] !== $b['_pinned']) return $b['_pinned'] <=> $a['_pinned'];
+            return strcmp((string)$b['date'], (string)$a['date']);
+        });
+        if (count($out['matches']) > $limit) {
+            $out['matches'] = array_slice($out['matches'], 0, $limit);
+        }
+        foreach ($out['matches'] as &$m) unset($m['_pinned']);
+        unset($m);
+        return $out;
+    }
+
+    /** Snippet for a standard (plaintext) match: a window around the query in the
+     *  first matching message body, else the opening of the thread for context. */
+    private static function standardSnippet(PDO $db, int $cid, string $query, string $like): string {
+        $mq = $db->prepare(
+            "SELECT aim_content FROM aim_conversation_messages
+              WHERE aim_aic_conversation_id = ? AND aim_delete_time IS NULL AND aim_content ILIKE ?
+              ORDER BY aim_message_id ASC LIMIT 1");
+        $mq->execute([$cid, $like]);
+        $body = (string)$mq->fetchColumn();
+        if ($body !== '') return self::snippetAround($body, $query);
+
+        // Title-only match: show the thread's opening line for context.
+        $oq = $db->prepare(
+            "SELECT aim_content FROM aim_conversation_messages
+              WHERE aim_aic_conversation_id = ? AND aim_delete_time IS NULL
+              ORDER BY aim_message_id ASC LIMIT 1");
+        $oq->execute([$cid]);
+        return self::firstChars((string)$oq->fetchColumn(), self::SNIPPET_RADIUS * 2);
+    }
+
+    /** In-window snippet for a protected match: mirrors protectedConversationMatches()
+     *  but captures the matching text. Returns ['title'=>.., 'snippet'=>..] on a
+     *  match, or null (no match, or a locked read mid-scan). Content is decrypted
+     *  via get(); the caller has already established the surfaced (trusted) path. */
+    private static function protectedSnippet(AiConversation $c, string $query): ?array {
+        require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation_messages_class.php'));
+        try {
+            $title = (string)$c->get('aic_title');
+        } catch (Throwable $e) {
+            return null;
+        }
+        $rows = new MultiAiConversationMessage(
+            ['conversation_id' => (int)$c->key, 'deleted' => false], ['aim_message_id' => 'ASC']);
+        $rows->load();
+        $first_body = '';
+        foreach ($rows as $m) {
+            try {
+                $body = (string)$m->get('aim_content');
+            } catch (Throwable $e) {
+                return null;
+            }
+            if ($first_body === '') $first_body = $body;
+            if ($query !== '' && self::containsCI($body, $query)) {
+                return ['title' => $title, 'snippet' => self::snippetAround($body, $query)];
+            }
+        }
+        if ($query !== '' && self::containsCI($title, $query)) {
+            return ['title' => $title, 'snippet' => self::firstChars($first_body, self::SNIPPET_RADIUS * 2)];
+        }
+        return null;
+    }
+
+    /** Case-insensitive substring test, mbstring where available. */
+    private static function containsCI(string $haystack, string $needle): bool {
+        if ($needle === '') return false;
+        if (function_exists('mb_stripos')) return mb_stripos($haystack, $needle) !== false;
+        return stripos($haystack, $needle) !== false;
+    }
+
+    /** A whitespace-collapsed window of text centered on the (case-insensitive)
+     *  query, with ellipses where it was clipped. Falls back to the leading slice
+     *  when the query isn't present (e.g. a title-only match feeding a body). */
+    private static function snippetAround(string $text, string $query): string {
+        $text = trim((string)preg_replace('/\s+/', ' ', $text));
+        if ($text === '') return '';
+        $pos = ($query !== '' && function_exists('mb_stripos')) ? mb_stripos($text, $query)
+             : ($query !== '' ? stripos($text, $query) : false);
+        if ($pos === false) return self::firstChars($text, self::SNIPPET_RADIUS * 2);
+
+        $len_fn = function_exists('mb_strlen') ? 'mb_strlen' : 'strlen';
+        $sub_fn = function_exists('mb_substr') ? 'mb_substr' : 'substr';
+        $qlen = $len_fn($query);
+        $start = max(0, $pos - self::SNIPPET_RADIUS);
+        $slice = $sub_fn($text, $start, self::SNIPPET_RADIUS * 2 + $qlen);
+        $prefix = $start > 0 ? '…' : '';
+        $suffix = ($start + $len_fn($slice)) < $len_fn($text) ? '…' : '';
+        return $prefix . trim($slice) . $suffix;
+    }
+
+    /** Whitespace-collapsed leading slice, ellipsized if it was clipped. */
+    private static function firstChars(string $text, int $n): string {
+        $text = trim((string)preg_replace('/\s+/', ' ', $text));
+        $len_fn = function_exists('mb_strlen') ? 'mb_strlen' : 'strlen';
+        $sub_fn = function_exists('mb_substr') ? 'mb_substr' : 'substr';
+        return $len_fn($text) > $n ? $sub_fn($text, 0, $n) . '…' : $text;
     }
 
 }
