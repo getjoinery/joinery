@@ -123,7 +123,8 @@ class AnthropicProvider implements LlmProviderInterface {
      * $onTextDelta as they arrive; the full canonical response is assembled from
      * the SSE stream and returned. Throws LlmProviderException on failure.
      */
-    public function createMessageStreamed(array $params, callable $onTextDelta): array {
+    public function createMessageStreamed(array $params, callable $onTextDelta,
+            ?callable $shouldAbort = null): array {
         $params['stream'] = true;
 
         // Translate the canonical thinking knob (['level'=>off|low|medium|high])
@@ -191,7 +192,7 @@ class AnthropicProvider implements LlmProviderInterface {
             throw new LlmProviderException('Anthropic 5xx/transport after retries: ' . ($last_error ?? 'unknown'));
         }
 
-        return $this->consumeStream($response->getBody(), $onTextDelta);
+        return $this->consumeStream($response->getBody(), $onTextDelta, $shouldAbort);
     }
 
     /** Blocking convenience: stream with a no-op sink and return the full result. */
@@ -199,20 +200,38 @@ class AnthropicProvider implements LlmProviderInterface {
         return $this->createMessageStreamed($params, static function (string $d): void {});
     }
 
+    /** How often, at most, to re-check the mid-stream abort predicate (a fresh DB
+     *  read), matching the local provider's cadence. */
+    const ABORT_POLL_SECONDS = 0.4;
+
     /**
      * Read the Anthropic SSE stream and assemble the canonical response. Events
      * are JSON objects carrying a `type`; we switch on that rather than the
      * `event:` line. Text deltas fire $onTextDelta; tool_use input arrives as
      * input_json_delta fragments accumulated per content-block index.
+     *
+     * $shouldAbort (when set) is polled at most every ABORT_POLL_SECONDS between
+     * reads; the first true return breaks the loop, closes the PSR-7 body (this
+     * loop reads to EOF and never closes otherwise, so the upstream connection
+     * would linger), and returns stop_reason 'aborted' with the partial content.
      */
-    private function consumeStream($body, callable $onTextDelta): array {
+    private function consumeStream($body, callable $onTextDelta, ?callable $shouldAbort = null): array {
         $blocks = [];   // index => ['type'=>'text','text'=>..] | ['type'=>'tool_use','id'=>,'name'=>,'_json'=>'']
         $usage = ['input_tokens' => 0, 'output_tokens' => 0,
                   'cache_creation_input_tokens' => 0, 'cache_read_input_tokens' => 0];
         $stop_reason = null;
+        $aborted = false;
+        $last_abort_check = 0.0;
 
         $buffer = '';
         while (!$body->eof()) {
+            if ($shouldAbort !== null) {
+                $now = microtime(true);
+                if ($now - $last_abort_check >= self::ABORT_POLL_SECONDS) {
+                    $last_abort_check = $now;
+                    if ($shouldAbort()) { $aborted = true; break; }
+                }
+            }
             $buffer .= $body->read(8192);
             // SSE events are separated by a blank line.
             while (($pos = strpos($buffer, "\n\n")) !== false) {
@@ -221,7 +240,11 @@ class AnthropicProvider implements LlmProviderInterface {
                 $this->handleEvent($event, $blocks, $usage, $stop_reason, $onTextDelta);
             }
         }
-        if (trim($buffer) !== '') {
+        if ($aborted) {
+            // Close the upstream so the connection isn't held open until GC.
+            if (is_object($body) && method_exists($body, 'close')) $body->close();
+            $stop_reason = 'aborted';
+        } elseif (trim($buffer) !== '') {
             $this->handleEvent($buffer, $blocks, $usage, $stop_reason, $onTextDelta);
         }
 

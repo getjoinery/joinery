@@ -33,8 +33,8 @@ class ChatRunner {
     // ['result' => <AgentLoop result>, 'context' => ChatTurnContext]
 
     public static function runTurn(AiConversation $conversation, int $acting_user_id,
-            ?callable $onTextDelta = null, ?callable $onActivity = null): array {
-        $ctx = new ChatTurnContext($conversation, $acting_user_id);
+            int $message_id = 0, ?callable $onTextDelta = null, ?callable $onActivity = null): array {
+        $ctx = new ChatTurnContext($conversation, $acting_user_id, $message_id);
         if ($onTextDelta !== null) $ctx->setStreamSink($onTextDelta);
         if ($onActivity !== null) $ctx->setActivityStamper($onActivity);
         $messages = self::buildHistoryMessages($conversation, null, $ctx);
@@ -49,9 +49,9 @@ class ChatRunner {
      * $decision is 'confirm' or 'cancel'.
      */
     public static function resumeTurn(AiConversation $conversation, int $acting_user_id,
-            array $pending, string $lead_text, string $decision, ?callable $onTextDelta = null,
-            ?callable $onActivity = null): array {
-        $ctx = new ChatTurnContext($conversation, $acting_user_id);
+            array $pending, string $lead_text, string $decision, int $message_id = 0,
+            ?callable $onTextDelta = null, ?callable $onActivity = null): array {
+        $ctx = new ChatTurnContext($conversation, $acting_user_id, $message_id);
         if ($onTextDelta !== null) $ctx->setStreamSink($onTextDelta);
         if ($onActivity !== null) $ctx->setActivityStamper($onActivity);
 
@@ -152,6 +152,8 @@ class ChatRunner {
                 return '_(I ran into repeated tool errors and stopped.)_';
             case 'refusal':
                 return '_(I declined to continue with that request.)_';
+            case 'cancelled':
+                return '_(Cancelled.)_';
             default:
                 return '_(No reply was generated.)_';
         }

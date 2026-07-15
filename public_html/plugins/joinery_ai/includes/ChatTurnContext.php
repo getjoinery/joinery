@@ -36,6 +36,10 @@ class ChatTurnContext implements ToolContext {
     /** @var int */
     private $acting_user_id;
 
+    /** @var int  the RUNNING assistant row this turn writes into; 0 when the turn
+     *  runs without a pollable row (unit tests). Drives the cancel re-read. */
+    private $message_id;
+
     /** @var int  the acting user's permission level, from their user row */
     private $acting_permission;
 
@@ -57,9 +61,10 @@ class ChatTurnContext implements ToolContext {
     /** @var callable|null  live sink for stage labels (set by the endpoint) */
     private $activity_stamper = null;
 
-    public function __construct(AiConversation $conversation, int $acting_user_id) {
+    public function __construct(AiConversation $conversation, int $acting_user_id, int $message_id = 0) {
         $this->conversation = $conversation;
         $this->acting_user_id = $acting_user_id;
+        $this->message_id = $message_id;
         $this->acting_permission = self::resolvePermission($acting_user_id);
         $this->owner_timezone = self::resolveTimezone($acting_user_id);
         $this->nonce = bin2hex(random_bytes(4));
@@ -137,13 +142,43 @@ class ChatTurnContext implements ToolContext {
         return $this->acting_permission < self::ADMIN_PERMISSION;
     }
 
-    /** Per-turn continuation guard: a hard wall clock. No kill flag — a chat
-     *  turn is one synchronous request. */
+    /** Per-turn continuation guard: the user's mid-flight Cancel (checked first,
+     *  it is the responsive path), then a hard wall clock. The cancel flag is
+     *  written by the chat_cancel endpoint in another process, so it is re-read
+     *  fresh from the DB — the in-memory row can't be trusted. This catches a
+     *  cancel that lands BETWEEN tool steps; the mid-generation case goes through
+     *  shouldAbort() inside the stream. */
     public function shouldContinue(): ?array {
+        if ($this->isCancelRequested()) {
+            return ['stop_reason' => 'cancelled', 'detail' => 'cancelled by user'];
+        }
         if (microtime(true) - $this->turn_started_at > self::PER_TURN_SECONDS) {
             return ['stop_reason' => 'wall_clock', 'detail' => 'per-turn timeout'];
         }
         return null;
+    }
+
+    /**
+     * Has the user requested cancellation of this turn? Re-reads the running
+     * row's aim_cancel_requested flag straight from the DB (not the in-memory
+     * copy) — the chat_cancel endpoint set it in a different process. Modeled on
+     * RecipeRunContext::isKillRequested(). No message id (unit-test path) → never
+     * cancelled.
+     */
+    public function isCancelRequested(): bool {
+        if ($this->message_id <= 0) return false;
+        $db = DbConnector::get_instance()->get_db_link();
+        $q = $db->prepare('SELECT aim_cancel_requested FROM aim_conversation_messages WHERE aim_message_id = ?');
+        $q->execute([$this->message_id]);
+        return (bool)$q->fetchColumn();
+    }
+
+    /** Mid-generation abort predicate, polled per stream chunk by the provider.
+     *  Same flag as shouldContinue() reads, through the same fresh SELECT, so one
+     *  signal drives both the between-steps and the in-stream stop. The provider
+     *  throttles how often it calls this. */
+    public function shouldAbort(): bool {
+        return $this->isCancelRequested();
     }
 
     public function beginToolCall(array $entry): void {

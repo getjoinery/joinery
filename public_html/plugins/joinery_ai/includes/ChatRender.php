@@ -221,9 +221,17 @@ class ChatRender {
             );
         }
 
+        // A turn the user stopped mid-flight keeps its partial answer and carries
+        // a small "Cancelled" marker — persistent across reloads (keyed on the
+        // stored status), not just in the live poll.
+        $cancelled = ((string)$msg->get('aim_status') === AiConversationMessage::STATUS_CANCELLED)
+            ? '<div class="joai-chat-cancelled-marker">Cancelled</div>'
+            : '';
+
         return '<div class="joai-chat-msg joai-chat-assistant" data-message-id="' . (int)$msg->key . '"'
              . ' data-raw="' . htmlspecialchars($body_md, ENT_QUOTES, 'UTF-8') . '">'
              . '<div class="joai-chat-body">' . $body_html . '</div>'
+             . $cancelled
              . $card
              . self::footHtml($trace, $time, $meta_extra, true)
              . '</div>';

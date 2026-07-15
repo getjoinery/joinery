@@ -1,7 +1,7 @@
 # Spec: Cancel an in-flight chat prompt (Joinery AI)
 
 **Status:** Draft (awaiting implementation)
-**Version:** 1.0
+**Version:** 1.1
 **Area:** `plugins/joinery_ai` — member + admin chat UI
 **Owner surface:** async chat turn lifecycle
 
@@ -50,6 +50,14 @@ The platform already does exactly this for admin recipe runs (the "Stop" button)
 
 The chat turn already runs through the **same** `AgentLoop`, so the loop-boundary check comes
 for free once the chat's context object learns to re-read a chat kill flag.
+
+Chat, however, needs one thing recipes never did: interruption **mid-generation**, because a
+chat turn is often a single long stream and the recipe pattern only stops at step boundaries.
+So this spec **extends** the boundary pattern down into the stream (§4.4) rather than only
+mirroring it — but it extends it in the *same shape*: a cooperative "should I stop?" predicate
+that returns cleanly (`shouldAbort()`), not a second, exception-based control-flow path. One
+cancellation model, checked at two points. The extension is written on the shared `ToolContext`
+and streaming contract, so recipe runs inherit mid-generation abort too.
 
 ---
 
@@ -117,44 +125,91 @@ Behavior:
 ### 4.3 Worker detection — thread the message id into the chat context
 `ChatTurnContext` currently holds the conversation but **not** the assistant message id, and its
 `shouldContinue()` (`includes/ChatTurnContext.php:142`) does no DB re-read. Changes:
-- Thread the assistant `message_id` into `ChatTurnContext` (available as `$assistant_msg` in
-  `ChatTurn::runAndFinalize()` / `ChatRunner::runTurn()`).
+- Thread the assistant `message_id` into `ChatTurnContext` in **both** turn paths — the fresh turn
+  (`$assistant_msg` in `ChatTurn::runAndFinalize()` / `ChatRunner::runTurn()`) and the
+  post-confirmation resume (`$msg` in `ChatTurn::resumeAndFinalize()` / `ChatRunner::resumeTurn()`).
+  A resumed turn generates just like a fresh one, so it must be cancellable too.
 - Add `ChatTurnContext::isCancelRequested()` modeled on `RecipeRunContext::isKillRequested()`:
-  a fresh `SELECT aim_cancel_requested FROM aim_... WHERE aim_message_id = ?`.
+  a fresh `SELECT aim_cancel_requested FROM aim_... WHERE aim_message_id = ?`. It deliberately
+  bypasses any stale in-memory copy — the flag is written by a different process.
 - Have `ChatTurnContext::shouldContinue()` return
-  `['stop_reason' => 'cancelled', 'detail' => 'cancelled by user']` when set (checked before the
-  wall-clock check), so `AgentLoop` picks it up at the next iteration boundary
-  (`AgentLoop.php:118`) with **no change to AgentLoop itself**.
+  `['stop_reason' => 'cancelled', 'detail' => 'cancelled by user']` when the flag is set (checked
+  before the wall-clock check). This catches a cancel that lands **between** tool steps:
+  `AgentLoop`'s existing loop-top guard (`AgentLoop.php:118`) breaks on it. The **mid-generation**
+  case — a single long stream — is handled by the same flag through `shouldAbort()` in §4.4.
 
-### 4.4 Prompt-time responsiveness — in-stream abort (in scope)
-The loop-boundary check (§4.3) only fires **between** LLM calls / tool steps. A common chat turn
-is a *single long generation*, so a boundary-only cancel would not interrupt until that
-generation finished — which is precisely when a user wants out. Therefore in-stream abort is a
-**core requirement**, not optional:
+This is one half of a **single cancellation model**: one flag, read through one predicate
+(`isCancelRequested()`), surfaced at two points (`shouldContinue()` at the loop boundary,
+`shouldAbort()` inside the stream). There is no second, exception-based mechanism.
 
-- Piggyback a **throttled** cancel re-read on the streaming callback. The provider fires a text
-  delta per chunk into `ChatTurnContext::emitText()` (`includes/ChatTurnContext.php:183`). Add a
-  throttle there (re-check at most every ~500 ms / N chunks to avoid a `SELECT` per token); when
-  cancel is set, signal the provider to stop.
-- The provider's SSE read loop (`OpenAiCompatibleProvider::consumeStream()`,
-  `OpenAiCompatibleProvider.php:242`) must honor that signal — break the `while (!feof($res))`
-  loop and let the existing `finally` (`:294`) `fclose($res)` close the upstream connection
-  (this also frees the Ollama/model runner promptly). The `AnthropicProvider` streaming path
-  needs the same hook.
-- Mechanism: pass a `shouldAbort` callable into the provider's `createMessageStreamed()`, or have
-  `emitText()` throw a dedicated `TurnCancelled` exception that `ChatRunner`/`ChatTurn` catch and
-  route to the cancelled finalization. Prefer the callable — throwing through the stream parser
-  is harder to reason about. Decide at implementation, but the in-stream check must exist.
+### 4.4 Prompt-time responsiveness — in-stream abort via the same predicate model
+The loop-boundary check (§4.3) fires only **between** LLM calls / tool steps. A common chat turn
+is a *single long generation*, so a boundary-only cancel would not interrupt until that generation
+finished — precisely when the user wants out. In-stream abort is therefore a **core requirement**,
+and it uses the **same cooperative "should I stop?" predicate the loop boundary already uses**,
+pushed down into the stream — not a second, exception-based control-flow path.
+
+- **Interface.** Add `shouldAbort(): bool` to the `ToolContext` interface
+  (`includes/ToolContext.php`). `ChatTurnContext::shouldAbort()` re-reads the flag via
+  `isCancelRequested()` (§4.3); `RecipeRunContext::shouldAbort()` returns `isKillRequested()`.
+  Both draw on the same flag their `shouldContinue()` already reads — one source of truth per
+  surface. `shouldAbort()` **throttles** the re-read (at most every ~500 ms / N chunks) since it
+  is polled per stream chunk; a raw `SELECT` per 8 KB `fread` would hammer the DB.
+- **Streaming contract.** Add an optional `?callable $shouldAbort = null` third parameter to
+  `LlmProviderInterface::createMessageStreamed()` and both implementations
+  (`OpenAiCompatibleProvider`, `AnthropicProvider`). Default `null` = never abort, so every
+  existing caller is unaffected.
+- **Read loop honors it — same pattern, each provider closes its own stream.** The *pattern* is
+  identical (poll `$shouldAbort` each chunk; `break`), but the two providers close differently:
+  - `OpenAiCompatibleProvider::consumeStream()` (`OpenAiCompatibleProvider.php:281`,
+    `while (!feof($res))`) drives a raw socket; its existing `finally { fclose($res); }` (`:334`)
+    already closes the upstream and frees the Ollama/model runner on any break. Just add the poll.
+  - `AnthropicProvider::consumeStream()` (`AnthropicProvider.php:208`) drives a **PSR-7 stream**
+    (`$body->eof()` / `$body->read(8192)`) and has **no close today** — it runs to EOF. Add the
+    poll to its `while` **and** an explicit `$body->close()` on the abort break, or the upstream
+    connection would linger. (Its loop already returns a `stop_reason`, so stamping `'aborted'`
+    there is a one-liner.)
+- **The abort is a first-class finish reason — no exception crosses the parser.** On break the
+  provider returns its **partial** accumulated text with `stop_reason => 'aborted'`, the same
+  normalized-stop-reason channel it already uses for `end_turn` / `refusal`. The partial answer
+  rides home in the ordinary return array.
+- **AgentLoop maps it, keeping the partial.** `AgentLoop::run()` gets two small additions: it
+  passes `[$context, 'shouldAbort']` as the new third arg to `createMessageStreamed()`
+  (`AgentLoop.php:160`), and — mirroring the existing `refusal` branch (`:188`) — it adds an
+  `aborted` branch **before** the `end_turn || empty($tool_uses)` branch (`:181`) that sets
+  `$assistant_text` to the partial `$iter_text`, `$stop_reason = 'cancelled'`, and breaks. The
+  placement matters: an aborted stream carries no `tool_uses`, so without an earlier branch line
+  `:181` would misread it as a normal `end_turn` completion and finalize the turn as **complete**.
+
+So one flag (`aim_cancel_requested`), one predicate (`isCancelRequested()`), drives **both** cancel
+paths — the between-steps case via `shouldContinue()` at the loop top (§4.3) and the mid-generation
+case via `shouldAbort()` inside the stream — each ending in `stop_reason === 'cancelled'`, with no
+separate mechanism to keep in sync.
+
+**Deliberate generalization (a benefit, not a side effect).** Because the abort predicate lives on
+`ToolContext` and the streaming contract rather than in chat-specific code, autonomous **recipe runs
+gain mid-generation abort for free**: today the recipe Stop button only takes effect at step
+boundaries, so a recipe's own single long generation cannot be interrupted. Wiring
+`RecipeRunContext::shouldAbort()` to its kill flag makes recipe generations interruptible too — one
+mechanism, both surfaces. This is the payoff for the extra integration surface over a chat-only
+exception hack.
 
 ### 4.5 Finalization — write the cancelled terminal state
 `ChatTurn::runAndFinalize()` (`includes/ChatTurn.php:34`) unconditionally writes
-`STATUS_COMPLETE` (`:62`). Add a branch: when `AgentLoop` returns (or the stream aborts with)
-`stop_reason === 'cancelled'`, write **`STATUS_CANCELLED`** instead, **persisting whatever partial
+`STATUS_COMPLETE` (`:62`). Add a branch: when `AgentLoop` returns
+`stop_reason === 'cancelled'` (both cancel paths funnel here — see §4.4), write
+**`STATUS_CANCELLED`** instead, **persisting whatever partial
 answer was already streamed** (so the user keeps the half-answer), and clear
 `aim_cancel_requested`. Model the terminal write on `ChatTurn::markFailed()` (`:156`).
 `ChatRunner::stopReasonNote()` (`includes/ChatRunner.php:143`) needs a `'cancelled'` case.
 Because both the fpm-detach path and the CLI worker call `runAndFinalize()`, this covers the web
 page and the `/api/v1` surface at once.
+
+**Apply the same branch to `resumeAndFinalize()` (`:127`).** A resumed (post-confirmation) turn
+also writes `STATUS_COMPLETE` unconditionally today; on `stop_reason === 'cancelled'` it must
+instead write `STATUS_CANCELLED`, keeping the combined lead-text + partial resumed answer and
+clearing `aim_cancel_requested`. Without this, a cancel during a resumed generation would be
+mislabelled complete.
 
 ### 4.6 Poll — surface the cancelled state
 `views/admin/chat_poll.php:60-91` branches on `aim_status`; add a `cancelled` branch alongside
@@ -162,9 +217,13 @@ complete/failed that returns `{status:'cancelled', assistant_html, conversation_
 the partial answer rendered) so the page can settle.
 
 ### 4.7 Frontend — the button + terminal handling (`includes/chat_view_body.php`)
-- **Mount:** a Cancel control in the composer, shown only while a turn is in flight. `setBusy()`
-  (`:668`) is the single choke point that knows a turn is running — extend it to show/hide the
-  Cancel button next to the thinking indicator (`:227`) / Send button (`:250`).
+- **Mount (Send-button morph):** while a turn is in flight the composer is already locked and the
+  Send button (`:250`) is disabled/idle — reuse that real estate instead of adding a second
+  control. `setBusy()` (`:668`) is the single choke point that knows a turn is running; extend it
+  to **morph the Send button into an active Cancel button** while busy and revert it to Send when
+  the turn settles. One element, two states, so the click handler must be state-aware (submit vs.
+  cancel), and — the sharp edge — `setBusy(false)` must revert it to Send on **every** terminal
+  path: complete, failed, **and** cancelled. (Acceptance test asserts the revert on each.)
 - **In-flight id:** capture the running assistant `message_id` (available at
   `streamInto(data.message_id)`, `:875`, and the confirm path `:1329`) into a module-scope var
   like the existing `lastTurn` (`:762`) so the Cancel handler can post it.
@@ -185,7 +244,10 @@ the partial answer rendered) so the page can settle.
 
 - **Cancel after completion** — endpoint no-ops when `aim_status !== running`; returns success.
 - **Race: turn completes between click and flag write** — worker already wrote
-  `STATUS_COMPLETE`; the flag is ignored; poll renders the complete answer. Harmless.
+  `STATUS_COMPLETE`; the flag is ignored; poll renders the complete answer. Harmless — but clear
+  `aim_cancel_requested` on the **complete and failed** finalize paths too (not only the cancelled
+  one), so a "cancel arrived just after completion" never leaves a stale "please stop" flag on a
+  settled row.
 - **Turn awaiting tool confirmation** — a turn parked on a pending action is not `running` in the
   generating sense; Cancel targets `running` turns only. (Declining the action uses the existing
   confirm card.) Out of scope; document the distinction in the UI copy.
@@ -205,14 +267,18 @@ the partial answer rendered) so the page can settle.
 |---|------|--------|
 | 1 | `data/ai_conversation_messages_class.php` | Add `STATUS_CANCELLED` const; add `aim_cancel_requested` bool field spec |
 | 2 | `views/profile/chat_cancel.php` (+ `views/admin/chat_cancel.php`) | New JSON POST endpoint (§4.2) |
-| 3 | `includes/ChatTurnContext.php` | Accept message id; add `isCancelRequested()`; `shouldContinue()` returns cancelled stop_reason (§4.3); throttled in-stream check in `emitText()` (§4.4) |
-| 4 | `includes/ChatRunner.php` / `includes/ChatTurn.php` | Pass message id into context; cancelled branch in finalization writing `STATUS_CANCELLED` + partial content; `stopReasonNote()` cancelled case (§4.5) |
-| 5 | `includes/llm/OpenAiCompatibleProvider.php` + `includes/llm/AnthropicProvider.php` | Honor a `shouldAbort` signal in the SSE read loop; close stream on abort (§4.4) |
-| 6 | `views/admin/chat_poll.php` | `cancelled` branch (§4.6) |
-| 7 | `includes/chat_view_body.php` | Cancel button in `setBusy()`; capture in-flight id; handler POST; `onCancelled` poll branch + render (§4.7) |
+| 3 | `includes/ToolContext.php` + `includes/RecipeRunContext.php` | Add `shouldAbort(): bool` to the interface; `RecipeRunContext::shouldAbort()` returns `isKillRequested()` (recipe generalization, §4.4) |
+| 4 | `includes/ChatTurnContext.php` | Accept message id; add `isCancelRequested()` (fresh SELECT); `shouldContinue()` returns cancelled stop_reason (§4.3); add throttled `shouldAbort()` (§4.4) |
+| 5 | `includes/llm/LlmProviderInterface.php` | Add optional `?callable $shouldAbort = null` third param to `createMessageStreamed()` (§4.4) |
+| 6 | `includes/llm/OpenAiCompatibleProvider.php` + `includes/llm/AnthropicProvider.php` | Poll `$shouldAbort` (throttled) in each read loop; `break` + return partial text with `stop_reason => 'aborted'`. OpenAI: existing `finally { fclose }` closes the socket. Anthropic: add `$body->close()` on abort — its `consumeStream` has none today (§4.4) |
+| 7 | `includes/AgentLoop.php` | Pass `[$context, 'shouldAbort']` to `createMessageStreamed()`; add `aborted` → `cancelled` branch before the `end_turn` branch (`:181`), keeping partial text (§4.4) |
+| 8 | `includes/ChatRunner.php` / `includes/ChatTurn.php` | Pass message id into context on **both** `runTurn`/`runAndFinalize` and `resumeTurn`/`resumeAndFinalize`; cancelled branch in **both** finalizers writing `STATUS_CANCELLED` + partial content and clearing the flag; `stopReasonNote()` cancelled case (§4.5). Clear `aim_cancel_requested` on the complete/failed paths too (§5) |
+| 9 | `views/admin/chat_poll.php` | `cancelled` branch (§4.6) |
+| 10 | `includes/chat_view_body.php` | Cancel button in `setBusy()` (Send-button morph, §4.7); capture in-flight id; handler POST; `onCancelled` poll branch + render |
 
-No new route in `serve.php` (profile view auto-discovery covers `chat_cancel`). No AgentLoop
-change (the shared `shouldContinue()` boundary already exists).
+No new route in `serve.php` (profile view auto-discovery covers `chat_cancel`). `AgentLoop`
+changes are small and uniform with its existing stop-reason dispatch: pass the abort predicate to
+the provider, and add one `aborted` → `cancelled` branch alongside `end_turn` / `refusal`.
 
 ---
 

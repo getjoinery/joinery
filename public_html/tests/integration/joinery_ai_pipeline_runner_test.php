@@ -52,7 +52,7 @@ class FakeVerdictProvider implements LlmProviderInterface {
     private $responses;
     public $calls = 0;
     public function __construct(array $responses) { $this->responses = $responses; }
-    public function createMessageStreamed(array $params, callable $onTextDelta): array {
+    public function createMessageStreamed(array $params, callable $onTextDelta, ?callable $shouldAbort = null): array {
         return $this->createMessage($params);
     }
     public function createMessage(array $params): array {

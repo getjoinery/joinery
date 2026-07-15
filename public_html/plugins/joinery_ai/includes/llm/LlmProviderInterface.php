@@ -25,10 +25,18 @@ interface LlmProviderInterface {
      *     output_tokens, cache_creation_input_tokens, cache_read_input_tokens} }
      * Throws LlmProviderException on failure.
      *
+     * $shouldAbort, when supplied, is polled (throttled) as the stream is read;
+     * the first true return stops the read cleanly, closes the upstream, and
+     * returns the partial content assembled so far with stop_reason 'aborted' —
+     * a normal finish reason, not an exception. Default null = never abort, so
+     * every existing caller is unaffected.
+     *
      * This is the one provider call path; the AgentLoop always uses it and passes
-     * the turn's ToolContext::emitText as the sink (a no-op for recipes).
+     * the turn's ToolContext::emitText as the sink (a no-op for recipes) and
+     * ToolContext::shouldAbort as the abort predicate.
      */
-    public function createMessageStreamed(array $params, callable $onTextDelta): array;
+    public function createMessageStreamed(array $params, callable $onTextDelta,
+        ?callable $shouldAbort = null): array;
 
     /**
      * Blocking convenience over createMessageStreamed (no-op delta sink). Kept

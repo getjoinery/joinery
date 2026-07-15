@@ -58,7 +58,7 @@ class FakeVerdictProvider implements LlmProviderInterface {
     private $responses;
     public $calls = 0;
     public function __construct(array $responses) { $this->responses = $responses; }
-    public function createMessageStreamed(array $params, callable $onTextDelta): array {
+    public function createMessageStreamed(array $params, callable $onTextDelta, ?callable $shouldAbort = null): array {
         return $this->createMessage($params);
     }
     public function createMessage(array $params): array {
@@ -78,6 +78,7 @@ class FakeVerdictProvider implements LlmProviderInterface {
     public function defaultModel(): string { return 'fake/test-model'; }
     public function id(): string { return 'fake'; }
     public function isPrivate(): bool { return true; }
+    public function reachabilityProbe(): ?string { return null; }
     public function modelCapabilities(string $model): array { return ['vision' => false, 'document' => false]; }
 }
 

@@ -28,6 +28,11 @@ use GuzzleHttp\Exception\ConnectException;    // network / connection refused
  */
 class OpenAiCompatibleProvider implements LlmProviderInterface {
 
+    /** How often, at most, to re-check the mid-stream abort predicate (a fresh DB
+     *  read). ~0.4s keeps a user Cancel felt within acceptance's ~1s while sparing
+     *  the DB a query per 8 KB chunk. */
+    const ABORT_POLL_SECONDS = 0.4;
+
     /** @var string Base URL of the OpenAI-compatible server, e.g. http://localhost:11434/v1 */
     protected $base_url;
 
@@ -207,7 +212,8 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
      * the configured base URL is surfaced with a local-specific message so the
      * caller can classify it as api_network_error.
      */
-    public function createMessageStreamed(array $params, callable $onTextDelta): array {
+    public function createMessageStreamed(array $params, callable $onTextDelta,
+            ?callable $shouldAbort = null): array {
         $body = $this->toOpenAiRequest($params);
         $url = $this->base_url . '/chat/completions';
 
@@ -224,7 +230,8 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
                 'timeout'      => 0,                  // local generation can run long
                 'read_timeout' => $this->read_timeout, // bound inactivity instead
             ]);
-            return $this->consumeStream($response->getBody(), $onTextDelta, $this->firstTokenTimeoutSeconds());
+            return $this->consumeStream($response->getBody(), $onTextDelta,
+                $this->firstTokenTimeoutSeconds(), $shouldAbort);
         } catch (ConnectException $e) {
             // Connection refused / DNS / timeout — the server isn't reachable.
             // Keep "not reachable" in the message so classify() reads it as a
@@ -255,13 +262,21 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
      * Each `data:` line is a chat-completion chunk; `data: [DONE]` ends it. Text
      * deltas pass through the think-filter before reaching $onTextDelta and the
      * accumulated answer; tool-call argument fragments accumulate per index.
+     *
+     * $shouldAbort (when set) is polled at most every ABORT_POLL_SECONDS between
+     * chunks; the first true return breaks the read, the finally closes the raw
+     * socket (freeing the model runner), and the canonical response comes back
+     * with stop_reason 'aborted' and whatever text had streamed.
      */
-    private function consumeStream($body, callable $onTextDelta, int $firstTokenTimeout = 0): array {
+    private function consumeStream($body, callable $onTextDelta, int $firstTokenTimeout = 0,
+            ?callable $shouldAbort = null): array {
         $text = '';
         $tool_calls = [];   // index => ['id'=>,'name'=>,'args'=>'']
         $finish = 'stop';
         $usage = ['prompt_tokens' => 0, 'completion_tokens' => 0, 'cached_tokens' => 0];
         $think = ['in' => false, 'carry' => '']; // <think> filter state
+        $aborted = false;
+        $last_abort_check = 0.0;
 
         // Drive the raw socket so the first-token wait can be bounded tighter than
         // the between-token read timeout. detach() yields the underlying PHP stream
@@ -279,6 +294,17 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
         $buffer = '';
         try {
             while (!feof($res)) {
+                // Cooperative mid-generation cancel: poll the abort predicate at
+                // most every ABORT_POLL_SECONDS so a per-chunk check never hammers
+                // the DB. On the first true, stop reading — the finally closes the
+                // socket and frees the model runner.
+                if ($shouldAbort !== null) {
+                    $now = microtime(true);
+                    if ($now - $last_abort_check >= self::ABORT_POLL_SECONDS) {
+                        $last_abort_check = $now;
+                        if ($shouldAbort()) { $aborted = true; break; }
+                    }
+                }
                 $data = fread($res, 8192);
                 $meta = stream_get_meta_data($res);
                 if (($data === '' || $data === false) && !empty($meta['timed_out'])) {
@@ -349,7 +375,7 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
         }
 
         return [
-            'stop_reason' => $this->mapStopReason($finish, $content),
+            'stop_reason' => $aborted ? 'aborted' : $this->mapStopReason($finish, $content),
             'content'     => $content,
             'usage'       => [
                 'input_tokens'                => $usage['prompt_tokens'],

@@ -112,6 +112,16 @@ class RecipeRunContext implements ToolContext {
     }
 
     /**
+     * Mid-generation abort predicate, polled per stream chunk. A recipe's own
+     * single long generation is now interruptible by the same admin Stop flag
+     * that halts it at step boundaries — one mechanism, both stopping points.
+     * A fresh SELECT (isKillRequested); the provider throttles how often it asks.
+     */
+    public function shouldAbort(): bool {
+        return $this->isKillRequested();
+    }
+
+    /**
      * Does a mutating tool call need a live human sign-off before it runs?
      * Recipes are autonomous — the author signed off at save time via the
      * taint gate — so the answer is always false here. The interactive chat
