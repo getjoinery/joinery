@@ -78,34 +78,121 @@ class PublicPage extends PublicPageBase {
 <body>
 
 <?php if ($this->show_site_chrome()): ?>
+<?php
+    // Member/account chrome, all sourced from get_menu_data() so the member
+    // apps (Email, Calendar, Drive, AI, ...) and their permission/setting gates
+    // stay in one place — the seeded profile menu.
+    $is_logged_in  = $session->is_logged_in();
+    $user_items    = $menu_data['user_menu']['items'] ?? [];
+    $display_name  = $menu_data['user_menu']['display_name'] ?: 'Account';
+    $register_link = $menu_data['user_menu']['register_link'] ?? null;
+    $cart_count    = (int)($menu_data['cart']['count'] ?? 0);
+    $cart_link     = $menu_data['cart']['link'] ?? '/cart';
+
+    // Secondary member nav lists the app sections only — drop Home, admin
+    // launcher items, and Sign out (those live in the avatar dropdown).
+    $member_items = [];
+    foreach ($user_items as $it) {
+        $slug = $it['slug'] ?? '';
+        if ($slug === 'core-home' || $slug === 'core-signout' || self::isAdminMenuItem($it)) {
+            continue;
+        }
+        $member_items[] = $it;
+    }
+    $in_member_area = (bool)preg_match('#^/(profile|drive)(/|$)#', $request_path);
+
+    // Avatar initials from the display name.
+    $initials = '';
+    foreach (preg_split('/\s+/', trim((string)$display_name)) as $word) {
+        if ($word === '') continue;
+        $initials .= mb_strtoupper(mb_substr($word, 0, 1));
+        if (mb_strlen($initials) >= 2) break;
+    }
+    if ($initials === '') $initials = 'U';
+?>
 <nav class="site-nav">
     <div class="container">
         <a href="/" class="nav-logo">Joinery</a>
 
-        <div class="nav-links" id="nav-links">
-            <a href="/features"<?php echo $request_path === '/features' ? ' class="active"' : ''; ?>>Features</a>
-            <a href="/pricing"<?php echo $request_path === '/pricing' ? ' class="active"' : ''; ?>>Pricing</a>
-            <div class="nav-dropdown">
-                <button class="nav-dropdown-toggle<?php echo in_array($request_path, ['/developers', '/documentation']) ? ' active' : ''; ?>" aria-haspopup="true" aria-expanded="false">
-                    Developers
-                    <svg class="nav-dropdown-chevron" viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1,1 5,5 9,1"/></svg>
-                </button>
-                <div class="nav-dropdown-menu">
-                    <a href="/developers"<?php echo $request_path === '/developers' ? ' class="active"' : ''; ?>>Overview</a>
-                    <a href="/documentation"<?php echo $request_path === '/documentation' ? ' class="active"' : ''; ?>>Documentation</a>
+        <div class="nav-cluster">
+            <div class="nav-links" id="nav-links">
+                <a href="/features"<?php echo $request_path === '/features' ? ' class="active"' : ''; ?>>Features</a>
+                <a href="/pricing"<?php echo $request_path === '/pricing' ? ' class="active"' : ''; ?>>Pricing</a>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle<?php echo in_array($request_path, ['/developers', '/documentation']) ? ' active' : ''; ?>" aria-haspopup="true" aria-expanded="false">
+                        Developers
+                        <svg class="nav-dropdown-chevron" viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1,1 5,5 9,1"/></svg>
+                    </button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/developers"<?php echo $request_path === '/developers' ? ' class="active"' : ''; ?>>Overview</a>
+                        <a href="/documentation"<?php echo $request_path === '/documentation' ? ' class="active"' : ''; ?>>Documentation</a>
+                    </div>
                 </div>
+                <a href="/showcase"<?php echo $request_path === '/showcase' ? ' class="active"' : ''; ?>>Showcase</a>
+                <a href="/philosophy"<?php echo $request_path === '/philosophy' ? ' class="active"' : ''; ?>>Philosophy</a>
+                <a href="/about"<?php echo $request_path === '/about' ? ' class="active"' : ''; ?>>About</a>
             </div>
-            <a href="/showcase"<?php echo $request_path === '/showcase' ? ' class="active"' : ''; ?>>Showcase</a>
-            <a href="/philosophy"<?php echo $request_path === '/philosophy' ? ' class="active"' : ''; ?>>Philosophy</a>
-            <a href="/about"<?php echo $request_path === '/about' ? ' class="active"' : ''; ?>>About</a>
-            <?php // TODO: Re-enable demo/signup button when ready ?>
-            <?php // <a href="/login" class="btn btn-primary btn-sm">Demo</a> ?>
-        </div>
 
-        <button class="nav-toggle" id="nav-toggle" aria-label="Toggle navigation">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-        </button>
+            <div class="nav-user">
+                <?php if ($is_logged_in): ?>
+                    <div class="nav-user-icons">
+                        <?php $this->render_notification_icon($menu_data); ?>
+                        <?php $this->render_message_icon($menu_data); ?>
+                        <?php if ($cart_count > 0): ?>
+                        <a href="<?php echo htmlspecialchars($cart_link, ENT_QUOTES, 'UTF-8'); ?>" class="header-cart-link" title="Cart" aria-label="Cart">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+                            <span class="cart-count"><?php echo $cart_count; ?></span>
+                        </a>
+                        <?php endif; ?>
+                    </div>
+                    <div class="nav-dropdown nav-dropdown--end nav-avatar">
+                        <button class="nav-dropdown-toggle nav-avatar-toggle" aria-haspopup="true" aria-expanded="false" aria-label="Account menu">
+                            <span class="nav-avatar-circle"><?php echo htmlspecialchars($initials, ENT_QUOTES, 'UTF-8'); ?></span>
+                            <svg class="nav-dropdown-chevron" viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1,1 5,5 9,1"/></svg>
+                        </button>
+                        <div class="nav-dropdown-menu nav-dropdown-menu--wide">
+                            <div class="nav-dropdown-name"><?php echo htmlspecialchars($display_name, ENT_QUOTES, 'UTF-8'); ?></div>
+                            <?php
+                            $prev_admin = false;
+                            foreach ($user_items as $it):
+                                if (($it['slug'] ?? '') === 'core-signout') continue; // rendered last
+                                $is_admin = self::isAdminMenuItem($it);
+                                if ($is_admin && !$prev_admin) echo '<div class="nav-dropdown-divider"></div>';
+                                $prev_admin = $is_admin;
+                                $active = ($it['link'] === $request_path) ? ' class="active"' : '';
+                                echo '<a href="' . htmlspecialchars($it['link'], ENT_QUOTES, 'UTF-8') . '"' . $active . '>' . htmlspecialchars($it['label']) . '</a>';
+                            endforeach;
+                            ?>
+                            <div class="nav-dropdown-divider"></div>
+                            <a href="/logout">Sign out</a>
+                        </div>
+                    </div>
+                <?php else: ?>
+                    <a href="/login" class="nav-signin<?php echo $request_path === '/login' ? ' active' : ''; ?>">Log in</a>
+                    <?php if ($register_link): ?>
+                    <a href="<?php echo htmlspecialchars($register_link, ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary btn-sm">Sign up</a>
+                    <?php endif; ?>
+                <?php endif; ?>
+            </div>
+
+            <button class="nav-toggle" id="nav-toggle" aria-label="Toggle navigation">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+            </button>
+        </div>
     </div>
+
+    <?php if ($is_logged_in && $in_member_area && !empty($member_items)): ?>
+    <div class="member-subnav">
+        <div class="container">
+            <nav class="member-subnav-links" aria-label="Profile sections">
+                <?php foreach ($member_items as $it):
+                    $active = ($it['link'] === $request_path) ? ' active' : '';
+                    echo '<a href="' . htmlspecialchars($it['link'], ENT_QUOTES, 'UTF-8') . '" class="member-subnav-link' . $active . '">' . htmlspecialchars($it['label']) . '</a>';
+                endforeach; ?>
+            </nav>
+        </div>
+    </div>
+    <?php endif; ?>
 </nav>
 <?php endif; ?>
 

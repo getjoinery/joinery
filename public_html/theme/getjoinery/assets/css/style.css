@@ -197,9 +197,92 @@ p:last-child { margin-bottom: 0; }
 }
 .nav-links .btn-primary { color: white; }
 .nav-links .btn-primary:hover { color: white; }
-.nav-user { display: flex; align-items: center; gap: 1rem; }
-.nav-user a { color: var(--text-muted); font-size: 0.9rem; font-weight: 500; }
-.nav-user a:hover { color: var(--text); }
+.nav-cluster { display: flex; align-items: center; gap: 2rem; margin-left: auto; }
+.nav-user { display: flex; align-items: center; gap: 1.1rem; }
+.nav-user .nav-signin { color: var(--text-muted); font-size: 0.9rem; font-weight: 500; text-decoration: none; transition: color var(--transition); }
+.nav-user .nav-signin:hover, .nav-user .nav-signin.active { color: var(--text); }
+
+/* Header action icons (notifications, messages, cart) */
+.nav-user-icons { display: flex; align-items: center; gap: 0.9rem; }
+.nav-user-icons a {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    color: var(--text-muted);
+    transition: color var(--transition);
+}
+.nav-user-icons a:hover { color: var(--text); }
+.nav-user-icons .notifications-count,
+.nav-user-icons .messages-count,
+.nav-user-icons .cart-count {
+    position: absolute;
+    top: -6px;
+    right: -8px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: var(--accent, #d9534f);
+    color: #fff;
+    font-size: 0.65rem;
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
+}
+
+/* Avatar dropdown */
+.nav-avatar-toggle { gap: 0.4rem; }
+.nav-avatar-circle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: var(--primary-dark, #2b2b28);
+    color: #fff;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+.nav-dropdown--end .nav-dropdown-menu { left: auto; right: 0; transform: none; }
+.nav-dropdown--end .nav-dropdown-menu::before { left: auto; right: 0; width: 120px; }
+.nav-dropdown-menu--wide { min-width: 220px; }
+.nav-dropdown-name {
+    padding: 0.35rem 1.25rem 0.6rem;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 260px;
+}
+.nav-dropdown-divider { height: 1px; margin: 0.4rem 0; background: var(--border); }
+
+/* Secondary member nav (Profile / Email / Calendar / Drive / AI ...) */
+.member-subnav { border-top: 1px solid var(--border); background: rgba(255,255,255,0.6); }
+.member-subnav .container { padding-top: 0; padding-bottom: 0; }
+.member-subnav-links {
+    display: flex;
+    gap: 0.35rem;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+.member-subnav-links::-webkit-scrollbar { display: none; }
+.member-subnav-link {
+    display: inline-block;
+    padding: 0.75rem 0.85rem;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    font-weight: 500;
+    text-decoration: none;
+    white-space: nowrap;
+    border-bottom: 2px solid transparent;
+    transition: color var(--transition), border-color var(--transition);
+}
+.member-subnav-link:hover { color: var(--text); }
+.member-subnav-link.active { color: var(--text); border-bottom-color: var(--primary-dark, var(--text)); font-weight: 600; }
 
 /* Mobile menu toggle */
 .nav-toggle {
@@ -1210,6 +1293,7 @@ table.table td { font-size: 0.9rem; color: var(--text-muted); }
     .container { padding: 0 1.5rem; }
 
     /* Nav */
+    .nav-cluster { gap: 0.75rem; }
     .nav-links { display: none; }
     .nav-links.open {
         display: flex;
@@ -1223,10 +1307,12 @@ table.table td { font-size: 0.9rem; color: var(--text-muted); }
         padding: 1rem 2rem;
         gap: 0.75rem;
         box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        z-index: 150;
     }
     .nav-toggle { display: block; }
-    .nav-user { display: none; }
-    .nav-links.open + .nav-user { display: flex; }
+    /* Avatar / action icons stay visible on mobile; only the marketing links collapse. */
+    .nav-user { display: flex; }
+    .nav-user-icons { gap: 0.6rem; }
 
     /* Dropdown in mobile nav */
     .nav-dropdown { width: 100%; }

@@ -231,10 +231,13 @@ abstract class PublicPageBase {
 				$user = new User($session->get_user_id(), TRUE);
 				$menu_data['user_menu']['user_name'] = $user->get('usr_email');
 				$menu_data['user_menu']['display_name'] = $user->display_name();
-				$menu_data['user_menu']['avatar_url'] = PathHelper::getThemeFilePath('avatar.png', 'assets/images', 'web');
 			} catch (Exception $e) {
 				$menu_data['user_menu']['display_name'] = 'User';
 			}
+			// Optional avatar asset — a theme without an avatar.png must not
+			// discard the real display name resolved above, so keep this out of
+			// that try and let a missing file return null instead of throwing.
+			$menu_data['user_menu']['avatar_url'] = PathHelper::getThemeFilePath('avatar.png', 'assets/images', 'web', NULL, NULL, false, false);
 		}
 
 		require_once(PathHelper::getIncludePath('data/admin_menus_class.php'));

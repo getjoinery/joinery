@@ -4,6 +4,7 @@ function profile_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('includes/Activation.php'));
 	require_once(PathHelper::getIncludePath('includes/ErrorHandler.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('data/address_class.php'));
@@ -111,7 +112,7 @@ function profile_logic(array $input): LogicResult{
 
 	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
 
-	return $page_vars;
+	return LogicResult::render($page_vars);
 }
 
 ?>

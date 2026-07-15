@@ -181,6 +181,41 @@ body.jy-default blockquote {
   justify-content: flex-end;
 }
 
+/* Secondary member nav (Profile / Email / Calendar / Drive / AI ...) */
+.jy-member-subnav {
+  background: var(--jy-color-bg);
+  border-bottom: 1px solid var(--jy-color-border);
+  position: sticky;
+  top: 60px;
+  z-index: 99;
+}
+.jy-member-subnav-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 var(--jy-space-5);
+  display: flex;
+  gap: var(--jy-space-1);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.jy-member-subnav-inner::-webkit-scrollbar { display: none; }
+.jy-member-subnav-link {
+  display: inline-block;
+  padding: var(--jy-space-3) var(--jy-space-3);
+  color: var(--jy-color-text-muted);
+  font-size: var(--jy-text-sm);
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
+}
+.jy-member-subnav-link:hover { color: var(--jy-color-text); text-decoration: none; }
+.jy-member-subnav-link.active {
+  color: var(--jy-color-primary);
+  border-bottom-color: var(--jy-color-primary);
+  font-weight: 600;
+}
+
 .jy-nav-links {
   display: flex;
   align-items: center;

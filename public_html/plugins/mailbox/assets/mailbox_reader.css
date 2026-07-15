@@ -1,7 +1,7 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.5
+ * Vanilla CSS, no framework. @version 2.6
  */
 
 .mbx-reader {
@@ -24,7 +24,10 @@
 	padding: 12px 0;
 }
 .mbx-rail-section { padding: 0 12px 16px; }
-.mbx-rail-title {
+/* Scoped under .mbx-reader so the reader's own heading sizing wins over a host
+ * theme's bare h1/h2 defaults (e.g. the kit's `body.jy-default h2`), which would
+ * otherwise blow these labels up to a page-title size. */
+.mbx-reader .mbx-rail-title {
 	font-size: 11px;
 	text-transform: uppercase;
 	letter-spacing: .05em;
@@ -241,7 +244,7 @@
 .mbx-thread-back:hover { background: #eef1f4; color: #111827; }
 .mbx-thread-back .mbx-back-arrow { font-size: 17px; line-height: 1; }
 .mbx-thread-header { margin-bottom: 14px; }
-.mbx-thread-header h1 { font-size: 18px; margin: 0 0 6px; color: #111827; }
+.mbx-reader .mbx-thread-header h1 { font-size: 18px; margin: 0 0 6px; color: #111827; }
 .mbx-thread-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .mbx-action {
 	border: 1px solid #cfd6dd; background: #fff; color: #374151;
