@@ -24,7 +24,9 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProv
  *   cache_read_tokens, messages (updated), stop_reason, detail, pending_action.
  * stop_reason is one of: end_turn, max_iterations, token_budget, refusal,
  *   tool_errors, pending_action, or any reason the context's shouldContinue()
- *   returns (recipe: cancelled, wall_clock).
+ *   returns (cancelled, wall_clock). 'cancelled' also arises mid-stream when the
+ *   context's shouldAbort() halts a generation (the provider reports 'aborted',
+ *   mapped to cancelled here) — one user-cancel signal, two stopping points.
  */
 class AgentLoop {
 
@@ -157,7 +159,8 @@ class AgentLoop {
             // no-op it, so this is transparent to the autonomous surface.
             $context->noteActivity('Waiting for ' . self::modelShortLabel($model) . '…'
                 . ($iter > 0 ? ' (step ' . ($iter + 1) . ')' : ''));
-            $response = $provider->createMessageStreamed($params, [$context, 'emitText']);
+            $response = $provider->createMessageStreamed($params, [$context, 'emitText'],
+                [$context, 'shouldAbort']);
 
             $usage = $response['usage'] ?? [];
             $in += (int)($usage['input_tokens'] ?? 0);
@@ -176,6 +179,18 @@ class AgentLoop {
                 } elseif (($block['type'] ?? '') === 'tool_use') {
                     $tool_uses[] = $block;
                 }
+            }
+
+            // The provider aborted this generation mid-stream because the context's
+            // shouldAbort() went true (the user hit Cancel). Keep whatever text
+            // streamed and stop the turn as cancelled. This MUST precede the
+            // end_turn branch: an aborted stream carries no tool_uses, so that
+            // branch would otherwise misread it as a normal completion.
+            if ($api_stop === 'aborted') {
+                $assistant_text = $iter_text;
+                $stop_reason = 'cancelled';
+                $detail = 'cancelled by user';
+                break;
             }
 
             if ($api_stop === 'end_turn' || empty($tool_uses)) {

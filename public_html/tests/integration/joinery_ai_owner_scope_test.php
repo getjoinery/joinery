@@ -44,6 +44,7 @@ class StubReadContext implements ToolContext {
     public function requiresConfirmation(): bool { return false; }
     public function ownerScopedReads(): bool { return $this->scoped; }
     public function shouldContinue(): ?array { return null; }
+    public function shouldAbort(): bool { return false; }
     public function beginToolCall(array $entry): void {}
     public function finishToolCall(array $entry): void {}
     public function appendToolCall(array $entry): void {}

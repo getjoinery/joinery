@@ -427,7 +427,10 @@ if (!function_exists('joai_pin_svg')) {
                         });
                         return;
                     }
-                    if (data.status === 'complete') { onComplete(data.assistant_html, data.conversation_usage); return; }
+                    // Cancelled settles like complete: the server renders the kept
+                    // partial answer with its own "Cancelled" marker, so the same
+                    // handler swaps the final bubble in and unlocks the composer.
+                    if (data.status === 'complete' || data.status === 'cancelled') { onComplete(data.assistant_html, data.conversation_usage); return; }
                     if (data.status === 'failed') { onFailed(data.error || 'The assistant could not complete this turn.'); return; }
                     if (typeof data.partial_text === 'string') onPartial(data.partial_text, data);
                     if (Date.now() - startedAt > POLL_GIVE_UP_MS) {
@@ -472,6 +475,7 @@ if (!function_exists('joai_pin_svg')) {
     // streaming text ("Waiting for glm-5p2… · 2m 40s") so the quiet stretch
     // before the first token is legible instead of an anonymous indicator.
     function streamInto(messageId) {
+        inflightMessageId = messageId;   // now the Cancel button has a target
         var bubble = ensureLiveBubble(messageId);
         var body = bubble.querySelector('.joai-chat-body');
         var activityEl = bubble.querySelector('.joai-chat-activity');
@@ -673,11 +677,45 @@ if (!function_exists('joai_pin_svg')) {
         if (n) { n.hidden = true; n.textContent = ''; }
     }
 
+    // The RUNNING assistant message this composer is streaming, so the Send
+    // button (morphed to Cancel while busy) can post it. Set when a poll starts,
+    // cleared when the turn settles.
+    var inflightMessageId = null;
+
+    // While a turn runs the composer is locked and Send is idle — reuse that real
+    // estate: morph Send into an active Cancel, and revert on EVERY terminal path
+    // (complete / failed / cancelled all route through setBusy(false)).
     function setBusy(busy) {
-        sendBtn.disabled = busy;
         input.disabled = busy;
         thinking.hidden = !busy;
-        if (busy) scrollToBottom();
+        if (busy) {
+            sendBtn.disabled = false;              // stays clickable — to cancel
+            sendBtn.textContent = 'Cancel';
+            sendBtn.classList.add('joai-chat-cancel-active');
+            sendBtn.classList.remove('joai-btn-primary');
+            scrollToBottom();
+        } else {
+            sendBtn.disabled = false;
+            sendBtn.textContent = 'Send';
+            sendBtn.classList.remove('joai-chat-cancel-active');
+            sendBtn.classList.add('joai-btn-primary');
+            inflightMessageId = null;
+        }
+    }
+
+    // Post a cancel for the in-flight turn. Leaves the poll running — the worker
+    // flips the row to cancelled and the poll renders the kept partial answer, so
+    // a turn that happens to finish first still lands correctly (no optimistic
+    // teardown). The button is disabled until the poll settles (revert via
+    // setBusy(false)) to prevent a double-post.
+    function cancelInflight() {
+        if (!inflightMessageId) return;            // nothing pollable to cancel yet
+        sendBtn.disabled = true;
+        var body = new FormData();
+        body.append('message_id', inflightMessageId);
+        fetch(JOAI_BASE + 'chat_cancel', { method: 'POST', body: body })
+            .then(function (r) { return r.json(); })
+            .catch(function () { sendBtn.disabled = false; }); // let them retry on a network error
     }
 
     // Conversation token/cost bar under the composer. The server is the source of
@@ -1426,7 +1464,12 @@ if (!function_exists('joai_pin_svg')) {
         });
     }
 
-    sendBtn.addEventListener('click', send);
+    // The Send button doubles as Cancel while a turn is in flight (setBusy morphs
+    // it), so the click is state-aware.
+    sendBtn.addEventListener('click', function () {
+        if (sendBtn.classList.contains('joai-chat-cancel-active')) cancelInflight();
+        else send();
+    });
     input.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
     });

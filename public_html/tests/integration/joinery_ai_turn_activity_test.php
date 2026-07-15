@@ -41,7 +41,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AgentLoop.p
 class FakeActivityProvider implements LlmProviderInterface {
     private $responses;
     public function __construct(array $responses) { $this->responses = $responses; }
-    public function createMessageStreamed(array $params, callable $onTextDelta): array {
+    public function createMessageStreamed(array $params, callable $onTextDelta, ?callable $shouldAbort = null): array {
         $response = array_shift($this->responses);
         foreach (($response['content'] ?? []) as $block) {
             if (($block['type'] ?? '') === 'text' && $block['text'] !== '') {

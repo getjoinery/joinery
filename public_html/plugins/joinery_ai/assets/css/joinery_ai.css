@@ -148,6 +148,11 @@ select.joai-chat-control { cursor: pointer; }
                    background: #dc3545; border: 0; border-radius: 5px;
                    padding: 0.35rem 0.8rem; cursor: pointer; }
 .joai-chat-retry:hover { background: #c0392b; }
+/* Send button morphs into an active Cancel while a turn streams (setBusy). */
+.joai-btn.joai-chat-cancel-active { background: #dc3545; border-color: #dc3545; color: #fff; }
+.joai-btn.joai-chat-cancel-active:hover { background: #c0392b; }
+/* A cancelled turn keeps its partial answer under a small marker. */
+.joai-chat-cancelled-marker { margin-top: 0.4rem; font-size: 0.78rem; font-weight: 600; color: #b26a00; }
 /* Markdown typography inside a bubble/body. */
 .joai-chat-body { word-wrap: break-word; overflow-wrap: anywhere; }
 .joai-chat-body > :first-child { margin-top: 0; }

@@ -70,7 +70,11 @@ if (ChatSeal::isLocked($conversation)) {
     exit;
 }
 
-if ($status === AiConversationMessage::STATUS_COMPLETE) {
+if ($status === AiConversationMessage::STATUS_COMPLETE
+        || $status === AiConversationMessage::STATUS_CANCELLED) {
+    // Cancelled settles like complete: the stored partial answer is rendered
+    // (assistantBubble stamps a "Cancelled" marker off aim_status), and the
+    // status field (already set above) tells the page which terminal it is.
     $model = ChatRender::conversationModel($conversation);
     $response['assistant_html'] = ChatRender::assistantBubble($msg, $session->get_timezone(), $model);
     $response['conversation_usage'] = ChatRender::conversationUsagePayload($conversation);

@@ -29,10 +29,13 @@ class AiConversationMessage extends SystemBase {
 
     // Turn lifecycle for asynchronous chat. A user row is COMPLETE on insert;
     // an assistant placeholder is RUNNING until the in-process turn finishes it
-    // (COMPLETE) or it errors / is reaped (FAILED). See ChatAsync.
-    const STATUS_RUNNING  = 'running';
-    const STATUS_COMPLETE = 'complete';
-    const STATUS_FAILED   = 'failed';
+    // (COMPLETE) or it errors / is reaped (FAILED). CANCELLED is a terminal state
+    // for a turn the user stopped mid-flight (aim_cancel_requested); any partial
+    // answer already streamed is kept. See ChatAsync / ChatTurn.
+    const STATUS_RUNNING   = 'running';
+    const STATUS_COMPLETE  = 'complete';
+    const STATUS_FAILED    = 'failed';
+    const STATUS_CANCELLED = 'cancelled';
 
     protected static $foreign_key_actions = [
         'aim_aic_conversation_id' => ['action' => 'permanent_delete'],
@@ -68,6 +71,11 @@ class AiConversationMessage extends SystemBase {
         // it is to the limit. NULL for remote models or an unreachable host.
         'aim_context_window'      => array('type'=>'int4', 'is_nullable'=>true),
         'aim_status'              => array('type'=>'varchar(20)', 'default'=>'complete'),
+        // Cross-process cancel signal. The chat_cancel endpoint sets this TRUE on a
+        // RUNNING assistant row; the running turn re-reads it (fresh SELECT) at the
+        // AgentLoop boundary and mid-stream, then exits STATUS_CANCELLED. Mirrors
+        // recipe runs' rcr_kill_requested. Cleared on every finalize path.
+        'aim_cancel_requested'    => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
         // Live one-line stage label while the row is RUNNING ("Waiting for
         // {model}…", "Running tool: web_search…"); NULL once the turn
         // finalizes. The turn runner is the only writer. See

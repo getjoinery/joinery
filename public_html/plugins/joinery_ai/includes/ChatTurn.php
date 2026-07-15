@@ -32,7 +32,7 @@ class ChatTurn {
             return;
         }
         try {
-            $turn = ChatRunner::runTurn($conversation, $uid,
+            $turn = ChatRunner::runTurn($conversation, $uid, (int)$assistant_msg->key,
                 ChatAsync::streamSink($assistant_msg, '', $sealed,
                     (int)$conversation->get('aic_owner_user_id')), $stamper);
         } catch (LlmProviderException $e) {
@@ -62,8 +62,17 @@ class ChatTurn {
         if (isset($result['context_window']) && $result['context_window'] !== null) {
             $cols['aim_context_window'] = (int)$result['context_window'];
         }
-        $cols['aim_status']        = AiConversationMessage::STATUS_COMPLETE;
+        // A user Cancel (between steps or mid-stream) funnels to stop_reason
+        // 'cancelled' — persist the terminal CANCELLED state, keeping whatever
+        // partial answer already streamed (resolveAssistantText returns it, or a
+        // short "Cancelled" marker when nothing streamed).
+        $cols['aim_status']        = (($result['stop_reason'] ?? '') === 'cancelled')
+            ? AiConversationMessage::STATUS_CANCELLED
+            : AiConversationMessage::STATUS_COMPLETE;
         $cols['aim_activity']      = null;
+        // Clear the request flag on every finalize path so a cancel that arrived
+        // just after the turn settled never leaves a stale "please stop" on the row.
+        $cols['aim_cancel_requested'] = false;
         AiConversationMessage::updateColumns((int)$assistant_msg->key, $cols);
         ChatAsync::clearScratch((int)$assistant_msg->key);   // the sealed content now lives in aim_content
 
@@ -91,7 +100,7 @@ class ChatTurn {
             $sink = ChatAsync::streamSink($msg, $seed, $sealed,
                 (int)$conversation->get('aic_owner_user_id'));
             $turn = ChatRunner::resumeTurn($conversation, $uid, $pending, $lead_text, $decision,
-                $sink, $stamper);
+                (int)$msg->key, $sink, $stamper);
         } catch (LlmProviderException $e) {
             error_log('[joinery_ai chat] resume provider error: ' . $e->getMessage());
             self::markFailed($msg,
@@ -124,8 +133,14 @@ class ChatTurn {
         if (isset($result['context_window']) && $result['context_window'] !== null) {
             $cols['aim_context_window'] = (int)$result['context_window'];   // fresh window for the resumed turn
         }
-        $cols['aim_status']        = AiConversationMessage::STATUS_COMPLETE;
+        // A cancel during the resumed generation is terminal too — keep the
+        // combined lead-text + partial resumed answer (already folded into
+        // $combined) and mark CANCELLED rather than mislabelling it complete.
+        $cols['aim_status']        = (($result['stop_reason'] ?? '') === 'cancelled')
+            ? AiConversationMessage::STATUS_CANCELLED
+            : AiConversationMessage::STATUS_COMPLETE;
         $cols['aim_activity']      = null;
+        $cols['aim_cancel_requested'] = false;   // clear on every finalize path (§5)
         AiConversationMessage::updateColumns((int)$msg->key, $cols);
         ChatAsync::clearScratch((int)$msg->key);
 
@@ -165,6 +180,7 @@ class ChatTurn {
         $cols = ChatSeal::errorColumns($msg, $error);
         $cols['aim_status']   = AiConversationMessage::STATUS_FAILED;
         $cols['aim_activity'] = null;
+        $cols['aim_cancel_requested'] = false;   // no stale flag on a settled row (§5)
         AiConversationMessage::updateColumns((int)$msg->key, $cols);
         ChatAsync::clearScratch((int)$msg->key);
     }

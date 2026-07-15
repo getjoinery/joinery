@@ -55,6 +55,14 @@ interface ToolContext {
      *  the turn, or null to continue. */
     public function shouldContinue(): ?array;
 
+    /** Mid-generation abort predicate, polled per stream chunk by the provider.
+     *  True means stop this generation NOW and hand back whatever text has
+     *  streamed so far. Reads the same cancel/kill flag shouldContinue() reads,
+     *  so one flag drives both the between-steps and the in-stream stop; recipes
+     *  wire it to their kill flag, chat to aim_cancel_requested. Must be cheap —
+     *  it is called throttled but frequently. */
+    public function shouldAbort(): bool;
+
     /** Record a tool call that has started but not completed. */
     public function beginToolCall(array $entry): void;
 
