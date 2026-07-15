@@ -166,6 +166,32 @@ class PublicPage extends PublicPageBase {
         </div>
     </div>
 </header>
+<?php
+        // Secondary member nav — a menu to move between the member/account
+        // pages (Profile, Email, Calendar, Drive, AI, ...). Shown only inside
+        // the member area, sourced from the same seeded profile menu as the
+        // avatar dropdown so app/permission/setting gates stay in one place.
+        $request_path   = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
+        $in_member_area = (bool)preg_match('#^/(profile|drive)(/|$)#', $request_path);
+        if (!empty($menu_data['user_menu']['is_logged_in']) && $in_member_area) {
+            $member_items = [];
+            foreach ($menu_data['user_menu']['items'] as $mi) {
+                $mi_slug = $mi['slug'] ?? '';
+                if ($mi_slug === 'core-home' || $mi_slug === 'core-signout' || self::isAdminMenuItem($mi)) {
+                    continue;
+                }
+                $member_items[] = $mi;
+            }
+            if (!empty($member_items)) {
+                echo '<div class="jy-member-subnav"><nav class="jy-member-subnav-inner" aria-label="Profile sections">';
+                foreach ($member_items as $mi) {
+                    $mi_active = ($mi['link'] === $request_path) ? ' active' : '';
+                    echo '<a href="' . htmlspecialchars($mi['link'], ENT_QUOTES, 'UTF-8') . '" class="jy-member-subnav-link' . $mi_active . '">' . htmlspecialchars($mi['label']) . '</a>';
+                }
+                echo '</nav></div>';
+            }
+        }
+?>
 <?php endif; ?>
 
 <main class="jy-main-content">

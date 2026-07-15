@@ -51,7 +51,7 @@
         {
             "slug": "dns-filtering",
             "title": "Filtering",
-            "url": "/profile/dns_filtering",
+            "url": "/profile/dns_filtering/profile",
             "icon": "shield",
             "visibility": "in",
             "permission": 0,
