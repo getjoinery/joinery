@@ -1,7 +1,7 @@
 {
     "name": "Mailbox",
     "description": "Self-hosted email: receiving, forwarding, local mailboxes, webmail reader, IMAP sync, DKIM/SRS",
-    "version": "1.38.1",
+    "version": "1.39.0",
     "author": "Joinery",
     "receives_upgrades": true,
     "included_in_publish": true,
@@ -248,6 +248,30 @@
         {
             "name": "mailbox_relay_outbound_mode",
             "default": "provider"
+        },
+        {
+            "name": "mailbox_fleet_service_url",
+            "default": ""
+        },
+        {
+            "name": "mailbox_fleet_api_public_key",
+            "default": ""
+        },
+        {
+            "name": "mailbox_fleet_api_secret_key",
+            "default": ""
+        },
+        {
+            "name": "mailbox_fleet_service_enabled",
+            "default": "0"
+        },
+        {
+            "name": "mailbox_fleet_mx_zone",
+            "default": ""
+        },
+        {
+            "name": "mailbox_fleet_grace_days",
+            "default": "14"
         }
     ]
 }

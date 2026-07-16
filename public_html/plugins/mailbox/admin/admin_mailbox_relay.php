@@ -4,9 +4,12 @@
  *
  * Lists the deployment's relay(s) with status + the four provisioning checks, and
  * drives provisioning (a server_manager job), rebuild, enable/disable, and delete.
- * Guided controls only — no explainer prose; details live in the plugin docs.
+ * Also the hosted-fleet surfaces (specs/mailbox_relay_shared_fleet.md): the
+ * tenant-side slot (enroll, domain TXT claims, release) and — on the operator's
+ * deployment — fleet shard registration. Guided controls only — no explainer
+ * prose; details live in the plugin docs.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -125,6 +128,124 @@ if (!empty($has_active_relay)) {
 		echo '</form>';
 		echo ' <span class="text-muted small">Sends a marked message out through your provider and back via the '
 			. 'relay MX; the origin-leak check then scans the delivered headers.</span>';
+	}
+
+	$page->end_box();
+}
+
+// --- hosted relay (fleet slot) -------------------------------------------------
+// The zero-infrastructure alternative to provisioning your own relay
+// (specs/mailbox_relay_shared_fleet.md): enroll with the operator's fleet,
+// point MX at the returned hostname, and the same pull/push consumers run.
+$page->begin_box(array('title' => 'Hosted relay (fleet)'));
+
+require_once(PathHelper::getIncludePath('includes/FormWriterV2HTML5.php'));
+$fform = $page->getFormWriter('fleet_config');
+echo $fform->begin_form();
+$fform->hiddeninput('action', '', array('value' => 'fleet_config'));
+$fform->textinput('mailbox_fleet_service_url', 'Fleet service URL', array(
+	'value' => $fleet_service_url, 'placeholder' => 'https://getjoinery.com'));
+$fform->textinput('mailbox_fleet_api_public_key', 'API public key', array(
+	'value' => $fleet_api_public_key));
+$fform->passwordinput('mailbox_fleet_api_secret_key', 'API secret key', array(
+	'placeholder' => $fleet_secret_set ? '(stored — leave blank to keep)' : ''));
+$fform->submitbutton('btn_fleet_config', 'Save connection');
+echo $fform->end_form();
+
+if ($fleet_configured) {
+	echo '<hr>';
+	if ($fleet_error !== '') {
+		echo '<p class="text-danger">' . htmlspecialchars($fleet_error) . '</p>';
+	} elseif (is_array($fleet_status) && empty($fleet_status['enrolled'])) {
+		if ($main_wg_public_key === '') {
+			echo '<p>Before enrolling, give this box its tunnel identity. Run once as root:</p>'
+				. '<pre><code>sudo bash plugins/mailbox/provisioning/provision_relay_main.sh</code></pre>';
+		} else {
+			echo relay_action_button(0, 'fleet_enroll', 'Enroll for a hosted relay slot', 'btn-primary');
+		}
+	} elseif (is_array($fleet_status)) {
+		$coords = $fleet_status['coordinates'] ?? array();
+		echo '<p><strong>Slot:</strong> ' . htmlspecialchars((string)($coords['slug'] ?? ''))
+			. ' — <strong>' . htmlspecialchars((string)($coords['status'] ?? '')) . '</strong></p>';
+		echo '<p><strong>Point every hosted domain\'s MX at:</strong> '
+			. '<code>' . htmlspecialchars((string)($coords['mx_hostname'] ?? '')) . '</code></p>';
+
+		// Domain claims: the fleet accepts no mail for a domain before its TXT
+		// challenge passes (fleet-wide uniqueness — a security boundary).
+		$claims = is_array($fleet_status['claims'] ?? null) ? $fleet_status['claims'] : array();
+		if (!empty($claims)) {
+			echo '<table class="table"><thead><tr>'
+				. '<th>Domain</th><th>Status</th><th>TXT record</th><th></th>'
+				. '</tr></thead><tbody>';
+			foreach ($claims as $claim) {
+				echo '<tr>';
+				echo '<td>' . htmlspecialchars((string)$claim['domain']) . '</td>';
+				echo '<td>' . htmlspecialchars((string)$claim['status']) . '</td>';
+				if ((string)$claim['status'] === 'verified') {
+					echo '<td>—</td><td></td>';
+				} else {
+					echo '<td><code>' . htmlspecialchars((string)$claim['txt_host']) . '</code> = '
+						. '<code>' . htmlspecialchars((string)$claim['txt_value']) . '</code></td>';
+					echo '<td><form method="post" style="display:inline">'
+						. '<input type="hidden" name="action" value="fleet_verify">'
+						. '<input type="hidden" name="claim_id" value="' . intval($claim['claim_id']) . '">'
+						. '<button type="submit" class="btn btn-sm btn-secondary">Verify</button>'
+						. '</form></td>';
+				}
+				echo '</tr>';
+			}
+			echo '</tbody></table>';
+		}
+
+		$cform = $page->getFormWriter('fleet_claim');
+		echo $cform->begin_form();
+		$cform->hiddeninput('action', '', array('value' => 'fleet_claim'));
+		$cform->textinput('fleet_domain', 'Claim a domain', array('placeholder' => 'example.com'));
+		$cform->submitbutton('btn_fleet_claim', 'Claim');
+		echo $cform->end_form();
+
+		echo relay_action_button(0, 'fleet_refresh', 'Refresh', 'btn-secondary');
+		echo relay_action_button(0, 'fleet_release', 'Release slot', 'btn-danger',
+			'Release this hosted relay slot? Point your MX elsewhere first.');
+	}
+}
+
+$page->end_box();
+
+// --- fleet shards (operator side) ----------------------------------------------
+if (!empty($fleet_service_on)) {
+	$page->begin_box(array('title' => 'Fleet shards (operator)'));
+
+	if (!empty($fleet_shards)) {
+		echo '<table class="table"><thead><tr>'
+			. '<th>Shard</th><th>Hostname</th><th>Public IP</th><th>Tenants</th><th>Active</th>'
+			. '</tr></thead><tbody>';
+		foreach ($fleet_shards as $row) {
+			$shard = $row['model'];
+			echo '<tr>';
+			echo '<td>' . htmlspecialchars((string)$shard->get('mfs_name')) . '</td>';
+			echo '<td>' . htmlspecialchars((string)$shard->get('mfs_hostname')) . '</td>';
+			echo '<td>' . htmlspecialchars((string)$shard->get('mfs_public_ip')) . '</td>';
+			echo '<td>' . intval($row['slots']) . ' / ' . intval($shard->get('mfs_capacity')) . '</td>';
+			echo '<td>' . ((bool)$shard->get('mfs_is_active') ? 'Yes' : 'No') . '</td>';
+			echo '</tr>';
+		}
+		echo '</tbody></table>';
+	}
+
+	if ($server_manager_active && !empty($nodes)) {
+		$sform = $page->getFormWriter('provision_shard');
+		echo $sform->begin_form();
+		$sform->hiddeninput('action', '', array('value' => 'provision_shard'));
+		$shard_node_options = array();
+		foreach ($nodes as $node) {
+			$shard_node_options[(string)$node->key] = $node->get('mgn_name') . ' (' . $node->get('mgn_host') . ')';
+		}
+		$sform->dropinput('shard_node_id', 'Managed node', array('options' => $shard_node_options));
+		$sform->textinput('shard_hostname', 'Shard mail hostname', array('placeholder' => 'shard1.mx.example.com'));
+		$sform->textinput('shard_capacity', 'Capacity (tenants)', array('value' => '25'));
+		$sform->submitbutton('btn_provision_shard', 'Provision shard');
+		echo $sform->end_form();
 	}
 
 	$page->end_box();

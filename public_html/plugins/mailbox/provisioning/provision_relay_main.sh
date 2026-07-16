@@ -116,14 +116,46 @@ echo "PEERED ${ENDPOINT}"
 HELPER
 chmod 755 "${PEER_HELPER}"
 
-echo "${WEB_USER} ALL=(root) NOPASSWD: ${PEER_HELPER}" > "${SUDOERS_FILE}"
+# Second narrow helper: set the interface's own tunnel address. Self-hosted
+# keeps the 10.99.0.2 default (the first-tenant allocation); a HOSTED fleet
+# slot receives an allocated address at enrollment, and the web user applies
+# it through this helper (FleetClient::applyCoordinates).
+ADDR_HELPER="/usr/local/sbin/joinery-relay-addr"
+cat > "${ADDR_HELPER}" <<'ADDRHELPER'
+#!/usr/bin/env bash
+# joinery-relay-addr <tunnel-ip>
+# Sets the jyrelay0 interface Address to <tunnel-ip>/24 (the fleet-allocated
+# tenant address) and re-applies the config. Installed by provision_relay_main.sh.
+set -euo pipefail
+WG_IF="jyrelay0"
+CONF="/etc/wireguard/${WG_IF}.conf"
+IP="${1:-}"
+if [[ ! "${IP}" =~ ^10\.99\.0\.([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-4])$ ]]; then
+    echo "joinery-relay-addr: bad tunnel ip" >&2; exit 2
+fi
+if [[ ! -f "${CONF}" ]]; then
+    echo "joinery-relay-addr: ${CONF} missing - run provision_relay_main.sh first" >&2; exit 3
+fi
+sed -i "s#^Address = .*#Address = ${IP}/24#" "${CONF}"
+if wg show "${WG_IF}" >/dev/null 2>&1; then
+    wg-quick down "${WG_IF}" >/dev/null 2>&1 || true
+fi
+wg-quick up "${WG_IF}" >/dev/null 2>&1 || true
+echo "ADDR_SET ${IP}/24"
+ADDRHELPER
+chmod 755 "${ADDR_HELPER}"
+
+{
+    echo "${WEB_USER} ALL=(root) NOPASSWD: ${PEER_HELPER}"
+    echo "${WEB_USER} ALL=(root) NOPASSWD: ${ADDR_HELPER}"
+} > "${SUDOERS_FILE}"
 chmod 440 "${SUDOERS_FILE}"
 if ! visudo -cf "${SUDOERS_FILE}" >/dev/null; then
     rm -f "${SUDOERS_FILE}"
     echo "ERROR: generated sudoers rule failed validation - removed." >&2
     exit 1
 fi
-echo "sudoers: ${WEB_USER} may run ${PEER_HELPER}"
+echo "sudoers: ${WEB_USER} may run ${PEER_HELPER} and ${ADDR_HELPER}"
 
 # --- 4. relay pull key (the web user's own SSH identity for the tunnel) --------
 # Must match RelaySsh::pullKeyPath(): {site root}/config/relay_pull_key.

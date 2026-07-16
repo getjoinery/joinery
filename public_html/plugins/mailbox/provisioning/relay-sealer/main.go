@@ -2,8 +2,14 @@
 // relay. It replaces utils/inbound_email_handler.php on the MX path: instead of
 // parsing and storing mail (which needs a database and a large code surface),
 // it seals each accepted message to the recipient's public key at the moment of
-// acceptance and spools ciphertext for the main Joinery box to pull over
-// WireGuard.
+// acceptance and spools ciphertext for the owning tenant's Joinery box to pull
+// over WireGuard.
+//
+// The relay stack is tenancy-native (specs/mailbox_relay_shared_fleet.md): the
+// routing map carries per-tenant blocks (spool directory, SRS secret, forward
+// identity, transport key, shard-side limits) and every recipient/domain entry
+// names its tenant. A self-hosted relay is a fleet of one — the same code path
+// with a single tenant block.
 //
 // Invocation (Postfix master.cf pipe, flags=DRh — no 'u': the local part's
 // case must survive for SRS bounce validation):
@@ -16,12 +22,19 @@
 // metadata sidecar) is written, via write-tempfile → fsync → atomic rename.
 // The process returns its Postfix exit code only AFTER the fsync.
 //
+// The same binary is also the shard's MAP MERGE UNIT:
+//
+//	relay-sealer merge-maps
+//
+// runs the fragment validation + merge (root only, triggered via sudo by the
+// tenant shell or the provisioning job — never a resident daemon). See merge.go.
+//
 // Exit codes follow Postfix pipe conventions:
 //
 //	0  = delivered / accepted (sealed + spooled, or forwarded, or silently discarded)
 //	67 = unknown user (permanent rejection)
 //	75 = temporary failure (Postfix will retry) — used whenever mail would
-//	     otherwise be lost (missing key, spool write failure)
+//	     otherwise be lost (missing key, spool write failure, tenant over quota)
 package main
 
 import (
@@ -43,6 +56,13 @@ const (
 )
 
 func main() {
+	// Merge-unit mode: root-only, dispatched on the literal first argument. A
+	// mail delivery can never reach this branch — the sealer pipe runs as the
+	// unprivileged relay user, and an SMTP recipient is always an address that
+	// passed relay_domains + check_recipient_access, never a bare word.
+	if len(os.Args) > 1 && os.Args[1] == "merge-maps" {
+		os.Exit(runMerge())
+	}
 	os.Exit(run())
 }
 
@@ -65,7 +85,7 @@ func run() int {
 	}
 
 	routingPath := envOr("JOINERY_RELAY_ROUTING", "/opt/joinery-relay/routing.json")
-	spoolDir := envOr("JOINERY_RELAY_SPOOL", "/var/spool/joinery-relay")
+	defaultSpoolDir := envOr("JOINERY_RELAY_SPOOL", "/var/spool/joinery-relay")
 
 	raw, err := io.ReadAll(io.LimitReader(os.Stdin, int64(maxMessageMiB)*1024*1024+1))
 	if err != nil {
@@ -99,10 +119,29 @@ func run() int {
 		return exitOK // domain accepts-and-discards unmatched mail
 	}
 
+	tc, ok := m.tenantFor(entry)
+	if !ok {
+		// An entry naming a tenant with no block is a torn/inconsistent map;
+		// temp-fail so the next merge (or sync) repairs it without losing mail.
+		fmt.Fprintf(os.Stderr, "relay-sealer: no tenant block %q for %s\n", entry.Tenant, recipient)
+		return exitTempFail
+	}
+	spoolDir := tc.SpoolDir
+	if spoolDir == "" {
+		spoolDir = defaultSpoolDir
+	}
+
 	stores := entry.Mode == modeStore || entry.Mode == modeForwardAndStore
 	forwards := entry.Mode == modeForward || entry.Mode == modeForwardAndStore
 
 	if stores {
+		// Per-tenant spool quota (shard policy from the root-owned limits, never
+		// tenant-pushed): a tenant that stops pulling must not fill the shard's
+		// disk for everyone. Over quota = temp-fail; the sender's MTA queues.
+		if over, why := spoolQuotaExceeded(spoolDir, tc); over {
+			fmt.Fprintf(os.Stderr, "relay-sealer: tenant %s over spool quota (%s), deferring\n", entry.Tenant, why)
+			return exitTempFail
+		}
 		if code := sealAndSpool(raw, recipient, sender, entry, m, spoolDir); code != exitOK {
 			return code
 		}
@@ -117,7 +156,20 @@ func run() int {
 			}
 			return exitUnknown
 		}
-		if err := forwardMessage(raw, recipient, entry, m); err != nil {
+		// Per-tenant forward throttle: forwarding is the fleet's one remaining
+		// sending surface, so one tenant's forwarded flood must degrade only
+		// that tenant. Over the limit: a stored copy makes the mail safe (skip
+		// the forward, never silently); forward-only mail is temp-failed so the
+		// relay's own queue retries once the bucket refills.
+		if !forwardAllowed(spoolDir, tc) {
+			fmt.Fprintf(os.Stderr, "relay-sealer: tenant %s over forward rate limit (%d/hour)\n",
+				entry.Tenant, tc.ForwardHourlyLimit)
+			if stores {
+				return exitOK
+			}
+			return exitTempFail
+		}
+		if err := forwardMessage(raw, recipient, entry, tc); err != nil {
 			fmt.Fprintf(os.Stderr, "relay-sealer: %v\n", err)
 			// Forwarding failed. If we also sealed a copy, the mail is not lost;
 			// accept. Otherwise temp-fail so the sender retries.
@@ -132,8 +184,9 @@ func run() int {
 }
 
 // sealAndSpool seals the raw message to the recipient's public key and commits
-// the .seal + .meta pair durably. Any failure returns a temp-fail so Postfix
-// retries — a message that cannot be sealed must never be silently lost.
+// the .seal + .meta pair durably into the tenant's spool directory. Any failure
+// returns a temp-fail so Postfix retries — a message that cannot be sealed must
+// never be silently lost.
 func sealAndSpool(raw []byte, recipient, sender string, entry routingEntry, m *routingMap, spoolDir string) int {
 	if entry.PublicKey == "" {
 		fmt.Fprintln(os.Stderr, "relay-sealer: store mode but no public key for recipient")

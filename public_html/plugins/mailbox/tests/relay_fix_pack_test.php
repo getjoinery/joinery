@@ -51,21 +51,17 @@ class RelayFixPackTest {
 		}
 	}
 
-	// R2-8 — one formula, every artifact.
+	// R2-8 — one formula covering the whole pushed artifact (the fragment).
 	private function testContentHashCoversEveryArtifact() {
 		section('contentHash');
-		$base = array(
-			'relay_domains' => 'a', 'recipients' => 'b', 'transport' => 'c',
-			'srs_access' => 'd', 'routing_json' => 'e',
-		);
+		$base = array('fragment' => '{"fragment_format":1,"tenant":"main","recipients":{}}');
 		$this->ok(RelayMapSync::contentHash($base) === RelayMapSync::contentHash($base),
 			'deterministic for identical artifacts');
-		foreach (array_keys($base) as $key) {
-			$mutated = $base;
-			$mutated[$key] .= 'X';
-			$this->ok(RelayMapSync::contentHash($mutated) !== RelayMapSync::contentHash($base),
-				"a change to {$key} changes the hash");
-		}
+		$mutated = array('fragment' => $base['fragment'] . 'X');
+		$this->ok(RelayMapSync::contentHash($mutated) !== RelayMapSync::contentHash($base),
+			'a change to the fragment changes the hash');
+		$this->ok(RelayMapSync::contentHash(array()) !== RelayMapSync::contentHash($base),
+			'a missing fragment never hashes like a real one');
 	}
 
 	// R2-3 — the SRS address is case-sensitive end to end.

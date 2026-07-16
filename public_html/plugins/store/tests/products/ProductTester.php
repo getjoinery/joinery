@@ -222,6 +222,7 @@ class ProductTester {
                         $this->testPaymentFlow();
                     } catch (Exception $e) {
                         echo "✗ <span style='color: red;'>Failed to set up payment test: " . htmlspecialchars($e->getMessage()) . "</span><br>\n";
+                        $this->test_results[] = ['name' => 'Payment: setup', 'id' => null, 'status' => 'FAILED', 'errors' => [$e->getMessage()]];
                     }
                 } else {
                     echo "⚠ <span style='color: orange;'>No successful products available for payment testing</span><br>\n";
@@ -308,47 +309,61 @@ class ProductTester {
     }
     
     /**
-     * Create a single coupon code by calling admin_coupon_code_edit.php
+     * Run an admin logic function directly with a simulated POST.
+     *
+     * The admin *pages* wrap their logic in process_logic(), which exits on
+     * the post-save redirect — fatal to a test process. Calling the logic
+     * function itself returns the LogicResult instead. Saves are gated on
+     * LibraryFunctions::isFormSubmission() (REQUEST_METHOD === 'POST'), so
+     * that is simulated too; the faked admin session (run()) satisfies
+     * check_permission() and everything stays in-process against the test
+     * database.
+     */
+    private function runAdminLogic($logic_path, $logic_fn, $post_data, $method = 'POST') {
+        // $method matters: form saves are gated on isFormSubmission() (POST),
+        // while version actions (new_version etc.) are GET actions that the
+        // POST save path would misinterpret as a form save.
+        $_POST = ($method === 'POST') ? $post_data : array();
+        $_GET = ($method === 'GET') ? $post_data : array();
+        $_REQUEST = $post_data;
+        $_SERVER['REQUEST_METHOD'] = $method;
+
+        $this->dbconnector->set_test_mode();
+
+        require_once(PathHelper::getIncludePath($logic_path));
+        $result = $logic_fn($post_data);
+
+        if ($result->error) {
+            throw new Exception("$logic_fn error: " . $result->error);
+        }
+        if ($result->hasValidationErrors()) {
+            throw new Exception("$logic_fn validation errors: " . json_encode($result->validation_errors));
+        }
+        return $result;
+    }
+
+    /**
+     * Create a single coupon code via admin_coupon_code_edit_logic()
      */
     private function createCouponCode($coupon_spec) {
-        // Add action field and json_confirm flag
         $post_data = array_merge(['action' => 'add', 'json_confirm' => '1'], $coupon_spec);
-        
-        // Set up $_POST and $_REQUEST for the admin script
-        $_POST = $post_data;
-        $_REQUEST = $post_data;
-        
-        // Ensure test mode is enabled
-        $dbconnector = DbConnector::get_instance();
-        $dbconnector->set_test_mode();
-        
-        // Capture output from admin_coupon_code_edit
-        ob_start();
-        
+
+        $this->runAdminLogic(
+            'plugins/store/admin/logic/admin_coupon_code_edit_logic.php',
+            'admin_coupon_code_edit_logic',
+            $post_data
+        );
+
+        // Verify directly in the database
         try {
-            // Include the admin script directly
-            include(PathHelper::getRootDir() . '/plugins/store/admin/admin_coupon_code_edit.php');
-            $response = ob_get_contents();
-        } catch (Exception $e) {
-            ob_end_clean();
-            throw new Exception("Error in admin_coupon_code_edit: " . $e->getMessage());
-        } catch (Error $e) {
-            ob_end_clean();
-            throw new Exception("Fatal error in admin_coupon_code_edit: " . $e->getMessage());
-        }
-        
-        ob_end_clean();
-        
-        // Instead of parsing response, directly check database for created coupon
-        try {
-            $created_coupon = CouponCode::GetByColumn('ccd_code', $coupon_spec['ccd_code']);
+            $created_coupon = CouponCode::GetByColumn('ccd_code', strtolower($coupon_spec['ccd_code']));
             if ($created_coupon && $created_coupon->key) {
                 return $created_coupon->key;
             }
         } catch (Exception $e) {
             // Coupon not found in database
         }
-        
+
         throw new Exception("Coupon was not created successfully or not found in database");
     }
     
@@ -510,74 +525,22 @@ class ProductTester {
      * Create a product by directly including admin_product_edit logic
      */
     private function createProduct($spec) {
-        // Creating product via admin endpoint
-        
         // Add action field and json_confirm flag, then pass all other data directly
         $post_data = array_merge(['action' => 'add', 'json_confirm' => '1'], $spec);
-        
-        
-        // Set up $_POST and $_REQUEST for the admin script
-        $_POST = $post_data;
-        $_REQUEST = $post_data;
-        
-        // Ensure test mode is enabled for this process
-        $dbconnector = DbConnector::get_instance();
-        $dbconnector->set_test_mode();
-        
-        // Capture output from admin_product_edit
-        ob_start();
-        
-        // Register shutdown function to catch fatal errors
-        $fatal_error_caught = false;
-        register_shutdown_function(function() use (&$fatal_error_caught) {
-            $error = error_get_last();
-            if ($error && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
-                $fatal_error_caught = true;
-                echo "Fatal error during include: " . $error['message'] . " in " . $error['file'] . " on line " . $error['line'] . "<br>\n";
-                flush();
-            }
-        });
-        
-        try {
-            // Include the admin script directly
-            include(PathHelper::getRootDir() . '/plugins/store/admin/admin_product_edit.php');
-            $response = ob_get_contents();
-        } catch (Exception $e) {
-            ob_end_clean();
-            throw new Exception("Error in admin_product_edit: " . $e->getMessage());
-        } catch (Error $e) {
-            ob_end_clean();
-            throw new Exception("Fatal error in admin_product_edit: " . $e->getMessage());
+
+        $result = $this->runAdminLogic(
+            'plugins/store/admin/logic/admin_product_edit_logic.php',
+            'admin_product_edit_logic',
+            $post_data
+        );
+
+        // The post-save redirect URL carries the new product id
+        if ($result->redirect && preg_match('/pro_product_id=(\d+)/', $result->redirect, $m)) {
+            return (int)$m[1];
         }
-        
-        if ($fatal_error_caught) {
-            ob_end_clean();
-            throw new Exception("Fatal error occurred during admin_product_edit include");
-        }
-        
-        ob_end_clean();
-        
-        // Since we're using direct includes, check for headers that were set
-        $headers = headers_list();
-        $location_header = '';
-        foreach ($headers as $header) {
-            if (stripos($header, 'Location:') === 0) {
-                $location_header = $header;
-                break;
-            }
-        }
-        
-        // Create a mock response with the location header for parsing
-        $response_with_headers = $location_header . "\n\n" . $response;
-        
-        // Parse response to extract product ID
-        $product_id = $this->extractProductIdFromResponse($response_with_headers);
-        
-        if (!$product_id) {
-            throw new Exception("Failed to extract product ID from admin_product_edit response");
-        }
-        
-        return $product_id;
+
+        throw new Exception("Failed to extract product ID from admin_product_edit_logic redirect ("
+            . ($result->redirect ?: 'no redirect — logic rendered instead of saving') . ")");
     }
     
     /**
@@ -745,33 +708,14 @@ class ProductTester {
             'prv_price_type' => $version_spec['prv_price_type'],
             'prv_trial_period_days' => $version_spec['prv_trial_period_days']
         ];
-        
-        
-        // Set up $_POST and $_REQUEST for the admin script
-        $_POST = $post_data;
-        $_REQUEST = $post_data;
-        
-        // Ensure test mode is enabled
-        $dbconnector = DbConnector::get_instance();
-        $dbconnector->set_test_mode();
-        
-        // Capture output from admin_product_edit
-        ob_start();
-        
-        try {
-            // Include the admin script directly
-            include(PathHelper::getRootDir() . '/plugins/store/admin/admin_product_edit.php');
-            $response = ob_get_contents();
-        } catch (Exception $e) {
-            ob_end_clean();
-            throw new Exception("Error creating version: " . $e->getMessage());
-        } catch (Error $e) {
-            ob_end_clean();
-            throw new Exception("Fatal error creating version: " . $e->getMessage());
-        }
-        
-        ob_end_clean();
-        
+
+        $this->runAdminLogic(
+            'plugins/store/admin/logic/admin_product_edit_logic.php',
+            'admin_product_edit_logic',
+            $post_data,
+            'GET'
+        );
+
         // Check if version was created successfully using the ProductVersion model
         try {
             // Use MultiProductVersion to find versions for this product
@@ -1317,24 +1261,30 @@ class ProductTester {
                             echo "✓ <span style='color: green;'><strong>Stripe Checkout session format verified: {$session_id}</strong></span><br>\n";
                             echo "✓ <span style='color: green;'><strong>Note: Full payment verification requires completing Stripe payment flow</strong></span><br>\n";
                             echo "✓ <span style='color: green;'><strong>{$mode} verification successful!</strong></span><br>\n";
+                            $this->test_results[] = ['name' => "Payment: $mode", 'id' => $order->key, 'status' => 'PASSED', 'errors' => []];
                         } else {
                             echo "✗ <span style='color: red;'><strong>Invalid session ID format: {$session_id}</strong></span><br>\n";
                             echo "✗ <span style='color: red;'><strong>{$mode} verification failed!</strong></span><br>\n";
+                            $this->test_results[] = ['name' => "Payment: $mode", 'id' => $order->key, 'status' => 'FAILED', 'errors' => ["Invalid session ID format: $session_id"]];
                         }
                     } else if ($this->verifyStripePayment($order)) {
                         echo "✓ <span style='color: green;'><strong>{$mode} verification successful!</strong></span><br>\n";
+                        $this->test_results[] = ['name' => "Payment: $mode", 'id' => $order->key, 'status' => 'PASSED', 'errors' => []];
                     } else {
                         echo "✗ <span style='color: red;'><strong>{$mode} verification failed!</strong></span><br>\n";
+                        $this->test_results[] = ['name' => "Payment: $mode", 'id' => $order->key, 'status' => 'FAILED', 'errors' => ["$mode verification failed"]];
                     }
-                    
+
                 } catch (Exception $e) {
-                    echo "✗ <span style='color: red;'><strong>{$mode} test failed:</strong> " . 
+                    echo "✗ <span style='color: red;'><strong>{$mode} test failed:</strong> " .
                          htmlspecialchars($e->getMessage()) . "</span><br>\n";
+                    $this->test_results[] = ['name' => "Payment: $mode", 'id' => null, 'status' => 'FAILED', 'errors' => [$e->getMessage()]];
                 }
             }
-            
+
         } catch (Exception $e) {
             echo "✗ <span style='color: red;'><strong>Payment test failed:</strong> " . htmlspecialchars($e->getMessage()) . "</span><br>\n";
+            $this->test_results[] = ['name' => 'Payment: setup', 'id' => null, 'status' => 'FAILED', 'errors' => [$e->getMessage()]];
         } finally {
             // Always restore original test mode state
             $_SESSION['test_mode'] = $original_test_mode;
@@ -1383,43 +1333,23 @@ class ProductTester {
         $_SESSION['send_emails'] = false;
         
         try {
-            // Include the cart_charge view which calls cart_charge_logic
-            ob_start();
-            
-            // Capture any redirects
-            $redirect_captured = false;
-            
-            // Override the redirect function temporarily
-            if (!function_exists('LibraryFunctions_Redirect_Override')) {
-                function LibraryFunctions_Redirect_Override($url) {
-                    global $redirect_captured;
-                    $redirect_captured = $url;
-                    throw new Exception("REDIRECT:$url");
-                }
+            // Call cart_charge_logic directly — the page wrapper would
+            // process_logic() the redirect and exit the test process.
+            require_once(PathHelper::getIncludePath('plugins/store/logic/cart_charge_logic.php'));
+            $_SERVER['REQUEST_METHOD'] = 'POST';
+
+            $result = cart_charge_logic($post_data);
+
+            if ($result->error) {
+                throw new Exception("cart_charge_logic error: " . $result->error);
             }
-            
-            try {
-                include(PathHelper::getRootDir() . '/views/cart_charge.php');
-            } catch (Exception $e) {
-                if (strpos($e->getMessage(), 'REDIRECT:') === 0) {
-                    // Expected redirect to cart_confirm
-                    $redirect_url = substr($e->getMessage(), 9);
-                    echo "✓ Payment processed, redirected to: " . htmlspecialchars($redirect_url) . "<br>\n";
-                } else {
-                    // Check if this is a user creation issue
-                    if (strpos($e->getMessage(), 'Call to a member function get() on null') !== false) {
-                        throw new Exception("Billing user creation failed - the user object is null. This usually means the test user email already exists in the database but couldn't be retrieved, or user creation failed.");
-                    }
-                    throw $e;
-                }
+            if ($result->redirect) {
+                echo "✓ Payment processed, redirected to: " . htmlspecialchars($result->redirect) . "<br>\n";
             }
-            
-            $output = ob_get_contents();
-            ob_end_clean();
-            
-            // The view redirects to cart_confirm, so verify the order was created
+
+            // Success redirects to cart_confirm; verify the order was created
             $this->verifyLatestOrder();
-            
+
         } finally {
             // Restore original POST/REQUEST/GET and email settings
             $_POST = $original_post;

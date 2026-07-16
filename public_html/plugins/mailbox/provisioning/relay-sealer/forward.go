@@ -73,9 +73,11 @@ func srsTimestamp(now time.Time) string {
 // rewrite From to the site's verified address (so the original sender domain's
 // DMARC never judges us), preserve the original sender as Reply-To, stamp the
 // X-Forwarded-* provenance headers — and SRS-rewrites the envelope sender so the
-// forwarding subdomain's SPF passes at the destination.
-func forwardMessage(raw []byte, recipient string, entry routingEntry, m *routingMap) error {
-	outgoing, envelopeSender := buildForwardMessage(raw, recipient, entry, m, time.Now().UTC())
+// forwarding subdomain's SPF passes at the destination. The SRS secret and the
+// From display identity come from the OWNING TENANT's block, so each tenant's
+// forwards carry that tenant's identity.
+func forwardMessage(raw []byte, recipient string, entry routingEntry, tc tenantConfig) error {
+	outgoing, envelopeSender := buildForwardMessage(raw, recipient, entry, tc, time.Now().UTC())
 
 	args := []string{"-i", "-f", envelopeSender, "--"}
 	args = append(args, entry.Destinations...)
@@ -91,18 +93,18 @@ func forwardMessage(raw []byte, recipient string, entry routingEntry, m *routing
 // InboundEmailRouter::buildForwardMessage (InboundEmailRouter.php:1387-1430). It
 // returns the rewritten raw MIME (CRLF) and the envelope sender. Kept as a pure
 // function so the Go test suite can assert parity against the PHP output.
-func buildForwardMessage(raw []byte, originalTo string, entry routingEntry, m *routingMap, now time.Time) (string, string) {
+func buildForwardMessage(raw []byte, originalTo string, entry routingEntry, tc tenantConfig, now time.Time) (string, string) {
 	fromFull := parseFromHeader(raw)         // parsed['from']  (unfolded, first occurrence)
 	fromEmail := extractFromEmail(fromFull)  // parsed['from_email']
 
 	// SRS envelope sender: rewrite the From-header address (matching the PHP,
 	// which SRS-rewrites parsed['from_email'], not the SMTP MAIL FROM).
 	envelopeSender := fromEmail
-	if m.SRSSecret != "" {
-		envelopeSender = srsRewrite(fromEmail, entry.ForwardingDomain, m.SRSSecret, now)
+	if tc.SRSSecret != "" {
+		envelopeSender = srsRewrite(fromEmail, entry.ForwardingDomain, tc.SRSSecret, now)
 	}
 
-	fromDisplay := forwardedFromDisplay(extractName(fromFull), m.ForwardFromName, m.ForwardShowVia)
+	fromDisplay := forwardedFromDisplay(extractName(fromFull), tc.ForwardFromName, tc.ForwardShowVia)
 
 	normalized := strings.ReplaceAll(string(raw), "\r\n", "\n")
 

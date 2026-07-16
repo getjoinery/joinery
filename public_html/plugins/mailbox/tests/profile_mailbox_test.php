@@ -338,8 +338,13 @@ class ProfileMailboxTest {
 	}
 }
 
-$base_url  = isset($argv[1]) ? rtrim($argv[1], '/') : 'https://dev.getjoinery.com';
-$origin_ip = isset($argv[2]) ? $argv[2] : '69.164.209.253';
+// Positional args only — the discovery runner passes --json, which must not
+// be mistaken for the base_url.
+$args = array_values(array_filter(array_slice($argv ?? array(), 1), function ($a) {
+	return strpos($a, '--') !== 0;
+}));
+$base_url  = isset($args[0]) ? rtrim($args[0], '/') : 'https://dev.getjoinery.com';
+$origin_ip = isset($args[1]) ? $args[1] : '69.164.209.253';
 
 $t = new ProfileMailboxTest($base_url, $origin_ip);
 $t->run();

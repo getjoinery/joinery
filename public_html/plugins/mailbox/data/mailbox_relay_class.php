@@ -27,7 +27,16 @@
  * mrl_mgn_managed_node_id links to the server_manager node when one exists (for
  * the health dot on the dashboard).
  *
- * @version 1.0
+ * The relay stack is TENANCY-NATIVE (specs/mailbox_relay_shared_fleet.md): on
+ * the relay this deployment is one tenant — identified by mrl_tenant_slug —
+ * with its own spool subdirectory, restricted pull account, and fragment drop
+ * area. A self-hosted relay is a fleet of one (slug 'main'); a hosted fleet
+ * slot (mrl_is_hosted) carries the coordinates the fleet service returned at
+ * enrollment instead of self-provisioned ones. Either way this row remains the
+ * deployment's ONE relay, so active() stays a singleton.
+ *
+ * @version 1.1 - tenant coordinates (slug, hosted-slot fields) + derived
+ *                pull-account/spool/fragment-path helpers
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -54,10 +63,26 @@ class MailboxRelay extends SystemBase {
 		// mrl_public_ip is the public MX IP that mail DNS points at.
 		'mrl_host'               => array('type'=>'varchar(255)'),
 		'mrl_public_ip'          => array('type'=>'varchar(64)'),
-		'mrl_ssh_user'           => array('type'=>'varchar(50)', 'default'=>'root'),
+		// The tenant's restricted pull account on the relay (jt-<slug>, locked to
+		// the joinery-tenant-shell forced command). Empty derives jt-<tenant slug>
+		// via pullUser() — never a root-class login.
+		'mrl_ssh_user'           => array('type'=>'varchar(50)'),
 		'mrl_ssh_port'           => array('type'=>'int4', 'default'=>22),
 		'mrl_ssh_key_path'       => array('type'=>'varchar(500)'),
-		'mrl_spool_path'         => array('type'=>'varchar(500)', 'default'=>'/var/spool/joinery-relay'),
+		// The tenant's spool SUBDIRECTORY on the relay. Empty derives
+		// /var/spool/joinery-relay/<tenant slug> via spoolPath().
+		'mrl_spool_path'         => array('type'=>'varchar(500)'),
+		// This deployment's tenant identity on the relay (spool subdir, pull
+		// account, fragment drop area all derive from it). 'main' on a
+		// self-hosted fleet of one; fleet-assigned on a hosted slot.
+		'mrl_tenant_slug'        => array('type'=>'varchar(28)', 'default'=>'main'),
+		// Hosted fleet slot (specs/mailbox_relay_shared_fleet.md § Enrollment):
+		// true when this relay is a slot on the operator's shared fleet. The MX
+		// hostname is the operator-controlled per-tenant A record tenants point
+		// their domains' MX at; the slot id is the enrollment's remote handle.
+		'mrl_is_hosted'          => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
+		'mrl_mx_hostname'        => array('type'=>'varchar(255)'),
+		'mrl_fleet_slot_id'      => array('type'=>'int8'),
 		// WireGuard: the relay's public key + listen endpoint (host:port), and the
 		// tunnel IP assigned to the relay. Joinery always initiates the peering.
 		'mrl_wg_public_key'      => array('type'=>'varchar(255)'),
@@ -144,6 +169,28 @@ class MailboxRelay extends SystemBase {
 	/** The ambient transport public key (Standard/Private sealing target for the map). */
 	public function transportPublicKey(): string {
 		return (string)$this->get('mrl_transport_public_key');
+	}
+
+	/** This deployment's tenant identity on the relay ('main' when unset). */
+	public function tenantSlug(): string {
+		$slug = strtolower(trim((string)$this->get('mrl_tenant_slug')));
+		return preg_match('/^[a-z0-9][a-z0-9-]{0,27}$/', $slug) ? $slug : 'main';
+	}
+
+	/** The restricted pull account (jt-<slug> unless the row overrides it). */
+	public function pullUser(): string {
+		return trim((string)$this->get('mrl_ssh_user')) ?: ('jt-' . $this->tenantSlug());
+	}
+
+	/** The tenant's spool subdirectory on the relay. */
+	public function spoolPath(): string {
+		$path = rtrim(trim((string)$this->get('mrl_spool_path')), '/');
+		return $path !== '' ? $path : ('/var/spool/joinery-relay/' . $this->tenantSlug());
+	}
+
+	/** The tenant's map-fragment drop area on the relay (fixed relay layout). */
+	public function fragmentDir(): string {
+		return '/opt/joinery-relay/home/' . $this->tenantSlug() . '/fragments';
 	}
 
 	/**

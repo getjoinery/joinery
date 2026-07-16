@@ -1,0 +1,16 @@
+{
+  "mailbox_fleet_slot": {
+    "label": "Hosted Relay Fleet Slot",
+    "type": "boolean",
+    "default": false,
+    "description": "A slot on the operator's shared hardened-relay fleet: edge-sealed mail ingest and a hidden origin with no extra infrastructure."
+  },
+  "mailbox_fleet_max_domains": {
+    "label": "Hosted Relay Max Domains",
+    "type": "integer",
+    "default": 5,
+    "min": 1,
+    "max": 500,
+    "description": "How many mail domains a hosted-relay tenant may verify and route through the fleet."
+  }
+}

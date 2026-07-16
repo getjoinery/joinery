@@ -347,13 +347,20 @@ class JobResultProcessor {
 
 			// Register (or refresh) the MailboxRelay row the mailbox plugin drives —
 			// created DISABLED so the admin enables it after verifying (Fix 10).
-			self::register_relay_row($node, $public_ip, $wg_pubkey);
+			// The output carries the TENANT_* markers (pull account, spool subdir).
+			// Fleet SHARDS (skeleton_only) are not this deployment's relay — the
+			// operator's box is not a tenant of them — so no relay row is minted.
+			$job_params = json_decode((string)$job->get('mjb_parameters'), true) ?: array();
+			if (empty($job_params['skeleton_only'])) {
+				self::register_relay_row($node, $public_ip, $wg_pubkey, $output);
+			}
 
 			// Peer the relay on the MAIN box's WireGuard interface — the other half
 			// of the tunnel. provision_relay_main.sh installs the root helper + a
 			// sudoers rule for exactly this call. Best-effort: on failure the tunnel
-			// health checks go red and the log says what to run.
-			if ($wg_pubkey !== '' && $public_ip !== '') {
+			// health checks go red and the log says what to run. Fleet shards skip
+			// this too — the operator's box holds no tunnel into its shards.
+			if ($wg_pubkey !== '' && $public_ip !== '' && empty($job_params['skeleton_only'])) {
 				$peer_cmd = 'sudo -n /usr/local/sbin/joinery-relay-peer '
 					. escapeshellarg($wg_pubkey) . ' ' . escapeshellarg($public_ip . ':51820') . ' 2>&1';
 				$peer_out = array(); $peer_code = 1;
@@ -389,7 +396,7 @@ class JobResultProcessor {
 	 * (no fatal) when that plugin is inactive. The row is left DISABLED — enabling
 	 * it (which makes the relay front every hosted domain) is an explicit admin act.
 	 */
-	private static function register_relay_row($node, string $public_ip, string $wg_pubkey): void {
+	private static function register_relay_row($node, string $public_ip, string $wg_pubkey, string $job_output = ''): void {
 		$relay_class = PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php');
 		if (!is_file($relay_class)) {
 			return; // mailbox plugin not present
@@ -410,7 +417,15 @@ class JobResultProcessor {
 			// The main box reaches the relay over the tunnel at its WireGuard IP.
 			$relay->set('mrl_host', (string)$node->get('mgn_wg_ip') ?: '10.99.0.1');
 			if ($public_ip !== '') { $relay->set('mrl_public_ip', $public_ip); }
-			$relay->set('mrl_ssh_user', 'root');
+			// The steady-state login is the RESTRICTED TENANT ACCOUNT the
+			// add-tenant step created (forced command: the tenant shell), never
+			// root. The markers carry the coordinates; a self-hosted relay is a
+			// fleet of one with slug 'main'.
+			$tenant_user = self::extract_marker($job_output, 'TENANT_SSH_USER') ?: 'jt-main';
+			$tenant_spool = self::extract_marker($job_output, 'TENANT_SPOOL') ?: '/var/spool/joinery-relay/main';
+			$tenant_slug = self::extract_marker($job_output, 'TENANT_SLUG') ?: 'main';
+			$relay->set('mrl_tenant_slug', substr($tenant_slug, 0, 28));
+			$relay->set('mrl_ssh_user', substr($tenant_user, 0, 50));
 			$relay->set('mrl_ssh_port', intval($node->get('mgn_ssh_port')) ?: 22);
 			// The relay's steady-state connections run as the WEB USER (cron tasks,
 			// health battery), so the row points at the web-user-owned pull key the
@@ -419,7 +434,7 @@ class JobResultProcessor {
 			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySsh.php'));
 			$pull_key = RelaySsh::pullKeyPath();
 			$relay->set('mrl_ssh_key_path', is_file($pull_key) ? $pull_key : (string)$node->get('mgn_ssh_key_path'));
-			$relay->set('mrl_spool_path', '/var/spool/joinery-relay');
+			$relay->set('mrl_spool_path', substr($tenant_spool, 0, 500));
 			if ($wg_pubkey !== '') { $relay->set('mrl_wg_public_key', substr($wg_pubkey, 0, 255)); }
 			$relay->set('mrl_wg_endpoint', (string)$node->get('mgn_wg_endpoint'));
 			$relay->set('mrl_wg_ip', (string)$node->get('mgn_wg_ip'));
