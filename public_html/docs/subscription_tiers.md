@@ -4,6 +4,17 @@
 
 The subscription tier system manages user subscriptions with feature-based access control. Users get assigned to tiers by purchasing products, and each tier grants access to specific features and limits.
 
+Tiers are sold through any of four billing sources — Stripe, PayPal, the
+Apple App Store, or Google Play (the mobile apps' in-app purchases). Each
+subscription order item stores its source in `odi_payment_source`, and a
+user has at most one active source at a time (see
+[Mobile Billing](mobile_billing.md) for the source model and exclusivity
+rules). All four drive the same grant path:
+`TierBilling::handleProductPurchase()` → `SubscriptionTier::addUser()` on
+purchase/renewal, and `TierBilling::handleSubscriptionExpired()` →
+`SubscriptionTier::removeUserFromAllTiers()` on expiry, cancellation, or
+refund.
+
 ## How It Works
 
 ### 1. Creating Subscription Tiers (Admin)
@@ -53,6 +64,13 @@ Example: `/plugins/controld/tier_features.json`
 When you edit a tier, the admin UI automatically shows all available features from all plugins. Simply set the values for each tier.
 
 **Note:** Plugin features are automatically prefixed with the plugin name (e.g., `max_devices` becomes `controld_max_devices`).
+
+The mailbox plugin's `mailbox_fleet_slot` (boolean) and
+`mailbox_fleet_max_domains` (integer) gate the hosted relay fleet
+(`plugins/mailbox/docs/overview.md` § Hosted relay fleet): the fleet service
+validates `mailbox_fleet_slot` against the enrolling customer's tier at
+enrollment and on a periodic re-check, with a grace window before a lapsed
+slot is suspended.
 
 **Core Features:** Core (non-plugin) features live in `/includes/core_tier_features.json`
 and are not prefixed. The member Drive defines four:
@@ -145,17 +163,17 @@ the same subscription data through `POST /api/v1/action/subscription_summary`
 (session key). The payload returns active and cancelled subscriptions
 (order-item id, product/tier name, price, period, status, renewal-or-end
 date, `can_cancel`), the current tier from the user record, and a
-`payment_source` marker (`stripe` / `paypal` / none) so the client knows
-which management affordances to show.
+`payment_source` marker (`stripe` / `paypal` / `app_store` / `play_store` /
+`none`) so the client knows which management affordances to show.
 
 The screen is read-only plus Cancel, which calls the existing
 `orders_recurring_action` — the same action the web page's cancel button
-uses, with no server change. Upgrade, downgrade, reactivate, and billing
-management stay web-only in the native app: selling digital subscriptions
-inside an iOS app must go through Apple In-App Purchase, so purchase/upgrade
-UI is not rebuilt natively around Stripe until a dedicated billing spec
-lands. The screen's "Change Plan" and "Manage Billing" rows open the
-existing web pages in the app's authenticated webview instead.
+uses. Upgrade, downgrade, reactivate, and billing management are routed by
+source: web-billed subscriptions open the existing web pages in the app's
+authenticated webview ("Change Plan" / "Manage Billing"), while store-billed
+subscriptions (`app_store` / `play_store`) deep-link to the store's own
+subscription management and report `can_cancel: false`. Selling inside the
+apps is the billing kits' job — see [Mobile Billing](mobile_billing.md).
 
 ---
 

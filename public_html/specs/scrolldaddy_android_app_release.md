@@ -114,10 +114,42 @@ review passes.
 
 - Strict mode (all-traffic routing, SNI/IP enforcement, UDP-443/QUIC
   stance) — its own future spec; the engine is unit-tested and waiting.
-- In-app billing (`specs/mobile_app_billing.md`, Play Billing flavor) and
-  in-app registration.
+- In-app registration.
 - Private DNS (DoT) guidance UI, always-on/lockdown onboarding flows beyond
   the existing deep link; Wear OS; F-Droid.
+
+## Billing go-live (post-launch, when selling in-app)
+
+The billing stack is built and verified
+(`specs/implemented/mobile_app_billing.md`, `docs/mobile_billing.md`): the
+app ships with `joinery-android-billing` registered and dormant, the server
+verifies against the Play Developer API, grants/revokes tiers, and
+acknowledges purchases. Launch stays login-only. Enabling sales later is
+configuration plus console setup — no code:
+
+1. **Play Console:** create the subscriptions (base plans matching the
+   plan periods) for `app.scrolldaddy.android`; the app build already
+   carries `com.android.vending.BILLING`. Payments profile completed.
+2. **Service account:** grant a Google Cloud service account the Play
+   Developer API financial-data access for the app; its JSON key fills
+   `store_play_service_account_json`; `store_play_package_names` =
+   `app.scrolldaddy.android`.
+3. **RTDN:** create the Pub/Sub topic, grant the Play publisher account,
+   add a push subscription to `https://{domain}/ajax/play_rtdn_webhook`
+   with OIDC authentication; set `store_play_rtdn_audience` to the push
+   subscription's audience (the webhook refuses requests while it is
+   empty).
+4. **Mapping:** Products → Mobile Store Products — map each Play product
+   ID to its tier-granting product.
+5. **Nav flip:** give the purchase menu entry `nativeScreen: "billing"`
+   (web pricing page stays the fallback for older builds).
+6. **License-tester verification on dev** (`debug` on; test purchases are
+   refused on production) from the internal testing track: purchase →
+   claim → tier granted (server acknowledges — unacknowledged purchases
+   auto-refund after three days); accelerated renewal extends the period;
+   cancel sets cancel-at-period-end; revoke via the Console refunds and
+   revokes the tier; restore re-claims after reinstall; a web-subscribed
+   account sees its existing source instead of buy buttons (exclusivity).
 
 ## Documentation deliverables (on implementation)
 

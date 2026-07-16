@@ -40,6 +40,9 @@ import kotlinx.coroutines.launch
  * Active + cancelled subscriptions. Read-only plus cancel — changing tier and
  * billing management are deliberately web-only (Google Play IAP policy), so
  * those rows open the web pages through [web] instead of native purchase UI.
+ * Store-billed subscriptions (payment_source app_store / play_store) are
+ * managed in their store: the web rows hide and a deep link to the store's
+ * subscription management appears instead.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -132,13 +135,21 @@ private fun SubscriptionList(
                 )
             }
         }
-        if (web != null) {
-            item {
-                WebRow("Change Plan", "member_subscriptions_change_plan") { onOpenWeb("Change Plan", "/profile/change-tier") }
+        when (payload.paymentSource) {
+            "play_store" -> item {
+                StoreManageRow("Manage in Google Play", "member_subscriptions_manage_play_store", PLAY_STORE_MANAGE_URL)
             }
-            if (payload.paymentSource == "stripe") {
+            "app_store" -> item {
+                StoreManageRow("Manage in App Store", "member_subscriptions_manage_app_store", APP_STORE_MANAGE_URL)
+            }
+            else -> if (web != null) {
                 item {
-                    WebRow("Manage Billing", "member_subscriptions_billing") { onOpenWeb("Billing", "/profile/billing") }
+                    WebRow("Change Plan", "member_subscriptions_change_plan") { onOpenWeb("Change Plan", "/profile/change-tier") }
+                }
+                if (payload.paymentSource == "stripe") {
+                    item {
+                        WebRow("Manage Billing", "member_subscriptions_billing") { onOpenWeb("Billing", "/profile/billing") }
+                    }
                 }
             }
         }
@@ -177,6 +188,28 @@ private fun SubSectionHeader(text: String) {
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
     )
+}
+
+internal const val PLAY_STORE_MANAGE_URL = "https://play.google.com/store/account/subscriptions"
+internal const val APP_STORE_MANAGE_URL = "https://apps.apple.com/account/subscriptions"
+
+/** A row that deep-links out to the store's subscription management page. */
+@Composable
+private fun StoreManageRow(label: String, tag: String, url: String) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    Row(
+        Modifier.fillMaxWidth().clickable {
+            context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)))
+        }.padding(horizontal = 16.dp, vertical = 14.dp).testTag(tag),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 @Composable

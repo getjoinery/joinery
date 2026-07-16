@@ -62,6 +62,13 @@ $formwriter = $page->getFormWriter('tier_form');
         </div>
         <?php endif; ?>
 
+        <?php if (!empty($page_vars['store_billed_source'])): ?>
+        <div class="alert alert-info">
+            Your subscription is billed through <?php echo $page_vars['store_billed_source'] === 'app_store' ? 'the App Store' : 'Google Play'; ?>.
+            Manage your plan in the app or your store account settings.
+        </div>
+        <?php endif; ?>
+
         <?php if ($page_vars['show_reactivate_button']): ?>
         <div class="jy-tier-reactivate">
             <?php $formwriter->begin_form(); ?>

@@ -8,6 +8,7 @@ import com.getjoinery.android.EncryptedCredentialStore
 import com.getjoinery.android.JoineryAppRoot
 import com.getjoinery.android.JoineryConfig
 import com.getjoinery.dnsfilter.DnsFilterConfig
+import com.getjoinery.billing.JoineryBilling
 import com.getjoinery.dnsfilter.JoineryDnsFilter
 
 /**
@@ -46,6 +47,12 @@ class MainActivity : ComponentActivity() {
         } else {
             JoineryDnsFilter.registerScreens(dnsConfig)
         }
+
+        // The billing module registers the `billing` native screen (Play
+        // Billing purchase/restore, server-authoritative status). It stays
+        // dormant until the server flips a nav entry to nativeScreen
+        // "billing"; the web pricing page is the fallback.
+        JoineryBilling.registerScreens()
 
         setContent {
             JoineryAppRoot(config = buildConfig(base), storeFileName = STORE_FILE)

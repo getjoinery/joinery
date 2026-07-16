@@ -89,11 +89,40 @@ class OrderItem extends SystemBase {	public static $prefix = 'odi';
 	    'odi_subscription_period_end' => array('type'=>'timestamp(6)'),
 	    'odi_subscription_cancel_at_period_end' => array('type'=>'bool', 'default'=>false),
 	    'odi_paypal_subscription_id' => array('type'=>'varchar(64)'),
+	    'odi_payment_source' => array('type'=>'varchar(20)'),
+	    'odi_app_store_original_transaction_id' => array('type'=>'varchar(64)'),
+	    'odi_play_purchase_token' => array('type'=>'varchar(255)'),
+	    'odi_store_environment' => array('type'=>'varchar(20)'),
 	);
 
 function get_order() {
 		$order = new Order($this->get('odi_ord_order_id'), TRUE);
 		return $order;
+	}
+
+	/**
+	 * The billing system this item is paid through: 'stripe', 'paypal',
+	 * 'app_store', 'play_store', or 'none'. Reads the stored
+	 * odi_payment_source when set; derives from the provider-ID columns for
+	 * rows written before the field existed.
+	 */
+	public function get_payment_source() {
+		if ($this->get('odi_payment_source')) {
+			return $this->get('odi_payment_source');
+		}
+		if ($this->get('odi_stripe_subscription_id')) {
+			return 'stripe';
+		}
+		if ($this->get('odi_paypal_subscription_id')) {
+			return 'paypal';
+		}
+		if ($this->get('odi_app_store_original_transaction_id')) {
+			return 'app_store';
+		}
+		if ($this->get('odi_play_purchase_token')) {
+			return 'play_store';
+		}
+		return 'none';
 	}
 	
 	function authenticate_write($data) {
@@ -292,17 +321,26 @@ function get_order() {
 		$period_end = strtotime($this->get('odi_subscription_period_end'));
 
 		if ($period_end < time()) {
-			// Period has passed - sync with Stripe
+			// Period has passed - sync with the billing provider
 			try {
-				require_once(PathHelper::getIncludePath('plugins/store/includes/StripeHelper.php'));
-				$stripe_helper = new StripeHelper();
+				$source = $this->get_payment_source();
+				if ($source === 'app_store') {
+					require_once(PathHelper::getIncludePath('plugins/store/includes/AppStoreHelper.php'));
+					AppStoreHelper::update_subscription_in_order_item($this);
+				} elseif ($source === 'play_store') {
+					require_once(PathHelper::getIncludePath('plugins/store/includes/GooglePlayHelper.php'));
+					GooglePlayHelper::update_subscription_in_order_item($this);
+				} else {
+					require_once(PathHelper::getIncludePath('plugins/store/includes/StripeHelper.php'));
+					$stripe_helper = new StripeHelper();
 
-				// This existing method updates all subscription fields
-				$stripe_helper->update_subscription_in_order_item($this);
+					// This existing method updates all subscription fields
+					$stripe_helper->update_subscription_in_order_item($this);
+				}
 
 				// Check status after update
 				$status = $this->get('odi_subscription_status');
-				return in_array($status, ['active', 'trialing']);
+				return in_array($status, ['active', 'trialing', 'grace_period']);
 
 			} catch (Exception $e) {
 				// If Stripe check fails, assume subscription is still valid
@@ -323,7 +361,7 @@ function get_order() {
 
 		// Check current status
 		$status = $this->get('odi_subscription_status');
-		if ($status && !in_array($status, ['active', 'trialing'])) {
+		if ($status && !in_array($status, ['active', 'trialing', 'grace_period'])) {
 			return false; // Not active status
 		}
 
@@ -390,6 +428,26 @@ class MultiOrderItem extends SystemMultiBase {
 			$filters['odi_stripe_subscription_id'] = [$this->options['odi_stripe_subscription_id'], PDO::PARAM_STR];
 		}
 
+		// PayPal Subscription ID filtering
+		if (isset($this->options['odi_paypal_subscription_id'])) {
+			$filters['odi_paypal_subscription_id'] = [$this->options['odi_paypal_subscription_id'], PDO::PARAM_STR];
+		}
+
+		// App Store original transaction ID filtering
+		if (isset($this->options['odi_app_store_original_transaction_id'])) {
+			$filters['odi_app_store_original_transaction_id'] = [$this->options['odi_app_store_original_transaction_id'], PDO::PARAM_STR];
+		}
+
+		// Google Play purchase token filtering
+		if (isset($this->options['odi_play_purchase_token'])) {
+			$filters['odi_play_purchase_token'] = [$this->options['odi_play_purchase_token'], PDO::PARAM_STR];
+		}
+
+		// Payment source filtering (stripe | paypal | app_store | play_store)
+		if (isset($this->options['odi_payment_source'])) {
+			$filters['odi_payment_source'] = [$this->options['odi_payment_source'], PDO::PARAM_STR];
+		}
+
 		// Status filtering
 		// DEPRECATED: Use 'odi_status' instead of 'status' (kept for backward compatibility only)
 		if (isset($this->options['status'])) {
@@ -409,6 +467,14 @@ class MultiOrderItem extends SystemMultiBase {
 
 		if (isset($this->options['is_active_subscription'])) {
 			$filters['odi_is_subscription'] = "= TRUE AND odi_subscription_cancelled_time IS NULL AND odi_status = " . OrderItem::STATUS_PAID;
+		}
+
+		// Currently-entitled subscriptions: never cancelled OR scheduled to
+		// cancel at a future time (end-of-period cancellations stay current —
+		// and reactivatable — until they lapse).
+		if (isset($this->options['is_current_subscription'])) {
+			$filters['odi_is_subscription'] = "= TRUE AND odi_status = " . OrderItem::STATUS_PAID
+				. " AND (odi_subscription_cancelled_time IS NULL OR odi_subscription_cancelled_time > now())";
 		}
 
 		if (isset($this->options['is_cancelled_subscription'])) {

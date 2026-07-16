@@ -11,11 +11,18 @@ purchase flows.
 webhook placement, specified the client kit slots, added the member-app
 source-routing consequence.
 
-**Status:** Active — not yet implemented. Not a launch blocker for either
-app: both launch login-only (accounts and subscriptions are created on the
-website), and every app phase ships without this spec. Each store
-integration is independently shippable, in either order, any time after the
-respective app's first store release.
+**Status:** IMPLEMENTED 2026-07-16. Server side (stored source +
+exclusivity, `MobileStoreProduct` mapping + admin page, `AppStoreHelper` +
+`app_store_webhook`, `GooglePlayHelper` + `play_rtdn_webhook`,
+`MobileBilling` claim/event engine, `billing_catalog` /
+`app_store_claim` / `play_claim` actions) verified by
+`plugins/store/tests/mobile_billing_test.php` (49 checks green). Client
+kits (`JoineryBillingKit`, `joinery-android-billing`) and member-screen
+source routing built and compile-verified with unit tests green on the Mac
+mini. Settings are `store_`-prefixed per the plugin settings rule
+(`store_app_store_*`, `store_play_*`). End-to-end store flows (App Store
+sandbox, Play internal testing track) require store-console setup and remain
+to be exercised when the apps ship — see docs/mobile_billing.md § Sandbox.
 
 **Depends on (implemented):** the subscription tier system
 (`docs/subscription_tiers.md`), and the store plugin's tier billing path.

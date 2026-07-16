@@ -10,10 +10,11 @@
  * through those public methods — the only place grant/revoke crosses the
  * gating/billing boundary.
  *
- * Store-owned. Callers (cart_charge_logic, change_tier_logic, the Stripe/PayPal
- * webhooks) are all store-side.
+ * Store-owned. Callers (cart_charge_logic, change_tier_logic, the
+ * Stripe/PayPal/App Store/Play webhooks, and the mobile claim actions) are all
+ * store-side.
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
 
@@ -67,6 +68,56 @@ class TierBilling {
             }
         }
         return false;
+    }
+
+    /**
+     * The billing system the user's active subscription runs through:
+     * 'stripe', 'paypal', 'app_store', or 'play_store' — null when the user
+     * has no active subscription. Reads stored state only (no provider API
+     * calls), so it is safe on request paths.
+     */
+    public static function getActiveSubscriptionSource($user_id) {
+        require_once(PathHelper::getIncludePath('plugins/store/data/order_items_class.php'));
+        $subscriptions = new MultiOrderItem(
+            array('user_id' => $user_id, 'is_active_subscription' => true),
+            array('order_item_id' => 'DESC')
+        );
+        $subscriptions->load();
+
+        foreach ($subscriptions as $subscription) {
+            $source = $subscription->get_payment_source();
+            if ($source !== 'none') {
+                return $source;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Exclusivity gate: a user with an active subscription from one source
+     * cannot start one from another. Returns the conflicting source name when
+     * the user's active subscription is billed somewhere other than
+     * $new_source, or null when the purchase may proceed.
+     */
+    public static function sourceConflict($user_id, $new_source) {
+        $active_source = self::getActiveSubscriptionSource($user_id);
+        if ($active_source !== null && $active_source !== $new_source) {
+            return $active_source;
+        }
+        return null;
+    }
+
+    /**
+     * Human-readable name for a payment source value.
+     */
+    public static function sourceLabel($source) {
+        $labels = array(
+            'stripe'     => 'this website',
+            'paypal'     => 'PayPal',
+            'app_store'  => 'the App Store',
+            'play_store' => 'Google Play',
+        );
+        return isset($labels[$source]) ? $labels[$source] : $source;
     }
 
     /**

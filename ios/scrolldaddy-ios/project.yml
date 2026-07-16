@@ -34,6 +34,8 @@ targets:
         product: JoineryKit
       - package: JoineryKit
         product: JoineryDNSFilterKit
+      - package: JoineryKit
+        product: JoineryBillingKit
       - target: ScrollDaddyTunnel
         embed: true
     settings:

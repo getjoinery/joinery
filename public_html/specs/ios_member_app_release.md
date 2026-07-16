@@ -70,8 +70,12 @@ and chrome-less; App Store review passes.
 
 ## Out of scope
 
-- In-app billing (`specs/mobile_app_billing.md`) — login-only v1 sells
-  nothing in-app.
+- In-app billing (`specs/implemented/mobile_app_billing.md` — built) —
+  the member app still sells nothing in-app. What v1 ships from that work
+  is only the Subscriptions screen's source routing: a member whose
+  subscription is billed through a store app sees a "Manage in App Store /
+  Google Play" deep link instead of the Stripe web rows. No release action
+  needed.
 - Push notifications, native content screens, Android — see the platform
   spec's future list.
 - ScrollDaddy iOS release (`specs/implemented/scrolldaddy_ios_app.md`) — its own spec.

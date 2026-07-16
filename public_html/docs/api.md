@@ -179,6 +179,8 @@ Mechanics worth knowing: the API *reads* the session and releases the session lo
 
 **Forward rule:** new features expose their logic as API actions (`_logic_descriptor()` opt-in) and page JavaScript calls `/api/v1` with this credential. `/ajax/` is legacy — no new endpoints there; existing ones migrate opportunistically when touched.
 
+**Provider webhooks are the one standing exception to the forward rule.** The rule exists because `/api/v1` authenticates with a session or API-key credential — and payment-provider webhooks can't carry one: they are machine-to-machine calls authenticated by payload signature (Stripe signature header, PayPal verification API, Apple signed JWS, Google OIDC bearer), with no session or CSRF. Provider webhooks therefore live in `plugins/store/ajax/` — `stripe_webhook.php`, `paypal_subscription_webhook.php`, `app_store_webhook.php`, `play_rtdn_webhook.php` — each verifying its signature before touching any state and using `WebhookLog` for idempotency.
+
 ### Key Properties
 
 | Property | Description |

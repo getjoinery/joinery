@@ -97,8 +97,41 @@ disable restores DNS; App Store review passes.
 
 - Strict mode (packet-tunnel transport, SNI enforcement, IPv6/QUIC stance) —
   its own future spec; the engine is unit-tested and waiting.
-- In-app billing (`specs/mobile_app_billing.md`) and in-app registration.
+- In-app registration.
 - Tamper-resistance (Screen Time / supervised devices).
+
+## Billing go-live (post-launch, when selling in-app)
+
+The billing stack is built and verified
+(`specs/implemented/mobile_app_billing.md`, `docs/mobile_billing.md`): the
+app ships with `JoineryBillingKit` registered and dormant, the server
+verifies/grants/revokes, and the harness covers the flows. Launch stays
+login-only. Enabling sales later is configuration plus store-console setup —
+no code:
+
+1. **App Store Connect:** create the auto-renewable subscription products
+   (one per plan/period, one subscription group) and submit them with an
+   app version. Complete the paid-apps agreement and tax/banking forms.
+2. **Server settings:** `store_app_store_bundle_ids` = `app.scrolldaddy.ios`;
+   for lazy status refresh, an In-App Purchase key from Users & Access →
+   Integrations fills `store_app_store_issuer_id` / `store_app_store_key_id`
+   / `store_app_store_private_key` (JWS verification of purchases and
+   notifications needs no credentials — it anchors at the pinned Apple root).
+3. **Notifications:** set the App Store Server Notifications V2 URL (both
+   production and sandbox) to `https://{domain}/ajax/app_store_webhook`.
+4. **Mapping:** Products → Mobile Store Products — map each App Store
+   product ID to its tier-granting product.
+5. **Nav flip:** give the purchase menu entry `nativeScreen: "billing"`
+   (web pricing page stays the fallback for older builds).
+6. **Sandbox verification on dev** (`debug` on; sandbox payloads are
+   refused on production): sandbox-account purchase → tier granted;
+   accelerated renewal extends the period; cancel sets
+   cancel-at-period-end; sandbox refund revokes the tier; restore
+   purchases re-claims after reinstall; a web-subscribed account sees its
+   existing source instead of buy buttons (exclusivity).
+7. **Review posture:** store-mandated subscription disclosures in the app
+   metadata; decide the optional US external-link entitlement at
+   submission time.
 
 ## Documentation deliverables (on implementation)
 

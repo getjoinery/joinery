@@ -1324,6 +1324,7 @@ class StripeHelper {
 		
 		//SAVE THE SUBSCRIPTION INFO FROM REGULAR CHECKOUT
 		$order_item->set('odi_stripe_subscription_id', $subscription_result['id']);
+		$order_item->set('odi_payment_source', 'stripe');
 		$order_item->set('odi_stripe_foreign_invoice_id', $subscription_result['latest_invoice']);
 		$order_item->set('odi_is_subscription', true);
 		$order_item->set('odi_status', OrderItem::STATUS_PAID);

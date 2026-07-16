@@ -1,6 +1,7 @@
 import SwiftUI
 import JoineryKit
 import JoineryDNSFilterKit
+import JoineryBillingKit
 
 /// The ScrollDaddy app: a pure brand shell over JoineryKit. All account- and
 /// navigation-shaped behavior comes from JoineryKit; the DNS-filtering surface
@@ -20,6 +21,12 @@ struct ScrollDaddyApp: App {
         // profileMenu entries), with the /profile/dns_filtering/* webviews as
         // the version-skew fallback.
         JoineryDNSFilter.registerScreens(config: Self.dnsFilterConfig)
+
+        // The billing kit registers the `billing` native screen (StoreKit 2
+        // purchase/restore, server-authoritative status). It stays dormant
+        // until the server flips a nav entry to nativeScreen "billing"; the
+        // web pricing page is the fallback.
+        JoineryBilling.registerScreens()
 
         if ProcessInfo.processInfo.arguments.contains("--reset-auth") {
             KeychainStore(service: Self.keychainService).deleteCredentials()

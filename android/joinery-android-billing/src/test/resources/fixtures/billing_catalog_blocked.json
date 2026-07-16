@@ -1,0 +1,21 @@
+{
+    "success": true,
+    "data": {
+        "store": "app_store",
+        "products": [
+            {
+                "store_product_id": "com.example.premium.monthly",
+                "product_name": "Premium Plan",
+                "period": "month",
+                "tier": {
+                    "tier_id": 3,
+                    "name": "Premium",
+                    "level": 20
+                }
+            }
+        ],
+        "active_source": "stripe",
+        "can_purchase": false,
+        "app_account_token": "00000000-0000-4000-8000-00000000002a"
+    }
+}
