@@ -4,10 +4,11 @@
  *
  * POST /api/v1/action/subscription_summary (session key). Returns active
  * and cancelled subscriptions, the current tier, and a payment_source
- * marker (stripe / paypal / none) so the client knows which management
- * affordances to show. Shares subscriptions_logic.php's query path.
+ * marker (stripe / paypal / app_store / play_store / none) so the client
+ * knows which management affordances to show. Shares
+ * subscriptions_logic.php's query path.
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 
 
@@ -34,12 +35,7 @@ function subscription_summary_logic(array $input): LogicResult {
 		$product = new Product($sub->get('odi_pro_product_id'), TRUE);
 		$product_version = $sub->get('odi_prv_product_version_id') ? new ProductVersion($sub->get('odi_prv_product_version_id'), TRUE) : null;
 
-		$payment_source = 'none';
-		if ($sub->get('odi_stripe_subscription_id')) {
-			$payment_source = 'stripe';
-		} elseif ($sub->get('odi_paypal_subscription_id')) {
-			$payment_source = 'paypal';
-		}
+		$payment_source = $sub->get_payment_source();
 
 		return array(
 			'order_item_id' => (int)$sub->key,
@@ -48,7 +44,8 @@ function subscription_summary_logic(array $input): LogicResult {
 			'price'         => $sub->get('odi_price'),
 			'status'        => $sub->get('odi_subscription_cancelled_time') ? 'cancelled' : ($sub->get('odi_subscription_status') ?: 'active'),
 			'renewal_or_end_date' => $sub->get('odi_subscription_cancelled_time') ?: $sub->get('odi_subscription_period_end'),
-			'can_cancel'    => !$sub->get('odi_subscription_cancelled_time'),
+			// Store-billed subscriptions cancel in their store, not here.
+			'can_cancel'    => !$sub->get('odi_subscription_cancelled_time') && !in_array($payment_source, array('app_store', 'play_store')),
 			'payment_source' => $payment_source,
 		);
 	};
@@ -93,10 +90,12 @@ function subscription_summary_logic(array $input): LogicResult {
 	));
 }
 
-function subscription_summary_logic_api() {
+function subscription_summary_logic_descriptor(): array {
 	return [
+		'description'      => 'Active and cancelled subscriptions, current tier, and payment source for the signed-in owner',
 		'requires_session' => true,
-		'description' => 'Active and cancelled subscriptions, current tier, and payment source for the signed-in owner',
+		'mutates'          => false,
+		'input'            => [],
 	];
 }
 

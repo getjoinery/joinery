@@ -173,7 +173,6 @@ class SubscriptionTierTester {
         $user->set('usr_email', $test_email);
         $user->set('usr_first_name', 'Tier');
         $user->set('usr_last_name', 'Test');
-        $user->set('usr_name', 'Tier Test User');
         $user->set('usr_password', password_hash('testpassword', PASSWORD_DEFAULT));
         $user->set('usr_permission', 1);
         $user->save();
@@ -903,9 +902,11 @@ class SubscriptionTierTester {
                 echo "<p style='margin-left:20px'>ℹ️ Cancel success: " . htmlspecialchars($cancel_result->data['success_message']) . "</p>";
             }
 
-            // Verify cancellation was scheduled
+            // Verify cancellation was scheduled — the subscription stays
+            // *current* (entitled until period end) even though it is no
+            // longer "active, never cancelled".
             $subscriptions = new MultiOrderItem(
-                array('user_id' => $this->test_user_id, 'is_active_subscription' => true),
+                array('user_id' => $this->test_user_id, 'is_current_subscription' => true),
                 array('order_item_id' => 'DESC')
             );
             $subscriptions->load();

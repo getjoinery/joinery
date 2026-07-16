@@ -37,7 +37,7 @@ $is_cli = php_sapi_name() === 'cli';
 $json_mode = $is_cli && in_array('--json', $GLOBALS['argv'] ?? array(), true);
 
 if ($json_mode) {
-	require_once(__DIR__ . '/../../lib/harness.php');
+	require_once(__DIR__ . '/../../../../tests/lib/harness.php');
 	require_once(__DIR__ . '/SubscriptionTierTester.php');
 	harness_boot();
 	set_time_limit(600);

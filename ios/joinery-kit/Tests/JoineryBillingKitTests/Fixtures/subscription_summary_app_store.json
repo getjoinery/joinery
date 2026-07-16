@@ -1,0 +1,23 @@
+{
+    "success": true,
+    "data": {
+        "active_subscriptions": [
+            {
+                "order_item_id": 512,
+                "product_name": "Premium Plan",
+                "period": "month",
+                "price": "9.99",
+                "status": "active",
+                "renewal_or_end_date": "2026-08-16 14:00:00",
+                "can_cancel": false,
+                "payment_source": "app_store"
+            }
+        ],
+        "cancelled_subscriptions": [],
+        "current_tier": {
+            "tier_id": 3,
+            "name": "Premium"
+        },
+        "payment_source": "app_store"
+    }
+}

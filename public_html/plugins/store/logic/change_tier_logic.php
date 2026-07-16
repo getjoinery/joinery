@@ -55,9 +55,10 @@ function change_tier_logic(array $input): LogicResult {
     $has_cancelled_subscription = false;
     $is_expired = false;
 
-    // Find active subscription order items
+    // Find the current subscription: active, or scheduled to cancel at a
+    // future period end (still entitled, and the row reactivation acts on).
     $subscriptions = new MultiOrderItem(
-        array('user_id' => $user_id, 'is_active_subscription' => true),
+        array('user_id' => $user_id, 'is_current_subscription' => true),
         array('order_item_id' => 'DESC')
     );
     $subscriptions->load();
@@ -107,8 +108,24 @@ function change_tier_logic(array $input): LogicResult {
     $page_vars['is_expired'] = $is_expired;
     $page_vars['is_paypal'] = $is_paypal;
 
+    // Store-billed subscriptions (App Store / Google Play) are managed in
+    // their store — source exclusivity means no web-side changes to them.
+    $store_billed_source = null;
+    if ($current_subscription && in_array($current_subscription->get_payment_source(), array('app_store', 'play_store'))) {
+        $store_billed_source = $current_subscription->get_payment_source();
+    }
+    $page_vars['store_billed_source'] = $store_billed_source;
+
     // Handle POST actions
     if (isset($input['action'])) {
+
+        if ($store_billed_source !== null) {
+            require_once(PathHelper::getIncludePath('plugins/store/includes/TierBilling.php'));
+            $page_vars['error_message'] = 'Your subscription is billed through '
+                . TierBilling::sourceLabel($store_billed_source)
+                . '. Manage it in the app or your store account settings.';
+            return LogicResult::render($page_vars);
+        }
 
         // Check if user has an active subscription
         if (!$current_subscription) {
@@ -231,6 +248,7 @@ function change_tier_logic(array $input): LogicResult {
                     $new_order_item->set('odi_status', OrderItem::STATUS_PAID);
                     $new_order_item->set('odi_is_subscription', true);
                     $new_order_item->set('odi_stripe_subscription_id', $subscription_id);
+                    $new_order_item->set('odi_payment_source', 'stripe');
                     $new_order_item->set('odi_subscription_status', 'active');
                     $new_order_item->set('odi_subscription_period_end', date('Y-m-d H:i:s', $updated_subscription->current_period_end));
                     $new_order_item->save();
@@ -362,6 +380,7 @@ function change_tier_logic(array $input): LogicResult {
                     $new_order_item->set('odi_status', OrderItem::STATUS_PAID);
                     $new_order_item->set('odi_is_subscription', true);
                     $new_order_item->set('odi_stripe_subscription_id', $subscription_id);
+                    $new_order_item->set('odi_payment_source', 'stripe');
                     $new_order_item->set('odi_subscription_status', 'active');
                     $new_order_item->set('odi_subscription_period_end', date('Y-m-d H:i:s', $updated_subscription->current_period_end));
                     $new_order_item->save();

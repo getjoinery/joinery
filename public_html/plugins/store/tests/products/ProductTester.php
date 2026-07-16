@@ -327,7 +327,7 @@ class ProductTester {
         
         try {
             // Include the admin script directly
-            include(PathHelper::getRootDir() . '/adm/admin_coupon_code_edit.php');
+            include(PathHelper::getRootDir() . '/plugins/store/admin/admin_coupon_code_edit.php');
             $response = ob_get_contents();
         } catch (Exception $e) {
             ob_end_clean();
@@ -540,7 +540,7 @@ class ProductTester {
         
         try {
             // Include the admin script directly
-            include(PathHelper::getRootDir() . '/adm/admin_product_edit.php');
+            include(PathHelper::getRootDir() . '/plugins/store/admin/admin_product_edit.php');
             $response = ob_get_contents();
         } catch (Exception $e) {
             ob_end_clean();
@@ -760,7 +760,7 @@ class ProductTester {
         
         try {
             // Include the admin script directly
-            include(PathHelper::getRootDir() . '/adm/admin_product_edit.php');
+            include(PathHelper::getRootDir() . '/plugins/store/admin/admin_product_edit.php');
             $response = ob_get_contents();
         } catch (Exception $e) {
             ob_end_clean();

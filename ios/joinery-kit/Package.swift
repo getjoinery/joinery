@@ -13,7 +13,10 @@
 // JoineryDNSFilterKit — the native DNS-filtering surface (device policy editor,
 // protection-mode control, NEDNSSettingsManager activation, packet-tunnel
 // hard-block engine) for any ScrollDaddy-style deployment; same layering as mail.
-// Version: 0.6.0 (native DNS-filtering surface: devices, always-on editor, protection modes, tunnel engine)
+// JoineryBillingKit — the native in-app purchase surface (StoreKit 2 purchase,
+// plan change, restore, server-authoritative status), registered as the
+// `billing` screen; same layering as mail.
+// Version: 0.7.0 (native billing surface: StoreKit 2 purchase/restore, billing screen)
 import PackageDescription
 
 let package = Package(
@@ -28,6 +31,7 @@ let package = Package(
         .library(name: "JoineryAIChatKit", targets: ["JoineryAIChatKit"]),
         .library(name: "JoineryMemberKit", targets: ["JoineryMemberKit"]),
         .library(name: "JoineryDNSFilterKit", targets: ["JoineryDNSFilterKit"]),
+        .library(name: "JoineryBillingKit", targets: ["JoineryBillingKit"]),
     ],
     targets: [
         .target(
@@ -58,6 +62,11 @@ let package = Package(
             name: "JoineryDNSFilterKit",
             dependencies: ["JoineryKit"],
             path: "Sources/JoineryDNSFilterKit"
+        ),
+        .target(
+            name: "JoineryBillingKit",
+            dependencies: ["JoineryKit"],
+            path: "Sources/JoineryBillingKit"
         ),
         .testTarget(
             name: "JoineryKitTests",
@@ -103,6 +112,14 @@ let package = Package(
             name: "JoineryDNSFilterKitTests",
             dependencies: ["JoineryDNSFilterKit"],
             path: "Tests/JoineryDNSFilterKitTests"
+        ),
+        .testTarget(
+            name: "JoineryBillingKitTests",
+            dependencies: ["JoineryBillingKit"],
+            path: "Tests/JoineryBillingKitTests",
+            resources: [
+                .copy("Fixtures"),
+            ]
         ),
     ]
 )

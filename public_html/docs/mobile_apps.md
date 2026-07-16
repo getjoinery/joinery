@@ -565,6 +565,31 @@ Accessibility ids: `protection_*`, `devices_*` / `device_*`, `editor_*`,
 (`registrationEnabled` false); see `specs/implemented/scrolldaddy_ios_app.md`
 for the phasing.
 
+## JoineryBillingKit (native billing module)
+
+**JoineryBillingKit** is the native in-app purchase surface
+(`ios/joinery-kit/Sources/JoineryBillingKit`, depends on JoineryKit only). An
+app that sells subscriptions adds the product and calls
+`JoineryBilling.registerScreens()` at launch; a menu entry with
+`nativeScreen: "billing"` lights it up, with the web pricing page as the
+version-skew fallback.
+
+- **BillingScreen** (registers `billing`) — current plan
+  (server-authoritative, from `store/subscription_summary`), purchasable
+  plans from `store/billing_catalog` with StoreKit-localized prices, the
+  StoreKit 2 purchase sheet, restore purchases, and manage-routing by source
+  (App Store deep link, or a notice when the subscription is billed
+  elsewhere — source exclusivity).
+
+Every StoreKit success posts its signed transaction (`jwsRepresentation`) to
+`store/app_store_claim`; the server verifies and grants the tier before the
+UI reports success, and the purchase carries the catalog's
+`app_account_token` as `appAccountToken` for webhook-side user linkage. The
+server model, webhooks, and claim actions: `docs/mobile_billing.md`.
+
+Accessibility ids: `billing_*`. Parsing tests with fixture envelopes:
+`Tests/JoineryBillingKitTests`.
+
 ## joinery-android (Android client core)
 
 The native Android core is **joinery-android**, a Kotlin + Jetpack Compose
@@ -980,6 +1005,32 @@ Stable `testTag` values use screen-scoped names (`protection_list`,
 `protection_status_label`, `protection_register`, `protection_enable`,
 `protection_edit_rules`, `protection_turn_off`, `devices_list`, `editor_list`,
 `filter_{key}`, `service_{key}`, `rule_add_button`).
+
+## joinery-android-billing (native billing module)
+
+**joinery-android-billing** is the Android native in-app purchase surface
+(`android/joinery-android-billing`, namespace `com.getjoinery.billing`,
+depends on `:joinery-android` and the Play Billing library), the platform
+counterpart to JoineryBillingKit. The app calls
+`JoineryBilling.registerScreens()` at launch; the server's `billing`
+navigation destination then renders natively, with the web pricing page as
+the version-skew fallback.
+
+- **BillingScreen** (registers `billing`) — same surface as the iOS kit:
+  server catalog + summary, Play-localized prices (`ProductDetails`), the
+  Play Billing purchase sheet (`PlayBillingConnector`), restore, and
+  manage-routing by source (Google Play deep link).
+
+Purchase tokens post to `store/play_claim` with the app's package name; the
+server fetches authoritative state from the Play Developer API, grants the
+tier, and acknowledges the purchase — the module never acknowledges locally.
+Purchases carry the catalog's `app_account_token` as `obfuscatedAccountId`
+for webhook-side user linkage.
+
+Stable `testTag` values: `billing_list`, `billing_current_tier`,
+`billing_plan_{productId}`, `billing_restore`, `billing_manage_play_store`,
+`billing_other_source`. Parsing tests share the iOS fixture envelopes
+(`src/test/resources/fixtures`).
 
 ## Standing up a new branded app
 

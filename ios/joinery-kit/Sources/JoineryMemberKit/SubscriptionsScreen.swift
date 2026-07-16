@@ -5,11 +5,18 @@ import JoineryKit
 /// and billing management are deliberately web-only (Apple IAP policy;
 /// specs/mobile_native_member_screens.md § Deliberately web), so those rows
 /// open the web pages through `context.web` instead of native purchase UI.
+/// Store-billed subscriptions (payment_source app_store / play_store) are
+/// managed in their store: the Stripe web rows hide and a deep link to the
+/// store's subscription management appears instead.
 public struct SubscriptionsScreen: View {
     @StateObject private var store: SubscriptionStore
     private let client: APIClient
     private let web: WebSessionCoordinator?
     @State private var pendingCancel: SubscriptionRow?
+    @Environment(\.openURL) private var openURL
+
+    static let appStoreManageURL = URL(string: "https://apps.apple.com/account/subscriptions")!
+    static let playStoreManageURL = URL(string: "https://play.google.com/store/account/subscriptions")!
 
     public init(client: APIClient, web: WebSessionCoordinator?) {
         self.client = client
@@ -76,20 +83,33 @@ public struct SubscriptionsScreen: View {
             Section {
                 LabeledContent("Current Plan", value: payload.currentTier?.name ?? "Free")
                     .accessibilityIdentifier("subscriptions_current_tier")
-                if let web {
-                    NavigationLink {
-                        WebScreen(title: "Change Plan", target: "/profile/change-tier", client: client, web: web)
-                    } label: {
-                        Text("Change Plan")
+                switch payload.paymentSource {
+                case "app_store":
+                    Button("Manage in App Store") {
+                        openURL(Self.appStoreManageURL)
                     }
-                    .accessibilityIdentifier("subscriptions_change_plan")
-                    if payload.paymentSource == "stripe" {
+                    .accessibilityIdentifier("subscriptions_manage_app_store")
+                case "play_store":
+                    Button("Manage in Google Play") {
+                        openURL(Self.playStoreManageURL)
+                    }
+                    .accessibilityIdentifier("subscriptions_manage_play_store")
+                default:
+                    if let web {
                         NavigationLink {
-                            WebScreen(title: "Billing", target: "/profile/billing", client: client, web: web)
+                            WebScreen(title: "Change Plan", target: "/profile/change-tier", client: client, web: web)
                         } label: {
-                            Text("Manage Billing")
+                            Text("Change Plan")
                         }
-                        .accessibilityIdentifier("subscriptions_billing")
+                        .accessibilityIdentifier("subscriptions_change_plan")
+                        if payload.paymentSource == "stripe" {
+                            NavigationLink {
+                                WebScreen(title: "Billing", target: "/profile/billing", client: client, web: web)
+                            } label: {
+                                Text("Manage Billing")
+                            }
+                            .accessibilityIdentifier("subscriptions_billing")
+                        }
                     }
                 }
             }

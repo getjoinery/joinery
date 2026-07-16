@@ -1,0 +1,81 @@
+// joinery-android-billing: the native in-app purchase surface for any Joinery
+// deployment that sells subscriptions inside its Android app. Layered on
+// joinery-android exactly like joinery-android-dnsfilter: the app depends on
+// this module and calls JoineryBilling.registerScreens() at launch; the
+// server's navigation entry (nativeScreen "billing") then renders natively,
+// with the web pricing page as the version-skew fallback.
+//
+// Server-authoritative: plans come from store/billing_catalog, Play Billing
+// supplies localized prices and runs the purchase sheet, and the purchase
+// token is posted to store/play_claim — the server verifies it against the
+// Play Developer API and grants the tier.
+plugins {
+    id "com.android.library"
+    id "org.jetbrains.kotlin.android"
+}
+
+android {
+    // Distinct from any brand APP module — AGP forbids two modules sharing a
+    // namespace. Mirrors the iOS "JoineryBillingKit".
+    namespace "com.getjoinery.billing"
+    compileSdk 35
+
+    defaultConfig {
+        minSdk 24
+        targetSdk 35
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    buildFeatures {
+        compose true
+    }
+    composeOptions {
+        // Kotlin 1.9.24 -> Compose compiler 1.5.14.
+        kotlinCompilerExtensionVersion "1.5.14"
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
+    testOptions {
+        unitTests {
+            includeAndroidResources = true
+            returnDefaultValues = true
+        }
+    }
+}
+
+dependencies {
+    api project(":joinery-android")
+
+    def composeBom = platform("androidx.compose:compose-bom:2024.06.00")
+    implementation composeBom
+    androidTestImplementation composeBom
+
+    implementation "androidx.core:core-ktx:1.13.1"
+    implementation "androidx.activity:activity-compose:1.9.0"
+    implementation "androidx.compose.ui:ui"
+    implementation "androidx.compose.foundation:foundation"
+    implementation "androidx.compose.material3:material3"
+    implementation "androidx.compose.material:material-icons-extended"
+
+    // Google Play Billing — the purchase sheet, ProductDetails pricing, and
+    // purchase-token plumbing. The server does the actual entitlement.
+    implementation "com.android.billingclient:billing-ktx:7.0.0"
+
+    testImplementation "junit:junit:4.13.2"
+    testImplementation "org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1"
+    // The store tests construct a BillingApi (which wraps ApiClient →
+    // OkHttpClient); OkHttp must be on the unit-test classpath to resolve it.
+    testImplementation "com.squareup.okhttp3:okhttp:4.12.0"
+
+    androidTestImplementation "androidx.test.ext:junit:1.2.1"
+    androidTestImplementation "androidx.compose.ui:ui-test-junit4"
+    debugImplementation "androidx.compose.ui:ui-tooling"
+    debugImplementation "androidx.compose.ui:ui-test-manifest"
+}

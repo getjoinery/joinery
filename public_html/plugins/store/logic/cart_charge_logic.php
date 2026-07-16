@@ -219,6 +219,21 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 	}
 
+	//Source exclusivity, pre-charge: a recipient whose active subscription is
+	//billed through the App Store or Google Play can't start a web-billed one
+	//— they must cancel in the store first. Surfaces before any card charge.
+	require_once(PathHelper::getIncludePath('plugins/store/includes/TierBilling.php'));
+	foreach($cart->items as $key => $cart_item) {
+		list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
+		if($product_version->is_subscription()){
+			$conflict = TierBilling::sourceConflict($resolved_users[$key]->key, 'stripe');
+			if ($conflict !== null && in_array($conflict, array('app_store', 'play_store'))) {
+				return _checkout_error('This subscription is billed through ' . TierBilling::sourceLabel($conflict)
+					. '. Cancel it in the app or your store account settings before subscribing here.');
+			}
+		}
+	}
+
 	$payment_service = '';
 	if($charge_total > 0){
 		if($settings->get_setting('use_paypal_checkout') && (!empty($_GET['id']) || !empty($_GET['subscription']))){
@@ -589,6 +604,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 					$order_item->set('odi_status', OrderItem::STATUS_PAID);
 					//MOVE THE SUBSCRIPTION ID FROM THE ORDER TO THE ORDER ITEM
 					$order_item->set('odi_stripe_subscription_id', $order->get('ord_stripe_subscription_id_temp'));
+					$order_item->set('odi_payment_source', 'stripe');
 					$order_item->save();
 					$order->set('ord_stripe_subscription_id_temp', NULL);
 					$order->save();
@@ -596,6 +612,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				else if($payment_service == 'paypal' && isset($_GET['paypal_subscription_id']) && $_GET['paypal_subscription_id']){
 					$order_item->set('odi_status', OrderItem::STATUS_PAID);
 					$order_item->set('odi_paypal_subscription_id', $_GET['paypal_subscription_id']);
+					$order_item->set('odi_payment_source', 'paypal');
 					$order_item->set('odi_subscription_status', 'active');
 					$order_item->save();
 				}

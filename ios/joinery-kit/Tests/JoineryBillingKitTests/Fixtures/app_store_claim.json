@@ -1,0 +1,15 @@
+{
+    "success": true,
+    "data": {
+        "order_item_id": 512,
+        "product_name": "Premium Plan",
+        "tier": {
+            "tier_id": 3,
+            "name": "Premium",
+            "level": 20
+        },
+        "status": "active",
+        "period_end": "2026-08-16 14:00:00",
+        "payment_source": "app_store"
+    }
+}
