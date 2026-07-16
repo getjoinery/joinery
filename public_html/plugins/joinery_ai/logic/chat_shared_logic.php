@@ -107,6 +107,9 @@ function joinery_ai_chat_page_logic(array $input, int $min_permission, string $l
     $default_model = ChatRunner::defaultModel();
     $default_web_search = $brave_key_set
         && (string)$settings->get_setting('joinery_ai_default_web_search') === '1';
+    // Memory defaults ON (unlike the other toggles): the feature only earns its
+    // keep when it's usually active. One setting flips it off site-wide.
+    $default_memory_access = (string)$settings->get_setting('joinery_ai_memory_default_on') === '1';
 
     return LogicResult::render([
         'session'        => $session,
@@ -119,6 +122,7 @@ function joinery_ai_chat_page_logic(array $input, int $min_permission, string $l
         'data_access'    => $selected ? (bool)$selected->get('aic_data_access') : false,
         'web_search'     => $selected ? (bool)$selected->get('aic_web_search') : $default_web_search,
         'history_access' => $selected ? (bool)$selected->get('aic_history_access') : false,
+        'memory_access'  => $selected ? (bool)$selected->get('aic_memory_access') : $default_memory_access,
         'temperature'    => $g('aic_temperature'),
         'top_p'          => $g('aic_top_p'),
         'max_tokens'     => $g('aic_max_tokens'),
@@ -137,6 +141,7 @@ function joinery_ai_chat_page_logic(array $input, int $min_permission, string $l
         'default_model'  => $default_model,
         'default_thinking_level' => $default_thinking_level,
         'default_web_search'     => $default_web_search,
+        'default_memory_access'  => $default_memory_access,
         'def_temperature'=> (string)$settings->get_setting('joinery_ai_default_temperature'),
         'def_top_p'      => (string)$settings->get_setting('joinery_ai_default_top_p'),
         'def_max_tokens' => (string)$settings->get_setting('joinery_ai_chat_max_tokens'),

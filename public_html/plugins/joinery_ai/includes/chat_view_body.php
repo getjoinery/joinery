@@ -10,8 +10,10 @@
  *   $session         SessionControl
  *   $conversations, $selected, $messages
  *   $models, $active_model, $model_privacy
- *   $data_access, $web_search, $history_access, $temperature, $top_p, $max_tokens, $instructions,
+ *   $data_access, $web_search, $history_access, $memory_access, $temperature, $top_p,
+ *   $max_tokens, $instructions,
  *   $thinking_level, $default_model, $default_thinking_level, $default_web_search,
+ *   $default_memory_access,
  *   $def_temperature, $def_top_p, $def_max_tokens, $brave_key_set, $chat_enabled
  */
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -149,6 +151,12 @@ if (!function_exists('joai_pin_svg')) {
                             <input type="checkbox" id="joai-toggle-history" data-capability="history_access"
                                    <?php echo $history_access ? 'checked' : ''; ?>>
                             History search
+                        </label>
+                        <label class="joai-chat-toggle"
+                               title="Let the assistant remember facts across chats and recall them automatically.">
+                            <input type="checkbox" id="joai-toggle-memory" data-capability="memory_access"
+                                   <?php echo $memory_access ? 'checked' : ''; ?>>
+                            Memory
                         </label>
                     </div>
 
@@ -336,6 +344,7 @@ if (!function_exists('joai_pin_svg')) {
     var dataToggle = document.getElementById('joai-toggle-data');
     var webToggle = document.getElementById('joai-toggle-web');
     var historyToggle = document.getElementById('joai-toggle-history');
+    var memoryToggle = document.getElementById('joai-toggle-memory');
     var modelSelect = document.getElementById('joai-model');
     var thinkingSelect = document.getElementById('joai-thinking-level');
     var sensitiveNotice = document.getElementById('joai-sensitive-notice');
@@ -394,6 +403,7 @@ if (!function_exists('joai_pin_svg')) {
     var DEFAULT_MODEL = <?php echo json_encode($default_model); ?>;
     var DEFAULT_THINKING = <?php echo json_encode($default_thinking_level); ?>;
     var DEFAULT_WEB = <?php echo $default_web_search ? 'true' : 'false'; ?>;
+    var DEFAULT_MEMORY = <?php echo $default_memory_access ? 'true' : 'false'; ?>;
     var DEFAULT_ATTACH_MODE = <?php echo json_encode($default_attachment_mode); ?>;
 
     // Attachment composer config: how many files a message accepts. Type/size and
@@ -513,6 +523,7 @@ if (!function_exists('joai_pin_svg')) {
     wireToggle(dataToggle);
     wireToggle(webToggle);
     wireToggle(historyToggle);
+    wireToggle(memoryToggle);
 
     // Model controls (model, thinking level, temperature, top_p, max tokens,
     // instructions). On an existing chat each persists immediately; on a new chat
@@ -794,12 +805,13 @@ if (!function_exists('joai_pin_svg')) {
         if (dataToggle && dataToggle.checked) parts.push('Data access');
         if (webToggle && webToggle.checked) parts.push('Web search');
         if (historyToggle && historyToggle.checked) parts.push('History search');
+        if (memoryToggle && memoryToggle.checked) parts.push('Memory');
         if (thinkingSelect && thinkingSelect.value && thinkingSelect.value !== 'off') {
             parts.push('Thinking: ' + thinkingSelect.selectedOptions[0].textContent.trim());
         }
         settingsSummary.textContent = parts.join('  ·  ');
     }
-    [modelSelect, dataToggle, webToggle, historyToggle, thinkingSelect].forEach(function (el) {
+    [modelSelect, dataToggle, webToggle, historyToggle, memoryToggle, thinkingSelect].forEach(function (el) {
         if (el) el.addEventListener('change', updateSettingsSummary);
     });
     updateSettingsSummary();
@@ -867,6 +879,7 @@ if (!function_exists('joai_pin_svg')) {
             if (dataToggle && dataToggle.checked) body.append('data_access', '1');
             if (webToggle && webToggle.checked) body.append('web_search', '1');
             if (historyToggle && historyToggle.checked) body.append('history_access', '1');
+            if (memoryToggle) body.append('memory_access', memoryToggle.checked ? '1' : '0');
             controls.forEach(function (el) {
                 var f = el.getAttribute('data-field');
                 if (f === 'model' || f === 'thinking_level' || f === 'attachment_mode') body.append(f, el.value);
@@ -1439,6 +1452,7 @@ if (!function_exists('joai_pin_svg')) {
         if (dataToggle) dataToggle.checked = false;
         if (webToggle && !webToggle.disabled) webToggle.checked = DEFAULT_WEB;
         if (historyToggle) historyToggle.checked = false;
+        if (memoryToggle) memoryToggle.checked = DEFAULT_MEMORY;
         if (modelSelect) modelSelect.value = DEFAULT_MODEL;
         if (thinkingSelect) thinkingSelect.value = DEFAULT_THINKING;
         controls.forEach(function (el) {

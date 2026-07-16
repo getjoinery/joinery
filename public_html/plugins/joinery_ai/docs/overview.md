@@ -20,6 +20,7 @@ plugins/joinery_ai/
     aip_recipe_item_log_class.php       # AipRecipeItemLog model — pipeline-mode processing log
     ai_conversations_class.php          # AiConversation model — one chat thread
     ai_conversation_messages_class.php  # AiConversationMessage model — one chat turn
+    ai_memories_class.php      # AiMemory model — durable cross-chat memory (user + shared scopes)
   includes/
     AgentLoop.php              # Bounded tool-use loop shared by agent-mode recipes and chat
     ToolContext.php            # Interface both agent-mode run contexts implement
@@ -30,6 +31,7 @@ plugins/joinery_ai/
     PipelineRunner.php         # Pipeline surface: the one-item-per-exchange loop
     ChatRunner.php             # Chat surface: builds a turn, drives AgentLoop
     ChatTurnContext.php        # Chat turn context (ToolContext)
+    ChatMemory.php             # Memory gate + two-layer automatic memory context
     ChatRender.php             # Transcript markup shared by view + AJAX endpoints
     RiskHeuristic.php          # Inline-vs-confirm classifier for mutating calls
     RecipeToolInterface.php    # Tool contract
@@ -54,6 +56,9 @@ plugins/joinery_ai/
     DescribeModelsTool.php     # describe_models — lazy schema discovery
     GetMyNotesTool.php
     SaveNoteTool.php
+    RememberTool.php           # remember — store one durable memory (acting user's private scope)
+    RecallTool.php             # recall — read own + shared memories by id or keyword
+    ForgetTool.php             # forget — soft-delete one of the acting user's own memories
     SearchConversationsTool.php # search_conversations — search the owner's own past chats (chat-only)
     GetWorkspaceTool.php
     SetWorkspaceTool.php
@@ -242,15 +247,16 @@ The interactive surface lives at `/admin/joinery_ai/chat` (permission 5). It is 
 - **The turn runs off the request** (see [Asynchronous turns](#asynchronous-turns)) — a slow local model never trips a proxy timeout.
 - **In-memory trace** flushed to `aim_tool_calls` on the assistant message by the endpoint.
 
-**Capability toggles.** A new conversation is a plain conversational assistant. Three independent per-chat switches (status strip) turn capabilities on, **all default off**:
+**Capability toggles.** A new conversation is a plain conversational assistant. Four independent per-chat switches (status strip) turn capabilities on:
 
 - **Data access** (`aic_data_access`) — the site-data tool group (`query_model`, `describe_models`, `create_model`, `update_model`, `delete_model`, `invoke_action`, `describe_actions`, `get_my_notes`, `save_note`) plus model scope (all `$ai_readable` models). Off → none of those tools exist and **no model information enters the prompt**. (Writes still pass the confirmation boundary regardless — this gates tool *availability*, not whether writes confirm.)
 - **Web search** (`aic_web_search`) — the web group (`web_search`, `fetch_url`, `get_stock_data`). `web_search` additionally needs the global `joinery_ai_brave_search_api_key`; the toggle is disabled in the UI when the key is unset.
 - **History search** (`aic_history_access`) — the `search_conversations` tool, which searches the owner's **own past chat conversations** by keyword. Its own gate, deliberately not part of Data access: searching the ambient record of everything the user has discussed is broader and more sensitive than reading a business table, so it is opted into separately. Owner-scoped (user A never sees user B's threads). Protected (Private/Fortress) chats respect the encryption boundary — their decrypted content is surfaced **only** when the current turn runs on a local model with the owner's vault open; on a remote model or a locked vault the tool returns a fixed, query-independent, count-free note that protected history was skipped and how to include it, never the content and never a per-query count (which would leak keyword presence over sealed data). The standard-vs-protected split, the surface gate, and all ciphertext handling live behind `MultiAiConversation::searchForTool()`; see [Sealed Vault](../../../docs/sealed_vault.md) for the encryption model.
+- **Memory** (`aic_memory_access`) — the `remember` / `recall` / `forget` tools plus the two-layer automatic memory context (see [Memory](#memory)). Unlike the other three toggles (which default off), a new chat seeds this one from the `joinery_ai_memory_default_on` setting (ships `1`): memory only earns its keep when it's usually active, and one setting flips it off site-wide.
 
-`ChatRunner::resolveAllowedTools()` derives the effective tool list from the three flags; `ChatTurnContext::allowedModels()` / `allowedActions()` return all readable models / all agent-callable actions when Data access is on, `[]` when off. New chats carry their initial toggle state on the first `chat_send`; existing chats persist a flip via `chat_set_capabilities.php`.
+`ChatRunner::resolveAllowedTools()` derives the effective tool list from the four flags; `ChatTurnContext::allowedModels()` / `allowedActions()` return all readable models / all agent-callable actions when Data access is on, `[]` when off. New chats carry their initial toggle state on the first `chat_send`; existing chats persist a flip via `chat_set_capabilities.php`.
 
-**Data model.** `AiConversation` (`aic_conversations`) is one thread — owner, model, the three capability flags (`aic_data_access`, `aic_web_search`, `aic_history_access`), and running token totals. `AiConversationMessage` (`aim_conversation_messages`) is one turn; assistant rows carry the tool trace, token counts, any `aim_pending_action`, the turn lifecycle (`aim_status` = `running` → `complete` | `failed` | `cancelled`, with `aim_error` on failure), and the cross-process cancel signal `aim_cancel_requested`. (Named `Ai*` because core messaging already owns `Conversation` / `Message`.) Neither is `$ai_readable`.
+**Data model.** `AiConversation` (`aic_conversations`) is one thread — owner, model, the four capability flags (`aic_data_access`, `aic_web_search`, `aic_history_access`, `aic_memory_access`), and running token totals. `AiConversationMessage` (`aim_conversation_messages`) is one turn; assistant rows carry the tool trace, token counts, any `aim_pending_action`, the turn lifecycle (`aim_status` = `running` → `complete` | `failed` | `cancelled`, with `aim_error` on failure), and the cross-process cancel signal `aim_cancel_requested`. (Named `Ai*` because core messaging already owns `Conversation` / `Message`.) Neither is `$ai_readable`.
 
 **Engine.** `ChatRunner` builds the system prompt + history and drives the loop:
 
@@ -364,6 +370,41 @@ The sealed-field model hook does the rest: `$sealed_fields` on `AiConversation` 
 **Untrusted framing.** Uploaded content is untrusted by default: the presence of any attachment forces the untrusted-input contract into the system prompt, extracted/verbatim text is wrapped in the per-turn `<<UNTRUSTED_nonce>>` markers, and a binary image/document block is preceded by an untrusted-source note. Prompt injection is contained at the tool-authorization boundary, not by text scrubbing — an upload adds content, never authority.
 
 Caps are settings-tunable: `joinery_ai_attach_image_max_bytes` (5 MB), `joinery_ai_attach_pdf_max_bytes` (10 MB), `joinery_ai_attach_text_max_bytes` (2 MB), `joinery_ai_attach_max_per_message` (5).
+
+## Memory
+
+Durable facts the assistant recalls across separate chats and recipe runs — "this member is allergic to shellfish", "refunds are honored within 30 days" — stored in `mem_memories` (`AiMemory` / `MultiAiMemory`, `data/ai_memories_class.php`). Distinct from recipe notes: notes upsert by title (a mutable scratchpad the agent rewrites each run), memories **accumulate** (each fact is its own row) and add a shared scope.
+
+**Two ownership scopes.**
+
+- **Per-user (private)** — `mem_scope = 'user'`, `mem_owner_user_id` set. Each member's memories are theirs; the AI only ever reads or writes the acting user's own. Everything the AI stores lands here.
+- **Admin-shared (global)** — `mem_scope = 'shared'`, owner NULL (the org owns it). An admin-curated pool the AI recalls for **every** user: org facts, policies, house style. Only humans write these, through the admin page. **The AI can never write a shared memory** — `remember` hard-codes `scope='user'` — which is both an authority boundary and a prompt-injection defense: a poisoned memory can only ever influence the one user whose chat wrote it.
+
+`mem_source` records who created each row (`ai` | `user` | `admin`) and is shown as a badge in the UIs; it is not rewritten when a human later edits an AI-created memory. `mem_created_by_user_id` records which human authored a shared row (audit) and is nulled on that user's deletion — the shared pool survives its authors. A user's private memories cascade away with the user. Not `$ai_readable`: the generic model tools owner-scope by a single owner column, and a shared row (NULL owner) would either leak or vanish under that logic — access goes only through the dedicated tools.
+
+**Three tools** (standard `recipe_tools/` implementations, available to chat via the Memory toggle and to recipes by listing them in the recipe's allowed tools):
+
+- `remember` `{content, title?, tags?}` — insert one `user`-scope, `source='ai'` row for the acting user. Always inserts; rejects empty/whitespace content; caps mirror notes (title ≤ 255, content ≤ 50,000 chars).
+- `recall` `{query?, ids?, limit?, scope?}` — full bodies of the acting user's own rows + all shared rows, by keyword (`ILIKE` over title+content) or by id (from the index below). Requested ids are filtered through the same scope, never fetched blind — a guessed foreign id returns nothing and leaks nothing. At least one of `query`/`ids` is required (no full dumps). The whole payload is wrapped in the per-turn untrusted envelope, so a stored memory's text can never act as an instruction on read-back.
+- `forget` `{memory_id}` — soft-delete one of the acting user's own rows. A shared, foreign, or nonexistent id is a no-op with one identical neutral message (no existence signal).
+
+**Two-layer automatic context (chat only).** When Memory is on, every turn folds memory into the system prompt before the model runs — no user prompt or tool call needed (`ChatMemory`, called from `ChatRunner::buildSystemPrompt`):
+
+- **Layer 1 — prompt-matched bodies.** The incoming message is reduced to salient terms (stopwords and short tokens dropped, English list), a selectivity guard drops any term matching more than half the in-scope set, and the **full bodies** of the top matches are injected, ranked most-distinct-terms-matched then most-recent. Two caps, both required: `joinery_ai_memory_prefetch_max` (count, ships 5) and `joinery_ai_memory_prefetch_max_chars` (total chars, ships 6000 — the load-bearing one, since a single memory may be 50,000 chars). An overflowing body is truncated with a "recall id N for the rest" marker.
+- **Layer 2 — title index.** A titles-only line per remaining in-scope memory (`title · scope · tags · id`): **all** shared rows plus personal rows up to `joinery_ai_memory_context_max_entries` (ships 200) — curated org facts are never crowded out by a big personal set. Rows already carried in full by Layer 1 are deduped out. Titles are whitespace-collapsed (an embedded newline can't smear the list) and an empty title renders `(untitled)`. This is the no-shared-words safety net: pre-retrieval can't match "restaurant" to "shellfish allergy", but the allergy's title is in front of the model, which pulls the body with `recall`.
+
+Every stored text in both layers is wrapped `<<UNTRUSTED_$nonce>>…<</UNTRUSTED_$nonce>>`, the contract gains a "Stored memories" source line, and the whole block rides **after** the prompt-cache breakpoint (appended to the untrusted block — the rotating nonce must never sit in the cached prefix). Recipes get no auto-injection — Layer 1 keys off an incoming user message, which a recipe run doesn't have; recipes pull via the tools.
+
+**Security-level gate.** One predicate — `ChatMemory::activeFor()` — governs the whole feature for a turn, applied identically in `resolveAllowedTools` (tool availability) and the injection step. A Standard chat is fully active on any model. A protected (Private/Fortress) chat is active **only on a local-model turn**: on a remote model neither layer is injected and none of the three tools is offered, so a sealed chat never ships plaintext memories to a cloud provider and never mints a new unsealed memory from sealed-context content. Fortress is pinned local, so it always qualifies. Memory rows themselves are stored plaintext (a documented limitation; memory is a natural future Sealed Vault consumer).
+
+**Human curation.**
+
+- **Admin → Joinery AI → Memory** (`/admin/joinery_ai/memory`, permission 10) manages the shared pool — list, add, edit, soft-delete, tag (`memory_edit`). New rows there are always shared, `source='admin'`, `created_by` the acting admin. A view filter also browses one user's private memories for support.
+- **Profile → AI Memory** (`/profile/joinery_ai/memory`, any member) manages the member's own rows — list, add, edit, delete — including AI-written ones, badged **AI** so they can be corrected or deleted. Edits are live on the next turn.
+
+**Settings:** `joinery_ai_memory_default_on` (new-chat toggle seed), `joinery_ai_memory_prefetch_max`, `joinery_ai_memory_prefetch_max_chars`, `joinery_ai_memory_context_max_entries` — all on the plugin's settings form.
+
+**Taint posture.** `remember` is a bespoke owner-scoped write (not in `ModelWriteExecutor::WRITE_TOOL_NAMES`) and memory is not a registered model, so — exactly like notes — neither tool changes a recipe's taint classification; the read-side defense is the untrusted envelope.
 
 ## Generic reads: `query_model` + per-recipe model allowlist
 
