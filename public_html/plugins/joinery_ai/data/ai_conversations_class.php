@@ -69,11 +69,16 @@ class AiConversation extends SystemBase {
         // Per-chat capability toggles (all default off → a plain conversational
         // assistant). Data access gates the site-data tool group + model scope;
         // web search gates the web tool group; history access gates the
-        // search_conversations tool (search across the owner's own past chats).
-        // See the chat-capabilities spec and specs/chat_search_past_conversations_tool.md.
+        // search_conversations tool (search across the owner's own past chats);
+        // memory access gates the remember/recall/forget tools + the two-layer
+        // memory context (the composer seeds it from joinery_ai_memory_default_on,
+        // so the column default stays false like its siblings).
+        // See the chat-capabilities spec, specs/chat_search_past_conversations_tool.md,
+        // and specs/joinery_ai_memory.md.
         'aic_data_access'        => array('type'=>'bool', 'default'=>false),
         'aic_web_search'         => array('type'=>'bool', 'default'=>false),
         'aic_history_access'     => array('type'=>'bool', 'default'=>false),
+        'aic_memory_access'      => array('type'=>'bool', 'default'=>false),
         // Per-chat model controls (NULL = fall back to the plugin-setting default,
         // then the provider/floor). See the chat-model-control spec.
         'aic_temperature'        => array('type'=>'numeric(3,2)'),   // NULL = use setting

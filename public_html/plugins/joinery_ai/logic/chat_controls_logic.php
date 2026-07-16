@@ -42,6 +42,7 @@ function chat_controls_logic(array $input): LogicResult {
             'max_tokens'     => (string)$settings->get_setting('joinery_ai_chat_max_tokens'),
             'web_search'     => $brave_key_set
                 && (string)$settings->get_setting('joinery_ai_default_web_search') === '1',
+            'memory_access'  => (string)$settings->get_setting('joinery_ai_memory_default_on') === '1',
         ],
     ]);
 }

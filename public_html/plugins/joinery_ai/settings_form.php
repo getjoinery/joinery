@@ -162,6 +162,33 @@ $formwriter->textbox('joinery_ai_chat_system_prompt', 'Chat System Prompt', [
                 . 'automatically and cannot be removed here.',
 ]);
 
+$formwriter->dropinput('joinery_ai_memory_default_on', 'Memory on by default for new chats', [
+    'value' => $settings->get_setting('joinery_ai_memory_default_on') === '1' ? '1' : '0',
+    'options' => ['1' => 'Yes', '0' => 'No'],
+    'helptext' => 'New chats start with the Memory capability enabled; each chat can '
+                . 'toggle it off. Memories are managed under Joinery AI → Memory.',
+]);
+
+$formwriter->numberinput('joinery_ai_memory_context_max_entries', 'Memory index cap (entries)', [
+    'value' => $settings->get_setting('joinery_ai_memory_context_max_entries'),
+    'min' => 1,
+    'helptext' => 'Most personal memories listed (titles only) in each turn\'s memory index. '
+                . 'Shared memories are always listed and don\'t count against this.',
+]);
+
+$formwriter->numberinput('joinery_ai_memory_prefetch_max', 'Memory pre-retrieval cap (count)', [
+    'value' => $settings->get_setting('joinery_ai_memory_prefetch_max'),
+    'min' => 1,
+    'helptext' => 'Most memory bodies auto-opened per turn when their words match the message.',
+]);
+
+$formwriter->numberinput('joinery_ai_memory_prefetch_max_chars', 'Memory pre-retrieval cap (chars)', [
+    'value' => $settings->get_setting('joinery_ai_memory_prefetch_max_chars'),
+    'min' => 100,
+    'helptext' => 'Total character budget for those auto-opened bodies; overflow is truncated '
+                . 'with a marker the assistant can follow up on with recall.',
+]);
+
 $formwriter->dropinput('joinery_ai_default_chat_level', 'Default privacy for new chats', [
     'value' => $settings->get_setting('joinery_ai_default_chat_level') ?: 'standard',
     'options' => [

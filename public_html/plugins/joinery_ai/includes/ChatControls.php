@@ -14,6 +14,7 @@ class ChatControls {
         'data_access'    => 'aic_data_access',
         'web_search'     => 'aic_web_search',
         'history_access' => 'aic_history_access',
+        'memory_access'  => 'aic_memory_access',
         'model'          => 'aic_model',
         'temperature'    => 'aic_temperature',
         'top_p'          => 'aic_top_p',
@@ -41,6 +42,7 @@ class ChatControls {
             case 'data_access':
             case 'web_search':
             case 'history_access':
+            case 'memory_access':
                 return [$col, self::truthy($value) ? 't' : 'f'];
 
             case 'model':
