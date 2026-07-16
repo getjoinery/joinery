@@ -21,8 +21,9 @@ $page->public_header(array(
         <!-- Category Filter Tabs -->
         <div class="filter-tabs">
             <?php
+            $selected_type = $_REQUEST['type'] ?? 'future';
             foreach($page_vars['tab_menus'] as $id => $name){
-                $active_class = ($id == $_REQUEST['type'] || (!isset($_REQUEST['type']) && $id == 'future')) ? ' active' : '';
+                $active_class = ($id == $selected_type) ? ' active' : '';
                 echo '<a href="/events?type='.$id.'" class="filter-tab'.$active_class.'">'.htmlspecialchars($name).'</a>';
             }
             ?>

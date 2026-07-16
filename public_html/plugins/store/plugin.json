@@ -1,6 +1,6 @@
 {
     "name": "Store",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "description": "Sell products: cart, checkout, orders, coupons, Stripe/PayPal, recurring subscriptions, billing portal, and product requirements",
     "author": "Joinery",
     "receives_upgrades": true,
