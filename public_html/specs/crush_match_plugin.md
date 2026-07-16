@@ -1,5 +1,16 @@
 # Crush Match Plugin Spec
 
+**Status: deferred** (owner, 2026-07-16) — kept on the roadmap, not scheduled.
+**Binding rework note for build time:** as written below, the plugin carries
+its own message tables (`crm_messages`) and its own PWA push service worker.
+Both must be replaced with platform capabilities at build time: the anonymous
+chat rides the core messaging/conversation system (`data/conversations_class.php`
+— the anonymity requirement becomes a display-layer concern, masking
+participant identity per conversation, not a parallel message store), and
+notifications use the platform web-push infrastructure (planned in
+`specs/chat_plugin.md`; if it doesn't exist yet when this builds, that gap is
+a prerequisite, not a reason to hand-roll a plugin-local service worker).
+
 ## Overview
 
 An anonymous mutual-crush matching plugin for Joinery sites. Users register under a hashed identity, list people they have crushes on, and receive an anonymous chat connection if the crush is mutual — with no either party's identity revealed until both consent.

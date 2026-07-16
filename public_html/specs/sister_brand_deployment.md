@@ -26,21 +26,23 @@ Each deployment must tag every Stripe customer and subscription it creates with 
 ```
 ScrollDaddy's deployment gets `stripe_brand_code=scrolldaddy`; NetworkSentry gets `stripe_brand_code=networksentry`. Empty string means tagging is disabled (safe default for existing deployment during rollout).
 
-**`includes/StripeHelper.php`** — three places to add `'metadata' => ['brand' => $brand_code]`:
+**`plugins/store/includes/StripeHelper.php`** (moved into the store plugin by
+the store extraction, 2026-07) — three places to add
+`'metadata' => ['brand' => $brand_code]`:
 
-1. `create_customer_at_stripe()` (~line 665): add `'metadata'` to the `customers->create()` call.
-2. Subscription creation (~line 1270): add `'metadata'` key to `$subscription_params`.
-3. Checkout session builder (~line 566): add `'metadata'` to `$create_list['subscription_data']` when `$contains_subscription` is true (create the array if it doesn't exist yet).
+1. `create_customer_at_stripe()` (~line 672): add `'metadata'` to the `customers->create()` call.
+2. Subscription creation (`$this->stripe->subscriptions->create($params)`, ~line 1120): add `'metadata'` key to `$params`.
+3. Checkout session builder (`$create_list['subscription_data']`, ~line 578): add `'metadata'` to `$create_list['subscription_data']` when `$contains_subscription` is true (create the array if it doesn't exist yet).
 
 In all three places: read `$brand_code = Globalvars::get_instance()->get_setting('stripe_brand_code')` and only add the metadata key when `$brand_code` is non-empty.
 
-**`ajax/stripe_webhook.php`** — add a brand filter after the idempotency check. For events that carry a `customer` ID (`customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_succeeded`, `invoice.payment_failed`): retrieve the Stripe customer, check `$customer->metadata->brand`, and if it doesn't match this deployment's `stripe_brand_code`, log and return 200 without acting. Skip the check when `stripe_brand_code` is empty (single-deployment compat).
+**`plugins/store/ajax/stripe_webhook.php`** (moved into the store plugin) — add a brand filter after the idempotency check. For events that carry a `customer` ID (`customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_succeeded`, `invoice.payment_failed`): retrieve the Stripe customer, check `$customer->metadata->brand`, and if it doesn't match this deployment's `stripe_brand_code`, log and return 200 without acting. Skip the check when `stripe_brand_code` is empty (single-deployment compat).
 
 `checkout.session.completed` is naturally scoped because it uses `client_reference_id` to find the local user — a foreign-brand session will have a `client_reference_id` that doesn't match any local user, which is already handled gracefully.
 
 ### 2. Device UID prefix
 
-`plugins/dns_filtering/data/devices_class.php:67` — the UID generator currently calls `bin2hex(random_bytes(16))` directly. Add a `device_uid_prefix` setting (declare in `plugins/dns_filtering/plugin.json` under `settings`, default `""`). On device creation, prepend the prefix and shorten the random part so the total stays within the `varchar(32)` column:
+`plugins/dns_filtering/data/devices_class.php:73` — the UID generator currently calls `bin2hex(random_bytes(16))` directly. Add a `device_uid_prefix` setting (declare in `plugins/dns_filtering/plugin.json` under `settings`, default `""`). On device creation, prepend the prefix and shorten the random part so the total stays within the `varchar(32)` column:
 
 - No prefix: `bin2hex(random_bytes(16))` — 32 hex chars (current behavior, unchanged)
 - With prefix (e.g. `s-`): prefix (2 chars) + `bin2hex(random_bytes(15))` — 32 chars total

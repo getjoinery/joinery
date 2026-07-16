@@ -158,6 +158,14 @@ so no new plumbing is needed. The feature touches each once:
   earlier conversation), so summaries ride in the system preamble and never
   disturb alternation.
 
+Note (2026-07-16): since this spec was written, the durable-memory feature
+(`specs/implemented/joinery_ai_memory.md`) also injects into the system prompt
+via `ChatMemory` (memory bodies + titles). The compaction-recap section is a
+*third* labeled preamble section alongside it — coordinate ordering and labels
+in `buildSystemPrompt` so the model can distinguish "recap of this
+conversation" from "durable memories about the user." The two mechanisms are
+otherwise independent.
+
 The agent loop, providers, confirmation boundary, token accounting, and the
 model-control knobs are otherwise untouched.
 

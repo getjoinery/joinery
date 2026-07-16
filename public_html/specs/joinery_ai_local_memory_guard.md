@@ -5,10 +5,10 @@
 **Touches:** `OpenAiCompatibleProvider`, `LlmProviderFactory`, `settings_form.php`,
 `plugin.json` (new settings), `LlmProviderException` (one new classify code) —
 plus a new small sidecar service on whatever host runs the local model
-(currently the dev mac mini).
-**Pairs with:** `docs/local_llm_mac_mini` operational notes (out of repo); the
-`AgentLoop::LOCAL_PER_CALL_MAX_TOKENS` cap already added for the same failure
-class.
+(currently the Mac Studio, `100.69.133.69`; the incidents below occurred on
+the earlier Mac mini host, which now serves as the iOS/Android build box).
+**Pairs with:** the `AgentLoop::LOCAL_PER_CALL_MAX_TOKENS` cap already added
+for the same failure class.
 
 ## Goal
 
@@ -32,8 +32,8 @@ is left.
 
 ## Why this happened
 
-Traced directly from a real incident: a chat turn to `qwen3:4b` (local, via
-Ollama on the mac mini) hung for 2+ minutes. The Ollama log showed the model
+Traced directly from a real incident (on the then-current mac mini host): a
+chat turn to `qwen3:4b` (local, via Ollama) hung for 2+ minutes. The Ollama log showed the model
 actively generating the whole time — not stuck, just decoding into a loop,
 n_decoded still climbing past 4,800 tokens with repeated `slot context shift`
 lines. Two contributing causes were found and fixed separately:
@@ -41,9 +41,10 @@ lines. Two contributing causes were found and fixed separately:
 1. Ollama's context window defaulted to 4,096 tokens, too small for this app's
    system prompt + tool schemas + history — fixed by setting
    `OLLAMA_CONTEXT_LENGTH` on the server.
-2. `AgentLoop` allowed up to 16,000 output tokens per call for every provider,
-   local included, which could exceed the context on its own — fixed by adding
-   `AgentLoop::LOCAL_PER_CALL_MAX_TOKENS` (4,000) for local models specifically.
+2. `AgentLoop` had no local-specific output-token cap, which could exceed the
+   context on its own — fixed by adding `AgentLoop::LOCAL_PER_CALL_MAX_TOKENS`
+   for local models specifically (initially 4,000; since raised to 16,000
+   after the server context window was raised to 24k on the Studio host).
 
 Separately, a follow-up comparison of `qwen3:4b` vs `qwen3.5:9b-nvfp4` on the
 same prompt found the 9B model taking 2+ minutes to not even finish, traced to
@@ -52,8 +53,12 @@ competing for the same Metal GPU the MLX runner needs. At the time, free system
 RAM had dropped to 277 MB (from a healthy ~8.6 GB with Xcode closed). The 4B
 model (llama.cpp/Metal, not MLX) was unaffected in the same window. By this
 point it's a reliably reproduced pattern, not a one-off: Xcode or Android dev
-tooling open on the mini means the 9B model hangs — this spec treats that as a
-hard rule to enforce, not just a correlated risk to warn about.
+tooling open on the model host means the 9B model hangs — this spec treats
+that as a hard rule to enforce, not just a correlated risk to warn about.
+(The model host has since moved to the Mac Studio, which normally runs no dev
+tooling — the mini is now the build box — so the GPU-contention case is rarer
+by separation of duties. The guard still enforces it: nothing prevents opening
+Xcode on the Studio, and the memory floor applies regardless of host.)
 
 Neither of the two context/token-budget fixes catches *this* failure mode — a
 host that's generally under memory/resource pressure, or actively contending
@@ -88,7 +93,7 @@ beyond what already exists for Ollama itself (no auth, private network only).
   `/tmp/memguard.log`/`.err`), independent of the Ollama LaunchAgent — one
   going down doesn't take the other with it.
 - Mac-only (`vm_stat`/`sysctl`/this `ps` matching are macOS-specific) —
-  acceptable since the current and only local-model host is the mac mini. A
+  acceptable since the current and only local-model host is the Mac Studio. A
   Linux host would need the memory equivalent from `/proc/meminfo` and its own
   process-matching table; out of scope until a second local host exists.
 
@@ -140,7 +145,7 @@ actionable (close Xcode/the emulator, or pick a different model) rather than
 ### New settings
 
 - `joinery_ai_local_memory_guard_url` (default `''`) — base URL of the sidecar,
-  e.g. `http://100.85.61.49:8787`. Blank disables both checks entirely; every
+  e.g. `http://100.69.133.69:8787`. Blank disables both checks entirely; every
   existing local deployment keeps working with zero config changes.
 - `joinery_ai_local_min_free_mb` (default `1024`) — minimum free host RAM
   required to dispatch. 1 GB is the floor observed to correlate with the actual
@@ -190,7 +195,7 @@ with factory defaults in `plugin.json`, seeded automatically — no migration.
 
 ## Implementation outline
 
-1. Write the sidecar script + its LaunchAgent on the mac mini; verify
+1. Write the sidecar script + its LaunchAgent on the model host (Mac Studio); verify
    `GET /status` returns sane numbers under healthy conditions, under
    memory-tight conditions, and with Xcode/the Android emulator open
    (reproduce both incidents to confirm each check actually catches its case).

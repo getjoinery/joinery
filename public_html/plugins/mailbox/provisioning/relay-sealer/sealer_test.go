@@ -103,7 +103,7 @@ func TestExtractMetaCollectsAllAuthResultsInOrder(t *testing.T) {
 // applying the PHP algorithm step by step.
 func TestBuildForwardMessageParity(t *testing.T) {
 	now := time.Date(2026, 7, 7, 0, 0, 0, 0, time.UTC)
-	m := &routingMap{
+	tc := tenantConfig{
 		SRSSecret:       "", // SRS off → envelope sender = From address, deterministic
 		ForwardFromName: "Example",
 		ForwardShowVia:  true,
@@ -129,7 +129,7 @@ func TestBuildForwardMessageParity(t *testing.T) {
 			"X-Forwarded-By: Joinery Inbound Email" +
 			"\r\n\r\n" +
 			"Hello body\r\n"
-		got, env := buildForwardMessage(raw, "team@example.com", entry, m, now)
+		got, env := buildForwardMessage(raw, "team@example.com", entry, tc, now)
 		if got != want {
 			t.Fatalf("rewrite mismatch:\n--- got ---\n%q\n--- want ---\n%q", got, want)
 		}
@@ -154,7 +154,7 @@ func TestBuildForwardMessageParity(t *testing.T) {
 			"X-Forwarded-By: Joinery Inbound Email" +
 			"\r\n\r\n" +
 			"body\r\n"
-		got, _ := buildForwardMessage(raw, "c@example.com", entry, m, now)
+		got, _ := buildForwardMessage(raw, "c@example.com", entry, tc, now)
 		if got != want {
 			t.Fatalf("rewrite mismatch:\n--- got ---\n%q\n--- want ---\n%q", got, want)
 		}
@@ -188,7 +188,9 @@ func TestResolveCatchAllStore(t *testing.T) {
 
 // TestResolveSRSBounce guards Fix 6: an SRS bounce returning to a forwarding
 // domain must resolve to a transport-sealed store even when it matches no alias
-// and its domain is a reject_unmatched forwarding subdomain.
+// and its domain is a reject_unmatched forwarding subdomain. The map here is a
+// LEGACY (pre-tenancy) shape — normalize() must lift it into a synthesized
+// tenant so the bounce still seals to the right transport key.
 func TestResolveSRSBounce(t *testing.T) {
 	m := &routingMap{
 		TransportPublicKey: "tpk",
@@ -198,12 +200,19 @@ func TestResolveSRSBounce(t *testing.T) {
 			"fwd.example.com": {CatchAllMode: modeStore, RejectUnmatched: true},
 		},
 	}
+	m.normalize()
 	entry, ok := m.resolve("SRS0=abc=de=gmail.com=alice@fwd.example.com")
 	if !ok {
 		t.Fatal("SRS bounce should resolve")
 	}
 	if entry.Mode != modeStore || entry.KeyKind != keyKindTransport || entry.PublicKey != "tpk" {
 		t.Fatalf("SRS bounce should be transport-sealed store, got %+v", entry)
+	}
+	if entry.Tenant != legacyTenantSlug {
+		t.Fatalf("legacy map SRS bounce should land in the synthesized tenant, got %q", entry.Tenant)
+	}
+	if tc, ok := m.tenantFor(entry); !ok || tc.TransportPublicKey != "tpk" {
+		t.Fatalf("tenantFor should resolve the synthesized tenant, got %+v ok=%v", tc, ok)
 	}
 	// A non-SRS unknown recipient at a forwarding domain still follows normal rules.
 	if _, ok := m.resolve("nobody@notforwarding.test"); ok {

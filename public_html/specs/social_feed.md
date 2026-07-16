@@ -2,6 +2,22 @@
 
 Display recent social media posts on public-facing pages as a unified timeline. A thin PHP proxy keeps access tokens server-side while JavaScript handles all rendering. Supports Instagram and Facebook Pages via the same Meta App.
 
+> **Reconciliation note (2026-07-16, binding at build time):** this spec predates
+> two platform changes and its endpoint layer must be modernized during
+> implementation rather than built as written:
+> 1. **No new `/ajax/` endpoints.** The proxy endpoint becomes a
+>    `_logic_descriptor()` action called via `/api/v1` (public/sessionless as
+>    appropriate); see CLAUDE.md § API Endpoint Rules.
+> 2. **OAuth goes through the platform OAuth2 core** (`docs/oauth2.md`:
+>    provider catalog, consumer registration, shared callback flow) instead of
+>    the hand-rolled `social_feed_oauth` endpoint specced below. Register Meta
+>    as a provider and this component as a consumer; keep only the
+>    component-config wiring described here.
+> 3. The hard-coded Graph API `v21.0` will need bumping to the current version
+>    at build time.
+> The `/ajax/` paths and OAuth endpoint details below are retained as behavioral
+> reference only.
+
 **Key design decisions:**
 - **No database tables** — no post caching, no data models. The proxy calls the platform API on each request.
 - **No dedicated admin page** — Meta App credentials go on the existing settings page. OAuth is handled by a small ajax endpoint. Everything else lives in the component config.

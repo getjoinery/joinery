@@ -67,10 +67,10 @@ For reference, these Patreon features already exist in Joinery:
 
 ---
 
-### 6. Free Trial Memberships
+### 6. Free Trial Memberships — PARTIAL
 **Patreon:** Creators can offer a 7-day free trial on any tier; each patron gets one trial per creator per lifetime.
-**Joinery:** `prv_trial_period_days` field exists but no trial-to-paid conversion logic or one-per-patron enforcement is visible.
-**Notes:** Stripe Checkout supports `trial_period_days` natively. Needs a per-user-per-tier record tracking whether a trial was used, plus admin UI to enable trials on specific tiers.
+**Joinery:** `prv_trial_period_days` is wired through Stripe Checkout (`subscription_data.trial_period_days` in `plugins/store/includes/StripeHelper.php`), so trial-to-paid conversion works. One-trial-per-patron enforcement is the remaining gap.
+**Notes:** Needs a per-user-per-tier record tracking whether a trial was used.
 
 ---
 
@@ -151,7 +151,7 @@ For reference, these Patreon features already exist in Joinery:
 ### 17. Community Chat Spaces
 **Patreon:** Creators get up to 10 named chat channels, which can be gated by tier. Members can post text and photos in real time.
 **Joinery:** Conversations are 1-to-1 or small groups; no channel-based community chat exists.
-**Notes:** A significant feature. Would require a new chat room data model (separate from personal conversations), WebSocket or polling for real-time updates, and tier-based access control per channel.
+**Notes:** Fully specced as `specs/chat_plugin.md` (channels, realtime Go WebSocket service, tier-gated access) — unbuilt, awaiting scheduling. This item is a pointer, not a new design.
 
 ---
 
@@ -252,30 +252,30 @@ For reference, these Patreon features already exist in Joinery:
 
 ---
 
-### 31. Outgoing Webhooks for Patron Events
+### 31. Outgoing Webhooks for Patron Events — PARTIAL
 **Patreon:** Operators can register webhook URLs to fire on `member.create`, `member.update`, `member.delete` events — enabling Zapier/n8n integrations.
-**Joinery:** Only inbound webhooks exist (Stripe, PayPal, Mailgun). No outgoing event dispatch.
-**Notes:** Also listed in `ghost_feature_ideas.md`. Requires an outgoing webhook registry (URL + events subscribed) and a dispatch call in the tier change, subscription, and registration flows.
+**Joinery:** Notification hooks shipped (`specs/implemented/notification_hooks.md`); the general outgoing-webhook registry (HMAC, retries, subscriptions) remains open — tracked in `specs/platform_gap_analysis.md`. Also listed in `ghost_feature_ideas.md` #24.
 
 ---
 
-### 32. Mobile App / PWA
-**Patreon:** Native iOS and Android apps for both creators (dashboard, messaging) and patrons (content consumption, community).
-**Joinery:** A `manifest.json` is present in the scrolldaddy plugin but no service worker or full PWA support. No native app.
-**Notes:** Full native apps are significant scope. A Progressive Web App (service worker, offline support, add-to-home-screen) is a more achievable intermediate step.
+### 32. ~~Mobile App / PWA~~ — LARGELY IMPLEMENTED
+**Joinery:** Native member apps are built for iOS and Android (app platform + member screens, `specs/implemented/ios_app_platform.md` / `android_app_platform.md`), with in-app billing (Apple IAP + Google Play) committed 2026-07. Store release is in flight (the four `*_app_release.md` specs). Remaining from the original idea: creator-dashboard surfaces in-app, and PWA/offline support for the web.
 
 ---
 
 ## Summary of Biggest Gaps
 
+*(Updated 2026-07-16: #1/#2 tier gating + early access implemented; #6 trials
+partial — checkout wiring done, per-patron enforcement open; #31 partial via
+notification hooks; #32 native member apps built, release in flight.)*
+
 | # | Feature | Impact | Complexity |
 |---|---|---|---|
-| 1 | Per-post tier gating with inline paywall | High | Medium |
 | 10 | MRR / ARR revenue dashboard | High | Low |
 | 14 | Patron Relationship Manager view | High | Low |
 | 5 | Gift memberships | High | Medium |
 | 4 | Charge-upfront billing option | High | Medium |
-| 6 | Free trial memberships (with enforcement) | High | Low |
+| 6 | Free trial one-per-patron enforcement (rest done) | High | Low |
 | 3 | Patron spot limits per tier | Medium | Low |
 | 11 | Churn rate and retention analytics | Medium | Low |
 | 12 | Per-post performance analytics | Medium | Low |
@@ -293,6 +293,5 @@ For reference, these Patreon features already exist in Joinery:
 | 23 | Audio posts with private RSS feeds | Medium | Medium |
 | 29 | Patron block + subscription cancel | Low | Low |
 | 28 | Content warnings and age gating | Low | Low |
-| 31 | Outgoing webhooks for patron events | Low | Medium |
+| 31 | Outgoing webhooks — remaining general system (partial) | Low | Medium |
 | 22 | Native video hosting | Low | High |
-| 32 | PWA / mobile app | Low | High |

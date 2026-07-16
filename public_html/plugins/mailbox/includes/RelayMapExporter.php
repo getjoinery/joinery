@@ -1,28 +1,17 @@
 <?php
 /**
- * RelayMapExporter - build the DB-free routing map the relay runs on.
+ * RelayMapExporter - build this deployment's MAP FRAGMENT for the relay.
  *
- * (specs/inbound_email_hardened_ingest_relay_executor.md § Phase 3). The relay
- * holds no database connection, so everything it needs to validate recipients at
- * SMTP time, seal to the right key, and forward, is compiled here from the
- * enabled InboundEmailDomain + InboundEmailAlias rows and pushed over the tunnel.
- *
- * It emits four artifacts:
- *
- *   - relay-domains.map — the domains the relay is authoritative for
- *     (Postfix relay_domains). reject_unauth_destination accepts recipients in
- *     these and rejects relay attempts for anything else.
- *   - recipients.access — check_recipient_access rules that preserve
- *     reject_unmatched semantics: `alias@domain OK` for every enabled alias, plus
- *     a domain-level `OK` (accept-all: catch-all or reject_unmatched=false) or
- *     `REJECT` (reject-unmatched, no catch-all). Postfix matches the full address
- *     before the domain, so listed aliases are accepted even under a domain REJECT
- *     — no backscatter, and a newly synced alias stops bouncing.
- *   - transport.map — routes each hosted domain to the `joinery` pipe (the Go
- *     sealer) as its transport.
- *   - routing.json — the sealer's per-recipient table: mode, destinations, the
- *     public key to seal to, and whether that key is the user's vault key
- *     (Fortress) or the ambient transport key (Standard/Private).
+ * The relay holds no database connection, so everything it needs to validate
+ * recipients at SMTP time, seal to the right key, and forward is compiled here
+ * from the enabled InboundEmailDomain + InboundEmailAlias rows and pushed over
+ * the tunnel as ONE JSON fragment (specs/mailbox_relay_shared_fleet.md § Map
+ * sync: fragment push and shard-side merge). The fragment carries ONLY this
+ * tenant's routing data — its domains, recipients, forwarding domains, and
+ * per-tenant identity (SRS secret, forward From identity, transport key). The
+ * relay's merge unit validates it against the tenant's root-owned domain
+ * allowlist and derives all Postfix map lines shard-side; nothing this side
+ * emits can bypass that validation.
  *
  * The seal target per recipient follows the existing implicit sealing rule
  * (encryption-at-rest): a recipient whose single grantee holds a Sealed Vault is
@@ -31,7 +20,8 @@
  * at pull. Catch-all recipients have no single owner, so they are always
  * transport-sealed.
  *
- * @version 1.2
+ * @version 2.0 - emits the tenancy-native fragment (fragment_format 1); the
+ *                Postfix artifacts are derived by the relay-side merge unit
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
@@ -58,23 +48,16 @@ class RelayMapExporter {
 	}
 
 	/**
-	 * Build every artifact. The output is DETERMINISTIC for a given routing state
-	 * (no timestamps, no counters) so RelayMapSync can hash it and skip an
-	 * unchanged push. Returns:
-	 *   [
-	 *     'relay_domains'    => string,  // Postfix map body
-	 *     'recipients'       => string,  // Postfix access-map body
-	 *     'transport'        => string,  // Postfix transport-map body
-	 *     'routing_json'     => string,  // the sealer routing table (pretty JSON)
-	 *   ]
+	 * Build the fragment. The output is DETERMINISTIC for a given routing state
+	 * (no timestamps, no counters — the fragment's 'version' is 0 here and
+	 * stamped by RelayMapSync just before a real push) so the sync can hash it
+	 * and skip an unchanged push. Returns:
+	 *   [ 'fragment' => string ]   // the fragment JSON (pretty)
 	 */
 	public function build(): array {
 		$domains = new MultiInboundEmailDomain(array('enabled' => true, 'deleted' => false));
 		$domains->load();
 
-		$relay_domains = array();
-		$recipient_access = array();
-		$transport = array();
 		// Forward From-rewrite identity, mirroring InboundEmailRouter::buildForwardMessage /
 		// forwardedFromDisplay so relay-side forwards align DMARC exactly as colocated
 		// forwards do (specs/mailbox_relay_fix_pack.md § Fix 5).
@@ -82,24 +65,27 @@ class RelayMapExporter {
 		$forward_from_name = (string)($this->settings->get_setting('defaultemailname') ?: 'Inbound Email');
 		$forward_show_via = ((string)$this->settings->get_setting('mailbox_from_show_via') !== '0');
 
-		$routing = array(
-			'srs_secret'            => $this->srsSecret(),
-			'forward_from_name'     => $forward_from_name,
-			'forward_show_via'      => $forward_show_via,
-			'transport_public_key'  => $this->transport_public_key,
-			'forwarding_domains'    => array(),
-			'recipients'            => array(),
-			'domains'               => array(),
+		$fragment = array(
+			'fragment_format'      => 1,
+			'tenant'               => $this->relay->tenantSlug(),
+			'version'              => 0,
+			'srs_secret'           => $this->srsSecret(),
+			'forward_from_name'    => $forward_from_name,
+			'forward_show_via'     => $forward_show_via,
+			'transport_public_key' => $this->transport_public_key,
+			'forwarding_domains'   => array(),
+			'recipients'           => array(),
+			'domains'              => array(),
 		);
 
 		// SRS-bounce accept (specs/mailbox_relay_fix_pack.md § Fix 6): bounces to
 		// forwarded mail return to SRS0=...@forwardingdomain, which is not in the
-		// alias list. Postfix must accept these (a regexp check_recipient_access
-		// entry per forwarding domain) and the sealer must store them (transport
-		// key) so the pull consumer can decode the NDR. Gated on the SRS setting:
-		// with SRS off no forward generates an SRS sender, so accepting the
-		// addresses would only spool bounces the consumer must then discard —
-		// reject them at SMTP time instead (§ R2-4).
+		// alias list. The relay must accept these (the merge derives a regexp
+		// check_recipient_access entry per forwarding domain) and the sealer must
+		// store them (transport key) so the pull consumer can decode the NDR.
+		// Gated on the SRS setting: with SRS off no forward generates an SRS
+		// sender, so accepting the addresses would only spool bounces the
+		// consumer must then discard (§ R2-4).
 		$srs_on = (bool)$this->settings->get_setting('mailbox_srs_enabled');
 		$forwarding_domains = array();
 
@@ -109,14 +95,12 @@ class RelayMapExporter {
 				continue;
 			}
 			// IMAP-source domains (mail pulled by IMAP poll, no MX at the relay) are
-			// not fronted by the relay. Including them in relay_domains makes the relay
-			// wrongly authoritative for e.g. gmail.com, so a forward to any address
-			// there loops back into the sealer instead of leaving over SMTP.
+			// not fronted by the relay. Including them makes the relay wrongly
+			// authoritative for e.g. gmail.com, so a forward to any address there
+			// loops back into the sealer instead of leaving over SMTP.
 			if ((bool)$domain->get('ied_is_imap_source')) {
 				continue;
 			}
-			$relay_domains[] = $domain_name . "\tOK";
-			$transport[] = $domain_name . "\tjoinery:";
 
 			$catch_all_mode = (string)$domain->get('ied_catch_all_mode');
 			$catch_all_address = trim((string)$domain->get('ied_catch_all_address'));
@@ -124,13 +108,6 @@ class RelayMapExporter {
 			$forwarding_domain = strtolower((string)$domain->forwarding_subdomain());
 			if ($srs_on && $forwarding_domain !== '') {
 				$forwarding_domains[$forwarding_domain] = true;
-				// A forwarding subdomain distinct from the hosted domain must also be
-				// accepted as a relay destination + routed to the sealer, or the SRS
-				// bounce is rejected as an unauth relay before recipient checks run.
-				if ($forwarding_domain !== $domain_name) {
-					$relay_domains[] = $forwarding_domain . "\tOK";
-					$transport[] = $forwarding_domain . "\tjoinery:";
-				}
 			}
 
 			// Map the domain catch-all onto the sealer's store|forward|none.
@@ -141,13 +118,7 @@ class RelayMapExporter {
 				$map_catch_mode = 'forward';
 			}
 
-			// Accept-all when the domain stores or forwards unmatched mail, or when
-			// it explicitly does not reject it; otherwise reject the domain (listed
-			// aliases still match first and are accepted).
-			$accept_all = ($map_catch_mode !== 'none') || !$reject_unmatched;
-			$recipient_access[] = $domain_name . "\t" . ($accept_all ? 'OK' : 'REJECT');
-
-			$routing['domains'][$domain_name] = array(
+			$fragment['domains'][$domain_name] = array(
 				'catch_all_mode'    => $map_catch_mode,
 				'catch_all_address' => $catch_all_address,
 				'reject_unmatched'  => $reject_unmatched,
@@ -168,11 +139,10 @@ class RelayMapExporter {
 					continue;
 				}
 				$address = $local . '@' . $domain_name;
-				$recipient_access[] = $address . "\tOK";
 
 				list($public_key, $key_kind) = $this->sealTargetForAlias($alias, $domain);
 
-				$routing['recipients'][$address] = array(
+				$fragment['recipients'][$address] = array(
 					'public_key'        => $public_key,
 					'key_kind'          => $key_kind,
 					'mode'              => (string)$alias->get('iea_delivery_mode'),
@@ -183,38 +153,15 @@ class RelayMapExporter {
 			}
 		}
 
-		// The sealer needs the set of forwarding domains (to store SRS bounces) and
-		// the transport key to seal them to.
-		$routing['forwarding_domains'] = array_values(array_keys($forwarding_domains));
-		sort($routing['forwarding_domains']);
-
-		// Postfix regexp check_recipient_access accepting SRS bounces at each
-		// forwarding domain (matched against the full recipient). No postmap needed
-		// for a regexp map.
-		// SRS0 only: SRSRewriter generates (and can decode) only SRS0; an SRS1
-		// at our forwarding domain is undecodable, so accepting it would spool
-		// blobs the consumer can only discard.
-		$srs_access = array();
-		foreach (array_keys($forwarding_domains) as $fd) {
-			$srs_access[] = '/^SRS0=[^@]*@' . preg_quote($fd, '/') . '$/ OK';
-		}
+		$fragment['forwarding_domains'] = array_keys($forwarding_domains);
+		sort($fragment['forwarding_domains']);
 
 		// Deterministic ordering so an unchanged routing state hashes identically.
-		sort($relay_domains);
-		$relay_domains = array_values(array_unique($relay_domains));
-		sort($recipient_access);
-		sort($transport);
-		$transport = array_values(array_unique($transport));
-		sort($srs_access);
-		ksort($routing['recipients']);
-		ksort($routing['domains']);
+		ksort($fragment['recipients']);
+		ksort($fragment['domains']);
 
 		return array(
-			'relay_domains' => $this->joinLines($relay_domains),
-			'recipients'    => $this->joinLines($recipient_access),
-			'transport'     => $this->joinLines($transport),
-			'srs_access'    => $this->joinLines($srs_access),
-			'routing_json'  => json_encode($routing, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES),
+			'fragment' => json_encode($fragment, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES),
 		);
 	}
 
@@ -257,9 +204,5 @@ class RelayMapExporter {
 			return '';
 		}
 		return (string)$this->settings->get_setting('mailbox_srs_secret');
-	}
-
-	private function joinLines(array $lines): string {
-		return $lines ? implode("\n", $lines) . "\n" : "";
 	}
 }

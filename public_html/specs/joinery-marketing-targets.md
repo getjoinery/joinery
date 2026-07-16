@@ -1,6 +1,19 @@
 # Joinery Marketing Targets (Exhaustive & Ranked)
 
-This document identifies potential marketing targets for **Joinery**—a modular, PHP/PostgreSQL membership and event management platform. Targets are ranked by **Synergy Score** based on their alignment with Joinery's core identity: **Open Source, PHP/PostgreSQL, Modular Architecture, and Self-Hosted Membership/Events.**
+**Reframing note (2026-07-16):** the target list below still holds — these
+audiences (self-hosters, PHP-architecture voices, open-source directories)
+are exactly right. But every pitch angle in this doc predates the current
+platform direction and must be rewritten before any outreach: the story is
+no longer "membership and event management platform" — it's **sovereignty
+and a loyal local-AI guardian**: self-hosted mail/drive/passwords with
+client-custody E2E encryption, a local LLM that works for the member (not a
+vendor), and protection (anti-scam email scanning, DNS filtering). The
+"open-source alternative to WildApricot" submissions below become
+"self-hosted alternative to Gmail/Dropbox/1Password with a local AI."
+Membership/events remain real features but are supporting cast, not the
+pitch.
+
+This document identifies potential marketing targets for **Joinery**. Targets are ranked by **Synergy Score** based on their alignment with Joinery's core identity: **Open Source, PHP/PostgreSQL, Modular Architecture, and Self-Hosted sovereignty.**
 
 ---
 

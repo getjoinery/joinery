@@ -967,34 +967,52 @@ can send as `list@mail.<domain>` but never as `you@<domain>`.
 
 ## Hardened ingest relay
 
-A deployment runs one of two receive topologies, chosen per deployment and both
-permanent:
+A deployment runs one of three receive topologies:
 
 - **Colocated** (the default, the cost floor): the MTA stack runs on the Joinery
   box itself, exactly as `install_email.sh` builds it. Zero extra infrastructure.
-- **Relay-fronted** (the opt-in upgrade): a minimal, hardened, disposable VPS at
+- **Relay-fronted, self-hosted**: a minimal, hardened, disposable VPS at
   the public MX fronts every hosted domain. It buys a hidden origin, edge-sealed
   ingest, and a shrunken main box.
+- **Relay-fronted, hosted fleet slot**: the same relay stack, run by the
+  platform operator as a shared fleet. The deployment enrolls for a slot,
+  points its domains' MX at a per-tenant hostname, and gets the same
+  edge-sealed ingest and hidden origin with zero extra infrastructure. See
+  [Hosted relay fleet](#hosted-relay-fleet).
 
 The relay runs Postfix + verify milters + a small Go sealing binary + WireGuard,
 and nothing else — no PHP, no database, no web, no application. It accepts mail,
 verifies it, **seals it to the recipient's public key at the moment of
-acceptance**, and spools ciphertext. The main Joinery box dials out over
-WireGuard and pulls the sealed blobs. Its own IP appears in no mail DNS.
+acceptance**, and spools ciphertext. Each tenant's Joinery box dials out over
+WireGuard and pulls its own sealed blobs. Its own IP appears in no mail DNS.
 
-Once a relay exists it is the MX for **all** the deployment's hosted domains (a
-mixed MX would leak the origin). The security level controls where mail is
-*sealed*, never where it is *routed*.
+**The relay stack is tenancy-native, and a self-hosted relay is a fleet of
+one.** Every tenant on a relay has its own spool subdirectory (setgid,
+tenant-group readable — the cross-tenant isolation boundary), its own
+restricted SSH pull account locked to a forced-command shell, its own WireGuard
+peer at an allocated tunnel address, and its own root-owned domain allowlist.
+A self-hosted relay is simply a relay on which the add-tenant operation has run
+once (slug `main`, allowlist `*`); a fleet shard is one on which it has run per
+enrolled tenant. One codebase, one code path — N=1 is the degenerate case.
+
+Once a relay fronts a deployment it is the MX for **all** that deployment's
+hosted domains (a mixed MX would leak the origin). The security level controls
+where mail is *sealed*, never where it is *routed*.
 
 ### The sealing binary
 
 `provisioning/relay-sealer/` is a single static Go binary built and installed by
 `provision_relay.sh` to `/opt/joinery-relay/relay-sealer`. It replaces the PHP
 pipe on the MX path as the Postfix `joinery` transport (raw on stdin,
-`${recipient} ${sender}` as argv). For each accepted message it:
+`${recipient} ${sender}` as argv). The same binary is the relay's **map merge
+unit** (`relay-sealer merge-maps` — see [Map sync](#map-sync-fragment-push--shard-side-merge)).
+For each accepted message it:
 
-- Looks up the recipient's public key + routing in the synced `routing.json` (no
-  database).
+- Looks up the recipient's public key + routing in the merged `routing.json` (no
+  database). Every entry names its owning tenant; the tenant's block carries the
+  spool directory, SRS secret, forward From identity, transport key, and the
+  shard-policy limits (per-tenant forward rate limit and spool quota — over
+  quota temp-fails, so senders queue instead of one tenant filling the disk).
 - Seals the **entire raw message** with `crypto_box_seal` (libsodium wire format,
   `SealedBox::openDek`-compatible) to that public key — Fortress recipients to the
   owner's vault key, Standard/Private to the ambient transport key Joinery holds.
@@ -1014,28 +1032,51 @@ pipe on the MX path as the Postfix `joinery` transport (raw on stdin,
   consumer routes it through the same `handleSRSBounce` path colocated ingest uses,
   so the original sender gets the NDR (never a stray stored message).
 
-### Alias-map sync
+### Map sync: fragment push + shard-side merge
 
-The relay holds no database, so `RelayMapExporter` compiles the routing from the
-enabled domains/aliases + each recipient's public key into static files, and
-`RelayMapSync` pushes them over the tunnel. IMAP-source domains are excluded —
-their mail arrives by IMAP poll, not MX, and listing them would make the relay
-wrongly authoritative for e.g. `gmail.com`, looping forwards to addresses there
-back into the sealer instead of out over SMTP. The artifacts: the Postfix `relay_domains`,
-`check_recipient_access` (preserving `reject_unmatched` — listed aliases match
-before a domain REJECT, so no backscatter), `transport_maps`, and the SRS-bounce
-accept `regexp` map, plus the sealer's `routing.json`. Each rsync's exit code is
-checked, so a failed upload never records success for a stale map. The push is
-content-hashed and skipped when unchanged. Every routing change (alias/domain/grant
-write, via a data-layer hook) triggers an immediate best-effort push, and the
-`SyncRelayMap` scheduled task reconciles every cron pass as the backstop — so a
-newly created alias reaches the relay before it can bounce.
+The relay holds no database, so `RelayMapExporter` compiles this tenant's
+routing — its domains, recipients, forwarding domains, and per-tenant identity
+(SRS secret, forward From identity, transport key) — into **one JSON fragment**,
+and `RelayMapSync` rsyncs it into the tenant's own drop area over the restricted
+tenant account (never root, never `/etc/postfix`), then triggers the relay's
+merge with the tenant shell's `joinery-merge` verb and reads the validation
+verdict in-band. IMAP-source domains are excluded — their mail arrives by IMAP
+poll, not MX, and listing them would make the relay wrongly authoritative for
+e.g. `gmail.com`, looping forwards to addresses there back into the sealer
+instead of out over SMTP.
+
+The relay-side merge (`relay-sealer merge-maps`, root, triggered — never a
+resident daemon) is **where the domain-claim boundary is mechanically
+enforced**: every domain a fragment names must sit inside that tenant's
+root-owned allowlist (`/opt/joinery-relay/tenants/<slug>/allowed_domains` — `*`
+on a self-hosted fleet of one, the explicit TXT-verified list on a fleet
+shard), and must not be claimed by another tenant on the relay. A fragment
+violating either is rejected whole — nothing from it is installed, and the
+tenant's **last accepted** fragment keeps serving so a bad push never erases
+working routing. From the validated fragments the merge derives all the Postfix
+artifacts — `relay_domains`, `check_recipient_access` (preserving
+`reject_unmatched`: listed aliases match before a domain REJECT, so no
+backscatter), `transport_maps`, the SRS-bounce accept `regexp` map — plus the
+merged `routing.json`, installs atomically, and runs `postmap` + `postfix
+reload` only when the output changed. Shard-policy limits
+(`tenants/<slug>/limits.json`) are stamped into the merged tenant block here,
+so a fragment can never raise its own caps.
+
+The tenant-side push is content-hashed and skipped when unchanged, and the
+verdict echoes the pushed fragment's version so the sync knows the merge saw
+this push. Every routing change (alias/domain/grant write, via a data-layer
+hook) triggers an immediate best-effort push, and the `SyncRelayMap` scheduled
+task reconciles every cron pass as the backstop — so a newly created alias
+reaches the relay before it can bounce.
 
 ### Spool pull + deferred ingest
 
-`PullRelaySpool` (scheduled task) dials out over WireGuard, `rsync`s new spool
-entries **copy-only**, stores each durably keyed on the spool id (an idempotent
-re-pull is a no-op), and deletes the remote entries it stored — the
+`PullRelaySpool` (scheduled task) dials out over WireGuard as the deployment's
+restricted tenant account, `rsync`s new entries from **its own spool
+subdirectory** copy-only, stores each durably keyed on the spool id (an
+idempotent re-pull is a no-op), and acks the entries it stored with the tenant
+shell's `joinery-ack` verb (ids only — the shell resolves them inside the
+tenant's spool and rejects anything with a path separator) — the
 delete-after-store is the ack. Standard/Private blobs are opened at pull with the
 ambient transport key and run through today's ingest. Fortress blobs cannot be
 opened while the owner is logged out, so they land as **pending-parse** rows:
@@ -1111,14 +1152,36 @@ submission listener is open.
 
 ### Provisioning
 
-`provisioning/provision_relay.sh` is the self-contained installer: idempotent, one
-required argument (the mail hostname) plus an optional `smarthost` second argument
-(default inbound-only opens no tunnel submission listener), zero prompts, runnable
-as root on a fresh minimal Debian VPS. It builds the sealer, wires Postfix +
-opendkim(verify, `RemoveARFrom`
-stripping forged Authentication-Results) + opendmarc(stamp) + rspamd(add-header
-spam scoring) + WireGuard + a default-deny firewall, and prints the relay public
-IP, WireGuard public key, and spool endpoint.
+`provisioning/provision_relay.sh` is the self-contained installer, in two
+layers:
+
+- **Shard skeleton** (`provision_relay.sh <mail-hostname> [smarthost]`):
+  idempotent, zero prompts, runnable as root on a fresh minimal Debian VPS. It
+  builds the sealer/merge binary, installs the tenant shell
+  (`/opt/joinery-relay/bin/joinery-tenant-shell`) and the sudoers rule letting
+  tenant accounts trigger the map merge, wires Postfix + opendkim(verify,
+  `RemoveARFrom` stripping forged Authentication-Results) + opendmarc(stamp) +
+  rspamd + WireGuard + a default-deny firewall, and prints the relay public IP,
+  WireGuard public key, and tunnel endpoint. rspamd is **stateless**: static
+  rules only, Bayes classifier and autolearn off, no redis — learned state on a
+  shared relay would be one model trained on every tenant's mail (a
+  cross-tenant privacy leak and a poisoning vector), and the relay's header was
+  never the verdict anyway — each tenant's own rspamd re-scores at ingest. The
+  script self-installs to `/opt/joinery-relay/provision_relay.sh` so tenant
+  lifecycle operations run without re-shipping the bundle.
+- **Tenant lifecycle** (`add-tenant <slug> --pull-pubkey … [--wg-pubkey …]
+  [--tunnel-ip …] [--domains a.com,b.com | '*' | '-'] [--forward-limit N]
+  [--spool-max-mib N] [--spool-max-entries N]`, plus `remove-tenant` and
+  `set-domains`): each run creates one tenant — spool subdirectory
+  (`/var/spool/joinery-relay/<slug>`, mode 2770, owner the sealer, group the
+  tenant), SSH account `jt-<slug>` whose authorized key is locked to the tenant
+  shell (rsync pull of its own spool, rsync push into its own fragment drop,
+  `joinery-ack`, `joinery-merge`, `joinery-ping` — nothing else), WireGuard
+  peer pinned to its allocated tunnel address, and the root-owned registry
+  entry (allowlist + limits). `remove-tenant` refuses while the tenant's spool
+  holds undrained sealed mail unless forced. The smarthost is single-tenant
+  only — `add-tenant` refuses a second tenant on a smarthost relay, because
+  `mynetworks` trusts the whole tunnel subnet in that mode.
 
 The main box's half of the tunnel is `provisioning/provision_relay_main.sh`
 (root, once per deployment): it generates the box's WireGuard keypair (private
@@ -1133,11 +1196,16 @@ until that key exists.
 The pull key is a dedicated SSH identity owned by the web user, because every
 steady-state relay connection — the spool pull and map-push cron tasks and the
 admin page's health battery — runs as the web user, and ssh only accepts a key
-file its caller owns with mode 600. The provision job authorizes the pull key's
-public half on the relay and points the relay row's `mrl_ssh_key_path` at it,
-so the managed node's admin key (which drives provisioning through the Go
-agent) never has to be readable by the web user, and it only grants access to
-the disposable relay.
+file its caller owns with mode 600. The provision job installs the pull key's
+public half as the tenant account's authorized key (forced command: the tenant
+shell) and points the relay row's `mrl_ssh_key_path` at it, so the managed
+node's admin key (which drives provisioning through the Go agent) never has to
+be readable by the web user, and the steady-state credential grants exactly the
+tenant surface — this tenant's spool and fragment drop, nothing else.
+`provision_relay_main.sh` also installs a second narrow root helper
+(`joinery-relay-addr`) that applies a fleet-allocated tunnel address to the
+`jyrelay0` interface (a hosted slot's allocation is not always the `10.99.0.2`
+self-hosted default).
 
 The **Relay** admin tab (`admin_mailbox_relay`) is the dashboard: it lists each
 relay with the four provisioning checks (tunnel, spool draining, map fresh, origin
@@ -1159,6 +1227,60 @@ only the milter mode is unused. The setup/health checks retarget to the relay
 (`checkRelayTunnel`, `checkRelaySpoolDraining`, `checkRelayMapFresh`) and add a
 deployment-wide origin-hidden check (`checkOriginHidden`) that fails if the main
 box IP appears in any hosted domain's mail DNS.
+
+### Hosted relay fleet
+
+The platform operator runs a shared fleet of hardened relays as a service
+(`specs/mailbox_relay_shared_fleet.md`). A **shard** is exactly the self-hosted
+relay stack fronting many tenants; a **slot** is one tenant deployment's place
+on a shard. The trust statement is published plainly: the fleet operator stands
+at the plaintext-arrival moment for inbound transit mail and could read it
+while actively compromised — the same position any hosted MX occupies. It can
+never reach the tenant's archive, keys, drive, passwords, or sending identity
+(DKIM keys never leave the tenant's app). The exit ramp: point your MX at your
+own relay whenever you want — same stack, nothing else changes
+(`fleet_release`).
+
+**Tenant side** (any deployment): the Relay tab's *Hosted relay (fleet)* box
+takes the operator's service URL + the customer account's API key
+(`mailbox_fleet_service_url` / `mailbox_fleet_api_public_key` /
+`mailbox_fleet_api_secret_key`). `FleetClient` calls the operator's
+`/api/v1/action/mailbox/fleet_*` actions: `fleet_enroll` sends this box's
+WireGuard + pull public keys and returns the slot coordinates (per-tenant MX
+hostname, shard WireGuard endpoint + key, allocated tunnel address, pull
+account, spool subdirectory), which fold into the deployment's `MailboxRelay`
+row (`mrl_is_hosted`) — after which every relay consumer runs exactly as
+against a self-hosted relay. Hosted vs self-hosted differs only in where the
+coordinates came from. Each domain must pass a **DNS TXT ownership challenge**
+before the fleet accepts a single message for it (`fleet_claim_domain` →
+publish `_joinery-fleet-challenge.<domain>` → `fleet_verify_domain`), with
+fleet-wide uniqueness; verification writes the domain into the tenant's
+shard-side allowlist, which the map merge enforces on every subsequent sync.
+
+**Operator side** (the deployment with `mailbox_fleet_service_enabled` +
+`mailbox_fleet_mx_zone` set): the fleet service is the brain — `FleetService`
+assigns shards (least-loaded active shard with capacity), allocates tunnel
+addresses, issues and verifies domain claims, and checks entitlement (the
+`mailbox_fleet_slot` tier feature, re-checked periodically with a
+`mailbox_fleet_grace_days` grace window before suspension empties the tenant's
+shard allowlist). Every decision is effected by dispatching a `server_manager`
+job (`relay_add_tenant` / `relay_set_domains` / `relay_remove_tenant`) from the
+`FleetReconcile` scheduled task — server_manager is the hands and never knows
+what a tenant or a domain claim is. Shards are registered on the Relay tab's
+*Fleet shards* box (skeleton-only provisioning: the operator's box is not a
+tenant of its own shards). Each tenant's MX hostname
+(`t-<slug>.<mailbox_fleet_mx_zone>`) is an operator-controlled A record, so
+re-sharding a tenant or replacing a burned shard is an A-record change —
+tenants never touch DNS after setup.
+
+**Rebuild carries the spool across the wipe.** The scheduled shard rebuild
+closes port 25, flushes the Postfix queue for a bounded window, copies the
+per-tenant spools and any still-deferred queue files aside, re-runs the full
+provisioning, and restores with a validating pass (strict `<id>.seal` /
+`<id>.meta` name pattern, owning tenant's directory, correct ownership, no
+exec bits) before reopening 25 — so **no accepted message is ever lost in a
+rebuild**; mail not yet accepted waits at senders' MTAs. Self-hosted rebuilds
+use the same sequence; N=1 is the same job.
 
 ## Mailbox Reader
 

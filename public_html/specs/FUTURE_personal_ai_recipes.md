@@ -36,4 +36,4 @@ Sovereignty here means "your data stays yours," not "nothing ever leaves the net
 
 ### Recipes ≠ persistent agents
 
-A recipe is a function: trigger → gather → format → deliver → exit. A persistent agent has continuity over time, judgment over state, memory of prior runs. Keeping these distinct matters when weighing anything above. The workspace field (`rcp_workspace`) is deliberately a notepad, not a memory subsystem; see `specs/joinery_ai_memory.md` for that thread.
+A recipe is a function: trigger → gather → format → deliver → exit. A persistent agent has continuity over time, judgment over state, memory of prior runs. Keeping these distinct matters when weighing anything above. The workspace field (`rcp_workspace`) is deliberately a notepad, not a memory subsystem; the memory thread has since shipped — see `specs/implemented/joinery_ai_memory.md` (`mem_memories`, remember/recall/forget recipe tools, automatic chat context).

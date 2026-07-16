@@ -1,14 +1,15 @@
-# Cloud Drive + Office Editing — Exploratory Spec
+# Office Editing on Drive — Exploratory Spec
 
-**Status:** Sketch / thinking-out-loud. Not committed to implementation. Captures the
-architecture discussion so we can come back to it.
+**Status:** Sketch / not committed to implementation. Scope note (2026-07-16): the Drive
+layer this spec originally sketched has since been built — see
+`specs/implemented/drive_core.md` and `specs/implemented/drive_encryption.md`. This spec
+now covers **only the Office-editing engine integration on top of the built Drive**.
 
 ## Goal
 
-Stand up a Google-Drive-style file workspace where members can store files and
-**open, edit, and save** Microsoft Office documents (`.docx`, `.xlsx`, `.pptx`) in the
-browser. Target ~50% feature coverage — "basic editing" — without destroying the
-documents users bring in.
+Let members **open, edit, and save** Microsoft Office documents (`.docx`, `.xlsx`,
+`.pptx`) in the browser, inside the existing Drive workspace. Target ~50% feature
+coverage — "basic editing" — without destroying the documents users bring in.
 
 ## The core reframe
 
@@ -33,7 +34,7 @@ that already solved fidelity + round-trip, and build the parts that fit our plat
 
 | Layer | Decision | Why |
 |---|---|---|
-| File storage, folders, sharing, permissions, versioning, search, thumbnails | **Build** (platform-level) | This is our wheelhouse; we already have an S3-compatible bucket, file management, and a permissions/session model. |
+| File storage, folders, sharing, permissions, versioning | **Built** — Drive shipped 2026-07-11 (`specs/implemented/drive_core.md`) | Platform-level; this spec consumes it. Search text-extraction and Office thumbnails remain to build here. |
 | OOXML editing engine (render + edit + round-trip save) | **Borrow** (OnlyOffice or Collabora) | A decade of work already done under an OSS license. |
 | Headless format ops (text extraction for search, thumbnail/preview generation, server-side conversions) | **Borrow libraries** (PhpSpreadsheet / PHPWord / LibreOffice headless) | Cheap, no editor needed. |
 
@@ -84,26 +85,33 @@ Either is a few hundred lines of PHP plus a container to run.
 
 This is the single most important non-engineering decision and gates everything else.
 
-## The Drive layer (what we actually build)
+## The Drive layer (already built — this spec consumes it)
 
-Leverage the existing cloud storage + file handling. Sketch of the data model (follows the
-platform's Active Record pattern; field specs drive schema via `update_database`):
+Drive shipped 2026-07-11; see `specs/implemented/drive_core.md` for the authoritative
+data model. What the editor integration builds against:
 
-- **Folder** — tree of folders per owner (member or org), parent pointer, name, soft-delete.
-- **DriveFile** — a stored file: owner, folder, display name, storage key (in the
-  S3-compatible bucket), mime/type, size, current version pointer, soft-delete.
-- **FileVersion** — immutable snapshot rows so the editor's periodic saves and manual
-  saves are versioned; storage key + size + created-by + created-time. Enables history and
-  safe round-trip (we never overwrite the only copy).
-- **FileShare** — grant of a file/folder to a user (or link/role) with a permission level
-  (view / comment / edit), reusing the platform's permission model rather than inventing one.
+- **Folders + files** — `Folder` (`fol`) tree per member owner; files reuse `fil_files`
+  with `fil_fol_folder_id`; physical bytes live in the refcounted `fbb_file_blobs` layer.
+- **FileVersion** (`fvr`) — immutable snapshot rows; the editor's periodic and manual
+  saves create versions, so round-trip never overwrites the only copy.
+- **Sharing** — `FileAccessGrant` (`fga`, roles `viewer`/`editor` — there is no comment
+  role) and `FileShareLink` (`fsl`, anonymous `/s/{token}` links). Editor access maps to
+  the `editor` role.
+- **Change feed / quota** — `FileChange` (`fch`) must record editor saves; quota is the
+  `drive_storage_bytes` tier feature enforced at upload/version creation.
 
-Cross-cutting, all reusing existing platform systems:
-- **Permissions/session** — gate every load/save through `SessionControl` + the share grants.
-- **Routing** — front-controller routes for the workspace UI; a dedicated endpoint pair for
-  the editor contract (config+callback for OnlyOffice, or the WOPI endpoints for Collabora).
-- **Search** — headless text extraction (PhpSpreadsheet/PHPWord/LibreOffice headless) feeds
-  the existing search surface; no editor involved.
+**Hard constraint — encryption:** Drive folders can be client-custody E2E encrypted
+(`specs/implemented/drive_encryption.md`). The editor server necessarily reads plaintext,
+so **Office editing is offered for plaintext folders only**; encrypted files never flow
+through the editor contract. (Editable-or-encrypted is a per-folder choice — already
+recorded in the drive_encryption spec.)
+
+New build surface for this spec (all that remains):
+- **Editor host contract** — a dedicated endpoint pair (JWT config + save callback for
+  OnlyOffice, or WOPI `CheckFileInfo`/`GetFile`/`PutFile` for Collabora), gated through
+  `SessionControl` + the share grants, writing saves as new `FileVersion` rows.
+- **Search** — headless text extraction (PhpSpreadsheet/PHPWord/LibreOffice headless)
+  feeds the existing search surface; no editor involved.
 - **Thumbnails/preview** — LibreOffice headless renders preview images on upload/version.
 
 ## What "50% / basic editing" means here
@@ -129,14 +137,15 @@ Explicitly out (first pass):
 3. **Storage handoff:** does the editor pull from a signed bucket URL directly, or proxy
    through our PHP so all access stays behind our permission checks? (Leaning proxy.)
 4. **Versioning granularity:** keep every autosave callback as a version, or coalesce.
-5. **Org vs personal ownership model:** does Drive attach to members, orgs/groups, or both.
-6. **Quota/limits:** storage caps per tier; tie into the existing subscription tier system.
+
+Resolved by the Drive build (2026-07-11): ownership is member-owned (`fol_usr_user_id`);
+quota is the `drive_storage_bytes` tier feature — neither is open anymore.
 
 ## Notes for whoever picks this up
 
-- This slots onto existing platform layers (cloud storage, file handling, permissions,
-  routing, subscription tiers) — the new build is the Drive data model + the editor host
-  contract, not an editor.
+- This slots onto the built Drive (data model, permissions, versioning, quota, routing) —
+  the new build is the editor host contract plus search/thumbnail extraction, not an
+  editor and not a storage layer.
 - Keep it platform-level: a generic file workspace + Office editing capability, not a
   product-specific feature. Any single product (e.g. ScrollDaddy) is one consumer, not the
   target.

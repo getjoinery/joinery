@@ -1,10 +1,11 @@
 # Manual exercise pass — the AI email & calendar features
 
-**Status:** Active checklist. This is a hands-on pass for a human (Jeremy),
-not an implementation spec. Work through it as a user of the product; write
-findings inline under each item (rough notes are fine — they become the
-next round of specs/fixes). Move to `implemented/` when the pass is done
-and the findings are triaged.
+**Status:** Active checklist — pass not yet run as of 2026-07-16 (confirmed
+with owner: still intended, deferred by build work). This is a hands-on pass
+for a human (Jeremy), not an implementation spec. Work through it as a user
+of the product; write findings inline under each item (rough notes are fine
+— they become the next round of specs/fixes). Move to `implemented/` when
+the pass is done and the findings are triaged.
 
 **The one-sentence recap of what got built:** the platform now reads your
 incoming mail for you — scores every message for danger, files it under

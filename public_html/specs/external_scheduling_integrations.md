@@ -2,7 +2,7 @@
 
 ## Overview
 
-Companion to `specs/scheduling_system.md` (the native booking engine). That spec ships the complete self-hosted scheduling product **and the seams** that let external scheduling and calendar services plug in without rearchitecting:
+Companion to `specs/implemented/scheduling_system.md` (the native booking engine, built — see also the native flow in `plugins/bookings/`). That spec shipped the complete self-hosted scheduling product **and the seams** that let external scheduling and calendar services plug in without rearchitecting:
 
 - the `CalendarItemSource` registry (native spec, Layer 1), and
 - the `SchedulingServiceProvider` interface + registry (native spec, Layer 4), with `NativeSchedulingProvider` as the only shipped implementation.

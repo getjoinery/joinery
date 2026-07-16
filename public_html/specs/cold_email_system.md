@@ -1,5 +1,12 @@
 # Cold Email Outreach System — Spec
 
+**Status:** Idea kept on the roadmap (owner, 2026-07-16); not scheduled.
+Updated 2026-07-16 to current platform conventions (API-action endpoints,
+`tasks/` scheduled tasks, the mailbox plugin's real table names, and the
+`joinery_ai` provider layer instead of plugin-local LLM keys). The Open
+Questions at the bottom must be resolved before build — the
+compliance ones (#3, #5) are product/legal calls, not implementation details.
+
 ## Reference Inspiration
 
 > "I've been running cold email campaigns for clients for 3 years and the biggest shift I've seen isn't the tools. It's what actually gets a reply.
@@ -77,45 +84,44 @@ A message body with merge variables. At minimum: `{first_name}`, `{company}`, `{
 
 **Plugin name:** `cold_email`
 
-**Plugin directory structure:**
+**Plugin directory structure** (each `*_class.php` contains both the
+single-row class and its Multi collection class, per `docs/example_class.php`):
 ```
 plugins/cold_email/
   plugin.json
   data/
-    prospect_class.php          -- Individual prospect record
-    multi_prospect_class.php
-    campaign_class.php          -- Campaign record
-    multi_campaign_class.php
-    campaign_prospect_class.php -- Join: prospect ↔ campaign with status + generated content
-    multi_campaign_prospect_class.php
-    email_template_class.php    -- Sequence step templates
-    multi_email_template_class.php
-    scrape_page_class.php       -- One scraped page per record
-    multi_scrape_page_class.php
-    outbound_email_class.php    -- Log of sent emails + reply tracking
-    multi_outbound_email_class.php
+    prospect_class.php           -- Prospect + MultiProspect
+    campaign_class.php           -- Campaign + MultiCampaign
+    campaign_prospect_class.php  -- Join: prospect ↔ campaign with status + generated content
+    email_template_class.php     -- Sequence step templates
+    scrape_page_class.php        -- One scraped page per record
+    outbound_email_class.php     -- Log of sent emails + reply tracking
   logic/
-    prospect_logic.php
-    campaign_logic.php
-    research_logic.php          -- Orchestrates scrape → analyze → icebreaker pipeline
+    prospect_logic.php           -- CRUD + CSV import; exposes API actions
+    campaign_logic.php           -- Campaign lifecycle; exposes API actions
+    research_logic.php           -- Orchestrates scrape → analyze → icebreaker pipeline
+    scrape_status_logic.php      -- Scrape-progress polling (API action)
+    generate_icebreaker_logic.php -- On-demand regeneration for one prospect (API action)
   admin/
-    admin_prospects.php         -- Prospect list, import, scrape status
-    admin_campaigns.php         -- Campaign list, wizard
-    admin_campaign_detail.php   -- Prospect roster, queue, send log
-    admin_research.php          -- Per-prospect research view
-  ajax/
-    scrape_status.php           -- Polling endpoint for scrape progress
-    generate_icebreaker.php     -- On-demand regeneration for single prospect
+    admin_cold_email_prospects.php   -- Prospect list, import, scrape status
+    admin_cold_email_campaigns.php   -- Campaign list, wizard
+    admin_cold_email_campaign.php    -- Prospect roster, queue, send log
+    admin_cold_email_research.php    -- Per-prospect research view
   includes/
     WebScraper.php              -- HTTP fetcher + page crawler
-    ResearchAnalyzer.php        -- LLM integration for research summaries
+    ResearchAnalyzer.php        -- Research summaries via the joinery_ai provider layer
     IcebreakerGenerator.php     -- Prompt + output formatting for icebreakers
     CampaignMailer.php          -- Sending logic with throttle + reply detection
-  scheduled/
-    scrape_runner.php           -- Processes pending scrape jobs (cron)
-    campaign_sender.php         -- Sends queued emails on schedule (cron)
-  views/                        -- (empty for now — no public-facing views)
+  tasks/
+    ColdEmailScrape.json / .php  -- Processes pending scrape jobs
+    ColdEmailSender.json / .php  -- Sends queued emails on schedule
 ```
+
+All page-facing endpoints are logic actions with `_logic_descriptor()` called
+via `/api/v1` with the browser-session credential — no `/ajax/` endpoints
+(CLAUDE.md § API Endpoint Rules). Scheduled work uses the platform task system
+(`docs/scheduled_tasks.md`), declared as `tasks/*.json` + `*.php` like the
+mailbox plugin's tasks.
 
 ---
 
@@ -224,9 +230,9 @@ plugins/cold_email/
 
 After scraping is complete:
 
-1. **Aggregate content:** Concatenate all scraped page text for the prospect. Prioritize: homepage, about, services/products, blog (most recent 3 posts), case studies. Truncate total to fit LLM context window (~40k tokens safe limit with GPT-4o).
+1. **Aggregate content:** Concatenate all scraped page text for the prospect. Prioritize: homepage, about, services/products, blog (most recent 3 posts), case studies. Truncate the total to a configurable token budget that fits the selected model's context window (local models have much smaller windows than cloud ones — see the mailbox AI pipeline's digest approach for precedent).
 
-2. **Research prompt:** Send to LLM (Claude or OpenAI — operator-configurable via setting) with a structured prompt requesting:
+2. **Research prompt:** Send to the LLM through the **`joinery_ai` provider layer** (`LlmProviderFactory` — Anthropic, OpenAI-compatible, or local, with keys and models already configured there; this plugin declares `joinery_ai` as a dependency and carries no API keys of its own) with a structured prompt requesting:
    - Plain-language description of the company (2–3 sentences)
    - Who they serve (target customer)
    - 3–5 likely pain points based on the content
@@ -260,7 +266,7 @@ Email templates support:
 
 ## Sending
 
-- **Transport:** Use the platform's existing `SystemMailer` with SMTP settings already configured. Add campaign-specific override for from-name/from-email.
+- **Transport:** Use the platform's existing `EmailSender` seam. When the sending domain is a mailbox-plugin domain, send through `MailboxSender` so outbound mail is DKIM-signed and gets the outbound protections the mailbox plugin already provides. Campaign-specific override for from-name/from-email.
 - **Throttle:** Respect `cec_daily_limit` per campaign. Track daily counts in campaign state.
 - **Sending window:** Only send during `cec_send_hour_start` to `cec_send_hour_end` UTC.
 - **Sequence steps:** After step 1 is sent, schedule step 2 at `next_send_time = sent_time + cet_delay_days`. If prospect replies (detected via reply-to monitoring or manual marking), stop sequence.
@@ -274,29 +280,33 @@ Email templates support:
 Two options (operator-configurable):
 
 1. **Manual marking:** Admin marks a prospect as replied in the campaign detail UI. Simple but requires human monitoring.
-2. **Inbound email monitoring:** If the platform's self-hosted email plugin is active, watch for replies to the from-address arriving in the inbound email table (`iem_inbound_emails`). Match on `Message-ID` / `In-Reply-To` header. Automatically set `coe_replied_time` and `ccp_status = replied`.
+2. **Inbound email monitoring:** If the **mailbox plugin** is active, watch for replies to the from-address arriving in `iem_inbound_email_messages`. Match on `Message-ID` / `In-Reply-To` header. Automatically set `coe_replied_time` and `ccp_status = replied`.
 
 ---
 
 ## Admin Interface
 
-### `/admin/cold_email/prospects`
+Admin pages live in `plugins/cold_email/admin/` and are declared in the
+plugin's `plugin.json` menu section (per the Plugin Developer Guide). All
+forms via FormWriter; page JS calls the logic actions through `/api/v1`.
+
+### `/admin/admin_cold_email_prospects`
 - List all prospects with scrape/research status badges
 - Import via CSV (columns: first_name, last_name, email, company_name, website_url, job_title)
 - Add single prospect form
 - Per-row: trigger scrape, view research, add to campaign
 
-### `/admin/cold_email/campaigns`
+### `/admin/admin_cold_email_campaigns`
 - Campaign list with status, prospect count, sent count, reply count
 - Create campaign wizard: name → sending settings → add prospects → create sequence steps → review & activate
 
-### `/admin/cold_email/campaign_detail?id=N`
+### `/admin/admin_cold_email_campaign?id=N`
 - Prospect roster table: status, icebreaker preview, next send time
 - Per-row: swap icebreaker, mark replied, skip prospect
 - Send log tab: all sent emails with open/reply timestamps
 - Stats bar: sent / opened / replied / bounced counts
 
-### `/admin/cold_email/research?prospect_id=N`
+### `/admin/admin_cold_email_research?prospect_id=N`
 - Full research summary for a prospect
 - Icebreaker candidates with rank scores
 - Raw scraped pages accordion (URL + extracted text preview)
@@ -306,14 +316,13 @@ Two options (operator-configurable):
 
 ## Plugin Settings
 
-Declared in `plugin.json`:
+Declared in `plugin.json` under `settings` (factory defaults, seeded
+automatically). LLM provider, model, and API keys are **not** plugin settings —
+they come from the `joinery_ai` plugin's existing provider configuration.
 
 | Key | Default | Description |
 |---|---|---|
-| `cold_email_llm_provider` | `openai` | `openai` or `claude` |
-| `cold_email_llm_model` | `gpt-4o` | Model to use for research/icebreaker generation |
-| `cold_email_openai_api_key` | `` | API key (stored encrypted) |
-| `cold_email_anthropic_api_key` | `` | API key (stored encrypted) |
+| `cold_email_model` | `` | Optional model id override for research/icebreaker generation; blank = joinery_ai's configured default |
 | `cold_email_scrape_max_pages` | `30` | Max pages to crawl per prospect |
 | `cold_email_scrape_delay_ms` | `500` | Delay between page fetches (ms) |
 | `cold_email_respect_robots_txt` | `1` | 1 = respect, 0 = ignore |
@@ -323,10 +332,19 @@ Declared in `plugin.json`:
 
 ## Scheduled Tasks
 
-Two tasks registered in the platform's scheduled task system:
+Two tasks declared as `tasks/*.json` + `*.php` in the plugin
+(`docs/scheduled_tasks.md`):
 
-1. **`cold_email_scrape`** — Runs every 2 minutes. Picks up to 3 pending scrape jobs and processes them.
-2. **`cold_email_sender`** — Runs every 5 minutes. Sends queued emails within daily limits and sending windows.
+1. **`ColdEmailScrape`** — Runs every 2 minutes. Picks up to 3 pending scrape jobs and processes them.
+2. **`ColdEmailSender`** — Runs every 5 minutes. Sends queued emails within daily limits and sending windows.
+
+## Tests
+
+On build, a `plugins/cold_email/tests/cold_email_test.php` using the shared
+harness (`@joinery-test` header, `db` tier): merge-variable substitution,
+throttle/window math, sequence-step scheduling, unsubscribe suppression
+across campaigns, and reply-detection matching against a fixture
+`iem_inbound_email_messages` row. Scrape and LLM calls are seam-mocked.
 
 ---
 

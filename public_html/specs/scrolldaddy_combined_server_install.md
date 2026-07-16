@@ -1,8 +1,21 @@
 # ScrollDaddy Combined Server Installation
 
+**Status:** Kept on roadmap (owner, 2026-07-16); not scheduled. Updated
+2026-07-16 for the plugin rename (`plugins/scrolldaddy` → `plugins/dns_filtering`,
+settings `scrolldaddy_dns_*` → `dns_filtering_dns_*`). Note two later
+developments to reconcile at build time:
+- The plugin now supports a **secondary DNS server**
+  (`dns_filtering_dns_secondary_*` settings). A combined install configures
+  the primary only and leaves the secondary settings blank.
+- `specs/edge_routing_tier.md` proposes a Caddy edge tier that also touches
+  the "who owns 443/TLS" question for *managed* multi-node hosting. The two
+  don't conflict — this spec is for a **self-hosted single box** where Apache
+  owns 443 — but if the edge tier lands first, revisit whether the DoH proxy
+  should ride the edge instead of local mod_proxy.
+
 ## Overview
 
-Currently ScrollDaddy runs as a two-server architecture: a **web server** (Joinery PHP app in a Docker container on 23.239.11.53) and a **DNS server** (Go binary on 45.56.103.84). They share a PostgreSQL database via private network. This spec covers combining both onto a single server, analyzing what changes, and producing an installer that sets up the full stack.
+Currently ScrollDaddy runs as a two-server architecture: a **web server** (Joinery PHP app in a Docker container) and a **DNS server** (Go binary). They share a PostgreSQL database via private network. (Current production IPs live in the Server Manager dashboard and Claude memory, not this spec.) This spec covers combining both onto a single server, analyzing what changes, and producing an installer that sets up the full stack.
 
 See [scrolldaddy-deployment.md](implemented/scrolldaddy-deployment.md) for the existing two-server deployment spec.
 
@@ -146,7 +159,7 @@ No private network, no remote DB user, no `pg_hba.conf` edits for remote access.
 | `pg_hba.conf`: allow from DNS server IP | `pg_hba.conf`: localhost only (default) |
 | PostgreSQL listens on VPC interface | PostgreSQL listens on localhost only (more secure) |
 
-The `scrolldaddy_reader` user is still recommended (principle of least privilege — DNS server should not be able to write), but the `pg_hba.conf` only needs the default `local all all peer` or `host all all 127.0.0.1/32 scram-sha-256` entry.
+The `scrolldaddy_reader` user is still recommended (principle of least privilege — DNS server should not be able to write), but the `pg_hba.conf` only needs the default `local all all peer` or `host all all 127.0.0.1/32 scram-sha-256` entry. (The resolver's multi-database support, `SCD_JOINERY_DB_URLS`, is irrelevant here — a combined install serves one database.)
 
 ### 3. DNS Server Env Config
 
@@ -191,7 +204,7 @@ No need for cross-server rules on port 8053. The Go API is truly localhost-only.
 
 ### 5. DNS Server Internal URL Setting
 
-The Joinery `scrolldaddy_dns_internal_url` setting stays `http://127.0.0.1:8053` — same as it would be in a two-server setup where the web server calls the DNS API. The difference is this is now genuinely localhost, not crossing a network.
+The Joinery `dns_filtering_dns_internal_url` setting stays `http://127.0.0.1:8053` — same as it would be in a two-server setup where the web server calls the DNS API. The difference is this is now genuinely localhost, not crossing a network. The `dns_filtering_dns_secondary_*` settings stay blank (no secondary server in a combined install).
 
 ### 6. TLS Certificates
 
@@ -205,7 +218,7 @@ certbot obtains standard certs for `scrolldaddy.app` and `dns.scrolldaddy.app` v
 
 ### 7. Blocklist Downloader
 
-No change needed. `DownloadBlocklists::trigger_reload()` already calls `http://127.0.0.1:8053/reload` using the `scrolldaddy_dns_internal_url` setting. Works identically on a single server.
+No change needed. The `DownloadBlocklists` task (`plugins/dns_filtering/tasks/`) already triggers the resolver reload via the `dns_filtering_dns_internal_url` setting. Works identically on a single server (and skips the secondary-server reload when the secondary settings are blank).
 
 ### 8. Cron / Scheduled Tasks
 
@@ -309,7 +322,7 @@ After installation:
 /var/www/html/{sitename}/
 ├── config/Globalvars_site.php
 ├── public_html/                     # Joinery web root
-│   └── plugins/scrolldaddy/        # ScrollDaddy plugin
+│   └── plugins/dns_filtering/      # DNS filtering plugin (ScrollDaddy brand)
 ├── uploads/
 ├── logs/
 └── backups/
@@ -450,9 +463,9 @@ certbot --apache -d $DNS_DOMAIN --non-interactive --agree-tos
 
 # 9. Update Joinery settings
 psql -U postgres -d $DBNAME <<SQL
-  UPDATE stg_settings SET stg_value = '$DNS_DOMAIN' WHERE stg_name = 'scrolldaddy_dns_host';
-  UPDATE stg_settings SET stg_value = 'http://127.0.0.1:8053' WHERE stg_name = 'scrolldaddy_dns_internal_url';
-  UPDATE stg_settings SET stg_value = '$API_KEY' WHERE stg_name = 'scrolldaddy_dns_api_key';
+  UPDATE stg_settings SET stg_value = '$DNS_DOMAIN' WHERE stg_name = 'dns_filtering_dns_host';
+  UPDATE stg_settings SET stg_value = 'http://127.0.0.1:8053' WHERE stg_name = 'dns_filtering_dns_internal_url';
+  UPDATE stg_settings SET stg_value = '$API_KEY' WHERE stg_name = 'dns_filtering_dns_api_key';
 SQL
 
 # 10. Start

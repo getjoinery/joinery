@@ -69,24 +69,18 @@ For reference, these Ghost features already exist in Joinery:
 
 ---
 
-### 6. Per-Post SEO Fields
-**Ghost:** Each post has dedicated fields for SEO title, SEO description, and a social sharing (OG) image distinct from the featured image.
-**Joinery:** No dedicated SEO meta fields on posts or pages; relies on content defaults.
-**Notes:** Requires new columns on `pst_posts` (e.g. `pst_seo_title`, `pst_seo_description`, `pst_og_fil_file_id`) and theme-layer `<meta>` tag rendering.
+### 6. ~~Per-Post SEO Fields~~ — IMPLEMENTED
+**Joinery:** Implemented via the centralized SEO metadata system — per-page/per-entity SEO title, description, and social tags, admin-editable in one table with one UI. See `specs/implemented/seo_metadata_unification.md` and `docs/seo_metadata.md`.
 
 ---
 
-### 7. Structured Data / Schema.org Markup
-**Ghost:** Posts automatically render `Article` structured data (JSON-LD) for rich search results.
-**Joinery:** Not implemented.
-**Notes:** Can be added to the post view template without any database changes. Requires pulling author, publish date, image, and description into a JSON-LD block.
+### 7. ~~Structured Data / Schema.org & OG Markup~~ — IMPLEMENTED
+**Joinery:** Open Graph / Twitter Card / canonical tags implemented centrally. See `specs/implemented/open_graph_meta_tags.md`, `specs/implemented/canonical_urls.md`, and `docs/seo_metadata.md`. (If any entity type still lacks JSON-LD `Article` markup specifically, that's a small delta on the existing system, not a new build.)
 
 ---
 
-### 8. Per-Post Excerpt and Custom OG Image
-**Ghost:** Each post has a custom excerpt (displayed in listings/feeds) and a separate social sharing image for Open Graph/Twitter Card previews.
-**Joinery:** `pst_short_description` serves as the excerpt but there is no per-post OG image field.
-**Notes:** Partially covered by `pst_short_description`. Needs an OG image field and theme-layer `<meta property="og:image">` rendering.
+### 8. ~~Per-Post Excerpt and Custom OG Image~~ — IMPLEMENTED
+**Joinery:** `pst_short_description` covers the excerpt; the centralized SEO metadata system covers per-page OG/social image and description (see #6/#7).
 
 ---
 
@@ -163,17 +157,15 @@ For reference, these Ghost features already exist in Joinery:
 
 ---
 
-### 18. Two-Factor Authentication for Staff
-**Ghost:** 2FA is enabled by default on all staff accounts, triggered on new/unrecognized devices.
-**Joinery:** No 2FA system found.
-**Notes:** Security feature. Could integrate TOTP (Google Authenticator-compatible) or email-based OTP.
+### 18. ~~Two-Factor Authentication for Staff~~ — IMPLEMENTED
+**Joinery:** TOTP two-factor auth implemented (`specs/implemented/totp_two_factor_auth.md`), plus passkeys and the account security-levels doctrine went well beyond it (`specs/implemented/passkeys_core.md`, `docs/account_security.md`).
 
 ---
 
-### 19. Full Site Export / Backup
+### 19. Full Site Export / Backup — PARTIAL
 **Ghost:** Admin can export all content (posts, pages, members, settings) as a JSON archive.
-**Joinery:** No content export tool found.
-**Notes:** Useful for backup and migration. Could export posts, pages, members, and settings as JSON or CSV.
+**Joinery:** Operator-level full-site clone exists (`utils/clone_export.php`, encrypted DB/uploads/themes); a portable *content*-level export is the deferred `specs/content_pack_feature.md`.
+**Notes:** Remaining gap is admin-facing selective export (JSON/CSV), not backup.
 
 ---
 
@@ -207,17 +199,14 @@ For reference, these Ghost features already exist in Joinery:
 
 ---
 
-### 24. Outgoing Webhooks (Content Events)
+### 24. Outgoing Webhooks (Content Events) — PARTIAL
 **Ghost:** Operators can configure outgoing webhook URLs to fire on events like `post.published`, `member.created`, `member.updated`.
-**Joinery:** Only inbound webhooks exist (Stripe, PayPal, Mailgun). No outgoing event webhooks.
-**Notes:** Would enable Zapier/n8n-style automation. Requires an outgoing webhook configuration UI and an event dispatch system hooked into the post save and member registration flows.
+**Joinery:** Notification hooks shipped (`specs/implemented/notification_hooks.md`) covering part of this; a general outgoing-webhook system (HMAC signing, retries, subscription UI) remains open — tracked in `specs/platform_gap_analysis.md`.
 
 ---
 
-### 25. Newsletter Signup Embed / Widget
-**Ghost:** A signup form widget can be embedded on any page or external site to capture newsletter subscribers.
-**Joinery:** No standalone embeddable subscriber capture widget found.
-**Notes:** Could be a simple iframe or JS snippet pointing to an existing registration endpoint.
+### 25. ~~Newsletter Signup Embed / Widget~~ — IMPLEMENTED
+**Joinery:** Implemented as the newsletter signup component (`specs/implemented/newsletter_signup_component.md`).
 
 ---
 
@@ -228,10 +217,8 @@ For reference, these Ghost features already exist in Joinery:
 
 ---
 
-### 27. Cloud Storage Adapter
-**Ghost:** Supports Cloudinary, Amazon S3, and Cloudflare as storage backends for uploaded media.
-**Joinery:** Local filesystem only.
-**Notes:** Relevant if the platform needs to scale beyond a single server or serve media via CDN.
+### 27. ~~Cloud Storage Adapter~~ — IMPLEMENTED
+**Joinery:** S3-compatible cloud bucket for uploaded files, with offload engine and signed URLs for private files. See `docs/cloud_storage.md` and `docs/file_signed_urls.md`.
 
 ---
 
@@ -244,18 +231,17 @@ For reference, these Ghost features already exist in Joinery:
 
 ## Summary of Biggest Gaps
 
+*(Updated 2026-07-16: implemented items struck — #1 tier gating, #6/#7/#8 SEO/OG,
+#18 2FA, #25 signup widget, #27 cloud storage; #24 partial via notification hooks.)*
+
 | # | Feature | Impact | Complexity |
 |---|---|---|---|
-| 1 | Gated/paywalled content | High | Medium |
 | 5 | Full-text post search for readers | High | Low |
-| 6 | Per-post SEO fields (title, description, OG image) | High | Low |
 | 3 | Email audience segmentation by tier/label | High | Medium |
 | 4 | Member import/export (CSV) | Medium | Low |
 | 17 | Granular author roles | Medium | Medium |
-| 24 | Outgoing webhooks (content/member events) | Medium | Medium |
+| 24 | Outgoing webhooks — remaining general system (partial) | Medium | Medium |
 | 14 | Per-post performance analytics | Medium | Medium |
 | 21 | Tag archive pages | Medium | Low |
 | 22 | Author archive pages | Medium | Low |
 | 2 | Email-only posts | Medium | Low |
-| 7 | Structured data / schema.org markup | Medium | Low |
-| 18 | Two-factor authentication for staff | Medium | High |

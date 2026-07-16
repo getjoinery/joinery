@@ -1,12 +1,18 @@
 # Native Booking Flow — Bookings Plugin
 
+**Status: implemented** (2026-07; commits `d515c357`, `683ea89f`, `0498be9c`). The
+`plugins/bookings/` plugin ships every artifact below — provider seam
+(`SchedulingServiceProvider`/`NativeSchedulingProvider`), `BookingItemSource`,
+public `/book/{slug}` flow, lifecycle logic, `BookingEmailsTask`, admin CRUD,
+profile pages, and `docs/overview.md`.
+
 ## Overview
 
-Booking is a feature layered on the **core personal calendar** (`specs/scheduling_system.md`): it publishes a subject's availability (the busy projection) and writes confirmed bookings back onto the calendar as items. A calendar with booking features, not a booking system with a calendar view.
+Booking is a feature layered on the **core personal calendar** (`specs/implemented/scheduling_system.md`): it publishes a subject's availability (the busy projection) and writes confirmed bookings back onto the calendar as items. A calendar with booking features, not a booking system with a calendar view.
 
 This spec covers everything booking-specific — booking types, the public booking page, the booking lifecycle (confirm / cancel / reschedule / remind), intake questions, paid bookings — plus a pluggable **scheduling-provider seam** so external services can slot in later. It is the "usable MVP" layer that sits on top of the core scheduling engine.
 
-**Depends on `specs/scheduling_system.md`**, which provides:
+**Depends on `specs/implemented/scheduling_system.md`**, which provides:
 - `CalendarSubject` (subject identity) and the schedule data model (`sch_schedules` / `scw_schedule_windows` / `sco_schedule_overrides`).
 - `SlotGenerator` (availability computation) and the availability editor.
 - The `CalendarItemSource` registry + the busy projection (the single upstream contract bookings both reads — for availability — and writes to — via `BookingItemSource`).

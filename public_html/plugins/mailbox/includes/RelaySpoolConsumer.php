@@ -23,7 +23,12 @@
  * Degradation is safe by construction: relay down → senders' MTAs retry; tunnel
  * down → the relay keeps spooling until the next successful pull.
  *
- * @version 1.1
+ * The pull runs over the deployment's RESTRICTED TENANT ACCOUNT on the relay
+ * (specs/mailbox_relay_shared_fleet.md): the rsync is pinned to this tenant's
+ * own spool subdirectory and the ack is the tenant shell's joinery-ack verb —
+ * ids only, no paths, no root.
+ *
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySsh.php'));
@@ -59,7 +64,7 @@ class RelaySpoolConsumer {
 		if (RelaySsh::host($this->relay) === '') {
 			return array('status' => 'skipped', 'message' => 'relay has no tunnel host yet');
 		}
-		$spool_path = rtrim((string)$this->relay->get('mrl_spool_path') ?: '/var/spool/joinery-relay', '/');
+		$spool_path = $this->relay->spoolPath();
 
 		$stage = $this->stageDir();
 		if ($stage === null) {
@@ -257,30 +262,30 @@ class RelaySpoolConsumer {
 
 	/**
 	 * Delete the durably-stored entries on the relay — the ack. Batched into one
-	 * ssh round trip. Returns the count acked.
+	 * ssh round trip via the tenant shell's joinery-ack verb (ids only; the
+	 * shell resolves them inside this tenant's spool and rejects anything with a
+	 * path separator). Returns the count acked.
 	 */
 	private function ack(string $spool_path, array $spool_ids): int {
 		if (empty($spool_ids)) {
 			return 0;
 		}
-		$targets = array();
+		$ids = array();
 		foreach ($spool_ids as $id) {
 			// spool ids are our own <unixnano>-<hex>; keep only safe chars defensively.
 			$safe = preg_replace('/[^A-Za-z0-9._-]/', '', $id);
-			if ($safe === '') { continue; }
-			$targets[] = $spool_path . '/' . $safe . '.seal';
-			$targets[] = $spool_path . '/' . $safe . '.meta';
+			if ($safe !== '') { $ids[] = $safe; }
 		}
-		if (empty($targets)) {
+		if (empty($ids)) {
 			return 0;
 		}
-		$remote_cmd = 'rm -f ' . implode(' ', array_map('escapeshellarg', $targets));
+		$remote_cmd = 'joinery-ack ' . implode(' ', $ids);
 		list($code, $out) = RelaySsh::run(RelaySsh::sshCommand($this->relay, $remote_cmd));
 		if ($code !== 0) {
-			error_log('RelaySpoolConsumer: ack delete failed: ' . $out);
+			error_log('RelaySpoolConsumer: ack failed: ' . $out);
 			return 0;
 		}
-		return count($spool_ids);
+		return count($ids);
 	}
 
 	private function stageDir(): ?string {

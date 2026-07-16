@@ -220,14 +220,17 @@ try {
 	// ---- app display mode -----------------------------------------------------
 	section('App display mode: chrome-less bridged session, normal traffic unaffected');
 
+	// Chrome markers vary by theme (getjoinery: site-nav/site-footer;
+	// jy-ui themes: jy-site-header/jy-site-footer) — match any of them.
+	$chrome_regex = '/class="(?:jy-)?site-(?:nav|header|footer)[" ]/';
+
 	$res = web_request('/profile', $jar1, true);
 	check($res['status'] === 200, 'bridged session loads /profile', 'status ' . $res['status']);
 	check(strpos($res['body'], 'jy-app-mode') !== false, 'app-mode body class hook present');
-	check(strpos($res['body'], 'class="site-nav"') === false, 'site nav chrome absent');
-	check(strpos($res['body'], 'class="site-footer"') === false, 'site footer chrome absent');
+	check(!preg_match($chrome_regex, $res['body']), 'site nav/footer chrome absent');
 
 	$res = web_request('/');
-	check(strpos($res['body'], 'class="site-nav"') !== false, 'anonymous page keeps site chrome');
+	check((bool)preg_match($chrome_regex, $res['body']), 'anonymous page keeps site chrome');
 	check(strpos($res['body'], 'jy-app-mode') === false, 'anonymous page has no app-mode hook');
 
 	// ---- lifetime coupling -----------------------------------------------------

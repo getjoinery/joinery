@@ -1,5 +1,14 @@
 # Multi-Distro Install Refactor
 
+**Status: deferred** (owner, 2026-07-16) — still a goal (bare-metal installs
+on any mainstream distro matter for the self-host story), but not scheduled;
+Docker-on-Ubuntu remains the supported production model in the meantime. The
+Open Questions at the bottom (PHP-version pinning source, PostgreSQL major
+pinning, certbot-on-RHEL, Alpine/musl audit) resolve at build time. Note the
+install scripts have kept evolving since this was written — re-verify the
+line-level refactor targets against the current `install_tools/` before
+starting.
+
 ## Goal
 
 Refactor the install scripts (`install.sh`, `_site_init.sh`, `build_dev_from_source.sh`, `fix_permissions.sh`, `Dockerfile.base`, `Dockerfile.template`) so that a single codebase can install and run Joinery on any mainstream Linux distribution, with minimal per-distro branching.

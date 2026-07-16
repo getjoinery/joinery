@@ -89,6 +89,63 @@ function admin_mailbox_relay_logic(array $input): LogicResult {
 			$flash($result['message'], $result['title']);
 			return LogicResult::redirect($self_url);
 		}
+
+		// --- hosted fleet (tenant side): configure, enroll, claim, verify, release
+		if ($action === 'fleet_config') {
+			admin_mailbox_relay_write_setting('mailbox_fleet_service_url',
+				trim((string)($input['mailbox_fleet_service_url'] ?? '')));
+			admin_mailbox_relay_write_setting('mailbox_fleet_api_public_key',
+				trim((string)($input['mailbox_fleet_api_public_key'] ?? '')));
+			$secret = trim((string)($input['mailbox_fleet_api_secret_key'] ?? ''));
+			if ($secret !== '') { // blank keeps the stored secret
+				admin_mailbox_relay_write_setting('mailbox_fleet_api_secret_key', $secret);
+			}
+			$flash('Fleet service connection saved.');
+			return LogicResult::redirect($self_url);
+		}
+
+		if (in_array($action, array('fleet_enroll', 'fleet_refresh', 'fleet_claim', 'fleet_verify', 'fleet_release'), true)) {
+			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetClient.php'));
+			$client = new FleetClient();
+			try {
+				switch ($action) {
+					case 'fleet_enroll':
+						$data = $client->enroll();
+						$flash('Enrolled — slot ' . htmlspecialchars((string)($data['slug'] ?? ''))
+							. ' (' . htmlspecialchars((string)($data['status'] ?? '')) . '). '
+							. 'Point your domains\' MX at ' . htmlspecialchars((string)($data['mx_hostname'] ?? '')) . '.');
+						break;
+					case 'fleet_refresh':
+						$client->status();
+						$flash('Fleet slot refreshed.');
+						break;
+					case 'fleet_claim':
+						$data = $client->claimDomain(trim((string)($input['fleet_domain'] ?? '')));
+						$flash('Domain claimed. Create a TXT record at ' . htmlspecialchars((string)($data['txt_host'] ?? ''))
+							. ' with the value shown in the claims table, then click Verify.');
+						break;
+					case 'fleet_verify':
+						$data = $client->verifyDomain(intval($input['claim_id'] ?? 0));
+						$flash((string)($data['message'] ?? 'Verification ran.'),
+							!empty($data['verified']) ? 'Verified' : 'Not verified yet');
+						break;
+					case 'fleet_release':
+						$data = $client->release();
+						$flash((string)($data['message'] ?? 'Slot released.'));
+						break;
+				}
+			} catch (\Throwable $e) {
+				$flash($e->getMessage(), 'Fleet service error');
+			}
+			return LogicResult::redirect($self_url);
+		}
+
+		// --- fleet shards (operator side): register a shard + provision skeleton
+		if ($action === 'provision_shard' && $server_manager_active) {
+			$result = admin_mailbox_relay_provision_shard($input, $session);
+			$flash($result['message'], $result['title']);
+			return LogicResult::redirect($self_url);
+		}
 	}
 
 	// --- list view -----------------------------------------------------------
@@ -122,6 +179,44 @@ function admin_mailbox_relay_logic(array $input): LogicResult {
 	$outbound_mode = (strtolower(trim((string)$settings->get_setting('mailbox_relay_outbound_mode'))) === 'smarthost')
 		? 'smarthost' : 'provider';
 
+	// --- hosted fleet (tenant side): live slot state when configured ----------
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetClient.php'));
+	$fleet_client = new FleetClient();
+	$fleet_configured = $fleet_client->configured();
+	$fleet_status = null;
+	$fleet_error = '';
+	if ($fleet_configured) {
+		// status() folds fresh coordinates into the relay row — intentional
+		// server-side reconciliation on a GET view, like job result processing.
+		SystemBase::$allow_get_mutation = true;
+		try {
+			$fleet_status = $fleet_client->status();
+		} catch (\Throwable $e) {
+			$fleet_error = $e->getMessage();
+		} finally {
+			SystemBase::$allow_get_mutation = false;
+		}
+	}
+
+	// --- fleet shards (operator side) ------------------------------------------
+	$fleet_service_on = ((string)$settings->get_setting('mailbox_fleet_service_enabled') === '1');
+	$fleet_shards = array();
+	if ($fleet_service_on) {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetService.php'));
+		$shard_multi = new MultiMailboxFleetShard(array('deleted' => false));
+		$shard_multi->load();
+		// Shard-row sync from node facts is reconciliation on a GET view.
+		SystemBase::$allow_get_mutation = true;
+		try {
+			foreach ($shard_multi as $shard) {
+				admin_mailbox_relay_sync_shard_from_node($shard);
+				$fleet_shards[] = array('model' => $shard, 'slots' => $shard->slotCount());
+			}
+		} finally {
+			SystemBase::$allow_get_mutation = false;
+		}
+	}
+
 	return LogicResult::render(array(
 		'relays'                => $relays,
 		'nodes'                 => $nodes,
@@ -129,9 +224,106 @@ function admin_mailbox_relay_logic(array $input): LogicResult {
 		'main_wg_public_key'    => (string)$settings->get_setting('mailbox_relay_wg_public_key'),
 		'has_active_relay'      => ($active !== null),
 		'outbound_mode'         => $outbound_mode,
+		'fleet_configured'      => $fleet_configured,
+		'fleet_service_url'     => (string)$settings->get_setting('mailbox_fleet_service_url'),
+		'fleet_api_public_key'  => (string)$settings->get_setting('mailbox_fleet_api_public_key'),
+		'fleet_secret_set'      => trim((string)$settings->get_setting('mailbox_fleet_api_secret_key')) !== '',
+		'fleet_status'          => $fleet_status,
+		'fleet_error'           => $fleet_error,
+		'fleet_service_on'      => $fleet_service_on,
+		'fleet_shards'          => $fleet_shards,
 		'session'               => $session,
 		'settings'              => $settings,
 	));
+}
+
+/**
+ * Register a fleet shard: create/refresh the MailboxFleetShard row and dispatch
+ * the skeleton-only provisioning job against its managed node (the operator's
+ * deployment is not a tenant of its own shards).
+ *
+ * @return array{message:string,title:string}
+ */
+function admin_mailbox_relay_provision_shard(array $input, $session): array {
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetService.php'));
+	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
+	require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+
+	$node_id = intval($input['shard_node_id'] ?? 0);
+	$hostname = trim((string)($input['shard_hostname'] ?? ''));
+	$capacity = max(1, intval($input['shard_capacity'] ?? 25));
+	if ($node_id <= 0 || $hostname === '' || strpos($hostname, '.') === false) {
+		return array('title' => 'Cannot provision shard', 'message' => 'Select a node and give the shard a mail hostname (FQDN).');
+	}
+	try {
+		$node = new ManagedNode($node_id, TRUE);
+	} catch (\Throwable $e) {
+		return array('title' => 'Cannot provision shard', 'message' => 'That managed node no longer exists.');
+	}
+
+	// One shard row per node.
+	$existing = new MultiMailboxFleetShard(array('node_id' => $node_id, 'deleted' => false));
+	$existing->load();
+	$shard = null;
+	foreach ($existing as $row) { $shard = $row; break; }
+	if ($shard === null) {
+		$shard = new MailboxFleetShard(NULL);
+		$shard->set('mfs_mgn_managed_node_id', $node_id);
+	}
+	$shard->set('mfs_name', (string)$node->get('mgn_name'));
+	$shard->set('mfs_hostname', substr($hostname, 0, 255));
+	$shard->set('mfs_capacity', $capacity);
+	$shard->save();
+
+	$params = array('mail_hostname' => $hostname, 'skeleton_only' => true);
+	$steps = JobCommandBuilder::build_provision_relay($node, $params);
+	ManagementJob::createJob($node->key, 'provision_relay', $steps, $params, $session->get_user_id());
+
+	return array('title' => 'Shard job queued',
+		'message' => 'Skeleton provisioning queued on ' . $node->get('mgn_name')
+			. '. Tenants land on it through fleet enrollment once it reports ready.');
+}
+
+/**
+ * Keep the shard row's connection facts (public IP, WireGuard endpoint + key)
+ * in step with what the provisioning job recorded on the managed node.
+ */
+function admin_mailbox_relay_sync_shard_from_node($shard): void {
+	$node_id = intval($shard->get('mfs_mgn_managed_node_id'));
+	if ($node_id <= 0) {
+		return;
+	}
+	try {
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare(
+			"SELECT mgn_wg_public_key, mgn_wg_endpoint FROM mgn_managed_nodes
+			  WHERE mgn_managed_node_id = ? LIMIT 1");
+		$stmt->execute(array($node_id));
+		$row = $stmt->fetch(PDO::FETCH_ASSOC);
+		if (!$row) {
+			return;
+		}
+		$endpoint = trim((string)$row['mgn_wg_endpoint']);
+		$pubkey = trim((string)$row['mgn_wg_public_key']);
+		$public_ip = ($endpoint !== '' && strpos($endpoint, ':') !== false)
+			? substr($endpoint, 0, strrpos($endpoint, ':')) : '';
+		$dirty = false;
+		if ($pubkey !== '' && $pubkey !== (string)$shard->get('mfs_wg_public_key')) {
+			$shard->set('mfs_wg_public_key', $pubkey); $dirty = true;
+		}
+		if ($endpoint !== '' && $endpoint !== (string)$shard->get('mfs_wg_endpoint')) {
+			$shard->set('mfs_wg_endpoint', $endpoint); $dirty = true;
+		}
+		if ($public_ip !== '' && $public_ip !== (string)$shard->get('mfs_public_ip')) {
+			$shard->set('mfs_public_ip', $public_ip); $dirty = true;
+		}
+		if ($dirty) {
+			$shard->save();
+		}
+	} catch (\Throwable $e) {
+		// Best-effort sync; the shard list still renders.
+	}
 }
 
 /**

@@ -56,7 +56,11 @@ func writeDurable(tmpDir, finalPath string, data []byte) error {
 		os.Remove(tmpName)
 		return err
 	}
-	if err := f.Chmod(0o600); err != nil {
+	// 0640, not 0600: the spool directory is setgid to the owning tenant's
+	// group, so committed entries inherit that group and the tenant's pull
+	// account can read them. Other tenants hold no membership — the directory's
+	// 2770 mode is the isolation boundary.
+	if err := f.Chmod(0o640); err != nil {
 		f.Close()
 		os.Remove(tmpName)
 		return err

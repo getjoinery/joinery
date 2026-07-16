@@ -8,7 +8,14 @@
  * centralises the connection flags (batch mode, accept-new host key, timeout,
  * port, identity file, login user) so the two consumers can never drift.
  *
- * @version 1.1
+ * The login is the deployment's RESTRICTED TENANT ACCOUNT (jt-<slug>, locked to
+ * the joinery-tenant-shell forced command on the relay) — never root. What the
+ * account can do is exactly the tenant surface: rsync pull of its own spool,
+ * rsync push into its own fragment drop area, joinery-ack, joinery-merge,
+ * joinery-ping (specs/mailbox_relay_shared_fleet.md § Multi-tenancy on a shard).
+ *
+ * @version 1.2 - login derives from the relay row's tenant identity (pullUser);
+ *                the root default is gone
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
@@ -49,7 +56,7 @@ class RelaySsh {
 	}
 
 	public static function user(MailboxRelay $relay): string {
-		return trim((string)$relay->get('mrl_ssh_user')) ?: 'root';
+		return $relay->pullUser();
 	}
 
 	/**

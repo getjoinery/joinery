@@ -27,16 +27,20 @@ mode) and a `client_app` id + minimum-version entry configured for it.
 ### App-context web polish
 
 - The cookie-consent banner greets every fresh install inside app-context
-  webviews. Decide whether app-mode sessions should suppress it (the app is
-  a signed-in, first-party surface) and implement accordingly.
+  webviews. **DECIDED (owner, 2026-07-16): suppress it for app-mode
+  sessions** — the app is a signed-in, first-party surface. Implement the
+  suppression (no code exists yet; gate on the app display mode the
+  platform already detects, see `docs/mobile_apps.md`).
 - Sweep the `/profile` surface in app display mode for anything else that
   reads wrong inside an app (marketing prompts, links that assume site
   chrome).
 
 ### Signing & devices
 
-- One-time Apple ID sign-in in Xcode on the Mac mini (team `J634NTDX3D`);
-  distribution certificate and provisioning via automatic signing.
+- One-time Apple ID sign-in in Xcode on the Mac mini. The team
+  (`DEVELOPMENT_TEAM: J634NTDX3D`) and automatic signing are already
+  configured in `ios/joinery-member-ios/project.yml`; only the interactive
+  sign-in ceremony remains.
 - Register a physical iPhone for the device gate.
 
 ### App Store Connect

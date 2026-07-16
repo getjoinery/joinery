@@ -1,6 +1,14 @@
 ---
 # Content Pack Feature
 
+**Status: deferred** (owner, 2026-07-16) — kept on the roadmap; other work
+took priority. Two facts to reconcile at build time: the original triggering
+use case (preserving getjoinery content through the site pivot) was since
+handled by `utils/seed_getjoinery_content.php` + `utils/clone_export.php`
+(full-site encrypted clone — heavier and different in kind from a portable
+content pack, so this spec is not superseded by it); and the spec's own note
+stands that packs get more valuable as the page/post system matures.
+
 ## Problem
 
 Joinery's "content" lives in two places: theme files (filesystem) and DB rows (settings, pages,

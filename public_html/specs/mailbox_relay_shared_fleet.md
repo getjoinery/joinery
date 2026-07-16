@@ -1,10 +1,13 @@
 # Mailbox — Shared Relay Fleet (Hosted Fortress Ingest)
 
-**Status:** Draft / awaiting implementation
-**Version:** 1.1 — tenancy-native design: the relay stack is multi-tenant at
-every layer with self-hosted as the N=1 case; map sync becomes fragment push +
-shard-side merge, named as the domain-claim enforcement point; rebuild carries
-the spool across the wipe; relay spam scoring is stateless (no Bayes).
+**Status:** Built — code complete and validated; live verification needs a real
+shard VPS plus a second tenant deployment (dev is colocated, single deployment).
+**Version:** 1.2 — implementation landed: open items resolved during the build
+are marked DECIDED below. 1.1 — tenancy-native design: the relay stack is
+multi-tenant at every layer with self-hosted as the N=1 case; map sync becomes
+fragment push + shard-side merge, named as the domain-claim enforcement point;
+rebuild carries the spool across the wipe; relay spam scoring is stateless (no
+Bayes).
 **Builds on:** `specs/implemented/mailbox_hardened_ingest_relay.md` (the relay
 stack this fleet runs), `specs/implemented/mailbox_relay_inbound_only.md` (**hard
 dependency** — the fleet exists only in inbound-only mode; a shared box that
@@ -55,8 +58,9 @@ Named mitigations, all policy-visible:
   shard's tenant list. Shard size is a dial (capacity/blast-radius tradeoff),
   not a redesign.
 - **Scheduled rebuild as fleet policy.** The relay spec's routine in-place
-  rebuild runs fleet-wide on a published cadence: persistence on a shard has
-  a shelf life, and an attacker must re-win a near-codeless box repeatedly.
+  rebuild runs fleet-wide on a published cadence (**weekly** — decided
+  2026-07-16): persistence on a shard has a shelf life of at most a week,
+  and an attacker must re-win a near-codeless box repeatedly.
 - **Metadata honesty.** The operator necessarily sees envelope metadata
   (who's mailing whom) for all fleet tenants — inherent to operating any MX,
   stated in the security model, never minimized.
@@ -300,28 +304,41 @@ Current-state only, per docs rules:
 
 ## Open Items to Confirm During Implementation
 
-- **Forward-path sending from shards:** direct from shard IP (simplest; PTR
-  and SPF for the forwarding subdomain name the shard) vs. an operator-owned
-  provider account for forwards only (keeps shard IPs out of the sending
-  business entirely but rests an operator API key on the shard — bounded to
-  the forwarding subdomain). Decide once, fleet-wide.
-- **Merge-unit trigger mechanism:** SSH forced-command on fragment push
-  (merge runs synchronously, tenant gets the validation verdict in-band) vs.
-  a path watch/timer (simpler account setup, verdict reported via the setup
-  checks). Either way it stays a triggered script, not a resident daemon.
-- **Shard sizing and assignment policy** (tenants per shard; whether
-  Fortress-heavy tenants are spread or packed).
-- **Spool-directory quota per tenant** (a tenant that stops pulling must not
-  fill a shard's disk for everyone).
-- **Entitlement re-check cadence and grace-window length** on lapse.
+- **Forward-path sending from shards — DECIDED: direct from shard IP.** The
+  sealer's existing re-injection through the shard's own Postfix stands
+  (per-tenant throttled by the shard-policy forward limit); PTR and SPF for
+  each forwarding subdomain name the shard. No operator provider key rests on
+  any shard.
+- **Merge-unit trigger mechanism — DECIDED: SSH forced-command verb.** The
+  tenant shell's `joinery-merge` verb triggers the merge (root, via a narrow
+  sudoers rule on `relay-sealer merge-maps`) and returns THIS tenant's verdict
+  in-band, so a rejected fragment surfaces in the same sync call that pushed
+  it. A triggered script, not a resident daemon.
+- **Shard sizing and assignment policy — DECIDED: least-loaded with a
+  per-shard capacity dial.** Enrollment assigns the least-loaded active shard
+  with free capacity (`mfs_capacity`, default 25); spreading vs packing
+  Fortress-heavy tenants is exercised through per-shard capacity, not a
+  separate mechanism.
+- **Spool-directory quota per tenant — DECIDED: shard-policy limits.json.**
+  Root-owned `tenants/<slug>/limits.json` (never tenant-pushed) carries the
+  spool quota (fleet default 512 MiB / 5000 entries; unlimited on self-hosted)
+  and the forward rate limit (fleet default 200/hour); the sealer temp-fails
+  over quota so senders queue instead of one tenant filling the shard's disk.
+- **Entitlement re-check cadence and grace-window length — DECIDED: every
+  FleetReconcile cron pass, `mailbox_fleet_grace_days` (default 14).** A lapse
+  starts the window; past it the slot suspends (allowlist emptied — the merge
+  drops its domains on the next pass); re-subscribing inside or after the
+  window reactivates automatically.
 - **Fleet service API location — DECIDED: standalone.** It lives in the
   mailbox plugin and does anything only on the operator's own deployment,
   built from what the platform already has: `/api/v1` key auth for the
   customer account, tier gating for entitlement, server_manager for the
-  shards. The hosted-product drafts
-  (`specs/automated_hosting_provisioning_setup.md`,
-  `specs/plugin_builder_hosted_product.md`) are not dependencies — if that
-  machinery is ever built, it calls this enrollment surface rather than
-  replacing it, so nothing here is throwaway.
-- **Published rebuild cadence** (weekly vs monthly) — a marketing-visible
-  security property; pick the number the ops budget can actually honor.
+  shards. The hosted-provisioning machinery
+  (`specs/automated_hosting_provisioning_setup.md`) is not a dependency —
+  if that machinery is ever activated, it calls this enrollment surface
+  rather than replacing it, so nothing here is throwaway.
+- **Published rebuild cadence — DECIDED: weekly** (owner, 2026-07-16). A
+  marketing-visible security property: persistence on a shard has a
+  maximum lifetime of one week. Revisit only if ops cost proves it
+  unsustainable — loosening the published number later is a downgrade
+  customers can see, so weekly ships only because we can honor it.

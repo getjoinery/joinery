@@ -1213,13 +1213,14 @@ class SessionControl{
 					$_SERVER['REQUEST_URI'] ?? ''
 				));
 			}
+			$request_uri = $_SERVER['REQUEST_URI'] ?? '';
 			if (count($_POST)) {
 				$query_string = http_build_query($_POST);
 			} else {
-				$query_string = parse_url($_SERVER['REQUEST_URI'], PHP_URL_QUERY);
+				$query_string = parse_url($request_uri, PHP_URL_QUERY);
 			}
 			$this->set_return(
-				parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) . '?' . $query_string);
+				parse_url($request_uri, PHP_URL_PATH) . '?' . $query_string);
 
 			//REDIRECT TO THE LOGIN PAGE
 			if($msgtext) {

@@ -11,8 +11,11 @@ then delete `_logic_api()` in one sweep. Formerly sub-piece 7d of
 
 ## Problem
 
-Two metadata companions coexist. As of 2026-07-09, 63 logic files define
-`_logic_api()` and only 18 define `_logic_descriptor()` — a ~45-file gap.
+Two metadata companions coexist. As of 2026-07-16, 104 logic files define
+`_logic_api()` and 83 define `_logic_descriptor()` — 85 files have
+`_logic_api()` with no descriptor. (Note: the gap has *grown* since the
+2026-07-09 snapshot of ~45, because the logic estate keeps growing; the
+inventory grep below is the source of truth, not any snapshot.)
 Legacy-only actions get no boundary validation and expose no input schema in
 discovery, and every file carrying both companions is duplicated metadata
 waiting to drift. The forward rule (CLAUDE.md, docs/api.md) already points new
@@ -20,7 +23,7 @@ code at descriptors, so the estate stops growing — this spec drains it.
 
 ## The work
 
-### 1 — Author descriptors (~45 files, the bulk)
+### 1 — Author descriptors (~85 files, the bulk)
 
 For each logic file with `_logic_api()` and no `_logic_descriptor()`: read the
 logic, write an honest descriptor — description, `requires_session` (and any

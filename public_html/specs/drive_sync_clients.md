@@ -1,8 +1,8 @@
 # Drive Sync Clients — Full Specification
 
-**Status:** Specced — ready for build planning. Open decisions for the owner are
-collected in [§ Decisions needed from the owner](#decisions-needed-from-the-owner);
-everything else is resolved by this spec. Supersedes the earlier skeleton.
+**Status:** Specced — ready for build planning. All decisions are resolved
+(walked through with the owner 2026-07-16); deliberately-deferred items are
+collected in [§ Deferred items](#deferred-items). Supersedes the earlier skeleton.
 
 ## Why this exists
 
@@ -252,7 +252,7 @@ those never leave the browser path.
 required at install): `api_device_link_rate_limit_requests` (`'600'`),
 `api_device_link_rate_limit_window` (`'3600'`). Scheduled task registration for
 `DrivePurgeDeviceLinks`. No new tier features: sync is Drive, gated by the
-existing `drive_active` + quota/tier features (see owner decision O9).
+existing `drive_active` + quota/tier features (D18 — no sync-specific gate).
 
 ## I.8 Server tests (Phase 0)
 
@@ -463,7 +463,8 @@ case-sensitive, NFC-normalized, legal-names-only tree:
   never synced, surfaced once as `unsyncable` (loop + escape risk). Hardlinks
   sync as independent files (server dedup makes the bytes free). Sparse files
   upload dense. xattrs / resource forks / ACLs / permissions: not synced in
-  v1 (owner decision O10 tracks the executable bit).
+  v1, including the executable bit — documented as unsupported (revisit if
+  synced code folders prove a real workload).
 - **Safe-save dances** (Office/Photoshop/SQLite write-temp-rename storms): the
   quiet period coalesces the storm; pairing precedence — (1) same path (a new
   inode at the same path is a *content edit*, not delete+create), (2) same
@@ -563,7 +564,7 @@ A native reimplementation of `VaultCrypto` + `DriveCrypto` (verified against
   web client learns to display (additive, version-tolerant readers).
 - **Thumbnail:** `IV[12] || ct` raw bytes, AAD = `contentId + ":thumb"`,
   JPEG ≤ 256 px. Desktop v1 does not generate thumbnails for encrypted
-  uploads (`thumb: false`) — owner decision O11.
+  uploads (`thumb: false`; web-parity thumbs can ride a later phase).
 - **Versions:** re-encrypt under the **same FK + contentId**
   (`encryptFileWith` semantics); the server refuses a wrapped-key payload on
   the version path and requires the uploader to hold a `FileKeyGrant`.
@@ -645,18 +646,20 @@ encrypted files never leave the device.
   (optional) selective-sync tree. `client_app` identifiers
   `joinery-sync-macos|windows|linux` + `client_version` headers wire the
   existing 426 upgrade gate.
-- **Shell (v1 scope, deliberately thin):** tray/menu-bar icon with the four
-  health states, issues panel, pause/resume, recent activity, settings
-  (folders, limits, selective sync, unlink). No file-manager overlay icons in
-  v1 (owner decision O12).
+- **Shell (v1 scope, deliberately thin):** a cross-platform Rust tray /
+  menu-bar icon with the four health states, issues panel, pause/resume, and
+  recent activity; Settings is a local page served by the daemon and opened
+  in the default browser (folders, limits, selective sync, unlink) — see D16.
+  No file-manager overlay icons in v1 (deferred).
 - **Daemon:** autostart per OS (LaunchAgent / Run key or Task Scheduler /
   systemd user unit). CLI: `joinery-drive login|status|issues|pause|resume|
   sync-now|unlink|recover-vault`.
 - **Packaging:** macOS notarized `.dmg` (universal2), Windows signed installer
   (NSIS or MSIX), Linux `.deb` + `.rpm` + static-musl tarball. Auto-update:
   the client checks a channel manifest and applies signed updates (macOS/Win);
-  Linux defers to the package manager. Signing identities and the update-feed
-  host are owner decisions (O5, O6).
+  Linux defers to the package manager. The update feed is central
+  (getjoinery.com) so instances stay zero-config (D19); signing identities
+  are a Phase-6 procurement prerequisite (see § Deferred items).
 - **Builds:** Linux + Windows cross-builds from the dev box (cargo,
   `cargo-xwin` for MSVC targets); macOS builds/notarization on the Mac mini
   over SSH (established iOS-gate pattern). Never run builds concurrently with
@@ -743,8 +746,8 @@ contracts, skip-if-toolchain-missing like `drive_crypto_gate.sh`):
   crypto (RustCrypto/`ring`), `notify` for watchers, single static binaries,
   first-class cross-compilation. Precedent for this exact problem: Dropbox
   rewrote its engine in Rust. (In-house Go precedent — `joinery-agent` —
-  noted; the deciding factors are the simulation-harness ergonomics and
-  crypto maturity. Flagged for owner sign-off as O1.)
+  considered; the deciding factors are the simulation-harness ergonomics and
+  crypto maturity. Owner-confirmed.)
 - **D2 — SQLite (WAL) state store**, id-keyed entries, last-agreed state as
   first-class persisted data.
 - **D3 — Session `ApiKey` is the device credential**, minted via the
@@ -767,10 +770,10 @@ contracts, skip-if-toolchain-missing like `drive_crypto_gate.sh`):
   surfaced as unsyncable; illegal-char names materialize via DB-backed
   reversible mangling.
 - **D9 — Poll-only change detection in v1** (30 s + post-mutation immediate
-  poll). The feed is cheap; push is a later additive endpoint (O8).
+  poll). The feed is cheap; push is a later additive endpoint (deferred).
 - **D10 — Whole-file transfer in v1**; dedup-by-possession already removes
   the worst re-transfer cases (moves, rebuilds, copies). Delta sync deferred
-  (O13) — it demands server-side CDC and an encryption-envelope redesign.
+  — it demands server-side CDC and an encryption-envelope redesign.
 - **D11 — Mass-delete guard** at `max(50, 25%)` per round, blocking prompt,
   both directions; unavailable sync root hard-pauses instead of reading as
   deletion.
@@ -784,45 +787,44 @@ contracts, skip-if-toolchain-missing like `drive_crypto_gate.sh`):
 - **D15 — `modified_time` is plaintext-only server-side; encrypted files
   carry mtime inside the encrypted metadata blob** (additive `mtime` field).
 
-# Decisions needed from the owner
+- **D16 — Shell = cross-platform Rust tray + daemon-served local settings
+  UI** opened in the default browser. Smallest maintained surface, zero UI
+  framework risk, and the daemon stays fully headless-capable. Tauri and
+  per-OS native shells rejected for v1 (framework weight / three UI codebases
+  for a deliberately thin surface).
+- **D17 — Naming:** "Joinery Drive" app name, `joinery-drive` binary,
+  `~/Joinery Drive` default sync root. Owner-confirmed.
+- **D18 — No sync-specific tier gate.** Desktop sync is included wherever
+  `drive_active` is on; storage quota — already a tier feature — is the
+  commercial meter. Gating the flagship trust feature would undercut the
+  reliability wedge; a gate stays additive to introduce later if ever wanted.
+- **D19 — Central update feed** at getjoinery.com: one signed artifact
+  stream, instances stay zero-config. Per-instance feeds rejected (every
+  instance would need its own signing infrastructure).
 
-Running list, none blocking Phase 0; recommendations inline.
+# Deferred items
 
-- **O1 — Core language sign-off:** Rust (recommended, D1) vs Go (matches
-  `joinery-agent`; simpler hiring/AI-agent story, weaker property-testing and
-  crypto-audit story).
-- **O2 — Shell technology:** minimal native tray per OS with a
-  Rust-served local settings UI (recommended: smallest surface), vs Tauri
-  app (one codebase, ~heavier), vs full per-OS native UIs.
-- **O3 — Product naming:** "Joinery Drive" app name, `joinery-drive` binary,
-  `~/Joinery Drive` default root — confirm.
-- **O4 — Passkey PRF native unlock:** the CTAP2 `hmac-secret` path could later
-  unlock the vault natively (salt = SHA-256(`joinery-passkey-prf:vault-drive-kek`)).
-  Worth a hardening phase, or is keychain custody (D6) the permanent answer?
-- **O5 — Signing identities:** Apple Developer ID (paid program — same blocker
-  as the iOS release spec) and a Windows code-signing cert need procurement.
-- **O6 — Update channel host:** per-instance (each Joinery server hosts its
-  clients' update feed — self-hosted purity) vs central getjoinery.com feed
-  (recommended: one signed artifact stream, instances stay zero-config).
-- **O7 — Tier gating:** is desktop sync a tier feature (`drive_sync_devices`
-  cap?) or included wherever `drive_active` is on (recommended: included;
-  quota is already the natural meter)?
-- **O8 — Push/long-poll:** add a cheap long-poll variant of `drive_changes`
-  later, or is 30 s polling acceptable indefinitely?
-- **O9 — Per-device quota/visibility features** beyond last-seen (e.g. admin
-  page listing all sync devices instance-wide)?
-- **O10 — Executable-bit preservation** (matters for synced code/scripts):
-  add a `fil_unix_mode`-style field later, or document as unsupported?
-- **O11 — Encrypted thumbnails from desktop:** generate client-side thumbs on
-  desktop uploads into vaults (web UI parity) or leave `thumb:false` (v1
-  recommendation)?
-- **O12 — File-manager integration** (Finder/Explorer sync badges, context
-  menus): later phase or never?
-- **O13 — Delta sync:** revisit after v1 telemetry shows whether large-file
+Deliberately not in v1; none block any phase.
+
+- Native passkey-PRF vault unlock via CTAP2 `hmac-secret`
+  (salt = SHA-256(`joinery-passkey-prf:vault-drive-kek`)) — keychain custody
+  (D6) is the answer until revisited.
+- Push / long-poll change notification — 30 s polling stands (D9).
+- An instance-wide admin page of sync devices (per-user visibility on
+  `/profile/security` ships in Phase 0).
+- Executable-bit / xattr / ACL preservation.
+- Client-generated encrypted thumbnails from desktop uploads.
+- Finder/Explorer overlay badges and context menus.
+- Block-level delta sync (D10) — revisit when telemetry shows large-file
   edit-in-place is a real workload.
-- **O14 — User-editable ignore patterns** (beyond the built-in junk list:
-  `.DS_Store`, `Thumbs.db`, `desktop.ini`, `~$*`, `*.tmp`, `.~lock*`,
-  `.jd-tmp-*`, `.jd-swap-*`): ship a UI for it or hold?
+- A UI for user-editable ignore patterns; the built-in junk list ships
+  (`.DS_Store`, `Thumbs.db`, `desktop.ini`, `~$*`, `*.tmp`, `.~lock*`,
+  `.jd-tmp-*`, `.jd-swap-*`), and a config-file escape hatch may ride along
+  at no design cost.
+
+**Phase-6 prerequisite (procurement, not design):** an Apple Developer ID
+(paid program — shared blocker with the iOS release spec) and a Windows
+code-signing certificate must exist before signed installers can ship.
 
 # Docs to update when phases land
 

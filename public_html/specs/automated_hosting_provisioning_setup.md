@@ -1,5 +1,12 @@
 # Automated Hosting Provisioning — Setup Checklist
 
+**Status (verified 2026-07-16): not yet executed.** The build spec is done
+(`specs/implemented/automated_hosting_provisioning.md`) but the activation
+settings are still empty on this deployment (`server_manager_getjoinery_api_url`,
+`..._api_public_key`, `..._api_secret_key`,
+`..._provisioning_domain_question_id`, `..._provisioning_welcome_from_*`).
+This checklist remains pending operational work, not a build item.
+
 This document covers the one-time operational setup required to activate the automated hosting provisioning pipeline. All code is already deployed; these are configuration steps only.
 
 ## 1. getjoinery.com — Domain Question
