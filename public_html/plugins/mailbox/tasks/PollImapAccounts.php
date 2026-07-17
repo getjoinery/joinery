@@ -38,8 +38,15 @@ class PollImapAccounts implements ScheduledTaskInterface {
 		}
 
 		// Enabled + due accounts. The claim below re-checks dueness atomically.
+		// An optional alias_id scopes the run to one alias's accounts — production
+		// leaves it unset (poll everything); tests pass their fixture alias so a
+		// run can never touch, connect to, or stamp a real account.
+		$account_filters = array('enabled' => true, 'due' => true, 'deleted' => false);
+		if (isset($config['alias_id'])) {
+			$account_filters['alias_id'] = (int)$config['alias_id'];
+		}
 		$accounts = new MultiInboundImapAccount(
-			array('enabled' => true, 'due' => true, 'deleted' => false),
+			$account_filters,
 			array('iia_last_poll_time' => 'ASC')
 		);
 		$accounts->load();

@@ -87,6 +87,14 @@ ok('10/8 rejected', throws_unsafe(fn() => scan_url_validate_target('http://10.1.
 ok('172.16/12 rejected', throws_unsafe(fn() => scan_url_validate_target('http://172.20.0.1/')));
 ok('192.168/16 rejected', throws_unsafe(fn() => scan_url_validate_target('http://192.168.1.1/')));
 ok('169.254/16 link-local rejected', throws_unsafe(fn() => scan_url_validate_target('http://169.254.169.254/')));
+// These four ranges were UNblocked here while the sibling UrlSafetyValidator
+// blocked them — a real SSRF hole (0.0.0.0 reaches loopback on Linux). Pin them.
+ok('0.0.0.0 rejected', throws_unsafe(fn() => scan_url_validate_target('http://0.0.0.0/')));
+ok('100.64/10 CGNAT rejected', throws_unsafe(fn() => scan_url_validate_target('http://100.64.0.1/')));
+ok('224/4 multicast rejected', throws_unsafe(fn() => scan_url_validate_target('http://224.0.0.1/')));
+ok('240/4 reserved rejected', throws_unsafe(fn() => scan_url_validate_target('http://240.0.0.1/')));
+// Boundary: the address just below CGNAT is public and must still be allowed.
+ok('100.63.255.255 (just below CGNAT) accepted', is_array(scan_url_validate_target('http://100.63.255.255/')));
 
 // ── Reject: loopback / private / link-local IPv6 literals ────────────────
 ok('[::1] loopback rejected', throws_unsafe(fn() => scan_url_validate_target('http://[::1]/')));

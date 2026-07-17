@@ -145,5 +145,19 @@ if (!$apcu) {
 	VaultUnlock::lockAll($uid);
 }
 
+section('Cross-user ownership guard');
+// A (user, vault) pair from different users must be refused at the ceremony
+// boundary — before any passphrase/code check — so a mismatched pair can never
+// open one user's window with another user's vault secret.
+$threw = false;
+try { $ceremonies->unlockWithPassphrase($fx['user'], $clamped['vault'], 'a sufficiently long passphrase'); }
+catch (VaultCeremonyException $e) { $threw = ($e->getMessage() === 'Vault does not belong to this user.'); }
+check($threw, 'passphrase unlock refuses a foreign vault (ownership)');
+
+$threw = false;
+try { $ceremonies->unlockWithRecoveryCode($fx['user'], $clamped['vault'], $fx['recovery_codes'][2], false); }
+catch (VaultCeremonyException $e) { $threw = ($e->getMessage() === 'Vault does not belong to this user.'); }
+check($threw, 'recovery unlock refuses a foreign vault (ownership)');
+
 harness_finish();
 ?>

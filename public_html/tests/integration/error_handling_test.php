@@ -270,10 +270,19 @@ class ErrorHandlingTester {
             } catch (Exception $e) {
                 // Ignore any errors during logging for test purposes
             }
-            
-            // Wait a moment for database write
-            sleep(1);
-            
+
+            // Clean up the row this test just wrote (db-tier tests must self-clean).
+            // Registered immediately so a crash mid-assert can't leak it.
+            harness_defer(function () use ($testMessage) {
+                try {
+                    $db = DbConnector::get_instance()->get_db_link();
+                    $db->prepare("DELETE FROM err_general_errors WHERE err_message = ?")->execute([$testMessage]);
+                } catch (\Throwable $e) { /* best effort */ }
+            });
+
+            // The insert is a synchronous PDO write — no wait needed (the old
+            // sleep(1) here was pure dead time on the pre-deploy gate).
+
             // Check if error was logged
             $dbconnector = DbConnector::get_instance();
             $dblink = $dbconnector->get_db_link();

@@ -70,6 +70,48 @@ $selected_tiers = $tiers_to_run[$tier_arg];
 $debug_on = (bool)Globalvars::get_instance()->get_setting('debug');
 $ROOT = dirname(__DIR__); // public_html
 
+/**
+ * Return the subset of a test's declared `needs` that are definitively
+ * unavailable in this environment, so the runner can report a legible SKIP
+ * instead of a hard failure (macmini powered down) or a false green (a gate
+ * that passes by absence of its runtime).
+ *
+ * Fails SAFE toward running: a need we don't recognize, or whose probe cannot
+ * reach a verdict, is treated as MET — we never skip a test for a reason we
+ * can't stand behind. Probe results are cached (the ssh probe is not free).
+ */
+function harness_unmet_needs(array $needs) {
+	static $cache = array();
+	$settings = Globalvars::get_instance();
+	$unmet = array();
+	foreach ($needs as $need) {
+		if (!array_key_exists($need, $cache)) {
+			switch ($need) {
+				case 'node':
+					$cache[$need] = trim((string)shell_exec('command -v node 2>/dev/null')) !== '';
+					break;
+				case 'macmini':
+					$rc = 1; @exec('ssh -o ConnectTimeout=5 -o BatchMode=yes macmini true 2>/dev/null', $o, $rc);
+					$cache[$need] = ($rc === 0);
+					break;
+				case 'stripe-test-keys':
+					$cache[$need] = trim((string)$settings->get_setting('stripe_api_key_test')) !== '';
+					break;
+				case 'mailgun':
+					$cache[$need] = trim((string)$settings->get_setting('mailgun_api_key')) !== '';
+					break;
+				case 'b2':
+					$cache[$need] = trim((string)$settings->get_setting('cloud_storage_access_key')) !== '';
+					break;
+				default:
+					$cache[$need] = true; // unrecognized need → assume met (never skip blindly)
+			}
+		}
+		if (!$cache[$need]) $unmet[] = $need;
+	}
+	return $unmet;
+}
+
 // ---------------------------------------------------------------------------
 // Discovery (shared with the dashboard + API action via lib/discovery.php)
 // ---------------------------------------------------------------------------
@@ -113,7 +155,8 @@ if ($want_list) {
 // Select + run
 // ---------------------------------------------------------------------------
 $to_run = array();
-$skipped_env = array(); // [{path, meta, reason}]
+$skipped_env = array();   // [{path, meta, reason}]
+$skipped_needs = array(); // [{path, meta, reason}]
 foreach ($declared as $d) {
 	// --only selects one exact test by repo-relative path, ignoring tier batching
 	// (but still subject to the env gate below). Otherwise filter by tier + substring.
@@ -121,7 +164,10 @@ foreach ($declared as $d) {
 		if (harness_rel($d['path'], $ROOT) !== $only) continue;
 	} else {
 		if (!in_array($d['meta']['tier'], $selected_tiers, true)) continue;
-		if ($filter !== '' && stripos($d['meta']['name'], $filter) === false && stripos($d['path'], $filter) === false) continue;
+		// Match the name or the REPO-RELATIVE path — not the absolute path, whose
+		// install-prefix segments (html, joinerytest) would match every test.
+		if ($filter !== '' && stripos($d['meta']['name'], $filter) === false
+			&& stripos(harness_rel($d['path'], $ROOT), $filter) === false) continue;
 	}
 
 	// env gate (pre-spawn): dev-only tests refuse to run when debug is off.
@@ -129,7 +175,41 @@ foreach ($declared as $d) {
 		$skipped_env[] = $d + array('reason' => "dev-only, but 'debug' setting is off (production)");
 		continue;
 	}
+
+	// needs gate: an unmet dependency (macmini off, node absent, missing creds)
+	// is a SKIP with a reason — not a hard failure, and not a silent pass.
+	$unmet = harness_unmet_needs($d['meta']['needs'] ?? array());
+	if ($unmet) {
+		$skipped_needs[] = $d + array('reason' => 'unmet needs: ' . implode(', ', $unmet));
+		continue;
+	}
 	$to_run[] = $d;
+}
+
+// A run that matched ZERO declared tests is almost always a mistake (a --filter
+// or --only typo, or a tier name with no tests) — and as the pre-deploy gate and
+// CI entry point, silently reporting PASS for "nothing ran" is a real hazard.
+// Fail closed. The exception is a batch on production where the selection DID
+// match tests but the env gate locked them all (dev-only on prod): that is the
+// legitimate "nothing to run here" case, so we key on the pre-gate match count.
+$selection_matched = count($to_run) + count($skipped_env) + count($skipped_needs);
+if ($selection_matched === 0) {
+	$why = $only !== '' ? "--only='$only' matched no declared test"
+		: ($filter !== '' ? "tier '$tier_arg' with --filter='$filter' matched no declared test"
+			: "tier '$tier_arg' has no declared tests");
+	if ($want_json) {
+		echo json_encode(array(
+			'tier_requested' => $tier_arg, 'tiers_run' => $selected_tiers, 'filter' => $filter,
+			'error' => 'no_tests_matched', 'message' => $why,
+			'totals' => array('tests' => 0, 'tests_passed' => 0, 'tests_failed' => 0,
+				'checks_passed' => 0, 'checks_failed' => 0, 'checks_skipped' => 0),
+			'results' => array(),
+		)) . "\n";
+	} else {
+		fwrite(STDERR, "\nERROR: $why.\n"
+			. "Nothing was executed. If this was intentional, check the tier/filter/only arguments.\n");
+	}
+	exit(2);
 }
 
 $results = array();
@@ -145,9 +225,14 @@ foreach ($to_run as $d) {
 function run_one($d, $root, $timeout_s) {
 	$path = $d['path'];
 	$is_sh = strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'sh';
+	// -d apc.enable_cli=1: APCu is off in CLI by default, so any suite that
+	// exercises the unlock-window / kill-switch runtime (which live in APCu)
+	// would silently SKIP in every gate run — the vault's most attack-relevant
+	// surface reading green by absence. Enabling it here makes those checks
+	// actually execute; suites that don't touch APCu are unaffected.
 	$inner = $is_sh
 		? 'bash ' . escapeshellarg($path)
-		: escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($path) . ' --json';
+		: escapeshellarg(PHP_BINARY) . ' -d apc.enable_cli=1 ' . escapeshellarg($path) . ' --json';
 	// -k 5s sends SIGKILL 5s after SIGTERM if the test ignores the term.
 	$cmd = 'timeout -k 5s ' . (int)$timeout_s . 's ' . $inner;
 
@@ -262,6 +347,9 @@ if ($want_json) {
 		'skipped_env' => array_map(function ($s) use ($ROOT) {
 			return array('name' => $s['meta']['name'], 'path' => harness_rel($s['path'], $ROOT), 'reason' => $s['reason']);
 		}, $skipped_env),
+		'skipped_needs' => array_map(function ($s) use ($ROOT) {
+			return array('name' => $s['meta']['name'], 'path' => harness_rel($s['path'], $ROOT), 'reason' => $s['reason']);
+		}, $skipped_needs),
 		'undeclared' => array_map(function ($p) use ($ROOT) { return harness_rel($p, $ROOT); }, $undeclared),
 	)) . "\n";
 	exit($tests_failed > 0 ? 1 : 0);
@@ -274,6 +362,10 @@ echo "Tests: $tests_passed passed, $tests_failed failed of $tests_total   |   Ch
 if ($skipped_env) {
 	echo "\nSkipped (environment):\n";
 	foreach ($skipped_env as $s) echo "  - " . $s['meta']['name'] . " (" . $s['reason'] . ")\n";
+}
+if ($skipped_needs) {
+	echo "\nSkipped (unmet needs):\n";
+	foreach ($skipped_needs as $s) echo "  - " . $s['meta']['name'] . " (" . $s['reason'] . ")\n";
 }
 if ($undeclared) {
 	echo "\nUndeclared (no @joinery-test header — not run):\n";

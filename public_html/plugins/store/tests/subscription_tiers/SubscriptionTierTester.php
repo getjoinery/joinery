@@ -411,7 +411,26 @@ class SubscriptionTierTester {
         $tier_display = SubscriptionTier::getUserTierDisplay($this->test_user_id);
         echo "<p>Tier display: <strong>$tier_display</strong></p>";
 
-        echo "<p class='text-success'>✓ Feature access working</p>";
+        // Real assertion: after assigning the user to a tier, the tier display
+        // must reflect that tier's name — not empty and not the free/default
+        // display. (Previously this method echoed and returned true regardless,
+        // so it could never fail.)
+        $expected_name = (string)($this->tiers[$test_level]['name'] ?? '');
+        $expected_display = (string)($this->tiers[$test_level]['display_name'] ?? '');
+        if (empty($tier_display)) {
+            $this->recordFailure('Feature Access', 'getUserTierDisplay returned empty after a tier assignment.');
+            return false;
+        }
+        $reflects = ($expected_name !== '' && stripos($tier_display, $expected_name) !== false)
+            || ($expected_display !== '' && stripos($tier_display, $expected_display) !== false);
+        if (!$reflects && ($expected_name !== '' || $expected_display !== '')) {
+            $this->recordFailure('Feature Access',
+                "Tier display '$tier_display' does not reflect the assigned tier "
+                . "('$expected_name' / '$expected_display').");
+            return false;
+        }
+
+        echo "<p class='text-success'>✓ Feature access reflects the assigned tier</p>";
         return true;
     }
 
@@ -667,6 +686,7 @@ class SubscriptionTierTester {
 
         $levels = array_keys($this->tiers);
         if (count($levels) < 2) {
+            $this->recordFailure('Logic File Upgrade', 'Need at least 2 tiers to test upgrade; none exercised.');
             echo "<p class='text-warning'>⚠️ Need at least 2 tiers to test upgrade</p>";
             return false;
         }
@@ -762,6 +782,7 @@ class SubscriptionTierTester {
 
         $levels = array_keys($this->tiers);
         if (count($levels) < 2) {
+            $this->recordFailure('Logic File Downgrade', 'Need at least 2 tiers to test downgrade; none exercised.');
             echo "<p class='text-warning'>⚠️ Need at least 2 tiers to test downgrade</p>";
             return false;
         }
@@ -995,6 +1016,7 @@ class SubscriptionTierTester {
 
         $levels = array_keys($this->tiers);
         if (count($levels) < 3) {
+            $this->recordFailure('Proration', 'Need at least 3 tiers to test proration; not exercised.');
             echo "<p class='text-warning'>⚠️ Need at least 3 tiers to test proration (currently on tier 2, need to upgrade to tier 3)</p>";
             return false;
         }
@@ -1160,6 +1182,11 @@ class SubscriptionTierTester {
         $this->loadTiers();
 
         if (count($this->tiers) < 3) {
+            // Record a failure — otherwise "no tiers, so no tests ran" leaves
+            // $test_failures empty and the runner reports a single GREEN check,
+            // making "0 tests executed" indistinguishable from a full pass.
+            $this->recordFailure('Setup', "Need at least 3 tiers for testing. Found: " . count($this->tiers)
+                . ". Provision tiers/products in the test DB (or sync it) before running.");
             echo "<p class='text-danger'>ERROR: Need at least 3 tiers for testing. Found: " . count($this->tiers) . "</p>";
             return;
         }

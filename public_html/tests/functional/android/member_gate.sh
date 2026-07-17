@@ -152,6 +152,12 @@ cleanup() {
 BRIDGE_CHECK_BEFORE=$($SETTING_CTL get app_bridge_key_check_seconds)
 [ -z "$BRIDGE_CHECK_BEFORE" ] && BRIDGE_CHECK_BEFORE=60
 trap cleanup EXIT
+# A runner timeout sends SIGTERM (then SIGKILL after 5s). An untrapped SIGTERM
+# kills bash WITHOUT running the EXIT trap, stranding flipped settings and the
+# source-file probes on the live site. Trapping the signals to exit fires the
+# EXIT trap, so cleanup runs exactly once on both normal and killed exits.
+trap 'exit 143' TERM
+trap 'exit 130' INT
 
 # ---- fixtures --------------------------------------------------------------
 

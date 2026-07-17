@@ -178,15 +178,21 @@ class ImapPollerTest {
 	private function testPollerSummary() {
 		$task = new PollImapAccounts();
 
-		// No due accounts for this fixture's alias yet (none created): the global
-		// run still succeeds. (Other accounts on the system may exist; we only
-		// assert the run does not throw and returns success.)
-		$result = $task->run(array('polling_enabled' => true, 'max_per_account' => 5));
+		// CRITICAL: every run here is scoped to this fixture's alias. Without the
+		// scope the task loads and CLAIMS every enabled+due account on the box —
+		// opening live IMAP connections to real Gmail/Microsoft accounts, stamping
+		// their poll cursors, and racing the real cron — which made this db-tier
+		// test behave like a live one. The alias scope keeps it hermetic.
+		$scope = array('polling_enabled' => true, 'max_per_account' => 5, 'alias_id' => $this->alias->key);
+
+		// No due accounts for this fixture's alias yet (none created): the scoped
+		// run still succeeds with nothing to do.
+		$result = $task->run($scope);
 		$this->ok(is_array($result) && ($result['status'] === 'success' || $result['status'] === 'skipped'),
 			'poller run returns a status array without throwing');
 
 		// Disabled-by-config short-circuits to skipped.
-		$skipped = $task->run(array('polling_enabled' => false));
+		$skipped = $task->run(array('polling_enabled' => false, 'alias_id' => $this->alias->key));
 		$this->ok($skipped['status'] === 'skipped', 'polling_enabled=false → skipped');
 
 		// An enabled, due, but UNCREDENTIALED account is skipped (status recorded),
@@ -201,7 +207,7 @@ class ImapPollerTest {
 		$acct->prepare(); $acct->save();
 		$this->account_ids[] = intval($acct->key);
 
-		$result2 = $task->run(array('polling_enabled' => true, 'max_per_account' => 5));
+		$result2 = $task->run($scope);
 		$this->ok($result2['status'] === 'success', 'run with an uncredentialed account still succeeds');
 
 		$reloaded = new InboundImapAccount($acct->key, TRUE);

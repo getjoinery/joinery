@@ -55,10 +55,13 @@
 
 /** @joinery-test
  * name: api_mailbox
- * tier: db
+ * tier: live
  * env: dev-only
- * needs: []
+ * needs: [dev-web]
  */
+// tier: live — the round-trip section performs a real send through the platform's
+// configured email service and drives the dev web origin over HTTP, so this must
+// not run in the `db` pre-deploy batch (which promises no external effects).
 require_once(__DIR__ . '/api_test_harness.php');
 api_test_boot($argv);
 
@@ -199,38 +202,18 @@ function mapi_insert_msg($db, $domain_id, $alias_id, $thread_key, $subject, $bod
 
 /** POST a multipart/form-data action request (mailbox/send with an attachment). */
 function mapi_send_multipart($base_url, $origin_ip, $headers, array $fields, $file_path, $file_name, $file_type) {
-	$host = parse_url($base_url, PHP_URL_HOST);
-	$ch = curl_init($base_url . '/api/v1/action/mailbox/send');
-	$post = $fields;
-	$post['attachments[]'] = new CURLFile($file_path, $file_type, $file_name);
-	$headers[] = 'Accept: application/json';
-	curl_setopt_array($ch, array(
-		CURLOPT_POST           => true,
-		CURLOPT_POSTFIELDS     => $post,
-		CURLOPT_RETURNTRANSFER => true,
-		CURLOPT_HTTPHEADER     => $headers,
-		CURLOPT_TIMEOUT        => 60,
-		CURLOPT_RESOLVE        => array($host . ':443:' . $origin_ip, $host . ':80:' . $origin_ip),
+	return harness_request('POST', '/api/v1/action/mailbox/send', array(
+		'headers' => $headers,
+		'body'    => $fields,
+		'files'   => array('attachments[]' => array(
+			'path' => $file_path, 'name' => $file_name, 'type' => $file_type)),
+		'timeout' => 60,
 	));
-	$raw = curl_exec($ch);
-	$status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-	curl_close($ch);
-	return array('status' => $status, 'json' => json_decode((string)$raw, true), 'raw' => (string)$raw);
 }
 
-/** GET an absolute signed URL with no session/key headers, pinned to the origin IP. */
+/** GET an absolute signed URL with no session/key headers. */
 function mapi_get_signed($signed_url, $origin_ip) {
-	$host = parse_url($signed_url, PHP_URL_HOST);
-	$ch = curl_init($signed_url);
-	curl_setopt_array($ch, array(
-		CURLOPT_RETURNTRANSFER => true,
-		CURLOPT_TIMEOUT        => 30,
-		CURLOPT_RESOLVE        => array($host . ':443:' . $origin_ip, $host . ':80:' . $origin_ip),
-	));
-	$body = curl_exec($ch);
-	$status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-	curl_close($ch);
-	return array('status' => $status, 'body' => (string)$body);
+	return harness_request('GET', $signed_url, array('accept' => null));
 }
 
 /** First https:// URL found inside a signed <img src="..."> body (post-cid-rewrite). */
@@ -551,8 +534,10 @@ try {
 		check(false, 'round-trip send did not complete — skipped the read-back assertions (see send response above)');
 	}
 
-} catch (Exception $e) {
-	$failed++;
+} catch (\Throwable $e) {
+	// Record the crash as a failing check (the old `$failed++` hit an
+	// undefined local, so a mid-suite exception produced a GREEN contract).
+	check(false, 'unhandled exception mid-suite', $e->getMessage());
 	echo "\nEXCEPTION: " . $e->getMessage() . "\n" . $e->getTraceAsString() . "\n";
 } finally {
 	section('Cleanup');

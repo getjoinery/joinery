@@ -16,10 +16,10 @@
  * deleted in the finally block.
  *
  * Usage: php signed_urls_test.php [base_url] [origin_ip]
- * Defaults target dev.getjoinery.com pinned to its origin IP (bypasses
+ * Defaults target the site this code serves, pinned to its origin IP (bypasses
  * Cloudflare so headers/status are the app's own).
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 
 if (php_sapi_name() !== 'cli') {
@@ -27,39 +27,20 @@ if (php_sapi_name() !== 'cli') {
 	exit(1);
 }
 
-require_once(__DIR__ . '/../../lib/harness.php');
+require_once(__DIR__ . '/../../lib/http.php');
+harness_http_boot($argv);
 harness_boot();
 
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('data/files_class.php'));
 
-$positional = array_values(array_filter(array_slice($argv, 1), function ($a) { return strpos($a, '--') !== 0; }));
-$BASE_URL  = isset($positional[0]) ? rtrim($positional[0], '/') : 'https://dev.getjoinery.com';
-$ORIGIN_IP = isset($positional[1]) ? $positional[1] : '69.164.209.253';
-
-/** GET a path with no cookies/session, pinned to the origin IP. */
+/** GET a path with no cookies/session. Returns ['status','headers','body']. */
 function http_get($path) {
-	global $BASE_URL, $ORIGIN_IP;
-	$host = parse_url($BASE_URL, PHP_URL_HOST);
-	$ch = curl_init($BASE_URL . $path);
-	curl_setopt_array($ch, array(
-		CURLOPT_RETURNTRANSFER => true,
-		CURLOPT_HEADER         => true,
-		CURLOPT_FOLLOWLOCATION => false,
-		CURLOPT_TIMEOUT        => 30,
-		CURLOPT_RESOLVE        => array($host . ':443:' . $ORIGIN_IP),
-	));
-	$raw = curl_exec($ch);
-	$status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-	$header_size = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
-	curl_close($ch);
-	if ($raw === false) {
-		return array('status' => 0, 'headers' => '', 'body' => '');
-	}
+	$r = harness_request('GET', $path, array('accept' => null));
 	return array(
-		'status'  => $status,
-		'headers' => substr($raw, 0, $header_size),
-		'body'    => substr($raw, $header_size),
+		'status'  => $r['status'],
+		'headers' => $r['header_string'],
+		'body'    => $r['body'],
 	);
 }
 

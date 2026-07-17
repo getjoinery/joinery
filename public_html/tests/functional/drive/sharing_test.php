@@ -7,9 +7,8 @@
  */
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
 
-require_once(__DIR__ . '/../../lib/harness.php');
 require_once(__DIR__ . '/../api/api_test_harness.php');
-api_test_boot($argv); // gives $BASE_URL / $ORIGIN_IP for the anonymous share fetch
+api_test_boot($argv);
 
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('data/files_class.php'));
@@ -17,8 +16,6 @@ require_once(PathHelper::getIncludePath('data/folders_class.php'));
 require_once(PathHelper::getIncludePath('includes/DriveHelper.php'));
 require_once(PathHelper::getIncludePath('data/file_access_grants_class.php'));
 require_once(PathHelper::getIncludePath('data/file_share_links_class.php'));
-
-global $BASE_URL, $ORIGIN_IP;
 
 /** Stub session for is_viewable(). */
 class ShareTestSession {
@@ -30,23 +27,11 @@ class ShareTestSession {
 
 /** Anonymous fetch of the public share page (no auth). Returns ['status','raw']. */
 function share_fetch($path, $post = null) {
-	global $BASE_URL, $ORIGIN_IP;
-	$ch = curl_init($BASE_URL . $path);
-	$host = parse_url($BASE_URL, PHP_URL_HOST);
-	$opts = array(
-		CURLOPT_RETURNTRANSFER => true,
-		CURLOPT_TIMEOUT => 30,
-		CURLOPT_RESOLVE => array($host . ':443:' . $ORIGIN_IP, $host . ':80:' . $ORIGIN_IP),
-	);
-	if ($post !== null) {
-		$opts[CURLOPT_POST] = true;
-		$opts[CURLOPT_POSTFIELDS] = http_build_query($post);
-	}
-	curl_setopt_array($ch, $opts);
-	$raw = curl_exec($ch);
-	$status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-	curl_close($ch);
-	return array('status' => $status, 'raw' => (string)$raw);
+	return harness_request($post === null ? 'GET' : 'POST', $path, array(
+		'body'   => $post,
+		'encode' => 'form',
+		'accept' => null,
+	));
 }
 
 $made_files = array(); $made_folders = array(); $made_links = array();

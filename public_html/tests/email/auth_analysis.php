@@ -51,8 +51,8 @@ $settings = Globalvars::get_instance();
 $run_test = false;
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $run_test = true;
-    // Debug: Log that form was submitted
-    error_log('Form submitted with POST data: ' . print_r($_POST, true));
+    // NOTE: never log $_POST here — this form carries a Gmail app password, and
+    // logging it writes a live credential into the error log / page source.
 }
 
 // Configuration
@@ -72,11 +72,8 @@ $page->admin_header([
     'readable_title' => 'Advanced Email Authentication Analysis'
 ]);
 
-// Debug output
-echo '<!-- DEBUG: REQUEST_METHOD = ' . ($_SERVER['REQUEST_METHOD'] ?? 'NOT SET') . ' -->';
-echo '<!-- DEBUG: POST data: ' . htmlspecialchars(print_r($_POST, true)) . ' -->';
-echo '<!-- DEBUG: REQUEST data: ' . htmlspecialchars(print_r($_REQUEST, true)) . ' -->';
-echo '<!-- DEBUG: $run_test = ' . ($run_test ? 'true' : 'false') . ' -->';
+// (Removed debug HTML comments that echoed $_POST/$_REQUEST into page source —
+// they leaked the submitted Gmail app password to anyone viewing the source.)
 
 // Handle web interface
 if (!$run_test) {

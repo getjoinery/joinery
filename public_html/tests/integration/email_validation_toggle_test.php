@@ -22,8 +22,17 @@ $settings = Globalvars::get_instance();
 
 section('email_validation_mx_check toggle');
 
-// Save original setting value for teardown
+// Save original setting value for teardown, and defer the restore NOW so a
+// crash mid-test cannot strand the dev site with MX validation flipped. (The
+// explicit restore at the end of the body remains for the happy path.)
 $original = $settings->get_setting('email_validation_mx_check');
+harness_defer(function () use ($original) {
+	try {
+		$s = new MultiSetting(['setting_name' => 'email_validation_mx_check']);
+		$s->load();
+		if ($s->count_all() > 0) { $row = $s->get(0); $row->set('stg_value', $original); $row->save(); }
+	} catch (\Throwable $e) { /* best effort */ }
+});
 
 function set_mx_check($value) {
 	global $settings;

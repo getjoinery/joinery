@@ -69,11 +69,15 @@ function scan_url_validate_target($url) {
 	// explicit ranges (PHP's filter misses 127/8); IPv6 uses PHP's filter,
 	// which reliably covers ::1, fe80::/10, fc00::/7 and ::ffff:0:0/96.
 	$private_ranges = array(
+		array(0x00000000, 0xFF000000), // 0.0.0.0/8   "this host" — routes to loopback on Linux
 		array(0x7F000000, 0xFF000000), // 127.0.0.0/8 loopback
 		array(0x0A000000, 0xFF000000), // 10.0.0.0/8
+		array(0x64400000, 0xFFC00000), // 100.64.0.0/10 CGNAT (RFC 6598)
 		array(0xAC100000, 0xFFF00000), // 172.16.0.0/12
 		array(0xC0A80000, 0xFFFF0000), // 192.168.0.0/16
-		array(0xA9FE0000, 0xFFFF0000), // 169.254.0.0/16 link-local
+		array(0xA9FE0000, 0xFFFF0000), // 169.254.0.0/16 link-local (incl. cloud metadata 169.254.169.254)
+		array(0xE0000000, 0xF0000000), // 224.0.0.0/4  multicast
+		array(0xF0000000, 0xF0000000), // 240.0.0.0/4  reserved / future
 	);
 	foreach ($ips as $ip) {
 		$blocked = false;

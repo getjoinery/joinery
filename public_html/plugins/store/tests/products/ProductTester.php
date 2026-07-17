@@ -12,6 +12,7 @@
  * Usage: Access this file through your web browser while logged in as an admin user.
  */
 
+require_once(__DIR__ . '/../../../../tests/lib/logic.php');
 require_once(PathHelper::getIncludePath('/includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('/plugins/store/includes/StripeHelper.php'));
 require_once(PathHelper::getIncludePath('/includes/SessionControl.php'));
@@ -309,37 +310,14 @@ class ProductTester {
     }
     
     /**
-     * Run an admin logic function directly with a simulated POST.
-     *
-     * The admin *pages* wrap their logic in process_logic(), which exits on
-     * the post-save redirect — fatal to a test process. Calling the logic
-     * function itself returns the LogicResult instead. Saves are gated on
-     * LibraryFunctions::isFormSubmission() (REQUEST_METHOD === 'POST'), so
-     * that is simulated too; the faked admin session (run()) satisfies
-     * check_permission() and everything stays in-process against the test
-     * database.
+     * Run an admin logic function directly with a simulated request, asserting
+     * it succeeded. Delegates to the shared harness_call_logic_ok() (see
+     * tests/lib/logic.php) — the faked admin session (run()) satisfies
+     * check_permission() and the test database keeps the writes in-process.
      */
     private function runAdminLogic($logic_path, $logic_fn, $post_data, $method = 'POST') {
-        // $method matters: form saves are gated on isFormSubmission() (POST),
-        // while version actions (new_version etc.) are GET actions that the
-        // POST save path would misinterpret as a form save.
-        $_POST = ($method === 'POST') ? $post_data : array();
-        $_GET = ($method === 'GET') ? $post_data : array();
-        $_REQUEST = $post_data;
-        $_SERVER['REQUEST_METHOD'] = $method;
-
         $this->dbconnector->set_test_mode();
-
-        require_once(PathHelper::getIncludePath($logic_path));
-        $result = $logic_fn($post_data);
-
-        if ($result->error) {
-            throw new Exception("$logic_fn error: " . $result->error);
-        }
-        if ($result->hasValidationErrors()) {
-            throw new Exception("$logic_fn validation errors: " . json_encode($result->validation_errors));
-        }
-        return $result;
+        return harness_call_logic_ok($logic_path, $logic_fn, $post_data, $method);
     }
 
     /**
@@ -544,117 +522,6 @@ class ProductTester {
     }
     
     /**
-     * Make HTTP request to admin endpoint
-     */
-    private function makeAdminRequest($endpoint, $post_data) {
-        // Use the system's existing method for building absolute URLs
-        $url = LibraryFunctions::get_absolute_url($endpoint);
-        
-        echo "Making request to: $url<br>\n";
-        flush(); 
-        
-        // Close the current session to prevent session locking
-        if (session_status() === PHP_SESSION_ACTIVE) {
-            session_write_close();
-        }
-        
-        // Prepare POST data string - handle arrays properly
-        $post_string = http_build_query($post_data);
-        
-        echo "POST string being sent:<br>\n";
-        echo "<pre>" . htmlspecialchars($post_string) . "</pre><br>\n";
-        flush();
-        
-        // Set up cURL with timeouts and redirect handling
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $post_string);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false); // Don't automatically follow redirects
-        curl_setopt($ch, CURLOPT_HEADER, true); // Include headers in response
-        curl_setopt($ch, CURLOPT_NOBODY, false);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 15); // Reduced to 15 second timeout
-        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5); // Reduced to 5 second connect timeout
-        curl_setopt($ch, CURLOPT_MAXREDIRS, 0); // Don't follow any redirects
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); // In case of SSL issues
-        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
-        
-        // Pass along existing session cookie from current request
-        if (isset($_SERVER['HTTP_COOKIE'])) {
-            curl_setopt($ch, CURLOPT_COOKIE, $_SERVER['HTTP_COOKIE']);
-        }
-        
-        echo "Executing cURL request...<br>\n";
-        flush();
-        
-        $response = curl_exec($ch);
-        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $curl_error = curl_error($ch);
-        curl_close($ch);
-        
-        echo "Response received. HTTP Code: $http_code<br>\n";
-        flush();
-        
-        // Restart the session after the request
-        if (session_status() === PHP_SESSION_NONE) {
-            session_start();
-        }
-        
-        if ($curl_error) {
-            throw new Exception("cURL error: " . $curl_error);
-        }
-        
-        // Handle redirects as success (302 is expected after product creation)
-        if ($http_code >= 400) {
-            throw new Exception("HTTP error $http_code from admin_product_edit");
-        } elseif ($http_code >= 300 && $http_code < 400) {
-            echo "Redirect response (HTTP $http_code) - this is expected<br>\n";
-            flush();
-        }
-        
-        return $response;
-    }
-    
-    /**
-     * Extract product ID from admin_product_edit response
-     */
-    private function extractProductIdFromResponse($response) {
-        
-        // First check for JSON response (when json_confirm is set)
-        if (preg_match('/"(\d+)"/', $response, $matches)) {
-            return intval($matches[1]);
-        }
-        
-        // Check for the comment format used when skip_redirect is set
-        if (preg_match('/<!-- PRODUCT_ID:(\d+) -->/', $response, $matches)) {
-            return intval($matches[1]);
-        }
-        
-        // admin_product_edit redirects to admin_product?pro_product_id=X on success
-        if (preg_match('/Location:.*admin_product\?pro_product_id=(\d+)/i', $response, $matches)) {
-            return intval($matches[1]);
-        }
-        
-        // Alternative: Look for admin_products redirect
-        if (preg_match('/Location:.*admin_products.*pro_product_id=(\d+)/i', $response, $matches)) {
-            return intval($matches[1]);
-        }
-        
-        // Alternative: Look for any redirect with product_id parameter
-        if (preg_match('/Location:.*pro_product_id=(\d+)/i', $response, $matches)) {
-            return intval($matches[1]);
-        }
-        
-        // Alternative: Look for product ID in the response body
-        if (preg_match('/pro_product_id[=:](\d+)/i', $response, $matches)) {
-            return intval($matches[1]);
-        }
-        
-        return null;
-    }
-    
-    /**
      * Verify a product was created successfully
      */
     private function verifyProduct($product_id, $spec) {
@@ -671,10 +538,12 @@ class ProductTester {
                 $prod_product = new Product($product_id, TRUE);
                 $prod_name = $prod_product->get('pro_name');
                 
-                // If the product exists in production with the right name, that's where it was created
+                // If the product exists in production with the right name, the test
+                // wrote to the LIVE database instead of the test copy. That is the
+                // loudest possible failure — never a pass with a warning.
                 if ($prod_name === $spec['pro_name']) {
-                    echo "<span style='color: red;'><strong>WARNING: Product was created in PRODUCTION database, not test database!</strong></span><br>\n";
-                    return true;
+                    $this->dbconnector->set_test_mode();
+                    throw new Exception("Product '{$spec['pro_name']}' was created in the PRODUCTION database, not the test database — test isolation is broken.");
                 }
             } catch (Exception $e) {
                 // Product not found in production - that's expected
@@ -1640,66 +1509,22 @@ class ProductTester {
             } catch (Exception $e) {
                 ob_end_clean();
                 
-                // Handle the specific case where session validation fails because payment wasn't completed
-                if (strpos($e->getMessage(), 'Invalid payment session') !== false || 
+                // A Stripe Checkout session can only reach "paid" by a human
+                // completing payment on Stripe's hosted page — impossible headlessly.
+                // Previously this branch FABRICATED a paid Order + OrderItems and
+                // returned them, which the caller then "verified" as paid: the test
+                // manufactured its own pass. Never do that. Surface the limitation
+                // honestly so it records as a real failure, not a fake success.
+                if (strpos($e->getMessage(), 'Invalid payment session') !== false ||
                     strpos($e->getMessage(), 'Session payment not completed') !== false) {
-                    
-                    echo "⚠ Expected validation error in test mode: Session created but not paid through Stripe<br>\n";
-                    echo "Note: In real usage, user would complete payment at Stripe before returning<br>\n";
-                    
-                    // For testing purposes, create a minimal order to verify the basic flow works
-                    // This simulates what would happen after a successful payment
-                    $session = SessionControl::get_instance();
-                    $cart = ShoppingCart::current();
-                    
-                    $test_order = new Order(NULL);
-                    $test_order->set('ord_usr_user_id', $billing_user->key);
-                    $test_order->set('ord_total_cost', $cart->get_total());
-                    $test_order->set('ord_timestamp', 'now()');
-                    $test_order->set('ord_status', Order::STATUS_PAID);
-                    $test_order->set('ord_stripe_session_id', $stripe_session->id);
-                    $test_order->set('ord_raw_cart', print_r($cart, true));
-                    $test_order->set('ord_serialized_cart', serialize($cart->get_items_generic()));
-                    if(StripeHelper::isTestMode()) {
-                        $test_order->set('ord_test_mode', true);
-                    }
-                    $test_order->save();
-                    $test_order->load();
-                    
-                    // Create order items from cart contents
-                    require_once(PathHelper::getIncludePath('/plugins/store/data/order_items_class.php'));
-                    foreach($cart->items as $key => $cart_item) {
-                        list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
-                        
-                        $order_item = new OrderItem(NULL);
-                        $order_item->set('odi_ord_order_id', $test_order->key);
-                        $order_item->set('odi_pro_product_id', $product->key);
-                        $order_item->set('odi_usr_user_id', $billing_user->key);
-                        $order_item->set('odi_product_info', base64_encode(serialize($data)));
-                        $order_item->set('odi_price', $price - $discount);
-                        $order_item->set('odi_prv_product_version_id', $product_version->key);
-                        $order_item->set('odi_status', OrderItem::STATUS_PAID);
-                        $order_item->set('odi_status_change_time', 'now()');
-                        
-                        if($product_version->is_subscription()){
-                            $order_item->set('odi_is_subscription', true);
-                        } else {
-                            $order_item->set('odi_is_subscription', false);	
-                        }
-                        
-                        $order_item->save();
-                        $order_item->load();
-                        
-                        // Save the extra info the user entered
-                        $order_item->save_cart_data($data);
-                    }
-                    
-                    echo "✓ Created test order with " . count($cart->items) . " order items<br>\n";
-                    return $test_order;
-                } else {
-                    // Re-throw other exceptions
-                    throw $e;
+                    throw new Exception(
+                        'stripe_checkout mode cannot be verified headlessly: the Checkout session was '
+                        . 'created but no payment can be completed without a human at Stripe\'s hosted page. '
+                        . 'Use stripe_regular (tokenized) mode for automated payment coverage, or complete '
+                        . 'this flow manually. (No order was fabricated.)');
                 }
+                // Re-throw any other exception unchanged.
+                throw $e;
             }
             
             $output = ob_get_clean();

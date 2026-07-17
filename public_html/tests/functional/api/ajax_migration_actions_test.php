@@ -32,52 +32,17 @@ api_test_boot($argv);
 
 require_once(PathHelper::getIncludePath('data/notifications_class.php'));
 
-global $BASE_URL, $ORIGIN_IP;
 $suffix = strtoupper(LibraryFunctions::random_string(6));
 
-// ---- cookie-jar browser-session helpers (a real web session, not a key) ----
-$jar_files = array();
-function jar_new() {
-	global $jar_files;
-	$f = tempnam(sys_get_temp_dir(), 'ajaxmig');
-	$jar_files[] = $f;
-	return $f;
-}
-function jar_curl($method, $path, $jar, $headers = array(), $body = null, $json = true) {
-	global $BASE_URL, $ORIGIN_IP;
-	$ch = curl_init($BASE_URL . $path);
-	$host = parse_url($BASE_URL, PHP_URL_HOST);
-	if ($body !== null) {
-		if ($json) { $payload = json_encode($body); $headers[] = 'Content-Type: application/json'; }
-		else { $payload = http_build_query($body); $headers[] = 'Content-Type: application/x-www-form-urlencoded'; }
-		curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
-	}
-	curl_setopt_array($ch, array(
-		CURLOPT_CUSTOMREQUEST => strtoupper($method),
-		CURLOPT_RETURNTRANSFER => true,
-		CURLOPT_HTTPHEADER => $headers,
-		CURLOPT_TIMEOUT => 30,
-		CURLOPT_COOKIEJAR => $jar,
-		CURLOPT_COOKIEFILE => $jar,
-		CURLOPT_FOLLOWLOCATION => true,
-		CURLOPT_RESOLVE => array($host . ':443:' . $ORIGIN_IP, $host . ':80:' . $ORIGIN_IP),
-	));
-	$raw = curl_exec($ch);
-	$status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-	curl_close($ch);
-	return array('status' => $status, 'raw' => (string) $raw, 'json' => json_decode((string) $raw, true));
-}
-/** The joinery_api_csrf value from a Netscape cookie jar, or ''. */
-function jar_csrf($jar) {
-	foreach (file($jar) ?: array() as $line) {
-		$p = explode("\t", trim($line));
-		if (count($p) >= 7 && $p[5] === 'joinery_api_csrf') return $p[6];
-	}
-	return '';
+// A cookie-jar request that follows redirects (this suite reads admin pages
+// behind the post-login 302). $body defaults to JSON.
+function jar_curl($method, $path, $jar, $headers = array(), $body = null) {
+	return harness_request($method, $path, array(
+		'jar' => $jar, 'headers' => $headers, 'body' => $body, 'follow' => true));
 }
 
 try {
-	echo "Base URL: $BASE_URL\nTest suffix: $suffix\n";
+	echo 'Base URL: ' . harness_http_base_url() . "\nTest suffix: $suffix\n";
 
 	section('Setup: staff / member / superadmin keys');
 	$staff  = make_user($suffix . 'ST', 5);
@@ -95,16 +60,19 @@ try {
 	$H_staff  = key_headers($k_staff['api_key']->get('apk_public_key'),  $k_staff['secret_key']);
 	$H_member = key_headers($k_member['api_key']->get('apk_public_key'), $k_member['secret_key']);
 	$H_super  = key_headers($k_super['api_key']->get('apk_public_key'),  $k_super['secret_key']);
-	check(true, 'fixtures created');
+	// Assert the fixtures actually materialized rather than a can't-fail check(true).
+	check($staff->key > 0 && $member->key > 0 && $super->key > 0
+		&& !empty($k_staff['secret_key']) && !empty($k_member['secret_key']) && !empty($k_super['secret_key']),
+		'fixtures created (3 users + 3 machine keys)');
 
 	// ------------------------------------------------------------------
 	section('email_available — security fix (was an open oracle) + floor 5');
 	// Anonymous browser principal (valid CSRF proof, no signed-in user): the
 	// action is not open — it is denied 401 (regression guard).
-	$anon = jar_new();
+	$anon = harness_jar_new('ajaxmig');
 	jar_curl('GET', '/', $anon); // distributes the joinery_api_csrf mirror cookie
-	$anon_csrf = jar_csrf($anon);
-	check($anon_csrf !== '', 'anonymous visitor received a joinery_api_csrf cookie');
+	$anon_csrf = harness_jar_csrf($anon);
+	check($anon_csrf !== null, 'anonymous visitor received a joinery_api_csrf cookie');
 	$r = jar_curl('POST', '/api/v1/action/email_available', $anon,
 		array('X-Joinery-Csrf: ' . $anon_csrf), array('email' => 'probe@example.com'));
 	check($r['status'] === 401, 'unauthenticated email_available -> 401 (not the old open oracle)', 'status ' . $r['status']);
@@ -203,15 +171,14 @@ try {
 	// $_SESSION unread cache so the next page render recomputes (3 -> 2). A machine
 	// key cannot show this (each request is a fresh simulated session), so we log
 	// in as staff and read the admin chrome badge before and after.
-	$sess = jar_new();
-	jar_curl('POST', '/login', $sess, array(),
-		array('email' => $staff->get('usr_email'), 'password' => 'TestPassword_' . $suffix . 'ST'), false);
+	$sess = harness_jar_new('ajaxmig');
+	harness_web_login($sess, $staff->get('usr_email'), 'TestPassword_' . $suffix . 'ST');
 	$badge_of = function ($raw) { return preg_match('/notifications-count">\s*(\d+)\s*</', $raw, $m) ? (int) $m[1] : null; };
 	$page1 = jar_curl('GET', '/admin/admin_users', $sess);
-	$sess_csrf = jar_csrf($sess);
+	$sess_csrf = harness_jar_csrf($sess);
 	$logged_in = strpos($page1['raw'], 'name="password"') === false && strpos($page1['raw'], 'notifications-count') !== false;
-	check($logged_in && $sess_csrf !== '', 'browser session established (admin chrome + csrf)',
-		'logged_in=' . var_export($logged_in, true) . ' csrf=' . ($sess_csrf === '' ? 'empty' : 'set'));
+	check($logged_in && $sess_csrf !== null, 'browser session established (admin chrome + csrf)',
+		'logged_in=' . var_export($logged_in, true) . ' csrf=' . ($sess_csrf === null ? 'empty' : 'set'));
 	check($badge_of($page1['raw']) === 3, 'chrome notification badge shows 3 before mark_read', 'badge ' . var_export($badge_of($page1['raw']), true));
 	$mr = jar_curl('POST', '/api/v1/action/notification_mark_read', $sess,
 		array('X-Joinery-Csrf: ' . $sess_csrf), array('notification_id' => $ntf_ids[0]));
@@ -228,12 +195,15 @@ try {
 	check($r['status'] === 200 && is_array($r['json']['data']['slots'] ?? null),
 		'sessionless POST with no slug -> 200 {slots:[...]} (never an auth error)');
 
-	harness_finish();
-
 } catch (Throwable $e) {
+	// Record the crash as a failing check so it reaches the result contract —
+	// previously the catch printed FATAL then called harness_finish() with no
+	// failing check, emitting a GREEN contract for a crashed suite.
+	check(false, 'unhandled exception mid-suite', $e->getMessage());
 	echo "FATAL: " . $e->getMessage() . "\n" . $e->getTraceAsString() . "\n";
-	harness_finish();
 } finally {
-	foreach ($jar_files as $f) { @unlink($f); }
+	harness_teardown_data();
 }
+
+harness_finish();
 ?>

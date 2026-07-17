@@ -376,7 +376,20 @@ class VaultCeremonies {
 	 *
 	 * @return array{regenerate_recommended:bool}
 	 */
+	/**
+	 * Defense in depth: the (User, vault) pair must belong together. The logic
+	 * shells load the caller's own vault, but nothing here re-checked it — so a
+	 * bug that passed a mismatched pair would open user A's window with vault B's
+	 * secret. Assert ownership at the ceremony boundary too.
+	 */
+	private function assertVaultOwnership(User $user, UserEncryptionVault $vault): void {
+		if ((int)$vault->get('uev_usr_user_id') !== (int)$user->key) {
+			throw new VaultCeremonyException('Vault does not belong to this user.');
+		}
+	}
+
 	public function unlockWithRecoveryCode(User $user, UserEncryptionVault $vault, string $code, bool $open_window = true): array {
+		$this->assertVaultOwnership($user, $vault);
 		if (trim($code) === '') {
 			throw new VaultCeremonyException('Enter a recovery code.');
 		}
@@ -411,9 +424,21 @@ class VaultCeremonies {
 			throw new VaultCeremonyException('Invalid or already-used recovery code.');
 		}
 
-		$matched->set('uew_is_used', true);
-		$matched->set('uew_used_time', gmdate('Y-m-d H:i:s'));
-		$matched->save();
+		// Consume the code ATOMICALLY. A load-then-save (the previous approach)
+		// races: two concurrent requests presenting the same code both load it as
+		// is_used=false, both unwrap, and both mark it used — double-unlocking from
+		// a single code. A conditional UPDATE guarded on is_used=false lets exactly
+		// one request win; a rowCount of 0 means another request already consumed
+		// it, which is an already-used code.
+		$db = DbConnector::get_instance()->get_db_link();
+		$consume = $db->prepare(
+			'UPDATE ' . UserEncryptionWrapping::$tablename . '
+			 SET uew_is_used = true, uew_used_time = :used_time
+			 WHERE ' . UserEncryptionWrapping::$pkey_column . ' = :id AND uew_is_used = false');
+		$consume->execute([':used_time' => gmdate('Y-m-d H:i:s'), ':id' => (int)$matched->key]);
+		if ($consume->rowCount() !== 1) {
+			throw new VaultCeremonyException('Invalid or already-used recovery code.');
+		}
 
 		// Kill-switch: end every window everywhere FIRST, then open one only for
 		// this session. A stolen code evicts the thief's pre-existing windows.
@@ -435,6 +460,7 @@ class VaultCeremonies {
 	 * KDF is deliberately expensive, so never per wrapping.
 	 */
 	public function unlockWithPassphrase(User $user, UserEncryptionVault $vault, string $passphrase): string {
+		$this->assertVaultOwnership($user, $vault);
 		if ($passphrase === '') {
 			throw new VaultCeremonyException('Enter your vault passphrase.');
 		}
