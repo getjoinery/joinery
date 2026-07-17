@@ -19,7 +19,12 @@
  * and suspenders against a grant to a mailbox that was soft-deleted rather than
  * permanently deleted.
  *
- * @version 1.2
+ * Compose signature (specs/mailbox_compose_maturity.md § Phase 3): ieg_signature holds
+ * a per-grant (user × mailbox) sanitized-HTML signature, edited by the grantee via
+ * signatureFor()/saveSignature() and inserted client-side at compose time. Personal, not
+ * mailbox administration — never sealed, no admin surface.
+ *
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -43,6 +48,12 @@ class InboundEmailMailboxGrant extends SystemBase {
 		'ieg_inbound_email_mailbox_grant_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'ieg_iea_inbound_email_alias_id'     => array('type'=>'int4', 'is_nullable'=>false, 'unique_with'=>array('ieg_usr_user_id')),
 		'ieg_usr_user_id'                    => array('type'=>'int4', 'is_nullable'=>false),
+		// Per-grant compose signature (specs/mailbox_compose_maturity.md § Phase 3):
+		// sanitized HTML, personal to (this user, this mailbox). NOT sealed — a
+		// signature is a template broadcast in cleartext on every outgoing message,
+		// so sealing protects nothing and would add a decrypt dependency to
+		// compose-open. Inserted client-side so the user sees exactly what sends.
+		'ieg_signature'                      => array('type'=>'text', 'is_nullable'=>true),
 		'ieg_create_time'                    => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
 
@@ -83,6 +94,37 @@ class InboundEmailMailboxGrant extends SystemBase {
 			$ids[] = intval($g->get('ieg_usr_user_id'));
 		}
 		return $ids;
+	}
+
+	/**
+	 * The compose signature for (user, mailbox), or '' when none / no grant.
+	 * Personal to the grant — one grantee of a shared alias never sees another's.
+	 */
+	static function signatureFor(int $user_id, int $alias_id): string {
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare('SELECT ieg_signature FROM ieg_inbound_email_mailbox_grants
+			WHERE ieg_usr_user_id = ? AND ieg_iea_inbound_email_alias_id = ? LIMIT 1');
+		$stmt->execute(array($user_id, $alias_id));
+		$v = $stmt->fetchColumn();
+		return ($v !== false && $v !== null) ? (string)$v : '';
+	}
+
+	/**
+	 * Save the compose signature on a user's OWN grant — a targeted single-column
+	 * UPDATE scoped to (user, mailbox), so it needs no admin permission (the
+	 * model's authenticate_write governs full-row admin edits, not a member editing
+	 * their personal signature). Returns false when the user holds no such grant
+	 * (rowCount 0), which the caller treats as "not authorized".
+	 */
+	static function saveSignature(int $user_id, int $alias_id, string $html): bool {
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare('UPDATE ieg_inbound_email_mailbox_grants SET ieg_signature = ?
+			WHERE ieg_usr_user_id = ? AND ieg_iea_inbound_email_alias_id = ?');
+		$stmt->bindValue(1, $html === '' ? null : $html, $html === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
+		$stmt->bindValue(2, $user_id, PDO::PARAM_INT);
+		$stmt->bindValue(3, $alias_id, PDO::PARAM_INT);
+		$stmt->execute();
+		return $stmt->rowCount() > 0;
 	}
 
 	/**

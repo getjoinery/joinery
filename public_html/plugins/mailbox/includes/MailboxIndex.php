@@ -32,7 +32,7 @@
  * an error. Index source: sender + subject + both bodies + attachment
  * filenames. Attachment CONTENTS are never indexed.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
@@ -251,46 +251,111 @@ class MailboxIndex {
 		}
 		$db = DbConnector::get_instance()->get_db_link();
 		$in = implode(',', array_map('intval', $alias_ids));
+
+		// Bookkeeping (loaded once): the high-water mark plus the refold queue —
+		// message ids at-or-below the mark that changed after folding. A draft
+		// morphs IN PLACE into its Sent row keeping its id (Fix 6), so it is never
+		// revisited by the `id > since` main pass; the queue drives an explicit
+		// delete-and-reinsert for exactly those ids.
+		$bookkeeping = InboundMailboxSearchIndex::loadOrCreateForUser($user_id);
+		$refold = json_decode((string)$bookkeeping->get('imi_refold_ids'), true);
+		$refold = is_array($refold) ? array_values(array_unique(array_map('intval', $refold))) : array();
+
+		// New rows since the mark (drafts stay OUT of the index — few, in flux, and
+		// opened directly, never searched).
 		$stmt = $db->prepare(
 			"SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
 			 WHERE iem_iea_inbound_email_alias_id IN ($in)
 			 AND iem_inbound_email_message_id > ? AND iem_delete_time IS NULL
+			 AND iem_direction IS DISTINCT FROM 'draft'
 			 ORDER BY iem_inbound_email_message_id ASC");
 		$stmt->execute(array($since_id));
-		$ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
-		if (!count($ids)) {
-			return;
+		$ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+
+		if (!count($ids) && !count($refold)) {
+			return; // nothing to fold and nothing queued — the early-out
 		}
+
+		// Which refold ids are still indexable (exist, non-deleted, non-draft, and in
+		// the user's scope) — the rest are only deleted from the FTS table.
+		$refold_valid = array();
+		if (count($refold)) {
+			$rin = implode(',', array_map('intval', $refold));
+			$rstmt = $db->prepare(
+				"SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
+				 WHERE iem_inbound_email_message_id IN ($rin)
+				 AND iem_iea_inbound_email_alias_id IN ($in)
+				 AND iem_delete_time IS NULL AND iem_direction IS DISTINCT FROM 'draft'");
+			$rstmt->execute();
+			$refold_valid = array_flip(array_map('intval', $rstmt->fetchAll(PDO::FETCH_COLUMN)));
+		}
+		$refold_set = array_flip($refold);
 
 		$shm = new SQLite3($this->shmPath($user_id));
 		$insert = $shm->prepare('INSERT INTO mailfts (message_id, content) VALUES (:id, :content)');
+		$delete = $shm->prepare('DELETE FROM mailfts WHERE message_id = :id');
 
-		$last_id = $since_id;
-		foreach ($ids as $id) {
-			$id = intval($id);
-			$last_id = $id;
-			$msg = new InboundEmailMessage($id, TRUE);
-			if (!$msg->key) {
+		// Refold pass: drop any stale FTS row for the queued id, then re-insert it
+		// when still indexable (the morphed Sent row's body now enters the index).
+		foreach ($refold as $id) {
+			$delete->bindValue(':id', $id, SQLITE3_INTEGER);
+			$delete->execute();
+			$delete->reset();
+			if (!isset($refold_valid[$id])) {
 				continue;
 			}
-			try {
-				$content = (string)$msg->get('iem_sender') . ' ' . (string)$msg->get('iem_subject') . ' '
-					. (string)$msg->get('iem_body_plain') . ' ' . strip_tags((string)$msg->get('iem_body_html'))
-					. ' ' . $this->attachmentFilenames($id);
-			} catch (VaultLockedException $e) {
-				// Shouldn't happen (fold() only runs in-window), but never let one
-				// row's decrypt failure abort the whole fold.
+			$content = $this->rowContent($id);
+			if ($content === null) {
 				continue;
 			}
 			$insert->bindValue(':id', $id, SQLITE3_INTEGER);
 			$insert->bindValue(':content', $content, SQLITE3_TEXT);
 			$insert->execute();
+			$insert->reset();
+		}
+
+		// Main pass: the new rows since the mark, skipping any already handled above.
+		$last_id = $since_id;
+		foreach ($ids as $id) {
+			$last_id = $id;
+			if (isset($refold_set[$id])) {
+				continue; // already delete-and-reinserted in the refold pass
+			}
+			$content = $this->rowContent($id);
+			if ($content === null) {
+				continue;
+			}
+			$insert->bindValue(':id', $id, SQLITE3_INTEGER);
+			$insert->bindValue(':content', $content, SQLITE3_TEXT);
+			$insert->execute();
+			$insert->reset();
 		}
 		$shm->close();
 
-		$bookkeeping = InboundMailboxSearchIndex::loadOrCreateForUser($user_id);
+		// One bookkeeping save: advance the watermark and clear the refold queue.
 		$bookkeeping->set('imi_fts_high_water', $last_id);
+		$bookkeeping->set('imi_refold_ids', null);
 		$bookkeeping->save();
+	}
+
+	/**
+	 * The indexable text for one message id — sender + subject + both bodies +
+	 * attachment filenames — read the same way a viewer would (through the
+	 * sealed-field hook). Returns null when the row is gone or a decrypt fails
+	 * (fold only runs in-window, but never let one row abort the whole fold).
+	 */
+	private function rowContent(int $id): ?string {
+		$msg = new InboundEmailMessage($id, TRUE);
+		if (!$msg->key) {
+			return null;
+		}
+		try {
+			return (string)$msg->get('iem_sender') . ' ' . (string)$msg->get('iem_subject') . ' '
+				. (string)$msg->get('iem_body_plain') . ' ' . strip_tags((string)$msg->get('iem_body_html'))
+				. ' ' . $this->attachmentFilenames($id);
+		} catch (VaultLockedException $e) {
+			return null;
+		}
 	}
 
 	private function attachmentFilenames(int $message_id): string {

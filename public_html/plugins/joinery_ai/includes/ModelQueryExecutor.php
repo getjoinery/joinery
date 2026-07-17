@@ -146,6 +146,16 @@ class ModelQueryExecutor {
             $where_parts[] = "$delete_field IS NULL";
         }
 
+        // A model may exclude some of its own rows from every AI read via a fixed,
+        // input-free SQL predicate declared as static $ai_read_filter (e.g. mailbox
+        // drafts — compose scratch that must never be summarized or query_model'd).
+        if (property_exists($class, 'ai_read_filter')) {
+            $filter_sql = $class::$ai_read_filter;
+            if (is_string($filter_sql) && $filter_sql !== '') {
+                $where_parts[] = $filter_sql;
+            }
+        }
+
         $order_parts = [];
         foreach ($sort as $field => $direction) {
             if (!in_array($field, $all_fields, true)) continue;

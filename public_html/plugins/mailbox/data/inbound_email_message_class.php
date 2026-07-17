@@ -88,7 +88,13 @@
  * iem_relay_sealed_raw until the next unlock, when DeferredIngest parses and seals it under a
  * fresh DEK. iem_relay_spool_id is the pull dedup key.
  *
- * @version 1.13
+ * COMPOSE MATURITY (specs/mailbox_compose_maturity.md). iem_bcc holds a composed row's
+ * Bcc list in its own sealed column (never merged into iem_recipient, so reply-all on a
+ * Sent copy can't re-leak it). iem_draft_state is a sealed JSON scratch column on
+ * iem_direction='draft' rows (saved drafts). Both are compose-only sealed fields — see
+ * isComposeOnlyField()/isComposedDirection() and the direction guard in decryptSealedField*().
+ *
+ * @version 1.14
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -112,7 +118,12 @@ class InboundEmailMessage extends SystemBase {
 	// worth sealing there; an inbound row's iem_recipient is the receiving
 	// alias address, routing metadata, and is never sealed even on an otherwise
 	// sealed row) — see the iem_direction check in decryptSealedField() below.
-	public static $sealed_fields = array('iem_sender', 'iem_subject', 'iem_body_plain', 'iem_body_html', 'iem_recipient', 'iem_ai_summary');
+	// iem_recipient and iem_bcc are "compose-only" sealed fields: real content on a
+	// composed row (outbound Sent copy or a saved draft), routing-only/absent on an
+	// inbound row — the direction guard in decryptSealedField*() seals them only when
+	// iem_direction is 'outbound' or 'draft'. iem_draft_state (compose scratch JSON)
+	// is likewise sealed and only ever set on a draft row.
+	public static $sealed_fields = array('iem_sender', 'iem_subject', 'iem_body_plain', 'iem_body_html', 'iem_recipient', 'iem_bcc', 'iem_draft_state', 'iem_ai_summary');
 
 	// AI surface (docs/example_class.php § AI): recipes may read mail through the
 	// query_model tool. On a protected domain a locked row is EXCLUDED from
@@ -128,6 +139,10 @@ class InboundEmailMessage extends SystemBase {
 	// always read cross-user.
 	public static $ai_readable = true;
 	public static $ai_description = 'Received and sent email messages (subject, sender, body, AI triage summary).';
+	// Drafts (specs/mailbox_compose_maturity.md § Phase 2) are compose scratch: never
+	// triaged, summarized, or readable through the query_model AI tool. ModelQueryExecutor
+	// appends this fixed predicate to every AI read of this model.
+	public static $ai_read_filter = "iem_direction IS DISTINCT FROM 'draft'";
 	public static $ai_owner_field = 'iem_sealed_owner_user_id';
 	public static $ai_untrusted_fields = array('iem_sender', 'iem_subject', 'iem_body_plain');
 
@@ -146,6 +161,20 @@ class InboundEmailMessage extends SystemBase {
 		// (iem_recipient carries a sealed outbound row's full recipient list).
 		'iem_sender'              => array('type'=>'text'),
 		'iem_recipient'           => array('type'=>'text'),
+		// Bcc on a composed row (specs/mailbox_compose_maturity.md § Phase 1). Its OWN
+		// sealed column, never merged into iem_recipient — so reply-all on your own Sent
+		// copy can structurally never re-leak a bcc'd address. NULL on inbound rows.
+		'iem_bcc'                 => array('type'=>'text', 'is_nullable'=>true),
+		// Draft scratch state (specs/mailbox_compose_maturity.md § Phase 2): a sealed JSON
+		// string {mode, source_id, to, cc} holding what the existing columns can't (To vs Cc
+		// split, reply/forward source + mode) so reopening a draft restores the exact fields.
+		// Only ever set on an iem_direction='draft' row; NULL everywhere else.
+		'iem_draft_state'         => array('type'=>'text', 'is_nullable'=>true),
+		// Draft author (compose maturity fix pack): a draft is PERSONAL compose state,
+		// owned by the user who is writing it — never shared with co-grantees of the
+		// alias and never visible to an all-access superadmin. Set only while
+		// iem_direction='draft'; cleared on morph to outbound.
+		'iem_draft_author_user_id' => array('type'=>'int8', 'is_nullable'=>true),
 		'iem_subject'             => array('type'=>'text'),
 		'iem_body_plain'          => array('type'=>'text'),
 		'iem_body_html'           => array('type'=>'text'),
@@ -258,6 +287,22 @@ class InboundEmailMessage extends SystemBase {
 	// ---------------------------------------------------------- encryption at rest
 
 	/**
+	 * Fields sealed only on a COMPOSED row (an outbound Sent copy or a saved draft):
+	 * iem_recipient/iem_bcc carry real content there, but on an inbound row
+	 * iem_recipient is the routing alias address (never sealed) and iem_bcc is absent;
+	 * iem_draft_state exists only on a draft. The direction guard in decryptSealedField*()
+	 * uses this so a broad read never tries to open an unsealed inbound recipient.
+	 */
+	public static function isComposeOnlyField(string $field): bool {
+		return $field === 'iem_recipient' || $field === 'iem_bcc' || $field === 'iem_draft_state';
+	}
+
+	/** True for a row direction whose recipient/bcc/draft columns are sealed content. */
+	public static function isComposedDirection(?string $direction): bool {
+		return $direction === 'outbound' || $direction === 'draft';
+	}
+
+	/**
 	 * The AD (additional data) row-binding string for a sealed content field —
 	 * the single source of this convention (docs/sealed_vault.md § AD). Every
 	 * sealer (InboundEmailRouter::storeMessage, MailboxSender::storeOutboundRow,
@@ -331,8 +376,8 @@ class InboundEmailMessage extends SystemBase {
 		if (!$this->get('iem_content_sealed') || !$this->get('iem_sealed_key')) {
 			return $ciphertext;
 		}
-		if ($field === 'iem_recipient' && $this->get('iem_direction') !== 'outbound') {
-			return $ciphertext; // inbound row: the receiving alias address, never sealed
+		if (self::isComposeOnlyField($field) && !self::isComposedDirection($this->get('iem_direction'))) {
+			return $ciphertext; // inbound row: recipient is the routing alias; bcc/draft absent
 		}
 		$owner_id = self::sealedOwnerUserId($this->get('iem_sealed_owner_user_id'), $this->get('iem_iea_inbound_email_alias_id'));
 		if ($owner_id === null) {
@@ -351,8 +396,8 @@ class InboundEmailMessage extends SystemBase {
 		if (empty($row['iem_content_sealed']) || empty($row['iem_sealed_key'])) {
 			return $ciphertext;
 		}
-		if ($field === 'iem_recipient' && ($row['iem_direction'] ?? 'inbound') !== 'outbound') {
-			return $ciphertext; // inbound row: the receiving alias address, never sealed
+		if (self::isComposeOnlyField($field) && !self::isComposedDirection($row['iem_direction'] ?? 'inbound')) {
+			return $ciphertext; // inbound row: recipient is the routing alias; bcc/draft absent
 		}
 		$owner_id = self::sealedOwnerUserId($row['iem_sealed_owner_user_id'] ?? null, $row['iem_iea_inbound_email_alias_id'] ?? null);
 		if ($owner_id === null) {
@@ -395,6 +440,23 @@ class InboundEmailMessage extends SystemBase {
 		return $crypto['crypto']->openField($bytes, $crypto['dek'], self::attachmentAd($message_id, (string)$att->get('ima_mime_part')));
 	}
 
+	/**
+	 * Unwrap a sealed row's per-message DEK (raw bytes) for its owner, in-window.
+	 * Returns null when the owner's unlock window is closed. Used by the draft
+	 * save path to re-seal an existing draft's content under its SAME DEK, keeping
+	 * already-persisted draft attachments (sealed under that DEK) readable.
+	 */
+	public static function unwrapDekInWindow(int $owner_id, string $sealed_key): ?string {
+		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
+		$secret = VaultUnlock::secretKey($owner_id);
+		if ($secret === null) {
+			return null;
+		}
+		$crypto = new VaultCrypto();
+		return $crypto->openItemDek($sealed_key, $secret);
+	}
+
 	/** @return array{crypto:VaultCrypto,dek:string} */
 	private static function openMessageDekCrypto(int $owner_id, string $sealed_key): array {
 		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
@@ -420,40 +482,63 @@ class InboundEmailMessage extends SystemBase {
 	 * same key.
 	 */
 	public static function sealAndPersistContent(int $message_id, UserEncryptionVault $vault, string $sender,
-			string $recipient, string $subject, string $body_plain, string $body_html, bool $seal_recipient = false): string {
+			string $recipient, string $subject, string $body_plain, string $body_html,
+			bool $seal_recipient = false, string $bcc = '', ?string $draft_state = null,
+			?string $reuse_dek = null): string {
 		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
 		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 
 		$crypto = new VaultCrypto();
-		$dek = $crypto->newItemDek();
-		$sealed_key = $crypto->sealItemDek($dek, (string)$vault->get('uev_public_key'));
+		// A saved draft re-seals its content under the SAME DEK on every save
+		// ($reuse_dek), so its already-persisted attachments (sealed under that DEK)
+		// stay readable; the DEK wrapping (iem_sealed_key/generation/owner) is left
+		// untouched in that case. A fresh row mints a new DEK and records its wrapping.
+		$reuse = ($reuse_dek !== null);
+		$dek = $reuse ? $reuse_dek : $crypto->newItemDek();
+		$sealed_key = $reuse ? null : $crypto->sealItemDek($dek, (string)$vault->get('uev_public_key'));
+
+		// The always-sealed content columns. iem_recipient/iem_bcc are added only
+		// for a composed row ($seal_recipient) — an inbound row's iem_recipient is
+		// the routing alias, already written at insert and left alone here; iem_bcc
+		// and iem_draft_state exist only on composed/draft rows.
+		$columns = array(
+			'iem_sender'     => $crypto->sealField($sender, $dek, self::sealAd($message_id, 'iem_sender')),
+			'iem_subject'    => $crypto->sealField($subject, $dek, self::sealAd($message_id, 'iem_subject')),
+			'iem_body_plain' => $crypto->sealField($body_plain, $dek, self::sealAd($message_id, 'iem_body_plain')),
+			'iem_body_html'  => $crypto->sealField($body_html, $dek, self::sealAd($message_id, 'iem_body_html')),
+		);
+		if ($seal_recipient) {
+			$columns['iem_recipient'] = $crypto->sealField($recipient, $dek, self::sealAd($message_id, 'iem_recipient'));
+			if ($bcc !== '') {
+				$columns['iem_bcc'] = $crypto->sealField($bcc, $dek, self::sealAd($message_id, 'iem_bcc'));
+			}
+		}
+		if ($draft_state !== null) {
+			$columns['iem_draft_state'] = $crypto->sealField($draft_state, $dek, self::sealAd($message_id, 'iem_draft_state'));
+		}
 
 		// The owner is recorded ON the row at seal time (iem_sealed_owner_user_id)
 		// so decryption never depends on the grant list as it happens to look
 		// later — a grant addition or alias deletion must not strand sealed mail.
-		$sets = 'iem_sender = ?, iem_subject = ?, iem_body_plain = ?, iem_body_html = ?,
-				 iem_sealed_key = ?, iem_key_generation = ?, iem_sealed_owner_user_id = ?, iem_content_sealed = true';
-		$params = [
-			$crypto->sealField($sender, $dek, self::sealAd($message_id, 'iem_sender')),
-			$crypto->sealField($subject, $dek, self::sealAd($message_id, 'iem_subject')),
-			$crypto->sealField($body_plain, $dek, self::sealAd($message_id, 'iem_body_plain')),
-			$crypto->sealField($body_html, $dek, self::sealAd($message_id, 'iem_body_html')),
-			$sealed_key,
-			intval($vault->get('uev_key_generation')),
-			intval($vault->get('uev_usr_user_id')),
-		];
-		// iem_recipient is only touched when the caller opts into sealing it
-		// (an outbound row's recipient list). An inbound row's iem_recipient —
-		// the receiving alias address, routing metadata — was already written
-		// correctly at insert and must be left alone here.
-		if ($seal_recipient) {
-			$sets = 'iem_recipient = ?, ' . $sets;
-			array_unshift($params, $crypto->sealField($recipient, $dek, self::sealAd($message_id, 'iem_recipient')));
+		$sets = array();
+		$params = array();
+		foreach ($columns as $col => $val) {
+			$sets[] = $col . ' = ?';
+			$params[] = $val;
 		}
+		// Only a freshly-minted DEK writes the wrapping columns; a reused DEK leaves
+		// the existing iem_sealed_key/generation/owner in place.
+		if (!$reuse) {
+			$sets[] = 'iem_sealed_key = ?';           $params[] = $sealed_key;
+			$sets[] = 'iem_key_generation = ?';       $params[] = intval($vault->get('uev_key_generation'));
+			$sets[] = 'iem_sealed_owner_user_id = ?'; $params[] = intval($vault->get('uev_usr_user_id'));
+		}
+		$sets[] = 'iem_content_sealed = true';
 		$params[] = $message_id;
 
 		$db = DbConnector::get_instance()->get_db_link();
-		$stmt = $db->prepare("UPDATE iem_inbound_email_messages SET $sets WHERE iem_inbound_email_message_id = ?");
+		$stmt = $db->prepare('UPDATE iem_inbound_email_messages SET ' . implode(', ', $sets)
+			. ' WHERE iem_inbound_email_message_id = ?');
 		$stmt->execute($params);
 		return $dek;
 	}

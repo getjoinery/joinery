@@ -19,7 +19,12 @@
  * the original's attachments server-side regardless of transport
  * (specs/implemented/inbound_email_compose_attachments.md).
  *
- * @version 1.2.0
+ * Compose maturity (specs/mailbox_compose_maturity.md): also accepts optional `bcc`,
+ * `body_html` (rich composer; server-sanitized), `inline_manifest` (inline-image
+ * local-id => filename), and `draft_id` (morph a saved draft into the Sent row). All
+ * optional, so the mobile `mailbox/send` contract stays backward-compatible.
+ *
+ * @version 1.3.0
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -40,13 +45,17 @@ function send_logic(array $input): LogicResult {
 	}
 
 	$params = array(
-		'mode'      => $input['mode'] ?? '',
-		'source_id' => $input['source_id'] ?? 0,
-		'alias_id'  => $input['alias_id'] ?? 0,
-		'to'        => $input['to'] ?? '',
-		'cc'        => $input['cc'] ?? '',
-		'subject'   => $input['subject'] ?? '',
-		'body'      => $input['body'] ?? '',
+		'mode'            => $input['mode'] ?? '',
+		'source_id'       => $input['source_id'] ?? 0,
+		'alias_id'        => $input['alias_id'] ?? 0,
+		'to'              => $input['to'] ?? '',
+		'cc'              => $input['cc'] ?? '',
+		'bcc'             => $input['bcc'] ?? '',
+		'subject'         => $input['subject'] ?? '',
+		'body'            => $input['body'] ?? '',
+		'body_html'       => $input['body_html'] ?? '',
+		'inline_manifest' => $input['inline_manifest'] ?? '',
+		'draft_id'        => $input['draft_id'] ?? 0,
 	);
 
 	$sender = new MailboxSender($viewer);

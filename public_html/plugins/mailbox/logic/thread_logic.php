@@ -37,6 +37,25 @@ function thread_logic(array $input): LogicResult {
 	$messages = $service->getThread($alias_id, $thread_key);
 	$messages = $service->withSignedTransport($messages);
 
+	// Harvest the thread's inbound senders into the contact store (§ Phase 4) —
+	// opportunistic, in-window by construction (the thread just decrypted), best-effort.
+	if (!$service->contentLocked()) {
+		$senders = array();
+		foreach ($messages as $m) {
+			if (($m['direction'] ?? 'inbound') !== 'outbound' && !empty($m['sender'])) {
+				$senders[] = (string)$m['sender'];
+			}
+		}
+		if (count($senders)) {
+			try {
+				require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxContacts.php'));
+				(new MailboxContacts())->harvest(intval($session->get_user_id()), $senders, MailboxContact::SOURCE_RECEIVED);
+			} catch (Throwable $e) {
+				error_log('mailbox/thread contact harvest: ' . $e->getMessage());
+			}
+		}
+	}
+
 	return LogicResult::render(array(
 		'messages' => $messages,
 		'folders'  => $service->threadFolderIds($alias_id, $thread_key),

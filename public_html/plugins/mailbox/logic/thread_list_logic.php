@@ -7,8 +7,9 @@
  * spam, inbox, folder_id, page. Returns {threads, has_more, page} — the
  * exact shapes the web reader's list endpoint serves; every row is scoped
  * by MailboxViewer (specs/implemented/mobile_native_email_server_api_and_ios.md).
+ * The `drafts` param switches to the Drafts view (specs/mailbox_compose_maturity.md).
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -33,6 +34,9 @@ function thread_list_logic(array $input): LogicResult {
 		'starred_only' => !empty($input['starred_only']),
 		'spam'         => !empty($input['spam']),
 		'inbox'        => !empty($input['inbox']),
+		// Drafts view (specs/mailbox_compose_maturity.md § Phase 2): the viewer's saved
+		// drafts, singletons, excluded from every other view.
+		'drafts'       => !empty($input['drafts']),
 	);
 
 	$page = isset($input['page']) ? intval($input['page']) : 1;

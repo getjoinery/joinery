@@ -42,7 +42,16 @@
  * ingest uses — so a recipient's reply threads back into this conversation
  * (specs/implemented/inbound_email_new_message_compose.md).
  *
- * @version 1.6
+ * COMPOSE MATURITY (specs/mailbox_compose_maturity.md § Phase 1). send() also accepts
+ * `bcc` (parsed like To/Cc, delivered as true envelope Bcc, stored in the sealed
+ * iem_bcc column — never merged into iem_recipient), `body_html` (the rich composer's
+ * HTML, server-sanitized via MailboxHtmlSanitizer and authoritative; the plaintext
+ * `body` param still works for degraded clients), and `inline_manifest` (local-id =>
+ * filename for pasted/dragged inline images, embedded with a minted Content-ID and
+ * cid-rewritten into the stored/sent HTML). The stored iem_body_plain is derived from
+ * the final sanitized HTML.
+ *
+ * @version 1.8
  */
 
 require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
@@ -53,6 +62,7 @@ require_once(PathHelper::getIncludePath('data/files_class.php'));
 require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxViewer.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxHtmlSanitizer.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
@@ -142,24 +152,30 @@ class MailboxSender {
 		}
 		$from_address = $transport->fromAddress ?: $alias_address;
 
-		// Recipients: trust the (admin-entered) To/Cc; for reply-all the client
-		// pre-populates them, but the server is the authority on what is sent.
+		// Recipients: trust the (admin-entered) To/Cc/Bcc; for reply-all the client
+		// pre-populates To/Cc, but the server is the authority on what is sent. Bcc
+		// is accepted in every mode (a private copy list is orthogonal to Cc, which
+		// forward suppresses).
 		$to = $this->parseAddressList($params['to'] ?? '');
 		$cc = ($mode === self::MODE_FORWARD) ? array() : $this->parseAddressList($params['cc'] ?? '');
+		$bcc = $this->parseAddressList($params['bcc'] ?? '');
 		if (empty($to)) {
 			throw new MailboxSenderException('Add at least one recipient.');
 		}
 
-		// Reading the source message's sealed fields (quoting/subject) requires
-		// an open window for its owner — composing is always in-window per
-		// specs/implemented/inbound_email_encryption_at_rest.md § 4.6, but a
-		// window can still close mid-compose (idle timeout, another tab's
-		// explicit lock); surface that as a clean user-facing message rather
-		// than an uncaught fatal.
+		// The user's own body portion. body_html (rich composer) is server-sanitized
+		// against the strict allowlist and is authoritative; the plaintext `body`
+		// param remains the path for mobile / degraded clients. Reading the source's
+		// sealed subject for normalizeSubject requires an open window — composing is
+		// always in-window (specs/implemented/inbound_email_encryption_at_rest.md §
+		// 4.6), but a window can close mid-compose; surface that cleanly.
+		$body_html_param = trim((string)($params['body_html'] ?? ''));
+		$userHtml = $body_html_param !== ''
+			? MailboxHtmlSanitizer::sanitize($body_html_param, true)
+			: $this->textToHtml((string)($params['body'] ?? ''));
 		try {
 			$subject = $this->normalizeSubject((string)($params['subject'] ?? ''), $mode,
 				$source !== null ? (string)$source->get('iem_subject') : '');
-			$body_html = $this->buildBody($mode, (string)($params['body'] ?? ''), $source);
 		} catch (VaultLockedException $e) {
 			throw new MailboxLockedException('Your vault is locked — unlock it to reply to or forward this message.');
 		}
@@ -169,8 +185,8 @@ class MailboxSender {
 		$email->from($from_address, $alias->get('iea_description') ?: null);
 		foreach ($to as $addr) { $email->to($addr); }
 		foreach ($cc as $addr) { $email->cc($addr); }
+		foreach ($bcc as $addr) { $email->bcc($addr); }
 		$email->subject($subject);
-		$email->html($body_html);
 		$email->messageId($message_id);
 
 		// Threading: replies are In-Reply-To/References the original; a forward
@@ -183,12 +199,47 @@ class MailboxSender {
 		}
 
 		// Forward re-attaches the original's attachments; uploads ride along in
-		// every mode.
+		// every mode. Inline (cid:) images among the uploads are embedded and their
+		// placeholder cid rewritten into the user's HTML before it is quoted/sent.
 		$total = 0;
 		if ($mode === self::MODE_FORWARD) {
 			$total += $this->attachOriginal($email, $source);
 		}
-		$accepted = $this->attachUploads($email, $files, $total);
+		// Draft-morph (specs/mailbox_compose_maturity.md § Phase 2): sending from a
+		// saved draft reuses its row and its already-persisted attachments in place.
+		// Re-attach those stored parts to the outgoing message (they were uploaded on
+		// an earlier autosave, so they are not in this request's $files).
+		$draft = null;
+		$draft_id = intval($params['draft_id'] ?? 0);
+		$morph_dek = null;
+		if ($draft_id > 0) {
+			$draft = $this->loadDraftInScope($draft_id);
+			if ($draft !== null) {
+				// Unwrap the sealed draft's DEK ONCE, up front (Fix 2): a sealed draft
+				// with a closed window fails here — before anything reaches the wire —
+				// and the same DEK decrypts its stored attachments/inline parts and is
+				// threaded into the morph so its sealed wrapping is never overwritten.
+				$morph_dek = $this->assertDraftSendable($draft);
+				$total += $this->attachStoredAttachments($email, $draft, $morph_dek);
+				$total += $this->attachStoredInline($email, $draft, $userHtml, $morph_dek, $total);
+			}
+		}
+
+		$inline_manifest = self::parseInlineManifest($params['inline_manifest'] ?? '');
+		$uploads = $this->attachUploads($email, $files, $total, $inline_manifest);
+		if (!empty($uploads['cid_replace'])) {
+			$userHtml = strtr($userHtml, $uploads['cid_replace']);
+		}
+
+		// Wrap the (cid-rewritten) user HTML with the server-side quote/forward
+		// block, then derive the stored plaintext from the final HTML.
+		try {
+			$body_html = $this->buildBody($mode, $userHtml, $source);
+		} catch (VaultLockedException $e) {
+			throw new MailboxLockedException('Your vault is locked — unlock it to reply to or forward this message.');
+		}
+		$email->html($body_html);
+		$email->text(MailboxHtmlSanitizer::toPlainText($body_html));
 
 		// One pipeline, synchronous (no retry-queue): success/failure is shown now.
 		try {
@@ -220,7 +271,12 @@ class MailboxSender {
 			} elseif ($account->smtpRewritesMessageId()) {
 				// Gmail rewrites the Message-ID on send, so a stored row could never
 				// match the filed copy. Store no local row; the message appears on the
-				// next Sent ingest (one poll-interval latency).
+				// next Sent ingest (one poll-interval latency). A draft it was sent from
+				// has nothing to morph into, so it is discarded here.
+				if ($draft !== null) {
+					try { $draft->permanent_delete(); }
+					catch (Throwable $e) { error_log('MailboxSender: draft cleanup after pending-ingest send failed: ' . $e->getMessage()); }
+				}
 				return array('ok' => true, 'outbound_id' => 0, 'pending_sent_ingest' => true);
 			}
 			// else (files Sent, preserves Message-ID): store the local row now; the
@@ -228,10 +284,25 @@ class MailboxSender {
 		}
 
 		$stored = $this->storeOutboundRow($source, $alias, $mode, $from_address,
-			array_merge($to, $cc), $subject, $email, $message_id);
-		if ($accepted) {
-			$this->persistOutboundUploads($stored['id'], $accepted, $stored['dek']);
+			array_merge($to, $cc), $bcc, $subject, $email, $message_id, $draft, $morph_dek);
+		if (!empty($uploads['regular'])) {
+			$this->persistOutboundUploads($stored['id'], $uploads['regular'], $stored['dek']);
 		}
+		if (!empty($uploads['inline'])) {
+			$this->persistInlineUploads($stored['id'], $uploads['inline'], $stored['dek']);
+		}
+
+		// A draft morphed IN PLACE into the Sent row (same id, now at-or-below every
+		// index's high-water mark), so a plain `id > since` fold never revisits it.
+		// Queue the id on each grantee's search-index bookkeeping for an explicit
+		// refold (Fix 6). Best-effort — never fails the send.
+		if ($draft !== null) {
+			$this->enqueueRefold(intval($alias->key), intval($stored['id']));
+		}
+
+		// Harvest every recipient into the contact store (§ Phase 4) — best-effort,
+		// in-window (send always is), so a sealed store can hash + seal the address.
+		$this->harvestRecipients(array_merge($to, $cc, $bcc));
 
 		return array('ok' => true, 'outbound_id' => $stored['id']);
 	}
@@ -255,6 +326,24 @@ class MailboxSender {
 			throw new MailboxSenderException('You do not have access to this mailbox.');
 		}
 		return $source;
+	}
+
+	/**
+	 * Harvest sent recipients into the viewer's contact store (§ Phase 4). Never
+	 * throws — a contact-store failure must not affect a successful send.
+	 *
+	 * @param string[] $addresses
+	 */
+	private function harvestRecipients(array $addresses): void {
+		if (!count($addresses)) {
+			return;
+		}
+		try {
+			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxContacts.php'));
+			(new MailboxContacts())->harvest($this->viewer->getUserId(), $addresses, MailboxContact::SOURCE_SENT);
+		} catch (\Throwable $e) {
+			error_log('MailboxSender: contact harvest failed: ' . $e->getMessage());
+		}
 	}
 
 	/** The enabled connected IMAP account bound to this alias, or null (hosted). */
@@ -291,11 +380,12 @@ class MailboxSender {
 
 	/**
 	 * Build the outgoing HTML body: the user's note + a quoted/forwarded
-	 * original. A new message ($source === null) carries only the user's text
-	 * — there is nothing to quote.
+	 * original. $userHtml is already the finished (sanitized, cid-rewritten) user
+	 * portion — from the rich composer's body_html or textToHtml() of a plaintext
+	 * body. A new message ($source === null) carries only that portion — there is
+	 * nothing to quote.
 	 */
-	private function buildBody(string $mode, string $userText, ?InboundEmailMessage $source): string {
-		$userHtml = $this->textToHtml($userText);
+	private function buildBody(string $mode, string $userHtml, ?InboundEmailMessage $source): string {
 		if ($mode === self::MODE_NEW) {
 			return '<div>' . $userHtml . '</div>';
 		}
@@ -512,15 +602,217 @@ class MailboxSender {
 	}
 
 	/**
-	 * Attach validated uploads. $runningTotal carries any forwarded-original bytes.
-	 * Returns the accepted uploads (bytes + display name) so the caller can persist
-	 * them onto the outbound manifest once the send succeeds.
-	 *
-	 * @return array<int, array{bytes:string, name:string}>
+	 * Load a draft row iff it is a draft, not deleted, and in the viewer's scope
+	 * (§ Phase 2 draft-morph). Returns null otherwise — a bad draft_id simply sends
+	 * a fresh outbound row rather than failing.
 	 */
-	private function attachUploads(EmailMessage $email, array $files, int $runningTotal): array {
+	private function loadDraftInScope(int $draft_id): ?InboundEmailMessage {
+		if ($draft_id <= 0) {
+			return null;
+		}
+		$row = new InboundEmailMessage($draft_id, TRUE);
+		if (!$row->key || $row->get('iem_delete_time') || $row->get('iem_direction') !== 'draft') {
+			return null;
+		}
+		$alias_id = intval($row->get('iem_iea_inbound_email_alias_id'));
+		if ($alias_id <= 0 || !$this->viewer->canAccess($alias_id)) {
+			return null;
+		}
+		// A draft belongs to its author alone (fix pack Fix 1) — a co-grantee or an
+		// all-access superadmin can never send-morph someone else's draft. A
+		// null/legacy author fails closed.
+		if (intval($row->get('iem_draft_author_user_id')) !== $this->viewer->getUserId()) {
+			return null;
+		}
+		return $row;
+	}
+
+	/**
+	 * Preflight a draft-morph send (Fix 2): unwrap the draft's sealed per-message
+	 * DEK once, up front — BEFORE any attach or SMTP work — so a sealed draft with a
+	 * closed window fails loudly (MailboxLockedException) with nothing on the wire,
+	 * and the raw DEK can be threaded through the attach + morph paths so the sealed
+	 * wrapping is never re-minted. Returns null when there is nothing sealed on the
+	 * draft (a Standard-tier draft), else the raw DEK bytes.
+	 */
+	private function assertDraftSendable(InboundEmailMessage $draft): ?string {
+		$sealed_key = (string)$draft->get('iem_sealed_key');
+		if ($sealed_key === '') {
+			return null; // nothing sealed anywhere on this draft
+		}
+		$owner_id = intval($draft->get('iem_sealed_owner_user_id'));
+		if ($owner_id <= 0) {
+			$owner_id = (int)(InboundEmailMessage::singleOwnerUserId(intval($draft->get('iem_iea_inbound_email_alias_id'))) ?? 0);
+		}
+		$dek = ($owner_id > 0) ? InboundEmailMessage::unwrapDekInWindow($owner_id, $sealed_key) : null;
+		if ($dek === null) {
+			throw new MailboxLockedException('Your vault is locked — unlock it to send this draft.');
+		}
+		return $dek;
+	}
+
+	/**
+	 * Re-attach a draft's already-persisted (file-backed) attachments to the outgoing
+	 * message — they were uploaded on an earlier autosave, so they are not in this
+	 * send's $files. A sealed attachment is decrypted with the preflight DEK directly
+	 * (no TOCTOU window); a null DEK on a sealed row throws (defensive — unreachable
+	 * after assertDraftSendable). Plaintext attachments pass through. A missing/gone
+	 * File is skipped (best-effort). Returns bytes added.
+	 */
+	private function attachStoredAttachments(EmailMessage $email, InboundEmailMessage $draft, ?string $dek = null): int {
+		$manifest = new MultiInboundMessageAttachment(array(
+			'message_id' => intval($draft->key), 'is_inline' => false,
+		));
+		$manifest->load();
+		$crypto = null;
+		$total = 0;
+		foreach ($manifest as $att) {
+			$fil_id = intval($att->get('ima_fil_file_id'));
+			if ($fil_id <= 0) {
+				continue;
+			}
+			$file = new File($fil_id, TRUE);
+			if (!$file->key || $file->get('fil_delete_time')) {
+				continue;
+			}
+			$bytes = $file->read_bytes('original');
+			if ($bytes === null) {
+				continue;
+			}
+			if ($this->isSealedRow($att)) {
+				if ($dek === null) {
+					throw new MailboxLockedException('Your vault is locked — unlock it to send this draft.');
+				}
+				if ($crypto === null) {
+					require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
+					$crypto = new VaultCrypto();
+				}
+				$bytes = $crypto->openField($bytes, $dek,
+					InboundEmailMessage::attachmentAd(intval($draft->key), (string)$att->get('ima_mime_part')));
+			}
+			$total += strlen($bytes);
+			if ($total > self::MAX_TOTAL_BYTES) {
+				throw new MailboxSenderException('The draft attachments exceed the size limit.');
+			}
+			$email->attachData($bytes, $att->get('ima_filename') ?: 'attachment',
+				(string)$att->get('ima_content_type') ?: 'application/octet-stream');
+		}
+		return $total;
+	}
+
+	/**
+	 * Re-embed a draft's stored inline (pasted) images on send (Fix 7). Each inline
+	 * row whose cid:{content_id} still appears in the user's HTML is embedded with
+	 * that same Content-ID (the outgoing HTML already carries cid:{content_id}, so no
+	 * rewrite is needed); unreferenced rows are skipped (pruned in the normal flow).
+	 * Sealing + cap handling mirror attachStoredAttachments. Returns bytes added.
+	 */
+	private function attachStoredInline(EmailMessage $email, InboundEmailMessage $draft, string $userHtml, ?string $dek = null, int $runningTotal = 0): int {
+		$manifest = new MultiInboundMessageAttachment(array(
+			'message_id' => intval($draft->key), 'is_inline' => true,
+		));
+		$manifest->load();
+		$crypto = null;
+		$added = 0;
+		foreach ($manifest as $att) {
+			$cid = trim((string)$att->get('ima_content_id'));
+			if ($cid === '' || strpos($userHtml, 'cid:' . $cid) === false) {
+				continue; // not referenced by the body being sent
+			}
+			$fil_id = intval($att->get('ima_fil_file_id'));
+			if ($fil_id <= 0) {
+				continue;
+			}
+			$file = new File($fil_id, TRUE);
+			if (!$file->key || $file->get('fil_delete_time')) {
+				continue;
+			}
+			$bytes = $file->read_bytes('original');
+			if ($bytes === null) {
+				continue;
+			}
+			if ($this->isSealedRow($att)) {
+				if ($dek === null) {
+					throw new MailboxLockedException('Your vault is locked — unlock it to send this draft.');
+				}
+				if ($crypto === null) {
+					require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
+					$crypto = new VaultCrypto();
+				}
+				$bytes = $crypto->openField($bytes, $dek,
+					InboundEmailMessage::attachmentAd(intval($draft->key), (string)$att->get('ima_mime_part')));
+			}
+			$added += strlen($bytes);
+			if ($runningTotal + $added > self::MAX_TOTAL_BYTES) {
+				throw new MailboxSenderException('The draft attachments exceed the size limit.');
+			}
+			$email->attachInlineData($bytes, $cid, $att->get('ima_filename') ?: 'image',
+				(string)$att->get('ima_content_type') ?: 'application/octet-stream');
+		}
+		return $added;
+	}
+
+	/** Robust truthiness for the ima_is_sealed bool across PDO representations. */
+	private function isSealedRow(InboundMessageAttachment $att): bool {
+		$v = $att->get('ima_is_sealed');
+		return ($v === true || $v === 't' || $v === 'true' || $v === '1' || $v === 1);
+	}
+
+	/**
+	 * Queue a morphed-draft Sent row id for an explicit refold on each grantee's
+	 * sealed search index (Fix 6). The draft folded OUT of the index (drafts are
+	 * excluded), then morphed in place into the Sent row keeping its id ≤ the
+	 * high-water mark, so a plain `id > since` fold never revisits it. Only a user
+	 * with an EXISTING index row needs the queue — one with none rebuilds from 0 on
+	 * first search. Best-effort; never throws into the send.
+	 */
+	private function enqueueRefold(int $alias_id, int $message_id): void {
+		try {
+			require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
+			require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_mailbox_search_index_class.php'));
+			foreach (InboundEmailMailboxGrant::user_ids_for_alias($alias_id) as $uid) {
+				$uid = intval($uid);
+				$multi = new MultiInboundMailboxSearchIndex(array('user_id' => $uid));
+				$multi->load();
+				if (!$multi->count()) {
+					continue; // no index yet — a first search rebuilds and folds this id
+				}
+				$bk = $multi->get(0);
+				$ids = json_decode((string)$bk->get('imi_refold_ids'), true);
+				if (!is_array($ids)) {
+					$ids = array();
+				}
+				$ids = array_map('intval', $ids);
+				if (!in_array($message_id, $ids, true)) {
+					$ids[] = $message_id;
+				}
+				$bk->set('imi_refold_ids', json_encode(array_values($ids)));
+				$bk->save();
+			}
+		} catch (\Throwable $e) {
+			error_log('MailboxSender: refold enqueue failed for message ' . $message_id . ': ' . $e->getMessage());
+		}
+	}
+
+	/**
+	 * Attach validated uploads. $runningTotal carries any forwarded-original bytes.
+	 * An upload named in $inline_manifest (local-id => filename) is an inline image:
+	 * it is embedded with a freshly-minted Content-ID and the placeholder
+	 * `cid:{local-id}` in the user's HTML is mapped to `cid:{real-cid}` (returned in
+	 * 'cid_replace'). Every other upload is a normal attachment. Caps (count,
+	 * per-file, running total) apply to inline and regular uploads alike.
+	 *
+	 * @return array{regular: array<int,array{bytes:string,name:string}>,
+	 *               inline: array<int,array{bytes:string,name:string,type:string,cid:string}>,
+	 *               cid_replace: array<string,string>}
+	 */
+	private function attachUploads(EmailMessage $email, array $files, int $runningTotal, array $inline_manifest = array()): array {
 		$count = 0;
-		$accepted = array();
+		$regular = array();
+		$inline = array();
+		$cid_replace = array();
+		$pending_inline = $inline_manifest; // consumed as matching uploads arrive
+
 		foreach ($files as $f) {
 			if (($f['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
 				continue;
@@ -548,10 +840,65 @@ class MailboxSender {
 				throw new MailboxSenderException('An attachment could not be read.');
 			}
 			$name = $this->safeFilename((string)($f['name'] ?? 'attachment'));
-			$email->attachData($bytes, $name, (string)($f['type'] ?? 'application/octet-stream'));
-			$accepted[] = array('bytes' => $bytes, 'name' => $name);
+			$type = (string)($f['type'] ?? 'application/octet-stream');
+
+			$localId = self::matchInlineLocalId($pending_inline, (string)($f['name'] ?? ''), $name);
+			if ($localId !== null) {
+				$cid = 'mbxinl-' . bin2hex(random_bytes(8));
+				$email->attachInlineData($bytes, $cid, $name, $type);
+				$inline[] = array('bytes' => $bytes, 'name' => $name, 'type' => $type, 'cid' => $cid);
+				$cid_replace['cid:' . $localId] = 'cid:' . $cid;
+			} else {
+				$email->attachData($bytes, $name, $type);
+				$regular[] = array('bytes' => $bytes, 'name' => $name);
+			}
 		}
-		return $accepted;
+		return array('regular' => $regular, 'inline' => $inline, 'cid_replace' => $cid_replace);
+	}
+
+	/**
+	 * Parse the inline manifest param (a JSON object, or an already-decoded array)
+	 * of local-id => filename. Empty/invalid → no inline images.
+	 *
+	 * @return array<string,string>
+	 */
+	public static function parseInlineManifest($raw): array {
+		if (is_array($raw)) {
+			$decoded = $raw;
+		} else {
+			$raw = trim((string)$raw);
+			if ($raw === '') {
+				return array();
+			}
+			$decoded = json_decode($raw, true);
+		}
+		if (!is_array($decoded)) {
+			return array();
+		}
+		$out = array();
+		foreach ($decoded as $localId => $filename) {
+			$lid = trim((string)$localId);
+			$fn = trim((string)$filename);
+			if ($lid !== '' && $fn !== '') {
+				$out[$lid] = $fn;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Find (and consume) the manifest local-id for an uploaded file, matched by
+	 * filename against either the raw or sanitized name. Returns null when the
+	 * upload is not an inline image.
+	 */
+	public static function matchInlineLocalId(array &$pending, string $rawName, string $safeName): ?string {
+		foreach ($pending as $localId => $filename) {
+			if ($filename === $rawName || $filename === $safeName) {
+				unset($pending[$localId]);
+				return (string)$localId;
+			}
+		}
+		return null;
 	}
 
 	private function safeFilename(string $name): string {
@@ -614,6 +961,59 @@ class MailboxSender {
 				));
 			} catch (Throwable $e) {
 				error_log('MailboxSender: failed to persist outbound upload "' . $a['name'] . '" on message '
+					. $message_id . ': ' . $e->getMessage());
+			}
+		}
+	}
+
+	/**
+	 * Persist each embedded inline image as a private File + an ima_ manifest row
+	 * flagged inline (ima_is_inline=true) carrying its Content-ID (ima_content_id),
+	 * so the stored HTML body's cid: reference resolves through the SAME
+	 * resolveInlineImages() rewrite that renders received inline images. Ownership
+	 * and sealing mirror persistOutboundUploads(); never throws (the message is
+	 * already sent, so a storage failure only degrades the Sent copy's inline art).
+	 *
+	 * @param array<int, array{bytes:string, name:string, type:string, cid:string}> $inline
+	 */
+	private function persistInlineUploads(int $message_id, array $inline, ?string $dek = null): void {
+		$crypto = null;
+		if ($dek !== null) {
+			require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
+			$crypto = new VaultCrypto();
+		}
+		$index = 0;
+		foreach ($inline as $a) {
+			$index++;
+			try {
+				$mime = File::detect_mime_bytes($a['bytes']) ?: ($a['type'] ?: 'application/octet-stream');
+				$bytes = $a['bytes'];
+				$original_size = strlen($bytes);
+				$part_id = 'inline:' . $index;
+				if ($crypto !== null) {
+					$bytes = $crypto->sealField($bytes, $dek, InboundEmailMessage::attachmentAd($message_id, $part_id));
+				}
+				$file = File::createFromBytes($bytes, $a['name'], $mime, $this->viewer->getUserId(), array(
+					'fil_private' => true,
+					'fil_source'  => File::SOURCE_EMAIL_ATTACHMENT,
+				));
+				if ($crypto !== null) {
+					$file->set('fil_type', substr($mime, 0, 128));
+					$file->save();
+				}
+				InboundMessageAttachment::CreateEntry(array(
+					'ima_iem_inbound_email_message_id' => $message_id,
+					'ima_filename'     => $a['name'],
+					'ima_content_type' => $mime,
+					'ima_size_bytes'   => $original_size,
+					'ima_mime_part'    => $part_id,
+					'ima_content_id'   => $a['cid'],
+					'ima_is_inline'    => true,
+					'ima_fil_file_id'  => (int)$file->key,
+					'ima_is_sealed'    => ($crypto !== null),
+				));
+			} catch (Throwable $e) {
+				error_log('MailboxSender: failed to persist inline image "' . $a['name'] . '" on message '
 					. $message_id . ': ' . $e->getMessage());
 			}
 		}
@@ -774,8 +1174,9 @@ class MailboxSender {
 	 *         seal any re-uploaded attachments under the same key.
 	 */
 	private function storeOutboundRow(?InboundEmailMessage $source, InboundEmailAlias $alias,
-			string $mode, string $from_address, array $recipients, string $subject,
-			EmailMessage $email, string $message_id): array {
+			string $mode, string $from_address, array $recipients, array $bcc, string $subject,
+			EmailMessage $email, string $message_id, ?InboundEmailMessage $morph = null,
+			?string $morph_dek = null): array {
 
 		$thread_key = $source !== null
 			? $this->resolveThreadKey($source, $message_id)
@@ -784,6 +1185,9 @@ class MailboxSender {
 		// Never truncated: the full list is real content (iem_recipient is text;
 		// a sealed row stores its AEAD blob, which outgrows any plaintext cap).
 		$recipient_str = implode(', ', $recipients);
+		// Bcc rides its OWN sealed column, never merged into iem_recipient (§ Phase 1)
+		// so reply-all on this Sent copy can never re-leak a bcc'd address.
+		$bcc_str = implode(', ', $bcc);
 		$body_plain = (string)$email->getTextBody();
 		$body_html = (string)$email->getHtmlBody();
 		$subject_trunc = substr($subject, 0, 4000);
@@ -792,49 +1196,102 @@ class MailboxSender {
 		$vault = $owner_id !== null ? UserEncryptionVault::loadForUser($owner_id) : null;
 		$sealing = ($vault !== null);
 
+		// The columns common to a fresh Sent row and a draft-morph. Content is empty
+		// when sealing (sealAndPersistContent writes the ciphertext right after).
+		$cols = array(
+			'iem_sender'       => $sealing ? '' : substr($from_address, 0, 500),
+			'iem_recipient'    => $sealing ? '' : $recipient_str,
+			'iem_bcc'          => ($sealing || $bcc_str === '') ? null : $bcc_str,
+			'iem_subject'      => $sealing ? '' : $subject_trunc,
+			'iem_body_plain'   => $sealing ? '' : $body_plain,
+			'iem_body_html'    => $sealing ? '' : $body_html,
+			'iem_raw_message'  => '',
+			'iem_message_id_header' => substr($message_id, 0, 255),
+			'iem_thread_key'   => $thread_key,
+			'iem_is_read'      => true,
+			'iem_is_starred'   => false,
+			'iem_dkim_result'  => 'unverified',
+			'iem_spf_result'   => 'unverified',
+			'iem_dmarc_result' => 'unverified',
+			'iem_auth_source'  => 'none',
+			'iem_received_time' => gmdate('Y-m-d H:i:s'),
+		);
+
+		// Draft-morph (§ Phase 2): reuse the draft row and its attachments in place —
+		// direction flips to outbound, message-id/thread key are set, draft_state
+		// cleared. Its existing attachments are sealed under the DRAFT's DEK, so re-seal
+		// content under that SAME DEK (unwrapped in-window; sending is always in-window)
+		// rather than minting a new one, which would strand those attachments. The morph
+		// is a targeted UPDATE, never $morph->save() — a full-row save would try to
+		// decrypt the loaded draft's sealed columns.
+		$reuse_dek = null;
+		$db = ($sealing) ? DbConnector::get_instance()->get_db_link() : null;
+		$dek = null;
+
+		if ($morph !== null) {
+			$message_id_row = intval($morph->key);
+			if ($sealing && $morph->get('iem_content_sealed') && $morph->get('iem_sealed_key')) {
+				// The sealed draft's DEK comes from the send() preflight (Fix 2) — never
+				// re-unwrapped or re-minted here, so the sealed wrapping and the draft's
+				// already-sealed attachments stay intact.
+				$reuse_dek = $morph_dek;
+				if ($reuse_dek === null) {
+					throw new MailboxLockedException('Your vault is locked — unlock it to send this draft.');
+				}
+			}
+			$cols['iem_direction'] = 'outbound';
+			$cols['iem_draft_state'] = null;
+			// The From identity the draft is finally sent under (Fix 5): a mid-draft
+			// From change files the Sent copy into the right mailbox and threads replies
+			// there. The row is no longer a draft, so clear its author (Fix 1).
+			$cols['iem_iea_inbound_email_alias_id']  = intval($alias->key);
+			$cols['iem_ied_inbound_email_domain_id'] = intval($alias->get('iea_ied_inbound_email_domain_id'));
+			$cols['iem_draft_author_user_id']        = null;
+			if (!$sealing && $morph->get('iem_content_sealed')) {
+				// Sealed draft sent from a standard alias: the content columns above are
+				// plaintext, so clear the sealed flag. iem_sealed_key/owner stay put so
+				// the draft's already-sealed attachments remain decryptable (per-file).
+				$cols['iem_content_sealed'] = false;
+			}
+			try {
+				if ($db !== null) { $db->beginTransaction(); }
+				InboundEmailMessage::updateColumns($message_id_row, $cols);
+				if ($sealing) {
+					$dek = InboundEmailMessage::sealAndPersistContent($message_id_row, $vault,
+						substr($from_address, 0, 500), $recipient_str, $subject_trunc, $body_plain, $body_html,
+						true, $bcc_str, null, $reuse_dek);
+					$db->commit();
+				}
+			} catch (\Throwable $e) {
+				if ($db !== null && $db->inTransaction()) { $db->rollBack(); }
+				throw $e;
+			}
+			return array('id' => $message_id_row, 'dek' => $dek);
+		}
+
+		// A fresh Sent row. The empty-content insert and its seal UPDATE are one
+		// transaction — the hollow row must never survive a seal failure (mirrors
+		// InboundEmailRouter::storeMessage; the mail is already on the wire).
 		$row = new InboundEmailMessage(NULL);
 		$row->set('iem_ied_inbound_email_domain_id', $source !== null
 			? $source->get('iem_ied_inbound_email_domain_id')
 			: $alias->get('iea_ied_inbound_email_domain_id'));
 		$row->set('iem_iea_inbound_email_alias_id', $alias->key);
 		$row->set('iem_direction', 'outbound');
-		$row->set('iem_sender', $sealing ? '' : substr($from_address, 0, 500));
-		$row->set('iem_recipient', $sealing ? '' : $recipient_str);
-		$row->set('iem_subject', $sealing ? '' : $subject_trunc);
-		$row->set('iem_body_plain', $sealing ? '' : $body_plain);
-		$row->set('iem_body_html', $sealing ? '' : $body_html);
-		$row->set('iem_raw_message', '');
-		$row->set('iem_message_id_header', substr($message_id, 0, 255));
-		$row->set('iem_thread_key', $thread_key);
-		$row->set('iem_is_read', true);
-		$row->set('iem_is_starred', false);
-		$row->set('iem_dkim_result', 'unverified');
-		$row->set('iem_spf_result', 'unverified');
-		$row->set('iem_dmarc_result', 'unverified');
-		$row->set('iem_auth_source', 'none');
-		$row->set('iem_received_time', gmdate('Y-m-d H:i:s'));
-
-		// A sealing row's insert and its seal UPDATE are one transaction — the
-		// empty-content insert must never survive a seal failure (mirrors
-		// InboundEmailRouter::storeMessage; the mail is already on the wire, so
-		// a failure here reports honestly rather than leaving a hollow Sent row).
-		$db = null;
-		if ($sealing) {
-			$db = DbConnector::get_instance()->get_db_link();
-			$db->beginTransaction();
+		foreach ($cols as $col => $val) {
+			$row->set($col, $val);
 		}
-		$dek = null;
 		try {
+			if ($db !== null) { $db->beginTransaction(); }
 			$row->save();
 			if ($sealing) {
 				$dek = InboundEmailMessage::sealAndPersistContent(intval($row->key), $vault,
-					substr($from_address, 0, 500), $recipient_str, $subject_trunc, $body_plain, $body_html, true);
+					substr($from_address, 0, 500), $recipient_str, $subject_trunc, $body_plain, $body_html,
+					true, $bcc_str, null, $reuse_dek);
 				$db->commit();
 			}
 		} catch (\Throwable $e) {
-			if ($db !== null) {
-				$db->rollBack();
-			}
+			if ($db !== null && $db->inTransaction()) { $db->rollBack(); }
 			throw $e;
 		}
 
