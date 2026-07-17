@@ -1045,9 +1045,70 @@ Infrastructure (P2):
   can't pass by refusing everything); a private file is 404-not-403 to a
   stranger. The in-process traversal half (routing_security_test.php, safe) is
   untouched.
+- **T10 drive_link_auth** — DONE 2026-07-17. New
+  `tests/functional/drive/link_auth_test.php` (db, dev-only, 15 checks) drives
+  drive_link_create_logic / drive_link_revoke_logic through an impersonated
+  session ($_SESSION, which SessionControl reads live). Minting: owner mints a
+  file link and a folder link; a viewer-grantee and a stranger are both refused
+  with the ownership-gate error; anonymous is refused; a nonexistent entity is
+  refused. Every non-owner actor holds the drive_share_links tier feature (a
+  lightweight tier fixture) so a refusal can only be the ownership gate, not the
+  tier gate — the model-layer sharing_test always passed the owner id straight
+  to mint() and never touched this gate. Revoking: a stranger and a viewer-
+  grantee are refused (link left live), the creator succeeds, and an admin
+  (perm >= 5) may revoke a link they did not create (deliberate staff override,
+  a positive control). Plus a render-side non-exposure check: a folder link
+  lists that folder's own file but not a private file elsewhere in the owner's
+  Drive. Full db 92/92, 2140 checks; teardown leaves no fixtures behind.
+- **T12 deletion-cascade execution** — DONE 2026-07-17. New
+  `tests/integration/deletion_cascade_test.php` (db, dev-only, 18 checks) proves
+  permanent_delete() actually READS del_deletion_rules and applies each action —
+  the companion deletion_rule_registration_test only proved rules are written.
+  Section A, against self-contained scratch tables (zzdel_*, created + dropped
+  by the test) with rule rows inserted directly: cascade deletes children, null
+  nulls the FK, set_value rewrites to a sentinel, prevent throws and rolls the
+  whole delete back (atomic — cascade/set_value children verified untouched
+  after the block), and removing the blocker lets it through. Section B:
+  permanent_delete_dry_run() lists all four dependencies with the right action
+  each and reports can_delete false→true as the prevent child comes and goes.
+  Section C: the permanent_delete ACTION recurses multi-level through the real
+  registered chain usr_users → aic_conversations → aim_conversation_messages
+  (only 3-level chain registered on dev; guarded with harness_skip if joinery_ai
+  is inactive) — deleting a user removes its conversation (level 2) and the
+  conversation's messages (level 3, the level flat-cascade would orphan) while a
+  bystander's conversation+message survive. getModelClassForTable discovers
+  models from the FILESYSTEM, so a fake in-file middle model can't drive the
+  recursion (falls back to flat cascade) — the recursion test needs real
+  on-disk models, hence the real chain. Full db 93/93, 2158 checks; teardown
+  clean (0 scratch tables / rule rows / fixture users).
 
-**Still remaining (documented in the work plan below):** T10 drive_link_auth,
-T12 deletion-cascade execution, T14 TaintGate, T15 Stripe webhook, T19 per-area
+- **T14 TaintGate + untrusted-envelope** — DONE 2026-07-17. New
+  `plugins/joinery_ai/tests/taint_gate_test.php` (db, dev-only, 25 checks) covers
+  joinery_ai's prompt-injection defense, which had zero tests. (1) evaluate()
+  predicate matrix: write-tool × untrusted-model → tainted-capable; workspace
+  path; read-only tool or out-of-scope untrusted model → not tainted;
+  whitespace-only workspace is empty; pipeline untrusted-digest flag. (2)
+  explain()/describeDrift() name the trigger. (3) Save-time gate wired through
+  admin_edit_logic in-process (perm-10 session): tainted-capable without opt-in
+  rejected, saves once rcp_allow_tainted_writes set, write-but-not-tainted saves
+  without opt-in (no over-block). (4) Run-start drift via reflection on
+  RecipeRunner::checkTaintDrift: drift blocked without opt-in, cleared by opt-in.
+  (5) Untrusted-input envelope: per-run nonce is fresh (distinct across
+  contexts) and unpredictable 8-hex; a fake closer bearing the wrong nonce stays
+  ENCLOSED inside the real <<UNTRUSTED_nonce>>…<</UNTRUSTED_nonce>> block, across
+  query_model (ModelQueryExecutor::wrapUntrustedFields), view_attachment
+  (AiAttachment::framedText), and get_workspace — the crafted-payload injection
+  the accept criterion names. Fixtures: Comment (untrusted), Group (clean),
+  update_model (write). 25/25 in isolation + via runner; teardown clean.
+  NOTE: the full db tier currently shows 6 PRE-EXISTING failures unrelated to
+  T14 — schema drift where the uncommitted mailbox compose-maturity work added
+  iem_bcc to InboundEmailMessage field specs but update_database was never run,
+  so every test inserting an inbound message fails (imap_poller, imap_syncer,
+  inbound_email_attachment_storage, inbound_raw_storage, mailbox_vault_reseal,
+  email_security_scan_job). They fail with T14 removed too; fix is update_database.
+
+**Still remaining (documented in the work plan below):**
+T15 Stripe webhook, T19 per-area
 fixture libs, T21 unify the two SSRF guards, the url_safety_validator test
 extension, the legacy email framework port/delete, cloud 6→4 consolidation,
 remaining teardown-hygiene fixes, and the P3 greenfield suites (account
@@ -1119,7 +1180,8 @@ high-value security checks. [D18]
 becomes a reported SKIP in both CLI and dashboard. *Accept:* with the mini off,
 the device gates report SKIP, not FAIL; drive_crypto reports SKIP without node. Est. M.
 
-**T10. New `drive_link_auth_test.php` (top drive escalation gap).** Cover
+**T10. New `drive_link_auth_test.php` (top drive escalation gap).** ✅ DONE (see
+progress log). Covers
 drive_link_create_logic / drive_link_revoke_logic: owner can mint/revoke; a
 viewer-grantee and a stranger cannot; revoke by non-creator refused; folder-link
 non-exposure of nested/private siblings. *Accept:* a stranger minting a public link
@@ -1134,7 +1196,8 @@ authenticated permission-gate check (perm-0 denied `/admin/*`, perm-5 denied
 `/tests/*`). *Accept:* a traversal payload and a low-perm admin request are both
 refused. Est. M. [misc gaps 1-3]
 
-**T12. Deletion-cascade execution test.** Fixture parent+child models; call
+**T12. Deletion-cascade execution test.** ✅ DONE (see progress log). Fixture
+parent+child models; call
 permanent_delete() on the parent and assert children are deleted per del_action,
 that permanent_delete recurses multi-level, and that `prevent` blocks. *Accept:* a
 rules table that is registered but never consulted fails this test. Est. M. [misc gap 4 — the data-loss gap]
@@ -1146,7 +1209,7 @@ table (or delegate to the unified guard, T21), and add test cases for
 IPv6 literals, `169.254.169.254`, decimal/octal IPs, and userinfo tricks. *Accept:*
 `http://0.0.0.0/` is rejected by both guards. Est. M. [unit D31]
 
-**T14. TaintGate test (joinery_ai's worst gap).** Cover the tainted-capable
+**T14. TaintGate test (joinery_ai's worst gap).** ✅ DONE (see progress log). Cover the tainted-capable
 predicate across write-tools × untrusted-model-reads, the save-time rejection
 without allow_tainted_writes, and the run-start drift re-check. Plus an
 untrusted-envelope conformance test across fetch_url/web_search/query_model/
