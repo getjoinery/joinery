@@ -120,6 +120,12 @@ MX_BEFORE=$($SETTING_CTL get email_validation_mx_check)
 MIN_VERSIONS_BEFORE=$($SETTING_CTL get api_min_client_versions)
 [ -z "$MIN_VERSIONS_BEFORE" ] && MIN_VERSIONS_BEFORE='{}'
 trap cleanup EXIT
+# A runner timeout sends SIGTERM (then SIGKILL after 5s). An untrapped SIGTERM
+# kills bash WITHOUT running the EXIT trap, stranding flipped settings and the
+# source-file probes on the live site. Trapping the signals to exit fires the
+# EXIT trap, so cleanup runs exactly once on both normal and killed exits.
+trap 'exit 143' TERM
+trap 'exit 130' INT
 $SETTING_CTL set email_validation_mx_check 0
 
 # ---- sync sources + build once ----------------------------------------------

@@ -25,7 +25,7 @@
  * @version 1.0.0
  */
 
-require_once(__DIR__ . '/../../../tests/lib/harness.php');
+require_once(__DIR__ . '/../../../tests/lib/http.php');
 harness_boot();
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
@@ -42,9 +42,6 @@ require_once(PathHelper::getIncludePath('data/files_class.php'));
 class ProfileMailboxTest {
 	private $db;
 
-	private $base_url;
-	private $origin_ip;
-
 	private $suffix;
 	private $msg_counter = 0;
 	private $domain_id;
@@ -59,10 +56,8 @@ class ProfileMailboxTest {
 	private $att_id;        // manifest row id
 	private $att_bytes;
 
-	function __construct($base_url, $origin_ip) {
+	function __construct() {
 		$this->db = DbConnector::get_instance()->get_db_link();
-		$this->base_url = $base_url;
-		$this->origin_ip = $origin_ip;
 	}
 
 	private function out($m) { echo (php_sapi_name() === 'cli' ? '' : '<br>') . $m . "\n"; }
@@ -307,21 +302,10 @@ class ProfileMailboxTest {
 			'/api/v1/action/mailbox/thread_action',
 			'/api/v1/action/mailbox/send',
 		);
-		$host = parse_url($this->base_url, PHP_URL_HOST);
 		foreach ($endpoints as $path) {
-			$ch = curl_init($this->base_url . $path);
-			curl_setopt_array($ch, array(
-				CURLOPT_RETURNTRANSFER => true,
-				CURLOPT_TIMEOUT        => 20,
-				CURLOPT_RESOLVE        => array($host . ':443:' . $this->origin_ip),
-				CURLOPT_POST           => true,
-				CURLOPT_POSTFIELDS     => '{}',
-				CURLOPT_HTTPHEADER     => array('Content-Type: application/json'),
-			));
-			curl_exec($ch);
-			$status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-			curl_close($ch);
-			$this->ok(in_array($status, array(400, 401, 403), true), "POST $path anonymous rejected (got $status)");
+			$r = harness_request('POST', $path, array('body' => array()));
+			$this->ok(in_array($r['status'], array(400, 401, 403), true),
+				"POST $path anonymous rejected (got {$r['status']})");
 		}
 	}
 
@@ -338,14 +322,8 @@ class ProfileMailboxTest {
 	}
 }
 
-// Positional args only — the discovery runner passes --json, which must not
-// be mistaken for the base_url.
-$args = array_values(array_filter(array_slice($argv ?? array(), 1), function ($a) {
-	return strpos($a, '--') !== 0;
-}));
-$base_url  = isset($args[0]) ? rtrim($args[0], '/') : 'https://dev.getjoinery.com';
-$origin_ip = isset($args[1]) ? $args[1] : '69.164.209.253';
+harness_http_boot($argv ?? array());
 
-$t = new ProfileMailboxTest($base_url, $origin_ip);
+$t = new ProfileMailboxTest();
 $t->run();
 harness_finish();

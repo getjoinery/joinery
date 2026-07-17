@@ -26,34 +26,21 @@ require_once(PathHelper::getIncludePath('data/app_bridge_tokens_class.php'));
 api_test_boot($argv);
 
 /**
- * Plain web request (not /api/v1): returns status, headers, body. Pins DNS to
- * the origin like api_request(). $cookie_jar (a file path) persists the web
- * session between calls, like a webview's cookie store.
+ * Plain web request (not /api/v1): returns status, headers (raw header block as
+ * a string, for preg_match against Location/Set-Cookie), and body. $cookie_jar
+ * (a file path) persists the web session between calls, like a webview's cookie
+ * store.
  */
 function web_request($path, $cookie_jar = null, $follow = false) {
-	global $BASE_URL, $ORIGIN_IP;
-	$ch = curl_init($BASE_URL . $path);
-	$host = parse_url($BASE_URL, PHP_URL_HOST);
-	curl_setopt_array($ch, array(
-		CURLOPT_RETURNTRANSFER => true,
-		CURLOPT_HEADER => true,
-		CURLOPT_FOLLOWLOCATION => $follow,
-		CURLOPT_MAXREDIRS => 5,
-		CURLOPT_TIMEOUT => 30,
-		CURLOPT_RESOLVE => array($host . ':443:' . $ORIGIN_IP, $host . ':80:' . $ORIGIN_IP),
+	$res = harness_request('GET', $path, array(
+		'jar'    => $cookie_jar,
+		'follow' => $follow,
+		'accept' => null,
 	));
-	if ($cookie_jar !== null) {
-		curl_setopt($ch, CURLOPT_COOKIEJAR, $cookie_jar);
-		curl_setopt($ch, CURLOPT_COOKIEFILE, $cookie_jar);
-	}
-	$raw = curl_exec($ch);
-	$status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-	$header_size = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
-	curl_close($ch);
 	return array(
-		'status' => $status,
-		'headers' => substr((string)$raw, 0, $header_size),
-		'body' => substr((string)$raw, $header_size),
+		'status'  => $res['status'],
+		'headers' => $res['header_string'],
+		'body'    => $res['body'],
 	);
 }
 
@@ -72,9 +59,6 @@ function login_session_key($email, $password, $device_label) {
 	}
 	return $data;
 }
-
-$jar_dir = sys_get_temp_dir() . '/app_platform_test_' . getmypid();
-@mkdir($jar_dir, 0700);
 
 $old_app_navigation = get_setting_raw('app_navigation');
 $old_check_seconds = get_setting_raw('app_bridge_key_check_seconds');
@@ -192,7 +176,7 @@ try {
 	// ---- bridge consumption --------------------------------------------------
 	section('/app_bridge: consumption, single use, expiry');
 
-	$jar1 = $jar_dir . '/jar1.txt';
+	$jar1 = harness_jar_new('app1');
 	$res = web_request($bridge_url, $jar1);
 	check($res['status'] === 302, 'valid token 302s', 'status ' . $res['status']);
 	check((bool)preg_match('#^Location:\s*/profile\s*$#mi', $res['headers']), 'redirects to the target path');
@@ -247,7 +231,7 @@ try {
 
 	// Password change (the lost-phone path) — revokes all session keys
 	$res = api_request('POST', '/api/v1/auth/web_session', $admin_headers, array('target' => '/profile'));
-	$jar2 = $jar_dir . '/jar2.txt';
+	$jar2 = harness_jar_new('app2');
 	$bres = web_request($res['json']['data']['bridge_url'], $jar2);
 	check($bres['status'] === 302, 'second bridge established', 'status ' . $bres['status']);
 	$pres = web_request('/profile', $jar2, true);
@@ -264,8 +248,6 @@ try {
 } finally {
 	if ($old_app_navigation !== null) set_setting_raw('app_navigation', $old_app_navigation);
 	if ($old_check_seconds !== null) set_setting_raw('app_bridge_key_check_seconds', $old_check_seconds);
-	array_map('unlink', glob($jar_dir . '/*') ?: array());
-	@rmdir($jar_dir);
 	harness_teardown_data();
 }
 

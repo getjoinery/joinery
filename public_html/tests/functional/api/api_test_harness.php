@@ -1,20 +1,21 @@
 <?php
 /**
- * REST API functional-suite harness — a thin layer over the shared harness
- * (tests/lib/harness.php) adding only the HTTP-specific pieces the API suites
- * need: the cURL request helper, key headers, and origin-IP pinning.
+ * REST API functional-suite boot.
  *
- * Everything else — the assertion surface (check/section), fixture factories
- * (make_user/make_machine_key), LIFO teardown, settings raw accessors, env
- * enforcement, and the result contract — comes from the shared harness.
+ * The assertion surface, fixtures, teardown and result contract come from the
+ * shared harness (tests/lib/harness.php); the HTTP client, cookie jar and CSRF
+ * helpers come from tests/lib/http.php. This file adds only what is specific to
+ * the API suites: the boot sequence, the key-header shape, and the rate-limiter
+ * reset.
  *
  * Each suite requires this file, declares its @joinery-test header (tier: db,
  * env: dev-only), calls api_test_boot($argv), creates fixtures, runs its
  * sections, and in a finally calls harness_teardown_data() then harness_finish().
  *
- * CLI only. Requests are pinned to the origin IP so they bypass Cloudflare
- * (stable REMOTE_ADDR), and custom headers are sent in hyphen form because
- * Apache→FPM drops header names containing underscores (the API accepts both).
+ * CLI only. Requests to the site under test are pinned to its origin so they
+ * bypass Cloudflare and REMOTE_ADDR stays stable (see tests/lib/http.php), and
+ * custom headers are sent in hyphen form because Apache→FPM drops header names
+ * containing underscores (the API accepts both).
  */
 
 if (php_sapi_name() !== 'cli') {
@@ -22,32 +23,31 @@ if (php_sapi_name() !== 'cli') {
 	exit(1);
 }
 
-require_once(__DIR__ . '/../../lib/harness.php');
+require_once(__DIR__ . '/../../lib/http.php');
 // API suites reference User / ApiKey directly (not only through the harness
-// fixture factories), so load them up front as the original harness did.
+// fixture factories), so load them up front.
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('data/api_keys_class.php'));
 
 // ---- shared mutable state (global script scope) ---------------------------
-$BASE_URL = 'https://dev.getjoinery.com';
-$ORIGIN_IP = '69.164.209.253';
+// The target lives in tests/lib/http.php; these mirror it for suites that print
+// or pass the values around. api_test_boot() populates them.
+$BASE_URL = null;
+$ORIGIN_IP = null;
 $TEST_START_UTC = gmdate('Y-m-d H:i:s');
 
 /**
- * Boot an API suite. Reads [base_url] and [origin_ip] from $argv (positional 1
- * and 2; defaults target dev pinned to its origin), then hands off to the
- * shared harness with the calling suite's @joinery-test metadata so its env
- * gate (dev-only) and result contract apply.
+ * Boot an API suite: resolve the target from [base_url] [origin_ip] in $argv
+ * (defaulting to the site this code serves), then hand off to the shared harness
+ * with the calling suite's @joinery-test metadata so its env gate and result
+ * contract apply.
  */
 function api_test_boot($argv) {
 	global $BASE_URL, $ORIGIN_IP, $TEST_START_UTC;
-	// Positional args are [base_url] [origin_ip]; skip flags like --json so the
-	// shared harness's output flags never get mistaken for a base URL.
-	$positional = array_values(array_filter(array_slice($argv, 1), function ($a) {
-		return strpos($a, '--') !== 0;
-	}));
-	if (isset($positional[0])) $BASE_URL = rtrim($positional[0], '/');
-	if (isset($positional[1])) $ORIGIN_IP = $positional[1];
+
+	harness_http_boot($argv);
+	$BASE_URL = harness_http_base_url();
+	$ORIGIN_IP = harness_http_origin_ip();
 	$TEST_START_UTC = gmdate('Y-m-d H:i:s');
 
 	$caller = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 1);
@@ -64,39 +64,20 @@ function api_test_boot($argv) {
 }
 
 /**
- * HTTP helper. Returns ['status' => int, 'json' => array|null, 'raw' => string].
+ * HTTP helper. Returns the shared client's response array, of which the API
+ * suites use ['status' => int, 'json' => array|null, 'raw' => string].
+ *
  * $body as array → JSON body by default. Pass $form = true to send it as
  * application/x-www-form-urlencoded instead — required for the CRUD POST create
  * path, which reads $_POST (PHP populates $_POST only for form-encoded bodies).
  * $headers as ['Name: value', ...].
  */
 function api_request($method, $path, $headers = array(), $body = null, $form = false) {
-	global $BASE_URL, $ORIGIN_IP;
-	$ch = curl_init($BASE_URL . $path);
-	$headers[] = 'Accept: application/json';
-	if ($body !== null) {
-		if ($form) {
-			$payload = http_build_query($body);
-			$headers[] = 'Content-Type: application/x-www-form-urlencoded';
-		} else {
-			$payload = json_encode($body);
-			$headers[] = 'Content-Type: application/json';
-		}
-		curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
-	}
-	$host = parse_url($BASE_URL, PHP_URL_HOST);
-	curl_setopt_array($ch, array(
-		CURLOPT_CUSTOMREQUEST => strtoupper($method),
-		CURLOPT_RETURNTRANSFER => true,
-		CURLOPT_HTTPHEADER => $headers,
-		CURLOPT_TIMEOUT => 30,
-		// Pin DNS to the origin so requests bypass Cloudflare
-		CURLOPT_RESOLVE => array($host . ':443:' . $ORIGIN_IP, $host . ':80:' . $ORIGIN_IP),
+	return harness_request($method, $path, array(
+		'headers' => $headers,
+		'body'    => $body,
+		'encode'  => $form ? 'form' : 'json',
 	));
-	$raw = curl_exec($ch);
-	$status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-	curl_close($ch);
-	return array('status' => $status, 'json' => json_decode((string)$raw, true), 'raw' => (string)$raw);
 }
 
 function key_headers($public_key, $secret_key) {

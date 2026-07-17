@@ -224,7 +224,10 @@ async function runOneRow(row) {
   cell.innerHTML = '<span class="running">running…</span>';
   const nx = row.nextSibling; if (nx && nx.classList && nx.classList.contains('fails')) nx.remove();
   try {
-    const run = await callRun({ test: path });
+    // Pass confirm for real-effect tests — the user already acknowledged the
+    // side effect in runTest()/runTier(); the server also requires this flag.
+    const needsConfirm = row.getAttribute('data-confirm') === '1';
+    const run = await callRun({ test: path, confirm: needsConfirm });
     const r = (run.results || []).find(x => x.path === path) || (run.results || [])[0];
     renderResult(row, r);
   } catch (e) {

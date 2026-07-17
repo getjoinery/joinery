@@ -98,6 +98,9 @@ function harness_parse_metadata($filepath) {
 		$hash = strpos($val, '#');
 		if ($hash !== false) $val = substr($val, 0, $hash);
 		$val = trim($val);
+		// tier/env are closed vocabularies — normalize case so a header typo
+		// like `tier: Live` cannot slip past the membership checks below.
+		if ($key === 'tier' || $key === 'env') $val = strtolower($val);
 		if ($key === 'needs') {
 			$val = trim($val, "[] \t");
 			$meta['needs'] = $val === '' ? array()
@@ -111,10 +114,14 @@ function harness_parse_metadata($filepath) {
 		}
 	}
 
-	// Fail closed: an unparseable/blank env is treated as dev-only, an unknown
-	// tier as safe (tier only drives batching; env is the safety axis).
+	// Fail closed on BOTH axes. An unparseable/blank env → dev-only. An
+	// unknown/mistyped tier → live: `safe` is the most-run batch (every
+	// `php tests/run.php` executes it), so defaulting an unrecognized tier there
+	// is fail-OPEN — a `tier: Live` typo would run a real-effect suite in the
+	// pre-deploy gate. `live` never runs unless explicitly named, so a typo
+	// fails safe (the test simply won't run until its header is corrected).
 	if (!in_array($meta['env'], array('any', 'prod-verify', 'dev-only'), true)) $meta['env'] = 'dev-only';
-	if (!in_array($meta['tier'], array('safe', 'db', 'test-db', 'live'), true)) $meta['tier'] = 'safe';
+	if (!in_array($meta['tier'], array('safe', 'db', 'test-db', 'live'), true)) $meta['tier'] = 'live';
 	if ($meta['name'] === '') $meta['name'] = pathinfo($filepath, PATHINFO_FILENAME);
 	return $meta;
 }
@@ -210,6 +217,23 @@ function section($title) {
 function check($condition, $label, $detail = '') {
 	$h = &$GLOBALS['__harness'];
 	if ($h['current'] === null) section('Tests');
+	// Guard against the arg-order swap check($label, $condition): a non-empty
+	// string in the condition slot is always truthy, so the real assertion would
+	// be silently discarded and the check would pass unconditionally. This is not
+	// a hypothetical — an entire unit suite shipped green while asserting nothing
+	// because of exactly this. The signature of the swap is a human-readable
+	// string where the condition belongs AND a non-string (bool/array/int, the
+	// real condition) where the label belongs; a legitimate truthy-string check
+	// like check($url, 'url present') always has a string label and is untouched.
+	if (is_string($condition) && $condition !== '' && !is_string($label)) {
+		$h['sections'][$h['current']]['checks'][] = array(
+			'label' => 'check() misuse: arguments appear swapped',
+			'passed' => false,
+			'detail' => 'condition slot holds a string ("' . substr($condition, 0, 80)
+				. '") — use ok($label, $condition) for label-first assertions',
+		);
+		$h['failed']++;
+	}
 	$passed = (bool)$condition;
 	$h['sections'][$h['current']]['checks'][] = array(
 		'label' => (string)$label, 'passed' => $passed, 'detail' => (string)$detail,
@@ -297,7 +321,7 @@ function harness_register_row($table, $pkey_column, $id) {
 		try {
 			$q = $db->prepare("DELETE FROM $table WHERE $pkey_column = ?");
 			$q->execute(array($id));
-		} catch (Exception $e) {
+		} catch (\Throwable $e) {
 			echo "  WARNING: could not delete $table row $id: " . $e->getMessage() . "\n";
 		}
 	});
@@ -309,7 +333,7 @@ function harness_register_key_id($id) {
 		try {
 			$q = $db->prepare("DELETE FROM apk_api_keys WHERE apk_api_key_id = ?");
 			$q->execute(array($id));
-		} catch (Exception $e) {
+		} catch (\Throwable $e) {
 			echo "  WARNING: could not delete api key $id: " . $e->getMessage() . "\n";
 		}
 	});
@@ -324,24 +348,27 @@ function harness_register_user($user) {
 		$db = DbConnector::get_instance()->get_db_link();
 		try {
 			$user->permanent_delete();
-		} catch (Exception $e) {
+		} catch (\Throwable $e) {
 			echo "  WARNING: could not permanently delete user " . $user->key . " (" . $e->getMessage() . "); soft-deleting\n";
 			if ($db->inTransaction()) $db->rollBack();
 			try {
 				$q = $db->prepare("UPDATE usr_users SET usr_delete_time = now() WHERE usr_user_id = ?");
 				$q->execute(array($user->key));
-			} catch (Exception $e2) {
+			} catch (\Throwable $e2) {
 				echo "  WARNING: soft delete also failed for user " . $user->key . ": " . $e2->getMessage() . "\n";
 			}
 		}
 	});
 }
 
-/** Run every deferred teardown callable in LIFO order. Safe after an exception. */
+/** Run every deferred teardown callable in LIFO order. Safe after an exception.
+ *  Catches \Throwable (not just Exception) so a TypeError/Error in one teardown
+ *  closure cannot abort the remaining teardowns or escape to the caller — an
+ *  escaping Error would skip the result-contract emit and lose every check. */
 function harness_teardown_data() {
 	$h = &$GLOBALS['__harness'];
 	foreach (array_reverse($h['deferred']) as $fn) {
-		try { $fn(); } catch (Exception $e) { echo "  WARNING: teardown step failed: " . $e->getMessage() . "\n"; }
+		try { $fn(); } catch (\Throwable $e) { echo "  WARNING: teardown step failed: " . $e->getMessage() . "\n"; }
 	}
 	$h['deferred'] = array();
 }

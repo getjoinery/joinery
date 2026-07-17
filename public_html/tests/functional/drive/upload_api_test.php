@@ -7,7 +7,6 @@
  */
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
 
-require_once(__DIR__ . '/../../lib/harness.php');
 require_once(__DIR__ . '/../api/api_test_harness.php');
 api_test_boot($argv);
 
@@ -15,32 +14,6 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('data/files_class.php'));
 require_once(PathHelper::getIncludePath('data/drive_usage_class.php'));
 require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
-
-global $BASE_URL, $ORIGIN_IP;
-
-/** Raw-body PUT to the chunk transport (api_request would JSON-encode the body). */
-function drive_put_chunk($path, array $key_headers, $content_range, $body) {
-	global $BASE_URL, $ORIGIN_IP;
-	$ch = curl_init($BASE_URL . $path);
-	$headers = array_merge($key_headers, array(
-		'Content-Range: ' . $content_range,
-		'Content-Type: application/octet-stream',
-		'Accept: application/json',
-	));
-	$host = parse_url($BASE_URL, PHP_URL_HOST);
-	curl_setopt_array($ch, array(
-		CURLOPT_CUSTOMREQUEST => 'PUT',
-		CURLOPT_RETURNTRANSFER => true,
-		CURLOPT_HTTPHEADER => $headers,
-		CURLOPT_POSTFIELDS => $body,
-		CURLOPT_TIMEOUT => 30,
-		CURLOPT_RESOLVE => array($host . ':443:' . $ORIGIN_IP, $host . ':80:' . $ORIGIN_IP),
-	));
-	$raw = curl_exec($ch);
-	$status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-	curl_close($ch);
-	return array('status' => $status, 'json' => json_decode((string)$raw, true), 'raw' => (string)$raw);
-}
 
 $made_files = array();
 harness_defer(function () use (&$made_files) {
@@ -89,20 +62,20 @@ check(($init['json']['data']['deduped'] ?? true) === false, 'fresh content is no
 
 // Chunk 1: bytes 0..7999
 $c1 = substr($content, 0, 8000);
-$r1 = drive_put_chunk('/api/v1/drive_upload/' . $token, $H, 'bytes 0-7999/' . $total, $c1);
+$r1 = harness_put_chunk('/api/v1/drive_upload/' . $token, $H, 'bytes 0-7999/' . $total, $c1);
 check($r1['status'] === 200 && ($r1['json']['data']['received_bytes'] ?? 0) === 8000, 'chunk 1 accepted, received=8000', 'got ' . $r1['status'] . ' / ' . json_encode($r1['json']['data'] ?? null));
 
 // Wrong offset: replay chunk 1 → 409 with the current received_bytes
-$rWrong = drive_put_chunk('/api/v1/drive_upload/' . $token, $H, 'bytes 0-7999/' . $total, $c1);
+$rWrong = harness_put_chunk('/api/v1/drive_upload/' . $token, $H, 'bytes 0-7999/' . $total, $c1);
 check($rWrong['status'] === 409, 'wrong-offset chunk rejected with 409', 'got ' . $rWrong['status']);
 check(($rWrong['json']['data']['received_bytes'] ?? -1) === 8000, '409 reports received_bytes=8000 for resume');
 
 // Resume: chunk 2 (8000..15999), chunk 3 (16000..19999)
 $c2 = substr($content, 8000, 8000);
-$r2 = drive_put_chunk('/api/v1/drive_upload/' . $token, $H, 'bytes 8000-15999/' . $total, $c2);
+$r2 = harness_put_chunk('/api/v1/drive_upload/' . $token, $H, 'bytes 8000-15999/' . $total, $c2);
 check($r2['status'] === 200 && ($r2['json']['data']['received_bytes'] ?? 0) === 16000, 'chunk 2 accepted, received=16000');
 $c3 = substr($content, 16000);
-$r3 = drive_put_chunk('/api/v1/drive_upload/' . $token, $H, 'bytes 16000-19999/' . $total, $c3);
+$r3 = harness_put_chunk('/api/v1/drive_upload/' . $token, $H, 'bytes 16000-19999/' . $total, $c3);
 check($r3['status'] === 200 && ($r3['json']['data']['received_bytes'] ?? 0) === $total, 'chunk 3 accepted, received=total');
 
 // GET status
@@ -157,7 +130,7 @@ $init4 = api_request('POST', '/api/v1/action/drive_upload_init', $H, array(
 ));
 $token4 = $init4['json']['data']['upload_token'] ?? null;
 check(!empty($token4), 'init (idempotency case) returns a token');
-$r4 = drive_put_chunk('/api/v1/drive_upload/' . $token4, $H, 'bytes 0-4095/4096', $content4);
+$r4 = harness_put_chunk('/api/v1/drive_upload/' . $token4, $H, 'bytes 0-4095/4096', $content4);
 check(($r4['json']['data']['received_bytes'] ?? 0) === 4096, 'single chunk uploaded');
 
 $idemKey = 'drive-idem-' . bin2hex(random_bytes(8));

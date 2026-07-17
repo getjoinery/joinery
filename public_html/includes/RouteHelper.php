@@ -293,10 +293,19 @@ class RouteHelper {
             return false;
         }
         
-        // Check for encoded path traversal sequences
-        $decoded_path = urldecode($path);
-        if (strpos($decoded_path, '../') !== false || strpos($decoded_path, '..\\') !== false || strpos($decoded_path, '..') === 0) {
-            return false;
+        // Check for encoded path traversal sequences. Decode ITERATIVELY: a
+        // single urldecode() misses double-encoded payloads (%252e%252e%252f →
+        // %2e%2e%2f), which any component that decodes a second time would turn
+        // back into "../". Loop until the string stops changing (bounded), and
+        // reject if a traversal sequence appears at any decoding depth.
+        $decoded_path = $path;
+        for ($i = 0; $i < 6; $i++) {
+            $next = urldecode($decoded_path);
+            if (strpos($next, '../') !== false || strpos($next, '..\\') !== false || strpos($next, '..') === 0) {
+                return false;
+            }
+            if ($next === $decoded_path) break; // fully decoded, stable
+            $decoded_path = $next;
         }
         
         // Check for double slashes (normalize to single)

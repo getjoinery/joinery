@@ -266,25 +266,9 @@ check(count($pg9['json']['data']['items'] ?? array('x')) === 0 && empty($pg9['js
 // ---------------------------------------------------------------------------
 section('API: end-to-end encrypted upload pipeline (init → chunk → complete)');
 
-/** Raw-body PUT to the chunk transport. */
-function enc_put_chunk($path, array $key_headers, $content_range, $body) {
-	global $BASE_URL, $ORIGIN_IP;
-	$ch = curl_init($BASE_URL . $path);
-	$headers = array_merge($key_headers, array('Content-Range: ' . $content_range, 'Content-Type: application/octet-stream', 'Accept: application/json'));
-	$host = parse_url($BASE_URL, PHP_URL_HOST);
-	curl_setopt_array($ch, array(
-		CURLOPT_CUSTOMREQUEST => 'PUT', CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => $headers,
-		CURLOPT_POSTFIELDS => $body, CURLOPT_TIMEOUT => 30,
-		CURLOPT_RESOLVE => array($host . ':443:' . $ORIGIN_IP, $host . ':80:' . $ORIGIN_IP),
-	));
-	$raw = curl_exec($ch); $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE); curl_close($ch);
-	return array('status' => $status, 'json' => json_decode((string)$raw, true));
-}
-
-global $BASE_URL, $ORIGIN_IP;
 $grp_id = $dblink->query("SELECT sbt_grp_group_id FROM sbt_subscription_tiers WHERE (sbt_features->>'drive_storage_bytes')::bigint > 0 AND sbt_delete_time IS NULL LIMIT 1")->fetchColumn();
-if (!$grp_id || !$BASE_URL) {
-	check(true, 'encrypted upload leg skipped (no drive-quota tier or base URL)');
+if (!$grp_id) {
+	harness_skip('encrypted upload leg', 'no drive-quota tier configured');
 } else {
 	$ins = $dblink->prepare("INSERT INTO grm_group_members (grm_grp_group_id, grm_foreign_key_id) VALUES (?, ?) RETURNING grm_group_member_id");
 	$ins->execute(array((int)$grp_id, (int)$owner->key));
@@ -310,7 +294,7 @@ if (!$grp_id || !$BASE_URL) {
 	$token = $init['json']['data']['upload_token'] ?? '';
 	check($token !== '' && empty($init['json']['data']['deduped']), 'encrypted upload opened (no dedup short-circuit)');
 
-	$put = enc_put_chunk('/api/v1/drive_upload/' . $token, $H, 'bytes 0-' . (strlen($cipher) - 1) . '/' . strlen($cipher), $cipher);
+	$put = harness_put_chunk('/api/v1/drive_upload/' . $token, $H, 'bytes 0-' . (strlen($cipher) - 1) . '/' . strlen($cipher), $cipher);
 	check($put['status'] === 200, 'ciphertext chunk accepted');
 
 	$complete = api_request('POST', '/api/v1/action/drive_upload_complete', $H, array(
@@ -369,7 +353,7 @@ if (!$grp_id || !$BASE_URL) {
 		));
 		$token = $init['json']['data']['upload_token'] ?? '';
 		if ($token === '') { return ''; }
-		$put = enc_put_chunk('/api/v1/drive_upload/' . $token, $key_headers, 'bytes 0-' . (strlen($cipher) - 1) . '/' . strlen($cipher), $cipher);
+		$put = harness_put_chunk('/api/v1/drive_upload/' . $token, $key_headers, 'bytes 0-' . (strlen($cipher) - 1) . '/' . strlen($cipher), $cipher);
 		return ($put['status'] === 200) ? $token : '';
 	}
 
@@ -443,7 +427,7 @@ if (!$grp_id || !$BASE_URL) {
 		'file_id' => $new_id, 'size_bytes' => 600, 'mime_type' => 'application/octet-stream',
 	));
 	$vtoken = $vinit['json']['data']['upload_token'] ?? '';
-	enc_put_chunk('/api/v1/drive_upload/' . $vtoken, $H, 'bytes 0-599/600', random_bytes(600));
+	harness_put_chunk('/api/v1/drive_upload/' . $vtoken, $H, 'bytes 0-599/600', random_bytes(600));
 	$vc1 = api_request('POST', '/api/v1/action/drive_upload_complete', $H, array(
 		'upload_token' => $vtoken, 'encrypted_metadata' => base64_encode(random_bytes(40)),
 		'wrapped_file_keys' => array((string)$owner->key => base64_encode(random_bytes(80))),
@@ -456,7 +440,7 @@ if (!$grp_id || !$BASE_URL) {
 		'file_id' => $new_id, 'size_bytes' => 600, 'mime_type' => 'application/octet-stream',
 	));
 	$vtoken2 = $vinit2['json']['data']['upload_token'] ?? '';
-	enc_put_chunk('/api/v1/drive_upload/' . $vtoken2, $FH, 'bytes 0-599/600', random_bytes(600));
+	harness_put_chunk('/api/v1/drive_upload/' . $vtoken2, $FH, 'bytes 0-599/600', random_bytes(600));
 	$vc2 = api_request('POST', '/api/v1/action/drive_upload_complete', $FH, array(
 		'upload_token' => $vtoken2, 'encrypted_metadata' => base64_encode(random_bytes(40)),
 	));
@@ -468,7 +452,7 @@ if (!$grp_id || !$BASE_URL) {
 		'file_id' => $new_id, 'size_bytes' => 600, 'mime_type' => 'application/octet-stream',
 	));
 	$vtoken3 = $vinit3['json']['data']['upload_token'] ?? '';
-	enc_put_chunk('/api/v1/drive_upload/' . $vtoken3, $H, 'bytes 0-599/600', random_bytes(600));
+	harness_put_chunk('/api/v1/drive_upload/' . $vtoken3, $H, 'bytes 0-599/600', random_bytes(600));
 	$vc3 = api_request('POST', '/api/v1/action/drive_upload_complete', $H, array(
 		'upload_token' => $vtoken3, 'encrypted_metadata' => $v2meta,
 	));

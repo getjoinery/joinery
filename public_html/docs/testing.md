@@ -158,6 +158,76 @@ error, an uncaught exception, an early `exit()` — the harness records a failin
 check so a crash can never be misread as a pass. Do not scatter bare `exit()`
 calls in a test body; return, or reach `harness_finish()`.
 
+## Talking to the site over HTTP
+
+`tests/lib/http.php` is the one HTTP client for tests — require it instead of the
+harness (it pulls the harness in) whenever a test makes real requests. There is
+no per-suite curl to copy, and nothing to configure: the base URL comes from the
+`webDir` setting, and requests to that site are automatically pinned to the
+machine's own origin IP so they bypass Cloudflare and keep a stable
+`REMOTE_ADDR`.
+
+```php
+require_once(__DIR__ . '/../lib/http.php');
+harness_boot();
+
+$r = harness_request('POST', '/api/v1/action/foo', array(
+    'headers' => harness_csrf_header($token),   // or key_headers(...) for API keys
+    'body'    => array('a' => 1),               // arrays default to a JSON body
+));
+check($r['status'] === 200, 'foo ran', $r['raw']);
+```
+
+`harness_request($method, $url, $opts)` returns `status`, `body`/`raw`, `json`,
+`headers` (array), `header_string`, `content_type`, `redirect_url`, and `error`.
+`$url` is a path against the base URL, or a full absolute URL (signed links).
+The options cover the whole surface: `encode` (`json`|`form`|`raw`|`multipart`),
+`files` for multipart uploads, `jar` for a cookie session, `cookies` for extra
+cookies, `follow` for redirects, `accept` (defaults to `application/json`, pass
+`null` to omit), `timeout`, `insecure`, and `pin` to force origin pinning on/off.
+
+For a browser (cookie) session rather than an API key:
+
+- `harness_jar_new($prefix)` — a cookie jar file, deleted at teardown.
+- `harness_web_login($jar, $email, $password)` — form-login and return the CSRF
+  token from the resulting page, or `null` if login failed.
+- `harness_jar_csrf($jar)` — the `joinery_api_csrf` cookie (present for anyone,
+  anonymous included); `harness_meta_csrf($html)` reads the `joinery-api-csrf`
+  meta tag instead (rendered only into a logged-in page). The two are not
+  interchangeable — pick the one the endpoint expects.
+- `harness_csrf_header($token)` — the `X-Joinery-Csrf` header a browser-session
+  call must send.
+- `harness_put_chunk($path, $key_headers, $content_range, $body)` — a raw-body
+  chunk PUT for the upload transport.
+
+A test may accept an optional `[base_url] [origin_ip]` on the command line; call
+`harness_http_boot($argv)` before `harness_boot()` to honour it (runner flags
+like `--json` are ignored). The REST API suites layer `api_test_boot()` /
+`api_request()` / `key_headers()` on top of this in
+`tests/functional/api/api_test_harness.php`.
+
+## Calling a logic function directly
+
+Admin and page logic is normally reached through `process_logic()`, which exits
+on the post-save redirect — fatal to a test. `tests/lib/logic.php` calls the
+logic function itself instead and hands back the `LogicResult`:
+
+```php
+require_once(__DIR__ . '/../lib/logic.php');
+
+$result = harness_call_logic('logic/foo_logic.php', 'foo_logic',
+    array('action' => 'add', 'name' => 'X'), 'POST');
+check(!$result->error, 'save succeeded', (string)$result->error);
+```
+
+`harness_call_logic($path, $fn, $data, $method)` simulates the request method
+(`REQUEST_METHOD`, `$_POST`/`$_GET`/`$_REQUEST`) and restores the superglobals
+afterwards — `$method` matters, since form saves are gated on a POST while GET
+actions (e.g. `new_version`) must not be sent as a form save. It does **not**
+throw on failure, so a test can assert on the result; `harness_call_logic_ok()`
+is the variant that throws, for fixture-setup steps where a failure should stop
+the run.
+
 ## The result contract
 
 A declared `.php` test **must** emit this contract. If it doesn't — it crashed,

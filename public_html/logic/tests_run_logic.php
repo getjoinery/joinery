@@ -39,6 +39,11 @@ function tests_run_logic(array $input): LogicResult {
 	$tier = isset($input['tier']) && in_array($input['tier'], $valid_tiers, true) ? $input['tier'] : 'safe';
 	$filter = isset($input['filter']) ? (string)$input['filter'] : '';
 	$test = isset($input['test']) ? (string)$input['test'] : '';
+	// Real-external-effect runs (the live tier, or a prod-verify test) require an
+	// explicit confirm flag SERVER-SIDE — the dashboard confirm is client-side JS,
+	// so a bare POST could otherwise fire a live send / Stripe charge / remote
+	// action with no acknowledgement of the side effect.
+	$confirmed = !empty($input['confirm']);
 
 	// Use the CLI binary, not PHP_BINARY — under php-fpm the latter is the fpm
 	// binary and would print usage instead of running the runner.
@@ -54,9 +59,18 @@ function tests_run_logic(array $input): LogicResult {
 		if ($match === null) {
 			return LogicResult::error('Unknown test: ' . $test);
 		}
+		if (($match['meta']['tier'] === 'live' || $match['meta']['env'] === 'prod-verify') && !$confirmed) {
+			return LogicResult::error('This test has real external effects ('
+				. $match['meta']['tier'] . '/' . $match['meta']['env']
+				. '). Re-run with confirm=true to acknowledge the side effect.');
+		}
 		$cmd .= ' ' . escapeshellarg($match['meta']['tier'])
 			. ' --only=' . escapeshellarg($test) . ' --json';
 	} else {
+		if ($tier === 'live' && !$confirmed) {
+			return LogicResult::error('The live tier runs tests with real external effects '
+				. '(mail, Stripe, storage, remote hosts). Re-run with confirm=true to acknowledge.');
+		}
 		$cmd .= ' ' . escapeshellarg($tier) . ' --json';
 		if ($filter !== '') $cmd .= ' --filter=' . escapeshellarg($filter);
 	}

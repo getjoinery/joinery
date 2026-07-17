@@ -339,8 +339,11 @@ try {
 	}
 	check($locked_out, "repeated bad logins lock the IP out (429) within " . ($auth_limit + 2) . " attempts");
 
-} catch (Exception $e) {
-	$failed++;
+} catch (\Throwable $e) {
+	// Record the crash as a failing check so it reaches the result contract.
+	// (The old `$failed++` incremented an undefined local, not the harness
+	// counter, so a mid-suite exception produced a GREEN contract.)
+	check(false, 'unhandled exception mid-suite', $e->getMessage());
 	echo "\nEXCEPTION: " . $e->getMessage() . "\n" . $e->getTraceAsString() . "\n";
 } finally {
 	section('Cleanup');

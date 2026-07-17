@@ -35,7 +35,7 @@
  * env: any
  * needs: []
  */
-require_once(__DIR__ . '/../lib/harness.php');
+require_once(__DIR__ . '/../lib/http.php');
 harness_boot();
 
 // Result helpers funnel into the shared harness. A pass/fail becomes a recorded
@@ -61,58 +61,37 @@ class HttpTester {
     public static $test_results = [];
     
     public static function init($settings) {
-        // Determine base URL for testing
+        // Determine base URL for testing. A web run targets its own host; a CLI
+        // run uses the site this code serves (webDir).
         if (isset($_SERVER['HTTP_HOST'])) {
             $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] ? 'https' : 'http';
             self::$base_url = $protocol . '://' . $_SERVER['HTTP_HOST'];
+            harness_http_configure(self::$base_url);
         } else {
-            // Try to get from settings or use fallback. Empty (not just null)
-            // must fall back too, so a CLI run with no site_domain still targets
-            // a real host instead of degrading to "https://".
-            $host = $settings->get_setting('site_domain');
-            if (empty($host)) $host = 'dev.getjoinery.com';
-            self::$base_url = 'https://' . $host;
+            self::$base_url = harness_http_base_url();
         }
-        
+
         self::$test_results[] = "Testing against base URL: " . self::$base_url;
     }
-    
+
     public static function testUrl($path, $expected_status = 200, $description = '', $options = []) {
         $url = self::$base_url . $path;
-        
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false); // Don't follow redirects automatically
-        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
-        curl_setopt($ch, CURLOPT_USERAGENT, 'RoutingTest/1.0');
-        curl_setopt($ch, CURLOPT_HEADER, true);
-        curl_setopt($ch, CURLOPT_NOBODY, false);
-        
-        // Add any custom headers or options
-        if (isset($options['headers'])) {
-            curl_setopt($ch, CURLOPT_HTTPHEADER, $options['headers']);
-        }
-        
-        if (isset($options['method']) && $options['method'] === 'POST') {
-            curl_setopt($ch, CURLOPT_POST, true);
-            if (isset($options['data'])) {
-                curl_setopt($ch, CURLOPT_POSTFIELDS, $options['data']);
-            }
-        }
-        
-        // Handle SSL for HTTPS
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
-        
-        $response = curl_exec($ch);
-        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $content_type = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
-        $redirect_url = curl_getinfo($ch, CURLINFO_REDIRECT_URL);
-        $curl_error = curl_error($ch);
-        curl_close($ch);
-        
+
+        $method = (isset($options['method']) && $options['method'] === 'POST') ? 'POST' : 'GET';
+        $res = harness_request($method, $path, array(
+            'headers'    => isset($options['headers']) ? $options['headers'] : array(),
+            'body'       => isset($options['data']) ? $options['data'] : null,
+            'encode'     => 'raw',
+            'accept'     => null,
+            'follow'     => false,
+            'insecure'   => true,
+            'user_agent' => 'RoutingTest/1.0',
+        ));
+        $http_code = $res['status'];
+        $content_type = $res['content_type'];
+        $redirect_url = $res['redirect_url'];
+        $curl_error = $res['error'];
+
         $result = [
             'url' => $url,
             'path' => $path,

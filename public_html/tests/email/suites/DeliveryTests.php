@@ -91,9 +91,12 @@ class DeliveryTests {
         $countQuery = "SELECT COUNT(*) as count FROM debug_email_logs";
         $beforeCount = $dblink->query($countQuery)->fetch()['count'];
         
-        // Create a test email using new EmailMessage architecture
+        // Create a test email using new EmailMessage architecture.
+        // (Method is createTestMessage — the old createTestEmail() name did not
+        // exist and threw a fatal Error that killed the whole email_suites run
+        // whenever email_debug_mode was on.)
         if ($this->runner) {
-            $message = $this->runner->createTestEmail();
+            $message = $this->runner->createTestMessage();
         } else {
             $message = EmailMessage::fromTemplate('default_outer_template', [
                 'mail_body' => '<p>Testing debug logging</p>',
