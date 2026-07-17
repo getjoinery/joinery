@@ -115,8 +115,8 @@ $routes = [
         '/product/{slug}'      => ['view' => 'views/product', 'plugin' => 'store', 'check_setting' => 'products_active'],
         '/list/{slug}'         => ['view' => 'views/list'],
         '/video/{slug}'        => ['view' => 'views/video', 'check_setting' => 'videos_active'],
-        '/book/{slug}'         => ['view' => 'views/book', 'check_setting' => 'bookings_active'],
-        '/booking/manage'      => ['view' => 'views/booking_manage', 'check_setting' => 'bookings_active'],
+        '/book/{slug}'         => ['view' => 'plugins/bookings/views/book', 'check_setting' => 'bookings_active'],
+        '/booking/manage'      => ['view' => 'plugins/bookings/views/booking_manage', 'check_setting' => 'bookings_active'],
 
         // ---- store: view routes (files live in plugins/store/views) ----
         '/products'    => ['view' => 'views/products',    'plugin' => 'store', 'check_setting' => 'products_list_items_active'],
