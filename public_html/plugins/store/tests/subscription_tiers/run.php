@@ -15,21 +15,22 @@
  * proration flows through change_tier_logic).
  *
  * Two output modes, one tester:
- *   - Web browser (admin): unchanged HTML report — access this file while
- *     logged in as an admin user.
- *   - CLI `--json`: the shared test contract. The tester records only failures
- *     (in $test_failures); this runner routes each recorded failure through the
- *     harness as a failing check(), and emits a single passing check when the
- *     run recorded no failures — mirroring the tester's own "no failures =
- *     success" verdict.
+ *   - Web browser (admin): HTML report — access this file while logged in as an
+ *     admin user.
+ *   - CLI `--json`: the shared test contract. The tester records each test's
+ *     verdict positively — passes in $test_passes, failures in $test_failures,
+ *     with $tests_executed counting every test that ran. This runner emits one
+ *     passing check per recorded pass, one failing check per recorded failure,
+ *     and a guard check that a test actually ran, so a run where zero tests
+ *     executed is red rather than a lone green check.
  *
- * Exit code reflects failures in BOTH modes: any recorded failure (an assertion
- * failure, not only a thrown exception) exits non-zero. In --json mode
- * harness_finish() supplies that for free; the web/legacy path checks the
- * collected failures explicitly.
+ * Exit code reflects the result in BOTH modes: any recorded failure — or zero
+ * tests executed — exits non-zero. In --json mode harness_finish() supplies that
+ * from the emitted checks; the web/legacy path checks the collected results
+ * explicitly.
  *
  * The tester's own aborts are preserved: it throws on test-DB setup failure and
- * returns early on unmet preconditions. In --json mode a thrown abort is
+ * records a failure on unmet preconditions. In --json mode a thrown abort is
  * surfaced as a failing check, never a pass.
  */
 
@@ -56,18 +57,30 @@ if ($json_mode) {
 		harness_finish();
 	}
 
-	// Route the tester's collected failures (private $test_failures) into the contract.
-	$ref = new ReflectionProperty('SubscriptionTierTester', 'test_failures');
-	$ref->setAccessible(true);
-	$failures = $ref->getValue($tester);
+	// Route the tester's collected results (private props) into the contract.
+	$read = function ($prop) use ($tester) {
+		$ref = new ReflectionProperty('SubscriptionTierTester', $prop);
+		$ref->setAccessible(true);
+		return $ref->getValue($tester);
+	};
+	$failures = $read('test_failures');
+	$passes = $read('test_passes');
+	$executed = (int)$read('tests_executed');
 
 	section('Subscription tier tests');
-	if (empty($failures)) {
-		check(true, 'all subscription tier tests', 'no failures recorded');
-	} else {
-		foreach ($failures as $f) {
-			check(false, (string)($f['test'] ?? 'subscription tier test'), (string)($f['message'] ?? ''));
-		}
+
+	// The load-bearing guard: a run where zero tier tests executed (preconditions
+	// unmet, setup aborted, Stripe keys missing) is RED, never a lone green check.
+	// The tester records passes positively, so "no failures" alone can never be
+	// mistaken for a full pass.
+	check($executed > 0, 'subscription tier tests executed',
+		$executed > 0 ? "$executed test(s) ran" : 'no tier test ran — preconditions unmet or setup aborted');
+
+	foreach ($passes as $p) {
+		check(true, (string)$p);
+	}
+	foreach ($failures as $f) {
+		check(false, (string)($f['test'] ?? 'subscription tier test'), (string)($f['message'] ?? ''));
 	}
 	harness_finish(); // exits non-zero if any check failed
 }
@@ -99,11 +112,13 @@ try {
 }
 
 // Assertion FAILURES (not just thrown exceptions) must also produce a non-zero
-// exit. Inspect the collected failures and exit(1) if any test failed.
-$ref = new ReflectionProperty('SubscriptionTierTester', 'test_failures');
-$ref->setAccessible(true);
-$failures = $ref->getValue($tester);
-if (!empty($failures)) {
+// exit. A run that executed no tests is likewise a failure, never a silent pass.
+$read = function ($prop) use ($tester) {
+	$ref = new ReflectionProperty('SubscriptionTierTester', $prop);
+	$ref->setAccessible(true);
+	return $ref->getValue($tester);
+};
+if (!empty($read('test_failures')) || (int)$read('tests_executed') === 0) {
 	exit(1);
 }
 ?>
