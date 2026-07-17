@@ -1106,9 +1106,73 @@ Infrastructure (P2):
   so every test inserting an inbound message fails (imap_poller, imap_syncer,
   inbound_email_attachment_storage, inbound_raw_storage, mailbox_vault_reseal,
   email_security_scan_job). They fail with T14 removed too; fix is update_database.
+- **T15 Stripe webhook** — DONE 2026-07-17. New
+  `plugins/store/tests/stripe_webhook_test.php` (db, dev-only, 23 checks) covers
+  the store's top money path, previously untested. Two seams mirroring
+  mobile_billing's split of crypto from engine. (1) Signature primitive: the
+  endpoint delegates verification to `\Stripe\Webhook::constructEvent`, exercised
+  in-process with a self-generated whsec_ secret (no configured secret, no HTTP)
+  — a correctly signed payload verifies; a tampered body under the original
+  signature, a wrong-secret signature, a stale timestamp (outside the SDK's 300s
+  DEFAULT_TOLERANCE window the endpoint uses), and a malformed header are each
+  rejected. (2) Endpoint over real HTTP against `/ajax/stripe_webhook`, events
+  signed with the site's configured stripe_endpoint_secret (read server-side,
+  never printed): a valid checkout.session.completed marks an Order STATUS_PAID
+  linked to the client_reference_id user at amount_total/100; an invalid-signature
+  post is refused with 400 and writes no order and no webhook-log row; a missing
+  signature header is 400; a byte-identical replayed event id returns 200 and
+  creates no second order (WebhookLog::isDuplicate suppresses it); and
+  customer.subscription.deleted for a subscriber holding the tier cancels the
+  order item and strips the tier (TierBilling::handleSubscriptionExpired). KEY
+  SEAM NOTE: the endpoint script exits() and defines a function, so it is built
+  to run once per request — the dispatch half MUST be driven over HTTP (a real
+  request populates php://input), never by including the file (function-redeclare
+  + exit() would break a second in-process event). The HTTP section skips
+  cleanly when stripe_endpoint_secret is unconfigured; the signature seam has no
+  config dependency. 23/23 in isolation + via runner; teardown leaves no orders/
+  order_items/products/tiers/groups/webhook_logs behind. Full db 100/100, 2317
+  checks.
+- **T16 tester failure→pass conversions** — DONE 2026-07-17. Two halves.
+  ProductTester (D26/D27): both conversions were already closed in the P0 pass and
+  re-verified here — the fabricated-paid-order fallback is gone (stripe_checkout
+  mode now throws an honest limitation instead of manufacturing a paid Order), and
+  the create-verify path throws when a product surfaces in the PRODUCTION db (test
+  isolation broken) rather than passing with a warning. SubscriptionTierTester
+  silent-green (D28) — the real remaining work: the runner inferred a single GREEN
+  check from the mere ABSENCE of recorded failures, so a run where zero tier tests
+  executed (preconditions unmet, setup aborted, Stripe keys missing) was
+  indistinguishable from a full pass. Fixed at the design level: the tester now
+  records passes POSITIVELY (`$test_passes`) and counts executions
+  (`$tests_executed`) through a `runTest()` dispatcher wrapping all 11 tests; a new
+  `stripeTestKeysPresent()` guard turns a missing-test-key run into a loud recorded
+  failure instead of a deep SDK throw or silent skip; and run.php now emits one
+  check per pass, one per failure, plus a load-bearing `check($executed > 0, ...)`
+  guard — so 0 executed is RED, never a lone green check. Verified: the suite's
+  contract went from 1 check to 12 (executed-guard + 11 per-test), 12/12 green via
+  runner at live tier (real Stripe test-mode calls); a zero-executed run flips the
+  guard check false → red + legacy exit 1. Accept criterion met by construction.
+- **T17 vault concurrency + ownership** — DONE 2026-07-17. The product fixes
+  (atomic conditional consume `UPDATE ... WHERE uew_is_used=false` with rowCount==1,
+  and `assertVaultOwnership` on both unlock cores) plus the cross-user ownership
+  negatives landed in the P0 pass and are re-verified — vault_ceremonies_test
+  already covers ownership refusal and *sequential* replay ("a consumed code never
+  unlocks again"). The remaining accept criterion — "two concurrent uses of one
+  recovery code cannot both unlock" — is the new
+  `tests/vault/vault_recovery_concurrency_test.php` (db, dev-only, 7 checks). It
+  spawns 8 real PHP worker processes (each its own DB connection), releases them on
+  a shared wall-clock barrier so their conditional consumes genuinely contend, and
+  asserts exactly one unlocks, the other seven are refused specifically as
+  already-used, and exactly one recovery wrapping ends up consumed; the raced code
+  is then spent to a later sequential use. The recovery code is passed to workers
+  via the environment, never argv (no process-list exposure). Proven to be a real
+  regression detector, not a serialized no-op: racing the OLD load-then-save
+  consume pattern under the same barrier double-unlocked all 8 workers (OK=8),
+  while the shipped atomic consume yields OK=1. Stable across repeated runner runs;
+  teardown removes its own vault + wrappings (0 orphans added — the standing
+  vault→uew cascade gap is separate and pre-existing). Full db 101/101.
 
 **Still remaining (documented in the work plan below):**
-T15 Stripe webhook, T19 per-area
+T19 per-area
 fixture libs, T21 unify the two SSRF guards, the url_safety_validator test
 extension, the legacy email framework port/delete, cloud 6→4 consolidation,
 remaining teardown-hygiene fixes, and the P3 greenfield suites (account
@@ -1217,19 +1281,19 @@ view_attachment (per-turn nonce freshness; an embedded fake closer doesn't
 terminate the block). *Accept:* a crafted untrusted payload with a fake envelope
 closer cannot inject. Est. M. [ai gaps 1-2]
 
-**T15. Stripe webhook test (store's top money gap).** Model it on mobile_billing's
+**T15. Stripe webhook test (store's top money gap).** ✅ DONE (see progress log). Model it on mobile_billing's
 seam approach: constructed events through stripe_webhook.php with a signature-
 failure case, a duplicate-event case, and an entitlement-revoking refund. *Accept:*
 an invalid-signature webhook is rejected; a duplicate event is suppressed. Est. M. [store gap 1]
 
-**T16. Fix ProductTester's two failure→pass conversions.** Delete the fabricated-
+**T16. Fix ProductTester's two failure→pass conversions.** ✅ DONE (see progress log). Delete the fabricated-
 paid-order fallback (ProductTester:1650-1702) → record a failure or skip; make the
 "found in production DB" branch (:674) a hard failure. Fix SubscriptionTierTester's
 silent-green: every precondition-miss `return` must recordFailure (:1162 etc.), and
 add the live-key guard it lacks. *Accept:* a run where 0 tier tests execute reports
 red, not one green check. Est. M. [store D26/D27/D28]
 
-**T17. Vault concurrency + ownership.** Add a recovery-code replay-under-concurrency
+**T17. Vault concurrency + ownership.** ✅ DONE (see progress log). Add a recovery-code replay-under-concurrency
 test and fix the underlying read-then-mark race with an atomic
 `UPDATE ... SET is_used=true WHERE ... AND is_used=false` in unlockWithRecoveryCode;
 assert vault ownership (`uev_usr_user_id === user->key`) inside the ceremony cores

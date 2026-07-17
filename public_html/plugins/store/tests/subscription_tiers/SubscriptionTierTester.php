@@ -37,6 +37,8 @@ class SubscriptionTierTester {
     private $tier_products = []; // Maps tier_level => product_id
     private $original_settings = []; // Store original settings to restore later
     private $test_failures = []; // Track all test failures
+    private $test_passes = [];    // Names of tests that executed and passed (positive proof)
+    private $tests_executed = 0;  // Count of test methods that actually ran to a verdict
 
     public function __construct() {
         $this->dbconnector = DbConnector::get_instance();
@@ -244,6 +246,49 @@ class SubscriptionTierTester {
         echo "<h3 style='color: #cc0000; margin-top: 0;'>❌ TEST FAILURE: {$test_name}</h3>";
         echo "<p style='font-weight: bold;'>{$message}</p>";
         echo "</div>";
+    }
+
+    /**
+     * Record a positive pass. A test that only ever records failures cannot
+     * distinguish "everything passed" from "nothing ran" — so each verified
+     * pass is recorded explicitly, and the runner treats zero executed tests
+     * as a red result rather than a lone green check.
+     */
+    private function recordPass($test_name) {
+        $this->test_passes[] = $test_name;
+        echo "<p class='text-success' style='font-weight:bold;'>✓ PASS: {$test_name}</p>";
+    }
+
+    /**
+     * Run one test and tally its verdict. Every test method returns true on a
+     * verified pass and false after recording its own failure, so a run that
+     * executes nothing leaves tests_executed at 0 — which the runner surfaces
+     * as a failing check. Any exception that escapes a test is recorded as a
+     * failure here rather than aborting the whole suite silently.
+     */
+    private function runTest($label, callable $test) {
+        $this->tests_executed++;
+        try {
+            $passed = (bool)$test();
+        } catch (Exception $e) {
+            $this->recordFailure($label, 'Uncaught exception: ' . $e->getMessage());
+            return false;
+        }
+        if ($passed) {
+            $this->recordPass($label);
+        }
+        return $passed;
+    }
+
+    /**
+     * The Stripe integration tests make real test-mode API calls. In test mode
+     * StripeHelper reads the _test-suffixed keys; both must be present or those
+     * tests cannot run.
+     */
+    private function stripeTestKeysPresent() {
+        $publishable = $this->settings->get_setting('stripe_api_key_test');
+        $secret = $this->settings->get_setting('stripe_api_pkey_test');
+        return !empty($publishable) && !empty($secret);
     }
 
     /**
@@ -1216,22 +1261,34 @@ class SubscriptionTierTester {
         // Step 5: Run model-level tests
         echo "<hr><h3>Step 5: Model Layer Tests</h3>";
 
-        $this->testBasicTierAssignment();
+        $this->runTest('Basic tier assignment', function () { return $this->testBasicTierAssignment(); });
         SubscriptionTier::removeUserFromAllTiers($this->test_user_id);
 
-        $this->testUpgradeOnlyLogic();
+        $this->runTest('Upgrade-only purchase logic', function () { return $this->testUpgradeOnlyLogic(); });
         SubscriptionTier::removeUserFromAllTiers($this->test_user_id);
 
-        $this->testFeatureAccess();
+        $this->runTest('Feature access', function () { return $this->testFeatureAccess(); });
         SubscriptionTier::removeUserFromAllTiers($this->test_user_id);
 
-        $this->testMinimumTierLevel();
+        $this->runTest('Minimum tier level checking', function () { return $this->testMinimumTierLevel(); });
         SubscriptionTier::removeUserFromAllTiers($this->test_user_id);
 
-        $this->testChangeTracking();
+        $this->runTest('Change tracking', function () { return $this->testChangeTracking(); });
         SubscriptionTier::removeUserFromAllTiers($this->test_user_id);
 
-        $this->testStripePriceSync();
+        // The remaining tiers exercise real Stripe test-mode calls. Guard the
+        // keys explicitly: without them the SDK throws deep in the stack, so a
+        // missing-key run must be a loud, recorded failure — never a silent skip
+        // that leaves the suite looking green.
+        if (!$this->stripeTestKeysPresent()) {
+            $this->recordFailure('Stripe Integration Preconditions',
+                'Stripe test keys are not configured (stripe_api_key_test / stripe_api_pkey_test); '
+                . 'the Stripe integration tier tests cannot run. Configure test keys, or run this suite '
+                . 'through tests/run.php, which skips it when needs:[stripe-test-keys] is unmet.');
+            echo "<p class='text-danger'><strong>ERROR:</strong> Stripe test keys missing — Stripe integration tests skipped.</p>";
+        } else {
+
+        $this->runTest('Stripe price ID auto-sync', function () { return $this->testStripePriceSync(); });
 
         // Step 6: Integration tests with Stripe
         echo "<hr><h3>Step 6: Integration Tests with Stripe API</h3>";
@@ -1257,13 +1314,13 @@ class SubscriptionTierTester {
         }
 
         // Test upgrade
-        $this->testLogicFileUpgrade();
+        $this->runTest('Upgrade via change_tier_logic (Stripe)', function () { return $this->testLogicFileUpgrade(); });
 
         // Test proration (uses the subscription created by upgrade test)
-        $this->testProration();
+        $this->runTest('Proration on upgrade (Stripe)', function () { return $this->testProration(); });
 
         // Test immediate downgrade
-        $this->testLogicFileDowngrade(true);
+        $this->runTest('Immediate downgrade (Stripe)', function () { return $this->testLogicFileDowngrade(true); });
 
         // Clean up and start fresh for cancellation test
         SubscriptionTier::removeUserFromAllTiers($this->test_user_id);
@@ -1279,7 +1336,7 @@ class SubscriptionTierTester {
             $session = SessionControl::get_instance();
 
             // Test immediate cancellation
-            $this->testLogicFileCancellation(true);
+            $this->runTest('Immediate cancellation (Stripe)', function () { return $this->testLogicFileCancellation(true); });
         }
 
         // Clean up and start fresh for reactivation test
@@ -1308,8 +1365,10 @@ class SubscriptionTierTester {
             $session = SessionControl::get_instance();
 
             // Test reactivation
-            $this->testLogicFileReactivation();
+            $this->runTest('Reactivation (Stripe)', function () { return $this->testLogicFileReactivation(); });
         }
+
+        } // end Stripe-integration guard (stripeTestKeysPresent)
 
         // Step 7: Restore settings
         echo "<hr><h3>Step 7: Restoring Original Settings</h3>";
@@ -1347,27 +1406,26 @@ class SubscriptionTierTester {
             echo "</div>";
         }
 
-        // Success or completion message
-        if (empty($this->test_failures)) {
+        // Success or completion message — a run that executed nothing is not a success.
+        if (empty($this->test_failures) && $this->tests_executed > 0) {
             echo "<div class='alert alert-success'>";
             echo "<h4>✓ All Subscription Tier Tests Completed Successfully!</h4>";
         } else {
             echo "<div class='alert alert-warning'>";
             echo "<h4>⚠️ Subscription Tier Tests Completed With Failures</h4>";
         }
-        echo "<p><strong>Tests Run:</strong></p>";
+        // Actual tally — only tests that genuinely executed and passed are listed
+        // here, so a run where the Stripe section was skipped cannot masquerade
+        // as a full pass.
+        echo "<p><strong>Tests executed: {$this->tests_executed} — passed: "
+            . count($this->test_passes) . ", failed: " . count($this->test_failures) . "</strong></p>";
+        if ($this->tests_executed === 0) {
+            echo "<p class='text-danger'><strong>No tier tests executed — this is a failure, not a pass.</strong></p>";
+        }
         echo "<ul>";
-        echo "<li>✓ Basic tier assignment</li>";
-        echo "<li>✓ Upgrade-only purchase logic</li>";
-        echo "<li>✓ Feature access</li>";
-        echo "<li>✓ Minimum tier level checking</li>";
-        echo "<li>✓ Change tracking</li>";
-        echo "<li>✓ Stripe price ID auto-sync (with real Stripe API)</li>";
-        echo "<li>✓ Upgrade via change_tier_logic (with Stripe)</li>";
-        echo "<li>✓ Proration on upgrade (with Stripe invoice analysis)</li>";
-        echo "<li>✓ Downgrade immediate (with Stripe)</li>";
-        echo "<li>✓ Cancellation immediate (with Stripe)</li>";
-        echo "<li>✓ Reactivation (with Stripe)</li>";
+        foreach ($this->test_passes as $pass) {
+            echo "<li>✓ " . htmlspecialchars($pass) . "</li>";
+        }
         echo "</ul>";
         echo "<p><strong>What was tested:</strong></p>";
         echo "<ul>";
