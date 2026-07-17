@@ -1,0 +1,132 @@
+<?php
+/**
+ * MailboxContact — a per-user email contact (specs/mailbox_compose_maturity.md § Phase 4).
+ *
+ * A disposable autocomplete cache, NOT an identity/relationship record (that is a separate
+ * future core system — specs/FUTURE_verified_connections.md; this table must stay a cache).
+ * One row per (user, normalized address); the store warms up through use (harvested on every
+ * send and on opening a thread) and can be imported from a vCard / Google CSV.
+ *
+ * ENCRYPTION AT REST. A row is sealed iff the owning user holds a Sealed Vault
+ * (docs/sealed_vault.md) — the same identity that seals their mail. imc_address and
+ * imc_display_name seal under a per-row DEK (imc_sealed_key, sealed to the owner's vault
+ * public key); imc_sealed_owner_user_id records whose vault, at seal time. $sealed_fields +
+ * the decrypt hooks are the generic Sealed Vault read path (SystemBase::get() and the
+ * raw-row readers). AD convention: "contact:{id}:{field}".
+ *
+ * BLIND-INDEX DEDUP. imc_address_hash is a deterministic digest of the normalized
+ * (lowercased, trimmed) address, unique per user, so upsert/dedup works even when
+ * imc_address is ciphertext. For a vault holder it is a KEYED hash (HMAC under a subkey
+ * derived from the in-window vault secret) so it never leaks the sealed address to an
+ * attacker with only DB access; for a user with no vault it is a plain SHA-256 (the address
+ * column is plaintext anyway). See MailboxContacts::addressHash(). A vault rotation changes
+ * the derived key, so a re-harvested address may land a second row post-rotation — harmless,
+ * because the contacts payload also de-duplicates by decrypted address on read (this store is
+ * a cache).
+ *
+ * @version 1.0
+ */
+
+require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
+
+class MailboxContactException extends SystemBaseException {}
+
+class MailboxContact extends SystemBase {
+	public static $prefix = 'imc';
+	public static $tablename = 'imc_mailbox_contacts';
+	public static $pkey_column = 'imc_mailbox_contact_id';
+
+	const SOURCE_SENT     = 'sent';
+	const SOURCE_RECEIVED = 'received';
+	const SOURCE_IMPORT   = 'import';
+	const SOURCE_MANUAL   = 'manual';
+
+	public static $sealed_fields = array('imc_address', 'imc_display_name');
+
+	protected static $foreign_key_actions = array(
+		'imc_usr_user_id' => array('action' => 'cascade'),
+	);
+
+	public static $field_specifications = array(
+		'imc_mailbox_contact_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+		'imc_usr_user_id'        => array('type'=>'int8', 'is_nullable'=>false),
+		// Ciphertext once sealed, so 'text' (base64 + AEAD outgrows a varchar cap).
+		'imc_address'            => array('type'=>'text'),
+		'imc_display_name'       => array('type'=>'text'),
+		// Deterministic dedup digest of the normalized address; keyed (blind index)
+		// for vault holders, plain SHA-256 otherwise. Unique per user.
+		'imc_address_hash'       => array('type'=>'varchar(64)', 'unique_with'=>array('imc_usr_user_id')),
+		'imc_last_used_time'     => array('type'=>'timestamp(6)', 'default'=>'now()'),
+		'imc_use_count'          => array('type'=>'int4', 'is_nullable'=>false, 'default'=>1),
+		'imc_source'             => array('type'=>'varchar(10)', 'default'=>'sent'), // sent|received|import|manual
+		// Sealed Vault columns (mirror InboundEmailMessage).
+		'imc_content_sealed'     => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
+		'imc_sealed_key'         => array('type'=>'text', 'is_nullable'=>true),
+		'imc_key_generation'     => array('type'=>'int4', 'is_nullable'=>false, 'default'=>0),
+		'imc_sealed_owner_user_id' => array('type'=>'int8', 'is_nullable'=>true),
+		'imc_create_time'        => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	);
+
+	function authenticate_write($data) {
+		// A member manages their OWN contacts; scope is enforced in MailboxContacts
+		// (every mutation is bound to the acting user's id), so no admin gate here.
+	}
+
+	/** The AD row-binding string for a sealed contact field (docs/sealed_vault.md § AD). */
+	public static function sealAd(int $contact_id, string $field): string {
+		return 'contact:' . $contact_id . ':' . $field;
+	}
+
+	/** Sealed Vault read hook (loaded-model path). */
+	protected function decryptSealedField($field, $ciphertext) {
+		if (!$this->get('imc_content_sealed') || !$this->get('imc_sealed_key')) {
+			return $ciphertext;
+		}
+		$owner_id = intval($this->get('imc_sealed_owner_user_id'));
+		return self::openField(intval($this->key), $owner_id, (string)$this->get('imc_sealed_key'), $field, $ciphertext);
+	}
+
+	/** Sealed Vault read hook (raw-row path — MailboxContacts list reads). */
+	public static function decryptSealedFieldStatic($field, $ciphertext, array $row) {
+		if (empty($row['imc_content_sealed']) || empty($row['imc_sealed_key'])) {
+			return $ciphertext;
+		}
+		$owner_id = intval($row['imc_sealed_owner_user_id'] ?? 0);
+		$contact_id = intval($row['imc_mailbox_contact_id'] ?? 0);
+		return self::openField($contact_id, $owner_id, (string)$row['imc_sealed_key'], $field, $ciphertext);
+	}
+
+	/** Unwrap the per-row DEK in-window, then open the AEAD field. */
+	private static function openField(int $contact_id, int $owner_id, string $sealed_key, string $field, string $ciphertext): string {
+		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
+		if ($owner_id <= 0) {
+			throw new VaultLockedException();
+		}
+		$secret = VaultUnlock::secretKey($owner_id);
+		if ($secret === null) {
+			throw new VaultLockedException();
+		}
+		$crypto = new VaultCrypto();
+		$dek = $crypto->openItemDek($sealed_key, $secret);
+		return $crypto->openField($ciphertext, $dek, self::sealAd($contact_id, $field));
+	}
+}
+
+class MultiMailboxContact extends SystemMultiBase {
+	protected static $model_class = 'MailboxContact';
+
+	protected function getMultiResults($only_count = false, $debug = false) {
+		$filters = array();
+
+		if (isset($this->options['user_id'])) {
+			$filters['imc_usr_user_id'] = array($this->options['user_id'], PDO::PARAM_INT);
+		}
+		if (isset($this->options['address_hash'])) {
+			$filters['imc_address_hash'] = array($this->options['address_hash'], PDO::PARAM_STR);
+		}
+
+		return $this->_get_resultsv2('imc_mailbox_contacts', $filters, $this->order_by, $only_count, $debug);
+	}
+}
+?>

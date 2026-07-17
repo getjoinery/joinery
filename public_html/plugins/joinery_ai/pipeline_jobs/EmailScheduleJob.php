@@ -24,7 +24,7 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
  * fixed in code, never configured or model-supplied. Nothing is deleted,
  * moved, or forwarded here.
  *
- * @version 1.1
+ * @version 1.2
  */
 class EmailScheduleJob implements PipelineJobInterface {
 
@@ -76,6 +76,11 @@ class EmailScheduleJob implements PipelineJobInterface {
         // unreadable here — never a candidate to retry, never a blocker for the
         // unsealed mail behind it in the queue.
         //
+        // Drafts are never AI-read (iem_direction IS DISTINCT FROM 'draft'), matching
+        // EmailTriageJob/EmailSecurityScanJob: a half-written draft must never reach the
+        // model, and its recipe-log mark must never suppress the real scan of the later
+        // sent (morphed, same-id) version.
+        //
         // Own recipe id, own aip_recipe_item_log rows — this job coexists with
         // triage/scan recipes on the same mailbox without interfering.
         $db = DbConnector::get_instance()->get_db_link();
@@ -84,6 +89,7 @@ class EmailScheduleJob implements PipelineJobInterface {
                 WHERE iem_iea_inbound_email_alias_id = :alias_id
                   AND iem_delete_time IS NULL
                   AND iem_spam_verdict IS DISTINCT FROM 'spam'
+                  AND iem_direction IS DISTINCT FROM 'draft'
                   AND iem_content_sealed IS NOT TRUE
                   AND " . MultiAipRecipeItemLog::notExistsClause('iem_inbound_email_message_id::text') . "
                 ORDER BY iem_received_time ASC, iem_inbound_email_message_id ASC

@@ -1288,8 +1288,10 @@ The Mailbox Reader is a two-pane Gmail-style reader over the stored messages:
 a left rail (mailbox switcher + filters + search) and a single main pane that
 shows either the conversation list or an opened conversation full-width (a back
 arrow or Esc returns to the list). It supports threading, read/unread, star, and
-search. It is a vanilla-JS client (`assets/mailbox_reader.js` + `.css`,
-cache-busted by file mtime) talking to five scoped AJAX endpoints.
+search, rich-text compose with Bcc and inline images, saved drafts, per-mailbox
+signatures, recipient autocomplete, and (for admins) a member-context panel. It is
+a vanilla-JS client (`assets/mailbox_reader.js` + `.css`, cache-busted by file
+mtime) talking to the scoped AJAX/API actions listed under **API Surface**.
 
 The reader has **two mounts** of one shared UI
 (`includes/mailbox_reader_mount.php`):
@@ -1478,19 +1480,121 @@ conversation with no source message to reply to or quote:
 - **Uploads.** `attachUploads()` runs in every mode, so a new message can
   carry attachments with no extra work.
 
+### Rich text, Bcc, and inline images
+
+The composer body is a vanilla `contenteditable` editor with a small toolbar
+(bold / italic / underline, bulleted & numbered lists, link, clear formatting).
+On send the client posts `body_html`; the server sanitizes it against a strict
+allowlist (`MailboxHtmlSanitizer` — `p br div b strong i em u a[http/https/mailto]
+ul ol li blockquote img[cid:]`; everything else unwrapped, every other attribute
+stripped) and derives `iem_body_plain` from the sanitized HTML. The plaintext
+`body` param still works unchanged for degraded clients, so the `send` contract
+stays backward-compatible.
+
+**Bcc** hides behind a toggle next to Cc. It is delivered as true envelope Bcc and
+stored on the outbound row in its **own sealed column `iem_bcc`** — never merged
+into `iem_recipient`, so a reply-all on your Sent copy can never re-leak a bcc'd
+address. The Sent view shows a separate "Bcc:" line.
+
+**Inline images** paste or drag into the editor. Each rides in `attachments[]` with
+an `inline_manifest` (local-id → filename); the server embeds it with a minted
+`Content-ID`, rewrites `cid:{local-id}` in the stored/sent HTML, and persists it as
+an `ima_is_inline` manifest row — so the Sent copy's inline art renders through the
+same `resolveInlineImages()` path as received inline images.
+
+### Drafts
+
+Drafts are `iem_inbound_email_messages` rows with `iem_direction='draft'` — no new
+table (`MailboxDrafts`). A draft carries the From alias, subject/body, `iem_recipient`
+(To + Cc), `iem_bcc`, and a sealed JSON `iem_draft_state` (`{mode, source_id, to, cc}`)
+that restores the exact fields on reopen. The composer autosaves (debounced, on close,
+and on `beforeunload`); the first save creates the row, later saves update it.
+
+**A draft is personal compose state, owned by its author** (`iem_draft_author_user_id`):
+every read/write is scoped to that user, so a co-grantee of a shared mailbox and an
+all-access superadmin can neither see the draft in the Drafts rail/count nor open, edit,
+send, or delete it. The author column is cleared when the draft morphs to an outbound row.
+
+The compose panel closes two ways: the **× is save-and-close** (the panel is always safe
+to close — it persists and keeps the draft), and a separate **🗑 discards** after a
+confirm (hard-deletes the row, its attachment manifest, and the backing Files). On send
+with `draft_id`, the draft **morphs into the Sent row** in place — direction flips, the
+final From alias/domain are written (a mid-draft From change files the Sent copy in the
+right mailbox), and the already-uploaded attachments are reused — or the draft is deleted
+in the Gmail pending-Sent-ingest case.
+
+Attachments persist onto the draft on save; the save response returns the authoritative
+attachment list so the client never re-uploads bytes it already sent, and a saved chip's
+× removes one part (`draft_attachment_delete`). Pasted **inline images** persist as inline
+manifest rows carrying their local id as Content-ID; reopening a draft resolves each
+`cid:{id}` to a signed URL so the image renders in the editor, and sending re-embeds the
+stored bytes under the same Content-ID. Removing an image from the editor prunes its
+stored part on the next save.
+
+A sealed draft re-seals its content under the SAME per-draft DEK on every save (reused
+in-window) so its attachments stay readable; autosave never blocks on the unlock window
+(a fresh public-key seal needs no window). Sending a sealed draft unwraps that DEK once,
+up front — a closed window fails loudly before anything reaches the wire (`locked:true`,
+prompting a one-tap unlock), never delivering a message shorn of its sealed attachments.
+A From change from a sealed to a standard mailbox clears `iem_content_sealed` but retains
+`iem_sealed_key`, so the draft's already-sealed attachments stay decryptable.
+
+A **Drafts** rail entry lists them (via `thread_list` `drafts=1`); every other view/query,
+the FTS index, IMAP dirtiness, and AI triage/scan/schedule exclude `direction='draft'`.
+Because a morphed draft keeps its message id (now below the FTS high-water mark), each
+mailbox owner's search bookkeeping carries a **refold queue** (`imi_refold_ids`) — the
+sent message is explicitly re-indexed on the next fold so it becomes searchable.
+
+### Signatures
+
+Each grantee sets a per-mailbox compose signature (`ieg_signature` on the grant —
+sanitized HTML, **not sealed**: a signature is a cleartext template on every outgoing
+message). A gear on each of the viewer's own mailboxes opens a small editor
+(`mailbox/signature_save`, own grant only). The `mailboxes` payload carries each
+mailbox's signature; on compose open the client inserts it into the editor above the
+quote, where the user sees and can edit it before sending — the server does no injection.
+
+### Contacts + recipient autocomplete
+
+A per-user contact store (`imc_mailbox_contacts`, `MailboxContact` /
+`MailboxContacts`) warms up through use: every send harvests To/Cc/Bcc, and opening a
+thread harvests the counterparty sender. Rows are sealed when the owner holds a vault
+(`imc_address` / `imc_display_name` under a per-row DEK); dedup is a per-user
+`imc_address_hash` — a keyed blind index for vault holders (never leaks the sealed
+address), plain SHA-256 otherwise. The composer fetches the whole (small) decrypted list
+once and filters it client-side for To/Cc/Bcc autocomplete (no server prefix-search over
+ciphertext); a locked vault makes autocomplete silently absent. A **Contacts** rail entry
+manages the list (add, delete, and import a vCard / Google CSV via `mailbox/contacts_import`).
+
+### Member-context panel
+
+When a thread opens, an admin (permission 5+) sees a right-hand panel showing who the
+correspondent is on the platform (`mailbox/sender_context`). The client sends the
+**message id, never an address**, so the endpoint can't be a membership oracle — the
+server re-derives the counterparty from a message already in the caller's scope, resolves
+it with `User::GetByEmail`, and returns the member card (name, email-verified, member-since,
+a link to the admin edit page) plus recent orders / event registrations / conversation
+count — each section present only when its plugin/feature is active. Non-admins never see
+the panel; it is lazy, session-cached, collapsible, and hidden below a width breakpoint.
+
 ## API Surface
 
 The mailbox is exposed to API clients (the native mobile mail screens,
-`docs/mobile_apps.md`) as five actions under the plugin namespace,
+`docs/mobile_apps.md`) as actions under the plugin namespace,
 `POST /api/v1/action/mailbox/{action}`, session-key authenticated:
 
 | Action | Purpose |
 |---|---|
-| `mailboxes` | The viewer's granted mailboxes with unread/total counts and folder rails, plus `can_compose` |
-| `thread_list` | Paged threads for a mailbox view — params `alias_id`, `q`, `unread_only`, `starred_only`, `spam`, `inbox`, `folder_id`, `page`; same row shapes as the web reader's list endpoint |
-| `thread` | One full thread: messages with plain/HTML bodies, attachment manifest, and the thread's folder ids |
+| `mailboxes` | The viewer's granted mailboxes with unread/total counts, folder rails, per-mailbox `signature`, `own` flag, plus `can_compose` and a `drafts` count |
+| `thread_list` | Paged threads for a mailbox view — params `alias_id`, `q`, `unread_only`, `starred_only`, `spam`, `inbox`, `folder_id`, `drafts`, `page`; same row shapes as the web reader's list endpoint |
+| `thread` | One full thread: messages with plain/HTML bodies, attachment manifest, and the thread's folder ids; harvests inbound senders into contacts |
 | `thread_action` | The reader's full mutation set: `mark_read`/`mark_unread`, `star`/`unstar`, `archive`/`unarchive`, `delete`, `mark_spam`/`mark_not_spam`, `set_membership`, `create_folder` — targets `ids[]` or a `thread_key` |
-| `send` | Reply / reply-all / forward / new message as the mailbox — `source_id` (reply/reply_all/forward) or `alias_id` (new); accepts a plain JSON body or, with attachments, multipart `attachments[]`; forwards re-attach the original's parts server-side |
+| `send` | Reply / reply-all / forward / new message as the mailbox — `source_id` or `alias_id`, plus optional `bcc`, `body_html`, `inline_manifest`, `draft_id` (morph a draft); plain JSON or multipart `attachments[]`; forwards re-attach the original's parts server-side |
+| `draft_save` / `draft_get` / `draft_delete` | Create/update, reopen, and discard a compose draft (multipart attachments + `inline_manifest` on save; save returns the persisted `attachments`/`inline` lists) |
+| `draft_attachment_delete` | Remove one saved attachment from a draft — `draft_id`, `attachment_id` (author-scoped, non-inline) |
+| `signature_save` | Save the caller's compose signature for one of their mailboxes |
+| `contacts` / `contact_delete` / `contacts_import` | List (decrypted, ranked) / delete / import-or-add the caller's contacts |
+| `sender_context` | Resolve a thread counterparty (by message id) to their member record — admin only |
 
 Each action is a `logic/{action}_logic.php` with an `_logic_api()` opt-in that
 builds a `MailboxViewer` for the key's user and goes through

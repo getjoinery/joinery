@@ -1,6 +1,6 @@
 # Mailbox — Compose Maturity (Individual Track)
 
-## Status: active — design
+## Status: implemented (all five phases; unit-tested + live-verified on dev)
 
 The individual-webmail compose layer for the mailbox plugin: **saved drafts,
 rich-text compose, BCC, per-mailbox signatures, recipient autocomplete backed by a

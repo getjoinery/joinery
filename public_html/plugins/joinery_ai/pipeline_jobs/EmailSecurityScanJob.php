@@ -80,6 +80,7 @@ class EmailSecurityScanJob implements PipelineJobInterface {
                 WHERE iem_iea_inbound_email_alias_id = :alias_id
                   AND iem_delete_time IS NULL
                   AND iem_spam_verdict IS DISTINCT FROM 'spam'
+                  AND iem_direction IS DISTINCT FROM 'draft'
                   AND iem_content_sealed IS NOT TRUE
                   AND " . MultiAipRecipeItemLog::notExistsClause('iem_inbound_email_message_id::text') . "
                 ORDER BY iem_received_time ASC, iem_inbound_email_message_id ASC

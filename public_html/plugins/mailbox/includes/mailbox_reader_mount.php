@@ -20,7 +20,11 @@
  * mailbox list for reply/forward modes) and clears the recipient/subject/body
  * fields. See specs/implemented/inbound_email_new_message_compose.md.
  *
- * @version 1.3.0
+ * Compose maturity (specs/mailbox_compose_maturity.md § Phase 1): the plain body
+ * textarea is a rich-text contenteditable + toolbar; a Bcc field hides behind a
+ * toggle; inline images paste/drag into the editor. The reader JS owns all of it.
+ *
+ * @version 1.5.0
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSender.php'));
@@ -55,6 +59,18 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 		'threadUrl'         => '/api/v1/action/mailbox/thread',
 		'actionUrl'         => '/api/v1/action/mailbox/thread_action',
 		'sendUrl'           => '/api/v1/action/mailbox/send',
+		'draftSaveUrl'      => '/api/v1/action/mailbox/draft_save',
+		'draftGetUrl'       => '/api/v1/action/mailbox/draft_get',
+		'draftDeleteUrl'    => '/api/v1/action/mailbox/draft_delete',
+		'draftAttachmentDeleteUrl' => '/api/v1/action/mailbox/draft_attachment_delete',
+		'signatureSaveUrl'  => '/api/v1/action/mailbox/signature_save',
+		'contactsUrl'       => '/api/v1/action/mailbox/contacts',
+		'contactDeleteUrl'  => '/api/v1/action/mailbox/contact_delete',
+		'contactsImportUrl' => '/api/v1/action/mailbox/contacts_import',
+		'senderContextUrl'  => '/api/v1/action/mailbox/sender_context',
+		// The member-context panel is admin-only (member records are operator data);
+		// the endpoint enforces it, this flag just suppresses the fetch for non-admins.
+		'canSeeContext'     => (SessionControl::get_instance()->get_permission() >= 5),
 		'messageDetailBase' => $opts['message_detail_base'] ?? null,
 		'attachmentUrlBase' => (string)$opts['attachment_url_base'],
 		'initialMailboxes'  => $opts['initial_mailboxes'],
@@ -93,7 +109,8 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 		<div class="mbx-compose" id="mbx-compose" hidden>
 			<div class="mbx-compose-head">
 				<span class="mbx-compose-title" id="mbx-compose-title">Reply</span>
-				<button type="button" class="mbx-iconbtn" id="mbx-compose-close" title="Discard">&times;</button>
+				<button type="button" class="mbx-iconbtn" id="mbx-compose-discard" title="Discard draft">&#128465;</button>
+					<button type="button" class="mbx-iconbtn" id="mbx-compose-close" title="Save &amp; close">&times;</button>
 			</div>
 			<div class="mbx-compose-error" id="mbx-compose-error" hidden></div>
 			<?php
@@ -119,9 +136,34 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 			$compose->textinput('to', 'To', array('id' => 'mbx_to',
 				'helptext' => 'Separate multiple addresses with commas.'));
 			$compose->textinput('cc', 'Cc', array('id' => 'mbx_cc', 'placeholder' => 'Optional'));
+			// Bcc is hidden behind a toggle (Gmail-style). It rides its own sealed
+			// column server-side (iem_bcc), never merged into the recipient list.
+			echo '<div class="mbx-bcc-toggle-row"><button type="button" class="mbx-bcc-toggle" id="mbx-bcc-toggle">Add Bcc</button></div>';
+			echo '<div class="mbx-bcc-row" id="mbx-bcc-row" hidden>';
+			$compose->textinput('bcc', 'Bcc', array('id' => 'mbx_bcc',
+				'placeholder' => 'Blind copy — hidden from other recipients'));
+			echo '</div>';
 			$compose->textinput('subject', 'Subject', array('id' => 'mbx_subject'));
-			$compose->textarea('body', 'Message', array('id' => 'mbx_body', 'rows' => 10));
+			// Rich-text editor: a minimal, dependency-free contenteditable + toolbar
+			// (specs/mailbox_compose_maturity.md § Phase 1). The reader JS serializes
+			// its HTML into body_html (server-sanitized, authoritative) and its text
+			// into the plaintext `body` fallback; the plain textarea is gone.
 			?>
+			<div class="mbx-field mbx-richwrap">
+				<span class="mbx-rich-label">Message</span>
+				<div class="mbx-toolbar" id="mbx-toolbar" role="toolbar" aria-label="Formatting">
+					<button type="button" class="mbx-tb" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>
+					<button type="button" class="mbx-tb" data-cmd="italic" title="Italic (Ctrl+I)"><em>I</em></button>
+					<button type="button" class="mbx-tb" data-cmd="underline" title="Underline (Ctrl+U)"><span style="text-decoration:underline">U</span></button>
+					<span class="mbx-tb-sep" aria-hidden="true"></span>
+					<button type="button" class="mbx-tb" data-cmd="insertUnorderedList" title="Bulleted list">&#8226; List</button>
+					<button type="button" class="mbx-tb" data-cmd="insertOrderedList" title="Numbered list">1. List</button>
+					<span class="mbx-tb-sep" aria-hidden="true"></span>
+					<button type="button" class="mbx-tb" data-cmd="createLink" title="Insert link">&#128279;</button>
+					<button type="button" class="mbx-tb" data-cmd="removeFormat" title="Clear formatting">&#10005;</button>
+				</div>
+				<div class="mbx-rich" id="mbx_body_rich" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Write your message…"></div>
+			</div>
 			<div class="mbx-attach-strip" id="mbx-attach-strip" hidden></div>
 			<div class="mbx-compose-actions">
 				<input type="file" id="mbx-file-input" class="mbx-file-input" multiple>
@@ -156,6 +198,10 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 			<div class="mbx-thread" id="mbx-thread"></div>
 		</div>
 	</section>
+	<!-- Member-context panel (§ Phase 5): who the correspondent is on this platform.
+	     Admin-only, lazy-filled on thread open, collapsible, hidden below a width
+	     breakpoint. The reader JS shows/populates it. -->
+	<aside class="mbx-context" id="mbx-context" hidden></aside>
 </div>
 <!-- WebAuthn helper for the in-reader vault unlock ceremony (locked-state contract).
      Not deferred: it must define window.JoineryPasskeys before the reader script

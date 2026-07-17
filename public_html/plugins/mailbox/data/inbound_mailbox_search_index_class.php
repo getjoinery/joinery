@@ -14,7 +14,7 @@
  * Never excluded from backup — losing this row only costs a search-index
  * rebuild, not content (the ground truth is always the sealed message rows).
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -38,6 +38,9 @@ class InboundMailboxSearchIndex extends SystemBase {
 		'imi_usr_user_id'      => array('type'=>'int8', 'is_nullable'=>false, 'unique'=>true,
 			'foreign_key'=>array('table'=>'usr_users', 'column'=>'usr_user_id', 'on_delete'=>'CASCADE')),
 		'imi_fts_high_water'   => array('type'=>'int8', 'is_nullable'=>false, 'default'=>0),
+		// Row ids at-or-below the high-water mark that changed after folding (a draft
+		// morphed into its Sent row keeps its id) — folded on the next cycle, then cleared.
+		'imi_refold_ids'       => array('type'=>'text', 'is_nullable'=>true),   // JSON int array
 		'imi_fil_file_id'      => array('type'=>'int8', 'is_nullable'=>true),
 		'imi_sealed_key'       => array('type'=>'text', 'is_nullable'=>true),
 		'imi_created_time'     => array('type'=>'timestamp(6)', 'default'=>'now()'),

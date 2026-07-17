@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.11
+ * No framework. @version 2.17
  *
  * Two-pane layout: the main pane swaps between the conversation list and an
  * opened conversation (toggled by the `reading` class on #mbx-reader); a back
@@ -26,8 +26,17 @@
 		inboxView: true,      // the Inbox view (non-archived); the default landing view
 		spamView: false,      // the Spam pseudo-folder (judged-spam, hidden from inbox)
 		mailboxLabel: '',     // the active mailbox label, for composing folder titles
+		draftsView: false,    // the Drafts pseudo-mailbox (saved drafts)
 		mailboxes: [],
-		messages: []      // messages of the currently-open thread
+		messages: [],     // messages of the currently-open thread
+		// Compose draft state (specs/mailbox_compose_maturity.md § Phase 2).
+		draftId: null,        // the saved draft's id once autosaved (null = not yet saved)
+		draftAlias: null,     // the From alias id the current compose is bound to
+		draftDirty: false,    // unsaved changes since the last autosave
+		draftSaving: false,   // an autosave is in flight
+		draftAttachments: [], // server-side attachments of a reopened draft (read-only chips)
+		contacts: [],         // the viewer's contacts (§ Phase 4), for recipient autocomplete
+		contactsView: false   // the Contacts manager pseudo-mailbox
 	};
 
 	// ---- tiny DOM helpers ----
@@ -139,12 +148,30 @@
 		list.innerHTML = '';
 
 		state.mailboxes.forEach(function (m) {
-			list.appendChild(mailboxItem(m.address, m.alias_id, m.unread, m.folders));
+			list.appendChild(mailboxItem(m.address, m.alias_id, m.unread, m.folders, m.own));
 		});
 		if (state.allAccess && data.unmatched && data.unmatched.total > 0) {
 			var li = mailboxItem('Unmatched', 'unmatched', data.unmatched.unread, []);
 			li.title = 'Unrouted mail that matched no mailbox';
 			list.appendChild(li);
+		}
+		// Drafts pseudo-mailbox (specs/mailbox_compose_maturity.md § Phase 2) — shown
+		// whenever the viewer can compose. Clicking it lists saved drafts.
+		if (state.mailboxes.length) {
+			var draftsTotal = (data.drafts && data.drafts.total) ? data.drafts.total : 0;
+			var dli = el('li', 'mbx-mailbox mbx-drafts-entry' + (state.draftsView ? ' active' : ''));
+			dli.dataset.alias = 'drafts';
+			dli.appendChild(el('span', 'mbx-mailbox-addr', 'Drafts'));
+			dli.appendChild(el('span', 'mbx-badge' + (draftsTotal ? '' : ' zero'), String(draftsTotal)));
+			dli.addEventListener('click', function () { selectDrafts(); });
+			list.appendChild(dli);
+
+			// Contacts manager (§ Phase 4).
+			var cli = el('li', 'mbx-mailbox mbx-contacts-entry' + (state.contactsView ? ' active' : ''));
+			cli.dataset.alias = 'contacts';
+			cli.appendChild(el('span', 'mbx-mailbox-addr', 'Contacts'));
+			cli.addEventListener('click', function () { selectContacts(); });
+			list.appendChild(cli);
 		}
 
 		// Highlight current selection + render the active mailbox's folder rail.
@@ -157,12 +184,22 @@
 		if (newBtn) newBtn.hidden = !state.mailboxes.length;
 	}
 
-	function mailboxItem(label, aliasId, unread, folders) {
+	function mailboxItem(label, aliasId, unread, folders, own) {
 		var li = el('li', 'mbx-mailbox');
 		li.dataset.alias = (aliasId == null ? '' : String(aliasId));
 		li._folders = folders || [];
 		var addr = el('span', 'mbx-mailbox-addr', label);
 		li.appendChild(addr);
+		// Signature gear (§ Phase 3) — only on mailboxes the viewer is a member of
+		// (a signature lives on a grant), never the superadmin's all-access extras.
+		if (own && aliasId != null && aliasId !== 'unmatched' && !isNaN(Number(aliasId))) {
+			var gear = el('button', 'mbx-sig-gear', '⚙');
+			gear.type = 'button';
+			gear.title = 'Edit signature';
+			gear.setAttribute('aria-label', 'Edit signature');
+			gear.addEventListener('click', function (e) { e.stopPropagation(); openSignatureEditor(aliasId); });
+			li.appendChild(gear);
+		}
 		var badge = el('span', 'mbx-badge' + (unread ? '' : ' zero'), String(unread || 0));
 		li.appendChild(badge);
 		li.addEventListener('click', function () { selectMailbox(aliasId, label); });
@@ -225,6 +262,8 @@
 
 	function selectFolder(folderId, name) {
 		closeThread();                    // leave any open conversation → show the list
+		state.draftsView = false;
+		state.contactsView = false;
 		state.inboxView = false;
 		state.spamView = false;
 		if (folderId === 'inbox') {
@@ -266,14 +305,42 @@
 		closeThread();                    // leave any open conversation → show the list
 		rememberMailbox(aliasId);
 		state.aliasId = aliasId;
+		state.draftsView = false;
+		state.contactsView = false;
 		state.folderId = null;            // reset to the folder-unfiltered view
 		state.inboxView = true;           // default to the Inbox (non-archived) view
 		state.spamView = false;
 		state.mailboxLabel = label || 'All mail';
 		$('#mbx-list-title').textContent = state.mailboxLabel;
 		highlightMailbox();
+		highlightDrafts();
 		renderFolderRail();
 		loadThreads(true);
+	}
+
+	// The Drafts pseudo-mailbox: list the viewer's saved drafts (server-scoped to
+	// their mailboxes). No folder rail, no inbox/spam split.
+	function selectDrafts() {
+		closeThread();
+		state.aliasId = null;
+		state.draftsView = true;
+		state.contactsView = false;
+		state.folderId = null;
+		state.inboxView = false;
+		state.spamView = false;
+		state.mailboxLabel = 'Drafts';
+		$('#mbx-list-title').textContent = 'Drafts';
+		var prior = $('#mbx-folder-rail');
+		if (prior) prior.parentNode.removeChild(prior);
+		highlightMailbox();
+		highlightDrafts();
+		loadThreads(true);
+	}
+
+	function highlightDrafts() {
+		Array.prototype.forEach.call(document.querySelectorAll('.mbx-drafts-entry'), function (li) {
+			li.classList.toggle('active', !!state.draftsView);
+		});
 	}
 
 	function refreshMailboxes() {
@@ -283,6 +350,12 @@
 	// ---- thread list (center) ----
 	function buildListQuery() {
 		var p = new URLSearchParams();
+		if (state.draftsView) {
+			// Drafts view: server-scoped to the viewer's mailboxes; no other filters.
+			p.set('drafts', '1');
+			p.set('page', String(state.page));
+			return CFG.listUrl + '?' + p.toString();
+		}
 		if (state.aliasId != null) p.set('alias_id', String(state.aliasId));
 		if (state.filter === 'unread') p.set('unread_only', '1');
 		if (state.filter === 'starred') p.set('starred_only', '1');
@@ -401,7 +474,10 @@
 
 		li.appendChild(el('span', 'mbx-thread-time', fmtTime(t.latest_time)));
 
-		li.addEventListener('click', function () { openThread(t, li); });
+		li.addEventListener('click', function () {
+			if (state.draftsView) { openDraft(t.latest_id); }
+			else { openThread(t, li); }
+		});
 		return li;
 	}
 
@@ -426,6 +502,7 @@
 			// attachment download) can prompt one-tap unlock first (§ 4.1).
 			state.threadLocked = !!data.locked;
 			renderThread(t, data.messages || [], data.folders || []);
+			loadSenderContext(data.messages || []); // member-context panel (§ Phase 5)
 			if (data.locked) {
 				// Sealed thread: metadata rendered, content is placeholders. Offer a
 				// one-tap unlock that re-runs this exact open on success — no navigation.
@@ -712,6 +789,8 @@
 		if (outbound) from.appendChild(el('span', 'mbx-sent-tag', 'Sent'));
 		left.appendChild(from);
 		left.appendChild(el('div', 'mbx-message-meta', 'to ' + (m.recipient || '')));
+		// Bcc line: only your own Sent copy carries it (its own sealed column).
+		if (outbound && m.bcc) left.appendChild(el('div', 'mbx-message-meta', 'Bcc: ' + m.bcc));
 		if (!outbound) left.appendChild(el('div', 'mbx-message-meta', authText(m)));
 		head.appendChild(left);
 
@@ -893,9 +972,25 @@
 	function renderAttachStrip() {
 		var strip = $('#mbx-attach-strip');
 		if (!strip) return;
-		if (!pendingFiles.length) { strip.hidden = true; strip.innerHTML = ''; return; }
+		var existing = state.draftAttachments || [];
+		if (!pendingFiles.length && !existing.length) { strip.hidden = true; strip.innerHTML = ''; return; }
 		strip.hidden = false;
 		strip.innerHTML = '';
+		// A reopened draft's already-saved attachments (they ride along on send via
+		// draft_id, so they are not re-uploaded here). The × removes the file + its
+		// manifest row from the draft server-side (Fix 3).
+		existing.forEach(function (a) {
+			var chip = el('span', 'mbx-attach-chip mbx-attach-saved');
+			chip.appendChild(el('span', 'mbx-attach-chip-name', a.filename));
+			chip.appendChild(el('span', 'mbx-attach-chip-size', fmtBytes2(a.size_bytes)));
+			chip.title = 'Saved on this draft';
+			var rm = el('button', 'mbx-attach-chip-remove', '×');
+			rm.type = 'button';
+			rm.setAttribute('aria-label', 'Remove ' + a.filename);
+			rm.addEventListener('click', function () { removeSavedAttachment(a.id); });
+			chip.appendChild(rm);
+			strip.appendChild(chip);
+		});
 		pendingFiles.forEach(function (file, idx) {
 			var chip = el('span', 'mbx-attach-chip');
 			chip.appendChild(el('span', 'mbx-attach-chip-name', file.name));
@@ -910,6 +1005,19 @@
 			chip.appendChild(rm);
 			strip.appendChild(chip);
 		});
+	}
+
+	// Remove one already-saved attachment from the open draft (the saved-chip ×).
+	function removeSavedAttachment(attId) {
+		if (!state.draftId) { return; }
+		joineryApi.post(CFG.draftAttachmentDeleteUrl, {
+			draft_id: String(state.draftId), attachment_id: String(attId)
+		}).then(function (data) {
+			if (data && data.deleted) {
+				state.draftAttachments = (state.draftAttachments || []).filter(function (a) { return a.id !== attId; });
+				renderAttachStrip();
+			}
+		}).catch(function () {});
 	}
 
 	// Client-side preflight only (fast, friendly message); the server is the
@@ -938,11 +1046,519 @@
 			pendingFiles.push(f);
 		}
 		renderAttachStrip();
+		markDraftDirty();
 	}
 
 	function clearPendingFiles() {
 		pendingFiles = [];
 		renderAttachStrip();
+	}
+
+	// ---- rich-text composer (contenteditable + toolbar, no dependency) ----
+	// Inline (pasted/dragged) images are held here (not in pendingFiles, so they
+	// don't show as attachment chips); each carries a local id used as its cid:
+	// placeholder. composerHtml() rewrites the display blob URL to cid:{localId};
+	// the server embeds the file and rewrites cid:{localId} → a real Content-ID.
+	var inlineImages = [];
+	var inlineSeq = 0;
+
+	function richEl() { return document.getElementById('mbx_body_rich'); }
+
+	function updateRichPlaceholder() {
+		var r = richEl();
+		if (!r) return;
+		var empty = r.textContent.trim() === '' && !r.querySelector('img');
+		r.classList.toggle('mbx-rich-empty', empty);
+	}
+
+	function revokeInlineUrls() {
+		inlineImages.forEach(function (im) {
+			if (im.url) { try { URL.revokeObjectURL(im.url); } catch (e) {} }
+		});
+	}
+
+	function clearComposer() {
+		var r = richEl();
+		if (r) r.innerHTML = '';
+		revokeInlineUrls();
+		inlineImages = [];
+		updateRichPlaceholder();
+	}
+
+	function setComposerHtml(html) {
+		var r = richEl();
+		if (r) r.innerHTML = html || '';
+		updateRichPlaceholder();
+	}
+
+	// Reopen a draft's stored inline images (Fix 7): swap each cid:{content_id} img
+	// src for its signed URL and stamp data-mbx-cid, so the image renders in the editor
+	// and composerHtml() maps it back to cid:{content_id} for the next save/send.
+	function rewriteInlineCids(html, inline) {
+		if (!inline || !inline.length) { return html; }
+		var map = {};
+		inline.forEach(function (im) { if (im.content_id && im.url) map[im.content_id] = im.url; });
+		var tmp = document.createElement('div');
+		tmp.innerHTML = html || '';
+		Array.prototype.forEach.call(tmp.querySelectorAll('img'), function (img) {
+			var src = img.getAttribute('src') || '';
+			if (src.indexOf('cid:') === 0) {
+				var cid = src.slice(4);
+				if (map[cid]) {
+					img.setAttribute('src', map[cid]);
+					img.setAttribute('data-mbx-cid', cid);
+				}
+			}
+		});
+		return tmp.innerHTML;
+	}
+
+	// The outgoing HTML: clone the editor, swap each inline image's display blob
+	// URL for its cid: placeholder, and drop the editing-only data attribute.
+	function composerHtml() {
+		var r = richEl();
+		if (!r) return '';
+		var clone = r.cloneNode(true);
+		Array.prototype.forEach.call(clone.querySelectorAll('img'), function (img) {
+			var lid = img.getAttribute('data-mbx-cid');
+			if (lid) { img.setAttribute('src', 'cid:' + lid); img.removeAttribute('data-mbx-cid'); }
+		});
+		var html = clone.innerHTML.trim();
+		// An empty editor serializes to '' or a stray <br> — normalize to empty.
+		return (html === '<br>' || html === '<div><br></div>') ? '' : html;
+	}
+
+	// Plaintext fallback (mobile / degraded clients); the server re-derives its own
+	// from the sanitized HTML, so this is only the `body` param backstop.
+	function composerText() {
+		var r = richEl();
+		return r ? r.innerText.replace(/ /g, ' ').trim() : '';
+	}
+
+	function execCmd(cmd) {
+		var r = richEl();
+		if (r) r.focus();
+		if (cmd === 'createLink') {
+			var url = window.prompt('Link URL:', 'https://');
+			if (!url) return;
+			if (!/^(https?:\/\/|mailto:)/i.test(url)) { url = 'https://' + url; }
+			document.execCommand('createLink', false, url);
+		} else {
+			document.execCommand(cmd, false, null);
+		}
+		updateRichPlaceholder();
+	}
+
+	function insertInlineImage(file) {
+		if (!file || file.type.indexOf('image/') !== 0) return;
+		var localId = 'inl' + (++inlineSeq) + Math.random().toString(36).slice(2, 6);
+		// Unique filename so the server matches this upload to its manifest entry.
+		var uniqueName = localId + '-' + (file.name || 'image.png').replace(/[^A-Za-z0-9._-]/g, '_');
+		var renamed = new File([file], uniqueName, { type: file.type });
+		var url = URL.createObjectURL(renamed);
+		inlineImages.push({ localId: localId, file: renamed, url: url });
+		var r = richEl();
+		if (r) r.focus();
+		document.execCommand('insertHTML', false,
+			'<img src="' + url + '" data-mbx-cid="' + localId + '" style="max-width:100%">');
+		updateRichPlaceholder();
+		markDraftDirty();
+	}
+
+	function onRichPaste(e) {
+		var items = e.clipboardData && e.clipboardData.items;
+		if (!items) return;
+		for (var i = 0; i < items.length; i++) {
+			if (items[i].kind === 'file' && items[i].type.indexOf('image/') === 0) {
+				var file = items[i].getAsFile();
+				if (file) { e.preventDefault(); insertInlineImage(file); }
+			}
+		}
+	}
+
+	// ---- signatures (§ Phase 3) ----
+	function mailboxById(aliasId) {
+		return state.mailboxes.filter(function (m) { return String(m.alias_id) === String(aliasId); })[0] || null;
+	}
+
+	// Run a formatting command against a specific editor (main composer or the
+	// signature modal), keeping the caret inside it.
+	function execCmdOn(editorEl, cmd) {
+		editorEl.focus();
+		if (cmd === 'createLink') {
+			var url = window.prompt('Link URL:', 'https://');
+			if (!url) return;
+			if (!/^(https?:\/\/|mailto:)/i.test(url)) { url = 'https://' + url; }
+			document.execCommand('createLink', false, url);
+		} else {
+			document.execCommand(cmd, false, null);
+		}
+	}
+
+	// A small toolbar for a contenteditable — the compose toolbar minus images
+	// (a signature carries none).
+	function buildMiniToolbar(editorEl) {
+		var tb = el('div', 'mbx-toolbar');
+		[['bold', 'B'], ['italic', 'I'], ['underline', 'U'],
+		 ['insertUnorderedList', '• List'], ['insertOrderedList', '1. List'],
+		 ['createLink', '🔗'], ['removeFormat', '✕']].forEach(function (c) {
+			var b = el('button', 'mbx-tb', c[1]);
+			b.type = 'button';
+			b.addEventListener('mousedown', function (e) { e.preventDefault(); });
+			b.addEventListener('click', function (e) { e.preventDefault(); execCmdOn(editorEl, c[0]); });
+			tb.appendChild(b);
+		});
+		return tb;
+	}
+
+	// The signature editor modal, opened from a mailbox's gear. Saves to the
+	// caller's own grant; the server sanitizes (images stripped) and echoes it back.
+	function openSignatureEditor(aliasId) {
+		var mb = mailboxById(aliasId);
+		if (!mb) return;
+
+		var overlay = el('div', 'mbx-modal-overlay');
+		var modal = el('div', 'mbx-modal');
+		modal.appendChild(el('h3', 'mbx-modal-title', 'Signature — ' + mb.address));
+		modal.appendChild(el('p', 'mbx-modal-help', 'Inserted at the bottom of every new message from this mailbox.'));
+
+		var editor = el('div', 'mbx-rich mbx-sig-editor');
+		editor.contentEditable = 'true';
+		editor.innerHTML = mb.signature || '';
+		modal.appendChild(buildMiniToolbar(editor));
+		modal.appendChild(editor);
+
+		var actions = el('div', 'mbx-modal-actions');
+		var cancel = el('button', 'mbx-action', 'Cancel');
+		cancel.type = 'button';
+		cancel.addEventListener('click', function () { closeModal(overlay); });
+		var save = el('button', 'mbx-action mbx-primary', 'Save');
+		save.type = 'button';
+		save.addEventListener('click', function () {
+			save.disabled = true;
+			joineryApi.post(CFG.signatureSaveUrl, { alias_id: String(aliasId), signature: editor.innerHTML })
+				.then(function (data) {
+					data = data || {};
+					mb.signature = data.signature || '';
+					closeModal(overlay);
+				}).catch(function () { save.disabled = false; alert('Could not save the signature.'); });
+		});
+		actions.appendChild(cancel);
+		actions.appendChild(save);
+		modal.appendChild(actions);
+
+		overlay.appendChild(modal);
+		overlay.addEventListener('click', function (e) { if (e.target === overlay) closeModal(overlay); });
+		document.body.appendChild(overlay);
+		editor.focus();
+	}
+
+	function closeModal(overlay) {
+		if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+	}
+
+	// Place the caret at the very start of an element (so the user types ABOVE an
+	// inserted signature).
+	function placeCaretAtStart(elem) {
+		try {
+			var range = document.createRange();
+			range.setStart(elem, 0);
+			range.collapse(true);
+			var sel = window.getSelection();
+			sel.removeAllRanges();
+			sel.addRange(range);
+		} catch (e) {}
+	}
+
+	// Insert the mailbox's signature into an EMPTY composer, with blank room above
+	// it and the caret at the top. No-op when there is no signature.
+	function insertSignature(aliasId) {
+		var mb = mailboxById(aliasId);
+		var sig = mb && mb.signature ? mb.signature : '';
+		var r = richEl();
+		if (!sig || !r) return;
+		r.innerHTML = '<div><br></div><div><br></div><div class="mbx-sig-block">' + sig + '</div>';
+		updateRichPlaceholder();
+		placeCaretAtStart(r);
+	}
+
+	// The composer holds nothing but (optionally) an inserted signature block —
+	// safe to swap the signature when the From identity changes.
+	function isComposerEmptyExceptSignature() {
+		var r = richEl();
+		if (!r) return true;
+		var clone = r.cloneNode(true);
+		var sig = clone.querySelector('.mbx-sig-block');
+		if (sig) sig.parentNode.removeChild(sig);
+		return (clone.innerText || '').replace(/ /g, ' ').trim() === '' && !clone.querySelector('img');
+	}
+
+	// ---- member-context panel (§ Phase 5) ----
+	var contextCache = {}; // message_id -> payload, per session
+
+	function fmtDate(iso) {
+		if (!iso) return '';
+		var d = new Date(String(iso).replace(' ', 'T') + 'Z');
+		return isNaN(d.getTime()) ? iso : d.toLocaleDateString();
+	}
+
+	// Lazily fetch + render who the thread's counterparty is on the platform. Admin
+	// only (CFG.canSeeContext); the client sends a message id (never an address), so
+	// the endpoint can't be a membership oracle.
+	function loadSenderContext(messages) {
+		var panel = $('#mbx-context');
+		if (!panel) return;
+		if (!CFG.canSeeContext) { panel.hidden = true; return; }
+		var target = lastInboundOrLast(messages);
+		if (!target || target.alias_id == null) { panel.hidden = true; return; }
+		var mid = target.id;
+		if (contextCache[mid]) { renderSenderContext(contextCache[mid]); return; }
+		joineryApi.post(CFG.senderContextUrl, { message_id: String(mid) }).then(function (data) {
+			data = data || {};
+			if (data.locked) { panel.hidden = true; return; }
+			contextCache[mid] = data;
+			renderSenderContext(data);
+		}).catch(function () { panel.hidden = true; });
+	}
+
+	function contextSection(t) { return el('div', 'mbx-context-section', t); }
+
+	function renderSenderContext(data) {
+		var panel = $('#mbx-context');
+		if (!panel) return;
+		panel.innerHTML = '';
+
+		var head = el('div', 'mbx-context-head');
+		head.appendChild(el('span', 'mbx-context-title', 'Contact'));
+		var hide = el('button', 'mbx-iconbtn', '×');
+		hide.type = 'button'; hide.title = 'Hide';
+		hide.addEventListener('click', function () { panel.hidden = true; });
+		head.appendChild(hide);
+		panel.appendChild(head);
+
+		if (!data.is_member) {
+			panel.appendChild(el('div', 'mbx-context-notmember',
+				'Not a member' + (data.address ? ' — ' + data.address : '')));
+			panel.hidden = false;
+			return;
+		}
+
+		var m = data.member;
+		var card = el('div', 'mbx-context-card');
+		card.appendChild(el('div', 'mbx-context-name', m.name));
+		card.appendChild(el('div', 'mbx-context-email', m.email + (m.email_verified ? ' ✓' : '')));
+		if (m.member_since) card.appendChild(el('div', 'mbx-context-since', 'Member since ' + fmtDate(m.member_since)));
+		var link = el('a', 'mbx-context-link', 'Open member →');
+		link.href = m.edit_url; link.target = '_blank'; link.rel = 'noopener';
+		card.appendChild(link);
+		panel.appendChild(card);
+
+		if (data.orders && data.orders.length) {
+			panel.appendChild(contextSection('Recent orders'));
+			data.orders.forEach(function (o) {
+				var row = el('div', 'mbx-context-row');
+				row.appendChild(el('span', null, '#' + o.id + ' · ' + o.status));
+				row.appendChild(el('span', 'mbx-context-muted', '$' + (Number(o.total) || 0).toFixed(2)));
+				panel.appendChild(row);
+			});
+		}
+		if (data.registrations && data.registrations.length) {
+			panel.appendChild(contextSection('Recent registrations'));
+			data.registrations.forEach(function (r) {
+				panel.appendChild(el('div', 'mbx-context-row', r.event));
+			});
+		}
+		if (data.conversations && data.conversations.count) {
+			panel.appendChild(contextSection('Messaging'));
+			panel.appendChild(el('div', 'mbx-context-row',
+				data.conversations.count + ' conversation' + (data.conversations.count === 1 ? '' : 's')));
+		}
+		panel.hidden = false;
+	}
+
+	// ---- contacts (§ Phase 4): autocomplete + management ----
+
+	// Fetch the (small) contact list once per compose open. A locked vault returns
+	// no contacts → autocomplete is silently absent (typing by hand still works).
+	function loadContacts() {
+		joineryApi.post(CFG.contactsUrl, {}).then(function (data) {
+			data = data || {};
+			state.contacts = (data.locked || !data.contacts) ? [] : data.contacts;
+		}).catch(function () { state.contacts = []; });
+	}
+
+	function matchContacts(token) {
+		token = (token || '').trim().toLowerCase();
+		if (!token) return [];
+		return state.contacts.filter(function (c) {
+			return c.address.indexOf(token) !== -1
+				|| (c.name && c.name.toLowerCase().indexOf(token) !== -1);
+		}).slice(0, 8);
+	}
+
+	// The token being typed = text after the last comma in the field.
+	function currentToken(value) {
+		var i = value.lastIndexOf(',');
+		return i === -1 ? value : value.slice(i + 1);
+	}
+	function commitToken(input, address) {
+		var v = input.value;
+		var i = v.lastIndexOf(',');
+		var prefix = i === -1 ? '' : v.slice(0, i + 1) + ' ';
+		input.value = prefix + address + ', ';
+		input.focus();
+	}
+
+	// A vanilla recipient-autocomplete on a To/Cc/Bcc input, filtering the fetched
+	// list client-side (no server prefix-search over ciphertext). Enter/Tab commits
+	// the highlighted contact; typing by hand is always available.
+	function attachAutocomplete(input) {
+		if (!input || input._acAttached) return;
+		input._acAttached = true;
+		var wrap = input.parentNode;
+		if (wrap) wrap.style.position = 'relative';
+		var dd = el('div', 'mbx-ac-dropdown');
+		dd.hidden = true;
+		if (wrap) wrap.appendChild(dd);
+		var items = [];
+		var active = -1;
+
+		function hide() { dd.hidden = true; active = -1; }
+		function render() {
+			items = matchContacts(currentToken(input.value));
+			dd.innerHTML = '';
+			if (!items.length) { dd.hidden = true; return; }
+			items.forEach(function (c, idx) {
+				var row = el('div', 'mbx-ac-item' + (idx === active ? ' active' : ''));
+				row.appendChild(el('span', 'mbx-ac-name', c.name || c.address));
+				if (c.name) row.appendChild(el('span', 'mbx-ac-addr', c.address));
+				row.addEventListener('mousedown', function (e) {
+					e.preventDefault();
+					commitToken(input, c.address); hide(); markDraftDirty();
+				});
+				dd.appendChild(row);
+			});
+			dd.hidden = false;
+		}
+
+		input.addEventListener('input', function () { active = -1; render(); });
+		input.addEventListener('keydown', function (e) {
+			if (dd.hidden) return;
+			if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(active + 1, items.length - 1); render(); }
+			else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(active - 1, -1); render(); }
+			else if (e.key === 'Enter') { e.preventDefault(); if (active >= 0 && items[active]) { commitToken(input, items[active].address); markDraftDirty(); } hide(); }
+			else if (e.key === 'Tab') { if (active >= 0 && items[active]) { e.preventDefault(); commitToken(input, items[active].address); markDraftDirty(); } hide(); }
+			else if (e.key === 'Escape') { e.preventDefault(); hide(); }
+		});
+		input.addEventListener('blur', function () { setTimeout(hide, 150); });
+	}
+
+	// ---- contacts manager (list / add / delete / import) ----
+	function selectContacts() {
+		closeThread();
+		state.contactsView = true;
+		state.draftsView = false;
+		state.mailboxLabel = 'Contacts';
+		$('#mbx-list-title').textContent = 'Contacts';
+		var prior = $('#mbx-folder-rail');
+		if (prior) prior.parentNode.removeChild(prior);
+		highlightMailbox();
+		highlightDrafts();
+		renderContactsManager();
+	}
+
+	function renderContactsManager() {
+		$('#mbx-reader').classList.add('reading');
+		var pane = $('#mbx-thread');
+		parkCompose();
+		pane.innerHTML = '<div class="mbx-loading">Loading contacts…</div>';
+
+		joineryApi.post(CFG.contactsUrl, {}).then(function (data) {
+			data = data || {};
+			pane.innerHTML = '';
+			var header = el('div', 'mbx-thread-header');
+			var back = el('button', 'mbx-thread-back', null);
+			back.type = 'button';
+			back.appendChild(el('span', 'mbx-back-arrow', '←'));
+			back.appendChild(el('span', null, 'Back'));
+			back.addEventListener('click', closeThread);
+			header.appendChild(back);
+			header.appendChild(el('h1', null, 'Contacts'));
+			pane.appendChild(header);
+
+			if (data.locked) {
+				var lb = el('div', 'mbx-unlock-banner');
+				lb.appendChild(el('span', 'mbx-unlock-text', 'Unlock to view your contacts.'));
+				var ub = el('button', 'mbx-unlock-btn', 'Unlock'); ub.type = 'button';
+				ub.addEventListener('click', async function () { if (await unlockVault()) renderContactsManager(); });
+				lb.appendChild(ub);
+				pane.appendChild(lb);
+				return;
+			}
+			state.contacts = data.contacts || [];
+
+			// Add + import controls.
+			var tools = el('div', 'mbx-contacts-tools');
+			var addInput = document.createElement('input');
+			addInput.type = 'text';
+			addInput.className = 'mbx-contacts-add';
+			addInput.placeholder = 'Add a contact (Name <email>)';
+			var addBtn = el('button', 'mbx-action mbx-primary', 'Add'); addBtn.type = 'button';
+			var doAdd = function () {
+				var v = addInput.value.trim();
+				if (!v) return;
+				addBtn.disabled = true;
+				joineryApi.post(CFG.contactsImportUrl, { address: v }).then(function () {
+					addInput.value = ''; addBtn.disabled = false; renderContactsManager();
+				}).catch(function () { addBtn.disabled = false; alert('That is not a valid email address.'); });
+			};
+			addBtn.addEventListener('click', doAdd);
+			addInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); doAdd(); } });
+			tools.appendChild(addInput);
+			tools.appendChild(addBtn);
+
+			var importLabel = el('label', 'mbx-action mbx-contacts-import', 'Import .vcf / .csv');
+			var importInput = document.createElement('input');
+			importInput.type = 'file';
+			importInput.accept = '.vcf,.csv,text/vcard,text/csv';
+			importInput.style.display = 'none';
+			importInput.addEventListener('change', function () {
+				if (!importInput.files || !importInput.files.length) return;
+				var fd = new FormData();
+				fd.append('file', importInput.files[0], importInput.files[0].name);
+				fetch(CFG.contactsImportUrl, { method: 'POST', credentials: 'same-origin',
+					headers: { 'X-Joinery-Csrf': joineryApi.csrf() }, body: fd })
+					.then(function (r) { return r.json(); }).then(function (env) {
+						var d = (env && env.data) ? env.data : {};
+						alert('Imported ' + (d.imported || 0) + ', skipped ' + (d.skipped || 0) + '.');
+						renderContactsManager();
+					}).catch(function () { alert('Import failed.'); });
+			});
+			importLabel.appendChild(importInput);
+			tools.appendChild(importLabel);
+			pane.appendChild(tools);
+
+			var list = el('div', 'mbx-contacts-list');
+			if (!state.contacts.length) {
+				list.appendChild(el('div', 'mbx-loading', 'No contacts yet. They fill in as you send and read mail.'));
+			}
+			state.contacts.forEach(function (c) {
+				var rowEl = el('div', 'mbx-contact-row');
+				var info = el('div', 'mbx-contact-info');
+				info.appendChild(el('span', 'mbx-contact-name', c.name || c.address));
+				if (c.name) info.appendChild(el('span', 'mbx-contact-addr', c.address));
+				rowEl.appendChild(info);
+				var del = el('button', 'mbx-contact-del', '×'); del.type = 'button'; del.title = 'Delete';
+				del.addEventListener('click', function () {
+					joineryApi.post(CFG.contactDeleteUrl, { contact_id: String(c.id) })
+						.then(function () { rowEl.parentNode.removeChild(rowEl); })
+						.catch(function () {});
+				});
+				rowEl.appendChild(del);
+				list.appendChild(rowEl);
+			});
+			pane.appendChild(list);
+		}).catch(function () { pane.innerHTML = '<div class="mbx-loading">Contacts could not be loaded.</div>'; });
 	}
 
 	// ---- compose (reply / reply all / forward) ----
@@ -979,6 +1595,16 @@
 	function ensurePrefix(subject, prefix, altRe) {
 		subject = subject || '';
 		return altRe.test(subject) ? subject : (prefix + ' ' + subject);
+	}
+
+	// Reset Bcc to hidden-behind-toggle with an empty field, on every compose open.
+	function resetBcc() {
+		var row = document.getElementById('mbx-bcc-row');
+		if (row) row.hidden = true;
+		var toggle = document.getElementById('mbx-bcc-toggle');
+		if (toggle) toggle.hidden = false;
+		var f = document.getElementById('mbx_bcc');
+		if (f) f.value = '';
 	}
 
 	function openCompose(mode, t, source) {
@@ -1018,8 +1644,13 @@
 			: ensurePrefix(subj, 'Re:', /^\s*re\s*:/i);
 		document.getElementById('mbx_subject').value = subj;
 
-		document.getElementById('mbx_body').value = '';
+		clearComposer();
+		resetBcc();
 		clearPendingFiles();
+		resetDraftState();
+		state.draftAlias = source.alias_id;   // implicit From identity for autosave
+		insertSignature(source.alias_id);     // signature at the bottom, caret above (§ Phase 3)
+		loadContacts();                       // recipient autocomplete (§ Phase 4)
 
 		var chips = document.querySelector('.mbx-reply-actions');
 		if (chips) chips.hidden = true;
@@ -1067,8 +1698,14 @@
 		document.getElementById('mbx_to').value = '';
 		document.getElementById('mbx_cc').value = '';
 		document.getElementById('mbx_subject').value = '';
-		document.getElementById('mbx_body').value = '';
+		clearComposer();
+		resetBcc();
 		clearPendingFiles();
+		resetDraftState();
+		var aliasSel = document.getElementById('mbx_alias_id');
+		state.draftAlias = aliasSel ? aliasSel.value : state.aliasId;
+		insertSignature(state.draftAlias);    // signature for the chosen From (§ Phase 3)
+		loadContacts();                       // recipient autocomplete (§ Phase 4)
 
 		var chips = document.querySelector('.mbx-reply-actions');
 		if (chips) chips.hidden = true;
@@ -1078,7 +1715,221 @@
 		document.getElementById('mbx_to').focus();
 	}
 
-	function closeCompose() {
+	// ---- drafts (autosave / reopen / discard) ----
+	var draftTimer = null;
+	// Incremented every time the compose panel is reset/reopened (resetDraftState);
+	// an in-flight autosave captures it and ignores its own resolution if it changed,
+	// so a stale save can never write its draft id into the next message (Fix 4).
+	var composeGen = 0;
+
+	// The From alias the compose is bound to: the From selector when it's shown
+	// (new/draft), else the implicit source-message alias (reply/forward).
+	function composeAliasId() {
+		var fromRow = document.getElementById('mbx-from-row');
+		var sel = document.getElementById('mbx_alias_id');
+		if (fromRow && !fromRow.hidden && sel) return sel.value;
+		return state.draftAlias != null ? String(state.draftAlias) : '';
+	}
+
+	// The shared compose payload (used by both autosave → draft_save and submit → send).
+	// includeFiles=false omits attachment bytes + the inline manifest — the fields-only
+	// shape the keepalive beforeunload save uses to stay under the ~64 KB budget (Fix 8);
+	// the bytes were already persisted by the debounced autosaves. Returns the FormData
+	// plus snapshots of exactly which pendingFiles / unsaved inlineImages were appended,
+	// so a resolving autosave can drop precisely those from the resend queue (Fix 3).
+	function buildComposeBody(includeFiles) {
+		var body = new FormData();
+		body.append('mode', document.getElementById('mbx_mode').value);
+		body.append('source_id', document.getElementById('mbx_source_id').value);
+		body.append('alias_id', composeAliasId());
+		body.append('to', document.getElementById('mbx_to').value);
+		body.append('cc', document.getElementById('mbx_cc').value);
+		var bccEl = document.getElementById('mbx_bcc');
+		body.append('bcc', bccEl ? bccEl.value : '');
+		body.append('subject', document.getElementById('mbx_subject').value);
+		body.append('body_html', composerHtml());
+		body.append('body', composerText());
+		var sentFiles = [];
+		var sentInline = [];
+		if (includeFiles) {
+			pendingFiles.forEach(function (f) { body.append('attachments[]', f, f.name); sentFiles.push(f); });
+			var manifest = {};
+			inlineImages.forEach(function (im) {
+				// A saved inline image is never re-appended and never re-listed — the
+				// server already holds its bytes and re-embeds it from storage on send.
+				if (im.saved) { return; }
+				manifest[im.localId] = im.file.name;
+				body.append('attachments[]', im.file, im.file.name);
+				sentInline.push(im);
+			});
+			if (Object.keys(manifest).length) {
+				body.append('inline_manifest', JSON.stringify(manifest));
+			}
+		}
+		return { body: body, sentFiles: sentFiles, sentInline: sentInline };
+	}
+
+	// True when the compose has anything worth saving (never create an empty draft).
+	function hasComposeContent() {
+		var v = function (id) { var e = document.getElementById(id); return e ? e.value.trim() : ''; };
+		var hasImg = !!richEl() && !!richEl().querySelector('img');
+		return !!(v('mbx_to') || v('mbx_cc') || v('mbx_bcc') || v('mbx_subject')
+			|| composerText() || hasImg || pendingFiles.length);
+	}
+
+	function markDraftDirty() {
+		if ($('#mbx-compose').hidden) return;
+		state.draftDirty = true;
+		clearTimeout(draftTimer);
+		draftTimer = setTimeout(function () { autosaveDraft(false); }, 3000);
+	}
+
+	// Persist the current compose as a draft. sync=true uses a keepalive fetch for
+	// the beforeunload path (fields only, no file bytes — Fix 8). cb runs after the
+	// save resolves.
+	function autosaveDraft(sync, cb) {
+		if (!hasComposeContent() || state.draftSaving) { if (cb) cb(); return; }
+		// The compose the resolve handler is allowed to mutate (Fix 4): if the panel
+		// was reset/reopened while the save was in flight, the resolved id belongs to
+		// a compose that no longer exists — clear draftSaving but touch nothing else.
+		var gen = composeGen;
+		var built = buildComposeBody(!sync);
+		var body = built.body;
+		if (state.draftId) body.append('draft_id', String(state.draftId));
+		state.draftSaving = true;
+		var opts = { method: 'POST', credentials: 'same-origin',
+			headers: { 'X-Joinery-Csrf': joineryApi.csrf() }, body: body };
+		if (sync) opts.keepalive = true;
+		fetch(CFG.draftSaveUrl, opts).then(function (r) { return r.json(); }).then(function (env) {
+			state.draftSaving = false;
+			if (gen !== composeGen) { if (cb) cb(); return; }   // stale — see above
+			var data = (env && env.data) ? env.data : {};
+			if (data.draft_id) {
+				state.draftId = data.draft_id;
+				state.draftDirty = false;
+				// Drop exactly the files/inline this save persisted from the resend
+				// queue (files added mid-flight survive); the server's authoritative
+				// list replaces the saved-chip strip (Fix 3).
+				built.sentFiles.forEach(function (f) {
+					var i = pendingFiles.indexOf(f);
+					if (i !== -1) pendingFiles.splice(i, 1);
+				});
+				built.sentInline.forEach(function (im) { im.saved = true; });
+				state.draftAttachments = data.attachments || [];
+				renderAttachStrip();
+			}
+			if (cb) cb();
+		}).catch(function () { state.draftSaving = false; if (cb) cb(); });
+	}
+
+	function resetDraftState() {
+		clearTimeout(draftTimer);
+		// Bump the compose generation so a still-in-flight autosave's resolve handler
+		// knows its draft id belongs to a compose that is no longer open (Fix 4).
+		composeGen++;
+		state.draftId = null;
+		state.draftAlias = null;
+		state.draftDirty = false;
+		state.draftAttachments = [];
+	}
+
+	// Open a saved draft from the Drafts list into the composer.
+	function openDraft(draftId) {
+		joineryApi.post(CFG.draftGetUrl, { draft_id: String(draftId) }).then(async function (data) {
+			data = data || {};
+			if (data.locked) {
+				if (await unlockVault()) { openDraft(draftId); }
+				return;
+			}
+			if (!data.draft_id) { alert('This draft could not be opened.'); return; }
+			showDraftComposer(data);
+		}).catch(function () { alert('This draft could not be opened.'); });
+	}
+
+	// Render the reading pane as just the composer (a draft has no conversation).
+	function showDraftComposer(data) {
+		$('#mbx-reader').classList.add('reading');
+		$('#mbx-read-pane').scrollTop = 0;
+		var pane = $('#mbx-thread');
+		parkCompose();
+		pane.innerHTML = '';
+
+		var header = el('div', 'mbx-thread-header');
+		var back = el('button', 'mbx-thread-back', null);
+		back.type = 'button';
+		back.appendChild(el('span', 'mbx-back-arrow', '←'));
+		back.appendChild(el('span', null, 'Back to drafts'));
+		back.addEventListener('click', function () { closeThread(); });
+		header.appendChild(back);
+		header.appendChild(el('h1', null, data.subject || '(no subject)'));
+		pane.appendChild(header);
+
+		var compose = document.getElementById('mbx-compose');
+		pane.appendChild(compose);
+		populateComposerFromDraft(data);
+	}
+
+	function populateComposerFromDraft(data) {
+		$('#mbx-compose-title').textContent = 'Draft';
+		hideComposeError();
+		document.getElementById('mbx_mode').value = data.mode || 'new';
+		document.getElementById('mbx_source_id').value = data.source_id || '';
+
+		populateFromSelect(data.alias_id);
+		var fromRow = document.getElementById('mbx-from-row');
+		if (fromRow) fromRow.hidden = false;
+
+		document.getElementById('mbx_to').value = data.to || '';
+		document.getElementById('mbx_cc').value = data.cc || '';
+		if (data.bcc) {
+			document.getElementById('mbx_bcc').value = data.bcc;
+			var row = document.getElementById('mbx-bcc-row'); if (row) row.hidden = false;
+			var tgl = document.getElementById('mbx-bcc-toggle'); if (tgl) tgl.hidden = true;
+		} else {
+			resetBcc();
+		}
+		document.getElementById('mbx_subject').value = data.subject || '';
+		// Rewrite each cid:{content_id} img src to its signed URL and tag it with
+		// data-mbx-cid so the editor displays the stored inline image and composerHtml()
+		// re-emits cid:{content_id} on later saves/sends (Fix 7). The bytes are never
+		// re-uploaded — the server re-embeds them from storage on send.
+		setComposerHtml(rewriteInlineCids(data.body_html || '', data.inline || []));
+		clearPendingFiles();
+
+		state.draftId = data.draft_id;
+		state.draftAlias = data.alias_id;
+		state.draftDirty = false;
+		state.draftAttachments = data.attachments || [];
+		loadContacts();                       // recipient autocomplete (§ Phase 4)
+		renderAttachStrip();
+
+		var chips = document.querySelector('.mbx-reply-actions');
+		if (chips) chips.hidden = true;
+		$('#mbx-compose').hidden = false;
+		document.getElementById('mbx_to').focus();
+	}
+
+	// Close the compose panel. discard=true deletes the saved draft; otherwise the
+	// panel saves-and-closes (the panel is always safe to close, §Phase 2).
+	function closeCompose(discard) {
+		clearTimeout(draftTimer);
+		if (discard === true) {
+			if (state.draftId) {
+				var did = state.draftId;
+				joineryApi.post(CFG.draftDeleteUrl, { draft_id: String(did) })
+					.then(function () { refreshMailboxes(); if (state.draftsView) loadThreads(true); })
+					.catch(function () {});
+			}
+			resetDraftState();
+		} else if (state.draftDirty && hasComposeContent()) {
+			autosaveDraft(false, function () {
+				refreshMailboxes();
+				if (state.draftsView) loadThreads(true);
+			});
+			resetDraftState();
+		} else {
+			resetDraftState();
+		}
 		$('#mbx-compose').hidden = true;
 		var chips = document.querySelector('.mbx-reply-actions');
 		if (chips) chips.hidden = false;
@@ -1112,20 +1963,25 @@
 
 		var btn = document.getElementById('mbx_send');
 		if (btn) btn.disabled = true;
+		clearTimeout(draftTimer);
 
-		// Built manually (not new FormData(form)) so a removed chip is honored —
-		// the form fields first, then the kept File objects as attachments[].
-		var body = new FormData();
-		body.append('mode', document.getElementById('mbx_mode').value);
-		body.append('source_id', document.getElementById('mbx_source_id').value);
-		var aliasSel = document.getElementById('mbx_alias_id');
-		body.append('alias_id', aliasSel ? aliasSel.value : '');
+		// Wait for any in-flight autosave to settle before sending, so the same file
+		// cannot arrive via both this request and a concurrent draft persist (Fix 3).
+		// Bounded: ~250 ms polls up to ~5 s, then proceed regardless.
+		var waited = 0;
+		(function whenSaved() {
+			if (state.draftSaving && waited < 5000) { waited += 250; setTimeout(whenSaved, 250); return; }
+			sendComposeNow(e, btn);
+		})();
+	}
+
+	function sendComposeNow(e, btn) {
+		// The shared compose payload (rich HTML + plaintext + attachments + inline
+		// manifest), plus the reader token and draft_id (a saved draft morphs into
+		// the Sent row, reusing its already-uploaded attachments).
+		var body = buildComposeBody(true).body;
 		body.append('_csrf_token', document.getElementById('mbx_csrf').value);
-		body.append('to', to);
-		body.append('cc', document.getElementById('mbx_cc').value);
-		body.append('subject', document.getElementById('mbx_subject').value);
-		body.append('body', document.getElementById('mbx_body').value);
-		pendingFiles.forEach(function (f) { body.append('attachments[]', f, f.name); });
+		if (state.draftId) body.append('draft_id', String(state.draftId));
 
 		// Multipart send (attachments) — joineryApi.post is JSON-only, so this
 		// keeps a direct fetch and borrows only the shared CSRF read.
@@ -1137,9 +1993,18 @@
 		}).then(function (r) { return r.json(); }).then(async function (env) {
 			if (btn) btn.disabled = false;
 			var data = (env && env.data) ? env.data : {};
-			if (!(env && env.errortype) && data.outbound_id) {
+			if (!(env && env.errortype) && (data.outbound_id || data.pending_sent_ingest)) {
+				// The draft (if any) was morphed into the Sent row (or deleted in the
+				// Gmail pending-ingest case) server-side — drop our handle without a
+				// save-and-close.
+				var wasDrafts = state.draftsView;
+				resetDraftState();
 				closeCompose();
-				if (state.threadKey != null) {
+				if (wasDrafts) {
+					// Sent from the Drafts view — return to the (now shorter) list.
+					closeThread();
+					loadThreads(true);
+				} else if (state.threadKey != null) {
 					// Re-open the thread so the new outbound row renders in the dialog.
 					reopenCurrentThread();
 				} else {
@@ -1178,6 +2043,7 @@
 		state.threadKey = null;
 		state.messages = [];
 		$('#mbx-thread').innerHTML = '';
+		var ctx = document.getElementById('mbx-context'); if (ctx) ctx.hidden = true;
 		$('#mbx-reader').classList.remove('reading');
 		Array.prototype.forEach.call(document.querySelectorAll('.mbx-thread-item'), function (n) {
 			n.classList.remove('active');
@@ -1219,11 +2085,86 @@
 		var newMsgBtn = $('#mbx-new-message');
 		if (newMsgBtn) newMsgBtn.addEventListener('click', openComposeNew);
 
-		// Compose: discard button + fetch-intercepted submit.
+		// Compose: × is save-and-close (the panel is always safe to close, § Phase 2);
+		// the 🗑 discards after a confirm; a fetch-intercepted submit sends.
 		var closeBtn = $('#mbx-compose-close');
-		if (closeBtn) closeBtn.addEventListener('click', closeCompose);
+		if (closeBtn) closeBtn.addEventListener('click', function () { closeCompose(); });
+		var discardBtn = $('#mbx-compose-discard');
+		if (discardBtn) discardBtn.addEventListener('click', function () {
+			if (state.draftId || hasComposeContent()) {
+				if (!confirm('Discard this draft?')) { return; }
+			}
+			closeCompose(true);
+		});
 		var composeForm = document.getElementById('mbx_compose_form');
 		if (composeForm) composeForm.addEventListener('submit', submitCompose);
+
+		// Autosave: any edit to a compose field marks the draft dirty (debounced save).
+		['mbx_to', 'mbx_cc', 'mbx_bcc', 'mbx_subject'].forEach(function (id) {
+			var f = document.getElementById(id);
+			if (f) f.addEventListener('input', markDraftDirty);
+		});
+		var aliasSel = document.getElementById('mbx_alias_id');
+		if (aliasSel) aliasSel.addEventListener('change', function () {
+			state.draftAlias = aliasSel.value;
+			// Swap the signature to the newly-chosen From, but only when the user
+			// hasn't started writing (never clobber real content).
+			if (isComposerEmptyExceptSignature()) { insertSignature(aliasSel.value); }
+			markDraftDirty();
+		});
+		// Recipient autocomplete on To/Cc/Bcc (§ Phase 4).
+		['mbx_to', 'mbx_cc', 'mbx_bcc'].forEach(function (id) { attachAutocomplete(document.getElementById(id)); });
+
+		// Last-ditch save when the page is being torn down mid-compose.
+		window.addEventListener('beforeunload', function () {
+			if (!$('#mbx-compose').hidden && state.draftDirty && hasComposeContent()) {
+				autosaveDraft(true);
+			}
+		});
+
+		// Rich-text toolbar: mousedown-preventDefault keeps the caret/selection in the
+		// editor while a button is pressed, so execCommand acts on the right range.
+		var toolbar = document.getElementById('mbx-toolbar');
+		if (toolbar) {
+			toolbar.addEventListener('mousedown', function (e) { e.preventDefault(); });
+			toolbar.addEventListener('click', function (e) {
+				var btn = e.target.closest ? e.target.closest('.mbx-tb') : null;
+				if (!btn) return;
+				e.preventDefault();
+				execCmd(btn.getAttribute('data-cmd'));
+			});
+		}
+		var rich = richEl();
+		if (rich) {
+			rich.addEventListener('input', function () { updateRichPlaceholder(); markDraftDirty(); });
+			rich.addEventListener('paste', onRichPaste);
+			// Image dropped onto the editor → inline; other files → attachments. Stop
+			// propagation so the panel-level drop handler doesn't also add them.
+			rich.addEventListener('drop', function (e) {
+				if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+				e.preventDefault();
+				e.stopPropagation();
+				var nonImg = [];
+				Array.prototype.forEach.call(e.dataTransfer.files, function (f) {
+					if (f.type.indexOf('image/') === 0) { insertInlineImage(f); }
+					else { nonImg.push(f); }
+				});
+				if (nonImg.length) { addFiles(nonImg); }
+				var panel = $('#mbx-compose');
+				if (panel) panel.classList.remove('mbx-compose-dragover');
+			});
+			updateRichPlaceholder();
+		}
+
+		// Bcc reveal (Gmail-style): the toggle shows the field, then hides itself.
+		var bccToggle = document.getElementById('mbx-bcc-toggle');
+		if (bccToggle) bccToggle.addEventListener('click', function () {
+			var row = document.getElementById('mbx-bcc-row');
+			if (row) row.hidden = false;
+			bccToggle.hidden = true;
+			var f = document.getElementById('mbx_bcc');
+			if (f) f.focus();
+		});
 
 		// Compose attachments: paperclip → hidden input; change → add; drag-and-drop
 		// onto the open compose panel also adds files.

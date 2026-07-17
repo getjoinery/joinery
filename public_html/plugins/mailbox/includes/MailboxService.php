@@ -56,6 +56,7 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_accou
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_folder_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_labels_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_label_members_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
 
 class MailboxService {
 
@@ -127,20 +128,43 @@ class MailboxService {
 	 * Always pins iem_delete_time IS NULL. The superadmin "All mail" (null +
 	 * all-access) case is unconstrained so NULL-alias unmatched mail surfaces.
 	 */
+	/**
+	 * Every normal read/mutation excludes draft rows (specs/mailbox_compose_maturity.md
+	 * § Phase 2) — a draft is compose scratch, visible ONLY in the Drafts view
+	 * (draftScopeSql). A reply/forward draft even shares its source's thread key, so
+	 * without this a draft would surface inside that conversation.
+	 */
+	const NO_DRAFTS = " AND iem_direction IS DISTINCT FROM 'draft'";
+
 	private function readScopeSql(?int $aliasId): string {
 		// "Unmatched" — NULL-alias mail that belongs to no mailbox. Superadmin-only;
 		// everyone else gets a no-match scope even if they craft the parameter.
 		if ($aliasId === self::UNMATCHED) {
 			return $this->viewer->isAllAccess()
-				? 'iem_delete_time IS NULL AND iem_iea_inbound_email_alias_id IS NULL'
+				? 'iem_delete_time IS NULL AND iem_iea_inbound_email_alias_id IS NULL' . self::NO_DRAFTS
 				: '1=0';
 		}
 		if ($aliasId === null && $this->viewer->isAllAccess()) {
-			return 'iem_delete_time IS NULL';
+			return 'iem_delete_time IS NULL' . self::NO_DRAFTS;
 		}
 		$ids = array_map('intval', $this->viewer->scopeAliasIds($aliasId));
 		$in = count($ids) ? implode(',', $ids) : 'NULL';
-		return 'iem_delete_time IS NULL AND iem_iea_inbound_email_alias_id IN (' . $in . ')';
+		return 'iem_delete_time IS NULL AND iem_iea_inbound_email_alias_id IN (' . $in . ')' . self::NO_DRAFTS;
+	}
+
+	/**
+	 * READ scope for the Drafts view: the viewer's own draft rows across the
+	 * mailboxes they can access. Never all-access-broad — drafts are personal
+	 * compose state, keyed by their From alias (a grant the viewer holds).
+	 */
+	private function draftScopeSql(): string {
+		$ids = array_map('intval', $this->viewer->accessibleAliasIds());
+		$in = count($ids) ? implode(',', $ids) : 'NULL';
+		// A draft belongs to its author alone (fix pack Fix 1) — never a co-grantee
+		// of a shared mailbox, never an all-access superadmin.
+		return "iem_delete_time IS NULL AND iem_direction = 'draft'"
+			. ' AND iem_iea_inbound_email_alias_id IN (' . $in . ')'
+			. ' AND iem_draft_author_user_id = ' . intval($this->viewer->getUserId());
 	}
 
 	/**
@@ -149,7 +173,8 @@ class MailboxService {
 	 * else only rows in mailboxes they hold a grant for.
 	 */
 	private function mutationScopeSql(): string {
-		$base = 'iem_delete_time IS NULL';
+		// A draft is never a target of read/star/archive/spam/delete thread actions.
+		$base = 'iem_delete_time IS NULL' . self::NO_DRAFTS;
 		if ($this->viewer->isAllAccess()) {
 			return $base;
 		}
@@ -171,6 +196,15 @@ class MailboxService {
 		$alias_ids = $this->viewer->accessibleAliasIds();
 		$db = $this->db();
 
+		// The aliases the viewer actually holds a GRANT for (a personal signature
+		// lives on a grant). For a plain member this equals the accessible set; for
+		// an all-access superadmin it is the subset they are truly a member of, so
+		// the reader shows the signature gear only where a signature can be set.
+		$own_alias_ids = array();
+		foreach (InboundEmailMailboxGrant::alias_ids_for_user($this->viewer->getUserId()) as $gid) {
+			$own_alias_ids[intval($gid)] = true;
+		}
+
 		// Per-alias aggregates for the accessible set.
 		$agg = array();
 		if (count($alias_ids)) {
@@ -182,7 +216,7 @@ class MailboxService {
 						COUNT(*) FILTER (WHERE iem_is_read = false) AS unread
 					FROM iem_inbound_email_messages
 					WHERE iem_delete_time IS NULL
-					AND iem_spam_verdict IS DISTINCT FROM 'spam'
+					AND iem_spam_verdict IS DISTINCT FROM 'spam'" . self::NO_DRAFTS . "
 					AND iem_iea_inbound_email_alias_id IN ($in)
 					GROUP BY iem_iea_inbound_email_alias_id";
 			$stmt = $db->query($sql);
@@ -229,6 +263,12 @@ class MailboxService {
 					'locked'         => ($seals && !$viewer_unlocked),
 					'unread'         => $row ? intval($row['unread']) : 0,
 					'total'          => $row ? intval($row['total']) : 0,
+					// The viewer's own compose signature for this mailbox (§ Phase 3),
+					// inserted client-side on compose open. Personal per grant. `own`
+					// marks a mailbox the viewer is a member of (a signature can be set).
+					'own'            => isset($own_alias_ids[$aid]),
+					'signature'      => isset($own_alias_ids[$aid])
+						? InboundEmailMailboxGrant::signatureFor($this->viewer->getUserId(), $aid) : '',
 				);
 				// Tracked membership folders for the reader's folder rail + the move/
 				// labels control; the \All coverage view is excluded (the mailbox root
@@ -245,12 +285,26 @@ class MailboxService {
 			'mailboxes'  => $mailboxes,
 		);
 
+		// Drafts bucket (specs/mailbox_compose_maturity.md § Phase 2): the count of the
+		// viewer's saved drafts across the mailboxes they can access, for the Drafts
+		// rail entry. Personal compose state, so scoped by grants even for a superadmin.
+		if (count($alias_ids)) {
+			$in = implode(',', array_map('intval', $alias_ids));
+			$row = $db->query("SELECT COUNT(*) AS total FROM iem_inbound_email_messages
+				WHERE iem_delete_time IS NULL AND iem_direction = 'draft'
+				AND iem_iea_inbound_email_alias_id IN ($in)
+				AND iem_draft_author_user_id = " . intval($this->viewer->getUserId()))->fetch(PDO::FETCH_ASSOC);
+			$result['drafts'] = array('total' => intval($row['total']));
+		} else {
+			$result['drafts'] = array('total' => 0);
+		}
+
 		if ($this->viewer->isAllAccess()) {
 			// "All mail" — every non-deleted, non-spam row, including NULL-alias.
 			$row = $db->query("SELECT COUNT(*) AS total,
 					COUNT(*) FILTER (WHERE iem_is_read = false) AS unread
 				FROM iem_inbound_email_messages
-				WHERE iem_delete_time IS NULL AND iem_spam_verdict IS DISTINCT FROM 'spam'")
+				WHERE iem_delete_time IS NULL AND iem_spam_verdict IS DISTINCT FROM 'spam'" . self::NO_DRAFTS . "")
 				->fetch(PDO::FETCH_ASSOC);
 			$result['all_mail'] = array(
 				'unread' => intval($row['unread']),
@@ -261,7 +315,7 @@ class MailboxService {
 			$row = $db->query("SELECT COUNT(*) AS total,
 					COUNT(*) FILTER (WHERE iem_is_read = false) AS unread
 				FROM iem_inbound_email_messages
-				WHERE iem_delete_time IS NULL AND iem_iea_inbound_email_alias_id IS NULL")
+				WHERE iem_delete_time IS NULL AND iem_iea_inbound_email_alias_id IS NULL" . self::NO_DRAFTS . "")
 				->fetch(PDO::FETCH_ASSOC);
 			$result['unmatched'] = array(
 				'unread' => intval($row['unread']),
@@ -478,7 +532,11 @@ class MailboxService {
 		// mail. No-op on colocated deployments (no pending rows ever exist).
 		$this->drainRelayBacklog($aliasId);
 
-		$where = array($this->readScopeSql($aliasId));
+		// Drafts view (specs/mailbox_compose_maturity.md § Phase 2): the viewer's saved
+		// drafts, each a singleton (grouped by its own id, not a shared thread key).
+		// Every other view excludes drafts via readScopeSql.
+		$drafts = !empty($filters['drafts']);
+		$where = array($drafts ? $this->draftScopeSql() : $this->readScopeSql($aliasId));
 		$params = array();
 
 		// Spam disposition (specs/inbound_email_spam_filtering.md): the Spam view shows
@@ -562,7 +620,7 @@ class MailboxService {
 			$having[] = 'BOOL_OR(iem_is_starred)';
 		}
 
-		$gk = self::GROUP_KEY_SQL;
+		$gk = $drafts ? "'m:' || iem_inbound_email_message_id" : self::GROUP_KEY_SQL;
 		// section_rank buckets each thread for the Gmail-style sectioned list:
 		// 0 = has unread, 1 = starred (all read), 2 = everything else. Ordering by
 		// it first keeps the buckets contiguous across pages, so the client renders
@@ -820,7 +878,7 @@ class MailboxService {
 		$in = implode(',', array_map('intval', $ids));
 		$db = $this->db();
 		$sql = "SELECT iem_inbound_email_message_id, iem_iea_inbound_email_alias_id,
-					iem_sender, iem_recipient, iem_subject, iem_received_time,
+					iem_sender, iem_recipient, iem_bcc, iem_subject, iem_received_time,
 					iem_is_read, iem_is_starred, iem_read_time, iem_dkim_result,
 					iem_spf_result, iem_dmarc_result, iem_auth_source, iem_spam_score,
 					iem_size_bytes, iem_message_id_header, iem_direction,
@@ -846,6 +904,10 @@ class MailboxService {
 										? intval($r['iem_iea_inbound_email_alias_id']) : null,
 				'sender'            => $decrypted['iem_sender'],
 				'recipient'         => $decrypted['iem_recipient'],
+				// Bcc: real content only on an outbound (Sent) row; the reader shows a
+				// separate "Bcc:" line when present. Its own sealed column, so it never
+				// leaks into iem_recipient / a reply-all.
+				'bcc'               => $decrypted['iem_bcc'],
 				'subject'           => $decrypted['iem_subject'],
 				'received_time'     => $r['iem_received_time'],
 				'is_read'           => (bool)$this->pgBool($r['iem_is_read']),
@@ -888,7 +950,7 @@ class MailboxService {
 	 * @return array<string,string> the same column names, decrypted (or unchanged)
 	 */
 	private function decryptThreadRow(array $row): array {
-		$fields = array('iem_sender', 'iem_recipient', 'iem_subject', 'iem_body_plain', 'iem_body_html', 'iem_ai_summary');
+		$fields = array('iem_sender', 'iem_recipient', 'iem_bcc', 'iem_subject', 'iem_body_plain', 'iem_body_html', 'iem_ai_summary');
 		// A Fortress pending-parse row is sealed to the owner and not yet parsed —
 		// its content columns are empty. Recipient stays cleartext metadata; the
 		// content fields render the same placeholder as a locked sealed row.

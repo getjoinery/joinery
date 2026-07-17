@@ -115,6 +115,33 @@ VaultUnlock::onReseal(function (int $user_id, string $old_secret_key, int $old_k
 		$index->purgePersisted($user_id);
 	}
 
+	// Contact store (specs/mailbox_compose_maturity.md § Phase 4): a sealed contact's
+	// DEK is sealed to the owner's vault, so a rotation must re-wrap it too, or the
+	// contact becomes unreadable. Same envelope re-seal as messages (the address/name
+	// ciphertext under the DEK is untouched).
+	$contact_ids = $db->query('SELECT imc_mailbox_contact_id FROM imc_mailbox_contacts
+		WHERE imc_usr_user_id = ' . intval($user_id) . ' AND imc_content_sealed = true
+		AND imc_key_generation = ' . intval($old_key_generation))->fetchAll(PDO::FETCH_COLUMN);
+	foreach ($contact_ids as $cid) {
+		$cid = intval($cid);
+		try {
+			$row = $db->prepare('SELECT imc_sealed_key FROM imc_mailbox_contacts WHERE imc_mailbox_contact_id = ?');
+			$row->execute(array($cid));
+			$sealed = (string)$row->fetchColumn();
+			if ($sealed === '') {
+				continue;
+			}
+			$dek = $crypto->openItemDek($sealed, $old_secret_key);
+			$new_sealed_key = $crypto->sealItemDek($dek, $new_public_key);
+			$upd = $db->prepare('UPDATE imc_mailbox_contacts SET imc_sealed_key = ?, imc_key_generation = ?
+				WHERE imc_mailbox_contact_id = ?');
+			$upd->execute(array($new_sealed_key, $new_key_generation, $cid));
+		} catch (Throwable $e) {
+			$failed++;
+			error_log('Mailbox vault reseal: failed for contact ' . $cid . ': ' . $e->getMessage());
+		}
+	}
+
 	// Protected-domain DKIM keys seal to this same vault public key, so a
 	// rotation must re-seal them alongside the message DEKs or the in-app
 	// signer can no longer unwrap the key. Both the live key and any
