@@ -188,6 +188,12 @@ echo $fw_email->end_form();
 		</td>
 	</tr>
 </table>
+<?php if ($cloud['ssh_key_path'] === '' || !$cloud['ssh_key_exists'] || !$cloud['ssh_pub_exists']): ?>
+	<form method="post">
+		<input type="hidden" name="action" value="generate_ssh_key">
+		<button type="submit" class="btn btn-primary">Generate provisioning key</button>
+	</form>
+<?php endif; ?>
 <?php
 $fw_cloud = $page->getFormWriter('form_cloud');
 echo $fw_cloud->begin_form();

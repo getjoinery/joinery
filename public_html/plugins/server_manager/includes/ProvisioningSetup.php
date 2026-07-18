@@ -257,6 +257,69 @@ class ProvisioningSetup {
 			'results' => $results);
 	}
 
+	/** Default location for the customer-cloud provisioning key. */
+	public static function defaultSshKeyPath(): string {
+		return PathHelper::getSiteRoot() . '/config/provisioning_key';
+	}
+
+	/**
+	 * Ensure the customer-cloud provisioning SSH keypair exists and the
+	 * path setting points at it. The public half is installed on created
+	 * instances; the private half is the control plane's only access to
+	 * them (root passwords are random and never stored).
+	 *
+	 * Idempotent and never destructive: an existing key file is kept, a
+	 * missing .pub is re-derived from the private key, and the setting is
+	 * only written when blank (a custom path stays untouched). $path
+	 * overrides the target location (tests); by default the configured
+	 * path or the site-root config/ default is used.
+	 *
+	 * @return array{ok:bool, message:string, generated:bool, path:string}
+	 */
+	public static function ensureSshKey(?string $path = null): array {
+		$setting = self::readSetting('server_manager_customer_cloud_ssh_key_path');
+		if ($path === null) {
+			$path = $setting !== '' ? $setting : self::defaultSshKeyPath();
+		}
+
+		$generated = false;
+		if (!file_exists($path)) {
+			$dir = dirname($path);
+			if (!is_dir($dir) || !is_writable($dir)) {
+				return array('ok' => false, 'generated' => false, 'path' => $path,
+					'message' => 'Cannot generate key: directory ' . $dir . ' is missing or not writable.');
+			}
+			$output = array();
+			$code = 0;
+			exec('ssh-keygen -t ed25519 -N ' . escapeshellarg('')
+				. ' -C ' . escapeshellarg('joinery-provisioning')
+				. ' -f ' . escapeshellarg($path) . ' -q 2>&1', $output, $code);
+			if ($code !== 0 || !file_exists($path)) {
+				return array('ok' => false, 'generated' => false, 'path' => $path,
+					'message' => 'ssh-keygen failed: ' . implode(' ', $output));
+			}
+			$generated = true;
+		}
+
+		if (!file_exists($path . '.pub')) {
+			exec('ssh-keygen -y -f ' . escapeshellarg($path)
+				. ' > ' . escapeshellarg($path . '.pub') . ' 2>/dev/null', $output, $code);
+			if (!file_exists($path . '.pub')) {
+				return array('ok' => false, 'generated' => $generated, 'path' => $path,
+					'message' => 'Key exists but its .pub could not be derived — check the key file.');
+			}
+		}
+
+		if ($setting === '') {
+			self::writeSetting('server_manager_customer_cloud_ssh_key_path', $path);
+		}
+
+		return array('ok' => true, 'generated' => $generated, 'path' => $path,
+			'message' => $generated
+				? 'Provisioning SSH keypair generated at ' . $path . '.'
+				: 'Provisioning SSH keypair already present at ' . $path . '.');
+	}
+
 	/**
 	 * Products the domain question is attached to (checkout requirement) —
 	 * the marker that makes a product a hosting product. Returns
