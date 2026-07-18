@@ -18,6 +18,8 @@
     { "name": "newsletter_active", "default": "1" },
     { "name": "oauth_google_client_id", "default": "" },
     { "name": "oauth_google_client_secret", "default": "" },
+    { "name": "oauth_linode_client_id", "default": "" },
+    { "name": "oauth_linode_client_secret", "default": "" },
     { "name": "oauth_microsoft_client_id", "default": "" },
     { "name": "oauth_microsoft_client_secret", "default": "" },
     { "name": "oauth_microsoft_tenant", "default": "common" },

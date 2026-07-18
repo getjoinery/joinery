@@ -1,6 +1,6 @@
 {
     "name": "Server Manager",
-    "version": "1.3.4",
+    "version": "1.4.0",
     "description": "Remote server management for Joinery instances",
     "author": "Joinery",
     "receives_upgrades": true,
@@ -18,6 +18,7 @@
                 { "slug": "server-manager-upgrades", "title": "Upgrades", "url": "/admin/server_manager/publish_upgrade", "order": 2 },
                 { "slug": "server-manager-targets", "title": "Remote Backup", "url": "/admin/server_manager/targets", "order": 3 },
                 { "slug": "server-manager-jobs", "title": "Jobs", "url": "/admin/server_manager/jobs", "order": 6 },
+                { "slug": "server-manager-cloud-connect", "title": "Cloud Connect", "url": "/profile/server_manager/connect_cloud", "order": 8 },
                 { "slug": "system-specs", "title": "Specifications", "url": "/admin/server_manager/specs", "order": 7 }
             ]
         },
@@ -39,6 +40,11 @@
         { "name": "server_manager_provisioning_welcome_from_email", "default": "" },
         { "name": "server_manager_provisioning_welcome_from_name",  "default": "" },
         { "name": "server_manager_provisioning_domain_question_id", "default": "" },
-        { "name": "server_manager_cert_expiry_warn_days",           "default": "21" }
+        { "name": "server_manager_cert_expiry_warn_days",           "default": "21" },
+        { "name": "server_manager_linode_referral_url",             "default": "", "helptext": "Linode referral URL shown on the Connect page's create-account link. New accounts signed up through it receive Linode's referral credit." },
+        { "name": "server_manager_customer_cloud_ssh_key_path",     "default": "", "helptext": "Private key path the management agent uses for customer-cloud nodes; its .pub sibling is installed on created instances via authorized_keys. Required for customer-cloud provisioning." },
+        { "name": "server_manager_customer_cloud_region",           "default": "us-southeast", "helptext": "Default region for customer-cloud instances." },
+        { "name": "server_manager_customer_cloud_type",             "default": "g6-nanode-1", "helptext": "Default instance type for customer-cloud instances." },
+        { "name": "server_manager_customer_cloud_image",            "default": "linode/ubuntu24.04", "helptext": "OS image for customer-cloud instances. Must be an Ubuntu LTS the installer supports." }
     ]
 }
