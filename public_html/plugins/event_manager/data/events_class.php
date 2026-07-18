@@ -551,42 +551,11 @@ function get_leader() {
 
 	}
 	
-	/*
-	function permanent_delete($debug=false){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		
-		$this_transaction = false;
-		if(!$dblink->inTransaction()){
-			$dblink->beginTransaction();
-			$this_transaction = true;
-		}		
-		
-		//DELETE ANY REGISTRATIONS
-		$event_registrants = new MultiEventRegistrant(array('event_id' => $this->key), NULL);
-		$event_registrants->load();
-		foreach($event_registrants as $event_registrant){
-			$event_registrant->remove();
-		}	
-		
-		//DELETE WAITING LIST
-		$event_registrants = new MultiWaitingList(array('event_id' => $this->key), NULL);
-		$event_registrants->load();
-		foreach($event_registrants as $event_registrant){
-			$event_registrant->remove();
-		}	
-		
-		parent::permanent_delete($debug);
-		
-		if($this_transaction){
-			$dblink->commit();
-		}	
-		
-		return true;
-	}
-	*/
+	// Event has no permanent_delete() override: registrants, sessions, and
+	// waiting-list rows are cascaded by the deletion rules for evt_events. See
+	// docs/deletion_system.md.
 
-	function copy() { 
+	function copy() {
 		// Returns a copy of this event, with history, etc reset so it can be used
 		$event = new event(NULL);
 		foreach (self::$field_specifications as $field => $spec) { 

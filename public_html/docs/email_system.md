@@ -353,6 +353,21 @@ email_test_mode = "1"         // Redirect all emails to test address
 email_test_redirect = "test@example.com"
 ```
 
+**Dry Run:**
+```php
+email_dry_run = "1"           // Build and validate, never transmit
+```
+
+`EmailSender::send()` returns success without touching a transport and without
+queueing. The check sits after validation, so a malformed message still fails
+loudly, and above both transport branches, so an injected per-mailbox transport
+is suppressed along with the globally selected service. Suppressed sends are
+recorded through the debug log with the service name `dry-run`.
+
+This is what a test suite sets when the code under test sends mail as a side
+effect — registration and password reset both do — so a gate run cannot emit
+real mail through whatever provider the environment happens to point at.
+
 ## Testing and Debugging
 
 ### Email Testing System

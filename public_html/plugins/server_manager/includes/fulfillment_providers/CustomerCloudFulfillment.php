@@ -22,7 +22,7 @@
  * Registered from server_manager's serve.php when the store plugin is
  * present.
  *
- * @version 1.1
+ * @version 1.2
  */
 require_once(PathHelper::getIncludePath('plugins/store/includes/FulfillmentRegistry.php'));
 
@@ -50,6 +50,14 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 		return array(AbstractProductRequirement::createInstance('QuestionRequirement', array(
 			'question_id' => $question_id,
 		)));
+	}
+
+	/**
+	 * Always available: a cloud site is provisioned on demand rather than drawn
+	 * from a finite pool, so there is no supply to run out before the charge.
+	 */
+	public function checkAvailability(Product $product, int $ref, int $quantity): ?string {
+		return null;
 	}
 
 	public function fulfill(User $user, Product $product, OrderItem $order_item, Order $order, int $ref): array {

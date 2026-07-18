@@ -196,6 +196,18 @@ structurally cannot open the vault. Every reset is a **credential event**: on
 completion it ends every open window everywhere (`lockAll()`) and alerts the
 account — so even a hostile reset lands the attacker in a re-locked vault.
 
+**A code is spent once, everywhere.** An activation or reset code is a bearer
+token: for as long as it resolves, it *is* the account. Consuming one
+(`deleteTempCode`) therefore has to end it for every caller, not only the flow
+that consumed it — `checkTempCode`, `getIdFromTempCode`, and `getTempCodeInfo`
+all treat `act_deleted` as part of what makes a code valid. This matters because
+`Activation::ActivateUser()` resolves a code without a separate validity call and
+is reached straight from `login_logic`, where an account with no password set is
+signed in and sent to `/password-set`. A resolver that honoured a spent code
+would make an already-used activation email a live credential until its expiry.
+Codes are never invalidated merely by being *read*, so re-clicking a link that
+was never completed still works.
+
 **Reset authorizers.** "Forgot password" offers whichever the account holds,
 each routed through the one completion path
 (`PasswordResetAuthorizers::issueResetUrl()` mints a single-use account code
