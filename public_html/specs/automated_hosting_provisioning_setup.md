@@ -38,14 +38,17 @@ into the three API settings; everything else on the page works the same.
 
 ## Remaining operator steps (genuinely manual)
 
-1. **Per hosting product** (product edit page): attach the domain question
-   as a requirement — a product with the question attached is what makes an
-   order a hosting order. For customer-cloud fulfillment additionally set
-   `pro_fulfillment_provider` to `customer_cloud` and put the Connect link
+1. **Per hosting product** (product edit page): for customer-cloud
+   fulfillment, pick **Customer cloud server** under Purchase grants — that
+   stamps `pro_fulfillment_provider = customer_cloud` and asks the domain
+   question at checkout automatically (the `CustomerCloudFulfillment`
+   provider contributes it) — and put the Connect link
    (`https://<control-plane-host>/profile/server_manager/connect_cloud`) in
-   the product's after-purchase message. The Connect page is deliberately
-   not in any member menu: buyers reach it by link at the moments that need
-   it (purchase, progress, re-connect).
+   the product's after-purchase message. For shared-host products, attach
+   the domain question as a requirement instead — the attachment is what
+   makes an order a hosting order. The Connect page is deliberately not in
+   any member menu: buyers reach it by link at the moments that need it
+   (purchase, progress, re-connect).
 2. **Shared-host fulfillment only**: opt at least one managed host in from
    the Server Manager dashboard (Edit → Max Sites + Provisioning Enabled).
    The host's IP is sent to customers as the DNS A-record target — it must

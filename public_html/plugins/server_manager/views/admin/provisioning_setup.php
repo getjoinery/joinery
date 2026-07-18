@@ -102,9 +102,10 @@ $page->begin_box(array());
 					<a href="/admin/admin_product_edit?pro_product_id=<?= (int)$pid ?>"><?= htmlspecialchars($pname) ?></a>&nbsp;
 				<?php endforeach; ?>
 			<?php else: ?>
-				<span class="badge bg-warning">None</span>
-				— attach it as a requirement on each hosting product (product edit &rarr; Requirements).
-				A product with this question attached is what makes an order a hosting order.
+				<span class="badge bg-warning">None attached directly</span>
+				— customer-cloud products ask it automatically via their fulfillment
+				provider; only shared-host products need it attached on the product
+				edit page.
 			<?php endif; ?>
 		</td>
 	</tr>
@@ -211,11 +212,13 @@ echo $fw_cloud->end_form();
 <hr>
 
 <h4>7. Products</h4>
-<p>Per hosting product (product edit page): attach the domain question as a
-requirement; for customer-cloud fulfillment set the fulfillment provider to
-<code>customer_cloud</code> and put the Connect link
+<p>Per hosting product (product edit page): for <strong>customer-cloud</strong>
+fulfillment pick <em>Customer cloud server</em> under Purchase grants — that is
+the entire setup (the domain question is asked automatically) — and put the
+Connect link
 (<code><?= htmlspecialchars($api['is_self'] ? '' : rtrim($api['url'], '/')) ?>/profile/server_manager/connect_cloud</code>)
-in the after-purchase message.</p>
+in the after-purchase message. For <strong>shared-host</strong> products,
+attach the domain question as a requirement instead.</p>
 
 <?php
 $page->end_box();
