@@ -1858,48 +1858,6 @@ class DatabaseUpdater {
     }
 
     /**
-     * Run migrations after table creation
-     *
-     * @param array $migrations Migrations array
-     * @return array Results
-     */
-    public function runMigrations($migrations) {
-        $results = [
-            'success' => false,
-            'migrations_run' => [],
-            'errors' => [],
-            'messages' => []
-        ];
-        
-        try {
-            // Load existing migration logic
-            require_once(PathHelper::getIncludePath('data/migrations_class.php'));
-            
-            $migration_obj = new Migration();
-            
-            foreach ($migrations as $migration) {
-                if ($migration_obj->check_migration($migration)) {
-                    $run_result = $migration_obj->run_migration($migration);
-                    if ($run_result) {
-                        $results['migrations_run'][] = $migration['database_version'];
-                        $results['messages'][] = "Applied migration: " . $migration['database_version'];
-                    } else {
-                        $results['errors'][] = "Failed migration: " . $migration['database_version'];
-                    }
-                }
-            }
-            
-            $results['success'] = true;
-            
-        } catch (Exception $e) {
-            $results['errors'][] = "Migration error: " . $e->getMessage();
-            $results['success'] = false;
-        }
-        
-        return $results;
-    }
-    
-    /**
      * Fix primary key constraints for all model classes
      * 
      * Error handling: Batch operation that logs errors and continues processing
