@@ -297,6 +297,49 @@ from `/admin/admin_test_database`. The model CRUD suite
 generic CRUD/validation against that copy; if it reports schema errors, sync the
 test database first.
 
+The copy does **not** receive `update_database` — that runs against the live
+database only. After any schema change, resync from `/admin/admin_test_database`
+so the copy matches; a test database that lags live validates models against a
+schema production does not have. Foreign key constraints in particular are
+materialized on the live database by `update_database`, so a stale copy silently
+loses that coverage.
+
+Both `test-db` suites declare `needs: [test-db]`. The runner probes the
+connection rather than trusting `dbname_test`, so a checkout with no copy
+provisioned skips them with a named reason instead of failing the gate.
+
+### How the model suite satisfies foreign keys
+
+`ModelTester` resolves every foreign-key-ish field to a real row. The declared
+`'foreign_key'` field spec (target table + column — the same declaration
+`DatabaseUpdater` materializes as a constraint) is authoritative; without one,
+the naming convention applies: an FK column is the child prefix followed by the
+parent model's primary key (`abv_abt_test_id` → `AbTest`). For each resolved
+reference the tester **creates a fresh parent row** through the target model
+(recursively, so the parent's own references are satisfied too) and removes it
+before the model's test finishes. Fresh parents keep results independent of
+which ids exist in the database and keep child-delete cascades away from real
+rows. Fields that resolve to no model (polymorphic ids like `entity_id`) get
+plain integers, which is only valid because they reference no single table.
+
+### Per-model test fixtures
+
+A model whose validity rules a generic generator cannot infer — cross-field
+business rules, enum values enforced in code — declares them:
+
+```php
+public static $test_fixture = array(
+    'values'       => array('mem_scope' => self::SCOPE_SHARED), // pinned field values
+    'update_field' => 'mem_content', // safe field for the update probe
+);
+```
+
+`values` override generated data in every dataset the tester builds (and pinned
+fields are exempted from null-value probing — the pin exists because other
+values are invalid). `update_field` names the field the CRUD update step
+modifies, for models whose first spec-order field is enum-validated. Declare a
+fixture only when the field specs genuinely cannot express the rule.
+
 ## Plugin tests
 
 A plugin's tests live in `plugins/{plugin}/tests/` and carry the same header.

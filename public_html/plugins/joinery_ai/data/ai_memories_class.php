@@ -73,6 +73,15 @@ class AiMemory extends SystemBase {
 
     public static $permanent_delete_actions = array();
 
+    // Generic CRUD testing (ModelTester) can't infer the scope/owner pairing
+    // rule: user-scope rows need an owner, shared-scope rows must not have
+    // one. Pin the scope whose validity doesn't depend on another row, and
+    // point the update probe at a field with no enum validation.
+    public static $test_fixture = array(
+        'values' => array('mem_scope' => self::SCOPE_SHARED),
+        'update_field' => 'mem_content',
+    );
+
     /** Validation runs from BOTH prepare() and save() — prepare() is not
      *  guaranteed to run first, and a bad scope/source must fail closed rather
      *  than become an unqueryable row. */
