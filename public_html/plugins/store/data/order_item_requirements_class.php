@@ -16,6 +16,11 @@ class DisplayablePermanentOrderItemRequirementException extends OrderItemRequire
 class OrderItemRequirement extends SystemBase {	public static $prefix = 'oir';
 	public static $tablename = 'oir_order_item_requirements';
 	public static $pkey_column = 'oir_order_item_requirement_id';
+
+	// REST CRUD exposure (Layer 1): the provisioning control plane polls
+	// these rows (checkout answers, e.g. the hosting domain question) over
+	// the API. Read-only surface; reads require permission >= 5.
+	public static $api_readable = true;
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 		/**
