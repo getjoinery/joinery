@@ -71,17 +71,35 @@ function reg_input(array $over = array()) {
 }
 
 /**
- * Call register_logic against a signed-out session.
+ * Call register_logic against a signed-out session and a fresh source address.
+ *
+ * Two pieces of state would otherwise leak between calls:
  *
  * A successful registration signs the new account in, and register_logic
  * redirects any signed-in visitor away before it validates anything. Without
- * this reset the first success turns every later call into a silent redirect —
- * which reads as "no error" and quietly passes a refusal check.
+ * the session reset the first success turns every later call into a silent
+ * redirect — which reads as "no error" and quietly passes a refusal check.
+ *
+ * Registration is also rate limited per IP, and this suite makes far more
+ * attempts than a person would. Each call gets its own documentation-range
+ * address so the throttle never fires except in the section that tests it.
  */
 function reg_call(array $input) {
+	static $n = 0;
 	$_SESSION = array();
+	$_SERVER['REMOTE_ADDR'] = '192.0.2.' . (100 + (++$n % 120));
 	return harness_call_logic('logic/register_logic.php', 'register_logic', $input, 'POST');
 }
+
+/** Drop the request-log rows this suite wrote. */
+harness_defer(function () {
+	try {
+		$db = DbConnector::get_instance()->get_db_link();
+		$db->prepare("DELETE FROM rql_request_logs WHERE rql_feature = 'register' AND rql_ip_address LIKE '192.0.2.%'")->execute();
+	} catch (\Throwable $e) {
+		echo "  WARNING: could not clean register request logs: " . $e->getMessage() . "\n";
+	}
+});
 
 /** Delete the account register_logic created for $email, plus its codes. */
 function reg_cleanup_email($email) {
@@ -118,6 +136,7 @@ check($res->error !== null && $res->redirect === null,
 harness_set_setting_mem('register_active', '1');
 
 // Deliberately NOT through reg_call(), which clears the session.
+$_SERVER['REMOTE_ADDR'] = '192.0.2.99';
 $_SESSION['usr_user_id'] = $existing_for_redirect = make_user('RegSignedIn')->key;
 $_SESSION['loggedin'] = true;
 $res = harness_call_logic('logic/register_logic.php', 'register_logic', reg_input(), 'POST');
@@ -258,6 +277,53 @@ try {
 reg_cleanup_email(strtolower($weak_email));
 check(!$weak_created && !User::GetByEmail($weak_email),
 	'a password failing the rules never creates an account');
+
+// ---------------------------------------------------------------------------
+section('Rate limiting');
+
+// The captcha and honeypot are client-side puzzles: once a bot can answer them,
+// nothing else caps how fast one source creates accounts. Unlike the other
+// checks in this suite, the throttle counts SUCCESSFUL attempts too — a flood of
+// real signups is the abuse being bounded.
+$flood_ip = '192.0.2.90';
+$_SERVER['REMOTE_ADDR'] = $flood_ip;
+require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
+
+check(RequestLogger::check_rate_limit('register', 5, 900, NULL),
+	'a fresh address starts inside the sign-up budget');
+
+$flood_emails = array();
+for ($i = 0; $i < 5; $i++) {
+	$flood_email = strtolower(reg_email('flood' . $i));
+	$flood_emails[] = $flood_email;
+	reg_cleanup_email($flood_email);
+	$_SERVER['REMOTE_ADDR'] = $flood_ip;
+	harness_call_logic('logic/register_logic.php', 'register_logic',
+		reg_input(array('usr_email' => $flood_email)), 'POST');
+	$_SESSION = array();
+}
+
+check(!RequestLogger::check_rate_limit('register', 5, 900, NULL),
+	'five sign-ups exhaust the budget for that address');
+
+$blocked_email = strtolower(reg_email('blocked'));
+reg_cleanup_email($blocked_email);
+$_SERVER['REMOTE_ADDR'] = $flood_ip;
+$res = harness_call_logic('logic/register_logic.php', 'register_logic',
+	reg_input(array('usr_email' => $blocked_email)), 'POST');
+$_SESSION = array();
+
+check($res->error !== null && stripos((string)$res->error, 'too many') !== false,
+	'a sixth sign-up from the same address is refused',
+	'error: ' . var_export($res->error, true));
+check(!User::GetByEmail($blocked_email),
+	'the throttled sign-up created no account');
+
+// Per-IP, like every other throttle on the platform: a different source is
+// unaffected. There is no global signup cap.
+$_SERVER['REMOTE_ADDR'] = '192.0.2.91';
+check(RequestLogger::check_rate_limit('register', 5, 900, NULL),
+	'a different address is unaffected by the first exhausting its budget');
 
 // ---------------------------------------------------------------------------
 section('Successful registration');
