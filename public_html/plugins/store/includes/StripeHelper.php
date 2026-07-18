@@ -898,6 +898,60 @@ class StripeHelper {
 		return $subscription;
 	}
 	
+	/**
+	 * Schedule a price change to take effect when the current period ends,
+	 * leaving the subscriber on what they already paid for until then.
+	 *
+	 * change_subscription() swaps the price immediately (with proration), which
+	 * is right for an upgrade but wrong for a downgrade the customer was told
+	 * takes effect at period end. Stripe expresses "later" as a subscription
+	 * schedule: phase one is the current price running to the existing period
+	 * end, phase two starts the new price.
+	 *
+	 * @param string $subscription_id
+	 * @param string $new_stripe_price The price id to move to at period end
+	 * @return object|false The schedule on success, false if it did not take
+	 */
+	public function schedule_subscription_change($subscription_id, $new_stripe_price){
+		$schedule = $this->stripe->subscriptionSchedules->create([
+			'from_subscription' => $subscription_id,
+		]);
+
+		if(empty($schedule->phases)){
+			return false;
+		}
+
+		// from_subscription seeds a single phase mirroring the live subscription.
+		// Preserve it verbatim as the paid-through phase, then append the new price.
+		$current = $schedule->phases[0];
+		$current_items = [];
+		foreach($current->items as $item){
+			$current_items[] = [
+				'price'    => $item->price,
+				'quantity' => isset($item->quantity) ? $item->quantity : 1,
+			];
+		}
+
+		$updated = $this->stripe->subscriptionSchedules->update(
+			$schedule->id,
+			[
+				'phases' => [
+					[
+						'items'      => $current_items,
+						'start_date' => $current->start_date,
+						'end_date'   => $current->end_date,
+					],
+					[
+						'items'      => [['price' => $new_stripe_price, 'quantity' => 1]],
+						'iterations' => 1,
+					],
+				],
+			]
+		);
+
+		return (count($updated->phases) > 1) ? $updated : false;
+	}
+
 	public function cancel_subscription($subscription_id, $cancel_type){
 		if($cancel_type == 'period_end'){
 			$subscription = $this->stripe->subscriptions->update(

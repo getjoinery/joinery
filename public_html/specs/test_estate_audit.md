@@ -1311,11 +1311,94 @@ security invariant (`oks <= 1`) every round, and tolerates ≤2 infrastructure
 casualties under maximum load while keeping "exactly one consumed" strict — 15/15
 standalone + 9/9 under heavy load after hardening.
 
+**Generation-2 store testers RETIRED — DONE 2026-07-18.** The two bespoke tester
+classes plus their runner shims (~3,200 lines) are deleted and re-expressed as
+native harness tests. Both are verified green against real Stripe test mode.
+
+- `plugins/store/tests/subscription_tiers_test.php` (live, dev-only,
+  needs stripe-test-keys, **39 checks**, was 12) replaces
+  `subscription_tiers/SubscriptionTierTester.php` + `run.php`. The entire
+  silent-green apparatus is gone — the positive `$test_passes` counter, the
+  `$tests_executed` guard, and the runner's reflection into private props were
+  all scaffolding to stop a coarse tester reporting green for tests that never
+  ran; native `check()` calls make that failure mode structurally impossible.
+  Sections: preconditions, model-layer entitlement, price-id sync, then the
+  Stripe lifecycle (upgrade+proration, downgrade immediate AND end-of-period,
+  cancellation immediate AND end-of-period, reactivation).
+- `plugins/store/tests/products_test.php` (live, dev-only, needs
+  stripe-test-keys, **44 checks**) replaces `products/ProductTester.php` +
+  `run.php` + both `products_to_test*.json` spec files. Fixtures are created
+  in-test rather than driven from JSON, matching the email conversion.
+  Sections: admin-logic product creation (incl. an explicit
+  written-to-test-DB-not-production assertion), cart add/remove/total, coupons,
+  and a real tokenized Stripe charge verified against the Stripe API.
+
+Defects found and fixed in the conversion (all were dead or unasserted paths):
+- **`subscription_downgrade_timing` was never honored** (product bug). The
+  setting drove only the button label; the downgrade branch always applied
+  immediately. Default is `end_of_period`, so the DEFAULT config was the broken
+  one — the UI promised end-of-period while the backend stripped paid-for access
+  at once. The two end-of-period test methods that would have caught it existed
+  but were never called (`testLogicFileDowngrade(false)` /
+  `testLogicFileCancellation(false)` — dead code). Fixed with a new
+  `StripeHelper::schedule_subscription_change()` (Stripe subscription schedule:
+  current price to period end, new price after) plus timing branching in
+  `change_tier_logic`.
+- **Stripe reactivation only half-reversed a cancellation** (product bug). It
+  cleared `cancel_at_period_end` but left `odi_subscription_cancelled_time` set
+  and the status stale, so `is_active_subscription` never matched again — the
+  PayPal branch in the same switch cleared all three correctly.
+- **The webhook never re-derived the tier from the billed price**, so a
+  scheduled downgrade would have scheduled at Stripe and never landed locally.
+  `customer.subscription.updated` now re-points the order item and tier from the
+  current price; covered by 5 new checks in `stripe_webhook_test` (23→28),
+  proven as real detectors by disabling the remap (3 fail).
+- **Silent-green Multi filter keys**: SubscriptionTierTester queried
+  `MultiGroupMember` with `grm_grp_group_id`/`grm_foreign_key_id` and
+  `MultiProduct` with `pro_is_active`/`pro_delete_time` — none are recognized
+  option keys, so both queries ran unfiltered. The membership assertion counted
+  every group member on the site and could never fail. (The documented
+  `->results` foot-gun's sibling; see the Multi option-key rule in CLAUDE.md.)
+- **Dead code referencing a schema that does not exist**: ProductTester's
+  `$this->test_billing_user` was read but never assigned anywhere, and
+  `createMockSubscription()` (uncalled) set `ord_amount` and
+  `odi_subscription_item_id` — neither column exists.
+- **Teardown**: ProductTester tracked `$created_products` only to print them —
+  products, versions and requirement instances were never deleted. The
+  replacement deletes via `permanent_delete()` (so the requirement-instance FK
+  children go too) and adds a narrow preclean keyed on its own generated
+  `pro_link` pattern, so a crashed run self-heals on the next one.
+- Order identification no longer uses "created in the last 60 seconds"; the
+  charge section takes a max-id watermark first, so a concurrent run cannot make
+  the suite verify somebody else's order.
+- **D29 closed (echo-only coupon results).** The coupon section now asserts the
+  arithmetic against a known single-item cart: a 15.00 coupon takes exactly
+  15.00 off, a 10 percent coupon takes exactly a tenth off, removal restores the
+  original total, and an unknown code is refused without moving the total.
+- **D28's scaffolding retired.** The `$test_passes` / `$tests_executed` /
+  executed-guard machinery added under T16 was the right fix for a coarse
+  tester; with native per-assertion checks it is unnecessary and is gone.
+
+Not fixed, logged here: `admin_product_edit_logic.php:57` sets `pro_created_by`,
+which is not a defined field on Product — every product creation logs a
+non-fatal "Attempting to set the non-defined field" exception and silently drops
+the intent. Fix is either adding the column to `$field_specifications` or
+removing the line, depending on whether the audit field is wanted.
+
+**Remaining generation-2 infrastructure (newly discovered, not in the original
+inventory):** `tests/models/` still holds `ModelTester.php` (83KB) and
+`MultiModelTester.php` (37KB) behind gen-4 shims (`models_test.php`,
+`test_model_tester.php`) plus three undeclared web/CLI runners (`run_all.php`,
+`run_automated.php`, `run_multi.php`, `index.php`). `models_test.php` hard-sets
+`SINGLE_TESTS_ONLY=true` / `TEST_MULTI=false`, so MultiModelTester never runs
+from the gate — which is exactly why T30 records the Multi surface as untested.
+Converting this cluster and enabling the Multi half are the same piece of work.
+
 **Still remaining (documented in the work plan below):**
 the full cloud 6→4 FILE merge
 (the D20/D21 DEFECTS are fixed; merging characterization into engine risks the
 real-BlobStorageProfile db-tier coverage and is deferred), the directory/naming
-taxonomy reorg + gen-2→gen-4 tester conversion, and the P3 greenfield suites
+taxonomy reorg, the tests/models gen-2 cluster (above), and the P3 greenfield suites
 (account security, event_manager, server_manager, UploadHandler, PluginManager,
 surveys, bookings, Multi collections, core-unit tests). These are larger and were
 left for a follow-up pass rather than risk half-built suites.

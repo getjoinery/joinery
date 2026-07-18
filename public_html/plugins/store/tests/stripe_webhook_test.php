@@ -44,6 +44,7 @@ harness_boot();
 require_once(PathHelper::getIncludePath('plugins/store/data/orders_class.php'));
 require_once(PathHelper::getIncludePath('plugins/store/data/order_items_class.php'));
 require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php'));
+require_once(PathHelper::getIncludePath('plugins/store/data/product_versions_class.php'));
 require_once(PathHelper::getIncludePath('data/webhook_logs_class.php'));
 require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
 require_once(PathHelper::getIncludePath('plugins/store/includes/TierBilling.php'));
@@ -314,6 +315,125 @@ check($oi->get('odi_subscription_cancelled_time') !== null, 'cancellation timest
 
 SubscriptionTier::clearUserCache($subscriber->key);
 check(SubscriptionTier::GetUserTier($subscriber->key) === null, 'subscription deletion strips the subscriber tier (entitlement revoked)');
+
+// --- a price change re-points the order item and the tier ------------------
+
+// This is how a downgrade scheduled for end-of-period actually lands: Stripe
+// swaps the price when the period rolls over and sends subscription.updated.
+// Nothing else moves the subscriber onto the new tier, so if this handler stops
+// re-deriving the product, a scheduled downgrade silently never takes effect
+// and the customer keeps the higher tier for free.
+
+/** A tier with its own product and priced version. Returns the parts by name. */
+function sw_make_plan($run_id, $suffix, $level, $price_id, $price) {
+	$tier = new SubscriptionTier(NULL);
+	$tier->set('sbt_name', 'sw_tier_' . $suffix . '_' . $run_id);
+	$tier->set('sbt_display_name', 'SW ' . strtoupper($suffix) . ' Tier');
+	$tier->set('sbt_tier_level', $level);
+	$tier->set('sbt_is_active', true);
+	$tier->save();
+	$tier->load();
+
+	$product = new Product(NULL);
+	$product->set('pro_name', 'SW ' . strtoupper($suffix) . ' Plan ' . $run_id);
+	$product->set('pro_link', 'sw-' . $suffix . '-plan-' . $run_id);
+	$product->set('pro_is_active', true);
+	$product->set('pro_sbt_subscription_tier_id', $tier->key);
+	$product->save();
+	$product->load();
+
+	$version = new ProductVersion(NULL);
+	$version->set('prv_pro_product_id', $product->key);
+	$version->set('prv_version_name', 'Monthly');
+	$version->set('prv_version_price', $price);
+	$version->set('prv_status', 1);          // > 0 keeps it in the active-version filter
+	$version->set('prv_price_type', 'month'); // recurring, matching a real tier plan
+	$version->set('prv_stripe_price_id_test', $price_id);
+	$version->save();
+	$version->load();
+
+	$group_id = $tier->get('sbt_grp_group_id');
+	harness_defer(function () use ($tier, $group_id) {
+		$db = DbConnector::get_instance()->get_db_link();
+		try {
+			if ($group_id) {
+				$db->prepare('DELETE FROM grm_group_members WHERE grm_grp_group_id = ?')->execute(array($group_id));
+			}
+			$db->prepare('DELETE FROM sbt_subscription_tiers WHERE sbt_subscription_tier_id = ?')->execute(array($tier->key));
+			if ($group_id) {
+				$db->prepare('DELETE FROM grp_groups WHERE grp_group_id = ?')->execute(array($group_id));
+			}
+		} catch (\Throwable $e) {
+			echo "  WARNING: plan cleanup failed: " . $e->getMessage() . "\n";
+		}
+	});
+	harness_register_row('pro_products', 'pro_product_id', $product->key);
+	harness_register_row('prv_product_versions', 'prv_product_version_id', $version->key);
+
+	return array('tier' => $tier, 'product' => $product, 'version' => $version);
+}
+
+$price_hi = 'price_sw_hi_' . $run_id;
+$price_lo = 'price_sw_lo_' . $run_id;
+$plan_hi = sw_make_plan($run_id, 'hi', 9310, $price_hi, 30.00);
+$plan_lo = sw_make_plan($run_id, 'lo', 9300, $price_lo, 10.00);
+
+$sub_pc = 'sub_swpc_' . $run_id;
+$order_pc = new Order(NULL);
+$order_pc->set('ord_usr_user_id', $subscriber->key);
+$order_pc->set('ord_total_cost', 30.00);
+$order_pc->set('ord_status', Order::STATUS_PAID);
+$order_pc->set('ord_stripe_session_id', 'cs_test_sw_' . $run_id . '_pc');
+$order_pc->save();
+$order_pc->load();
+
+$oi_pc = new OrderItem(NULL);
+$oi_pc->set('odi_ord_order_id', $order_pc->key);
+$oi_pc->set('odi_pro_product_id', $plan_hi['product']->key);
+$oi_pc->set('odi_prv_product_version_id', $plan_hi['version']->key);
+$oi_pc->set('odi_usr_user_id', $subscriber->key);
+$oi_pc->set('odi_price', 30.00);
+$oi_pc->set('odi_status', OrderItem::STATUS_PAID);
+$oi_pc->set('odi_is_subscription', true);
+$oi_pc->set('odi_stripe_subscription_id', $sub_pc);
+$oi_pc->set('odi_subscription_status', 'active');
+$oi_pc->save();
+$oi_pc->load();
+
+harness_register_row('ord_orders', 'ord_order_id', $order_pc->key);
+harness_register_row('odi_order_items', 'odi_order_item_id', $oi_pc->key);
+
+$plan_hi['tier']->addUser($subscriber->key, 'purchase', 'order', $order_pc->key);
+SubscriptionTier::clearUserCache($subscriber->key);
+$held = SubscriptionTier::GetUserTier($subscriber->key);
+check($held !== NULL && (int)$held->key === (int)$plan_hi['tier']->key,
+	'subscriber holds the higher tier before the price change (positive control)');
+
+$payload_pc = sw_event('evt_sw_' . $run_id . '_pricechg', 'customer.subscription.updated', array(
+	'id'                   => $sub_pc,
+	'object'               => 'subscription',
+	'status'               => 'active',
+	'cancel_at_period_end' => false,
+	'current_period_end'   => time() + 2592000,
+	'items'                => array('data' => array(
+		array('price' => array('id' => $price_lo)),
+	)),
+));
+$r = sw_post($payload_pc, sw_sign_header($payload_pc, $endpoint_secret));
+check($r['status'] === 200, 'price-change subscription.updated accepted (200)', 'status ' . $r['status']);
+
+$oi_pc->load();
+check((int)$oi_pc->get('odi_pro_product_id') === (int)$plan_lo['product']->key,
+	'the order item is re-pointed at the newly billed product',
+	'product ' . $oi_pc->get('odi_pro_product_id') . ', expected ' . $plan_lo['product']->key);
+check((int)$oi_pc->get('odi_prv_product_version_id') === (int)$plan_lo['version']->key,
+	'the order item is re-pointed at the newly billed version');
+
+SubscriptionTier::clearUserCache($subscriber->key);
+$now_held = SubscriptionTier::GetUserTier($subscriber->key);
+check($now_held !== NULL && (int)$now_held->key === (int)$plan_lo['tier']->key,
+	'the subscriber is moved to the tier matching the new price',
+	'tier ' . ($now_held ? $now_held->key : 'none') . ', expected ' . $plan_lo['tier']->key);
 
 harness_finish();
 ?>

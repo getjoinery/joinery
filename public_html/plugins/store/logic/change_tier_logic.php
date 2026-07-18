@@ -349,6 +349,41 @@ function change_tier_logic(array $input): LogicResult {
 
                     $item_id = $subscription->items->data[0]->id;
 
+                    // Honor the configured timing. An end-of-period downgrade must
+                    // leave the subscriber on the tier they already paid for until
+                    // the period ends — applying it now would strip paid-for access
+                    // early, and the button they clicked told them otherwise.
+                    if (strtolower($page_vars['settings']['subscription_downgrade_timing']) != 'immediate') {
+                        try {
+                            $schedule = $stripe_helper->schedule_subscription_change($subscription_id, $new_price_id);
+                        } catch (Exception $e) {
+                            throw new Exception('Failed to schedule your plan change with the payment processor: ' . $e->getMessage());
+                        }
+
+                        if (!$schedule) {
+                            throw new Exception('Unable to schedule your plan change. Please try again or contact support.');
+                        }
+
+                        // No local tier or order-item change yet: Stripe swaps the
+                        // price at period end and the customer.subscription.updated
+                        // webhook re-points the order item and tier at that moment.
+                        $effective_date = date('F j, Y', strtotime($current_subscription->get('odi_subscription_period_end')));
+
+                        try {
+                            EmailSender::sendTemplate('subscription_downgraded', $user->get('usr_email'), [
+                                'recipient' => $user->export_as_array(),
+                                'tier_name' => $new_tier->get('sbt_display_name'),
+                                'previous_tier_name' => $current_tier_name,
+                                'effective_date' => $effective_date,
+                            ]);
+                        } catch (Exception $e) {
+                            error_log('Subscription downgrade email failed: ' . $e->getMessage());
+                        }
+
+                        $page_vars['success_message'] = 'Your plan will change to ' . $new_tier->get('sbt_display_name')
+                            . " on {$effective_date}. You keep your current plan until then.";
+                        break;
+                    }
 
                     // Update subscription with Stripe
                     try {
@@ -583,7 +618,13 @@ function change_tier_logic(array $input): LogicResult {
                         }
 
                         if ($subscription) {
+                            // Reverse every field the end-of-period cancellation set,
+                            // not just the flag: a lingering cancelled_time keeps the
+                            // subscription out of the active-subscription filter, so
+                            // the reactivated subscriber would still read as lapsed.
                             $current_subscription->set('odi_subscription_cancel_at_period_end', false);
+                            $current_subscription->set('odi_subscription_cancelled_time', null);
+                            $current_subscription->set('odi_subscription_status', 'active');
                             $current_subscription->save();
 
                             // Send reactivation email
