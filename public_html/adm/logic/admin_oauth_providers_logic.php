@@ -7,7 +7,7 @@
  * back to the browser. A blank secret field means "leave the stored secret
  * unchanged", so an admin can edit the client id without re-entering the secret.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../includes/PathHelper.php');
@@ -24,12 +24,14 @@ function admin_oauth_providers_logic(array $input): LogicResult {
     if (LibraryFunctions::isFormSubmission()) {
         // Plain (non-secret) settings.
         admin_oauth_providers_upsert('oauth_google_client_id', trim((string)($input['oauth_google_client_id'] ?? '')), $session);
+        admin_oauth_providers_upsert('oauth_linode_client_id', trim((string)($input['oauth_linode_client_id'] ?? '')), $session);
         admin_oauth_providers_upsert('oauth_microsoft_client_id', trim((string)($input['oauth_microsoft_client_id'] ?? '')), $session);
         admin_oauth_providers_upsert('oauth_microsoft_tenant', trim((string)($input['oauth_microsoft_tenant'] ?? '')), $session);
 
         // Secrets: only overwrite when a new value was actually entered.
         $secrets = [
             'oauth_google_client_secret'    => trim((string)($input['oauth_google_client_secret_input'] ?? '')),
+            'oauth_linode_client_secret'    => trim((string)($input['oauth_linode_client_secret_input'] ?? '')),
             'oauth_microsoft_client_secret' => trim((string)($input['oauth_microsoft_client_secret_input'] ?? '')),
         ];
         $secrets_to_set = array_filter($secrets, function ($v) { return $v !== ''; });

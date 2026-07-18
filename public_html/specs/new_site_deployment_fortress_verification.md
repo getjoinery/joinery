@@ -1,8 +1,9 @@
 # New-Site Deployment + Fortress Live Verification — Prep Plan
 
-**Status:** Active — ordered work plan. Item 5 (the Fortress live-verification
-runbook) is written: `specs/fortress_live_verification_runbook.md`. The rest are
-tasks to work through in sequence.
+**Status:** Active — ordered work plan. Item 1 is DONE (backlog committed,
+release published 2026-07-18). Item 5 (the Fortress live-verification runbook)
+is written: `specs/fortress_live_verification_runbook.md`. The decided
+execution sequence for the remaining items is in **Execution sequence** below.
 **Why this exists:** Two goals converge on one missing thing — a second, real
 deployment. The shared-relay-fleet spec's own status line is the pivot:
 *"Built — code complete and validated; live verification needs a real shard VPS
@@ -29,6 +30,78 @@ topology dev cannot provide:
   mailbox relay, AI memory, mobile billing) have landed since anyone did a
   from-scratch install. The zero-config principle is a claim that has drifted
   out of test.
+
+## Site roles (decided 2026-07-18)
+
+The three standing deployments and what each is for:
+
+- **jeremytunnell.com** — the **feature test site**. First real daily-use
+  deployment of the email / calendar / drive / password features (with and
+  without encryption). It moves to its own VPS via the copy-site path and
+  becomes the second fleet tenant for the Fortress verification below.
+- **getjoinery.com** — the **production control plane**: Server Manager,
+  automated provisioning fulfillment, and — once this testing program is
+  green — the publish source for all production upgrades.
+- **dev.getjoinery.com** — the **development site**: where features are
+  built, the publish source for the beta-tester upgrade channel, and other
+  dev actions.
+
+There are **two control planes**, with different fleets — nothing migrates
+between them:
+
+- **Dev control plane** (dev.getjoinery.com, the existing node registry):
+  manages the *deployment* fleet. It is how code reaches getjoinery.com and
+  every other node — a prod control plane can only ever be deployed *from*
+  dev — and it publishes the beta upgrade channel.
+- **Prod control plane** (getjoinery.com): manages the *customer/production*
+  fleet — provisioning hosts, customer-cloud nodes, and the production
+  upgrade channel once this testing program is green. It registers its own
+  hosts from scratch and never needs dev's registry.
+
+## Execution sequence (decided 2026-07-18)
+
+The concrete run order for the remaining items, folding in the decisions
+above. Each step gates the next.
+
+1. ~~Get the tree deployable~~ — **DONE 2026-07-18**: backlog committed,
+   release published from dev.
+2. **Build customer-cloud provisioning** on dev
+   (`specs/customer_cloud_provisioning.md`): Linode OAuth provider +
+   `customer_cloud` consumer, compute driver, fulfillment branch, Connect
+   page. Built first deliberately — it removes the manual VPS purchase from
+   the critical path (the feature creates VPS A) and makes test order #1 a
+   test of the true final state.
+   - *Parallel (operator, in progress):* register the OAuth client in Linode
+     Cloud Manager (callback `https://getjoinery.com/oauth_callback`) and
+     collect the referral URL from the Cloud Manager profile.
+3. **Publish + upgrade getjoinery.com from dev** (Updates tab). First live
+   publish→apply exercise of the new release cycle; getjoinery.com must be
+   current before it can serve as the prod control plane.
+4. **Activate provisioning on getjoinery.com** — the
+   `specs/automated_hosting_provisioning_setup.md` checklist (domain
+   Question, service user + API key, `server_manager_*` settings, scheduled
+   tasks) executed **on getjoinery.com**, not dev, per the two-control-plane
+   decision; plus the customer-cloud settings (OAuth client credentials,
+   referral URL).
+5. **Test order #1 — BYO-Linode** (satisfies item 2, fresh-install gate):
+   the owner acts as the test customer. Order on getjoinery.com → Connect
+   the owner's Linode account via OAuth → pipeline creates **VPS A** on that
+   account, installs, registers the node, SSL. This is the from-scratch
+   install proof *and* the final-state provisioning proof in one run.
+6. **Test order #2 — shared-host mode**: flip VPS A to Provisioning Enabled
+   on the prod control plane, place a second test order → container install
+   on VPS A proves the original shared-host fulfillment mode. Both modes
+   tested on one VPS.
+7. **Clone jeremytunnell.com onto VPS A** (satisfies item 3, copy-site
+   test): `backup_project.sh` on the current prod box →
+   restore/clone flow onto VPS A. jeremytunnell.com then begins life as the
+   feature test site (email / calendar / drive / passwords, with and without
+   encryption).
+8. **VPS B — relay shard** (item 4): buy the second VPS, deploy the relay
+   stack in fleet configuration, point jeremytunnell.com's Fortress domain
+   MX at it.
+9. **Fortress live-verification runbook** (item 5), then the **pentest
+   brief** (item 6).
 
 ## Ordered work
 

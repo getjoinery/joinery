@@ -8,7 +8,7 @@
  * exact string to paste into the Google/Azure console — derived from the same
  * helper exchangeCode() uses, so it matches byte-for-byte.
  *
- * @version 1.1
+ * @version 1.2
  */
 
     require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -39,10 +39,12 @@
 
     // Is a stored secret present? (Drives the masked "saved" affordance below.)
     $google_secret_set    = (string)$settings->get_setting('oauth_google_client_secret', false, true) !== '';
+    $linode_secret_set    = (string)$settings->get_setting('oauth_linode_client_secret', false, true) !== '';
     $microsoft_secret_set = (string)$settings->get_setting('oauth_microsoft_client_secret', false, true) !== '';
 
     $configured = OAuth2ProviderRegistry::configured();
     $google_ok    = isset($configured['google']);
+    $linode_ok    = isset($configured['linode']);
     $microsoft_ok = isset($configured['microsoft']);
 ?>
 
@@ -101,6 +103,18 @@ stored encrypted and are never displayed back. See
         'value' => $settings->get_setting('oauth_google_client_id', false, true),
     ]);
     $secret_field('oauth_google_client_secret_input', 'Google Client Secret', $google_secret_set);
+
+    echo '<hr>';
+
+    // ----- Linode -----
+    echo '<h3>Linode ' . ($linode_ok
+        ? '<span style="font-size:.7em;color:#2e7d32;">(configured)</span>'
+        : '<span style="font-size:.7em;color:#b71c1c;">(not configured)</span>') . '</h3>';
+
+    $formwriter->textinput('oauth_linode_client_id', 'Linode Client ID', [
+        'value' => $settings->get_setting('oauth_linode_client_id', false, true),
+    ]);
+    $secret_field('oauth_linode_client_secret_input', 'Linode Client Secret', $linode_secret_set);
 
     echo '<hr>';
 

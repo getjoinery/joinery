@@ -240,6 +240,66 @@ The `provision_ssl` job runs `certbot --apache -d DOMAIN` on the node's host (fo
 
 For nodes installed via **Install New Node**, `ProvisionPendingSsl` (scheduled hourly) watches for nodes with `mgn_ssl_state = 'pending'`, checks DNS, and kicks off `provision_ssl` jobs automatically. After ~16 hours of DNS check failures it flips state to `failed`. Manual provisioning via the Setup card is the fallback.
 
+## Hosting Provisioning
+
+Paid hosting orders on getjoinery become installed, SSL'd Joinery sites with
+no human touch. The **Poll Hosting Orders** scheduled task polls the
+getjoinery API each cron tick for paid orders carrying an answer to the
+configured domain Question, and fulfills each one in the mode the product
+declares in `pro_fulfillment_provider`:
+
+- **Shared host** (the default, any other value): the pipeline picks the
+  least-loaded provisioning-enabled `ManagedHost`, assigns the next Docker
+  port, and dispatches an `install_node` job. The buyer's site is a container
+  on infrastructure the operator owns.
+- **`customer_cloud`**: the buyer's site runs on a server in **their own
+  cloud account**, billed to them by the provider — see below.
+
+Both modes end the same way: `install_node` completes, the welcome email goes
+out with DNS instructions, and `ProvisionPendingSsl` turns HTTPS on once DNS
+resolves. Activation steps (Question, API service user, settings) are in
+`specs/automated_hosting_provisioning_setup.md`.
+
+### Customer-Cloud Fulfillment
+
+The buyer connects their Linode account once at
+`/profile/server_manager/connect_cloud` (the **Connect page** — also the
+re-connect page if a grant is later revoked). The grant flows through the
+[platform OAuth2 core](/docs/oauth2.md) (provider `linode`, consumer purpose
+`customer_cloud`, scope `linodes:read_write` only — no account or billing
+access). Tokens are SecretBox-encrypted on the buyer's
+`CustomerCloudAccount` row.
+
+Each customer-cloud order is a `CustomerCloudProvision` row that the
+**Provision Customer Cloud** scheduled task advances:
+
+`pending_connect` → (buyer grants) → `ready` → instance created on the
+buyer's account → `booting` → running + IP → ManagedNode + `install_node` job
+→ `installing` → `done` (or `failed`, which alerts the ops address).
+
+If the buyer hasn't connected yet, they get an email pointing at the Connect
+page; the page's create-account link uses `server_manager_linode_referral_url`
+so new Linode signups carry the referral credit. A token-refresh failure or a
+provider 401 parks the provision back at `pending_connect` and flags the
+account link — a fresh grant resumes it automatically.
+
+**Customer-owned node semantics:** the resulting node is a normal
+`ManagedNode` (installs, upgrades, uptime checks, SSL all apply), with
+`mgn_ssh_key_path` set from `server_manager_customer_cloud_ssh_key_path`
+(whose `.pub` sibling is installed on the instance at create time) and no
+`mgn_mgh_host_id` — it belongs to no managed host. The server is the
+customer's property: cancelling their subscription stops management, never
+touches the instance.
+
+Settings: `server_manager_customer_cloud_ssh_key_path` (required),
+`server_manager_customer_cloud_region` / `_type` / `_image` (instance
+defaults), `server_manager_linode_referral_url`. Provider credentials are the
+core `oauth_linode_*` settings (Admin → System → OAuth Providers).
+
+The compute API surface is `CloudComputeProvider`
+(`includes/cloud_compute/`) with `LinodeComputeDriver` implementing it; a new
+provider is a new driver plus its OAuth provider class.
+
 ## Backup Targets
 
 Backup targets define where backup files are uploaded after creation. Each node can optionally have a backup target assigned. If no target is set, backups remain local only on the remote server.
@@ -444,6 +504,21 @@ Represents a remote Joinery instance. Key fields:
 - `mgn_last_status_data` -- JSON from last status check (disk, memory, load, etc.)
 - `mgn_joinery_version` -- Last known version string
 - `mgn_bkt_backup_target_id` -- FK to backup target (null = local only)
+
+### CustomerCloudAccount (`cca_customer_cloud_accounts`)
+
+A user's OAuth-linked cloud provider account (one row per user + provider).
+Holds the SecretBox-encrypted token set via `storeToken()`/`getToken()`;
+`cca_status` is `active`, `refresh_failed`, or `revoked` (the latter two mean
+the buyer must re-connect).
+
+### CustomerCloudProvision (`cvp_customer_cloud_provisions`)
+
+One customer-cloud fulfillment, order to running site. Keyed to the getjoinery
+order item (`cvp_external_order_item_id`, unique); `cvp_status` is the state
+machine documented under [Customer-Cloud Fulfillment](#customer-cloud-fulfillment);
+links to the account (`cvp_cca_account_id`), instance (`cvp_instance_id`/`_ip`),
+and resulting node (`cvp_mgn_node_id`).
 
 ### ManagementJob (`mjb_management_jobs`)
 

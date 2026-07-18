@@ -22,6 +22,8 @@ class PollHostingOrders implements ScheduledTaskInterface {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_host_class.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_account_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/GetJoineryApiClient.php'));
 
@@ -58,6 +60,15 @@ class PollHostingOrders implements ScheduledTaskInterface {
 			"WHERE mjb_external_order_item_id IS NOT NULL AND mjb_delete_time IS NULL"
 		);
 		$handled = array_map('intval', array_column($q->fetchAll(PDO::FETCH_ASSOC), 'mjb_external_order_item_id'));
+
+		// Customer-cloud orders are handled the moment their provision row exists
+		// (any status) — the ProvisionCustomerCloud task owns them from there.
+		$q = $db->query(
+			"SELECT cvp_external_order_item_id FROM cvp_customer_cloud_provisions WHERE cvp_delete_time IS NULL"
+		);
+		foreach (array_column($q->fetchAll(PDO::FETCH_ASSOC), 'cvp_external_order_item_id') as $cvp_order_id) {
+			$handled[] = (int)$cvp_order_id;
+		}
 
 		$started = 0;
 		$skipped = 0;
@@ -99,6 +110,48 @@ class PollHostingOrders implements ScheduledTaskInterface {
 
 			if (!$slug) {
 				$errors[] = "Order #{$order_item_id}: could not derive slug from domain '{$domain}'.";
+				continue;
+			}
+
+			// Fulfillment fork: the product declares its provider. 'customer_cloud'
+			// orders become a provision row (worked by ProvisionCustomerCloud);
+			// anything else falls through to shared-host fulfillment below.
+			$fulfillment = '';
+			$product_id  = (int)($order_item['odi_pro_product_id'] ?? 0);
+			if ($product_id) {
+				$product = $client->get('Product/' . $product_id);
+				if (is_array($product)) {
+					$fulfillment = (string)($product['pro_fulfillment_provider'] ?? '');
+				}
+			}
+
+			if ($fulfillment === 'customer_cloud') {
+				if (!$user_id) {
+					$errors[] = "Order #{$order_item_id}: customer-cloud order has no buyer user id — cannot start the Connect flow.";
+					continue;
+				}
+
+				$provision = new CustomerCloudProvision(NULL);
+				$provision->set('cvp_external_order_item_id', $order_item_id);
+				$provision->set('cvp_usr_user_id', $user_id);
+				$provision->set('cvp_domain',      $domain);
+				$provision->set('cvp_slug',        $slug);
+				$provision->set('cvp_buyer_email', $admin_email);
+				$provision->set('cvp_buyer_name',  $user_name);
+
+				// If the buyer already granted access, skip the Connect wait.
+				$account = CustomerCloudAccount::get_for_user($user_id, 'linode');
+				if ($account !== null && $account->get('cca_status') === 'active') {
+					$provision->set('cvp_cca_account_id', $account->key);
+					$provision->set('cvp_status', 'ready');
+				} else {
+					$provision->set('cvp_status', 'pending_connect');
+					$this->send_connect_email($client, $admin_email, $user_name, $domain);
+				}
+				$provision->save();
+
+				$handled[] = $order_item_id;
+				$started++;
 				continue;
 			}
 
@@ -196,6 +249,47 @@ class PollHostingOrders implements ScheduledTaskInterface {
 			return ['status' => 'error', 'message' => $msg];
 		}
 		return ['status' => 'success', 'message' => $msg];
+	}
+
+	/**
+	 * Email the buyer their Connect link — a customer-cloud order can't
+	 * proceed until they grant access to their cloud account. Queued through
+	 * the getjoinery API like the welcome email; best-effort.
+	 */
+	private function send_connect_email($client, $to_email, $to_name, $domain) {
+		if (!$to_email) return;
+
+		$settings   = Globalvars::get_instance();
+		$from_email = $settings->get_setting('server_manager_provisioning_welcome_from_email') ?: 'support@getjoinery.com';
+		$from_name  = $settings->get_setting('server_manager_provisioning_welcome_from_name')  ?: 'Get Joinery Support';
+
+		$connect_url = LibraryFunctions::get_absolute_url('/profile/server_manager/connect_cloud');
+		$name = htmlspecialchars($to_name);
+		$dom  = htmlspecialchars($domain);
+		$url  = htmlspecialchars($connect_url);
+
+		$body = <<<HTML
+<html><body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px;color:#333">
+<h2 style="color:#1a1a1a">One step left: connect your server account</h2>
+<p>Hi {$name},</p>
+<p>Thanks for your order! Your site <strong>{$dom}</strong> will run on a server in your own Linode account, billed directly to you by Linode — we never mark up your hosting.</p>
+<p>To set it up, connect your Linode account (or create one — new accounts get a \$100 credit):</p>
+<p style="text-align:center"><a href="{$url}" style="display:inline-block;background:#02b159;color:#fff;padding:12px 28px;border-radius:4px;text-decoration:none;font-weight:bold">Connect your account</a></p>
+<p>As soon as you connect, your server is created and your site installs automatically — you'll get another email when it's ready.</p>
+<p style="color:#666;font-size:.9em">Questions? Reply to this email or contact support@getjoinery.com.</p>
+<p>— The Get Joinery Team</p>
+</body></html>
+HTML;
+
+		$client->post('QueuedEmail', [
+			'equ_from'      => $from_email,
+			'equ_from_name' => $from_name,
+			'equ_to'        => $to_email,
+			'equ_to_name'   => $to_name,
+			'equ_subject'   => 'Connect your account to finish setting up ' . $domain,
+			'equ_body'      => $body,
+			'equ_status'    => 2, // READY_TO_SEND
+		]);
 	}
 }
 ?>

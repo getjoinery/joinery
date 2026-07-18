@@ -65,6 +65,33 @@ Go to **Admin > System > Scheduled Tasks** and activate both tasks:
 
 Both default to `every_run` frequency. No additional configuration is required.
 
+## 5b. Customer-Cloud Mode (optional, per product)
+
+To fulfill a product onto the buyer's own Linode account instead of a shared
+host (see `specs/customer_cloud_provisioning.md`):
+
+1. Register the OAuth client: Linode Cloud Manager → Profile → OAuth Apps →
+   Create OAuth App, **not** public, callback
+   `https://<control-plane-host>/oauth_callback`. Enter the client ID/secret
+   at **Admin → System → OAuth Providers** on the control plane.
+2. Set `server_manager_customer_cloud_ssh_key_path` to the management SSH
+   private key path; ensure its `.pub` sibling exists (it is installed on
+   created instances).
+3. Optionally set `server_manager_linode_referral_url` (Cloud Manager →
+   Profile → Referrals) and the region/type/image defaults.
+4. Set the hosting product's `pro_fulfillment_provider` to `customer_cloud`,
+   and put the Connect link
+   (`https://<control-plane-host>/profile/server_manager/connect_cloud`) in
+   the product's after-purchase message — the buyer sees it at checkout
+   instead of waiting for the poll-tick email. The Connect page is
+   deliberately not in any menu: buyers reach it by link at the moments that
+   need it (purchase, progress, re-connect).
+5. Activate the **Provision Customer Cloud** scheduled task alongside the two
+   in step 5.
+
+No provisioning host is needed for customer-cloud products — step 4 above
+applies only to shared-host fulfillment.
+
 ## 6. Verify End-to-End
 
 1. Place a test order on getjoinery.com for a hosting product, entering a test domain.

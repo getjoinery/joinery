@@ -126,12 +126,25 @@ The cloud-app registration (Google Cloud / Azure, the shared redirect URI, pasti
 client id/secret) is documented here once; the IMAP overview links to it and adds
 only the per-account "Connect" step.
 
+### Consumer: Customer Cloud (Server Manager)
+
+The Server Manager plugin's customer-cloud fulfillment mode (purpose
+`customer_cloud`, in `plugins/server_manager/includes/oauth_consumers/`) lets a
+hosting buyer grant access to their own Linode account so the provisioning
+pipeline can create their server there — billed by Linode to the buyer. Scope
+requested: `linodes:read_write` only (instance management, no account/billing
+access). The consumer stores the token set (encrypted) on the buyer's
+`CustomerCloudAccount` and releases their waiting provisions. See
+[Server Manager → Customer-Cloud Fulfillment](/plugins/server_manager/docs/overview.md#customer-cloud-fulfillment).
+
 ## Settings
 
 | Setting | Default | Notes |
 |---------|---------|-------|
 | `oauth_google_client_id` | `""` | |
 | `oauth_google_client_secret` | `""` | stored via SecretBox |
+| `oauth_linode_client_id` | `""` | |
+| `oauth_linode_client_secret` | `""` | stored via SecretBox |
 | `oauth_microsoft_client_id` | `""` | |
 | `oauth_microsoft_client_secret` | `""` | stored via SecretBox |
 | `oauth_microsoft_tenant` | `common` | `common` / `organizations` / `consumers` / a tenant id |
@@ -177,6 +190,22 @@ Google returns a refresh token reliably only when the authorize request includes
    outbound SMTP, add `IMAP.AccessAsUser.All` and `SMTP.Send` (Office 365 Exchange
    Online). Note M365 tenants may disable SMTP AUTH org-wide — sending then needs a
    tenant admin to enable it, or a relay-class provider (Mailgun/SES).
+
+### Linode
+
+1. **Linode Cloud Manager → Profile → OAuth Apps → Create OAuth App.**
+2. Leave **Public** unchecked (the platform is a confidential server-side
+   client).
+3. **Callback URL**: paste the exact value from the OAuth Providers admin page
+   (`https://<your-host>/oauth_callback`).
+4. Copy the **client ID** and **client secret** into the admin page (Linode
+   shows the secret once).
+
+Linode access tokens expire in two hours and the code grant includes **no
+refresh token** (the token response carries `refresh_token: null`). A stored
+Linode grant is a two-hour credential: `ensureFresh()` throws once it expires,
+and the consumer must send the user back through consent. No extra authorize
+params are needed.
 
 ## Scope minimization
 
