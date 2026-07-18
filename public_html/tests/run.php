@@ -10,8 +10,8 @@
  * failed. This is the pre-deploy gate and the CI entry point.
  *
  *   php tests/run.php                 # the `safe` tier
- *   php tests/run.php db              # safe + db
- *   php tests/run.php test-db         # only test-db (never implied)
+ *   php tests/run.php db              # safe + db + test-db (the pre-deploy gate)
+ *   php tests/run.php test-db         # only the test-database suites
  *   php tests/run.php live            # only live (never implied)
  *   php tests/run.php db --filter=api # narrow by name or path substring
  *   php tests/run.php --json          # emit the aggregate JSON contract
@@ -57,11 +57,16 @@ if (!in_array($tier_arg, $valid_tiers, true)) {
 	exit(2);
 }
 
-// Which tiers a batch request includes. safe⊂db are cumulative; test-db and
-// live run alone and never pull in the others.
+// Which tiers a batch request includes. safe ⊂ db ⊂ test-db are cumulative, so
+// the pre-deploy gate covers the model suite too; asking for test-db alone still
+// runs just that tier. live never pulls in the others — it has real external
+// effects and is always an explicit choice.
+//
+// test-db suites declare needs:[test-db], so an install without the database
+// copy skips them rather than failing the gate.
 $tiers_to_run = array(
 	'safe'    => array('safe'),
-	'db'      => array('safe', 'db'),
+	'db'      => array('safe', 'db', 'test-db'),
 	'test-db' => array('test-db'),
 	'live'    => array('live'),
 );
@@ -102,6 +107,25 @@ function harness_unmet_needs(array $needs) {
 					break;
 				case 'b2':
 					$cache[$need] = trim((string)$settings->get_setting('cloud_storage_access_key')) !== '';
+					break;
+				case 'test-db':
+					// The test-database copy is provisioned per install (see
+					// /admin/admin_test_database), so a checkout without one must
+					// skip rather than fail. Probe the connection itself; a
+					// configured-but-absent database is exactly the case a
+					// settings-only check would miss.
+					$name = trim((string)$settings->get_setting('dbname_test'));
+					if ($name === '') { $cache[$need] = false; break; }
+					try {
+						new PDO(
+							'pgsql:host=localhost port=5432 dbname=' . $name,
+							$settings->get_setting('dbusername_test'),
+							$settings->get_setting('dbpassword_test')
+						);
+						$cache[$need] = true;
+					} catch (\Throwable $e) {
+						$cache[$need] = false;
+					}
 					break;
 				default:
 					$cache[$need] = true; // unrecognized need → assume met (never skip blindly)

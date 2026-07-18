@@ -64,8 +64,8 @@ From the command line:
 
 ```bash
 php tests/run.php              # the safe tier
-php tests/run.php db           # safe + db
-php tests/run.php test-db      # only the test-database suite (never implied)
+php tests/run.php db           # safe + db + test-db — the pre-deploy gate
+php tests/run.php test-db      # only the test-database suites
 php tests/run.php live         # only live tests (never implied)
 php tests/run.php db --filter=api   # narrow by name or path substring
 php tests/run.php --only=tests/unit/dns_resolver_test.php  # one exact test by repo-relative path
@@ -74,10 +74,17 @@ php tests/run.php --list       # list discovered tests, run nothing
 php tests/run.php --json       # emit the aggregate JSON contract (for CI)
 ```
 
-`safe` and `db` are cumulative; `test-db` and `live` run only when named and
-never pull in the others. Each test runs in its own subprocess, so a fatal in
-one file cannot take down the run. The runner exits non-zero if any test
-failed — it is the pre-deploy gate and the CI entry point.
+`safe`, `db` and `test-db` are cumulative, so `php tests/run.php db` is the
+pre-deploy gate and covers the model CRUD suite. `live` runs only when named and
+never pulls in the others — it has real external effects, so it is always an
+explicit choice. Each test runs in its own subprocess, so a fatal in one file
+cannot take down the run. The runner exits non-zero if any test failed — it is
+the CI entry point.
+
+The `test-db` suites declare `needs: [test-db]`, and the runner probes the
+connection itself rather than trusting the setting. An install without the
+database copy skips them with a named reason instead of failing the gate; see
+[The test database](#the-test-database).
 
 A run that matches **zero** declared tests exits non-zero (code 2) with an
 explicit message, rather than reporting a hollow green — a `--filter`/`--only`

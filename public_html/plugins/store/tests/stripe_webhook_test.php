@@ -52,6 +52,32 @@ require_once(PathHelper::getComposerAutoloadPath()); // Stripe SDK for the signa
 
 $run_id = substr(md5(uniqid('sw', true)), 0, 8);
 
+/**
+ * Remove fixtures stranded by an earlier crashed run, matched on this suite's
+ * own generated names so nothing real can be caught. Order matters: versions and
+ * products reference the tier, and the tier group holds memberships.
+ */
+function sw_preclean() {
+	$db = DbConnector::get_instance()->get_db_link();
+	$removed = 0;
+	try {
+		$db->exec("DELETE FROM prv_product_versions WHERE prv_pro_product_id IN
+			(SELECT pro_product_id FROM pro_products WHERE pro_link ~ '^sw-(hi|lo)-plan-[0-9a-f]{8}$')");
+		$removed += $db->exec("DELETE FROM pro_products WHERE pro_link ~ '^sw-(hi|lo)-plan-[0-9a-f]{8}$'");
+		$db->exec("DELETE FROM grm_group_members WHERE grm_grp_group_id IN
+			(SELECT sbt_grp_group_id FROM sbt_subscription_tiers WHERE sbt_name ~ '^sw_tier_(hi|lo)_[0-9a-f]{8}$')");
+		$db->exec("DELETE FROM grp_groups WHERE grp_group_id IN
+			(SELECT sbt_grp_group_id FROM sbt_subscription_tiers WHERE sbt_name ~ '^sw_tier_(hi|lo)_[0-9a-f]{8}$')");
+		$removed += $db->exec("DELETE FROM sbt_subscription_tiers WHERE sbt_name ~ '^sw_tier_(hi|lo)_[0-9a-f]{8}$'");
+	} catch (\Throwable $e) {
+		echo "  WARNING: preclean failed: " . $e->getMessage() . "\n";
+	}
+	return $removed;
+}
+
+$precleaned = sw_preclean();
+if ($precleaned > 0) echo "  Precleaned $precleaned fixture row(s) stranded by an earlier run\n";
+
 // ---------------------------------------------------------------------------
 // Helpers — build and sign events exactly as Stripe does.
 // ---------------------------------------------------------------------------
@@ -326,6 +352,10 @@ check(SubscriptionTier::GetUserTier($subscriber->key) === null, 'subscription de
 
 /** A tier with its own product and priced version. Returns the parts by name. */
 function sw_make_plan($run_id, $suffix, $level, $price_id, $price) {
+	// Cleanup is registered immediately after each save, never at the end of the
+	// helper: a throw partway through (a missing required field, say) would
+	// otherwise strand everything created before it with nothing registered to
+	// remove it.
 	$tier = new SubscriptionTier(NULL);
 	$tier->set('sbt_name', 'sw_tier_' . $suffix . '_' . $run_id);
 	$tier->set('sbt_display_name', 'SW ' . strtoupper($suffix) . ' Tier');
@@ -333,25 +363,6 @@ function sw_make_plan($run_id, $suffix, $level, $price_id, $price) {
 	$tier->set('sbt_is_active', true);
 	$tier->save();
 	$tier->load();
-
-	$product = new Product(NULL);
-	$product->set('pro_name', 'SW ' . strtoupper($suffix) . ' Plan ' . $run_id);
-	$product->set('pro_link', 'sw-' . $suffix . '-plan-' . $run_id);
-	$product->set('pro_is_active', true);
-	$product->set('pro_sbt_subscription_tier_id', $tier->key);
-	$product->save();
-	$product->load();
-
-	$version = new ProductVersion(NULL);
-	$version->set('prv_pro_product_id', $product->key);
-	$version->set('prv_version_name', 'Monthly');
-	$version->set('prv_version_price', $price);
-	$version->set('prv_status', 1);          // > 0 keeps it in the active-version filter
-	$version->set('prv_price_type', 'month'); // recurring, matching a real tier plan
-	$version->set('prv_stripe_price_id_test', $price_id);
-	$version->save();
-	$version->load();
-
 	$group_id = $tier->get('sbt_grp_group_id');
 	harness_defer(function () use ($tier, $group_id) {
 		$db = DbConnector::get_instance()->get_db_link();
@@ -367,7 +378,25 @@ function sw_make_plan($run_id, $suffix, $level, $price_id, $price) {
 			echo "  WARNING: plan cleanup failed: " . $e->getMessage() . "\n";
 		}
 	});
+
+	$product = new Product(NULL);
+	$product->set('pro_name', 'SW ' . strtoupper($suffix) . ' Plan ' . $run_id);
+	$product->set('pro_link', 'sw-' . $suffix . '-plan-' . $run_id);
+	$product->set('pro_is_active', true);
+	$product->set('pro_sbt_subscription_tier_id', $tier->key);
+	$product->save();
+	$product->load();
 	harness_register_row('pro_products', 'pro_product_id', $product->key);
+
+	$version = new ProductVersion(NULL);
+	$version->set('prv_pro_product_id', $product->key);
+	$version->set('prv_version_name', 'Monthly');
+	$version->set('prv_version_price', $price);
+	$version->set('prv_status', 1);          // > 0 keeps it in the active-version filter
+	$version->set('prv_price_type', 'month'); // recurring, matching a real tier plan
+	$version->set('prv_stripe_price_id_test', $price_id);
+	$version->save();
+	$version->load();
 	harness_register_row('prv_product_versions', 'prv_product_version_id', $version->key);
 
 	return array('tier' => $tier, 'product' => $product, 'version' => $version);

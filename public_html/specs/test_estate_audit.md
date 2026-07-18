@@ -1403,20 +1403,28 @@ non-fatal "Attempting to set the non-defined field" exception and silently drops
 the intent. Fix is either adding the column to `$field_specifications` or
 removing the line, depending on whether the audit field is wanted.
 
-**Remaining generation-2 infrastructure (newly discovered, not in the original
-inventory):** `tests/models/` still holds `ModelTester.php` (83KB) and
+**`tests/models/` (newly inventoried).** It holds `ModelTester.php` (83KB) and
 `MultiModelTester.php` (37KB) behind gen-4 shims (`models_test.php`,
-`test_model_tester.php`) plus three undeclared web/CLI runners (`run_all.php`,
-`run_automated.php`, `run_multi.php`, `index.php`). `models_test.php` hard-sets
-`SINGLE_TESTS_ONLY=true` / `TEST_MULTI=false`, so MultiModelTester never runs
-from the gate — which is exactly why T30 records the Multi surface as untested.
-Converting this cluster and enabling the Multi half are the same piece of work.
+`test_model_tester.php`) plus four undeclared web/CLI runners (`run_all.php`,
+`run_automated.php`, `run_multi.php`, `index.php`). These are **not** the same
+shape as the store testers that were retired: they are reusable engines that
+introspect `$field_specifications` and generate values per type across all 151
+models, so there is nothing to convert — the shims already drive them correctly.
+The suite was red (66/151) and is now green; see the T32 entry below and
+`specs/implemented/model_crud_suite_repair.md`.
+
+`models_test.php` hard-sets `SINGLE_TESTS_ONLY=true` / `TEST_MULTI=false`, so
+`MultiModelTester` never runs from the gate — which is exactly why **T30**
+records the Multi surface as untested. A measured probe with `MULTI_TESTS_ONLY`
+showed the Multi engine itself works (9 pass / 0 fail / 3 skip on a 12-model
+sample), so T30 is wiring plus whatever the full sweep then surfaces. It is
+unblocked now that the single-model half is green.
 
 **Still remaining (documented in the work plan below):**
 the full cloud 6→4 FILE merge
 (the D20/D21 DEFECTS are fixed; merging characterization into engine risks the
 real-BlobStorageProfile db-tier coverage and is deferred), the directory/naming
-taxonomy reorg, the tests/models gen-2 cluster (above), and the P3 greenfield suites
+taxonomy reorg, and the P3 greenfield suites
 (account security, event_manager, server_manager, UploadHandler, PluginManager,
 surveys, bookings, Multi collections, core-unit tests). These are larger and were
 left for a follow-up pass rather than risk half-built suites.

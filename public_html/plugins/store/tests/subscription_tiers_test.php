@@ -276,6 +276,10 @@ check(count($tiers) >= 3, 'at least 3 active tiers', 'found ' . count($tiers));
 // MultiProduct's recognized option keys are is_active / deleted — the raw column
 // names pro_is_active / pro_delete_time are silently ignored, which would let an
 // inactive or soft-deleted product be picked as a tier's product.
+// A tier is only usable here if its product actually has a version to price and
+// subscribe to. Taking the first active product regardless would let an
+// unrelated half-built product (one created by a crashed run, say) decide the
+// fixture set and fail the suite for a reason that has nothing to do with tiers.
 $tier_products = array();
 foreach ($tiers as $level => $tier) {
 	$products = new MultiProduct(array(
@@ -284,8 +288,12 @@ foreach ($tiers as $level => $tier) {
 		'deleted'                      => false,
 	));
 	$products->load();
-	if ($products->count() > 0) {
-		$tier_products[$level] = $products->get(0)->key;
+	foreach ($products as $candidate) {
+		$versions = $candidate->get_product_versions();
+		if ($versions->count() > 0) {
+			$tier_products[$level] = $candidate->key;
+			break;
+		}
 	}
 }
 check(count($tier_products) >= 3, 'at least 3 tiers have an active product',
