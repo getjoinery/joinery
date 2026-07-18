@@ -36,6 +36,18 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	if (!empty($_POST)) {
 
+		// Rate limit account creation per IP. The captcha and honeypot below stop
+		// a naive bot, but both are client-side puzzles: neither caps how fast one
+		// source can create accounts once it can answer them. Every other
+		// credential entry point (login, both reset paths) is throttled — this one
+		// was not. Counts all attempts, not just failures, because a flood of
+		// SUCCESSFUL signups is the abuse being bounded here.
+		require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
+		if (!RequestLogger::check_rate_limit('register', 5, 900, NULL)) {
+			return LogicResult::error('Too many sign-up attempts from this location. Please wait a few minutes and try again.');
+		}
+		RequestLogger::log('register', 'register_attempt', TRUE);
+
 		$formwriter = new FormWriter('form1');
 		if(!$formwriter->honeypot_check($input)){
 			return LogicResult::error('This feature is turned off');

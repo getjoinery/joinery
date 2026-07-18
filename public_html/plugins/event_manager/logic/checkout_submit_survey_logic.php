@@ -4,7 +4,7 @@
  * mark the buyer's event registration survey-complete. Logged-in only: the
  * confirmation surveys belong to the purchaser's event registrations.
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 
 function checkout_submit_survey_logic(array $input): LogicResult {
@@ -13,13 +13,42 @@ function checkout_submit_survey_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/questions_class.php'));
 	require_once(PathHelper::getIncludePath('data/survey_answers_class.php'));
 
+	require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_registrants_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/event_manager/data/events_class.php'));
+
 	$session = SessionControl::get_instance();
 	$user_id = $session->get_user_id();
 	$survey_id = isset($input['survey_id']) ? intval($input['survey_id']) : 0;
 	$event_id = isset($input['event_id']) ? intval($input['event_id']) : 0;
 
-	if (!$survey_id || !$user_id) {
-		return LogicResult::error('Not logged in or invalid survey');
+	if (!$user_id) {
+		return LogicResult::error('Not logged in');
+	}
+	if (!$survey_id || !$event_id) {
+		return LogicResult::error('Invalid survey');
+	}
+
+	// The survey_id and event_id arrive from the browser, so neither is
+	// trustworthy on its own. A confirmation survey is answerable only by someone
+	// holding a registration for the event that asks it, and only the survey that
+	// event actually attached — otherwise any signed-in user could post answers
+	// into any survey on the platform, polluting a question set they were never
+	// given.
+	$registrant = EventRegistrant::check_if_registrant_exists($user_id, $event_id);
+	if (!$registrant) {
+		return LogicResult::error('You do not hold a registration for this event.');
+	}
+
+	$event = new Event($event_id, TRUE);
+	if (!$event->key || (int)$event->get('evt_svy_survey_id') !== $survey_id) {
+		return LogicResult::error('That survey does not belong to this event.');
+	}
+
+	// Answered already: return the same success shape rather than appending a
+	// second set of answers. The confirmation page posts by fetch, so a retry,
+	// a double-click, or a replayed request would otherwise duplicate every row.
+	if ($registrant->get('evr_survey_completed')) {
+		return LogicResult::render(array('submitted' => true, 'already_submitted' => true));
 	}
 
 	$sq = new MultiSurveyQuestion(
@@ -51,16 +80,10 @@ function checkout_submit_survey_logic(array $input): LogicResult {
 		}
 	}
 
-	// Mark the survey completed on the event registrant. This action lives in
-	// event_manager, so the plugin is active whenever it resolves.
-	if ($event_id) {
-		require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_registrants_class.php'));
-		$registrant = EventRegistrant::check_if_registrant_exists($user_id, $event_id);
-		if ($registrant) {
-			$registrant->set('evr_survey_completed', true);
-			$registrant->save();
-		}
-	}
+	// Mark the survey completed on the registration resolved above, which is what
+	// makes the replay guard bite on the next attempt.
+	$registrant->set('evr_survey_completed', true);
+	$registrant->save();
 
 	return LogicResult::render(array('submitted' => true));
 }
