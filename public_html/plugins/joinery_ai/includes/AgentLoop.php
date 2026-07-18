@@ -108,6 +108,12 @@ class AgentLoop {
         }
 
         $in = 0; $out = 0; $cw = 0; $cr = 0;
+        // $in sums every call in the loop — right for cost, wrong for describing the
+        // context window. $baseline_in is the FIRST call's prompt: system prompt +
+        // the whole conversation + this turn's message, before any tool result joins
+        // it. That is the conversation's own size, it grows every turn, and it is
+        // what the context badge reports.
+        $baseline_in = null;
         $consecutive_tool_errors = 0;
         $assistant_text = '';
         $stop_reason = 'max_iterations';
@@ -163,6 +169,13 @@ class AgentLoop {
                 [$context, 'shouldAbort']);
 
             $usage = $response['usage'] ?? [];
+            // A cached prompt reports its tokens split across input/cache_read, so
+            // this one call's true prompt size is their sum.
+            if ($baseline_in === null) {
+                $baseline_in = (int)($usage['input_tokens'] ?? 0)
+                             + (int)($usage['cache_read_input_tokens'] ?? 0)
+                             + (int)($usage['cache_creation_input_tokens'] ?? 0);
+            }
             $in += (int)($usage['input_tokens'] ?? 0);
             $out += (int)($usage['output_tokens'] ?? 0);
             $cw += (int)($usage['cache_creation_input_tokens'] ?? 0);
@@ -264,6 +277,7 @@ class AgentLoop {
         return [
             'assistant_text'     => $assistant_text,
             'input_tokens'       => $in,
+            'context_tokens'     => (int)($baseline_in ?? 0),
             'output_tokens'      => $out,
             'cache_write_tokens' => $cw,
             'cache_read_tokens'  => $cr,
