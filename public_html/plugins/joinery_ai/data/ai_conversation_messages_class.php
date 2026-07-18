@@ -70,6 +70,16 @@ class AiConversationMessage extends SystemBase {
         // the local host's /api/ps. Colors the per-reply context number by how close
         // it is to the limit. NULL for remote models or an unreachable host.
         'aim_context_window'      => array('type'=>'int4', 'is_nullable'=>true),
+        // The conversation's size as of this turn: the first tool-loop call's prompt,
+        // which is the system prompt plus the whole conversation plus this turn's
+        // message, before any tool result joins it. Only ever grows, so the badge
+        // built on it climbs toward the window and never travels back — once it
+        // reads red, the oldest exchanges are being dropped on every turn and only a
+        // new conversation resets it. Deliberately NOT aim_input_tokens, which sums
+        // every call in the loop (counting the system prompt and conversation once
+        // per step) and so moves with tool volume rather than conversation length.
+        // NULL for rows written before this column existed.
+        'aim_context_used'        => array('type'=>'int4', 'is_nullable'=>true),
         'aim_status'              => array('type'=>'varchar(20)', 'default'=>'complete'),
         // Cross-process cancel signal. The chat_cancel endpoint sets this TRUE on a
         // RUNNING assistant row; the running turn re-reads it (fresh SELECT) at the

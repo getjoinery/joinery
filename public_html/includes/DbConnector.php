@@ -75,10 +75,23 @@ class DbConnector {
 		return true;
 	}
 	
+	/** How many recent statements the error-context history keeps. */
+	const QUERY_HISTORY_LIMIT = 50;
+
 	public function execute_query() {
 		$q = $this->current_query;
-		if (!in_array($q, $this->query_history)){
-			$this->query_history[] = $q; 
+		// Record the SQL text, not the PDOStatement. A statement holds a
+		// reference to the connection that prepared it, so keeping the objects
+		// pinned every connection ever opened alive — a process that switches
+		// test mode repeatedly (the model suite does it once per class) then
+		// exhausted max_connections part-way through. The only consumer is
+		// error context via print_r, which read the query string anyway.
+		$sql = $q->queryString;
+		if (!in_array($sql, $this->query_history, true)) {
+			$this->query_history[] = $sql;
+			if (count($this->query_history) > self::QUERY_HISTORY_LIMIT) {
+				array_shift($this->query_history);
+			}
 		}
 		$q->execute();
 		return true;
@@ -108,9 +121,15 @@ class DbConnector {
 	}	
 
 	public function close_test_mode() {
-		$this->test_mode = false;	
+		$this->test_mode = false;
+		// Release the connection set_test_mode() opened. Dropping the last
+		// reference is what actually closes a PDO handle; leaving it set meant
+		// every open/close cycle held a server connection until the process
+		// ended, so a run that switches test mode many times (the model suite
+		// does it once per class) exhausts max_connections part-way through.
+		$this->dblink_test = NULL;
 		return true;
-	}				
+	}
 
 	function handle_query_error($e) {
 		require_once(__DIR__ . '/ErrorClasses.php');

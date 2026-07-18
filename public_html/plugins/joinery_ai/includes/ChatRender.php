@@ -141,21 +141,28 @@ class ChatRender {
         return 'joai-ctx-ok';
     }
 
-    /** The metadata pieces for a turn's footer line: the context size (color-flagged
-     *  by how full the model's window is) and the estimated cost, each dropped when
-     *  it would read as zero. "context" is everything fed to the model this turn
-     *  (system prompt, history, and any tool/web results across the tool loop). */
-    public static function turnUsageParts(int $in, float $usd, ?int $window = null): array {
+    /** The metadata pieces for a turn's footer line: how full the context window is
+     *  (color-flagged) and the estimated cost, each dropped when it would read as
+     *  zero. $used is the conversation's size as of this turn — system prompt plus
+     *  every prior exchange plus this one. Because a conversation only grows, the
+     *  colour derived from it never travels backwards: amber stays amber and red
+     *  stays red, which is the intent. Red means the oldest exchanges are being
+     *  dropped on every turn from here on, and only a new conversation resets it.
+     *  Deliberately NOT the turn's billed input total, which re-counts the system
+     *  prompt and history once per tool-loop step and so jumps around with tool use. */
+    public static function turnUsageParts(int $used, float $usd, ?int $window = null): array {
         $parts = [];
-        if ($in > 0) {
+        if ($used > 0) {
             $title = ($window !== null && $window > 0)
-                ? self::compactTokens($in) . ' of the model\'s ' . self::compactTokens($window)
-                    . ' context window (' . (int)round($in / $window * 100) . '%). Amber/red as it fills'
-                    . ' — past the window the model drops the oldest turns.'
-                : 'Size of everything fed to the model this turn.';
-            $parts[] = '<span class="joai-ctx ' . self::contextBand($in, $window) . '" title="'
+                ? 'This conversation is using ' . self::compactTokens($used) . ' of the model\'s '
+                    . self::compactTokens($window) . ' context window ('
+                    . (int)round($used / $window * 100) . '%). It only grows, and once it fills, the'
+                    . ' model drops the oldest exchanges on every turn from then on — start a new'
+                    . ' conversation before that.'
+                : 'How much the conversation is carrying as of this turn.';
+            $parts[] = '<span class="joai-ctx ' . self::contextBand($used, $window) . '" title="'
                 . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '">'
-                . self::compactTokens($in) . ' ctx</span>';
+                . self::compactTokens($used) . ' ctx</span>';
         }
         $cost = self::formatCost($usd);
         if ($cost !== '') {
@@ -208,7 +215,13 @@ class ChatRender {
         $out = (int)$msg->get('aim_output_tokens');
         $win_raw = $msg->get('aim_context_window');
         $window = ($win_raw === null || $win_raw === '') ? null : (int)$win_raw;
-        $meta_extra = self::turnUsageParts($in, self::estimateCost($model, $in, $out), $window);
+        // Cost is billed on every call in the loop ($in); the badge tracks the
+        // thread's resting size. Rows written before that was recorded have no
+        // value — fall back to $in so they still show something, knowing that on a
+        // tool-heavy turn it reads high.
+        $used_raw = $msg->get('aim_context_used');
+        $used = ($used_raw === null || $used_raw === '' || (int)$used_raw <= 0) ? $in : (int)$used_raw;
+        $meta_extra = self::turnUsageParts($used, self::estimateCost($model, $in, $out), $window);
 
         $pending = $msg->get('aim_pending_action');
         if (is_string($pending)) $pending = json_decode($pending, true);

@@ -59,6 +59,7 @@ class ChatTurn {
             !empty($result['pending_action']) ? $result['pending_action'] : null);
         $cols['aim_input_tokens']  = (int)$result['input_tokens'];
         $cols['aim_output_tokens'] = (int)$result['output_tokens'];
+        $cols['aim_context_used']  = (int)($result['context_tokens'] ?? 0);
         if (isset($result['context_window']) && $result['context_window'] !== null) {
             $cols['aim_context_window'] = (int)$result['context_window'];
         }
@@ -125,11 +126,18 @@ class ChatTurn {
         $merged_trace = array_merge(self::decodeTrace($msg->get('aim_tool_calls')), $ctx->toolCalls());
         $prior_in  = (int)$msg->get('aim_input_tokens');
         $prior_out = (int)$msg->get('aim_output_tokens');
+        $prior_ctx  = (int)$msg->get('aim_context_used');
 
         $cols = ChatSeal::turnColumns($conversation, (int)$msg->key, $combined, $merged_trace,
             !empty($result['pending_action']) ? $result['pending_action'] : null);
         $cols['aim_input_tokens']  = $prior_in + (int)$result['input_tokens'];
         $cols['aim_output_tokens'] = $prior_out + (int)$result['output_tokens'];
+        // The resumed leg's first call is NOT a clean baseline — it replays the
+        // pre-confirmation tool loop, so it reads inflated. The thread's resting
+        // size was already measured when this turn opened; keep that reading.
+        $cols['aim_context_used']  = $prior_ctx > 0
+            ? $prior_ctx
+            : (int)($result['context_tokens'] ?? 0);
         if (isset($result['context_window']) && $result['context_window'] !== null) {
             $cols['aim_context_window'] = (int)$result['context_window'];   // fresh window for the resumed turn
         }

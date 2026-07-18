@@ -106,6 +106,13 @@ class ChatSerializer {
     public static function message(AiConversationMessage $msg, string $model = ''): array {
         $in  = (int)$msg->get('aim_input_tokens');
         $out = (int)$msg->get('aim_output_tokens');
+        // Window usage is the thread's resting size as of this turn, not the billed
+        // input total (which re-counts system + history per tool-loop step). Legacy
+        // rows predate the column and fall back to the billed total.
+        $used_raw = $msg->get('aim_context_used');
+        $used = ($used_raw === null || $used_raw === '' || (int)$used_raw <= 0) ? $in : (int)$used_raw;
+        $win_raw = $msg->get('aim_context_window');
+        $window  = ($win_raw === null || $win_raw === '') ? null : (int)$win_raw;
 
         $pending = $msg->get('aim_pending_action');
         if (is_string($pending)) $pending = json_decode($pending, true);
@@ -125,9 +132,12 @@ class ChatSerializer {
             'attachments'    => AiMessageAttachment::displayListForMessage((int)$msg->key),
             'tool_calls'     => self::toolCalls($msg->get('aim_tool_calls')),
             'usage'          => [
-                'input_tokens'  => $in,
-                'output_tokens' => $out,
-                'cost_label'    => ($in || $out)
+                'input_tokens'   => $in,
+                'output_tokens'  => $out,
+                'context_used'   => $used,
+                'context_window' => $window,
+                'context_band'   => ChatRender::contextBand($used, $window),
+                'cost_label'     => ($in || $out)
                     ? ChatRender::formatCost(ChatRender::estimateCost($model, $in, $out)) : '',
             ],
         ] + self::runningExtras($msg);

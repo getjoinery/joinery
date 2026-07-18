@@ -587,17 +587,41 @@ class ModelTester {
     /**
      * Generate valid test data for all required fields
      */
+    /**
+     * Whether a field must be given a value for a row to save.
+     *
+     * Two field-spec keys express that intent and models use them
+     * inconsistently: 'required' drives model-level validation, while
+     * 'is_nullable' => false drives the database constraint. Honoring only
+     * 'required' meant a model declaring just the NOT NULL half had its INSERT
+     * fail on a constraint the generator could have satisfied — and, for
+     * varchars, got handed an empty string that SystemBase stores as NULL.
+     *
+     * A NOT NULL column that is neither serial nor defaulted is required data
+     * by definition. Serial and defaulted columns are left alone; the database
+     * supplies those.
+     */
+    protected function field_requires_value($field_name) {
+        $spec = $this->model_class::$field_specifications[$field_name] ?? [];
+        if (!is_array($spec)) return false;
+
+        if (isset($spec['required']) && $spec['required'] === true) return true;
+
+        $not_null = isset($spec['is_nullable']) && $spec['is_nullable'] === false;
+        $db_supplied = !empty($spec['serial']) || isset($spec['default']);
+        return $not_null && !$db_supplied;
+    }
+
     protected function generate_valid_test_data($index = 0) {
         $test_data = [];
         $model_class = $this->model_class;
         
-        // Get required fields from field_specifications
         foreach ($model_class::$field_specifications as $field_name => $spec) {
-            if (isset($spec['required']) && $spec['required'] === true) {
+            if ($this->field_requires_value($field_name)) {
                 $test_data[$field_name] = $this->generate_field_value($field_name, $index);
             }
         }
-        
+
         return $test_data;
     }
     
@@ -650,10 +674,10 @@ class ModelTester {
         preg_match('/varchar\\((\\d+)\\)/', $type, $matches);
         $max_length = isset($matches[1]) ? (int)$matches[1] : 255;
         
-        // Check if this field is required - avoid empty strings for required fields
+        // Avoid empty strings for fields that must have a value — SystemBase
+        // stores '' as NULL, which trips the NOT NULL constraint.
         $model_class = $this->model_class;
-        $field_spec = $model_class::$field_specifications[$field] ?? [];
-        $is_required = isset($field_spec['required']) && $field_spec['required'] === true;
+        $is_required = $this->field_requires_value($field);
         
         // Strategic string patterns for comprehensive testing
         $patterns = [];
