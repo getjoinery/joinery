@@ -27,7 +27,10 @@ One click each, idempotent, with live status badges:
    SSL, and Provision Customer Cloud (creates missing rows, resumes paused).
 5. **Customer-cloud settings**: SSH key path (with key/.pub existence
    badges), referral URL, region/type/image defaults, and a status badge for
-   the Linode OAuth app credentials.
+   the Linode OAuth app credentials. The provisioning keypair itself is
+   generated automatically at plugin activation (default
+   `{site root}/config/provisioning_key`); the page's Generate button covers
+   control planes activated before the key existed.
 
 **Remote-store case:** when the store is a different site from the control
 plane, mint the service user + key on the store site and paste the values

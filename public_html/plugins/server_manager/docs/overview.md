@@ -275,6 +275,14 @@ opting a shared host in, and registering the Linode OAuth app. When the store
 is a remote site rather than the control plane itself, the service key is
 minted on the store site and its values entered in the API settings fields.
 
+The customer-cloud provisioning keypair (the public half is installed on
+created instances; the private half is the control plane's only access to
+them) is generated automatically at plugin activation
+(`activate.php` → `ProvisioningSetup::ensureSshKey()`), defaulting to
+`{site root}/config/provisioning_key`. The page's **Generate provisioning
+key** button runs the same idempotent action for control planes activated
+before the key existed; an existing key or custom path is never overwritten.
+
 ### Customer-Cloud Fulfillment
 
 The buyer connects their Linode account once at
