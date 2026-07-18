@@ -247,7 +247,7 @@ try {
 	// Hold the row's advisory lock on a SEPARATE session (same-session locks are reentrant).
 	$lock_conn = new PDO('pgsql:host=localhost port=5432 dbname=' . $settings->get_setting('dbname') . ' user=' . $settings->get_setting('dbusername') . ' password=' . $settings->get_setting('dbpassword'));
 	$lock_id = $gid;
-	$lk = $lock_conn->prepare("SELECT pg_try_advisory_lock(:k1, :k2) AS got"); $lk->execute([':k1' => -42, ':k2' => $gid]);
+	$lk = $lock_conn->prepare("SELECT pg_try_advisory_lock(:k1, :k2) AS got"); $lk->execute([':k1' => CloudOffloadEngine::ADVISORY_LOCK_NAMESPACE, ':k2' => $gid]);
 	$got = $lk->fetch(PDO::FETCH_ASSOC);
 	ok('precondition: lock acquired on a separate session', !empty($got['got']));
 	$noop = new NoopDriver();
@@ -256,7 +256,7 @@ try {
 	ok('lock held ⇒ nothing pushed', count($noop->puts) === 0);
 	ok('lock held ⇒ message reports skipped', strpos($gres['message'], 'skipped=1') !== false);
 	// Release and re-run: now it proceeds.
-	$lock_conn->prepare("SELECT pg_advisory_unlock(:k1, :k2)")->execute([':k1' => -42, ':k2' => $gid]);
+	$lock_conn->prepare("SELECT pg_advisory_unlock(:k1, :k2)")->execute([':k1' => CloudOffloadEngine::ADVISORY_LOCK_NAMESPACE, ':k2' => $gid]);
 	$lock_id = null;
 	$gres2 = CloudOffloadEngine::syncBatch($gprofile, $noop);
 	ok('lock released ⇒ row now pushed (cloud)', $drvflag($GTABLE, $gid) === 'cloud' && count($noop->puts) === 1);
@@ -320,7 +320,7 @@ try {
 	} catch (Exception $e) {}
 	set_enabled_mem($enabled_snapshot);
 	// Release a still-held advisory lock.
-	if ($lock_conn && $lock_id !== null) { try { $lock_conn->prepare("SELECT pg_advisory_unlock(:k1, :k2)")->execute([':k1' => -42, ':k2' => $lock_id]); } catch (Exception $e) {} }
+	if ($lock_conn && $lock_id !== null) { try { $lock_conn->prepare("SELECT pg_advisory_unlock(:k1, :k2)")->execute([':k1' => CloudOffloadEngine::ADVISORY_LOCK_NAMESPACE, ':k2' => $lock_id]); } catch (Exception $e) {} }
 	$lock_conn = null;
 	// Bucket objects.
 	foreach (array_unique($created_keys) as $k) { try { $driver->delete($k); } catch (Exception $e) {} }

@@ -27,6 +27,9 @@ class CloudOffloadEngine {
 	const REVERSE_BATCH_LIMIT = 25;
 	const TIME_BUDGET_SECONDS = 60;
 	const FAILED_COUNT_CAP    = 5;
+	/** First key of the per-row pg advisory lock — namespaces it away from
+	 *  runner-level locks. Exposed so a test can contend on the SAME namespace. */
+	const ADVISORY_LOCK_NAMESPACE = -42;
 
 	// ====================================================================
 	// FORWARD — local -> cloud
@@ -372,16 +375,16 @@ class CloudOffloadEngine {
 		error_log('CloudOffload ' . $profile->table() . ' id=' . $id . ': ' . $message);
 	}
 
-	/** Per-row advisory lock; -42 namespaces it from runner-level locks. */
+	/** Per-row advisory lock; ADVISORY_LOCK_NAMESPACE namespaces it from runner-level locks. */
 	private static function _lock($dblink, int $id): bool {
 		$q = $dblink->prepare("SELECT pg_try_advisory_lock(:k1, :k2) AS got");
-		$q->execute([':k1' => -42, ':k2' => $id]);
+		$q->execute([':k1' => self::ADVISORY_LOCK_NAMESPACE, ':k2' => $id]);
 		$got = $q->fetch(PDO::FETCH_ASSOC);
 		return !empty($got['got']);
 	}
 
 	private static function _unlock($dblink, int $id): void {
 		$q = $dblink->prepare("SELECT pg_advisory_unlock(:k1, :k2)");
-		$q->execute([':k1' => -42, ':k2' => $id]);
+		$q->execute([':k1' => self::ADVISORY_LOCK_NAMESPACE, ':k2' => $id]);
 	}
 }

@@ -10,8 +10,8 @@
  *
  * Runs with no real network: a fake backend is installed via
  * DnsResolver::setBackend(). This is the deterministic counterpart to the
- * live-DNS integration test in tests/email/suites/AuthenticationTests.php —
- * it makes DnsAuthChecker's SPF/DKIM/DMARC logic testable for the first time.
+ * live-DNS integration test in tests/email/email_auth_dns_test.php —
+ * it makes DnsAuthChecker's SPF/DKIM/DMARC logic testable offline.
  * Run:  php tests/unit/dns_auth_checker_test.php
  *
  * @version 1.0
@@ -21,19 +21,7 @@ require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
 require_once(PathHelper::getIncludePath('includes/DnsAuthChecker.php'));
-
-/**
- * Fake raw-DNS layer. getRecords() mirrors dns_get_record(): an array of
- * record arrays, or false to simulate a resolver failure.
- */
-class FakeDnsBackend {
-    private $data;
-    public function __construct(array $data) { $this->data = $data; }
-    public function getRecords($name, $type) {
-        $key = $name . '|' . $type;
-        return array_key_exists($key, $this->data) ? $this->data[$key] : [];
-    }
-}
+require_once(__DIR__ . '/../lib/dns_fixtures.php'); // FakeDnsBackend
 
 // A DKIM TXT value with a public key long enough to satisfy isDKIMRecord().
 $dkim_txt = 'v=DKIM1; k=rsa; p=' . str_repeat('A', 200);

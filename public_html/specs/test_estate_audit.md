@@ -1171,14 +1171,154 @@ Infrastructure (P2):
   teardown removes its own vault + wrappings (0 orphans added — the standing
   vault→uew cascade gap is separate and pre-existing). Full db 101/101.
 
+**T21 (unify the two SSRF guards) — DONE 2026-07-17.** The two near-identical
+SSRF validators — joinery_ai's `UrlSafetyValidator` (fetch_url tool) and
+dns_filtering's `scan_url_validate_target()` (scan_url action) — are now one core
+class, `includes/UrlSafetyValidator.php`, with a single authoritative IPv4 range
+table. That single table is the whole point: the split table is exactly how the
+0.0.0.0/8 SSRF hole (T13) diverged — one guard blocked it, the other did not.
+- The one genuine policy difference between the two callers is the port allowlist:
+  the LLM fetch tool restricts to 80/443, while the page scanner legitimately hits
+  dev sites on non-standard ports. This is now a per-call option — `checkAndResolve($url,
+  ['allowed_ports' => null])` permits any port; the default keeps 80/443. Every
+  other defense (scheme allowlist, blocked-hostname literals, resolve-all-IPs
+  range rejection, fail-closed on resolver error, IP pinning via the returned
+  `ips`) is shared, so it cannot drift again.
+- `FetchUrlTool` now requires the core path; the plugin copy
+  `plugins/joinery_ai/includes/UrlSafetyValidator.php` is deleted. `scan_url_logic`
+  calls the core guard (any-port) and catches `UnsafeUrlException`; its
+  `scan_url_validate_target()` function and `ScanUrlValidationException` are gone,
+  and its user-facing error is kept generic so it does not disclose a target's
+  resolved internal address.
+- One comprehensive test, `tests/unit/url_safety_validator_test.php` (48 checks),
+  replaces both former unit tests (the scan_url one is deleted). It covers both
+  port modes, the full IPv4 range table + boundary, IPv6 loopback/link-local/
+  unique-local/v4-mapped, DNS rebinding, fail-closed, redirect-hop revalidation,
+  and the T13-remaining obfuscation cases (v4-mapped metadata, decimal/octal/hex-
+  encoded IP hosts, userinfo tricks). Safe tier green (36/36 — the two SSRF tests
+  are now one). Docs updated (joinery_ai + dns_filtering overviews).
+- Known pre-existing gap left in place (out of T21's unify scope, and true of both
+  former guards): the NAT64 well-known prefix `64:ff9b::/96` embedding an IPv4
+  address is not blocked — a future range-table addition, not a regression.
+
+**T19 (extract per-area fixture libs) — DONE 2026-07-18.** All five
+duplicate-fixture families are now single shared libs, every touched test verified green:
+- `tests/lib/dns_fixtures.php` — `FakeDnsBackend` (was 3 identical copies:
+  dns_resolver, dns_auth_checker, url_safety_validator).
+- `tests/lib/llm_fixtures.php` — `FakeLlmProvider` base (all 8 LlmProviderInterface
+  boilerplate methods once) + `ScriptedLlmProvider` (accepts full canonical
+  responses OR the `['text'=>…]` shorthand, streams text deltas). Replaced the two
+  identical `FakeVerdictProvider` copies (email_security_scan_job,
+  joinery_ai_pipeline_runner) + `FakeActivityProvider` (turn_activity); the bespoke
+  `ChatCancelStubProvider` now extends the base, keeping only its cancel logic.
+- `tests/lib/cloud_fixtures.php` — `RecordingMockDriver` (ops log + failure
+  injection + on_put; was CharMockDriver/EngMockDriver/PrivMockDriver),
+  `InMemoryBlobDriver` (content round-trip; was RawIngestMockDriver/
+  RawStoreMockDriver), and `ScratchTableProfile` (option-driven eligibility/
+  visibility/ownership; was EngMockProfile + PartProfile). `reverseEligibilityWhere()`
+  defaults to `''` so the Eng case — which had no such method — is behavior-identical
+  (the engine trims the result; '' == absent).
+- `tests/lib/vault_fixtures.php` gained `vault_fixture_client_vault()` — the raw-SQL
+  client-custody vault write (was inline in drive/encryption_test).
+- `plugins/mailbox/tests/lib/mailbox_test_fixture.php` — `mailbox_make_user()`
+  (raw insert bypassing MX validation; was 5 near-identical private `makeUser`
+  copies across inbound_attachment, inbound_email_mailbox_grant,
+  inbound_email_attachment_storage, mailbox_reader, profile_mailbox) plus
+  `mailbox_purge_domains($domain_like, $user_email_like, $purge_orphan_grants)` —
+  the FK-safe preClean cascade (attachments→grants→messages→aliases→domains, +
+  optional user sweep by email LIKE and orphan-grant sweep). Replaced 7 per-file
+  `preClean()` bodies (inbound_attachment, inbound_email_attachment_storage,
+  profile_mailbox, mailbox_reader, inbound_email_mailbox_grant, raw_message_store,
+  inbound_raw_storage). The cascade + the escaped-underscore user LIKE were
+  proven correct against a seeded fixture (all cascade rows removed; matching user
+  deleted, non-matching kept). The three IMAP suites (imap_poller/imap_syncer/
+  inbound_imap_account) keep their own preClean — they cascade extra IMAP tables
+  (iia/iif/ilb/ilm), a genuinely different shape, not core boilerplate.
+
+**Housekeeping — DONE 2026-07-18 (safe 36/36, db green).** The bounded, coverage-safe
+housekeeping items:
+- **Discovery marker anchored.** `harness_parse_metadata` now matches `@joinery-test`
+  only at a header-style line start (`/^[ \t\/*#]*@joinery-test\b/m`), so a prose
+  MENTION of the marker (docs, a test describing the header format) is no longer
+  discovered as a phantom test. Verified: the prose-only files (vault_fixtures,
+  api_test_harness, discovery, run.php) dropped out of the declared list; real
+  tests unchanged.
+- **docs/testing.md synced** with `--only=`, `--timeout=`, the zero-match non-zero
+  exit, the fail-closed tier direction (unknown tier → live), and `needs` enforcement.
+- **Cloud D20 + D21.** Deleted the self-referential cap check in
+  cloud_storage_characterization (it re-ran its own copy of the eligibility SQL —
+  a real regression in the engine's query still passed; the cap is covered through
+  the REAL query in cloud_offload_engine). Added the partial-push failure path to
+  cloud_offload_engine (a multi-object row via the shared profile's new `variants`
+  option; a later object's PUT fails; asserts the already-pushed object is deleted
+  — no bucket orphan — the row stays local, counter bumped). engine 16→22, char 22→20.
+- **db-tier teardown hygiene.** joinery_ai_pipeline_runner and email_security_scan_job
+  now register each throwaway row's cleanup via harness_defer AT creation (LIFO,
+  crash-safe) instead of an end-of-file block; native_entry and schedule_model
+  register their rows via harness_register_row. error_handling and
+  email_validation_toggle were already crash-safe (defers present, no undeferred
+  persistent rows). The two store testers' teardown is folded into their
+  gen-2→gen-4 conversion (below), not half-fixed.
+- **Hardcoded env facts.** The `-42` per-row advisory-lock namespace is now
+  `CloudOffloadEngine::ADVISORY_LOCK_NAMESPACE`, single-sourced on the engine and
+  referenced by cloud_storage_live_b2 (was hardcoded in both). joinery_ai_turn_activity
+  derives its conversation owner instead of assuming user 1 exists. Confirmed the
+  rest were already derived: http.php base URL from `webDir` (the dev URL survives
+  only in doc examples), live_b2 DB name from `get_setting('dbname')`, origin IP
+  from the outbound interface (T18).
+- **Legacy email framework — RETIRED 2026-07-18.** The ~2000-line
+  generation-2 framework (`EmailTestRunner` + `suites/{Service,Template,Delivery,
+  Authentication}Tests` + the `email_suite_test` wrapper + `fixtures/` + the dead
+  `test_runner.php`) is deleted. Its valuable coverage is re-expressed as four
+  native harness tests, each verified green:
+  - `email_template_render` (db, 18 checks) — template→EmailMessage rendering:
+    body *var* substitution, subject extraction, subject-override priority, the
+    htmlToText alternate, subjectless→empty-subject, fail-loud on a missing
+    template. Self-created throwaway templates. (The legacy TemplateTests was
+    partly stale — it called a removed `CreateLegacyTemplate` and asserted a
+    "missing subject exception" the model never raised; those were NOT ported.)
+  - `email_provider_config` (safe, 13 checks + 3 skips) — the provider registry
+    (env-independent) + per-provider config well-formedness (unconfigured → SKIP).
+  - `email_send_delivery` (live/dev-only, needs mailgun, 6 checks) — CLOSED-LOOP:
+    sends through the active provider (Mailgun) AND the SMTP fallback (transport
+    override) to a throwaway store alias on dev.getjoinery.com, then polls
+    iem_inbound_email_messages to prove arrival (both delivered in ~5–10s). A
+    stronger bar than the legacy "send accepted" checks.
+  - `email_auth_dns` (live/prod-verify, needs mailgun, 7 checks) — SPF/DKIM/DMARC
+    against the REAL published DNS for mailgun_domain (mg.dev.getjoinery.com: SPF
+    pass, DKIM selector `mx`, DMARC present). Complements the offline, mocked
+    `dns_auth_checker_test`.
+  DeliveryTests was deleted with nothing ported — confirmed no unique coverage
+  (its "test-mode redirect" never tested redirect, just template-sendability now
+  in email_template_render; debug-logging is a no-op unless debug mode is on;
+  service-sending is subsumed by email_send_delivery). docs/email_system.md and
+  the dns_auth_checker_test pointer were updated to the new files.
+
+**Vault recovery-unlock robustness — FIXED 2026-07-18.** Running the full db gate
+after the email work surfaced a flaky failure in the T17 `vault_recovery_concurrency`
+test: under heavy concurrent load, `unlockWithRecoveryCode` occasionally threw a raw
+`SodiumException` ("unsupported key length"). Root cause was a real defense-in-depth
+gap, not a data bug (every stored salt is a valid 16 bytes): the per-recovery-code
+KEK derivation (`kekFromRecoveryCode`) sat OUTSIDE the per-wrapping try/catch, so a
+single malformed or transiently-unreadable salt on ANY recovery wrapping aborted the
+whole unlock — denying every other recovery code. Moved the derivation inside the
+try/catch so one bad row is skipped, not fatal (`SodiumException extends Exception`,
+already caught). Verified: 20/20 standalone + 12/12 under 3× concurrent load (was
+~1/8 flaky); vault_ceremonies 27/27 still green. The T17 test was also hardened:
+the concurrent round retries when NO worker wins (the atomic consume never fired, so
+the code is still unused and re-racing the same fixture is safe), asserts the hard
+security invariant (`oks <= 1`) every round, and tolerates ≤2 infrastructure
+casualties under maximum load while keeping "exactly one consumed" strict — 15/15
+standalone + 9/9 under heavy load after hardening.
+
 **Still remaining (documented in the work plan below):**
-T19 per-area
-fixture libs, T21 unify the two SSRF guards, the url_safety_validator test
-extension, the legacy email framework port/delete, cloud 6→4 consolidation,
-remaining teardown-hygiene fixes, and the P3 greenfield suites (account
-security, event_manager, server_manager, UploadHandler, PluginManager, surveys,
-bookings, Multi collections, core-unit tests). These are larger and were left
-for a follow-up pass rather than risk half-built suites.
+the full cloud 6→4 FILE merge
+(the D20/D21 DEFECTS are fixed; merging characterization into engine risks the
+real-BlobStorageProfile db-tier coverage and is deferred), the directory/naming
+taxonomy reorg + gen-2→gen-4 tester conversion, and the P3 greenfield suites
+(account security, event_manager, server_manager, UploadHandler, PluginManager,
+surveys, bookings, Multi collections, core-unit tests). These are larger and were
+left for a follow-up pass rather than risk half-built suites.
 
 ## Recommendations / work plan
 
@@ -1309,7 +1449,7 @@ cookie jar + session-login/CSRF (generalizing api_test_harness, base URL + origi
 from Globalvars, not hardcoded). Migrate the 4 API + 2 mailbox curl copies. *Accept:*
 no test file defines its own cookie-jar curl or logic-call simulation. Est. L. [E5]
 
-**T19. Extract per-area fixture libs.** `plugins/mailbox/tests/lib/mailbox_test_fixture.php`
+**T19. Extract per-area fixture libs.** ✅ DONE (see progress log): DNS, LLM, cloud, vault-client, mailbox raw-user, and the mailbox purge-boilerplate fixtures are all extracted and migrated. `plugins/mailbox/tests/lib/mailbox_test_fixture.php`
 (kills 8 purge-boilerplate copies + 4 raw makeUser); `cloud_storage_fixtures.php`
 (RecordingMockDriver with get/put/delete failure injection + ScratchTableProfile,
 kills 4 drivers + 3 profiles); a scripted `FakeLlmProvider` base (kills 3 stubs);
@@ -1323,7 +1463,7 @@ harness_finish so the contract is emitted even when a teardown throws (emit insi
 a finally, or move `finished=true` after emit). *Accept:* a TypeError in one
 teardown closure still produces a full contract and runs remaining teardowns. Est. M. [D39]
 
-**T21. Unify the two SSRF guards.** Merge UrlSafetyValidator and
+**T21. Unify the two SSRF guards.** ✅ DONE (see progress log). Merge UrlSafetyValidator and
 scan_url_validate_target into one core validator with a single range table (per the
 build-generally principle — this is how the 0.0.0.0 gap diverged), then one
 comprehensive test replaces both. *Accept:* both call sites use the same guard;

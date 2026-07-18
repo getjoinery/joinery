@@ -1,0 +1,94 @@
+<?php
+/** @joinery-test
+ * name: email_provider_config
+ * tier: safe
+ * env: any
+ * needs: []
+ */
+/**
+ * Email sending-provider abstraction + configuration, read-only (no mail sent).
+ *
+ * Two layers:
+ *  1. The provider registry — EmailSender auto-discovers provider classes and
+ *     exposes them by key. This is code-driven and environment-independent, so
+ *     it is asserted unconditionally: the registry lists mailgun and smtp, hands
+ *     back labels and settings fields for known keys, and returns nothing for an
+ *     unknown key. The configured active provider resolves to a real instance.
+ *  2. Per-provider config well-formedness — asserted only for providers this
+ *     install actually configured (a set primary credential); an unconfigured
+ *     provider is a SKIP, never a failure, so the test is green on any install.
+ *
+ * Replaces the read-only ServiceTests config coverage of the retired
+ * tests/email/suites framework. The real-send checks move to the live tier
+ * (email_send_delivery_test); nothing here touches the network.
+ *
+ * @version 1.0
+ */
+
+if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
+
+require_once(__DIR__ . '/../lib/harness.php');
+harness_boot();
+require_once(PathHelper::getIncludePath('includes/EmailServiceProvider.php'));
+require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+
+$settings = Globalvars::get_instance();
+
+section('provider registry (code-driven, environment-independent)');
+EmailSender::resetProviderCache();
+
+$services = EmailSender::getAvailableServices();
+check(is_array($services) && count($services) > 0, 'getAvailableServices returns a non-empty registry', 'count: ' . count($services));
+check(isset($services['mailgun']), 'registry includes mailgun');
+check(isset($services['smtp']), 'registry includes smtp');
+check(isset($services['mailgun']) && is_string($services['mailgun']) && $services['mailgun'] !== '', 'mailgun has a non-empty label');
+check(isset($services['smtp']) && is_string($services['smtp']) && $services['smtp'] !== '', 'smtp has a non-empty label');
+
+$discovered = EmailSender::getDiscoveredProviders();
+$classes_exist = true;
+foreach ($discovered as $key => $class) {
+	if (!class_exists($class)) { $classes_exist = false; break; }
+}
+check($classes_exist, 'every discovered provider maps to a real class');
+
+check(is_array(EmailSender::getProviderSettings('mailgun')) && count(EmailSender::getProviderSettings('mailgun')) > 0,
+	'getProviderSettings returns fields for mailgun');
+check(is_array(EmailSender::getProviderSettings('smtp')) && count(EmailSender::getProviderSettings('smtp')) > 0,
+	'getProviderSettings returns fields for smtp');
+check(EmailSender::getProviderSettings('zz_nonexistent_provider') === [],
+	'getProviderSettings for an unknown key returns an empty array (no fabricated fields)');
+
+section('the configured active provider resolves to a real instance');
+$active = EmailSender::getActiveProvider();
+check($active instanceof EmailServiceProvider, 'getActiveProvider returns an EmailServiceProvider',
+	'email_service=' . ($settings->get_setting('email_service') ?: '(default mailgun)'));
+$fallback_key = $settings->get_setting('email_fallback_service');
+if ($fallback_key) {
+	check(isset($discovered[$fallback_key]), "the fallback provider ('$fallback_key') is a discovered provider");
+} else {
+	harness_skip('no email_fallback_service configured');
+}
+
+section('per-provider config well-formedness (unconfigured providers SKIP)');
+// [key => [primary credential setting, [all required settings]]]
+$provider_reqs = array(
+	'mailgun'  => array('mailgun_api_key', array('mailgun_api_key', 'mailgun_domain')),
+	'smtp'     => array('smtp_host',        array('smtp_host', 'smtp_port')),
+	'sendgrid' => array('sendgrid_api_key', array('sendgrid_api_key')),
+	'postmark' => array('postmark_api_key', array('postmark_api_key')),
+	'ses'      => array('ses_access_key',   array('ses_access_key', 'ses_secret_key')),
+);
+foreach ($provider_reqs as $key => $spec) {
+	list($primary, $required) = $spec;
+	if (trim((string)$settings->get_setting($primary)) === '') {
+		harness_skip("$key not configured (no $primary)");
+		continue;
+	}
+	$missing = array();
+	foreach ($required as $field) {
+		if (trim((string)$settings->get_setting($field)) === '') { $missing[] = $field; }
+	}
+	check(empty($missing), "$key is configured with every required field", 'missing: ' . implode(', ', $missing));
+}
+
+harness_finish();

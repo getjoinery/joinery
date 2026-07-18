@@ -37,23 +37,8 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mess
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachment_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RawMessageStore.php'));
-
-/** In-memory CloudStorageDriver standing in for the verified-private bucket. */
-class RawIngestMockDriver implements CloudStorageDriver {
-	public $objects = array();
-	public function put(string $local_path, string $remote_key, string $content_type): void {
-		$this->objects[$remote_key] = (string)file_get_contents($local_path);
-	}
-	public function get(string $remote_key, string $local_path): void {
-		if (!array_key_exists($remote_key, $this->objects)) {
-			throw new RuntimeException('mock: no such object ' . $remote_key);
-		}
-		file_put_contents($local_path, $this->objects[$remote_key]);
-	}
-	public function delete(string $remote_key): void { unset($this->objects[$remote_key]); }
-	public function url(string $remote_key): string { return ''; }
-	public function ping(): array { return array('ok' => true, 'message' => 'mock'); }
-}
+require_once(__DIR__ . '/../../../tests/lib/cloud_fixtures.php'); // InMemoryBlobDriver
+require_once(__DIR__ . '/lib/mailbox_test_fixture.php'); // mailbox_purge_domains()
 
 class InboundRawStorageTest {
 	private $db;
@@ -298,7 +283,7 @@ class InboundRawStorageTest {
 		$local_path = RawMessageStore::localPathForKey($key);
 
 		// Move the bytes to the mock private bucket and flip the row to 'cloud'.
-		$mock = new RawIngestMockDriver();
+		$mock = new InMemoryBlobDriver();
 		$mock->objects[$key] = (string)file_get_contents($local_path);
 		@unlink($local_path); // a cloud row keeps no local copy
 		$this->db->prepare("UPDATE iem_inbound_email_messages
@@ -373,22 +358,7 @@ class InboundRawStorageTest {
 	}
 
 	private function preClean() {
-		try {
-			$dids = $this->db->query("SELECT ied_inbound_email_domain_id FROM ied_inbound_email_domains
-				WHERE ied_domain LIKE 'irs-test-%'")->fetchAll(PDO::FETCH_COLUMN);
-			if ($dids) {
-				$in = implode(',', array_map('intval', $dids));
-				$mids = $this->db->query("SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
-					WHERE iem_ied_inbound_email_domain_id IN ($in)")->fetchAll(PDO::FETCH_COLUMN);
-				if ($mids) {
-					$min = implode(',', array_map('intval', $mids));
-					$this->db->exec("DELETE FROM ima_inbound_message_attachments WHERE ima_iem_inbound_email_message_id IN ($min)");
-				}
-				$this->db->exec("DELETE FROM iem_inbound_email_messages WHERE iem_ied_inbound_email_domain_id IN ($in)");
-				$this->db->exec("DELETE FROM iea_inbound_email_aliases WHERE iea_ied_inbound_email_domain_id IN ($in)");
-				$this->db->exec("DELETE FROM ied_inbound_email_domains WHERE ied_inbound_email_domain_id IN ($in)");
-			}
-		} catch (\Throwable $e) {}
+		mailbox_purge_domains('irs-test-%');
 	}
 
 	private function tearDown() {

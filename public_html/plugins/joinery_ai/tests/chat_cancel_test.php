@@ -17,7 +17,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatTurnContext.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRunner.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AgentLoop.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderInterface.php'));
+require_once(__DIR__ . '/../../../tests/lib/llm_fixtures.php'); // FakeLlmProvider base (+ LlmProviderInterface)
 
 /**
  * A provider stub for the cooperative-cancel path. In 'abort' mode it emits a
@@ -25,9 +25,11 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProv
  * clicking Cancel mid-generation), then honors $shouldAbort by returning the
  * partial with stop_reason 'aborted'. 'end_turn' mode never aborts (the control).
  * 'tool_use' mode returns a tool call so the loop would continue to a second step.
+ *
+ * The interface boilerplate lives in FakeLlmProvider; only the cancel behavior
+ * and the 'stub' identity are overridden here.
  */
-class ChatCancelStubProvider implements LlmProviderInterface {
-    public $calls = 0;
+class ChatCancelStubProvider extends FakeLlmProvider {
     private $mode;
     private $flip_msg_id;
     public function __construct(string $mode, int $flip_msg_id = 0) {
@@ -60,16 +62,9 @@ class ChatCancelStubProvider implements LlmProviderInterface {
                 'content' => [['type' => 'text', 'text' => 'partial answer so far']],
                 'usage' => ['input_tokens' => 3, 'output_tokens' => 4]];
     }
-    public function createMessage(array $params): array {
-        return $this->createMessageStreamed($params, static function (string $d): void {});
-    }
-    public function estimateCost(string $model, array $usage): float { return 0.0; }
     public function models(): array { return ['stub' => 'stub']; }
     public function defaultModel(): string { return 'stub'; }
     public function id(): string { return 'stub'; }
-    public function isPrivate(): bool { return true; }
-    public function reachabilityProbe(): ?string { return null; }
-    public function modelCapabilities(string $model): array { return ['vision' => false, 'document' => false]; }
 }
 
 // ---- Fixtures ------------------------------------------------------------

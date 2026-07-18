@@ -47,7 +47,7 @@ function harness_is_excluded_path($path) {
 	}
 	$excl_files = array('api_test_harness.php', 'index.php', 'run_all.php',
 		'run_multi.php', 'run_automated.php', 'ModelTester.php', 'MultiModelTester.php',
-		'setting_ctl.php', 'menu_probe.php', 'test_runner.php', 'EmailTestRunner.php');
+		'setting_ctl.php', 'menu_probe.php');
 	return in_array(basename($path), $excl_files, true);
 }
 

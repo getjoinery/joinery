@@ -68,6 +68,8 @@ php tests/run.php db           # safe + db
 php tests/run.php test-db      # only the test-database suite (never implied)
 php tests/run.php live         # only live tests (never implied)
 php tests/run.php db --filter=api   # narrow by name or path substring
+php tests/run.php --only=tests/unit/dns_resolver_test.php  # one exact test by repo-relative path
+php tests/run.php db --timeout=30   # override every test's declared wall-clock cap (seconds)
 php tests/run.php --list       # list discovered tests, run nothing
 php tests/run.php --json       # emit the aggregate JSON contract (for CI)
 ```
@@ -76,6 +78,24 @@ php tests/run.php --json       # emit the aggregate JSON contract (for CI)
 never pull in the others. Each test runs in its own subprocess, so a fatal in
 one file cannot take down the run. The runner exits non-zero if any test
 failed — it is the pre-deploy gate and the CI entry point.
+
+A run that matches **zero** declared tests exits non-zero (code 2) with an
+explicit message, rather than reporting a hollow green — a `--filter`/`--only`
+typo or an empty tier is almost always a mistake, and the gate must not pass on
+nothing.
+
+An unrecognized or mistyped `tier:` in a header resolves to `live`, not `safe`:
+`safe` runs on every `php tests/run.php`, so defaulting an unknown tier there
+would be fail-open (a `tier: Live` typo could fire a real-effect suite in the
+pre-deploy gate). `live` never runs unless named, so the typo fails safe — the
+test simply does not run until its header is corrected. `env` fails closed the
+same way, defaulting to `dev-only`.
+
+A test's `needs` are enforced: before running, the runner probes each declared
+dependency (`macmini`, `node`, `stripe-test-keys`, `mailgun`, `b2`, …). An unmet
+need makes the test a reported **SKIP** with its reason — never a silent pass and
+never a hard failure — so a box without the dependency stays green honestly. An
+unrecognized need name is treated as met (it never blindly skips).
 
 Any single test also runs on its own and prints a human summary, or emits the
 contract with `--json`:

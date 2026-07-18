@@ -44,6 +44,7 @@ $entry->set('cal_blocks_availability', true);
 $entry->set('cal_visibility', 'details');
 $entry->set('cal_type', 'personal');
 $entry->save();
+harness_register_row('cal_entries', 'cal_calendar_entry_id', (int)$entry->key);
 ok('entry saved with an id', (bool)$entry->key);
 
 CalendarItemSourceRegistry::resetCache();
@@ -73,6 +74,7 @@ $free->set('cal_end_utc', gmdate('Y-m-d H:i:s', strtotime('+3 days 09:30')));
 $free->set('cal_blocks_availability', false);
 $free->set('cal_title', 'Reminder');
 $free->save();
+harness_register_row('cal_entries', 'cal_calendar_entry_id', (int)$free->key);
 
 // Discriminate blocking vs non-blocking against the source directly — the merged
 // registry busy projection also contains this user's events, which would mask it.

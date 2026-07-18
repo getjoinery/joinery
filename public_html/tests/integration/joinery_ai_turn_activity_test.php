@@ -29,46 +29,23 @@
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderInterface.php'));
+require_once(__DIR__ . '/../lib/llm_fixtures.php'); // ScriptedLlmProvider (+ LlmProviderInterface)
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatTurnContext.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatAsync.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatTurn.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSerializer.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AgentLoop.php'));
 
-/** Scripted provider: each createMessageStreamed() call shifts the next
- *  response off the queue, streaming its text through the sink first. */
-class FakeActivityProvider implements LlmProviderInterface {
-    private $responses;
-    public function __construct(array $responses) { $this->responses = $responses; }
-    public function createMessageStreamed(array $params, callable $onTextDelta, ?callable $shouldAbort = null): array {
-        $response = array_shift($this->responses);
-        foreach (($response['content'] ?? []) as $block) {
-            if (($block['type'] ?? '') === 'text' && $block['text'] !== '') {
-                $onTextDelta($block['text']);
-            }
-        }
-        return $response;
-    }
-    public function createMessage(array $params): array {
-        return $this->createMessageStreamed($params, function ($d) {});
-    }
-    public function estimateCost(string $model, array $usage): float { return 0.0; }
-    public function models(): array { return []; }
-    public function defaultModel(): string { return 'fake/test-model'; }
-    public function id(): string { return 'fake'; }
-    public function isPrivate(): bool { return true; }
-    public function reachabilityProbe(): ?string { return null; }   // an in-memory fake is always reachable
-    public function modelCapabilities(string $model): array {
-        return ['vision' => false, 'document' => false];
-    }
-}
-
 section('joinery_ai turn-activity lifecycle');
 
 // --- fixtures: a throwaway conversation + running assistant row -------------
 
-$owner_uid = 1;
+// Any real user owns the throwaway conversation — derive one rather than assume
+// user 1 exists (a fresh install may not have it).
+$owner_uid = (int)DbConnector::get_instance()->get_db_link()
+	->query("SELECT usr_user_id FROM usr_users WHERE usr_delete_time IS NULL ORDER BY usr_user_id LIMIT 1")
+	->fetchColumn();
+if ($owner_uid <= 0) { harness_skip('no active user to own the test conversation'); harness_finish(); }
 $conversation = new AiConversation(NULL);
 $conversation->set('aic_owner_user_id', $owner_uid);
 $conversation->set('aic_title', 'activity-test ' . gmdate('His'));
@@ -94,7 +71,7 @@ try {
     $ctx->setActivityStamper($capture);
     // >80 chars so the throttled sink flushes on the first delta.
     $long_text = str_repeat('All work and no play makes the assistant a dull model. ', 3);
-    $provider = new FakeActivityProvider([
+    $provider = new ScriptedLlmProvider([
         [
             'stop_reason' => 'end_turn',
             'content'     => [['type' => 'text', 'text' => $long_text]],
@@ -127,7 +104,7 @@ try {
     $ctx2 = new ChatTurnContext($conversation, $owner_uid);
     $ctx2->setActivityStamper(function (string $label) use (&$labels2): void { $labels2[] = $label; });
     $tool_use = ['type' => 'tool_use', 'id' => 'toolu_x1', 'name' => 'nonexistent_tool', 'input' => []];
-    $provider2 = new FakeActivityProvider([
+    $provider2 = new ScriptedLlmProvider([
         ['stop_reason' => 'tool_use', 'content' => [$tool_use], 'usage' => []],
         ['stop_reason' => 'end_turn',
          'content' => [['type' => 'text', 'text' => 'done']], 'usage' => []],

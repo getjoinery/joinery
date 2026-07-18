@@ -83,7 +83,7 @@ The plugin exposes its logic layer as REST API actions under the `dns_filtering/
 
 The web AJAX endpoints (`ajax/block_rule_add.php`, `block_rule_delete.php`, `block_filter_set.php`, `purge_querylog.php`, `test_domain.php`, `scan_url.php`) are thin wrappers over the same logic functions, preserving their original JSON shapes (and `test_domain`'s GET contract).
 
-`scan_url`'s SSRF boundary is `scan_url_validate_target()` in `logic/scan_url_logic.php`: scheme allowlist, all-resolved-IPs private/loopback/link-local rejection (fail closed), `CURLOPT_RESOLVE` IP pinning, and manual redirect walking with per-hop revalidation. Covered by `tests/unit/scan_url_validate_target_test.php`.
+`scan_url`'s SSRF boundary is the platform-shared `UrlSafetyValidator` (`includes/UrlSafetyValidator.php`), called from `logic/scan_url_logic.php` with `allowed_ports => null` so the page scanner can reach dev sites on non-standard ports: scheme allowlist, all-resolved-IPs private/loopback/link-local/reserved rejection (fail closed), `CURLOPT_RESOLVE` IP pinning, and manual redirect walking with per-hop revalidation. Covered by `tests/unit/url_safety_validator_test.php`.
 
 ### Hard-block rules
 

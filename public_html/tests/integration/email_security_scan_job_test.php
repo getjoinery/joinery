@@ -34,7 +34,7 @@
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 require_once(PathHelper::getIncludePath('data/users_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderInterface.php'));
+require_once(__DIR__ . '/../lib/llm_fixtures.php'); // ScriptedLlmProvider (+ LlmProviderInterface)
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineRunner.php'));
@@ -54,34 +54,6 @@ function throws_invalid(callable $fn) {
     catch (InvalidArgumentException $e) { return true; }
 }
 
-class FakeVerdictProvider implements LlmProviderInterface {
-    private $responses;
-    public $calls = 0;
-    public function __construct(array $responses) { $this->responses = $responses; }
-    public function createMessageStreamed(array $params, callable $onTextDelta, ?callable $shouldAbort = null): array {
-        return $this->createMessage($params);
-    }
-    public function createMessage(array $params): array {
-        $this->calls++;
-        $next = array_shift($this->responses) ?? ['text' => '{}'];
-        return [
-            'stop_reason' => 'end_turn',
-            'content' => [['type' => 'text', 'text' => $next['text']]],
-            'usage' => $next['usage'] ?? [
-                'input_tokens' => 10, 'output_tokens' => 10,
-                'cache_creation_input_tokens' => 0, 'cache_read_input_tokens' => 0,
-            ],
-        ];
-    }
-    public function estimateCost(string $model, array $usage): float { return 0.0; }
-    public function models(): array { return []; }
-    public function defaultModel(): string { return 'fake/test-model'; }
-    public function id(): string { return 'fake'; }
-    public function isPrivate(): bool { return true; }
-    public function reachabilityProbe(): ?string { return null; }
-    public function modelCapabilities(string $model): array { return ['vision' => false, 'document' => false]; }
-}
-
 $db = DbConnector::get_instance()->get_db_link();
 $owner_uid = (int)$db->query("SELECT usr_user_id FROM usr_users WHERE usr_permission >= 10 AND usr_delete_time IS NULL ORDER BY usr_user_id LIMIT 1")->fetchColumn();
 if ($owner_uid <= 0) {
@@ -98,6 +70,8 @@ $domain->set('ied_domain', "zztest-{$suffix}.example");
 $domain->set('ied_is_enabled', true);
 $domain->set('ied_reject_unmatched', true);
 $domain->save();
+// Crash-safe teardown registered at creation (LIFO runs children before parents).
+harness_defer(function () use ($domain) { try { $domain->permanent_delete(); } catch (Throwable $e) {} });
 
 $alias = new InboundEmailAlias(NULL);
 $alias->set('iea_ied_inbound_email_domain_id', (int)$domain->key);
@@ -106,6 +80,7 @@ $alias->set('iea_delivery_mode', InboundEmailAlias::MODE_STORE);
 $alias->set('iea_is_enabled', true);
 $alias->prepare();
 $alias->save();
+harness_defer(function () use ($alias) { try { $alias->permanent_delete(); } catch (Throwable $e) {} });
 
 $address = 'zzscan@' . $domain->get('ied_domain');
 echo "test alias: $address (id={$alias->key})\n\n";
@@ -146,6 +121,7 @@ if (count($pre_existing_grant) === 0) {
     $grant->set('ieg_iea_inbound_email_alias_id', (int)$alias->key);
     $grant->set('ieg_usr_user_id', $owner_uid);
     $grant->save();
+    harness_defer(function () use ($grant) { try { $grant->permanent_delete(); } catch (Throwable $e) {} });
     $grant_created = true;
 } else {
     $grant = $pre_existing_grant->current();
@@ -155,6 +131,17 @@ $prepare_ok = true;
 try { $recipe->prepare(); } catch (RecipeException $e) { $prepare_ok = false; }
 ok('save succeeds once the owner holds a grant', $prepare_ok);
 $recipe->save();
+$recipe_cleanup_id = (int)$recipe->key;
+harness_defer(function () use ($recipe_cleanup_id) {
+    $runs = new MultiRecipeRun(['recipe_id' => $recipe_cleanup_id]);
+    $runs->load();
+    foreach ($runs as $r) { $r->permanent_delete(); }
+    $logs = new MultiAipRecipeItemLog(['recipe_id' => $recipe_cleanup_id]);
+    $logs->load();
+    foreach ($logs as $l) { $l->permanent_delete(); }
+    $rr = new Recipe($recipe_cleanup_id, true);
+    if ($rr->key) { $rr->permanent_delete(); }
+});
 
 // --- 4. nextItem(): oldest non-spam, not-yet-logged, on the configured alias
 section("4. nextItem");
@@ -176,6 +163,7 @@ function make_message(int $domain_id, int $alias_id, string $subject, string $bo
     if ($spam_verdict !== null) $msg->set('iem_spam_verdict', $spam_verdict);
     $msg->set('iem_received_time', gmdate('Y-m-d H:i:s', strtotime("$received_offset_minutes minutes")));
     $msg->save();
+    harness_defer(function () use ($msg) { try { $msg->permanent_delete(); } catch (Throwable $e) {} });
     return $msg;
 }
 
@@ -246,12 +234,14 @@ $log2->save();
 $other_domain = new InboundEmailDomain(NULL);
 $other_domain->set('ied_domain', "zztest-other-{$suffix}.example");
 $other_domain->save();
+harness_defer(function () use ($other_domain) { try { $other_domain->permanent_delete(); } catch (Throwable $e) {} });
 $other_alias = new InboundEmailAlias(NULL);
 $other_alias->set('iea_ied_inbound_email_domain_id', (int)$other_domain->key);
 $other_alias->set('iea_alias', 'zzother');
 $other_alias->set('iea_delivery_mode', InboundEmailAlias::MODE_STORE);
 $other_alias->prepare();
 $other_alias->save();
+harness_defer(function () use ($other_alias) { try { $other_alias->permanent_delete(); } catch (Throwable $e) {} });
 $msg_elsewhere = make_message((int)$other_domain->key, (int)$other_alias->key, 'Elsewhere', 'body', null, '-5');
 
 ok('recordVerdict refuses a message outside the configured mailbox', throws_invalid(
@@ -267,7 +257,7 @@ $run->set('rcr_started_time', gmdate('Y-m-d H:i:s'));
 $run->save();
 $ctx = new RecipeRunContext($recipe, $run);
 
-$provider = new FakeVerdictProvider([
+$provider = new ScriptedLlmProvider([
     // msg_newer is already logged (step 6 recorded it) — the only remaining
     // item is msg_spam, which nextItem() must never surface, so end_turn
     // (caught up) with zero provider calls is the only correct outcome.
@@ -287,7 +277,7 @@ $run2->set('rcr_started_time', gmdate('Y-m-d H:i:s'));
 $run2->save();
 $ctx2 = new RecipeRunContext($recipe, $run2);
 
-$provider2 = new FakeVerdictProvider([
+$provider2 = new ScriptedLlmProvider([
     ['text' => '{"score": 1, "verdict": "safe", "red_flags": [], "summary": "Ordinary newsletter."}'],
     ['text' => '{"score": 8, "verdict": "dangerous", "red_flags": [{"check":"D","finding":"Demands immediate sign-in."}], "summary": "Likely phishing."}'],
 ]);
@@ -299,26 +289,8 @@ $msg_a->load(); $msg_b->load();
 ok('newsletter scored 1 (safe)', (int)$msg_a->get('iem_ai_danger_score') === 1);
 ok('account-alert scored 8 (dangerous)', (int)$msg_b->get('iem_ai_danger_score') === 8);
 
-// --- cleanup -----------------------------------------------------------------
-echo "\ncleaning up...\n";
-foreach ([$msg_oldest, $msg_spam, $msg_newer, $msg_elsewhere, $msg_a, $msg_b] as $m) {
-    try { $m->permanent_delete(); } catch (Throwable $e) { echo "  (cleanup) message {$m->key}: {$e->getMessage()}\n"; }
-}
-try { $other_alias->permanent_delete(); } catch (Throwable $e) {}
-try { $other_domain->permanent_delete(); } catch (Throwable $e) {}
-if ($grant_created) {
-    try { $grant->permanent_delete(); } catch (Throwable $e) {}
-}
-try { $alias->permanent_delete(); } catch (Throwable $e) {}
-try { $domain->permanent_delete(); } catch (Throwable $e) {}
-
-$rid = (int)$recipe->key;
-$runs = new MultiRecipeRun(['recipe_id' => $rid]);
-$runs->load();
-foreach ($runs as $r) { $r->permanent_delete(); }
-$logs = new MultiAipRecipeItemLog(['recipe_id' => $rid]);
-$logs->load();
-foreach ($logs as $l) { $l->permanent_delete(); }
-$recipe->permanent_delete();
+// Cleanup runs via the harness_defer calls registered at each fixture's creation
+// (LIFO — children before parents), so a mid-suite failure still reclaims every
+// throwaway domain, alias, grant, message, recipe, run, and log.
 
 harness_finish();

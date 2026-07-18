@@ -29,23 +29,8 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_doma
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RawMessageStore.php'));
-
-/** In-memory CloudStorageDriver standing in for the verified-private bucket. */
-class RawStoreMockDriver implements CloudStorageDriver {
-	public $objects = array();
-	public function put(string $local_path, string $remote_key, string $content_type): void {
-		$this->objects[$remote_key] = (string)file_get_contents($local_path);
-	}
-	public function get(string $remote_key, string $local_path): void {
-		if (!array_key_exists($remote_key, $this->objects)) {
-			throw new RuntimeException('mock: no such object ' . $remote_key);
-		}
-		file_put_contents($local_path, $this->objects[$remote_key]);
-	}
-	public function delete(string $remote_key): void { unset($this->objects[$remote_key]); }
-	public function url(string $remote_key): string { return ''; }
-	public function ping(): array { return array('ok' => true, 'message' => 'mock'); }
-}
+require_once(__DIR__ . '/../../../tests/lib/cloud_fixtures.php'); // InMemoryBlobDriver
+require_once(__DIR__ . '/lib/mailbox_test_fixture.php'); // mailbox_purge_domains()
 
 class RawMessageStoreTest {
 	private $db;
@@ -108,16 +93,7 @@ class RawMessageStoreTest {
 	}
 
 	private function preClean() {
-		try {
-			$dids = $this->db->query("SELECT ied_inbound_email_domain_id FROM ied_inbound_email_domains
-				WHERE ied_domain LIKE 'rms-test-%'")->fetchAll(PDO::FETCH_COLUMN);
-			if ($dids) {
-				$in = implode(',', array_map('intval', $dids));
-				$this->db->exec("DELETE FROM iem_inbound_email_messages WHERE iem_ied_inbound_email_domain_id IN ($in)");
-				$this->db->exec("DELETE FROM iea_inbound_email_aliases WHERE iea_ied_inbound_email_domain_id IN ($in)");
-				$this->db->exec("DELETE FROM ied_inbound_email_domains WHERE ied_inbound_email_domain_id IN ($in)");
-			}
-		} catch (\Throwable $e) {}
+		mailbox_purge_domains('rms-test-%');
 	}
 
 	private function testKeyLayout() {
@@ -187,7 +163,7 @@ class RawMessageStoreTest {
 
 	private function testCloudRoundTrip() {
 		section('Cloud round-trip');
-		$mock = new RawStoreMockDriver();
+		$mock = new InMemoryBlobDriver();
 		$key = RawMessageStore::keyFor($this->message_id);
 		$raw = "From: c@d\r\nSubject: cloud\r\n\r\ncloud bytes " . $this->suffix;
 		$mock->objects[$key] = $raw;
