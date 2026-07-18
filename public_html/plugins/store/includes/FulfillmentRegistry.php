@@ -13,7 +13,7 @@
  * Store-owned registry. Fail soft: a product with no fulfillment provider simply
  * has nothing to fulfill.
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 
 interface FulfillmentProvider {
@@ -28,6 +28,26 @@ interface FulfillmentProvider {
      * required survey). Returns AbstractProductRequirement[].
      */
     public function extraRequirements(Product $product, int $ref): array;
+    /**
+     * Whether this fulfillment can still be delivered, asked BEFORE the charge.
+     *
+     * fulfill() runs after payment succeeds, so it is the wrong place to
+     * discover that a thing has run out: refusing there means the buyer has
+     * already been charged for something they cannot be given. Anything with a
+     * finite supply — event seats, workshop places, provisioned machines —
+     * answers here instead, while the purchase can still be declined for free.
+     *
+     * Return NULL to proceed, or a buyer-facing sentence explaining the refusal
+     * (it is shown to them as-is).
+     *
+     * $quantity is the number of units this cart line would consume.
+     *
+     * Advisory, not a lock: two checkouts can pass this concurrently and both
+     * proceed. It closes the ordinary case — a full event still selling seats —
+     * not a determined race. A provider needing a hard guarantee enforces it
+     * with a database constraint of its own.
+     */
+    public function checkAvailability(Product $product, int $ref, int $quantity): ?string;
     /**
      * Run fulfillment on a successful, paid purchase. Returns
      * ['ref_id' => ?int, 'label' => ?string, 'labels' => ?array] for the

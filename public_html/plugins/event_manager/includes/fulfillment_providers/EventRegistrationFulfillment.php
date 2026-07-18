@@ -48,6 +48,50 @@ class EventRegistrationFulfillment implements FulfillmentProvider {
         return $out;
     }
 
+    /**
+     * Refuse a purchase that would seat more people than the event holds.
+     *
+     * evt_max_signups decides whether the Register button renders, but the
+     * button is not the only way to reach checkout — a product URL reaches it
+     * directly. Asking here means a full event stops selling seats instead of
+     * charging for one that does not exist.
+     *
+     * A bundle ($ref <= 0) seats a group whose membership is resolved at
+     * fulfillment, so its size is not known here; bundles are not capacity
+     * checked. An event with no evt_max_signups is uncapped.
+     */
+    public function checkAvailability(Product $product, int $ref, int $quantity): ?string {
+        if ($ref <= 0) {
+            return null;
+        }
+        require_once(PathHelper::getIncludePath('plugins/event_manager/data/events_class.php'));
+        require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_registrants_class.php'));
+
+        $event = new Event($ref, TRUE);
+        if (!$event->key) {
+            return null;
+        }
+        $max = (int)$event->get('evt_max_signups');
+        if ($max <= 0) {
+            return null;
+        }
+
+        // Expired registrations no longer hold a seat, matching the count the
+        // event page shows.
+        $registrants = new MultiEventRegistrant(array('event_id' => $event->key, 'expired' => false));
+        $taken = (int)$registrants->count_all();
+        $remaining = $max - $taken;
+
+        if ($remaining <= 0) {
+            return trim((string)$event->get('evt_name')) . ' is full.';
+        }
+        if ($quantity > $remaining) {
+            return trim((string)$event->get('evt_name')) . ' has only ' . $remaining
+                . ' ' . ($remaining === 1 ? 'place' : 'places') . ' left.';
+        }
+        return null;
+    }
+
     public function fulfill(User $user, Product $product, OrderItem $order_item, Order $order, int $ref): array {
         require_once(PathHelper::getIncludePath('plugins/event_manager/data/events_class.php'));
 

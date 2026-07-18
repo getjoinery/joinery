@@ -159,6 +159,20 @@ class EmailSender {
             throw new Exception('Invalid email message: ' . implode(', ', $errors));
         }
 
+        // Dry run: the message is fully built and validated, but no transport is
+        // touched and nothing is queued. Placed after validation so a dry run still
+        // surfaces a malformed message, and above the transport branches so it
+        // covers the injected-transport path as well as the global-service one.
+        $settings = Globalvars::get_instance();
+        if ((string)$settings->get_setting('email_dry_run') === '1') {
+            $this->logEmailDebug(
+                'Dry run: suppressed send to '
+                . implode(', ', array_column($message->getRecipients() ?: array(), 'email'))
+                . ' — subject: ' . $message->getSubject(),
+                'dry-run');
+            return true;
+        }
+
         // Injected transport: send through it directly, no provider fallback.
         if ($transport !== null) {
             $service = method_exists($transport, 'getKey') ? $transport::getKey() : get_class($transport);
@@ -185,7 +199,6 @@ class EmailSender {
         }
 
         // Use service selection with fallback
-        $settings = Globalvars::get_instance();
         $service = $settings->get_setting('email_service') ?: 'mailgun';
         $fallback = $settings->get_setting('email_fallback_service') ?: 'smtp';
 

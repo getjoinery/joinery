@@ -476,8 +476,18 @@ private static function UcName($string) {
 
 			$dblink->commit();
 		}
-		catch (TTClassException $e) {
-			$dblink->rollBack();
+		// Roll back on ANY failure, not just TTClassException. CreateNew reaches
+		// GeneratePassword, which throws DisplayableUserException for a password
+		// that fails the rules — an ordinary, expected outcome of a bad signup.
+		// Catching only TTClassException let that escape with the transaction
+		// still open: a web request papered over it by dying, but any long-lived
+		// process (CLI, queue worker, test run) kept a poisoned connection and
+		// failed every subsequent write with "There is already an active
+		// transaction".
+		catch (\Throwable $e) {
+			if ($dblink->inTransaction()) {
+				$dblink->rollBack();
+			}
 			throw $e;
 		}
 
@@ -625,10 +635,6 @@ private static function UcName($string) {
 		$password = trim($password);
 		if (strlen($password) < 8) {
 			throw new DisplayableUserException('Your password must be at least 8 characters');
-		}
-
-		if (strstr(' ', $password) !== FALSE) {
-			throw new DisplayableUserException('Your password cannot contain spaces.');
 		}
 
 		return password_hash($password, PASSWORD_ARGON2ID);

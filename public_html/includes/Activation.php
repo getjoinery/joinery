@@ -162,9 +162,15 @@ class Activation {
 		$statement->execute();
 	}
 
+	// act_deleted = FALSE is part of what makes a code valid, not an extra the
+	// caller may remember to add. Without it here, a consumed code stayed live
+	// for the rest of its lifetime through every path that resolves a code
+	// without calling checkTempCode first — ActivateUser among them, which
+	// login_logic reaches directly. Consuming a code has to mean something
+	// everywhere it is honoured.
 	static function getIdFromTempCode($act_code, $act_purpose){
 		$statement = DbConnector::GetPreparedStatement(
-			'SELECT act_usr_user_id FROM act_activation_codes WHERE
+			'SELECT act_usr_user_id FROM act_activation_codes WHERE act_deleted = FALSE AND
 			act_code = :act_code AND act_expires_time > NOW() AND act_purpose = :act_purpose');
 
 		$act_code_lower = strtolower($act_code);
@@ -181,9 +187,10 @@ class Activation {
 		return FALSE;
 	}
 
+	// act_deleted = FALSE for the same reason as getIdFromTempCode above.
 	static function getTempCodeInfo($act_code, $act_purpose){
 		$statement = DbConnector::GetPreparedStatement(
-			'SELECT * FROM act_activation_codes WHERE act_code = :act_code AND act_expires_time > NOW() AND act_purpose = :act_purpose');
+			'SELECT * FROM act_activation_codes WHERE act_deleted = FALSE AND act_code = :act_code AND act_expires_time > NOW() AND act_purpose = :act_purpose');
 		$act_code_lower = strtolower($act_code);
 		$statement->bindParam(':act_code', $act_code_lower, PDO::PARAM_STR);
 		$statement->bindParam(':act_purpose', $act_purpose, PDO::PARAM_INT);

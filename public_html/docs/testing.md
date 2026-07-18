@@ -186,7 +186,13 @@ Settings and databases:
 
 - `get_setting_raw($name)` / `set_setting_raw($name, $value)` — persisted DB settings.
 - `harness_set_setting_mem($key, $value)` — override a setting in the Globalvars
-  in-memory cache only, restored at teardown. Never persisted.
+  in-memory cache only, restored at teardown. Never persisted. **A blank value
+  does not override.** `Globalvars::get_setting()` treats an empty in-memory
+  value as a cache miss and reads the database instead, so a setting cannot be
+  switched off by blanking it — the live value silently wins and the test
+  exercises the wrong branch. Use `'0'` where the setting is a flag; where the
+  setting is free text whose emptiness means "off" (`anti_spam_answer`), read
+  the live value and satisfy the check rather than trying to disable it.
 - `harness_test_mode()` — switch to the copied test database and close it at
   teardown; use with tier `test-db`.
 

@@ -234,6 +234,38 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 	}
 
+	//Fulfillment availability, pre-charge: anything with a finite supply gets to
+	//refuse while the purchase can still be declined for free. fulfill() runs
+	//only after payment succeeds, so a refusal there would mean the buyer has
+	//already been charged for something that cannot be delivered.
+	require_once(PathHelper::getIncludePath('plugins/store/includes/FulfillmentRegistry.php'));
+	foreach($cart->items as $key => $cart_item) {
+		list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
+		if(!$product->get('pro_fulfillment_provider')){
+			continue;
+		}
+		$availability_provider = FulfillmentRegistry::get($product->get('pro_fulfillment_provider'));
+		if(!$availability_provider){
+			//An unresolvable provider is handled after the charge, where it is
+			//already logged and stamped onto the order.
+			continue;
+		}
+		try {
+			$unavailable = $availability_provider->checkAvailability(
+				$product, (int)$product->get('pro_fulfillment_ref'), (int)$quantity);
+		}
+		catch (\Throwable $e) {
+			//A provider that cannot answer must not take the checkout down with
+			//it; treat silence as available and let fulfillment report the truth.
+			error_log('cart_charge_logic: checkAvailability failed for product #'
+				. $product->key . ': ' . $e->getMessage());
+			$unavailable = null;
+		}
+		if($unavailable !== null){
+			return _checkout_error($unavailable);
+		}
+	}
+
 	$payment_service = '';
 	if($charge_total > 0){
 		if($settings->get_setting('use_paypal_checkout') && (!empty($_GET['id']) || !empty($_GET['subscription']))){

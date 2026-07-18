@@ -1329,6 +1329,65 @@ security invariant (`oks <= 1`) every round, and tolerates ≤2 infrastructure
 casualties under maximum load while keeping "exactly one consumed" strict — 15/15
 standalone + 9/9 under heavy load after hardening.
 
+**T23 account security lifecycle — DONE 2026-07-18.** The top-ranked zero now has
+four db-tier suites under `tests/account_security/` — 137 checks, all inside the
+pre-deploy gate rather than behind a live HTTP round trip, because the logic
+functions are callable in-process through `harness_call_logic`:
+
+- `registration_test.php` (35) — the feature gate, three bot defenses, required
+  fields in both bare and `lbx_reg_` forms, duplicate and platform-hosted address
+  refusals, Argon2id hashing, and the successful path down to the activation code
+  actually minted.
+- `login_test.php` (31) — credential refusals proven indistinguishable (no
+  enumeration oracle), the per-IP failure throttle at both edges plus window
+  expiry and success exclusion, the IP allowlist including CIDR, the activation
+  gate, and the second-factor divert asserting the diverted session is NOT signed
+  in under either cadence.
+- `password_reset_test.php` (40) — code entropy/shape/distinctness, expiry,
+  single use across all three resolvers, purpose and ownership isolation, the
+  completion flow, and reset-request throttling.
+- `stepup_test.php` (30) — factor detection, marker TTL asserted on both sides of
+  the boundary, session binding, the gate's four decisions, and the open-redirect
+  guard across seven hostile return URLs.
+
+Four product defects surfaced and were fixed, which is the return on testing an
+untested subsystem:
+
+1. **Consumed activation codes stayed live (security).** Validity was expressed in
+   three lookups and only `checkTempCode` filtered `act_deleted`;
+   `getIdFromTempCode` and `getTempCodeInfo` did not. `Activation::ActivateUser`
+   resolves through the former and `login_logic.php:36` calls it with no
+   `checkTempCode` in front, so a spent activation link stayed a working
+   credential for its full lifetime — and for an account with no password set
+   that branch calls `store_session_variables()`, signing the visitor in. Old
+   activation mail was account takeover. `profile_logic.php:37` and two admin
+   pages shared the exposure; `recovery_verify_logic.php:32` carries a comment
+   showing the asymmetry was known and locally worked around. Fixed at the source
+   — both resolvers now filter `act_deleted` — which covers every caller and
+   costs no UX, since `ActivateUser` never deletes codes and re-clicking a valid
+   link still works. Reverting the fix turns exactly five checks red.
+2. **`User::CreateCompleteNew` leaked an open transaction.** It caught only
+   `TTClassException`, so the `DisplayableUserException` a failing password raises
+   escaped with the transaction open. A web request hid it by dying; any
+   long-lived process kept a poisoned connection and failed every later write.
+3. **`email_dry_run` did nothing.** A declared setting with an admin control
+   reading "prevent all sending, just log" that `EmailSender::send()` never
+   consulted. Registration and reset both send, and dev points `email_service` at
+   mailgun, so the gate would have emitted real mail on every run.
+4. **The password no-spaces rule was unreachable and is deleted.**
+   `strstr(' ', $password)` had haystack and needle reversed, so it never fired.
+   Removed rather than repaired: a passphrase with spaces is a good password,
+   nothing in the UI claimed otherwise, and `GeneratePassword`/`check_password`
+   already trim symmetrically. No replacement check — asserting that something is
+   accepted asserts the absence of a rule, of which there are infinitely many.
+
+Also documented: `harness_set_setting_mem` cannot blank a setting, because
+`Globalvars::get_setting()` treats an empty in-memory value as a cache miss and
+falls through to the database. It silently routes a test down the wrong branch;
+`docs/testing.md` now says so.
+
+Gate after: safe 39/39 (765 checks), db 114/114 (2790 checks).
+
 **Generation-2 store testers RETIRED — DONE 2026-07-18.** The two bespoke tester
 classes plus their runner shims (~3,200 lines) are deleted and re-expressed as
 native harness tests. Both are verified green against real Stripe test mode.
@@ -1589,7 +1648,7 @@ Ranked by the estate-wide gap map. Each is a new suite for a subsystem with no
 business-logic coverage today:
 
 - **T23. Account security lifecycle** (registration, login lockout, password reset,
-  email verification, step-up) — the highest-risk zero. Est. L.
+  email verification, step-up) — the highest-risk zero. ✅ DONE (see progress log).
 - **T24. event_manager** (registration, waiting lists, ICS, checkout+survey path) —
   its tests/ dir exists and is empty. Est. L.
 - **T25. server_manager** (JobCommandBuilder, JobResultProcessor) — the production
