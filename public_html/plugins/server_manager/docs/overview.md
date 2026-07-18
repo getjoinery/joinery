@@ -253,7 +253,11 @@ declares in `pro_fulfillment_provider`:
   port, and dispatches an `install_node` job. The buyer's site is a container
   on infrastructure the operator owns.
 - **`customer_cloud`**: the buyer's site runs on a server in **their own
-  cloud account**, billed to them by the provider — see below.
+  cloud account**, billed to them by the provider — see below. A product opts
+  in by picking **Customer cloud server** in the product-edit Purchase grants
+  picker (`CustomerCloudFulfillment`, registered with the store's
+  FulfillmentRegistry from serve.php); that stamps the provider value and
+  contributes the domain question as a checkout requirement automatically.
 
 Both modes end the same way: `install_node` completes, the welcome email goes
 out with DNS instructions, and `ProvisionPendingSsl` turns HTTPS on once DNS

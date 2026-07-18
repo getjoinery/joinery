@@ -226,6 +226,66 @@ array_map('unlink', glob($key_dir . '/provisioning_key*'));
 rmdir($key_dir);
 
 // ---------------------------------------------------------------------------
+section('CustomerCloudFulfillment provider');
+// ---------------------------------------------------------------------------
+
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/fulfillment_providers/CustomerCloudFulfillment.php'));
+$provider = new CustomerCloudFulfillment();
+check($provider->key() === 'customer_cloud', 'provider key matches the poll-task fork value');
+check(count($provider->options()) === 1, 'single picker option (no per-ref entity)');
+
+// Unconfigured case FIRST: Globalvars caches non-blank settings on first
+// read, so the blank-setting check must run before the configured one.
+require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php'));
+$fake_product = new Product(NULL);
+$q_setting_hold = ProvisioningSetup::readSetting('server_manager_provisioning_domain_question_id');
+ProvisioningSetup::writeSetting('server_manager_provisioning_domain_question_id', '');
+check($provider->extraRequirements($fake_product, 0) === array(),
+	'no requirement contributed when the question is unconfigured');
+ProvisioningSetup::writeSetting('server_manager_provisioning_domain_question_id', $q_setting_hold);
+
+$reqs = $provider->extraRequirements($fake_product, 0);
+check(count($reqs) === 1 && $reqs[0] instanceof QuestionRequirement,
+	'contributes the domain question as a checkout requirement');
+
+// fulfill(): creates the provision row from the order's stored domain answer.
+require_once(PathHelper::getIncludePath('plugins/store/data/orders_class.php'));
+require_once(PathHelper::getIncludePath('plugins/store/data/order_items_class.php'));
+require_once(PathHelper::getIncludePath('plugins/store/data/order_item_requirements_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
+
+$buyer = make_user('CcfBuyer');
+$odi = new OrderItem(NULL);
+$odi->set('odi_ord_order_id', 999999901);
+$odi->set('odi_pro_product_id', 999999901);
+$odi->set('odi_usr_user_id', $buyer->key);
+$odi->save();
+$odi->load();
+harness_register_row('odi_order_items', 'odi_order_item_id', $odi->key);
+
+$oir = new OrderItemRequirement(NULL);
+$oir->set('oir_odi_order_item_id', $odi->key);
+$oir->set('oir_qst_question_id', $q1['question_id']);
+$oir->set('oir_label', 'Domain');
+$oir->set('oir_answer', 'Fulfill-Test.Example.COM');
+$oir->save();
+$oir->load();
+harness_register_row('oir_order_item_requirements', 'oir_order_item_requirement_id', $oir->key);
+
+$f1 = $provider->fulfill($buyer, $fake_product, $odi, new Order(NULL), 0);
+check((int)($f1['ref_id'] ?? 0) > 0, 'fulfill creates a provision row');
+$cvp = new CustomerCloudProvision((int)$f1['ref_id'], TRUE);
+harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $cvp->key);
+check($cvp->get('cvp_status') === 'pending_connect', 'provision starts at pending_connect (no grant)');
+check($cvp->get('cvp_slug') === 'fulfill-test-example-com', 'slug sanitized from the domain answer');
+check((int)$cvp->get('cvp_usr_user_id') === (int)$buyer->key, 'provision linked to the buyer');
+
+$f2 = $provider->fulfill($buyer, $fake_product, $odi, new Order(NULL), 0);
+check(($f2['ref_id'] ?? null) === null, 'second fulfill defers (row already exists)');
+$dupes = new MultiCustomerCloudProvision(array('external_order_item_id' => (int)$odi->key, 'deleted' => false));
+check((int)$dupes->count_all() === 1, 'no duplicate provision row created');
+
+// ---------------------------------------------------------------------------
 section('status reflects state');
 // ---------------------------------------------------------------------------
 

@@ -17,3 +17,13 @@ $routes = [
 		],
 	],
 ];
+
+// ---- Product fulfillment: customer-cloud server (the store↔server_manager
+// seam). Registered only when the store plugin is present; picking it on a
+// product is the entire product-side setup for BYO-cloud hosting.
+$smf_registry = PathHelper::getIncludePath('plugins/store/includes/FulfillmentRegistry.php');
+if (file_exists($smf_registry)) {
+	require_once($smf_registry);
+	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/fulfillment_providers/CustomerCloudFulfillment.php'));
+	FulfillmentRegistry::register(new CustomerCloudFulfillment());
+}
