@@ -160,10 +160,20 @@ The assertion surface:
 Fixtures and teardown (all LIFO, run automatically at finish or on crash):
 
 - `make_user($suffix, $permission = 0)` — a test user, registered for cleanup.
+  The generated email carries a per-process random token, so leftovers from a
+  killed run can never collide with the next run's same-suffix fixture.
 - `make_machine_key($user_id, $name, $permission = 4)` — an API key.
 - `harness_register_row($table, $pkey_col, $id)` / `harness_register_user($user)`
   / `harness_register_key_id($id)`.
 - `harness_defer(callable)` — any custom teardown.
+
+Register every row a test creates — or register a parent whose declared
+DB-level foreign keys (`foreign_key` in the field spec, see
+[Deletion System](deletion_system.md)) cascade to the children. Never assume a
+cascade that is not declared. The `referential_integrity` test (tier `safe`)
+fails the gate whenever a run leaves orphan rows, stray `harnesstest_%` users,
+or a serial sequence behind its table's `MAX(pkey)` — a leak surfaces in the
+very next run with the table named, not later as flakiness in another suite.
 
 Settings and databases:
 

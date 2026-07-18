@@ -432,14 +432,17 @@ try {
         if (isset($field_specs[$pkey_column]) && isset($field_specs[$pkey_column]['serial']) && $field_specs[$pkey_column]['serial']) {
             $sequence_name = $table_name . '_' . $pkey_column . '_seq';
 
-            output("Updating sequence '$sequence_name' to $next_id...", 'header');
+            output("Syncing sequence '$sequence_name' (forward-only)...", 'header');
 
             try {
-                $seq_sql = "SELECT setval('$sequence_name', :val, false)";
-                $seq_q = $dblink->prepare($seq_sql);
-                $seq_q->execute(['val' => $next_id]);
-
-                output("Sequence updated successfully", 'success');
+                // Forward-only: advances past MAX(pkey) if behind, never rewinds.
+                require_once(PathHelper::getIncludePath('includes/DatabaseUpdater.php'));
+                $sync = DatabaseUpdater::syncSequenceForward($sequence_name, $table_name, $pkey_column, $dblink);
+                if ($sync['advanced']) {
+                    output("Sequence advanced: {$sync['current']} → {$sync['max']}", 'success');
+                } else {
+                    output("Sequence already at or ahead of MAX({$pkey_column}) — left untouched", 'success');
+                }
             } catch (PDOException $e) {
                 output("Warning: Could not update sequence: " . $e->getMessage(), 'warning');
             }

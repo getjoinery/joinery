@@ -41,7 +41,10 @@ function vault_fixture_vault(string $suffix, string $passphrase = '', int $code_
 	$ceremonies = new VaultCeremonies();
 	$result = $ceremonies->setup($user, (int)$passkey->key, (string)$passkey->get('pkc_label'), $kek, $passphrase, $code_count, false);
 	harness_register_row('uev_user_encryption_vaults', 'uev_user_encryption_vault_id', (int)$result['vault']->key);
-	// uew rows cascade with the vault row (FK ON DELETE CASCADE)
+	// uew rows are removed by the DB-level fk_uew_uev_user_encryption_vault_id
+	// ON DELETE CASCADE (declared in user_encryption_wrappings_class.php and
+	// materialized by update_database; the referential-integrity gate test
+	// verifies it exists)
 	return [
 		'user'           => $user,
 		'passkey'        => $passkey,

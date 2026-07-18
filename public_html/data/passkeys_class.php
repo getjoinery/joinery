@@ -29,7 +29,8 @@ class Passkey extends SystemBase {
 
 	public static $field_specifications = array(
 		'pkc_passkey_credential_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true, 'is_primary_key'=>true),
-		'pkc_usr_user_id'           => array('type'=>'int8', 'is_nullable'=>false, 'index'=>true),
+		'pkc_usr_user_id'           => array('type'=>'int8', 'is_nullable'=>false, 'index'=>true,
+			'foreign_key'=>array('table'=>'usr_users', 'column'=>'usr_user_id', 'on_delete'=>'CASCADE')),
 		'pkc_credential_id'         => array('type'=>'text', 'is_nullable'=>false),
 		'pkc_source_json'           => array('type'=>'text', 'is_nullable'=>false),
 		'pkc_sign_count'            => array('type'=>'int8', 'is_nullable'=>false, 'default'=>0),

@@ -1171,6 +1171,24 @@ Infrastructure (P2):
   teardown removes its own vault + wrappings (0 orphans added — the standing
   vault→uew cascade gap is separate and pre-existing). Full db 101/101.
 
+- **T32 db-tier flakiness root cause (vault suites)** — DONE 2026-07-18. The
+  rotating vault-suite failures (`specs/implemented/test_gate_flakiness.md` has
+  the full investigation and fix) were primary-key reuse: `update_database`'s
+  sequence-sync step rewound serial sequences to `MAX(pkey)` after test
+  teardown deleted the newest rows, while the database contained **zero**
+  foreign-key constraints (the `'foreign_key'` field-spec key was materialized
+  by nothing), so deleted test vaults left 1,894 orphaned rows that re-attached
+  to freshly created vaults sharing a recycled ID. Fix: forward-only sequence
+  sync everywhere (shared `DatabaseUpdater::syncSequenceForward`), the
+  `'foreign_key'` spec key is now materialized as real constraints by
+  update_database + plugin sync (orphans block loudly), migration 150 removed
+  the orphan estate, `make_user` emails carry a per-process token, and the new
+  `tests/schema/referential_integrity_test.php` (tier `safe`) fails the gate on
+  any future orphan/behind-sequence/stray-fixture leak. Hypotheses ruled out:
+  APCu (per-process in CLI), connection exhaustion (sequential subprocesses),
+  concurrency-suite residue (same orphan class as every suite), fixture-name
+  collision (secondary abort mode only, also fixed).
+
 **T21 (unify the two SSRF guards) — DONE 2026-07-17.** The two near-identical
 SSRF validators — joinery_ai's `UrlSafetyValidator` (fetch_url tool) and
 dns_filtering's `scan_url_validate_target()` (scan_url action) — are now one core

@@ -1015,3 +1015,13 @@
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
 
+	// Delete rows violating declared foreign keys (orphaned vault wrappings,
+	// stray test-fixture users and their descendants) so the FOREIGN KEYS step
+	// can materialize the declared constraints in the same run.
+	$migration = array();
+	$migration['database_version'] = '150';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'cleanup_orphaned_fk_rows.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+

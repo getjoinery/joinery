@@ -88,6 +88,45 @@ If no `$foreign_key_actions` is specified:
 - **Default action**: `cascade` (dependent records are deleted)
 - This is safe for most relationships and eliminates configuration for common cases
 
+## Database-Level Foreign Keys (the integrity backstop)
+
+The PHP deletion doctrine above runs only when deletion goes through the
+models. Raw SQL, a crashed process, or a killed test run bypasses it — and a
+child row that survives its parent is worse than clutter: if the parent's
+primary key is ever reallocated, the stale child attaches to the new owner.
+For hard ownership edges, a real database constraint closes that hole.
+
+A field spec declares one with the `foreign_key` key:
+
+```php
+'uew_uev_user_encryption_vault_id' => array('type'=>'int8', 'is_nullable'=>false, 'index'=>true,
+    'foreign_key'=>array('table'=>'uev_user_encryption_vaults',
+                         'column'=>'uev_user_encryption_vault_id',
+                         'on_delete'=>'CASCADE')),
+```
+
+`update_database` (and plugin sync) materializes every declaration as a real
+`FOREIGN KEY ... ON DELETE ...` constraint: missing constraints are created,
+and an existing constraint whose target or `ON DELETE` action differs from the
+declaration is dropped and recreated — the declaration is the single source of
+truth. If orphan rows block creation, the sync reports the table, relation,
+and orphan count as a loud error and refuses to continue silently; clean the
+orphans (a data migration), then re-run. `on_delete` accepts `CASCADE`,
+`SET NULL`, `RESTRICT`, and `NO ACTION`.
+
+**When to declare one:** the child row is meaningless or dangerous without its
+parent — encryption wrappings without their vault, passkey credentials without
+their user. Soft-delete flows are unaffected (soft delete never removes parent
+rows), and the PHP sweeps delete children before parents, so the constraint is
+a no-op behind them — the two layers cannot fight. Ordinary relationships stay
+on the PHP doctrine alone; it handles sentinel values, `prevent`, and
+per-model logic that a DB constraint cannot express.
+
+The `referential_integrity` test (`tests/schema/`, tier `safe`) verifies in
+every gate run that each declaration is materialized, that no declared
+relation has orphan rows, and that no serial sequence sits behind its table's
+`MAX(pkey)`.
+
 ## Using $foreign_key_actions in Models
 
 ### Basic Examples
