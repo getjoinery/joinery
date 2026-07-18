@@ -32,14 +32,14 @@ function event_logic(array $input): LogicResult {
 	}
 
 	if ($instance_date && $event->is_recurring_parent()) {
-		// Check if a materialized instance exists for this date
-		$materialized = $event->_get_materialized_instance_for_date($instance_date);
-		if ($materialized) {
-			// Use the materialized instance as the event
-			$event = $materialized;
-		} else if ($event->date_matches_pattern($instance_date)) {
-			// Create a virtual instance for display
-			$virtual = $event->create_virtual_instance($instance_date);
+		// Shared with the ICS route so a date resolves the same way in both.
+		$resolved = $event->resolve_instance_for_date($instance_date);
+		if ($resolved instanceof Event) {
+			// A materialized instance is a real event; handle it as one.
+			$event = $resolved;
+		} else if ($resolved) {
+			// Virtual instance — display only, registration not yet open.
+			$virtual = $resolved;
 			$page_vars['event'] = $virtual;
 			$page_vars['is_virtual'] = true;
 			$page_vars['registration_message'] = 'Registration is not yet open for this date.';

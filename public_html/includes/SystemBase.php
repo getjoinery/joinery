@@ -182,6 +182,16 @@ abstract class SystemBase {
 	static function get_by_link($link, $search_deleted=false){
 		$classname = get_called_class();
 		$mclassname = 'Multi'.$classname;
+
+		// No link means no match. Passing NULL through would drop the filter
+		// entirely — Multi option keys are read with isset(), which is false for
+		// NULL — leaving an unfiltered query that returns every row, of which
+		// get(0) hands back an arbitrary one. A lookup for nothing would then
+		// answer with somebody else's record.
+		if ($link === null || $link === '') {
+			return false;
+		}
+
 		if($search_deleted){
 			$results = new $mclassname(array('link' => $link));
 		}

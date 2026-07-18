@@ -1593,7 +1593,7 @@ class MethodExistenceTest {
      *     points back at the model, implementing getMultiResults()
      *
      *   ADVISORIES (⚠️ — reported, do not affect exit code):
-     *   - $permanent_delete_actions not declared on the class itself
+     *   - $permanent_delete_actions declared on the class (nothing reads it)
      *   - Multi class not named Multi{Model}
      *   - $prefix shared with another loaded model class
      *
@@ -1740,12 +1740,14 @@ class MethodExistenceTest {
                 }
             }
 
-            // $permanent_delete_actions — must be declared per class (advisory:
-            // most legacy models inherit the SystemBase default)
+            // Deletion behaviour is declared by the child model in
+            // $foreign_key_actions, so a model declaring $permanent_delete_actions
+            // is stating a rule nothing reads (see docs/deletion_system.md).
             $pda = $reflection->getProperty('permanent_delete_actions');
-            if ($pda->getDeclaringClass()->getName() !== $class) {
-                $advisories[] = "$class: \$permanent_delete_actions is not declared on the class itself "
-                              . "(define it, even if empty — see docs/deletion_system.md)";
+            if ($pda->getDeclaringClass()->getName() === $class) {
+                $advisories[] = "$class: \$permanent_delete_actions is declared but nothing reads it "
+                              . "— deletion behaviour belongs in the child model's \$foreign_key_actions "
+                              . "(see docs/deletion_system.md)";
             }
 
             // Prefix collision with other loaded models (advisory)

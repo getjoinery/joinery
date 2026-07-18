@@ -827,9 +827,20 @@ function get_leader() {
 		$tz = $this->get('evt_timezone') ?: 'America/New_York';
 		$start_date = LibraryFunctions::convert_time($this->get('evt_start_time'), 'UTC', $tz, 'Y-m-d');
 
+		$start_month = (int) date('n', strtotime($start_date));
+		$start_day = (int) date('j', strtotime($start_date));
+
 		// Start from whichever is later: from_date or start_date
 		$current = new DateTime(max($from_date, $start_date));
-		$max_iterations = $count * 50; // Safety limit
+
+		// Safety limit. Every type but yearly is walked a day at a time, so the
+		// budget has to cover the longest stride a pattern can ask for — a
+		// monthly series with an interval of 6 leaves ~186 days between
+		// occurrences. Too small a budget does not raise anything: it silently
+		// returns a short list, which reads as "the series ended".
+		$max_iterations = ($type === 'yearly')
+			? ($count * $interval + 10)
+			: ($count * 31 * $interval + 366);
 		$iterations = 0;
 
 		while (count($dates) < $count && $iterations < $max_iterations) {
@@ -845,26 +856,40 @@ function get_leader() {
 				$dates[] = $date_str;
 			}
 
-			// Advance by one day for daily/weekly, or strategically for monthly/yearly
-			if ($type === 'daily') {
-				$current->modify('+1 day');
-			} elseif ($type === 'weekly') {
-				$current->modify('+1 day');
-			} elseif ($type === 'monthly') {
-				$current->modify('+1 day');
-			} elseif ($type === 'yearly') {
-				// Jump months at a time for yearly
-				if (count($dates) > 0) {
-					$current->modify('+11 months');
-				} else {
-					$current->modify('+1 day');
+			// A yearly pattern only ever matches in its start month, so step
+			// straight to the next anniversary. Walking a day at a time would
+			// spend a year of iterations per occurrence, and jumping by a fixed
+			// number of months drifts out of the start month and lands on
+			// anniversaries years apart. Every other type is dense enough that a
+			// day at a time is both correct and cheap.
+			if ($type === 'yearly') {
+				$year = (int) $current->format('Y');
+				$candidate = self::_anniversary_in_year($year, $start_month, $start_day);
+				if ($candidate <= $current->format('Y-m-d')) {
+					$candidate = self::_anniversary_in_year($year + 1, $start_month, $start_day);
 				}
+				$current = new DateTime($candidate);
 			} else {
 				$current->modify('+1 day');
 			}
 		}
 
 		return $dates;
+	}
+
+	/**
+	 * The anniversary date within a given year, clamped to the length of the
+	 * month. A series starting Feb 29 lands on Feb 28 in a common year rather
+	 * than rolling forward into March.
+	 *
+	 * @param int $year
+	 * @param int $month
+	 * @param int $day
+	 * @return string Y-m-d
+	 */
+	private static function _anniversary_in_year($year, $month, $day) {
+		$days_in_month = (int) date('t', mktime(0, 0, 0, $month, 1, $year));
+		return sprintf('%04d-%02d-%02d', $year, $month, min($day, $days_in_month));
 	}
 
 	/**
@@ -878,12 +903,18 @@ function get_leader() {
 		$virtual->is_virtual = true;
 		$virtual->parent_event_id = $this->key;
 		$virtual->instance_date = $instance_date;
-		$virtual->evt_event_id = null;
 
 		// Copy all display fields from parent
 		foreach (self::$field_specifications as $field => $spec) {
 			$virtual->$field = $this->get($field);
 		}
+
+		// Clear the row id AFTER the copy above, which would otherwise hand the
+		// virtual instance the parent's id. A virtual instance has no row, and
+		// anything reading an id off one would be pointed at the parent event —
+		// linking to, or registering for, the series template instead of the
+		// occurrence in hand.
+		$virtual->evt_event_id = null;
 
 		// Adjust start/end times to the instance date (timezone-aware)
 		if ($this->get('evt_start_time')) {
@@ -1112,6 +1143,53 @@ function get_leader() {
 		$instance->load();
 
 		return $instance;
+	}
+
+	/**
+	 * Resolve the occurrence of this series that falls on a requested date.
+	 *
+	 * Every public entry point that accepts a date in the URL — the event page,
+	 * the per-event ICS download — resolves it here, so a date that is a real
+	 * occurrence on one is a real occurrence on all of them. Answering that
+	 * question in each route separately is how they drift: a URL that 404s as a
+	 * page while serving a calendar entry describes an event that does not exist.
+	 *
+	 * Returns the materialized row when one exists (it wins even if the pattern
+	 * has since changed, because people may already be registered against it), a
+	 * virtual instance when the date is a genuine occurrence, and null when the
+	 * date is not an occurrence at all — malformed, impossible, outside the
+	 * series, or off-pattern.
+	 *
+	 * @param string $date Y-m-d
+	 * @return Event|stdClass|null
+	 */
+	public function resolve_instance_for_date($date) {
+		if (!$this->is_recurring_parent()) {
+			return null;
+		}
+
+		// Shape first. A well-formed but impossible date (2026-02-31) must be
+		// rejected here rather than reaching the DateTime construction inside
+		// create_virtual_instance, and a date that is merely parseable is not
+		// good enough: strtotime rolls 2026-02-31 forward to March 3, which
+		// would serve one date's occurrence under another date's URL.
+		if (!$date || !preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $date, $m)) {
+			return null;
+		}
+		if (!checkdate((int)$m[2], (int)$m[3], (int)$m[1])) {
+			return null;
+		}
+
+		$materialized = $this->_get_materialized_instance_for_date($date);
+		if ($materialized) {
+			return $materialized;
+		}
+
+		if (!$this->date_matches_pattern($date)) {
+			return null;
+		}
+
+		return $this->create_virtual_instance($date);
 	}
 
 	/**
