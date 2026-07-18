@@ -3,7 +3,7 @@
  * name: models_crud
  * tier: test-db         # runs against the copied test database
  * env: dev-only
- * needs: []
+ * needs: [test-db]
  */
 
 /**

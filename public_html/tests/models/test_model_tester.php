@@ -3,7 +3,7 @@
  * name: model_tester_selftest
  * tier: test-db
  * env: dev-only
- * needs: []
+ * needs: [test-db]
  */
 /**
  * Self-test of the ModelTester machinery: runs one model (ActivationCode)
