@@ -43,21 +43,39 @@ function vault_regenerate_codes_logic(array $input): LogicResult {
 	$code_count = isset($input['recovery_code_count']) ? (int)$input['recovery_code_count'] : 10;
 	$code_count = max(5, min(20, $code_count));
 
-	$old_codes = new MultiUserEncryptionWrapping(['vault_id' => $vault->key, 'unlocker_type' => UserEncryptionWrapping::TYPE_RECOVERY]);
-	$old_codes->load();
-	foreach ($old_codes as $wrapping) {
-		$wrapping->soft_delete();
-	}
-
 	$box = new SealedBox();
 	$salt = (string)$vault->get('uev_salt');
 	$generation = (int)$vault->get('uev_key_generation');
+
+	// Retire the old codes and mint the new set in ONE transaction: a failure
+	// mid-mint (e.g. a malformed uev_salt failing the KEK derivation) must roll
+	// the retirement back too — recovery codes are the last-resort unlockers,
+	// so a failed regeneration must leave the existing set fully usable.
+	$db = DbConnector::get_instance()->get_db_link();
 	$recovery_codes = [];
-	for ($i = 0; $i < $code_count; $i++) {
-		$code = $box->generateRecoveryCode();
-		$recovery_codes[] = $code;
-		$kek = $box->kekFromRecoveryCode($code, $salt);
-		UserEncryptionWrapping::createWrapped($vault->key, UserEncryptionWrapping::TYPE_RECOVERY, $secret_key, $kek, null, null, $generation, $salt);
+	try {
+		$db->beginTransaction();
+
+		$old_codes = new MultiUserEncryptionWrapping(['vault_id' => $vault->key, 'unlocker_type' => UserEncryptionWrapping::TYPE_RECOVERY]);
+		$old_codes->load();
+		foreach ($old_codes as $wrapping) {
+			$wrapping->soft_delete();
+		}
+
+		for ($i = 0; $i < $code_count; $i++) {
+			$code = $box->generateRecoveryCode();
+			$recovery_codes[] = $code;
+			$kek = $box->kekFromRecoveryCode($code, $salt);
+			UserEncryptionWrapping::createWrapped($vault->key, UserEncryptionWrapping::TYPE_RECOVERY, $secret_key, $kek, null, null, $generation, $salt);
+		}
+
+		$db->commit();
+	} catch (Throwable $e) {
+		if ($db->inTransaction()) {
+			$db->rollBack();
+		}
+		error_log('Recovery code regeneration: could not replace the codes for vault ' . (int)$vault->key . ': ' . $e->getMessage());
+		return LogicResult::error('Could not regenerate your recovery codes - nothing was changed and your existing codes still work. Try again.');
 	}
 
 	return LogicResult::render(['recovery_codes' => $recovery_codes]);
