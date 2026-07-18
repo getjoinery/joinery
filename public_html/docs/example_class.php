@@ -156,6 +156,12 @@ class Example extends SystemBase
     // 'index' => true              - Plain btree index on this column
     // 'index_with' => array(...)   - Composite btree index (this column first,
     //                                then the listed columns, in order)
+    // 'foreign_key' => array(...)  - Real DB-level FOREIGN KEY constraint,
+    //                                materialized by update_database / plugin
+    //                                sync. Declare for hard ownership edges
+    //                                (child meaningless without parent); see
+    //                                docs/deletion_system.md for when to use
+    //                                this vs $foreign_key_actions.
     //
     // AUTO-DETECTION:
     // - Timestamp fields detected from type: 'timestamp', 'date'
@@ -227,10 +233,10 @@ class Example extends SystemBase
             'is_nullable' => true,
             'index' => true,               // Index the FK column — Postgres does
                                            // NOT auto-index the referencing side
-            'foreign_key' => array(
-                'table' => 'categories',
-                'column' => 'cat_id',
-                'on_delete' => 'SET NULL'
+            'foreign_key' => array(       // Materialized as a real constraint;
+                'table' => 'categories',  // mismatched ON DELETE is corrected,
+                'column' => 'cat_id',     // orphan rows block creation loudly.
+                'on_delete' => 'SET NULL' // CASCADE | SET NULL | RESTRICT | NO ACTION
             )
         ),
         

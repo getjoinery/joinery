@@ -688,6 +688,17 @@ class PluginManager extends AbstractExtensionManager {
             throw new Exception("Plugin '$name' table update failed: " . implode('; ', $table_result['errors']));
         }
 
+        // Materialize declared foreign keys on the plugin's tables
+        $fk_result = $database_updater->manageForeignKeys(LibraryFunctions::discover_model_classes([
+            'require_tablename' => true,
+            'require_field_specifications' => true,
+            'include_plugins' => true,
+            'plugin_filter' => $name
+        ]));
+        if (!empty($fk_result['errors'])) {
+            throw new Exception("Plugin '$name' foreign key sync failed: " . implode('; ', $fk_result['errors']));
+        }
+
         // Seed declared default settings from plugin.json
         $this->syncSettings($name);
 
@@ -967,6 +978,18 @@ class PluginManager extends AbstractExtensionManager {
             }
             if (!empty($migration_errors)) {
                 throw new Exception("Plugin migration failed: " . implode('; ', $migration_errors));
+            }
+
+            // Materialize declared foreign keys on the plugin's tables (after
+            // migrations, so a data-fix migration can clear orphans first)
+            $fk_result = $database_updater->manageForeignKeys(LibraryFunctions::discover_model_classes([
+                'require_tablename' => true,
+                'require_field_specifications' => true,
+                'include_plugins' => true,
+                'plugin_filter' => $name
+            ]));
+            if (!empty($fk_result['errors'])) {
+                throw new Exception("Plugin foreign key sync failed: " . implode('; ', $fk_result['errors']));
             }
 
             // Load metadata
@@ -1259,6 +1282,16 @@ class PluginManager extends AbstractExtensionManager {
                 $index_result = $database_updater->manageIndexes($plugin_classes);
                 if (!empty($index_result['messages'])) {
                     $table_messages = array_merge($table_messages, $index_result['messages']);
+                }
+
+                // Materialize declared foreign keys ('foreign_key' field-spec key)
+                // on plugin classes — same pass core tables get from update_database.
+                $fk_result = $database_updater->manageForeignKeys($plugin_classes);
+                if (!empty($fk_result['messages'])) {
+                    $table_messages = array_merge($table_messages, $fk_result['messages']);
+                }
+                foreach (($fk_result['errors'] ?? []) as $error) {
+                    $table_messages[] = "$plugin_name: foreign key error - $error";
                 }
             } catch (Exception $e) {
                 $table_messages[] = "$plugin_name: constraint/index sync error - " . $e->getMessage();

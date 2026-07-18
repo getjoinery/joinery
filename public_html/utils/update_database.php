@@ -515,10 +515,37 @@
 		// closes this ordering hazard for good. See "DEFERRED COLUMN CLEANUP" below.
 		$cleanup_result = ['errors' => [], 'warnings' => [], 'messages' => []];
 
-		// Step 5: Sync all serial sequences to their max values
-		// This prevents primary key collisions after data imports or migrations
-		echo "-----SEQUENCE SYNC-----<br>\n";
-		$seq_sync_count = 0;
+		// Step 4.8: Materialize declared foreign keys (core classes; plugin
+		// classes get the same treatment in PluginManager::sync). Runs AFTER
+		// migrations so an orphan-cleanup migration can unblock constraint
+		// creation within the same run.
+		echo "-----FOREIGN KEYS-----<br>\n";
+		$fk_result = $database_updater->manageForeignKeys($classes);
+		if (!empty($fk_result['messages'])) {
+			echo implode('<br>', $fk_result['messages']) . "<br>\n";
+		}
+		if (!empty($fk_result['warnings'])) {
+			foreach ($fk_result['warnings'] as $warning) {
+				echo 'WARNING: ' . $warning . "<br>\n";
+			}
+		}
+		if (!empty($fk_result['errors'])) {
+			foreach ($fk_result['errors'] as $error) {
+				echo 'ERROR: ' . $error . "<br>\n";
+			}
+		}
+		echo "✓ Foreign keys: " . count($fk_result['constraints_added']) . " added, "
+			. count($fk_result['constraints_replaced']) . " replaced, "
+			. count($fk_result['errors']) . " errors<br>\n";
+
+		// Step 5: Sync all serial sequences FORWARD-ONLY to their max values.
+		// Advances a sequence that fell behind MAX(pkey) (data imports with
+		// explicit IDs); NEVER moves one backwards — a rewound sequence reuses
+		// primary keys of deleted rows, re-attaching any orphaned references
+		// those IDs left behind.
+		echo "-----SEQUENCE SYNC (forward-only)-----<br>\n";
+		$seq_check_count = 0;
+		$seq_advanced_count = 0;
 		foreach ($classes as $class) {
 			if (!isset($class::$tablename) || !isset($class::$pkey_column)) {
 				continue;
@@ -530,16 +557,19 @@
 			$table = $class::$tablename;
 			$seq_name = $table . '_' . $pkey . '_seq';
 			try {
-				$sync_sql = "SELECT setval('{$seq_name}', COALESCE((SELECT MAX({$pkey}) FROM {$table}), 1), true)";
-				$dbhelper->get_db_link()->exec($sync_sql);
-				$seq_sync_count++;
+				$sync = DatabaseUpdater::syncSequenceForward($seq_name, $table, $pkey, $dbhelper->get_db_link());
+				$seq_check_count++;
+				if ($sync['advanced']) {
+					$seq_advanced_count++;
+					echo "  Advanced {$seq_name}: {$sync['current']} → {$sync['max']}<br>\n";
+				}
 			} catch (Exception $e) {
 				if ($verbose) {
 					echo "⚠ Could not sync sequence {$seq_name}: " . $e->getMessage() . "<br>\n";
 				}
 			}
 		}
-		echo "✓ Synced {$seq_sync_count} sequences<br>\n";
+		echo "✓ Checked {$seq_check_count} sequences, advanced {$seq_advanced_count}<br>\n";
 
 		// Display last 5 migrations
 		echo "<br>\n<strong>Last 5 Migrations:</strong><br>\n";

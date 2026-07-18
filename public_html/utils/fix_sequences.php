@@ -228,12 +228,11 @@ try {
                           "Current sequence value: $current_value<br>" .
                           "Max table value: $max_val<br>" .
                           "Setting sequence to: $new_value", 'warning');
-                    
-                    // Fix the sequence
-                    $fix_sql = "SELECT setval('$sequence_name', $new_value, false)";
-                    $fix_q = $dblink->prepare($fix_sql);
-                    $fix_q->execute();
-                    
+
+                    // Forward-only shared helper: advances past MAX(pkey), never rewinds.
+                    require_once(PathHelper::getIncludePath('includes/DatabaseUpdater.php'));
+                    DatabaseUpdater::syncSequenceForward($sequence_name, $table_name, $pkey_column, $dblink);
+
                     output("FIXED: $sequence_name successfully updated", 'info');
                 }
                 $stats['fixed']++;

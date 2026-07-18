@@ -52,18 +52,8 @@ $vault = $fx['vault'];
 $code = $fx['recovery_codes'][0];
 $vault_id = (int)$vault->key;
 
-// The fixture registers the vault row for teardown, but wrappings are not
-// cascaded with it — remove them explicitly. Registered after the fixture, so
-// LIFO runs it before the vault delete.
-harness_defer(function () use ($vault_id) {
-	$db = DbConnector::get_instance()->get_db_link();
-	try {
-		$db->prepare('DELETE FROM uew_user_encryption_wrappings WHERE uew_uev_user_encryption_vault_id = ?')
-			->execute(array($vault_id));
-	} catch (\Throwable $e) {
-		echo "  WARNING: wrapping cleanup failed: " . $e->getMessage() . "\n";
-	}
-});
+// Wrapping rows are removed by the uew→uev ON DELETE CASCADE when the fixture's
+// registered vault delete runs — the same teardown contract as every other suite.
 
 // The worker: bootstrap the framework, load the pair, wait on the barrier, then
 // attempt the unlock. The code arrives via the environment, never argv, so it

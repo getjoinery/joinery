@@ -281,14 +281,18 @@ function harness_defer(callable $fn) {
 
 /**
  * Create a test user at the given permission level, registered for cleanup.
- * Email is unique per $suffix so concurrent suites never collide.
+ * Email is unique per $suffix AND per process: the random run token means a
+ * leftover user from a killed run (SIGKILL skips teardown) can never collide
+ * with the next run's same-suffix fixture ("email already been used").
  */
 function make_user($suffix, $permission = 0) {
+	static $run_token = null;
+	if ($run_token === null) $run_token = bin2hex(random_bytes(4));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	$user = new User(NULL);
 	$user->set('usr_first_name', 'HarnessTest');
 	$user->set('usr_last_name', 'User' . $suffix);
-	$user->set('usr_email', 'harnesstest_' . strtolower($suffix) . '@getjoinery.com');
+	$user->set('usr_email', 'harnesstest_' . strtolower($suffix) . '_' . $run_token . '@getjoinery.com');
 	$user->set('usr_password', User::GeneratePassword('TestPassword_' . $suffix));
 	$user->set('usr_permission', $permission);
 	$user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));

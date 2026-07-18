@@ -1601,6 +1601,263 @@ class DatabaseUpdater {
     }
 
     /**
+     * Manage declared foreign-key constraints for all classes.
+     *
+     * A field spec may declare a DB-level foreign key:
+     *
+     *   'uew_uev_user_encryption_vault_id' => array('type'=>'int8', 'is_nullable'=>false,
+     *       'foreign_key'=>array('table'=>'uev_user_encryption_vaults',
+     *                            'column'=>'uev_user_encryption_vault_id',
+     *                            'on_delete'=>'CASCADE')),
+     *
+     * The declaration is the single source of truth: a missing constraint is
+     * created, and an existing constraint whose referenced table/column or
+     * ON DELETE action differs is dropped and recreated to match. Orphan child
+     * rows BLOCK creation with a loud error — a silently skipped constraint is
+     * indistinguishable from an enforced one, which is exactly the failure mode
+     * this mechanism exists to prevent.
+     *
+     * The DB constraint is the integrity backstop that holds under raw SQL,
+     * crashed processes, and killed test runs; the PHP deletion doctrine
+     * ($foreign_key_actions) remains the authority for business-logic deletes.
+     *
+     * @param array $classes Model class names
+     * @return array Results
+     */
+    public function manageForeignKeys($classes) {
+        $results = [
+            'success' => true,
+            'constraints_added' => [],
+            'constraints_replaced' => [],
+            'errors' => [],
+            'warnings' => [],
+            'messages' => []
+        ];
+
+        try {
+            $dblink = $this->dbconnector->get_db_link();
+
+            foreach ($classes as $class) {
+                if (!isset($class::$field_specifications) || !isset($class::$tablename)) {
+                    continue;
+                }
+                $table = $class::$tablename;
+
+                foreach ($class::$field_specifications as $field => $spec) {
+                    if (empty($spec['foreign_key'])) {
+                        continue;
+                    }
+                    $fk = $spec['foreign_key'];
+                    if (empty($fk['table']) || empty($fk['column'])) {
+                        $results['success'] = false;
+                        $results['errors'][] = "{$table}.{$field}: foreign_key spec requires 'table' and 'column'";
+                        continue;
+                    }
+                    $on_delete = strtoupper(trim($fk['on_delete'] ?? 'RESTRICT'));
+                    if (!in_array($on_delete, ['CASCADE', 'SET NULL', 'RESTRICT', 'NO ACTION'], true)) {
+                        $results['success'] = false;
+                        $results['errors'][] = "{$table}.{$field}: unsupported on_delete '{$on_delete}'";
+                        continue;
+                    }
+                    $this->ensureForeignKey($table, $field, $fk['table'], $fk['column'], $on_delete, $dblink, $results);
+                }
+            }
+        } catch (Exception $e) {
+            $results['success'] = false;
+            $results['errors'][] = "Foreign key management error: " . $e->getMessage();
+        }
+
+        return $results;
+    }
+
+    /**
+     * Ensure one declared single-column foreign key exists and matches its spec.
+     */
+    private function ensureForeignKey($table, $field, $ref_table, $ref_column, $on_delete, $dblink, &$results) {
+        $existing = $this->getExistingForeignKey($table, $field, $dblink);
+
+        if ($existing) {
+            $matches = ($existing['ref_table'] === $ref_table)
+                && ($existing['ref_column'] === $ref_column)
+                && ($existing['on_delete'] === $on_delete);
+            if ($matches) {
+                if ($this->verbose) {
+                    $results['messages'][] = "Foreign key already correct: {$existing['name']} on {$table}.{$field}";
+                }
+                return;
+            }
+            // Mismatched declaration wins: drop and recreate.
+            try {
+                $q = $dblink->prepare("ALTER TABLE {$table} DROP CONSTRAINT \"{$existing['name']}\"");
+                $q->execute();
+            } catch (PDOException $e) {
+                $results['success'] = false;
+                $results['errors'][] = "Could not drop mismatched foreign key {$existing['name']} on {$table}.{$field}: " . $e->getMessage();
+                return;
+            }
+            $results['messages'][] = "Dropped mismatched foreign key {$existing['name']} on {$table}.{$field} "
+                . "(was → {$existing['ref_table']}.{$existing['ref_column']} ON DELETE {$existing['on_delete']})";
+        }
+
+        // Orphan children make constraint creation impossible. Report them as a
+        // hard, loud error — never skip silently.
+        $orphans = $this->countForeignKeyOrphans($table, $field, $ref_table, $ref_column, $dblink);
+        if ($orphans === null) {
+            $results['success'] = false;
+            $results['errors'][] = "Could not check {$table}.{$field} for orphans; foreign key not created";
+            return;
+        }
+        if ($orphans > 0) {
+            echo "<br>⚠️  FOREIGN KEY BLOCKED — ORPHAN ROWS<br>";
+            echo "═══════════════════════════════════════════════════════════════════════════════<br>";
+            echo "Table: {$table}.{$field} → {$ref_table}.{$ref_column}<br>";
+            echo "Issue: {$orphans} row(s) reference a parent that does not exist<br>";
+            echo "Action: foreign key NOT created — referential integrity is NOT enforced on this table<br>";
+            echo "Resolution: delete or re-point the orphan rows, then re-run update_database:<br>";
+            echo "  SELECT * FROM {$table} c WHERE c.{$field} IS NOT NULL AND NOT EXISTS "
+                . "(SELECT 1 FROM {$ref_table} p WHERE p.{$ref_column} = c.{$field});<br>";
+            echo "═══════════════════════════════════════════════════════════════════════════════<br><br>";
+            $results['success'] = false;
+            $results['errors'][] = "Foreign key on {$table}.{$field} blocked by {$orphans} orphan row(s)";
+            return;
+        }
+
+        $name = $this->foreignKeyConstraintName($table, $field);
+        $sql = "ALTER TABLE {$table} ADD CONSTRAINT \"{$name}\" FOREIGN KEY ({$field}) "
+            . "REFERENCES {$ref_table} ({$ref_column}) ON DELETE {$on_delete}";
+        try {
+            if ($this->verbose) {
+                echo "Executing: $sql<br>\n";
+            }
+            $q = $dblink->prepare($sql);
+            $q->execute();
+            $key = $existing ? 'constraints_replaced' : 'constraints_added';
+            $results[$key][] = $name;
+            $results['messages'][] = "Added foreign key: {$name} ({$table}.{$field} → {$ref_table}.{$ref_column} ON DELETE {$on_delete})";
+        } catch (PDOException $e) {
+            $results['success'] = false;
+            $results['errors'][] = "Failed to add foreign key {$name} on {$table}.{$field}: " . $e->getMessage();
+        }
+    }
+
+    /**
+     * The existing single-column FK on ($table, $column), or null.
+     * Returns ['name', 'ref_table', 'ref_column', 'on_delete'].
+     */
+    private function getExistingForeignKey($table, $column, $dblink) {
+        $sql = "SELECT c.conname AS name,
+                       ref.relname AS ref_table,
+                       ratt.attname AS ref_column,
+                       CASE c.confdeltype
+                           WHEN 'c' THEN 'CASCADE'
+                           WHEN 'n' THEN 'SET NULL'
+                           WHEN 'r' THEN 'RESTRICT'
+                           WHEN 'd' THEN 'SET DEFAULT'
+                           ELSE 'NO ACTION'
+                       END AS on_delete
+                FROM pg_constraint c
+                JOIN pg_class t    ON t.oid = c.conrelid
+                JOIN pg_attribute att  ON att.attrelid = t.oid AND att.attnum = c.conkey[1]
+                JOIN pg_class ref  ON ref.oid = c.confrelid
+                JOIN pg_attribute ratt ON ratt.attrelid = ref.oid AND ratt.attnum = c.confkey[1]
+                WHERE c.contype = 'f'
+                  AND array_length(c.conkey, 1) = 1
+                  AND t.relname = :table
+                  AND att.attname = :column";
+        try {
+            $q = $dblink->prepare($sql);
+            $q->bindValue(':table', $table, PDO::PARAM_STR);
+            $q->bindValue(':column', $column, PDO::PARAM_STR);
+            $q->execute();
+            $row = $q->fetch(PDO::FETCH_ASSOC);
+            return $row ?: null;
+        } catch (PDOException $e) {
+            if ($this->verbose) {
+                echo "Error checking foreign key on {$table}.{$column}: " . $e->getMessage() . "<br>\n";
+            }
+            return null;
+        }
+    }
+
+    /**
+     * Count child rows whose non-null FK value has no parent. Null on query error.
+     */
+    private function countForeignKeyOrphans($table, $field, $ref_table, $ref_column, $dblink) {
+        $sql = "SELECT count(*) FROM {$table} c
+                WHERE c.{$field} IS NOT NULL
+                  AND NOT EXISTS (SELECT 1 FROM {$ref_table} p WHERE p.{$ref_column} = c.{$field})";
+        try {
+            $q = $dblink->prepare($sql);
+            $q->execute();
+            return (int)$q->fetchColumn();
+        } catch (PDOException $e) {
+            if ($this->verbose) {
+                echo "Error counting orphans for {$table}.{$field}: " . $e->getMessage() . "<br>\n";
+            }
+            return null;
+        }
+    }
+
+    /**
+     * A deterministic constraint name that fits Postgres's 63-char identifier
+     * limit. Field names carry their table prefix, so the short forms stay
+     * unique; detection is by (table, column) anyway, never by name.
+     */
+    private function foreignKeyConstraintName($table, $field) {
+        $name = 'fk_' . $table . '_' . $field;
+        if (strlen($name) > 63) {
+            $name = 'fk_' . $field;
+        }
+        if (strlen($name) > 63) {
+            $name = 'fk_' . substr($field, 0, 47) . '_' . substr(md5($table . '.' . $field), 0, 8);
+        }
+        return $name;
+    }
+
+    /**
+     * Forward-only sequence sync — THE one way any code path may adjust a
+     * serial sequence. Advances the sequence when it is behind MAX(pkey) (the
+     * legitimate case after an import with explicit IDs) and NEVER moves it
+     * backwards: a primary key, once allocated, is never reallocated. Rewinding
+     * a sequence over deleted rows re-attaches any orphaned references the old
+     * IDs left behind — for security-sensitive tables that is a data-integrity
+     * hazard, not a hygiene issue.
+     *
+     * @param string $sequence_name e.g. 'usr_users_usr_user_id_seq'
+     * @param string $table_name
+     * @param string $pkey_column
+     * @param PDO    $dblink
+     * @param bool   $apply  false = report only (dry run)
+     * @return array ['current'=>int, 'is_called'=>bool, 'max'=>int, 'behind'=>bool, 'advanced'=>bool]
+     * @throws PDOException on unreadable sequence/table
+     */
+    public static function syncSequenceForward($sequence_name, $table_name, $pkey_column, $dblink, $apply = true) {
+        $q = $dblink->prepare("SELECT last_value, is_called FROM {$sequence_name}");
+        $q->execute();
+        $seq = $q->fetch(PDO::FETCH_ASSOC);
+        $current = (int)$seq['last_value'];
+        $is_called = ($seq['is_called'] === true || $seq['is_called'] === 't' || $seq['is_called'] === 1);
+
+        $q = $dblink->prepare("SELECT COALESCE(MAX({$pkey_column}), 0) FROM {$table_name}");
+        $q->execute();
+        $max = (int)$q->fetchColumn();
+
+        // is_called=false means the NEXT nextval() returns last_value itself,
+        // so the sequence is behind whenever max >= last_value in that state.
+        $behind = $is_called ? ($max > $current) : ($max >= $current && $max > 0);
+        $advanced = false;
+        if ($behind && $apply) {
+            $q = $dblink->prepare("SELECT setval(:seq, :val, true)");
+            $q->bindValue(':seq', $sequence_name, PDO::PARAM_STR);
+            $q->bindValue(':val', $max, PDO::PARAM_INT);
+            $q->execute();
+            $advanced = true;
+        }
+
+        return ['current' => $current, 'is_called' => $is_called, 'max' => $max, 'behind' => $behind, 'advanced' => $advanced];
+    }
+
+    /**
      * Run migrations after table creation
      *
      * @param array $migrations Migrations array
