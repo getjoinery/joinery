@@ -30,50 +30,8 @@ require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriv
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudOffloadEngine.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_storage/BlobStorageProfile.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageLifecycle.php'));
+require_once(__DIR__ . '/../lib/cloud_fixtures.php'); // RecordingMockDriver
 
-/**
- * In-memory mock driver. Records every call; behavior is overridable via
- * closures so a test can inject a mid-flight side effect or a failure.
- */
-class CharMockDriver implements CloudStorageDriver {
-	public $calls = [];          // ordered log of ['op'=>..., 'key'=>...]
-	public $put_should_fail = false;
-	public $on_put = null;       // closure(remote_key): void — side effect during push
-
-	public function putMany(array $items): array {
-		$out = [];
-		foreach ($items as $item) {
-			$this->calls[] = ['op' => 'put', 'key' => $item['remote_key']];
-			if ($this->on_put) { ($this->on_put)($item['remote_key']); }
-			$out[$item['remote_key']] = $this->put_should_fail
-				? new RuntimeException('mock put failure')
-				: true;
-		}
-		return $out;
-	}
-	public function put(string $local_path, string $remote_key, string $content_type): void {
-		$this->calls[] = ['op' => 'put', 'key' => $remote_key];
-		if ($this->on_put) { ($this->on_put)($remote_key); }
-		if ($this->put_should_fail) { throw new RuntimeException('mock put failure'); }
-	}
-	public function get(string $remote_key, string $local_path): void {
-		$this->calls[] = ['op' => 'get', 'key' => $remote_key];
-		$dir = dirname($local_path);
-		if (!is_dir($dir)) { mkdir($dir, 0777, true); }
-		file_put_contents($local_path, "mock-bytes-for-$remote_key\n");
-	}
-	public function delete(string $remote_key): void {
-		$this->calls[] = ['op' => 'delete', 'key' => $remote_key];
-	}
-	public function url(string $remote_key): string { return 'https://mock/' . $remote_key; }
-	public function ping(): array { return ['ok' => true, 'message' => 'mock']; }
-
-	public function ops($filter = null) {
-		$out = [];
-		foreach ($this->calls as $c) { if ($filter === null || $c['op'] === $filter) $out[] = $c; }
-		return $out;
-	}
-}
 
 $settings  = Globalvars::get_instance();
 $dblink    = DbConnector::get_instance()->get_db_link();
@@ -121,7 +79,7 @@ try {
 	file_put_contents($orig_path, "original-bytes\n");
 	$temp_paths[] = $orig_path;
 
-	$driver = new CharMockDriver();
+	$driver = new RecordingMockDriver();
 	$res = $sync_row->invoke(null, $profile, (int)$b->key, $driver);
 	$reloaded = new FileBlob($b->key, true);
 	ok('forward: returns pushed', $res === 'pushed');
@@ -134,7 +92,7 @@ try {
 	// 2. Missing-on-disk: failure recorded, counter increments, stays local
 	// -------------------------------------------------------------------
 	$b2 = make_blob_row();   // no file placed on disk
-	$driver2 = new CharMockDriver();
+	$driver2 = new RecordingMockDriver();
 	$res2 = $sync_row->invoke(null, $profile, (int)$b2->key, $driver2);
 	$reloaded2 = new FileBlob($b2->key, true);
 	ok('missing: returns failed', $res2 === 'failed');
@@ -142,23 +100,10 @@ try {
 	ok('missing: failed_count incremented to 1', (int)$reloaded2->get('fbb_sync_failed_count') === 1);
 	ok('missing: row stays local', $reloaded2->get('fbb_storage_driver') === 'local');
 
-	// -------------------------------------------------------------------
-	// 2b. Cap: a row at FAILED_COUNT_CAP is excluded by the eligibility query
-	// -------------------------------------------------------------------
-	$b_cap = make_blob_row(['fbb_sync_failed_count' => CloudOffloadEngine::FAILED_COUNT_CAP]);
-	$b_elig = make_blob_row(['fbb_sync_failed_count' => 0]);
-	$q = $dblink->prepare(
-		"SELECT fbb_file_blob_id FROM fbb_file_blobs
-		 WHERE (fbb_storage_driver IS NULL OR fbb_storage_driver = 'local')
-		   AND fbb_is_private = FALSE
-		   AND COALESCE(fbb_sync_failed_count, 0) < :cap
-		   AND fbb_file_blob_id = ANY(:ids)");
-	$q->bindValue(':cap', CloudOffloadEngine::FAILED_COUNT_CAP, PDO::PARAM_INT);
-	$q->bindValue(':ids', '{' . $b_cap->key . ',' . $b_elig->key . '}');
-	$q->execute();
-	$selected = $q->fetchAll(PDO::FETCH_COLUMN, 0);
-	ok('cap: capped row excluded', !in_array((string)$b_cap->key, array_map('strval', $selected), true));
-	ok('cap: eligible row included', in_array((string)$b_elig->key, array_map('strval', $selected), true));
+	// (The failure-count cap is covered end-to-end by cloud_offload_engine_test
+	// through the engine's REAL eligibility query — a self-referential check that
+	// re-ran the SQL inline here was removed: it re-asserted its own copy and
+	// could not catch a regression in the actual query.)
 
 	// -------------------------------------------------------------------
 	// 3. Mid-flight ineligibility: push undone, row stays local
@@ -167,7 +112,7 @@ try {
 	$orig3 = $fast_dir . '/' . $b3->get('fbb_stored_name');
 	file_put_contents($orig3, "original-bytes-3\n");
 	$temp_paths[] = $orig3;
-	$driver3 = new CharMockDriver();
+	$driver3 = new RecordingMockDriver();
 	$fid3 = (int)$b3->key;
 	// During the push, flip the blob private so the post-push reload re-check
 	// fails for the public profile (isEligibleRow → false).
@@ -186,7 +131,7 @@ try {
 	// 4. Reverse pull-back: 'cloud' → 'local', inverse ordering (get before delete)
 	// -------------------------------------------------------------------
 	$b4 = make_blob_row(['fbb_storage_driver' => 'cloud']);
-	$driver4 = new CharMockDriver();
+	$driver4 = new RecordingMockDriver();
 	$res4 = $pull_row->invoke(null, $profile, (int)$b4->key, $driver4);
 	$reloaded4 = new FileBlob($b4->key, true);
 	$local4 = $fast_dir . '/' . $b4->get('fbb_stored_name');

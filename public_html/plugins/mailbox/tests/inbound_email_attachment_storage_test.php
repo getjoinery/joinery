@@ -23,6 +23,7 @@
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
+require_once(__DIR__ . '/lib/mailbox_test_fixture.php'); // mailbox_make_user()
 require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
 require_once(PathHelper::getIncludePath('data/files_class.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
@@ -96,11 +97,7 @@ class InboundAttachmentStorageTest {
 	}
 
 	private function makeUser($email, $perm = 5) {
-		$stmt = $this->db->prepare("INSERT INTO usr_users
-			(usr_first_name, usr_email, usr_timezone, usr_permission)
-			VALUES ('Ias', ?, 'UTC', ?) RETURNING usr_user_id");
-		$stmt->execute(array($email, $perm));
-		$id = intval($stmt->fetchColumn());
+		$id = mailbox_make_user($email, (int)$perm, 'Ias');
 		$this->created_user_ids[] = $id;
 		return $id;
 	}
@@ -247,29 +244,7 @@ class InboundAttachmentStorageTest {
 	}
 
 	private function preClean() {
-		try {
-			$dids = $this->db->query("SELECT ied_inbound_email_domain_id FROM ied_inbound_email_domains
-				WHERE ied_domain LIKE 'ias-test-%'")->fetchAll(PDO::FETCH_COLUMN);
-			if ($dids) {
-				$in = implode(',', array_map('intval', $dids));
-				$mids = $this->db->query("SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
-					WHERE iem_ied_inbound_email_domain_id IN ($in)")->fetchAll(PDO::FETCH_COLUMN);
-				if ($mids) {
-					$min = implode(',', array_map('intval', $mids));
-					$this->db->exec("DELETE FROM ima_inbound_message_attachments WHERE ima_iem_inbound_email_message_id IN ($min)");
-				}
-				$aids = $this->db->query("SELECT iea_inbound_email_alias_id FROM iea_inbound_email_aliases
-					WHERE iea_ied_inbound_email_domain_id IN ($in)")->fetchAll(PDO::FETCH_COLUMN);
-				if ($aids) {
-					$ain = implode(',', array_map('intval', $aids));
-					$this->db->exec("DELETE FROM ieg_inbound_email_mailbox_grants WHERE ieg_iea_inbound_email_alias_id IN ($ain)");
-				}
-				$this->db->exec("DELETE FROM iem_inbound_email_messages WHERE iem_ied_inbound_email_domain_id IN ($in)");
-				$this->db->exec("DELETE FROM iea_inbound_email_aliases WHERE iea_ied_inbound_email_domain_id IN ($in)");
-				$this->db->exec("DELETE FROM ied_inbound_email_domains WHERE ied_inbound_email_domain_id IN ($in)");
-			}
-			$this->db->exec("DELETE FROM usr_users WHERE usr_email LIKE 'ias\\_%@example.test'");
-		} catch (\Throwable $e) {}
+		mailbox_purge_domains('ias-test-%', 'ias\_%@example.test');
 	}
 
 	private function tearDown() {

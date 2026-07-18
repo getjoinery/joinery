@@ -20,6 +20,7 @@
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
+require_once(__DIR__ . '/lib/mailbox_test_fixture.php'); // mailbox_make_user()
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
@@ -62,25 +63,7 @@ class InboundEmailMailboxGrantTest {
 	}
 
 	private function preClean() {
-		try {
-			$this->db->exec("DELETE FROM ieg_inbound_email_mailbox_grants
-				WHERE ieg_iea_inbound_email_alias_id NOT IN
-				(SELECT iea_inbound_email_alias_id FROM iea_inbound_email_aliases)");
-			$dids = $this->db->query("SELECT ied_inbound_email_domain_id FROM ied_inbound_email_domains
-				WHERE ied_domain LIKE 'grant-test-%'")->fetchAll(PDO::FETCH_COLUMN);
-			if ($dids) {
-				$in = implode(',', array_map('intval', $dids));
-				$aids = $this->db->query("SELECT iea_inbound_email_alias_id FROM iea_inbound_email_aliases
-					WHERE iea_ied_inbound_email_domain_id IN ($in)")->fetchAll(PDO::FETCH_COLUMN);
-				if ($aids) {
-					$ain = implode(',', array_map('intval', $aids));
-					$this->db->exec("DELETE FROM ieg_inbound_email_mailbox_grants WHERE ieg_iea_inbound_email_alias_id IN ($ain)");
-				}
-				$this->db->exec("DELETE FROM iea_inbound_email_aliases WHERE iea_ied_inbound_email_domain_id IN ($in)");
-				$this->db->exec("DELETE FROM ied_inbound_email_domains WHERE ied_inbound_email_domain_id IN ($in)");
-			}
-			$this->db->exec("DELETE FROM usr_users WHERE usr_email LIKE 'grantuser%@example.test'");
-		} catch (\Throwable $e) {}
+		mailbox_purge_domains('grant-test-%', 'grantuser%@example.test', true);
 	}
 
 	private function setUp() {
@@ -114,14 +97,7 @@ class InboundEmailMailboxGrantTest {
 	}
 
 	private function makeUser($email) {
-		// Raw insert to bypass the User model's email-deliverability validation
-		// (test domains have no MX). permanent_delete() on the loaded model still
-		// exercises the real deletion-rule cascade.
-		$stmt = $this->db->prepare("INSERT INTO usr_users
-			(usr_first_name, usr_last_name, usr_email, usr_timezone, usr_permission)
-			VALUES ('Grant', 'Tester', ?, 'UTC', 5) RETURNING usr_user_id");
-		$stmt->execute([$email]);
-		return intval($stmt->fetchColumn());
+		return mailbox_make_user($email, 5, 'Grant');
 	}
 
 	private function grantCount($alias_id, $user_id) {

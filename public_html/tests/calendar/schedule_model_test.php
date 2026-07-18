@@ -46,6 +46,7 @@ $win->set('scw_day_of_week', 1);            // Monday
 $win->set('scw_start_time', '09:00:00');
 $win->set('scw_end_time', '17:00:00');
 $win->save();
+harness_register_row('scw_schedule_windows', 'scw_schedule_window_id', (int)$win->key);
 ok('window saved with an id', (bool)$win->key);
 
 $reload = new ScheduleWindow($win->key, true);
@@ -65,6 +66,7 @@ $ov->set('sco_sch_schedule_id', $schedule->key);
 $ov->set('sco_date', '2026-12-25');
 // null start/end = fully unavailable that date
 $ov->save();
+harness_register_row('sco_schedule_overrides', 'sco_schedule_override_id', (int)$ov->key);
 ok('override saved with an id', (bool)$ov->key);
 $ov_active = new MultiScheduleOverride(['schedule_id' => $schedule->key, 'deleted' => false]);
 $ov_active->load();

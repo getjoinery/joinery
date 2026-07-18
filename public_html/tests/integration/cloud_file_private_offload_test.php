@@ -33,63 +33,23 @@ require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriv
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudOffloadEngine.php'));
 require_once(PathHelper::getIncludePath('data/files_class.php'));
 require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
+require_once(__DIR__ . '/../lib/cloud_fixtures.php'); // RecordingMockDriver, ScratchTableProfile
 
 $TABLE = 'cloud_file_private_test_rows';
 $dblink = DbConnector::get_instance()->get_db_link();
 
-/** Mock driver: records ops; get() writes bytes so reverse placement succeeds. */
-class PrivMockDriver implements CloudStorageDriver {
-	public $calls = [];
-	public function putMany(array $items): array {
-		$out = [];
-		foreach ($items as $it) { $this->calls[] = ['op'=>'put','key'=>$it['remote_key']]; $out[$it['remote_key']] = true; }
-		return $out;
-	}
-	public function put(string $l, string $k, string $c): void { $this->calls[] = ['op'=>'put','key'=>$k]; }
-	public function get(string $k, string $l): void {
-		$this->calls[] = ['op'=>'get','key'=>$k];
-		if (!is_dir(dirname($l))) mkdir(dirname($l), 0777, true);
-		file_put_contents($l, "bytes:$k\n");
-	}
-	public function delete(string $k): void { $this->calls[] = ['op'=>'delete','key'=>$k]; }
-	public function url(string $k): string { return 'https://mock-bucket.example/' . $k; }
-	public function ping(): array { return ['ok'=>true,'message'=>'mock']; }
-}
-
 /**
- * Two mock profiles over the SAME scratch table, distinguished by a `kind`
+ * Two scratch-table profiles over the SAME table, distinguished by a `kind`
  * column ('pub' | 'priv'), each owning its slice via reverseEligibilityWhere().
  * This mirrors how BlobStorageProfile / BlobPrivateStorageProfile share fbb_file_blobs.
  */
-class PartProfile implements StorageProfile {
-	public $table; public $base; public $own;
-	public function __construct($table, $base, $own) { $this->table = $table; $this->base = $base; $this->own = $own; }
-	public function table(): string { return $this->table; }
-	public function pkeyColumn(): string { return 'id'; }
-	public function driverColumn(): string { return 'drv'; }
-	public function failedCountColumn(): string { return 'failed'; }
-	public function lastAttemptColumn(): string { return 'last_attempt'; }
-	public function visibility(): string { return $this->own === 'priv' ? 'private' : 'public'; }
-	public function eligibilityWhere(): string { return "kind = '{$this->own}'"; }
-	public function reverseEligibilityWhere(): string { return "kind = '{$this->own}'"; }
-	private function _row($id) {
-		$db = DbConnector::get_instance()->get_db_link();
-		$q = $db->prepare("SELECT * FROM {$this->table} WHERE id = ?"); $q->execute([$id]); return $q->fetch(PDO::FETCH_ASSOC);
-	}
-	public function rowExists(int $id): bool { return (bool)$this->_row($id); }
-	public function isEligibleRow(int $id): bool {
-		$r = $this->_row($id); if (!$r) return false;
-		$local = ($r['drv'] === null || $r['drv'] === '' || $r['drv'] === 'local');
-		return $local && $r['kind'] === $this->own;
-	}
-	public function itemsForRow(int $id): ?array {
-		$path = $this->base . '/disk/' . $id . '/original';
-		if (!file_exists($path)) return null;
-		return [['local_path'=>$path,'remote_key'=>$id.'/original','content_type'=>'application/octet-stream']];
-	}
-	public function reverseItemsForRow(int $id): array {
-		return [['remote_key'=>$id.'/original','local_path'=>$this->base.'/restore/'.$id.'/original','content_type'=>'application/octet-stream']];
-	}
+function part_profile(string $table, string $base, string $own): ScratchTableProfile {
+	return new ScratchTableProfile($table, $base, [
+		'visibility'                => $own === 'priv' ? 'private' : 'public',
+		'eligibility_where'         => "kind = '{$own}'",
+		'reverse_eligibility_where' => "kind = '{$own}'",
+		'is_eligible'               => function ($r) use ($own) { return $r['kind'] === $own; },
+	]);
 }
 
 $BASE = sys_get_temp_dir() . '/cloud_file_priv_' . bin2hex(random_bytes(4));
@@ -115,11 +75,11 @@ try {
 	$priv2 = $ins('cloud', 'priv');
 	$pub1  = $ins('cloud', 'pub');
 
-	$privProfile = new PartProfile($TABLE, $BASE, 'priv');
-	$pubProfile  = new PartProfile($TABLE, $BASE, 'pub');
+	$privProfile = part_profile($TABLE, $BASE, 'priv');
+	$pubProfile  = part_profile($TABLE, $BASE, 'pub');
 
 	// Drain the PRIVATE store only.
-	$rev = new PrivMockDriver();
+	$rev = new RecordingMockDriver();
 	$res = CloudOffloadEngine::reverseBatch($privProfile, $rev);
 	ok('private drain: status success', $res['status'] === 'success');
 	ok('private drain: priv rows flipped to local', $drvflag($priv1) === 'local' && $drvflag($priv2) === 'local');
@@ -131,9 +91,9 @@ try {
 
 	// With private drained but a public cloud row remaining, the private reverse
 	// now reports empty (deactivate) while the public store still has work.
-	$empty = CloudOffloadEngine::reverseBatch($privProfile, new PrivMockDriver());
+	$empty = CloudOffloadEngine::reverseBatch($privProfile, new RecordingMockDriver());
 	ok('private drain: empty ⇒ deactivate signal (per-store)', !empty($empty['deactivate']));
-	$pubres = CloudOffloadEngine::reverseBatch($pubProfile, new PrivMockDriver());
+	$pubres = CloudOffloadEngine::reverseBatch($pubProfile, new RecordingMockDriver());
 	ok('public drain: still had the public row (no premature deactivate)', empty($pubres['deactivate']));
 	ok('public drain: public row now local', $drvflag($pub1) === 'local');
 

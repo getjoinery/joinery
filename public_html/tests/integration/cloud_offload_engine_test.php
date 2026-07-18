@@ -26,6 +26,7 @@ harness_boot();
 
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriver.php'));
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudOffloadEngine.php'));
+require_once(__DIR__ . '/../lib/cloud_fixtures.php'); // RecordingMockDriver, ScratchTableProfile
 
 $TABLE = 'cloud_offload_engine_test_rows';
 $BASE  = sys_get_temp_dir() . '/cloud_engine_test_' . bin2hex(random_bytes(4));
@@ -34,78 +35,19 @@ mkdir($BASE . '/restore', 0777, true);
 
 $dblink = DbConnector::get_instance()->get_db_link();
 
-/** Mock driver: records ops; get() writes bytes; putMany honours a per-key fail set. */
-class EngMockDriver implements CloudStorageDriver {
-	public $calls = [];
-	public $fail_keys = [];        // remote_keys whose PUT should fail
-	public $on_put = null;         // closure(remote_key): void
-	public function putMany(array $items): array {
-		$out = [];
-		foreach ($items as $it) {
-			$this->calls[] = ['op' => 'put', 'key' => $it['remote_key']];
-			if ($this->on_put) { ($this->on_put)($it['remote_key']); }
-			$out[$it['remote_key']] = in_array($it['remote_key'], $this->fail_keys, true)
-				? new RuntimeException('mock put fail') : true;
-		}
-		return $out;
-	}
-	public function put(string $l, string $k, string $c): void { $this->calls[] = ['op'=>'put','key'=>$k]; }
-	public function get(string $k, string $l): void {
-		$this->calls[] = ['op' => 'get', 'key' => $k];
-		if (!is_dir(dirname($l))) mkdir(dirname($l), 0777, true);
-		file_put_contents($l, "bytes:$k\n");
-	}
-	public function delete(string $k): void { $this->calls[] = ['op' => 'delete', 'key' => $k]; }
-	public function url(string $k): string { return 'https://mock/' . $k; }
-	public function ping(): array { return ['ok' => true, 'message' => 'mock']; }
-	public function ops($f = null) { return array_values(array_filter($this->calls, fn($c) => $f === null || $c['op'] === $f)); }
-}
-
-/** Mock profile over the scratch table; files live under $BASE/disk/<id>/original. */
-class EngMockProfile implements StorageProfile {
-	public $table; public $base;
-	public function __construct($table, $base) { $this->table = $table; $this->base = $base; }
-	public function table(): string { return $this->table; }
-	public function pkeyColumn(): string { return 'id'; }
-	public function driverColumn(): string { return 'drv'; }
-	public function failedCountColumn(): string { return 'failed'; }
-	public function lastAttemptColumn(): string { return 'last_attempt'; }
-	public function visibility(): string { return 'public'; }
-	public function eligibilityWhere(): string { return 'eligible = true'; }
-	private function _row($id) {
-		$db = DbConnector::get_instance()->get_db_link();
-		$q = $db->prepare("SELECT * FROM {$this->table} WHERE id = ?");
-		$q->execute([$id]);
-		return $q->fetch(PDO::FETCH_ASSOC);
-	}
-	public function rowExists(int $id): bool { return (bool)$this->_row($id); }
-	public function isEligibleRow(int $id): bool {
-		$r = $this->_row($id);
-		if (!$r) return false;
-		$local = ($r['drv'] === null || $r['drv'] === '' || $r['drv'] === 'local');
-		return $local && ($r['eligible'] === true || $r['eligible'] === 't' || $r['eligible'] === '1');
-	}
-	public function itemsForRow(int $id): ?array {
-		$path = $this->base . '/disk/' . $id . '/original';
-		if (!file_exists($path)) return null;
-		return [['local_path' => $path, 'remote_key' => $id . '/original', 'content_type' => 'application/octet-stream']];
-	}
-	public function reverseItemsForRow(int $id): array {
-		return [[
-			'remote_key'   => $id . '/original',
-			'local_path'   => $this->base . '/restore/' . $id . '/original',
-			'content_type' => 'application/octet-stream',
-		]];
-	}
-}
-
 function make_disk_file($base, $id) {
 	$dir = $base . '/disk/' . $id;
 	if (!is_dir($dir)) mkdir($dir, 0777, true);
 	file_put_contents($dir . '/original', "local-bytes-$id\n");
 }
 
-$profile = new EngMockProfile($TABLE, $BASE);
+// A scratch-table profile whose eligibility is a boolean `eligible` column.
+$profile = new ScratchTableProfile($TABLE, $BASE, [
+	'eligibility_where' => 'eligible = true',
+	'is_eligible'       => function ($r) {
+		return $r['eligible'] === true || $r['eligible'] === 't' || $r['eligible'] === '1';
+	},
+]);
 
 try {
 	$dblink->exec("DROP TABLE IF EXISTS $TABLE");
@@ -138,7 +80,7 @@ try {
 	$capd = $ins('local', CloudOffloadEngine::FAILED_COUNT_CAP); make_disk_file($BASE, $capd); // excluded
 	$mid  = $ins('local'); make_disk_file($BASE, $mid);   // mid-flight undo
 
-	$fwd = new EngMockDriver();
+	$fwd = new RecordingMockDriver();
 	$fwd->on_put = function($key) use ($dblink, $TABLE, $mid) {
 		if ($key === $mid . '/original') {
 			$dblink->prepare("UPDATE $TABLE SET eligible = false WHERE id = ?")->execute([$mid]);
@@ -162,7 +104,7 @@ try {
 
 	// --- REVERSE ---------------------------------------------------------
 	// ok1/ok2 are now 'cloud'. Pull them back.
-	$rev = new EngMockDriver();
+	$rev = new RecordingMockDriver();
 	$rres = CloudOffloadEngine::reverseBatch($profile, $rev);
 	ok('reverse: status success', $rres['status'] === 'success');
 	ok('reverse: rows flipped to local', $drvflag($ok1) === 'local' && $drvflag($ok2) === 'local');
@@ -173,8 +115,37 @@ try {
 
 	// --- DEACTIVATE WHEN EMPTY ------------------------------------------
 	$dblink->exec("UPDATE $TABLE SET drv = 'local' WHERE drv = 'cloud'");
-	$empty = CloudOffloadEngine::reverseBatch($profile, new EngMockDriver());
+	$empty = CloudOffloadEngine::reverseBatch($profile, new RecordingMockDriver());
 	ok('reverse: zero cloud rows → deactivate signal', !empty($empty['deactivate']) && $empty['deactivate'] === true);
+
+	// --- PARTIAL-PUSH FAILURE (multi-object row, a later object's PUT fails) --
+	// A row with two objects (original + a 'thumb' variant); the driver fails the
+	// variant. The engine must roll the whole row back: delete the original it
+	// already pushed (no bucket orphan), leave the row 'local', and bump its
+	// failure counter. This exercises the partial-push cleanup path the failure-
+	// injection knob was built for — otherwise never triggered by a 1-object row.
+	section('Partial-push failure rolls the row back (no orphan)');
+	$multi_profile = new ScratchTableProfile($TABLE, $BASE, [
+		'eligibility_where' => 'eligible = true',
+		'is_eligible'       => function ($r) { return $r['eligible'] === true || $r['eligible'] === 't' || $r['eligible'] === '1'; },
+		'variants'          => ['thumb'],
+	]);
+	$pf = $ins('local');
+	make_disk_file($BASE, $pf);                                  // original
+	file_put_contents("$BASE/disk/$pf/thumb", "thumb-bytes-$pf\n"); // variant
+	$pdriver = new RecordingMockDriver();
+	$pdriver->fail_keys = [$pf . '/thumb'];                      // the 2nd object PUT fails
+	$sync_row = new ReflectionMethod('CloudOffloadEngine', '_sync_row');
+	$sync_row->setAccessible(true);
+	$pres = $sync_row->invoke(null, $multi_profile, $pf, $pdriver);
+	ok('partial-push: row reported failed', $pres === 'failed');
+	ok('partial-push: the already-pushed original was deleted (rollback)',
+		count(array_filter($pdriver->ops('delete'), function ($c) use ($pf) { return $c['key'] === $pf . '/original'; })) === 1);
+	ok('partial-push: every pushed object was cleaned up (no bucket orphan)',
+		count($pdriver->ops('delete')) === count(array_filter($pdriver->ops('put'), function ($c) use ($pf) { return $c['key'] === $pf . '/original'; })));
+	ok('partial-push: row stays local', $drvflag($pf) === 'local');
+	ok('partial-push: failure counter incremented', $failcount($pf) === 1);
+	ok('partial-push: local bytes NOT deleted', file_exists("$BASE/disk/$pf/original"));
 
 } finally {
 	$dblink->exec("DROP TABLE IF EXISTS $TABLE");

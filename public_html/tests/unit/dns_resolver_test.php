@@ -18,20 +18,7 @@
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
-
-/**
- * Fake raw-DNS layer. getRecords() mirrors dns_get_record(): it returns an
- * array of record arrays, or false to simulate a resolver failure.
- */
-class FakeDnsBackend {
-    /** @var array map of "name|type" => records array, or false */
-    private $data;
-    public function __construct(array $data) { $this->data = $data; }
-    public function getRecords($name, $type) {
-        $key = $name . '|' . $type;
-        return array_key_exists($key, $this->data) ? $this->data[$key] : [];
-    }
-}
+require_once(__DIR__ . '/../lib/dns_fixtures.php'); // FakeDnsBackend
 
 // ── Fixture ──────────────────────────────────────────────────────────────
 DnsResolver::setBackend(new FakeDnsBackend([

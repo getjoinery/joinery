@@ -1,7 +1,7 @@
 <?php
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeToolInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunContext.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/UrlSafetyValidator.php'));
+require_once(PathHelper::getIncludePath('includes/UrlSafetyValidator.php'));
 require_once(PathHelper::getComposerAutoloadPath());
 
 use GuzzleHttp\Client;

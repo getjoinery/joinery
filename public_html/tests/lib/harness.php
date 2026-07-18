@@ -71,14 +71,19 @@ function harness_parse_metadata($filepath) {
 	if (!is_readable($filepath)) return null;
 	// Only the head of the file can carry the header; cap the read.
 	$head = (string)file_get_contents($filepath, false, null, 0, 4096);
-	if (strpos($head, '@joinery-test') === false) return null;
+	// Anchor the marker to the start of a header line (after comment framing
+	// only) so a mere prose MENTION of "@joinery-test" mid-line — docs, a test
+	// that describes the header format — is not mistaken for a real header and
+	// discovered as a phantom test.
+	if (!preg_match('/^[ \t\/*#]*(@joinery-test\b)/m', $head, $mm, PREG_OFFSET_CAPTURE)) return null;
+	$marker_offset = $mm[1][1];
 
 	// timeout_explicit records whether the header actually declared a timeout —
 	// the dashboard only marks a test CLI-only when its author explicitly set a
 	// long cap, so default-cap tests stay web-runnable.
 	$meta = array('name' => '', 'tier' => 'safe', 'env' => 'dev-only', 'needs' => array(),
 		'timeout' => 180, 'timeout_explicit' => false);
-	$after = substr($head, strpos($head, '@joinery-test'));
+	$after = substr($head, $marker_offset);
 	$lines = preg_split('/\r\n|\r|\n/', $after);
 	foreach ($lines as $i => $raw) {
 		if ($i === 0) continue; // the marker line itself

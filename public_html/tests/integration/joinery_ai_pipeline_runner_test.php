@@ -37,7 +37,7 @@ require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 
 require_once(PathHelper::getIncludePath('data/users_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderInterface.php'));
+require_once(__DIR__ . '/../lib/llm_fixtures.php'); // ScriptedLlmProvider (+ LlmProviderInterface)
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineRunner.php'));
@@ -45,36 +45,6 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunCo
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/aip_recipe_item_log_class.php'));
-
-/** Scripted provider: each createMessage() call shifts the next canned
- *  response off the queue. A missing queue entry returns an empty '{}'. */
-class FakeVerdictProvider implements LlmProviderInterface {
-    private $responses;
-    public $calls = 0;
-    public function __construct(array $responses) { $this->responses = $responses; }
-    public function createMessageStreamed(array $params, callable $onTextDelta, ?callable $shouldAbort = null): array {
-        return $this->createMessage($params);
-    }
-    public function createMessage(array $params): array {
-        $this->calls++;
-        $next = array_shift($this->responses) ?? ['text' => '{}'];
-        return [
-            'stop_reason' => 'end_turn',
-            'content' => [['type' => 'text', 'text' => $next['text']]],
-            'usage' => $next['usage'] ?? [
-                'input_tokens' => 10, 'output_tokens' => 10,
-                'cache_creation_input_tokens' => 0, 'cache_read_input_tokens' => 0,
-            ],
-        ];
-    }
-    public function estimateCost(string $model, array $usage): float { return 0.0; }
-    public function models(): array { return []; }
-    public function defaultModel(): string { return 'fake/test-model'; }
-    public function id(): string { return 'fake'; }
-    public function isPrivate(): bool { return true; }
-    public function reachabilityProbe(): ?string { return null; }   // an in-memory fake is always reachable
-    public function modelCapabilities(string $model): array { return ['vision' => false, 'document' => false]; }
-}
 
 /** In-memory job: a fixed item list, real idempotency via the actual
  *  aip_recipe_item_log table (so the exclusion wiring is genuinely exercised,
@@ -132,11 +102,8 @@ if ($owner_uid <= 0) {
 echo "PipelineRunner — item pipeline loop\n";
 echo "owner_uid=$owner_uid\n\n";
 
-$created_recipes = [];
-
 /** Build a fresh throwaway Recipe + running RecipeRun bound to the fixture job. */
 function make_recipe_and_run(int $owner_uid, int $max_iterations, int $token_budget): array {
-    global $created_recipes;
     $recipe = new Recipe(NULL);
     $recipe->set('rcp_name', 'pipeline-fixture-test ' . gmdate('His') . '-' . mt_rand(1000, 9999));
     $recipe->set('rcp_mode', Recipe::MODE_PIPELINE);
@@ -146,7 +113,20 @@ function make_recipe_and_run(int $owner_uid, int $max_iterations, int $token_bud
     $recipe->set('rcp_max_tokens', $token_budget);
     $recipe->prepare();
     $recipe->save();
-    $created_recipes[] = $recipe;
+
+    // Crash-safe teardown registered at creation (LIFO): drop the recipe's logs
+    // and runs, then the recipe itself — even if a later assertion throws.
+    $rid = (int)$recipe->key;
+    harness_defer(function () use ($rid) {
+        $logs = new MultiAipRecipeItemLog(['recipe_id' => $rid]);
+        $logs->load();
+        foreach ($logs as $log) { $log->permanent_delete(); }
+        $runs = new MultiRecipeRun(['recipe_id' => $rid]);
+        $runs->load();
+        foreach ($runs as $run) { $run->permanent_delete(); }
+        $r = new Recipe($rid, true);
+        if ($r->key) { $r->permanent_delete(); }
+    });
 
     $run = new RecipeRun(NULL);
     $run->set('rcr_rcp_recipe_id', (int)$recipe->key);
@@ -166,7 +146,7 @@ FixtureJudgeJob::$items = [
 ];
 FixtureJudgeJob::$recorded = [];
 [$recipe1, $run1, $ctx1] = make_recipe_and_run($owner_uid, 5, 5000);
-$provider1 = new FakeVerdictProvider([
+$provider1 = new ScriptedLlmProvider([
     ['text' => '{"verdict": "keep"}'],
     ['text' => '{"verdict": "flag"}'],
 ]);
@@ -182,7 +162,7 @@ section('2. invalid-verdict retry');
 FixtureJudgeJob::$items = [['item_key' => 'b1', 'digest' => 'item B1', 'label' => 'Item B1']];
 FixtureJudgeJob::$recorded = [];
 [$recipe2, $run2, $ctx2] = make_recipe_and_run($owner_uid, 5, 5000);
-$provider2 = new FakeVerdictProvider([
+$provider2 = new ScriptedLlmProvider([
     ['text' => 'not json at all'],
     ['text' => '{"verdict": "keep"}'],
 ]);
@@ -203,7 +183,7 @@ FixtureJudgeJob::$items = [
 ];
 FixtureJudgeJob::$recorded = [];
 [$recipe3, $run3, $ctx3] = make_recipe_and_run($owner_uid, 5, 5000);
-$provider3 = new FakeVerdictProvider([
+$provider3 = new ScriptedLlmProvider([
     ['text' => 'still not json'],   // c1 attempt 1
     ['text' => 'still not json'],   // c1 attempt 2 (retry) — gives up
     ['text' => '{"verdict": "keep"}'], // c2 attempt 1 — succeeds
@@ -228,7 +208,7 @@ FixtureJudgeJob::$items = [
 ];
 FixtureJudgeJob::$recorded = [];
 [$recipe4, $run4, $ctx4] = make_recipe_and_run($owner_uid, 5, 5000);
-$provider4 = new FakeVerdictProvider(array_fill(0, 8, ['text' => 'never valid json']));
+$provider4 = new ScriptedLlmProvider(array_fill(0, 8, ['text' => 'never valid json']));
 $result4 = PipelineRunner::run($provider4, 'fake/test-model', $recipe4, $ctx4, 5, 5000, null, null, 'off');
 ok('stop_reason is tool_errors', $result4['stop_reason'] === 'tool_errors');
 ok('exactly 3 items attempted before abort (6 calls: 2 per item)', $provider4->calls === 6);
@@ -241,7 +221,7 @@ FixtureJudgeJob::$items = [['item_key' => 'e1', 'digest' => 'e1', 'label' => 'E1
 [$recipe5, $run5, $ctx5] = make_recipe_and_run($owner_uid, 5, 5000);
 $q = $db->prepare("UPDATE rcr_recipe_runs SET rcr_kill_requested = TRUE WHERE rcr_run_id = ?");
 $q->execute([(int)$run5->key]);
-$provider5 = new FakeVerdictProvider([['text' => '{"verdict": "keep"}']]);
+$provider5 = new ScriptedLlmProvider([['text' => '{"verdict": "keep"}']]);
 $result5 = PipelineRunner::run($provider5, 'fake/test-model', $recipe5, $ctx5, 5, 5000, null, null, 'off');
 ok('stop_reason is cancelled', $result5['stop_reason'] === 'cancelled');
 ok('provider never called', $provider5->calls === 0);
@@ -255,7 +235,7 @@ FixtureJudgeJob::$items = [
 ];
 FixtureJudgeJob::$recorded = [];
 [$recipe6, $run6, $ctx6] = make_recipe_and_run($owner_uid, 5, 50);
-$provider6 = new FakeVerdictProvider([
+$provider6 = new ScriptedLlmProvider([
     ['text' => '{"verdict": "keep"}', 'usage' => ['input_tokens' => 5, 'output_tokens' => 50,
         'cache_creation_input_tokens' => 0, 'cache_read_input_tokens' => 0]],
     ['text' => '{"verdict": "keep"}'],
@@ -265,17 +245,7 @@ ok('stop_reason is token_budget', $result6['stop_reason'] === 'token_budget');
 ok('exactly one item processed before the budget halted the run', $provider6->calls === 1);
 ok('f1 recorded, f2 never reached', FixtureJudgeJob::$recorded === ['f1' => ['verdict' => 'keep']]);
 
-// --- cleanup -----------------------------------------------------------------
-echo "\ncleaning up...\n";
-foreach ($created_recipes as $r) {
-    $rid = (int)$r->key;
-    $runs = new MultiRecipeRun(['recipe_id' => $rid]);
-    $runs->load();
-    foreach ($runs as $run) { $run->permanent_delete(); }
-    $logs = new MultiAipRecipeItemLog(['recipe_id' => $rid]);
-    $logs->load();
-    foreach ($logs as $log) { $log->permanent_delete(); }
-    $r->permanent_delete();
-}
+// Cleanup runs via the per-recipe harness_defer registered in make_recipe_and_run()
+// — crash-safe (LIFO), so a mid-suite failure still reclaims every throwaway row.
 
 harness_finish();

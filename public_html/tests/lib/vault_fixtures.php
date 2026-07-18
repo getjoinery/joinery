@@ -52,6 +52,30 @@ function vault_fixture_vault(string $suffix, string $passphrase = '', int $code_
 	];
 }
 
+/**
+ * A client-custody vault row (a caller-supplied public key, no server-held
+ * private key) so consumers like drive_public_keys can resolve the user's key.
+ * This is the raw model for E2E-encrypted scopes where the server never holds
+ * the secret; the setup ceremony in vault_fixture_vault() is server-custody and
+ * does not fit. Inserts one uev row (client custody, no wrappings), registers it
+ * for teardown, and returns its id.
+ *
+ * @param int    $user_id
+ * @param string $public_key  base64 public key the caller minted
+ * @param string $scope       vault scope (e.g. 'drive', 'passwords')
+ * @return int   the new uev_user_encryption_vault_id
+ */
+function vault_fixture_client_vault(int $user_id, string $public_key, string $scope = 'drive'): int {
+	$dblink = DbConnector::get_instance()->get_db_link();
+	$q = $dblink->prepare(
+		"INSERT INTO uev_user_encryption_vaults (uev_usr_user_id, uev_scope, uev_custody, uev_public_key, uev_salt, uev_key_generation)
+		 VALUES (?, ?, 'client', ?, ?, 1) RETURNING uev_user_encryption_vault_id");
+	$q->execute(array($user_id, $scope, $public_key, base64_encode(random_bytes(16))));
+	$id = (int)$q->fetchColumn();
+	harness_register_row('uev_user_encryption_vaults', 'uev_user_encryption_vault_id', $id);
+	return $id;
+}
+
 /** True when APCu actually works in this process (CLI needs apc.enable_cli=1). */
 function vault_apcu_usable(): bool {
 	if (!function_exists('apcu_store')) {

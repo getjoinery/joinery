@@ -407,8 +407,22 @@ class VaultCeremonies {
 			if ($salt === '') {
 				$salt = (string)$vault->get('uev_salt'); // legacy row predating uew_salt
 			}
-			if (!isset($keks[$salt])) {
-				$keks[$salt] = $this->box->kekFromRecoveryCode($code, $salt);
+			// A malformed/unreadable salt skips that one wrapping instead of
+			// aborting the whole unlock — one bad row must not deny every other
+			// recovery code. Unlike a failed unwrap below (the expected wrong-code
+			// case), a derivation failure means the ROW is damaged, so log it
+			// while the user still has working codes.
+			if (!array_key_exists($salt, $keks)) {
+				try {
+					$keks[$salt] = $this->box->kekFromRecoveryCode($code, $salt);
+				} catch (Exception $e) {
+					$keks[$salt] = null;
+					error_log('Vault recovery unlock: skipping wrapping ' . (int)$wrapping->key
+						. ' (vault ' . (int)$vault->key . ') - KEK derivation failed: ' . $e->getMessage());
+				}
+			}
+			if ($keks[$salt] === null) {
+				continue;
 			}
 			try {
 				$ad = UserEncryptionWrapping::adFor((int)$vault->key, $wrapping->key);
@@ -477,8 +491,20 @@ class VaultCeremonies {
 			if ($salt === '') {
 				$salt = (string)$vault->get('uev_salt'); // legacy row predating uew_salt
 			}
-			if (!isset($keks[$salt])) {
-				$keks[$salt] = $this->box->kekFromPassphrase($passphrase, $salt);
+			// Same rule as unlockWithRecoveryCode: a malformed/unreadable salt
+			// skips that one wrapping, never aborts the whole unlock, and gets
+			// logged because a derivation failure means the row is damaged.
+			if (!array_key_exists($salt, $keks)) {
+				try {
+					$keks[$salt] = $this->box->kekFromPassphrase($passphrase, $salt);
+				} catch (Exception $e) {
+					$keks[$salt] = null;
+					error_log('Vault passphrase unlock: skipping wrapping ' . (int)$wrapping->key
+						. ' (vault ' . (int)$vault->key . ') - KEK derivation failed: ' . $e->getMessage());
+				}
+			}
+			if ($keks[$salt] === null) {
+				continue;
 			}
 			try {
 				$ad = UserEncryptionWrapping::adFor((int)$vault->key, $wrapping->key);

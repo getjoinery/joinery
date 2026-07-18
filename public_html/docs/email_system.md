@@ -357,15 +357,27 @@ email_test_redirect = "test@example.com"
 
 ### Email Testing System
 
-The email suites run from the unified test dashboard at `/tests/` and on the
-CLI through `tests/email/email_suite_test.php` — see **📖 [Testing](testing.md)**
-for tiers, the runner, and how to run. The suites send real mail, so they carry
-tier `live` / env `prod-verify`.
+Email coverage lives in `tests/email/` as standard harness tests — run from the
+unified dashboard at `/tests/` or the CLI (`php tests/run.php <tier>`); see
+**📖 [Testing](testing.md)** for tiers and the runner. Each test declares its own
+tier so the safe/db parts stay in the pre-deploy gate and only the real-mail and
+real-DNS parts are gated to `live`:
 
-**Test Types:**
-- **ServiceTests**: SMTP/Mailgun configuration validation
-- **TemplateTests**: Template processing and variable replacement
-- **DeliveryTests**: End-to-end sending simulation (test mode)
+- **`email_template_render`** (db) — template → EmailMessage rendering: variable
+  substitution, subject extraction, subject override, the plain-text alternate,
+  and fail-loud on a missing template. Uses throwaway templates it creates.
+- **`email_provider_config`** (safe) — the provider registry and per-provider
+  config well-formedness (an unconfigured provider SKIPs, never fails).
+- **`email_send_delivery`** (live) — closed-loop delivery: sends through the
+  active provider and the SMTP fallback to a throwaway inbound alias, then polls
+  `iem_inbound_email_messages` to prove the mail actually arrived.
+- **`email_auth_dns`** (live/prod-verify) — SPF, DKIM, and DMARC against the real
+  published DNS for the configured `mailgun_domain`.
+- **`email_pattern_send`** (live) — Mailgun send patterns through EmailSender.
+- **`email_template_iteration`** (safe) — `{loop X as Y}` template iteration.
+
+`DnsAuthChecker`'s parsing logic is unit-tested offline in
+`tests/unit/dns_auth_checker_test.php` with a fake resolver.
 
 The email pattern test (`tests/email/email_pattern_test.php`) resolves its
 recipient in order: the first non-flag command-line argument, then the

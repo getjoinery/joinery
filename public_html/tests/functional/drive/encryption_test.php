@@ -17,6 +17,7 @@ require_once(PathHelper::getIncludePath('data/folders_class.php'));
 require_once(PathHelper::getIncludePath('includes/DriveHelper.php'));
 require_once(PathHelper::getIncludePath('data/file_key_grants_class.php'));
 require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
+require_once(__DIR__ . '/../../lib/vault_fixtures.php'); // vault_fixture_client_vault()
 
 $dblink = DbConnector::get_instance()->get_db_link();
 
@@ -27,24 +28,13 @@ harness_defer(function () use (&$made_files, &$made_folders) {
 	foreach (array_reverse($made_folders) as $fid) { $dblink->prepare("DELETE FROM fol_folders WHERE fol_folder_id=?")->execute(array((int)$fid)); }
 });
 
-/** Insert a client-custody drive vault row so drive_public_keys can resolve it. */
-function make_drive_vault($user_id, $public_key) {
-	$dblink = DbConnector::get_instance()->get_db_link();
-	$q = $dblink->prepare(
-		"INSERT INTO uev_user_encryption_vaults (uev_usr_user_id, uev_scope, uev_custody, uev_public_key, uev_salt, uev_key_generation)
-		 VALUES (?, 'drive', 'client', ?, ?, 1) RETURNING uev_user_encryption_vault_id");
-	$q->execute(array((int)$user_id, (string)$public_key, base64_encode(random_bytes(16))));
-	$id = $q->fetchColumn();
-	harness_register_row('uev_user_encryption_vaults', 'uev_user_encryption_vault_id', $id);
-	return $id;
-}
-
 $owner  = make_user('drvenc_owner');
 $friend = make_user('drvenc_friend');
 $owner_pk  = base64_encode(random_bytes(32));
 $friend_pk = base64_encode(random_bytes(32));
-make_drive_vault($owner->key, $owner_pk);
-make_drive_vault($friend->key, $friend_pk);
+// Client-custody drive vaults so drive_public_keys can resolve each user's key.
+vault_fixture_client_vault((int)$owner->key, $owner_pk, 'drive');
+vault_fixture_client_vault((int)$friend->key, $friend_pk, 'drive');
 
 // ---------------------------------------------------------------------------
 section('encrypted folder + file model layer');

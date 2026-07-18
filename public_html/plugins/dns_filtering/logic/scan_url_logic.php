@@ -9,100 +9,17 @@
  * The web editor's page JS calls
  * POST /api/v1/action/dns_filtering/scan_url.
  *
- * SECURITY: scan_url_validate_target() is the SSRF boundary for this
- * server-side URL fetch. Every fetch target — the initial URL and each
- * redirect hop — must pass through it, and the connection must be pinned
- * to the IPs it validated (CURLOPT_RESOLVE). Covered by
- * tests/unit/scan_url_validate_target_test.php.
+ * SECURITY: UrlSafetyValidator is the SSRF boundary for this server-side URL
+ * fetch. Every fetch target — the initial URL and each redirect hop — must pass
+ * through UrlSafetyValidator::checkAndResolve(), and the connection must be
+ * pinned to the IPs it validated (CURLOPT_RESOLVE). The page scanner opts into
+ * any port (allowed_ports => null) since it legitimately scans dev sites on
+ * non-standard ports. Covered by tests/unit/url_safety_validator_test.php.
  *
- * @version 1.2
+ * @version 1.3
  */
 
-require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
-
-class ScanUrlValidationException extends Exception {}
-
-/**
- * SSRF guard for a single URL. Rejects non-http(s) schemes and any host that
- * resolves to a private/loopback/reserved address. On any failure it throws
- * ScanUrlValidationException — there is no safe return value, so every
- * failure mode fails closed.
- *
- * On success returns the data needed to pin the connection:
- *   ['host' => string, 'port' => int, 'ips' => string[]]
- * Pinning the fetch to these exact IPs (CURLOPT_RESOLVE) closes the
- * resolve-then-fetch DNS-rebinding window; calling this for every redirect
- * hop closes redirect-to-internal SSRF. 'ips' is empty for an IP-literal
- * host — no DNS happens, so there is nothing to pin.
- */
-function scan_url_validate_target($url) {
-	$scheme = strtolower((string)parse_url($url, PHP_URL_SCHEME));
-	if (!in_array($scheme, array('http', 'https'), true)) {
-		throw new ScanUrlValidationException('URL uses an unsupported scheme. Only http and https are allowed.');
-	}
-	$host = parse_url($url, PHP_URL_HOST);
-	if (!$host) {
-		throw new ScanUrlValidationException('Invalid URL: could not parse hostname.');
-	}
-	$port = parse_url($url, PHP_URL_PORT);
-	$port = $port ? (int)$port : ($scheme === 'https' ? 443 : 80);
-
-	// An IP-literal host needs no DNS lookup (and no pin); a hostname is
-	// resolved to every A/AAAA address. A resolver failure fails closed.
-	$host_for_ip = trim($host, '[]');
-	if (filter_var($host_for_ip, FILTER_VALIDATE_IP)) {
-		$ips = array($host_for_ip);
-		$pin_ips = array();
-	} else {
-		try {
-			$ips = DnsResolver::resolveHostIps($host);
-		} catch (DnsLookupException $e) {
-			throw new ScanUrlValidationException('URL host could not be resolved.');
-		}
-		if (empty($ips)) {
-			throw new ScanUrlValidationException('URL host does not resolve.');
-		}
-		$pin_ips = $ips;
-	}
-
-	// Reject any address in a private/loopback/reserved range. IPv4 uses
-	// explicit ranges (PHP's filter misses 127/8); IPv6 uses PHP's filter,
-	// which reliably covers ::1, fe80::/10, fc00::/7 and ::ffff:0:0/96.
-	$private_ranges = array(
-		array(0x00000000, 0xFF000000), // 0.0.0.0/8   "this host" — routes to loopback on Linux
-		array(0x7F000000, 0xFF000000), // 127.0.0.0/8 loopback
-		array(0x0A000000, 0xFF000000), // 10.0.0.0/8
-		array(0x64400000, 0xFFC00000), // 100.64.0.0/10 CGNAT (RFC 6598)
-		array(0xAC100000, 0xFFF00000), // 172.16.0.0/12
-		array(0xC0A80000, 0xFFFF0000), // 192.168.0.0/16
-		array(0xA9FE0000, 0xFFFF0000), // 169.254.0.0/16 link-local (incl. cloud metadata 169.254.169.254)
-		array(0xE0000000, 0xF0000000), // 224.0.0.0/4  multicast
-		array(0xF0000000, 0xF0000000), // 240.0.0.0/4  reserved / future
-	);
-	foreach ($ips as $ip) {
-		$blocked = false;
-		if (strpos($ip, ':') !== false) {
-			if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
-				$blocked = true;
-			}
-		} else {
-			$long = ip2long($ip);
-			if ($long !== false) {
-				foreach ($private_ranges as $range) {
-					if (($long & $range[1]) === $range[0]) {
-						$blocked = true;
-						break;
-					}
-				}
-			}
-		}
-		if ($blocked) {
-			throw new ScanUrlValidationException('URL resolves to a private or reserved address.');
-		}
-	}
-
-	return array('host' => $host, 'port' => $port, 'ips' => $pin_ips);
-}
+require_once(PathHelper::getIncludePath('includes/UrlSafetyValidator.php'));
 
 /**
  * Returns the registrable domain (last two labels, or three for known SLD TLDs).
@@ -166,7 +83,7 @@ function scan_url_logic(array $input): LogicResult{
 	}
 
 	// Initial host, used only as the page-domain fallback below. Scheme and host
-	// are validated inside scan_url_validate_target() before any fetch happens.
+	// are validated inside UrlSafetyValidator before any fetch happens.
 	$host = parse_url($raw_url, PHP_URL_HOST);
 
 	// Load device and verify ownership
@@ -187,9 +104,9 @@ function scan_url_logic(array $input): LogicResult{
 
 	// Fetch the page. Redirects are walked manually (curl's own FOLLOWLOCATION is
 	// off) so every hop — the initial URL and each redirect target — is run
-	// through scan_url_validate_target() and the connection is pinned to the IPs
-	// it just validated. This closes both DNS rebinding and redirect-to-internal
-	// SSRF: curl never re-resolves a host on its own.
+	// through UrlSafetyValidator and the connection is pinned to the IPs it just
+	// validated. This closes both DNS rebinding and redirect-to-internal SSRF:
+	// curl never re-resolves a host on its own.
 	$current_url   = $raw_url;
 	$final_url     = $raw_url;
 	$html          = false;
@@ -198,9 +115,12 @@ function scan_url_logic(array $input): LogicResult{
 
 	for ($hop = 0; $hop <= $max_redirects; $hop++) {
 		try {
-			$target = scan_url_validate_target($current_url); // throws if unsafe
-		} catch (ScanUrlValidationException $e) {
-			return LogicResult::error($e->getMessage());
+			// Any port is permitted — a page scanner legitimately hits dev sites
+			// on non-standard ports. The message is kept generic on purpose so it
+			// does not disclose a target's resolved internal address.
+			$target = UrlSafetyValidator::checkAndResolve($current_url, array('allowed_ports' => null));
+		} catch (UnsafeUrlException $e) {
+			return LogicResult::error('This URL cannot be scanned. It must be an http(s) address that does not resolve to a private or reserved network.');
 		}
 		$final_url = $current_url;
 

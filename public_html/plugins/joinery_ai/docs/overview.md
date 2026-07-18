@@ -46,7 +46,6 @@ plugins/joinery_ai/
       OpenAiCompatibleProvider.php # Ollama / llama.cpp / vLLM / LM Studio; base for remote OpenAI-compatible
       FireworksProvider.php      # Fireworks AI (extends OpenAiCompatibleProvider)
     CostGuard.php              # Per-run token/dollar ceilings
-    UrlSafetyValidator.php     # SSRF guard for fetch_url tool
     ModelRegistry.php          # Generic reads: finds models with $ai_readable
     ModelSchemaBuilder.php     # Generic reads: field_specifications -> field schema
     AiPromptBuilder.php        # Shared prompt assembly: model name catalog + schema sections
@@ -618,7 +617,7 @@ Reader mode escalates automatically through three tiers, gated on a small conten
 2. **Embedded-data harvest** — for JavaScript-rendered pages whose visible body is empty, the page's own shipped data is read (JSON-LD `articleBody`/`headline`, then OpenGraph/`<meta>`). This reads the JSON already in the HTML; it does **not** execute JavaScript, so a page that fetches its body over the network after load and embeds nothing is the remaining gap.
 3. **Full strip** — the same flatten as `mode: "full"`, for anything the first two miss.
 
-Extraction is pure string/DOM work on already-downloaded bytes — the SSRF guard, IP pinning, redirect re-validation, and size/time caps run first and are untouched. The HTML is parsed with `LIBXML_NONET` so the parser can never fetch an external DTD or entity. **Reader mode is a structure filter, not a trust filter:** its output is exactly as untrusted as the raw page and still flows through the chat assistant's untrusted-content handling. Non-HTML responses (JSON, plain text, CSV) bypass extraction in both modes.
+Extraction is pure string/DOM work on already-downloaded bytes — the SSRF guard (the platform-shared `includes/UrlSafetyValidator.php`, restricting `fetch_url` to ports 80/443), IP pinning, redirect re-validation, and size/time caps run first and are untouched. The HTML is parsed with `LIBXML_NONET` so the parser can never fetch an external DTD or entity. **Reader mode is a structure filter, not a trust filter:** its output is exactly as untrusted as the raw page and still flows through the chat assistant's untrusted-content handling. Non-HTML responses (JSON, plain text, CSV) bypass extraction in both modes.
 
 ## Cost protection
 
