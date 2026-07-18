@@ -49,19 +49,14 @@ rotate algorithms later without breaking existing blobs.
 (alongside the DB credentials), not a `stg_settings` value, because it must be
 available before the database and must never live in the database it protects.
 
+The key exists without operator action:
+
 - **On install**, `_site_init.sh` generates it per environment.
-- **For an existing site**, add it manually:
-
-  ```php
-  // in config/Globalvars_site.php
-  $this->settings['secret_box_key'] = '<base64_encode(random_bytes(32)) output>';
-  ```
-
-  Generate the value without echoing it into a shared shell history/log:
-
-  ```bash
-  php -r 'echo base64_encode(random_bytes(32)), "\n";'
-  ```
+- **On upgrade**, the `update_database` pipeline's SecretBox Key Check step
+  (`SecretBox::ensureConfigKey()`) generates and writes one when the config
+  file has none — covering sites installed before the key existed. A present
+  key is never touched; an unwritable config file is reported in the upgrade
+  output instead of failing the upgrade.
 
 If the key is absent, the constructor throws (fail closed). **Changing or losing
 the key makes every value encrypted with it permanently undecryptable** — treat it

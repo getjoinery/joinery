@@ -663,6 +663,19 @@
 		$migration_log->prepare();
 		$migration_log->save();
 		
+		// Step: SecretBox key self-heal. Sites installed before secret_box_key
+		// existed have no key in Globalvars_site.php and fail closed the first
+		// time anything stores a secret; generate one here so every upgraded
+		// site can encrypt at rest. Present keys are never touched.
+		echo "<br>\n<strong>SecretBox Key Check</strong><br>\n";
+		try {
+			require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
+			$sbk = SecretBox::ensureConfigKey();
+			echo ($sbk['ok'] ? '✓ ' : '⚠️  ') . $sbk['message'] . "<br>\n";
+		} catch (Exception $e) {
+			echo "⚠️  SecretBox key check failed: " . $e->getMessage() . "<br>\n";
+		}
+
 		// Step: Seed core settings from public_html/settings.json
 		// Runs after core DB is fully up to date, before plugin sync — ensures
 		// any core setting a plugin might collision-check against already exists.

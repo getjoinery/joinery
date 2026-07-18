@@ -18,7 +18,12 @@
  * constructor throws — SecretBox fails closed and never silently stores or
  * returns plaintext. Plaintext is never logged or echoed.
  *
- * @version 1.0
+ * The key exists on every site without operator action: the installer
+ * generates it for new sites, and ensureConfigKey() — run by the
+ * update_database pipeline — backfills it into the config file on sites
+ * installed before the key existed.
+ *
+ * @version 1.1
  */
 class SecretBox {
 
@@ -48,6 +53,67 @@ class SecretBox {
         }
 
         $this->key = $key;
+    }
+
+    /**
+     * Ensure config/Globalvars_site.php carries a secret_box_key, generating
+     * and writing one when absent. Idempotent and non-destructive: an
+     * existing non-empty key assignment is never touched; an unwritable or
+     * missing config file is reported, not fatal. The key value itself is
+     * never included in the returned message or any log.
+     *
+     * $config_path overrides the target file (tests); by default the site's
+     * own config file is used.
+     *
+     * @return array{ok:bool, action:string, message:string}
+     */
+    public static function ensureConfigKey(?string $config_path = null): array {
+        if ($config_path === null) {
+            $config_path = PathHelper::getSiteRoot() . '/config/Globalvars_site.php';
+        }
+
+        if (!file_exists($config_path)) {
+            return array('ok' => false, 'action' => 'missing_config',
+                'message' => 'Config file not found: ' . $config_path);
+        }
+        $contents = file_get_contents($config_path);
+        if ($contents === false) {
+            return array('ok' => false, 'action' => 'unreadable',
+                'message' => 'Config file could not be read: ' . $config_path);
+        }
+
+        if (preg_match("/settings\\[['\"]secret_box_key['\"]\\]\\s*=\\s*['\"][^'\"]+['\"]/", $contents)) {
+            return array('ok' => true, 'action' => 'present',
+                'message' => 'secret_box_key already configured.');
+        }
+
+        if (!is_writable($config_path)) {
+            return array('ok' => false, 'action' => 'unwritable',
+                'message' => 'secret_box_key is missing and the config file is not writable: '
+                    . $config_path);
+        }
+
+        $key = base64_encode(random_bytes(self::KEY_BYTES));
+        $block = "\n// Key for SecretBox (secrets at rest). Generated automatically for a site\n"
+            . "// installed before this key existed. 32 random bytes, base64-encoded.\n"
+            . "\$this->settings['secret_box_key'] = '" . $key . "';\n";
+
+        // Content after a PHP closing tag would be emitted as page output, so
+        // the block goes before a trailing closing tag when one exists.
+        $close = strrpos($contents, '?>');
+        if ($close !== false) {
+            $new_contents = substr($contents, 0, $close) . $block . "\n" . substr($contents, $close);
+        } else {
+            $new_contents = rtrim($contents) . "\n" . $block;
+        }
+
+        if (file_put_contents($config_path, $new_contents, LOCK_EX) === false) {
+            return array('ok' => false, 'action' => 'write_failed',
+                'message' => 'Failed writing secret_box_key to ' . $config_path);
+        }
+
+        return array('ok' => true, 'action' => 'generated',
+            'message' => 'secret_box_key generated and written to the config file.');
     }
 
     /**
