@@ -1,6 +1,6 @@
 {
     "name": "Server Manager",
-    "version": "1.4.0",
+    "version": "1.5.0",
     "description": "Remote server management for Joinery instances",
     "author": "Joinery",
     "receives_upgrades": true,
@@ -17,6 +17,7 @@
                 { "slug": "server-manager-dashboard", "title": "Dashboard", "url": "/admin/server_manager", "order": 1 },
                 { "slug": "server-manager-upgrades", "title": "Upgrades", "url": "/admin/server_manager/publish_upgrade", "order": 2 },
                 { "slug": "server-manager-targets", "title": "Remote Backup", "url": "/admin/server_manager/targets", "order": 3 },
+                { "slug": "server-manager-provisioning", "title": "Provisioning", "url": "/admin/server_manager/provisioning_setup", "order": 5 },
                 { "slug": "server-manager-jobs", "title": "Jobs", "url": "/admin/server_manager/jobs", "order": 6 },
                 { "slug": "server-manager-cloud-connect", "title": "Cloud Connect", "url": "/profile/server_manager/connect_cloud", "order": 8 },
                 { "slug": "system-specs", "title": "Specifications", "url": "/admin/server_manager/specs", "order": 7 }
