@@ -257,8 +257,23 @@ declares in `pro_fulfillment_provider`:
 
 Both modes end the same way: `install_node` completes, the welcome email goes
 out with DNS instructions, and `ProvisionPendingSsl` turns HTTPS on once DNS
-resolves. Activation steps (Question, API service user, settings) are in
-`specs/automated_hosting_provisioning_setup.md`.
+resolves.
+
+### Activation — the Provisioning page
+
+**Server Manager → Provisioning** (`/admin/server_manager/provisioning_setup`)
+activates the pipeline: every requirement shows a live status badge, and each
+automatable step is a one-click, idempotent action backed by
+`includes/ProvisioningSetup.php` — mint the store API service user
+(`provisioning@<host>`, permission 5, password recovery disabled) and machine
+key and write the API settings (with a loopback probe badge and key
+rotation), create the domain Question, save the email settings, activate the
+three scheduled tasks, and save the customer-cloud settings (SSH key path
+with key/.pub existence badges, referral URL, instance defaults). The page
+also shows what stays manual: attaching the question to hosting products,
+opting a shared host in, and registering the Linode OAuth app. When the store
+is a remote site rather than the control plane itself, the service key is
+minted on the store site and its values entered in the API settings fields.
 
 ### Customer-Cloud Fulfillment
 

@@ -98,11 +98,12 @@ automatically.
    `https://getjoinery.com/oauth_callback`. Store the client ID and secret
    in the provider's two settings on getjoinery.com (secret is
    SecretBox-encrypted by the settings layer).
-2. Copy the referral URL from the Linode Cloud Manager profile into
-   `server_manager_linode_referral_url` on getjoinery.com.
-3. The rest of the pipeline activation is
-   `specs/automated_hosting_provisioning_setup.md`, executed on
-   getjoinery.com (the prod control plane).
+2. Copy the referral URL from the Linode Cloud Manager profile into the
+   Provisioning page's referral field on getjoinery.com.
+3. The rest of the pipeline activation is the guided **Server Manager →
+   Provisioning** page (`/admin/server_manager/provisioning_setup`) on
+   getjoinery.com (the prod control plane) — see
+   `specs/automated_hosting_provisioning_setup.md`.
 
 ## First live test
 

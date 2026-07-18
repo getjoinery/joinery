@@ -1,112 +1,79 @@
-# Automated Hosting Provisioning — Setup Checklist
+# Automated Hosting Provisioning — Activation
 
-**Status (verified 2026-07-16): not yet executed.** The build spec is done
-(`specs/implemented/automated_hosting_provisioning.md`) but the activation
-settings are still empty on this deployment (`server_manager_getjoinery_api_url`,
-`..._api_public_key`, `..._api_secret_key`,
-`..._provisioning_domain_question_id`, `..._provisioning_welcome_from_*`).
-This checklist remains pending operational work, not a build item.
+**Status (updated 2026-07-18): activation is now a guided admin page, not a
+manual checklist.** The control plane's **Server Manager → Provisioning** page
+(`/admin/server_manager/provisioning_setup`) shows the live state of every
+pipeline requirement and does the automatable work itself
+(`ProvisioningSetup` engine, `plugins/server_manager/includes/`). What
+remains below is the operator work the platform cannot do for itself.
 
-This document covers the one-time operational setup required to activate the automated hosting provisioning pipeline. All code is already deployed; these are configuration steps only.
+## The Provisioning page does this for you
 
-## 1. getjoinery.com — Domain Question
+One click each, idempotent, with live status badges:
 
-Create a Question and attach it to every hosting product.
+1. **Store API credentials** (self-store case): creates the service user
+   (`provisioning@<host>`, permission 5 — the API grants cross-user read
+   only at >= 5; password recovery disabled), mints a machine API key
+   (capability read+write, no delete), and writes
+   `server_manager_getjoinery_api_url` / `..._api_public_key` /
+   `..._api_secret_key`. A loopback probe badge confirms the API answers
+   with the stored credentials. Rotation is a button.
+2. **Domain question**: creates the required short-text Question and writes
+   `server_manager_provisioning_domain_question_id`. The page lists which
+   products the question is attached to.
+3. **Email settings**: welcome from address/name and the admin alert
+   address, edited in place.
+4. **Scheduled tasks**: activates Poll Hosting Orders, Provision Pending
+   SSL, and Provision Customer Cloud (creates missing rows, resumes paused).
+5. **Customer-cloud settings**: SSH key path (with key/.pub existence
+   badges), referral URL, region/type/image defaults, and a status badge for
+   the Linode OAuth app credentials.
 
-1. Go to **Admin > Questions** and create a new Question:
-   - **Label:** "What domain would you like to use for your site?"
-   - **Type:** text (single line)
-   - **Required:** yes
-   - **Internal name / slug:** something memorable, e.g. `hosting_domain`
+**Remote-store case:** when the store is a different site from the control
+plane, mint the service user + key on the store site and paste the values
+into the three API settings; everything else on the page works the same.
 
-2. Note the **Question ID** (`qst_id`) — you'll need it in step 3.
+## Remaining operator steps (genuinely manual)
 
-3. For each hosting product, go to **Admin > Products > [product] > Requirements** and attach this Question as a QuestionRequirement. This causes the domain field to appear at checkout and the answer to land in `oir_order_item_requirements.oir_answer`.
-
-## 2. getjoinery.com — API Service User
-
-The control plane needs a dedicated API key with permission to read orders and queue emails.
-
-1. Create a user (e.g. `provisioning@getjoinery.com`) with **permission level 3**.
-2. Generate an API key pair for that user under **Admin > API Keys**.
-3. Note the **public key** and **secret key**.
-
-## 3. Control Plane — Plugin Settings
-
-On the control plane (Server Manager plugin settings), configure:
-
-| Setting | Value |
-|---------|-------|
-| `server_manager_getjoinery_api_url` | `https://getjoinery.com` |
-| `server_manager_getjoinery_api_public_key` | public key from step 2 |
-| `server_manager_getjoinery_api_secret_key` | secret key from step 2 |
-| `server_manager_provisioning_domain_question_id` | Question ID from step 1 |
-| `server_manager_provisioning_admin_alert_email` | your ops alert address |
-| `server_manager_provisioning_welcome_from_email` | `support@getjoinery.com` (must be authorized for getjoinery's mail domain) |
-| `server_manager_provisioning_welcome_from_name` | `Get Joinery Support` |
-
-## 4. Control Plane — Enable a Provisioning Host
-
-At least one managed host must be opted in before any orders will be fulfilled.
-
-1. Go to **Admin > Server Manager** and click **Edit** on the host you want to use for auto-provisioning.
-2. Set **Max Sites** to the number of sites this host should hold (e.g. 50).
-3. Check **Provisioning Enabled**.
-4. Save.
-
-> The host's IP (`mgh_host`) is sent to customers in the welcome email as the DNS A-record target. Make sure it is a routable public IP, not a hostname or private address.
-
-## 5. Control Plane — Activate Scheduled Tasks
-
-Go to **Admin > System > Scheduled Tasks** and activate both tasks:
-
-- **Poll Hosting Orders** — polls getjoinery every cron tick (~15 min) for new paid orders
-- **Provision Pending SSL** — watches for DNS to resolve and runs certbot once it does
-
-Both default to `every_run` frequency. No additional configuration is required.
-
-## 5b. Customer-Cloud Mode (optional, per product)
-
-To fulfill a product onto the buyer's own Linode account instead of a shared
-host (see `specs/customer_cloud_provisioning.md`):
-
-1. Register the OAuth client: Linode Cloud Manager → Profile → OAuth Apps →
-   Create OAuth App, **not** public, callback
-   `https://<control-plane-host>/oauth_callback`. Enter the client ID/secret
-   at **Admin → System → OAuth Providers** on the control plane.
-2. Set `server_manager_customer_cloud_ssh_key_path` to the management SSH
-   private key path; ensure its `.pub` sibling exists (it is installed on
-   created instances).
-3. Optionally set `server_manager_linode_referral_url` (Cloud Manager →
-   Profile → Referrals) and the region/type/image defaults.
-4. Set the hosting product's `pro_fulfillment_provider` to `customer_cloud`,
-   and put the Connect link
+1. **Per hosting product** (product edit page): attach the domain question
+   as a requirement — a product with the question attached is what makes an
+   order a hosting order. For customer-cloud fulfillment additionally set
+   `pro_fulfillment_provider` to `customer_cloud` and put the Connect link
    (`https://<control-plane-host>/profile/server_manager/connect_cloud`) in
-   the product's after-purchase message — the buyer sees it at checkout
-   instead of waiting for the poll-tick email. The Connect page is
-   deliberately not in any menu: buyers reach it by link at the moments that
-   need it (purchase, progress, re-connect).
-5. Activate the **Provision Customer Cloud** scheduled task alongside the two
-   in step 5.
+   the product's after-purchase message. The Connect page is deliberately
+   not in any member menu: buyers reach it by link at the moments that need
+   it (purchase, progress, re-connect).
+2. **Shared-host fulfillment only**: opt at least one managed host in from
+   the Server Manager dashboard (Edit → Max Sites + Provisioning Enabled).
+   The host's IP is sent to customers as the DNS A-record target — it must
+   be a routable public IP.
+3. **Customer-cloud fulfillment only**: register the OAuth client in Linode
+   Cloud Manager (Profile → OAuth Apps → Create OAuth App, **not** public,
+   callback `https://<control-plane-host>/oauth_callback`) and enter the
+   client ID/secret at **Admin → System → OAuth Providers**. Optionally copy
+   the referral URL from Cloud Manager → Profile → Referrals into the
+   Provisioning page's field.
 
-No provisioning host is needed for customer-cloud products — step 4 above
-applies only to shared-host fulfillment.
+## Verify End-to-End
 
-## 6. Verify End-to-End
-
-1. Place a test order on getjoinery.com for a hosting product, entering a test domain.
+1. Place a test order on the store for a hosting product, entering a test
+   domain.
 2. Wait up to 15 minutes for the next Poll Hosting Orders run.
-3. Check **Admin > Server Manager** — a new node should appear in the host accordion with `install_state = installing`.
-4. Once the install job completes, verify the welcome email arrived at the buyer's address.
-5. Point the test domain's A record to the host IP.
-6. Wait for the next Provision Pending SSL run (~15 min). The node's SSL badge should flip from `pending` to `active` once certbot succeeds.
+3. Check **Admin > Server Manager** — a new node should appear with
+   `install_state = installing` (shared-host), or watch the buyer's Connect
+   page progress table (customer-cloud).
+4. Once the install job completes, verify the welcome email arrived at the
+   buyer's address.
+5. Point the test domain's A record at the node IP.
+6. Wait for the next Provision Pending SSL run (~15 min). The node's SSL
+   badge should flip from `pending` to `active` once certbot succeeds.
 
 ## Failure Modes to Watch
 
 | Symptom | Likely cause |
 |---------|-------------|
-| No node appears after 15 min | API credentials wrong, or question ID incorrect — check Poll Hosting Orders last run status in Scheduled Tasks |
+| No node appears after 15 min | API credentials wrong (check the Provisioning page's probe badge), or question not attached to the product — check Poll Hosting Orders last run status in Scheduled Tasks |
 | Node stuck at `install_failed` | install_node job failed — click the job for details, fix the host, click Retry |
 | SSL stuck at `pending` for hours | DNS not pointing to the correct IP — verify with `dig domain.com` |
 | SSL badge flips to `failed` | ~16 hours of certbot failures — check job output for certbot errors (rate limits, DNS misconfiguration) |
-| Welcome email not received | Check getjoinery's queued email queue; verify `welcome_from_email` is SPF/DKIM-authorized |
+| Welcome email not received | Check the store's queued email queue; verify `welcome_from_email` is SPF/DKIM-authorized |
