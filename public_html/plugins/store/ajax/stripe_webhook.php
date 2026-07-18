@@ -2,6 +2,8 @@
 require_once(PathHelper::getIncludePath('plugins/store/includes/StripeHelper.php'));
 require_once(PathHelper::getIncludePath('plugins/store/data/orders_class.php'));
 require_once(PathHelper::getIncludePath('plugins/store/data/order_items_class.php'));
+require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php'));
+require_once(PathHelper::getIncludePath('plugins/store/data/product_versions_class.php'));
 require_once(PathHelper::getIncludePath('data/webhook_logs_class.php'));
 require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/store/includes/TierBilling.php'));
@@ -90,10 +92,44 @@ try {
                     $order_item->set('odi_subscription_cancel_at_period_end', false);
                 }
 
+                $user_id = $order_item->get('odi_usr_user_id');
+
+                // Re-derive the product from whatever price Stripe is now billing.
+                // A scheduled downgrade lands here at period end, when Stripe swaps
+                // the price on its own — nothing else would move the subscriber onto
+                // the new tier. This also picks up price changes made directly in
+                // the Stripe dashboard.
+                $new_price_id = null;
+                if (!empty($subscription->items->data)) {
+                    $new_price_id = $subscription->items->data[0]->price->id;
+                }
+
+                if ($new_price_id) {
+                    // $stripe_helper is the instance that already verified this event.
+                    $price_column = $stripe_helper->test_mode ? 'prv_stripe_price_id_test' : 'prv_stripe_price_id';
+                    $version = ProductVersion::GetByColumn($price_column, $new_price_id);
+
+                    if ($version && $version->get('prv_pro_product_id') != $order_item->get('odi_pro_product_id')) {
+                        $new_product = new Product($version->get('prv_pro_product_id'), TRUE);
+
+                        $order_item->set('odi_pro_product_id', $new_product->key);
+                        $order_item->set('odi_prv_product_version_id', $version->key);
+                        $order_item->set('odi_price', $version->get('prv_version_price'));
+
+                        // 'subscription_change' is the reason that permits a move in
+                        // either direction; 'purchase' would refuse the downgrade.
+                        if ($new_product->get('pro_sbt_subscription_tier_id') && $user_id) {
+                            $new_tier = new SubscriptionTier($new_product->get('pro_sbt_subscription_tier_id'), TRUE);
+                            $new_tier->addUser($user_id, 'subscription_change', 'order_item', $order_item->key, null);
+                        }
+
+                        error_log("Stripe webhook: subscription $subscription_id price changed to $new_price_id, moved to product " . $new_product->key);
+                    }
+                }
+
                 $order_item->save();
 
                 // Trigger tier validation
-                $user_id = $order_item->get('odi_usr_user_id');
                 if ($user_id) {
                     SubscriptionTier::GetUserTier($user_id);
                 }

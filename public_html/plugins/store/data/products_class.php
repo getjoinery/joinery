@@ -96,6 +96,9 @@ class Product extends SystemBase {
 	    'pro_tier_min_level' => array('type'=>'int4', 'is_nullable'=>true),
 	    'pro_fil_file_id' => array('type'=>'int4'),
 	    'pro_emt_receipt_template_id' => array('type'=>'int4', 'is_nullable'=>true),
+	    // Set once, on create, by admin_product_edit_logic. Nullable because
+	    // products that predate the column have no creator on record.
+	    'pro_created_by' => array('type'=>'int8', 'is_nullable'=>true),
 	);
 
 public function get_requirement_info($output='text') {
