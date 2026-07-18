@@ -129,6 +129,12 @@ relation has orphan rows, and that no serial sequence sits behind its table's
 
 ## Using $foreign_key_actions in Models
 
+A child model declares what happens to its own rows when a parent goes away. The
+model holding the reference is the one that knows whether losing its parent means
+it should vanish, be reassigned, or block the delete outright — so that decision
+lives with it rather than in a list kept by the parent. This also lets a plugin
+define behaviour for its own tables without editing a core model.
+
 ### Basic Examples
 
 **Most Common: Set to Deleted User**
@@ -506,36 +512,3 @@ timed purge:
 4. **Prefer CASCADE for logs and temporary data**: Default behavior is usually correct
 5. **Use PREVENT sparingly**: Only for truly critical references that can't be orphaned
 6. **Document custom permanent_delete()**: Explain any special pre/post-deletion logic
-
-## Migration from Old System
-
-The old system used `$permanent_delete_actions` in parent models:
-
-```php
-// OLD (deprecated)
-class User extends SystemBase {
-    public static $permanent_delete_actions = [
-        'ord_usr_user_id' => User::USER_DELETED  // Parent declares child behavior
-    ];
-}
-```
-
-New system uses `$foreign_key_actions` in child models:
-
-```php
-// NEW (current)
-class Order extends SystemBase {
-    protected static $foreign_key_actions = [
-        'ord_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
-    ];
-}
-```
-
-**Why the change?**
-- Child models know their own requirements better than parents
-- Prevents tight coupling between unrelated models
-- Allows plugins to define behavior without modifying core
-- More explicit action specification
-- Supports prevent/null actions that didn't exist before
-
-All `$permanent_delete_actions` declarations have been removed in favor of `$foreign_key_actions`.

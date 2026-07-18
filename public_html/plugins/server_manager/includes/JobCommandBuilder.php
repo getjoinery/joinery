@@ -5,7 +5,7 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
- * @version 1.2
+ * @version 1.4
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -1174,22 +1174,31 @@ class JobCommandBuilder {
 			: ' --register-unsafely-without-email';
 		$is_docker    = (bool)$node->get('mgn_container_name');
 
+		// The site name reaches the remote shell through a variable rather than
+		// being interpolated into the path directly. escapeshellarg returns the
+		// value WITH its quotes, so placing it inside a double-quoted string
+		// makes those quotes literal path characters — the config file is then
+		// never found, the patch below never runs, and the step still reports
+		// success. Assigning first and expanding as "${SITE}" keeps the value
+		// both quoted and correct.
+		$site_var = 'SITE=' . escapeshellarg($sitename) . '; ';
+
 		if (self::is_cloudflare_domain($domain)) {
 			// Cloudflare proxied: certbot not needed (Cloudflare provides edge SSL).
 			// Just ensure the HTTP proxy passes X-Forwarded-Proto "https" to the backend.
 			return [
 				['type' => 'ssh', 'label' => 'Cloudflare detected — skip certbot, patch proxy config', 'on_host' => $is_docker,
-				 'cmd' => "CONF=\"/etc/apache2/sites-enabled/{$sitename_esc}-proxy.conf\"; " .
-				          "[ -f \"\$CONF\" ] && sed -i 's/X-Forwarded-Proto \"http\"/X-Forwarded-Proto \"https\"/' \"\$CONF\" && systemctl reload apache2; " .
-				          "echo 'SSL_SKIPPED_CLOUDFLARE'",
+				 'cmd' => $site_var
+				          . self::proto_patch_cmd('"/etc/apache2/sites-enabled/${SITE}-proxy.conf"')
+				          . '; echo \'SSL_SKIPPED_CLOUDFLARE\'',
 				 'timeout' => 30],
 			];
 		}
 
 		// certbot's Apache plugin copies X-Forwarded-Proto "http" from the HTTP VHost into
 		// the SSL VHost it generates — always patch it to "https" after certbot runs.
-		$ssl_patch_cmd = "SSL_CONF=\"/etc/apache2/sites-enabled/{$sitename_esc}-proxy-le-ssl.conf\"; " .
-		                 "[ -f \"\$SSL_CONF\" ] && sed -i 's/X-Forwarded-Proto \"http\"/X-Forwarded-Proto \"https\"/' \"\$SSL_CONF\" && systemctl reload apache2 || true";
+		$ssl_patch_cmd = $site_var
+		               . self::proto_patch_cmd('"/etc/apache2/sites-enabled/${SITE}-proxy-le-ssl.conf"');
 
 		return [
 			['type' => 'ssh', 'label' => 'Ensure certbot is installed', 'on_host' => $is_docker,
@@ -1205,6 +1214,40 @@ class JobCommandBuilder {
 			 'cmd' => "test -f /etc/letsencrypt/live/{$domain_esc}/fullchain.pem && echo SSL_CERT_VERIFIED",
 			 'continue_on_error' => true],
 		];
+	}
+
+	/**
+	 * Shell fragment that forces X-Forwarded-Proto to "https" in a proxy vhost
+	 * and names the outcome in the job output.
+	 *
+	 * A site is installed with a plain HTTP proxy before DNS cutover, so
+	 * manage_domain.sh writes the header as "http" — correct at that moment.
+	 * This flips it once TLS is actually terminating in front of the backend,
+	 * whether by certbot or at the Cloudflare edge. Getting it wrong means the
+	 * application believes every request arrived unencrypted.
+	 *
+	 * The outcome is reported because the previous form could not tell
+	 * "rewrote it", "already correct" and "never found the file" apart: all
+	 * three exited zero and printed the same thing. That is how a patch whose
+	 * target path had stopped matching went unnoticed — a step that cannot fail
+	 * visibly cannot be trusted when it says it succeeded. Each case now names
+	 * itself, so JobResultProcessor and a human reading the log see the same
+	 * four outcomes.
+	 *
+	 * @param string $conf_shell_path Shell expression for the config path,
+	 *                                already quoted for the remote shell.
+	 * @return string
+	 */
+	private static function proto_patch_cmd($conf_shell_path) {
+		$http_pattern  = 'X-Forwarded-Proto "http"';
+		$https_pattern = 'X-Forwarded-Proto "https"';
+		return 'CONF=' . $conf_shell_path . '; '
+		     . 'if [ ! -f "$CONF" ]; then echo PROTO_CONF_MISSING; '
+		     . 'elif grep -q \'' . $http_pattern . '\' "$CONF"; then '
+		     .   'sed -i \'s/' . $http_pattern . '/' . $https_pattern . '/\' "$CONF" '
+		     .   '&& systemctl reload apache2 && echo PROTO_PATCHED; '
+		     . 'elif grep -q \'' . $https_pattern . '\' "$CONF"; then echo PROTO_ALREADY_HTTPS; '
+		     . 'else echo PROTO_HEADER_ABSENT; fi';
 	}
 
 	private static function is_cloudflare_domain($domain) {

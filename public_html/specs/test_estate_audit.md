@@ -1479,6 +1479,149 @@ showed the Multi engine itself works (9 pass / 0 fail / 3 skip on a 12-model
 sample), so T30 is wiring plus whatever the full sweep then surfaces. It is
 unblocked now that the single-model half is green.
 
+**T24 event_manager — IN PROGRESS 2026-07-18.** Five db-tier suites (201 checks)
+under `plugins/event_manager/tests/`, all inside the pre-deploy gate:
+
+- `event_capacity_test.php` (22) — the availability contract, capacity
+  arithmetic, seat release on expiry, and the enforcement boundary (pins that
+  `add_registrant` is not the gate).
+- `event_deletion_test.php` (20) — declared rules, the executed cascade, and the
+  blast radius: what must survive a delete.
+- `checkout_survey_test.php` (22) — the registration requirement, the
+  survey-belongs-to-event binding, the replay guard, and the answers written.
+- `event_recurrence_test.php` (89) — pattern matching for all four types
+  (intervals, named weekdays, week-of-month including last, month-length and
+  leap-day clamping), occurrence computation, virtual instance construction
+  across a DST boundary, range expansion with materialized/virtual dedup,
+  materialization idempotence and refusals, and ending a series.
+
+- `event_ics_test.php` (48) — date resolution, both ICS route handlers driven end
+  to end, calendar feed membership and UID distinctness, and ICS content.
+
+Recurrence carried three defects, all in the same shape: date arithmetic that
+looks plausible in the output, so nothing downstream flags it.
+
+1. **Annual events listed occurrences 11 years apart.** After the first match,
+   `compute_occurrence_dates` advanced by 11 months and kept doing so, drifting a
+   month per step and only realigning with the start month after twelve steps —
+   132 months. A yearly series asked for four occurrences returned 2026, 2037,
+   2048, 2059. The two `count = 1` callers (event page, ICS feed) escaped it
+   because the loop exits on the first match; the admin occurrence list asks for
+   20 and got nonsense. Fixed by stepping to the next anniversary directly,
+   clamped to month length so a Feb 29 series lands on Feb 28 in common years and
+   returns to Feb 29 in leap years.
+2. **Wide strides silently returned short lists.** The iteration budget was
+   `count * 50` while the loop walked one day at a time, so a quarterly series
+   asked for 20 occurrences returned 11 and stopped. A short list is
+   indistinguishable from a series that ended. The budget now accounts for the
+   stride the pattern can actually ask for.
+3. **Virtual instances carried the parent's row id.** `create_virtual_instance`
+   set `evt_event_id = null` and then the field-copy loop two lines below put the
+   parent's id straight back. Latent today — every consumer gates on `is_virtual`
+   and builds URLs from `evt_link` plus the instance date — but the code stated
+   an intent the next statement destroyed, and any consumer reading the id would
+   have linked to, or registered against, the series template instead of the
+   occurrence. Fixed by clearing after the copy.
+
+All three were confirmed load-bearing by reverting the fix and watching the
+specific checks go red (4 of 89).
+
+`event_ics_test.php` (48) closes the ICS half: the date-resolution contract, both
+route handlers driven end to end, the calendar feed's membership and UID
+distinctness, and ICS content (UTC stamps, RFC 5545 escaping, envelope). The
+handlers finish through `exit()`, so they run in a subprocess via
+`tests/support/ics_route_runner.php` rather than in-process — which means the
+real handler is what gets tested, route params and all.
+
+Two more defects, both about a date arriving from a URL:
+
+4. **The ICS route served occurrences that do not exist.** The event page checked
+   a requested date against the recurrence pattern and 404'd otherwise; the ICS
+   route handed any date straight to `create_virtual_instance`. So a URL that
+   404'd as a page still returned a calendar entry — published into software that
+   would then remind people to attend. The same gap covered a date on a
+   non-recurring event, a finished series (which emitted the series template as
+   though it were an event), and malformed input. Fixed by giving both routes one
+   resolver, `Event::resolve_instance_for_date()`, which also rejects a
+   well-formed but impossible date (`2026-02-31`) that `strtotime` would
+   otherwise roll forward to March 3 — serving one date's occurrence under
+   another date's URL. A materialized row still wins over the pattern, because
+   people may already be registered against it.
+5. **`get_by_link(NULL)` returned an arbitrary record (`SystemBase`).** Multi
+   option keys are read with `isset()`, which is false for NULL, so a null slug
+   dropped the filter entirely and left an unfiltered query whose first row was
+   returned. Platform-wide: every model with a slug. The live consequence found
+   was `Product::prepare()`, which calls `get_by_link($this->get('pro_link'))` as
+   a duplicate check — a product with no link yet matched some unrelated product
+   and threw "This product link already exists." Fixed in `SystemBase` by
+   returning false for an empty or null link.
+
+**Still remaining in T24:** the check-then-insert in `materialize_instance` and
+the missing database-level parent link on instance rows, both recorded in
+`specs/deferred_fixes.md` (entries 4 and 5) because each is a schema change.
+
+**T25 server_manager — DONE 2026-07-18.** The production deploy pipeline had zero
+coverage of the two classes that carry it. Two db-tier suites, 121 checks:
+
+- `job_command_builder_test.php` (71) — transport gating and the disabled-action
+  reasons, input refusals, shell safety, path construction, step structure.
+- `job_result_processor_test.php` (50) — dispatch, the API envelope, SSH status
+  parsing, markers and SSL tokens, size formatting, and the end-to-end node
+  update.
+
+Shell safety is tested by pushing metacharacters (`; touch CANARY`, `$(…)`,
+backticks, embedded quotes) through every builder that takes input, then
+**running the emitted fragment through a real shell** in a scratch directory and
+asserting the payload never fires. Asserting on the shape of the string would
+pass just as well against a builder that silently dropped its input, so each case
+also asserts the payload survives — quoted — before proving it inert. All
+builders held: slugs are shape-checked, values are `escapeshellarg`'d, numeric
+options are `intval`'d.
+
+The parsers are tested against output that is not the happy case — truncated,
+doubled, empty, error text — pinning that unrecognised output yields *no*
+reading rather than a wrong one. A missing reading is visibly missing on the
+dashboard; a misparsed one is indistinguishable from a real measurement.
+
+One defect, and it is the quiet kind:
+
+6. **The X-Forwarded-Proto patch never ran.** `escapeshellarg` returns its value
+   *with* quotes, and `build_provision_ssl` interpolated the result inside an
+   already double-quoted shell string. The emitted path was
+   `/etc/apache2/sites-enabled/'mysite'-proxy.conf` — quotes and all — so
+   `[ -f "$CONF" ]` never matched, the `sed` never ran, and the step still
+   reported success (the Cloudflare branch ends in an `echo`, the certbot branch
+   in `|| true`). Both branches were affected. Fixed by assigning the value to a
+   shell variable and expanding `"${SITE}"`, which keeps it both quoted and
+   correct; a site name containing a space is covered so the fix cannot regress
+   into unquoted interpolation. Confirmed load-bearing: reverting turns 3 checks
+   red, one of which shows the config file still reading
+   `X-Forwarded-Proto "http"` after the patch ran.
+
+   **Fleet impact: none, verified.** The deployed fleet was checked directly
+   rather than inferred from the code path. No config anywhere on the shared
+   host or the DNS nodes contains `X-Forwarded-Proto "http"`, and the
+   `-proxy.conf` / `-proxy-le-ssl.conf` files this step targets do not exist on
+   any of them. The live vhosts are `{sitename}.conf`, written by a mechanism
+   that bakes `"https"` into both the `:80` and `:443` vhosts from the start, so
+   the patch was never load-bearing for these sites. The bug would bite a node
+   provisioned through `manage_domain.sh`'s docker-proxy path, which writes the
+   header as `"http"` (correct pre-cutover) and relies on this step to flip it
+   once TLS terminates in front. No current node took that route.
+
+   **The reason it went unnoticed is the part worth fixing.** The step could not
+   distinguish "rewrote the header", "already correct" and "never found the
+   file" — all three exited zero and printed the same thing. A step that cannot
+   fail visibly cannot be trusted when it reports success. The patch now emits
+   one of `PROTO_PATCHED`, `PROTO_ALREADY_HTTPS`, `PROTO_CONF_MISSING` or
+   `PROTO_HEADER_ABSENT`, each covered by a check that runs the emitted fragment
+   against a real config file and asserts both the marker and the resulting file
+   contents, including that a repeat run is a no-op rather than a duplicate.
+
+Also surfaced, not fixed: the error log drops any error longer than 255
+characters (`specs/deferred_fixes.md` entry 6), found when a fixture violated a
+NOT NULL constraint and the logging of that failure itself failed.
+
 **Still remaining (documented in the work plan below):**
 the full cloud 6→4 FILE merge
 (the D20/D21 DEFECTS are fixed; merging characterization into engine risks the
