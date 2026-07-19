@@ -5,7 +5,7 @@
  * Used by provisioning tasks to poll orders and queue welcome emails.
  * Auth: public_key / secret_key request headers.
  *
- * @version 1.0
+ * @version 1.1
  */
 class GetJoineryApiClient {
 
@@ -46,8 +46,10 @@ class GetJoineryApiClient {
 			CURLOPT_TIMEOUT        => 15,
 			CURLOPT_CONNECTTIMEOUT => 10,
 			CURLOPT_HTTPHEADER     => [
-				'public_key: ' . $this->public_key,
-				'secret_key: ' . $this->secret_key,
+				// Dash spelling: Apache→FPM stacks silently drop header names
+				// containing underscores (see api/apiv1.php's normalization).
+				'public-key: ' . $this->public_key,
+				'secret-key: ' . $this->secret_key,
 				'Accept: application/json',
 			],
 			CURLOPT_FOLLOWLOCATION => false,

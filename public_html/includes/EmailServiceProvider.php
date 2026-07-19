@@ -10,7 +10,7 @@
  *
  * This file also declares the optional RawMessageRelay capability (below).
  *
- * @version 1.1
+ * @version 1.2
  */
 interface EmailServiceProvider {
     /**
@@ -23,6 +23,15 @@ interface EmailServiceProvider {
      * Return a human-readable label for admin UI (e.g., 'Mailgun', 'SMTP').
      */
     public static function getLabel(): string;
+
+    /**
+     * Return the DNS domain a sending domain must include: in its SPF record
+     * for mail sent through this provider to pass SPF (e.g., 'mailgun.org'),
+     * or '' when no fixed include applies — local sends covered by the
+     * server's own IP, arbitrary smarthosts, or providers that publish
+     * per-domain DNS from their own dashboard.
+     */
+    public static function getSpfIncludeDomain(): string;
 
     /**
      * Return an array of setting field definitions this provider requires.

@@ -2112,3 +2112,12 @@ dialog.jy-ui::backdrop { background: rgba(0, 0, 0, 0.45); }
     .jy-ui .jy-checkout-mobilesummary { display: block; }
     .jy-ui .jy-checkout-summary-col { display: none; }
 }
+
+/* ============================================
+   Copy field (PublicPageBase::copy_field)
+   Unscoped: appears in admin fix tables and
+   anywhere a value is carried to another system.
+   ============================================ */
+.jy-copyfield { display: flex; gap: 0.25rem; align-items: center; }
+.jy-copyfield input[readonly] { flex: 1; min-width: 10rem; cursor: text; background: #fff; }
+.jy-copyfield button { white-space: nowrap; }

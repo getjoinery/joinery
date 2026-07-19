@@ -28,6 +28,11 @@ class SesProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubm
         return 'Amazon SES';
     }
 
+    public static function getSpfIncludeDomain(): string
+    {
+        return 'amazonses.com';
+    }
+
     public static function getSettingsFields(): array {
         return [
             [

@@ -140,6 +140,24 @@ function admin_mailbox_relay_logic(array $input): LogicResult {
 			return LogicResult::redirect($self_url);
 		}
 
+		// --- fleet service (operator side): switch the service on/off + MX zone
+		if ($action === 'fleet_service_config') {
+			$enabled = !empty($input['mailbox_fleet_service_enabled']) ? '1' : '0';
+			$zone = strtolower(trim((string)($input['mailbox_fleet_mx_zone'] ?? '')));
+			if ($enabled === '1' && (strpos($zone, '.') === false)) {
+				$flash('Set the fleet MX zone first — a DNS zone this deployment\'s operator controls, e.g. mx.example.com.',
+					'Cannot enable fleet service');
+				return LogicResult::redirect($self_url);
+			}
+			admin_mailbox_relay_write_setting('mailbox_fleet_service_enabled', $enabled);
+			admin_mailbox_relay_write_setting('mailbox_fleet_mx_zone', $zone);
+			$flash($enabled === '1'
+				? 'Fleet service is on. Each tenant\'s MX hostname is <slug>.' . $zone
+					. ' — publish it as an A record pointing at the tenant\'s shard.'
+				: 'Fleet service is off. Tenant slots stop reconciling until it is re-enabled.');
+			return LogicResult::redirect($self_url);
+		}
+
 		// --- fleet shards (operator side): register a shard + provision skeleton
 		if ($action === 'provision_shard' && $server_manager_active) {
 			$result = admin_mailbox_relay_provision_shard($input, $session);
@@ -231,6 +249,7 @@ function admin_mailbox_relay_logic(array $input): LogicResult {
 		'fleet_status'          => $fleet_status,
 		'fleet_error'           => $fleet_error,
 		'fleet_service_on'      => $fleet_service_on,
+		'fleet_mx_zone'         => trim((string)$settings->get_setting('mailbox_fleet_mx_zone')),
 		'fleet_shards'          => $fleet_shards,
 		'session'               => $session,
 		'settings'              => $settings,
@@ -298,7 +317,7 @@ function admin_mailbox_relay_sync_shard_from_node($shard): void {
 		$db = DbConnector::get_instance()->get_db_link();
 		$stmt = $db->prepare(
 			"SELECT mgn_wg_public_key, mgn_wg_endpoint FROM mgn_managed_nodes
-			  WHERE mgn_managed_node_id = ? LIMIT 1");
+			  WHERE mgn_id = ? LIMIT 1");
 		$stmt->execute(array($node_id));
 		$row = $stmt->fetch(PDO::FETCH_ASSOC);
 		if (!$row) {
@@ -322,7 +341,9 @@ function admin_mailbox_relay_sync_shard_from_node($shard): void {
 			$shard->save();
 		}
 	} catch (\Throwable $e) {
-		// Best-effort sync; the shard list still renders.
+		// Best-effort sync; the shard list still renders — but never silently.
+		error_log('admin_mailbox_relay_sync_shard_from_node failed for shard '
+			. intval($shard->key) . ': ' . $e->getMessage());
 	}
 }
 

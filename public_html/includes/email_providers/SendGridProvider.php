@@ -19,6 +19,11 @@ class SendGridProvider implements EmailServiceProvider, InboundEmailProvider {
         return 'SendGrid';
     }
 
+    public static function getSpfIncludeDomain(): string
+    {
+        return 'sendgrid.net';
+    }
+
     public static function getSettingsFields(): array {
         return [
             [

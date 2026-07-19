@@ -88,6 +88,32 @@ document.addEventListener('DOMContentLoaded', function() {
 //   confirm/alert/prompt — text modes (message + optional input).
 //   open(content, { buttons }) — content mode for arbitrary DOM + a custom
 //   button set; each button is { label, style, onClick(dialog), close }.
+// Click-to-copy: any <button data-jy-copy="text"> copies that text to the
+// clipboard and briefly confirms on the button itself. Delegated, so markup
+// rendered at any time (including inside modals) works without wiring.
+document.addEventListener('click', function (e) {
+    const btn = e.target.closest ? e.target.closest('[data-jy-copy]') : null;
+    if (!btn) return;
+    const text = btn.getAttribute('data-jy-copy') || '';
+    const done = () => {
+        const prev = btn.textContent;
+        btn.textContent = 'Copied';
+        btn.disabled = true;
+        setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 1200);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, done);
+    } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); } catch (err) { /* best effort */ }
+        document.body.removeChild(ta);
+        done();
+    }
+});
+
 const JoineryModal = (() => {
     let dialog, msgEl, contentEl, inputEl, actionsEl;
 
@@ -149,6 +175,27 @@ const JoineryModal = (() => {
         confirmBtn.onclick = () => { dialog.close(); onConfirm(); };
     }
 
+    // Type-to-confirm for irreversible actions: the message states the action,
+    // the input demands the exact phrase, and the confirm button stays disabled
+    // until it matches. Use for permanent deletes and anything else with no undo.
+    function confirmTyped(message, requiredText, onConfirm, options) {
+        const opts = Object.assign(
+            { confirmLabel: 'I understand', placeholder: requiredText },
+            options
+        );
+        const confirmBtn = _open(
+            message + ' Type "' + requiredText + '" to confirm.',
+            opts, true, true
+        );
+        confirmBtn.disabled = true;
+        inputEl.value = '';
+        const matches = () => inputEl.value.trim() === requiredText;
+        inputEl.oninput   = () => { confirmBtn.disabled = !matches(); };
+        const submit = () => { if (!matches()) return; dialog.close(); onConfirm(); };
+        confirmBtn.onclick = submit;
+        inputEl.onkeydown  = (e) => { if (e.key === 'Enter') submit(); };
+    }
+
     function alert(message, onClose, options) {
         const opts = Object.assign({ confirmLabel: 'OK', confirmStyle: 'primary' }, options);
         const confirmBtn = _open(message, opts, false, false);
@@ -189,5 +236,5 @@ const JoineryModal = (() => {
         return { dialog: dialog, content: contentEl };
     }
 
-    return { confirm, alert, prompt, open };
+    return { confirm, confirmTyped, alert, prompt, open };
 })();

@@ -25,6 +25,11 @@ class BrevoProvider implements EmailServiceProvider {
         return 'Brevo';
     }
 
+    public static function getSpfIncludeDomain(): string
+    {
+        return 'spf.brevo.com';
+    }
+
     public static function getSettingsFields(): array {
         return [
             [

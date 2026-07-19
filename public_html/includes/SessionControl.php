@@ -1158,18 +1158,69 @@ class SessionControl{
 
 	/**
 	 * Get the real client IP address, accounting for Cloudflare and reverse proxies.
-	 * Prefers CF-Connecting-IP (Cloudflare), falls back to X-Forwarded-For, then REMOTE_ADDR.
+	 *
+	 * Default mode prefers CF-Connecting-IP, falls back to X-Forwarded-For, then
+	 * REMOTE_ADDR — right for heuristics (hijack detection, logging) where a
+	 * spoofed header costs nothing.
+	 *
+	 * $for_auth mode is for security decisions (e.g. API-key IP restrictions):
+	 * CF-Connecting-IP is honored ONLY when the TCP peer is a verified
+	 * Cloudflare edge address, and X-Forwarded-For is never trusted — otherwise
+	 * a direct-to-origin request could spoof any allowed IP with one header.
 	 */
-	private function _get_client_ip() {
-		if (!empty($_SERVER['HTTP_CF_CONNECTING_IP'])) {
+	public static function get_client_ip(bool $for_auth = false) {
+		$remote = $_SERVER['REMOTE_ADDR'] ?? '';
+		if (!empty($_SERVER['HTTP_CF_CONNECTING_IP'])
+				&& (!$for_auth || self::ip_is_cloudflare_edge($remote))) {
 			return $_SERVER['HTTP_CF_CONNECTING_IP'];
 		}
-		if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+		if (!$for_auth && !empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
 			// X-Forwarded-For can contain multiple IPs; the first is the real client
 			$ips = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
 			return trim($ips[0]);
 		}
-		return $_SERVER['REMOTE_ADDR'] ?? '';
+		return $remote;
+	}
+
+	private function _get_client_ip() {
+		return self::get_client_ip();
+	}
+
+	/** True when $ip is inside Cloudflare's published edge ranges (www.cloudflare.com/ips). */
+	public static function ip_is_cloudflare_edge(string $ip): bool {
+		static $ranges = array(
+			'173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22',
+			'141.101.64.0/18', '108.162.192.0/18', '190.93.240.0/20', '188.114.96.0/20',
+			'197.234.240.0/22', '198.41.128.0/17', '162.158.0.0/15', '104.16.0.0/13',
+			'104.24.0.0/14', '172.64.0.0/13', '131.0.72.0/22',
+			'2400:cb00::/32', '2606:4700::/32', '2803:f800::/32', '2405:b500::/32',
+			'2405:8100::/32', '2a06:98c0::/29', '2c0f:f248::/32',
+		);
+		$packed = @inet_pton($ip);
+		if ($packed === false) {
+			return false;
+		}
+		foreach ($ranges as $range) {
+			list($net, $bits) = explode('/', $range);
+			$net_packed = @inet_pton($net);
+			if ($net_packed === false || strlen($net_packed) !== strlen($packed)) {
+				continue;
+			}
+			$bits = (int)$bits;
+			$bytes = intdiv($bits, 8);
+			$remainder = $bits % 8;
+			if ($bytes > 0 && strncmp($packed, $net_packed, $bytes) !== 0) {
+				continue;
+			}
+			if ($remainder > 0) {
+				$mask = 0xFF << (8 - $remainder) & 0xFF;
+				if ((ord($packed[$bytes]) & $mask) !== (ord($net_packed[$bytes]) & $mask)) {
+					continue;
+				}
+			}
+			return true;
+		}
+		return false;
 	}
 
 	/**

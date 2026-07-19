@@ -16,7 +16,7 @@
  *   id, scope, layer, label, severity, status, summary, detail, fix, recheckable
  * where fix is null or ['text'=>, 'command'=>?, 'dns_record'=>['type','name','value']?].
  *
- * @version 1.12
+ * @version 1.16
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -44,6 +44,7 @@ class InboundEmailSetupCheck {
 	private $publicIp = '';
 	private $publicIpIsPrivate = false;
 	private $mailHostname = '';
+	private $relay_info = null;
 
 	function __construct() {
 		$this->settings = Globalvars::get_instance();
@@ -525,9 +526,9 @@ class InboundEmailSetupCheck {
 		} elseif (empty($mx)) {
 			$out[] = $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::FAIL,
 				$domain . ' has no MX record.', '',
-				$this->dnsFix('MX', $domain, '10 ' . $canonical));
+				$this->dnsFix('MX', $domain, $canonical, 10));
 		} else {
-			$out[] = $this->mxResult($domain, strtolower(rtrim($mx[0]['host'], '.')), $mx[0]['pri']);
+			$out[] = $this->mxResult($domain, strtolower(rtrim($mx[0]['host'], '.')), $mx[0]['pri'], $canonical);
 		}
 
 		// A protected sending identity (specs/mailbox_outbound_send_protection.md)
@@ -556,7 +557,7 @@ class InboundEmailSetupCheck {
 				$out[] = $r;
 			}
 		} else {
-			$spfValue = 'v=spf1 ip4:' . ($this->publicIp !== '' ? $this->publicIp : 'YOUR_SERVER_IP') . ' -all';
+			$spfValue = $this->prescribedSpf();
 			if (!$txtOk) {
 				$out[] = $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::UNKNOWN,
 					'DNS TXT lookup for ' . $domain . ' failed — try again.');
@@ -790,9 +791,20 @@ class InboundEmailSetupCheck {
 	 * Evaluate an MX target through the CNAME / resolves / points-here chain
 	 * and return a single 'domain.mx' result. Called when the domain has an MX;
 	 * the first unmet condition determines the status.
+	 *
+	 * The suggested fix depends on who owns the MX target: a target the
+	 * operator controls (this deployment's mail host, or any name under the
+	 * domain itself) is fixed by correcting its A record; a third-party target
+	 * (a previous mail provider) is fixed by changing the domain's MX to this
+	 * deployment's mail host — its A record is not ours to point.
 	 */
-	private function mxResult($domain, $mxTarget, $mxPri) {
+	private function mxResult($domain, $mxTarget, $mxPri, $canonical) {
 		$lead = $domain . ' MX → ' . $mxTarget . ' (priority ' . $mxPri . ')';
+		$owned_target = ($mxTarget === $canonical)
+			|| ($mxTarget === $domain)
+			|| (substr($mxTarget, -strlen('.' . $domain)) === '.' . $domain);
+		$mx_swap_fix = $this->dnsFix('MX', $domain, $canonical, 10);
+		$mx_swap_fix['text'] = 'Replace the MX record at your DNS provider (and remove the old one).';
 
 		// MX target must not be a CNAME (RFC 2181).
 		list($cname, $cnameOk) = $this->dns(function () use ($mxTarget) { return DnsResolver::getCname($mxTarget); });
@@ -803,7 +815,9 @@ class InboundEmailSetupCheck {
 		if ($cname !== null) {
 			return $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::FAIL,
 				$lead . ', but ' . $mxTarget . ' is a CNAME (' . $cname . ') — RFC 2181 forbids an MX target that is a CNAME.',
-				'', array('text' => 'Point the MX at a hostname that has its own A record, not a CNAME.'));
+				'', $owned_target
+					? array('text' => 'Point the MX at a hostname that has its own A record, not a CNAME.')
+					: $mx_swap_fix);
 		}
 
 		// MX target must resolve, and resolve to this server.
@@ -815,7 +829,9 @@ class InboundEmailSetupCheck {
 		if (empty($mxA)) {
 			return $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::FAIL,
 				$lead . ', but ' . $mxTarget . ' has no A record.', '',
-				$this->dnsFix('A', $mxTarget, $this->publicIp !== '' ? $this->publicIp : 'YOUR_SERVER_IP'));
+				$owned_target
+					? $this->dnsFix('A', $mxTarget, $this->publicIp !== '' ? $this->publicIp : 'YOUR_SERVER_IP')
+					: $mx_swap_fix);
 		}
 		if ($this->publicIp === '') {
 			return $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::UNKNOWN,
@@ -823,8 +839,9 @@ class InboundEmailSetupCheck {
 		}
 		if (!in_array($this->publicIp, $mxA, true)) {
 			return $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::FAIL,
-				$lead . ' → ' . implode(', ', $mxA) . ', not this server (' . $this->publicIp . ').', '',
-				$this->dnsFix('A', $mxTarget, $this->publicIp));
+				$lead . ' → ' . implode(', ', $mxA) . ', not this server (' . $this->publicIp . ')'
+				. ($owned_target ? '.' : ' — mail is still being delivered to the old provider.'), '',
+				$owned_target ? $this->dnsFix('A', $mxTarget, $this->publicIp) : $mx_swap_fix);
 		}
 		if ($this->publicIpIsPrivate) {
 			return $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::WARN,
@@ -847,17 +864,33 @@ class InboundEmailSetupCheck {
 		}
 		$spfEval = $this->spfAuthorizes($spf, $domain);
 		if ($spfEval === 'pass') {
+			// The server is authorized — but mail also leaves through the
+			// outbound relay, so a record that omits the relay's include still
+			// produces SPF failures at recipients.
+			$relay = $this->relayInfo();
+			if ($relay['spf_include'] !== '') {
+				$lookups = 0;
+				if (!$this->spfChainIncludes($spf, $relay['spf_include'], $lookups)) {
+					return $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::WARN,
+						'SPF authorizes this server (' . $this->publicIp . '), but not the outbound relay ('
+						. $relay['label'] . ') — mail sent through it will fail SPF.',
+						'Record: ' . $spf,
+						$this->dnsFix('TXT', $domain, $spfValue));
+				}
+				return $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::PASS,
+					'SPF record present; authorizes ' . $this->publicIp . ' and the ' . $relay['label'] . ' relay.');
+			}
 			return $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::PASS,
 				'SPF record present and authorizes ' . $this->publicIp . '.');
 		}
-		if ($spfEval === 'include') {
+		if ($spfEval === 'unverified') {
 			return $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::WARN,
-				'SPF record present, but it uses include:/redirect mechanisms — could not fully verify ' . $this->publicIp . '.',
+				'SPF record present, but its policy could not be fully verified (a DNS lookup failed or the 10-lookup limit was hit).',
 				'Record: ' . $spf,
-				array('text' => 'Confirm the included policy covers ' . $this->publicIp . ', or add ip4:' . $this->publicIp . ' directly.'));
+				array('text' => 'Confirm the policy covers ' . $this->publicIp . ', or add ip4:' . $this->publicIp . ' directly.'));
 		}
 		return $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::FAIL,
-			'SPF record present, but it does not authorize ' . $this->publicIp . '.',
+			'SPF record present, but it does not authorize ' . $this->publicIp . ' (include: policies expanded).',
 			'Record: ' . $spf,
 			$this->dnsFix('TXT', $domain, $spfValue));
 	}
@@ -968,9 +1001,9 @@ class InboundEmailSetupCheck {
 				'Record: ' . $spf,
 				$this->dnsFix('TXT', $domain, $suggested));
 		}
-		if ($eval === 'include') {
+		if ($eval === 'unverified') {
 			return $this->r('domain.spf', $domain, 'domain', 'SPF excludes this server', self::REQUIRED, self::WARN,
-				'SPF uses include:/redirect mechanisms — could not confirm the box (' . $this->publicIp . ') is excluded.',
+				'SPF policy could not be fully verified — could not confirm the box (' . $this->publicIp . ') is excluded.',
 				'Record: ' . $spf,
 				array('text' => 'Confirm no included policy authorizes ' . $this->publicIp . '; the tightest shape is ' . $suggested . '.'));
 		}
@@ -1033,7 +1066,7 @@ class InboundEmailSetupCheck {
 				'A protected domain routes its SRS forwarding envelope through a subdomain (e.g. fwd.' . $domain . ') so forwarding and bounces keep working while locked.',
 				array('text' => 'Set the forwarding subdomain on the Protect page.'));
 		}
-		$spfValue = 'v=spf1 ip4:' . ($this->publicIp !== '' ? $this->publicIp : 'YOUR_SERVER_IP') . ' -all';
+		$spfValue = $this->prescribedSpf();
 		list($txt, $ok) = $this->dns(function () use ($sub) { return DnsResolver::getTxt($sub); });
 		if (!$ok) {
 			return $this->r('domain.fwd_spf', $domain, 'domain', 'Forwarding subdomain SPF', self::REQUIRED, self::UNKNOWN,
@@ -1048,13 +1081,27 @@ class InboundEmailSetupCheck {
 		}
 		$eval = $this->spfAuthorizes($spf, $sub);
 		if ($eval === 'pass') {
+			// Forwarded mail leaves through the relay with an SRS envelope on
+			// this subdomain, so the relay's include is part of its shape too.
+			$relay = $this->relayInfo();
+			if ($relay['spf_include'] !== '') {
+				$lookups = 0;
+				if (!$this->spfChainIncludes($spf, $relay['spf_include'], $lookups)) {
+					return $this->r('domain.fwd_spf', $domain, 'domain', 'Forwarding subdomain SPF', self::REQUIRED, self::WARN,
+						$sub . ' SPF authorizes this server, but not the outbound relay (' . $relay['label']
+						. ') — forwarded mail sent through it will fail SPF.', 'Record: ' . $spf,
+						$this->dnsFix('TXT', $sub, $spfValue));
+				}
+				return $this->r('domain.fwd_spf', $domain, 'domain', 'Forwarding subdomain SPF', self::REQUIRED, self::PASS,
+					$sub . ' SPF authorizes this server (' . $this->publicIp . ') and the ' . $relay['label'] . ' relay.');
+			}
 			return $this->r('domain.fwd_spf', $domain, 'domain', 'Forwarding subdomain SPF', self::REQUIRED, self::PASS,
 				$sub . ' SPF authorizes this server (' . $this->publicIp . ').');
 		}
-		if ($eval === 'include') {
+		if ($eval === 'unverified') {
 			return $this->r('domain.fwd_spf', $domain, 'domain', 'Forwarding subdomain SPF', self::REQUIRED, self::WARN,
-				$sub . ' SPF uses include:/redirect — could not confirm it authorizes ' . $this->publicIp . '.', 'Record: ' . $spf,
-				array('text' => 'Confirm the included policy covers ' . $this->publicIp . ', or add ip4:' . $this->publicIp . ' directly.'));
+				$sub . ' SPF policy could not be fully verified — could not confirm it authorizes ' . $this->publicIp . '.', 'Record: ' . $spf,
+				array('text' => 'Confirm the policy covers ' . $this->publicIp . ', or add ip4:' . $this->publicIp . ' directly.'));
 		}
 		return $this->r('domain.fwd_spf', $domain, 'domain', 'Forwarding subdomain SPF', self::REQUIRED, self::FAIL,
 			$sub . ' SPF does not authorize this server (' . $this->publicIp . ').', 'Record: ' . $spf,
@@ -1084,7 +1131,7 @@ class InboundEmailSetupCheck {
 		if (empty($mx)) {
 			return $this->r('domain.fwd_mx', $domain, 'domain', 'Forwarding subdomain MX', self::REQUIRED, self::FAIL,
 				$sub . ' has no MX record — delivery-failure notices sent to the SRS envelope cannot reach this server.', '',
-				$this->dnsFix('MX', $sub, '10 ' . $mxTarget));
+				$this->dnsFix('MX', $sub, $mxTarget, 10));
 		}
 		$host = strtolower(rtrim($mx[0]['host'], '.'));
 		list($mxA, $mxAOk) = $this->dns(function () use ($host) { return DnsResolver::getA($host); });
@@ -1099,7 +1146,7 @@ class InboundEmailSetupCheck {
 		if (!in_array($this->publicIp, $mxA, true)) {
 			return $this->r('domain.fwd_mx', $domain, 'domain', 'Forwarding subdomain MX', self::REQUIRED, self::FAIL,
 				$sub . ' MX → ' . $host . ' → ' . implode(', ', $mxA) . ', not this server (' . $this->publicIp . ').', '',
-				$this->dnsFix('MX', $sub, '10 ' . $mxTarget));
+				$this->dnsFix('MX', $sub, $mxTarget, 10));
 		}
 		return $this->r('domain.fwd_mx', $domain, 'domain', 'Forwarding subdomain MX', self::REQUIRED, self::PASS,
 			$sub . ' MX → ' . $host . ' → this server; SRS bounces route back to the router.');
@@ -1274,10 +1321,73 @@ class InboundEmailSetupCheck {
 		);
 	}
 
-	private function dnsFix($type, $name, $value) {
+	/**
+	 * Describe the resolved outbound relay once per run:
+	 * ['mode', 'label', 'spf_include'] from InboundEmailRouter::describeRelay(),
+	 * or all-empty values when the router cannot be built.
+	 */
+	private function relayInfo() {
+		if ($this->relay_info === null) {
+			$this->relay_info = array('mode' => '', 'label' => '', 'spf_include' => '');
+			try {
+				require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
+				$this->relay_info = (new InboundEmailRouter())->describeRelay();
+			} catch (\Throwable $e) {
+				// Relay unresolvable — the plugin.relay check reports that; SPF
+				// prescriptions just omit the include.
+			}
+		}
+		return $this->relay_info;
+	}
+
+	/**
+	 * The SPF record this deployment prescribes for a sending domain: the
+	 * server's own IP plus, when outbound rides a relay provider with a fixed
+	 * SPF range, that provider's include — mail leaves through both paths.
+	 */
+	private function prescribedSpf() {
+		$terms = array('v=spf1', 'ip4:' . ($this->publicIp !== '' ? $this->publicIp : 'YOUR_SERVER_IP'));
+		$relay = $this->relayInfo();
+		if ($relay['spf_include'] !== '') {
+			$terms[] = 'include:' . $relay['spf_include'];
+		}
+		$terms[] = '-all';
+		return implode(' ', $terms);
+	}
+
+	/**
+	 * Whether an SPF policy's include:/redirect= chain reaches $needle,
+	 * within the shared 10-lookup budget. Used to confirm a published record
+	 * covers the outbound relay provider.
+	 */
+	private function spfChainIncludes($spf, $needle, &$lookups) {
+		foreach (preg_split('/\s+/', trim($spf)) as $term) {
+			$term = ltrim($term, '+');
+			if ($term === '' || $term[0] === '-' || $term[0] === '~' || $term[0] === '?') { continue; }
+			$target = '';
+			if (stripos($term, 'include:') === 0) { $target = substr($term, 8); }
+			elseif (stripos($term, 'redirect=') === 0) { $target = substr($term, 9); }
+			if ($target === '') { continue; }
+			if (strcasecmp(rtrim($target, '.'), rtrim($needle, '.')) === 0) { return true; }
+			if (++$lookups > 10) { continue; }
+			list($txt, $ok) = $this->dns(function () use ($target) { return DnsResolver::getTxt($target); });
+			if (!$ok) { continue; }
+			$sub_spf = $this->extractSpf($txt);
+			if ($sub_spf !== '' && $this->spfChainIncludes($sub_spf, $needle, $lookups)) { return true; }
+		}
+		return false;
+	}
+
+	private function dnsFix($type, $name, $value, $priority = null) {
+		$record = array('type' => $type, 'name' => $name, 'value' => $value);
+		if ($priority !== null) {
+			// MX priority is its own field in every DNS panel — never baked
+			// into the pasteable value.
+			$record['priority'] = $priority;
+		}
 		return array(
 			'text' => 'Publish this record at your DNS provider.',
-			'dns_record' => array('type' => $type, 'name' => $name, 'value' => $value),
+			'dns_record' => $record,
 		);
 	}
 
@@ -1302,17 +1412,38 @@ class InboundEmailSetupCheck {
 	}
 
 	/**
-	 * Evaluate whether an SPF record authorizes the server's public IP.
-	 * Returns 'pass', 'fail', or 'include' (has include/redirect — not fully verifiable here).
+	 * Evaluate whether an SPF record authorizes the server's public IP,
+	 * expanding include:/redirect= policies recursively within RFC 7208's
+	 * 10-DNS-mechanism budget so the verdict is definitive whenever DNS
+	 * cooperates. Returns 'pass', 'fail', or 'unverified' (the budget ran out
+	 * or a lookup failed before a definitive answer was possible).
 	 */
 	private function spfAuthorizes($spf, $domain) {
 		if ($this->publicIp === '') { return 'fail'; }
-		$hasInclude = false;
+		$lookups = 0;
+		return $this->spfPolicyAuthorizes($spf, $domain, $lookups);
+	}
+
+	/** Recursive worker for spfAuthorizes; $lookups is the shared DNS budget. */
+	private function spfPolicyAuthorizes($spf, $domain, &$lookups) {
+		$unverified = false;
 		foreach (preg_split('/\s+/', trim($spf)) as $term) {
 			$term = ltrim($term, '+');
 			if ($term === '' || stripos($term, 'v=spf1') === 0) { continue; }
-			if (stripos($term, 'include:') === 0 || stripos($term, 'redirect=') === 0) {
-				$hasInclude = true;
+			// Fail/softfail/neutral-qualified mechanisms never authorize.
+			if ($term[0] === '-' || $term[0] === '~' || $term[0] === '?') { continue; }
+			$sub_target = '';
+			if (stripos($term, 'include:') === 0) { $sub_target = substr($term, 8); }
+			elseif (stripos($term, 'redirect=') === 0) { $sub_target = substr($term, 9); }
+			if ($sub_target !== '') {
+				if (++$lookups > 10) { $unverified = true; continue; }
+				list($txt, $ok) = $this->dns(function () use ($sub_target) { return DnsResolver::getTxt($sub_target); });
+				if (!$ok) { $unverified = true; continue; }
+				$sub_spf = $this->extractSpf($txt);
+				if ($sub_spf === '') { continue; } // no policy there — authorizes nothing
+				$sub = $this->spfPolicyAuthorizes($sub_spf, $sub_target, $lookups);
+				if ($sub === 'pass') { return 'pass'; }
+				if ($sub === 'unverified') { $unverified = true; }
 				continue;
 			}
 			if (stripos($term, 'ip4:') === 0) {
@@ -1320,23 +1451,26 @@ class InboundEmailSetupCheck {
 			} elseif (stripos($term, 'ip6:') === 0) {
 				if (strcasecmp($this->publicIp, substr($term, 4)) === 0) { return 'pass'; }
 			} elseif ($term === 'a' || stripos($term, 'a:') === 0) {
+				if (++$lookups > 10) { $unverified = true; continue; }
 				$host = ($term === 'a') ? $domain : substr($term, 2);
 				list($ips, $ok) = $this->dns(function () use ($host) { return DnsResolver::getA($host); });
-				if ($ok && in_array($this->publicIp, $ips, true)) { return 'pass'; }
+				if (!$ok) { $unverified = true; continue; }
+				if (in_array($this->publicIp, $ips, true)) { return 'pass'; }
 			} elseif ($term === 'mx' || stripos($term, 'mx:') === 0) {
+				if (++$lookups > 10) { $unverified = true; continue; }
 				$host = ($term === 'mx') ? $domain : substr($term, 3);
 				list($mx, $ok) = $this->dns(function () use ($host) { return DnsResolver::getMx($host); });
-				if ($ok) {
-					foreach ($mx as $rec) {
-						list($mxips, $ok2) = $this->dns(function () use ($rec) {
-							return DnsResolver::getA(rtrim($rec['host'], '.'));
-						});
-						if ($ok2 && in_array($this->publicIp, $mxips, true)) { return 'pass'; }
-					}
+				if (!$ok) { $unverified = true; continue; }
+				foreach ($mx as $rec) {
+					list($mxips, $ok2) = $this->dns(function () use ($rec) {
+						return DnsResolver::getA(rtrim($rec['host'], '.'));
+					});
+					if (!$ok2) { $unverified = true; continue; }
+					if (in_array($this->publicIp, $mxips, true)) { return 'pass'; }
 				}
 			}
 		}
-		return $hasInclude ? 'include' : 'fail';
+		return $unverified ? 'unverified' : 'fail';
 	}
 
 	/** IPv4 membership test for a literal address or a CIDR block. */

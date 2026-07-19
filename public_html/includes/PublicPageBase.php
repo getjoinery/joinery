@@ -880,13 +880,36 @@ abstract class PublicPageBase {
 	 *   'class'   => additional CSS classes for the button
 	 * @return string HTML
 	 */
+	/**
+	 * A pasteable value with a Copy button: a readonly input (click selects
+	 * all, so manual copy still works) beside a button wired to the base.js
+	 * data-jy-copy handler. Use wherever the user is expected to carry a value
+	 * into another system (DNS records, keys, URLs).
+	 *
+	 * @return string HTML
+	 */
+	static function copy_field($value) {
+		$esc = htmlspecialchars($value);
+		return '<span class="jy-copyfield">'
+			. '<input type="text" class="form-control form-control-sm" readonly value="' . $esc . '" onclick="this.select()">'
+			. '<button type="button" class="btn btn-sm btn-outline-secondary" data-jy-copy="' . $esc . '">Copy</button>'
+			. '</span>';
+	}
+
 	static function action_button($label, $url, $options = []) {
 		$hidden_fields = isset($options['hidden']) ? $options['hidden'] : [];
 		$confirm_msg   = isset($options['confirm']) ? $options['confirm'] : '';
+		$typed_phrase  = isset($options['confirm_typed']) ? $options['confirm_typed'] : '';
 		$extra_class   = isset($options['class'])   ? ' ' . $options['class'] : '';
 
 		$btn_onclick = '';
-		if ($confirm_msg) {
+		if ($confirm_msg && $typed_phrase) {
+			// Irreversible action: the modal demands the exact phrase be typed
+			// before the confirm button enables.
+			$escaped        = addslashes(htmlspecialchars($confirm_msg, ENT_QUOTES));
+			$escaped_phrase = addslashes(htmlspecialchars($typed_phrase, ENT_QUOTES));
+			$btn_onclick = ' onclick="var f=this.closest(\'form\'); JoineryModal.confirmTyped(\'' . $escaped . '\', \'' . $escaped_phrase . '\', function(){ f.submit(); });"';
+		} else if ($confirm_msg) {
 			$escaped = addslashes(htmlspecialchars($confirm_msg, ENT_QUOTES));
 			$btn_onclick = ' onclick="var f=this.closest(\'form\'); JoineryModal.confirm(\'' . $escaped . '\', function(){ f.submit(); });"';
 		}

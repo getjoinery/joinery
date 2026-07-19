@@ -11,7 +11,7 @@
  * exactly as against a self-hosted relay. Hosted vs self-hosted differs only
  * in where the coordinates came from.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
@@ -179,8 +179,10 @@ class FleetClient {
 			CURLOPT_CONNECTTIMEOUT => 5,
 			CURLOPT_HTTPHEADER     => array(
 				'Content-Type: application/json',
-				'public_key: ' . trim((string)$this->settings->get_setting('mailbox_fleet_api_public_key')),
-				'secret_key: ' . trim((string)$this->settings->get_setting('mailbox_fleet_api_secret_key')),
+				// Dash spelling: Apache→FPM stacks silently drop header names
+				// containing underscores (see api/apiv1.php's normalization).
+				'public-key: ' . trim((string)$this->settings->get_setting('mailbox_fleet_api_public_key')),
+				'secret-key: ' . trim((string)$this->settings->get_setting('mailbox_fleet_api_secret_key')),
 			),
 		));
 		$body = curl_exec($ch);
@@ -196,7 +198,7 @@ class FleetClient {
 			throw new FleetClientException('Fleet service returned an unreadable response (HTTP ' . $http . ').');
 		}
 		if ($http !== 200) {
-			$msg = (string)($decoded['error_message'] ?? $decoded['message'] ?? ('HTTP ' . $http));
+			$msg = (string)($decoded['error'] ?? $decoded['error_message'] ?? $decoded['message'] ?? ('HTTP ' . $http));
 			throw new FleetClientException('Fleet service: ' . $msg);
 		}
 		return is_array($decoded['data'] ?? null) ? $decoded['data'] : array();
