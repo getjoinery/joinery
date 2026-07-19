@@ -62,7 +62,7 @@ class RawRelayComposeTransport implements EmailServiceProvider {
         return 'Raw-MIME relay (hidden origin)';
     }
 
-    public static function getSpfIncludeDomain(): string {
+    public static function getSpfMechanism(string $domain): string {
         // Pass-through wrapper — the SPF identity is the wrapped provider's.
         return '';
     }

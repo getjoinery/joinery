@@ -140,8 +140,21 @@ class RelayFleetTest {
 		$slot_a->set('mft_tunnel_ip', '10.99.0.2');
 		$slot_a->save();
 		$slot_a->set('mft_slug', 't' . intval($slot_a->key));
+		$slot_a->set('mft_mx_hostname', 't' . intval($slot_a->key) . '.mx.fleet-test.example');
 		$slot_a->save();
 		$this->cleanup[] = array('mft_mailbox_fleet_slots', 'mft_mailbox_fleet_slot_id', intval($slot_a->key));
+
+		// The coordinates a tenant folds into its MailboxRelay row: slug-derived
+		// pull account and spool, the slot's MX hostname (id-derived — DNS names
+		// no tenant), and the shard's tunnel identity.
+		$coords = FleetService::coordinates($slot_a);
+		$slug = 't' . intval($slot_a->key);
+		check($coords['slug'] === $slug, 'coordinates carry the id-derived slug');
+		check($coords['mx_hostname'] === $slug . '.mx.fleet-test.example', 'coordinates carry the slot MX hostname');
+		check($coords['ssh_user'] === 'jt-' . $slug, 'pull account derives from the slug');
+		check($coords['spool_path'] === '/var/spool/joinery-relay/' . $slug, 'spool path derives from the slug');
+		check($coords['tunnel_ip'] === '10.99.0.2', 'coordinates carry the allocated tunnel address');
+		check($coords['relay_tunnel_ip'] === '10.99.0.1', 'the shard relay listens at .1');
 
 		check(FleetService::allocateTunnelIp($shard) === '10.99.0.3',
 			'allocation skips the live slot\'s address');

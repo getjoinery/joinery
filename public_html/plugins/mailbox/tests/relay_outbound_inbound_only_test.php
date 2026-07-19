@@ -53,7 +53,7 @@ class FakeApiRelay implements EmailServiceProvider, ApiSubmissionRelay {
 
 	public static function getKey(): string { return 'fake-api'; }
 	public static function getLabel(): string { return 'Fake API relay'; }
-	public static function getSpfIncludeDomain(): string { return ''; }
+	public static function getSpfMechanism(string $domain): string { return ''; }
 	public static function getSettingsFields(): array { return []; }
 	public static function validateConfiguration(): array { return ['valid' => true, 'errors' => []]; }
 	public function send(EmailMessage $m): bool { return true; }
@@ -73,7 +73,7 @@ class FakeApiRelay implements EmailServiceProvider, ApiSubmissionRelay {
 class FakeSmtpRelay implements EmailServiceProvider, RawMessageRelay {
 	public static function getKey(): string { return 'fake-smtp'; }
 	public static function getLabel(): string { return 'Fake SMTP relay'; }
-	public static function getSpfIncludeDomain(): string { return ''; }
+	public static function getSpfMechanism(string $domain): string { return ''; }
 	public static function getSettingsFields(): array { return []; }
 	public static function validateConfiguration(): array { return ['valid' => true, 'errors' => []]; }
 	public function send(EmailMessage $m): bool { return true; }

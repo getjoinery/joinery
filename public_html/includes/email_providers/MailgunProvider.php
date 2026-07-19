@@ -27,9 +27,9 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
         return 'Mailgun';
     }
 
-    public static function getSpfIncludeDomain(): string
+    public static function getSpfMechanism(string $domain): string
     {
-        return 'mailgun.org';
+        return 'include:mailgun.org';
     }
 
     public static function getSettingsFields(): array {

@@ -104,7 +104,7 @@ function admin_mailbox_relay_logic(array $input): LogicResult {
 			return LogicResult::redirect($self_url);
 		}
 
-		if (in_array($action, array('fleet_enroll', 'fleet_refresh', 'fleet_claim', 'fleet_verify', 'fleet_release'), true)) {
+		if (in_array($action, array('fleet_enroll', 'fleet_refresh', 'fleet_release'), true)) {
 			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetClient.php'));
 			$client = new FleetClient();
 			try {
@@ -113,21 +113,12 @@ function admin_mailbox_relay_logic(array $input): LogicResult {
 						$data = $client->enroll();
 						$flash('Enrolled — slot ' . htmlspecialchars((string)($data['slug'] ?? ''))
 							. ' (' . htmlspecialchars((string)($data['status'] ?? '')) . '). '
-							. 'Point your domains\' MX at ' . htmlspecialchars((string)($data['mx_hostname'] ?? '')) . '.');
+							. 'Point your domains\' MX at ' . htmlspecialchars((string)($data['mx_hostname'] ?? ''))
+							. '. Each hosted domain\'s Setup tab shows its ownership record to publish.');
 						break;
 					case 'fleet_refresh':
 						$client->status();
 						$flash('Fleet slot refreshed.');
-						break;
-					case 'fleet_claim':
-						$data = $client->claimDomain(trim((string)($input['fleet_domain'] ?? '')));
-						$flash('Domain claimed. Create a TXT record at ' . htmlspecialchars((string)($data['txt_host'] ?? ''))
-							. ' with the value shown in the claims table, then click Verify.');
-						break;
-					case 'fleet_verify':
-						$data = $client->verifyDomain(intval($input['claim_id'] ?? 0));
-						$flash((string)($data['message'] ?? 'Verification ran.'),
-							!empty($data['verified']) ? 'Verified' : 'Not verified yet');
 						break;
 					case 'fleet_release':
 						$data = $client->release();
@@ -176,6 +167,10 @@ function admin_mailbox_relay_logic(array $input): LogicResult {
 	$active_health = ($active !== null) ? admin_mailbox_relay_health() : null;
 	$relays = array();
 	foreach ($relays_multi as $relay) {
+		// Reconcile the relay's MX hostname from its provision job when the
+		// row predates the hostname being persisted — the topology-aware
+		// setup checks prescribe against it.
+		admin_mailbox_relay_backfill_mx_hostname($relay);
 		$is_active = ($active !== null && intval($relay->key) === intval($active->key));
 		$relays[] = array(
 			'model'   => $relay,
@@ -228,7 +223,11 @@ function admin_mailbox_relay_logic(array $input): LogicResult {
 		try {
 			foreach ($shard_multi as $shard) {
 				admin_mailbox_relay_sync_shard_from_node($shard);
-				$fleet_shards[] = array('model' => $shard, 'slots' => $shard->slotCount());
+				$fleet_shards[] = array(
+					'model' => $shard,
+					'slots' => $shard->slotCount(),
+					'dns'   => admin_mailbox_relay_shard_dns_rows($shard),
+				);
 			}
 		} finally {
 			SystemBase::$allow_get_mutation = false;
@@ -345,6 +344,105 @@ function admin_mailbox_relay_sync_shard_from_node($shard): void {
 		error_log('admin_mailbox_relay_sync_shard_from_node failed for shard '
 			. intval($shard->key) . ': ' . $e->getMessage());
 	}
+}
+
+/**
+ * Persist a self-hosted relay's MX hostname from its provision/rebuild job
+ * parameters when the row does not carry one. One field serves both relay
+ * topologies: the hosted path stores it from slot coordinates; this reconcile
+ * covers self-hosted rows whose provisioning predates the field.
+ */
+function admin_mailbox_relay_backfill_mx_hostname($relay): void {
+	if ((bool)$relay->get('mrl_is_hosted') || trim((string)$relay->get('mrl_mx_hostname')) !== '') {
+		return;
+	}
+	$node_id = intval($relay->get('mrl_mgn_managed_node_id'));
+	if ($node_id <= 0 || !PluginHelper::isPluginActive('server_manager')) {
+		return;
+	}
+	try {
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare(
+			"SELECT mjb_parameters FROM mjb_management_jobs
+			  WHERE mjb_mgn_node_id = ? AND mjb_job_type IN ('provision_relay', 'rebuild_relay')
+			    AND mjb_delete_time IS NULL
+			  ORDER BY mjb_id DESC LIMIT 1");
+		$stmt->execute(array($node_id));
+		$params = json_decode((string)$stmt->fetchColumn(), true) ?: array();
+		$hostname = strtolower(trim((string)($params['mail_hostname'] ?? '')));
+		if ($hostname === '' || strpos($hostname, '.') === false) {
+			return;
+		}
+		$was_allowed = SystemBase::$allow_get_mutation;
+		SystemBase::$allow_get_mutation = true;
+		try {
+			$relay->set('mrl_mx_hostname', substr($hostname, 0, 255));
+			$relay->save();
+		} finally {
+			SystemBase::$allow_get_mutation = $was_allowed;
+		}
+	} catch (\Throwable $e) {
+		// Best-effort reconcile; the list still renders — but never silently.
+		error_log('admin_mailbox_relay_backfill_mx_hostname failed for relay '
+			. intval($relay->key) . ': ' . $e->getMessage());
+	}
+}
+
+/**
+ * The operator's DNS-to-publish rows for a shard: the shard hostname's A
+ * record, the shard IP's PTR expectation, and one A row per live slot MX
+ * hostname — each with a live resolution verdict for the green/red dot.
+ *
+ * @return array<int,array{kind:string,name:string,value:string,state:string,found:string}>
+ *         state: 'ok' | 'wrong' | 'missing' | 'unknown'.
+ */
+function admin_mailbox_relay_shard_dns_rows($shard): array {
+	require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_fleet_slot_class.php'));
+
+	$ip = trim((string)$shard->get('mfs_public_ip'));
+	$host = strtolower(trim((string)$shard->get('mfs_hostname')));
+	$rows = array();
+
+	$a_row = function (string $name, string $expect) {
+		try {
+			$found = DnsResolver::getA($name);
+		} catch (\Throwable $e) {
+			return array('kind' => 'A', 'name' => $name, 'value' => $expect, 'state' => 'unknown', 'found' => '');
+		}
+		if (empty($found)) {
+			return array('kind' => 'A', 'name' => $name, 'value' => $expect, 'state' => 'missing', 'found' => '');
+		}
+		$state = ($expect !== '' && in_array($expect, $found, true)) ? 'ok' : 'wrong';
+		return array('kind' => 'A', 'name' => $name, 'value' => $expect, 'state' => $state, 'found' => implode(', ', $found));
+	};
+
+	if ($host !== '') {
+		$rows[] = $a_row($host, $ip);
+	}
+	if ($ip !== '' && $host !== '') {
+		try {
+			$ptr = DnsResolver::getPtr($ip);
+			$ptr_name = !empty($ptr) ? strtolower(rtrim((string)$ptr[0], '.')) : '';
+			$state = ($ptr_name === $host) ? 'ok' : ($ptr_name === '' ? 'missing' : 'wrong');
+		} catch (\Throwable $e) {
+			$ptr_name = '';
+			$state = 'unknown';
+		}
+		$rows[] = array('kind' => 'PTR', 'name' => $ip, 'value' => $host, 'state' => $state, 'found' => $ptr_name);
+	}
+
+	$slots = new MultiMailboxFleetSlot(array(
+		'shard_id' => intval($shard->key), 'live' => true, 'deleted' => false,
+	));
+	$slots->load();
+	foreach ($slots as $slot) {
+		$mx_host = strtolower(trim((string)$slot->get('mft_mx_hostname')));
+		if ($mx_host !== '' && $mx_host !== $host) {
+			$rows[] = $a_row($mx_host, $ip);
+		}
+	}
+	return $rows;
 }
 
 /**

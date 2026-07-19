@@ -403,7 +403,8 @@ class JobResultProcessor {
 			// operator's box is not a tenant of them — so no relay row is minted.
 			$job_params = json_decode((string)$job->get('mjb_parameters'), true) ?: array();
 			if (empty($job_params['skeleton_only'])) {
-				self::register_relay_row($node, $public_ip, $wg_pubkey, $output);
+				self::register_relay_row($node, $public_ip, $wg_pubkey, $output,
+					(string)($job_params['mail_hostname'] ?? ''));
 			}
 
 			// Peer the relay on the MAIN box's WireGuard interface — the other half
@@ -447,7 +448,7 @@ class JobResultProcessor {
 	 * (no fatal) when that plugin is inactive. The row is left DISABLED — enabling
 	 * it (which makes the relay front every hosted domain) is an explicit admin act.
 	 */
-	private static function register_relay_row($node, string $public_ip, string $wg_pubkey, string $job_output = ''): void {
+	private static function register_relay_row($node, string $public_ip, string $wg_pubkey, string $job_output = '', string $mail_hostname = ''): void {
 		$relay_class = PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php');
 		if (!is_file($relay_class)) {
 			return; // mailbox plugin not present
@@ -476,6 +477,12 @@ class JobResultProcessor {
 			$tenant_spool = self::extract_marker($job_output, 'TENANT_SPOOL') ?: '/var/spool/joinery-relay/main';
 			$tenant_slug = self::extract_marker($job_output, 'TENANT_SLUG') ?: 'main';
 			$relay->set('mrl_tenant_slug', substr($tenant_slug, 0, 28));
+			// The MX hostname the admin provisioned with — the topology-aware
+			// setup checks prescribe every domain's MX against it.
+			$mail_hostname = strtolower(trim($mail_hostname));
+			if ($mail_hostname !== '') {
+				$relay->set('mrl_mx_hostname', substr($mail_hostname, 0, 255));
+			}
 			$relay->set('mrl_ssh_user', substr($tenant_user, 0, 50));
 			$relay->set('mrl_ssh_port', intval($node->get('mgn_ssh_port')) ?: 22);
 			// The relay's steady-state connections run as the WEB USER (cron tasks,

@@ -66,7 +66,7 @@
  * paths alike, never IMAP-polled mail. forwardStoredMessage() relays a copy for a filter's
  * "Forward to" action, reusing the alias-forward envelope rebuild + relay.
  *
- * @version 1.20
+ * @version 1.21
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -1539,18 +1539,33 @@ class InboundEmailRouter {
 	/**
 	 * Describe the resolved forwarding relay for status display (Setup tab).
 	 * Returns ['mode' => 'provider'|'smtp', 'label' => string,
-	 * 'spf_include' => string] — spf_include is the DNS domain a sending
-	 * domain must include: in its SPF for mail relayed this way to pass SPF,
-	 * or '' when none applies.
+	 * 'provider_class' => string] — provider_class is the EmailServiceProvider
+	 * class name behind the relay ('' on the SMTP path), which callers use for
+	 * per-domain lookups like relaySpfMechanism().
 	 */
 	public function describeRelay() {
 		$provider = $this->resolveRelayProvider();
 		if ($provider instanceof RawMessageRelay) {
 			$class = get_class($provider);
 			return array('mode' => 'provider', 'label' => $class::getLabel(),
-				'spf_include' => $class::getSpfIncludeDomain());
+				'provider_class' => $class);
 		}
-		return array('mode' => 'smtp', 'label' => 'SMTP relay', 'spf_include' => '');
+		return array('mode' => 'smtp', 'label' => 'SMTP relay', 'provider_class' => '');
+	}
+
+	/**
+	 * The SPF mechanism a sending domain must carry for mail relayed through
+	 * the resolved forwarding relay to pass SPF (the provider's
+	 * getSpfMechanism()), or '' when none applies — the SMTP relay path, or a
+	 * provider with nothing to prescribe.
+	 */
+	public function relaySpfMechanism(string $domain): string {
+		$relay = $this->describeRelay();
+		if ($relay['provider_class'] === '') {
+			return '';
+		}
+		$class = $relay['provider_class'];
+		return (string)$class::getSpfMechanism($domain);
 	}
 
 	/**

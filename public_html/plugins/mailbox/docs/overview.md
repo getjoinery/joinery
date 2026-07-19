@@ -61,6 +61,46 @@ check, along with one-click actions to enable the plugin or register a domain.
 The tab cannot create DNS records or set reverse DNS for you (those live with
 your registrar / VPS provider) — it detects, instructs, and verifies.
 
+#### Topology-aware prescriptions
+
+Every prescription derives from the deployment's **receive topology**,
+resolved from the `MailboxRelay` row: **colocated** (no relay row — the box is
+the MX), **self-hosted relay** (`mrl_is_hosted = false`), or **hosted fleet
+slot** (`mrl_is_hosted = true`). A relay row's *existence* — enabled or not —
+flips every prescription to relay targets: the checklist walks the user to the
+relay end state, so mid-cutover guidance already names the relay. Topology is
+deployment-level; the security level is per-domain.
+
+Under a fronted topology:
+
+- **MX** must string-equal the relay's MX hostname (`mrl_mx_hostname`) and
+  resolve to the relay's public IP. The box's address is never prescribed.
+- **SPF** prescribes the outbound provider's mechanism alone
+  (`v=spf1 <mechanism> -all`, from `EmailServiceProvider::getSpfMechanism()`)
+  — a record naming the box FAILS, because it publishes the address the relay
+  hides. Smarthost outbound prescribes the relay's IP instead. Local-sendmail
+  outbound gets no record prescription: that row prescribes switching to an
+  API provider.
+- **Relay identity rows** (the MX hostname's A record, the relay IP's PTR)
+  replace the box's own A/PTR rows. On a fleet slot they are operator-published
+  and render as neutral INFO when missing; on a self-hosted relay the tenant
+  owns the zone, so they are REQUIRED with the fix.
+- **Domain ownership** (fleet only, `domain.ownership`): the fleet accepts no
+  mail for a domain until a TXT proof is published. The row behaves like every
+  other DNS row — the challenge is filed automatically (at enrollment for
+  every registered domain, and at domain registration while a slot exists),
+  re-verified on every check pass, and shown with the copy-ready TXT record
+  until it goes green. There are no buttons and no claim/verify vocabulary.
+- **Cutover completion** (`plugin.relay_enable`): while the relay row is
+  disabled, a neutral INFO row points at the Relay tab; once every hosted
+  domain's MX targets the relay (and every ownership proof is published), it
+  becomes a REQUIRED FAIL — mail is arriving at the relay with no consumer —
+  until the admin enables the relay.
+
+Fleet state (slot + ownership proofs) is read live from the fleet service once
+per check run — never cached; if the service is unreachable, the ownership row
+renders one UNKNOWN naming the error and the rest of the page is unaffected.
+
 #### Advanced server setup
 
 Settings and diagnostics that are server-wide rather than per-mailbox live
@@ -1260,11 +1300,17 @@ hostname, shard WireGuard endpoint + key, allocated tunnel address, pull
 account, spool subdirectory), which fold into the deployment's `MailboxRelay`
 row (`mrl_is_hosted`) — after which every relay consumer runs exactly as
 against a self-hosted relay. Hosted vs self-hosted differs only in where the
-coordinates came from. Each domain must pass a **DNS TXT ownership challenge**
-before the fleet accepts a single message for it (`fleet_claim_domain` →
-publish `_joinery-fleet-challenge.<domain>` → `fleet_verify_domain`), with
-fleet-wide uniqueness; verification writes the domain into the tenant's
-shard-side allowlist, which the map merge enforces on every subsequent sync.
+coordinates came from. Each domain must pass a **DNS TXT ownership proof**
+(`_joinery-fleet-challenge.<domain>`) before the fleet accepts a single
+message for it, with fleet-wide uniqueness; verification writes the domain
+into the tenant's shard-side allowlist, which the map merge enforces on every
+subsequent sync. The proof is fully automated on the tenant side: challenges
+are filed at enrollment and at domain registration
+(`FleetClient::fileDomainClaims()`), the Setup tab's `domain.ownership` row
+shows the copy-ready TXT record and re-verifies on every check pass, and the
+Relay tab shows a read-only **Ownership proofs** state table. The
+`fleet_claim_domain` / `fleet_verify_domain` API actions are what that
+automation calls — they are not user-facing steps.
 
 **Operator side** (the deployment with `mailbox_fleet_service_enabled` +
 `mailbox_fleet_mx_zone` set): the fleet service is the brain — `FleetService`
@@ -1281,7 +1327,11 @@ tenant of its own shards). Each tenant's MX hostname
 (`<slug>.<mailbox_fleet_mx_zone>`, slug format `t<id>` — deliberately
 anonymous so DNS names no tenant) is an operator-controlled A record, so
 re-sharding a tenant or replacing a burned shard is an A-record change —
-tenants never touch DNS after setup.
+tenants never touch DNS after setup. The operator's half of that guidance is
+the fleet box's **DNS to publish** table: every record the fleet zone needs —
+each shard's A record and PTR expectation, and one A record per live slot MX
+hostname — with a live resolution verdict and copy fields. (PTR records are
+set where the shard's IP is hosted, not in the DNS zone.)
 
 **Rebuild carries the spool across the wipe.** The scheduled shard rebuild
 closes port 25, flushes the Postfix queue for a bounded window, copies the

@@ -16,7 +16,14 @@
  *   id, scope, layer, label, severity, status, summary, detail, fix, recheckable
  * where fix is null or ['text'=>, 'command'=>?, 'dns_record'=>['type','name','value']?].
  *
- * @version 1.16
+ * TOPOLOGY-AWARE (specs/mailbox_setup_topology_aware.md): every prescription
+ * derives from the deployment's receive topology — colocated (the box is the
+ * MX), self-hosted relay, or hosted fleet slot. A MailboxRelay row's existence
+ * (enabled or not) flips prescriptions to relay targets: the checklist walks
+ * the user TO the relay end state, so mid-cutover guidance already names the
+ * relay. Topology is deployment-level; security level is per-domain.
+ *
+ * @version 1.17
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -45,6 +52,10 @@ class InboundEmailSetupCheck {
 	private $publicIpIsPrivate = false;
 	private $mailHostname = '';
 	private $relay_info = null;
+	private $router = null;
+	private $spf_mechanisms = array();
+	private $topology = null;
+	private $fleet_state = null;
 
 	function __construct() {
 		$this->settings = Globalvars::get_instance();
@@ -60,6 +71,133 @@ class InboundEmailSetupCheck {
 
 	/** The canonical mail-server hostname in use (configured setting, may be ''). */
 	public function getMailHostname() { return $this->mailHostname; }
+
+	/**
+	 * The deployment's receive topology, resolved once per run from the
+	 * MailboxRelay row — no new state. A relay row created disabled during
+	 * cutover already switches every prescription to relay targets; only
+	 * deleting/releasing the relay returns colocated guidance.
+	 *
+	 * @return array{mode:string,relay:?MailboxRelay,mx_hostname:string,public_ip:string,enabled:bool}
+	 *         mode is 'colocated' | 'self_hosted' | 'fleet'.
+	 */
+	public function topology(): array {
+		if ($this->topology !== null) {
+			return $this->topology;
+		}
+		$this->topology = array('mode' => 'colocated', 'relay' => null,
+			'mx_hostname' => '', 'public_ip' => '', 'enabled' => false);
+		try {
+			require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+			$multi = new MultiMailboxRelay(array('deleted' => false));
+			$multi->load();
+			foreach ($multi as $relay) {
+				$this->topology = array(
+					'mode'        => ((bool)$relay->get('mrl_is_hosted')) ? 'fleet' : 'self_hosted',
+					'relay'       => $relay,
+					'mx_hostname' => strtolower(trim((string)$relay->get('mrl_mx_hostname'))),
+					'public_ip'   => trim((string)$relay->get('mrl_public_ip')),
+					'enabled'     => (bool)$relay->get('mrl_is_enabled'),
+				);
+				break; // at most one relay per deployment
+			}
+		} catch (\Throwable $e) {
+			// Relay table absent (before update_database) — colocated.
+		}
+		return $this->topology;
+	}
+
+	/** Whether a relay or fleet slot fronts this deployment. */
+	private function fronted(): bool {
+		return $this->topology()['mode'] !== 'colocated';
+	}
+
+	/**
+	 * One conversation with the fleet service per check run (live, never
+	 * cached across runs): slot state plus this deployment's ownership
+	 * proofs, keyed by domain. The buttonless ownership contract
+	 * (specs/mailbox_setup_topology_aware.md Decision 4) is served here:
+	 * a registered domain with no challenge gets one filed (idempotent),
+	 * and every pending challenge is re-verified — an idempotent
+	 * operator-side DNS lookup — so publishing the record is all the user
+	 * ever does. On API failure 'ok' is false and 'error' carries the
+	 * user-facing message; the caller renders one UNKNOWN row and the rest
+	 * of the page is unaffected.
+	 *
+	 * @return array{ok:bool,error:string,enrolled:bool,claims:array<string,array>}
+	 */
+	private function fleetState(): array {
+		if ($this->fleet_state !== null) {
+			return $this->fleet_state;
+		}
+		$state = array('ok' => false, 'error' => '', 'enrolled' => false, 'claims' => array());
+		try {
+			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetClient.php'));
+			$client = new FleetClient();
+			// status() folds fresh slot coordinates into the relay row —
+			// server-side reconciliation, deliberate on a GET view.
+			$was_allowed = SystemBase::$allow_get_mutation;
+			SystemBase::$allow_get_mutation = true;
+			try {
+				$status = $client->status();
+			} finally {
+				SystemBase::$allow_get_mutation = $was_allowed;
+			}
+			$state['ok'] = true;
+			$state['enrolled'] = !empty($status['enrolled']);
+			foreach ((array)($status['claims'] ?? array()) as $claim) {
+				$domain = strtolower(trim((string)($claim['domain'] ?? '')));
+				if ($domain !== '') {
+					$state['claims'][$domain] = $claim;
+				}
+			}
+			// Re-run verification for every pending challenge; a claim the
+			// operator has since verified flips to proven on this same pass.
+			foreach ($state['claims'] as $domain => $claim) {
+				if ((string)($claim['status'] ?? '') !== 'pending') {
+					continue;
+				}
+				try {
+					$verdict = $client->verifyDomain(intval($claim['claim_id'] ?? 0));
+					if (!empty($verdict['verified'])) {
+						$state['claims'][$domain]['status'] = 'verified';
+					}
+				} catch (\Throwable $e) {
+					// Verification refusals (e.g. claimed elsewhere meanwhile)
+					// surface on the row via the still-pending claim.
+					error_log('InboundEmailSetupCheck: fleet verify for ' . $domain . ' failed: ' . $e->getMessage());
+				}
+			}
+		} catch (\Throwable $e) {
+			$state['error'] = $e->getMessage();
+		}
+		$this->fleet_state = $state;
+		return $state;
+	}
+
+	/**
+	 * The fleet's ownership proof for one domain, filing the challenge if none
+	 * exists yet (idempotent — registration/enrollment normally files it, this
+	 * self-heals the gap so the row always carries a publishable record).
+	 */
+	private function fleetClaimFor(string $domain): ?array {
+		$state = $this->fleetState();
+		if (!$state['ok']) {
+			return null;
+		}
+		if (isset($state['claims'][$domain])) {
+			return $state['claims'][$domain];
+		}
+		try {
+			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetClient.php'));
+			$claim = (new FleetClient())->claimDomain($domain);
+			$this->fleet_state['claims'][$domain] = $claim;
+			return $claim;
+		} catch (\Throwable $e) {
+			error_log('InboundEmailSetupCheck: fleet challenge filing for ' . $domain . ' failed: ' . $e->getMessage());
+			return array('status' => 'error', 'error' => $e->getMessage());
+		}
+	}
 
 	/**
 	 * Run the full check suite.
@@ -202,8 +340,17 @@ class InboundEmailSetupCheck {
 				$this->installerFix());
 
 		$p = @stream_socket_client('tcp://127.0.0.1:25', $en, $es, 2);
-		if ($p) {
-			@fclose($p);
+		$listening = (bool)$p;
+		if ($p) { @fclose($p); }
+		if ($this->fronted()) {
+			// The relay is the public MX; the box's own listener is dead weight
+			// awaiting decommission (specs/mailbox_listener_decommission.md) —
+			// its state is informational, never a required condition.
+			$out[] = $this->r('host.port25', '', 'host', 'SMTP port 25 listening', self::RECOMMENDED, self::INFO,
+				'The relay is this deployment\'s public MX; this box\'s own mail listener is pending decommission.',
+				'Port 25 ' . ($listening ? 'is' : 'is not') . ' listening locally. Once every domain\'s MX points '
+				. 'at the relay, close port 25 on this box.');
+		} elseif ($listening) {
 			$out[] = $this->r('host.port25', '', 'host', 'SMTP port 25 listening', self::REQUIRED, self::PASS,
 				'Port 25 is listening locally.',
 				'Reachability from the internet is confirmed only by the end-to-end test below — some ISPs block inbound port 25.');
@@ -410,6 +557,16 @@ class InboundEmailSetupCheck {
 				'', $this->hostnameFix());
 		}
 
+		// Under a fronted topology the public mail-host identity is the RELAY's:
+		// its MX hostname must resolve to its IP and its PTR must name it. The
+		// box's own A/PTR rows drop — nothing receives or sends directly from
+		// the box, so prescribing its records would re-publish the address the
+		// relay exists to hide.
+		if ($this->fronted()) {
+			foreach ($this->frontedMailHostResults() as $r) { $out[] = $r; }
+			return $out;
+		}
+
 		// A record for the mail host.
 		if ($canonical === '') {
 			$out[] = $this->r('mailhost.a_record', '', 'mailhost', 'Mail host A record', self::REQUIRED, self::UNKNOWN,
@@ -491,6 +648,79 @@ class InboundEmailSetupCheck {
 		return $out;
 	}
 
+	/**
+	 * The mail-host identity rows for a fronted deployment: the relay MX
+	 * hostname's A record and the relay IP's PTR. Who can act decides the
+	 * severity — a fleet slot's records are OPERATOR-published (INFO, no
+	 * tenant fix); a self-hosted relay's zone is the tenant's own (REQUIRED,
+	 * with the fix).
+	 */
+	private function frontedMailHostResults() {
+		$out = array();
+		$t = $this->topology();
+		$is_fleet = ($t['mode'] === 'fleet');
+		$host = $t['mx_hostname'];
+		$relay_ip = $t['public_ip'];
+
+		if ($host === '') {
+			$out[] = $this->r('mailhost.a_record', '', 'mailhost', 'Relay MX hostname A record', self::REQUIRED, self::UNKNOWN,
+				'The relay\'s MX hostname is not recorded yet.',
+				'Open the Relay tab once — it records the hostname from the relay\'s provisioning job — then re-check.');
+			return $out;
+		}
+
+		list($aRecords, $aOk) = $this->dns(function () use ($host) { return DnsResolver::getA($host); });
+		if (!$aOk) {
+			$out[] = $this->r('mailhost.a_record', '', 'mailhost', 'Relay MX hostname A record', self::REQUIRED, self::UNKNOWN,
+				'DNS lookup for ' . $host . ' failed — try again.');
+		} elseif (empty($aRecords) || ($relay_ip !== '' && !in_array($relay_ip, $aRecords, true))) {
+			$resolved = empty($aRecords) ? 'does not resolve' : 'resolves to ' . implode(', ', $aRecords);
+			if ($is_fleet) {
+				$out[] = $this->r('mailhost.a_record', '', 'mailhost', 'Relay MX hostname A record', self::RECOMMENDED, self::INFO,
+					$host . ' ' . $resolved . ' — the fleet operator\'s DNS is not in place yet.',
+					'This record is published by the fleet operator (' . $host . ' → '
+					. ($relay_ip !== '' ? $relay_ip : 'the relay IP') . '); no action needed on your side.');
+			} else {
+				$out[] = $this->r('mailhost.a_record', '', 'mailhost', 'Relay MX hostname A record', self::REQUIRED, self::FAIL,
+					$host . ' ' . $resolved . ', not the relay (' . ($relay_ip !== '' ? $relay_ip : 'IP unknown') . ').', '',
+					$this->dnsFix('A', $host, $relay_ip !== '' ? $relay_ip : 'YOUR_RELAY_IP'));
+			}
+		} else {
+			$out[] = $this->r('mailhost.a_record', '', 'mailhost', 'Relay MX hostname A record', self::REQUIRED, self::PASS,
+				$host . ' resolves to the relay (' . implode(', ', $aRecords) . ').');
+		}
+
+		// Reverse DNS for the relay IP — receiving MTAs judge the relay, not the box.
+		if ($relay_ip === '') {
+			$out[] = $this->r('mailhost.ptr', '', 'mailhost', 'Relay reverse DNS (PTR)', self::REQUIRED, self::UNKNOWN,
+				'Cannot check — the relay\'s public IP is not recorded.');
+			return $out;
+		}
+		list($ptr, $ptrOk) = $this->dns(function () use ($relay_ip) { return DnsResolver::getPtr($relay_ip); });
+		$ptrName = (!empty($ptr)) ? strtolower(rtrim((string)$ptr[0], '.')) : '';
+		if (!$ptrOk) {
+			$out[] = $this->r('mailhost.ptr', '', 'mailhost', 'Relay reverse DNS (PTR)', self::REQUIRED, self::UNKNOWN,
+				'Reverse-DNS lookup for ' . $relay_ip . ' failed — try again.');
+		} elseif ($ptrName === $host) {
+			$out[] = $this->r('mailhost.ptr', '', 'mailhost', 'Relay reverse DNS (PTR)', self::REQUIRED, self::PASS,
+				$relay_ip . ' → ' . $ptrName . ' — the relay names itself.');
+		} elseif ($is_fleet) {
+			$out[] = $this->r('mailhost.ptr', '', 'mailhost', 'Relay reverse DNS (PTR)', self::RECOMMENDED, self::INFO,
+				$relay_ip . ($ptrName !== '' ? ' → ' . $ptrName : ' has no PTR record')
+				. ' — expected ' . $host . '.',
+				'The relay\'s reverse DNS is set by the fleet operator; no action needed on your side.');
+		} else {
+			$out[] = $this->r('mailhost.ptr', '', 'mailhost', 'Relay reverse DNS (PTR)', self::REQUIRED, self::FAIL,
+				$relay_ip . ($ptrName !== '' ? ' → ' . $ptrName : ' has no PTR record')
+				. ' — receiving servers expect ' . $host . '.',
+				'Reverse DNS is set by whoever owns the relay\'s IP — the relay host\'s provider panel, not your DNS zone.',
+				array('text' => 'Set Reverse DNS (RDNS) for ' . $relay_ip . ' to ' . $host
+					. ' at the relay\'s hosting provider. The provider only accepts it once ' . $host
+					. ' has an A record pointing to ' . $relay_ip . '.'));
+		}
+		return $out;
+	}
+
 	// ===================================================================
 	// Per-domain DNS layer
 	// ===================================================================
@@ -518,17 +748,34 @@ class InboundEmailSetupCheck {
 
 		// MX — one check covering all four conditions: an MX record exists,
 		// its target is not a CNAME, the target resolves, and the target's A
-		// record points to this server. The first unmet condition wins.
+		// record points to the topology's MX host (the relay when fronted,
+		// this server when colocated). The first unmet condition wins.
+		$fronted = $this->fronted();
+		$mx_prescribed = $fronted ? $this->topology()['mx_hostname'] : $canonical;
 		list($mx, $mxOk) = $this->dns(function () use ($domain) { return DnsResolver::getMx($domain); });
-		if (!$mxOk) {
+		if ($fronted && $mx_prescribed === '') {
+			$out[] = $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::UNKNOWN,
+				'The relay\'s MX hostname is not recorded yet, so there is no target to verify against.',
+				'Open the Relay tab once — it records the hostname from the relay\'s provisioning job — then re-check.');
+		} elseif (!$mxOk) {
 			$out[] = $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::UNKNOWN,
 				'DNS lookup for ' . $domain . ' MX failed — try again.');
 		} elseif (empty($mx)) {
 			$out[] = $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::FAIL,
 				$domain . ' has no MX record.', '',
-				$this->dnsFix('MX', $domain, $canonical, 10));
+				$this->dnsFix('MX', $domain, $mx_prescribed, 10));
+		} elseif ($fronted) {
+			$out[] = $this->frontedMxResult($domain, strtolower(rtrim($mx[0]['host'], '.')), $mx[0]['pri']);
 		} else {
 			$out[] = $this->mxResult($domain, strtolower(rtrim($mx[0]['host'], '.')), $mx[0]['pri'], $canonical);
+		}
+
+		// Ownership proof (hosted fleet only): the fleet accepts no mail for a
+		// domain until its owner proves control by publishing a TXT code. The
+		// row behaves like every other DNS row — publish the record, the check
+		// goes green (challenges are filed and re-verified automatically).
+		if ($this->topology()['mode'] === 'fleet') {
+			$out[] = $this->ownershipResult($domain);
 		}
 
 		// A protected sending identity (specs/mailbox_outbound_send_protection.md)
@@ -557,15 +804,28 @@ class InboundEmailSetupCheck {
 				$out[] = $r;
 			}
 		} else {
-			$spfValue = $this->prescribedSpf();
+			$plan = $this->spfPlan($domain);
 			if (!$txtOk) {
 				$out[] = $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::UNKNOWN,
 					'DNS TXT lookup for ' . $domain . ' failed — try again.');
+			} elseif ($plan['prescribe'] === 'switch_provider') {
+				// No record can both authorize this outbound path and keep the
+				// box's address out of DNS — the fix is the outbound path itself.
+				$out[] = $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::FAIL,
+					'Sent mail leaves from this server itself (' . $plan['label'] . ') — no SPF record can '
+					. 'authorize that without publishing the address the relay hides.',
+					'Under a relay, outbound mail must ride a provider with its own sending range.',
+					array('text' => 'Switch the outbound email provider on the Settings page to an API provider '
+						. 'with its own sending range (e.g. Mailgun or SES), then re-check.'));
+			} elseif ($plan['prescribe'] === 'unknown') {
+				$out[] = $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::UNKNOWN,
+					'Could not determine ' . $plan['label'] . '\'s SPF mechanism for ' . $domain
+					. ' — its API did not answer. Try again.');
 			} elseif ($spf === '') {
 				$out[] = $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::FAIL,
-					$domain . ' has no SPF (v=spf1) record.', '', $this->dnsFix('TXT', $domain, $spfValue));
+					$domain . ' has no SPF (v=spf1) record.', '', $this->dnsFix('TXT', $domain, $plan['value']));
 			} else {
-				$out[] = $this->spfResult($domain, $spf, $spfValue);
+				$out[] = $this->spfResult($domain, $spf, $plan);
 			}
 
 			// DKIM — one check covering both that a signing key exists on this
@@ -677,7 +937,67 @@ class InboundEmailSetupCheck {
 				array('text' => 'Check the active email provider credential, or the forwarding SMTP relay settings, on the Settings page.'));
 		}
 
+		// Cutover completion: a relay row exists but is not enabled yet. Once
+		// DNS is fully cut over, mail is arriving at the relay with no consumer
+		// — the last step is the admin's explicit enable on the Relay tab.
+		if ($this->fronted() && !$this->topology()['enabled']) {
+			$out[] = $this->relayEnableResult();
+		}
+
 		return $out;
+	}
+
+	/**
+	 * The 'plugin.relay_enable' row: REQUIRED FAIL when every enabled hosted
+	 * domain's MX already points at the relay (and, on a fleet slot, every
+	 * ownership proof is published) but the relay row is still disabled;
+	 * neutral INFO while DNS is still moving.
+	 */
+	private function relayEnableResult() {
+		$t = $this->topology();
+		$expected = $t['mx_hostname'];
+		$is_fleet = ($t['mode'] === 'fleet');
+
+		$domains = array();
+		try {
+			$multi = new MultiInboundEmailDomain(array('deleted' => false, 'enabled' => true), array('ied_domain' => 'ASC'));
+			$multi->load();
+			foreach ($multi as $d) {
+				if (!(bool)$d->get('ied_is_imap_source')) {
+					$domains[] = strtolower(trim((string)$d->get('ied_domain')));
+				}
+			}
+		} catch (\Throwable $e) {
+			// Fall through to the INFO shape below.
+		}
+
+		$ready = ($expected !== '' && !empty($domains));
+		foreach ($ready ? $domains : array() as $domain) {
+			list($mx, $ok) = $this->dns(function () use ($domain) { return DnsResolver::getMx($domain); });
+			if (!$ok || empty($mx) || strtolower(rtrim($mx[0]['host'], '.')) !== $expected) {
+				$ready = false;
+				break;
+			}
+			if ($is_fleet) {
+				$claim = $this->fleetClaimFor($domain);
+				if ($claim === null || (string)($claim['status'] ?? '') !== 'verified') {
+					$ready = false;
+					break;
+				}
+			}
+		}
+
+		if ($ready) {
+			return $this->r('plugin.relay_enable', '', 'plugin', 'Relay enabled', self::REQUIRED, self::FAIL,
+				'DNS is cut over but the relay is not enabled — mail is arriving at the relay with no consumer.',
+				'Every hosted domain\'s MX points at ' . $expected
+				. ($is_fleet ? ' and every ownership proof is published.' : '.'),
+				array('text' => 'Enable the relay on the Relay tab.'));
+		}
+		return $this->r('plugin.relay_enable', '', 'plugin', 'Relay enabled', self::RECOMMENDED, self::INFO,
+			'The relay is not enabled yet — enable it on the Relay tab after the rows above go green.',
+			'Enabling it makes the relay front every hosted domain; do it once the MX'
+			. ($is_fleet ? ' and ownership rows' : ' rows') . ' pass.');
 	}
 
 	// ===================================================================
@@ -853,11 +1173,112 @@ class InboundEmailSetupCheck {
 	}
 
 	/**
-	 * Evaluate an existing SPF record and return a single 'domain.spf' result:
-	 * whether it authorizes this server's public IP. Called when the domain
-	 * already has a v=spf1 record.
+	 * MX evaluation under a fronted topology: the target must string-equal the
+	 * relay MX hostname AND that name must resolve to the relay's public IP.
+	 * The owned-target heuristic does not apply — for a fleet slot the hostname
+	 * lives in the operator's zone, so exact match is the only correct target.
 	 */
-	private function spfResult($domain, $spf, $spfValue) {
+	private function frontedMxResult($domain, $mxTarget, $mxPri) {
+		$t = $this->topology();
+		$expected = $t['mx_hostname'];
+		$relay_ip = $t['public_ip'];
+		$lead = $domain . ' MX → ' . $mxTarget . ' (priority ' . $mxPri . ')';
+		$fix = $this->dnsFix('MX', $domain, $expected, 10);
+		$fix['text'] = 'Replace the MX record at your DNS provider (and remove the old one).';
+
+		if ($mxTarget !== $expected) {
+			return $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::FAIL,
+				$lead . ', not the relay (' . $expected . ') — mail is still being delivered to the old target.',
+				'', $fix);
+		}
+		list($mxA, $mxAOk) = $this->dns(function () use ($mxTarget) { return DnsResolver::getA($mxTarget); });
+		if (!$mxAOk) {
+			return $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::UNKNOWN,
+				$lead . '. DNS lookup for ' . $mxTarget . ' failed — try again.');
+		}
+		$resolves = !empty($mxA) && ($relay_ip === '' || in_array($relay_ip, $mxA, true));
+		if (!$resolves) {
+			$resolved = empty($mxA) ? 'does not resolve' : 'resolves to ' . implode(', ', $mxA);
+			if ($t['mode'] === 'fleet') {
+				// The A record behind the MX target is operator-published; the
+				// tenant's half (the MX record itself) is already correct.
+				return $this->r('domain.mx', $domain, 'domain', 'MX record', self::RECOMMENDED, self::INFO,
+					$lead . ' — correct target, but it ' . $resolved
+					. '. The fleet operator\'s A record is not in place yet; no action needed on your side.');
+			}
+			return $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::FAIL,
+				$lead . ' — correct target, but it ' . $resolved
+				. ', not the relay (' . ($relay_ip !== '' ? $relay_ip : 'IP unknown') . ').', '',
+				$this->dnsFix('A', $mxTarget, $relay_ip !== '' ? $relay_ip : 'YOUR_RELAY_IP'));
+		}
+		return $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::PASS,
+			$lead . ' → ' . ($relay_ip !== '' ? $relay_ip : implode(', ', $mxA)) . ' — the relay.');
+	}
+
+	/**
+	 * The 'domain.ownership' row (hosted fleet only): publish-the-record proof
+	 * of domain control, with no user-facing claim/verify vocabulary — the
+	 * challenge is filed automatically and re-verified on every check pass
+	 * (specs/mailbox_setup_topology_aware.md Decision 4).
+	 */
+	private function ownershipResult($domain) {
+		$label = 'Domain ownership';
+		$state = $this->fleetState();
+		if (!$state['ok']) {
+			return $this->r('domain.ownership', $domain, 'domain', $label, self::REQUIRED, self::UNKNOWN,
+				'Could not reach the fleet service to check the ownership proof.',
+				$state['error']);
+		}
+		if (!$state['enrolled']) {
+			return $this->r('domain.ownership', $domain, 'domain', $label, self::REQUIRED, self::FAIL,
+				'This deployment no longer holds a fleet slot, so the relay accepts no mail for ' . $domain . '.',
+				'', array('text' => 'Re-enroll on the Relay tab.'));
+		}
+		$claim = $this->fleetClaimFor($domain);
+		if ($claim === null || (string)($claim['status'] ?? '') === 'error') {
+			return $this->r('domain.ownership', $domain, 'domain', $label, self::REQUIRED, self::UNKNOWN,
+				'Could not obtain the ownership record for ' . $domain . ' from the fleet service.',
+				(string)($claim['error'] ?? ''));
+		}
+		if ((string)$claim['status'] === 'verified') {
+			return $this->r('domain.ownership', $domain, 'domain', $label, self::REQUIRED, self::PASS,
+				'Ownership proven.');
+		}
+		return $this->r('domain.ownership', $domain, 'domain', $label, self::REQUIRED, self::FAIL,
+			'Prove you own ' . $domain . ': publish this record at your DNS provider.',
+			'The relay accepts no mail for this domain until this record is published. '
+			. 'It is re-checked automatically on every pass — publish it and re-check.',
+			$this->dnsFix('TXT', (string)$claim['txt_host'], (string)$claim['txt_value']));
+	}
+
+	/**
+	 * Evaluate an existing SPF record against the topology's plan and return a
+	 * single 'domain.spf' result. Colocated: the record must authorize this
+	 * server and carry the outbound mechanism. Fronted: the record must carry
+	 * the plan's mechanism and must NOT authorize this server — a record still
+	 * naming the box republishes the address the relay hides.
+	 */
+	private function spfResult($domain, $spf, array $plan) {
+		$fix = $this->dnsFix('TXT', $domain, $plan['value']);
+
+		if ($this->fronted()) {
+			if ($this->publicIp !== '') {
+				$boxEval = $this->spfAuthorizes($spf, $domain);
+				if ($boxEval === 'pass') {
+					return $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::FAIL,
+						'SPF authorizes this server (' . $this->publicIp . ') — it publishes the address the relay hides.',
+						'Record: ' . $spf, $fix);
+				}
+			}
+			if ($plan['mechanism'] !== '' && !$this->spfCoversMechanism($spf, $plan['mechanism'])) {
+				return $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::WARN,
+					'SPF does not authorize the outbound path (' . $plan['label'] . ') — sent mail will fail SPF.',
+					'Record: ' . $spf, $fix);
+			}
+			return $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::PASS,
+				'SPF authorizes the outbound path (' . $plan['label'] . ') and does not name this server.');
+		}
+
 		if ($this->publicIp === '') {
 			return $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::UNKNOWN,
 				'SPF record present, but cannot confirm it authorizes this server — the public IP could not be determined.');
@@ -865,23 +1286,17 @@ class InboundEmailSetupCheck {
 		$spfEval = $this->spfAuthorizes($spf, $domain);
 		if ($spfEval === 'pass') {
 			// The server is authorized — but mail also leaves through the
-			// outbound relay, so a record that omits the relay's include still
+			// outbound provider, so a record that omits its mechanism still
 			// produces SPF failures at recipients.
-			$relay = $this->relayInfo();
-			if ($relay['spf_include'] !== '') {
-				$lookups = 0;
-				if (!$this->spfChainIncludes($spf, $relay['spf_include'], $lookups)) {
-					return $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::WARN,
-						'SPF authorizes this server (' . $this->publicIp . '), but not the outbound relay ('
-						. $relay['label'] . ') — mail sent through it will fail SPF.',
-						'Record: ' . $spf,
-						$this->dnsFix('TXT', $domain, $spfValue));
-				}
-				return $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::PASS,
-					'SPF record present; authorizes ' . $this->publicIp . ' and the ' . $relay['label'] . ' relay.');
+			if ($plan['mechanism'] !== '' && !$this->spfCoversMechanism($spf, $plan['mechanism'])) {
+				return $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::WARN,
+					'SPF authorizes this server (' . $this->publicIp . '), but not the outbound provider ('
+					. $plan['label'] . ') — mail sent through it will fail SPF.',
+					'Record: ' . $spf, $fix);
 			}
 			return $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::PASS,
-				'SPF record present and authorizes ' . $this->publicIp . '.');
+				'SPF record present; authorizes ' . $this->publicIp
+				. ($plan['mechanism'] !== '' ? ' and the ' . $plan['label'] . ' path.' : '.'));
 		}
 		if ($spfEval === 'unverified') {
 			return $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::WARN,
@@ -891,8 +1306,7 @@ class InboundEmailSetupCheck {
 		}
 		return $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::FAIL,
 			'SPF record present, but it does not authorize ' . $this->publicIp . ' (include: policies expanded).',
-			'Record: ' . $spf,
-			$this->dnsFix('TXT', $domain, $spfValue));
+			'Record: ' . $spf, $fix);
 	}
 
 	/**
@@ -1048,10 +1462,12 @@ class InboundEmailSetupCheck {
 	}
 
 	/**
-	 * The forwarding subdomain's SPF must authorize the box — alias forwarding
-	 * runs while locked and needs an SPF-passing envelope for bounce routing.
-	 * Under the bare domain's aspf=s this subdomain can never align the identity,
-	 * so it adds no spoofing capability.
+	 * The forwarding subdomain's SPF must authorize whatever forwards the mail:
+	 * this box when colocated, the RELAY when a relay/fleet slot fronts the
+	 * deployment (forwards leave direct from its IP). Alias forwarding runs
+	 * while locked and needs an SPF-passing envelope for bounce routing. Under
+	 * the bare domain's aspf=s this subdomain can never align the identity, so
+	 * it adds no spoofing capability.
 	 */
 	private function forwardingSubdomainSpfResult($model) {
 		$domain = (string)$model->get('ied_domain');
@@ -1066,7 +1482,24 @@ class InboundEmailSetupCheck {
 				'A protected domain routes its SRS forwarding envelope through a subdomain (e.g. fwd.' . $domain . ') so forwarding and bounces keep working while locked.',
 				array('text' => 'Set the forwarding subdomain on the Protect page.'));
 		}
-		$spfValue = $this->prescribedSpf();
+
+		// Who forwards decides the authorized sender.
+		$fronted = $this->fronted();
+		if ($fronted) {
+			$t = $this->topology();
+			$sender_ip = $t['public_ip'];
+			$sender_label = 'the relay';
+			$fwd_mech = '';
+			$spfValue = 'v=spf1 ip4:' . ($sender_ip !== '' ? $sender_ip : 'YOUR_RELAY_IP') . ' -all';
+		} else {
+			$sender_ip = $this->publicIp;
+			$sender_label = 'this server';
+			$relay = $this->relayInfo();
+			$fwd_mech = $this->providerMechanism($relay['provider_class'], $domain);
+			$spfValue = 'v=spf1 ip4:' . ($sender_ip !== '' ? $sender_ip : 'YOUR_SERVER_IP')
+				. ($fwd_mech !== '' ? ' ' . $fwd_mech : '') . ' -all';
+		}
+
 		list($txt, $ok) = $this->dns(function () use ($sub) { return DnsResolver::getTxt($sub); });
 		if (!$ok) {
 			return $this->r('domain.fwd_spf', $domain, 'domain', 'Forwarding subdomain SPF', self::REQUIRED, self::UNKNOWN,
@@ -1079,45 +1512,52 @@ class InboundEmailSetupCheck {
 				$sub . ' has no SPF record — forwarded mail will fail SPF at the destination.', '',
 				$this->dnsFix('TXT', $sub, $spfValue));
 		}
-		$eval = $this->spfAuthorizes($spf, $sub);
+		if ($sender_ip === '') {
+			return $this->r('domain.fwd_spf', $domain, 'domain', 'Forwarding subdomain SPF', self::REQUIRED, self::UNKNOWN,
+				$sub . ' has an SPF record, but the forwarding sender\'s IP could not be determined.');
+		}
+		$eval = $this->spfAuthorizes($spf, $sub, $sender_ip);
 		if ($eval === 'pass') {
-			// Forwarded mail leaves through the relay with an SRS envelope on
-			// this subdomain, so the relay's include is part of its shape too.
-			$relay = $this->relayInfo();
-			if ($relay['spf_include'] !== '') {
-				$lookups = 0;
-				if (!$this->spfChainIncludes($spf, $relay['spf_include'], $lookups)) {
-					return $this->r('domain.fwd_spf', $domain, 'domain', 'Forwarding subdomain SPF', self::REQUIRED, self::WARN,
-						$sub . ' SPF authorizes this server, but not the outbound relay (' . $relay['label']
-						. ') — forwarded mail sent through it will fail SPF.', 'Record: ' . $spf,
-						$this->dnsFix('TXT', $sub, $spfValue));
-				}
-				return $this->r('domain.fwd_spf', $domain, 'domain', 'Forwarding subdomain SPF', self::REQUIRED, self::PASS,
-					$sub . ' SPF authorizes this server (' . $this->publicIp . ') and the ' . $relay['label'] . ' relay.');
+			// Colocated forwards also leave through the outbound relay
+			// provider, so its mechanism is part of the subdomain's shape too.
+			if ($fwd_mech !== '' && !$this->spfCoversMechanism($spf, $fwd_mech)) {
+				return $this->r('domain.fwd_spf', $domain, 'domain', 'Forwarding subdomain SPF', self::REQUIRED, self::WARN,
+					$sub . ' SPF authorizes ' . $sender_label . ', but not the outbound relay ('
+					. $this->relayInfo()['label'] . ') — forwarded mail sent through it will fail SPF.',
+					'Record: ' . $spf,
+					$this->dnsFix('TXT', $sub, $spfValue));
 			}
 			return $this->r('domain.fwd_spf', $domain, 'domain', 'Forwarding subdomain SPF', self::REQUIRED, self::PASS,
-				$sub . ' SPF authorizes this server (' . $this->publicIp . ').');
+				$sub . ' SPF authorizes ' . $sender_label . ' (' . $sender_ip . ').');
 		}
 		if ($eval === 'unverified') {
 			return $this->r('domain.fwd_spf', $domain, 'domain', 'Forwarding subdomain SPF', self::REQUIRED, self::WARN,
-				$sub . ' SPF policy could not be fully verified — could not confirm it authorizes ' . $this->publicIp . '.', 'Record: ' . $spf,
-				array('text' => 'Confirm the policy covers ' . $this->publicIp . ', or add ip4:' . $this->publicIp . ' directly.'));
+				$sub . ' SPF policy could not be fully verified — could not confirm it authorizes ' . $sender_label
+				. ' (' . $sender_ip . ').', 'Record: ' . $spf,
+				array('text' => 'Confirm the policy covers ' . $sender_ip . ', or add ip4:' . $sender_ip . ' directly.'));
 		}
 		return $this->r('domain.fwd_spf', $domain, 'domain', 'Forwarding subdomain SPF', self::REQUIRED, self::FAIL,
-			$sub . ' SPF does not authorize this server (' . $this->publicIp . ').', 'Record: ' . $spf,
+			$sub . ' SPF does not authorize ' . $sender_label . ' (' . $sender_ip . ').', 'Record: ' . $spf,
 			$this->dnsFix('TXT', $sub, $spfValue));
 	}
 
 	/**
 	 * The forwarding subdomain must RECEIVE mail, not just send it: remote DSNs
 	 * are addressed to the SRS envelope (SRS0=...@<subdomain>), so without an MX
-	 * pointing back at this box, bounce handling silently dies and original
-	 * senders never learn their mail failed. REQUIRED for the protected shape.
+	 * pointing back at this deployment's MX host — the relay when fronted, this
+	 * box when colocated — bounce handling silently dies and original senders
+	 * never learn their mail failed. REQUIRED for the protected shape.
 	 */
 	private function forwardingSubdomainMxResult($model) {
 		$domain = (string)$model->get('ied_domain');
 		$sub = $model->forwarding_subdomain();
-		$mxTarget = $this->mailHostname !== '' ? $this->mailHostname : 'YOUR_MAIL_HOST';
+		$fronted = $this->fronted();
+		$t = $this->topology();
+		$mxTarget = $fronted
+			? ($t['mx_hostname'] !== '' ? $t['mx_hostname'] : 'YOUR_RELAY_MX_HOST')
+			: ($this->mailHostname !== '' ? $this->mailHostname : 'YOUR_MAIL_HOST');
+		$expect_ip = $fronted ? $t['public_ip'] : $this->publicIp;
+		$expect_label = $fronted ? 'the relay' : 'this server';
 		if ($sub === '' || strcasecmp($sub, $domain) === 0) {
 			return $this->r('domain.fwd_mx', $domain, 'domain', 'Forwarding subdomain MX', self::REQUIRED, self::FAIL,
 				'No dedicated forwarding subdomain is configured for ' . $domain . '.', '',
@@ -1130,7 +1570,7 @@ class InboundEmailSetupCheck {
 		}
 		if (empty($mx)) {
 			return $this->r('domain.fwd_mx', $domain, 'domain', 'Forwarding subdomain MX', self::REQUIRED, self::FAIL,
-				$sub . ' has no MX record — delivery-failure notices sent to the SRS envelope cannot reach this server.', '',
+				$sub . ' has no MX record — delivery-failure notices sent to the SRS envelope cannot reach ' . $expect_label . '.', '',
 				$this->dnsFix('MX', $sub, $mxTarget, 10));
 		}
 		$host = strtolower(rtrim($mx[0]['host'], '.'));
@@ -1139,17 +1579,17 @@ class InboundEmailSetupCheck {
 			return $this->r('domain.fwd_mx', $domain, 'domain', 'Forwarding subdomain MX', self::REQUIRED, self::UNKNOWN,
 				$sub . ' MX → ' . $host . '. DNS lookup for ' . $host . ' failed — try again.');
 		}
-		if ($this->publicIp === '') {
+		if ($expect_ip === '') {
 			return $this->r('domain.fwd_mx', $domain, 'domain', 'Forwarding subdomain MX', self::REQUIRED, self::UNKNOWN,
-				$sub . ' MX → ' . $host . '. Cannot confirm it points here — the server public IP could not be determined.');
+				$sub . ' MX → ' . $host . '. Cannot confirm it points at ' . $expect_label . ' — its IP could not be determined.');
 		}
-		if (!in_array($this->publicIp, $mxA, true)) {
+		if (!in_array($expect_ip, $mxA, true)) {
 			return $this->r('domain.fwd_mx', $domain, 'domain', 'Forwarding subdomain MX', self::REQUIRED, self::FAIL,
-				$sub . ' MX → ' . $host . ' → ' . implode(', ', $mxA) . ', not this server (' . $this->publicIp . ').', '',
+				$sub . ' MX → ' . $host . ' → ' . implode(', ', $mxA) . ', not ' . $expect_label . ' (' . $expect_ip . ').', '',
 				$this->dnsFix('MX', $sub, $mxTarget, 10));
 		}
 		return $this->r('domain.fwd_mx', $domain, 'domain', 'Forwarding subdomain MX', self::REQUIRED, self::PASS,
-			$sub . ' MX → ' . $host . ' → this server; SRS bounces route back to the router.');
+			$sub . ' MX → ' . $host . ' → ' . $expect_label . '; SRS bounces route back to the router.');
 	}
 
 	/**
@@ -1323,57 +1763,159 @@ class InboundEmailSetupCheck {
 
 	/**
 	 * Describe the resolved outbound relay once per run:
-	 * ['mode', 'label', 'spf_include'] from InboundEmailRouter::describeRelay(),
+	 * ['mode', 'label', 'provider_class'] from InboundEmailRouter::describeRelay(),
 	 * or all-empty values when the router cannot be built.
 	 */
 	private function relayInfo() {
 		if ($this->relay_info === null) {
-			$this->relay_info = array('mode' => '', 'label' => '', 'spf_include' => '');
+			$this->relay_info = array('mode' => '', 'label' => '', 'provider_class' => '');
 			try {
 				require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
-				$this->relay_info = (new InboundEmailRouter())->describeRelay();
+				$this->router = new InboundEmailRouter();
+				$this->relay_info = $this->router->describeRelay();
 			} catch (\Throwable $e) {
 				// Relay unresolvable — the plugin.relay check reports that; SPF
-				// prescriptions just omit the include.
+				// prescriptions just omit the mechanism.
 			}
 		}
 		return $this->relay_info;
 	}
 
-	/**
-	 * The SPF record this deployment prescribes for a sending domain: the
-	 * server's own IP plus, when outbound rides a relay provider with a fixed
-	 * SPF range, that provider's include — mail leaves through both paths.
-	 */
-	private function prescribedSpf() {
-		$terms = array('v=spf1', 'ip4:' . ($this->publicIp !== '' ? $this->publicIp : 'YOUR_SERVER_IP'));
-		$relay = $this->relayInfo();
-		if ($relay['spf_include'] !== '') {
-			$terms[] = 'include:' . $relay['spf_include'];
+	/** The active outbound provider's class (email_service setting), or null. */
+	private function activeProviderClass(): ?string {
+		try {
+			require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+			$service = (string)$this->settings->get_setting('email_service') ?: 'mailgun';
+			return EmailSender::getDiscoveredProviders()[$service] ?? null;
+		} catch (\Throwable $e) {
+			return null;
 		}
-		$terms[] = '-all';
-		return implode(' ', $terms);
 	}
 
 	/**
-	 * Whether an SPF policy's include:/redirect= chain reaches $needle,
-	 * within the shared 10-lookup budget. Used to confirm a published record
-	 * covers the outbound relay provider.
+	 * A provider class's SPF mechanism for a domain, cached per (class, domain)
+	 * for the run — per-account providers answer from their API, so each pair
+	 * is fetched once.
 	 */
-	private function spfChainIncludes($spf, $needle, &$lookups) {
+	private function providerMechanism(?string $class, string $domain): string {
+		if ($class === null || $class === '') {
+			return '';
+		}
+		$key = $class . '|' . $domain;
+		if (!array_key_exists($key, $this->spf_mechanisms)) {
+			$mech = '';
+			try {
+				$mech = trim((string)$class::getSpfMechanism($domain));
+			} catch (\Throwable $e) {
+				error_log('InboundEmailSetupCheck: getSpfMechanism(' . $class . ', ' . $domain . ') failed: '
+					. $e->getMessage());
+			}
+			$this->spf_mechanisms[$key] = $mech;
+		}
+		return $this->spf_mechanisms[$key];
+	}
+
+	/**
+	 * The SPF this deployment prescribes for a sending domain, by topology
+	 * (specs/mailbox_setup_topology_aware.md Decision 5). Returns:
+	 *   'prescribe' — 'record' (value is copy-ready), 'switch_provider' (no
+	 *                 record can both work and hide the origin), or 'unknown'
+	 *                 (the provider's API did not answer).
+	 *   'value'     — the copy-ready record ('' unless prescribe = record).
+	 *   'mechanism' — the outbound mechanism(s) a published record must cover.
+	 *   'label'     — what carries the mail, for row text.
+	 *
+	 * Colocated: the box's own IP plus every outbound mechanism (forwarding
+	 * relay + compose provider). Fronted, provider outbound: the provider's
+	 * mechanism alone — the box IP is exactly what the relay hides. Fronted,
+	 * smarthost outbound: the relay's IP.
+	 */
+	private function spfPlan(string $domain): array {
+		if (!$this->fronted()) {
+			$terms = array('v=spf1', 'ip4:' . ($this->publicIp !== '' ? $this->publicIp : 'YOUR_SERVER_IP'));
+			$mechanisms = array();
+			$relay = $this->relayInfo();
+			$label = $relay['label'];
+			foreach (array($relay['provider_class'], $this->activeProviderClass()) as $class) {
+				$mech = $this->providerMechanism($class, $domain);
+				foreach ($mech === '' ? array() : preg_split('/\s+/', $mech) as $term) {
+					if (!in_array($term, $mechanisms, true)) { $mechanisms[] = $term; }
+				}
+			}
+			$value = implode(' ', array_merge($terms, $mechanisms, array('-all')));
+			return array('prescribe' => 'record', 'value' => $value,
+				'mechanism' => implode(' ', $mechanisms), 'label' => $label);
+		}
+
+		$t = $this->topology();
+		$outbound_mode = (strtolower(trim((string)$this->settings->get_setting('mailbox_relay_outbound_mode'))) === 'smarthost')
+			? 'smarthost' : 'provider';
+		if ($outbound_mode === 'smarthost') {
+			$mech = 'ip4:' . ($t['public_ip'] !== '' ? $t['public_ip'] : 'YOUR_RELAY_IP');
+			return array('prescribe' => 'record', 'value' => 'v=spf1 ' . $mech . ' -all',
+				'mechanism' => $mech, 'label' => 'the relay smarthost');
+		}
+
+		$class = $this->activeProviderClass();
+		$label = ($class !== null) ? $class::getLabel() : 'the configured provider';
+		$is_api = ($class !== null)
+			&& in_array('ApiSubmissionRelay', class_implements($class) ?: array(), true);
+		if (!$is_api) {
+			// Compose under a fronted topology refuses non-API providers (the
+			// origin would leak) — the SPF fix IS switching providers.
+			return array('prescribe' => 'switch_provider', 'value' => '', 'mechanism' => '', 'label' => $label);
+		}
+		$mech = $this->providerMechanism($class, $domain);
+		if ($mech === '') {
+			return array('prescribe' => 'unknown', 'value' => '', 'mechanism' => '', 'label' => $label);
+		}
+		return array('prescribe' => 'record', 'value' => 'v=spf1 ' . $mech . ' -all',
+			'mechanism' => $mech, 'label' => $label);
+	}
+
+	/**
+	 * Whether a published SPF policy covers every term of a prescribed
+	 * mechanism ('include:x', 'a:host', 'ip4:...', possibly several
+	 * space-separated), expanding the include:/redirect= chain within the
+	 * shared 10-lookup budget.
+	 */
+	private function spfCoversMechanism($spf, $mechanism) {
+		foreach (preg_split('/\s+/', trim($mechanism)) as $needed) {
+			if ($needed === '') { continue; }
+			$lookups = 0;
+			if (!$this->spfChainHasTerm($spf, $needed, $lookups)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * Whether an SPF policy (or anything its include:/redirect= chain reaches,
+	 * within the shared 10-lookup budget) carries $needed as a term. An
+	 * include:/redirect= term also matches a needed include: by target, so
+	 * 'include:mailgun.org' is found whether it appears directly or as the
+	 * redirect target of an intermediate policy.
+	 */
+	private function spfChainHasTerm($spf, $needed, &$lookups) {
+		$needed_norm = strtolower(ltrim(rtrim($needed, '.'), '+'));
+		$needed_target = '';
+		if (stripos($needed_norm, 'include:') === 0) { $needed_target = substr($needed_norm, 8); }
 		foreach (preg_split('/\s+/', trim($spf)) as $term) {
 			$term = ltrim($term, '+');
 			if ($term === '' || $term[0] === '-' || $term[0] === '~' || $term[0] === '?') { continue; }
+			$term_norm = strtolower(rtrim($term, '.'));
+			if ($term_norm === $needed_norm) { return true; }
 			$target = '';
 			if (stripos($term, 'include:') === 0) { $target = substr($term, 8); }
 			elseif (stripos($term, 'redirect=') === 0) { $target = substr($term, 9); }
 			if ($target === '') { continue; }
-			if (strcasecmp(rtrim($target, '.'), rtrim($needle, '.')) === 0) { return true; }
+			if ($needed_target !== '' && strcasecmp(rtrim($target, '.'), $needed_target) === 0) { return true; }
 			if (++$lookups > 10) { continue; }
 			list($txt, $ok) = $this->dns(function () use ($target) { return DnsResolver::getTxt($target); });
 			if (!$ok) { continue; }
 			$sub_spf = $this->extractSpf($txt);
-			if ($sub_spf !== '' && $this->spfChainIncludes($sub_spf, $needle, $lookups)) { return true; }
+			if ($sub_spf !== '' && $this->spfChainHasTerm($sub_spf, $needed, $lookups)) { return true; }
 		}
 		return false;
 	}
@@ -1412,20 +1954,22 @@ class InboundEmailSetupCheck {
 	}
 
 	/**
-	 * Evaluate whether an SPF record authorizes the server's public IP,
+	 * Evaluate whether an SPF record authorizes an IP (the server's public IP
+	 * by default; callers pass the relay's IP to test the fronted shape),
 	 * expanding include:/redirect= policies recursively within RFC 7208's
 	 * 10-DNS-mechanism budget so the verdict is definitive whenever DNS
 	 * cooperates. Returns 'pass', 'fail', or 'unverified' (the budget ran out
 	 * or a lookup failed before a definitive answer was possible).
 	 */
-	private function spfAuthorizes($spf, $domain) {
-		if ($this->publicIp === '') { return 'fail'; }
+	private function spfAuthorizes($spf, $domain, $ip = null) {
+		$ip = ($ip === null) ? $this->publicIp : $ip;
+		if ($ip === '') { return 'fail'; }
 		$lookups = 0;
-		return $this->spfPolicyAuthorizes($spf, $domain, $lookups);
+		return $this->spfPolicyAuthorizes($spf, $domain, $ip, $lookups);
 	}
 
 	/** Recursive worker for spfAuthorizes; $lookups is the shared DNS budget. */
-	private function spfPolicyAuthorizes($spf, $domain, &$lookups) {
+	private function spfPolicyAuthorizes($spf, $domain, $ip, &$lookups) {
 		$unverified = false;
 		foreach (preg_split('/\s+/', trim($spf)) as $term) {
 			$term = ltrim($term, '+');
@@ -1441,21 +1985,21 @@ class InboundEmailSetupCheck {
 				if (!$ok) { $unverified = true; continue; }
 				$sub_spf = $this->extractSpf($txt);
 				if ($sub_spf === '') { continue; } // no policy there — authorizes nothing
-				$sub = $this->spfPolicyAuthorizes($sub_spf, $sub_target, $lookups);
+				$sub = $this->spfPolicyAuthorizes($sub_spf, $sub_target, $ip, $lookups);
 				if ($sub === 'pass') { return 'pass'; }
 				if ($sub === 'unverified') { $unverified = true; }
 				continue;
 			}
 			if (stripos($term, 'ip4:') === 0) {
-				if ($this->ip4InCidr($this->publicIp, substr($term, 4))) { return 'pass'; }
+				if ($this->ip4InCidr($ip, substr($term, 4))) { return 'pass'; }
 			} elseif (stripos($term, 'ip6:') === 0) {
-				if (strcasecmp($this->publicIp, substr($term, 4)) === 0) { return 'pass'; }
+				if (strcasecmp($ip, substr($term, 4)) === 0) { return 'pass'; }
 			} elseif ($term === 'a' || stripos($term, 'a:') === 0) {
 				if (++$lookups > 10) { $unverified = true; continue; }
 				$host = ($term === 'a') ? $domain : substr($term, 2);
 				list($ips, $ok) = $this->dns(function () use ($host) { return DnsResolver::getA($host); });
 				if (!$ok) { $unverified = true; continue; }
-				if (in_array($this->publicIp, $ips, true)) { return 'pass'; }
+				if (in_array($ip, $ips, true)) { return 'pass'; }
 			} elseif ($term === 'mx' || stripos($term, 'mx:') === 0) {
 				if (++$lookups > 10) { $unverified = true; continue; }
 				$host = ($term === 'mx') ? $domain : substr($term, 3);
@@ -1466,7 +2010,7 @@ class InboundEmailSetupCheck {
 						return DnsResolver::getA(rtrim($rec['host'], '.'));
 					});
 					if (!$ok2) { $unverified = true; continue; }
-					if (in_array($this->publicIp, $mxips, true)) { return 'pass'; }
+					if (in_array($ip, $mxips, true)) { return 'pass'; }
 				}
 			}
 		}

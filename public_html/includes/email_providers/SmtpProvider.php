@@ -43,10 +43,16 @@ class SmtpProvider implements EmailServiceProvider, RawMessageRelay {
         return 'SMTP';
     }
 
-    public static function getSpfIncludeDomain(): string
+    public static function getSpfMechanism(string $domain): string
     {
-        // No fixed SPF include: sending identity is not tied to a shared provider range.
-        return '';
+        // Mail egresses from the configured SMTP host, so its address records
+        // are the authorized senders. Localhost submission is the box itself —
+        // covered (colocated only) by the server's own ip4 term, not an a: term.
+        $host = strtolower(trim((string)Globalvars::get_instance()->get_setting('smtp_host')));
+        if ($host === '' || $host === 'localhost' || $host === '127.0.0.1' || $host === '::1') {
+            return '';
+        }
+        return 'a:' . $host;
     }
 
     public static function getSettingsFields(): array {

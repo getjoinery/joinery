@@ -23,9 +23,10 @@ class PostfixProvider implements InboundEmailProvider {
         return 'Postfix (self-hosted)';
     }
 
-    public static function getSpfIncludeDomain(): string
+    public static function getSpfMechanism(string $domain): string
     {
-        // No fixed SPF include: sending identity is not tied to a shared provider range.
+        // No SPF mechanism: local sendmail egresses from this server itself,
+        // covered (colocated only) by the server's own ip4 term.
         return '';
     }
 

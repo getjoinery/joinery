@@ -102,6 +102,11 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 						$domain->set('ied_reject_unmatched', true);
 						$domain->prepare();
 						$domain->save();
+						// A fleet-fronted deployment files the domain's ownership
+						// challenge at registration, so the Setup tab's ownership
+						// row carries a publishable record immediately.
+						require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetClient.php'));
+						(new FleetClient())->fileDomainClaims($domain_name);
 					}
 					$announce('Domain "' . $domain_name . '" registered.', 'Domain added');
 				} catch (InboundEmailDomainException $e) {
@@ -304,17 +309,18 @@ function _setup_is_sending_row(array $r): bool {
 }
 
 /**
- * Receiving rows for a mailbox: the domain's inbound DNS, the inbound-auth
- * verifier, that the plugin is on, that the alias resolves, and the end-to-end
- * proof. Server-internal host/mailhost rows are intentionally excluded — they
- * live in the Advanced server view.
+ * Receiving rows for a mailbox: the domain's inbound DNS (including the
+ * fleet ownership proof), the inbound-auth verifier, that the plugin is on,
+ * the relay cutover-completion row, that the alias resolves, and the
+ * end-to-end proof. Server-internal host/mailhost rows are intentionally
+ * excluded — they live in the Advanced server view.
  */
 function _setup_is_receiving_row(array $r): bool {
 	if ($r['id'] === 'domain.dkim') { return false; }      // DKIM signing is outbound
 	if ($r['layer'] === 'domain')   { return true; }
 	if ($r['layer'] === 'address')  { return true; }
 	if ($r['layer'] === 'e2e')      { return true; }
-	return in_array($r['id'], array('plugin.enabled', 'host.inbound_verification'), true);
+	return in_array($r['id'], array('plugin.enabled', 'host.inbound_verification', 'plugin.relay_enable'), true);
 }
 
 /**
