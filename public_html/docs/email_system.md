@@ -12,6 +12,8 @@ The email system consists of three focused classes that provide clear separation
 
 **Inbound transports.** Mail can arrive three ways: a self-hosted **Postfix** MX→pipe, a **webhook** provider (Mailgun), or by **IMAP poll** of an existing mailbox (Gmail, Microsoft 365, Yahoo, iCloud, Fastmail, any IMAP host). The first two are *push*; IMAP is *pull* — a scheduled task polls the mailbox and ingests new mail. Combined with the generic **SMTP** outbound provider, IMAP-in gives a complete **bring-your-own-mailbox** pairing (SMTP out + IMAP in on the same account) for low-volume users with no self-hosted MX. See [Receiving by IMAP poll](/plugins/mailbox/docs/overview.md#receiving-by-imap-poll).
 
+**Outbound doctrine: a mail provider is the assumed path.** All outbound mail — transactional, composed, and forwarded — leaves through a configured provider (Mailgun, SMTP relay/submission, SES, a connected account). Self-hosting inbound (running your own MX) does **not** imply self-hosting outbound: a box that receives its own mail still sends through a provider by default. Direct-to-recipient delivery from the box's own port 25 is an **advanced setup** a user must deliberately pursue — it requires provider-level unblocking of outbound port 25 (most clouds block it by default and lift it only by support ticket), a matching PTR, and owning the IP's sending reputation. Setup flows, health checks, and dashboards treat the provider path as normal and must not present direct self-hosted delivery as a required step or a default fork.
+
 ## Architecture
 
 ### EmailMessage Class

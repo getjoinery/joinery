@@ -2,6 +2,8 @@
 #
 # install_email.sh - host installer + base configurator for Mailbox.
 #
+# Version: 2.11 - Converge myhostname and milter AuthservID to mailbox_mail_hostname on every run
+# Version: 2.10 - Create /etc/opendkim on fresh boxes (package ships only opendkim.conf)
 # Version: 2.9 - Renamed for the Mailbox plugin (spec
 #                plugin_rename_inbound_email_to_mailbox).
 #                2.8 - Optional content spam scanner (spec
@@ -369,6 +371,16 @@ if [[ -z "${AUTHSERV_ID}" ]]; then
     AUTHSERV_ID="$(postconf -h myhostname 2>/dev/null | tr -d '[:space:]' || true)"
     echo "opendkim/opendmarc: mailbox_mail_hostname is unset — using myhostname '${AUTHSERV_ID}' as AuthservID." >&2
     echo "                    Set the mail hostname on the Mailbox Setup tab to match, or verdicts are ignored." >&2
+else
+    # The configured mail hostname IS this box's mail identity — align Postfix
+    # myhostname (the HELO name) with it. The earlier myhostname block only
+    # rescues localhost-ish defaults; this is the converge step once the
+    # operator has chosen a hostname on the Setup tab.
+    ALIGN_CURRENT="$(postconf -h myhostname 2>/dev/null | tr -d '[:space:]' || true)"
+    if [[ "${ALIGN_CURRENT}" != "${AUTHSERV_ID}" ]]; then
+        postconf -e "myhostname = ${AUTHSERV_ID}"
+        echo "main.cf: myhostname = ${AUTHSERV_ID} (was '${ALIGN_CURRENT:-unset}'; aligned to mailbox_mail_hostname)"
+    fi
 fi
 echo "opendkim/opendmarc: AuthservID = ${AUTHSERV_ID}"
 
@@ -376,7 +388,11 @@ mkdir -p /run/opendkim
 chown opendkim:opendkim /run/opendkim 2>/dev/null || true
 
 # key.table / signing.table / trusted.hosts: create only if absent — a re-run
-# must never wipe per-domain key entries an operator has since added.
+# must never wipe per-domain key entries an operator has since added. The
+# package ships only /etc/opendkim.conf, so the directory itself must be
+# created on a fresh box.
+mkdir -p /etc/opendkim
+chown opendkim:opendkim /etc/opendkim 2>/dev/null || true
 if [[ ! -f /etc/opendkim/key.table ]]; then
     : > /etc/opendkim/key.table
     echo "opendkim: created empty /etc/opendkim/key.table"
@@ -422,7 +438,15 @@ InternalHosts           /etc/opendkim/trusted.hosts
 OPENDKIMCONF
     echo "opendkim: wrote /etc/opendkim.conf (inet socket localhost:8891, Mode sv, AuthservID ${AUTHSERV_ID})"
 else
-    echo "opendkim: /etc/opendkim.conf already managed by us - leaving it."
+    # Managed conf stays in place, but AuthservID must converge — the operator
+    # may have set or changed the mail hostname since the conf was written.
+    CUR_DKIM_AUTHSERV="$(awk '/^AuthservID/{print $2; exit}' /etc/opendkim.conf 2>/dev/null || true)"
+    if [[ "${CUR_DKIM_AUTHSERV}" != "${AUTHSERV_ID}" ]]; then
+        sed -i "s|^AuthservID.*|AuthservID              ${AUTHSERV_ID}|" /etc/opendkim.conf
+        echo "opendkim: AuthservID converged to ${AUTHSERV_ID} (was '${CUR_DKIM_AUTHSERV:-unset}')"
+    else
+        echo "opendkim: /etc/opendkim.conf already managed by us - leaving it."
+    fi
 fi
 
 # Debian's opendkim systemd integration can override the socket from
@@ -462,7 +486,14 @@ RejectFailures          false
 OPENDMARCCONF
     echo "opendmarc: wrote /etc/opendmarc.conf (inet socket localhost:8893, AuthservID ${AUTHSERV_ID})"
 else
-    echo "opendmarc: /etc/opendmarc.conf already managed by us - leaving it."
+    # Same converge as opendkim: AuthservID must track the configured hostname.
+    CUR_DMARC_AUTHSERV="$(awk '/^AuthservID/{print $2; exit}' /etc/opendmarc.conf 2>/dev/null || true)"
+    if [[ "${CUR_DMARC_AUTHSERV}" != "${AUTHSERV_ID}" ]]; then
+        sed -i "s|^AuthservID.*|AuthservID              ${AUTHSERV_ID}|" /etc/opendmarc.conf
+        echo "opendmarc: AuthservID converged to ${AUTHSERV_ID} (was '${CUR_DMARC_AUTHSERV:-unset}')"
+    else
+        echo "opendmarc: /etc/opendmarc.conf already managed by us - leaving it."
+    fi
 fi
 
 # Keep /etc/default/opendmarc SOCKET in step with the conf (mirrors opendkim).

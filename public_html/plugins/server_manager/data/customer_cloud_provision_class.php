@@ -23,7 +23,7 @@
  *                     is the standard pipeline)
  *   failed          - terminal; cvp_error says why. Admin alert sent.
  *
- * @version 1.1
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -98,11 +98,16 @@ class CustomerCloudProvision extends SystemBase {
 			throw new CustomerCloudProvisionException("Unknown docker mode '{$docker_mode}'.");
 		}
 		$install_mode = $this->get('cvp_install_mode') ?: 'fresh';
-		if (!in_array($install_mode, array('fresh', 'from_backup'), true)) {
+		if (!in_array($install_mode, array('fresh', 'from_backup', 'bare'), true)) {
 			throw new CustomerCloudProvisionException("Unknown install mode '{$install_mode}'.");
 		}
 		if ($install_mode === 'from_backup' && empty($this->get('cvp_source_node_id'))) {
 			throw new CustomerCloudProvisionException('Source node is required for from-backup provisions.');
+		}
+		// A bare instance (no site install) has no order to fulfill — it exists
+		// for infrastructure roles like relay shards, which only admins create.
+		if ($install_mode === 'bare' && $origin !== 'admin') {
+			throw new CustomerCloudProvisionException('Bare provisions must be admin-origin.');
 		}
 		if (empty($this->get('cvp_usr_user_id'))) {
 			throw new CustomerCloudProvisionException('User is required.');
@@ -149,6 +154,10 @@ class MultiCustomerCloudProvision extends SystemMultiBase {
 
 		if (isset($this->options['account_id'])) {
 			$filters['cvp_cca_account_id'] = [$this->options['account_id'], PDO::PARAM_INT];
+		}
+
+		if (isset($this->options['node_id'])) {
+			$filters['cvp_mgn_node_id'] = [$this->options['node_id'], PDO::PARAM_INT];
 		}
 
 		if (isset($this->options['deleted'])) {

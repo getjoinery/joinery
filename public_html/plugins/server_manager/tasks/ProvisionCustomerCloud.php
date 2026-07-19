@@ -14,6 +14,12 @@
  *                 install_node job (Go agent executes it) -> installing
  *   installing -> drive JobResultProcessor on the finished job -> done | failed
  *
+ * install_mode 'bare' (admin-origin only) births the instance and creates the
+ * ManagedNode but installs no site: the verification job is a plain
+ * check_status, and the node completes with mgn_skip_joinery_checks set and no
+ * web root, site URL, or SSL state. Infrastructure roles (e.g. mail relay
+ * shards) build on the bare node via their own provision jobs.
+ *
  * The install job carries mjb_external_order_item_id, so the standard welcome
  * email and Provision Pending SSL flows apply unchanged from 'installing' on.
  *
@@ -28,7 +34,7 @@
  *   server_manager_customer_cloud_type          default instance type
  *   server_manager_customer_cloud_image         default OS image
  *
- * @version 1.1
+ * @version 1.2
  */
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 
@@ -185,17 +191,25 @@ class ProvisionCustomerCloud implements ScheduledTaskInterface {
 		$install_mode = $provision->get('cvp_install_mode') ?: 'fresh';
 		$sitename     = $provision->get('cvp_sitename')     ?: $slug;
 		$port         = (int)($provision->get('cvp_port')   ?: 8080);
+		$is_bare      = ($install_mode === 'bare');
 
 		$node->set('mgn_host',          $instance['ip']);
 		$node->set('mgn_ssh_user',      'root');
 		$node->set('mgn_ssh_key_path',  $key_path);
 		$node->set('mgn_ssh_port',      22);
-		$node->set('mgn_web_root',      "/var/www/html/{$sitename}/public_html");
-		$node->set('mgn_site_url',      'https://' . $domain);
 		$node->set('mgn_install_state', 'installing');
-		$node->set('mgn_ssl_state',     'pending');
-		if ($docker_mode === 'docker') {
-			$node->set('mgn_port', $port);
+		if ($is_bare) {
+			// No site on the box: nothing for Joinery status checks to probe,
+			// no vhost for ProvisionPendingSsl to certbot. The domain is the
+			// node's name/DNS identity (e.g. a relay MX hostname), not a site.
+			$node->set('mgn_skip_joinery_checks', true);
+		} else {
+			$node->set('mgn_web_root',  "/var/www/html/{$sitename}/public_html");
+			$node->set('mgn_site_url',  'https://' . $domain);
+			$node->set('mgn_ssl_state', 'pending');
+			if ($docker_mode === 'docker') {
+				$node->set('mgn_port', $port);
+			}
 		}
 		$node->set('mgn_enabled',       true);
 		if (!$node->key) {
@@ -203,6 +217,26 @@ class ProvisionCustomerCloud implements ScheduledTaskInterface {
 		}
 		$node->save();
 		$node->load();
+
+		// A bare instance is done when it answers over SSH: dispatch a plain
+		// status check as the verification job and let handle_installing watch
+		// it, reusing the same job-driven completion path as site installs.
+		if ($is_bare) {
+			try {
+				$steps = JobCommandBuilder::build_check_status($node);
+			} catch (Exception $e) {
+				$node->set('mgn_install_state', 'install_failed');
+				$node->save();
+				$this->alert_and_fail($provision, 'Failed to build verification steps — ' . $e->getMessage());
+				return 1;
+			}
+			ManagementJob::createJob($node->key, 'check_status', $steps, [], null);
+			$provision->set('cvp_mgn_node_id', $node->key);
+			$provision->set('cvp_instance_ip', $instance['ip']);
+			$provision->set('cvp_status',      'installing');
+			$provision->save();
+			return 1;
+		}
 
 		// build_install_node contract: 'domain' is the primary domain for a
 		// fresh install but the SOURCE domain for from_backup (the target
@@ -255,16 +289,19 @@ class ProvisionCustomerCloud implements ScheduledTaskInterface {
 	 * processing is what flips node state and sends the welcome email).
 	 */
 	private function handle_installing($provision) {
+		$is_bare  = ($provision->get('cvp_install_mode') === 'bare');
+		$job_type = $is_bare ? 'check_status' : 'install_node';
+
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare(
 			"SELECT mjb_id FROM mjb_management_jobs " .
-			"WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'install_node' AND mjb_delete_time IS NULL " .
+			"WHERE mjb_mgn_node_id = ? AND mjb_job_type = ? AND mjb_delete_time IS NULL " .
 			"ORDER BY mjb_id DESC LIMIT 1"
 		);
-		$q->execute([$provision->get('cvp_mgn_node_id')]);
+		$q->execute([$provision->get('cvp_mgn_node_id'), $job_type]);
 		$job_id = $q->fetchColumn();
 		if (!$job_id) {
-			$this->alert_and_fail($provision, 'Install job disappeared — manual review required.');
+			$this->alert_and_fail($provision, ucfirst($is_bare ? 'verification' : 'install') . ' job disappeared — manual review required.');
 			return 1;
 		}
 
@@ -280,6 +317,25 @@ class ProvisionCustomerCloud implements ScheduledTaskInterface {
 		}
 
 		$node = new ManagedNode($provision->get('cvp_mgn_node_id'), TRUE);
+
+		// Bare instances: nothing clears install_state for a check_status job —
+		// a completed check IS the proof of life, so clear it here.
+		if ($is_bare) {
+			if ($status === 'completed') {
+				$node->set('mgn_install_state', null);
+				$node->save();
+				$provision->set('cvp_status', 'done');
+				$provision->set('cvp_error',  null);
+				$provision->save();
+			} else {
+				$node->set('mgn_install_state', 'install_failed');
+				$node->save();
+				$this->alert_and_fail($provision,
+					"Verification job #{$job->key} finished '{$status}' — the instance is up on the provider but did not answer over SSH.");
+			}
+			return 1;
+		}
+
 		if ($node->get('mgn_install_state') === null) {
 			$provision->set('cvp_status', 'done');
 			$provision->set('cvp_error',  null);

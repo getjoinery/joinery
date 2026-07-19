@@ -285,7 +285,7 @@ A plugin that needs something installed on the host declares it; the platform in
 - **Non-interactive** — set `DEBIAN_FRONTEND=noninteractive`; never prompt.
 - **Exit 0 when not-applicable** — plugin inactive for the site, feature setting off, wrong platform.
 
-The runner `maintenance_scripts/install_tools/_plugin_installers_start.sh` executes every **active** plugin's declared installer at the root moments without systemd: the container `CMD` (every start), `install.sh` site builds, and `upgrade.php`. The runner is fail-safe — an installer failure logs a warning and never blocks container start. The Mailbox plugin's `provisioning/install_email.sh` is the reference implementation.
+The runner `maintenance_scripts/install_tools/_plugin_installers_start.sh` executes every **active** plugin's declared installer at the root moments without systemd: the container `CMD` (every start), `install.sh` site builds, and `upgrade.php`. On a bare-metal node, activating a plugin after install has no such moment — run the installers on demand from the node's detail page in Server Manager (Actions → Run Plugin Installers), which queues a `run_plugin_installers` job. The runner is fail-safe — an installer failure logs a warning and never blocks container start. The Mailbox plugin's `provisioning/install_email.sh` is the reference implementation.
 
 Activation cannot run a `host_installer` (web requests lack root) — pair the installer with `provisioners` entries (below) so the admin UI detects missing host state and points at the fix; on Docker nodes a container restart runs the installer automatically.
 

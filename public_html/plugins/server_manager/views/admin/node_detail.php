@@ -6,7 +6,7 @@
  * Consolidated node management page with tabs:
  * Overview, Backups, Database, Updates, Jobs
  *
- * @version 1.6
+ * @version 1.8
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -303,6 +303,44 @@ if ($_POST && isset($_POST['action'])) {
 		exit;
 	}
 
+	if ($action === 'run_plugin_installers') {
+		try {
+			$steps = JobCommandBuilder::build_run_plugin_installers($node);
+			$job = ManagementJob::createJob($node->key, 'run_plugin_installers', $steps, [], $session->get_user_id());
+			header('Location: /admin/server_manager/job_detail?job_id=' . $job->key);
+			exit;
+		} catch (Exception $e) {
+			$session->save_message(new DisplayMessage(
+				'Cannot run plugin installers: ' . $e->getMessage(), 'Error', $page_regex,
+				DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+			));
+			header('Location: ' . $base_url . '&tab=overview');
+			exit;
+		}
+	}
+
+	if ($action === 'set_reverse_dns') {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeReverseDns.php'));
+		$rdns_hostname = trim($_POST['rdns_hostname'] ?? '');
+		try {
+			$result = NodeReverseDns::set($node, $rdns_hostname);
+			$session->save_message(new DisplayMessage(
+				'Reverse DNS set: ' . htmlspecialchars($result['ip']) . ' now answers ' . htmlspecialchars($result['rdns']) . '. Resolver caches may take a few minutes to catch up.',
+				'Saved', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+			));
+		} catch (NodeReverseDnsException $e) {
+			$msg = htmlspecialchars($e->getMessage());
+			if ($e->reconnect) {
+				$msg .= ' <a href="/profile/server_manager/connect_cloud">Re-connect the cloud account</a>, then retry.';
+			}
+			$session->save_message(new DisplayMessage(
+				$msg, 'Error', $page_regex, DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+			));
+		}
+		header('Location: ' . $base_url . '&tab=overview');
+		exit;
+	}
+
 	// Save/clear API credential (Overview tab panel)
 	if ($action === 'save_api_credential') {
 		$pub  = trim($_POST['mgn_api_public_key'] ?? '');
@@ -466,6 +504,9 @@ if (!empty($display_messages)) {
 <form id="nodeActionCheckStatus" method="post" action="<?php echo $base_url; ?>" hidden>
 	<input type="hidden" name="action" value="check_status">
 </form>
+<form id="run_plugin_installers_form" method="post" action="<?php echo $base_url; ?>" hidden>
+	<input type="hidden" name="action" value="run_plugin_installers">
+</form>
 
 <?php
 // ============================================================
@@ -548,6 +589,9 @@ if ($tab === 'overview') {
 		<button type="button" class="btn btn-sm btn-primary dropdown-toggle" onclick="var m=this.nextElementSibling;m.style.display=m.style.display==='block'?'none':'block'">Actions</button>
 		<ul class="dropdown-menu dropdown-menu-end svm-dropdown-menu">
 			<li><a class="dropdown-item" href="<?php echo $base_url; ?>&tab=overview&edit=1#connectionSettings">Edit Connection Settings</a></li>
+			<?php if (JobCommandBuilder::has_ssh($node) && $node->get('mgn_web_root')): ?>
+				<li><a class="dropdown-item" href="#" onclick="JoineryModal.confirm('Run every active plugin\'s host installer on this node (root, idempotent)? Needed after activating a plugin that configures system services, e.g. the mail stack.', function(){ document.getElementById('run_plugin_installers_form').submit(); }); return false;">Run Plugin Installers</a></li>
+			<?php endif; ?>
 			<?php if (!$node->get('mgn_delete_time')): ?>
 				<li><hr class="dropdown-divider"></li>
 				<li><a class="dropdown-item text-danger" href="#" onclick="JoineryModal.confirm('Delete this site?', function(){ window.location='<?php echo $base_url; ?>&amp;action=delete'; })">Delete Site</a></li>
@@ -945,6 +989,45 @@ if ($tab === 'overview') {
 
 	echo '</tbody></table>';
 	$page->end_box();
+
+	// ── Reverse DNS panel (cloud-born nodes only) ──
+	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeReverseDns.php'));
+	$rdns_provision = NodeReverseDns::provisionForNode($node);
+	if ($rdns_provision) {
+		$rdns_ip = (string)$rdns_provision->get('cvp_instance_ip');
+		try {
+			$rdns_ptrs = DnsResolver::getPtr($rdns_ip);
+			$rdns_current = count($rdns_ptrs) ? implode(', ', $rdns_ptrs) : '';
+		} catch (Exception $e) {
+			$rdns_current = '';
+		}
+		$rdns_suggest = '';
+		if ($node->get('mgn_site_url')) {
+			$rdns_domain = parse_url($node->get('mgn_site_url'), PHP_URL_HOST);
+			if ($rdns_domain) {
+				$rdns_suggest = 'mail.' . preg_replace('/^www\./', '', $rdns_domain);
+			}
+		}
+
+		$pageoptions = ['title' => 'Reverse DNS'];
+		$page->begin_box($pageoptions);
+		echo '<div class="mb-2"><span class="text-muted small">' . htmlspecialchars($rdns_ip) . ' currently answers: </span>';
+		echo '<code>' . htmlspecialchars($rdns_current ?: 'no PTR record') . '</code></div>';
+		echo '<p class="text-muted small mb-2">Sets the PTR through the cloud account that provisioned this node. The hostname\'s A record must already point at ' . htmlspecialchars($rdns_ip) . '.</p>';
+
+		$fw_rdns = $page->getFormWriter('rdns_form', [
+			'action' => $base_url . '&tab=overview',
+			'values' => ['rdns_hostname' => $rdns_suggest],
+		]);
+		$fw_rdns->begin_form();
+		$fw_rdns->hiddeninput('action', '', ['id' => 'rdns_action', 'value' => 'set_reverse_dns']);
+		$fw_rdns->textinput('rdns_hostname', 'Hostname', [
+			'placeholder' => 'mail.example.com',
+		]);
+		$fw_rdns->submitbutton('btn_rdns_set', 'Set Reverse DNS', ['class' => 'btn btn-sm btn-primary']);
+		$fw_rdns->end_form();
+		$page->end_box();
+	}
 
 	// Recent jobs for this node
 	$overview_jobs = new MultiManagementJob(['deleted' => false, 'node_id' => $node->key], ['mjb_id' => 'DESC'], 10);

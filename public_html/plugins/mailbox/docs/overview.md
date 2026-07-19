@@ -11,6 +11,15 @@ Postfix receives inbound mail, pipes it to a PHP handler, which looks up the
 alias and relays it through the selected outbound provider (see
 [Forwarding relay](#forwarding-relay)).
 
+**Self-hosting here means inbound.** The plugin owns receiving — MX, Postfix,
+the pipe handler, verification milters. Everything it sends (forwards, replies,
+composed mail) leaves through the platform's configured outbound provider, the
+assumed path for all outbound mail (see the outbound doctrine in
+[Email System](/docs/email_system.md)). Delivering directly from this box's own
+port 25 to recipient mail servers is an advanced setup a deployment must
+deliberately pursue (cloud egress unblock, PTR, IP reputation) — never a
+required step of mailbox setup.
+
 **Features:** multiple domains, multiple destinations per alias, catch-all addresses, SRS for SPF compatibility, inbound authentication results (SPF/DKIM/DMARC) read from the verifying MTA / provider, outbound DKIM signing (opendkim), per-alias and per-domain rate limiting, RBL spam filtering, inbound email logs with admin viewer, live DNS validation.
 
 ## Installation

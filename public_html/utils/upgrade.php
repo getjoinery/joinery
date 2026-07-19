@@ -68,6 +68,31 @@
 		flush();
 	}
 
+	// After a self-update the refreshed pipeline must run from the start. On
+	// the web a human is present to click Continue; on CLI (agent jobs, cron,
+	// scripted deploys) nobody is, so re-exec the same command automatically.
+	// One-shot: if the re-run lands in a self-update state again (a copy that
+	// silently didn't take), stop and ask rather than loop.
+	function self_update_cli_rerun() {
+		global $argv;
+		if (getenv('JOINERY_UPGRADE_RERUN') === '1') {
+			echo "  Automatic re-run already attempted once and deployment files still differ.\n";
+			echo "  Investigate before re-running manually.\n";
+			exit(1);
+		}
+		echo "  Deployment tools updated — continuing automatically with the refreshed pipeline.\n\n";
+		if (ob_get_level() > 0) {
+			ob_flush();
+		}
+		flush();
+		$cmd = 'JOINERY_UPGRADE_RERUN=1 ' . escapeshellarg(PHP_BINARY);
+		foreach ($argv as $arg) {
+			$cmd .= ' ' . escapeshellarg($arg);
+		}
+		passthru($cmd, $exit_code);
+		exit($exit_code);
+	}
+
 	// Section header: emits as plain heading on CLI, as <h3> for web.
 	function out_step($title) {
 		global $is_cli;
@@ -525,10 +550,10 @@
 
 				if ($is_cli) {
 					echo "\n════════════════════════════════════════════════════════════\n";
-					echo "  UPGRADE PIPELINE REFRESHED — PLEASE RE-RUN THE UPGRADE\n";
+					echo "  UPGRADE PIPELINE REFRESHED\n";
 					echo "════════════════════════════════════════════════════════════\n\n";
 					echo "  utils/upgrade.php has been refreshed from the source.\n";
-					echo "  Re-run the same command to continue with the new orchestrator.\n\n";
+					self_update_cli_rerun();
 				} else {
 					out_step('Upgrade Pipeline Refreshed');
 					echo '<div style="border: 3px solid #0066cc; padding: 20px; margin: 20px 0; background-color: #e7f3ff; color: #004085;">';
@@ -696,14 +721,10 @@
 				if ($is_cli) {
 					echo "\n";
 					echo "════════════════════════════════════════════════════════════\n";
-					echo "  SELF-UPDATE COMPLETE — PLEASE RE-RUN THE UPGRADE\n";
+					echo "  SELF-UPDATE COMPLETE\n";
 					echo "════════════════════════════════════════════════════════════\n";
 					echo "\n";
-					echo "  Deployment tools have been updated. The upgrade will\n";
-					echo "  resume automatically from where it left off.\n";
-					echo "\n";
-					echo "  Re-run with the same command to continue.\n";
-					echo "\n";
+					self_update_cli_rerun();
 				} else {
 					echo '<div style="border: 3px solid #0066cc; padding: 20px; margin: 20px 0; background-color: #e7f3ff; color: #004085;">';
 					echo '<h2 style="margin-top: 0; color: #0066cc;">Self-Update Complete</h2>';
@@ -978,20 +999,28 @@
 				upgrade_abort('Deployment Failed', 'Could not move staged files to live. Error: ' . htmlspecialchars(implode(' ', $mv_output)) . '. Rollback attempted.', false);
 			}
 
-			// Fix permissions using centralized script (production mode)
+			// Fix permissions using centralized script (production mode).
+			// The script chowns to www-data and therefore requires root. In a
+			// docker container this process IS root; on bare metal it runs as
+			// the agent user, so prefix sudo -n (passwordless, non-interactive).
+			// Without the chown, the deployed tree stays owned by the agent
+			// user with mode 770 and Apache cannot read a single file — the
+			// site 500s until permissions are fixed by hand.
+			$is_root = function_exists('posix_geteuid') ? (posix_geteuid() === 0) : (trim((string)shell_exec('id -u')) === '0');
+			$root_prefix = $is_root ? '' : 'sudo -n ';
 			$fix_permissions_script = $full_site_dir . '/maintenance_scripts/install_tools/fix_permissions.sh';
 			if(file_exists($fix_permissions_script)) {
 				if($verbose) echo 'Setting permissions using fix_permissions.sh --production<br>';
-				exec("$fix_permissions_script " . escapeshellarg($site_template) . " --production 2>&1", $perm_output, $perm_exit);
+				exec($root_prefix . escapeshellarg($fix_permissions_script) . " " . escapeshellarg($site_template) . " --production 2>&1", $perm_output, $perm_exit);
 				if($perm_exit !== 0) {
-					echo 'Warning: fix_permissions.sh failed, falling back to chmod<br>';
-					exec("chmod -R 770 $live_directory");
+					echo 'Warning: fix_permissions.sh failed (' . htmlspecialchars(implode(' ', array_slice($perm_output, -2))) . '), falling back to chmod<br>';
+					exec($root_prefix . "chmod -R 770 " . escapeshellarg($live_directory));
 				}
 			} else {
 				echo 'Warning: fix_permissions.sh not found, using fallback chmod<br>';
-				exec("chmod -R 770 $live_directory");
+				exec($root_prefix . "chmod -R 770 " . escapeshellarg($live_directory));
 			}
-			exec("chmod -R 770 $backup_directory");
+			exec($root_prefix . "chmod -R 770 " . escapeshellarg($backup_directory) . " 2>/dev/null");
 
 			// Check if deployment succeeded
 			$deployment_failed = false;

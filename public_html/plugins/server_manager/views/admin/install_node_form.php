@@ -10,6 +10,7 @@
  *     'ready'; the Provision Customer Cloud task births the instance in the
  *     connected cloud account and dispatches the install from there.
  *
+ * @version 1.5 - Bare install mode: cloud instance with no site (infrastructure nodes)
  * @version 1.4 - Cloud-instance target (admin-origin provisions)
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -34,21 +35,32 @@ if ($_POST && isset($_POST['mgn_name'])) {
 		$sitename    = trim($_POST['sitename'] ?? '');
 		$docker_mode = $_POST['docker_mode'] ?? '';
 
-		if (!$sitename) {
-			$field_errors['sitename'] = 'Site name is required.';
-		} elseif (!preg_match('/^[a-z0-9_]+$/', $sitename)) {
-			$field_errors['sitename'] = 'Lowercase letters, numbers, and underscores only.';
+		$is_cloud_target = (($_POST['host_dropdown'] ?? '') === '__cloud__');
+		$is_bare         = ($mode === 'bare');
+
+		if (!in_array($mode, ['fresh', 'from_backup', 'bare'], true)) {
+			$field_errors['install_mode'] = 'Choose an install type.';
+		} elseif ($is_bare && !$is_cloud_target) {
+			// A bare node with no site only makes sense for an instance this
+			// form births; an existing server is added via the node form.
+			$field_errors['install_mode'] = 'Bare instance is only available with the create-cloud-instance target.';
 		}
-		if ($docker_mode !== 'docker' && $docker_mode !== 'bare-metal') {
-			$field_errors['docker_mode'] = 'Choose Docker or Bare-metal.';
+
+		if (!$is_bare) {
+			if (!$sitename) {
+				$field_errors['sitename'] = 'Site name is required.';
+			} elseif (!preg_match('/^[a-z0-9_]+$/', $sitename)) {
+				$field_errors['sitename'] = 'Lowercase letters, numbers, and underscores only.';
+			}
+			if ($docker_mode !== 'docker' && $docker_mode !== 'bare-metal') {
+				$field_errors['docker_mode'] = 'Choose Docker or Bare-metal.';
+			}
 		}
 
 		$domain = rtrim(preg_replace('#^https?://#i', '', trim($_POST['domain'] ?? '')), '/');
 		if (!$domain) {
 			$field_errors['domain'] = 'Domain is required.';
 		}
-
-		$is_cloud_target = (($_POST['host_dropdown'] ?? '') === '__cloud__');
 
 		$mgn_host = trim($_POST['mgn_host'] ?? '');
 		if (!$is_cloud_target && !$mgn_host) {
@@ -72,7 +84,7 @@ if ($_POST && isset($_POST['mgn_name'])) {
 			}
 		}
 
-		if ($mode === 'fresh') {
+		if ($mode !== 'from_backup') {
 			$source_node_id = 0;
 		} else {
 			$source_node_id = intval($_POST['source_node_id'] ?? 0);
@@ -112,7 +124,7 @@ if ($_POST && isset($_POST['mgn_name'])) {
 				$provision->set('cvp_usr_user_id',    $cloud_account->get('cca_usr_user_id'));
 				$provision->set('cvp_domain',         $domain);
 				$provision->set('cvp_slug',           $slug);
-				$provision->set('cvp_sitename',       $sitename);
+				$provision->set('cvp_sitename',       $is_bare ? $slug : $sitename);
 				$provision->set('cvp_buyer_email',    $owner->key ? $owner->get('usr_email') : '');
 				$provision->set('cvp_buyer_name',     $owner->key ? trim($owner->get('usr_first_name') . ' ' . $owner->get('usr_last_name')) : '');
 				$provision->set('cvp_status',         'ready');
@@ -120,7 +132,7 @@ if ($_POST && isset($_POST['mgn_name'])) {
 				$provision->set('cvp_provider',       $cloud_account->get('cca_provider'));
 				$provision->set('cvp_region',         trim($_POST['cloud_region']));
 				$provision->set('cvp_instance_type',  trim($_POST['cloud_instance_type']));
-				$provision->set('cvp_docker_mode',    $docker_mode);
+				$provision->set('cvp_docker_mode',    $is_bare ? 'bare-metal' : $docker_mode);
 				$provision->set('cvp_install_mode',   $mode);
 				if ($mode === 'from_backup') {
 					$provision->set('cvp_source_node_id', $source_node_id);
@@ -356,6 +368,8 @@ $formwriter->textinput('cloud_instance_type', 'Instance Type', [
 ]);
 echo '</div>';
 
+// Site-defining fields — hidden for a bare instance (no site is installed)
+echo '<div id="site_fields">';
 $formwriter->textinput('sitename', 'Site Name', [
 	'required'    => true,
 	'placeholder' => 'e.g., mysite',
@@ -368,12 +382,14 @@ $formwriter->radioinput('docker_mode', 'Deployment Mode', [
 		'bare-metal' => 'Bare-metal — Apache + PostgreSQL + PHP directly on host',
 	],
 ]);
+echo '</div>';
 
 $formwriter->radioinput('install_mode', 'Install Type', [
 	'required' => true,
 	'options'  => [
 		'fresh'       => 'Fresh install — empty Joinery site with default schema and admin user',
 		'from_backup' => 'Install from backup — clone an existing managed node via its backup',
+		'bare'        => 'Bare instance — no site install (infrastructure node, e.g. mail relay shard); cloud target only',
 	],
 ]);
 
@@ -453,10 +469,31 @@ function applyHostPreset(val) {
 }
 
 function toggleModePanel() {
-	var fresh = document.querySelector("input[name=install_mode][value=fresh]");
-	var isFresh = fresh && fresh.checked;
+	var fresh  = document.querySelector("input[name=install_mode][value=fresh]");
+	var backup = document.querySelector("input[name=install_mode][value=from_backup]");
+	var isFresh  = fresh && fresh.checked;
+	var isBackup = backup && backup.checked;
 	document.getElementById("panel_fresh").hidden  = !isFresh;
-	document.getElementById("panel_backup").hidden = isFresh;
+	document.getElementById("panel_backup").hidden = !isBackup;
+	var siteFields = document.getElementById("site_fields");
+	if (siteFields) siteFields.hidden = !(isFresh || isBackup);
+}
+
+function syncBareAvailability() {
+	// Bare instance only exists for the create-cloud-instance target: on any
+	// other target, disable it and fall back to fresh if it was selected.
+	var hostSel = document.getElementById("host_dropdown");
+	var bare    = document.querySelector("input[name=install_mode][value=bare]");
+	if (!hostSel || !bare) return;
+	var isCloud = (hostSel.value === "__cloud__");
+	bare.disabled = !isCloud;
+	var wrap = bare.closest(".form-check");
+	if (wrap) wrap.style.opacity = isCloud ? "1" : "0.4";
+	if (!isCloud && bare.checked) {
+		var fresh = document.querySelector("input[name=install_mode][value=fresh]");
+		if (fresh) fresh.checked = true;
+		toggleModePanel();
+	}
 }
 
 function toggleBackupSourcePanel() {
@@ -505,12 +542,13 @@ if (sourceNodeSel) sourceNodeSel.addEventListener("change", updateBackupOptions)
 
 var hostDropdown = document.getElementById("host_dropdown");
 if (hostDropdown) {
-	hostDropdown.addEventListener("change", function() { applyHostPreset(this.value); });
+	hostDropdown.addEventListener("change", function() { applyHostPreset(this.value); syncBareAvailability(); });
 }
 
 // Initial state
 toggleModePanel();
 toggleBackupSourcePanel();
+syncBareAvailability();
 if (hostDropdown && hostDropdown.value && hostDropdown.value !== "__custom__") {
 	applyHostPreset(hostDropdown.value);
 }
