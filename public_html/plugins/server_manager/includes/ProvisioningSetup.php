@@ -15,7 +15,7 @@
  * set up from here — the key must be minted on the store site and its values
  * entered in the settings fields.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -47,7 +47,15 @@ class ProvisioningSetup {
 		'PollHostingOrders'      => 'Poll Hosting Orders',
 		'ProvisionPendingSsl'    => 'Provision Pending SSL',
 		'ProvisionCustomerCloud' => 'Provision Customer Cloud',
+		// Core task, but a hard pipeline requirement: the buyer's welcome
+		// email is queued into equ_queued_emails on the store site and only
+		// this task drains that queue. (Remote-store case: activate it on the
+		// store site.)
+		'SendQueuedEmails'       => 'Send Queued Emails',
 	);
+
+	/** TASK_CLASSES entries owned by core — no sct_plugin_name stamp. */
+	const CORE_TASK_CLASSES = array('SendQueuedEmails');
 
 	/** This site's own origin, the self-store API URL. */
 	public static function selfApiUrl(): string {
@@ -237,7 +245,9 @@ class ProvisioningSetup {
 				$task = new ScheduledTask(NULL);
 				$task->set('sct_name', $name);
 				$task->set('sct_task_class', $class);
-				$task->set('sct_plugin_name', 'server_manager');
+				if (!in_array($class, self::CORE_TASK_CLASSES, true)) {
+					$task->set('sct_plugin_name', 'server_manager');
+				}
 				$task->set('sct_frequency', 'every_run');
 				$task->set('sct_is_active', TRUE);
 				$task->save();
@@ -419,6 +429,33 @@ class ProvisioningSetup {
 				'type' => self::readSetting('server_manager_customer_cloud_type'),
 				'image' => self::readSetting('server_manager_customer_cloud_image'),
 			),
+			'agent' => self::agentStatus(),
+		);
+	}
+
+	/**
+	 * State of the job-executing Go agent. Every job the pipeline creates
+	 * (install_node, provision_ssl, ...) sits pending until an agent polling
+	 * THIS site's queue claims it — a control plane without a live agent looks
+	 * activated but can never execute, so the page surfaces it as a hard
+	 * requirement.
+	 *
+	 * @return array{present:bool, online:bool, name:string, version:string,
+	 *               last_heartbeat:string}
+	 */
+	public static function agentStatus(): array {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/agent_heartbeat_class.php'));
+		$agent = AgentHeartbeat::getLatest();
+		if ($agent === null) {
+			return array('present' => false, 'online' => false,
+				'name' => '', 'version' => '', 'last_heartbeat' => '');
+		}
+		return array(
+			'present' => true,
+			'online' => (bool)$agent->is_online(),
+			'name' => (string)$agent->get('ahb_agent_name'),
+			'version' => (string)$agent->get('ahb_agent_version'),
+			'last_heartbeat' => (string)$agent->get('ahb_last_heartbeat'),
 		);
 	}
 }

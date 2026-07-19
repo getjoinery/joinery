@@ -174,6 +174,12 @@ $routes = [
     
     // Routes with custom handling (complex logic preserved)
     'custom' => [
+        // Admin landing: /admin has no page of its own — the users list is
+        // the entry point (permission is enforced by the target page).
+        '/admin' => function($params, $settings, $session, $template_directory) {
+            header('Location: /admin/admin_users');
+            exit;
+        },
         // Plugin admin discovery
         '/plugins/{plugin}/admin/*' => function($params, $settings, $session, $template_directory) {
             // $params is URL segments: [0]="", [1]="plugins", [2]="scrolldaddy", [3]="admin", [4]="admin_ctld_account"

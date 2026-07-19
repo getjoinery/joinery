@@ -465,8 +465,10 @@ class JobResultProcessor {
 	 * Send the post-provisioning welcome email to the customer via getjoinery's
 	 * QueuedEmail API. Reads credentials from Server Manager plugin settings.
 	 * Silently returns on any failure — email delivery is best-effort.
+	 * Public: ProvisionCustomerCloud's failed-provision recovery path also
+	 * sends it (for completed retry jobs that carry no order-item linkage).
 	 */
-	private static function send_provisioning_welcome_email($job, $node) {
+	public static function send_provisioning_welcome_email($job, $node) {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/GetJoineryApiClient.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_host_class.php'));
 
@@ -489,14 +491,19 @@ class JobResultProcessor {
 
 		if (!$admin_email || !$domain) return;
 
-		// Resolve host IP for the DNS A-record instruction
+		// Resolve host IP for the DNS A-record instruction: shared-host nodes
+		// live on a ManagedHost machine; customer-cloud nodes have no host row
+		// — the node's own address is the DNS target.
 		$host_ip = '';
 		$host_id = $node->get('mgn_mgh_host_id');
 		if ($host_id) {
 			try {
 				$host    = new ManagedHost($host_id, true);
-				$host_ip = $host->get('mgh_host');
+				$host_ip = (string)$host->get('mgh_host');
 			} catch (Exception $e) {}
+		}
+		if ($host_ip === '') {
+			$host_ip = (string)$node->get('mgn_host');
 		}
 
 		$client = new GetJoineryApiClient($api_url, $pub_key, $sec_key);

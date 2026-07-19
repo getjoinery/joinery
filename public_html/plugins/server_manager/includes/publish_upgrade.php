@@ -34,7 +34,9 @@
 		$cli_patch = null;
 		$cli_notes = '';
 
-		if (!empty($cli_args[0]) && strpos($cli_args[0], '.') !== false) {
+		if (!empty($cli_args[0]) && preg_match('/^\d+\.\d+(\.\d+)?$/', $cli_args[0])) {
+			// Strictly numeric dotted version — anything else with a dot
+			// ("install.sh fixed...") is release notes, not a version.
 			$parts = explode('.', $cli_args[0], 3);
 			$cli_major = $parts[0];
 			$cli_minor = $parts[1] ?? null;

@@ -7,7 +7,7 @@
  * item shows its live state with a one-click action where the platform can
  * do the work itself.
  *
- * @version 1.0
+ * @version 1.1
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/logic/admin_provisioning_setup_logic.php'));
@@ -23,6 +23,7 @@ $email = $status['email'];
 $tasks = $status['tasks'];
 $cloud = $status['cloud'];
 $shared = $status['shared_hosts'];
+$agent = $status['agent'];
 
 function smps_badge(bool $ok, string $ok_label = 'OK', string $bad_label = 'Missing', string $bad_color = 'warning'): string {
 	return $ok
@@ -46,7 +47,30 @@ $page->admin_header(array(
 $page->begin_box(array());
 ?>
 
-<h4>1. Store API connection</h4>
+<h4>1. Job agent</h4>
+<table class="table table-sm">
+	<tr>
+		<th style="width:260px">Agent</th>
+		<td>
+			<?php if (!$agent['present']): ?>
+				<?= smps_badge(false, '', 'Never connected', 'danger') ?>
+				&nbsp; No agent has ever polled this site's job queue — jobs the pipeline
+				creates will sit pending forever. Install joinery-agent on this host
+				(<code>joinery-agent-installer.sh</code>; containers are auto-detected
+				and supervised by cron).
+			<?php else: ?>
+				<?= smps_badge($agent['online'], 'Online', 'Offline', 'danger') ?>
+				&nbsp; <?= htmlspecialchars($agent['name']) ?>
+				<?php if ($agent['version']): ?>v<?= htmlspecialchars($agent['version']) ?><?php endif; ?>
+				&nbsp;&middot;&nbsp; last heartbeat <?= htmlspecialchars($agent['last_heartbeat']) ?> UTC
+			<?php endif; ?>
+		</td>
+	</tr>
+</table>
+
+<hr>
+
+<h4>2. Store API connection</h4>
 <table class="table table-sm">
 	<tr>
 		<th style="width:260px">Credentials</th>
@@ -82,7 +106,7 @@ $page->begin_box(array());
 
 <hr>
 
-<h4>2. Domain question</h4>
+<h4>3. Domain question</h4>
 <table class="table table-sm">
 	<tr>
 		<th style="width:260px">Question</th>
@@ -120,7 +144,7 @@ $page->begin_box(array());
 
 <hr>
 
-<h4>3. Emails</h4>
+<h4>4. Emails</h4>
 <?php
 $fw_email = $page->getFormWriter('form_email');
 echo $fw_email->begin_form();
@@ -134,7 +158,7 @@ echo $fw_email->end_form();
 
 <hr>
 
-<h4>4. Scheduled tasks</h4>
+<h4>5. Scheduled tasks</h4>
 <table class="table table-sm">
 	<?php foreach ($tasks as $class => $info): ?>
 	<tr>
@@ -153,7 +177,7 @@ echo $fw_email->end_form();
 
 <hr>
 
-<h4>5. Shared-host fulfillment</h4>
+<h4>6. Shared-host fulfillment</h4>
 <table class="table table-sm">
 	<tr>
 		<th style="width:260px">Provisioning-enabled hosts</th>
@@ -167,7 +191,7 @@ echo $fw_email->end_form();
 
 <hr>
 
-<h4>6. Customer-cloud fulfillment</h4>
+<h4>7. Customer-cloud fulfillment</h4>
 <table class="table table-sm">
 	<tr>
 		<th style="width:260px">Linode OAuth app</th>
@@ -211,7 +235,7 @@ echo $fw_cloud->end_form();
 
 <hr>
 
-<h4>7. Products</h4>
+<h4>8. Products</h4>
 <p>Per hosting product (product edit page): for <strong>customer-cloud</strong>
 fulfillment pick <em>Customer cloud server</em> under Purchase grants — that is
 the entire setup (the domain question is asked automatically) — and put the

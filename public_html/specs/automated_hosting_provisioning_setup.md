@@ -24,7 +24,11 @@ One click each, idempotent, with live status badges:
 3. **Email settings**: welcome from address/name and the admin alert
    address, edited in place.
 4. **Scheduled tasks**: activates Poll Hosting Orders, Provision Pending
-   SSL, and Provision Customer Cloud (creates missing rows, resumes paused).
+   SSL, Provision Customer Cloud, and Send Queued Emails (creates missing
+   rows, resumes paused). Send Queued Emails is core-owned but a hard
+   pipeline requirement — the buyer welcome email queues into
+   `equ_queued_emails` on the store site and only that task drains the
+   queue; in the remote-store case activate it on the store site.
 5. **Customer-cloud settings**: SSH key path (with key/.pub existence
    badges), referral URL, region/type/image defaults, and a status badge for
    the Linode OAuth app credentials. The provisioning keypair itself is
@@ -36,7 +40,19 @@ One click each, idempotent, with live status badges:
 plane, mint the service user + key on the store site and paste the values
 into the three API settings; everything else on the page works the same.
 
+The page also shows (as requirement #1) a **job agent heartbeat badge** —
+every job the pipeline creates sits pending until a joinery-agent polling
+this site's queue claims it, so a control plane without a live agent cannot
+execute anything.
+
 ## Remaining operator steps (genuinely manual)
+
+0. **Job agent**: install joinery-agent on the control plane's host
+   (`sudo bash joinery-agent-installer.sh --config <Globalvars_site.php path>`,
+   built from `{agent repo}/build_installer.sh`). Hosts without systemd
+   (Docker containers) are auto-detected and supervised via cron. The
+   Provisioning page's agent badge must show Online before anything below
+   can execute.
 
 1. **Per hosting product** (product edit page): for customer-cloud
    fulfillment, pick **Customer cloud server** under Purchase grants — that

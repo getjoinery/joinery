@@ -54,7 +54,7 @@ class ProvisionPendingSsl implements ScheduledTaskInterface {
 
 			// Inspect previous provision_ssl jobs for this node
 			$q = $db->prepare(
-				"SELECT mjb_status, mjb_create_time, mjb_completed_time
+				"SELECT mjb_id, mjb_status, mjb_create_time, mjb_completed_time
 				 FROM mjb_management_jobs
 				 WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'provision_ssl' AND mjb_delete_time IS NULL
 				 ORDER BY mjb_create_time ASC"
@@ -68,6 +68,21 @@ class ProvisionPendingSsl implements ScheduledTaskInterface {
 
 				// Skip if a job is still in flight
 				if (in_array($last['mjb_status'], ['pending', 'running'])) {
+					$skipped++;
+					continue;
+				}
+
+				// A completed job means the cert is in — process its result
+				// here (flips mgn_ssl_state to active). Admin page views also
+				// process results, but an unattended pipeline must not depend
+				// on someone looking at a dashboard; without this the node
+				// stays pending and gets a fresh certbot job every tick.
+				if ($last['mjb_status'] === 'completed') {
+					require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
+					$done_job = new ManagementJob($last['mjb_id'], TRUE);
+					if (!$done_job->get('mjb_result')) {
+						JobResultProcessor::process($done_job);
+					}
 					$skipped++;
 					continue;
 				}
