@@ -182,11 +182,10 @@ class MultiQueuedEmail extends SystemMultiBase {
 		}
 
 		if (isset($this->options['multi_status'])) {
-			$status_conditions = [];
-			foreach($this->options['multi_status'] as $status) {
-				$status_conditions[] = 'equ_status = '.$status;
-			}
-			$filters['equ_status'] = '('.implode(' OR ', $status_conditions).')';
+			// String-condition filter format: the value is appended literally
+			// after the column name, so it must START with the operator.
+			$statuses = array_map('intval', (array)$this->options['multi_status']);
+			$filters['equ_status'] = 'IN (' . implode(',', $statuses) . ')';
 		}
 
 		return $this->_get_resultsv2('equ_queued_emails', $filters, $this->order_by, $only_count, $debug);

@@ -2267,12 +2267,14 @@ do_site_docker() {
         print_success "Ports $PORT and $DB_PORT are available"
     fi
 
-    # Require joinery-base image (all site images build FROM it)
+    # Require joinery-base image (all site images build FROM it). A host that
+    # has never built it — e.g. a freshly provisioned customer-cloud VPS —
+    # gets it built here automatically; Dockerfile.base ships alongside this
+    # script in every release archive.
     print_step "Checking for joinery-base:${BASE_IMAGE_VERSION}..."
     if ! docker image inspect "joinery-base:${BASE_IMAGE_VERSION}" > /dev/null 2>&1; then
-        print_error "joinery-base:${BASE_IMAGE_VERSION} not found."
-        print_info "Build it first with:  ./install.sh build-base"
-        exit 1
+        print_warning "joinery-base:${BASE_IMAGE_VERSION} not found — building it now (one-time per host, 5-10 minutes)."
+        do_build_base
     fi
     print_success "joinery-base:${BASE_IMAGE_VERSION} found"
 

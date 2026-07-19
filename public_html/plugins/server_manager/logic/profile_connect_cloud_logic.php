@@ -12,7 +12,7 @@
  * customer_cloud, scope linodes:read_write — the minimum that can create and
  * manage instances; no account/billing access is requested).
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -51,6 +51,9 @@ function profile_connect_cloud_logic(array $input): LogicResult {
 			);
 			return LogicResult::redirect($consent_url);
 		} catch (Throwable $e) {
+			error_log('Connect cloud: beginConsent failed for user ' . intval($user_id)
+				. ' (' . get_class($e) . ': ' . $e->getMessage() . ') at '
+				. $e->getFile() . ':' . $e->getLine());
 			return LogicResult::redirect($self_url . '?error=start_failed');
 		}
 	}

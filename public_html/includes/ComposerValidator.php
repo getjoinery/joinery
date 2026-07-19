@@ -11,8 +11,9 @@
  * utils/list_dependencies.php --orphans can report packages no plugin
  * declares anymore.
  *
- * @version 1.1 - Plugin-declared composer packages: validation of active
- *                plugins' requires.composer + reconcilePluginPackages().
+ * @version 1.2 - Installed-package truth source is vendor/composer/installed.json
+ *                (what composer actually put on disk), never composer.lock
+ *                (which ships with the source and only states intent).
  */
 class ComposerValidator {
 
@@ -21,8 +22,12 @@ class ComposerValidator {
     private $warnings = [];
     private $packageConflicts = [];
 
-    public function __construct() {
-        $this->composerPath = PathHelper::getComposerVendorPath();
+    /**
+     * @param string|null $vendor_path Vendor directory override (trailing
+     *        slash), for tests; defaults to the configured composerAutoLoad path.
+     */
+    public function __construct($vendor_path = null) {
+        $this->composerPath = $vendor_path !== null ? $vendor_path : PathHelper::getComposerVendorPath();
     }
 
     /**
@@ -179,24 +184,20 @@ class ComposerValidator {
             return true;
         }
         
-        // Check if composer.lock exists
+        // composer.lock still needs to exist — composer install reads it for
+        // deterministic versions. Its absence is install-fixable.
         if (!file_exists($composerLockPath)) {
             $this->errors[] = "composer.lock not found at: $composerLockPath";
             $this->errors[] = "Run 'composer install' in the project directory";
             return false;
         }
-        
-        // Parse composer.lock to see what's actually installed
-        $composerLock = json_decode(file_get_contents($composerLockPath), true);
-        if (!$composerLock || !isset($composerLock['packages'])) {
-            $this->warnings[] = "Unable to parse composer.lock";
-            return true;
-        }
-        
-        // Build list of installed packages
-        $installedPackages = [];
-        foreach ($composerLock['packages'] as $package) {
-            $installedPackages[$package['name']] = $package['version'];
+
+        // What is ACTUALLY installed in the vendor tree — never the lock file.
+        $installedPackages = $this->getInstalledPackages();
+        if ($installedPackages === null) {
+            $this->errors[] = "Missing required packages: vendor tree at {$this->composerPath} was not composer-installed (no composer/installed.json)";
+            $this->errors[] = "Run 'composer install' to build the vendor directory";
+            return false;
         }
         
         // Check each required package
@@ -221,7 +222,7 @@ class ComposerValidator {
                 continue;
             }
 
-            if (!isset($installedPackages[$packageName])) {
+            if (!isset($installedPackages[strtolower($packageName)])) {
                 $missingPackages[] = $packageName;
             }
         }
@@ -242,7 +243,7 @@ class ComposerValidator {
         ];
         
         foreach ($criticalPackages as $package => $description) {
-            if (!isset($installedPackages[$package])) {
+            if (!isset($installedPackages[strtolower($package)])) {
                 $this->warnings[] = "Critical package missing: $package - $description";
             }
         }
@@ -341,7 +342,7 @@ class ComposerValidator {
 
         $installed = $this->getInstalledPackages();
         if ($installed === null) {
-            return true; // lock missing/unparseable - already reported by earlier checks
+            return true; // vendor tree not composer-installed - already reported by validateRequiredPackages
         }
 
         $missing = [];
@@ -364,17 +365,29 @@ class ComposerValidator {
      * @return array|null package name => version
      */
     private function getInstalledPackages() {
-        $lock_path = PathHelper::getBasePath() . '/composer.lock';
-        if (!file_exists($lock_path)) {
+        // composer.lock is deliberately not consulted here: the lock ships
+        // with the source and records what SHOULD be installed. installed.json
+        // is written by composer into the vendor tree itself, so it reflects
+        // what IS on disk — a vendor tree that was never composer-installed
+        // (or was hand-assembled) has no installed.json and reports null.
+        $installed_path = $this->composerPath . 'composer/installed.json';
+        if (!file_exists($installed_path)) {
             return null;
         }
-        $lock = json_decode(file_get_contents($lock_path), true);
-        if (!$lock || !isset($lock['packages'])) {
+        $data = json_decode(file_get_contents($installed_path), true);
+        if (!is_array($data)) {
+            return null;
+        }
+        // Composer 2 wraps the list under 'packages'; Composer 1 is a bare array.
+        $list = isset($data['packages']) ? $data['packages'] : $data;
+        if (!is_array($list)) {
             return null;
         }
         $installed = [];
-        foreach ($lock['packages'] as $package) {
-            $installed[strtolower($package['name'])] = $package['version'];
+        foreach ($list as $package) {
+            if (isset($package['name'])) {
+                $installed[strtolower($package['name'])] = $package['version'] ?? '';
+            }
         }
         return $installed;
     }

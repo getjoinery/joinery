@@ -176,9 +176,19 @@ ensure_apache_on_host() {
         apt-get install -y -qq apache2
     fi
 
-    if ! apache2ctl -M 2>/dev/null | grep -q proxy_http; then
-        print_info "Enabling Apache proxy modules..."
-        a2enmod proxy proxy_http >/dev/null
+    # Everything the proxy vhost template uses: ProxyPass (proxy, proxy_http),
+    # RequestHeader (headers), RewriteEngine (rewrite), SSLEngine (ssl — inside
+    # the <IfFile> cert guard, needed the moment SSL provisions).
+    local needed="proxy proxy_http headers rewrite ssl"
+    local missing=""
+    local m
+    for m in $needed; do
+        apache2ctl -M 2>/dev/null | grep -q "${m}_module" || missing="$missing $m"
+    done
+    if [ -n "$missing" ]; then
+        print_info "Enabling Apache modules:${missing}..."
+        # shellcheck disable=SC2086
+        a2enmod -q $missing >/dev/null
         systemctl reload apache2
     fi
 }

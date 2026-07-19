@@ -169,7 +169,7 @@ section('activateTasks');
 // ---------------------------------------------------------------------------
 
 $t1 = ProvisioningSetup::activateTasks();
-check(count($t1['results']) === 3, 'all three tasks handled');
+check(count($t1['results']) === count(ProvisioningSetup::TASK_CLASSES), 'every task class handled');
 foreach (ProvisioningSetup::TASK_CLASSES as $class => $name) {
 	$rows = new MultiScheduledTask(array('task_class' => $class, 'deleted' => false));
 	$rows->load();
@@ -179,7 +179,7 @@ foreach (ProvisioningSetup::TASK_CLASSES as $class => $name) {
 }
 
 $t2 = ProvisioningSetup::activateTasks();
-check(count(array_filter($t2['results'], fn($r) => $r === 'already active')) === 3,
+check(count(array_filter($t2['results'], fn($r) => $r === 'already active')) === count(ProvisioningSetup::TASK_CLASSES),
 	'second run reports already active');
 
 // Pause one and confirm resume.
@@ -294,8 +294,45 @@ check($status['api']['configured'] === true, 'status: api configured');
 check($status['api']['is_self'] === true, 'status: api is self-store');
 check($status['api']['service_user_exists'] === true, 'status: service user exists');
 check($status['question']['exists'] === true, 'status: question exists');
-check(count(array_filter($status['tasks'], fn($t) => $t['state'] === 'active')) === 3,
+check(count(array_filter($status['tasks'], fn($t) => $t['state'] === 'active'))
+		=== count(ProvisioningSetup::TASK_CLASSES),
 	'status: all tasks active');
+
+// ---------------------------------------------------------------------------
+section('agentStatus');
+// ---------------------------------------------------------------------------
+
+// The job-executing agent is a hard pipeline requirement: without one, jobs
+// sit pending forever (the getjoinery VPS-A stall). status() must expose it.
+check(array_key_exists('agent', $status), 'status: agent key present');
+
+$agent_status = ProvisioningSetup::agentStatus();
+check(isset($agent_status['present'], $agent_status['online']),
+	'agentStatus returns present/online flags');
+
+// A fresh heartbeat must classify as present+online; a stale one as offline.
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/agent_heartbeat_class.php'));
+$hb = new AgentHeartbeat(NULL);
+$hb->set('ahb_agent_name', 'harnesstest-agent-' . substr(md5(uniqid('', true)), 0, 6));
+$hb->set('ahb_agent_version', '9.9.9');
+$hb->set('ahb_status', 'ok');
+$hb->set('ahb_last_heartbeat', gmdate('Y-m-d H:i:s'));
+$hb->save();
+$hb->load();
+harness_register_row('ahb_agent_heartbeats', 'ahb_id', (int)$hb->key);
+
+$fresh = ProvisioningSetup::agentStatus();
+check($fresh['present'] === true && $fresh['online'] === true,
+	'with a fresh heartbeat in the table, status is present and online',
+	json_encode($fresh));
+
+// Classification itself, on the row (agentStatus reads the globally newest
+// heartbeat, so a live dev agent would mask a stale fixture there).
+check($hb->is_online() === true, 'a just-written heartbeat classifies online');
+$hb->set('ahb_last_heartbeat', gmdate('Y-m-d H:i:s', time() - 3600));
+$hb->save();
+$hb->load();
+check($hb->is_online() === false, 'an hour-old heartbeat classifies offline');
 
 } finally {
 
