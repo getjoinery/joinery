@@ -6,7 +6,7 @@
  * instances it creates are billed by Linode to the customer. Requires the
  * 'linodes:read_write' OAuth scope.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getComposerAutoloadPath());
@@ -59,6 +59,16 @@ class LinodeComputeDriver implements CloudComputeProvider {
 
 	public function deleteInstance(string $instance_id): void {
 		$this->request('DELETE', 'linode/instances/' . rawurlencode($instance_id));
+	}
+
+	public function setReverseDns(string $instance_id, string $ip, string $hostname): array {
+		$result = $this->request('PUT',
+			'linode/instances/' . rawurlencode($instance_id) . '/ips/' . rawurlencode($ip),
+			array('rdns' => $hostname));
+		return array(
+			'ip'   => (string)($result['address'] ?? $ip),
+			'rdns' => (string)($result['rdns'] ?? ''),
+		);
 	}
 
 	/**

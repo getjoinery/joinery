@@ -69,6 +69,7 @@ class CustomerCloudProvisioningTest {
 			$this->test_provision_model();
 			$this->test_origin_rules();
 			$this->test_consumer();
+			$this->test_reverse_dns();
 		} catch (Exception $e) {
 			check(false, 'uncaught exception', $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
 		} finally {
@@ -132,6 +133,26 @@ class CustomerCloudProvisioningTest {
 		])]);
 		$instance = $driver->getInstance('12345');
 		check($instance['status'] === 'running' && $instance['ip'] === '203.0.113.7', 'getInstance normalizes running instance');
+
+		// setReverseDns: normalized {ip, rdns} from the provider response.
+		$driver = $this->driverWith([$this->jsonResponse(200, [
+			'address' => '203.0.113.7', 'rdns' => 'mail.example.com', 'type' => 'ipv4', 'public' => true,
+		])]);
+		$r = $driver->setReverseDns('12345', '203.0.113.7', 'mail.example.com');
+		check($r['ip'] === '203.0.113.7' && $r['rdns'] === 'mail.example.com',
+			'setReverseDns returns normalized ip + rdns');
+
+		// Linode rejects rdns whose forward record is absent — reason surfaces with field.
+		$driver = $this->driverWith([$this->jsonResponse(400, ['errors' => [
+			['field' => 'rdns', 'reason' => 'Hostname does not resolve to this address'],
+		]])]);
+		try {
+			$driver->setReverseDns('12345', '203.0.113.7', 'mail.example.com');
+			check(false, 'setReverseDns 400 raises with field context');
+		} catch (CloudComputeException $e) {
+			check($e->getCode() === 400 && strpos($e->getMessage(), 'rdns: Hostname does not resolve') !== false,
+				'setReverseDns 400 raises with field context');
+		}
 	}
 
 	private function test_account_tokens() {
@@ -290,6 +311,30 @@ class CustomerCloudProvisioningTest {
 			check(true, 'unknown docker mode rejected');
 		}
 
+		// Bare mode: admin-origin saves with no site parameters at all.
+		$bare = new CustomerCloudProvision(NULL);
+		$bare->set('cvp_origin', 'admin');
+		$bare->set('cvp_usr_user_id', $this->user_id);
+		$bare->set('cvp_domain', 'mx1.example.com');
+		$bare->set('cvp_slug', 'mx1-example-com');
+		$bare->set('cvp_install_mode', 'bare');
+		$bare->save();
+		check($bare->key > 0, 'bare admin-origin provision saves without site parameters');
+
+		// Bare mode is an infrastructure decision an order can never make.
+		try {
+			$bad = new CustomerCloudProvision(NULL);
+			$bad->set('cvp_external_order_item_id', 970000 + random_int(0, 9999));
+			$bad->set('cvp_usr_user_id', $this->user_id);
+			$bad->set('cvp_domain', 'orderbare.example.com');
+			$bad->set('cvp_slug', 'orderbare-example-com');
+			$bad->set('cvp_install_mode', 'bare');
+			$bad->save();
+			check(false, 'bare mode on an order-origin provision rejected');
+		} catch (CustomerCloudProvisionException $e) {
+			check(true, 'bare mode on an order-origin provision rejected');
+		}
+
 		// Defaults reproduce the order flow exactly: docker, fresh, port 8080.
 		$order_id = 960000 + random_int(0, 9999);
 		$plain = new CustomerCloudProvision(NULL);
@@ -339,12 +384,122 @@ class CustomerCloudProvisioningTest {
 		check(count($multi) === 1, 're-grant upserts the same account row');
 	}
 
+	private function test_reverse_dns() {
+		section('NodeReverseDns (injected fake driver)');
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeReverseDns.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+
+		$blank_node = new ManagedNode(NULL);
+
+		// Hostname syntax gate fires before anything else.
+		try {
+			NodeReverseDns::set($blank_node, 'not a hostname');
+			check(false, 'invalid hostname rejected');
+		} catch (NodeReverseDnsException $e) {
+			check(strpos($e->getMessage(), 'fully-qualified') !== false, 'invalid hostname rejected');
+		}
+
+		// A node that was not cloud-born has no provision — actionable error.
+		$manual_node = new ManagedNode(NULL);
+		$manual_node->set('mgn_name', 'RDNS Test Manual');
+		$manual_node->set('mgn_slug', 'rdns-test-manual-' . random_int(1000, 9999));
+		$manual_node->set('mgn_host', '203.0.113.99');
+		$manual_node->save();
+		$this->rdns_node_ids[] = (int)$manual_node->key;
+		try {
+			NodeReverseDns::set($manual_node, 'mail.example.com');
+			check(false, 'node without provision gets panel guidance');
+		} catch (NodeReverseDnsException $e) {
+			check(strpos($e->getMessage(), 'no cloud-provision record') !== false,
+				'node without provision gets panel guidance');
+		}
+
+		// Cloud-born node: provision row links node → instance; injected fake
+		// driver receives the provision's instance id + ip and the hostname.
+		$node = new ManagedNode(NULL);
+		$node->set('mgn_name', 'RDNS Test Cloud');
+		$node->set('mgn_slug', 'rdns-test-cloud-' . random_int(1000, 9999));
+		$node->set('mgn_host', '203.0.113.80');
+		$node->save();
+		$this->rdns_node_ids[] = (int)$node->key;
+
+		$provision = new CustomerCloudProvision(NULL);
+		$provision->set('cvp_origin', 'admin');
+		$provision->set('cvp_usr_user_id', $this->user_id);
+		$provision->set('cvp_domain', 'rdns.example.com');
+		$provision->set('cvp_slug', 'rdns-example-com');
+		$provision->set('cvp_status', 'done');
+		$provision->set('cvp_instance_id', '424242');
+		$provision->set('cvp_instance_ip', '203.0.113.80');
+		$provision->set('cvp_mgn_node_id', $node->key);
+		$provision->save();
+
+		$found = NodeReverseDns::provisionForNode($node);
+		check($found && (int)$found->key === (int)$provision->key, 'provisionForNode finds the birth provision');
+
+		$fake = new RdnsFakeDriver();
+		$result = NodeReverseDns::set($node, 'Mail.Example.com', $fake, true);
+		check($fake->calls === 1
+			&& $fake->last_instance === '424242'
+			&& $fake->last_ip === '203.0.113.80'
+			&& $fake->last_hostname === 'mail.example.com',
+			'driver called with provision instance/ip and lowercased hostname');
+		check($result['rdns'] === 'mail.example.com', 'set returns the provider result');
+
+		// Forward-record precondition: a hostname that cannot resolve to the
+		// node IP is refused with the create-the-A-record instruction, and the
+		// driver is never reached.
+		try {
+			NodeReverseDns::set($node, 'rdns-missing.example.invalid', $fake, false);
+			check(false, 'missing forward A record refused before the provider call');
+		} catch (NodeReverseDnsException $e) {
+			check(strpos($e->getMessage(), 'Create the A record first') !== false && $fake->calls === 1,
+				'missing forward A record refused before the provider call');
+		}
+
+		// setQuietly (the SSL-issuance pipeline hook) never throws: failure is
+		// a returned ok=false, success passes the provider result through.
+		$quiet_fail = NodeReverseDns::setQuietly($manual_node, 'mail.example.com');
+		check(is_array($quiet_fail) && $quiet_fail['ok'] === false
+			&& strpos($quiet_fail['message'], 'no cloud-provision record') !== false,
+			'setQuietly swallows failure into ok=false');
+		$quiet_ok = NodeReverseDns::setQuietly($node, 'rdns.example.com', $fake, true);
+		check($quiet_ok['ok'] === true && $fake->calls === 2 && $fake->last_hostname === 'rdns.example.com',
+			'setQuietly success reaches the provider');
+	}
+
+	private $rdns_node_ids = [];
+
 	private function cleanup() {
 		$ids = [$this->user_id, $this->user_id + 20000];
 		$q = $this->db->prepare("DELETE FROM cvp_customer_cloud_provisions WHERE cvp_usr_user_id IN (?, ?)");
 		$q->execute($ids);
 		$q = $this->db->prepare("DELETE FROM cca_customer_cloud_accounts WHERE cca_usr_user_id IN (?, ?)");
 		$q->execute($ids);
+		foreach ($this->rdns_node_ids as $node_id) {
+			$q = $this->db->prepare("DELETE FROM mgn_managed_nodes WHERE mgn_id = ?");
+			$q->execute([$node_id]);
+		}
+	}
+}
+
+/** Records the arguments NodeReverseDns passes through; no network. */
+class RdnsFakeDriver implements CloudComputeProvider {
+	public $calls = 0;
+	public $last_instance = '';
+	public $last_ip = '';
+	public $last_hostname = '';
+
+	public function createInstance(array $opts): array { throw new CloudComputeException('not used'); }
+	public function getInstance(string $instance_id): array { throw new CloudComputeException('not used'); }
+	public function deleteInstance(string $instance_id): void { throw new CloudComputeException('not used'); }
+
+	public function setReverseDns(string $instance_id, string $ip, string $hostname): array {
+		$this->calls++;
+		$this->last_instance = $instance_id;
+		$this->last_ip = $ip;
+		$this->last_hostname = $hostname;
+		return array('ip' => $ip, 'rdns' => $hostname);
 	}
 }
 

@@ -73,6 +73,15 @@ wizard: **setup cards ARE the wizard.**
 - **server_manager** (control planes): links the whole Provisioning page as
   one card whose status is the page's aggregate.
 
+**Plugin cards aggregate — they never duplicate.** A plugin that has its own
+setup/health surface (the mailbox Setup tab, the Provisioning page) remains the
+single source of truth for its items: the detailed checks, the how-to-fix
+guidance, and any one-click fix actions live there. Its dashboard card reports
+only the aggregate ("Mail setup: 3 items remaining") and links into the owning
+page. The dashboard tells you *that* something needs doing; the owning page
+tells you *what* and offers the fix. No item may exist as a second copy on the
+dashboard that can drift from the plugin's own checklist.
+
 ### Core health cards (the silent-failure monitor)
 
 | Card | Red when |
@@ -102,6 +111,13 @@ events + registrations. mailbox: inbound volume. joinery_ai: runs/tokens.
   reading a site's overall color via API) without parsing HTML.
 - **Test-send is the green condition for email**, not mere key presence —
   configured-but-broken is the failure mode that actually occurred.
+- **Outbound email means a provider** (see the outbound doctrine in
+  `docs/email_system.md`): the setup card is green when a provider is
+  configured and a test send succeeded. Direct self-hosted delivery from the
+  box's own port 25 (egress unblock, PTR, IP reputation) is advanced setup and
+  never appears as a setup-card requirement.
+- **Plugin cards aggregate, never duplicate** (see the plugin-contributed
+  cards section): detailed items and fix actions stay on the owning page.
 
 ## Open questions (owner)
 

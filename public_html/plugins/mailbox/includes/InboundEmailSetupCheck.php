@@ -16,7 +16,7 @@
  *   id, scope, layer, label, severity, status, summary, detail, fix, recheckable
  * where fix is null or ['text'=>, 'command'=>?, 'dns_record'=>['type','name','value']?].
  *
- * @version 1.11
+ * @version 1.12
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -478,9 +478,11 @@ class InboundEmailSetupCheck {
 						: $this->r('mailhost.ptr_matches', '', 'mailhost', 'PTR matches mail hostname', self::RECOMMENDED, self::WARN,
 							'PTR (' . $ptrName . ') differs from the mail hostname (' . $canonical . ').',
 							'Aligning HELO name and PTR improves deliverability of forwarded mail.',
-							array('text' => 'In the Linode Cloud Manager, open the Linode for this server, go to the Network tab, '
-								. 'and set Reverse DNS (RDNS) for ' . $this->publicIp . ' to ' . $canonical . '. '
-								. 'Linode only accepts ' . $canonical . ' if it already has an A record pointing to ' . $this->publicIp . '.'));
+							array('text' => 'If this server was provisioned through Server Manager, use the Reverse DNS panel on its '
+								. 'node detail page (control plane, Overview tab) — it sets the PTR through the cloud account '
+								. 'grant in one step. Otherwise set Reverse DNS for ' . $this->publicIp . ' to ' . $canonical . ' '
+								. 'in your hosting provider\'s panel. Either way the provider only accepts ' . $canonical . ' '
+								. 'if it already has an A record pointing to ' . $this->publicIp . '.'));
 				}
 			}
 		}

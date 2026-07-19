@@ -48,6 +48,16 @@ interface CloudComputeProvider {
 	 * @throws CloudComputeException on any API failure.
 	 */
 	public function deleteInstance(string $instance_id): void;
+
+	/**
+	 * Set the reverse-DNS (PTR) hostname on one of the instance's IPs.
+	 * Providers typically require the hostname's forward A record to already
+	 * resolve to the address, and reject the update otherwise.
+	 *
+	 * @return array {ip: string, rdns: string} as stored by the provider.
+	 * @throws CloudComputeException on any API failure.
+	 */
+	public function setReverseDns(string $instance_id, string $ip, string $hostname): array;
 }
 
 class CloudComputeException extends Exception {}

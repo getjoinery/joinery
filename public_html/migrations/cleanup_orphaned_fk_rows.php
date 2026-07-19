@@ -50,6 +50,23 @@ function cleanup_orphaned_fk_rows() {
 		}
 	}
 
+	// Model classes are discovered from code on disk, which includes plugins
+	// that are not installed on this site — their tables were never created.
+	// Sweep only relations whose tables exist in THIS database.
+	$table_exists_cache = array();
+	$exists_stmt = $dblink->prepare("SELECT to_regclass(?)");
+	$table_exists = function($table) use ($exists_stmt, &$table_exists_cache) {
+		if (!array_key_exists($table, $table_exists_cache)) {
+			$exists_stmt->execute(array('public.' . $table));
+			$val = $exists_stmt->fetchColumn();
+			$table_exists_cache[$table] = !empty($val);
+		}
+		return $table_exists_cache[$table];
+	};
+	$relations = array_values(array_filter($relations, function($r) use ($table_exists) {
+		return $table_exists($r['table']) && $table_exists($r['ref_table']);
+	}));
+
 	$total = 0;
 	for ($pass = 1; $pass <= 6; $pass++) {
 		$deleted_this_pass = 0;

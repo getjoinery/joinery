@@ -155,7 +155,7 @@ The node detail page (`/admin/server_manager/node_detail?mgn_id=N&tab=...`) has 
 
 | Tab | Purpose |
 |-----|---------|
-| **Overview** | Status summary (health dot, disk/memory/load/postgres/version), action buttons (Check Status, Test Connection), recent jobs for this node, connection settings (collapsed by default), delete node |
+| **Overview** | Status summary (health dot, disk/memory/load/postgres/version), action buttons (Check Status, Test Connection), recent jobs for this node, connection settings (collapsed by default), delete node. The Actions dropdown also offers **Run Plugin Installers** — queues a `run_plugin_installers` job that executes every active plugin's declared `host_installer` on the node as root (idempotent); this is how a bare-metal node picks up system-service configuration (e.g. the mail stack) after a plugin is activated, since it has no container-start moment |
 | **Backups** | Target indicator, run database/project backup, fetch backup file, backup file browser with scan and delete, restore full project from a `.tar.gz` archive |
 | **Database** | Copy database from another node to this one, restore from backup file |
 | **Updates** | Version comparison (node vs control plane), apply update |
@@ -205,6 +205,8 @@ Destructive operations auto-backup the target database before proceeding. The UI
 
 - **A known host** (or *Other server* with manual SSH details): the form creates the ManagedNode and dispatches the `install_node` job immediately.
 - **Create a new cloud instance**: no server exists yet. The form records an admin-origin `CustomerCloudProvision` (connected cloud account, region, instance type, plus all install parameters) and the **Provision Customer Cloud** task births the instance, creates the node, and dispatches the install — see [Customer-Cloud Fulfillment](#customer-cloud-fulfillment). The instance is created in, and billed to, the selected connected account; Linode grants expire after two hours, so connect (or re-connect) shortly before submitting. Cloud targets always take a fresh source backup in From-Backup mode. In-flight provisions appear in a banner at the top of the dashboard.
+
+  The cloud target also offers **Bare instance** as the install type: the instance is born, the SSH key injected, and the managed node created with `mgn_skip_joinery_checks` set — but no site is installed (no web root, site URL, or SSL flow). Completion is a passing `check_status` job. This is how infrastructure nodes that host no Joinery site — a mail relay shard, for example — enter management; the role's own provisioning (e.g. the mailbox plugin's provision-relay job) builds on the bare node afterward. Bare is admin-origin only; orders always install a site.
 
 Two install types:
 

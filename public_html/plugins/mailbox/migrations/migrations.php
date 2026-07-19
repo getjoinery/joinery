@@ -11,7 +11,7 @@
  * the Mailbox Reader's thread-key index is created here (same pattern as the
  * server_manager plugin's index migration).
  *
- * @version 1.22.0
+ * @version 1.23.0
  */
 return [
 	[
@@ -96,14 +96,20 @@ return [
 		'version' => '1.11.0',
 		'up' => function($dbconnector) {
 			$dblink = $dbconnector->get_db_link();
-			$dblink->exec(
-				"CREATE INDEX IF NOT EXISTS imf_folder_uid_idx
-				 ON imf_inbound_message_folders (imf_iif_inbound_imap_folder_id, imf_imap_uid)"
-			);
-			$dblink->exec(
-				"CREATE INDEX IF NOT EXISTS imf_message_idx
-				 ON imf_inbound_message_folders (imf_iem_inbound_email_message_id)"
-			);
+			// imf_ is a retired table (converted away by iem_009); on a fresh
+			// install it never exists, so its indexes are skipped — they died
+			// with the table anyway.
+			$hasImf = $dblink->query("SELECT to_regclass('public.imf_inbound_message_folders')")->fetchColumn();
+			if ($hasImf) {
+				$dblink->exec(
+					"CREATE INDEX IF NOT EXISTS imf_folder_uid_idx
+					 ON imf_inbound_message_folders (imf_iif_inbound_imap_folder_id, imf_imap_uid)"
+				);
+				$dblink->exec(
+					"CREATE INDEX IF NOT EXISTS imf_message_idx
+					 ON imf_inbound_message_folders (imf_iem_inbound_email_message_id)"
+				);
+			}
 			$dblink->exec(
 				"CREATE INDEX IF NOT EXISTS iem_imap_locator_idx
 				 ON iem_inbound_email_messages
@@ -202,14 +208,20 @@ return [
 		'version' => '1.20.0',
 		'up' => function($dbconnector) {
 			$dblink = $dbconnector->get_db_link();
-			$dblink->exec(
-				"CREATE INDEX IF NOT EXISTS ifm_folder_uid_idx
-				 ON ifm_imap_folder_membership (ifm_iif_inbound_imap_folder_id, ifm_imap_uid)"
-			);
-			$dblink->exec(
-				"CREATE INDEX IF NOT EXISTS ifm_message_idx
-				 ON ifm_imap_folder_membership (ifm_iem_inbound_email_message_id)"
-			);
+			// ifm_ is a retired table (dropped by iem_010); on a fresh install
+			// it never exists, so its indexes are skipped — they died with the
+			// table anyway.
+			$hasIfm = $dblink->query("SELECT to_regclass('public.ifm_imap_folder_membership')")->fetchColumn();
+			if ($hasIfm) {
+				$dblink->exec(
+					"CREATE INDEX IF NOT EXISTS ifm_folder_uid_idx
+					 ON ifm_imap_folder_membership (ifm_iif_inbound_imap_folder_id, ifm_imap_uid)"
+				);
+				$dblink->exec(
+					"CREATE INDEX IF NOT EXISTS ifm_message_idx
+					 ON ifm_imap_folder_membership (ifm_iem_inbound_email_message_id)"
+				);
+			}
 			$dblink->exec(
 				"CREATE INDEX IF NOT EXISTS grm_foreign_key_idx
 				 ON grm_group_members (grm_foreign_key_id)"
@@ -234,66 +246,14 @@ return [
 		'id' => 'iem_009_convert_folders_to_label_groups',
 		'version' => '1.20.0',
 		'up' => function($dbconnector) {
-			require_once(PathHelper::getIncludePath('data/groups_class.php'));
-			require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_folder_class.php'));
-			require_once(PathHelper::getIncludePath('plugins/mailbox/data/imap_folder_membership_class.php'));
-			$dblink = $dbconnector->get_db_link();
-			$pgbool = function($v) { return ($v === true || $v === 't' || $v === '1' || $v === 1); };
-
-			// 1. Bind folders -> groups.
-			$folderGroup = array(); // iif id => group id (or null for coverage)
-			$fids = $dblink->query("SELECT iif_inbound_imap_folder_id FROM iif_inbound_imap_folders")
-				->fetchAll(PDO::FETCH_COLUMN);
-			foreach ($fids as $fid) {
-				$folder = new InboundImapFolder(intval($fid), TRUE);
-				$folderGroup[intval($fid)] = $folder->key ? $folder->ensureGroup() : null;
-			}
-
-			// 2. imf_ membership -> grm_group_members (truth) + ifm_ projection (shadow).
-			$hasImf = $dblink->query("SELECT to_regclass('public.imf_inbound_message_folders')")->fetchColumn();
-			if ($hasImf) {
-				$rows = $dblink->query(
-					"SELECT imf_iem_inbound_email_message_id AS msg, imf_iif_inbound_imap_folder_id AS folder,
-							imf_present_local AS local, imf_present_base AS base,
-							imf_imap_uid AS uid, imf_imap_uidvalidity AS uidv
-					 FROM imf_inbound_message_folders")->fetchAll(PDO::FETCH_ASSOC);
-				foreach ($rows as $r) {
-					$msg = intval($r['msg']);
-					$fid = intval($r['folder']);
-					$gid = $folderGroup[$fid] ?? null;
-					if ($gid && $pgbool($r['local'])) {
-						(new Group(intval($gid), TRUE))->add_member($msg);
-					}
-					if ($pgbool($r['base'])) {
-						ImapFolderMembership::setBaseline($msg, $fid, true,
-							$r['uid'] !== null ? intval($r['uid']) : null,
-							$r['uidv'] !== null ? intval($r['uidv']) : null);
-					}
-				}
-				$dblink->exec("DROP TABLE IF EXISTS imf_inbound_message_folders");
-			}
-
-			// 3. Repoint filter label actions (old fil_action_label_id = an iif id).
-			$hasOld = $dblink->query(
-				"SELECT 1 FROM information_schema.columns
-				 WHERE table_name = 'fil_inbound_email_filters'
-				   AND column_name = 'fil_action_label_id'")->fetchColumn();
-			if ($hasOld) {
-				$filters = $dblink->query(
-					"SELECT fil_inbound_email_filter_id AS id, fil_action_label_id AS folder
-					 FROM fil_inbound_email_filters
-					 WHERE fil_action_label_id IS NOT NULL")->fetchAll(PDO::FETCH_ASSOC);
-				$upd = $dblink->prepare(
-					"UPDATE fil_inbound_email_filters
-					 SET fil_action_grp_group_id = ? WHERE fil_inbound_email_filter_id = ?");
-				foreach ($filters as $f) {
-					$gid = $folderGroup[intval($f['folder'])] ?? null;
-					if ($gid) {
-						$upd->execute(array(intval($gid), intval($f['id'])));
-					}
-				}
-				$dblink->exec("ALTER TABLE fil_inbound_email_filters DROP COLUMN IF EXISTS fil_action_label_id");
-			}
+			// Historical no-op. The conversion this migration performed ran
+			// against the imf_-era schema, and its machinery (the
+			// ImapFolderMembership class, InboundImapFolder::ensureGroup) no
+			// longer exists in the codebase — the Groups-based model it
+			// converted INTO was itself retired by iem_010. Every database
+			// that held imf_-era state has already applied it (tracked in
+			// plm_plugin_migrations); a fresh install has nothing to convert.
+			// Recorded as applied so the history stays linear.
 		},
 	],
 

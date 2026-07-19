@@ -1,4 +1,16 @@
 #!/usr/bin/env bash
+#VERSION 2.24 - Postgres is local-only by default. Bare metal: listen_addresses
+#              = localhost + loopback-only pg_hba (no 0.0.0.0/0 rule). Docker:
+#              the container DB port publish binds 127.0.0.1 (docker's iptables
+#              bypass ufw, so an unbound -p exposed every container's Postgres
+#              to the internet regardless of firewall); in-container Postgres
+#              still listens on '*' for the bridge path, pg_hba scoped to
+#              172.16.0.0/12. Nothing in the managed flow connects to Postgres
+#              remotely — jobs run over SSH / docker exec.
+#VERSION 2.23 - Bare-metal firewall no longer opens 5432 to the world. Nothing
+#              in the managed flow connects to Postgres remotely (jobs run
+#              psql/pg_dump on the node over SSH), so the rule was pure attack
+#              surface. Found on the first bare-metal customer-cloud node.
 #VERSION 2.22 - Declared-dependency install (spec plugin_dependency_installation):
 #               new install_declared_dependencies() reads the deployed source's
 #               dependency declarations via utils/list_dependencies.php --apt and
@@ -530,7 +542,7 @@ list_docker_containers() {
 
             # Extract web port (format: 0.0.0.0:8080->80/tcp)
             local web_port=$(echo "$ports" | grep -oP '0\.0\.0\.0:\K[0-9]+(?=->80)' | head -1)
-            local db_port=$(echo "$ports" | grep -oP '0\.0\.0\.0:\K[0-9]+(?=->5432)' | head -1)
+            local db_port=$(echo "$ports" | grep -oP '(?:0\.0\.0\.0|127\.0\.0\.1):\K[0-9]+(?=->5432)' | head -1)
 
             if [ -n "$web_port" ]; then
                 printf "%-20s %-15s %-12s %s\n" "$name" "$web_port" "${db_port:-N/A}" "$status"
@@ -551,7 +563,7 @@ list_docker_containers() {
                 # Check if image starts with joinery-
                 if [[ "$image" == joinery-* ]]; then
                     local web_port=$(echo "$ports" | grep -oP '0\.0\.0\.0:\K[0-9]+(?=->80)' | head -1)
-                    local db_port=$(echo "$ports" | grep -oP '0\.0\.0\.0:\K[0-9]+(?=->5432)' | head -1)
+                    local db_port=$(echo "$ports" | grep -oP '(?:0\.0\.0\.0|127\.0\.0\.1):\K[0-9]+(?=->5432)' | head -1)
 
                     printf "%-20s %-15s %-12s %s\n" "$name" "${web_port:-N/A}" "${db_port:-N/A}" "$status"
                     found=1
@@ -1563,9 +1575,30 @@ EOF
     cp ${PG_CONFIG_DIR}/pg_hba.conf ${PG_CONFIG_DIR}/pg_hba.conf.backup
     cp ${PG_CONFIG_DIR}/postgresql.conf ${PG_CONFIG_DIR}/postgresql.conf.backup
 
-    # Configure authentication in pg_hba.conf
+    # Configure authentication in pg_hba.conf.
+    #
+    # Postgres is LOCAL-ONLY by default: nothing legitimately connects to it
+    # from off the box — the site is co-located, and every management DB job
+    # arrives over SSH (bare metal) or docker exec (containers).
+    #
+    # The container image build (--skip-postgres-password) is the one shape
+    # that needs network listening: the docker published-port path delivers
+    # connections to the container's eth0 from the host's bridge, so it
+    # listens on '*' with the bridge subnet allowed in pg_hba. The exposure
+    # boundary for containers is the docker -p binding, which is loopback-only.
     print_info "Configuring PostgreSQL authentication..."
-    tee ${PG_CONFIG_DIR}/pg_hba.conf > /dev/null << 'EOF'
+    if [ "$SKIP_POSTGRES_PASSWORD" -eq 1 ]; then
+        # Container image: allow loopback + the docker bridge subnets.
+        PG_HOST_RULES="host    all             all             127.0.0.1/32            md5
+host    all             all             172.16.0.0/12           md5"
+        PG_LISTEN="*"
+    else
+        # Bare metal: loopback only.
+        PG_HOST_RULES="host    all             all             127.0.0.1/32            md5"
+        PG_LISTEN="localhost"
+    fi
+
+    tee ${PG_CONFIG_DIR}/pg_hba.conf > /dev/null << EOF
 # PostgreSQL Client Authentication Configuration File
 # ===================================================
 
@@ -1575,9 +1608,8 @@ EOF
 local   all             postgres                                md5
 local   all             all                                     md5
 
-# IPv4 local connections:
-host    all             all             127.0.0.1/32            md5
-host    all             all             0.0.0.0/0               md5
+# IPv4 connections:
+${PG_HOST_RULES}
 
 # IPv6 local connections:
 host    all             all             ::1/128                 md5
@@ -1589,9 +1621,9 @@ host    replication     all             127.0.0.1/32            md5
 host    replication     all             ::1/128                 md5
 EOF
 
-    # Configure PostgreSQL to listen on port 5432
-    print_info "Configuring PostgreSQL to listen on port 5432..."
-    sed -i "s/#listen_addresses = 'localhost'/listen_addresses = '*'/" ${PG_CONFIG_DIR}/postgresql.conf
+    # Configure PostgreSQL listening
+    print_info "Configuring PostgreSQL to listen on port 5432 (${PG_LISTEN})..."
+    sed -i "s/#listen_addresses = 'localhost'/listen_addresses = '${PG_LISTEN}'/" ${PG_CONFIG_DIR}/postgresql.conf
     sed -i "s/#port = 5432/port = 5432/" ${PG_CONFIG_DIR}/postgresql.conf
     sed -i "s/#max_wal_size = 1GB/max_wal_size = 64MB/" ${PG_CONFIG_DIR}/postgresql.conf
     sed -i "s/max_wal_size = 1GB/max_wal_size = 64MB/" ${PG_CONFIG_DIR}/postgresql.conf
@@ -1690,7 +1722,8 @@ EOF
         ufw allow ssh
         ufw allow http
         ufw allow https
-        ufw allow 5432
+        # Postgres stays firewalled: management jobs run psql/pg_dump ON the
+        # node over SSH, so nothing connects to 5432 from outside the box.
         ufw --force enable
 
         # Configure fail2ban
@@ -2484,7 +2517,7 @@ EOF
             --name "$SITENAME" \
             --restart unless-stopped \
             -p "$PORT":80 \
-            -p "$DB_PORT":5432 \
+            -p 127.0.0.1:"$DB_PORT":5432 \
             $CLONE_ENV_OPTS \
             -v "${SITENAME}_postgres":/var/lib/postgresql \
             -v "${SITENAME}_uploads":/var/www/html/"${SITENAME}"/uploads \
@@ -2503,7 +2536,7 @@ EOF
             --name "$SITENAME" \
             --restart unless-stopped \
             -p "$PORT":80 \
-            -p "$DB_PORT":5432 \
+            -p 127.0.0.1:"$DB_PORT":5432 \
             $CLONE_ENV_OPTS \
             -v "${SITENAME}_postgres":/var/lib/postgresql \
             -v "${SITENAME}_uploads":/var/www/html/"${SITENAME}"/uploads \

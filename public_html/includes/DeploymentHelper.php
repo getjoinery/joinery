@@ -889,6 +889,33 @@ class DeploymentHelper {
             }
         }
 
+        // Re-align the stored system_version with the tree just restored.
+        // update_database stamps system_version BEFORE its final error
+        // accounting, so a failed upgrade can leave the database claiming the
+        // new version while the restored files are the old one — which makes
+        // the next upgrade attempt refuse with "same version". The restored
+        // tree's VERSION file is the truth.
+        $restored_version_file = $public_html . '/VERSION';
+        if (file_exists($restored_version_file)) {
+            $restored_version = trim((string)@file_get_contents($restored_version_file));
+            if ($restored_version !== '' && preg_match('/^\d+\.\d+\.\d+$/', $restored_version)) {
+                try {
+                    $dblink = DbConnector::get_instance()->get_db_link();
+                    $stmt = $dblink->prepare(
+                        "UPDATE stg_settings SET stg_value = ? WHERE stg_name = 'system_version' AND stg_value <> ?");
+                    $stmt->execute([$restored_version, $restored_version]);
+                    if ($stmt->rowCount() > 0 && $verbose) {
+                        echo "  system_version reset to restored tree's $restored_version\n";
+                    }
+                } catch (Exception $e) {
+                    $result['warnings'][] = 'Could not re-align system_version: ' . $e->getMessage();
+                    if ($verbose) {
+                        echo "  WARNING: could not re-align system_version: " . $e->getMessage() . "\n";
+                    }
+                }
+            }
+        }
+
         $result['success'] = true;
 
         if ($verbose) {
@@ -1008,9 +1035,16 @@ class DeploymentHelper {
             'warnings' => []
         ];
 
+        // chown (and chmod of files owned by others) requires root. In docker
+        // this process is root; on bare metal it is the agent user, so prefix
+        // sudo -n (passwordless, non-interactive — fails cleanly into the
+        // existing warnings if sudo is unavailable).
+        $is_root = function_exists('posix_geteuid') ? (posix_geteuid() === 0) : (trim((string)shell_exec('id -u')) === '0');
+        $root_prefix = $is_root ? '' : 'sudo -n ';
+
         // Change ownership
         $chown_result = 0;
-        exec("chown -R $owner:$group " . escapeshellarg($path) . " 2>&1", $output, $chown_result);
+        exec($root_prefix . "chown -R $owner:$group " . escapeshellarg($path) . " 2>&1", $output, $chown_result);
 
         if ($chown_result !== 0) {
             $result['warnings'][] = "chown failed: " . implode(' ', $output);
@@ -1019,7 +1053,7 @@ class DeploymentHelper {
 
         // Change permissions
         $chmod_result = 0;
-        exec("chmod -R $mode " . escapeshellarg($path) . " 2>&1", $output, $chmod_result);
+        exec($root_prefix . "chmod -R $mode " . escapeshellarg($path) . " 2>&1", $output, $chmod_result);
 
         if ($chmod_result !== 0) {
             $result['warnings'][] = "chmod failed: " . implode(' ', $output);
@@ -1030,7 +1064,7 @@ class DeploymentHelper {
         $uploads_dir = $path . '/uploads';
         if (is_dir($uploads_dir)) {
             $chmod_uploads = 0;
-            exec("chmod -R 777 " . escapeshellarg($uploads_dir) . " 2>&1", $output, $chmod_uploads);
+            exec($root_prefix . "chmod -R 777 " . escapeshellarg($uploads_dir) . " 2>&1", $output, $chmod_uploads);
 
             if ($chmod_uploads !== 0) {
                 $result['warnings'][] = "chmod 777 on uploads failed: " . implode(' ', $output);

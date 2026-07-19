@@ -397,4 +397,41 @@ check(count($steps) === 1, 'deleting nothing still emits one step', 'steps: ' . 
 check(strpos($steps[0]['cmd'], 'Nothing to delete') !== false,
 	'that step says nothing was deleted rather than pretending it deleted something');
 
+section('Plugin installers');
+
+// The runner lives in the site dir, one level above web root, and needs the
+// sitename as its argument. On a bare-metal node whose SSH user is not root
+// the whole invocation must be sudo'd — and because sudo strips the caller's
+// environment, PGPASSWORD (which the runner needs to query active plugins)
+// has to be re-injected explicitly, not assumed to survive.
+$bare = jcb_node(array(
+	'mgn_ssh_user' => 'user1',
+	'mgn_web_root' => '/var/www/html/jeremytunnell/public_html'));
+$steps = JobCommandBuilder::build_run_plugin_installers($bare);
+check(count($steps) === 1, 'one step is emitted', 'steps: ' . count($steps));
+$cmd = $steps[0]['cmd'];
+check(strpos($cmd, 'sudo ') !== false,
+	'a bare-metal non-root node gets a sudo invocation', $cmd);
+check(strpos($cmd, '/var/www/html/jeremytunnell/maintenance_scripts/install_tools/_plugin_installers_start.sh') !== false,
+	'the runner path is the site dir, not the web root', $cmd);
+check(preg_match("/_plugin_installers_start\\.sh '?jeremytunnell'?(\\s|$)/", $cmd) === 1,
+	'the sitename is passed as the runner argument', $cmd);
+check(strpos($cmd, 'PGPASSWORD') !== false,
+	'PGPASSWORD is carried across the sudo boundary', $cmd);
+
+// A docker node's steps execute inside the container as root: no sudo.
+$dockered = jcb_node(array(
+	'mgn_container_name' => 'jeremytunnell',
+	'mgn_web_root' => '/var/www/html/jeremytunnell/public_html'));
+$steps = JobCommandBuilder::build_run_plugin_installers($dockered);
+check(strpos($steps[0]['cmd'], 'sudo ') === false,
+	'a docker node runs the installers without sudo', $steps[0]['cmd']);
+
+// A node with no web root cannot address a site: refuse at build time rather
+// than emit a job that greps a config under the filesystem root.
+$rootless = jcb_node(array('mgn_web_root' => ''));
+$threw = false;
+try { JobCommandBuilder::build_run_plugin_installers($rootless); } catch (Exception $e) { $threw = true; }
+check($threw, 'a node without mgn_web_root is refused at build time');
+
 harness_finish();

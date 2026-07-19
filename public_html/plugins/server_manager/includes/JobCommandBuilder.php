@@ -5,7 +5,7 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
- * @version 1.5
+ * @version 1.6
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -883,6 +883,41 @@ class JobCommandBuilder {
 			['type' => 'ssh', 'label' => 'Apply Joinery update',
 			 'cmd' => "cd {$web_root} && php utils/upgrade.php --verbose",
 			 'timeout' => 3600],
+		];
+	}
+
+	/**
+	 * Run every active plugin's host installer on the node via
+	 * maintenance_scripts/install_tools/_plugin_installers_start.sh. Container
+	 * starts and code upgrades already run it; this job is the root moment a
+	 * bare-metal node otherwise lacks after activating a plugin whose
+	 * host_installer configures system services (e.g. mailbox -> Postfix).
+	 * The runner is fail-safe by contract (inactive plugin, unreachable DB, or
+	 * an installer failure all exit 0), so the job output is the record of what
+	 * ran — read it, don't infer from the green.
+	 */
+	public static function build_run_plugin_installers($node) {
+		if (!self::has_ssh($node)) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot run plugin installers: no SSH credentials configured.");
+		}
+		$web_root = rtrim($node->get('mgn_web_root'), '/');
+		if (!$web_root || dirname($web_root) === '/' || dirname($web_root) === '.') {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot run plugin installers: mgn_web_root is not set.");
+		}
+		$site_dir     = dirname($web_root);
+		$sitename_esc = escapeshellarg(basename($site_dir));
+		$runner       = $site_dir . '/maintenance_scripts/install_tools/_plugin_installers_start.sh';
+		$sudo         = self::sudo_prefix($node);
+		$creds        = self::get_db_credentials_script($node);
+
+		return [
+			['type' => 'ssh', 'label' => 'Run active plugin host installers',
+			 // PGPASSWORD is passed explicitly because sudo does not forward the
+			 // caller's environment; the runner needs it to query active plugins.
+			 'cmd' => "{$creds} && {$sudo}env PGPASSWORD=\"\$PGPASSWORD\" bash {$runner} {$sitename_esc}",
+			 'timeout' => 900],
 		];
 	}
 

@@ -5,7 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
- * @version 1.4
+ * @version 1.5
  */
 
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
@@ -115,6 +115,7 @@ class JobResultProcessor {
 		}
 
 		if ($node) {
+			$prev_ssl_state = $node->get('mgn_ssl_state');
 			$node->set('mgn_last_status_check', gmdate('Y-m-d H:i:s'));
 			$node->set('mgn_last_status_data', json_encode($result));
 			if ($version) {
@@ -129,6 +130,22 @@ class JobResultProcessor {
 				}
 			}
 			$node->save();
+
+			// The first confirmation of an active cert doubles as the
+			// reverse-DNS moment for cloud-born nodes: the domain has just
+			// proven it resolves to this box, which is the provider's
+			// precondition for accepting it as rDNS. Best-effort and
+			// transition-only — a stale grant or manual node leaves the PTR
+			// to the mailbox Setup tab checklist, and a later custom PTR is
+			// never overwritten by routine status checks.
+			if ($ssl_new_state === 'active' && $prev_ssl_state !== 'active') {
+				$rdns_domain = $result['ssl_domain']
+					?? (parse_url($node->get('mgn_site_url') ?: '', PHP_URL_HOST) ?: '');
+				if ($rdns_domain && !filter_var($rdns_domain, FILTER_VALIDATE_IP)) {
+					require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeReverseDns.php'));
+					$result['rdns_attempt'] = NodeReverseDns::setQuietly($node, $rdns_domain);
+				}
+			}
 		}
 
 		// Save structured result on the job
@@ -557,12 +574,36 @@ HTML;
 			$node = new ManagedNode($node_id, TRUE);
 		} catch (Exception $e) { return; }
 
+		$rdns_attempt = null;
 		if ($job->get('mjb_status') === 'completed') {
+			$was_active = ($node->get('mgn_ssl_state') === 'active');
 			$node->set('mgn_ssl_state', 'active');
 			$node->save();
+
+			// The cert just issued, so the domain provably resolves to this
+			// box — the provider's precondition for accepting it as reverse
+			// DNS. Set the PTR through the birth provision's grant now, so a
+			// standalone site never needs the control-plane panel. Best-effort
+			// and first-issuance-only: a stale grant or manual node leaves the
+			// PTR to the mailbox Setup tab checklist, and a later custom PTR
+			// is never overwritten by a cert renewal.
+			if (!$was_active) {
+				$params = json_decode($job->get('mjb_parameters') ?: '', true);
+				$rdns_domain = is_array($params) && !empty($params['domain'])
+					? $params['domain']
+					: (parse_url($node->get('mgn_site_url') ?: '', PHP_URL_HOST) ?: '');
+				if ($rdns_domain && !filter_var($rdns_domain, FILTER_VALIDATE_IP)) {
+					require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeReverseDns.php'));
+					$rdns_attempt = NodeReverseDns::setQuietly($node, $rdns_domain);
+				}
+			}
 		}
 
-		$job->set('mjb_result', json_encode(['ssl_state' => $node->get('mgn_ssl_state')]));
+		$result = ['ssl_state' => $node->get('mgn_ssl_state')];
+		if ($rdns_attempt !== null) {
+			$result['rdns_attempt'] = $rdns_attempt;
+		}
+		$job->set('mjb_result', json_encode($result));
 		$job->save();
 	}
 

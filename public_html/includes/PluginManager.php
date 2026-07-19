@@ -313,9 +313,18 @@ class PluginManager extends AbstractExtensionManager {
                 continue;
             }
 
-            // Run the up function
+            // Run the up function. Inside a wrapping transaction (install()),
+            // a failed statement aborts the whole transaction in Postgres, which
+            // would both mask the real error (every later statement reports
+            // "current transaction is aborted") and block recording the failure.
+            // A savepoint per migration keeps a failure contained to itself.
             $result = array('success' => false, 'id' => $migration_id);
 
+            $dblink = $dbconnector->get_db_link();
+            $use_savepoint = $dblink->inTransaction();
+            if ($use_savepoint) {
+                $dblink->exec("SAVEPOINT plugin_migration");
+            }
             try {
                 $up = $migration['up'] ?? null;
                 if (is_callable($up)) {
@@ -324,9 +333,15 @@ class PluginManager extends AbstractExtensionManager {
                 } else {
                     $result['success'] = true; // No up function — nothing to do
                 }
-            } catch (Exception $e) {
+                if ($use_savepoint) {
+                    $dblink->exec("RELEASE SAVEPOINT plugin_migration");
+                }
+            } catch (Throwable $e) {
                 $result['success'] = false;
                 $result['error'] = $e->getMessage();
+                if ($use_savepoint) {
+                    $dblink->exec("ROLLBACK TO SAVEPOINT plugin_migration");
+                }
             }
 
             // Record the migration
@@ -365,17 +380,30 @@ class PluginManager extends AbstractExtensionManager {
 
         $result = array('success' => false, 'id' => $migration_id);
 
+        // Savepoint per migration for the same reason as runPhpMigrations: a
+        // failure inside a wrapping transaction must not poison the transaction
+        // or mask its own error message.
+        $dblink = DbConnector::get_instance()->get_db_link();
+        $use_savepoint = $dblink->inTransaction();
+        if ($use_savepoint) {
+            $dblink->exec("SAVEPOINT plugin_migration");
+        }
         try {
             $sql = file_get_contents($file);
             if (empty(trim($sql))) {
                 $result['success'] = true;
             } else {
-                $dblink = DbConnector::get_instance()->get_db_link();
                 $dblink->exec($sql);
                 $result['success'] = true;
             }
-        } catch (Exception $e) {
+            if ($use_savepoint) {
+                $dblink->exec("RELEASE SAVEPOINT plugin_migration");
+            }
+        } catch (Throwable $e) {
             $result['error'] = $e->getMessage();
+            if ($use_savepoint) {
+                $dblink->exec("ROLLBACK TO SAVEPOINT plugin_migration");
+            }
         }
 
         // Record the migration
