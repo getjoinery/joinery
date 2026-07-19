@@ -12,13 +12,17 @@
  * fixture raw messages built in-memory (no DB writes — InboundEmailMessage
  * fields are set directly, never saved).
  *
- * Runs offline except for one read-only settings lookup (the configured
- * mailbox_mail_hostname, used to build a trusted Authentication-Results
- * line in the fixture so the DKIM-domain extraction has something to find).
+ * Runs fully offline. The digest trusts an Authentication-Results line only
+ * when its authserv-id matches the configured mailbox_mail_hostname, so the
+ * test pins that setting in memory rather than reading whatever this box
+ * happens to have. Reading it would make the DKIM-domain assertion pass or
+ * fail on operator configuration: the setting ships with an empty default, and
+ * an empty authserv-id means no line is ever trusted — so on an unconfigured
+ * box the check fails while the code is working correctly.
  *
  * Run: php tests/unit/email_security_digest_test.php
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
@@ -26,9 +30,10 @@ harness_boot();
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/EmailSecurityDigest.php'));
 
-$settings = Globalvars::get_instance();
-$authserv_id = (string)$settings->get_setting('mailbox_mail_hostname');
-if ($authserv_id === '') { $authserv_id = 'devmail.getjoinery.com'; } // fallback if unset on this box
+// Both sides of the comparison — the fixture header and the code that decides
+// whether to trust it — now come from this one value.
+$authserv_id = 'devmail.getjoinery.com';
+harness_set_setting_mem('mailbox_mail_hostname', $authserv_id);
 
 // --- Build an obfuscated-subject phishing fixture ---------------------------
 

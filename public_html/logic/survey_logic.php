@@ -20,10 +20,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$page_vars['settings'] = $settings;
 	$session->check_permission(0);
 
-	if($input['survey_id']){
-		$survey_id = LibraryFunctions::decode($input['survey_id']);
-	}
-	else if($input['survey_id']){
+	if(!empty($input['survey_id'])){
 		$survey_id = LibraryFunctions::decode($input['survey_id']);
 	}
 	else{
@@ -35,17 +32,17 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	
 	$numperpage = 30;
 	$offset = 0;
-	if($input['offset']){
+	if(!empty($input['offset'])){
 		$offset = $input['offset'];
 	}
 
 	$sort = 'survey_question_id';
-	if($input['sort']){
+	if(!empty($input['sort'])){
 		$sort = $input['sort'];
 	}
-	
+
 	$sdirection = 'DESC';
-	if($input['sdirection']){
+	if(!empty($input['sdirection'])){
 		$sdirection = $input['sdirection'];
 	}
 
@@ -63,39 +60,52 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$page_vars['numrecords'] = $numrecords;
 
 
+	$invalid_messages = array();
 	if (!empty($_POST)) {
-		$invalid_messages = array();
 		foreach($survey_questions as $survey_question){
 			$question = new Question($survey_question->get('srq_qst_question_id'), TRUE);
-			if(isset($input['question_'.$question->key]) && $input['question_'.$question->key]){
-				$valid = $question->validate_answers($input['question_'.$question->key]);
-				if($valid == 'valid'){
-					$survey_answer = new SurveyAnswer(NULL);
-					$survey_answer->set('sva_svy_survey_id', $survey->key);
-					$survey_answer->set('sva_create_time', 'now()');
-					$survey_answer->set('sva_qst_question_id', $question->key);
-					$survey_answer->set('sva_usr_user_id', $session->get_user_id());
-					if(is_array($input['question_'.$question->key])){
-						$answer = implode(',',$input['question_'.$question->key]);
-					}
-					else{
-						$answer = $input['question_'.$question->key];
-					}
-					$survey_answer->set('sva_answer', strip_tags(trim($answer)));
-					if($survey_answer->check_for_duplicates()){
-						$survey_answer = SurveyAnswer::get_answer($survey->key, $question->key, $session->get_user_id());
-						$survey_answer->set('sva_answer', strip_tags(trim($answer)));
-						$survey_answer->save();
-					}
-					else{
-						$survey_answer->save();
-					}
-					
-				}
-				else{
-					$invalid_messages[] = $valid;
-				}
+
+			// Every question on this page is validated, including one whose
+			// field is absent from the post entirely. Validating only the
+			// fields that arrived would mean a required question could be
+			// satisfied by omitting it: the browser enforces required, and
+			// anything posting directly would simply leave the field out and
+			// be redirected to the finish page as though the survey were
+			// complete.
+			$raw_answer = $input['question_'.$question->key] ?? NULL;
+			$valid = $question->validate_answers($raw_answer);
+			if($valid != 'valid'){
+				$invalid_messages[] = $valid;
+				continue;
 			}
+
+			// An optional question left blank passes validation but has nothing
+			// to record, and must not overwrite an existing answer with an
+			// empty one.
+			if($raw_answer === NULL || $raw_answer === '' || (is_array($raw_answer) && count($raw_answer) == 0)){
+				continue;
+			}
+
+			$answer = is_array($raw_answer) ? implode(',', $raw_answer) : $raw_answer;
+			$answer = strip_tags(trim($answer));
+
+			$survey_answer = new SurveyAnswer(NULL);
+			$survey_answer->set('sva_svy_survey_id', $survey->key);
+			$survey_answer->set('sva_create_time', 'now()');
+			$survey_answer->set('sva_qst_question_id', $question->key);
+			$survey_answer->set('sva_usr_user_id', $session->get_user_id());
+			$survey_answer->set('sva_answer', $answer);
+
+			// Re-answering updates the row already there rather than adding a
+			// second one, which the (survey, question, user) uniqueness would
+			// refuse anyway. check_for_duplicates() hands back the existing
+			// row, so there is no need to look it up a second time.
+			$existing = $survey_answer->check_for_duplicates();
+			if($existing){
+				$survey_answer = $existing;
+				$survey_answer->set('sva_answer', $answer);
+			}
+			$survey_answer->save();
 		}
 		if(empty($invalid_messages)){
 			return LogicResult::redirect('/survey_finish?survey_id='.LibraryFunctions::encode($survey->key));

@@ -1622,6 +1622,261 @@ Also surfaced, not fixed: the error log drops any error longer than 255
 characters (`specs/deferred_fixes.md` entry 6), found when a fixture violated a
 NOT NULL constraint and the logging of that failure itself failed.
 
+**T26 UploadHandler / photos — DONE 2026-07-19.** The upload path is the one
+place where a stranger chooses both the bytes on our disk and the name they land
+under, and it had no coverage. One db-tier suite, `upload_safety_test.php` (116
+checks), pinning the four things that have to hold independently: the name
+cannot escape the upload directory or become a hidden/control-character name;
+the extension allowlist is applied to the *sanitized* name rather than the one
+the client sent; the stored type is read from the bytes, never from the claimed
+Content-Type or the extension; and only genuine raster images render inline.
+
+The type-detection layer came through clean and is worth saying so plainly: PHP
+source named `photo.png` stores as `text/x-php`, HTML named `photo.gif` as
+`text/html`, an SVG named `photo.png` as `image/svg+xml`, and a real PNG named
+`notes.txt` is still detected as a PNG — so detection is actual detection, not
+merely distrust of the client. Unrecognized bytes fail closed to
+`application/octet-stream`. None of these are `is_image()`, and none render
+inline.
+
+Two defects, both in `UploadHandler`'s name pipeline:
+
+7. **A NUL byte in an uploaded filename crashed the upload.** `trim_file_name`
+   strips control characters only from the *ends* of the name, so a NUL in the
+   middle survives — and it is invisible to everything downstream: `is_file()`
+   reports false for a NUL path, so the name looks unused, and the allowlist
+   regex still matches the trailing `.png`. It then reaches
+   `move_uploaded_file()`, which rejects NUL paths with a `ValueError`. A value
+   the client fully controls produced an unhandled fatal instead of a refusal,
+   leaving the temporary file orphaned. Fixed by stripping `\x00-\x1f\x7f`
+   throughout the name, which is what the existing comment already claimed the
+   trim was doing. Reverting turns 7 checks red.
+
+8. **`basename($path, null)` emitted a deprecation on every call.** The private
+   `basename()` helper defaults `$suffix` to null and passes it straight to PHP's
+   `basename()`, where a null suffix has been deprecated since 8.1 (this host
+   runs 8.3). Every default-argument call — which is all of them — logged a
+   notice. Defaulted to `''`.
+
+Also pinned, because it is the assumption the rest of the surface rests on:
+neither directory that receives uploaded bytes (`upload_dir`, the fast-serve
+`static_files/uploads`) is inside the document root. This matters because
+`File::_mint_unique_name` preserves whatever extension it is handed — including
+`.php` — and the non-upload ingestion paths (`createFromBytes`, used by inbound
+email attachments) never pass through `UploadHandler`'s allowlist at all. Today
+a `.php` name is inert wherever it lands *only* because Apache cannot reach
+either directory. The test asserts that placement directly, so a future move
+under `public_html` fails the gate rather than becoming an execution hole.
+`RouteHelper::serveStaticFile`'s hard `.php` rejection is covered as the second
+layer.
+
+**Schema fixes applied — 2026-07-19.** The three items held in
+`specs/deferred_fixes.md` as entries 4–6 were all schema changes waiting on one
+`update_database` run. That run happened; all three are live and the entries are
+closed.
+
+- **One materialized instance per parent per date.** `unique_with` on
+  (`evt_materialized_instance_date`, `evt_parent_event_id`). Both columns are
+  NULL on standalone events and recurring parents, so only instance rows are
+  constrained — covered by a check that two NULL-pair events still save, since
+  if Postgres collided repeated NULLs every non-recurring event after the first
+  would fail.
+- **A real parent link on instance rows.** `foreign_key` on
+  `evt_parent_event_id` → `evt_events.evt_event_id` `ON DELETE CASCADE`, so an
+  instance cannot outlive its parent even when deletion bypasses the models.
+- **The error log stopped dropping its most detailed errors.**
+  `err_error`, `err_message`, `err_description`, `err_file` and `err_path`
+  widened from `varchar(255)` to `text`.
+
+Preconditions were checked before the run rather than assumed: zero duplicate
+(parent, date) pairs, zero orphaned instances, zero self-references. A second
+`update_database` run reported no further table changes and only the one
+pre-existing unrelated warning (`usa_users_addrs.usa_usr_user_id` nullability).
+
+`materialize_instance()` gained the race recovery entry 4 called for, and **the
+first version of it was wrong** — worth recording, because the mistake is the
+kind that reviews pass. It caught `PDOException` and classified the failure by
+SQLSTATE 23505, walking the previous-chain to find it. Two things defeated that.
+`save()` rewraps driver errors and `handle_query_error()` throws a
+`DatabaseException`, so no `PDOException` escapes at all; and more decisively,
+`unique_with` generates an *application-level* pre-check that fires before the
+database is ever reached, throwing a `DisplayableUserException` carrying no
+SQLSTATE anywhere in its chain. So the recovery now does not classify the
+exception. It asks the only question that matters — is the row there now? — and
+returns it if so, rethrowing otherwise. That is robust to both refusal paths
+and to any future third one.
+
+Pinning that recovery needed a deliberate construction, and the first attempt at
+*that* was also wrong: the guard at the top of `materialize_instance()` returns
+the existing row long before the write, so a single-threaded test never reaches
+the catch at all. The check passed with the recovery code deleted — it was
+measuring nothing. A `RaceLoserEvent` subclass whose first lookup reports
+nothing (the state every racing caller is genuinely in: it read before the
+winner committed) reaches it deterministically, and now deleting the recovery
+turns the suite red. `event_recurrence_test.php` 89 → 102 checks.
+
+The new constraint also surfaced a defect in `ModelTester` itself, which is
+worth more than the constraint that found it. Its composite-unique check proves
+that a *different* combination is still accepted, and it built that different
+value by appending `_different` to the original — valid for text, invalid for
+every other column type. On the new `date` column it produced
+`2023-01-01_different`, Postgres rejected the row, and the tester read that
+rejection as "the constraint incorrectly rejected a different combination". The
+check therefore fails whether the model is correct or not, and it would have
+done so for any composite unique constraint involving a date, timestamp or
+boolean column — this was the first one that existed. Fixed with a type-aware
+`vary_scalar_value()` that shifts dates and timestamps by a year, negates
+booleans, and keeps text inside the column's declared width (appending to a
+value already at maximum length would fail on width, producing the same
+misreading). `models_crud` 150 → 151.
+
+**T27 PluginManager::sync() — DONE 2026-07-19.** This runs on every upgrade,
+against every active plugin, and writes tables, columns, unique constraints,
+indexes, foreign keys, migrations, deletion rules, menus and settings. Nothing
+else in the platform changes so much in one unattended step, and a deploy is
+precisely when nobody is watching. One db-tier suite,
+`plugin_sync_test.php` (52 checks).
+
+The collision guard is tested by planting a real file whose basename matches a
+core `utils/` file inside an active plugin, not by inspecting the regex: the
+guard must refuse, the message must name the file, the plugin and the other
+owner, and — the part that matters — `sync()` itself must abort with *that*
+error rather than some later one, because the guard's whole purpose is to fire
+before any schema is mutated. Removing the file clears it, and a shared basename
+outside `ajax/`, `utils/` and `tests/` is still allowed, so the guard does not
+overreach.
+
+Settings seeding is pinned on the invariant that matters at deploy time: an
+operator changes a setting, ships an upgrade, and the upgrade must not hand it
+back to the factory default. `seed_declared()` relies on `ON CONFLICT DO
+NOTHING`, which relies on a unique index on `stg_name` — both are asserted,
+since without the index the statement would error rather than skip. The
+manifest rules (prefix, `legacy_core` opt-out, core collision, string-only
+defaults) are covered, and every shipped plugin's declared settings are run
+through them, so a bad manifest fails here rather than mid-deploy.
+
+One defect, and it is the same shape as T25's:
+
+9. **A plugin whose settings failed to sync produced no output at all.**
+   `sync()` deliberately catches per-plugin failures so one bad plugin cannot
+   abort an upgrade — an unreadable `plugin.json`, a manifest that violates the
+   naming rules. The cost of that choice is that the failure becomes a string in
+   `$result['settings_messages']` rather than an exception, and
+   `utils/update_database.php` — the only caller on the deploy path — never read
+   that array. It printed `table_messages` and `migration_messages` and
+   discarded the rest, so a plugin's settings silently failed to seed while the
+   deploy reported `✓ Plugins synced`. `deletion_rule_messages` was dropped the
+   same way. Both are now printed, settings failures marked as warnings.
+   Reverting turns 2 checks red.
+
+Also pinned, because the failure mode is silent damage to an unrelated action:
+`pruneOrphanedRules()` deletes any deletion rule whose source or target table
+matches no declared model, and it runs on every sync. Model discovery scans the
+filesystem rather than activation state, so a **deactivated** plugin's models
+still count and its rules survive. If discovery ever became activation-aware,
+deactivating a plugin would quietly delete the rules protecting its tables while
+the tables and rows still existed — and the damage would show up later, on some
+unrelated delete. The inactive `items` plugin on this box gives the check real
+coverage rather than a vacuous pass.
+
+**A silent-green test found along the way.** `email_security_digest` (safe tier)
+read `mailbox_mail_hostname` to build its fixture's Authentication-Results
+header, with a hardcoded fallback when the setting was empty. But the code under
+test reads that same setting to decide whether to *trust* the line, and it has
+no fallback — an empty authserv-id trusts nothing. So the fixture used the
+fallback while the code used the empty value, and the DKIM-domain assertion
+failed against working code. The setting ships with an empty default, so this
+was a safe-tier check whose result depended on whether an operator had
+configured this particular box. Fixed by pinning the setting in memory
+(`harness_set_setting_mem`) so both sides of the comparison come from one value;
+the test now passes with the setting still empty in the database, which is the
+proof it is hermetic. Separately, `mailbox_mail_hostname` is currently blank on
+dev and two corpus tools in `tests/tools/` document it as
+`devmail.getjoinery.com` — restoring operator config is left to the owner.
+
+**A second silent-green test, same shape.** `joinery_ai_chat_encryption` asserts
+a Fortress chat routes to the local provider, but the local provider is built
+from `joinery_ai_local_model`, which ships empty and is operator-configured. On
+a box where it is unset the factory throws, and the check fails against routing
+that is working correctly. Fixed the same way — pin the setting in memory, since
+what the check is about is that Fortress routes locally, not that a particular
+host is configured. Both of these were found only because an unrelated change
+made the gate red; a safe- or db-tier check whose result depends on local
+operator configuration is worth sweeping for deliberately, and that sweep is not
+yet done.
+
+The suite also asserts `sync()` is idempotent — a second run reports no further
+table changes and no further migrations — because on a deploy the no-op path is
+the common path, and a second run that still reports changes means something is
+being rewritten every time.
+
+**T28 Questions & surveys — DONE 2026-07-19.** One db-tier suite,
+`tests/functional/surveys/survey_answer_test.php` (60 checks). Event checkout
+already had `checkout_survey_test.php` covering *who* may answer; this covers
+the other half — whether an answer is accepted at all, and what gets stored.
+
+The subsystem turned out to be the worst-condition code the audit has touched
+so far. Five defects, four of which made a documented feature simply not work:
+
+10. **The integer rule made a question unanswerable.** `validate_answers()`
+    tested `is_integer($answers)`, but answers arrive from a form post and are
+    therefore always strings — `is_integer("5")` is false. Any question
+    carrying the integer rule refused every possible answer, including a
+    correct one. Now `ctype_digit`, which accepts exactly the set the
+    client-side `digits` rule advertises for the same option, so the two sides
+    cannot disagree. Reverting turns 2 checks red.
+
+11. **The decimal rule was worse: it tested an undefined variable.**
+    `preg_match('/^\d+\.\d+$/', $number)` — `$number` exists nowhere in the
+    method. It evaluated to NULL, the match always failed, and every decimal
+    question rejected every answer while emitting a PHP deprecation on each
+    attempt. Now `is_numeric($scalar)`, mirroring the client-side `number`
+    rule. Reverting turns 3 checks red.
+
+12. **A length or bound rule on a multi-select question was a fatal error.** A
+    checkbox-list answer arrives as an array; `strlen()` of an array is a
+    TypeError in PHP 8, so an admin who put a `max_length` on a checkbox-list
+    question took the page down for anyone answering it. The rules now measure
+    the comma-joined form — which is what actually gets stored, so a length
+    limit now bounds the stored value rather than an incidental representation.
+    Reverting crashes the suite outright at check 25, which is the honest
+    reproduction of the production symptom.
+
+13. **A required question could be satisfied by silence.** This is the one that
+    matters. `survey_logic()` validated only the questions whose field arrived
+    in the post and was truthy — so omitting a required field entirely meant it
+    was never validated, no message was produced, and the submitter was
+    redirected to the finish page as though the survey were complete. Required
+    was enforced by the browser and nowhere else, which is to say not enforced.
+    Every question is now validated, present or absent; a question that passes
+    validation but carries nothing to store still writes no row, so an optional
+    blank answer behaves as before and does not overwrite an existing answer.
+    Reverting turns 3 checks red.
+
+14. **The input's typing cap ignored the admin's rule.** `output_question()`
+    read `$this->get('max_length')` — not a column, so always NULL, so every
+    field was capped at 255 characters no matter what the question's
+    `max_length` rule said. An admin who allowed 500 got a browser that refused
+    at 255 while the server would have accepted the full answer. Now read from
+    the validation options, which is where the value has always lived.
+    Reverting turns 1 check red.
+
+The rule-engine section deliberately pins the server rule and the advertised
+client rule together (`digits`/`ctype_digit`, `number`/`is_numeric`). Defects
+10 and 11 were both *drift* between what the browser was told to enforce and
+what the server enforced, and drift is the failure mode that re-emerges;
+asserting the pair keeps them from separating again.
+
+Two findings needed an owner decision rather than a fix, and are recorded as
+entries 11 and 12 in `specs/deferred_fixes.md`: Multi collections silently
+ignore filter options they do not implement (this subsystem asks
+`MultiQuestionOption` for `'deleted' => false` in four live call sites, against
+a class with no such filter and a table with no such column — harmless here,
+but the same mechanism turns a misspelled ownership filter into a silent data
+exposure), and `Question` carries a `qst_is_required` column that nothing
+reads, while required-ness actually lives in the serialized `qst_validate`
+blob.
+
 **Still remaining (documented in the work plan below):**
 the full cloud 6→4 FILE merge
 (the D20/D21 DEFECTS are fixed; merging characterization into engine risks the
@@ -1796,9 +2051,9 @@ business-logic coverage today:
   its tests/ dir exists and is empty. Est. L.
 - **T25. server_manager** (JobCommandBuilder, JobResultProcessor) — the production
   deploy pipeline, zero tests. Est. M.
-- **T26. UploadHandler / photos** — the legacy upload attack surface. Est. M.
-- **T27. PluginManager::sync()** — runs on every deploy, mutates schema. Est. M.
-- **T28. Questions & surveys** — event checkout depends on it. Est. M.
+- **T26. UploadHandler / photos** — the legacy upload attack surface. ✅ DONE (see progress log).
+- **T27. PluginManager::sync()** — runs on every deploy, mutates schema. ✅ DONE (see progress log).
+- **T28. Questions & surveys** — event checkout depends on it. ✅ DONE (see progress log).
 - **T29. bookings /book flow** — double-booking/timezone; no tests dir. Est. M.
 - **T30. Multi-collection CRUD suite** — the entire Multi surface is untested
   (SINGLE_TESTS_ONLY); high value given the documented `->results` foot-gun. Est. M.

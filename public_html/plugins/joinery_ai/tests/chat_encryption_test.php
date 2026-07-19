@@ -132,7 +132,13 @@ harness_register_row('aic_conversations', 'aic_conversation_id', (int)$fort->key
 $rejected = false;
 try { LlmProviderFactory::forConversation($fort); } catch (LlmProviderException $e) { $rejected = true; }
 check($rejected, 'a Fortress chat on a cloud model is rejected at the provider choke point');
-// A Fortress chat on a local model resolves fine.
+// A Fortress chat on a local model resolves fine. The local provider is built
+// from joinery_ai_local_model, which ships empty and is operator-configured —
+// so reading whatever this box has would make the check fail on an unconfigured
+// box while the routing under test is working correctly. Pin it instead: what
+// is being asserted is that Fortress routes to the local provider, not that a
+// particular host happens to be set up.
+harness_set_setting_mem('joinery_ai_local_model', 'qwen3:4b-instruct');
 $fort->set('aic_model', 'qwen3:4b-instruct');
 $ok_local = false;
 try { LlmProviderFactory::forConversation($fort); $ok_local = true; } catch (Throwable $e) {}

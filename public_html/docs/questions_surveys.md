@@ -83,6 +83,24 @@ $question->output_question($formwriter, $existing_value);
 
 The submitted field name is always `question_{question_id}`.
 
+## Validation rules
+
+A question's rules live in `qst_validate` as a PHP-serialized array. A rule is in force if its key is *present*, regardless of the value:
+
+| Rule key | Server check | Client rule |
+|---|---|---|
+| `required` | answer is not `''`, `NULL`, or an empty selection | `required` |
+| `integer` | `ctype_digit` — digits only | `digits` |
+| `decimal` | `is_numeric` — any numeric value | `number` |
+| `min_length` / `max_length` | string length bounds | `minlength` / `maxlength` |
+| `min_value` / `max_value` | value comparison bounds | `min` / `max` |
+
+`Question::validate_answers($answer)` returns the string `'valid'` on success, or a human-readable message describing the failure. `Question::output_js_validation($rules)` produces the client-side equivalent for the same question. The two accept the same set of values by design — a rule tightened on one side must be tightened on the other, or a submission the browser allows is refused by the server.
+
+`"0"` is a real answer and satisfies `required`. A checkbox-list answer arrives as an array and is measured as its stored comma-joined form, so `max_length` bounds what is actually persisted.
+
+Rules are enforced server-side for every question in the survey, whether or not its field was submitted — a required question cannot be satisfied by omitting it from the post.
+
 ## Reading answers programmatically
 
 ```php
