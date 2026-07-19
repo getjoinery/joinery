@@ -12,7 +12,7 @@
 	$act_result = Activation::CheckForActiveCode($phone->get('phn_usr_user_id'), Activation::PHONE_VERIFY);
 
 	$phone_numbers_unver = new MultiPhoneNumber(
-		array('user_id'=>$phone->get('phn_usr_user_id'), 'verified'=>FALSE, 'deleted'=>FALSE)
+		array('user_id'=>$phone->get('phn_usr_user_id'), 'verified'=>FALSE)
 		);
 	$phone_numbers_unver->load();
 	$numphoneunverified = $phone_numbers_unver->count_all();

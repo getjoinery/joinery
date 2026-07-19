@@ -47,13 +47,13 @@ class AiMemory extends SystemBase {
         // Which human authored a shared row (audit); SET NULL on user deletion so
         // removing an admin never deletes or orphans the shared pool.
         'mem_created_by_user_id' => array('type'=>'int4', 'is_nullable'=>true),
-        'mem_scope'              => array('type'=>'varchar(16)', 'required'=>true, 'default'=>'user'),
+        'mem_scope'              => array('type'=>'varchar(16)', 'required'=>true, 'default'=>'user', 'allowed_values'=>array(self::SCOPE_USER, self::SCOPE_SHARED)),
         'mem_title'              => array('type'=>'varchar(255)'),
         'mem_content'            => array('type'=>'text', 'required'=>true),
         'mem_tags'               => array('type'=>'jsonb'),
         // Who created it ('ai' | 'user' | 'admin') — origin provenance for the UI
         // badge. Not rewritten when a human later edits an AI-created memory.
-        'mem_source'             => array('type'=>'varchar(16)', 'required'=>true, 'default'=>'user'),
+        'mem_source'             => array('type'=>'varchar(16)', 'required'=>true, 'default'=>'user', 'allowed_values'=>array(self::SOURCE_AI, self::SOURCE_USER, self::SOURCE_ADMIN)),
         'mem_create_time'        => array('type'=>'timestamp(6)', 'default'=>'now()'),
         'mem_update_time'        => array('type'=>'timestamp(6)'),
         'mem_delete_time'        => array('type'=>'timestamp(6)'),

@@ -79,11 +79,14 @@ class NativeSchedulingProvider implements SchedulingServiceProvider {
 		$max_week = $type->get('bkt_max_per_week');
 		if (!$max_day && !$max_week) { return $slots; }
 
-		// Count existing live bookings for this type, bucketed by host-local day/week.
+		// Count every row that occupies the host's time — confirmed bookings and
+		// live paid holds alike (Booking::occupies_host_time, the same predicate
+		// availability uses) — bucketed by host-local day/week.
 		$day_counts = []; $week_counts = [];
-		$existing = new MultiBooking(['booking_type_id' => $type->key, 'status' => Booking::BOOKING_STATUS_BOOKED, 'deleted' => false]);
+		$existing = new MultiBooking(['booking_type_id' => $type->key, 'deleted' => false]);
 		$existing->load();
 		foreach ($existing as $b) {
+			if (!$b->occupies_host_time()) { continue; }
 			$local = LibraryFunctions::convert_time($b->get('bkn_start_time'), 'UTC', $tz, 'Y-m-d');
 			$day_counts[$local] = ($day_counts[$local] ?? 0) + 1;
 			$wk = date('o-W', strtotime($local));

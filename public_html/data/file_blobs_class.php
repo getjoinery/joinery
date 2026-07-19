@@ -43,7 +43,7 @@ class FileBlob extends SystemBase {
 		'fbb_file_blob_id'      => array('type'=>'int8','is_nullable'=>false,'serial'=>true),
 		'fbb_stored_name'       => array('type'=>'varchar(255)','is_nullable'=>false,'required'=>true,'unique'=>true),
 		'fbb_size_bytes'        => array('type'=>'int8','is_nullable'=>false,'required'=>true),
-		'fbb_sha256'            => array('type'=>'character(64)','is_nullable'=>true,'index'=>true),
+		'fbb_sha256'            => array('type'=>'varchar(64)','is_nullable'=>true,'index'=>true),
 		'fbb_mime_type'         => array('type'=>'varchar(128)','is_nullable'=>true),
 		'fbb_is_private'        => array('type'=>'bool','is_nullable'=>false,'default'=>'false'),
 		'fbb_reference_count'   => array('type'=>'int4','is_nullable'=>false,'default'=>1),

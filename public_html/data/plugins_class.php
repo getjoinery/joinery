@@ -332,10 +332,13 @@ class MultiPlugin extends SystemMultiBase {
                 $plugin_data['version'] = $plugin->get_version();
                 $plugin_data['author'] = $plugin->get_author();
             } else {
-                // No plugin record - plugin is inactive
+                // No plugin record — the plugin is on disk but not installed.
+                // The badge says so with the same three-state vocabulary (and
+                // color) as the stats bar: Install creates schema, Activate
+                // does not, and the row must tell those apart at a glance.
                 $plugin_data['plugin'] = null;
                 $plugin_data['is_active'] = false;
-                $plugin_data['status_badge'] = '<span class="badge bg-secondary">Inactive</span>';
+                $plugin_data['status_badge'] = '<span class="badge bg-info">Not Installed</span>';
 
                 if ($metadata) {
                     $plugin_data['display_name'] = $metadata['name'] ?? $plugin_name;

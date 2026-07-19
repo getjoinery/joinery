@@ -281,11 +281,45 @@ class JobResultProcessor {
 	}
 
 	/**
-	 * Post-process apply_update: no-op — version tracking is now handled by
-	 * the X-Joinery-Version header on dashboard refresh, so a chained
-	 * check_status job is no longer needed.
+	 * Post-process apply_update: stamp the node's current version so the
+	 * Updates tab reflects reality the moment the job completes, instead of
+	 * waiting for someone to refresh the dashboard. The running site is the
+	 * authority — X-Joinery-Version from a HEAD probe of the node's site URL.
 	 */
 	private static function process_apply_update($job) {
+		$node_id = $job->get('mjb_mgn_node_id');
+		if (!$node_id) { return; }
+		try { $node = new ManagedNode($node_id, TRUE); } catch (Exception $e) { return; }
+		if (!$node->key) { return; }
+		$site_url = rtrim((string)$node->get('mgn_site_url'), '/');
+		if ($site_url === '') { return; }
+
+		$version = null;
+		$ch = curl_init($site_url . '/');
+		curl_setopt_array($ch, [
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_NOBODY         => true,
+			CURLOPT_CONNECTTIMEOUT => 5,
+			CURLOPT_TIMEOUT        => 8,
+			CURLOPT_FOLLOWLOCATION => true,
+			CURLOPT_MAXREDIRS      => 5,
+			CURLOPT_SSL_VERIFYPEER => $node->get('mgn_tls_insecure') ? false : true,
+			CURLOPT_SSL_VERIFYHOST => $node->get('mgn_tls_insecure') ? 0 : 2,
+			CURLOPT_HEADERFUNCTION => function ($curl, $header) use (&$version) {
+				if (stripos($header, 'X-Joinery-Version:') === 0) {
+					$v = trim(substr($header, strlen('X-Joinery-Version:')));
+					if ($v !== '') { $version = $v; }
+				}
+				return strlen($header);
+			},
+		]);
+		curl_exec($ch);
+		curl_close($ch);
+
+		if ($version) {
+			$node->set('mgn_joinery_version', $version);
+			$node->save();
+		}
 	}
 
 	/**

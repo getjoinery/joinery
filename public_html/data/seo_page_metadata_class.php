@@ -152,7 +152,7 @@ class SeoPageMetadata extends SystemBase {
 			$dblink = DbConnector::get_instance()->get_db_link();
 			$sql = "INSERT INTO spm_seo_page_metadata (spm_path, spm_create_time)
 			        VALUES (?, now())
-			        ON CONFLICT (spm_path) DO NOTHING";
+			        ON CONFLICT (spm_path) WHERE spm_delete_time IS NULL DO NOTHING";
 			$q = $dblink->prepare($sql);
 			$q->execute(array($canonical));
 			self::$per_request_lookup_cache[$canonical] = null;
@@ -537,7 +537,7 @@ class SeoPageMetadata extends SystemBase {
 						$ins = $dblink->prepare("INSERT INTO spm_seo_page_metadata
 							(spm_path, spm_entity_type, spm_entity_id, spm_create_time)
 							VALUES (?, ?, ?, now())
-							ON CONFLICT (spm_path) DO NOTHING");
+							ON CONFLICT (spm_path) WHERE spm_delete_time IS NULL DO NOTHING");
 						$ins->execute(array($rec['path'], $rec['entity_type'], $rec['entity_id']));
 						if ($ins->rowCount() > 0) {
 							$result['inserted_entity']++;
@@ -547,7 +547,7 @@ class SeoPageMetadata extends SystemBase {
 					$ins = $dblink->prepare("INSERT INTO spm_seo_page_metadata
 						(spm_path, spm_create_time)
 						VALUES (?, now())
-						ON CONFLICT (spm_path) DO NOTHING");
+						ON CONFLICT (spm_path) WHERE spm_delete_time IS NULL DO NOTHING");
 					$ins->execute(array($rec['path']));
 					if ($ins->rowCount() > 0) {
 						$result['inserted_static']++;

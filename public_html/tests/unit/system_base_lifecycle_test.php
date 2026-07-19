@@ -211,15 +211,12 @@ $s3->load();
 harness_register_row('sch_schedules', 'sch_schedule_id', $s3->key);
 check($s3->key !== NULL, 'A different pair saves normally');
 
-// Soft-deleting a row does NOT free its unique values, and the two layers that
-// decide this disagree — see deferred_fixes entry 23.
-//
-// The application pre-check excludes deleted rows, so it reports the pair as
-// available. The database constraint does not exclude them, so the insert is
-// refused anyway. The user-visible result is that re-creating a record you just
-// deleted fails with a raw database error instead of the friendly message the
-// pre-check exists to produce. Pinned as it behaves today so that fixing the
-// disagreement is a deliberate change to this test.
+// Soft-deleting a row frees its unique values, and BOTH enforcement layers
+// agree: the application pre-check excludes deleted rows, and on a
+// soft-deletable table update_database materializes unique/unique_with as a
+// PARTIAL unique index (unique among live rows) rather than a full
+// constraint — same exclusion, one answer. Delete-then-recreate with the
+// same values therefore succeeds.
 $s1->soft_delete();
 
 $probe = new Schedule(NULL);
@@ -252,15 +249,27 @@ try {
 } catch (Throwable $e) {
 	$refusal = $e;
 }
-check($refusal !== null,
-	'but the database constraint still refuses the pair, so the two disagree');
-check($refusal !== null && strpos($refusal->getMessage(), 'Unique violation') !== false,
-	'and the caller gets a raw constraint violation, not a readable message',
-	$refusal ? substr($refusal->getMessage(), 0, 90) : '');
+check($refusal === null,
+	'and the database agrees: re-creating a soft-deleted pair saves cleanly',
+	$refusal ? get_class($refusal) . ': ' . substr($refusal->getMessage(), 0, 90) : '');
+check($s4->key !== NULL, 'the replacement row was written');
 if ($s4->key) {
 	$s4->load();
 	harness_register_row('sch_schedules', 'sch_schedule_id', $s4->key);
 }
+
+// The partial index still polices live rows: a duplicate of the LIVE
+// replacement is refused at the database even when the pre-check is bypassed
+// (raw insert), so scoping uniqueness to live rows weakened nothing.
+$raw_refused = false;
+try {
+	$raw = DbConnector::get_instance()->get_db_link()->prepare(
+		'INSERT INTO sch_schedules (sch_subject_type, sch_subject_id, sch_timezone) VALUES (?, ?, ?)');
+	$raw->execute(array('harnesstest_' . $RUN, $subject_id, 'UTC'));
+} catch (Throwable $e) {
+	$raw_refused = true;
+}
+check($raw_refused, 'a raw duplicate of the live pair is still refused by the database');
 
 
 section('Collections are iterated, never read as ->results');

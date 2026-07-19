@@ -63,6 +63,10 @@ class MultiProductVersion extends SystemMultiBase {
 			$filters['prv_pro_product_id'] = [$this->options['product_id'], PDO::PARAM_INT];
 		}
 
+		if (isset($this->options['version_name'])) {
+			$filters['prv_version_name'] = [$this->options['version_name'], PDO::PARAM_STR];
+		}
+
 		if (isset($this->options['is_active'])) {
 			if ($this->options['is_active']) {
 				$filters['prv_status'] = "> 0";

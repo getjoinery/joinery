@@ -2,7 +2,7 @@
 /**
  * API v1 Endpoint
  *
- * @version 2.13
+ * @version 2.14
  * @changelog 2.13 - Drive chunk transport logs its OUTCOME: the api_upload
  *   request-log row is written by DriveUploadTransport's response helpers
  *   (success on 2xx, failure with status code otherwise) instead of a
@@ -355,7 +355,11 @@ $classes = LibraryFunctions::discover_model_classes(['include_plugins' => true, 
 $readable_classes = array_values(array_filter($classes, fn($c) => api_flag($c, 'api_readable')));
 $writable_classes = array_values(array_filter($classes, fn($c) => api_flag($c, 'api_writable')));
 
-$source_ip = $_SERVER['REMOTE_ADDR'];
+// Auth-grade client IP: behind Cloudflare the TCP peer is an edge address, so
+// key IP restrictions must check the verified CF-Connecting-IP instead — but
+// only when the peer really is a Cloudflare edge (a spoofed header from a
+// direct-to-origin request must not defeat the restriction).
+$source_ip = SessionControl::get_client_ip(true);
 // Authentication: resolve + validate the credential and load its user, or exit
 // 4xx. Key headers are the primary credential (full chain: key lookup,
 // status/expiry/IP checks, secret verify, user load, failure logging that feeds
@@ -588,6 +592,11 @@ if (in_array($operation, $classes)) {
 
 	parse_str($_SERVER['QUERY_STRING'], $url_parts);
 
+	// __route is routing metadata injected by the Apache rewrite; RouteHelper
+	// strips it from the superglobals, but re-parsing the raw query string
+	// resurrects it here. It is not a filter.
+	unset($url_parts['__route']);
+
 	$page = isset($url_parts['page']) ? $url_parts['page'] : 0;
 	unset($url_parts['page']);
 
@@ -615,8 +624,15 @@ if (in_array($operation, $classes)) {
 		$objects->api_owner_scope = [$owner_col, $auth_data['current_user_id']];
 	}
 
-	$numobjects = $objects->count_all();
-	$objects->load();
+	// An unknown filter key is a caller error, not a server fault: without the
+	// refusal the key would be silently dropped and the collection would
+	// return every row, presented as a filtered result.
+	try {
+		$numobjects = $objects->count_all();
+		$objects->load();
+	} catch (UnknownMultiOptionException $e) {
+		api_error('Unknown filter parameter (' . $e->getMessage() . ')', 'TransactionError', 400);
+	}
 
 	$response_array = array();
 	foreach ($objects as $object) {

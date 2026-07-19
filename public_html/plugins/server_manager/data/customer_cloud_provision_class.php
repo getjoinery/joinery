@@ -46,7 +46,7 @@ class CustomerCloudProvision extends SystemBase {
 
 	public static $field_specifications = array(
 		'cvp_id'                     => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
-		'cvp_origin'                 => array('type'=>'varchar(10)', 'is_nullable'=>false, 'default'=>'order'),
+		'cvp_origin'                 => array('type'=>'varchar(10)', 'is_nullable'=>false, 'default'=>'order', 'allowed_values'=>array('order', 'admin')),
 		'cvp_external_order_item_id' => array('type'=>'int8', 'unique'=>true),
 		'cvp_usr_user_id'            => array('type'=>'int8', 'required'=>true, 'is_nullable'=>false),
 		'cvp_domain'                 => array('type'=>'varchar(255)', 'required'=>true, 'is_nullable'=>false),
@@ -62,8 +62,8 @@ class CustomerCloudProvision extends SystemBase {
 		'cvp_region'                 => array('type'=>'varchar(50)'),
 		'cvp_instance_type'          => array('type'=>'varchar(50)'),
 		'cvp_mgn_node_id'            => array('type'=>'int8'),
-		'cvp_docker_mode'            => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'docker'),
-		'cvp_install_mode'           => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'fresh'),
+		'cvp_docker_mode'            => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'docker', 'allowed_values'=>array('docker', 'bare-metal')),
+		'cvp_install_mode'           => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'fresh', 'allowed_values'=>array('fresh', 'from_backup', 'bare')),
 		'cvp_source_node_id'         => array('type'=>'int8'),
 		'cvp_backup_source'          => array('type'=>'varchar(10)'),
 		'cvp_port'                   => array('type'=>'int4', 'is_nullable'=>false, 'default'=>8080),

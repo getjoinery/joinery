@@ -296,6 +296,10 @@ function make_user($suffix, $permission = 0) {
 	$user->set('usr_password', User::GeneratePassword('TestPassword_' . $suffix));
 	$user->set('usr_permission', $permission);
 	$user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
+	// A harness user is a usable user: activated, so it can sign in through
+	// either door when activation_required_login is on. Tests about the
+	// activation gate itself set usr_is_activated back to false explicitly.
+	$user->set('usr_is_activated', true);
 	$user->save();
 	$user->load();
 	harness_register_user($user);

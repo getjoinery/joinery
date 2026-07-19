@@ -22,7 +22,7 @@ class AddressRequirement extends AbstractProductRequirement {
 
         if ($user) {
             $default_address = $user->get_default_address();
-            $address_book = new MultiAddress(['user_id' => $user->key, 'deleted' => false]);
+            $address_book = new MultiAddress(['user_id' => $user->key]);
             $address_book->load();
             $address_dropdown_builder = $address_book->get_address_dropdown_options($user->get_default_address());
             $new_address_display = true;

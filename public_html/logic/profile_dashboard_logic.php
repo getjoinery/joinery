@@ -37,7 +37,7 @@ function profile_dashboard_logic(array $input): LogicResult {
 	// ---------------------------------------------------------------
 	// USER CARD
 	// ---------------------------------------------------------------
-	$addresses = new MultiAddress(array('user_id' => $user->key, 'deleted' => FALSE));
+	$addresses = new MultiAddress(array('user_id' => $user->key));
 	$address_string = '';
 	if ($addresses->count_all() > 0) {
 		$addresses->load();

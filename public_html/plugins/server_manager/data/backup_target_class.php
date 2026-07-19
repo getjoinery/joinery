@@ -27,7 +27,7 @@ class BackupTarget extends SystemBase {
 	public static $field_specifications = array(
 		'bkt_id'              => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'bkt_name'            => array('type'=>'varchar(100)', 'required'=>true, 'is_nullable'=>false),
-		'bkt_provider'        => array('type'=>'varchar(30)', 'required'=>true, 'is_nullable'=>false),
+		'bkt_provider'        => array('type'=>'varchar(30)', 'required'=>true, 'is_nullable'=>false, 'allowed_values'=>array('b2', 's3', 'linode')),
 		'bkt_bucket'          => array('type'=>'varchar(255)'),
 		'bkt_path_prefix'     => array('type'=>'varchar(255)', 'default'=>'joinery-backups'),
 		'bkt_credentials'     => array('type'=>'jsonb'),

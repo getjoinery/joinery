@@ -68,7 +68,10 @@ $settings = Globalvars::get_instance();
 
 // The options the admin upload page builds — in particular the allowlist is
 // assembled from the allowed_upload_extensions setting, so the test exercises
-// the real regex rather than the class default.
+// the real regex-construction pipeline. The value is pinned in memory: the
+// accept/refuse checks below assume png in and php out, and must not flip
+// with operator configuration.
+harness_set_setting_mem('allowed_upload_extensions', 'gif,jpeg,jpg,png,avif,webp,pdf,xls,doc,xlsx,docx,mp3,mp4,m4a');
 $allowed = $settings->get_setting('allowed_upload_extensions');
 $probe = new UploadSafetyProbe(array(
     'accept_file_types' => '/\.(' . str_replace(',', '|', $allowed) . ')$/i',

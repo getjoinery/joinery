@@ -62,30 +62,19 @@ function book_logic(array $input): LogicResult {
 			return LogicResult::render($page_vars);
 		}
 
-		// Match-or-create the invitee by email (an inactive record is fine).
-		$client = User::GetByEmail($email);
-		if (!$client) {
-			$parts = preg_split('/\s+/', $name, 2);
-			$client = new User(NULL);
-			$client->set('usr_email', $email);
-			$client->set('usr_first_name', $parts[0] !== '' ? $parts[0] : 'Guest');
-			if (!empty($parts[1])) { $client->set('usr_last_name', $parts[1]); }
-			if ($invitee_tz) { $client->set('usr_timezone', $invitee_tz); }
-			$client->set('usr_permission', 0);
-			try {
-				$client->save();
-			} catch (Exception $e) {
-				$page_vars['errors'][] = 'We couldn\'t use that email address. Please double-check it.';
-				return LogicResult::render($page_vars);
-			}
-		}
-
 		$provider = SchedulingProviderRegistry::get($type->get('bkt_provider'));
 
-		// Race-safe creation: serialize per host, then re-check the slot is still open.
+		// Race-safe creation: serialize per host, then re-check the slot is still
+		// open. The invitee is matched-or-created only AFTER the slot is
+		// confirmed free — a lost race must not leave a user row behind — and
+		// inside the transaction, so a failure past that point rolls it back.
+		// The email-save failure keeps its own flag so the invitee still gets
+		// the specific message rather than the generic one.
 		$dblink = DbConnector::get_instance()->get_db_link();
 		$booking = null;
+		$client = null;
 		$conflict = false;
+		$email_error = false;
 		try {
 			$dblink->beginTransaction();
 			$lock = $dblink->prepare('SELECT pg_advisory_xact_lock(?)');
@@ -100,23 +89,48 @@ function book_logic(array $input): LogicResult {
 				$conflict = true;
 				$dblink->rollBack();
 			} else {
-				$booking = $provider->createBooking($type, array(
-					'user_id'  => $client->key,
-					'notes'    => $notes,
-					'timezone' => $invitee_tz,
-					'utm'      => array(
-						'source'   => $input['utm_source'] ?? null,
-						'medium'   => $input['utm_medium'] ?? null,
-						'campaign' => $input['utm_campaign'] ?? null,
-						'content'  => $input['utm_content'] ?? null,
-						'term'     => $input['utm_term'] ?? null,
-					),
-				), $slot_start);
-				$dblink->commit();
+				// Match-or-create the invitee by email (an inactive record is fine).
+				$client = User::GetByEmail($email);
+				if (!$client) {
+					$parts = preg_split('/\s+/', $name, 2);
+					$client = new User(NULL);
+					$client->set('usr_email', $email);
+					$client->set('usr_first_name', $parts[0] !== '' ? $parts[0] : 'Guest');
+					if (!empty($parts[1])) { $client->set('usr_last_name', $parts[1]); }
+					if ($invitee_tz) { $client->set('usr_timezone', $invitee_tz); }
+					$client->set('usr_permission', 0);
+					try {
+						$client->save();
+					} catch (Exception $e) {
+						$email_error = true;
+						$dblink->rollBack();
+					}
+				}
+
+				if (!$email_error) {
+					$booking = $provider->createBooking($type, array(
+						'user_id'  => $client->key,
+						'notes'    => $notes,
+						'timezone' => $invitee_tz,
+						'utm'      => array(
+							'source'   => $input['utm_source'] ?? null,
+							'medium'   => $input['utm_medium'] ?? null,
+							'campaign' => $input['utm_campaign'] ?? null,
+							'content'  => $input['utm_content'] ?? null,
+							'term'     => $input['utm_term'] ?? null,
+						),
+					), $slot_start);
+					$dblink->commit();
+				}
 			}
 		} catch (Exception $e) {
 			if ($dblink->inTransaction()) { $dblink->rollBack(); }
 			$page_vars['errors'][] = 'Could not complete the booking. Please try again.';
+			return LogicResult::render($page_vars);
+		}
+
+		if ($email_error) {
+			$page_vars['errors'][] = 'We couldn\'t use that email address. Please double-check it.';
 			return LogicResult::render($page_vars);
 		}
 

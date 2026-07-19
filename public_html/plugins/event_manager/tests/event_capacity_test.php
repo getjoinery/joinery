@@ -69,8 +69,8 @@ function ec_seat($event, $user, $expires = null) {
 	return $reg;
 }
 
-/** A product wired to the event fulfillment provider. */
-function ec_make_product($event_id) {
+/** A product wired to the event fulfillment provider. ref 0 + group = bundle. */
+function ec_make_product($event_id, $group_id = null) {
 	$slug = bin2hex(random_bytes(3));
 	$product = new Product(NULL);
 	$product->set('pro_name', 'HarnessTest Ticket ' . $slug);
@@ -78,10 +78,24 @@ function ec_make_product($event_id) {
 	$product->set('pro_is_active', true);
 	$product->set('pro_fulfillment_provider', 'event_registration');
 	$product->set('pro_fulfillment_ref', (int)$event_id);
+	if ($group_id) {
+		$product->set('pro_grp_group_id', (int)$group_id);
+	}
 	$product->save();
 	$product->load();
 	harness_register_row('pro_products', 'pro_product_id', $product->key);
 	return $product;
+}
+
+/** An event bundle group containing $events, registered for teardown. */
+function ec_make_bundle($owner_user_id, array $events) {
+	$group = Group::add_group('HarnessTest Bundle ' . bin2hex(random_bytes(3)), $owner_user_id, 'event');
+	harness_register_row('grp_groups', 'grp_group_id', $group->key);
+	foreach ($events as $event) {
+		$member = $group->add_member(is_object($event) ? $event->key : (int)$event);
+		harness_register_row('grm_group_members', 'grm_group_member_id', $member->key);
+	}
+	return $group;
 }
 
 $provider = new EventRegistrationFulfillment();
@@ -179,14 +193,52 @@ check($provider->checkAvailability($product_expiring, $expiring->key, 2) !== nul
 	'only the expired seat is released, not both');
 
 // ---------------------------------------------------------------------------
-section('Enforcement boundary');
+section('Bundle capacity');
 
-// A bundle seats a group whose membership resolves at fulfillment, so its size
-// is unknown before the charge and it is deliberately not capacity checked.
-check($provider->checkAvailability($product_capped, 0, 1) === null,
-	'a bundle reference is not capacity checked');
-check($provider->checkAvailability($product_capped, -1, 1) === null,
-	'a negative reference is not capacity checked');
+// A bundle registers the buyer into every event in its group, so every capped
+// event in the group must have room — one full event refuses the whole bundle.
+// At this point $capped is full (3/3) and $expiring has one free seat.
+$bundle_open = ec_make_event('BundleOpen', 2);
+$bundle_group = ec_make_bundle($u1->key, array($uncapped, $bundle_open));
+$product_bundle = ec_make_product(0, $bundle_group->key);
+
+check($provider->checkAvailability($product_bundle, 0, 1) === null,
+	'a bundle whose events all have room is available');
+
+$bundle_over = $provider->checkAvailability($product_bundle, 0, 3);
+check($bundle_over !== null,
+	'a quantity exceeding a member event\'s remaining places is refused',
+	'answer: ' . var_export($bundle_over, true));
+check(is_string($bundle_over) && strpos($bundle_over, $bundle_open->get('evt_name')) !== false,
+	'the refusal names which event in the bundle lacks room',
+	'answer: ' . var_export($bundle_over, true));
+
+$full_member = ec_make_bundle($u1->key, array($uncapped, $capped, $bundle_open));
+$product_full_bundle = ec_make_product(0, $full_member->key);
+$bundle_full = $provider->checkAvailability($product_full_bundle, 0, 1);
+check($bundle_full !== null, 'a bundle containing a full event is refused',
+	'answer: ' . var_export($bundle_full, true));
+check(is_string($bundle_full) && strpos($bundle_full, $capped->get('evt_name')) !== false
+	&& stripos($bundle_full, 'full') !== false,
+	'the refusal names the full event',
+	'answer: ' . var_export($bundle_full, true));
+
+check($provider->checkAvailability($product_full_bundle, -1, 1) !== null,
+	'a negative reference is treated as a bundle and still checked');
+
+// Robustness: a group member pointing at a deleted event is skipped, a bundle
+// with no group at all is not checked, and neither takes checkout down.
+$ghost_member = $bundle_group->add_member(999999999);
+harness_register_row('grm_group_members', 'grm_group_member_id', $ghost_member->key);
+check($provider->checkAvailability($product_bundle, 0, 1) === null,
+	'a group member pointing at a missing event is skipped');
+
+$product_groupless = ec_make_product(0);
+check($provider->checkAvailability($product_groupless, 0, 1) === null,
+	'a bundle product with no group is not capacity checked');
+
+// ---------------------------------------------------------------------------
+section('Enforcement boundary');
 
 // A reference pointing at nothing must not take checkout down.
 check($provider->checkAvailability($product_capped, 999999999, 1) === null,

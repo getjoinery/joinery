@@ -362,7 +362,8 @@ check(count($slots_d) === 2, 'The contested day starts with two open hours', jso
 $first = bk_submit($type_d->get('bkt_slug'), $day_d . ' 09:00:00');
 check(!bk_errors($first), 'The first booker gets the slot', json_encode(bk_errors($first)));
 
-$second = bk_submit($type_d->get('bkt_slug'), $day_d . ' 09:00:00');
+$loser_email = 'bkflow_loser_' . $RUN . '@getjoinery.com';
+$second = bk_submit($type_d->get('bkt_slug'), $day_d . ' 09:00:00', array('invitee_email' => $loser_email));
 check(bk_errors($second), 'The second booker for the same hour is refused');
 check(strpos(implode(' ', bk_errors($second)), 'just taken') !== false,
 	'The refusal tells them the time was taken', json_encode(bk_errors($second)));
@@ -370,6 +371,17 @@ check(!$second->redirect, 'The losing booker is not sent to a confirmation page'
 
 $rows = bk_rows($type_d);
 check(count($rows) === 1, 'Exactly one booking exists for the contested hour', count($rows) . ' rows');
+
+// A lost race must not mint a user: the invitee is matched-or-created only
+// after the slot is confirmed free, inside the booking transaction, so the
+// loser's email leaves no usr_users row behind.
+$loser_q = DbConnector::get_instance()->get_db_link()->prepare(
+	'SELECT usr_user_id FROM usr_users WHERE usr_email = ?');
+$loser_q->execute(array($loser_email));
+$loser_row = $loser_q->fetchColumn();
+check($loser_row === false, 'The losing booker leaves no user row behind',
+	$loser_row ? 'user id ' . $loser_row : '');
+if ($loser_row) { harness_register_row('usr_users', 'usr_user_id', $loser_row); }
 
 // The loser must still be able to take a different time — a conflict is not a
 // dead end, and the failed attempt must not have consumed anything.
@@ -475,6 +487,42 @@ check(count(bk_rows($type_c)) === 2, 'The cap holds at two bookings for the day'
 // The cap is per period, so the next week is unaffected.
 $day_c_next = gmdate('Y-m-d', strtotime($day_c . ' +7 days'));
 check(count(bk_slots($type_c, $day_c_next)) === 4, 'The following week opens fresh under a daily cap');
+
+// A live paid hold counts toward the cap exactly like a confirmation — slot
+// availability and the cap counter answer through one predicate
+// (Booking::occupies_host_time), so they cannot disagree about what a hold
+// is. An expired hold counts for neither.
+$host_h = bk_host('HoldCap', 'UTC');
+$sched_h = bk_schedule($host_h, 'UTC');
+list($day_h, $dow_h) = bk_future_day(19);
+bk_window($sched_h, $dow_h, '09:00:00', '13:00:00');
+$type_h = bk_type($host_h, array('bkt_max_per_day' => 1));
+
+check(count(bk_slots($type_h, $day_h)) === 4, 'The hold-cap day starts with four open hours');
+
+$holder = make_user('BkHoldCap');
+$hold = new Booking(NULL);
+$hold->set('bkn_provider', 'native');
+$hold->set('bkn_bkt_booking_type_id', $type_h->key);
+$hold->set('bkn_usr_user_id_booked', $host_h->key);
+$hold->set('bkn_usr_user_id_client', $holder->key);
+$hold->set('bkn_start_time', $day_h . ' 09:00:00');
+$hold->set('bkn_end_time', $day_h . ' 10:00:00');
+$hold->set('bkn_status', Booking::BOOKING_STATUS_CREATED);
+$hold->set('bkn_hold_expires_time', gmdate('Y-m-d H:i:s', time() + 900));
+$hold->set('bkn_action_token', Booking::make_action_token());
+$hold->save();
+harness_register_row('bkn_bookings', 'bkn_booking_id', $hold->key);
+
+check(count(bk_slots($type_h, $day_h)) === 0,
+	'A live paid hold consumes the daily cap, not just its own hour',
+	json_encode(bk_slots($type_h, $day_h)));
+
+$hold->set('bkn_hold_expires_time', gmdate('Y-m-d H:i:s', time() - 60));
+$hold->save();
+check(count(bk_slots($type_h, $day_h)) === 4,
+	'An expired hold releases the cap along with its hour',
+	json_encode(bk_slots($type_h, $day_h)));
 
 
 // ============================================================================
@@ -673,6 +721,18 @@ check((int)$bn2->get('bkn_status') === Booking::BOOKING_STATUS_BOOKED,
 	'A different host cannot cancel someone else\'s booking');
 check($bn2->get('bkn_canceled_by') === '' || $bn2->get('bkn_canceled_by') === NULL,
 	'The other host is not recorded against it');
+
+// The refusal must be reported as a refusal — a foreign or missing id gets
+// the error flag, never the success banner.
+check($res->redirect && strpos($res->redirect, 'cancel_error=1') !== false
+	&& strpos($res->redirect, 'canceled=1') === false,
+	'The refused cancellation reports an error, not success',
+	'redirect: ' . var_export($res->redirect, true));
+$res = harness_call_logic('plugins/bookings/logic/my_bookings_logic.php', 'my_bookings_logic',
+	array('cancel_booking' => '1', 'bkn_booking_id' => 999999999), 'POST');
+check($res->redirect && strpos($res->redirect, 'cancel_error=1') !== false,
+	'Cancelling a nonexistent booking reports an error, not success',
+	'redirect: ' . var_export($res->redirect, true));
 bk_signin(null);
 
 

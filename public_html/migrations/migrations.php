@@ -1025,3 +1025,13 @@
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
 
+	// Required-ness of a question is the qst_is_required column; promote any
+	// legacy 'required' key out of the qst_validate blob so every enforcement
+	// surface (surveys, store requirements, browser JS) reads one source.
+	$migration = array();
+	$migration['database_version'] = '151';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'promote_question_required_to_column.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+

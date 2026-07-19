@@ -56,21 +56,48 @@ class EventRegistrationFulfillment implements FulfillmentProvider {
      * directly. Asking here means a full event stops selling seats instead of
      * charging for one that does not exist.
      *
-     * A bundle ($ref <= 0) seats a group whose membership is resolved at
-     * fulfillment, so its size is not known here; bundles are not capacity
-     * checked. An event with no evt_max_signups is uncapped.
+     * A bundle ($ref <= 0) registers the buyer into every event in its group,
+     * so every capped event in the group must have room; the first full one
+     * refuses the whole purchase, named so a buyer knows which event blocked
+     * it. An event with no evt_max_signups is uncapped.
      */
     public function checkAvailability(Product $product, int $ref, int $quantity): ?string {
-        if ($ref <= 0) {
-            return null;
-        }
         require_once(PathHelper::getIncludePath('plugins/event_manager/data/events_class.php'));
         require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_registrants_class.php'));
 
-        $event = new Event($ref, TRUE);
-        if (!$event->key) {
+        if ($ref > 0) {
+            $event = new Event($ref, TRUE);
+            if (!$event->key) {
+                return null;
+            }
+            return $this->eventAvailability($event, $quantity);
+        }
+
+        // Bundle: check each event in the group with the same arithmetic a
+        // single ticket gets.
+        if (!$product->get('pro_grp_group_id')) {
             return null;
         }
+        require_once(PathHelper::getIncludePath('data/groups_class.php'));
+        $group = new Group($product->get('pro_grp_group_id'), TRUE);
+        if (!$group->key) {
+            return null;
+        }
+        foreach ($group->get_member_list() as $group_member) {
+            $bundle_event = new Event($group_member->get('grm_foreign_key_id'), TRUE);
+            if (!$bundle_event->key) {
+                continue;
+            }
+            $answer = $this->eventAvailability($bundle_event, $quantity);
+            if ($answer !== null) {
+                return $answer;
+            }
+        }
+        return null;
+    }
+
+    /** The per-event capacity arithmetic behind checkAvailability(). */
+    private function eventAvailability(Event $event, int $quantity): ?string {
         $max = (int)$event->get('evt_max_signups');
         if ($max <= 0) {
             return null;

@@ -56,7 +56,7 @@ class InboundEmailDomain extends SystemBase {
 		'ied_inbound_email_domain_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'ied_domain'            => array('type'=>'varchar(255)', 'required'=>true, 'is_nullable'=>false),
 		'ied_is_enabled'        => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),
-		'ied_catch_all_mode'    => array('type'=>'varchar(20)', 'default'=>'forward', 'is_nullable'=>false),
+		'ied_catch_all_mode'    => array('type'=>'varchar(20)', 'default'=>'forward', 'is_nullable'=>false, 'allowed_values'=>array(self::CATCHALL_FORWARD, self::CATCHALL_STORE)),
 		'ied_catch_all_address' => array('type'=>'varchar(500)'),
 		'ied_reject_unmatched'  => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),
 		'ied_is_imap_source'    => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),

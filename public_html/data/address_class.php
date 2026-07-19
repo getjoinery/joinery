@@ -380,7 +380,6 @@ private static function UcAddress($string) {
 			'user_id' => $this->get('usa_usr_user_id'),
 			'state_lower' => $this->get('usa_state'),
 			'city_lower' => $this->get('usa_city'),
-			'deleted' => FALSE,
 		));
 		if ($address_count->count_all()) {
 			$address_count->load();
@@ -796,6 +795,10 @@ class MultiAddress extends SystemMultiBase {
             $filters['usa_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
         }
 
+        if (isset($this->options['bad'])) {
+            $filters['usa_is_bad'] = $this->options['bad'] ? "IS TRUE" : "IS NOT TRUE";
+        }
+
         if (isset($this->options['address1'])) {
             $filters['usa_address1'] = [$this->options['address1'], PDO::PARAM_STR];
         }
@@ -832,7 +835,7 @@ class MultiAddress extends SystemMultiBase {
     }
 
 	public static function AddressDropdown($user_id, $get_raw_options=FALSE) {
-		$address_book = new MultiAddress(array('user_id' => $user_id, 'deleted' => FALSE, 'bad' => FALSE));
+		$address_book = new MultiAddress(array('user_id' => $user_id, 'bad' => FALSE));
 		$address_book->load();
 
 		if ($get_raw_options) {

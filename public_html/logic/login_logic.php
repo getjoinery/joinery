@@ -189,6 +189,15 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		$returnurl = $session->get_return();
 		$_SESSION['returnurl'] = NULL;
 
+		// Only a local path may be followed — no scheme, no protocol-relative
+		// '//host'. The slot is server-written today; this keeps the redirect
+		// from becoming an open redirect if any future caller stores user
+		// input in it. '/login' itself is never a destination.
+		if ($returnurl && (strpos($returnurl, '/') !== 0 || strpos($returnurl, '//') === 0
+			|| strpos($returnurl, '/login') === 0)) {
+			$returnurl = FALSE;
+		}
+
 		if ($returnurl) {
 			return LogicResult::redirect($returnurl);
 		} else {

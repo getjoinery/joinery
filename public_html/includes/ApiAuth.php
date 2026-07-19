@@ -357,9 +357,16 @@ class ApiAuth {
 	 * account-existence oracle. Returns a result the endpoint shell shapes into
 	 * a response; performs no logging or HTTP itself.
 	 *
+	 * When activation_required_login is on, an unactivated account is refused
+	 * here exactly as login_logic refuses it a web session — same setting, same
+	 * gate, both doors — and the activation email is re-sent. The reason is
+	 * only revealed after the password verifies, so it is no account-existence
+	 * oracle.
+	 *
 	 * @return array On success: ['ok'=>true, 'user'=>User, 'api_key'=>ApiKey, 'secret_key'=>string].
 	 *               On failure: ['ok'=>false, 'user'=>User|null] (user set when found-but-invalid,
-	 *               for failure logging).
+	 *               for failure logging), plus 'reason'=>'activation_required' when
+	 *               the credentials were valid but the account is unactivated.
 	 */
 	public static function attemptLogin($email, $password, $device_label = NULL) {
 		require_once(PathHelper::getIncludePath('data/users_class.php'));
@@ -367,6 +374,13 @@ class ApiAuth {
 
 		if (!$user || $user->get('usr_delete_time') || !$user->check_password($password)) {
 			return array('ok' => false, 'user' => $user ?: null);
+		}
+
+		$settings = Globalvars::get_instance();
+		if ($settings->get_setting('activation_required_login') && !$user->get('usr_is_activated')) {
+			require_once(PathHelper::getIncludePath('includes/Activation.php'));
+			Activation::email_activate_send($user);
+			return array('ok' => false, 'user' => $user, 'reason' => 'activation_required');
 		}
 
 		$minted = ApiKey::CreateSessionKey($user->key, $device_label);

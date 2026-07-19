@@ -121,7 +121,7 @@
 	// Validation checkboxes - unserialize and convert
 	$validation_data = unserialize($question->get('qst_validate')) ?: [];
 	$checked_vals = [];
-	if (!empty($validation_data['required'])) $checked_vals[] = 'required';
+	if ($question->get('qst_is_required')) $checked_vals[] = 'required';
 	if (!empty($validation_data['integer'])) $checked_vals[] = 'integer';
 	if (!empty($validation_data['decimal'])) $checked_vals[] = 'decimal';
 

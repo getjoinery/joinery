@@ -137,10 +137,11 @@ class Group extends SystemBase {	public static $prefix = 'grp';
 			exit();	
 		}
 		
-		$groups_out = new MultiGroup(array(
-			'category' => $category,
-			'return_deleted' => $return_deleted
-		));
+		$group_options = array('category' => $category);
+		if (!$return_deleted) {
+			$group_options['deleted'] = false;
+		}
+		$groups_out = new MultiGroup($group_options);
 			
 		$groups_out->load();
 

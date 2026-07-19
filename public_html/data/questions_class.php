@@ -82,7 +82,7 @@ class Question extends SystemBase {	public static $prefix = 'qst';
 			$question_name = 'question_'.$this->key;
 		}
 
-		if(array_key_exists('required', $validation_options)){
+		if($this->get('qst_is_required')){
 			$validation_rules[$question_name]['required']['value'] = 'true';
 		}
 		if(array_key_exists('integer', $validation_options)){
@@ -109,7 +109,7 @@ class Question extends SystemBase {	public static $prefix = 'qst';
 	function validate_answers($answers){
 		$validation_options = unserialize($this->get('qst_validate')) ?: [];
 
-		if(array_key_exists('required', $validation_options)){
+		if($this->get('qst_is_required')){
 			if($answers === '' || $answers === NULL || (is_array($answers) && count($answers) == 0)){
 				return 'You did not answer this question: '. $this->get('qst_question');
 			}
@@ -221,7 +221,7 @@ class Question extends SystemBase {	public static $prefix = 'qst';
 		}
 		else if ($this->get('qst_type') == Question::TYPE_DROPDOWN){
 			$options = new MultiQuestionOption(
-				array('deleted'=>false, 'question_id'=> $this->key),
+				array('question_id'=> $this->key),
 				NULL,		//SORT BY => DIRECTION
 				NULL,  //NUM PER PAGE
 				NULL);  //OFFSET
@@ -237,7 +237,7 @@ class Question extends SystemBase {	public static $prefix = 'qst';
 		}
 		else if ($this->get('qst_type') == Question::TYPE_RADIO){
 			$options = new MultiQuestionOption(
-				array('deleted'=>false, 'question_id'=> $this->key),
+				array('question_id'=> $this->key),
 				NULL,		//SORT BY => DIRECTION
 				NULL,  //NUM PER PAGE
 				NULL);  //OFFSET
@@ -253,7 +253,7 @@ class Question extends SystemBase {	public static $prefix = 'qst';
 		}
 		else if ($this->get('qst_type') == Question::TYPE_CHECKBOX){
 			$options = new MultiQuestionOption(
-				array('deleted'=>false, 'question_id'=> $this->key),
+				array('question_id'=> $this->key),
 				NULL,		//SORT BY => DIRECTION
 				NULL,  //NUM PER PAGE
 				NULL);  //OFFSET
@@ -272,7 +272,7 @@ class Question extends SystemBase {	public static $prefix = 'qst';
 		}
 		else if ($this->get('qst_type') == Question::TYPE_CHECKBOX_LIST){
 			$options = new MultiQuestionOption(
-				array('deleted'=>false, 'question_id'=> $this->key),
+				array('question_id'=> $this->key),
 				NULL,		//SORT BY => DIRECTION
 				NULL,  //NUM PER PAGE
 				NULL);  //OFFSET
@@ -399,7 +399,7 @@ class Question extends SystemBase {	public static $prefix = 'qst';
 		/*
 		if ($this->get('qst_type') == Question::TYPE_DROPDOWN){
 			$options = new MultiQuestionOption(
-				array('deleted'=>false, 'question_id'=> $this->key),
+				array('question_id'=> $this->key),
 				NULL,		//SORT BY => DIRECTION
 				NULL,  //NUM PER PAGE
 				NULL);  //OFFSET
@@ -412,7 +412,7 @@ class Question extends SystemBase {	public static $prefix = 'qst';
 		}
 		else if ($this->get('qst_type') == Question::TYPE_RADIO){
 			$options = new MultiQuestionOption(
-				array('deleted'=>false, 'question_id'=> $this->key),
+				array('question_id'=> $this->key),
 				NULL,		//SORT BY => DIRECTION
 				NULL,  //NUM PER PAGE
 				NULL);  //OFFSET
@@ -424,7 +424,7 @@ class Question extends SystemBase {	public static $prefix = 'qst';
 		}
 		else if ($this->get('qst_type') == Question::TYPE_CHECKBOX){
 			$options = new MultiQuestionOption(
-				array('deleted'=>false, 'question_id'=> $this->key),
+				array('question_id'=> $this->key),
 				NULL,		//SORT BY => DIRECTION
 				NULL,  //NUM PER PAGE
 				NULL);  //OFFSET
@@ -436,7 +436,7 @@ class Question extends SystemBase {	public static $prefix = 'qst';
 		}
 		else if ($this->get('qst_type') == Question::TYPE_CHECKBOX_LIST){
 			$options = new MultiQuestionOption(
-				array('deleted'=>false, 'question_id'=> $this->key),
+				array('question_id'=> $this->key),
 				NULL,		//SORT BY => DIRECTION
 				NULL,  //NUM PER PAGE
 				NULL);  //OFFSET

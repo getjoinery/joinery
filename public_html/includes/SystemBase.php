@@ -1293,6 +1293,20 @@ abstract class SystemBase {
 			}
 		}
 
+		// CHECK DECLARED ENUMS: a field with 'allowed_values' accepts only members
+		// of the set. NULL/empty passes — nullability and required-ness are their
+		// own declarations. Loose comparison so int-backed enums match their
+		// string form from the database.
+		foreach (static::$field_specifications as $field_name => $spec) {
+			if (!empty($spec['allowed_values']) && is_array($spec['allowed_values'])) {
+				$enum_value = $this->get($field_name);
+				if (!is_null($enum_value) && $enum_value !== '' && !in_array($enum_value, $spec['allowed_values'])) {
+					throw new SystemBaseException('Field "' . $field_name . '" must be one of: '
+						. implode(', ', $spec['allowed_values']) . ' — got "' . $enum_value . '".');
+				}
+			}
+		}
+
 		// CHECK VALIDATION RULES FROM field_specifications['validation']
 		foreach (static::$field_specifications as $field_name => $spec) {
 			if (isset($spec['validation']) && is_array($spec['validation'])) {
@@ -1868,11 +1882,22 @@ abstract class SystemBase {
 
 }
 
+/**
+ * Thrown when a Multi collection is asked to filter by an option key its
+ * getMultiResults() does not implement. Distinct from SystemBaseException so
+ * transport shells (the REST collection endpoint) can map it to a caller
+ * error (400) rather than a server fault.
+ */
+class UnknownMultiOptionException extends SystemBaseException {}
+
 abstract class SystemMultiBase implements IteratorAggregate, Countable {
 
 	private $multi_data;
 	protected $cached_references;
 	protected static $default_options = array();
+
+	/** Per-class cache for known_option_keys(); null = source unreadable. */
+	private static $known_option_keys_cache = array();
 
 	public $loaded;
 	public $loadable;
@@ -1934,7 +1959,78 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 		}
 	}
 
+	/**
+	 * The option keys this collection implements, derived from its source:
+	 * every literal $this->options['key'] mention in the class file of this
+	 * class and each ancestor below SystemMultiBase (any method — filter
+	 * builders and helpers alike), plus the keys of $default_options. Derived
+	 * rather than declared so the set can never drift from the code that does
+	 * the filtering. Returns null if a source file cannot be read, in which
+	 * case enforcement is skipped — introspection failure must never block a
+	 * query.
+	 */
+	private function known_option_keys() {
+		$class = get_class($this);
+		if (!array_key_exists($class, self::$known_option_keys_cache)) {
+			$keys = array_keys(static::$default_options);
+			try {
+				$seen_files = array();
+				for ($rc = new ReflectionClass($class); $rc && $rc->getName() !== 'SystemMultiBase'; $rc = $rc->getParentClass()) {
+					$file = $rc->getFileName();
+					if (!$file || isset($seen_files[$file])) {
+						continue;
+					}
+					$seen_files[$file] = true;
+					$src = @file_get_contents($file);
+					if ($src === false) {
+						self::$known_option_keys_cache[$class] = null;
+						return null;
+					}
+					// A pass-through class iterates its options generically and
+					// maps every key to a column — there is no fixed vocabulary
+					// to enforce, and a bogus key already fails loudly as a SQL
+					// error. Skip enforcement for it.
+					if (preg_match('/foreach\s*\(\s*\$this->options\b/', $src)) {
+						self::$known_option_keys_cache[$class] = null;
+						return null;
+					}
+					if (preg_match_all('/options\[\s*[\'"]([A-Za-z0-9_]+)[\'"]\s*\]/', $src, $m)) {
+						$keys = array_merge($keys, $m[1]);
+					}
+				}
+				$keys = array_values(array_unique($keys));
+			} catch (\Throwable $e) {
+				$keys = null;
+			}
+			self::$known_option_keys_cache[$class] = $keys;
+		}
+		return self::$known_option_keys_cache[$class];
+	}
+
+	/**
+	 * Refuse a query whose options include a key this collection does not
+	 * implement. Without this, an unknown key is silently dropped and the
+	 * collection returns MORE rows than the caller asked for — which for an
+	 * ownership filter is a data-exposure bug that reads as correct code.
+	 */
+	private function assert_options_known() {
+		if (!is_array($this->options) || $this->options === array()) {
+			return;
+		}
+		$known = $this->known_option_keys();
+		if ($known === null) {
+			return;
+		}
+		$unknown = array_diff(array_keys($this->options), $known);
+		if ($unknown) {
+			throw new UnknownMultiOptionException(get_class($this) . ' does not implement option'
+				. (count($unknown) > 1 ? 's' : '') . " '" . implode("', '", $unknown)
+				. "' — the filter would be silently ignored and the query would return unfiltered rows.");
+		}
+	}
+
 	protected function _get_resultsv2($table, $filters = [], $sorts = [], $only_count = false, $debug = false) {
+		$this->assert_options_known();
 		$where_clauses = [];
 		$bind_params = [];
 		$operation = $this->operation;

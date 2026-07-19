@@ -925,6 +925,12 @@ class ModelTester {
             }
         }
 
+        // A declared enum: any generated value must be a member of the set.
+        if (is_array($spec) && !empty($spec['allowed_values']) && is_array($spec['allowed_values'])) {
+            $allowed = array_values($spec['allowed_values']);
+            return $allowed[$index % count($allowed)];
+        }
+
         // Handle different field types with index support.
         // 'char' matches varchar(n), character(n), and char(n).
         if (strpos($type, 'char') !== false) {
@@ -1480,6 +1486,18 @@ class ModelTester {
         $spec = $model_class::$field_specifications[$field] ?? [];
         $type = strtolower($spec['type'] ?? 'varchar(255)');
 
+        // A declared enum can only vary to another member of the set. A
+        // single-member set has no different legal value — return the value
+        // unchanged rather than something the model must reject.
+        if (!empty($spec['allowed_values']) && is_array($spec['allowed_values'])) {
+            foreach ($spec['allowed_values'] as $candidate) {
+                if ($candidate != $value) {
+                    return $candidate;
+                }
+            }
+            return $value;
+        }
+
         if (strpos($type, 'bool') !== false) {
             $truthy = ($value === true || $value === 't' || $value === 'true' || $value === '1' || $value === 1);
             return !$truthy;
@@ -1521,7 +1539,20 @@ class ModelTester {
         $model_class = $this->model_class;
         $spec = $model_class::$field_specifications[$field] ?? [];
         $type = $spec['type'] ?? 'varchar(255)';
-        
+
+        // A declared enum: the update value must be a different member of the
+        // set. A single-member set has none — null signals the caller to skip
+        // this field, matching the timestamp convention below.
+        if (!empty($spec['allowed_values']) && is_array($spec['allowed_values'])) {
+            $current = $this->generate_field_value($field);
+            foreach ($spec['allowed_values'] as $candidate) {
+                if ($candidate != $current) {
+                    return $candidate;
+                }
+            }
+            return null;
+        }
+
         // Generate appropriate different value based on field type
         if (strpos($type, 'int') !== false) {
             $original_value = $this->generate_integer_value($field, $type);
