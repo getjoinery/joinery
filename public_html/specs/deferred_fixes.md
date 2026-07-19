@@ -354,6 +354,20 @@ The four live `'deleted' => false` arguments in `data/questions_class.php`
 should be dropped either way — they promise a filter that does not exist.
 They are deliberately left in place for now so this entry has a reproducer.
 
+**Update 2026-07-19 (T30).** Half of this is now covered, and it is worth being
+precise about which half. `tests/models/multi_models_test.php` asserts that
+every row a filter returns satisfies that filter, so a collection which
+*declares* an option and then fails to apply it is caught — verified by
+mutating `MultiBookingType` to accept `user_id` and discard its filters, which
+the suite now fails and previously passed.
+
+What remains uncovered is exactly the case this entry opens with: a **caller**
+passing an option the class never declared. No per-class suite can see it,
+because from the collection's side nothing happened — the key was read by no
+one. That still needs the strictness decision above, and option 2 (log unknown
+option keys in dev) is still the natural first step, now with a green Multi
+suite underneath it to catch any fallout from tightening.
+
 ---
 
 ## 12. A question stores its required-ness in two places and reads only one
@@ -436,3 +450,306 @@ Two process notes worth keeping regardless of the outcome:
   were already listed. Verified by forcing a check red and confirming the
   block appears within the last few lines of output — so even a run read
   through a pager or a `tail` names its failures.
+
+## 14. Postgres on the jeremytunnell VPS accepts connections from the entire internet
+
+**Found:** 2026-07-19, during the read-only step-8 mail-readiness probe of node
+176 (jeremytunnell-vps, 45.79.204.178). Its ufw shows `5432 ALLOW IN Anywhere`
+(v4 and v6), and Postgres is listening on the external interface — verified
+reachable from the dev box (connection accepted, password prompt reached).
+Password auth is the only gate on a box that now serves jeremytunnell.com and
+is about to hold real mail.
+
+**Scope:** specific to node 176's install path. VPS A (45.56.119.74) refuses
+5432, so the exposure came from something in the bare-metal and/or from-backup
+branch of the install — possibly a rule added so the control plane could push
+the node-32 restore, never removed. The other bare-metal-branch findings from
+the same probe (no ufw 25/tcp rule, opendmarc absent, `hostname -f` =
+`localhost`) suggest that branch's host-setup steps diverge from the docker
+path in more ways than this one.
+
+**Cost of leaving it:** the box's database is one credential guess or one
+pg_hba misconfiguration away from the internet, and it is the box that step 8
+turns into a mail server holding personal mail. Exposure also invites constant
+credential-stuffing noise in the logs.
+
+**What closing it takes:** identify what legitimately needs remote 5432 (if
+the control plane needs it for backup/restore pushes, restrict the rule to the
+control plane's IP; if nothing does, delete the rule and set
+`listen_addresses` back to localhost). Then audit the bare-metal install
+branch so the next born node does not reproduce it, and add the check to the
+node health/status surface so an exposed 5432 shows up as a finding rather
+than a probe surprise. Firewall change on a live box — do it attended.
+
+## 15. A booker who loses the race for a slot still leaves a user account behind
+
+**Found:** 2026-07-19, while writing the T29 bookings suite. Confirmed by
+probe: two submissions for the same hour, the second refused with "that time
+was just taken", and the losing email still has a `usr_users` row afterwards.
+
+`book_logic()` matches-or-creates the invitee from their email *before* it
+opens the transaction and re-checks the slot. So the order is: create the
+person, take the lock, discover the slot is gone, roll back the booking — and
+the person stays. Every lost race, every mistyped-then-corrected attempt at a
+contested time, mints a permanent user record for an appointment that never
+happened.
+
+**Why it is not obviously a one-line fix.** Moving the match-or-create inside
+the transaction would make the rollback clean it up, but it also moves it
+under the generic `catch` that currently returns "Could not complete the
+booking" — losing the specific "We couldn't use that email address" message a
+failed `User::save()` produces today. The other direction (create it lazily,
+only after `$open` is confirmed) keeps the message but means the invitee is
+created while holding the advisory lock, lengthening the critical section for
+every booking to save litter on the rare one. Which trade is right depends on
+whether these ghost accounts are actually a problem — they are inactive,
+permission 0, and a returning booker with the same email is matched to the
+existing row rather than duplicated, so they may be harmless clutter.
+
+**Cost of leaving it:** the user table accumulates records for people who
+never booked, which distorts any member count, any "users who have booked"
+segment, and any email list built by querying users. It also means a contested
+booking page is a way for an outsider to create rows in `usr_users` at will —
+not an account they control, but rows nonetheless.
+
+**What closing it takes:** decide whether ghost invitees matter. If they do,
+move the creation after the conflict check and decide what the invalid-email
+path says. If they do not, say so here and leave the code alone.
+
+## 16. Pending paid holds block their slot but do not count toward booking caps
+
+**Found:** 2026-07-19, T29. Confirmed by probe: a `BOOKING_STATUS_CREATED`
+booking with an unexpired `bkn_hold_expires_time` on a type with
+`bkt_max_per_day = 1` removes its own hour from availability, but the rest of
+the day stays open — the cap of one is not reached.
+
+Two pieces of code disagree about what a hold is.
+`BookingItemSource::getItems()` treats CREATED-with-live-expiry as occupying
+the slot, which is why the hour disappears. `NativeSchedulingProvider::
+applyCaps()` counts only `BOOKING_STATUS_BOOKED`, so the same row is invisible
+to the cap. A host who set "two a day" can end up with two confirmed bookings
+plus any number of live holds on the same day.
+
+**Why it needs a decision rather than a fix.** Whether a hold should consume a
+cap slot is a policy question, not an oversight to correct blindly. Counting
+them means an abandoned checkout eats the host's daily allowance until the
+hold expires. Not counting them means the cap is a cap on confirmations, not
+on the day — which is defensible, but then availability and caps are answering
+two different questions and that should be deliberate and documented rather
+than incidental.
+
+**Cost of leaving it:** the cap silently means something different from what
+the admin field implies, and only on days where a checkout was started and not
+finished — so it will present as an occasional inexplicable overbooking rather
+than a reproducible rule.
+
+**What closing it takes:** decide the policy, then make the two call sites
+agree — ideally by giving `Booking` one predicate ("does this row occupy the
+host's time") that both the item source and the cap counter call, so they
+cannot drift again. Document the answer in the bookings overview.
+
+## 17. A host cancelling someone else's booking is told it worked
+
+**Found:** 2026-07-19, T29. Pinned in `booking_flow_test.php`: the booking
+correctly is *not* canceled, which is the part that matters, so this is a
+truthfulness bug rather than a security one.
+
+`my_bookings_logic()` checks ownership before cancelling — `if ($booking->key
+&& (int)$booking->get('bkn_usr_user_id_booked') === (int)$user_id)` — but the
+redirect to `/profile/bookings/my_bookings?canceled=1` sits outside the `if`.
+A host who posts another host's booking id gets the success banner and no
+cancellation. The same is true for an id that does not exist at all.
+
+**Why it is not a drive-by fix.** The page has no error channel: its
+`page_vars` carry `session`, `bookings` and `canceled`, so surfacing a failure
+means adding an errors key and rendering it in the view, or deciding that the
+right answer is a 404 rather than a message. That is a small view change, but
+it is a view change with a wording choice in it, and the booking-manage page
+already has its own error convention that this one should probably match.
+
+**Cost of leaving it:** low, and bounded by the fact that nothing actually
+happens. The realistic case is not an attacker but a host acting on a stale
+list — the booking was already canceled, or the page was open in another tab —
+who is told the cancellation succeeded and stops thinking about it.
+
+**What closing it takes:** decide between an inline error and a 404, then move
+the redirect inside the ownership branch and add the corresponding check to
+`booking_flow_test.php`, which currently asserts only that the booking is
+untouched.
+
+## 18. A stored sha256 reads back padded, so PHP-side hash comparisons fail
+
+**Found:** 2026-07-19, T30. The Multi suite reported `MultiFileBlob` returning
+a row whose `fbb_sha256` did not equal the value it had just filtered by. The
+query was right; the values differ only in trailing whitespace.
+
+`fbb_sha256` is declared `character(64)`. Postgres blank-pads CHAR columns to
+their full width on write and ignores that padding when comparing CHAR values,
+so `WHERE fbb_sha256 = :sha` behaves exactly as intended. PHP does not: a value
+read back from the database is 64 characters wide whatever was written, so
+`$blob->get('fbb_sha256') === hash('sha256', $bytes)` is false for a blob whose
+hash is genuinely correct.
+
+Nothing in production compares the field this way today — the dedup lookup at
+`file_blobs_class.php:321` does it in SQL, which is why this has never bitten.
+The one PHP comparison in the tree is `tests/functional/files/blob_layer_test.php:80`,
+and it passes only because it reads the in-memory object it just saved rather
+than a reloaded row. Change that line to reload first and it fails.
+
+**Why it needs a decision.** The obvious fix is `varchar(64)`, which makes the
+stored value what was written and removes the trap entirely. That is a column
+type change on a table holding real blob rows; `update_database` would apply it,
+and with no production users (see the deployment notes) the migration risk is
+low, but it is still a schema change made for a latent hazard rather than a
+live bug. The alternative is to leave the type and document that this field
+must be compared with `rtrim()` or in SQL — cheaper, but it leaves a rule
+someone has to know.
+
+**Cost of leaving it:** the next person who writes an integrity check, a
+dedup path, or a sync comparison in PHP gets a silent false negative — two
+identical files judged different, or a corruption check that never matches.
+That is a bug that looks like data loss rather than like a type quirk.
+
+**What closing it takes:** decide between the column type change and the
+documented rule. If the type changes, drop the `rtrim()` in
+`MultiModelTester::same_field_value()` that currently absorbs it, and make
+`blob_layer_test.php` reload before comparing so the property is actually
+pinned. If the rule stays, write it into `docs/file_signed_urls.md` or the
+blob section it belongs to, and add the reload-then-compare check with
+`rtrim()` so the behaviour is at least asserted.
+
+## 19. Logging in from a protected URL dumps the user on a 404 instead of the page they asked for
+
+**Found:** 2026-07-19, during step-8 phase 1 on jeremytunnell.com. Visiting
+`/admin` while signed out redirects to `/login` (correct); submitting the
+login form then lands back on `/login` itself, which for an authenticated
+user renders the 404 page. The session is fine — the user is signed in — but
+the original destination is lost and the first thing a new admin sees after
+logging in is "Page Not Found."
+
+**Cost of leaving it:** every deep link into a protected page (bookmarks,
+emailed admin links, docs links) greets the user with an error page after
+login. It reads as a broken site, and it will hit every customer admin on
+every new site.
+
+**What closing it takes:** carry the originally-requested URL through the
+login flow (return-to parameter or session slot) and redirect there on
+success; fall back to the profile or home page, never to `/login` itself.
+Verify the return target is a local path (no open redirect).
+
+## 20. Applying a node update reports success when the upgrade only self-updated its tooling — FIXED in tree 2026-07-19
+
+The Apply Update job on a node runs `utils/upgrade.php`, which after a
+self-update of deployment tooling used to print "please re-run" and exit 0 —
+so the job completed green while the site was still on the old version, and
+the operator had to notice and click Apply Update again. Fixed in tree:
+in CLI mode `upgrade.php` now re-execs its refreshed self automatically
+(one-shot guard, web flow keeps the Continue button). Ships with the next
+publish; until a node has received it, one upgrade may still need a second
+Apply Update click (the two-pass gotcha).
+
+## 21. Node detail Updates tab shows Current Version: Unknown for a live node
+
+**Found:** 2026-07-19, node 176. The control-plane version and the update
+availability render, but the node's own current version is "Unknown" — so
+"Update available" is asserted without knowing what the node runs, and after
+an upgrade there is no on-page confirmation the version advanced. Likely just
+never populated for bare-metal/agent nodes (mgn version field written by a
+status check that has not run, or not written at all).
+
+**Cost of leaving it:** operators cannot see from the dashboard whether an
+upgrade landed; today the only proof is reading job output.
+
+**What closing it takes:** have the status check (or upgrade job completion)
+stamp the node's system version, and render it on the Updates tab.
+
+## 22. Plugins table Status column says "Inactive" for plugins that are not installed
+
+**Found:** 2026-07-19, jeremytunnell.com admin Plugins page. The stats bar
+distinguishes Inactive (installed, off) from Not Installed, but every row's
+Status cell reads "Inactive" either way. The Actions menu differs (Install vs
+Activate), which is the only visible cue.
+
+**Cost of leaving it:** an admin cannot tell at a glance which plugins are a
+one-click Activate versus a schema-creating Install; the states carry very
+different weight.
+
+**What closing it takes:** render the row status from the same three-state
+logic the stats bar uses.
+
+## 23. Soft-deleting a row does not free its unique values, and the two layers disagree about that
+
+**Found:** 2026-07-19, T31. Reproduced directly and pinned as current behaviour
+in `tests/unit/system_base_lifecycle_test.php`.
+
+A `unique_with` declaration materialises two enforcement points. The
+application pre-check (`check_for_duplicate()`, called from
+`check_unique_constraints()` inside `save()`) excludes soft-deleted rows. The
+database constraint `update_database` creates does not. So after soft-deleting
+a record:
+
+- `check_for_duplicate()` reports the values as free — verified, returns 0.
+- `save()` on a new record with those values is refused by Postgres with
+  `SQLSTATE[23505]`, surfaced as a `DatabaseException`.
+
+The user-visible effect is that deleting a record and creating a replacement
+with the same identifying values fails, and fails badly: the pre-check that
+exists precisely to turn this into a readable `DisplayableUserException` a form
+can render says there is no problem, so the raw database error escapes to an
+error page instead.
+
+**Why this is not obvious from the code.** Each layer is individually
+defensible. Excluding deleted rows from the pre-check is what you want if
+soft-delete means "gone". Including them in the constraint is what you get by
+default, because a plain unique index cannot know about a delete column. The
+bug is only in their disagreement, and nothing in either file mentions the
+other.
+
+**The platform already has the fix pattern.** `pkc_credential_id` in
+`data/passkeys_class.php` declares a partial unique index with
+`'where' => 'pkc_delete_time IS NULL'`, which is exactly the constraint that
+agrees with the pre-check. It is applied by hand there; `unique_with` does not
+do it.
+
+**Cost of leaving it:** every model with a `unique_with` on a soft-deletable
+table has a delete-then-recreate path that fails with a database error. How
+often that is reached depends entirely on whether the values are user-chosen
+(a slug, a name, a subject pairing) — where they are, it will be hit by an
+ordinary user doing an ordinary thing.
+
+**What closing it takes:** a decision on which layer moves, applied to
+`unique_with` generally rather than per-model. Either make `update_database`
+emit a partial unique index excluding soft-deleted rows whenever the table has
+a delete column (matching the pre-check, and the passkeys precedent), or make
+`check_for_duplicate()` include deleted rows for uniqueness purposes and
+produce a message that explains the collision is with a deleted record. The
+first is better behaviour and a schema migration across many tables; the second
+is a smaller change that leaves users unable to reuse values. Either way,
+`system_base_lifecycle_test.php` pins today's behaviour, so the fix has a test
+to update rather than a blank page.
+
+## 24. Every docker site's Postgres is published to the internet through the ufw bypass
+
+**Found:** 2026-07-19, while making Postgres local-only the install default.
+Site containers are started with `-p $DB_PORT:5432` (host ports 908X) bound to
+all interfaces, and docker's iptables NAT rules run BEFORE ufw — a host
+firewall does not protect published ports. So every docker-mode site's
+Postgres is reachable from the internet on its 908X port, password-gated only.
+This applies to the shared docker host (8 containers) and VPS A (test2jt). The
+overnight probe that found node 176's exposure checked 5432 only, which is why
+the docker estate's 908X ports were not flagged then.
+
+**Fixed for future installs:** install.sh 2.24 binds the DB publish to
+`127.0.0.1:` (host-local management access unchanged, container-internal
+access unchanged) and makes bare-metal Postgres listen on localhost only.
+
+**What closing it takes for the existing estate (owner timing):** port
+bindings are immutable on a running container, so either (a) recreate each
+container with the new loopback binding — seconds of downtime per site, next
+maintenance window — or (b) one host-level `DOCKER-USER` iptables rule per
+docker host dropping external traffic whose original destination port is in
+the 908X range (no restarts, but another special rule to remember). (a) is the
+honest end state; (b) is acceptable interim hardening if (a) waits.
+
+**Cost of leaving it:** internet-facing Postgres on nine-plus databases,
+protected by a single password each, on hosts that also hold real user data.

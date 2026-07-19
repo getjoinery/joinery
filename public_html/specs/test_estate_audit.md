@@ -1877,6 +1877,211 @@ exposure), and `Question` carries a `qst_is_required` column that nothing
 reads, while required-ness actually lives in the serialized `qst_validate`
 blob.
 
+**T29 bookings — DONE 2026-07-19.** One db-tier suite,
+`plugins/bookings/tests/booking_flow_test.php` (123 checks), covering the
+public flow through `book_logic`, the sessionless slot endpoint, the invitee
+manage link, the host cancel path, and the availability rules underneath all of
+them.
+
+No defects. This is the first P3 subsystem to come through the audit clean, and
+it is worth saying why rather than just recording the count. Bookings was built
+after the calendar seam existed, so the properties that usually rot in this
+codebase — a check that lives in one place and is skipped in another — are
+here structurally rather than by convention. A booked slot disappears because
+`BookingItemSource` projects it into the same busy blocks the generator already
+subtracts, not because the booking code remembers to look at other bookings.
+The posted slot is re-checked against live availability inside a per-host
+advisory lock, so the browser's slot list is treated as a claim rather than a
+fact. And the same window/cap/notice gates run whether a caller is drawing the
+picker or submitting a form, so hiding a slot and refusing it are the same
+code path — which is why every "refused, not just hidden" check in the suite
+passes.
+
+Ten separate reverts were used to prove the checks are load-bearing rather than
+decorative, since a suite that finds nothing is exactly the suite most likely to
+be asserting nothing: dropping the booking conflict re-check turns 11 checks
+red; un-projecting bookings from the busy blocks, 14; skipping the per-period
+caps, 3; not storing the invitee's local times, 2; not enforcing the
+cancellation notice window, 4; not re-checking on reschedule, 2; skipping the
+host-ownership check on cancel, 2; ignoring the already-resolved state, 1;
+letting inactive types take bookings, 1; not recomputing local time on
+reschedule, 1. Removing the bookable-window clamp turns 4 red and ignoring
+minimum notice turns 2 red.
+
+The DST section deliberately locates its own test dates by asking
+`DateTimeZone` for the actual New York offset on each candidate day, then
+asserts the UTC hour outright (13:00 in summer, 14:00 in winter). Deriving the
+expected value with `convert_time` — the same function under test — would have
+produced a check that passes no matter what the conversion does.
+
+Three findings needed an owner decision rather than a fix and are recorded as
+entries 15, 16 and 17 in `specs/deferred_fixes.md`: a booker who loses the race
+for a slot still leaves a real user record behind, pending paid holds block
+their slot but do not count toward per-day/per-week caps, and a host cancelling
+a booking that is not theirs is told it worked.
+
+**T30 Multi-collection CRUD — DONE 2026-07-19.** One test-db-tier suite,
+`tests/models/multi_models_test.php` (143 checks), driving `MultiModelTester`
+over every model that has a collection class — the half of the model estate
+`models_test.php` has always excluded by hard-setting `SINGLE_TESTS_ONLY`.
+
+The wiring was the easy part. The engine behind it asserted almost nothing,
+and most of this entry is about what it took to make its green mean something.
+
+**The assertion that mattered.** `test_multi_filtering()` checked that *at
+least one* returned row matched the filter. That is satisfied by a collection
+which ignores the option entirely and hands back the whole table, because the
+row being looked for is somewhere in it. Proven, not assumed: a `MultiBookingType`
+mutated to accept `user_id` and then discard every filter passed the suite
+before the change and fails it after. It now asserts that **every** returned
+row matches. This is the exact failure shape deferred entry 11 describes — an
+option silently dropped returns a plausible superset, and where the option is
+an owner id, the superset is somebody else's data.
+
+**Why that assertion could not simply be turned on.** Applying it naively
+produced 25 failures and zero bugs, because it assumed every option is an
+equality match. Many are predicates: `created_before` is a bound,
+`has_parent_menu_id` is IS NOT NULL, `active` maps to a status literal. The
+tester now reads each option's own block in `getMultiResults()` and classifies
+it — an array right-hand side binds the caller's value, anything else
+interprets it — and only equality options earn the row-by-row assertion.
+Classification is scoped to the option's block rather than searched file-wide,
+because several classes expose two options over one column (`MultiAdminMenu`
+has both `parent_menu_id` and `has_parent_menu_id` on `amu_parent_menu_id`) and
+a file-wide search calls the predicate an equality.
+
+**Four further engine defects, each of which was manufacturing false failures:**
+
+18. **Strict comparison against a system that does not coerce.** `set()` keeps
+    whatever PHP type it is handed while a loaded row comes back through PDO's
+    typing, so `9774 === '9774'` failed for essentially every integer column.
+    70 of the original 80 failures. Values are now compared by string form,
+    with NULL kept distinct from the empty string.
+19. **Fixtures were born soft-deleted.** The generator filled every field
+    including `*_delete_time`, and most collections read that column
+    unconditionally — so the fixture was invisible to the very query under
+    test, which then reported the model broken for filtering correctly.
+20. **Guessed column names asserted as fact.** When an option does not map to
+    a plain column the detector guesses `prefix_option`, which is wrong for
+    `MultiConversation`'s lateral join and for `MultiUserEncryptionWrapping`'s
+    `vault_id` → `uew_uev_user_encryption_vault_id`. Those options are now
+    skipped rather than failed.
+21. **Options that take a raw SQL fragment were fed a scalar.**
+    `MultiProductVersion`'s `prv_display_priority` is passed straight through
+    as the condition — its only caller sends the string `'> 0'`, a documented
+    filter format — so a generated `210` landed in the query as
+    `prv_display_priority 210` and failed to parse. Such options cannot be
+    driven from synthesised data and are dropped.
+
+**One product-side find, recorded as deferred entry 18:** `fbb_sha256` is
+`character(64)`, so a hash reads back blank-padded and any PHP-side equality
+against a computed digest fails, even though the SQL comparison succeeds.
+
+**The leak that made the gate red.** Two separate fixture leaks were fixed, and
+they matter more than any single assertion because both convert one failure
+into a permanent one. `MultiModelTester` overrides `test()` and never called
+`teardown_created_parents()`, so every foreign-key parent it built survived the
+run — and those parents carry deterministic values, so the leftover Schedule
+row `(sch_subject_type='a', sch_subject_id=4957)` was precisely the row
+`models_crud`'s own composite-unique test inserts next time. One run of the new
+suite was enough to make the test-db tier red until that row was deleted by
+hand. Separately, `ModelTester`'s unique-constraint cleanup sat after a
+`test_fail()` that throws, so a failing constraint test abandoned its fixture
+and then collided with it forever after; cleanup now runs in a `finally`. The
+Multi fixtures are also removed outright rather than soft-deleted, since a
+soft-deleted row still occupies any unique constraint that does not exclude
+deleted rows.
+
+Verified by running the whole tier three times in succession: 297/297 each
+time, with the schedule table left at exactly the two rows it started with.
+Repeatability was the point — before this, the second run of any pair failed.
+
+**What this suite cannot catch, stated plainly:** it reads each class's own
+source as the specification, so a filter wired to the wrong column reads as
+correct — the tester learns the intended column from the same line that
+implements it. It also cannot see deferred entry 11's other half, where a
+*caller* passes an option the class never implemented; that is a call-site
+problem no per-class suite reaches.
+
+**T31 Core unit tests — DONE 2026-07-19.** Four suites, 156 checks, covering
+the contracts every page and every model inherits:
+
+- `tests/unit/time_conversion_test.php` (28, safe) — `convert_time`,
+  `time_shift`, `time_ago_or_time`.
+- `tests/unit/logic_result_test.php` (35, safe) — `LogicResult` and
+  `process_logic`.
+- `tests/unit/descriptor_validator_base_test.php` (54, safe) — base type
+  coercion, required/default handling, the whitelist property. The existing
+  `descriptor_validator_pipeline_test.php` covers only the pipeline additions
+  (enum, min/max, max_length, nested arrays).
+- `tests/unit/system_base_lifecycle_test.php` (38, db) — the Active Record
+  rules `models_crud` cannot express, because it drives models generically
+  rather than asserting the contract a developer has to hold in their head.
+
+**One defect found and fixed: an empty timestamp rendered as the current time.**
+`convert_time()` guarded against NULL but not `''`, and DateTime reads the empty
+string as "now". A blank optional timestamp therefore rendered as this moment —
+not a visibly wrong value a reader would question, but a plausible one saying
+the thing just happened. `time_shift('')` had the same hole, reporting a
+deadline a week out for a record with no start date. Both now refuse an empty
+input the way they already refused NULL. Reverting either guard turns a check
+red.
+
+**One defect found and deferred (entry 23): soft-delete and `unique_with`
+disagree.** The application pre-check inside `save()` excludes soft-deleted rows
+and reports a freed unique pair as available; the database constraint does not
+exclude them and refuses the insert. Deleting a record and creating a
+replacement with the same identifying values fails with a raw
+`SQLSTATE[23505]` reaching the user as an error page, precisely because the
+pre-check whose job is to turn that into a readable message says there is no
+problem. The platform already has the fix pattern — `pkc_credential_id`
+declares a partial unique index with `'where' => 'pkc_delete_time IS NULL'` —
+it is simply not what `unique_with` emits. Pinned as current behaviour so the
+fix is a deliberate test change.
+
+The rest is characterization of behaviour that is correct but surprising, which
+is the category most likely to be "fixed" into something wrong: a timestamp
+string carrying its own offset overrides the `$fromtz` argument; a DateTime
+argument ignores it entirely; `time_shift('1 month')` on Jan 31 overflows to
+March 3 rather than clamping to February, and lands a day earlier in a leap
+year; a primary key comes back from PDO as a string, so `$model->key === 5` is
+false for row 5; setting an undeclared field logs an exception no caller sees,
+keeps the value readable in memory, and drops it silently at save; and declared
+defaults do not exist on an object until it has been saved and reloaded.
+
+**Two intermittent gate failures were found and fixed on the way**, both
+unrelated to T31's own suites and both surfaced only because the runner now
+names its failures — without that, each would have been another unattributable
+red like deferred entry 13.
+
+- `tests/integration/oauth/secret_box_test.php` tampered with a ciphertext by
+  flipping its **last** base64 character. When the encoded length is not a
+  multiple of three that character carries fewer than six significant bits, so
+  some flips decode to byte-for-byte identical ciphertext — nothing was
+  tampered, decryption correctly succeeded, and the check failed. Measured at
+  roughly one run in eight. It now flips a character mid-ciphertext and, more
+  importantly, **asserts the tamper actually changed the decoded bytes before
+  asserting decryption fails**: a check that a *non*-tampered blob fails to
+  decrypt is worse than no check, because it reads as proof the guard works.
+  Twenty consecutive runs green after the fix.
+- `MultiMigration` in the Multi suite failed whenever the generator produced a
+  version with one decimal place: `mig_version` is `numeric(6,2)`, so 1092.9 is
+  read back as `'1092.90'`. Same number, same row, different string. The
+  comparison now normalises numeric strings, by trimming trailing fractional
+  zeros textually rather than casting to float so bigint keys beyond float's
+  exact-integer range still compare correctly. This is the same shape as the
+  `character(64)` padding found in T30 — the database's canonical
+  representation of a value is not PHP's, in more than one type.
+
+Two checks were rewritten after falsification showed they proved less than they
+claimed. "A duplicate pair is refused by save()" passed with the entire
+application pre-check deleted, because the database constraint refuses it too —
+it now asserts the exception *type*, which is what distinguishes a renderable
+form error from an error page. And the soft-delete exclusion is now asserted as
+a pair with `$search_deleted = true`, since either half alone is satisfiable by
+a broken filter: a check that always returns 0 passes the first, one that never
+filters passes the second.
+
 **Still remaining (documented in the work plan below):**
 the full cloud 6→4 FILE merge
 (the D20/D21 DEFECTS are fixed; merging characterization into engine risks the
@@ -2054,11 +2259,12 @@ business-logic coverage today:
 - **T26. UploadHandler / photos** — the legacy upload attack surface. ✅ DONE (see progress log).
 - **T27. PluginManager::sync()** — runs on every deploy, mutates schema. ✅ DONE (see progress log).
 - **T28. Questions & surveys** — event checkout depends on it. ✅ DONE (see progress log).
-- **T29. bookings /book flow** — double-booking/timezone; no tests dir. Est. M.
+- **T29. bookings /book flow** — double-booking/timezone; no tests dir. ✅ DONE (see progress log).
 - **T30. Multi-collection CRUD suite** — the entire Multi surface is untested
-  (SINGLE_TESTS_ONLY); high value given the documented `->results` foot-gun. Est. M.
+  (SINGLE_TESTS_ONLY); high value given the documented `->results` foot-gun.
+  ✅ DONE (see progress log).
 - **T31. Core unit tests** — process_logic/LogicResult, convert_time/time_shift,
-  SystemBase lifecycle, DescriptorValidator base coercion. Est. M.
+  SystemBase lifecycle, DescriptorValidator base coercion. ✅ DONE (see progress log).
 
 ### Housekeeping (bundle opportunistically when touching a file)
 

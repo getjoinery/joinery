@@ -298,10 +298,25 @@ error output). The runner and the dashboard consume only this:
 
 `test-db` tests run against a copy of the dev database so CRUD is isolated from
 live data. Manage the copy — create it, sync its schema with the live database —
-from `/admin/admin_test_database`. The model CRUD suite
-(`tests/models/models_test.php`, tier `test-db`) drives every data model's
-generic CRUD/validation against that copy; if it reports schema errors, sync the
-test database first.
+from `/admin/admin_test_database`. Two suites drive the model estate against
+that copy; if either reports schema errors, sync the test database first:
+
+- `tests/models/models_test.php` — every data model's generic CRUD, validation
+  and constraint behaviour, one check per model class.
+- `tests/models/multi_models_test.php` — every collection class, one check per
+  model that has one. For each it verifies that the loaded collection matches
+  the equivalent direct SQL, that each declared filter narrows the result set,
+  and that ordering and pagination agree with `ORDER BY` / `LIMIT` / `OFFSET`.
+
+Filters get the assertion their shape earns. An option that binds the caller's
+value to a column (`$filters['col'] = [$this->options['x'], PDO::PARAM_INT]`)
+must return rows that **all** carry that value — a collection which accepts an
+option and then drops it returns a plausible superset, and where the option is
+an owner id that superset is another user's data. An option that interprets its
+value instead — a range bound, a boolean flag, a mapped literal — is exercised
+but not asserted row-by-row, because the caller's value is not the stored value.
+Options that take a raw SQL fragment cannot be driven from generated data and
+are skipped.
 
 The copy does **not** receive `update_database` — that runs against the live
 database only. After any schema change, resync from `/admin/admin_test_database`
