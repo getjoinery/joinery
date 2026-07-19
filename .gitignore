@@ -49,3 +49,7 @@ public_html/tests/fixtures/email_security_corpus/
 /config/relay_pull_key.pub
 /config/relay_test_key
 /config/relay_test_key.pub
+
+# Site config dir: per-environment secrets (Globalvars_site.php, SSH identities,
+# provisioning keys) - nothing in it is ever committed
+/config/

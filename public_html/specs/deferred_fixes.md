@@ -384,3 +384,55 @@ rather than a live contradiction.
 resolution is the reverse — promote the rules out of a serialized blob into
 real columns, where they can be queried, indexed, and validated — but that is
 a schema migration for the whole rule set, not a one-column change.
+
+---
+
+## 13. One db-tier test failed once, was never identified, and has not recurred
+
+**Deferred:** 2026-07-19
+
+A full `php tests/run.php db` reported `Tests: 126 passed, 1 failed of 127`.
+The failing test was never named: the run had been invoked through
+`| tail -30`, which discarded everything above the summary, and the summary
+reports counts rather than names. An immediate re-run of the same tier, same
+box, same working tree came back `127 passed, 0 failed of 127` — 3384 checks,
+`RESULT: PASS`. The failure has not reappeared since.
+
+So there is no reproducer, no name, and no evidence of what broke. What is
+known: it was one test out of 127, it was not one of the four suites added that
+day (`survey_answer`, `upload_safety`, `plugin_sync`, `event_recurrence` all
+pass standalone and in-tier), and another agent was committing to the same
+working tree throughout both runs.
+
+**Why this is written down rather than dismissed:** an unattributed red that
+turns green on its own is the exact signature of the two worst gate problems
+this project has had. The db-tier vault flakiness looked like noise for days
+before it turned out to be sequences being set backwards, which re-attached
+orphaned child rows to reused primary keys. `CustomerCloudProvision` looked
+like a real regression until it self-resolved when another agent's
+`$test_fixture` landed. Both were dismissed as flakes first. A green re-run is
+not evidence that nothing is wrong; it is evidence that whatever is wrong is
+intermittent, which is worse.
+
+**Cost of leaving it:** if it is real and ordering- or timing-dependent, it
+will surface again at the least convenient moment — most likely on the
+pre-deploy gate, where a red of unknown provenance either blocks a deploy or,
+worse, gets waved through as a known flake. The habit of waving reds through is
+the actual risk here, more than the defect itself.
+
+**What closing it takes:** one full db run at a quiet moment, with no
+concurrent work in the tree, captured to a file rather than piped through
+`tail`. If it recurs it names itself and becomes an ordinary bug. If several
+clean runs pass, close this entry as a transient — but close it deliberately,
+with the runs recorded, rather than by forgetting.
+
+Two process notes worth keeping regardless of the outcome:
+- Never invoke the runner through `tail`. Capture the full output to a file;
+  the summary line alone cannot tell you what failed.
+- **Fixed 2026-07-19.** `tests/run.php` reported failure counts but not
+  failure names in its summary, which is what made this entry necessary at
+  all. It now prints a `Failed:` block naming each failed test and its path
+  immediately above `RESULT: FAIL`, matching how skipped and undeclared tests
+  were already listed. Verified by forcing a check red and confirming the
+  block appears within the last few lines of output — so even a run read
+  through a pager or a `tail` names its failures.
