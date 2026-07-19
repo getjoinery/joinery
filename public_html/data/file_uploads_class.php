@@ -29,14 +29,14 @@ class FileUpload extends SystemBase {
 
 	public static $field_specifications = array(
 		'fup_file_upload_id' => array('type' => 'int8', 'is_nullable' => false, 'serial' => true, 'is_primary_key' => true),
-		'fup_token_sha256'   => array('type' => 'character(64)', 'is_nullable' => false, 'required' => true, 'unique' => true),
+		'fup_token_sha256'   => array('type' => 'varchar(64)', 'is_nullable' => false, 'required' => true, 'unique' => true),
 		'fup_usr_user_id'    => array('type' => 'int4', 'is_nullable' => false, 'required' => true, 'index' => true),
 		'fup_fol_folder_id'  => array('type' => 'int8', 'is_nullable' => true),
 		'fup_fil_file_id'    => array('type' => 'int8', 'is_nullable' => true),
 		'fup_display_name'   => array('type' => 'varchar(255)', 'is_nullable' => false, 'required' => true),
 		'fup_mime_type'      => array('type' => 'varchar(128)', 'is_nullable' => true),
 		'fup_expected_bytes' => array('type' => 'int8', 'is_nullable' => false, 'required' => true),
-		'fup_expected_sha256'=> array('type' => 'character(64)', 'is_nullable' => true),
+		'fup_expected_sha256'=> array('type' => 'varchar(64)', 'is_nullable' => true),
 		'fup_received_bytes' => array('type' => 'int8', 'is_nullable' => false, 'default' => 0, 'zero_on_create' => true),
 		'fup_update_time'    => array('type' => 'timestamp(6)', 'is_nullable' => true),
 		'fup_create_time'    => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()'),

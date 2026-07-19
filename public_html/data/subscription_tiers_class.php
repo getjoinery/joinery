@@ -98,7 +98,7 @@ class SubscriptionTier extends SystemBase {
         }
 
         // Get all subscription tier groups
-        $tier_groups = new MultiGroup(['grp_category' => 'subscription_tier']);
+        $tier_groups = new MultiGroup(['category' => 'subscription_tier']);
         $tier_groups->load();
 
         // Remove user from all subscription tier groups
@@ -310,7 +310,7 @@ class SubscriptionTier extends SystemBase {
      */
     public static function removeUserFromAllTiers($user_id) {
         // Get all subscription tier groups
-        $tier_groups = new MultiGroup(['grp_category' => 'subscription_tier']);
+        $tier_groups = new MultiGroup(['category' => 'subscription_tier']);
         $tier_groups->load();
 
         // Remove user from all subscription tier groups

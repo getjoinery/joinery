@@ -44,7 +44,7 @@ class MobileStoreProduct extends SystemBase {
 
 	public static $field_specifications = array(
 	    'msp_mobile_store_product_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
-	    'msp_store' => array('type'=>'varchar(20)', 'required'=>true),
+	    'msp_store' => array('type'=>'varchar(20)', 'required'=>true, 'allowed_values'=>array(self::STORE_APP_STORE, self::STORE_PLAY_STORE)),
 	    'msp_store_product_id' => array('type'=>'varchar(255)', 'required'=>true),
 	    'msp_pro_product_id' => array('type'=>'int4', 'required'=>true),
 	    'msp_prv_product_version_id' => array('type'=>'int4'),

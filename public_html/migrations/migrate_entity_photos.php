@@ -28,7 +28,7 @@ function migrate_entity_photos() {
 				SELECT :type, {$map['pkey']}, {$map['fk']}, true, 0
 				FROM {$map['table']}
 				WHERE {$map['fk']} IS NOT NULL AND {$map['delete']} IS NULL
-				ON CONFLICT (eph_entity_type, eph_entity_id, eph_fil_file_id) DO NOTHING";
+				ON CONFLICT (eph_entity_type, eph_entity_id, eph_fil_file_id) WHERE eph_delete_time IS NULL DO NOTHING";
 		$q = $dblink->prepare($sql);
 		$q->execute(['type' => $map['type']]);
 	}

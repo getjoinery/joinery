@@ -22,7 +22,7 @@ function admin_survey_user_answers_logic(array $input): LogicResult {
 	$user = new User($user_id, TRUE);
 
 	$answers = new MultiSurveyAnswer(
-		array('svy_survey_id' => $survey->key, 'usr_user_id' => $user->key),
+		array('survey_id' => $survey->key, 'user_id' => $user->key),
 		array($sort=>$sdirection)
 	);
 	$numrecords = $answers->count_all();

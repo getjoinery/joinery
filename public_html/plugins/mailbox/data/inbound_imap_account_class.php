@@ -123,7 +123,7 @@ class InboundImapAccount extends SystemBase {
 		'iia_iea_inbound_email_alias_id'=> array('type'=>'int4'),
 		'iia_imap_host'                 => array('type'=>'varchar(255)'),
 		'iia_imap_port'                 => array('type'=>'int4', 'default'=>'993'),
-		'iia_imap_encryption'           => array('type'=>'varchar(10)', 'default'=>'ssl'),
+		'iia_imap_encryption'           => array('type'=>'varchar(10)', 'default'=>'ssl', 'allowed_values'=>array(self::ENC_SSL, self::ENC_TLS, self::ENC_NONE)),
 		'iia_imap_folder'               => array('type'=>'varchar(255)', 'default'=>'INBOX'),
 		'iia_username'                  => array('type'=>'varchar(255)'),
 		'iia_auth_method'               => array('type'=>'varchar(10)', 'default'=>'password', 'is_nullable'=>false),
@@ -139,7 +139,7 @@ class InboundImapAccount extends SystemBase {
 		'iia_uidvalidity'               => array('type'=>'int8'),
 		'iia_last_seen_uid'             => array('type'=>'int8'),
 		// Two-way sync (specs/two_way_imap_sync.md §4, §5). Off by default.
-		'iia_sync_mode'                 => array('type'=>'varchar(10)', 'default'=>'off', 'is_nullable'=>false),
+		'iia_sync_mode'                 => array('type'=>'varchar(10)', 'default'=>'off', 'is_nullable'=>false, 'allowed_values'=>array(self::SYNC_OFF, self::SYNC_PULL, self::SYNC_BOTH)),
 		'iia_sync_deletes'              => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'iia_show_compose'              => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		// CONDSTORE is the sync gate (incremental flag/membership pull via

@@ -136,6 +136,41 @@ try {
 	check(($r['json']['errortype'] ?? '') === 'AuthenticationError', 'wrong password errortype AuthenticationError');
 
 	// ------------------------------------------------------------------
+	section('Activation gate (model layer, hermetic)');
+	// The same activation_required_login setting gates both sign-in doors:
+	// login_logic pins its side in tests/account_security/login_test.php, this
+	// pins ApiAuth::attemptLogin. In-memory setting pins keep it hermetic;
+	// email_dry_run stops the re-sent activation email from actually sending.
+	require_once(PathHelper::getIncludePath('includes/ApiAuth.php'));
+	harness_set_setting_mem('email_dry_run', '1');
+	$unactivated = make_user($suffix . 'U');
+	$unactivated_pass = 'TestPassword_' . $suffix . 'U';
+	$unactivated->set('usr_is_activated', FALSE);
+	$unactivated->save();
+
+	harness_set_setting_mem('activation_required_login', '1');
+	$res = ApiAuth::attemptLogin($unactivated->get('usr_email'), $unactivated_pass);
+	check($res['ok'] === false && ($res['reason'] ?? '') === 'activation_required',
+		'an unactivated account is refused session keys when activation is required',
+		var_export($res['reason'] ?? $res['ok'], true));
+
+	$res = ApiAuth::attemptLogin($unactivated->get('usr_email'), 'definitely-wrong');
+	check($res['ok'] === false && !isset($res['reason']),
+		'a wrong password stays the generic failure — activation state is only revealed after the password verifies');
+
+	harness_set_setting_mem('activation_required_login', '0');
+	$res = ApiAuth::attemptLogin($unactivated->get('usr_email'), $unactivated_pass);
+	check($res['ok'] === true, 'the same account gets keys when the site does not require activation');
+	if (!empty($res['ok'])) { harness_register_key_id($res['api_key']->key); }
+
+	$unactivated->set('usr_is_activated', TRUE);
+	$unactivated->save();
+	harness_set_setting_mem('activation_required_login', '1');
+	$res = ApiAuth::attemptLogin($unactivated->get('usr_email'), $unactivated_pass);
+	check($res['ok'] === true, 'an activated account gets keys with activation required');
+	if (!empty($res['ok'])) { harness_register_key_id($res['api_key']->key); }
+
+	// ------------------------------------------------------------------
 	section('CRUD via session key (acceptance #2)');
 	$r = api_request('GET', '/api/v1/User/' . $user_a->key, key_headers($phone_pub, $phone_sec));
 	check($r['status'] === 200, 'GET own User returns 200', $r['raw']);

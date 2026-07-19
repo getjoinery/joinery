@@ -105,6 +105,20 @@ class ApiAuthEndpoint {
 		$result = ApiAuth::attemptLogin($email, $password, $device_label);
 
 		if (!$result['ok']) {
+			// Valid credentials on an unactivated account (activation_required_login
+			// on): refused with the reason, matching the web login door. The
+			// activation email was re-sent by attemptLogin.
+			if (($result['reason'] ?? '') === 'activation_required') {
+				RequestLogger::log('api_auth', 'auth/login', false, [
+					'user_id' => $result['user']->key,
+					'status_code' => 403,
+					'error_type' => 'AuthenticationError',
+					'note' => 'Activation required'
+				]);
+				api_error('This account requires email activation before signing in. '
+					. 'An activation email has been sent to ' . $result['user']->get('usr_email')
+					. ' — click the link inside to activate.', 'AuthenticationError', 403);
+			}
 			RequestLogger::log('api_auth', 'auth/login', false, [
 				'user_id' => $result['user'] ? $result['user']->key : NULL,
 				'status_code' => 401,

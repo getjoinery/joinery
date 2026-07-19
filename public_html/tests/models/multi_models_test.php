@@ -94,4 +94,43 @@ foreach ($with_multi as $class) {
 section('Coverage');
 check(count($with_multi) > 0, 'The estate has Multi classes to test', count($with_multi) . ' of ' . count($classes));
 
+// ---------------------------------------------------------------------------
+// The per-class checks above prove a DECLARED option filters correctly. This
+// section pins the other half of the contract: an option a collection never
+// declared must refuse the query, not silently return unfiltered rows.
+section('Unknown option keys are refused, not silently dropped');
+
+$bogus = new MultiUser(array('no_such_option_key' => 1));
+$threw = false;
+try {
+	$bogus->count_all();
+} catch (UnknownMultiOptionException $e) {
+	$threw = true;
+	check(strpos($e->getMessage(), 'no_such_option_key') !== false,
+		'the refusal names the unknown key', $e->getMessage());
+}
+check($threw, 'an undeclared option key throws UnknownMultiOptionException');
+
+// A declared key still works — enforcement must not flag the legitimate set.
+$fine = new MultiUser(array('deleted' => false));
+$threw = false;
+try {
+	$fine->count_all();
+} catch (UnknownMultiOptionException $e) {
+	$threw = true;
+}
+check(!$threw, 'a declared option key passes enforcement');
+
+// A pass-through collection (iterates its options generically, every key maps
+// to a column) is exempt — it has no fixed vocabulary and a bogus key already
+// fails loudly in SQL.
+$passthrough = new MultiPlugin(array('plg_name' => 'no_such_plugin_zz'));
+$threw = false;
+try {
+	$passthrough->count_all();
+} catch (UnknownMultiOptionException $e) {
+	$threw = true;
+}
+check(!$threw, 'a pass-through collection is exempt from enforcement');
+
 harness_finish();

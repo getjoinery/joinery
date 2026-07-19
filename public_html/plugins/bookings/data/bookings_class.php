@@ -90,6 +90,22 @@ class Booking extends SystemBase {
 		return $s === self::BOOKING_STATUS_BOOKED || $s === self::BOOKING_STATUS_CREATED;
 	}
 
+	/**
+	 * Whether this row occupies the host's time right now: a confirmed booking,
+	 * or a paid hold whose expiry is still in the future. Slot availability and
+	 * the per-day/per-week caps both answer through this one predicate, so they
+	 * cannot drift into disagreeing about what a hold is.
+	 */
+	function occupies_host_time() {
+		$s = (int)$this->get('bkn_status');
+		if ($s === self::BOOKING_STATUS_BOOKED) { return true; }
+		if ($s === self::BOOKING_STATUS_CREATED) {
+			$exp = $this->get('bkn_hold_expires_time');
+			return $exp && $exp > gmdate('Y-m-d H:i:s');
+		}
+		return false;
+	}
+
 	function authenticate_write($data) {
 		// Host or staff may write; invitee acts through the action token, not auth.
 		if ($this->get('bkn_usr_user_id_booked') != $data['current_user_id']

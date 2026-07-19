@@ -494,14 +494,8 @@ class MultiModelTester extends ModelTester {
             return (bool)$a === (bool)$b;
         }
         if (is_scalar($a) && is_scalar($b)) {
-            // Trailing spaces are dropped because a CHAR(n) column blank-pads
-            // on the way in: fbb_sha256 is character(64), so a 64-character
-            // hash written as 33 characters of test data reads back with 31
-            // spaces on the end. Postgres ignores that padding when comparing
-            // CHAR values, so the query genuinely matched; only a PHP-side
-            // string comparison sees a difference.
-            $sa = rtrim((string)$a);
-            $sb = rtrim((string)$b);
+            $sa = (string)$a;
+            $sb = (string)$b;
 
             // Numbers are compared as numbers, because a NUMERIC(p,s) column
             // returns its value at full scale: mig_version is numeric(6,2), so

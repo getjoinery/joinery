@@ -57,6 +57,12 @@ function sa_make_question($text, $type = Question::TYPE_SHORT_TEXT, $rules = arr
 	$q = new Question(NULL);
 	$q->set('qst_question', $text);
 	$q->set('qst_type', $type);
+	// Required-ness is the qst_is_required column; the qst_validate blob
+	// carries only value rules (integer, decimal, lengths, bounds).
+	if (array_key_exists('required', $rules)) {
+		$q->set('qst_is_required', (bool)$rules['required']);
+		unset($rules['required']);
+	}
 	if (!empty($rules)) {
 		$q->set('qst_validate', serialize($rules));
 	}
@@ -116,9 +122,11 @@ $user = make_user('survey_answer');
 section('The rule engine: what one answer must satisfy');
 // ============================================================================
 
-// Rules are stored serialized on the question, and every rule is keyed by
-// presence rather than value — array_key_exists, not truthiness — so a rule
-// that is present at all is in force.
+// Value rules are stored serialized on the question and keyed by presence
+// rather than value — array_key_exists, not truthiness — so a rule that is
+// present at all is in force. Required-ness alone lives in the
+// qst_is_required column, enforced identically by the surveys path and the
+// store's checkout requirements.
 
 $q_required = sa_make_question('Required probe', Question::TYPE_SHORT_TEXT, array('required' => 1));
 check($q_required->validate_answers('') !== 'valid',
@@ -131,6 +139,19 @@ check($q_required->validate_answers('0') === 'valid',
 	'required rule accepts "0", which is a real answer and not an absence');
 check($q_required->validate_answers('yes') === 'valid',
 	'required rule accepts ordinary text');
+
+// One source: a legacy 'required' key sitting only in the blob does not
+// enforce — the column is the single authority (migration 151 promotes
+// legacy rows, so such a blob can only exist by hand).
+$q_blob_only = new Question(NULL);
+$q_blob_only->set('qst_question', 'Blob-only required probe');
+$q_blob_only->set('qst_type', Question::TYPE_SHORT_TEXT);
+$q_blob_only->set('qst_validate', serialize(array('required' => 1)));
+$q_blob_only->save();
+$q_blob_only->load();
+harness_register_row('qst_questions', 'qst_question_id', $q_blob_only->key);
+check($q_blob_only->validate_answers('') === 'valid',
+	'a blob-only required key no longer enforces — the column is the single source');
 
 $q_int = sa_make_question('Integer probe', Question::TYPE_SHORT_TEXT, array('integer' => 1));
 check($q_int->validate_answers('5') === 'valid',

@@ -151,8 +151,27 @@ class Example extends SystemBase
     //                                string as time input, and the schema
     //                                backfill renders them unquoted.
     // 'zero_on_create' => true     - Set to 0 when creating if NULL
+    // 'allowed_values' => array()  - Declared enum: save() refuses any non-NULL
+    //                                value outside the set, and the model test
+    //                                suite generates only members of the set.
+    //                                Use class constants for the members where
+    //                                they exist (array(self::STATUS_A, ...)).
+    //                                Declare this on every column whose legal
+    //                                values are a fixed set enforced in PHP —
+    //                                it is the single source the model, the
+    //                                tester, and future CHECK-constraint
+    //                                materialization all read.
     // 'unique' => true             - Single field unique constraint
     // 'unique_with' => array(...)  - Multi-field unique constraint
+    //                                On a soft-deletable table (a delete_time
+    //                                or is_deleted column), both materialize
+    //                                as PARTIAL unique indexes — unique among
+    //                                live rows, matching check_for_duplicate()
+    //                                — so deleting a record frees its values.
+    //                                An INSERT ... ON CONFLICT targeting the
+    //                                columns must name the same predicate
+    //                                (e.g. ON CONFLICT (col) WHERE
+    //                                x_delete_time IS NULL).
     // 'index' => true              - Plain btree index on this column
     // 'index_with' => array(...)   - Composite btree index (this column first,
     //                                then the listed columns, in order)
@@ -465,7 +484,16 @@ class MultiExample extends SystemMultiBase
     /**
      * REQUIRED: Implement getMultiResults method
      * This method handles all filtering logic and returns database results
-     * 
+     *
+     * Option keys are a contract: a caller passing a key this class does not
+     * read gets UnknownMultiOptionException at query time, not a silently
+     * unfiltered result. The known set is derived from the literal
+     * $this->options['key'] mentions in this file (plus $default_options), so
+     * implementing a filter here IS declaring it. The REST collection
+     * endpoint maps the exception to a 400 naming the bad parameter. A class
+     * that instead iterates $this->options generically (mapping every key to
+     * a column) is exempt — a bogus key there fails loudly in SQL.
+     *
      * @param bool $only_count Return count only (for pagination)
      * @param bool $debug Enable debug output
      * @return array|int Query results or count

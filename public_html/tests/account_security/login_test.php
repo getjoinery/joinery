@@ -281,6 +281,51 @@ check($res->error === null && !login_is_retry($res),
 	'redirect: ' . var_export($res->redirect, true));
 
 // ---------------------------------------------------------------------------
+section('Post-login destination (return-to)');
+
+// A protected page bounce stores the requested URL (SessionControl::
+// check_permission -> set_return); login must send the user back there, and
+// only there. The slot is server-written, but the redirect refuses anything
+// that is not a local path so it can never become an open redirect — and
+// /login itself is never a destination (an authenticated user landing on
+// /login reads as a 404).
+$dest_user = make_user('LoginReturn');
+$dest_email = $dest_user->get('usr_email');
+$dest_pass = 'TestPassword_LoginReturn';
+
+function login_call_with_return($email, $pass, $returnurl) {
+	$_SESSION = array();
+	if ($returnurl !== null) { $_SESSION['returnurl'] = $returnurl; }
+	return harness_call_logic('logic/login_logic.php', 'login_logic',
+		array('email' => $email, 'password' => $pass), 'POST');
+}
+
+$res = login_call_with_return($dest_email, $dest_pass, '/admin/admin_users?');
+check($res->redirect === '/admin/admin_users?',
+	'login returns the user to the page that bounced them',
+	'redirect: ' . var_export($res->redirect, true));
+
+$res = login_call_with_return($dest_email, $dest_pass, null);
+check($res->redirect !== null && strpos($res->redirect, '/login') !== 0,
+	'with no stored destination, login falls back to a real page, never /login',
+	'redirect: ' . var_export($res->redirect, true));
+
+$res = login_call_with_return($dest_email, $dest_pass, 'https://evil.example/');
+check($res->redirect !== null && strpos($res->redirect, 'evil.example') === false,
+	'an absolute URL in the return slot is not followed',
+	'redirect: ' . var_export($res->redirect, true));
+
+$res = login_call_with_return($dest_email, $dest_pass, '//evil.example/');
+check($res->redirect !== null && strpos($res->redirect, 'evil.example') === false,
+	'a protocol-relative URL in the return slot is not followed',
+	'redirect: ' . var_export($res->redirect, true));
+
+$res = login_call_with_return($dest_email, $dest_pass, '/login?retry=1');
+check($res->redirect !== null && strpos($res->redirect, '/login') !== 0,
+	'/login itself is never the post-login destination',
+	'redirect: ' . var_export($res->redirect, true));
+
+// ---------------------------------------------------------------------------
 section('Second-factor divert');
 
 $totp_ip = '192.0.2.50';

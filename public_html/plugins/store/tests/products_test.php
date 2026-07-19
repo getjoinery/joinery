@@ -136,7 +136,7 @@ function pt_create_version($product_id, $version_name, $price, $price_type = 'si
 	);
 
 	$versions = new MultiProductVersion(
-		array('prv_pro_product_id' => $product_id, 'prv_version_name' => $version_name),
+		array('product_id' => $product_id, 'version_name' => $version_name),
 		array('prv_product_version_id' => 'DESC'), 1, 0
 	);
 	$versions->load();

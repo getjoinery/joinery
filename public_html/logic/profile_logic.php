@@ -121,7 +121,7 @@ function profile_logic(array $input): LogicResult{
 	// ADDRESS — for sidebar user card
 	// ---------------------------------------------------------------
 	$addresses = new MultiAddress(
-		array('user_id' => $session->get_user_id(), 'deleted' => FALSE));
+		array('user_id' => $session->get_user_id()));
 	$num_addresses = $addresses->count_all();
 	if ($num_addresses) {
 		$addresses->load();

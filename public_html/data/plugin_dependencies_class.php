@@ -53,7 +53,14 @@ class MultiPluginDependency extends SystemMultiBase {
 
     protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
-        
+
+        if (isset($this->options['plugin_name'])) {
+            $filters['pld_plugin_name'] = [$this->options['plugin_name'], PDO::PARAM_STR];
+        }
+        if (isset($this->options['depends_on'])) {
+            $filters['pld_depends_on'] = [$this->options['depends_on'], PDO::PARAM_STR];
+        }
+
         return $this->_get_resultsv2('pld_plugin_dependencies', $filters, $this->order_by, $only_count, $debug);
     }
 }

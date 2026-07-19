@@ -19,6 +19,7 @@
 /* --- My bookings (/profile/bookings/my) --- */
 .jy-ui .bkn-wrap { max-width: 820px; margin: 1.5rem auto; }
 .jy-ui .bkn-saved { background: #e6f7ec; border: 1px solid #2d7d46; padding: .6rem .9rem; border-radius: 4px; margin-bottom: 1rem; }
+.jy-ui .bkn-error { background: #fdecea; border: 1px solid #b3261e; padding: .6rem .9rem; border-radius: 4px; margin-bottom: 1rem; }
 .jy-ui .bkn-card { border: 1px solid #e2e2e2; border-radius: 6px; padding: 1rem; margin-bottom: 1rem; }
 .jy-ui .bkn-with { color: #555; }
 .jy-ui .bkn-cancel-form { margin-top: .6rem; display: flex; gap: .4rem; align-items: flex-end; }

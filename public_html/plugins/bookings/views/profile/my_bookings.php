@@ -19,6 +19,9 @@ echo PublicPage::BeginPage('My Bookings', array());
 ?>
 <div class="jy-ui">
 <div class="bkn-wrap">
+<?php if (!empty($cancel_error)): ?>
+	<div class="bkn-error">That booking could not be canceled — it may already be canceled, or it isn't yours.</div>
+<?php endif; ?>
 <?php if (!empty($canceled)): ?>
 	<div class="bkn-saved">Booking canceled. The invitee has been notified.</div>
 <?php endif; ?>

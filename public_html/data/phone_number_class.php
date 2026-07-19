@@ -183,7 +183,6 @@ public static $phone_carriers = array(
 
 	function check_for_duplicates() {
 		$number_count = new MultiPhoneNumber(array(
-			'deleted' => FALSE,
 			'phone_number' => $this->get('phn_phone_number'),
 			'user_id' => $this->get('phn_usr_user_id'),
 			'country_code' => $this->get('phn_cco_country_code_id'),

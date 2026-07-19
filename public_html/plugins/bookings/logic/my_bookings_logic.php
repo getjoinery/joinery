@@ -23,17 +23,20 @@ function my_bookings_logic(array $input): LogicResult {
 		$bid = LibraryFunctions::fetch_variable_local($input, 'bkn_booking_id', NULL, 'required', 'Booking id required.', 'safemode', 'int');
 		$reason = trim(LibraryFunctions::fetch_variable_local($input, 'cancel_reason', '', '', '', 'safemode', NULL));
 		$booking = new Booking($bid, TRUE);
-		if ($booking->key && (int)$booking->get('bkn_usr_user_id_booked') === (int)$user_id) {
-			$booking->set('bkn_status', Booking::BOOKING_STATUS_CANCELED);
-			$booking->set('bkn_canceled_by', 'host');
-			if ($reason !== '') { $booking->set('bkn_cancel_reason', $reason); }
-			$booking->set('bkn_update_time', gmdate('Y-m-d H:i:s'));
-			$booking->save();
-			$type = new BookingType($booking->get('bkn_bkt_booking_type_id'), TRUE);
-			$host = new User($user_id, TRUE);
-			$client = new User($booking->get('bkn_usr_user_id_client'), TRUE);
-			if ($type->key) { booking_notify_cancellation($booking, $type, $host, $client, $settings, 'host'); }
+		// The success banner is earned only by an actual cancellation: a missing
+		// id or someone else's booking gets an error, not a lie. PRG both ways.
+		if (!$booking->key || (int)$booking->get('bkn_usr_user_id_booked') !== (int)$user_id) {
+			return LogicResult::redirect('/profile/bookings/my_bookings?cancel_error=1');
 		}
+		$booking->set('bkn_status', Booking::BOOKING_STATUS_CANCELED);
+		$booking->set('bkn_canceled_by', 'host');
+		if ($reason !== '') { $booking->set('bkn_cancel_reason', $reason); }
+		$booking->set('bkn_update_time', gmdate('Y-m-d H:i:s'));
+		$booking->save();
+		$type = new BookingType($booking->get('bkn_bkt_booking_type_id'), TRUE);
+		$host = new User($user_id, TRUE);
+		$client = new User($booking->get('bkn_usr_user_id_client'), TRUE);
+		if ($type->key) { booking_notify_cancellation($booking, $type, $host, $client, $settings, 'host'); }
 		return LogicResult::redirect('/profile/bookings/my_bookings?canceled=1');
 	}
 
@@ -48,5 +51,6 @@ function my_bookings_logic(array $input): LogicResult {
 
 	return LogicResult::render(array(
 		'session' => $session, 'bookings' => $bookings, 'canceled' => !empty($input['canceled']),
+		'cancel_error' => !empty($input['cancel_error']),
 	));
 }

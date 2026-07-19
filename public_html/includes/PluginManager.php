@@ -640,7 +640,7 @@ class PluginManager extends AbstractExtensionManager {
      */
     private function storeDependencies($plugin_name, $manifest) {
         // Clear existing dependencies
-        $existing = new MultiPluginDependency(array('pld_plugin_name' => $plugin_name));
+        $existing = new MultiPluginDependency(array('plugin_name' => $plugin_name));
         $existing->load();
         foreach ($existing as $dep) {
             $dep->permanent_delete();
@@ -1110,21 +1110,21 @@ class PluginManager extends AbstractExtensionManager {
 
         // Step 5: Delete version, dependency, and migration records
         require_once(PathHelper::getIncludePath('data/plugin_versions_class.php'));
-        $versions = new MultiPluginVersion(array('plv_plugin_name' => $name));
+        $versions = new MultiPluginVersion(array('plugin_name' => $name));
         $versions->load();
         foreach ($versions as $version) {
             $version->permanent_delete();
         }
 
         require_once(PathHelper::getIncludePath('data/plugin_dependencies_class.php'));
-        $deps = new MultiPluginDependency(array('pld_plugin_name' => $name));
+        $deps = new MultiPluginDependency(array('plugin_name' => $name));
         $deps->load();
         foreach ($deps as $dep) {
             $dep->permanent_delete();
         }
 
         require_once(PathHelper::getIncludePath('data/plugin_migrations_class.php'));
-        $migrations = new MultiPluginMigration(array('plm_plugin_name' => $name));
+        $migrations = new MultiPluginMigration(array('plugin_name' => $name));
         $migrations->load();
         foreach ($migrations as $migration) {
             $migration->permanent_delete();
@@ -1398,7 +1398,7 @@ class PluginManager extends AbstractExtensionManager {
     protected function getDependents($plugin_name) {
         $dependents = array();
         
-        $deps = new MultiPluginDependency(array('pld_depends_on' => $plugin_name));
+        $deps = new MultiPluginDependency(array('depends_on' => $plugin_name));
         $deps->load();
         
         foreach ($deps as $dep) {

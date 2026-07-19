@@ -68,10 +68,19 @@ function admin_question_edit_logic(array $input): LogicResult {
 		//VALIDATION
 		$validation_array = [];
 
+		// Required-ness is the qst_is_required column — the blob carries only
+		// the value rules (integer, decimal, lengths, bounds).
+		$question->set('qst_is_required',
+			isset($input['validation_options']) && is_array($input['validation_options'])
+			&& in_array('required', $input['validation_options']));
+
 		if(isset($input['validation_options']) && is_array($input['validation_options'])){
 			foreach ($input['validation_options'] as $option){
 				// Handle if $option is a string value
 				if(is_string($option)) {
+					if($option == 'required'){
+						continue;
+					}
 					$validation_array[$option] = $option;
 					if($option == 'decimal' || $option == 'integer'){
 						if(isset($input['max_value']) && $input['max_value'] != ''){

@@ -34,7 +34,7 @@
 
 				if ($_POST['tier_id'] === '0') {
 					// Remove user from all tiers
-					$tier_groups = new MultiGroup(['grp_category' => 'subscription_tier']);
+					$tier_groups = new MultiGroup(['category' => 'subscription_tier']);
 					$tier_groups->load();
 
 					foreach ($tier_groups as $group) {

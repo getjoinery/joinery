@@ -142,7 +142,7 @@
 		'validation' => ['required' => true]
 	]);
 
-	$products = new MultiProduct(array('user_id'=> $user->key));
+	$products = new MultiProduct(array());
 	$products->load();
 	$optionvals = $products->get_dropdown_array();
 	$formwriter->dropinput('odi_pro_product_id', 'Product purchased', [

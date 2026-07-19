@@ -887,14 +887,59 @@ class DatabaseUpdater {
     }
     
     /**
-     * Add missing unique constraints for a table
+     * The predicate that scopes uniqueness to live rows on a soft-deletable
+     * table — the same exclusion SystemBase::check_for_duplicate() applies, so
+     * the database constraint and the application pre-check agree about
+     * whether a soft-deleted row still occupies its values.
+     *
+     * @return string|null NULL when the table has no soft-delete column.
+     */
+    private function softDeletePredicate($class) {
+        if (!isset($class::$field_specifications) || !isset($class::$prefix)) {
+            return null;
+        }
+        $prefix = $class::$prefix;
+        if (isset($class::$field_specifications[$prefix . '_delete_time'])) {
+            return $prefix . '_delete_time IS NULL';
+        }
+        if (isset($class::$field_specifications[$prefix . '_is_deleted'])) {
+            return '(' . $prefix . '_is_deleted IS NULL OR ' . $prefix . '_is_deleted = FALSE)';
+        }
+        return null;
+    }
+
+    /**
+     * Add missing unique constraints for a table.
+     *
+     * Soft-deletable tables are handled by manageIndexes() instead: their
+     * unique/unique_with declarations materialize as PARTIAL unique indexes
+     * (unique among live rows), because a plain UNIQUE constraint would refuse
+     * delete-then-recreate with the same values — a collision the pre-check
+     * deliberately does not report. Here that means: skip adding the full
+     * constraint, and drop any existing one so the partial index can take
+     * over within the same run (constraints sync before indexes).
      */
     private function addMissingConstraints($class, $table, $dblink, &$results) {
         if (!isset($class::$field_specifications)) {
             return;
         }
-        
+
+        $soft_predicate = $this->softDeletePredicate($class);
+
         foreach ($class::$field_specifications as $field => $spec) {
+            if ($soft_predicate !== null && (!empty($spec['unique']) || isset($spec['unique_with']))) {
+                $fields = isset($spec['unique_with'])
+                    ? array_merge(array($field), $spec['unique_with'])
+                    : array($field);
+                if (!empty($spec['unique']) && isset($spec['unique_with'])) {
+                    // Both declared on one field: handle each set below.
+                    $this->replaceConstraintWithPartialIndex($class, $table, array($field), $dblink, $results);
+                    $this->replaceConstraintWithPartialIndex($class, $table, $fields, $dblink, $results);
+                } else {
+                    $this->replaceConstraintWithPartialIndex($class, $table, $fields, $dblink, $results);
+                }
+                continue;
+            }
             // Single field unique constraints
             if (isset($spec['unique']) && $spec['unique']) {
                 $constraint_name = $this->generateOptimalConstraintName($table, [$field], 'unique');
@@ -955,6 +1000,32 @@ class DatabaseUpdater {
         }
     }
     
+    /**
+     * On a soft-deletable table, retire the full UNIQUE constraint covering
+     * $fields so the partial unique index (created by manageIndexes in the
+     * same run) becomes the only enforcer. Idempotent: nothing to drop means
+     * nothing happens.
+     */
+    private function replaceConstraintWithPartialIndex($class, $table, $fields, $dblink, &$results) {
+        $constraint_name = $this->generateOptimalConstraintName($table, $fields, 'unique');
+        $existing = null;
+        if ($this->constraintExists($constraint_name, $dblink)) {
+            $existing = $constraint_name;
+        } else {
+            $existing = $this->findExistingConstraintByColumns($table, $fields, $dblink, 'UNIQUE');
+        }
+        if (!$existing) {
+            return;
+        }
+        $sql = "ALTER TABLE $table DROP CONSTRAINT $existing";
+        if ($this->executeConstraintSql($sql, $dblink)) {
+            $results['constraints_removed'][] = $existing;
+            $results['messages'][] = "Replaced full unique constraint $existing with a partial unique index (unique among live rows)";
+        } else {
+            $results['errors'][] = "Failed to drop constraint $existing (superseded by partial unique index)";
+        }
+    }
+
     /**
      * Remove obsolete constraints from a table
      */
@@ -1208,7 +1279,13 @@ class DatabaseUpdater {
     private function getExpectedUniqueConstraints($class) {
         $constraints = array();
         $table = $class::$tablename;
-        
+
+        // Soft-deletable tables enforce uniqueness via partial unique indexes
+        // (see addMissingConstraints) — no table constraints are expected.
+        if ($this->softDeletePredicate($class) !== null) {
+            return $constraints;
+        }
+
         if (isset($class::$field_specifications)) {
             foreach ($class::$field_specifications as $field => $spec) {
                 if (isset($spec['unique']) && $spec['unique']) {
@@ -1367,6 +1444,7 @@ class DatabaseUpdater {
         $expected = [];
 
         // Field-level shorthand: 'index' => true / 'index_with' => [...]
+        $soft_predicate = $this->softDeletePredicate($class);
         if (isset($class::$field_specifications)) {
             foreach ($class::$field_specifications as $field => $spec) {
                 if (isset($spec['index']) && $spec['index']) {
@@ -1375,6 +1453,18 @@ class DatabaseUpdater {
                 if (isset($spec['index_with'])) {
                     $columns = array_merge([$field], $spec['index_with']);
                     $expected[] = $this->buildIndexDefinition($table, $columns, 'btree', null, false);
+                }
+                // On a soft-deletable table, unique/unique_with materialize as
+                // partial unique indexes — unique among live rows, matching
+                // check_for_duplicate() — instead of full table constraints.
+                if ($soft_predicate !== null) {
+                    if (!empty($spec['unique'])) {
+                        $expected[] = $this->buildIndexDefinition($table, [$field], 'btree', $soft_predicate, true);
+                    }
+                    if (isset($spec['unique_with'])) {
+                        $columns = array_merge([$field], $spec['unique_with']);
+                        $expected[] = $this->buildIndexDefinition($table, $columns, 'btree', $soft_predicate, true);
+                    }
                 }
             }
         }

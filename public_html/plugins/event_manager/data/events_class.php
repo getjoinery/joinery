@@ -388,7 +388,11 @@ function get_leader() {
 				}
 			}
 			
-			$event_registrant->set('evr_ord_order_id', $order->key);
+			//AN ORDERLESS CALL (FREE REGISTRATION PATH) MUST NOT TOUCH THE ORDER
+			//LINKAGE — SETTING IT FROM A NULL ORDER WIPED THE PAID ORDER ID
+			if($order){
+				$event_registrant->set('evr_ord_order_id', $order->key);
+			}
 			$event_registrant->save();
 			return $event_registrant;
 		}

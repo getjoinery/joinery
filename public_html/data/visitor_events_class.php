@@ -69,7 +69,7 @@ class VisitorEvent extends SystemBase {
 	public static $field_specifications = array(
 	    'vse_visitor_event_id' => array('type'=>'int8', 'serial'=>true),
 	    'vse_visitor_id' => array('type'=>'varchar(20)'),
-	    'vse_usr_user_id' => array('type'=>'int4'),
+	    'vse_usr_user_id' => array('type'=>'int4', 'index'=>true),
 	    'vse_type' => array('type'=>'int2'),
 	    'vse_ip' => array('type'=>'varchar(64)'),
 	    'vse_page' => array('type'=>'text'),

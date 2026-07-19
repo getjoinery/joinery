@@ -22,6 +22,15 @@ An account has up to two doors, and they are deliberately different:
 
 Everything below follows from keeping those doors separate.
 
+**Email activation gates every session-opening path.** When
+`activation_required_login` is on, an unactivated account is refused a session
+by web sign-in (`login_logic`) and by API login (`ApiAuth::attemptLogin`, the
+door the native apps use) alike — same setting, same gate. Each refusal
+re-sends the activation email, and the refusal is only issued after the
+password verifies, so it discloses nothing about account existence. Pinned by
+`tests/account_security/login_test.php` (web) and
+`tests/functional/api/session_keys_test.php` (API).
+
 ## The role split: a passkey never opens both doors
 
 **A passkey never opens both the session and the vault on the same account.**

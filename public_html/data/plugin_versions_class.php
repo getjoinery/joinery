@@ -51,7 +51,11 @@ class MultiPluginVersion extends SystemMultiBase {
 
     protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
-        
+
+        if (isset($this->options['plugin_name'])) {
+            $filters['plv_plugin_name'] = [$this->options['plugin_name'], PDO::PARAM_STR];
+        }
+
         return $this->_get_resultsv2('plv_plugin_versions', $filters, $this->order_by, $only_count, $debug);
     }
 }

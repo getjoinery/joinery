@@ -43,6 +43,7 @@ class Product extends SystemBase {
 		'pro_prg_product_group_id' => ['action' => 'prevent', 'message' => 'Cannot delete product group - products exist'],
 		'pro_fil_file_id' => ['action' => 'null'],
 		'pro_emt_receipt_template_id' => ['action' => 'null'],
+		'pro_sbt_subscription_tier_id' => ['action' => 'prevent', 'message' => 'Cannot delete subscription tier - products still grant it'],
 	];
 
 	const PRICE_TYPE_ONE = 1;

@@ -27,21 +27,18 @@ class BookingItemSource implements CalendarItemSource {
 		}
 
 		$items = [];
-		// BOOKED confirmations and CREATED (paid holds) both occupy the slot.
-		foreach ([Booking::BOOKING_STATUS_BOOKED, Booking::BOOKING_STATUS_CREATED] as $status) {
+		// One occupancy answer for the whole plugin: confirmed bookings and live
+		// paid holds occupy the slot (Booking::occupies_host_time — the caps
+		// counter reads the same predicate).
+		{
 			$bookings = new MultiBooking([
 				'user_id_booked' => $host_id,
-				'status' => $status,
 				'deleted' => false,
 			]);
 			$bookings->load();
 			foreach ($bookings as $b) {
-				// A hold that has expired no longer occupies the slot.
-				if ($status === Booking::BOOKING_STATUS_CREATED) {
-					$exp = $b->get('bkn_hold_expires_time');
-					if (!$exp || $exp < gmdate('Y-m-d H:i:s')) {
-						continue;
-					}
+				if (!$b->occupies_host_time()) {
+					continue;
 				}
 				$s = $b->get('bkn_start_time');
 				$e = $b->get('bkn_end_time') ?: $s;

@@ -682,8 +682,8 @@ function change_tier_logic(array $input): LogicResult {
         // Get products for this tier
         $tier_products = new MultiProduct([
             'pro_sbt_subscription_tier_id' => $tier->key,
-            'pro_is_active' => true,
-            'pro_delete_time' => 'IS NULL'
+            'is_active' => true,
+            'deleted' => false
         ]);
         $tier_products->load();
 
