@@ -16,12 +16,15 @@
  *    and decrypts back to the granted values; get_for_user scoping.
  *  - CustomerCloudProvision: CRUD, fail(), Multi status/order-item filters,
  *    duplicate order-item rejection.
+ *  - Origin rules: order-origin requires an order item, admin-origin does
+ *    not; install-parameter validation (docker mode, install mode,
+ *    from-backup source); defaults reproduce the order-flow behavior.
  *  - CustomerCloudConsumer: a grant upserts the account link and flips the
  *    user's pending_connect provisions (same provider only) to ready.
  *
  * Run: php plugins/server_manager/tests/customer_cloud_provisioning_test.php
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -64,6 +67,7 @@ class CustomerCloudProvisioningTest {
 			$this->test_driver();
 			$this->test_account_tokens();
 			$this->test_provision_model();
+			$this->test_origin_rules();
 			$this->test_consumer();
 		} catch (Exception $e) {
 			check(false, 'uncaught exception', $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
@@ -210,6 +214,96 @@ class CustomerCloudProvisioningTest {
 		$reloaded = new CustomerCloudProvision($provision->key, TRUE);
 		check($reloaded->get('cvp_status') === 'failed' && strpos($reloaded->get('cvp_error'), 'test failure reason') !== false,
 			'fail() records terminal status + reason');
+	}
+
+	private function test_origin_rules() {
+		section('Provision origin + install-parameter rules');
+
+		// Admin origin needs no order item; install params ride on the row.
+		$admin = new CustomerCloudProvision(NULL);
+		$admin->set('cvp_origin', 'admin');
+		$admin->set('cvp_usr_user_id', $this->user_id);
+		$admin->set('cvp_domain', 'adminborn.example.com');
+		$admin->set('cvp_slug', 'adminborn-example-com');
+		$admin->set('cvp_sitename', 'adminborn');
+		$admin->set('cvp_docker_mode', 'bare-metal');
+		$admin->set('cvp_install_mode', 'from_backup');
+		$admin->set('cvp_source_node_id', 12345);
+		$admin->set('cvp_backup_source', 'new');
+		$admin->set('cvp_status', 'ready');
+		$admin->save();
+		$admin->load();
+		check($admin->key > 0 && $admin->get('cvp_external_order_item_id') === null,
+			'admin-origin provision saves without an order item');
+		check($admin->get('cvp_docker_mode') === 'bare-metal'
+			&& $admin->get('cvp_install_mode') === 'from_backup'
+			&& (int)$admin->get('cvp_source_node_id') === 12345,
+			'install parameters persist on the row');
+
+		// A second admin provision also without an order item — the unique
+		// constraint must allow multiple NULLs.
+		$admin2 = new CustomerCloudProvision(NULL);
+		$admin2->set('cvp_origin', 'admin');
+		$admin2->set('cvp_usr_user_id', $this->user_id);
+		$admin2->set('cvp_domain', 'adminborn2.example.com');
+		$admin2->set('cvp_slug', 'adminborn2-example-com');
+		$admin2->save();
+		check($admin2->key > 0, 'second order-item-less provision saves (unique allows NULLs)');
+
+		// Order origin still demands the order item.
+		try {
+			$bad = new CustomerCloudProvision(NULL);
+			$bad->set('cvp_usr_user_id', $this->user_id);
+			$bad->set('cvp_domain', 'noorder.example.com');
+			$bad->set('cvp_slug', 'noorder-example-com');
+			$bad->save();
+			check(false, 'order-origin without order item rejected');
+		} catch (CustomerCloudProvisionException $e) {
+			check(true, 'order-origin without order item rejected');
+		}
+
+		// From-backup demands a source node.
+		try {
+			$bad = new CustomerCloudProvision(NULL);
+			$bad->set('cvp_origin', 'admin');
+			$bad->set('cvp_usr_user_id', $this->user_id);
+			$bad->set('cvp_domain', 'nosource.example.com');
+			$bad->set('cvp_slug', 'nosource-example-com');
+			$bad->set('cvp_install_mode', 'from_backup');
+			$bad->save();
+			check(false, 'from-backup without source node rejected');
+		} catch (CustomerCloudProvisionException $e) {
+			check(true, 'from-backup without source node rejected');
+		}
+
+		// Unknown docker mode rejected.
+		try {
+			$bad = new CustomerCloudProvision(NULL);
+			$bad->set('cvp_origin', 'admin');
+			$bad->set('cvp_usr_user_id', $this->user_id);
+			$bad->set('cvp_domain', 'badmode.example.com');
+			$bad->set('cvp_slug', 'badmode-example-com');
+			$bad->set('cvp_docker_mode', 'kvm');
+			$bad->save();
+			check(false, 'unknown docker mode rejected');
+		} catch (CustomerCloudProvisionException $e) {
+			check(true, 'unknown docker mode rejected');
+		}
+
+		// Defaults reproduce the order flow exactly: docker, fresh, port 8080.
+		$order_id = 960000 + random_int(0, 9999);
+		$plain = new CustomerCloudProvision(NULL);
+		$plain->set('cvp_external_order_item_id', $order_id);
+		$plain->set('cvp_usr_user_id', $this->user_id);
+		$plain->set('cvp_domain', 'defaults.example.com');
+		$plain->set('cvp_slug', 'defaults-example-com');
+		$plain->save();
+		$plain->load();
+		check($plain->get('cvp_origin') === 'order'
+			&& $plain->get('cvp_docker_mode') === 'docker'
+			&& $plain->get('cvp_install_mode') === 'fresh'
+			&& (int)$plain->get('cvp_port') === 8080,
+			'defaults keep order-flow behavior (order/docker/fresh/8080)');
 	}
 
 	private function test_consumer() {

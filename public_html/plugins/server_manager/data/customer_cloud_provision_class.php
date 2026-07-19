@@ -1,10 +1,17 @@
 <?php
 /**
- * CustomerCloudProvision - One customer-cloud fulfillment, order to running site.
+ * CustomerCloudProvision - One cloud-instance provision, request to running site.
  *
- * Created by PollHostingOrders when a paid order's product declares
- * pro_fulfillment_provider = 'customer_cloud'. Advanced by the
- * ProvisionCustomerCloud scheduled task.
+ * Two origins (cvp_origin):
+ *   order - created by PollHostingOrders when a paid order's product declares
+ *           pro_fulfillment_provider = 'customer_cloud'; carries the order
+ *           item linkage that drives the buyer welcome email.
+ *   admin - created by the Install New Node form's cloud-instance target;
+ *           no order item, no welcome email.
+ *
+ * Install parameters travel on the row (cvp_docker_mode, cvp_install_mode,
+ * cvp_source_node_id, cvp_backup_source, cvp_port) and are honored by the
+ * ProvisionCustomerCloud scheduled task, which advances every provision.
  *
  * Status flow:
  *   pending_connect - waiting for the buyer's OAuth grant (Connect page)
@@ -16,7 +23,7 @@
  *                     is the standard pipeline)
  *   failed          - terminal; cvp_error says why. Admin alert sent.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -30,12 +37,21 @@ class CustomerCloudProvision extends SystemBase {
 
 	public static $permanent_delete_actions = array();
 
+	// Admin origin needs no order item, so spec-generated test rows validate;
+	// the update test must mutate a free-form field, not a code-enforced enum.
+	public static $test_fixture = array(
+		'values'       => array('cvp_origin' => 'admin'),
+		'update_field' => 'cvp_domain',
+	);
+
 	public static $field_specifications = array(
 		'cvp_id'                     => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
-		'cvp_external_order_item_id' => array('type'=>'int8', 'required'=>true, 'is_nullable'=>false, 'unique'=>true),
+		'cvp_origin'                 => array('type'=>'varchar(10)', 'is_nullable'=>false, 'default'=>'order'),
+		'cvp_external_order_item_id' => array('type'=>'int8', 'unique'=>true),
 		'cvp_usr_user_id'            => array('type'=>'int8', 'required'=>true, 'is_nullable'=>false),
 		'cvp_domain'                 => array('type'=>'varchar(255)', 'required'=>true, 'is_nullable'=>false),
 		'cvp_slug'                   => array('type'=>'varchar(50)', 'required'=>true, 'is_nullable'=>false),
+		'cvp_sitename'               => array('type'=>'varchar(50)'),
 		'cvp_buyer_email'            => array('type'=>'varchar(255)'),
 		'cvp_buyer_name'             => array('type'=>'varchar(255)'),
 		'cvp_status'                 => array('type'=>'varchar(20)', 'is_nullable'=>false, 'default'=>'pending_connect'),
@@ -46,6 +62,11 @@ class CustomerCloudProvision extends SystemBase {
 		'cvp_region'                 => array('type'=>'varchar(50)'),
 		'cvp_instance_type'          => array('type'=>'varchar(50)'),
 		'cvp_mgn_node_id'            => array('type'=>'int8'),
+		'cvp_docker_mode'            => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'docker'),
+		'cvp_install_mode'           => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'fresh'),
+		'cvp_source_node_id'         => array('type'=>'int8'),
+		'cvp_backup_source'          => array('type'=>'varchar(10)'),
+		'cvp_port'                   => array('type'=>'int4', 'is_nullable'=>false, 'default'=>8080),
 		'cvp_error'                  => array('type'=>'text'),
 		'cvp_create_time'            => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'cvp_update_time'            => array('type'=>'timestamp(6)'),
@@ -53,8 +74,35 @@ class CustomerCloudProvision extends SystemBase {
 	);
 
 	function prepare() {
-		if (empty($this->get('cvp_external_order_item_id'))) {
-			throw new CustomerCloudProvisionException('Order item id is required.');
+		$this->validate_row();
+		$this->set('cvp_update_time', gmdate('Y-m-d H:i:s'));
+	}
+
+	// Validation lives in save(): prepare() is not guaranteed to run first.
+	function save($debug = false) {
+		$this->validate_row();
+		$this->set('cvp_update_time', gmdate('Y-m-d H:i:s'));
+		return parent::save($debug);
+	}
+
+	private function validate_row() {
+		$origin = $this->get('cvp_origin') ?: 'order';
+		if (!in_array($origin, array('order', 'admin'), true)) {
+			throw new CustomerCloudProvisionException("Unknown origin '{$origin}'.");
+		}
+		if ($origin === 'order' && empty($this->get('cvp_external_order_item_id'))) {
+			throw new CustomerCloudProvisionException('Order item id is required for order-origin provisions.');
+		}
+		$docker_mode = $this->get('cvp_docker_mode') ?: 'docker';
+		if (!in_array($docker_mode, array('docker', 'bare-metal'), true)) {
+			throw new CustomerCloudProvisionException("Unknown docker mode '{$docker_mode}'.");
+		}
+		$install_mode = $this->get('cvp_install_mode') ?: 'fresh';
+		if (!in_array($install_mode, array('fresh', 'from_backup'), true)) {
+			throw new CustomerCloudProvisionException("Unknown install mode '{$install_mode}'.");
+		}
+		if ($install_mode === 'from_backup' && empty($this->get('cvp_source_node_id'))) {
+			throw new CustomerCloudProvisionException('Source node is required for from-backup provisions.');
 		}
 		if (empty($this->get('cvp_usr_user_id'))) {
 			throw new CustomerCloudProvisionException('User is required.');
@@ -62,7 +110,6 @@ class CustomerCloudProvision extends SystemBase {
 		if (empty($this->get('cvp_domain'))) {
 			throw new CustomerCloudProvisionException('Domain is required.');
 		}
-		$this->set('cvp_update_time', gmdate('Y-m-d H:i:s'));
 	}
 
 	/**

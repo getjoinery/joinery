@@ -6,7 +6,7 @@
  * Consolidated node management page with tabs:
  * Overview, Backups, Database, Updates, Jobs
  *
- * @version 1.5
+ * @version 1.6
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -253,6 +253,13 @@ if ($_POST && isset($_POST['action'])) {
 			$node->set('mgn_install_state', 'installing');
 			$node->save();
 			$job = ManagementJob::createJob($node->key, 'install_node', $steps, $params, $session->get_user_id());
+			// Carry the auto-provisioned order linkage forward: the retry is
+			// the same fulfillment, and success must still send the buyer's
+			// welcome email (JobResultProcessor keys it off this field).
+			if ($prev->get('mjb_external_order_item_id')) {
+				$job->set('mjb_external_order_item_id', $prev->get('mjb_external_order_item_id'));
+				$job->save();
+			}
 			header('Location: /admin/server_manager/job_detail?job_id=' . $job->key);
 			exit;
 		} catch (Exception $e) {
@@ -819,13 +826,29 @@ if ($tab === 'overview') {
 		}
 
 		if ($ssl_card_state === 'pending') {
-			echo '<p class="mb-3">SSL provisioning is in progress for <strong>' . htmlspecialchars($ssl_card_domain) . '</strong>.</p>';
 			$db = DbConnector::get_instance()->get_db_link();
-			$q  = $db->prepare("SELECT mjb_id FROM mjb_management_jobs WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'provision_ssl' AND mjb_delete_time IS NULL ORDER BY mjb_id DESC LIMIT 1");
+			$q  = $db->prepare("SELECT mjb_id, mjb_status FROM mjb_management_jobs WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'provision_ssl' AND mjb_delete_time IS NULL ORDER BY mjb_id DESC LIMIT 1");
 			$q->execute([$node->key]);
 			$ssl_pend_row = $q->fetch(PDO::FETCH_ASSOC);
-			if ($ssl_pend_row) {
-				echo '<p><a href="/admin/server_manager/job_detail?job_id=' . $ssl_pend_row['mjb_id'] . '" class="btn btn-sm btn-outline-secondary">View provision SSL job #' . $ssl_pend_row['mjb_id'] . '</a></p>';
+
+			// "Pending" covers two very different situations: a job in flight,
+			// and a job that already failed (the hourly-backoff retry hasn't
+			// fired yet). The failed one needs to say so and offer an
+			// immediate retry — while it waits, the domain may already point
+			// here with HTTP redirecting to an HTTPS that cannot answer.
+			if ($ssl_pend_row && $ssl_pend_row['mjb_status'] === 'failed') {
+				echo '<div class="alert alert-danger mb-3">The last SSL provisioning attempt for <strong>' . htmlspecialchars($ssl_card_domain) . '</strong> failed. '
+					. 'It retries automatically with hourly backoff. '
+					. '<a href="/admin/server_manager/job_detail?job_id=' . $ssl_pend_row['mjb_id'] . '" class="alert-link">Review the job output →</a></div>';
+				echo '<form method="post" action="' . $base_url . '">';
+				echo '<input type="hidden" name="action" value="provision_ssl">';
+				echo '<button type="submit" class="btn btn-primary btn-sm">Retry SSL now</button>';
+				echo '</form>';
+			} else {
+				echo '<p class="mb-3">SSL provisioning is in progress for <strong>' . htmlspecialchars($ssl_card_domain) . '</strong>.</p>';
+				if ($ssl_pend_row) {
+					echo '<p><a href="/admin/server_manager/job_detail?job_id=' . $ssl_pend_row['mjb_id'] . '" class="btn btn-sm btn-outline-secondary">View provision SSL job #' . $ssl_pend_row['mjb_id'] . '</a></p>';
+				}
 			}
 		} else {
 			echo '<p class="mb-3">No SSL certificate is configured for <strong>' . htmlspecialchars($ssl_card_domain) . '</strong>.</p>';

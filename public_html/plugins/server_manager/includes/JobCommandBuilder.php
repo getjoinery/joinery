@@ -5,7 +5,7 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
- * @version 1.4
+ * @version 1.5
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -1183,13 +1183,18 @@ class JobCommandBuilder {
 		// both quoted and correct.
 		$site_var = 'SITE=' . escapeshellarg($sitename) . '; ';
 
+		// Bare-metal nodes run jobs as user1 after install; every command that
+		// touches /etc, /var/log/letsencrypt, or services needs the sudo prefix
+		// (empty for Docker/root nodes).
+		$sudo = self::sudo_prefix($node);
+
 		if (self::is_cloudflare_domain($domain)) {
 			// Cloudflare proxied: certbot not needed (Cloudflare provides edge SSL).
 			// Just ensure the HTTP proxy passes X-Forwarded-Proto "https" to the backend.
 			return [
 				['type' => 'ssh', 'label' => 'Cloudflare detected — skip certbot, patch proxy config', 'on_host' => $is_docker,
 				 'cmd' => $site_var
-				          . self::proto_patch_cmd('"/etc/apache2/sites-enabled/${SITE}-proxy.conf"')
+				          . self::proto_patch_cmd('"/etc/apache2/sites-enabled/${SITE}-proxy.conf"', $sudo)
 				          . '; echo \'SSL_SKIPPED_CLOUDFLARE\'',
 				 'timeout' => 30],
 			];
@@ -1198,20 +1203,20 @@ class JobCommandBuilder {
 		// certbot's Apache plugin copies X-Forwarded-Proto "http" from the HTTP VHost into
 		// the SSL VHost it generates — always patch it to "https" after certbot runs.
 		$ssl_patch_cmd = $site_var
-		               . self::proto_patch_cmd('"/etc/apache2/sites-enabled/${SITE}-proxy-le-ssl.conf"');
+		               . self::proto_patch_cmd('"/etc/apache2/sites-enabled/${SITE}-proxy-le-ssl.conf"', $sudo);
 
 		return [
 			['type' => 'ssh', 'label' => 'Ensure certbot is installed', 'on_host' => $is_docker,
-			 'cmd' => "command -v certbot >/dev/null 2>&1 || apt-get install -y -qq certbot python3-certbot-apache",
+			 'cmd' => "command -v certbot >/dev/null 2>&1 || {$sudo}apt-get install -y -qq certbot python3-certbot-apache",
 			 'timeout' => 120],
 			['type' => 'ssh', 'label' => 'Run certbot', 'on_host' => $is_docker,
-			 'cmd' => "certbot --apache -d {$domain_esc} --non-interactive --agree-tos{$email_arg}",
+			 'cmd' => "{$sudo}certbot --apache -d {$domain_esc} --non-interactive --agree-tos{$email_arg}",
 			 'timeout' => 300],
 			['type' => 'ssh', 'label' => 'Fix X-Forwarded-Proto in SSL VHost', 'on_host' => $is_docker,
 			 'cmd' => $ssl_patch_cmd,
 			 'timeout' => 30],
 			['type' => 'ssh', 'label' => 'Verify certificate', 'on_host' => $is_docker,
-			 'cmd' => "test -f /etc/letsencrypt/live/{$domain_esc}/fullchain.pem && echo SSL_CERT_VERIFIED",
+			 'cmd' => "{$sudo}test -f /etc/letsencrypt/live/{$domain_esc}/fullchain.pem && echo SSL_CERT_VERIFIED",
 			 'continue_on_error' => true],
 		];
 	}
@@ -1238,14 +1243,14 @@ class JobCommandBuilder {
 	 *                                already quoted for the remote shell.
 	 * @return string
 	 */
-	private static function proto_patch_cmd($conf_shell_path) {
+	private static function proto_patch_cmd($conf_shell_path, $sudo = '') {
 		$http_pattern  = 'X-Forwarded-Proto "http"';
 		$https_pattern = 'X-Forwarded-Proto "https"';
 		return 'CONF=' . $conf_shell_path . '; '
 		     . 'if [ ! -f "$CONF" ]; then echo PROTO_CONF_MISSING; '
 		     . 'elif grep -q \'' . $http_pattern . '\' "$CONF"; then '
-		     .   'sed -i \'s/' . $http_pattern . '/' . $https_pattern . '/\' "$CONF" '
-		     .   '&& systemctl reload apache2 && echo PROTO_PATCHED; '
+		     .   $sudo . 'sed -i \'s/' . $http_pattern . '/' . $https_pattern . '/\' "$CONF" '
+		     .   '&& ' . $sudo . 'systemctl reload apache2 && echo PROTO_PATCHED; '
 		     . 'elif grep -q \'' . $https_pattern . '\' "$CONF"; then echo PROTO_ALREADY_HTTPS; '
 		     . 'else echo PROTO_HEADER_ABSENT; fi';
 	}

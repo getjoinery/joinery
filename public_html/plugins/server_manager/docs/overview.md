@@ -32,13 +32,21 @@ This compiles the binary and packages it into `joinery-agent-installer.sh` — a
 #### Install
 
 ```bash
-sudo bash joinery-agent-installer.sh --verbose
+sudo bash joinery-agent-installer.sh --verbose [--config /path/to/Globalvars_site.php]
 ```
 
-This creates:
+The installer detects the host's supervision capability:
+
+- **systemd hosts**: installs `/etc/systemd/system/joinery-agent.service`; start with `systemctl start joinery-agent`.
+- **No systemd** (Docker containers, minimal hosts): installs `/usr/local/bin/joinery-agent-supervise` plus `/etc/cron.d/joinery-agent` (`@reboot` + a once-a-minute keepalive) and starts the agent immediately. Logs go to `/var/log/joinery-agent.log`.
+
+Both modes create:
 - `/usr/local/bin/joinery-agent` — the binary
-- `/etc/systemd/system/joinery-agent.service` — systemd unit
 - `/etc/joinery-agent/joinery-agent.env` — configuration (from example, first install only)
+
+`--config PATH` stamps `JOINERY_CONFIG` into the env file, pointing the agent at the right site without editing anything.
+
+**Every control plane needs a live agent.** All jobs (install_node, provision_ssl, backups, upgrades) sit `pending` until an agent polling that site's own database claims them. The **Server Manager → Provisioning** page shows an agent heartbeat badge as requirement #1.
 
 #### Configure (usually not needed)
 
@@ -70,10 +78,11 @@ sudo systemctl status joinery-agent
 
 The dashboard at `/admin/server_manager` should now show **Agent Status: Online**.
 
-If anything is wrong, the agent logs to systemd journal:
+If anything is wrong, the agent logs to the systemd journal (systemd hosts) or `/var/log/joinery-agent.log` (cron-supervised hosts):
 
 ```bash
-journalctl -u joinery-agent -f
+journalctl -u joinery-agent -f      # systemd
+tail -f /var/log/joinery-agent.log  # cron supervision
 ```
 
 Common startup errors are self-explanatory — missing `DB_NAME`, wrong password, or plugin tables not installed. Each error message tells you exactly what to fix.
@@ -192,7 +201,12 @@ Destructive operations auto-backup the target database before proceeding. The UI
 
 ### One-Click Node Install
 
-**Dashboard → Install New Node** opens a form that provisions a fresh Joinery site on an SSH-accessible server in a single click. Two modes:
+**Dashboard → Install New Node** opens a form that provisions a Joinery site in a single click. The **Target Host** dropdown offers three kinds of target:
+
+- **A known host** (or *Other server* with manual SSH details): the form creates the ManagedNode and dispatches the `install_node` job immediately.
+- **Create a new cloud instance**: no server exists yet. The form records an admin-origin `CustomerCloudProvision` (connected cloud account, region, instance type, plus all install parameters) and the **Provision Customer Cloud** task births the instance, creates the node, and dispatches the install — see [Customer-Cloud Fulfillment](#customer-cloud-fulfillment). The instance is created in, and billed to, the selected connected account; Linode grants expire after two hours, so connect (or re-connect) shortly before submitting. Cloud targets always take a fresh source backup in From-Backup mode. In-flight provisions appear in a banner at the top of the dashboard.
+
+Two install types:
 
 - **Fresh**: empty Joinery site with default schema. Admin picks the domain. Default admin login is `admin@example.com` / `changeme123`, with `usr_force_password_change=true` so the first login forces a new password.
 - **From Backup**: fresh install + restore of a source node's DB and project files. Target inherits the source's domain — admin cuts over DNS after install. Use source admin credentials to log in.
@@ -297,12 +311,25 @@ re-connect page if a grant is later revoked). The grant flows through the
 access). Tokens are SecretBox-encrypted on the buyer's
 `CustomerCloudAccount` row.
 
-Each customer-cloud order is a `CustomerCloudProvision` row that the
+Each provision is a `CustomerCloudProvision` row that the
 **Provision Customer Cloud** scheduled task advances:
 
-`pending_connect` → (buyer grants) → `ready` → instance created on the
-buyer's account → `booting` → running + IP → ManagedNode + `install_node` job
-→ `installing` → `done` (or `failed`, which alerts the ops address).
+`pending_connect` → (grant arrives) → `ready` → instance created on the
+connected account → `booting` → running + IP → ManagedNode + `install_node`
+job → `installing` → `done` (or `failed`, which alerts the ops address).
+
+Provisions have two origins (`cvp_origin`):
+
+- **order** — created by a customer-cloud purchase. Starts at
+  `pending_connect`, installs fresh + Docker, and sends the buyer welcome
+  email on completion (the order-item linkage drives it).
+- **admin** — created by the Install New Node form's cloud-instance target.
+  Starts at `ready` (the admin picked an already-connected account), carries
+  its install parameters on the row (`cvp_docker_mode`, `cvp_install_mode`,
+  `cvp_source_node_id`, `cvp_backup_source`, `cvp_port`, `cvp_sitename`),
+  and sends no welcome email. The row belongs to the grant owner
+  (`cvp_usr_user_id`), so a stale grant is re-connectable by the person who
+  can actually re-consent.
 
 If the buyer hasn't connected yet, they get an email pointing at the Connect
 page; the page's create-account link uses `server_manager_linode_referral_url`
@@ -541,11 +568,15 @@ the buyer must re-connect).
 
 ### CustomerCloudProvision (`cvp_customer_cloud_provisions`)
 
-One customer-cloud fulfillment, order to running site. Keyed to the getjoinery
-order item (`cvp_external_order_item_id`, unique); `cvp_status` is the state
-machine documented under [Customer-Cloud Fulfillment](#customer-cloud-fulfillment);
-links to the account (`cvp_cca_account_id`), instance (`cvp_instance_id`/`_ip`),
-and resulting node (`cvp_mgn_node_id`).
+One cloud-instance provision, request to running site. `cvp_origin` is
+`order` (keyed to the getjoinery order item — `cvp_external_order_item_id`,
+unique, required for this origin) or `admin` (no order item); `cvp_status` is
+the state machine documented under
+[Customer-Cloud Fulfillment](#customer-cloud-fulfillment); install parameters
+ride on the row (`cvp_docker_mode`, `cvp_install_mode`, `cvp_source_node_id`,
+`cvp_backup_source`, `cvp_port`, `cvp_sitename`); links to the account
+(`cvp_cca_account_id`), instance (`cvp_instance_id`/`_ip`), and resulting
+node (`cvp_mgn_node_id`).
 
 ### ManagementJob (`mjb_management_jobs`)
 

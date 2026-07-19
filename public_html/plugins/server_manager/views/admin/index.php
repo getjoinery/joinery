@@ -3,7 +3,7 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
- * @version 1.7
+ * @version 1.8 - In-flight cloud provisions banner
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -57,6 +57,14 @@ $recent_jobs->load();
 
 // Agent heartbeat
 $agent = AgentHeartbeat::getLatest();
+
+// Cloud provisions still working toward a running site (or stuck)
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
+$inflight_provisions = new MultiCustomerCloudProvision([
+	'statuses' => ['pending_connect', 'ready', 'booting', 'installing', 'failed'],
+	'deleted'  => false,
+], ['cvp_id' => 'DESC']);
+$inflight_provisions->load();
 
 // Cron health: active if ran within 20 minutes
 $settings        = Globalvars::get_instance();
@@ -119,6 +127,32 @@ $agent_label  = $agent_online ? 'Online'  : 'Offline';
 		</div>
 	<?php endif; ?>
 </div>
+
+<?php if (count($inflight_provisions)): ?>
+<!-- Cloud provisions in flight -->
+<div class="card mb-4">
+	<div class="card-body py-2">
+		<strong>Cloud provisions:</strong>
+		<table class="table table-sm mb-0 mt-2">
+			<thead><tr><th>Domain</th><th>Origin</th><th>Status</th><th>Instance</th><th>Detail</th></tr></thead>
+			<tbody>
+			<?php foreach ($inflight_provisions as $prov):
+				$pstatus = $prov->get('cvp_status');
+				$badge = ($pstatus === 'failed') ? 'danger' : (($pstatus === 'pending_connect') ? 'warning' : 'info');
+			?>
+				<tr>
+					<td><?php echo htmlspecialchars($prov->get('cvp_domain')); ?></td>
+					<td><?php echo htmlspecialchars($prov->get('cvp_origin') ?: 'order'); ?></td>
+					<td><span class="badge bg-<?php echo $badge; ?>"><?php echo htmlspecialchars($pstatus); ?></span></td>
+					<td><?php echo htmlspecialchars(trim(($prov->get('cvp_instance_type') ?: '') . ' ' . ($prov->get('cvp_region') ?: '')) ?: '—'); ?></td>
+					<td class="text-muted"><?php echo htmlspecialchars(mb_substr((string)$prov->get('cvp_error'), 0, 120) ?: '—'); ?></td>
+				</tr>
+			<?php endforeach; ?>
+			</tbody>
+		</table>
+	</div>
+</div>
+<?php endif; ?>
 
 <!-- Two-column layout: Hosts & Sites (left) | Recent Jobs (right) -->
 <div class="row">

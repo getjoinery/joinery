@@ -104,103 +104,283 @@ looking like an oversight.
 
 ---
 
-## 4. Materializing a recurring instance twice can create a duplicate row
+## 4. models_crud fails on SubscriptionTier — RESOLVED 2026-07-19 (torn test-DB copy)
 
-**Deferred:** 2026-07-18
+**Resolved:** 2026-07-19. The untruncated message was `Column
+'sbt_subscription_tier_id' exists but is not set as primary key`: the test
+database itself was missing the primary keys on `sbt_subscription_tiers` AND
+`usr_users`. Cause: `copyLiveToTest()` (adm/admin_test_database.php) ran
+`pg_dump | psql` straight into the live test-DB name while a concurrent test
+run held connections — constraint DDL failed mid-restore and the function
+could not see it (a pipe's exit code is psql's, and psql without ON_ERROR_STOP
+exits 0 past errors). Fixed in admin_test_database.php v1.1: restore into a
+staging database with `pipefail` + `ON_ERROR_STOP=1`, then terminate/drop/
+rename swap; any failure is now loud and leaves the previous copy untouched.
+After a clean resync, models_crud passed 151/151 twice. The ModelTester
+HTML-truncation gripe below stands — it cost most of the diagnosis time.
 
-`Event::materialize_instance()` checks whether the date is already materialized,
-then inserts if not. Nothing holds a lock across those two steps, so two
-concurrent calls for the same date can both pass the check and both insert. The
-duplicate is then invisible: `_get_materialized_instance_for_date()` selects
-`LIMIT 1`, so every later lookup returns one of the two and the other sits
-unreferenced.
+**Original entry (for context):**
 
-**Cost of leaving it:** narrower than entries 1 and 2 — materialization is
-admin-initiated, so it needs two admins (or one double-click reaching two
-handlers) on the same occurrence at the same moment. The result is a stray event
-row that expansion may surface as a second copy of one occurrence, and that holds
-its own registrants if anyone signs up before it is noticed.
+`tests/models/models_test.php` reports one sub-check failure on
+`SubscriptionTier`, truncated to `key in table 'sbt_subscription_tiers'` (the
+full text is swallowed because ModelTester emits it wrapped in HTML). The suite
+was 151/151 earlier the same day and regressed after that point.
 
-**Why this one IS a constraint problem.** Unlike event capacity (entry 1), "one
-materialized instance per parent per date" is a uniqueness rule, so it is
-directly expressible: `unique_with` on `evt_materialized_instance_date` naming
-`evt_parent_event_id`. Those keys materialize real database constraints through
-`update_database` / plugin sync, and both columns are nullable, so standalone
-events and recurring parents — which have NULL for both — stay outside the
-constraint. Postgres permits repeated NULLs in a unique index.
+**What was ruled out:** it is not the `vary_scalar_value()` change made that day
+— the failure reproduces with `tests/models/ModelTester.php` stashed. It is not
+a database constraint: nothing references `sbt_subscription_tiers` with a
+foreign key, so a delete cannot be blocked at that layer. The rows in the table
+are seeded plans, not leftover fixtures.
 
-**What closing it takes:** add the `unique_with` key, sync, and confirm no
-duplicate pairs exist first (none do on dev). `materialize_instance` should then
-catch the constraint violation and re-read, so the loser of a race returns the
-winner's row rather than surfacing a database error — which is what the existing
-idempotence check already promises callers.
+**What points elsewhere:** the warning printed alongside the failure names
+`pro_products.pro_sbt_subscription_tier_id`, and
+`plugins/store/data/products_class.php` is one of many files being actively
+changed in the working tree by concurrent store work (optional donation
+pricing). `CustomerCloudProvision` failed and then self-resolved the same
+afternoon when that author's `$test_fixture` declaration landed, so the tree was
+demonstrably shifting under the gate.
 
-Pinned today by `plugins/event_manager/tests/event_recurrence_test.php`, which
-asserts single-threaded idempotence and that exactly one row exists for a
-materialized date. The concurrent case belongs with the fix.
+**Cost of leaving it:** the db gate is red, which is the state that makes every
+other red result unreadable. Attribution has to happen before any db run is
+believed.
 
----
-
-## 5. A materialized instance has no database-level link to its parent
-
-**Deferred:** 2026-07-18
-
-`evt_parent_event_id` is declared as a plain `integer` with no `foreign_key` key,
-so nothing at the database level stops an instance row outliving the parent it
-describes. The PHP deletion rules do cascade instances when a parent is
-permanently deleted — `event_deletion_test.php` proves the executed cascade — but
-that only holds when deletion goes through the models.
-
-**Cost of leaving it:** an instance orphaned by raw SQL, a killed process, or an
-interrupted test keeps a `evt_parent_event_id` pointing at a free id. This is the
-exact hazard `docs/deletion_system.md` describes for hard ownership edges: if the
-parent's primary key is later reallocated, the stale instance attaches itself to
-an unrelated event and starts appearing in that series' expansion. Sequences are
-forward-only platform-wide, which makes reallocation unlikely rather than
-impossible.
-
-**Why it qualifies.** An instance is meaningless without its parent — it holds no
-recurrence pattern of its own and exists only to override one date of a series.
-That is the stated test for declaring a real constraint.
-
-**What closing it takes:** add `'foreign_key' => array('table' => 'evt_events',
-'column' => 'evt_event_id', 'on_delete' => 'CASCADE')` to the
-`evt_parent_event_id` spec and run `update_database` / plugin sync. It is a
-self-referencing constraint on a nullable column, so standalone events and
-parents (NULL) stay outside it. No orphans exist on dev today, so creation would
-not be blocked. The `referential_integrity` safe-tier test would then guard it
-every run.
-
-Deferred only because it is a schema change, which needs an explicit go-ahead
-before `update_database` runs.
+**What closing it takes:** re-run once the concurrent store/server_manager work
+is committed and settled. If it survives that, get the untruncated message first
+— ModelTester should emit sub-check failures as plain text rather than HTML, so
+the harness reports the whole sentence instead of its tail.
 
 ---
 
-## 6. The error log silently drops its most detailed errors
+## 5. Two tests were green or red depending on operator configuration, and the sweep for others is not done
 
-**Deferred:** 2026-07-18
+**Deferred:** 2026-07-19 — the two known cases are fixed; the sweep is not
 
-`err_error` and `err_message` in `err_general_errors` are `varchar(255)`, and
-both receive raw exception and database messages. A PostgreSQL error carrying a
-`DETAIL:` clause routinely runs past 255 characters, so the insert that records
-it fails on its own length limit. The platform then prints `Database error
-logging failed: ... value too long for type character varying(255)` and the
-original error is never stored.
+`email_security_digest` (safe) and `joinery_ai_chat_encryption` (db) each read a
+setting that ships empty and is operator-configured, then asserted behaviour
+that depends on it being set. Both are now hermetic — they pin the setting in
+memory with `harness_set_setting_mem` — but they were found by accident, because
+an unrelated change turned the gate red and the failures had to be attributed.
 
-**Cost of leaving it:** the errors that go missing are precisely the ones worth
-having. A short error ("permission denied") fits and is logged; a constraint
-violation naming the table, the column and the failing row does not, so the
-incident that actually needed a record leaves none. Nothing about this is
-visible unless someone is watching stderr at the moment it happens — which is
-how it was found, incidentally, while a test fixture violated a NOT NULL
-constraint.
+**Cost of leaving it:** this class of test does not fail loudly, it fails
+*confusingly* — the assertion goes red while the code under test is working
+correctly, on one box and not another. It also fails in the other direction:
+the same test passes for a reason unrelated to what it claims to prove. A gate
+that behaves differently per box is a gate nobody trusts, which is the exact
+problem the P0 tier of `specs/test_estate_audit.md` set out to fix.
 
-**What closing it takes:** change both fields to `text` in
-`data/general_errors_class.php` and run `update_database`. Postgres stores
-`varchar(n)` and `text` identically, so widening costs nothing and rewrites no
-rows. `err_description`, `err_file` and `err_path` are also `varchar(255)` and
-worth reviewing in the same pass — a file path plus a long class name reaches
-that limit too.
+**What closing it takes:** a sweep of every safe- and db-tier test for
+`get_setting(` calls whose result feeds an assertion, rather than a fixture the
+test fully controls. Each hit is then either pinned in memory or moved to a tier
+where the configuration is a declared `needs:`. Mechanical to find, and worth
+doing in one pass rather than one accident at a time.
 
-Grouped with entries 4 and 5: all three are schema changes and want a single
-`update_database` run.
+---
+
+## 6. ModelTester cannot generate valid values for code-enforced enum columns
+
+**Deferred:** 2026-07-19
+
+`vary_scalar_value()` and `generate_different_value()` now respect a column's
+declared *type* — dates shift, booleans negate, text stays inside its width.
+Neither can respect a constraint that exists only in PHP: a `varchar(10)` column
+that `prepare()` restricts to `'order'` or `'admin'` will still be handed
+`'order_upd'`, and the model's own validation rejects it. The failure reads as
+the model being broken.
+
+**Cost of leaving it:** every model with a code-enforced enum needs a manual
+`$test_fixture` declaration naming a safe `update_field`, and nothing prompts
+the author to add one. The test simply fails after the fact, on someone else's
+gate run — which is how `CustomerCloudProvision` surfaced.
+
+**What closing it takes:** either declare the allowed set in the field spec
+(`'allowed_values' => ['order','admin']`) so the tester and the model read one
+source — which also lets `update_database` consider a real CHECK constraint —
+or have ModelTester skip fields whose model rejects a generated value, and
+report them as needing a `$test_fixture` rather than as failures. The first is
+better: it removes the guesswork instead of tolerating it.
+
+---
+
+## 7. A stray harness fixture user appeared mid-gate and its source was not identified
+
+**Deferred:** 2026-07-19 — transient, currently clean
+
+One db gate run failed `referential_integrity`'s "no leftover harnesstest_%
+users" check with a single row. The row was gone by the next query, and the
+check has passed on every run since.
+
+**Most likely cause:** a falsification run deliberately crashed mid-test that
+day (several were run to prove new checks were load-bearing), and a crash
+between `make_user()` and teardown leaves exactly this. That is a testing
+artifact rather than a product defect, and it was not reproduced.
+
+**Cost of leaving it:** small but not zero. The guard exists because leaked
+fixtures are how the vault-suite flakiness started, so a leak whose source is
+unknown is worth one look. If it recurs without a deliberately crashed run
+nearby, the leak is real and teardown has a hole.
+
+**What closing it takes:** if it reappears, capture the user row's id and
+adjacent rows before anything else runs — the id ordering identifies which
+suite created it.
+
+---
+
+## 8. Two operator settings on dev sit at factory defaults and may not be intentional
+
+**Deferred:** 2026-07-19 — needs an owner decision, not a code change
+
+Surfaced while attributing test failures, not by looking for it:
+
+- `mailbox_mail_hostname` is empty. It was created 2026-07-06 and has never been
+  updated, so it appears never to have been configured on this box.
+  `tests/tools/fetch_spamassassin_ham.php` and `fetch_phishing_pot.php` both
+  document the intended value as `devmail.getjoinery.com`, and both note it MUST
+  equal this setting.
+- `joinery_ai_local_model` is empty and `joinery_ai_local_base_url` is
+  `http://localhost:11434/v1`. Both rows were created 2026-06-20 and last
+  written 2026-07-18 21:05. The recorded dev configuration for the local LLM
+  host is the Mac Studio at `100.69.133.69:11434/v1` with a Qwen model, so these
+  look reset rather than deliberately cleared.
+
+**Cost of leaving it:** low and bounded, now that the two tests that depended on
+these have been made hermetic — which is exactly why it needs recording rather
+than fixing quietly. Nothing in the gate will complain about them again, so if
+the values matter for real use (inbound mail DKIM attribution, local-model
+chat), the blanks will be discovered by a person hitting the feature.
+
+**Why this is not being changed unilaterally:** writing operator configuration
+is not a test-estate change, and the correct values are inferred from tool
+comments and prior notes rather than known. `seed_declared()` uses `ON CONFLICT
+DO NOTHING`, so no deploy will restore them — a human has to set them.
+
+**What closing it takes:** confirm whether each blank is intentional. If not,
+set them through the admin settings page. If the local-LLM reset has a cause
+worth finding, the 2026-07-18 21:05 write timestamp is the starting point.
+
+**Addendum 2026-07-19 (entry 8):** restoring the recorded values may no longer
+be enough — the Studio's Ollama now lists only re-tagged models
+(`qwen3.5-9b-pintest:latest`, `qwen3.6-35b-a3b-cap24k:latest`), so
+`joinery_ai_local_model` needs whichever tag is current, not the old
+`qwen3.5:9b-nvfp4`. The endpoint itself is up and reachable at
+`100.69.133.69:11434/v1`. Until settings and tags agree, the
+`joinery_ai_chat_encryption` check "a Fortress chat on a local model resolves
+to the local provider" stays red on dev.
+
+---
+
+## 9. vse_visitor_events has no index on vse_usr_user_id (1.5M rows and growing)
+
+**Deferred:** 2026-07-19
+
+`vse_visitor_events` holds ~1.57M rows and its only index is the primary key.
+Every per-user query — including the `SELECT COUNT(*) ... WHERE
+vse_usr_user_id = ?` that `permanent_delete()`/dry-run issues when a user is
+deleted — is a full table scan. During the 2026-07-19 model-suite runs, three
+of these COUNTs sat `active` for minutes and held connections on the test
+database (which is also what blocked `dropdb` during the copy investigation).
+
+**Cost of leaving it:** user deletion (and any admin/analytics view that
+filters events by user) gets slower every day the table grows; long scans hold
+connections and locks that interfere with unrelated operations, as they
+demonstrably did here.
+
+**What closing it takes:** add an index declaration for `vse_usr_user_id` in
+`data/visitor_events_class.php` field specs so `update_database` materializes
+it. One-line class change plus a schema sync; verify the analytics write path
+doesn't mind the extra index maintenance (this table is insert-heavy).
+
+---
+
+## 10. Deleting a SubscriptionTier default-deletes referencing products
+
+**Deferred:** 2026-07-19
+
+ModelTester warns on every run: `SubscriptionTier` has an empty
+`$permanent_delete_actions` while `pro_products.pro_sbt_subscription_tier_id`
+references it, so a tier's permanent delete falls back to the default action
+for referencing rows. A tier is a billing plan; products pointing at it should
+survive its removal (nullify or block), not ride along on the default.
+
+**Cost of leaving it:** deleting a subscription tier from the admin can take
+its products with it, silently. Rare operation, expensive surprise.
+
+**What closing it takes:** declare the relationship in
+`SubscriptionTier::$permanent_delete_actions` (likely `set_null` on
+`pro_sbt_subscription_tier_id`, or refuse deletion while products reference
+the tier), then the ModelTester warning disappears on its own.
+
+---
+
+## 11. Multi collections silently ignore filter options they do not implement
+
+**Deferred:** 2026-07-19
+
+`Question::output_question()` asks for a question's answer choices with
+`new MultiQuestionOption(array('deleted' => false, 'question_id' => $this->key))`
+in four live call sites (and four more in a commented-out block).
+`MultiQuestionOption::getMultiResults()` implements no `deleted` option, and
+`qop_question_options` has no delete column at all — verified against the live
+schema. The filter does nothing and no one is told.
+
+Today the result is still correct: question options are hard-deleted, so every
+row is live and "exclude deleted" and "exclude nothing" agree. The hazard is
+the mechanism, not this instance. `SystemMultiBase` reads only the option keys
+a subclass names and drops the rest, so any filter key that is misspelled,
+renamed, or never implemented degrades to *no filter* — the collection returns
+more rows than the caller asked for, silently. For an ownership filter
+(`user_id`, `owner_id`) that failure mode is a data-exposure bug that reads as
+correct code, and the reviewer's eye slides right over it because the call
+site plainly says what it wanted.
+
+**Cost of leaving it:** every Multi call site is trusted-by-appearance. A
+future refactor that renames a filter key in `getMultiResults()` without
+updating callers widens those queries instead of breaking them, and nothing —
+not a test, not a log line — reports it.
+
+**What closing it takes:** a decision on strictness, because the blast radius
+is platform-wide. Options, roughly in order of appeal:
+
+1. **Throw on unknown option keys** in `SystemMultiBase`. Correct and loud, but
+   it will surface every existing dead filter across the codebase at once,
+   some of them in paths with no test coverage. Needs a survey of current
+   offenders before it can be turned on.
+2. **Log unknown option keys** (dev/test only), leaving behaviour unchanged.
+   Cheap, reversible, and it produces exactly the survey option 1 needs. This
+   is the natural first step whichever end state is chosen.
+3. **Leave it and fix the call sites found by hand.** Closes this instance,
+   not the class.
+
+The four live `'deleted' => false` arguments in `data/questions_class.php`
+should be dropped either way — they promise a filter that does not exist.
+They are deliberately left in place for now so this entry has a reproducer.
+
+---
+
+## 12. A question stores its required-ness in two places and reads only one
+
+**Deferred:** 2026-07-19
+
+`Question` declares a `qst_is_required` boolean column, and nothing in the
+codebase ever reads it. Whether an answer is actually required is decided by a
+`required` key inside `qst_validate`, a PHP-serialized blob in a text column —
+that is what `validate_answers()` checks, what `output_js_validation()`
+advertises to the browser, and what the new
+`tests/functional/surveys/survey_answer_test.php` pins.
+
+So the admin-facing column and the enforced rule can disagree, and the column
+is the one that looks authoritative.
+
+**Cost of leaving it:** an admin who sets required-ness through whichever
+surface writes `qst_is_required` gets a question that is not required, with no
+error and no way to tell from the question record which value is in force.
+Worth confirming against the question admin page before deciding — it may be
+that nothing writes the column either, in which case this is dead schema
+rather than a live contradiction.
+
+**What closing it takes:** decide which one is the source of truth.
+`qst_validate` is the working implementation and carries all the other rules
+(lengths, bounds, numeric type), so the cheap resolution is to drop
+`qst_is_required` from the field specs as dead schema. The more principled
+resolution is the reverse — promote the rules out of a serialized blob into
+real columns, where they can be queried, indexed, and validated — but that is
+a schema migration for the whole rule set, not a one-column change.
