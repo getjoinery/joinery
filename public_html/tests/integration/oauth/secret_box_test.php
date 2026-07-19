@@ -55,8 +55,31 @@ class SecretBoxTest {
         $this->ok(SecretBox::looksEncrypted($blob), 'looksEncrypted true for a blob');
         $this->ok(!SecretBox::looksEncrypted($plain), 'looksEncrypted false for plaintext');
 
-        // Tamper: flip the last char of the ciphertext part.
-        $bad = substr($blob, 0, -1) . (substr($blob, -1) === 'A' ? 'B' : 'A');
+        // Tamper with a character in the middle of the ciphertext part.
+        //
+        // Flipping the *last* base64 character is not a reliable tamper: when
+        // the encoded length is not a multiple of 3 the final character carries
+        // fewer than six significant bits, so some flips decode to byte-for-byte
+        // identical ciphertext. Decryption then succeeds because nothing was
+        // actually changed, and this check failed roughly one run in eight —
+        // a flaky gate that looked like an authentication weakness.
+        $parts = explode('.', $blob);
+        $cipher_part = $parts[count($parts) - 1];
+        $mid = intdiv(strlen($cipher_part), 2);
+        $parts[count($parts) - 1] = substr($cipher_part, 0, $mid)
+            . ($cipher_part[$mid] === 'A' ? 'B' : 'A')
+            . substr($cipher_part, $mid + 1);
+        $bad = implode('.', $parts);
+
+        // Prove the tamper landed before asserting anything about decryption:
+        // an assertion that a *non*-tampered blob fails to decrypt is worse
+        // than no assertion, because it reads as proof the check works.
+        $b64url_decode = function ($s) {
+            return base64_decode(strtr($s, '-_', '+/') . str_repeat('=', (4 - strlen($s) % 4) % 4));
+        };
+        $this->ok($b64url_decode($parts[count($parts) - 1]) !== $b64url_decode($cipher_part),
+            'the tampered ciphertext really differs from the original');
+
         $threw = false;
         try { $box->decrypt($bad); } catch (Throwable $e) { $threw = true; }
         $this->ok($threw, 'tampered ciphertext fails to decrypt');

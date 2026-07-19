@@ -770,7 +770,11 @@ class LibraryFunctions {
 
 	//CONVERT TIME FROM ONE TIMEZONE TO ANOTHER
 	static function convert_time($starttime, $fromtz, $totz, $format='M j, Y g:i a T'){
-		if(is_null($starttime)){
+		// An empty string is "no time", the same as NULL, and must not be
+		// converted. DateTime reads '' as "now", so without this a blank field
+		// renders as the current moment — a plausible-looking timestamp that
+		// says an optional event just happened, rather than an empty cell.
+		if(is_null($starttime) || $starttime === ''){
 			return FALSE;
 		}
 
@@ -810,7 +814,10 @@ class LibraryFunctions {
 
 	//RETURN NEW TIME SHIFTED BY INTERVAL FROM INPUT TIME
 	static function time_shift($starttime, $interval='7 days', $format='M j, Y g:i a T'){
-		if(is_null($starttime)){
+		// Same reasoning as convert_time: '' is not a time. Shifting it by the
+		// default interval would report a deadline a week from today for a
+		// record that has no start at all.
+		if(is_null($starttime) || $starttime === ''){
 			return FALSE;
 		}
 

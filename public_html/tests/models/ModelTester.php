@@ -428,7 +428,12 @@ class ModelTester {
     protected function test_single_field_unique($field, $debug = false) {
         $verbose = $this->is_verbose();
         $model_class = $this->model_class;
-        
+
+        // Declared out here so the finally block can reach them however the
+        // try exits.
+        $model1 = null;
+        $model2 = null;
+
         try {
             // Create first record
             $model1 = new $model_class(null);
@@ -464,20 +469,6 @@ class ModelTester {
                 $this->test_pass("Unique constraint on $field properly enforced (Exception: " . get_class($e) . ")");
             }
             
-            // Clean up
-            try {
-                $model1->permanent_delete();
-            } catch (Exception $e) {
-                $this->test_warn("Cleanup failed for unique constraint test on $field - permanent_delete_actions may need configuration: " . $e->getMessage());
-            }
-            if ($model2->key) {
-                try {
-                    $model2->permanent_delete();
-                } catch (Exception $e) {
-                    $this->test_warn("Cleanup failed for unique constraint test on $field - permanent_delete_actions may need configuration: " . $e->getMessage());
-                }
-            }
-            
         } catch (Exception $e) {
             // Check if this is a missing table error
             if (strpos($e->getMessage(), 'Undefined table') !== false ||
@@ -485,6 +476,33 @@ class ModelTester {
                 $this->test_warn("Cannot test unique constraint on $field - database table does not exist: " . $e->getMessage());
             } else {
                 $this->test_fail("Error testing unique constraint on $field: " . $e->getMessage());
+            }
+        } finally {
+            // Cleanup runs even when the test above failed. test_fail() throws,
+            // so cleanup written after it never executes on the failing path —
+            // and the fixture values here are deterministic, so the row left
+            // behind is exactly the row the next run tries to insert. That
+            // turns any single failure into a permanent one: the constraint
+            // test then collides with its own leftover on every subsequent run,
+            // and the only way back to green is deleting a row by hand.
+            $this->cleanup_constraint_fixtures([$model1, $model2], "unique constraint test on $field");
+        }
+    }
+
+    /**
+     * Remove rows created by a constraint test, tolerating the ones that were
+     * never saved. Failures are warned about rather than swallowed: cleanup
+     * that quietly does nothing is how a test database rots.
+     */
+    protected function cleanup_constraint_fixtures(array $models, $context) {
+        foreach ($models as $model) {
+            if (!$model || !$model->key) {
+                continue;
+            }
+            try {
+                $model->permanent_delete();
+            } catch (Exception $e) {
+                $this->test_warn("Cleanup failed for $context - permanent_delete_actions may need configuration: " . $e->getMessage());
             }
         }
     }
@@ -497,7 +515,13 @@ class ModelTester {
         $model_class = $this->model_class;
         $all_fields = array_merge(array($main_field), $other_fields);
         $field_list = implode(', ', $all_fields);
-        
+
+        // Declared out here so the finally block can reach them however the
+        // try exits.
+        $model1 = null;
+        $model2 = null;
+        $model3 = null;
+
         try {
             // Create first record
             $model1 = new $model_class(null);
@@ -559,29 +583,10 @@ class ModelTester {
             try {
                 $model3->save();
                 $this->test_pass("Composite unique constraint allows different combinations on ($field_list)");
-                try {
-                    $model3->permanent_delete();
-                } catch (Exception $delete_e) {
-                    $this->test_warn("Cleanup failed for composite unique constraint test on ($field_list) - permanent_delete_actions may need configuration: " . $delete_e->getMessage());
-                }
             } catch (Exception $e) {
                 $this->test_fail("Composite unique constraint incorrectly rejected different combination on ($field_list): " . $e->getMessage());
             }
-            
-            // Clean up
-            try {
-                $model1->permanent_delete();
-            } catch (Exception $e) {
-                $this->test_warn("Cleanup failed for unique constraint test on $field - permanent_delete_actions may need configuration: " . $e->getMessage());
-            }
-            if ($model2->key) {
-                try {
-                    $model2->permanent_delete();
-                } catch (Exception $e) {
-                    $this->test_warn("Cleanup failed for unique constraint test on $field - permanent_delete_actions may need configuration: " . $e->getMessage());
-                }
-            }
-            
+
         } catch (Exception $e) {
             // Check if this is a missing table error
             if (strpos($e->getMessage(), 'Undefined table') !== false ||
@@ -590,6 +595,13 @@ class ModelTester {
             } else {
                 $this->test_fail("Error testing composite unique constraint on ($field_list): " . $e->getMessage());
             }
+        } finally {
+            // See test_single_field_unique(): cleanup has to survive the throw,
+            // because these fixture values are deterministic and a surviving row
+            // is precisely what the next run collides with. Schedule was already
+            // in that state — a leftover (sch_subject_type='a', sch_subject_id=4957)
+            // row made the test-db gate red on every run until it was removed.
+            $this->cleanup_constraint_fixtures([$model1, $model2, $model3], "composite unique constraint test on ($field_list)");
         }
     }
     
