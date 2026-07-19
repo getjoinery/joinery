@@ -22,7 +22,7 @@
  * `filesSent` is the PRESETS smtp_files_sent capability: true when the provider's
  * SMTP saves the sent copy itself; false when two-way sync must APPEND it.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('includes/EmailServiceProvider.php'));
@@ -106,7 +106,7 @@ class OutboundTransport {
             if (!($provider instanceof ApiSubmissionRelay)) {
                 $t->error = 'Sent mail cannot leave through the current email provider without exposing this '
                     . 'server\'s address. Choose a provider that submits over an API (Mailgun or Amazon SES), '
-                    . 'or switch the relay to smarthost mode on the Relay tab.';
+                    . 'or switch the relay to smarthost mode on the mailbox Settings tab.';
                 return $t;
             }
             require_once(PathHelper::getIncludePath('includes/RawRelayComposeTransport.php'));

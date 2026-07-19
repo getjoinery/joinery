@@ -10,7 +10,7 @@
  * full Postfix/relay health run — live behind the Advanced disclosure so they
  * don't clutter the per-mailbox view.
  *
- * @version 2.3
+ * @version 2.4
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -33,6 +33,23 @@ $page->admin_header(array(
 ));
 
 echo AdminPage::tab_menu(mailbox_admin_tabs(), 'Setup');
+
+// The relay-or-direct choice comes before everything else — until it is made,
+// the mailbox surfaces show only the choice card.
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
+if (mailbox_receive_mode() === '') {
+	echo mailbox_receive_gate_render();
+	$page->admin_footer();
+	return;
+}
+
+// Relay section — present whenever the deployment receives through a relay
+// (or a relay row exists). Renders above the mailbox picker: the relay is
+// server-wide and gates every domain's DNS below it.
+if (!empty($relay_section)) {
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/relay_section.php'));
+	mailbox_relay_section_render($page, $relay_section);
+}
 
 // The per-check "Details & how to fix" disclosure reads as a link, not a field.
 
@@ -177,7 +194,7 @@ if ($selected) {
 			}
 			echo '<li class="mb-2"><strong>The relay</strong> fronts every Fortress domain and seals fresh mail before it reaches Joinery. '
 				. 'Provision it once (shared by all Fortress domains). '
-				. '<a class="btn btn-sm btn-outline-secondary" href="/plugins/mailbox/admin/admin_mailbox_relay">Relay setup</a></li>';
+				. '<a class="btn btn-sm btn-outline-secondary" href="#relay-section">Relay setup</a></li>';
 			echo '<li class="mb-0"><strong>This domain cannot send mail unless you are signed in.</strong> '
 				. 'For automated mail (confirmations, notifications), add a Standard subdomain: '
 				. '<a class="btn btn-sm btn-outline-secondary" href="/plugins/mailbox/admin/admin_mailbox_domains?action=add&prefill_domain='

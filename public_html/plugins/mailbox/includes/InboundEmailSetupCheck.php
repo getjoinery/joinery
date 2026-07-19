@@ -23,7 +23,7 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
- * @version 1.17
+ * @version 1.18
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -665,7 +665,7 @@ class InboundEmailSetupCheck {
 		if ($host === '') {
 			$out[] = $this->r('mailhost.a_record', '', 'mailhost', 'Relay MX hostname A record', self::REQUIRED, self::UNKNOWN,
 				'The relay\'s MX hostname is not recorded yet.',
-				'Open the Relay tab once — it records the hostname from the relay\'s provisioning job — then re-check.');
+				'Reload the Setup tab once — its Relay section records the hostname from the relay\'s provisioning job — then re-check.');
 			return $out;
 		}
 
@@ -756,7 +756,7 @@ class InboundEmailSetupCheck {
 		if ($fronted && $mx_prescribed === '') {
 			$out[] = $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::UNKNOWN,
 				'The relay\'s MX hostname is not recorded yet, so there is no target to verify against.',
-				'Open the Relay tab once — it records the hostname from the relay\'s provisioning job — then re-check.');
+				'Reload the Setup tab once — its Relay section records the hostname from the relay\'s provisioning job — then re-check.');
 		} elseif (!$mxOk) {
 			$out[] = $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::UNKNOWN,
 				'DNS lookup for ' . $domain . ' MX failed — try again.');
@@ -939,7 +939,7 @@ class InboundEmailSetupCheck {
 
 		// Cutover completion: a relay row exists but is not enabled yet. Once
 		// DNS is fully cut over, mail is arriving at the relay with no consumer
-		// — the last step is the admin's explicit enable on the Relay tab.
+		// — the last step is the admin's explicit enable in the Setup tab's Relay section.
 		if ($this->fronted() && !$this->topology()['enabled']) {
 			$out[] = $this->relayEnableResult();
 		}
@@ -992,10 +992,10 @@ class InboundEmailSetupCheck {
 				'DNS is cut over but the relay is not enabled — mail is arriving at the relay with no consumer.',
 				'Every hosted domain\'s MX points at ' . $expected
 				. ($is_fleet ? ' and every ownership proof is published.' : '.'),
-				array('text' => 'Enable the relay on the Relay tab.'));
+				array('text' => 'Enable the relay in the Relay section above.'));
 		}
 		return $this->r('plugin.relay_enable', '', 'plugin', 'Relay enabled', self::RECOMMENDED, self::INFO,
-			'The relay is not enabled yet — enable it on the Relay tab after the rows above go green.',
+			'The relay is not enabled yet — enable it in the Relay section above after the rows below go green.',
 			'Enabling it makes the relay front every hosted domain; do it once the MX'
 			. ($is_fleet ? ' and ownership rows' : ' rows') . ' pass.');
 	}
@@ -1232,7 +1232,7 @@ class InboundEmailSetupCheck {
 		if (!$state['enrolled']) {
 			return $this->r('domain.ownership', $domain, 'domain', $label, self::REQUIRED, self::FAIL,
 				'This deployment no longer holds a fleet slot, so the relay accepts no mail for ' . $domain . '.',
-				'', array('text' => 'Re-enroll on the Relay tab.'));
+				'', array('text' => 'Re-enroll in the Setup tab\'s Relay section.'));
 		}
 		$claim = $this->fleetClaimFor($domain);
 		if ($claim === null || (string)($claim['status'] ?? '') === 'error') {

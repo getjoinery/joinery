@@ -13,7 +13,7 @@
  * every Edit jump to the existing per-object editors with context pre-filled.
  * DNS/host diagnostics live on the Setup tab.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -39,6 +39,15 @@ echo AdminPage::tab_menu(mailbox_admin_tabs(), 'Accounts');
 
 // Flash messages render in the AdminPage header (admin pages must not
 // fetch or render session messages themselves).
+
+// The relay-or-direct choice comes before everything else — until it is made,
+// the mailbox surfaces show only the choice card.
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
+if (mailbox_receive_mode() === '') {
+	echo mailbox_receive_gate_render();
+	$page->admin_footer();
+	return;
+}
 
 $domain_base  = '/plugins/mailbox/admin/admin_mailbox_domains';
 $alias_base   = '/plugins/mailbox/admin/admin_mailbox_alias';

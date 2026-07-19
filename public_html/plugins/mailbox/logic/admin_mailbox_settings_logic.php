@@ -47,8 +47,41 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 			$value = max($min, intval($input[$k] ?? 0));
 			mailbox_settings_write_setting($k, (string)$value);
 		}
+
+		// Relay configuration — saved only when its box rendered (the fields
+		// are absent otherwise, and absence must not blank stored values).
+		if (array_key_exists('mailbox_fleet_service_url', $input)) {
+			mailbox_settings_write_setting('mailbox_fleet_service_url',
+				trim((string)$input['mailbox_fleet_service_url']));
+			mailbox_settings_write_setting('mailbox_fleet_api_public_key',
+				trim((string)($input['mailbox_fleet_api_public_key'] ?? '')));
+			$secret = trim((string)($input['mailbox_fleet_api_secret_key'] ?? ''));
+			if ($secret !== '') { // blank keeps the stored secret
+				mailbox_settings_write_setting('mailbox_fleet_api_secret_key', $secret);
+			}
+		}
+
+		$outbound_note = '';
+		if (array_key_exists('mailbox_relay_outbound_mode', $input)) {
+			$prior = (strtolower(trim((string)$settings->get_setting('mailbox_relay_outbound_mode'))) === 'smarthost')
+				? 'smarthost' : 'provider';
+			$mode = ($input['mailbox_relay_outbound_mode'] === 'smarthost') ? 'smarthost' : 'provider';
+			mailbox_settings_write_setting('mailbox_relay_outbound_mode', $mode);
+			// The relay's Postfix submission listener is baked at provision time,
+			// so a mode switch takes effect on the relay itself only at the next
+			// Rebuild (Setup tab). The tunnel check fails honestly until then.
+			if ($mode === 'smarthost' && $prior !== 'smarthost') {
+				$outbound_note = ' Sent mail now leaves through the relay smarthost — this deployment owns the '
+					. 'relay IP\'s sending reputation. Run Rebuild on the relay (Setup tab) to open its tunnel '
+					. 'submission listener; until then compose sends are refused.';
+			} elseif ($mode === 'provider' && $prior === 'smarthost') {
+				$outbound_note = ' Sent mail now leaves through your email provider. The relay\'s submission '
+					. 'listener stays open until its next Rebuild.';
+			}
+		}
+
 		$session->save_message(new DisplayMessage(
-			'Settings saved.', 'Saved', '~/plugins/mailbox/admin/~',
+			'Settings saved.' . $outbound_note, 'Saved', '~/plugins/mailbox/admin/~',
 			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 		));
 		return LogicResult::redirect($base);
@@ -63,10 +96,28 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 		$values[$k] = intval($settings->get_setting($k));
 	}
 
+	// Relay configuration state. The connection box renders once the
+	// deployment's receive mode is relay (or a connection/relay already
+	// exists); the outbound box only once a relay is active.
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+	$fleet_url = trim((string)$settings->get_setting('mailbox_fleet_service_url'));
+	$values['mailbox_fleet_service_url']    = $fleet_url;
+	$values['mailbox_fleet_api_public_key'] = trim((string)$settings->get_setting('mailbox_fleet_api_public_key'));
+	$fleet_secret_set = trim((string)$settings->get_setting('mailbox_fleet_api_secret_key')) !== '';
+	$outbound_mode = (strtolower(trim((string)$settings->get_setting('mailbox_relay_outbound_mode'))) === 'smarthost')
+		? 'smarthost' : 'provider';
+	$show_relay_config = (mailbox_receive_mode() === 'relay')
+		|| mailbox_receive_relay_exists() || $fleet_url !== '';
+
 	return LogicResult::render(array(
-		'session' => $session,
-		'base'    => $base,
-		'values'  => $values,
+		'session'           => $session,
+		'base'              => $base,
+		'values'            => $values,
+		'show_relay_config' => $show_relay_config,
+		'fleet_secret_set'  => $fleet_secret_set,
+		'has_active_relay'  => (MailboxRelay::active() !== null),
+		'outbound_mode'     => $outbound_mode,
 	));
 }
 

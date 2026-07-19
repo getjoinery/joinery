@@ -6,7 +6,7 @@
  * list). DNS and host verification live on the Setup tab
  * (admin_mailbox_setup), driven by InboundEmailSetupCheck.
  *
- * @version 2.3
+ * @version 2.4
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -34,6 +34,15 @@ echo AdminPage::tab_menu(mailbox_admin_tabs(), 'Accounts');
 
 // Flash messages render in the AdminPage header (admin pages must not
 // fetch or render session messages themselves).
+
+// The relay-or-direct choice comes before everything else — until it is made,
+// the mailbox surfaces show only the choice card.
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
+if (mailbox_receive_mode() === '') {
+	echo mailbox_receive_gate_render();
+	$page->admin_footer();
+	return;
+}
 
 if (isset($error)) {
 	echo '<div class="alert alert-danger">' . htmlspecialchars($error) . '</div>';

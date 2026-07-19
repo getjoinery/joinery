@@ -16,7 +16,7 @@
  * also used by the member page at /profile/mailbox/mailbox — this page
  * supplies the admin chrome and the admin endpoint URLs.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -40,6 +40,15 @@ $page->admin_header(
 );
 
 echo AdminPage::tab_menu(mailbox_admin_tabs(), 'Mailboxes');
+
+// The relay-or-direct choice comes before everything else — until it is made,
+// the mailbox surfaces show only the choice card.
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
+if (mailbox_receive_mode() === '') {
+	echo mailbox_receive_gate_render();
+	$page->admin_footer();
+	return;
+}
 
 mailbox_render_mailbox_reader($page, array(
 	'csrf_token'          => $csrf_token,

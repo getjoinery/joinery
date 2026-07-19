@@ -19,7 +19,7 @@
  * is a no-op; with smarthost on, checkRelayTunnel applies and the two provider
  * checks are no-ops. The check list always matches the chosen path.
  *
- * @version 1.9
+ * @version 1.10
  */
 
 require_once(PathHelper::getIncludePath('includes/ProvisioningCheckFailed.php'));
@@ -328,7 +328,7 @@ class InboundEmailHealth {
             if (strpos($reply, '250') !== 0) {
                 throw new ProvisioningCheckFailed(
                     'The relay is reachable but refuses compose submission over the tunnel (got: ' . trim($reply)
-                    . '). The relay was provisioned inbound-only — run Rebuild on the Relay tab to open the '
+                    . '). The relay was provisioned inbound-only — run Rebuild in the Setup tab\'s Relay section to open the '
                     . 'tunnel submission listener.'
                 );
             }
