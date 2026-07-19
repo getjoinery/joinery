@@ -1,6 +1,6 @@
 # Mailbox — Topology-Aware Setup Tab (Relay/Fleet DNS Guidance)
 
-**Status:** Draft for review — decisions below need the owner's talk-through.
+**Status:** All decisions resolved (owner, 2026-07-19). Ready to build.
 **Builds on:** `specs/mailbox_relay_shared_fleet.md` (hosted fleet, live-verified
 2026-07-19 on shard1/t172), `specs/implemented/mailbox_relay_inbound_only.md`
 (outbound rides the provider under a relay), the Setup tab's Receiving/Sending
@@ -162,14 +162,14 @@ table is the manual floor it would later automate.
 
 - `plugins/mailbox/includes/InboundEmailSetupCheck.php` — topology resolution
   (one query for the live relay row + optional FleetClient status), prescribed
-  MX/SPF/PTR/A derivations, `domain.fleet_claim` + `plugin.relay_enable` rows,
+  MX/SPF/PTR/A derivations, `domain.ownership` + `plugin.relay_enable` rows,
   fronted-mode row suppressions/retargets.
 - `plugins/mailbox/admin/admin_mailbox_setup.php` — no structural change; new
   rows land in the existing Receiving/Sending groups (claim row = Receiving).
 - `plugins/server_manager/includes/JobResultProcessor.php` — persist
   `mail_hostname` → `mrl_mx_hostname` in `register_relay_row`.
 - `plugins/mailbox/admin/admin_mailbox_relay.php` + logic — operator DNS table;
-  claims table keeps its Verify buttons (state display, not guidance).
+  claims table becomes the read-only Ownership proofs state table (Decision 4).
 - Tests: setup-check verdicts per topology (colocated rows unchanged as the
   regression floor; fronted MX/SPF/claim-row matrix; the fleet test extends to
   hostname/claim coordinate assertions).
@@ -182,7 +182,7 @@ table is the manual floor it would later automate.
 - `docs/email_system.md` — SPF guidance under fronted topologies (provider
   include only, never the box IP).
 
-## Decisions to confirm (talk-through)
+## Decisions (all resolved)
 
 1. **Disabled relay row already flips prescriptions — DECIDED (owner,
    2026-07-19).** A relay row's existence (enabled or not) switches every
