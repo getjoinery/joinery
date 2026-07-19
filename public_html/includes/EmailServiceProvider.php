@@ -10,7 +10,7 @@
  *
  * This file also declares the optional RawMessageRelay capability (below).
  *
- * @version 1.2
+ * @version 1.3
  */
 interface EmailServiceProvider {
     /**
@@ -25,13 +25,23 @@ interface EmailServiceProvider {
     public static function getLabel(): string;
 
     /**
-     * Return the DNS domain a sending domain must include: in its SPF record
-     * for mail sent through this provider to pass SPF (e.g., 'mailgun.org'),
-     * or '' when no fixed include applies — local sends covered by the
-     * server's own IP, arbitrary smarthosts, or providers that publish
-     * per-domain DNS from their own dashboard.
+     * Return the SPF mechanism a sending domain must carry in its SPF record
+     * for mail sent through this provider to pass SPF — a complete term ready
+     * to paste into a v=spf1 record. Three shapes:
+     *
+     *   - 'include:mailgun.org' — providers with a fixed shared range.
+     *   - 'a:smtp.example.com'  — derived from configured settings (custom SMTP).
+     *   - fetched from the provider's own API for providers that publish
+     *     per-account DNS records (Resend-class); may be several
+     *     space-separated mechanisms.
+     *
+     * Return '' when no mechanism applies or can be determined: local sends
+     * covered by the server's own IP, or a per-account provider whose API is
+     * unreachable. Callers treat '' as "nothing to prescribe", never as an
+     * error. $domain is the sending domain being asked about — most providers
+     * ignore it; per-account providers use it to select the account record.
      */
-    public static function getSpfIncludeDomain(): string;
+    public static function getSpfMechanism(string $domain): string;
 
     /**
      * Return an array of setting field definitions this provider requires.

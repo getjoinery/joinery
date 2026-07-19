@@ -5,11 +5,13 @@
  * Lists the deployment's relay(s) with status + the four provisioning checks, and
  * drives provisioning (a server_manager job), rebuild, enable/disable, and delete.
  * Also the hosted-fleet surfaces (specs/mailbox_relay_shared_fleet.md): the
- * tenant-side slot (enroll, domain TXT claims, release) and — on the operator's
- * deployment — fleet shard registration. Guided controls only — no explainer
- * prose; details live in the plugin docs.
+ * tenant-side slot (enroll, ownership-proof state, release) and — on the
+ * operator's deployment — fleet shard registration plus the DNS-to-publish
+ * table. Ownership proofs are read-only state here: challenges are filed and
+ * verified automatically, and the Setup tab carries the publishable record.
+ * Guided controls only — no explainer prose; details live in the plugin docs.
  *
- * @version 1.3
+ * @version 1.4
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -170,39 +172,29 @@ if ($fleet_configured) {
 		echo '<p><strong>Point every hosted domain\'s MX at:</strong> '
 			. PublicPageBase::copy_field((string)($coords['mx_hostname'] ?? '')) . '</p>';
 
-		// Domain claims: the fleet accepts no mail for a domain before its TXT
-		// challenge passes (fleet-wide uniqueness — a security boundary).
+		// Ownership proofs — read-only state. Challenges are filed and
+		// re-verified automatically; each domain's Setup tab carries the
+		// publishable record as a normal DNS row.
 		$claims = is_array($fleet_status['claims'] ?? null) ? $fleet_status['claims'] : array();
 		if (!empty($claims)) {
+			echo '<h5>Ownership proofs</h5>';
 			echo '<table class="table"><thead><tr>'
-				. '<th>Domain</th><th>Status</th><th>TXT record</th><th></th>'
+				. '<th>Domain</th><th>Status</th><th>TXT record</th>'
 				. '</tr></thead><tbody>';
 			foreach ($claims as $claim) {
+				$proven = ((string)$claim['status'] === 'verified');
 				echo '<tr>';
 				echo '<td>' . htmlspecialchars((string)$claim['domain']) . '</td>';
-				echo '<td>' . htmlspecialchars((string)$claim['status']) . '</td>';
-				if ((string)$claim['status'] === 'verified') {
-					echo '<td>—</td><td></td>';
-				} else {
-					echo '<td><code>' . htmlspecialchars((string)$claim['txt_host']) . '</code> = '
-						. PublicPageBase::copy_field((string)$claim['txt_value']) . '</td>';
-					echo '<td><form method="post" style="display:inline">'
-						. '<input type="hidden" name="action" value="fleet_verify">'
-						. '<input type="hidden" name="claim_id" value="' . intval($claim['claim_id']) . '">'
-						. '<button type="submit" class="btn btn-sm btn-secondary">Verify</button>'
-						. '</form></td>';
-				}
+				echo '<td>' . ($proven
+					? '<span class="badge badge-success">Proven</span>'
+					: '<span class="badge badge-secondary">Awaiting DNS record</span>') . '</td>';
+				echo '<td>' . ($proven ? '—'
+					: '<code>' . htmlspecialchars((string)$claim['txt_host']) . '</code> = '
+						. PublicPageBase::copy_field((string)$claim['txt_value'])) . '</td>';
 				echo '</tr>';
 			}
 			echo '</tbody></table>';
 		}
-
-		$cform = $page->getFormWriter('fleet_claim');
-		echo $cform->begin_form();
-		$cform->hiddeninput('action', '', array('value' => 'fleet_claim'));
-		$cform->textinput('fleet_domain', 'Claim a domain', array('placeholder' => 'example.com'));
-		$cform->submitbutton('btn_fleet_claim', 'Claim');
-		echo $cform->end_form();
 
 		echo relay_action_button(0, 'fleet_refresh', 'Refresh', 'btn-secondary');
 		echo relay_action_button(0, 'fleet_release', 'Release slot', 'btn-danger',
@@ -247,6 +239,30 @@ if ($server_manager_active) {
 			echo '</tr>';
 		}
 		echo '</tbody></table>';
+
+		// DNS to publish: the operator's half of the tenants' MX guidance —
+		// every record the fleet zone needs, with a live resolution verdict.
+		echo '<h5>DNS to publish</h5>';
+		echo '<table class="table"><thead><tr>'
+			. '<th></th><th>Type</th><th>Name</th><th>Value</th><th>Currently</th>'
+			. '</tr></thead><tbody>';
+		$dns_dots = array('ok' => '🟢', 'wrong' => '🔴', 'missing' => '🔴', 'unknown' => '⚪');
+		foreach ($fleet_shards as $row) {
+			foreach ($row['dns'] as $dns) {
+				echo '<tr>';
+				echo '<td>' . ($dns_dots[$dns['state']] ?? '⚪') . '</td>';
+				echo '<td>' . htmlspecialchars($dns['kind']) . '</td>';
+				echo '<td>' . PublicPageBase::copy_field($dns['name']) . '</td>';
+				echo '<td>' . PublicPageBase::copy_field($dns['value']) . '</td>';
+				echo '<td>' . ($dns['state'] === 'ok' ? 'published'
+					: ($dns['state'] === 'missing' ? 'no record'
+					: ($dns['state'] === 'unknown' ? 'lookup failed'
+					: htmlspecialchars($dns['found'])))) . '</td>';
+				echo '</tr>';
+			}
+		}
+		echo '</tbody></table>';
+		echo '<p class="text-muted small">PTR records are set where the shard\'s IP is hosted, not in the DNS zone.</p>';
 	}
 
 	if (!empty($fleet_service_on) && !empty($nodes)) {

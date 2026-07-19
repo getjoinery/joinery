@@ -21,9 +21,9 @@ class PostmarkProvider implements EmailServiceProvider {
         return 'Postmark';
     }
 
-    public static function getSpfIncludeDomain(): string
+    public static function getSpfMechanism(string $domain): string
     {
-        return 'spf.mtasv.net';
+        return 'include:spf.mtasv.net';
     }
 
     public static function getSettingsFields(): array {

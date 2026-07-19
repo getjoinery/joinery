@@ -18,10 +18,64 @@ class ResendProvider implements EmailServiceProvider {
         return 'Resend';
     }
 
-    public static function getSpfIncludeDomain(): string
+    /** @var array<string,string> Per-request cache of domain => mechanism. */
+    private static $spf_mechanism_cache = [];
+
+    public static function getSpfMechanism(string $domain): string
     {
-        // No fixed SPF include: sending identity is not tied to a shared provider range.
-        return '';
+        // Resend publishes per-account DNS records (no fixed shared range), so
+        // the mechanism is fetched from its API: the SPF TXT value Resend
+        // prescribes for the domain, minus the version/all wrapper. '' when the
+        // domain is not registered there or the API is unreachable — callers
+        // treat that as nothing to prescribe.
+        $domain = strtolower(trim($domain));
+        if ($domain === '') {
+            return '';
+        }
+        if (array_key_exists($domain, self::$spf_mechanism_cache)) {
+            return self::$spf_mechanism_cache[$domain];
+        }
+        $mechanism = '';
+        $key = trim((string)Globalvars::get_instance()->get_setting('resend_api_key'));
+        if ($key !== '') {
+            try {
+                $resend = \Resend::client($key);
+                foreach ($resend->domains->list()->data ?? [] as $entry) {
+                    $name = strtolower(trim((string)($entry['name'] ?? '')));
+                    if ($name !== $domain && $name !== '') {
+                        continue;
+                    }
+                    $detail = $resend->domains->get((string)$entry['id']);
+                    foreach ($detail->records ?? [] as $record) {
+                        $r = (array)$record;
+                        if (strcasecmp((string)($r['record'] ?? ''), 'SPF') !== 0
+                            || strcasecmp((string)($r['type'] ?? ''), 'TXT') !== 0) {
+                            continue;
+                        }
+                        $mechanism = self::mechanismsFromSpfValue((string)($r['value'] ?? ''));
+                        break 2;
+                    }
+                }
+            } catch (\Throwable $e) {
+                error_log('ResendProvider::getSpfMechanism: ' . $e->getMessage());
+            }
+        }
+        self::$spf_mechanism_cache[$domain] = $mechanism;
+        return $mechanism;
+    }
+
+    /** The mechanisms of a v=spf1 record, without the version tag or the all term. */
+    private static function mechanismsFromSpfValue(string $value): string
+    {
+        $terms = [];
+        foreach (preg_split('/\s+/', trim($value)) as $term) {
+            if ($term === '' || stripos($term, 'v=spf1') === 0
+                || preg_match('/^[-~?+]?all$/i', $term)) {
+                continue;
+            }
+            $terms[] = $term;
+        }
+        return implode(' ', $terms);
     }
 
     public static function getSettingsFields(): array {

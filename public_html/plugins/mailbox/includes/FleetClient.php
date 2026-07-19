@@ -11,7 +11,12 @@
  * exactly as against a self-hosted relay. Hosted vs self-hosted differs only
  * in where the coordinates came from.
  *
- * @version 1.1
+ * Ownership challenges are filed automatically (fileDomainClaims): on
+ * enrollment for every already-registered hosted domain, and on domain
+ * registration while a slot exists. The Setup tab's ownership row re-verifies
+ * them on every check pass — publishing the TXT record is all the user does.
+ *
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
@@ -57,7 +62,52 @@ class FleetClient {
 			'pull_public_key' => $pull_pubkey,
 		));
 		$this->applyCoordinates($data);
+		// Every already-registered hosted domain gets its ownership challenge
+		// filed now, so the Setup tab's ownership rows carry a publishable
+		// record from the first render.
+		$this->fileDomainClaims();
 		return $data;
+	}
+
+	/**
+	 * File the ownership challenge for one hosted domain — or, with no
+	 * argument, for every registered hosted (non-IMAP-source) domain.
+	 * Idempotent (the fleet returns an existing live claim) and best-effort:
+	 * failures are logged, never fatal, because the setup check self-heals a
+	 * missing challenge on its next pass.
+	 */
+	public function fileDomainClaims(?string $only_domain = null): void {
+		if (!$this->configured() || $this->hostedRelayRow() === null) {
+			return;
+		}
+		$domains = array();
+		if ($only_domain !== null) {
+			$domains[] = strtolower(trim($only_domain));
+		} else {
+			try {
+				require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
+				$multi = new MultiInboundEmailDomain(array('deleted' => false));
+				$multi->load();
+				foreach ($multi as $d) {
+					if (!(bool)$d->get('ied_is_imap_source')) {
+						$domains[] = strtolower(trim((string)$d->get('ied_domain')));
+					}
+				}
+			} catch (\Throwable $e) {
+				error_log('FleetClient::fileDomainClaims: domain listing failed: ' . $e->getMessage());
+				return;
+			}
+		}
+		foreach ($domains as $domain) {
+			if ($domain === '') {
+				continue;
+			}
+			try {
+				$this->claimDomain($domain);
+			} catch (\Throwable $e) {
+				error_log('FleetClient::fileDomainClaims: challenge for ' . $domain . ' failed: ' . $e->getMessage());
+			}
+		}
 	}
 
 	/** Poll the slot; re-applies coordinates so a re-shard lands automatically. */

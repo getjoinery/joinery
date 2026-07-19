@@ -831,12 +831,39 @@ Create a single file in `includes/email_providers/` implementing `EmailServicePr
 class SendGridProvider implements EmailServiceProvider {
     public static function getKey(): string { return 'sendgrid'; }
     public static function getLabel(): string { return 'SendGrid'; }
+    public static function getSpfMechanism(string $domain): string { return 'include:sendgrid.net'; }
     public static function getSettingsFields(): array { /* ... */ }
     public static function validateConfiguration(): array { /* ... */ }
     public function send(EmailMessage $message): bool { /* ... */ }
     public function sendBatch(EmailMessage $message, array $recipients): array { /* ... */ }
 }
 ```
+
+### SPF mechanism (`getSpfMechanism`)
+
+`getSpfMechanism(string $domain)` answers one question: what must a sending
+domain's SPF record carry for mail sent through this provider to pass SPF? It
+returns a complete, paste-ready mechanism term (possibly several,
+space-separated):
+
+- **Fixed shared range** — a static include (`include:mailgun.org`,
+  `include:sendgrid.net`, …). Most providers.
+- **Settings-derived** — custom SMTP returns `a:<smtp_host>` from the
+  configured `smtp_host` (nothing for localhost — the server's own IP covers
+  local submission).
+- **Per-account records** — providers that publish DNS from their own
+  dashboard (Resend-class) fetch the record from their API for the given
+  domain, cached per request; `''` when the API is unreachable.
+- **`''`** — no mechanism applies (local sendmail, connected accounts whose
+  SPF belongs to the account's own provider). Callers treat `''` as "nothing
+  to prescribe", never as an error.
+
+The Mailbox plugin's Setup tab builds every prescribed SPF record from this
+mechanism. **Under a relay-fronted topology** (a `MailboxRelay` row fronts the
+deployment — see the Mailbox plugin docs), the prescription is the provider
+mechanism *alone* (`v=spf1 <mechanism> -all`): the server's own IP is exactly
+the address the relay hides, so it must never appear in DNS. Colocated
+deployments prescribe the server IP plus the mechanism.
 
 The provider automatically appears in the admin email settings dropdown and its configuration fields render dynamically. No other files need modification.
 

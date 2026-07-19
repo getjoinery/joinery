@@ -152,6 +152,14 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 			$domain->prepare();
 			$domain->save();
 
+			// A fleet-fronted deployment files a new hosted domain's ownership
+			// challenge at registration, so the Setup tab's ownership row
+			// carries a publishable record immediately.
+			if (!$is_imap) {
+				require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetClient.php'));
+				(new FleetClient())->fileDomainClaims($domain_name);
+			}
+
 			// A level change may alter the acting user's max posture — drop the
 			// session cache so the Fortress mandatory-2FA gate (§ 5.3) re-evaluates.
 			unset($_SESSION['max_security_level']);

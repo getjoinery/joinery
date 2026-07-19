@@ -53,9 +53,10 @@ class ConnectedMailboxProvider implements EmailServiceProvider {
         return 'Connected Email Account';
     }
 
-    public static function getSpfIncludeDomain(): string
+    public static function getSpfMechanism(string $domain): string
     {
-        // No fixed SPF include: sending identity is not tied to a shared provider range.
+        // No SPF mechanism: mail leaves through the connected account's own
+        // infrastructure, whose SPF the account's provider publishes.
         return '';
     }
 
