@@ -26,6 +26,38 @@ function admin_mailbox_logic(array $input): LogicResult {
 		return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_accounts');
 	}
 
+	// Handle restore of a soft-deleted mailbox. Stored messages keep their
+	// pointer to the alias through soft delete, so restoring the alias brings
+	// its mail back in the reader with no re-attachment step.
+	if ($input && isset($input['action']) && $input['action'] === 'undelete') {
+		$alias = new InboundEmailAlias($input['iea_inbound_email_alias_id'], TRUE);
+		$alias->undelete();
+
+		$session->save_message(new DisplayMessage(
+			'Mailbox restored. Its stored mail is back in the reader.',
+			'Restored',
+			'~/plugins/mailbox/admin/~',
+			DisplayMessage::MESSAGE_ANNOUNCEMENT,
+			DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+		));
+		return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_accounts');
+	}
+
+	if ($input && isset($input['action']) && $input['action'] === 'permanent_delete') {
+		$session->check_permission(10);
+		$alias = new InboundEmailAlias($input['iea_inbound_email_alias_id'], TRUE);
+		$alias->permanent_delete();
+
+		$session->save_message(new DisplayMessage(
+			'Mailbox permanently deleted.',
+			'Deleted',
+			'~/plugins/mailbox/admin/~',
+			DisplayMessage::MESSAGE_ANNOUNCEMENT,
+			DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+		));
+		return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_accounts');
+	}
+
 	// Handle enable/disable toggle
 	if ($input && isset($input['action']) && $input['action'] === 'toggle_enabled') {
 		$alias = new InboundEmailAlias($input['iea_inbound_email_alias_id'], TRUE);

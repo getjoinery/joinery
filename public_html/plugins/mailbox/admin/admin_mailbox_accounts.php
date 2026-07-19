@@ -13,7 +13,7 @@
  * every Edit jump to the existing per-object editors with context pre-filled.
  * DNS/host diagnostics live on the Setup tab.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -220,6 +220,37 @@ $connect_button = function ($imap) use ($imap_action) {
 			<?php endforeach; ?>
 		</ul>
 		<?php endif; ?>
+
+		<?php if (!empty($node['deleted_mailboxes'])): ?>
+		<details class="iea-trash">
+			<summary>Deleted mailboxes (<?php echo count($node['deleted_mailboxes']); ?>)</summary>
+			<ul class="iea-mailboxes">
+				<?php foreach ($node['deleted_mailboxes'] as $dmb): ?>
+				<li class="iea-mailbox">
+					<div class="iea-mb-main">
+						<div class="iea-mb-addr"><?php echo htmlspecialchars($dmb->get_full_address()); ?>
+							<span class="iea-badge iea-badge-off">deleted</span></div>
+					</div>
+					<div class="iea-mb-actions">
+						<?php
+						echo PublicPageBase::action_button('Restore', $alias_action, array(
+							'hidden' => array('action' => 'undelete', 'iea_inbound_email_alias_id' => $dmb->key),
+							'confirm' => 'Restore this mailbox? Its stored mail comes back in the reader.',
+							'class' => 'btn btn-sm btn-outline-success',
+						));
+						echo PublicPageBase::action_button('Permanent delete', $alias_action, array(
+							'hidden' => array('action' => 'permanent_delete', 'iea_inbound_email_alias_id' => $dmb->key),
+							'confirm' => 'PERMANENTLY delete this mailbox and its stored mail? This cannot be undone.',
+							'confirm_typed' => 'delete ' . $dmb->get_full_address(),
+							'class' => 'btn btn-sm btn-outline-danger',
+						));
+						?>
+					</div>
+				</li>
+				<?php endforeach; ?>
+			</ul>
+		</details>
+		<?php endif; ?>
 	</div>
 	<?php endforeach; ?>
 <?php endif; ?>
@@ -247,7 +278,8 @@ $connect_button = function ($imap) use ($imap_action) {
 					));
 					echo PublicPageBase::action_button('Permanent delete', $domain_base, array(
 						'hidden' => array('action' => 'permanent_delete', 'ied_inbound_email_domain_id' => $d->key),
-						'confirm' => 'PERMANENTLY delete this domain and all its aliases? This cannot be undone.',
+						'confirm' => 'PERMANENTLY delete this domain and all its mailboxes? This cannot be undone.',
+						'confirm_typed' => 'delete ' . $d->get('ied_domain'),
 						'class' => 'btn btn-sm btn-outline-danger',
 					));
 					?>

@@ -5,7 +5,7 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
- * @version 1.6
+ * @version 1.7
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -126,8 +126,8 @@ class JobCommandBuilder {
 			CURLOPT_CONNECTTIMEOUT => $timeout_seconds,
 			CURLOPT_TIMEOUT        => $timeout_seconds,
 			CURLOPT_HTTPHEADER     => [
-				'public_key: ' . $public_key,
-				'secret_key: ' . $secret_key,
+				'public-key: ' . $public_key,
+				'secret-key: ' . $secret_key,
 				'Accept: application/json',
 			],
 			CURLOPT_SSL_VERIFYPEER => $node->get('mgn_tls_insecure') ? false : true,
@@ -217,8 +217,8 @@ class JobCommandBuilder {
 			CURLOPT_CONNECTTIMEOUT => $timeout_seconds,
 			CURLOPT_TIMEOUT        => $timeout_seconds,
 			CURLOPT_HTTPHEADER     => [
-				'public_key: ' . $public_key,
-				'secret_key: ' . $secret_key,
+				'public-key: ' . $public_key,
+				'secret-key: ' . $secret_key,
 				'Accept: application/json',
 			],
 			CURLOPT_SSL_VERIFYPEER => $node->get('mgn_tls_insecure') ? false : true,

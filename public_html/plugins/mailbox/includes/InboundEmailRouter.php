@@ -66,7 +66,7 @@
  * paths alike, never IMAP-polled mail. forwardStoredMessage() relays a copy for a filter's
  * "Forward to" action, reusing the alias-forward envelope rebuild + relay.
  *
- * @version 1.19
+ * @version 1.20
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -1538,15 +1538,19 @@ class InboundEmailRouter {
 
 	/**
 	 * Describe the resolved forwarding relay for status display (Setup tab).
-	 * Returns ['mode' => 'provider'|'smtp', 'label' => string].
+	 * Returns ['mode' => 'provider'|'smtp', 'label' => string,
+	 * 'spf_include' => string] — spf_include is the DNS domain a sending
+	 * domain must include: in its SPF for mail relayed this way to pass SPF,
+	 * or '' when none applies.
 	 */
 	public function describeRelay() {
 		$provider = $this->resolveRelayProvider();
 		if ($provider instanceof RawMessageRelay) {
 			$class = get_class($provider);
-			return array('mode' => 'provider', 'label' => $class::getLabel());
+			return array('mode' => 'provider', 'label' => $class::getLabel(),
+				'spf_include' => $class::getSpfIncludeDomain());
 		}
-		return array('mode' => 'smtp', 'label' => 'SMTP relay');
+		return array('mode' => 'smtp', 'label' => 'SMTP relay', 'spf_include' => '');
 	}
 
 	/**

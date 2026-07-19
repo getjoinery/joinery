@@ -68,11 +68,15 @@ class MultiUrl extends SystemMultiBase {
 
 	protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
-        
+
         if (isset($this->options['incoming'])) {
             $filters['url_incoming'] = [$this->options['incoming'], PDO::PARAM_STR];
         }
-        
+
+        if (isset($this->options['deleted'])) {
+            $filters['url_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
+        }
+
         return $this->_get_resultsv2('url_urls', $filters, $this->order_by, $only_count, $debug);
     }
 }

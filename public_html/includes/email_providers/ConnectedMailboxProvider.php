@@ -53,6 +53,12 @@ class ConnectedMailboxProvider implements EmailServiceProvider {
         return 'Connected Email Account';
     }
 
+    public static function getSpfIncludeDomain(): string
+    {
+        // No fixed SPF include: sending identity is not tied to a shared provider range.
+        return '';
+    }
+
     /**
      * A dropdown of the connected accounts. Built dynamically (this provider may
      * query the DB) so every account the operator has connected is selectable.

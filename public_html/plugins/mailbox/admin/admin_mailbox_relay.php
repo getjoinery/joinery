@@ -9,7 +9,7 @@
  * deployment — fleet shard registration. Guided controls only — no explainer
  * prose; details live in the plugin docs.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -168,7 +168,7 @@ if ($fleet_configured) {
 		echo '<p><strong>Slot:</strong> ' . htmlspecialchars((string)($coords['slug'] ?? ''))
 			. ' — <strong>' . htmlspecialchars((string)($coords['status'] ?? '')) . '</strong></p>';
 		echo '<p><strong>Point every hosted domain\'s MX at:</strong> '
-			. '<code>' . htmlspecialchars((string)($coords['mx_hostname'] ?? '')) . '</code></p>';
+			. PublicPageBase::copy_field((string)($coords['mx_hostname'] ?? '')) . '</p>';
 
 		// Domain claims: the fleet accepts no mail for a domain before its TXT
 		// challenge passes (fleet-wide uniqueness — a security boundary).
@@ -185,7 +185,7 @@ if ($fleet_configured) {
 					echo '<td>—</td><td></td>';
 				} else {
 					echo '<td><code>' . htmlspecialchars((string)$claim['txt_host']) . '</code> = '
-						. '<code>' . htmlspecialchars((string)$claim['txt_value']) . '</code></td>';
+						. PublicPageBase::copy_field((string)$claim['txt_value']) . '</td>';
 					echo '<td><form method="post" style="display:inline">'
 						. '<input type="hidden" name="action" value="fleet_verify">'
 						. '<input type="hidden" name="claim_id" value="' . intval($claim['claim_id']) . '">'
@@ -212,11 +212,27 @@ if ($fleet_configured) {
 
 $page->end_box();
 
-// --- fleet shards (operator side) ----------------------------------------------
-if (!empty($fleet_service_on)) {
-	$page->begin_box(array('title' => 'Fleet shards (operator)'));
+// --- hosted fleet (operator side) ----------------------------------------------
+// The operator needs server_manager to run shards, so the box only appears where
+// operating a fleet is possible; on tenant-only deployments it stays hidden.
+if ($server_manager_active) {
+	$page->begin_box(array('title' => 'Hosted fleet (operator)'));
 
-	if (!empty($fleet_shards)) {
+	$oform = $page->getFormWriter('fleet_service_config');
+	echo $oform->begin_form();
+	$oform->hiddeninput('action', '', array('value' => 'fleet_service_config'));
+	$oform->checkboxinput('mailbox_fleet_service_enabled', 'Run a hosted relay fleet other deployments can enroll in', array(
+		'checked' => !empty($fleet_service_on),
+	));
+	$oform->textinput('mailbox_fleet_mx_zone', 'Fleet MX zone', array(
+		'value'       => (string)($fleet_mx_zone ?? ''),
+		'placeholder' => 'mx.example.com',
+		'helptext'    => 'A DNS zone you control. Each tenant\'s MX hostname is <slug>.<zone> (slug format t<id>), published by you as an A record pointing at its shard.',
+	));
+	$oform->submitbutton('btn_fleet_service', 'Save');
+	echo $oform->end_form();
+
+	if (!empty($fleet_service_on) && !empty($fleet_shards)) {
 		echo '<table class="table"><thead><tr>'
 			. '<th>Shard</th><th>Hostname</th><th>Public IP</th><th>Tenants</th><th>Active</th>'
 			. '</tr></thead><tbody>';
@@ -233,7 +249,7 @@ if (!empty($fleet_service_on)) {
 		echo '</tbody></table>';
 	}
 
-	if ($server_manager_active && !empty($nodes)) {
+	if (!empty($fleet_service_on) && !empty($nodes)) {
 		$sform = $page->getFormWriter('provision_shard');
 		echo $sform->begin_form();
 		$sform->hiddeninput('action', '', array('value' => 'provision_shard'));

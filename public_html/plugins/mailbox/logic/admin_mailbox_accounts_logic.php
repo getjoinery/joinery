@@ -11,7 +11,7 @@
  * through the existing per-object editors (domain, alias, IMAP) which highlight
  * the Accounts tab.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -64,7 +64,25 @@ function admin_mailbox_accounts_logic(array $input): LogicResult {
 			$mailboxes[] = array('alias' => $alias, 'imap' => $imap);
 		}
 
-		$tree[] = array('domain' => $domain, 'mailboxes' => $mailboxes);
+		// Soft-deleted mailboxes under this domain — restorable from the same
+		// card, mirroring the deleted-domains trash. Superadmin-only, like it.
+		$deleted_mailboxes = array();
+		if ($session->get_permission() >= 10) {
+			$mb_trash = new MultiInboundEmailAlias(
+				array('domain_id' => $domain->key, 'deleted' => true),
+				array('iea_alias' => 'ASC')
+			);
+			$mb_trash->load();
+			foreach ($mb_trash as $alias) {
+				$deleted_mailboxes[] = $alias;
+			}
+		}
+
+		$tree[] = array(
+			'domain' => $domain,
+			'mailboxes' => $mailboxes,
+			'deleted_mailboxes' => $deleted_mailboxes,
+		);
 	}
 
 	// Soft-deleted domains — a "trash" superadmins can restore from, kept on this

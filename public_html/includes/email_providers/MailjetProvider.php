@@ -22,6 +22,11 @@ class MailjetProvider implements EmailServiceProvider {
         return 'Mailjet';
     }
 
+    public static function getSpfIncludeDomain(): string
+    {
+        return 'spf.mailjet.com';
+    }
+
     public static function getSettingsFields(): array {
         return [
             [

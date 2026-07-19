@@ -1,6 +1,7 @@
 # Deferred Fixes
 
-**Status:** Open — a standing list, not a project
+**Status:** Complete — all 24 entries resolved 2026-07-19 (owner decisions
+recorded per entry; fixes verified by the full test estate)
 **Created:** 2026-07-18
 
 Known defects and gaps that are understood, reproducible, and deliberately not
@@ -17,6 +18,13 @@ is not re-raised).
 ## 1. Concurrent checkout can overbook an event by one
 
 **Deferred:** 2026-07-18 (owner decision)
+**Decided against 2026-07-19 (owner):** accepted as a known limitation. The
+pre-charge availability check cannot see a competing buyer whose charge is in
+flight; refusing them would require a pre-charge seat hold (bookings-style
+held row with expiry), which is a checkout-path feature, not a patch. Note the
+race window is the full payment round trip (seconds), not milliseconds — the
+count runs pre-charge and the seat is written post-charge. Revisit if a real
+event overbooks.
 
 `FulfillmentProvider::checkAvailability()` counts registrants, the charge runs,
 then `fulfill()` seats the buyer. Nothing holds a lock across those steps, so two
@@ -47,34 +55,35 @@ fix.
 
 ---
 
-## 2. Bundle purchases bypass the event capacity check entirely
+## 2. Bundle purchases bypass the event capacity check entirely — FIXED 2026-07-19
 
-**Deferred:** 2026-07-18 (owner decision)
-
-`EventRegistrationFulfillment::checkAvailability()` returns "available" for any
-bundle (`$ref <= 0`). A bundle seats every member of a group, and the membership
-is not resolved until `fulfill()` runs, so the number of seats it will consume is
-not known while the purchase can still be refused.
-
-**Cost of leaving it:** a bundle can seat any number of people into a full event.
-Unlike entry 1, this is not a narrow race — it is unbounded and repeatable.
-
-**What closing it takes:** resolve the group size during checkout so the seat
-count is known before the charge, then treat a bundle as consuming that many
-seats. The complication is that group membership can change between purchase and
-fulfillment, so "how many seats did this bundle buy" needs a defined answer
-(membership at purchase time, most likely, recorded on the order item).
-Alternatively, declare bundles exempt on purpose and say so in the event admin UI
-so an organizer running a capped event knows not to sell bundles into it.
-
-Pinned today by `event_capacity_test.php` as current behavior ("a bundle
-reference is not capacity checked"), so a change here is a deliberate test change.
+**Fixed:** 2026-07-19 (owner decision). A bundle registers its buyer into every
+event in its group, so `checkAvailability()` now runs the same per-event
+capacity arithmetic on each event in the group; the first full (or
+insufficient-quantity) event refuses the whole purchase, named in the message.
+Groupless bundles and members pointing at missing events are skipped, matching
+the existing missing-event behavior. The in-flight charge race accepted for
+single tickets in entry 1 applies to bundles identically. Pinned by the
+`Bundle capacity` section of `event_capacity_test.php` (28/28 green).
 
 ---
 
-## 3. API sign-in does not enforce the activation gate that web sign-in does
+## 3. API sign-in does not enforce the activation gate that web sign-in does — FIXED 2026-07-19
 
-**Deferred:** 2026-07-18 — pending owner decision on which side is correct
+**Fixed:** 2026-07-19 (owner decision: both doors agree). `ApiAuth::attemptLogin`
+now applies the same `activation_required_login` gate as `login_logic`: valid
+credentials on an unactivated account are refused (endpoint returns 403 with
+the reason) and the activation email is re-sent; the reason is only revealed
+after the password verifies, so no account-existence oracle. The apps have no
+in-app registration, so no first-launch flow depended on the bypass.
+`make_user()` in the test harness now creates activated users (a harness user
+is a usable user; activation-gate tests set the flag false explicitly), which
+is what kept the API suites that log in over HTTP green on dev. Documented in
+`docs/account_security.md` § The two doors; pinned by the "Activation gate"
+section of `tests/functional/api/session_keys_test.php` (66/66 green) and
+verified end-to-end over HTTP on dev (403 → activate → 200).
+
+**Original entry (for context):**
 
 `login_logic` refuses an unactivated account when `activation_required_login` is
 on. `POST /api/v1/auth/login` (`ApiAuthEndpoint` → `ApiAuth::attemptLogin`) has no
@@ -151,9 +160,24 @@ the harness reports the whole sentence instead of its tail.
 
 ---
 
-## 5. Two tests were green or red depending on operator configuration, and the sweep for others is not done
+## 5. Two tests were green or red depending on operator configuration, and the sweep for others is not done — SWEEP DONE 2026-07-19
 
-**Deferred:** 2026-07-19 — the two known cases are fixed; the sweep is not
+**Closed:** 2026-07-19. Every safe- and db-tier test calling `get_setting(` was
+reviewed (21 files; live tier out of scope — that tier declares its
+environment). One genuine case found and fixed: `upload_safety_test` built its
+accept-regex from `allowed_upload_extensions`, so its png-accepted/php-refused
+checks flipped with operator config; the setting is now pinned in memory
+(116/116 green). Everything else is sound by one of four patterns, recorded
+here so the sweep is not redone: **infrastructure reads** (`upload_dir`,
+`composerAutoLoad` as fixture locations), **adaptive reads** (expectation
+computed from the setting, self-consistent for any value:
+`api_session_key_lifetime_days`, `api_auth_rate_limit_requests`,
+`theme_template` adaptors, `anti_spam_answer` — the last documented in-file),
+**declared skips** (`stripe_webhook_test` skips loudly when unconfigured;
+`email_provider_config_test` skips unconfigured providers and reds only on
+half-configured ones — a deliberate pre-deploy config lint with the missing
+field named), and **deliberate hard requirements** (`guest_credential_test`
+requires `products_active` with the reason documented in-file).
 
 `email_security_digest` (safe) and `joinery_ai_chat_encryption` (db) each read a
 setting that ships empty and is operator-configured, then asserted behaviour
@@ -176,9 +200,26 @@ doing in one pass rather than one accident at a time.
 
 ---
 
-## 6. ModelTester cannot generate valid values for code-enforced enum columns
+## 6. ModelTester cannot generate valid values for code-enforced enum columns — FIXED 2026-07-19
 
-**Deferred:** 2026-07-19
+**Fixed:** 2026-07-19 (owner decision: declare the set). Field specs accept
+`'allowed_values' => array(...)`; `SystemBase::save()` refuses any non-NULL
+value outside the set (proven load-bearing: a junk `bkt_provider` that
+previously saved through — enforcement was prepare()-only — is now refused),
+and all three ModelTester generators (`generate_field_value`,
+`vary_scalar_value`, `generate_different_value`) pick only members of the set,
+with null-skip when a single-member set has no different value. Declared on
+every code-enforced enum found by survey: `ied_catch_all_mode`,
+`iia_imap_encryption`, `iia_sync_mode`, `bkt_provider`, `msp_store`,
+`cvp_origin`, `cvp_docker_mode`, `cvp_install_mode`, `mem_scope`,
+`mem_source`. Documented in `docs/example_class.php`. Green: models_crud
+151/151, multi_models_crud 145/145, safe tier 44/44.
+
+**Follow-up deliberately not done:** having `update_database` materialize
+`allowed_values` as a real CHECK constraint. The declaration is written to
+support it when wanted.
+
+**Original entry (for context):**
 
 `vary_scalar_value()` and `generate_different_value()` now respect a column's
 declared *type* — dates shift, booleans negate, text stays inside its width.
@@ -201,9 +242,13 @@ better: it removes the guesswork instead of tolerating it.
 
 ---
 
-## 7. A stray harness fixture user appeared mid-gate and its source was not identified
+## 7. A stray harness fixture user appeared mid-gate and its source was not identified — CLOSED 2026-07-19
 
-**Deferred:** 2026-07-19 — transient, currently clean
+**Closed:** 2026-07-19 (owner decision): attributed to that day's deliberately
+crashed falsification runs — a crash between `make_user()` and teardown leaves
+exactly this residue. The `referential_integrity` check remains in every db
+run as the standing tripwire; if it fires again without a crashed run nearby,
+follow the capture playbook below and treat it as a real teardown hole.
 
 One db gate run failed `referential_integrity`'s "no leftover harnesstest_%
 users" check with a single row. The row was gone by the next query, and the
@@ -225,9 +270,15 @@ suite created it.
 
 ---
 
-## 8. Two operator settings on dev sit at factory defaults and may not be intentional
+## 8. Two operator settings on dev sit at factory defaults and may not be intentional — RESOLVED 2026-07-19
 
-**Deferred:** 2026-07-19 — needs an owner decision, not a code change
+**Resolved:** 2026-07-19 (owner confirmed the blanks were unintentional; values
+set with owner approval): `mailbox_mail_hostname` → `devmail.getjoinery.com`,
+`joinery_ai_local_base_url` → `http://100.69.133.69:11434/v1`,
+`joinery_ai_local_model` → `qwen3.5:9b-nvfp4`. The addendum's stale-tag worry
+was moot by set time — the Studio's Ollama again lists `qwen3.5:9b-nvfp4`, and
+a live completion against that tag was verified before closing. The cause of
+the 2026-07-18 21:05 reset was not chased.
 
 Surfaced while attributing test failures, not by looking for it:
 
@@ -268,9 +319,13 @@ to the local provider" stays red on dev.
 
 ---
 
-## 9. vse_visitor_events has no index on vse_usr_user_id (1.5M rows and growing)
+## 9. vse_visitor_events has no index on vse_usr_user_id (1.5M rows and growing) — FIXED 2026-07-19
 
-**Deferred:** 2026-07-19
+**Fixed:** 2026-07-19 (owner approved). `'index'=>true` declared on
+`vse_usr_user_id` in `data/visitor_events_class.php`; `update_database`
+materialized `vse_visitor_events_usr_user_id_idx`, and EXPLAIN confirms the
+per-user COUNT now runs as an index-only scan instead of a 1.5M-row
+sequential scan.
 
 `vse_visitor_events` holds ~1.57M rows and its only index is the primary key.
 Every per-user query — including the `SELECT COUNT(*) ... WHERE
@@ -291,9 +346,16 @@ doesn't mind the extra index maintenance (this table is insert-heavy).
 
 ---
 
-## 10. Deleting a SubscriptionTier default-deletes referencing products
+## 10. Deleting a SubscriptionTier default-deletes referencing products — FIXED 2026-07-19
 
-**Deferred:** 2026-07-19
+**Fixed:** 2026-07-19 (owner decision: prevent). Declared in the referencing
+class — `Product::$foreign_key_actions['pro_sbt_subscription_tier_id'] =
+prevent` ("Cannot delete subscription tier - products still grant it") — which
+is where deletion rules live (`DeletionRule::registerModelRules` reads the
+child's `$foreign_key_actions`; the original entry's suggestion of
+`SubscriptionTier::$permanent_delete_actions` named the wrong side). Rule
+registered via `update_database` and verified: `permanent_delete_dry_run()` on
+a tier with referencing products returns `can_delete: false` with the message.
 
 ModelTester warns on every run: `SubscriptionTier` has an empty
 `$permanent_delete_actions` while `pro_products.pro_sbt_subscription_tier_id`
@@ -311,9 +373,45 @@ the tier), then the ModelTester warning disappears on its own.
 
 ---
 
-## 11. Multi collections silently ignore filter options they do not implement
+## 11. Multi collections silently ignore filter options they do not implement — FIXED 2026-07-19
 
-**Deferred:** 2026-07-19
+**Fixed:** 2026-07-19 (owner decision: full sequence to the throw end state).
+`SystemMultiBase::_get_resultsv2()` now refuses any option key the collection
+does not implement (`UnknownMultiOptionException`). The known set is derived
+at runtime from the literal `$this->options['key']` mentions in the class
+(and ancestor) source plus `$default_options` — implementing a filter IS
+declaring it, so the set cannot drift. Pass-through collections (those that
+`foreach` their options generically, mapping every key to a column — e.g.
+MultiPlugin) are exempt: they have no fixed vocabulary and a bogus key
+already fails loudly in SQL. The REST collection endpoint maps the exception
+to a 400 naming the parameter (previously an unknown filter silently
+returned every row); the router's `__route` param, resurrected by the
+endpoint's raw QUERY_STRING parse, is stripped there.
+
+**Offender sweep before the flip** (static tokenizer survey of all 690
+literal call sites + full-estate run): 26 real offenders found and fixed.
+The worst were live bugs, not dead filters: `PluginManager` uninstall was
+loading "the plugin's" versions/dependencies/migrations through three
+collections that ignored ALL options — so uninstalling one plugin
+permanent-deleted every plugin's version, dependency, and migration rows —
+and `MultiMailingList` ignored `active`, so inactive lists showed in contact
+preferences. Those four classes got real option implementations
+(`plugin_name`, `depends_on`, `active`), as did `MultiAddress` (`bad`) and
+`MultiProductVersion` (`version_name`). The rest were dead keys dropped
+(`deleted` on tables with no delete column — questions/options, addresses,
+phone numbers — including this entry's original reproducer) or renamed to
+the implemented key (`grp_category`→`category`, raw column names in survey
+answers, tier products, product-version test).
+
+Pinned by the "Unknown option keys" section of
+`tests/models/multi_models_test.php` (throw, named key, declared-key pass,
+pass-through exemption; 149/149 green) and verified over HTTP on dev
+(unknown filter → 400 naming it, declared filter → 200). Documented in
+`docs/example_class.php`. Safe tier 44/44.
+
+**Follow-up (done 2026-07-19):** the CLAUDE.md "Model Querying Patterns"
+section documents the throw — updated in the `agf_agent_files` record (owner
+approved the DB write) and regenerated to disk.
 
 `Question::output_question()` asks for a question's answer choices with
 `new MultiQuestionOption(array('deleted' => false, 'question_id' => $this->key))`
@@ -370,9 +468,22 @@ suite underneath it to catch any fallout from tightening.
 
 ---
 
-## 12. A question stores its required-ness in two places and reads only one
+## 12. A question stores its required-ness in two places and reads only one — FIXED 2026-07-19
 
-**Deferred:** 2026-07-19
+**Fixed:** 2026-07-19 (owner decision: column authoritative). The entry's
+premise had drifted by fix time: the column was NOT unread — the store's
+checkout requirements (`QuestionRequirement`, `SurveyRequirement`) enforced
+`qst_is_required` while the surveys path enforced the blob's `required` key,
+and the admin editor wrote only the blob while provisioning wrote only the
+column. Live data disagreed on real rows (4 blob-required, 2 column-required,
+none matching), so an editor-marked required question was skippable at
+checkout. Now: the editor's Required checkbox reads and writes the column;
+`validate_answers()` and `output_js_validation()` read the column; the blob
+carries only value rules (integer, decimal, lengths, bounds). Migration 151
+(`promote_question_required_to_column.php`) promoted the 4 legacy blob rows
+and stripped the stale key. Pinned in `survey_answer_test.php`, including a
+one-source check that a hand-written blob-only `required` key no longer
+enforces (61/61 green).
 
 `Question` declares a `qst_is_required` boolean column, and nothing in the
 codebase ever reads it. Whether an answer is actually required is decided by a
@@ -401,9 +512,16 @@ a schema migration for the whole rule set, not a one-column change.
 
 ---
 
-## 13. One db-tier test failed once, was never identified, and has not recurred
+## 13. One db-tier test failed once, was never identified, and has not recurred — CLOSED 2026-07-19
 
-**Deferred:** 2026-07-19
+**Closed:** 2026-07-19 (owner decision), on the entry's own terms: multiple
+clean full db runs, captured to files, closed deliberately. Recorded runs,
+all 2026-07-19, all `RESULT: PASS`: 134/134 (3848 checks) and 134/134
+(3854 checks) captured under the session scratchpad (`db_run_entry3.log`,
+`db_run_entry11.log`), plus a third run for the entry-12 changes. These ran
+during a day of heavy concurrent tree churn and stayed green throughout. The
+runner has named failed tests in its summary since the same-day fix noted
+below, so any recurrence names itself. The two process notes below stand.
 
 A full `php tests/run.php db` reported `Tests: 126 passed, 1 failed of 127`.
 The failing test was never named: the run had been invoked through
@@ -451,9 +569,23 @@ Two process notes worth keeping regardless of the outcome:
   block appears within the last few lines of output — so even a run read
   through a pager or a `tail` names its failures.
 
-## 14. Postgres on the jeremytunnell VPS accepts connections from the entire internet
+## 14. Postgres on the jeremytunnell VPS accepts connections from the entire internet — CLOSED 2026-07-19
 
-**Found:** 2026-07-19, during the read-only step-8 mail-readiness probe of node
+**Closed:** 2026-07-19, attended. On inspection the primary exposure was
+already remediated (by the same-day install.sh 2.24 hardening pass): the ufw
+5432 rule is gone (rules now 22/80/443/25 only), `listen_addresses =
+'localhost'`, Postgres bound to loopback only, no remote connections — and
+5432 verified refused from the internet. One residual was fixed in this
+pass: `pg_hba.conf` still carried `host all all 0.0.0.0/0 md5`, dead behind
+the loopback listener but re-arming the exposure if `listen_addresses` ever
+widened; removed (backup at `pg_hba.conf.bak-2026-07-19`), Postgres
+reloaded, and jeremytunnell.com verified serving DB-backed pages afterward.
+Nothing legitimately needed remote 5432 — the control plane works over SSH.
+
+**Still open from this entry:** surfacing an exposed 5432 (and the other
+bare-metal-branch divergences: `hostname -f` = localhost, opendmarc absent)
+as node health-check findings, so the next exposure is a dashboard finding
+rather than a probe surprise.
 176 (jeremytunnell-vps, 45.79.204.178). Its ufw shows `5432 ALLOW IN Anywhere`
 (v4 and v6), and Postgres is listening on the external interface — verified
 reachable from the dev box (connection accepted, password prompt reached).
@@ -473,19 +605,29 @@ pg_hba misconfiguration away from the internet, and it is the box that step 8
 turns into a mail server holding personal mail. Exposure also invites constant
 credential-stuffing noise in the logs.
 
-**What closing it takes:** identify what legitimately needs remote 5432 (if
-the control plane needs it for backup/restore pushes, restrict the rule to the
-control plane's IP; if nothing does, delete the rule and set
-`listen_addresses` back to localhost). Then audit the bare-metal install
-branch so the next born node does not reproduce it, and add the check to the
-node health/status surface so an exposed 5432 shows up as a finding rather
-than a probe surprise. Firewall change on a live box — do it attended.
+**FIXED 2026-07-19 (job 698).** Nothing legitimately needed remote 5432 —
+the control plane works over SSH. The job deleted the ufw allow-5432 rule
+(v4 and v6) and set `listen_addresses = 'localhost'`, converging the box to
+the install.sh 2.24 default. Verified: Postgres listens on loopback only,
+5432 refuses from outside, and the site serves 200. The install-branch audit
+half is also closed: install.sh 2.24 makes local-only Postgres the default
+for every install mode, so the next born node cannot reproduce this. Still
+open from this entry: surfacing an exposed 5432 as a node health finding.
 
-## 15. A booker who loses the race for a slot still leaves a user account behind
+## 15. A booker who loses the race for a slot still leaves a user account behind — FIXED 2026-07-19
 
-**Found:** 2026-07-19, while writing the T29 bookings suite. Confirmed by
-probe: two submissions for the same hour, the second refused with "that time
-was just taken", and the losing email still has a `usr_users` row afterwards.
+**Fixed:** 2026-07-19 (owner decision: create after the conflict check, keep
+the specific message). `book_logic()` now matches-or-creates the invitee only
+after the advisory lock is held and the slot re-check confirms it free, inside
+the booking transaction; a `User::save()` failure sets its own flag, rolls
+back, and still surfaces the specific "We couldn't use that email address"
+message rather than the generic one. The critical section gains one INSERT on
+the rare new-invitee path. Pinned in `booking_flow_test.php`'s double-booking
+section: the losing booker's email leaves no `usr_users` row (124/124 green).
+
+**Original entry (for context):** two submissions for the same hour, the
+second refused with "that time was just taken", and the losing email still
+had a `usr_users` row afterwards.
 
 `book_logic()` matches-or-creates the invitee from their email *before* it
 opens the transaction and re-checks the slot. So the order is: create the
@@ -516,9 +658,18 @@ not an account they control, but rows nonetheless.
 move the creation after the conflict check and decide what the invalid-email
 path says. If they do not, say so here and leave the code alone.
 
-## 16. Pending paid holds block their slot but do not count toward booking caps
+## 16. Pending paid holds block their slot but do not count toward booking caps — FIXED 2026-07-19
 
-**Found:** 2026-07-19, T29. Confirmed by probe: a `BOOKING_STATUS_CREATED`
+**Fixed:** 2026-07-19 (owner decision: holds count). One predicate now
+answers occupancy for the whole plugin — `Booking::occupies_host_time()`
+(confirmed, or a CREATED hold with unexpired `bkn_hold_expires_time`) — read
+by both `BookingItemSource` and `NativeSchedulingProvider::applyCaps()`, so
+the two can no longer drift. A live hold consumes the daily/weekly cap
+exactly like a confirmation; an expired hold releases both its hour and the
+cap. Documented in the bookings overview; pinned in `booking_flow_test.php`'s
+caps section (127/127 green).
+
+**Original finding:** a `BOOKING_STATUS_CREATED`
 booking with an unexpired `bkn_hold_expires_time` on a type with
 `bkt_max_per_day = 1` removes its own hour from availability, but the rest of
 the day stays open — the cap of one is not reached.
@@ -548,10 +699,19 @@ agree — ideally by giving `Booking` one predicate ("does this row occupy the
 host's time") that both the item source and the cap counter call, so they
 cannot drift again. Document the answer in the bookings overview.
 
-## 17. A host cancelling someone else's booking is told it worked
+## 17. A host cancelling someone else's booking is told it worked — FIXED 2026-07-19
 
-**Found:** 2026-07-19, T29. Pinned in `booking_flow_test.php`: the booking
-correctly is *not* canceled, which is the part that matters, so this is a
+**Fixed:** 2026-07-19 (owner decision: inline error). `my_bookings_logic()`
+now earns the success redirect only on an actual cancellation; a missing id
+or someone else's booking redirects with `cancel_error=1` (PRG both ways,
+matching the `canceled=1` pattern) and the view renders "That booking could
+not be canceled — it may already be canceled, or it isn't yours" in a
+`bkn-error` banner styled alongside `bkn-saved`. Pinned in
+`booking_flow_test.php`: the refused foreign cancel and a nonexistent id
+both report the error flag and never the success banner (129/129 green).
+
+**Original finding:** the booking
+correctly is *not* canceled, which is the part that matters, so this was a
 truthfulness bug rather than a security one.
 
 `my_bookings_logic()` checks ownership before cancelling — `if ($booking->key
@@ -577,9 +737,23 @@ the redirect inside the ownership branch and add the corresponding check to
 `booking_flow_test.php`, which currently asserts only that the booking is
 untouched.
 
-## 18. A stored sha256 reads back padded, so PHP-side hash comparisons fail
+## 18. A stored sha256 reads back padded, so PHP-side hash comparisons fail — FIXED 2026-07-19
 
-**Found:** 2026-07-19, T30. The Multi suite reported `MultiFileBlob` returning
+**Fixed:** 2026-07-19 (owner decision: column type change). All four
+fixed-width hash columns in the estate — `fbb_sha256`, `fsl_token_sha256`,
+`fup_token_sha256`, `fup_expected_sha256` — are now `varchar(64)`;
+`update_database` applied the live conversion (Postgres strips the padding in
+the cast; 0 padded values remain across 372 blob rows) and the test database
+was aligned. The `rtrim()` workaround in
+`MultiModelTester::same_field_value()` is gone — which is what proves the fix
+is load-bearing: with the old schema still in the test DB, the suite failed
+on exactly the padding this entry describes, and went 149/149 after the
+conversion. `blob_layer_test` already compares a reloaded row (57/57);
+models_crud 151/151. One nuance worth recording: real sha256 values are
+exactly 64 chars, so the padding only ever bit values narrower than the
+column — test data today, but any truncated/sentinel value tomorrow.
+
+**Original entry (for context):** The Multi suite reported `MultiFileBlob` returning
 a row whose `fbb_sha256` did not equal the value it had just filtered by. The
 query was right; the values differ only in trailing whitespace.
 
@@ -618,9 +792,22 @@ pinned. If the rule stays, write it into `docs/file_signed_urls.md` or the
 blob section it belongs to, and add the reload-then-compare check with
 `rtrim()` so the behaviour is at least asserted.
 
-## 19. Logging in from a protected URL dumps the user on a 404 instead of the page they asked for
+## 19. Logging in from a protected URL dumps the user on a 404 instead of the page they asked for — HARDENED 2026-07-19, original report NOT reproduced
 
-**Found:** 2026-07-19, during step-8 phase 1 on jeremytunnell.com. Visiting
+**Closed:** 2026-07-19. The mechanism the fix called for already exists and
+works: `check_permission()` stores the bounced URL (`set_return`) and
+`login_logic` redirects to it on success, verified end-to-end over HTTP on
+dev (bounce from `/admin/admin_users` → login → back on the original page,
+200). The jeremytunnell.com observation did NOT reproduce — that site (now
+0.8.120) redirects identically and `alternate_loggedin_homepage` is unset,
+so the fallback is `/profile`, never `/login`. Hardening landed anyway: the
+return redirect now refuses non-local paths (no scheme, no
+protocol-relative `//host`) and refuses `/login` itself as a destination.
+Pinned in a new "Post-login destination (return-to)" section of
+`tests/account_security/login_test.php` (36/36 green) — previously nothing
+covered this path, which is presumably how the original report was possible.
+If an admin reports it again, capture the exact request sequence (the
+fresh-site first-login/password-set ceremony is the untested suspect). Visiting
 `/admin` while signed out redirects to `/login` (correct); submitting the
 login form then lands back on `/login` itself, which for an authenticated
 user renders the 404 page. The session is fine — the user is signed in — but
@@ -648,9 +835,18 @@ in CLI mode `upgrade.php` now re-execs its refreshed self automatically
 publish; until a node has received it, one upgrade may still need a second
 Apply Update click (the two-pass gotcha).
 
-## 21. Node detail Updates tab shows Current Version: Unknown for a live node
+## 21. Node detail Updates tab shows Current Version: Unknown for a live node — FIXED 2026-07-19
 
-**Found:** 2026-07-19, node 176. The control-plane version and the update
+**Fixed:** 2026-07-19. By fix time the field was populated-but-stale rather
+than Unknown (node 176 showed 0.8.112 while serving 0.8.120): status checks
+stamp `mgn_joinery_version`, but `JobResultProcessor::process_apply_update`
+was a deliberate no-op, so an upgrade never refreshed it until someone
+happened to hit a dashboard refresh. That handler now HEAD-probes the node's
+site URL and stamps the `X-Joinery-Version` the running site reports — the
+site itself is the authority — the moment the Apply Update job completes.
+Verified by re-processing node 176's latest completed apply_update job:
+record corrected 0.8.112 → 0.8.120. The Updates tab already renders the
+field, so post-upgrade confirmation is now on-page. The control-plane version and the update
 availability render, but the node's own current version is "Unknown" — so
 "Update available" is asserted without knowing what the node runs, and after
 an upgrade there is no on-page confirmation the version advanced. Likely just
@@ -663,9 +859,14 @@ upgrade landed; today the only proof is reading job output.
 **What closing it takes:** have the status check (or upgrade job completion)
 stamp the node's system version, and render it on the Updates tab.
 
-## 22. Plugins table Status column says "Inactive" for plugins that are not installed
+## 22. Plugins table Status column says "Inactive" for plugins that are not installed — FIXED 2026-07-19
 
-**Found:** 2026-07-19, jeremytunnell.com admin Plugins page. The stats bar
+**Fixed:** 2026-07-19. The no-DB-record branch of
+`MultiPlugin::get_all_plugins_with_status()` hardcoded an "Inactive" badge;
+it now renders "Not Installed" (`bg-info`, the stats bar's color for that
+state), so the row and the stats bar speak the same three-state vocabulary
+and Install-vs-Activate is visible at a glance. Dev has no uninstalled
+plugins to screenshot; the branch is the one customer sites exercise. The stats bar
 distinguishes Inactive (installed, off) from Not Installed, but every row's
 Status cell reads "Inactive" either way. The Actions menu differs (Install vs
 Activate), which is the only visible cue.
@@ -677,10 +878,24 @@ different weight.
 **What closing it takes:** render the row status from the same three-state
 logic the stats bar uses.
 
-## 23. Soft-deleting a row does not free its unique values, and the two layers disagree about that
+## 23. Soft-deleting a row does not free its unique values, and the two layers disagree about that — FIXED 2026-07-19
 
-**Found:** 2026-07-19, T31. Reproduced directly and pinned as current behaviour
-in `tests/unit/system_base_lifecycle_test.php`.
+**Fixed:** 2026-07-19 (owner decision: make the constraint match the
+pre-check). On any soft-deletable table, `update_database` now materializes
+`unique`/`unique_with` as PARTIAL unique indexes (`WHERE {prefix}_delete_time
+IS NULL`, or the is_deleted equivalent — `DatabaseUpdater::
+softDeletePredicate()` mirrors `check_for_duplicate()` exactly) instead of
+full table constraints; existing full constraints are dropped in the same run
+("Replaced full unique constraint ... with a partial unique index").
+Migration applied live: 17 declarations across 15 tables converted, and the
+test database aligned with the same DDL. Fallout handled: `INSERT ... ON
+CONFLICT` against a partial index must name the predicate — the three
+`spm_path` upserts in `seo_page_metadata_class.php` (which errored 42P10 mid-
+migration and are now fixed) and one legacy migration. Documented in
+`docs/example_class.php`. Pinned in `system_base_lifecycle_test.php`, flipped
+from the disagreement to the agreement: delete-then-recreate saves cleanly
+AND a raw duplicate of the live pair is still refused by the database
+(39/39 green). Safe tier 44/44; full db + test-db tiers rerun on top.
 
 A `unique_with` declaration materialises two enforcement points. The
 application pre-check (`check_for_duplicate()`, called from
@@ -728,9 +943,15 @@ is a smaller change that leaves users unable to reuse values. Either way,
 `system_base_lifecycle_test.php` pins today's behaviour, so the fix has a test
 to update rather than a blank page.
 
-## 24. Every docker site's Postgres is published to the internet through the ufw bypass
+## 24. Every docker site's Postgres is published to the internet through the ufw bypass — CLOSED 2026-07-19
 
-**Found:** 2026-07-19, while making Postgres local-only the install default.
+**Closed:** 2026-07-19, verified externally (owner reported it already fixed;
+confirmed by probe): ports 9080–9089 on both the shared docker host
+(23.239.11.53) and VPS A (45.56.119.74) are refused/filtered from the
+internet. Remediated outside this session — whether by container recreation
+with the 2.24 loopback binding or a host-level rule was not inspected; if a
+DOCKER-USER rule is the mechanism, remember it must be persisted across
+reboots and retired when containers are recreated.
 Site containers are started with `-p $DB_PORT:5432` (host ports 908X) bound to
 all interfaces, and docker's iptables NAT rules run BEFORE ufw — a host
 firewall does not protect published ports. So every docker-mode site's
@@ -743,13 +964,80 @@ the docker estate's 908X ports were not flagged then.
 `127.0.0.1:` (host-local management access unchanged, container-internal
 access unchanged) and makes bare-metal Postgres listen on localhost only.
 
-**What closing it takes for the existing estate (owner timing):** port
-bindings are immutable on a running container, so either (a) recreate each
-container with the new loopback binding — seconds of downtime per site, next
-maintenance window — or (b) one host-level `DOCKER-USER` iptables rule per
-docker host dropping external traffic whose original destination port is in
-the 908X range (no restarts, but another special rule to remember). (a) is the
-honest end state; (b) is acceptable interim hardening if (a) waits.
+**FIXED 2026-07-19 (job 697).** All nine containers on the shared host now
+bind their DB publish to `127.0.0.1`. Port bindings are immutable on a running
+container but live in each container's `hostconfig.json`, so the job stopped
+the docker daemon once, patched the 5432 binding in all nine files (originals
+kept beside each as `.bak-deferred24`), and restarted the daemon — one
+~30-second blip for all sites instead of nine recreations, container layers
+(site code upgrades), envs, and volumes untouched. Verified: `docker ps`
+shows `127.0.0.1:908X->5432` for all nine, an external scan of 9078–9090
+finds every port dark (including 9088, the only one that had been reachable —
+an upstream cloud firewall was already shielding the other eight), and all
+nine sites serve 200 through the reverse proxy. VPS A (test2jt,
+45.56.119.74) no longer answers on any port — that box is gone, so the
+shared host was the whole estate.
 
-**Cost of leaving it:** internet-facing Postgres on nine-plus databases,
-protected by a single password each, on hosts that also hold real user data.
+**EXCEPTION: `scrolldaddy` binds the private IP, not loopback.** Eight of the
+nine containers have no remote database readers, so loopback is right for
+them. The `scrolldaddy` container is the exception: the two ScrollDaddy DNS
+resolvers (`45.56.103.84` / private `192.168.206.21`, and `97.107.131.227` /
+private `192.168.151.4`) read device profiles and blocklists from it over the
+Linode private network, per `SCD_DB_HOST`/`SCD_JOINERY_DB_URLS` in
+`/etc/scrolldaddy/scrolldaddy.env`. Converging it to loopback cut both
+resolvers off from their data at 14:51 on 2026-07-19; they kept answering
+queries from cached data, but `/health` went 503 (`db_connected:false`) and
+admin-side config changes stopped propagating. Its 5432 publish is therefore
+bound to `192.168.206.198:9087` (docker-prod's private IP, original kept as
+`hostconfig.json.bak-scrolldaddy-restore`) — off the internet, verified
+unreachable from a public probe, and reachable by both resolvers.
+
+**Any future job that converges DB bindings must skip `scrolldaddy`** — a
+blanket "set every 5432 publish to 127.0.0.1" sweep silently re-breaks DNS
+filtering. Note also that a UFW rule cannot restrict these ports: docker's
+iptables NAT runs before ufw. Source restriction for 9080–9099 lives in the
+`DOCKER-USER` chain, which currently accepts the whole `192.168.128.0/17`
+Linode private range — broader than the two resolvers, and worth tightening
+once the private-network consumers of the other eight containers are known.
+
+---
+
+## 25. A system alert addressed to a rejecting mailbox is discarded silently
+
+**Found:** 2026-07-19, while investigating why the ScrollDaddy DNS outage in
+entry 24 ran ~63 minutes before a human noticed.
+
+Monitoring was never the gap. `RunNodeUptimeChecks` detected both resolvers
+down and sent alerts on schedule (failure #1 at 15:00 below the
+`FAILURE_THRESHOLD = 2` debounce, down alerts at 15:15, recovery alerts at
+16:00). Every one of those alerts was addressed to `info@dev.getjoinery.com`,
+because `server_manager_provisioning_admin_alert_email` was empty and the
+recipient chain falls back to `webmaster_email`. That address has no alias on
+`dev.getjoinery.com`, and the domain runs `reject_unmatched = true`, so the
+mail was refused at delivery. Nothing recorded the loss: `EmailSender` had
+already returned success, and a rejection at the far end is not a send
+failure. Dev's alert recipient is now set explicitly and a test send was
+confirmed accepted.
+
+**Cost of leaving it:** every alert path sharing that fallback fails the same
+way and looks healthy while doing it — node up/down, certificate expiry,
+`ProvisionCustomerCloud`, `ProvisionPendingSsl`. The failure is invisible from
+inside the platform: task logs read `success`, the run summary counts the
+alerts as fired, and only the absence of an email in a human's inbox reveals
+it. Each deployment carries its own `webmaster_email`, so a site is one
+unrouteable address away from silent alerting with no signal that it happened.
+
+**What closing it takes:** treat an alert address as something to verify
+rather than assume. Options, roughly increasing in cost: validate the
+configured recipient is deliverable when it is saved in admin settings;
+capture Mailgun bounce/rejection webhooks and surface them against the sending
+setting; or give system alerts a delivery receipt so an unacknowledged alert
+escalates. A cheap partial step is a startup or scheduled assertion that the
+resolved alert recipient is not an address the platform's own inbound domain
+would reject — that exact contradiction is what happened here.
+
+**Related:** the alert path itself is sound and worth preserving as the
+template — `RunNodeUptimeChecks` already pins each check to the node's own IP
+so a shared round-robin hostname (the two DNS servers share
+`dns.scrolldaddy.app`) is checked as itself rather than whichever A record
+resolves first.

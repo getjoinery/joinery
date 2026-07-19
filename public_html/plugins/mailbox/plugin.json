@@ -1,7 +1,7 @@
 {
     "name": "Mailbox",
     "description": "Self-hosted email: receiving, forwarding, local mailboxes, webmail reader, IMAP sync, DKIM/SRS",
-    "version": "1.39.4",
+    "version": "1.39.11",
     "author": "Joinery",
     "receives_upgrades": true,
     "included_in_publish": true,

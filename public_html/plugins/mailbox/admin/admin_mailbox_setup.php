@@ -3,12 +3,14 @@
  * Inbound Email - Setup & Verification (mailbox-first)
  *
  * Pick a registered mailbox; the page checks its setup, grouped into Receiving
- * (always) and Forwarding (only when the mailbox forwards). Server-wide
+ * (always) plus Forwarding (when the mailbox forwards) or Sending (relay and
+ * DKIM signing, when it stores only — composed replies still leave the
+ * server). Server-wide
  * diagnostics — the inbound provider, this server's mail hostname/IP, and the
  * full Postfix/relay health run — live behind the Advanced disclosure so they
  * don't clutter the per-mailbox view.
  *
- * @version 2.0
+ * @version 2.3
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -58,13 +60,16 @@ $render_fix = function ($fix) use ($address) {
 	}
 	if (!empty($fix['dns_record'])) {
 		$rec = $fix['dns_record'];
+		$has_priority = array_key_exists('priority', $rec);
 		echo '<table class="table table-sm table-bordered mb-2 iem-table-760">';
-		echo '<thead><tr><th>Type</th><th>Name</th><th>Value</th></tr></thead><tbody><tr>';
+		echo '<thead><tr><th>Type</th><th>Name</th>'
+			. ($has_priority ? '<th>Priority</th>' : '') . '<th>Value</th></tr></thead><tbody><tr>';
 		echo '<td>' . htmlspecialchars($rec['type']) . '</td>';
 		echo '<td><code>' . htmlspecialchars($rec['name']) . '</code></td>';
-		echo '<td><input type="text" class="form-control form-control-sm iem-copyfield" readonly '
-			. 'value="' . htmlspecialchars($rec['value'])
-			. '" onclick="this.select()"></td>';
+		if ($has_priority) {
+			echo '<td><code>' . htmlspecialchars((string)$rec['priority']) . '</code></td>';
+		}
+		echo '<td>' . PublicPageBase::copy_field($rec['value']) . '</td>';
 		echo '</tr></tbody></table>';
 	}
 	if (!empty($fix['action'])) {
@@ -191,9 +196,11 @@ if ($selected) {
 	}
 	$page->end_box();
 
-	if ($forwards) {
-		$page->begin_box(array('title' => 'Forwarding'));
-		echo '<p class="text-muted small mb-3">This mailbox forwards mail back out, so outbound delivery must work too.</p>';
+	if ($forwards || !empty($forwarding_rows)) {
+		$page->begin_box(array('title' => $forwards ? 'Forwarding' : 'Sending'));
+		echo '<p class="text-muted small mb-3">' . ($forwards
+			? 'This mailbox forwards mail back out, so outbound delivery must work too.'
+			: 'Replies and new mail composed from this mailbox leave through the outbound stack.') . '</p>';
 		if (empty($forwarding_rows)) {
 			echo '<p class="text-muted mb-0">No forwarding checks available.</p>';
 		} else {
@@ -267,9 +274,7 @@ if (!$advanced) {
 			echo '<tr>';
 			echo '<td>' . htmlspecialchars($rec['type']) . '</td>';
 			echo '<td><code>' . htmlspecialchars($rec['name']) . '</code></td>';
-			echo '<td><input type="text" class="form-control form-control-sm iem-copyfield" readonly '
-				. 'value="' . htmlspecialchars($rec['value'])
-				. '" onclick="this.select()"></td>';
+			echo '<td>' . PublicPageBase::copy_field($rec['value']) . '</td>';
 			echo '<td class="text-muted small">' . htmlspecialchars($rec['note'] ?? '') . '</td>';
 			echo '</tr>';
 		}

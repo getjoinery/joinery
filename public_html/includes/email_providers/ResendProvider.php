@@ -18,6 +18,12 @@ class ResendProvider implements EmailServiceProvider {
         return 'Resend';
     }
 
+    public static function getSpfIncludeDomain(): string
+    {
+        // No fixed SPF include: sending identity is not tied to a shared provider range.
+        return '';
+    }
+
     public static function getSettingsFields(): array {
         return [
             [

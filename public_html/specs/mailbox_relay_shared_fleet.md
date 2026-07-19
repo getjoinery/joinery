@@ -82,7 +82,8 @@ of a redesign.
 ### DNS indirection: per-tenant MX hostnames
 
 Each tenant gets a stable hostname the operator controls, e.g.
-`t-{tenant}.mx.getjoinery.com`, and points every hosted domain's MX at it.
+`t{id}.mx.getjoinery.com` (id-derived, so DNS names no tenant), and points
+every hosted domain's MX at it.
 MX targets cannot be CNAMEs, so the indirection is an operator-controlled
 **A record**: re-sharding a tenant, rotating a shard's IP, or replacing a
 burned box is an A-record change on the operator's side — tenants never
@@ -301,6 +302,23 @@ Current-state only, per docs rules:
   aggregation risk and its mitigations (sharding, published rebuild
   cadence), metadata visibility, and the exit ramp.
 - `docs/subscription_tiers.md` — the fleet-slot feature and its gating.
+
+## Follow-up Build Items
+
+- **Order-time auto-enrollment (added 2026-07-19).** Entitlement is already
+  order-shaped (the fleet service gates on the `mailbox_fleet_slot` tier
+  feature), but the tenant-side setup is manual: the admin pastes the
+  operator's service URL + their customer API key into the Relay tab and
+  clicks Enroll. For customer-cloud orders that's a redundant step — the
+  provisioning pipeline created the customer's API key and *is* the operator,
+  so it already holds both values. Build: (a) an operator store product/tier
+  granting `mailbox_fleet_slot`; (b) the customer-cloud provision path
+  pre-seeds `mailbox_fleet_service_url` + API key settings on the new box so
+  a Fortress-tier order either enrolls itself during provisioning or lands
+  the owner on a one-click Enroll. The DNS TXT ownership challenges and the
+  MX edit stay manual by nature — the customer proving domain control at
+  their own DNS provider. Sequenced after the manual path is live-proven
+  (first dogfood tenant).
 
 ## Open Items to Confirm During Implementation
 

@@ -60,7 +60,6 @@ a.iea-badge-warn:hover { background: #fde68a; color: #92400e; }
 .iem-inline-form { display: inline; }
 .iem-table-760 { max-width: 760px; }
 .iem-table-900 { max-width: 900px; }
-.iem-copyfield { cursor: pointer; background: #fff; }
 .iem-code-break { word-break: break-all; }
 .iem-msg-iframe { width: 100%; min-height: 500px; border: 1px solid #ccc; background: #fff; }
 .iem-msg-plain { white-space: pre-wrap; word-break: break-word; }

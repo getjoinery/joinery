@@ -1,0 +1,6 @@
+{
+  "name": "Reconcile hosted relay fleet",
+  "description": "Operator-side brain of the shared relay fleet: reconciles finished shard lifecycle jobs into slot statuses, dispatches flagged work as server_manager jobs (relay_add_tenant / relay_set_domains / relay_remove_tenant), and re-checks each active slot's entitlement with the grace-window suspension. Runs every cron pass (every_run); no-op unless this deployment runs the fleet service.",
+  "default_frequency": "every_run",
+  "config_fields": []
+}

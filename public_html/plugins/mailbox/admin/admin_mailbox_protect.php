@@ -8,7 +8,7 @@
  * records shown → verify the protected shape → activate (enforce). Staged
  * rotation (stage → publish → verify → cut over) and disable live here too.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -80,7 +80,7 @@ if ($has_key && !empty($dns_records)) {
 		echo '<tr>'
 			. '<td>' . htmlspecialchars($rec['type']) . '</td>'
 			. '<td><code>' . htmlspecialchars($rec['name']) . '</code></td>'
-			. '<td><code style="word-break:break-all">' . htmlspecialchars($rec['value']) . '</code>'
+			. '<td>' . PublicPageBase::copy_field($rec['value'])
 			. '<br><small>' . htmlspecialchars($rec['note']) . '</small></td>'
 			. '</tr>';
 	}

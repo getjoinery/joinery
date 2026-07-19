@@ -1,6 +1,6 @@
 {
     "name": "Event Manager",
-    "version": "1.0.7",
+    "version": "1.0.8",
     "description": "Events toolkit: events, locations, event sessions and waiting lists, with store integration for ticketed events and event surveys at checkout",
     "author": "Joinery",
     "receives_upgrades": true,

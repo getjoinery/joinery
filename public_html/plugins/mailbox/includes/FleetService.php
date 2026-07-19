@@ -17,7 +17,7 @@
  *   - The FleetReconcile scheduled task (cron, operator context) dispatches
  *     the flagged jobs, reconciles finished ones, and re-checks entitlement.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_fleet_shard_class.php'));
@@ -110,7 +110,7 @@ class FleetService {
 		$zone = trim((string)Globalvars::get_instance()->get_setting('mailbox_fleet_mx_zone'));
 		$slug = 't' . intval($slot->key);
 		$slot->set('mft_slug', $slug);
-		$slot->set('mft_mx_hostname', 't-' . $slug . '.' . $zone);
+		$slot->set('mft_mx_hostname', $slug . '.' . $zone);
 		$slot->save();
 
 		return $slot;
@@ -282,11 +282,13 @@ class FleetService {
 			$db = DbConnector::get_instance()->get_db_link();
 			$stmt = $db->prepare(
 				"SELECT mjb_job_type, mjb_status, mjb_output FROM mjb_management_jobs
-				  WHERE mjb_management_job_id = ? LIMIT 1");
+				  WHERE mjb_id = ? LIMIT 1");
 			$stmt->execute(array($job_id));
 			$row = $stmt->fetch(PDO::FETCH_ASSOC);
 			return $row ?: null;
 		} catch (\Throwable $e) {
+			// A broken read here makes reconcile re-dispatch forever — never fail silently.
+			error_log('FleetService::lastJobState failed for job ' . $job_id . ': ' . $e->getMessage());
 			return null;
 		}
 	}

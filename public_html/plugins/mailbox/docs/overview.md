@@ -1278,7 +1278,8 @@ job (`relay_add_tenant` / `relay_set_domains` / `relay_remove_tenant`) from the
 what a tenant or a domain claim is. Shards are registered on the Relay tab's
 *Fleet shards* box (skeleton-only provisioning: the operator's box is not a
 tenant of its own shards). Each tenant's MX hostname
-(`t-<slug>.<mailbox_fleet_mx_zone>`) is an operator-controlled A record, so
+(`<slug>.<mailbox_fleet_mx_zone>`, slug format `t<id>` — deliberately
+anonymous so DNS names no tenant) is an operator-controlled A record, so
 re-sharding a tenant or replacing a burned shard is an A-record change —
 tenants never touch DNS after setup.
 

@@ -6,8 +6,8 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  *
  * The page is mailbox-first: an admin picks one of the mailboxes already
  * registered on the Accounts tab, and the checks are scoped to that mailbox —
- * a "Receiving" group always, and a "Forwarding" group only when the mailbox
- * forwards. The server-wide diagnostics (inbound provider, this server's mail
+ * a "Receiving" group always, plus a "Forwarding" group when the mailbox
+ * forwards or a "Sending" group (relay, DKIM) when it stores only. The server-wide diagnostics (inbound provider, this server's mail
  * hostname/IP, and the full Postfix/relay health run) live behind the Advanced
  * disclosure (?advanced=1); they are useful but not per-mailbox, so they stay
  * out of the default view.
@@ -16,7 +16,7 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  * plugin, enable SRS, register a domain, or apply a one-click fix — each writes
  * through a model and redirects so the next render reads fresh settings.
  *
- * @version 2.0
+ * @version 2.1
  */
 function admin_mailbox_setup_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -197,6 +197,8 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 			foreach ($all as $r) {
 				if ($forwards && _setup_is_forwarding_row($r)) {
 					$forwarding_rows[] = $r;
+				} elseif (!$forwards && _setup_is_sending_row($r)) {
+					$forwarding_rows[] = $r;
 				} elseif (_setup_is_receiving_row($r)) {
 					$receiving_rows[] = $r;
 				}
@@ -289,6 +291,16 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
  */
 function _setup_is_forwarding_row(array $r): bool {
 	return in_array($r['id'], array('plugin.srs_secret', 'plugin.relay', 'domain.dkim', 'host.opendkim'), true);
+}
+
+/**
+ * Sending rows for a store-only mailbox: replies and new mail composed from
+ * the reader still leave through the outbound stack, so the relay and DKIM
+ * signing are its concerns too — everything a forwarding mailbox needs except
+ * SRS, which only rewrites forwarded envelopes.
+ */
+function _setup_is_sending_row(array $r): bool {
+	return in_array($r['id'], array('plugin.relay', 'domain.dkim', 'host.opendkim'), true);
 }
 
 /**

@@ -26,7 +26,7 @@
  *   - Non-protected hosted domains: no in-app signature (the provider's normal
  *     alignment for the domain applies if it is verified there).
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/EmailServiceProvider.php'));
@@ -60,6 +60,11 @@ class RawRelayComposeTransport implements EmailServiceProvider {
 
     public static function getLabel(): string {
         return 'Raw-MIME relay (hidden origin)';
+    }
+
+    public static function getSpfIncludeDomain(): string {
+        // Pass-through wrapper — the SPF identity is the wrapped provider's.
+        return '';
     }
 
     public static function getSettingsFields(): array {
