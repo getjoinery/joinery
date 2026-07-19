@@ -6,7 +6,7 @@
  * - Detect schema differences between live and test databases
  * - Copy live database to test database
  *
- * Version: 1.00
+ * Version: 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -152,7 +152,16 @@ function getDatabaseSchema($dbname, $db_user) {
 }
 
 /**
- * Copy live database to test database using pg_dump/psql
+ * Copy live database to test database using pg_dump/psql.
+ *
+ * The restore lands in a staging database first, with ON_ERROR_STOP and
+ * pipefail so any failed statement fails the whole copy loudly — a plain
+ * `pg_dump | psql` into the final name reports psql's exit code (0 even when
+ * statements error mid-stream) and, worse, a test run holding connections
+ * during the restore can make constraint DDL fail silently, leaving a copy
+ * with missing primary keys that every test-db suite then trips over. Once
+ * staging restores cleanly, the swap (terminate, drop, rename) takes under a
+ * second, so concurrent test runs get a torn moment instead of a torn copy.
  */
 function copyLiveToTest($live_db, $test_db, $db_user) {
     $settings = Globalvars::get_instance();
@@ -162,59 +171,86 @@ function copyLiveToTest($live_db, $test_db, $db_user) {
     putenv("PGPASSWORD={$password}");
 
     // Escape all shell arguments up front
-    $esc_user = escapeshellarg($db_user);
-    $esc_test = escapeshellarg($test_db);
-    $esc_live = escapeshellarg($live_db);
+    $esc_user    = escapeshellarg($db_user);
+    $esc_test    = escapeshellarg($test_db);
+    $esc_live    = escapeshellarg($live_db);
+    $staging_db  = $test_db . '_staging';
+    $esc_staging = escapeshellarg($staging_db);
+
+    $terminate = function ($dbname) use ($db_user, $password) {
+        try {
+            $pdo = new PDO("pgsql:host=localhost;port=5432;dbname=postgres", $db_user, $password);
+            $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+            $stmt = $pdo->prepare("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = ? AND pid <> pg_backend_pid()");
+            $stmt->execute([$dbname]);
+        } catch (PDOException $e) {
+            // Non-fatal — the drop below will surface a real blocker
+        }
+    };
+
+    $fail = function ($message) use ($esc_user, $esc_staging) {
+        exec("dropdb -U {$esc_user} --if-exists {$esc_staging} 2>&1");
+        putenv("PGPASSWORD");
+        return ['success' => false, 'message' => $message];
+    };
 
     $output = [];
     $return_var = 0;
 
-    // Step 1: Terminate connections to test database via PDO (avoids shell + SQL injection risk)
+    // Step 1: Fresh staging database
+    $terminate($staging_db);
+    exec("dropdb -U {$esc_user} --if-exists {$esc_staging} 2>&1", $output, $return_var);
+    if ($return_var !== 0) {
+        return $fail("Failed to drop stale staging database. Output: " . implode("\n", $output));
+    }
+    $output = [];
+    exec("createdb -U {$esc_user} {$esc_staging} 2>&1", $output, $return_var);
+    if ($return_var !== 0) {
+        return $fail("Failed to create staging database. Output: " . implode("\n", $output));
+    }
+
+    // Step 2: Dump live and restore into staging. pipefail + ON_ERROR_STOP:
+    // the first failed statement (or a failed dump) fails the copy.
+    $pipeline = "set -o pipefail; pg_dump -U {$esc_user} {$esc_live} | psql -q -v ON_ERROR_STOP=1 -U {$esc_user} -d {$esc_staging} 2>&1";
+    $output = [];
+    exec('bash -c ' . escapeshellarg($pipeline), $output, $return_var);
+    if ($return_var !== 0) {
+        return $fail("Restore into staging failed (nothing replaced — the previous test copy is untouched). Output tail: "
+            . implode("\n", array_slice($output, -15)));
+    }
+
+    // Step 3: Swap staging into place (short window; retry once if a test
+    // run reconnects between terminate and drop).
+    for ($attempt = 1; $attempt <= 3; $attempt++) {
+        $terminate($test_db);
+        $output = [];
+        exec("dropdb -U {$esc_user} --if-exists {$esc_test} 2>&1", $output, $return_var);
+        if ($return_var === 0) {
+            break;
+        }
+        sleep(2);
+    }
+    if ($return_var !== 0) {
+        return $fail("Could not drop the old test database to swap in the fresh copy (connections keep grabbing it). Output: "
+            . implode("\n", $output));
+    }
+
     try {
         $pdo = new PDO("pgsql:host=localhost;port=5432;dbname=postgres", $db_user, $password);
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $stmt = $pdo->prepare("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = ? AND pid <> pg_backend_pid()");
-        $stmt->execute([$test_db]);
+        // Identifiers can't be bound — quote defensively even though both
+        // names come from config, not user input.
+        $quote_ident = function ($name) { return '"' . str_replace('"', '""', $name) . '"'; };
+        $pdo->exec("ALTER DATABASE " . $quote_ident($staging_db) . " RENAME TO " . $quote_ident($test_db));
     } catch (PDOException $e) {
-        // Non-fatal — continue even if we can't terminate connections
+        return $fail("Restored copy is ready in '{$staging_db}' but the rename failed: " . $e->getMessage());
     }
 
-    // Step 2: Drop test database
-    exec("dropdb -U {$esc_user} --if-exists {$esc_test} 2>&1", $output, $return_var);
-    if ($return_var !== 0) {
-        // Try again after a brief pause
-        sleep(2);
-        exec("dropdb -U {$esc_user} --if-exists {$esc_test} 2>&1", $output, $return_var);
-    }
-
-    // Step 3: Create empty test database
-    exec("createdb -U {$esc_user} {$esc_test} 2>&1", $output, $return_var);
-    if ($return_var !== 0) {
-        putenv("PGPASSWORD");
-        return [
-            'success' => false,
-            'message' => "Failed to create test database. Output: " . implode("\n", $output)
-        ];
-    }
-
-    // Step 4: Dump live and restore to test (works even with active connections on live)
-    $dump_restore_cmd = "pg_dump -U {$esc_user} {$esc_live} | psql -U {$esc_user} -d {$esc_test} 2>&1";
-    exec($dump_restore_cmd, $output, $return_var);
-
-    // Clear password from environment
     putenv("PGPASSWORD");
-
-    if ($return_var === 0) {
-        return [
-            'success' => true,
-            'message' => "Successfully copied '{$live_db}' to '{$test_db}'. Test database is now in sync with live."
-        ];
-    } else {
-        return [
-            'success' => false,
-            'message' => "Failed to copy database. Output: " . implode("\n", $output)
-        ];
-    }
+    return [
+        'success' => true,
+        'message' => "Successfully copied '{$live_db}' to '{$test_db}'. Test database is now in sync with live."
+    ];
 }
 
 // Start output

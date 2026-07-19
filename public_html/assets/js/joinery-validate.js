@@ -1,9 +1,9 @@
 /**
  * Joinery Validation System - Pure JavaScript validation library
  * No jQuery dependencies, works alongside jQuery validation if present
- * @version 1.0.12
+ * @version 1.0.13
  */
-console.log('%c=== JOINERY VALIDATION v1.0.12 ===', 'color: blue; font-weight: bold');
+console.log('%c=== JOINERY VALIDATION v1.0.13 ===', 'color: blue; font-weight: bold');
 
 (function() {
     'use strict';
@@ -360,9 +360,24 @@ console.log('%c=== JOINERY VALIDATION v1.0.12 ===', 'color: blue; font-weight: b
             const rules = this.rules[fieldName];
 
             // Get field(s) using findFields method
-            const fields = this.findFields(cleanName);
+            let fields = this.findFields(cleanName);
             if (fields.length === 0) {
                 if (this.debug) console.warn(`⚠️ Field not found for validation: ${cleanName}`);
+                return true;
+            }
+
+            // A control the user cannot interact with cannot be asked to fill
+            // anything in: skip disabled fields and fields inside hidden
+            // sections (conditional panels via visibility_rules or [hidden]).
+            const allFields = fields;
+            fields = Array.from(fields).filter(el => {
+                if (el.disabled) return false;
+                if (el.type === 'hidden') return true; // carries data, not UI
+                return el.checkVisibility ? el.checkVisibility() : !!el.offsetParent;
+            });
+            if (fields.length === 0) {
+                if (this.debug) console.log(`⏭ Skipping validation for hidden/disabled field: ${cleanName}`);
+                this.clearError(allFields[0]);
                 return true;
             }
 

@@ -1,6 +1,11 @@
 <?php
 /**
- * ProvisionCustomerCloud - Advances customer-cloud provisions to running sites.
+ * ProvisionCustomerCloud - Advances cloud-instance provisions to running sites.
+ *
+ * Handles both origins: order-origin provisions created by hosting purchases
+ * and admin-origin provisions created by the Install New Node form's
+ * cloud-instance target. Install parameters (docker mode, fresh/from-backup,
+ * source node, port) ride on the provision row.
  *
  * Works the cvp_customer_cloud_provisions state machine each cron tick:
  *
@@ -23,7 +28,7 @@
  *   server_manager_customer_cloud_type          default instance type
  *   server_manager_customer_cloud_image         default OS image
  *
- * @version 1.0
+ * @version 1.1
  */
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 
@@ -45,7 +50,7 @@ class ProvisionCustomerCloud implements ScheduledTaskInterface {
 		require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Client.php'));
 
 		$actionable = new MultiCustomerCloudProvision(array(
-			'statuses' => array('ready', 'booting', 'installing'),
+			'statuses' => array('ready', 'booting', 'installing', 'failed'),
 			'deleted'  => false,
 		));
 		$actionable->load();
@@ -70,6 +75,7 @@ class ProvisionCustomerCloud implements ScheduledTaskInterface {
 					case 'ready':      $advanced += $this->handle_ready($provision, $key_path); break;
 					case 'booting':    $advanced += $this->handle_booting($provision, $key_path); break;
 					case 'installing': $advanced += $this->handle_installing($provision); break;
+					case 'failed':     $advanced += $this->handle_failed_recheck($provision); break;
 				}
 			} catch (Exception $e) {
 				$this->errors[] = "Provision #{$provision->key} ({$provision->get('cvp_domain')}): " . $e->getMessage();
@@ -175,14 +181,22 @@ class ProvisionCustomerCloud implements ScheduledTaskInterface {
 			$node->set('mgn_name', $domain);
 			$node->set('mgn_slug', $slug);
 		}
+		$docker_mode  = $provision->get('cvp_docker_mode')  ?: 'docker';
+		$install_mode = $provision->get('cvp_install_mode') ?: 'fresh';
+		$sitename     = $provision->get('cvp_sitename')     ?: $slug;
+		$port         = (int)($provision->get('cvp_port')   ?: 8080);
+
 		$node->set('mgn_host',          $instance['ip']);
 		$node->set('mgn_ssh_user',      'root');
 		$node->set('mgn_ssh_key_path',  $key_path);
 		$node->set('mgn_ssh_port',      22);
+		$node->set('mgn_web_root',      "/var/www/html/{$sitename}/public_html");
 		$node->set('mgn_site_url',      'https://' . $domain);
 		$node->set('mgn_install_state', 'installing');
 		$node->set('mgn_ssl_state',     'pending');
-		$node->set('mgn_port',          8080);
+		if ($docker_mode === 'docker') {
+			$node->set('mgn_port', $port);
+		}
 		$node->set('mgn_enabled',       true);
 		if (!$node->key) {
 			$node->prepare();
@@ -190,15 +204,30 @@ class ProvisionCustomerCloud implements ScheduledTaskInterface {
 		$node->save();
 		$node->load();
 
+		// build_install_node contract: 'domain' is the primary domain for a
+		// fresh install but the SOURCE domain for from_backup (the target
+		// domain comes from the node's site URL via post-restore fixups).
+		$job_domain = $domain;
+		if ($install_mode === 'from_backup') {
+			$source_node = new ManagedNode((int)$provision->get('cvp_source_node_id'), TRUE);
+			$job_domain = parse_url($source_node->get('mgn_site_url') ?: '', PHP_URL_HOST) ?: $domain;
+		}
+
 		$job_params = [
-			'mode'        => 'fresh',
-			'sitename'    => $slug,
-			'domain'      => $domain,
-			'docker_mode' => 'docker',
-			'port'        => 8080,
+			'mode'        => $install_mode,
+			'sitename'    => $sitename,
+			'domain'      => $job_domain,
+			'docker_mode' => $docker_mode,
 			'admin_email' => $provision->get('cvp_buyer_email'),
 			'user_name'   => $provision->get('cvp_buyer_name'),
 		];
+		if ($docker_mode === 'docker') {
+			$job_params['port'] = $port;
+		}
+		if ($install_mode === 'from_backup') {
+			$job_params['source_node_id'] = (int)$provision->get('cvp_source_node_id');
+			$job_params['backup_source']  = $provision->get('cvp_backup_source') ?: 'new';
+		}
 
 		try {
 			$steps = JobCommandBuilder::build_install_node($node, $job_params);
@@ -258,6 +287,57 @@ class ProvisionCustomerCloud implements ScheduledTaskInterface {
 		} else {
 			$this->alert_and_fail($provision,
 				"Install job #{$job->key} finished '{$status}' with install_state '{$node->get('mgn_install_state')}' — see the job detail page.");
+		}
+		return 1;
+	}
+
+	/**
+	 * A failed provision is not a dead end: the admin can Retry Install from
+	 * the node detail page. When that retry succeeds the NODE recovers
+	 * (install_state clears) but nothing else touches the provision — so each
+	 * tick re-checks failed provisions against their node and completes them
+	 * once the node is healthy. Silent while the node is still broken: the
+	 * failure was already alerted once, and re-alerting every tick would spam
+	 * the admin.
+	 */
+	private function handle_failed_recheck($provision) {
+		$node_id = (int)$provision->get('cvp_mgn_node_id');
+		if (!$node_id) {
+			return 0; // failed before a node existed — nothing to recover from
+		}
+		$node = new ManagedNode($node_id, TRUE);
+		if (!$node->key || $node->get('mgn_install_state') !== null) {
+			return 0; // node gone or still broken — stay failed, no re-alert
+		}
+
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare(
+			"SELECT mjb_id FROM mjb_management_jobs " .
+			"WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'install_node' AND mjb_delete_time IS NULL " .
+			"ORDER BY mjb_id DESC LIMIT 1"
+		);
+		$q->execute([$node_id]);
+		$job_id = $q->fetchColumn();
+		if (!$job_id) {
+			return 0;
+		}
+		$job = new ManagementJob($job_id, TRUE);
+		if ($job->get('mjb_status') !== 'completed') {
+			return 0;
+		}
+
+		$provision->set('cvp_status', 'done');
+		$provision->set('cvp_error',  null);
+		$provision->save();
+
+		// The buyer's welcome email is normally sent by JobResultProcessor when
+		// the completed job carries the order-item linkage. A retry job that
+		// predates linkage-copying has none — send it here instead, never both.
+		if (!$job->get('mjb_external_order_item_id')
+				&& $provision->get('cvp_external_order_item_id')) {
+			$job->set('mjb_external_order_item_id', $provision->get('cvp_external_order_item_id'));
+			$job->save();
+			JobResultProcessor::send_provisioning_welcome_email($job, $node);
 		}
 		return 1;
 	}

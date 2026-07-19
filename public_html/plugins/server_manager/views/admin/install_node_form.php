@@ -3,14 +3,21 @@
  * Server Manager - Install New Node
  * URL: /admin/server_manager/install_node_form
  *
- * One-click node provisioning: creates a ManagedNode, queues an install_node job,
- * redirects to the job detail page.
+ * One-click node provisioning. Two targets:
+ *   - Existing server: creates a ManagedNode, queues an install_node job,
+ *     redirects to the job detail page.
+ *   - New cloud instance: creates an admin-origin CustomerCloudProvision at
+ *     'ready'; the Provision Customer Cloud task births the instance in the
+ *     connected cloud account and dispatches the install from there.
  *
- * @version 1.3 - Remove redundant section headings where label alone is sufficient
+ * @version 1.4 - Cloud-instance target (admin-origin provisions)
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_account_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
+require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 
 $session = SessionControl::get_instance();
@@ -41,9 +48,28 @@ if ($_POST && isset($_POST['mgn_name'])) {
 			$field_errors['domain'] = 'Domain is required.';
 		}
 
+		$is_cloud_target = (($_POST['host_dropdown'] ?? '') === '__cloud__');
+
 		$mgn_host = trim($_POST['mgn_host'] ?? '');
-		if (!$mgn_host) {
+		if (!$is_cloud_target && !$mgn_host) {
 			$field_errors['host_dropdown'] = 'Target host is required.';
+		}
+
+		$cloud_account = null;
+		if ($is_cloud_target) {
+			$cca_id = intval($_POST['cca_account_id'] ?? 0);
+			$cloud_account = $cca_id ? new CustomerCloudAccount($cca_id, TRUE) : null;
+			if (!$cloud_account || !$cloud_account->key
+					|| $cloud_account->get('cca_status') !== 'active'
+					|| $cloud_account->get('cca_delete_time')) {
+				$field_errors['cca_account_id'] = 'Choose an active connected cloud account.';
+			}
+			if (trim($_POST['cloud_region'] ?? '') === '') {
+				$field_errors['cloud_region'] = 'Region is required.';
+			}
+			if (trim($_POST['cloud_instance_type'] ?? '') === '') {
+				$field_errors['cloud_instance_type'] = 'Instance type is required.';
+			}
 		}
 
 		if ($mode === 'fresh') {
@@ -52,6 +78,11 @@ if ($_POST && isset($_POST['mgn_name'])) {
 			$source_node_id = intval($_POST['source_node_id'] ?? 0);
 			if (!$source_node_id) {
 				$field_errors['source_node_id'] = 'Source node is required for from-backup install.';
+			}
+			// A brand-new instance has no cached backups to point at — the
+			// pipeline always captures a fresh source backup for cloud targets.
+			if ($is_cloud_target && ($_POST['backup_source'] ?? 'new') === 'existing') {
+				$field_errors['backup_source'] = 'Cloud instances install from a fresh backup — choose "Take fresh backup now".';
 			}
 		}
 
@@ -66,6 +97,40 @@ if ($_POST && isset($_POST['mgn_name'])) {
 			while ($existing_check->count_all() > 0) {
 				$slug = $base_slug . '-' . $counter++;
 				$existing_check = new MultiManagedNode(['slug' => $slug, 'deleted' => false]);
+			}
+
+			if ($is_cloud_target) {
+				// No server exists yet — record what to build and let the
+				// Provision Customer Cloud task birth the instance and
+				// dispatch the install from there. The provision belongs to
+				// the grant owner: if the grant goes stale, they are the one
+				// who can re-connect and resume it.
+				$owner = new User($cloud_account->get('cca_usr_user_id'), TRUE);
+
+				$provision = new CustomerCloudProvision(NULL);
+				$provision->set('cvp_origin',         'admin');
+				$provision->set('cvp_usr_user_id',    $cloud_account->get('cca_usr_user_id'));
+				$provision->set('cvp_domain',         $domain);
+				$provision->set('cvp_slug',           $slug);
+				$provision->set('cvp_sitename',       $sitename);
+				$provision->set('cvp_buyer_email',    $owner->key ? $owner->get('usr_email') : '');
+				$provision->set('cvp_buyer_name',     $owner->key ? trim($owner->get('usr_first_name') . ' ' . $owner->get('usr_last_name')) : '');
+				$provision->set('cvp_status',         'ready');
+				$provision->set('cvp_cca_account_id', $cloud_account->key);
+				$provision->set('cvp_provider',       $cloud_account->get('cca_provider'));
+				$provision->set('cvp_region',         trim($_POST['cloud_region']));
+				$provision->set('cvp_instance_type',  trim($_POST['cloud_instance_type']));
+				$provision->set('cvp_docker_mode',    $docker_mode);
+				$provision->set('cvp_install_mode',   $mode);
+				if ($mode === 'from_backup') {
+					$provision->set('cvp_source_node_id', $source_node_id);
+					$provision->set('cvp_backup_source',  'new');
+				}
+				$provision->prepare();
+				$provision->save();
+
+				header('Location: /admin/server_manager/install_node_form?provision_created=' . $provision->key);
+				exit;
 			}
 
 			// Create the node record
@@ -167,26 +232,39 @@ foreach ($existing_nodes as $en) {
 	$source_node_options[$en->key] = $label;
 }
 
-// Build host dropdown options
-$has_known_hosts = !empty($known_hosts);
-$host_dropdown_options = [];
-if ($has_known_hosts) {
-	$host_dropdown_options[''] = '-- Select a known host --';
-	foreach ($known_hosts as $kh) {
-		$preview = implode(', ', array_slice($kh['slugs'], 0, 3));
-		if (count($kh['slugs']) > 3) $preview .= ', +' . (count($kh['slugs']) - 3) . ' more';
-		$host_dropdown_options[$kh['host']] = $kh['host'] . ' — ' . $preview;
-	}
-	$host_dropdown_options['__custom__'] = 'Other (enter manually)';
+// Connected cloud accounts — target options for cloud-instance birth
+$cloud_accounts = new MultiCustomerCloudAccount(['status' => 'active', 'deleted' => false]);
+$cloud_accounts->load();
+$cloud_account_options = ['' => '-- Select a connected account --'];
+foreach ($cloud_accounts as $ca) {
+	$ca_user = new User($ca->get('cca_usr_user_id'), TRUE);
+	$who = $ca_user->key
+		? trim($ca_user->get('usr_first_name') . ' ' . $ca_user->get('usr_last_name'))
+		: ('user #' . $ca->get('cca_usr_user_id'));
+	$cloud_account_options[$ca->key] = ucfirst($ca->get('cca_provider')) . ' — ' . $who;
 }
+$has_cloud_accounts = count($cloud_account_options) > 1;
+
+// Build host dropdown options
+$host_dropdown_options = ['' => '-- Select target --'];
+foreach ($known_hosts as $kh) {
+	$preview = implode(', ', array_slice($kh['slugs'], 0, 3));
+	if (count($kh['slugs']) > 3) $preview .= ', +' . (count($kh['slugs']) - 3) . ' more';
+	$host_dropdown_options[$kh['host']] = $kh['host'] . ' — ' . $preview;
+}
+$host_dropdown_options['__custom__'] = 'Other server (enter SSH details)';
+$host_dropdown_options['__cloud__']  = 'Create a new cloud instance';
 
 // Determine initial state for re-render after validation error
 $post_host = $_POST['mgn_host'] ?? '';
 $host_dropdown_value = '';
-if ($post_host) {
+if (($_POST['host_dropdown'] ?? '') === '__cloud__') {
+	$host_dropdown_value = '__cloud__';
+} elseif ($post_host) {
 	$host_dropdown_value = isset($known_hosts_map[$post_host]) ? $post_host : '__custom__';
 }
-$ssh_fields_hidden = $has_known_hosts && (!$host_dropdown_value || $host_dropdown_value !== '__custom__');
+$ssh_fields_hidden   = (!$host_dropdown_value || $host_dropdown_value !== '__custom__');
+$cloud_fields_hidden = ($host_dropdown_value !== '__cloud__');
 
 $page = new AdminPage();
 $page->admin_header([
@@ -202,6 +280,11 @@ $page->admin_header([
 
 if ($error) {
 	echo '<div class="alert alert-danger">' . htmlspecialchars($error) . '</div>';
+}
+if (!empty($_GET['provision_created'])) {
+	echo '<div class="alert alert-success">Cloud provision #' . intval($_GET['provision_created'])
+		. ' created. The provisioning task creates the instance within a couple of minutes; the node and its install job then appear on the '
+		. '<a href="/admin/server_manager" class="alert-link">Server Manager dashboard</a>. Failures alert the ops email.</div>';
 }
 
 $page->begin_box(['title' => 'New Node']);
@@ -219,6 +302,9 @@ $formwriter = $page->getFormWriter('install_form', [
 		'install_mode'   => $_POST['install_mode'] ?? 'fresh',
 		'domain'         => $_POST['domain'] ?? '',
 		'source_node_id' => $_POST['source_node_id'] ?? '',
+		'cca_account_id' => $_POST['cca_account_id'] ?? '',
+		'cloud_region'   => $_POST['cloud_region'] ?? (Globalvars::get_instance()->get_setting('server_manager_customer_cloud_region') ?: 'us-southeast'),
+		'cloud_instance_type' => $_POST['cloud_instance_type'] ?? (Globalvars::get_instance()->get_setting('server_manager_customer_cloud_type') ?: 'g6-standard-1'),
 	],
 ]);
 
@@ -234,14 +320,12 @@ $formwriter->textinput('mgn_name', 'Display Name', [
 	'placeholder' => 'e.g., Getjoinery Orgs',
 ]);
 
-if ($has_known_hosts) {
-	$formwriter->dropinput('host_dropdown', 'Target Host', [
-		'required' => true,
-		'options'  => $host_dropdown_options,
-	]);
-}
+$formwriter->dropinput('host_dropdown', 'Target Host', [
+	'required' => true,
+	'options'  => $host_dropdown_options,
+]);
 
-// SSH detail fields — hidden when a known host is selected
+// SSH detail fields — hidden unless "Other server" is selected
 echo '<div id="ssh_fields"' . ($ssh_fields_hidden ? ' hidden' : '') . '>';
 $formwriter->textinput('mgn_host', 'SSH Host', [
 	'placeholder' => '23.239.11.53 or server.example.com',
@@ -249,6 +333,27 @@ $formwriter->textinput('mgn_host', 'SSH Host', [
 $formwriter->textinput('mgn_ssh_user', 'SSH User');
 $formwriter->textinput('mgn_ssh_key_path', 'SSH Key Path');
 $formwriter->numberinput('mgn_ssh_port', 'SSH Port', ['min' => 1, 'max' => 65535]);
+echo '</div>';
+
+// Cloud-instance fields — shown only for the create-cloud-instance target
+echo '<div id="cloud_fields"' . ($cloud_fields_hidden ? ' hidden' : '') . '>';
+if ($has_cloud_accounts) {
+	$formwriter->dropinput('cca_account_id', 'Connected Cloud Account', [
+		'options'      => $cloud_account_options,
+		'empty_option' => false,
+		'helptext'     => 'The instance is created in — and billed to — this account. Linode grants expire after two hours: re-connect shortly before submitting if the connection is old.',
+	]);
+} else {
+	echo '<div class="alert alert-info mb-3">No cloud account is connected yet. '
+		. '<a href="/profile/server_manager/connect_cloud" class="alert-link">Connect a Linode account</a>, then return here.</div>';
+}
+$formwriter->textinput('cloud_region', 'Region', [
+	'placeholder' => 'e.g., us-southeast',
+]);
+$formwriter->textinput('cloud_instance_type', 'Instance Type', [
+	'placeholder' => 'e.g., g6-standard-1',
+	'helptext'    => 'g6-nanode-1 = 1 GB, g6-standard-1 = 2 GB, g6-standard-2 = 4 GB.',
+]);
 echo '</div>';
 
 $formwriter->textinput('sitename', 'Site Name', [
@@ -308,11 +413,14 @@ var BACKUP_LISTS = ' . json_encode($backup_lists) . ';
 var KNOWN_HOSTS  = ' . json_encode(array_values($known_hosts_map)) . ';
 
 function applyHostPreset(val) {
-	var fields   = document.getElementById("ssh_fields");
-	var dmDocker = document.getElementById("docker_mode_docker");
-	var dmBare   = document.getElementById("docker_mode_bare-metal");
+	var fields      = document.getElementById("ssh_fields");
+	var cloudFields = document.getElementById("cloud_fields");
+	var dmDocker    = document.getElementById("docker_mode_docker");
+	var dmBare      = document.getElementById("docker_mode_bare-metal");
 
-	if (!val) {
+	if (cloudFields) cloudFields.hidden = (val !== "__cloud__");
+
+	if (!val || val === "__cloud__") {
 		if (fields) fields.hidden = true;
 		if (dmBare) { dmBare.disabled = false; dmBare.closest(".form-check").style.opacity = "1"; }
 		return;
