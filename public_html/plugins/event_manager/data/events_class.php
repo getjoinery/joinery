@@ -145,9 +145,23 @@ class Event extends SystemBase {	public static $prefix = 'evt';
 	    'evt_recurrence_week_of_month' => array('type'=>'integer', 'is_nullable'=>true),
 	    'evt_recurrence_end_date' => array('type'=>'date', 'is_nullable'=>true),
 
-	    // Instance relationship fields (set on materialized instances)
-	    'evt_parent_event_id' => array('type'=>'integer', 'is_nullable'=>true),
-	    'evt_materialized_instance_date' => array('type'=>'date', 'is_nullable'=>true),
+	    // Instance relationship fields (set on materialized instances).
+	    // Both columns are NULL on standalone events and on recurring parents, so
+	    // the constraints below apply only to instance rows — Postgres permits
+	    // repeated NULLs in a unique index, and a NULL FK is unconstrained.
+	    //
+	    // An instance is meaningless without its parent: it carries no recurrence
+	    // pattern of its own and exists only to override one date of a series.
+	    // The cascade makes that ownership real at the database level, so an
+	    // instance cannot outlive its parent when deletion bypasses the models.
+	    'evt_parent_event_id' => array('type'=>'integer', 'is_nullable'=>true,
+	        'foreign_key'=>array('table'=>'evt_events', 'column'=>'evt_event_id', 'on_delete'=>'CASCADE')),
+	    // One materialized instance per parent per date. This is a uniqueness
+	    // rule, so it belongs in the database rather than in a check-then-insert:
+	    // materialize_instance() reads before it writes, and two concurrent calls
+	    // for the same date could both pass the read.
+	    'evt_materialized_instance_date' => array('type'=>'date', 'is_nullable'=>true,
+	        'unique_with'=>array('evt_parent_event_id')),
 	    'evt_tier_min_level' => array('type'=>'int4', 'is_nullable'=>true),
 	    'evt_tier_public_after_hours' => array('type'=>'int4', 'is_nullable'=>true),
 	    'evt_tzdata_version' => array('type'=>'varchar(10)', 'is_nullable'=>true),
@@ -1139,7 +1153,29 @@ function get_leader() {
 		$instance->set('evt_link', $instance->create_url($this->get('evt_name') . '-' . $instance_date));
 
 		$instance->prepare();
-		$instance->save();
+		try {
+			$instance->save();
+		} catch (Exception $e) {
+			// The read at the top of this method and this write are not one
+			// atomic step, so a concurrent call for the same date can pass that
+			// read too. Uniqueness is refused in two different places depending
+			// on how the calls interleave — save()'s own unique_with pre-check
+			// throws a DisplayableUserException, while a true race gets past
+			// that and is stopped by the database constraint, arriving as a
+			// wrapped DatabaseException — so this deliberately does not try to
+			// classify the exception. It asks the question that actually
+			// matters instead: is the row there now?
+			//
+			// If it is, someone else created it between our read and our write,
+			// and returning it is the idempotent answer the guard at the top
+			// already promises callers. If it is not, the save failed for some
+			// other reason and that error is not ours to swallow.
+			$winner = $this->_get_materialized_instance_for_date($instance_date);
+			if ($winner) {
+				return $winner;
+			}
+			throw $e;
+		}
 		$instance->load();
 
 		return $instance;

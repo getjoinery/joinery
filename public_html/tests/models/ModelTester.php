@@ -549,8 +549,7 @@ class ModelTester {
                         // For numeric values, add 9999 to make it different
                         $model3->set($test_field, $value + 9999);
                     } else {
-                        // For string values, append '_different'
-                        $model3->set($test_field, $value . '_different');
+                        $model3->set($test_field, $this->vary_scalar_value($test_field, $value));
                     }
                 } else {
                     $model3->set($test_field, $value);
@@ -1448,6 +1447,64 @@ class ModelTester {
     /**
      * Generate a different value for a field (for update testing)
      */
+    /**
+     * A value guaranteed to differ from $value while remaining legal for the
+     * column's declared type.
+     *
+     * Appending a suffix is only valid for text columns. On a date, timestamp or
+     * boolean column it produces something the database rejects outright, and the
+     * rejection looks exactly like the constraint under test firing — so a
+     * composite-unique check on a non-text column fails whether the model is
+     * correct or not. This differs from generate_different_value(), which returns
+     * fixed values suitable for update tests: here the result must differ from a
+     * specific value that is already stored.
+     *
+     * @param string $field the column being varied
+     * @param mixed  $value the value it must differ from
+     * @return mixed a different, type-legal value
+     */
+    protected function vary_scalar_value($field, $value) {
+        $model_class = $this->model_class;
+        $spec = $model_class::$field_specifications[$field] ?? [];
+        $type = strtolower($spec['type'] ?? 'varchar(255)');
+
+        if (strpos($type, 'bool') !== false) {
+            $truthy = ($value === true || $value === 't' || $value === 'true' || $value === '1' || $value === 1);
+            return !$truthy;
+        }
+
+        // Shift rather than substitute a fixed date: a constant could equal the
+        // value already stored, which would make the row a duplicate and read as
+        // the constraint firing.
+        if (strpos($type, 'timestamp') !== false || strpos($type, 'datetime') !== false) {
+            $base = strtotime((string)$value) ?: time();
+            return gmdate('Y-m-d H:i:s', strtotime('+1 year', $base));
+        }
+        if (strpos($type, 'date') !== false) {
+            $base = strtotime((string)$value) ?: time();
+            return gmdate('Y-m-d', strtotime('+1 year', $base));
+        }
+        if (strpos($type, 'time') !== false) {
+            return ((string)$value === '10:45:00') ? '11:45:00' : '10:45:00';
+        }
+
+        // Text: append, but stay inside a declared length or the write fails on
+        // width rather than on the constraint.
+        $suffix = '_different';
+        $varied = (string)$value . $suffix;
+        if (preg_match('/\((\d+)\)/', $type, $m)) {
+            $max = (int)$m[1];
+            if (strlen($varied) > $max) {
+                $keep = max(0, $max - strlen($suffix));
+                $varied = substr((string)$value, 0, $keep) . $suffix;
+                if (strlen($varied) > $max) {
+                    $varied = substr($varied, 0, $max);
+                }
+            }
+        }
+        return $varied;
+    }
+
     protected function generate_different_value($field) {
         $model_class = $this->model_class;
         $spec = $model_class::$field_specifications[$field] ?? [];

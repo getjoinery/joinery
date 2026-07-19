@@ -48,16 +48,24 @@ class GeneralError extends SystemBase {	public static $prefix = 'err';
 	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
+	    // The free-text columns are `text`, not varchar(255). They receive raw
+	    // exception and database messages, and the ones that overflow 255 are
+	    // exactly the ones worth keeping: a constraint violation naming the table,
+	    // the column and the failing row runs well past it, while a short message
+	    // ("permission denied") fits. A too-long value does not truncate — the
+	    // insert recording the error fails on its own length limit and the error
+	    // is lost entirely. Postgres stores varchar(n) and text identically, so
+	    // there is no cost to the width.
 	    'err_general_error_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
-	    'err_error' => array('type'=>'varchar(255)'),
+	    'err_error' => array('type'=>'text'),
 	    'err_code' => array('type'=>'varchar(32)'),
 	    'err_usr_user_id' => array('type'=>'int4'),
-	    'err_description' => array('type'=>'varchar(255)'),
-	    'err_file' => array('type'=>'varchar(255)'),
+	    'err_description' => array('type'=>'text'),
+	    'err_file' => array('type'=>'text'),
 	    'err_line' => array('type'=>'varchar(32)'),
 	    'err_context' => array('type'=>'text'),
-	    'err_path' => array('type'=>'varchar(255)'),
-	    'err_message' => array('type'=>'varchar(255)'),
+	    'err_path' => array('type'=>'text'),
+	    'err_message' => array('type'=>'text'),
 	    'err_level' => array('type'=>'varchar(255)'),
 	    'err_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);

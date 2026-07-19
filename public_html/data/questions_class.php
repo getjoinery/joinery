@@ -110,54 +110,75 @@ class Question extends SystemBase {	public static $prefix = 'qst';
 		$validation_options = unserialize($this->get('qst_validate')) ?: [];
 
 		if(array_key_exists('required', $validation_options)){
-			if($answers == '' || $answers === NULL || (is_array($answers) && count($answers) == 0)){
+			if($answers === '' || $answers === NULL || (is_array($answers) && count($answers) == 0)){
 				return 'You did not answer this question: '. $this->get('qst_question');
 			}
 		}
+
+		// A checkbox-list answer arrives as an array and is persisted as its
+		// comma-joined form. Every rule below measures a single value, so they
+		// are applied to that same joined string: a length limit then bounds
+		// what is actually stored, and passing the array straight to strlen()
+		// would be a fatal TypeError rather than a validation failure.
+		$scalar = is_array($answers) ? implode(',', $answers) : (string)$answers;
+
 		if(array_key_exists('integer', $validation_options)){
-			if(!is_integer($answers)){
-				return 'This answer to this question "'.$this->get('qst_question').'" needs to be a number: '. $answers;
-			}			
+			// Answers arrive from a form post, so they are strings — is_integer()
+			// would reject every genuine answer and make the question
+			// unanswerable. This mirrors the client-side "digits" rule that
+			// output_js_validation() advertises for the same option, so the two
+			// sides accept exactly the same set of values.
+			if(!ctype_digit($scalar)){
+				return 'This answer to this question "'.$this->get('qst_question').'" needs to be a number: '. $scalar;
+			}
 		}
 		if(array_key_exists('decimal', $validation_options)){
-			if(!preg_match('/^\d+\.\d+$/',$number)){
-				return 'This answer to this question "'.$this->get('qst_question').'" needs to be a decimal number: '. $answers;
-			}				
+			// Mirrors the client-side "number" rule, which accepts any numeric
+			// value rather than requiring a fractional part.
+			if(!is_numeric($scalar)){
+				return 'This answer to this question "'.$this->get('qst_question').'" needs to be a decimal number: '. $scalar;
+			}
 		}
 		if(array_key_exists('max_length', $validation_options)){
-			if(strlen($answers) > $validation_options['max_length']){
-				return 'This answer to this question "'.$this->get('qst_question').'" is too long: '. $answers;
+			if(strlen($scalar) > $validation_options['max_length']){
+				return 'This answer to this question "'.$this->get('qst_question').'" is too long: '. $scalar;
 			}
-		}	
+		}
 		if(array_key_exists('min_length', $validation_options)){
-			if(strlen($answers) < $validation_options['min_length']){
-				return 'This answer to this question "'.$this->get('qst_question').'" is too short: '. $answers;
+			if(strlen($scalar) < $validation_options['min_length']){
+				return 'This answer to this question "'.$this->get('qst_question').'" is too short: '. $scalar;
 			}
 		}
 		if(array_key_exists('max_value', $validation_options)){
-			if($answers > $validation_options['max_value']){
-				return 'This answer to this question "'.$this->get('qst_question').'" is too large: '. $answers;
+			if($scalar > $validation_options['max_value']){
+				return 'This answer to this question "'.$this->get('qst_question').'" is too large: '. $scalar;
 			}
 		}
 		if(array_key_exists('min_value', $validation_options)){
-			if($answers < $validation_options['min_value']){
-				return 'This answer to this question "'.$this->get('qst_question').'" is too small: '. $answers;
+			if($scalar < $validation_options['min_value']){
+				return 'This answer to this question "'.$this->get('qst_question').'" is too small: '. $scalar;
 			}
-		}		
+		}
 		return 'valid';
 	}
 	
 	function output_question($formwriter, $value=NULL, $append_text=NULL){
 		$field_name = 'question_'.$this->key;
-		$field_max_length = 255;
 		$question_text = $this->get('qst_question') . $append_text;
-		if($this->get('max_length')){
-			$field_max_length = $this->get('max_length');
-		}
 
 		// Get validation options
 		$validation_options = unserialize($this->get('qst_validate')) ?: [];
 		$validation = [];
+
+		// The typing cap on the input comes from the question's own max_length
+		// rule. Reading it as a field would always yield NULL — max_length is a
+		// validation option, not a column — leaving every input capped at 255
+		// characters, so an admin who allowed 500 would find the browser
+		// refusing input the server would have accepted.
+		$field_max_length = 255;
+		if (!empty($validation_options['max_length'])) {
+			$field_max_length = $validation_options['max_length'];
+		}
 
 		if (!empty($validation_options['required'])) {
 			$validation['required'] = true;

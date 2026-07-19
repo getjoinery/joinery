@@ -542,6 +542,13 @@ class UploadHandler
         // into different directories or replacing hidden system files.
         // Also remove control characters and spaces (\x00..\x20) around the filename:
         $name = trim($this->basename(stripslashes($name)), ".\x00..\x20");
+        // Strip control characters throughout, not only at the edges. A NUL left
+        // in the middle of a name survives every check below — is_file() reports
+        // false for a NUL path, so the name looks unused — and then reaches
+        // move_uploaded_file(), which rejects NUL paths with a ValueError. The
+        // upload dies on an unhandled fatal instead of a refusal, and the
+        // temporary file is orphaned.
+        $name = preg_replace('/[\x00-\x1f\x7f]/', '', $name);
         // Replace dots in filenames to avoid security issues with servers
         // that interpret multiple file extensions, e.g. "example.php.png":
         $replacement = $this->options['replace_dots_in_filenames'];
@@ -1248,7 +1255,9 @@ class UploadHandler
         return $this->generate_response($response, $print_response);
     }
 
-    protected function basename($filepath, $suffix = null) {
+    // $suffix defaults to '' rather than null: every default-argument call site
+    // passes it straight to basename(), and a null $suffix is deprecated.
+    protected function basename($filepath, $suffix = '') {
         $splited = preg_split('/\//', rtrim ($filepath, '/ '));
         return substr(basename('X'.$splited[count($splited)-1], $suffix), 1);
     }

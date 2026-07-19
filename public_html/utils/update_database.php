@@ -785,6 +785,22 @@
 					echo "  Migration: " . htmlspecialchars($mm) . "<br>\n";
 				}
 			}
+			// settings_messages is populated only when a plugin's settings sync
+			// threw — an invalid manifest declaration, an unreadable plugin.json.
+			// sync() catches those per plugin so one bad manifest cannot abort the
+			// deploy, which means this array is the ONLY place the failure is
+			// visible. Unprinted, a plugin's settings silently fail to seed while
+			// the deploy reports success.
+			if (!empty($plugin_sync_result['settings_messages'])) {
+				foreach ($plugin_sync_result['settings_messages'] as $sm) {
+					echo "  ⚠️  Settings sync failed: " . htmlspecialchars($sm) . "<br>\n";
+				}
+			}
+			if (!empty($plugin_sync_result['deletion_rule_messages'])) {
+				foreach ($plugin_sync_result['deletion_rule_messages'] as $dm) {
+					echo "  Deletion rule: " . htmlspecialchars($dm) . "<br>\n";
+				}
+			}
 		} catch (Exception $e) {
 			echo "⚠️  Plugin/Theme sync failed: " . htmlspecialchars($e->getMessage()) . "<br>\n";
 			// Non-fatal — core DB update already succeeded

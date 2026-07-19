@@ -39,6 +39,40 @@ require_once(PathHelper::getIncludePath('plugins/event_manager/data/events_class
 $db = DbConnector::get_instance()->get_db_link();
 
 /**
+ * A parent whose first materialized-instance lookup reports nothing.
+ *
+ * That is the state every racing caller is in: it read before the winner
+ * committed. The guard at the top of materialize_instance() therefore lets it
+ * through to the write, which collides — and the recovery re-read (the second
+ * lookup) sees the row that landed in between. Without this, the guard returns
+ * the existing row first and the recovery path is simply never executed.
+ */
+class RaceLoserEvent extends Event {
+	public $lookup_calls = 0;
+	public function _get_materialized_instance_for_date($date) {
+		$this->lookup_calls++;
+		if ($this->lookup_calls === 1) {
+			return null;   // read before the winner committed
+		}
+		return parent::_get_materialized_instance_for_date($date);
+	}
+}
+
+/**
+ * A parent that never sees a materialized instance, however often it looks.
+ * Models the other branch: the write failed for a reason that is not the race,
+ * so there is nothing to recover and the error must propagate.
+ */
+class BlindEvent extends Event {
+	public function _get_materialized_instance_for_date($date) {
+		return null;
+	}
+	public function date_matches_pattern($date) {
+		return true;   // reach the write; the failure under test is at save time
+	}
+}
+
+/**
  * A recurring parent. $start is a local wall-clock time in $tz, which is how an
  * organizer thinks about it; it is stored as UTC like every other event time.
  */
@@ -523,6 +557,147 @@ check($standalone->get('evt_recurrence_end_date') === null
 	|| $standalone->get('evt_recurrence_end_date') === '',
 	'ending a non-recurring event does nothing',
 	'got: ' . var_export($standalone->get('evt_recurrence_end_date'), true));
+
+// ---------------------------------------------------------------------------
+section('One materialized instance per parent per date, enforced by the database');
+
+// materialize_instance() reads before it writes, and those are not one atomic
+// step: two concurrent calls for the same date can both pass the read. The
+// unique index on (parent, instance date) is what actually settles that race.
+// A duplicate created by any other route — a second process, raw SQL, a
+// half-finished import — would otherwise be invisible, because the lookup takes
+// LIMIT 1 and would simply return one of the two while the other sat holding
+// its own registrants.
+$race = rc_make_parent('Race', '2026-03-02 18:00:00', array(
+	'evt_recurrence_type' => 'weekly',
+	'evt_recurrence_interval' => 1,
+));
+$won = $race->materialize_instance('2026-03-09');
+harness_register_row('evt_events', 'evt_event_id', $won->key);
+check($won->key > 0, 'the first materialization creates an instance row');
+
+// The race loser's shape: an insert that never saw the winner's row. It must be
+// refused by the database rather than accepted as a second copy.
+$db = DbConnector::get_instance()->get_db_link();
+$dup_refused = false;
+try {
+	$ins = $db->prepare(
+		"INSERT INTO evt_events (evt_name, evt_link, evt_parent_event_id, evt_materialized_instance_date)
+		 VALUES (?, ?, ?, ?)"
+	);
+	$ins->execute(array('HarnessTest dup', 'harnesstest-dup-' . bin2hex(random_bytes(4)), $race->key, '2026-03-09'));
+} catch (PDOException $e) {
+	$dup_refused = (isset($e->errorInfo[0]) && $e->errorInfo[0] === '23505');
+}
+check($dup_refused, 'a duplicate (parent, date) pair is refused by the unique constraint');
+
+$count = $db->prepare("SELECT count(*) FROM evt_events WHERE evt_parent_event_id = ? AND evt_materialized_instance_date = ?");
+$count->execute(array($race->key, '2026-03-09'));
+check((int)$count->fetchColumn() === 1, 'exactly one row exists for the materialized date');
+
+// The loser must not surface the database error to the caller: the idempotence
+// the read-guard already promises has to hold when the guard is lost.
+$again = $race->materialize_instance('2026-03-09');
+check($again->key == $won->key, 'a repeat materialization returns the existing row, not an error',
+	'got ' . $again->key . ' vs ' . $won->key);
+
+// Saving a duplicate through the model is refused before it ever reaches the
+// database: unique_with generates an application-level pre-check as well as the
+// constraint. Both refusals matter, and they surface as different exception
+// types, which is why materialize_instance() recovers by re-reading rather than
+// by classifying what it caught.
+$escaped = null;
+$dup_model = new Event(NULL);
+$dup_model->set('evt_name', 'HarnessTest dup model');
+$dup_model->set('evt_link', $dup_model->create_url('HarnessTest dup model ' . bin2hex(random_bytes(3))));
+$dup_model->set('evt_parent_event_id', $race->key);
+$dup_model->set('evt_materialized_instance_date', '2026-03-09');
+try {
+	$dup_model->save();
+} catch (Exception $e) {
+	$escaped = $e;
+}
+check($escaped !== null, 'a duplicate saved through the model raises rather than inserting');
+
+$still_one = $db->prepare("SELECT count(*) FROM evt_events WHERE evt_parent_event_id = ? AND evt_materialized_instance_date = ?");
+$still_one->execute(array($race->key, '2026-03-09'));
+check((int)$still_one->fetchColumn() === 1, 'the refused duplicate left no second row');
+
+// The recovery itself. The guard at the top of materialize_instance() normally
+// returns the existing row long before the write, so the catch is unreachable
+// in a single-threaded test — which is exactly the state a real race is in when
+// it starts. RaceLoserEvent reproduces it deterministically: the first lookup
+// (the guard) reports nothing, as it would for a caller that read before the
+// winner committed, and the second (the recovery re-read) sees the winner's row.
+$loser = new RaceLoserEvent($race->key, TRUE);
+$recovered = $loser->materialize_instance('2026-03-09');
+check($recovered instanceof Event && $recovered->key == $won->key,
+	'a materialization that loses the race returns the winning row rather than raising',
+	'got ' . (is_object($recovered) ? $recovered->key : var_export($recovered, true)) . ' vs ' . $won->key);
+check($loser->lookup_calls === 2,
+	'the losing path re-read exactly once after the failed write',
+	'lookups: ' . $loser->lookup_calls);
+
+$after_race = $db->prepare("SELECT count(*) FROM evt_events WHERE evt_parent_event_id = ? AND evt_materialized_instance_date = ?");
+$after_race->execute(array($race->key, '2026-03-09'));
+check((int)$after_race->fetchColumn() === 1, 'losing the race created no second row');
+
+// The converse has to hold too, or the catch would swallow genuine failures:
+// when the write fails for a reason that is not the race, there is no row to
+// re-read and the original error must propagate.
+$propagated = false;
+$blind = new BlindEvent($race->key, TRUE);
+try {
+	// The same already-taken date, so the write still collides — but this parent
+	// never sees the existing row, so the recovery re-read comes back empty and
+	// the exception has nowhere to go but out.
+	$blind->materialize_instance('2026-03-09');
+} catch (Exception $e) {
+	$propagated = true;
+}
+check($propagated, 'a save failure with no row to re-read still raises');
+
+// Standalone events and recurring parents carry NULL in both columns, so the
+// constraint must not collide them — Postgres permits repeated NULLs, and if it
+// did not, every non-recurring event after the first would fail to save.
+$plain_a = rc_make_parent('NullPairA', '2026-03-02 18:00:00', array());
+$plain_b = rc_make_parent('NullPairB', '2026-03-02 18:00:00', array());
+check($plain_a->key > 0 && $plain_b->key > 0 && $plain_a->key != $plain_b->key,
+	'two events with NULL parent and NULL instance date both save');
+
+// ---------------------------------------------------------------------------
+section('An instance cannot outlive its parent');
+
+// The PHP cascade is covered by event_deletion_test.php. This is the layer
+// below it: an instance is meaningless without its parent, so the link is a
+// real foreign key and the cascade holds even when deletion bypasses the
+// models entirely.
+$orphan_parent = rc_make_parent('Cascade', '2026-03-02 18:00:00', array(
+	'evt_recurrence_type' => 'weekly',
+	'evt_recurrence_interval' => 1,
+));
+$child = $orphan_parent->materialize_instance('2026-03-09');
+$child_id = $child->key;
+
+$db->prepare("DELETE FROM evt_events WHERE evt_event_id = ?")->execute(array($orphan_parent->key));
+$left = $db->prepare("SELECT count(*) FROM evt_events WHERE evt_event_id = ?");
+$left->execute(array($child_id));
+check((int)$left->fetchColumn() === 0,
+	'deleting a parent with raw SQL removes its instances too');
+
+// The other half of the same guarantee: an instance cannot be created pointing
+// at a parent that does not exist.
+$bad_fk_refused = false;
+try {
+	$ins = $db->prepare(
+		"INSERT INTO evt_events (evt_name, evt_link, evt_parent_event_id, evt_materialized_instance_date)
+		 VALUES (?, ?, ?, ?)"
+	);
+	$ins->execute(array('HarnessTest orphan', 'harnesstest-orphan-' . bin2hex(random_bytes(4)), 2147483000, '2026-03-09'));
+} catch (PDOException $e) {
+	$bad_fk_refused = (isset($e->errorInfo[0]) && $e->errorInfo[0] === '23503');
+}
+check($bad_fk_refused, 'an instance pointing at a non-existent parent is refused');
 
 rc_track_instances($series);
 harness_finish();
