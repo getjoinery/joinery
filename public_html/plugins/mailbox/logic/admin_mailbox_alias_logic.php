@@ -13,6 +13,12 @@ function admin_mailbox_alias_logic(array $input): LogicResult {
 	$session->check_permission(5);
 	$settings = Globalvars::get_instance();
 
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
+	$gate_redirect = mailbox_receive_gate_handle($input);
+	if ($gate_redirect !== null) {
+		return $gate_redirect;
+	}
+
 	// Staff users who can be granted access to this mailbox. The reader is
 	// staff-only in v1, so the access list is scoped to permission >= 5; the
 	// grant model itself is generic and supports non-admin members later.

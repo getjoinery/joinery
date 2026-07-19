@@ -40,6 +40,36 @@ host may be a Docker container or bare metal.
 3. **Mailbox** appears under **Emails** in the admin sidebar — it opens on the
    **Setup** tab
 
+### The receive-mode choice (relay or direct)
+
+Before anything else, the deployment answers one question: does mail come
+straight to this server, or does a relay front it so the server's address
+stays hidden? Until the answer is known, the Mailboxes, Accounts, and Setup
+tabs (and the domain/mailbox editors) render only a choice card — domains and
+mailboxes cannot be created first, because every DNS prescription hangs on
+the answer.
+
+The card is a brief pros/cons comparison (setup effort, whether the server's
+address is public or hidden, and that a relay is **required for the Fortress
+email security level**) with one choose button per column. The choice belongs
+to the admin: a relay provisioned as part of setup does not decide it — the
+card still appears, with the relay column noting the relay is already
+provisioned.
+
+`mailbox_receive_mode()` (`includes/receive_mode.php`) resolves the mode:
+
+1. The stored choice (`mailbox_receive_mode` setting) → its value. Choosing
+   **relay** redirects to the Setup tab's Relay section; choosing **direct** redirects to
+   Accounts to add the first domain (with a pointer to remove any provisioned
+   relay).
+2. Live domains with no stored choice → the deployment is running and is
+   never gated; the mode reports what it is doing (live relay row → `relay`,
+   else `direct`).
+3. Otherwise undecided — gated pages show the card.
+
+The choice is deployment-wide and reversible (the setting can be changed
+later).
+
 ### Setup & verification (mailbox-first)
 
 The **Setup** tab (`Emails > Mailbox > Setup`) verifies one mailbox at a time.
@@ -92,7 +122,7 @@ Under a fronted topology:
   re-verified on every check pass, and shown with the copy-ready TXT record
   until it goes green. There are no buttons and no claim/verify vocabulary.
 - **Cutover completion** (`plugin.relay_enable`): while the relay row is
-  disabled, a neutral INFO row points at the Relay tab; once every hosted
+  disabled, a neutral INFO row points at the Relay section; once every hosted
   domain's MX targets the relay (and every ownership proof is published), it
   becomes a REQUIRED FAIL — mail is arriving at the relay with no consumer —
   until the admin enables the relay.
@@ -1167,7 +1197,7 @@ ciphertext through any transport. The asymmetry lives on **inbound**, which land
 in the operator's own archive under the user's keys — and inbound keeps the relay.
 
 The **relay smarthost** is the opt-in alternative (`mailbox_relay_outbound_mode =
-smarthost`, chosen on the Relay tab's "Sent mail leaves through" select). Compose
+smarthost`, chosen on the Settings tab's "Sent mail leaves through" select). Compose
 sends then leave through the relay over the tunnel, so no third party carries
 outbound plaintext — in exchange the deployment owns the relay IP's sending
 reputation (warmup, blocklist monitoring, PTR hygiene). `OutboundTransport` routes
@@ -1185,7 +1215,7 @@ tunnel check failing) until the Rebuild opens the listener, and switching back t
 provider leaves the listener open until the next Rebuild closes it. The mode
 select's save message says so.
 
-The Relay tab's outbound checks match the chosen path, never showing an N/A row.
+The relay's outbound health checks match the chosen path, never showing an N/A row.
 Provider mode verifies the active provider is API-class and offers an out-and-back
 origin-leak probe: `sendOriginProbe()` sends a marked message from the first
 enabled store-mode alias on a Standard or Private domain to itself — a listed
@@ -1239,12 +1269,12 @@ installs the `joinery-relay-peer` root helper plus the sudoers rule that lets
 the provision job peer a freshly built relay automatically, generates the
 **relay pull key** (`{site root}/config/relay_pull_key`, `RelaySsh::pullKeyPath()`),
 and registers the public key in settings (`mailbox_relay_wg_public_key`). The
-Relay tab's provision form stays gated — showing the exact command to run —
+Relay section's provision form stays gated — showing the exact command to run —
 until that key exists.
 
 The pull key is a dedicated SSH identity owned by the web user, because every
 steady-state relay connection — the spool pull and map-push cron tasks and the
-admin page's health battery — runs as the web user, and ssh only accepts a key
+Relay section's health battery — runs as the web user, and ssh only accepts a key
 file its caller owns with mode 600. The provision job installs the pull key's
 public half as the tenant account's authorized key (forced command: the tenant
 shell) and points the relay row's `mrl_ssh_key_path` at it, so the managed
@@ -1256,9 +1286,10 @@ tenant surface — this tenant's spool and fragment drop, nothing else.
 `jyrelay0` interface (a hosted slot's allocation is not always the `10.99.0.2`
 self-hosted default).
 
-The **Relay** admin tab (`admin_mailbox_relay`) is the dashboard: it lists each
-relay with the four provisioning checks (tunnel, spool draining, map fresh, origin
-hidden), and its guided controls provision, rebuild, enable/disable, and delete.
+The **Setup tab's Relay section** (rendered whenever the receive mode is relay
+or a relay row exists) is the dashboard: it lists each relay with the four
+provisioning checks (tunnel, spool draining, map fresh, origin hidden), and its
+guided controls provision, rebuild, enable/disable, and delete.
 "Provision" picks a managed node and fires a `provision_relay` job through
 `server_manager` (`JobCommandBuilder::build_provision_relay`); on success the job
 result processor registers the relay as a `ManagedNode` (health dot) and creates a
@@ -1290,10 +1321,11 @@ never reach the tenant's archive, keys, drive, passwords, or sending identity
 own relay whenever you want — same stack, nothing else changes
 (`fleet_release`).
 
-**Tenant side** (any deployment): the Relay tab's *Hosted relay (fleet)* box
-takes the operator's service URL + the customer account's API key
+**Tenant side** (any deployment): the Settings tab's *Hosted relay connection*
+box takes the operator's service URL + the customer account's API key
 (`mailbox_fleet_service_url` / `mailbox_fleet_api_public_key` /
-`mailbox_fleet_api_secret_key`). `FleetClient` calls the operator's
+`mailbox_fleet_api_secret_key`); enrollment itself is a button in the Setup
+tab's Relay section. `FleetClient` calls the operator's
 `/api/v1/action/mailbox/fleet_*` actions: `fleet_enroll` sends this box's
 WireGuard + pull public keys and returns the slot coordinates (per-tenant MX
 hostname, shard WireGuard endpoint + key, allocated tunnel address, pull
@@ -1308,7 +1340,7 @@ subsequent sync. The proof is fully automated on the tenant side: challenges
 are filed at enrollment and at domain registration
 (`FleetClient::fileDomainClaims()`), the Setup tab's `domain.ownership` row
 shows the copy-ready TXT record and re-verifies on every check pass, and the
-Relay tab shows a read-only **Ownership proofs** state table. The
+Relay section shows a read-only **Ownership proofs** state table. The
 `fleet_claim_domain` / `fleet_verify_domain` API actions are what that
 automation calls — they are not user-facing steps.
 
@@ -1321,14 +1353,17 @@ addresses, issues and verifies domain claims, and checks entitlement (the
 shard allowlist). Every decision is effected by dispatching a `server_manager`
 job (`relay_add_tenant` / `relay_set_domains` / `relay_remove_tenant`) from the
 `FleetReconcile` scheduled task — server_manager is the hands and never knows
-what a tenant or a domain claim is. Shards are registered on the Relay tab's
-*Fleet shards* box (skeleton-only provisioning: the operator's box is not a
-tenant of its own shards). Each tenant's MX hostname
+what a tenant or a domain claim is. The operator's control panel is the
+**relay fleet console** (`/plugins/mailbox/admin/admin_mailbox_fleet`, reached
+from the Server Manager dashboard — operator infrastructure, so it never
+appears in the tenant mailbox tabs): the service switch + MX zone, shard
+registration (skeleton-only provisioning: the operator's box is not a tenant
+of its own shards), and the DNS-to-publish table. Each tenant's MX hostname
 (`<slug>.<mailbox_fleet_mx_zone>`, slug format `t<id>` — deliberately
 anonymous so DNS names no tenant) is an operator-controlled A record, so
 re-sharding a tenant or replacing a burned shard is an A-record change —
 tenants never touch DNS after setup. The operator's half of that guidance is
-the fleet box's **DNS to publish** table: every record the fleet zone needs —
+the fleet console's **DNS to publish** table: every record the fleet zone needs —
 each shard's A record and PTR expectation, and one A record per live slot MX
 hostname — with a live resolution verdict and copy fields. (PTR records are
 set where the shard's IP is hosted, not in the DNS zone.)

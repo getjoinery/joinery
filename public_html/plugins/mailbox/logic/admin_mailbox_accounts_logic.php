@@ -11,7 +11,7 @@
  * through the existing per-object editors (domain, alias, IMAP) which highlight
  * the Accounts tab.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -27,6 +27,12 @@ function admin_mailbox_accounts_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 	$settings = Globalvars::get_instance();
+
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
+	$gate_redirect = mailbox_receive_gate_handle($input);
+	if ($gate_redirect !== null) {
+		return $gate_redirect;
+	}
 
 	// IMAP feeds carry full-mailbox credentials — superadmin-only, like the
 	// retired standalone IMAP Accounts page.

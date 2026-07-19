@@ -16,7 +16,7 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  * plugin, enable SRS, register a domain, or apply a one-click fix — each writes
  * through a model and redirects so the next render reads fresh settings.
  *
- * @version 2.1
+ * @version 2.2
  */
 function admin_mailbox_setup_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -31,6 +31,22 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 	$settings = Globalvars::get_instance();
+
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
+	$gate_redirect = mailbox_receive_gate_handle($input);
+	if ($gate_redirect !== null) {
+		return $gate_redirect;
+	}
+
+	// Relay section actions (lifecycle, provisioning, hosted-slot enrollment)
+	// post back to this tab. Must run before the mail-hostname save below —
+	// the provision form also carries a mail_hostname field.
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/relay_admin.php'));
+	$relay_redirect = admin_mailbox_relay_tenant_actions($input, $session,
+		'/plugins/mailbox/admin/admin_mailbox_setup');
+	if ($relay_redirect !== null) {
+		return $relay_redirect;
+	}
 
 	$base = '/plugins/mailbox/admin/admin_mailbox_setup';
 	$selected_alias_id = isset($input['alias_id']) ? (int)$input['alias_id'] : 0;
@@ -254,10 +270,18 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		}
 	}
 
+	// The Relay section renders whenever the deployment's receive mode is
+	// relay, or a relay row exists whatever the stored choice says.
+	$relay_section = null;
+	if (mailbox_receive_mode() === 'relay' || mailbox_receive_relay_exists()) {
+		$relay_section = admin_mailbox_relay_tenant_vars();
+	}
+
 	return LogicResult::render(array(
 		'session'                    => $session,
 		'settings'                   => $settings,
 		'base'                       => $base,
+		'relay_section'              => $relay_section,
 		// Mailbox-first view
 		'mailbox_options'            => $mailbox_options,
 		'selected_alias_id'          => $selected_alias_id,

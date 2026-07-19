@@ -15,6 +15,12 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 	$session->check_permission(5);
 	$settings = Globalvars::get_instance();
 
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
+	$gate_redirect = mailbox_receive_gate_handle($input);
+	if ($gate_redirect !== null) {
+		return $gate_redirect;
+	}
+
 	// Level ordering: raising crosses into sealing; lowering leaves it.
 	$level_rank = array(
 		InboundEmailDomain::LEVEL_STANDARD => 0,

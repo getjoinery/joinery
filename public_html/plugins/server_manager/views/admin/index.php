@@ -3,7 +3,7 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
- * @version 1.8 - In-flight cloud provisions banner
+ * @version 1.9 - Relay Fleet console link (mailbox plugin)
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -110,6 +110,9 @@ $agent_label  = $agent_online ? 'Online'  : 'Offline';
 					<span class="text-muted ms-2">Last run: <?php echo LibraryFunctions::time_ago_or_time($last_cron_run, 'UTC', $session->get_timezone(), 'M j, g:i:s A'); ?></span>
 				<?php endif; ?>
 			</div>
+			<?php if (PluginHelper::isPluginActive('mailbox')): ?>
+				<a href="/plugins/mailbox/admin/admin_mailbox_fleet" class="btn btn-sm btn-outline-secondary">Relay Fleet</a>
+			<?php endif; ?>
 			<a href="/admin/server_manager/publish_upgrade" class="btn btn-sm btn-primary">Publish New Upgrade</a>
 		</div>
 	</div>

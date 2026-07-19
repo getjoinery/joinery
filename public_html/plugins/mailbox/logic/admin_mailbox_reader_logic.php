@@ -7,7 +7,7 @@
  * initial switcher data so the rail renders without a flash. All list/thread
  * reads and mutations go through the AJAX endpoints, scoped by MailboxViewer.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -19,6 +19,12 @@ function admin_mailbox_reader_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 	$settings = Globalvars::get_instance();
+
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
+	$gate_redirect = mailbox_receive_gate_handle($input);
+	if ($gate_redirect !== null) {
+		return $gate_redirect;
+	}
 
 	// Persistent CSRF token for the reader's action endpoint (validated, not
 	// consumed, because the reader fires many actions per session).

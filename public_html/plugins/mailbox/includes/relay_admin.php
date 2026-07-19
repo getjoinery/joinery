@@ -1,163 +1,118 @@
 <?php
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
+/**
+ * Relay admin machinery (specs/mailbox_relay_fix_pack.md § Fix 10,
+ * specs/mailbox_relay_shared_fleet.md).
+ *
+ * There is no Relay page: tenant relay setup (status, health, provisioning,
+ * hosted-slot enrollment) renders as the Setup tab's Relay section
+ * (relay_section.php), relay configuration (service connection, outbound
+ * mode) lives on the Settings tab, and the operator fleet console is its own
+ * page (admin_mailbox_fleet) reached from the Server Manager dashboard. This
+ * file is their shared machinery — the tenant/operator action handlers and
+ * view-var assemblers, plus the lower-level helpers (job dispatch, health
+ * battery, DNS rows, reconciles).
+ *
+ * @version 1.0
+ */
+
+/** The shared flash shape every relay surface uses. */
+function admin_mailbox_relay_flash($session, string $msg, string $title = 'Done'): void {
+	$session->save_message(new DisplayMessage(
+		$msg, $title, '~/plugins/mailbox/admin/~',
+		DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+	));
+}
 
 /**
- * Relay admin logic (specs/mailbox_relay_fix_pack.md § Fix 10).
- *
- * Lists the deployment's hardened ingest relay(s) with status/health and drives
- * the lifecycle: provision a relay on a managed node (a server_manager
- * provision_relay job), rebuild it, enable/disable it, delete it. The relay row
- * (MailboxRelay) is created/updated by the job result processor on success; the
- * admin enables it here once it exists.
+ * Tenant-side relay actions (Setup tab's Relay section): relay lifecycle,
+ * provisioning jobs, the origin-leak probe, and hosted-slot enrollment.
+ * Returns a redirect when the input was one of these actions, null otherwise.
  */
-function admin_mailbox_relay_logic(array $input): LogicResult {
+function admin_mailbox_relay_tenant_actions(array $input, $session, string $self_url): ?LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
 
-	$session = SessionControl::get_instance();
-	$session->check_permission(5);
-	$settings = Globalvars::get_instance();
-
-	$self_url = '/plugins/mailbox/admin/admin_mailbox_relay';
-
-	$flash = function ($msg, $title = 'Done') use ($session) {
-		$session->save_message(new DisplayMessage(
-			$msg, $title, '~/plugins/mailbox/admin/~',
-			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
-		));
-	};
-
+	$action = $input['action'] ?? null;
+	if ($action === null) {
+		return null;
+	}
+	$relay_id = $input['mrl_mailbox_relay_id'] ?? null;
 	$server_manager_active = PluginHelper::isPluginActive('server_manager');
 
-	// --- actions -------------------------------------------------------------
-	$action = $input['action'] ?? null;
-	if ($action !== null) {
-		$relay_id = $input['mrl_mailbox_relay_id'] ?? null;
-
-		if (($action === 'enable' || $action === 'disable') && $relay_id) {
-			$relay = new MailboxRelay(intval($relay_id), TRUE);
-			$relay->set('mrl_is_enabled', $action === 'enable');
-			$relay->save();
-			$flash($action === 'enable' ? 'Relay enabled — it now fronts every hosted domain.' : 'Relay disabled.');
-			return LogicResult::redirect($self_url);
-		}
-
-		if ($action === 'delete' && $relay_id) {
-			$relay = new MailboxRelay(intval($relay_id), TRUE);
-			$relay->soft_delete();
-			$flash('Relay removed.');
-			return LogicResult::redirect($self_url);
-		}
-
-		// Outbound mode: where compose sends leave from
-		// (specs/mailbox_relay_inbound_only.md). Provider (default) rides the
-		// configured email provider's API and hides the origin; smarthost routes
-		// compose through the relay over the tunnel.
-		if ($action === 'set_outbound_mode') {
-			$prior = (strtolower(trim((string)$settings->get_setting('mailbox_relay_outbound_mode'))) === 'smarthost')
-				? 'smarthost' : 'provider';
-			$mode = (($input['mailbox_relay_outbound_mode'] ?? 'provider') === 'smarthost') ? 'smarthost' : 'provider';
-			admin_mailbox_relay_write_setting('mailbox_relay_outbound_mode', $mode);
-			// The relay's Postfix submission listener is baked at provision time
-			// (provision_relay.sh's smarthost argument), so a mode switch takes
-			// effect on the relay itself only at the next Rebuild. The tunnel
-			// check does a real submission handshake, so it fails honestly until then.
-			if ($mode === 'smarthost') {
-				$flash('Sent mail now leaves through the relay smarthost. This deployment owns the relay IP\'s '
-					. 'sending reputation. Run Rebuild on the relay to open its tunnel submission listener — '
-					. 'until then compose sends are refused and the tunnel check fails.');
-			} else {
-				$flash('Sent mail now leaves through your email provider.'
-					. ($prior === 'smarthost'
-						? ' The relay\'s submission listener stays open until its next Rebuild.' : ''));
-			}
-			return LogicResult::redirect($self_url);
-		}
-
-		// Out-and-back origin-leak probe (provider mode): send a marked message
-		// from a hosted alias to itself; it returns via the relay MX and the
-		// origin-leak check scans the delivered headers.
-		if ($action === 'origin_probe') {
-			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailHealth.php'));
-			$res = InboundEmailHealth::sendOriginProbe();
-			$flash($res['message'], $res['ok'] ? 'Probe sent' : 'Probe not sent');
-			return LogicResult::redirect($self_url);
-		}
-
-		if (($action === 'provision' || $action === 'rebuild') && $server_manager_active) {
-			$result = admin_mailbox_relay_dispatch_job($action, $input, $session);
-			$flash($result['message'], $result['title']);
-			return LogicResult::redirect($self_url);
-		}
-
-		// --- hosted fleet (tenant side): configure, enroll, claim, verify, release
-		if ($action === 'fleet_config') {
-			admin_mailbox_relay_write_setting('mailbox_fleet_service_url',
-				trim((string)($input['mailbox_fleet_service_url'] ?? '')));
-			admin_mailbox_relay_write_setting('mailbox_fleet_api_public_key',
-				trim((string)($input['mailbox_fleet_api_public_key'] ?? '')));
-			$secret = trim((string)($input['mailbox_fleet_api_secret_key'] ?? ''));
-			if ($secret !== '') { // blank keeps the stored secret
-				admin_mailbox_relay_write_setting('mailbox_fleet_api_secret_key', $secret);
-			}
-			$flash('Fleet service connection saved.');
-			return LogicResult::redirect($self_url);
-		}
-
-		if (in_array($action, array('fleet_enroll', 'fleet_refresh', 'fleet_release'), true)) {
-			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetClient.php'));
-			$client = new FleetClient();
-			try {
-				switch ($action) {
-					case 'fleet_enroll':
-						$data = $client->enroll();
-						$flash('Enrolled — slot ' . htmlspecialchars((string)($data['slug'] ?? ''))
-							. ' (' . htmlspecialchars((string)($data['status'] ?? '')) . '). '
-							. 'Point your domains\' MX at ' . htmlspecialchars((string)($data['mx_hostname'] ?? ''))
-							. '. Each hosted domain\'s Setup tab shows its ownership record to publish.');
-						break;
-					case 'fleet_refresh':
-						$client->status();
-						$flash('Fleet slot refreshed.');
-						break;
-					case 'fleet_release':
-						$data = $client->release();
-						$flash((string)($data['message'] ?? 'Slot released.'));
-						break;
-				}
-			} catch (\Throwable $e) {
-				$flash($e->getMessage(), 'Fleet service error');
-			}
-			return LogicResult::redirect($self_url);
-		}
-
-		// --- fleet service (operator side): switch the service on/off + MX zone
-		if ($action === 'fleet_service_config') {
-			$enabled = !empty($input['mailbox_fleet_service_enabled']) ? '1' : '0';
-			$zone = strtolower(trim((string)($input['mailbox_fleet_mx_zone'] ?? '')));
-			if ($enabled === '1' && (strpos($zone, '.') === false)) {
-				$flash('Set the fleet MX zone first — a DNS zone this deployment\'s operator controls, e.g. mx.example.com.',
-					'Cannot enable fleet service');
-				return LogicResult::redirect($self_url);
-			}
-			admin_mailbox_relay_write_setting('mailbox_fleet_service_enabled', $enabled);
-			admin_mailbox_relay_write_setting('mailbox_fleet_mx_zone', $zone);
-			$flash($enabled === '1'
-				? 'Fleet service is on. Each tenant\'s MX hostname is <slug>.' . $zone
-					. ' — publish it as an A record pointing at the tenant\'s shard.'
-				: 'Fleet service is off. Tenant slots stop reconciling until it is re-enabled.');
-			return LogicResult::redirect($self_url);
-		}
-
-		// --- fleet shards (operator side): register a shard + provision skeleton
-		if ($action === 'provision_shard' && $server_manager_active) {
-			$result = admin_mailbox_relay_provision_shard($input, $session);
-			$flash($result['message'], $result['title']);
-			return LogicResult::redirect($self_url);
-		}
+	if (($action === 'enable' || $action === 'disable') && $relay_id) {
+		$relay = new MailboxRelay(intval($relay_id), TRUE);
+		$relay->set('mrl_is_enabled', $action === 'enable');
+		$relay->save();
+		admin_mailbox_relay_flash($session,
+			$action === 'enable' ? 'Relay enabled — it now fronts every hosted domain.' : 'Relay disabled.');
+		return LogicResult::redirect($self_url);
 	}
 
-	// --- list view -----------------------------------------------------------
+	if ($action === 'delete' && $relay_id) {
+		$relay = new MailboxRelay(intval($relay_id), TRUE);
+		$relay->soft_delete();
+		admin_mailbox_relay_flash($session, 'Relay removed.');
+		return LogicResult::redirect($self_url);
+	}
+
+	// Out-and-back origin-leak probe (provider mode): send a marked message
+	// from a hosted alias to itself; it returns via the relay MX and the
+	// origin-leak check scans the delivered headers.
+	if ($action === 'origin_probe') {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailHealth.php'));
+		$res = InboundEmailHealth::sendOriginProbe();
+		admin_mailbox_relay_flash($session, $res['message'], $res['ok'] ? 'Probe sent' : 'Probe not sent');
+		return LogicResult::redirect($self_url);
+	}
+
+	if (($action === 'provision' || $action === 'rebuild') && $server_manager_active) {
+		$result = admin_mailbox_relay_dispatch_job($action, $input, $session);
+		admin_mailbox_relay_flash($session, $result['message'], $result['title']);
+		return LogicResult::redirect($self_url);
+	}
+
+	// Hosted slot lifecycle (the service connection itself is saved on Settings).
+	if (in_array($action, array('fleet_enroll', 'fleet_refresh', 'fleet_release'), true)) {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetClient.php'));
+		$client = new FleetClient();
+		try {
+			switch ($action) {
+				case 'fleet_enroll':
+					$data = $client->enroll();
+					admin_mailbox_relay_flash($session,
+						'Enrolled — slot ' . htmlspecialchars((string)($data['slug'] ?? ''))
+						. ' (' . htmlspecialchars((string)($data['status'] ?? '')) . '). '
+						. 'Point your domains\' MX at ' . htmlspecialchars((string)($data['mx_hostname'] ?? ''))
+						. '. Each hosted domain\'s checks below show its ownership record to publish.');
+					break;
+				case 'fleet_refresh':
+					$client->status();
+					admin_mailbox_relay_flash($session, 'Hosted relay slot refreshed.');
+					break;
+				case 'fleet_release':
+					$data = $client->release();
+					admin_mailbox_relay_flash($session, (string)($data['message'] ?? 'Slot released.'));
+					break;
+			}
+		} catch (\Throwable $e) {
+			admin_mailbox_relay_flash($session, $e->getMessage(), 'Relay service error');
+		}
+		return LogicResult::redirect($self_url);
+	}
+
+	return null;
+}
+
+/**
+ * Tenant-side view vars for the Setup tab's Relay section: the relay rows
+ * (health attached to the active one, MX hostname reconciled), provisionable
+ * nodes, and live hosted-slot state.
+ */
+function admin_mailbox_relay_tenant_vars(): array {
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+	$settings = Globalvars::get_instance();
+	$server_manager_active = PluginHelper::isPluginActive('server_manager');
+
 	$relays_multi = new MultiMailboxRelay(array('deleted' => false));
 	$relays_multi->load();
 	// The health battery (TCP probe + map build + DNS) resolves the ACTIVE relay
@@ -173,8 +128,8 @@ function admin_mailbox_relay_logic(array $input): LogicResult {
 		admin_mailbox_relay_backfill_mx_hostname($relay);
 		$is_active = ($active !== null && intval($relay->key) === intval($active->key));
 		$relays[] = array(
-			'model'   => $relay,
-			'health'  => $is_active ? $active_health : null,
+			'model'  => $relay,
+			'health' => $is_active ? $active_health : null,
 		);
 	}
 
@@ -189,10 +144,7 @@ function admin_mailbox_relay_logic(array $input): LogicResult {
 		}
 	}
 
-	$outbound_mode = (strtolower(trim((string)$settings->get_setting('mailbox_relay_outbound_mode'))) === 'smarthost')
-		? 'smarthost' : 'provider';
-
-	// --- hosted fleet (tenant side): live slot state when configured ----------
+	// Live hosted-slot state when the service connection is configured.
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetClient.php'));
 	$fleet_client = new FleetClient();
 	$fleet_configured = $fleet_client->configured();
@@ -211,7 +163,67 @@ function admin_mailbox_relay_logic(array $input): LogicResult {
 		}
 	}
 
-	// --- fleet shards (operator side) ------------------------------------------
+	return array(
+		'relays'                => $relays,
+		'nodes'                 => $nodes,
+		'server_manager_active' => $server_manager_active,
+		'main_wg_public_key'    => (string)$settings->get_setting('mailbox_relay_wg_public_key'),
+		'has_active_relay'      => ($active !== null),
+		'outbound_mode'         => (strtolower(trim((string)$settings->get_setting('mailbox_relay_outbound_mode'))) === 'smarthost')
+			? 'smarthost' : 'provider',
+		'fleet_configured'      => $fleet_configured,
+		'fleet_status'          => $fleet_status,
+		'fleet_error'           => $fleet_error,
+	);
+}
+
+/**
+ * Operator-side actions (fleet console): service on/off + MX zone, shard
+ * provisioning. Returns a redirect when handled, null otherwise.
+ */
+function admin_mailbox_relay_operator_actions(array $input, $session, string $self_url): ?LogicResult {
+	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+	$action = $input['action'] ?? null;
+	if ($action === null) {
+		return null;
+	}
+
+	if ($action === 'fleet_service_config') {
+		$enabled = !empty($input['mailbox_fleet_service_enabled']) ? '1' : '0';
+		$zone = strtolower(trim((string)($input['mailbox_fleet_mx_zone'] ?? '')));
+		if ($enabled === '1' && (strpos($zone, '.') === false)) {
+			admin_mailbox_relay_flash($session,
+				'Set the fleet MX zone first — a DNS zone this deployment\'s operator controls, e.g. mx.example.com.',
+				'Cannot enable fleet service');
+			return LogicResult::redirect($self_url);
+		}
+		admin_mailbox_relay_write_setting('mailbox_fleet_service_enabled', $enabled);
+		admin_mailbox_relay_write_setting('mailbox_fleet_mx_zone', $zone);
+		admin_mailbox_relay_flash($session, $enabled === '1'
+			? 'Fleet service is on. Each tenant\'s MX hostname is <slug>.' . $zone
+				. ' — publish it as an A record pointing at the tenant\'s shard.'
+			: 'Fleet service is off. Tenant slots stop reconciling until it is re-enabled.');
+		return LogicResult::redirect($self_url);
+	}
+
+	if ($action === 'provision_shard' && PluginHelper::isPluginActive('server_manager')) {
+		$result = admin_mailbox_relay_provision_shard($input, $session);
+		admin_mailbox_relay_flash($session, $result['message'], $result['title']);
+		return LogicResult::redirect($self_url);
+	}
+
+	return null;
+}
+
+/**
+ * Operator-side view vars for the fleet console: service state, shard rows
+ * (connection facts reconciled) with slot counts and DNS-to-publish rows,
+ * and the nodes a shard can be provisioned onto.
+ */
+function admin_mailbox_relay_operator_vars(): array {
+	$settings = Globalvars::get_instance();
+	$server_manager_active = PluginHelper::isPluginActive('server_manager');
+
 	$fleet_service_on = ((string)$settings->get_setting('mailbox_fleet_service_enabled') === '1');
 	$fleet_shards = array();
 	if ($fleet_service_on) {
@@ -234,25 +246,23 @@ function admin_mailbox_relay_logic(array $input): LogicResult {
 		}
 	}
 
-	return LogicResult::render(array(
-		'relays'                => $relays,
-		'nodes'                 => $nodes,
+	$nodes = array();
+	if ($server_manager_active) {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+		$node_multi = new MultiManagedNode(array('enabled' => true, 'deleted' => false));
+		$node_multi->load();
+		foreach ($node_multi as $node) {
+			$nodes[] = $node;
+		}
+	}
+
+	return array(
 		'server_manager_active' => $server_manager_active,
-		'main_wg_public_key'    => (string)$settings->get_setting('mailbox_relay_wg_public_key'),
-		'has_active_relay'      => ($active !== null),
-		'outbound_mode'         => $outbound_mode,
-		'fleet_configured'      => $fleet_configured,
-		'fleet_service_url'     => (string)$settings->get_setting('mailbox_fleet_service_url'),
-		'fleet_api_public_key'  => (string)$settings->get_setting('mailbox_fleet_api_public_key'),
-		'fleet_secret_set'      => trim((string)$settings->get_setting('mailbox_fleet_api_secret_key')) !== '',
-		'fleet_status'          => $fleet_status,
-		'fleet_error'           => $fleet_error,
 		'fleet_service_on'      => $fleet_service_on,
 		'fleet_mx_zone'         => trim((string)$settings->get_setting('mailbox_fleet_mx_zone')),
 		'fleet_shards'          => $fleet_shards,
-		'session'               => $session,
-		'settings'              => $settings,
-	));
+		'nodes'                 => $nodes,
+	);
 }
 
 /**

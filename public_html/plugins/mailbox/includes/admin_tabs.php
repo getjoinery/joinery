@@ -16,11 +16,14 @@
  *   echo AdminPage::tab_menu(mailbox_admin_tabs(), 'Mailboxes');
  *
  * "Filters" (Gmail-parity inbound rules) sits between Accounts and Logs.
+ * Relay surfaces are split across the tabs — setup/status on Setup,
+ * configuration on Settings; the operator fleet console hangs off the Server
+ * Manager dashboard — so there is no Relay tab.
  *
  * (A future declarative-tabs core enhancement — specs/declarative_admin_tabs.md
  * — would replace this helper with adminMenu children; kept self-contained for now.)
  *
- * @version 2.1
+ * @version 2.2
  */
 
 if (!function_exists('mailbox_admin_tabs')) {
@@ -35,7 +38,6 @@ if (!function_exists('mailbox_admin_tabs')) {
 			'Filters'   => $base . 'admin_mailbox_filters',
 			'Logs'      => $base . 'admin_mailbox_logs',
 			'Setup'     => $base . 'admin_mailbox_setup',
-			'Relay'     => $base . 'admin_mailbox_relay',
 			'Settings'  => $base . 'admin_mailbox_settings',
 		);
 	}
