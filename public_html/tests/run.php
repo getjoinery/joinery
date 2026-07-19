@@ -383,6 +383,19 @@ echo "\n================================================================\n";
 echo "Tier: $tier_arg" . ($filter ? " (filter: $filter)" : '') . "   Environment: " . ($debug_on ? 'dev (debug on)' : 'production (debug off)') . "\n";
 echo "Tests: $tests_passed passed, $tests_failed failed of $tests_total   |   Checks: $checks_passed passed, $checks_failed failed" . ($checks_skipped ? ", $checks_skipped skipped" : '') . "\n";
 
+// Failures are named again at the end, not only where they occurred. A long
+// run scrolls its failures far above the summary, and anything reading the
+// runner through a pager or a tail sees the counts without ever learning which
+// test produced them — which has already cost one investigation.
+if ($tests_failed > 0) {
+	echo "\nFailed:\n";
+	foreach ($results as $r) {
+		if ($r['status'] !== 'fail') continue;
+		echo "  - " . $r['name'] . "  (" . $r['path'] . ")\n";
+		if (!empty($r['note'])) echo "      ↳ " . $r['note'] . "\n";
+	}
+}
+
 if ($skipped_env) {
 	echo "\nSkipped (environment):\n";
 	foreach ($skipped_env as $s) echo "  - " . $s['meta']['name'] . " (" . $s['reason'] . ")\n";
