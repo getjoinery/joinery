@@ -52,8 +52,6 @@ class Product extends SystemBase {
 	const PRODUCT_TYPE_SYSTEM = 0;
 	const PRODUCT_TYPE_EVENT = 1;
 	const PRODUCT_TYPE_ITEM = 2;
-	
-	const PRODUCT_ID_OPTIONAL_DONATION=4;
 
 		/**
 	 * Field specifications define database column properties and validation rules
@@ -217,16 +215,27 @@ public function get_requirement_info($output='text') {
 	
 	// get_requirement_validation() removed — validation is now unified through AbstractProductRequirement
 	
+	/**
+	 * Whether this product is the store's piggyback donation product — the one
+	 * added alongside another purchase when the buyer enters an optional
+	 * donation amount. Identified by the store_optional_donation_product_id
+	 * setting (blank = the feature is off); never by a hardcoded product ID.
+	 */
+	public function is_optional_donation(){
+		$settings = Globalvars::get_instance();
+		$donation_id = (int)$settings->get_setting('store_optional_donation_product_id');
+		return $donation_id > 0 && (int)$this->key === $donation_id;
+	}
+
 	//THIS FUNCTION GIVES AN ESTIMATE OF PRICE FOR DISPLAY PURPOSES
 	public function get_readable_price($product_version_id=NULL){
-		$settings = Globalvars::get_instance(); 
+		$settings = Globalvars::get_instance();
 		$currency_symbol = CurrencyHelper::symbol(strtolower($settings->get_setting('site_currency'))) ?? '$';
 
-		if($this->key == Product::PRODUCT_ID_OPTIONAL_DONATION){
-			//IT IS AN OPTIONAL DONATION
-			//REMOVE EVERYTHING BUT DECIMALS AND INTEGERS (ALLOW FOR EUROPEAN COMMAS)
+		if($this->is_optional_donation()){
+			//BUYER NAMES THE AMOUNT — THERE IS NO PRICE TO DISPLAY
 			return false;
-		}		
+		}
 		else{
 			$versions = $this->get_product_versions();
 			if(!$this->count_product_versions()){
@@ -277,11 +286,11 @@ public function get_requirement_info($output='text') {
 		//HANDLE PRICES
 		$settings = Globalvars::get_instance(); 
 		
-		if($this->key == Product::PRODUCT_ID_OPTIONAL_DONATION){
+		if($this->is_optional_donation() && !empty($data['user_price'])){
 			//IT IS AN OPTIONAL DONATION
 			//REMOVE EVERYTHING BUT DECIMALS AND INTEGERS (ALLOW FOR EUROPEAN COMMAS)
 			return str_replace(',', '.', preg_replace("/[^0-9\.,]/", "", $data['user_price']));
-		}		
+		}
 		else if($product_version->get('prv_price_type') == 'user'){
 	
 			if($data['user_price_override']){

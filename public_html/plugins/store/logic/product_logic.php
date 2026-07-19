@@ -100,8 +100,15 @@ function product_logic(array $input): LogicResult {
 			} else {
 				// New item — add to cart
 				if(!empty($input['user_price'])){
-					$extra_donation = new Product(Product::PRODUCT_ID_OPTIONAL_DONATION, TRUE);
-					$cart->add_item($extra_donation, $form_data);
+					$donation_id = (int)$settings->get_setting('store_optional_donation_product_id');
+					if($donation_id > 0){
+						$extra_donation = new Product($donation_id, TRUE);
+						$cart->add_item($extra_donation, $form_data);
+					}
+					else{
+						error_log('product_logic: buyer entered a donation amount but '
+							. 'store_optional_donation_product_id is not configured — donation skipped.');
+					}
 				}
 				$cart->add_item($product, $form_data);
 			}

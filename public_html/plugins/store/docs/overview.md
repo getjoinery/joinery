@@ -30,7 +30,11 @@ The plugin registers its providers with core registries at load time: SEO metada
 
 `activate.php` is idempotent and self-guarded. It backfills `stc_stripe_customers` from the pre-extraction user columns and product fulfillment columns where those still exist, claims the plugin's scheduled-task rows, and drops the superseded columns. On upgrade, `update_database` runs a one-time auto-activation: the store activates when the install shows store evidence (product/order rows, or a Stripe/PayPal key configured); a store-less install stays inactive.
 
-Settings keep their pre-extraction core names (`products_active`, `checkout_type`, `stripe_api_key`, ...) via the per-setting `legacy_core: true` flag in `plugin.json`.
+Settings keep their pre-extraction core names (`products_active`, `checkout_type`, `stripe_api_key`, ...) via the per-setting `legacy_core: true` flag in `plugin.json`. The plugin's `settings_form.php` surfaces store settings on **Admin → Settings** under Plugin Settings.
+
+### Optional piggyback donation
+
+A buyer entering an amount in a `UserPriceRequirement` field ("User Chooses Price" on the product edit page) gets a second cart item: the site's donation product, identified by the `store_optional_donation_product_id` setting (the "Optional donation product" dropdown on the settings page). The donation product prices itself from the buyer's entered amount (`Product::is_optional_donation()`); it shows no fixed price in listings. Blank setting = feature off — entered amounts are logged and skipped, never charged. The donation product is never identified by a hardcoded product ID.
 
 ## Related Docs
 
