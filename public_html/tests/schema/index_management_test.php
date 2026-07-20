@@ -12,7 +12,7 @@
  * it creates a throwaway real table, exercises manageIndexes() against stub
  * model classes, asserts the live pg_indexes state, and persists nothing.
  *
- * CLI:  php tests/schema/test_index_management.php
+ * CLI:  php tests/schema/index_management_test.php
  */
 
 require_once(__DIR__ . '/../lib/harness.php');

@@ -8,7 +8,7 @@
  * Reached from the Server Manager dashboard; tenant relay surfaces live on
  * the mailbox Setup/Settings tabs.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -110,6 +110,32 @@ if (!empty($fleet_service_on)) {
 		echo '<p>No managed nodes are available. Add a node in Server Manager first.</p>';
 	}
 
+	$page->end_box();
+
+	// --- Fortress hosting product (order-time auto-enrollment) ----------------
+	$page->begin_box(array('title' => 'Fortress hosting product'));
+	if (empty($store_active)) {
+		echo '<p>Selling fleet slots needs the store plugin. Activate it to create the Fortress hosting product.</p>';
+	} elseif (!empty($fleet_products)) {
+		echo '<table class="table"><thead><tr>'
+			. '<th>Product</th><th>Fulfillment</th><th>Active</th><th></th>'
+			. '</tr></thead><tbody>';
+		foreach ($fleet_products as $fp) {
+			echo '<tr>';
+			echo '<td>' . htmlspecialchars($fp['name']) . '</td>';
+			echo '<td>' . htmlspecialchars($fp['fulfillment'] !== '' ? $fp['fulfillment'] : 'none (tier only)') . '</td>';
+			echo '<td>' . ($fp['is_active'] ? 'Yes' : 'No — not for sale yet') . '</td>';
+			echo '<td><a href="/plugins/store/admin/admin_product_edit?pro_product_id=' . intval($fp['id']) . '">Edit</a></td>';
+			echo '</tr>';
+		}
+		echo '</tbody></table>';
+		echo '<p class="text-muted small">A paid order for a customer-cloud product on a fleet-slot tier builds the buyer\'s server and pre-seeds its relay enrollment — the owner\'s Setup tab lands on one-click Enroll.</p>';
+	} else {
+		echo '<form method="post">';
+		echo '<input type="hidden" name="action" value="fleet_create_product">';
+		echo '<button type="submit" class="btn btn-primary">Create Fortress hosting product</button>';
+		echo '</form>';
+	}
 	$page->end_box();
 }
 

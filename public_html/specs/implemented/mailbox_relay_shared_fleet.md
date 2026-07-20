@@ -2,7 +2,8 @@
 
 **Status:** Built — code complete and validated; live verification needs a real
 shard VPS plus a second tenant deployment (dev is colocated, single deployment).
-**Version:** 1.2 — implementation landed: open items resolved during the build
+**Version:** 1.3 — order-time auto-enrollment built (see Follow-up Build
+Items). 1.2 — implementation landed: open items resolved during the build
 are marked DECIDED below. 1.1 — tenancy-native design: the relay stack is
 multi-tenant at every layer with self-hosted as the N=1 case; map sync becomes
 fragment push + shard-side merge, named as the domain-claim enforcement point;
@@ -305,20 +306,37 @@ Current-state only, per docs rules:
 
 ## Follow-up Build Items
 
-- **Order-time auto-enrollment (added 2026-07-19).** Entitlement is already
-  order-shaped (the fleet service gates on the `mailbox_fleet_slot` tier
-  feature), but the tenant-side setup is manual: the admin pastes the
-  operator's service URL + their customer API key into the Relay tab and
-  clicks Enroll. For customer-cloud orders that's a redundant step — the
-  provisioning pipeline created the customer's API key and *is* the operator,
-  so it already holds both values. Build: (a) an operator store product/tier
-  granting `mailbox_fleet_slot`; (b) the customer-cloud provision path
-  pre-seeds `mailbox_fleet_service_url` + API key settings on the new box so
-  a Fortress-tier order either enrolls itself during provisioning or lands
-  the owner on a one-click Enroll. The DNS TXT ownership challenges and the
-  MX edit stay manual by nature — the customer proving domain control at
-  their own DNS provider. Sequenced after the manual path is live-proven
-  (first dogfood tenant).
+- **Order-time auto-enrollment (added 2026-07-19) — BUILT 2026-07-20.**
+  Entitlement is already order-shaped (the fleet service gates on the
+  `mailbox_fleet_slot` tier feature), but the tenant-side setup was manual:
+  the admin pasted the operator's service URL + their customer API key and
+  clicked Enroll. For customer-cloud orders that was a redundant step — the
+  provisioning pipeline mints the customer's API key and *is* the operator,
+  so it already holds both values. As built:
+  - **(a) Operator product/tier**: the fleet console's *Fortress hosting
+    product* box (`admin_mailbox_fleet`) creates, in one click and
+    idempotently, a slot-granting tier (reusing any existing tier whose
+    features grant `mailbox_fleet_slot`) plus an inactive
+    `customer_cloud`-fulfilled product on it; pricing/activation stay the
+    operator's explicit acts. Detection is derived by query (products whose
+    tier grants the slot) — no marker setting to drift.
+  - **(b) Provision-path seeding**: `ProvisionCustomerCloud` calls
+    `FleetProvisionSeeding` (mailbox plugin) on both done-paths. Gate:
+    fleet service on + self-store (a remote store's buyer ids are not local
+    users) + buyer's tier entitled. It mints the buyer's `Fleet enrollment`
+    machine key (re-mint deactivates the old one) and upserts the three
+    `mailbox_fleet_*` settings into the new site's DB over SSH — the secret
+    travels on stdin into a psql heredoc, never in a job-step row, argv, or
+    log. Best-effort: failure alerts ops, never fails the provision. The
+    owner lands on one-click Enroll (the WireGuard keys still come from
+    `provision_relay_main.sh` on their box, guided by the Setup tab); the
+    DNS TXT ownership challenges and MX edit stay manual by nature.
+  - Tests: `plugins/mailbox/tests/fleet_auto_enrollment_test.php` (db, 28
+    checks) — gate matrix, key mint/re-mint, remote-command shape (secret
+    structurally absent), slug refusal, product-creation idempotency.
+  - **Not yet live-proven**: the SSH seeding leg end-to-end rides the next
+    real customer-cloud order (it must not be exercised against dev's own
+    site — dev's fleet settings are real tenant state).
 
 ## Open Items to Confirm During Implementation
 

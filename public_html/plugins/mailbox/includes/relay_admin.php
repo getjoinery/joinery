@@ -13,7 +13,7 @@
  * battery, DNS rows, reconciles). The local-listener decommission machinery
  * lives in listener_admin.php; its actions and view vars are folded in here.
  *
- * @version 1.7
+ * @version 1.8
  */
 
 /** True when the Linode OAuth client is configured (the one-click branch). */
@@ -367,7 +367,116 @@ function admin_mailbox_relay_operator_actions(array $input, $session, string $se
 		return LogicResult::redirect($self_url);
 	}
 
+	if ($action === 'fleet_create_product' && PluginHelper::isPluginActive('store')) {
+		$result = admin_mailbox_relay_create_fleet_product();
+		admin_mailbox_relay_flash($session, $result['message'], $result['title']);
+		return LogicResult::redirect($self_url);
+	}
+
 	return null;
+}
+
+/**
+ * Products whose tier carries the fleet-slot feature — what makes an order a
+ * Fortress order. Derived by query, no marker setting to drift. Returns rows
+ * of ['id','name','is_active','fulfillment'].
+ */
+function admin_mailbox_relay_fleet_products(): array {
+	if (!PluginHelper::isPluginActive('store')) {
+		return array();
+	}
+	$db = DbConnector::get_instance()->get_db_link();
+	$q = $db->prepare(
+		"SELECT p.pro_product_id, p.pro_name, p.pro_is_active, p.pro_fulfillment_provider
+		 FROM pro_products p
+		 JOIN sbt_subscription_tiers t
+		   ON t.sbt_subscription_tier_id = p.pro_sbt_subscription_tier_id
+		  AND t.sbt_delete_time IS NULL
+		 WHERE p.pro_delete_time IS NULL
+		   AND (t.sbt_features->>'mailbox_fleet_slot') = 'true'
+		 ORDER BY p.pro_name");
+	$q->execute();
+	$rows = array();
+	foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+		$rows[] = array(
+			'id'          => (int)$row['pro_product_id'],
+			'name'        => (string)$row['pro_name'],
+			'is_active'   => (bool)$row['pro_is_active'],
+			'fulfillment' => (string)($row['pro_fulfillment_provider'] ?? ''),
+		);
+	}
+	return $rows;
+}
+
+/**
+ * One-click Fortress hosting product: reuse (or create) a tier whose features
+ * grant the fleet slot, then create an INACTIVE customer-cloud hosting product
+ * on it — the operator prices and activates it deliberately on the product
+ * edit page. Idempotent: an existing fleet product means nothing to do.
+ *
+ * @return array{message:string,title:string}
+ */
+function admin_mailbox_relay_create_fleet_product(): array {
+	$existing = admin_mailbox_relay_fleet_products();
+	if (!empty($existing)) {
+		return array('title' => 'Already set up',
+			'message' => 'A product granting the fleet slot already exists: ' . $existing[0]['name'] . '.');
+	}
+
+	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php'));
+
+	// Reuse a slot-granting tier if one exists; otherwise create one above the
+	// current top level.
+	$tier = null;
+	$top_level = 0;
+	$tiers = new MultiSubscriptionTier(array('sbt_delete_time' => 'IS NULL'));
+	$tiers->load();
+	foreach ($tiers as $row) {
+		$top_level = max($top_level, (int)$row->get('sbt_tier_level'));
+		$features = json_decode((string)$row->get('sbt_features'), true) ?: array();
+		if (!empty($features['mailbox_fleet_slot']) && $tier === null) {
+			$tier = $row;
+		}
+	}
+	$tier_created = false;
+	if ($tier === null) {
+		$tier = new SubscriptionTier(NULL);
+		$tier->set('sbt_name', 'fortress');
+		$tier->set('sbt_display_name', 'Fortress');
+		$tier->set('sbt_tier_level', $top_level + 10);
+		$tier->set('sbt_description', 'Fortress hosting: a dedicated server with a hosted relay slot on the shared fleet.');
+		$tier->setFeatures(array('mailbox_fleet_slot' => true, 'mailbox_fleet_max_domains' => 5));
+		$tier->save();
+		$tier->load();
+		$tier_created = true;
+	}
+
+	$link = 'fortress-hosting';
+	$link_taken = new MultiProduct(array('link' => $link));
+	if ($link_taken->count_all() > 0) {
+		$link .= '-' . substr(md5(uniqid('', true)), 0, 6);
+	}
+	$product = new Product(NULL);
+	$product->set('pro_name', 'Fortress Hosting');
+	$product->set('pro_link', $link);
+	$product->set('pro_description',
+		'A dedicated server in your own cloud account, built automatically, with a hosted relay slot on the shared fleet.');
+	$product->set('pro_sbt_subscription_tier_id', $tier->key);
+	if (PluginHelper::isPluginActive('server_manager')) {
+		$product->set('pro_fulfillment_provider', 'customer_cloud');
+	}
+	// Born inactive: price and publish are the operator's explicit acts.
+	$product->set('pro_is_active', FALSE);
+	$product->save();
+	$product->load();
+
+	return array('title' => 'Product created',
+		'message' => ($tier_created
+			? 'Tier "Fortress" created (level ' . $tier->get('sbt_tier_level') . ') with the fleet-slot feature. '
+			: 'Reused tier "' . $tier->get('sbt_display_name') . '" (it already grants the fleet slot). ')
+			. 'Product "Fortress Hosting" created inactive — set its price and activate it on the product edit page. '
+			. 'Orders then provision the buyer\'s server and pre-seed its relay enrollment automatically.');
 }
 
 /**
@@ -417,6 +526,8 @@ function admin_mailbox_relay_operator_vars(): array {
 		'fleet_mx_zone'         => trim((string)$settings->get_setting('mailbox_fleet_mx_zone')),
 		'fleet_shards'          => $fleet_shards,
 		'nodes'                 => $nodes,
+		'store_active'          => PluginHelper::isPluginActive('store'),
+		'fleet_products'        => $fleet_service_on ? admin_mailbox_relay_fleet_products() : array(),
 	);
 }
 

@@ -34,7 +34,7 @@
  *   server_manager_customer_cloud_type          default instance type
  *   server_manager_customer_cloud_image         default OS image
  *
- * @version 1.2
+ * @version 1.3
  */
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 
@@ -340,6 +340,7 @@ class ProvisionCustomerCloud implements ScheduledTaskInterface {
 			$provision->set('cvp_status', 'done');
 			$provision->set('cvp_error',  null);
 			$provision->save();
+			$this->seed_fleet_enrollment($provision, $node);
 		} else {
 			$this->alert_and_fail($provision,
 				"Install job #{$job->key} finished '{$status}' with install_state '{$node->get('mgn_install_state')}' — see the job detail page.");
@@ -385,6 +386,7 @@ class ProvisionCustomerCloud implements ScheduledTaskInterface {
 		$provision->set('cvp_status', 'done');
 		$provision->set('cvp_error',  null);
 		$provision->save();
+		$this->seed_fleet_enrollment($provision, $node);
 
 		// The buyer's welcome email is normally sent by JobResultProcessor when
 		// the completed job carries the order-item linkage. A retry job that
@@ -396,6 +398,59 @@ class ProvisionCustomerCloud implements ScheduledTaskInterface {
 			JobResultProcessor::send_provisioning_welcome_email($job, $node);
 		}
 		return 1;
+	}
+
+	/**
+	 * Order-time fleet enrollment (specs/mailbox_relay_shared_fleet.md
+	 * § Follow-up): when the buyer's tier carries the fleet-slot feature, the
+	 * finished site gets the fleet-service settings pre-seeded so its owner
+	 * lands on a one-click Enroll. Best-effort — the site is up either way and
+	 * the owner can always enter the credentials manually, so a seeding
+	 * failure alerts ops but never fails the provision. Bare instances have
+	 * no site to seed.
+	 */
+	private function seed_fleet_enrollment($provision, $node) {
+		if (($provision->get('cvp_install_mode') ?: 'fresh') === 'bare') {
+			return;
+		}
+		$seeder = PathHelper::getIncludePath('plugins/mailbox/includes/FleetProvisionSeeding.php');
+		if (!is_file($seeder) || !PluginHelper::isPluginActive('mailbox')) {
+			return;
+		}
+		try {
+			require_once($seeder);
+			$buyer_id = (int)$provision->get('cvp_usr_user_id');
+			if (!FleetProvisionSeeding::applies($buyer_id)) {
+				return;
+			}
+			$sitename = $provision->get('cvp_sitename') ?: $provision->get('cvp_slug');
+			$result = FleetProvisionSeeding::seedNode($node, $buyer_id, (string)$sitename);
+			if ($result['ok']) {
+				error_log('ProvisionCustomerCloud: fleet enrollment seeded for provision #'
+					. $provision->key . ' (' . $provision->get('cvp_domain') . ')');
+				return;
+			}
+		} catch (\Throwable $e) {
+			$result = array('ok' => false, 'message' => $e->getMessage());
+		}
+
+		$reason = 'Fleet enrollment seeding failed for ' . $provision->get('cvp_domain')
+			. ': ' . $result['message'];
+		error_log('ProvisionCustomerCloud: ' . $reason);
+		$this->errors[] = "Provision #{$provision->key}: {$reason}";
+		$to = $this->resolve_alert_recipient();
+		if ($to) {
+			try {
+				EmailSender::quickSend($to, '[customer-cloud] Fleet seeding failed: ' . $provision->get('cvp_domain'),
+					"The site installed fine, but pre-seeding its hosted-relay credentials failed.\n\n"
+					. "Domain: " . $provision->get('cvp_domain') . "\n"
+					. "Reason: " . $result['message'] . "\n\n"
+					. "The owner can still connect manually: mint an API key for their account and "
+					. "enter it with this deployment's URL on their mailbox Settings tab.\n");
+			} catch (\Throwable $e) {
+				error_log('ProvisionCustomerCloud: fleet seeding alert send failed: ' . $e->getMessage());
+			}
+		}
 	}
 
 	/**

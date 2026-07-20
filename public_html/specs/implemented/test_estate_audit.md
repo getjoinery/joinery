@@ -1,6 +1,22 @@
 # Test Estate Audit
 
-**Status:** AUDIT COMPLETE (2026-07-16). All 13 areas surveyed; findings,
+**Status:** IMPLEMENTED (2026-07-20). Every numbered work-plan item (T1–T32,
+P0 through P3, plus the housekeeping bundle) is done and gate-verified — see
+the dated progress log entries throughout. Final items closed 2026-07-20:
+T20's accept criterion was proven by demonstration (a TypeError in one
+teardown closure still runs the remaining teardowns LIFO and emits the full
+result contract, exit honest), and the two `test_*.php` stragglers were
+renamed to the `*_test.php` suffix (`tests/schema/index_management_test.php`,
+`tests/models/model_tester_selftest_test.php`; discovery re-verified: 150
+declared, 0 undeclared, both suites green).
+
+Two items remain deferred by decision, not omission: the cloud 6→4 file merge
+(rationale in the progress log — merging characterization into the engine
+suite risks the real-BlobStorageProfile db-tier coverage) and the optional
+feature-based directory taxonomy reorg (headers carry all metadata; the runner
+ignores location, so the reorg is cosmetic).
+
+**Original status:** AUDIT COMPLETE (2026-07-16). All 13 areas surveyed; findings,
 duplication map, gap map, and executor-ready work plan below. This spec is the
 work plan — implement from the "Recommendations / work plan" section (P0 first).
 

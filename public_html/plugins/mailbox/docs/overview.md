@@ -402,6 +402,22 @@ published" check then hands you the TXT record as a copy-paste DNS fix.
 
 Forwarding works without a DKIM key; only outbound DKIM signing is affected.
 
+**The Setup tab's DKIM rows follow the signing path** (specs/mailbox_provider_dkim.md):
+the local opendkim key above is prescribed only when the domain's mail actually
+leaves through local Postfix (colocated deployments). When composed mail rides
+an API provider — always the case on a relay-fronted deployment with provider
+outbound, and additionally on colocated deployments whose active provider is
+API-class — the correct DKIM record is the one the **provider** issues for the
+domain, and the row verifies exactly that: providers implementing
+`DkimRecordSource` (Mailgun, SES — see
+[email_system.md](../../../docs/email_system.md#provider-dkim-records-optional-capability))
+report their required records from their own API, and the Setup tab renders one
+row per record, each checked against live DNS with a copy-paste fix. A domain
+not registered at the provider gets a row saying so (mail from it fails DMARC
+alignment until it is added at the provider dashboard); a provider without the
+capability gets generic guidance naming it. Under the relay smarthost outbound
+mode, the row states plainly that sends carry no DKIM signature.
+
 ### Firewall
 
 `install_email.sh` runs `ufw allow 25/tcp` when ufw is active. Bare metal or a
@@ -1438,6 +1454,25 @@ the fleet console's **DNS to publish** table: every record the fleet zone needs 
 each shard's A record and PTR expectation, and one A record per live slot MX
 hostname — with a live resolution verdict and copy fields. (PTR records are
 set where the shard's IP is hosted, not in the DNS zone.)
+
+**Selling slots — order-time auto-enrollment.** The fleet console's *Fortress
+hosting product* box creates the sellable product in one click (store +
+server_manager required): a subscription tier whose features grant
+`mailbox_fleet_slot` (an existing slot-granting tier is reused) and an
+inactive `customer_cloud`-fulfilled product on it — pricing and activating it
+are the operator's explicit acts on the product edit page. When a paid order
+then provisions the buyer's server, `ProvisionCustomerCloud` finishes by
+calling `FleetProvisionSeeding` (mailbox side): if the fleet service is on,
+the store is this deployment, and the buyer's tier carries the slot feature,
+it mints a machine API key for the buyer's account (`Fleet enrollment`,
+read+write; re-minting deactivates the previous one) and writes the three
+fleet-service settings into the new site's database over SSH — the secret
+travels on stdin into a psql heredoc, never in a job row, argv, or log. The
+owner's Setup tab then lands on one-click Enroll; the DNS TXT ownership
+proofs and the MX edit stay manual by nature (the customer proving domain
+control at their own DNS provider). Seeding is best-effort: a failure alerts
+the ops address and leaves the provision done — the owner can always enter
+the credentials manually on the Settings tab.
 
 **Rebuild carries the spool across the wipe.** The scheduled shard rebuild
 closes port 25, flushes the Postfix queue for a bounded window, copies the

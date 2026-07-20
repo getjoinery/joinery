@@ -653,7 +653,7 @@ The test estate runs on the shared harness (`tests/lib/harness.php`) with the
 - [ ] Login history (`log_logins`)
 
 ### 13.8 Database Management
-- [x] Automatic schema updates from model `$field_specifications` — covered by `tests/schema/test_index_management.php`
+- [x] Automatic schema updates from model `$field_specifications` — covered by `tests/schema/index_management_test.php`
 - [ ] Database migration system for data changes
 - [ ] Database version tracking (`database_version`, `db_migration_version`)
 - [ ] Test database management (`admin_test_database`)
