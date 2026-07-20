@@ -17,7 +17,7 @@
  *   - The FleetReconcile scheduled task (cron, operator context) dispatches
  *     the flagged jobs, reconciles finished ones, and re-checks entitlement.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_fleet_shard_class.php'));
@@ -178,6 +178,27 @@ class FleetService {
 			'ssh_user'        => 'jt-' . $slug,
 			'spool_path'      => '/var/spool/joinery-relay/' . $slug,
 		);
+	}
+
+	/**
+	 * Release a slot (the tenant's exit ramp). Marks it released — the
+	 * FleetReconcile task dispatches the remove-tenant job once the spool
+	 * drains — and revokes every live domain claim immediately: release means
+	 * the domains are moving, and their next home (a new slot here or another
+	 * fleet) must be able to claim them before this slot finishes evicting.
+	 */
+	public static function releaseSlot(MailboxFleetSlot $slot): void {
+		$slot->set('mft_status', MailboxFleetSlot::STATUS_RELEASED);
+		$slot->save();
+
+		$claims = new MultiMailboxFleetDomainClaim(array(
+			'slot_id' => intval($slot->key), 'live' => true, 'deleted' => false,
+		));
+		$claims->load();
+		foreach ($claims as $claim) {
+			$claim->set('mfd_status', MailboxFleetDomainClaim::STATUS_REVOKED);
+			$claim->save();
+		}
 	}
 
 	// ----------------------------------------------------------- domain claims

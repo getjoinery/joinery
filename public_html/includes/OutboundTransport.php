@@ -22,7 +22,7 @@
  * `filesSent` is the PRESETS smtp_files_sent capability: true when the provider's
  * SMTP saves the sent copy itself; false when two-way sync must APPEND it.
  *
- * @version 1.3
+ * @version 1.4
  */
 
 require_once(PathHelper::getIncludePath('includes/EmailServiceProvider.php'));
@@ -87,8 +87,16 @@ class OutboundTransport {
         // box IP appears nowhere. The relay smarthost is the opt-in for operators
         // who want no third party touching outbound plaintext and accept owning
         // the relay IP's sending reputation.
+        // Doctrine enforcement keys off the RECORDED cutover state, not the
+        // relay row's mere existence: relays are born enabled and run through
+        // the DNS move, during which sends must keep working the legacy way
+        // (the origin is still public until the MX flips, so nothing leaks).
+        // The smarthost opt-in is an explicit admin choice and applies as soon
+        // as it is chosen.
         $relay = self::activeRelay();
-        if ($relay !== null) {
+        $cutover_complete = ((string)Globalvars::get_instance()
+            ->get_setting('mailbox_relay_cutover_complete') === '1');
+        if ($relay !== null && (self::relayOutboundMode() === 'smarthost' || $cutover_complete)) {
             if (self::relayOutboundMode() === 'smarthost') {
                 // Opt-in: relay smarthost over the tunnel — the sent Received: chain
                 // shows the relay. SmtpProvider still runs the in-app DKIM signer;

@@ -52,7 +52,7 @@ class ProvisionCustomerCloud implements ScheduledTaskInterface {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/cloud_compute/LinodeComputeDriver.php'));
+		require_once(PathHelper::getIncludePath('includes/cloud_compute/LinodeComputeDriver.php'));
 		require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Client.php'));
 
 		$actionable = new MultiCustomerCloudProvision(array(

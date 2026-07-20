@@ -16,7 +16,7 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  * plugin, enable SRS, register a domain, or apply a one-click fix — each writes
  * through a model and redirects so the next render reads fresh settings.
  *
- * @version 2.2
+ * @version 2.3
  */
 function admin_mailbox_setup_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -273,7 +273,9 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	// The Relay section renders whenever the deployment's receive mode is
 	// relay, or a relay row exists whatever the stored choice says.
 	$relay_section = null;
-	if (mailbox_receive_mode() === 'relay' || mailbox_receive_relay_exists()) {
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/listener_admin.php'));
+	if (mailbox_receive_mode() === 'relay' || mailbox_receive_relay_exists()
+			|| mailbox_listener_setting() === 'decommissioned') {
 		$relay_section = admin_mailbox_relay_tenant_vars();
 	}
 

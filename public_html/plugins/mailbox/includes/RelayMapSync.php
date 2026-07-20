@@ -19,7 +19,7 @@
  * periodic reconcile (SyncRelayMap scheduled task), so freshness beats the
  * reject_unmatched gate.
  *
- * @version 2.0 - fragment push + merge-verdict flow (replaces the root-login
+ * @version 2.1 - fragment push + merge-verdict flow (replaces the root-login
  *                full-file replace into /etc/postfix)
  */
 
@@ -96,7 +96,7 @@ class RelayMapSync {
 			return array('status' => 'error', 'message' => 'built fragment is not valid JSON');
 		}
 		$fragment['version'] = $version;
-		$fragment_body = json_encode($fragment, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+		$fragment_body = self::encodeFragmentBody($fragment);
 
 		$stage = self::stage($fragment_body);
 		if ($stage === null) {
@@ -145,6 +145,21 @@ class RelayMapSync {
 		$relay->save();
 
 		return array('status' => 'success', 'message' => 'map v' . $version . ' pushed', 'version' => $version);
+	}
+
+	/**
+	 * Encode the fragment for the shard-side merge. The merge's typed
+	 * unmarshal requires 'recipients' and 'domains' to be JSON OBJECTS even
+	 * when empty — PHP's empty array would encode as [] and reject the whole
+	 * fragment (a domainless deployment's first push hits exactly this).
+	 */
+	public static function encodeFragmentBody(array $fragment): string {
+		foreach (array('recipients', 'domains') as $map_field) {
+			if (array_key_exists($map_field, $fragment) && $fragment[$map_field] === array()) {
+				$fragment[$map_field] = (object)array();
+			}
+		}
+		return json_encode($fragment, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 	}
 
 	/** Write the fragment to a private staging dir; returns its path or null. */

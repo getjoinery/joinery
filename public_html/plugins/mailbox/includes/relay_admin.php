@@ -10,10 +10,18 @@
  * page (admin_mailbox_fleet) reached from the Server Manager dashboard. This
  * file is their shared machinery — the tenant/operator action handlers and
  * view-var assemblers, plus the lower-level helpers (job dispatch, health
- * battery, DNS rows, reconciles).
+ * battery, DNS rows, reconciles). The local-listener decommission machinery
+ * lives in listener_admin.php; its actions and view vars are folded in here.
  *
- * @version 1.0
+ * @version 1.7
  */
+
+/** True when the Linode OAuth client is configured (the one-click branch). */
+function admin_mailbox_relay_linode_oauth_configured(): bool {
+	require_once(PathHelper::getIncludePath('includes/oauth/OAuth2ProviderRegistry.php'));
+	$provider = OAuth2ProviderRegistry::get('linode');
+	return $provider !== null && $provider::isConfigured();
+}
 
 /** The shared flash shape every relay surface uses. */
 function admin_mailbox_relay_flash($session, string $msg, string $title = 'Done'): void {
@@ -38,6 +46,13 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 	}
 	$relay_id = $input['mrl_mailbox_relay_id'] ?? null;
 	$server_manager_active = PluginHelper::isPluginActive('server_manager');
+
+	// Local mail listener decommission/restore (listener_admin.php).
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/listener_admin.php'));
+	$listener_redirect = mailbox_listener_actions($input, $session, $self_url);
+	if ($listener_redirect !== null) {
+		return $listener_redirect;
+	}
 
 	if (($action === 'enable' || $action === 'disable') && $relay_id) {
 		$relay = new MailboxRelay(intval($relay_id), TRUE);
@@ -68,6 +83,113 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 	if (($action === 'provision' || $action === 'rebuild') && $server_manager_active) {
 		$result = admin_mailbox_relay_dispatch_job($action, $input, $session);
 		admin_mailbox_relay_flash($session, $result['message'], $result['title']);
+		return LogicResult::redirect($self_url);
+	}
+
+	// Cloud path (specs/mailbox_relay_cloud_provisioning.md): create the run;
+	// the section then shows the just-in-time credential step. Nothing to
+	// configure beforehand.
+	if ($action === 'relay_cloud_begin') {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provision_class.php'));
+
+		$mail_hostname = strtolower(trim((string)($input['cloud_mail_hostname'] ?? '')));
+		$region = trim((string)($input['cloud_region'] ?? ''));
+		// Instance type is fixed to the 1 GB Nanode for now — a relay idles,
+		// and the provider's own interface can resize it later.
+		$type = 'g6-nanode-1';
+		if ($mail_hostname === '' || strpos($mail_hostname, '.') === false) {
+			admin_mailbox_relay_flash($session, 'A mail hostname (FQDN, e.g. mx.example.com) is required.', 'Cannot provision');
+			return LogicResult::redirect($self_url);
+		}
+		if ($region === '') {
+			admin_mailbox_relay_flash($session, 'Pick a region.', 'Cannot provision');
+			return LogicResult::redirect($self_url);
+		}
+		if (RelayCloudProvision::live() !== null) {
+			admin_mailbox_relay_flash($session, 'A relay cloud act is already in flight — one at a time.', 'Cannot provision');
+			return LogicResult::redirect($self_url);
+		}
+
+		$run = new RelayCloudProvision(NULL);
+		$run->set('rcp_kind', 'provision');
+		$run->set('rcp_provider', 'linode');
+		$run->set('rcp_mail_hostname', substr($mail_hostname, 0, 255));
+		$run->set('rcp_region', substr($region, 0, 50));
+		$run->set('rcp_instance_type', substr($type, 0, 50));
+		$run->save();
+		return LogicResult::redirect($self_url);
+	}
+
+	// The one-click credential branch: when a Linode OAuth client is
+	// configured, the step is a single Approve at Linode — the consent lands
+	// on the run via RelayCloudConsumer with the same grant-per-act custody.
+	if ($action === 'relay_cloud_connect') {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provision_class.php'));
+		require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Client.php'));
+		$run = RelayCloudProvision::live();
+		if ($run === null || (string)$run->get('rcp_status') !== 'awaiting_grant') {
+			return LogicResult::redirect($self_url);
+		}
+		try {
+			$consent_url = (new OAuth2Client())->beginConsent(
+				'linode', array('linodes:read_write'), 'relay_cloud',
+				array('run_id' => intval($run->key)), $self_url);
+		} catch (\Throwable $e) {
+			admin_mailbox_relay_flash($session, $e->getMessage(), 'Could not start the Linode approval');
+			return LogicResult::redirect($self_url);
+		}
+		return LogicResult::redirect($consent_url);
+	}
+
+	// The just-in-time credential floor: a short-lived provider token, minted
+	// by the customer for this one act, verified live, sealed onto the run,
+	// and erased at the run's terminal state (grant-per-act custody).
+	if ($action === 'relay_cloud_token') {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provision_class.php'));
+		require_once(PathHelper::getIncludePath('includes/cloud_compute/LinodeComputeDriver.php'));
+
+		$run = RelayCloudProvision::live();
+		if ($run === null || (string)$run->get('rcp_status') !== 'awaiting_grant') {
+			return LogicResult::redirect($self_url);
+		}
+		$token = trim((string)($input['cloud_token'] ?? ''));
+		if ($token === '') {
+			admin_mailbox_relay_flash($session, 'Paste the token to continue.', 'Token required');
+			return LogicResult::redirect($self_url);
+		}
+		// Fail fast on a bad token (a cheap read call); transient provider
+		// trouble is not the customer's fault, so only a rejection blocks.
+		try {
+			(new LinodeComputeDriver($token))->regions();
+		} catch (CloudComputeException $e) {
+			if ((int)$e->getCode() === 401) {
+				admin_mailbox_relay_flash($session,
+					'Linode rejected that token. Create a fresh one (scope: Linodes read/write) and paste it again.',
+					'Token rejected');
+				return LogicResult::redirect($self_url);
+			}
+		} catch (\Throwable $e) {
+			// Network hiccup — proceed; the run's own error handling covers it.
+		}
+		$run->sealToken($token);
+		$run->set('rcp_status', 'ready');
+		$run->set('rcp_error', null);
+		$run->save();
+		admin_mailbox_relay_flash($session,
+			'Provisioning started — the server is created in your account and built automatically. '
+			. 'This page shows progress; the whole run takes several minutes.');
+		return LogicResult::redirect($self_url);
+	}
+
+	// Dismiss a finished (or abandoned-at-consent) run from the section.
+	if ($action === 'relay_cloud_dismiss') {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provision_class.php'));
+		$run = RelayCloudProvision::latest();
+		if ($run !== null && (string)$run->get('rcp_status') !== 'booting'
+				&& (string)$run->get('rcp_status') !== 'provisioning') {
+			$run->eraseCredentials();
+			$run->soft_delete();
+		}
 		return LogicResult::redirect($self_url);
 	}
 
@@ -110,6 +232,7 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
  */
 function admin_mailbox_relay_tenant_vars(): array {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySsh.php'));
 	$settings = Globalvars::get_instance();
 	$server_manager_active = PluginHelper::isPluginActive('server_manager');
 
@@ -144,10 +267,13 @@ function admin_mailbox_relay_tenant_vars(): array {
 		}
 	}
 
-	// Live hosted-slot state when the service connection is configured.
+	// Live hosted-slot state when the service connection is configured — and
+	// only while the hosted offering is launched (no network call for a
+	// surface that is not rendered).
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetClient.php'));
 	$fleet_client = new FleetClient();
-	$fleet_configured = $fleet_client->configured();
+	$fleet_configured = mailbox_hosted_relay_offered() && $fleet_client->configured();
 	$fleet_status = null;
 	$fleet_error = '';
 	if ($fleet_configured) {
@@ -163,17 +289,46 @@ function admin_mailbox_relay_tenant_vars(): array {
 		}
 	}
 
+	// Cloud path state: the latest act (live progress or last outcome). The
+	// cheap transitions (create instance, poll boot) advance right here on
+	// page load so a watching admin sees progress; the long SSH build stays
+	// with the scheduled task.
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provision_class.php'));
+	$live_run = RelayCloudProvision::live();
+	if ($live_run !== null && in_array((string)$live_run->get('rcp_status'), array('ready', 'booting'), true)) {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayCloudProvisioner.php'));
+		$was_allowed = SystemBase::$allow_get_mutation;
+		SystemBase::$allow_get_mutation = true;
+		try {
+			(new RelayCloudProvisioner())->advanceCheap($live_run);
+		} catch (\Throwable $e) {
+			error_log('relay cloud page-advance failed for run ' . intval($live_run->key) . ': ' . $e->getMessage());
+		} finally {
+			SystemBase::$allow_get_mutation = $was_allowed;
+		}
+	}
+
+	// Local mail listener state + guardrail verdict (listener_admin.php) — the
+	// box renders whenever a live relay row exists or a decommission is recorded.
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/listener_admin.php'));
+	$listener = (count($relays) > 0 || mailbox_listener_setting() === 'decommissioned')
+		? mailbox_listener_state() : null;
+
 	return array(
+		'listener'              => $listener,
 		'relays'                => $relays,
 		'nodes'                 => $nodes,
 		'server_manager_active' => $server_manager_active,
 		'main_wg_public_key'    => (string)$settings->get_setting('mailbox_relay_wg_public_key'),
+		'pull_key_ready'        => is_file(RelaySsh::pullKeyPath()),
 		'has_active_relay'      => ($active !== null),
 		'outbound_mode'         => (strtolower(trim((string)$settings->get_setting('mailbox_relay_outbound_mode'))) === 'smarthost')
 			? 'smarthost' : 'provider',
 		'fleet_configured'      => $fleet_configured,
 		'fleet_status'          => $fleet_status,
 		'fleet_error'           => $fleet_error,
+		'cloud_run'             => RelayCloudProvision::latest(),
+		'cloud_oauth_configured'=> admin_mailbox_relay_linode_oauth_configured(),
 	);
 }
 
@@ -484,16 +639,18 @@ function admin_mailbox_relay_health(): array {
 	$mode = (strtolower(trim((string)Globalvars::get_instance()->get_setting('mailbox_relay_outbound_mode'))) === 'smarthost')
 		? 'smarthost' : 'provider';
 	// The check list matches the chosen outbound path — never an N/A row.
+	// Labels are plain outcomes; the technical detail rides the tooltip on
+	// failure.
 	$run = array(
-		'checkRelaySpoolDraining' => 'Spool draining',
-		'checkRelayMapFresh'      => 'Alias map fresh',
-		'checkOriginHidden'       => 'Origin hidden in DNS',
+		'checkRelaySpoolDraining' => 'Mail pickup',
+		'checkRelayMapFresh'      => 'Address list current',
+		'checkOriginHidden'       => 'Server address hidden',
 	);
 	if ($mode === 'smarthost') {
-		$run['checkRelayTunnel'] = 'Tunnel accepts compose submission';
+		$run['checkRelayTunnel'] = 'Sending tunnel';
 	} else {
-		$run['checkOutboundTransportClass'] = 'Sent mail leaves via provider API';
-		$run['checkOutboundOriginLeak']     = 'No origin leak in sent mail';
+		$run['checkOutboundTransportClass'] = 'Sending route hides your address';
+		$run['checkOutboundOriginLeak']     = 'No leaks in sent mail';
 	}
 	$out = array();
 	foreach ($run as $method => $label) {

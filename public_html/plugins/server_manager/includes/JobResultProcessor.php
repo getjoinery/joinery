@@ -497,7 +497,10 @@ class JobResultProcessor {
 			$relay->set('mrl_wg_endpoint', (string)$node->get('mgn_wg_endpoint'));
 			$relay->set('mrl_wg_ip', (string)$node->get('mgn_wg_ip'));
 			if (!$existing) {
-				$relay->set('mrl_is_enabled', false); // admin enables after verifying
+				// Born enabled: pulling and map pushes start immediately, so the
+				// relay is ready before any MX points at it. Doctrine effects key
+				// off the recorded cutover state; Disable is an emergency stop.
+				$relay->set('mrl_is_enabled', true);
 			}
 			$relay->save();
 			// Mint the ambient transport keypair now so the first map push can seal

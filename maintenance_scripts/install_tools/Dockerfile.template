@@ -155,7 +155,7 @@ CMD set +H && \
     find "/var/www/html/${SITENAME}/public_html" -type f -exec chmod 644 {} + && \
     php "/var/www/html/${SITENAME}/public_html/utils/update_database.php" 2>/dev/null || true && \
     bash "/var/www/html/${SITENAME}/maintenance_scripts/install_tools/_reconcile_upgradable_assets.sh" || true && \
-    echo "*/15 * * * * www-data php /var/www/html/${SITENAME}/public_html/utils/process_scheduled_tasks.php >> /var/www/html/${SITENAME}/logs/cron_scheduled_tasks.log 2>&1" > /etc/cron.d/scheduled-tasks && \
+    echo "*/5 * * * * www-data php /var/www/html/${SITENAME}/public_html/utils/process_scheduled_tasks.php >> /var/www/html/${SITENAME}/logs/cron_scheduled_tasks.log 2>&1" > /etc/cron.d/scheduled-tasks && \
     chmod 644 /etc/cron.d/scheduled-tasks && \
     echo "" >> /etc/cron.d/scheduled-tasks && \
     echo "0 2 * * * root /usr/sbin/logrotate /etc/logrotate.d/joinery-${SITENAME} > /dev/null 2>&1" > /etc/cron.d/logrotate-joinery && \

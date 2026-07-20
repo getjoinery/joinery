@@ -18,7 +18,7 @@
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_account_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/includes/cloud_compute/LinodeComputeDriver.php'));
+require_once(PathHelper::getIncludePath('includes/cloud_compute/LinodeComputeDriver.php'));
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Client.php'));
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2ProviderRegistry.php'));
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
