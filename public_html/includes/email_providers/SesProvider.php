@@ -9,7 +9,12 @@
  * through the same AWS credential — over an HTTP API, so the submitting box's
  * IP never enters the delivered Received: chain.
  *
- * @version 1.4
+ * Implements DkimRecordSource: GetEmailIdentity reports the Easy DKIM CNAME
+ * tokens a sending domain must publish, which drives the mailbox Setup tab's
+ * DKIM row. (SES selects the verified identity — and its DKIM keys — from the
+ * message's From domain automatically, so raw relays need no path selection.)
+ *
+ * @version 1.5
  */
 
 require_once(PathHelper::getComposerAutoloadPath());
@@ -18,7 +23,7 @@ require_once(PathHelper::getIncludePath('includes/InboundEmailProvider.php'));
 use Aws\SesV2\SesV2Client;
 use Aws\Exception\AwsException;
 
-class SesProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubmissionRelay {
+class SesProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubmissionRelay, DkimRecordSource {
 
     public static function getKey(): string {
         return 'ses';
@@ -388,6 +393,46 @@ class SesProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubm
         }
 
         return new SesV2Client($config);
+    }
+
+    // ── DkimRecordSource ────────────────────────────────────────────────
+
+    /**
+     * The Easy DKIM CNAME records SES requires for a sending domain identity.
+     * A domain verified with BYODKIM has no tokens — that returns 'ok' with no
+     * records, meaning nothing is left to publish. NotFoundException means the
+     * domain is not an identity in this account/region.
+     */
+    public static function getDkimStatus(string $domain): array {
+        $settings = Globalvars::get_instance();
+        try {
+            $client = self::buildClient(
+                $settings->get_setting('ses_region') ?: 'us-east-1',
+                $settings->get_setting('ses_access_key_id'),
+                $settings->get_setting('ses_secret_access_key')
+            );
+            $identity = $client->getEmailIdentity(['EmailIdentity' => $domain]);
+        } catch (AwsException $e) {
+            if ($e->getAwsErrorCode() === 'NotFoundException') {
+                return ['status' => 'not_registered', 'records' => []];
+            }
+            error_log('[SesProvider] getDkimStatus(' . $domain . ') failed: '
+                . ($e->getAwsErrorMessage() ?: $e->getMessage()));
+            return ['status' => 'unreachable', 'records' => []];
+        } catch (\Throwable $e) {
+            error_log('[SesProvider] getDkimStatus(' . $domain . ') failed: ' . $e->getMessage());
+            return ['status' => 'unreachable', 'records' => []];
+        }
+
+        $records = [];
+        foreach (($identity['DkimAttributes']['Tokens'] ?? []) as $token) {
+            $records[] = [
+                'type'  => 'CNAME',
+                'name'  => $token . '._domainkey.' . $domain,
+                'value' => $token . '.dkim.amazonses.com',
+            ];
+        }
+        return ['status' => 'ok', 'records' => $records];
     }
 
     // ── RawMessageRelay ─────────────────────────────────────────────────

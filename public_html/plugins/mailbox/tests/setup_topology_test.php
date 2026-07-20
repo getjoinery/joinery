@@ -27,10 +27,15 @@
  *  - Relay mail-host identity rows (A + PTR) with the operator/tenant split.
  *  - plugin.relay_enable renders INFO while DNS is still moving.
  *  - Provider getSpfMechanism shapes (static includes, local '' cases).
+ *  - DKIM plan branching (specs/mailbox_provider_dkim.md): local opendkim only
+ *    when mail rides local Postfix, provider-driven rows under provider
+ *    outbound, the honest smarthost gap — and provider DKIM row rendering
+ *    (records verified against DNS, not_registered / unreachable verdicts)
+ *    via a fake DkimRecordSource provider.
  *
  * Run: php tests/run.php db --filter=setup_topology
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -73,6 +78,14 @@ function call_private($obj, string $method, ...$args) {
 	return $m->invoke($obj, ...$args);
 }
 
+/** Scriptable DkimRecordSource double — the setup check calls it by class name. */
+if (!class_exists('FakeDkimRecordProvider')) {
+	class FakeDkimRecordProvider {
+		public static $status = array('status' => 'ok', 'records' => array());
+		public static function getDkimStatus(string $domain): array { return self::$status; }
+	}
+}
+
 // One fixture map serves every section.
 DnsResolver::setBackend(new FakeDnsBackend(array(
 	// The box's own identity (colocated floor).
@@ -90,6 +103,11 @@ DnsResolver::setBackend(new FakeDnsBackend(array(
 	'mailgun.org|' . DNS_TXT          => array(array('txt' => 'v=spf1 ip4:198.51.100.99/32 -all')),
 	'umbrella.example|' . DNS_TXT     => array(array('txt' => 'v=spf1 include:mailgun.org -all')),
 	'otherprovider.example|' . DNS_TXT => array(array('txt' => 'v=spf1 ip4:192.0.2.55 -all')),
+	// Provider DKIM records (specs/mailbox_provider_dkim.md).
+	'krs._domainkey.signed.example|' . DNS_TXT   => array(array('txt' => 'k=rsa; p=MIGfPUBLICKEY')),
+	'krs._domainkey.wrong.example|' . DNS_TXT    => array(array('txt' => 'k=rsa; p=SOMEOTHERKEY')),
+	'krs._domainkey.broken.example|' . DNS_TXT   => false,
+	'tok1._domainkey.cname.example|' . DNS_CNAME => array(array('target' => 'tok1.dkim.amazonses.com')),
 )));
 
 try {
@@ -242,6 +260,104 @@ try {
 	check(MailgunProvider::getSpfMechanism('example.test') === 'include:mailgun.org', 'Mailgun mechanism');
 	check(SesProvider::getSpfMechanism('example.test') === 'include:amazonses.com', 'SES mechanism');
 	check(PostfixProvider::getSpfMechanism('example.test') === '', 'local sendmail has no mechanism');
+
+	// -----------------------------------------------------------------------
+	section('dkim plan: signing path by topology and outbound mode');
+
+	harness_set_setting_mem('email_service', 'mailgun');
+	harness_set_setting_mem('mailbox_relay_outbound_mode', '');
+
+	$c = topo_checker(topo('colocated'));
+	$plan = call_private($c, 'dkimPlan');
+	check($plan['local'] === true, 'colocated: local opendkim signs what the box submits');
+	check($plan['provider'] === true && $plan['class'] === 'MailgunProvider',
+		'colocated + API provider: provider records verified too');
+
+	$c = topo_checker(topo('self_hosted', SELF_MX, RELAY_IP, true));
+	$plan = call_private($c, 'dkimPlan');
+	check($plan['local'] === false, 'fronted: a local opendkim key is never prescribed');
+	check($plan['provider'] === true && $plan['class'] === 'MailgunProvider',
+		'fronted provider outbound: the provider is the signer');
+	check($plan['smarthost'] === false, 'fronted provider outbound: no smarthost gap row');
+
+	harness_set_setting_mem('email_service', 'smtp');
+	$c = topo_checker(topo('self_hosted', SELF_MX, RELAY_IP, true));
+	$plan = call_private($c, 'dkimPlan');
+	check($plan['provider'] === true && $plan['class'] === null,
+		'provider without the capability: generic guidance (class null), still never opendkim');
+	$c = topo_checker(topo('colocated'));
+	$plan = call_private($c, 'dkimPlan');
+	check($plan['local'] === true && $plan['provider'] === false,
+		'colocated + local-submission provider: opendkim row only');
+
+	harness_set_setting_mem('email_service', 'mailgun');
+	harness_set_setting_mem('mailbox_relay_outbound_mode', 'smarthost');
+	$c = topo_checker(topo('self_hosted', SELF_MX, RELAY_IP, true));
+	$plan = call_private($c, 'dkimPlan');
+	check($plan['smarthost'] === true && $plan['provider'] === false && $plan['local'] === false,
+		'smarthost outbound: the unsigned gap is stated, nothing else prescribed');
+	harness_set_setting_mem('mailbox_relay_outbound_mode', '');
+
+	// -----------------------------------------------------------------------
+	section('provider DKIM rows: verified against DNS, one row per record');
+
+	$cls = 'FakeDkimRecordProvider';
+	$c = topo_checker(topo('self_hosted', SELF_MX, RELAY_IP, true));
+
+	FakeDkimRecordProvider::$status = array('status' => 'ok', 'records' => array(
+		array('type' => 'TXT', 'name' => 'krs._domainkey.signed.example', 'value' => 'k=rsa; p=MIGfPUBLICKEY'),
+	));
+	$rows = call_private($c, 'providerDkimRows', $cls, 'FakeMail', 'signed.example', 'domain.dkim');
+	check(count($rows) === 1 && $rows[0]['status'] === 'pass', 'published matching TXT record passes');
+
+	FakeDkimRecordProvider::$status = array('status' => 'ok', 'records' => array(
+		array('type' => 'TXT', 'name' => 'krs._domainkey.unsigned.example', 'value' => 'k=rsa; p=MIGfPUBLICKEY'),
+	));
+	$rows = call_private($c, 'providerDkimRows', $cls, 'FakeMail', 'unsigned.example', 'domain.dkim');
+	check($rows[0]['status'] === 'warn', 'missing record warns');
+	check(($rows[0]['fix']['dns_record']['name'] ?? '') === 'krs._domainkey.unsigned.example'
+		&& ($rows[0]['fix']['dns_record']['type'] ?? '') === 'TXT', 'fix carries the copy-ready record');
+
+	FakeDkimRecordProvider::$status = array('status' => 'ok', 'records' => array(
+		array('type' => 'TXT', 'name' => 'krs._domainkey.wrong.example', 'value' => 'k=rsa; p=MIGfPUBLICKEY'),
+	));
+	$rows = call_private($c, 'providerDkimRows', $cls, 'FakeMail', 'wrong.example', 'domain.dkim');
+	check($rows[0]['status'] === 'warn', 'mismatched published key warns (compared by p= body)');
+
+	FakeDkimRecordProvider::$status = array('status' => 'ok', 'records' => array(
+		array('type' => 'CNAME', 'name' => 'tok1._domainkey.cname.example', 'value' => 'tok1.dkim.amazonses.com'),
+		array('type' => 'CNAME', 'name' => 'tok2._domainkey.cname.example', 'value' => 'tok2.dkim.amazonses.com'),
+	));
+	$rows = call_private($c, 'providerDkimRows', $cls, 'FakeMail', 'cname.example', 'domain.dkim');
+	check(count($rows) === 2, 'one row per required record');
+	check($rows[0]['id'] === 'domain.dkim' && $rows[1]['id'] === 'domain.dkim.1', 'row ids stay unique');
+	check($rows[0]['status'] === 'pass', 'published CNAME matches by target');
+	check($rows[1]['status'] === 'warn'
+		&& ($rows[1]['fix']['dns_record']['type'] ?? '') === 'CNAME', 'unpublished CNAME warns with its record');
+
+	FakeDkimRecordProvider::$status = array('status' => 'ok', 'records' => array(
+		array('type' => 'TXT', 'name' => 'krs._domainkey.broken.example', 'value' => 'k=rsa; p=MIGfPUBLICKEY'),
+	));
+	$rows = call_private($c, 'providerDkimRows', $cls, 'FakeMail', 'broken.example', 'domain.dkim');
+	check($rows[0]['status'] === 'unknown', 'a failed DNS lookup renders unknown, never a fabricated verdict');
+
+	FakeDkimRecordProvider::$status = array('status' => 'not_registered', 'records' => array());
+	$rows = call_private($c, 'providerDkimRows', $cls, 'FakeMail', 'absent.example', 'domain.dkim');
+	check($rows[0]['status'] === 'warn' && strpos($rows[0]['summary'], 'not registered') !== false,
+		'unregistered domain warns toward the provider dashboard');
+	check(strpos($rows[0]['summary'], 'DMARC alignment') !== false, 'the alignment consequence is stated');
+
+	FakeDkimRecordProvider::$status = array('status' => 'unreachable', 'records' => array());
+	$rows = call_private($c, 'providerDkimRows', $cls, 'FakeMail', 'offline.example', 'domain.dkim');
+	check($rows[0]['status'] === 'unknown', 'an unreachable provider API renders unknown');
+
+	FakeDkimRecordProvider::$status = array('status' => 'ok', 'records' => array());
+	$rows = call_private($c, 'providerDkimRows', $cls, 'FakeMail', 'byodkim.example', 'domain.dkim');
+	check($rows[0]['status'] === 'pass', 'registered with nothing left to publish passes');
+
+	$rows = call_private($c, 'providerDkimRows', null, 'SomeMail', 'generic.example', 'domain.dkim');
+	check($rows[0]['status'] === 'warn' && strpos($rows[0]['summary'], 'SomeMail') !== false,
+		'capability-less provider gets a generic row naming it — never an opendkim prescription');
 
 } catch (\Throwable $e) {
 	check(false, 'uncaught ' . get_class($e), $e->getMessage());

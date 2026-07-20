@@ -23,7 +23,7 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
- * @version 1.20
+ * @version 1.22
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -54,6 +54,7 @@ class InboundEmailSetupCheck {
 	private $relay_info = null;
 	private $router = null;
 	private $spf_mechanisms = array();
+	private $dkim_statuses = array();
 	private $topology = null;
 	private $fleet_state = null;
 
@@ -860,19 +861,41 @@ class InboundEmailSetupCheck {
 				$out[] = $this->spfResult($domain, $spf, $plan);
 			}
 
-			// DKIM — one check covering both that a signing key exists on this
-			// server and that the matching record is published in DNS. The first
-			// unmet condition wins.
-			$keyFile = '/etc/opendkim/keys/' . $domain . '/mail.txt';
-			$localKey = $this->readDkimKey($keyFile);
-			if ($localKey === '') {
+			// DKIM — rows per signing path this domain's mail actually rides
+			// (specs/mailbox_provider_dkim.md): local opendkim when mail leaves
+			// through local Postfix, the outbound provider's own records when
+			// composed mail rides its API, an honest gap under the relay
+			// smarthost. A locally generated key is never prescribed for a path
+			// it doesn't sign.
+			$dkim_plan = $this->dkimPlan();
+			if ($dkim_plan['smarthost']) {
 				$out[] = $this->r('domain.dkim', $domain, 'domain', 'DKIM record', self::RECOMMENDED, self::WARN,
-					'No DKIM key has been generated for ' . $domain . ' on this server.',
-					'Forwarding works without DKIM; generating a key improves outbound deliverability. '
-					. 'The command below generates the key, wires opendkim, and prints the DNS record to publish.',
-					$this->dkimFix($domain));
-			} else {
-				$out[] = $this->dkimResult($domain, $localKey);
+					'Sent mail leaves through the relay smarthost without a DKIM signature.',
+					'Deliverability rides on SPF alone. Switching the relay outbound mode to '
+					. 'provider (with an API provider) restores DKIM signing.');
+			}
+			if ($dkim_plan['local']) {
+				// Local opendkim signs what this box submits itself. One check
+				// covering both that a signing key exists on this server and
+				// that the matching record is published in DNS; the first unmet
+				// condition wins.
+				$keyFile = '/etc/opendkim/keys/' . $domain . '/mail.txt';
+				$localKey = $this->readDkimKey($keyFile);
+				if ($localKey === '') {
+					$out[] = $this->r('domain.dkim', $domain, 'domain', 'DKIM record', self::RECOMMENDED, self::WARN,
+						'No DKIM key has been generated for ' . $domain . ' on this server.',
+						'Forwarding works without DKIM; generating a key improves outbound deliverability. '
+						. 'The command below generates the key, wires opendkim, and prints the DNS record to publish.',
+						$this->dkimFix($domain));
+				} else {
+					$out[] = $this->dkimResult($domain, $localKey);
+				}
+			}
+			if ($dkim_plan['provider']) {
+				$id_base = $dkim_plan['local'] ? 'domain.dkim_provider' : 'domain.dkim';
+				foreach ($this->providerDkimRows($dkim_plan['class'], $dkim_plan['label'], $domain, $id_base) as $r) {
+					$out[] = $r;
+				}
 			}
 
 			// DMARC
@@ -892,6 +915,41 @@ class InboundEmailSetupCheck {
 						$domain . ' has no DMARC record.',
 						'DMARC is optional but recommended once SPF and DKIM pass.',
 						$this->dnsFix('TXT', '_dmarc.' . $domain, 'v=DMARC1; p=none; rua=mailto:postmaster@' . $domain));
+			}
+		}
+
+		// Unsealed mail on a protected domain (specs/mailbox_protection_ceremony.md
+		// § 3): the ceremony seals the backlog at raise time and the mutation-point
+		// refusals keep every mailbox sealable, so this row firing means protection
+		// silently degraded (a vault deleted after the raise, a legacy state) — the
+		// one outcome the ceremony exists to end, so it must be loud.
+		if ($model && $model->seals_content()) {
+			$unsealed = 0;
+			try {
+				$db = DbConnector::get_instance()->get_db_link();
+				$stmt = $db->prepare(
+					"SELECT COUNT(*) FROM iem_inbound_email_messages
+					 WHERE iem_ied_inbound_email_domain_id = ?
+					   AND iem_content_sealed = false AND iem_delete_time IS NULL");
+				$stmt->execute(array(intval($model->key)));
+				$unsealed = intval($stmt->fetchColumn());
+			} catch (\Throwable $e) {
+				// Count unavailable — say nothing rather than fabricate a verdict.
+				$unsealed = -1;
+			}
+			if ($unsealed > 0) {
+				$out[] = $this->r('domain.sealed_backlog', $domain, 'domain', 'Mail sealed at rest',
+					self::REQUIRED, self::FAIL,
+					$unsealed . ' message(s) on this protected domain are stored unsealed.',
+					'Every message on a Private or Fortress domain should be sealed to its mailbox '
+					. 'owner\'s vault. Unsealed rows mean the owner\'s vault is missing or was deleted '
+					. 'after the level was raised.',
+					array('text' => 'Open the domain editor — the sealing pass resumes automatically once '
+						. 'every mailbox owner has a vault.'));
+			} elseif ($unsealed === 0) {
+				$out[] = $this->r('domain.sealed_backlog', $domain, 'domain', 'Mail sealed at rest',
+					self::REQUIRED, self::PASS,
+					'Every stored message on this protected domain is sealed.');
 			}
 		}
 
@@ -1975,6 +2033,155 @@ class InboundEmailSetupCheck {
 		}
 		return array('prescribe' => 'record', 'value' => 'v=spf1 ' . $mech . ' -all',
 			'mechanism' => $mech, 'label' => $label);
+	}
+
+	/**
+	 * Which DKIM signing paths carry a domain's mail, by topology
+	 * (specs/mailbox_provider_dkim.md). Returns:
+	 *   'local'     — local opendkim signs what this box submits itself
+	 *                 (colocated only; a fronted deployment's compose never
+	 *                 rides local Postfix).
+	 *   'provider'  — composed mail rides the outbound provider's API, so the
+	 *                 correct record is the one the PROVIDER issues.
+	 *   'smarthost' — fronted with the relay smarthost carrying sends, which
+	 *                 sign nothing (honest-gap row).
+	 *   'class'     — the provider class when it can report its records
+	 *                 (DkimRecordSource), else null (generic guidance).
+	 *   'label'     — the provider's display label.
+	 */
+	private function dkimPlan(): array {
+		$class = $this->activeProviderClass();
+		$label = ($class !== null) ? $class::getLabel() : 'the configured provider';
+		$source = ($class !== null)
+			&& in_array('DkimRecordSource', class_implements($class) ?: array(), true);
+
+		if (!$this->fronted()) {
+			return array('local' => true, 'smarthost' => false,
+				'provider' => $source, 'class' => $source ? $class : null, 'label' => $label);
+		}
+
+		$smarthost = strtolower(trim((string)$this->settings->get_setting('mailbox_relay_outbound_mode'))) === 'smarthost';
+		if ($smarthost) {
+			return array('local' => false, 'smarthost' => true,
+				'provider' => false, 'class' => null, 'label' => $label);
+		}
+		return array('local' => false, 'smarthost' => false,
+			'provider' => true, 'class' => $source ? $class : null, 'label' => $label);
+	}
+
+	/**
+	 * The DKIM rows for a domain whose mail is provider-signed: one row per
+	 * record the provider requires, each verified against live DNS. A provider
+	 * without the DkimRecordSource capability ($class null) gets one generic
+	 * row naming it — never a prescription for a local opendkim key.
+	 */
+	private function providerDkimRows(?string $class, string $label, string $domain, string $id_base): array {
+		if ($class === null) {
+			return array($this->r($id_base, $domain, 'domain', 'DKIM record', self::RECOMMENDED, self::WARN,
+				'Sent mail is DKIM-signed by ' . $label . ' — publish the DKIM record it issues for ' . $domain . '.',
+				$label . ' does not report its required records to this deployment; find them in its dashboard.',
+				array('text' => 'Publish the DKIM record ' . $label . ' provides for ' . $domain
+					. ' at your DNS provider, then re-check.')));
+		}
+
+		$status = $this->providerDkimStatus($class, $domain);
+		if ($status['status'] === 'unreachable') {
+			return array($this->r($id_base, $domain, 'domain', 'DKIM record (' . $label . ')', self::RECOMMENDED, self::UNKNOWN,
+				'Could not determine ' . $label . '\'s DKIM records for ' . $domain . ' — its API did not answer. Try again.'));
+		}
+		if ($status['status'] === 'not_registered') {
+			return array($this->r($id_base, $domain, 'domain', 'DKIM record (' . $label . ')', self::RECOMMENDED, self::WARN,
+				$domain . ' is not registered as a sending domain at ' . $label
+				. ' — mail sent from ' . $domain . ' addresses is signed as another domain and fails DMARC alignment.',
+				'',
+				array('text' => 'Add ' . $domain . ' as a sending domain in the ' . $label
+					. ' dashboard, publish the records it provides, then re-check.')));
+		}
+		if (empty($status['records'])) {
+			return array($this->r($id_base, $domain, 'domain', 'DKIM record (' . $label . ')', self::RECOMMENDED, self::PASS,
+				$label . ' reports DKIM configured for ' . $domain . ' with no records left to publish.'));
+		}
+
+		$rows = array();
+		$i = 0;
+		foreach ($status['records'] as $rec) {
+			$rows[] = $this->providerDkimRecordRow($id_base . ($i > 0 ? '.' . $i : ''), $label, $domain, $rec);
+			$i++;
+		}
+		return $rows;
+	}
+
+	/** Verify one provider-required DKIM record (TXT by p= body, CNAME by target) against live DNS. */
+	private function providerDkimRecordRow(string $id, string $label, string $domain, array $rec): array {
+		$type = strtoupper(trim((string)($rec['type'] ?? 'TXT')));
+		$name = rtrim(trim((string)($rec['name'] ?? '')), '.');
+		$value = trim((string)($rec['value'] ?? ''));
+		$row_label = 'DKIM record (' . $label . ')';
+
+		if ($type === 'CNAME') {
+			list($target, $ok) = $this->dns(function () use ($name) { return DnsResolver::getCname($name); });
+			if (!$ok) {
+				return $this->r($id, $domain, 'domain', $row_label, self::RECOMMENDED, self::UNKNOWN,
+					'The DNS lookup for ' . $name . ' failed — try again.');
+			}
+			if ($target === null || $target === '') {
+				return $this->r($id, $domain, 'domain', $row_label, self::RECOMMENDED, self::WARN,
+					$label . ' requires a DKIM record at ' . $name . ' that is not published yet.', '',
+					$this->dnsFix('CNAME', $name, $value));
+			}
+			if (strcasecmp(rtrim((string)$target, '.'), rtrim($value, '.')) === 0) {
+				return $this->r($id, $domain, 'domain', $row_label, self::RECOMMENDED, self::PASS,
+					'The ' . $label . ' DKIM record at ' . $name . ' is published.');
+			}
+			return $this->r($id, $domain, 'domain', $row_label, self::RECOMMENDED, self::WARN,
+				'The record at ' . $name . ' does not match what ' . $label . ' requires.',
+				'Published: ' . $target, $this->dnsFix('CNAME', $name, $value));
+		}
+
+		list($txt, $ok) = $this->dns(function () use ($name) { return DnsResolver::getTxt($name); });
+		if (!$ok) {
+			return $this->r($id, $domain, 'domain', $row_label, self::RECOMMENDED, self::UNKNOWN,
+				'The DNS lookup for ' . $name . ' failed — try again.');
+		}
+		$published = '';
+		foreach ($txt as $t) {
+			if (stripos($t, 'v=DKIM1') !== false || strpos($t, 'p=') !== false) { $published .= $t; }
+		}
+		if ($published === '') {
+			return $this->r($id, $domain, 'domain', $row_label, self::RECOMMENDED, self::WARN,
+				$label . ' requires a DKIM record at ' . $name . ' that is not published yet.', '',
+				$this->dnsFix('TXT', $name, $value));
+		}
+		$pubP = $this->extractDkimP($published);
+		$wantP = $this->extractDkimP($value);
+		$match = ($wantP !== '') ? ($pubP === $wantP)
+			: (preg_replace('/\s+/', '', $published) === preg_replace('/\s+/', '', $value));
+		if ($match) {
+			return $this->r($id, $domain, 'domain', $row_label, self::RECOMMENDED, self::PASS,
+				'The ' . $label . ' DKIM record at ' . $name . ' is published and matches.');
+		}
+		return $this->r($id, $domain, 'domain', $row_label, self::RECOMMENDED, self::WARN,
+			'The record at ' . $name . ' does not match what ' . $label . ' requires.',
+			'Published: ' . $published, $this->dnsFix('TXT', $name, $value));
+	}
+
+	/**
+	 * A provider class's DKIM status for a domain, cached per (class, domain)
+	 * for the run — the answer comes from the provider's API.
+	 */
+	private function providerDkimStatus(string $class, string $domain): array {
+		$key = $class . '|' . $domain;
+		if (!array_key_exists($key, $this->dkim_statuses)) {
+			$status = array('status' => 'unreachable', 'records' => array());
+			try {
+				$status = $class::getDkimStatus($domain);
+			} catch (\Throwable $e) {
+				error_log('InboundEmailSetupCheck: getDkimStatus(' . $class . ', ' . $domain . ') failed: '
+					. $e->getMessage());
+			}
+			$this->dkim_statuses[$key] = $status;
+		}
+		return $this->dkim_statuses[$key];
 	}
 
 	/**

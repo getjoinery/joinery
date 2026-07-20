@@ -87,6 +87,14 @@ $result = $sender->sendBatch($message, $recipients);
 - Automatic fallback if primary fails
 - Queue failed emails for retry
 
+**Sending defaults.** A message with no From gets `defaultemail` /
+`defaultemailname`. A message with no Reply-To gets `defaultreplyto` (when the
+setting is non-empty) — this is what lets a deployment keep its transactional
+From on an automated sending subdomain while replies land in a human mailbox
+on the bare domain. The default Reply-To applies to ambient sends only: a send
+through an injected transport is send-as-a-mailbox and never carries the
+site-wide Reply-To. All three are edited on the admin Email Settings page.
+
 **Protected identity domains.** A From address at a domain the Mailbox plugin
 marks as a protected sending identity is usable **only** through the session-gated
 mailbox compose path (`MailboxSender`, which sends with an injected transport).
@@ -922,6 +930,16 @@ need both:
 | `ses` | SESv2 `sendEmail` with `Content.Raw.Data` | SES owns bounces; verified MAIL FROM domain | ✅ |
 | `smtp` | Native raw SMTP | Full `MAIL FROM` control | ❌ (SMTP submission) |
 
+**Mailgun submission-domain alignment.** The domain in Mailgun's API path is
+its DKIM signing identity, so `relayRawMessage()` picks it per message: when
+the envelope sender's domain is an **active** sending domain in the Mailgun
+account, the relay submits through it and Mailgun's signature aligns with the
+From domain for DMARC; otherwise the configured `mailgun_domain` carries the
+send. The account lookup is cached per request and any failure falls back —
+a send never breaks because the domains API hiccuped. SES needs no equivalent:
+SESv2 selects the verified identity (and its DKIM keys) from the message's
+From domain automatically.
+
 The structured-only providers (`postmark`, `sendgrid`, `brevo`, `mailjet`,
 `resend`) deliberately **do not** implement it — they expose no faithful
 raw-MIME relay. A provider without the capability is detected via
@@ -932,6 +950,32 @@ smarthost. See
 [Mailbox — Forwarding relay](../plugins/mailbox/docs/overview.md#forwarding-relay)
 and [Mailbox — Outbound sending](../plugins/mailbox/docs/overview.md#outbound-sending)
 for how the mailbox plugin resolves each path.
+
+### Provider DKIM records (optional capability)
+
+`DkimRecordSource` is a further opt-in capability declared in the same file:
+a provider that DKIM-signs outbound mail itself implements it to report, from
+its own API, the DNS records a sending domain must publish for that signing to
+verify and align:
+
+```php
+public static function getDkimStatus(string $domain): array
+// ['status' => 'ok'|'not_registered'|'unreachable',
+//  'records' => [['type' => ..., 'name' => ..., 'value' => ...], ...]]
+```
+
+`ok` lists what must be published (possibly nothing left); `not_registered`
+means the API answered and the domain is not a sending domain there — the fix
+is at the provider dashboard, not in DNS; `unreachable` means callers must
+render an unknown verdict, never a fabricated one.
+
+Implementers: **Mailgun** (sending DNS records from the domains API — the
+`_domainkey` TXT rows) and **SES** (Easy DKIM CNAME tokens from
+`GetEmailIdentity`; a BYODKIM identity has no tokens and reports `ok` with no
+records). Local-submission providers (`postfix`, `smtp`) never implement it —
+opendkim owns their signing. The mailbox Setup tab consumes this to drive its
+per-domain DKIM rows; see
+[Mailbox — opendkim](../plugins/mailbox/docs/overview.md#opendkim-dkim-signing--inbound-verify).
 
 Protected-domain `From` addresses remain usable only via the session-gated
 mailbox compose path (the injected transport), never by transactional senders —

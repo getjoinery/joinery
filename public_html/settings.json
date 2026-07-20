@@ -109,6 +109,7 @@
     { "name": "custom_css", "default": "" },
     { "name": "defaultemail", "default": "" },
     { "name": "defaultemailname", "default": "" },
+    { "name": "defaultreplyto", "default": "" },
     { "name": "hcaptcha_private", "default": "" },
     { "name": "hcaptcha_public", "default": "" },
     { "name": "logo_link", "default": "" },
