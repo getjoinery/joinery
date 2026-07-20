@@ -1,0 +1,19 @@
+
+# Joinery Drive sync clients — Rust workspace (specs/drive_sync_clients.md).
+# Crates join the members list as their phase lands:
+#   jd-proto, jd-vfs, jd-core, jd-sim, jd-daemon, jd-shell
+[workspace]
+resolver = "2"
+members = [
+    "jd-crypto",
+    "jd-proto",
+]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "UNLICENSED"
+publish = false
+
+[profile.release]
+lto = "thin"
