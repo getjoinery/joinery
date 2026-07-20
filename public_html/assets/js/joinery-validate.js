@@ -1,9 +1,14 @@
 /**
  * Joinery Validation System - Pure JavaScript validation library
  * No jQuery dependencies, works alongside jQuery validation if present
- * @version 1.0.13
+ * @version 1.1.0
+ * @changelog 1.1.0 - A valid form re-submits NATIVELY (requestSubmit + a
+ *   one-shot stand-aside flag) instead of form.submit(), so other submit
+ *   listeners (step-up interceptors, payment tokenizers, analytics) see the
+ *   validated submission and may cancel it. form.submit() remains only as
+ *   the no-requestSubmit legacy fallback.
  */
-console.log('%c=== JOINERY VALIDATION v1.0.13 ===', 'color: blue; font-weight: bold');
+console.log('%c=== JOINERY VALIDATION v1.1.0 ===', 'color: blue; font-weight: bold');
 
 (function() {
     'use strict';
@@ -54,6 +59,15 @@ console.log('%c=== JOINERY VALIDATION v1.0.13 ===', 'color: blue; font-weight: b
 
             // Submit handler - simple and deterministic
             this.form.addEventListener('submit', async (e) => {
+                // Our own validated re-dispatch (below): stand aside so the
+                // event proceeds natively. Other listeners still see it and
+                // may preventDefault - that is the point of the re-dispatch.
+                if (this.form.dataset.jyValidated === '1') {
+                    delete this.form.dataset.jyValidated;
+                    if (this.debug) console.log('→ Validated re-dispatch, passing through');
+                    return;
+                }
+
                 if (this.debug) {
                     console.log('%c=== FORM SUBMIT ATTEMPT ===', 'color: red; font-weight: bold');
                 }
@@ -99,27 +113,38 @@ console.log('%c=== JOINERY VALIDATION v1.0.13 ===', 'color: blue; font-weight: b
                 }
 
                 if (isValid) {
-                    // Reattach the clicked submit button's name/value so the
-                    // programmatic submit below carries it (form.submit() drops
-                    // the submitter that native submission would have sent).
-                    if (submitter && submitter.name) {
-                        let preserved = this.form.querySelector('input[type="hidden"][data-joinery-submitter]');
-                        if (!preserved) {
-                            preserved = document.createElement('input');
-                            preserved.type = 'hidden';
-                            preserved.setAttribute('data-joinery-submitter', '1');
-                            this.form.appendChild(preserved);
-                        }
-                        preserved.name = submitter.name;
-                        preserved.value = submitter.value || '';
-                    }
                     if (this.submitHandler) {
                         if (this.debug) console.log('→ Calling custom submitHandler');
                         this.submitHandler(this.form);
+                    } else if (this.form.requestSubmit) {
+                        // Re-submit NATIVELY with a one-shot stand-aside flag.
+                        // A native submission fires the submit event again, so
+                        // every other listener (step-up interceptors, payment
+                        // tokenizers, analytics) sees the validated submission
+                        // and may cancel it - form.submit() silently navigated
+                        // over them. requestSubmit(submitter) also carries the
+                        // clicked button's name/value natively.
+                        this.form.dataset.jyValidated = '1';
+                        if (this.debug) console.log('→ Valid, re-dispatching natively via requestSubmit');
+                        this.form.requestSubmit(
+                            (submitter && submitter.form === this.form) ? submitter : undefined
+                        );
                     } else {
+                        // Legacy fallback (no requestSubmit): preserve the
+                        // clicked button's name/value - form.submit() drops the
+                        // submitter native submission would have sent.
+                        if (submitter && submitter.name) {
+                            let preserved = this.form.querySelector('input[type="hidden"][data-joinery-submitter]');
+                            if (!preserved) {
+                                preserved = document.createElement('input');
+                                preserved.type = 'hidden';
+                                preserved.setAttribute('data-joinery-submitter', '1');
+                                this.form.appendChild(preserved);
+                            }
+                            preserved.name = submitter.name;
+                            preserved.value = submitter.value || '';
+                        }
                         try {
-                            // Direct form submission - bypasses submit events but is simple and reliable
-                            // Incompatibility detection has already warned about payment forms and analytics
                             this.form.submit();
                         } catch (error) {
                             // Fallback for name="submit" shadowing issue

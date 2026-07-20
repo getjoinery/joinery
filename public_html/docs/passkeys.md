@@ -5,8 +5,9 @@ secret derivation. `includes/PasskeyService.php` is the single owner of every
 ceremony — consumers never touch the underlying library or handle raw WebAuthn
 JSON themselves.
 
-Gated by the `passkeys_enabled` setting. Every endpoint and UI entry point checks
-it and fails closed (404/hidden) when off.
+Gated by the `passkeys_enabled` setting — an emergency kill switch, on by
+default (vault setup and protected mailboxes depend on passkeys). Every
+endpoint and UI entry point checks it and fails closed (404/hidden) when off.
 
 This doc covers the *mechanics*. The account-level rules — which door a passkey
 may open, when passwordless sign-in is allowed, what each sensitive action
@@ -34,12 +35,12 @@ and reused across every ceremony call in `PasskeyService`.
 |---|---|---|
 | Registration | `getRegistrationOptions()` / `verifyRegistration()` | Enroll a new credential on a signed-in session |
 | Authentication | `getAuthenticationOptions()` / `verifyAuthentication()` | Passwordless sign-in |
-| Step-up | `getStepUpOptions()` / `verifyStepUp()` / `hasRecentStepUp()` | Re-confirm with an existing passkey before a sensitive action |
+| Step-up | `getStepUpOptions()` / `verifyStepUp()` / `hasRecentStepUp()` | Re-confirm with an existing passkey before a sensitive action (user verification required) |
 | Secret derivation | `getDerivationOptions()` / `verifyDerivation()` | WebAuthn PRF extension — a stable 32-byte secret per (credential, context) that the server never holds at rest |
 
 Each `get*Options()` call mints a random 32-byte challenge, stashes it in
 `pks_passkey_ceremonies` keyed by the browser-session id and tagged with a
-purpose string and a 120-second expiry, and returns a JSON-ready options array
+purpose string and a five-minute expiry, and returns a JSON-ready options array
 for the browser. Each `verify*()` call reads the stashed challenge, **deletes it
 immediately** (single-use — a replay finds nothing), and only then runs the
 WebAuthn verification. A mismatched purpose or an expired stash raises
@@ -105,7 +106,7 @@ is sent to the server), and the two client-custody contexts `vault-passwords-kek
 (Drive), whose KEK is derived and used **only in the browser** and never
 transmitted. The distinct per-scope context is what guarantees one scope's KEK can
 never unwrap another's key. Every derivation request sets `userVerification:
-required` (not merely `preferred`, unlike sign-in/step-up), since a vault unlock
+required` (not merely `preferred`, unlike sign-in), since a vault unlock
 demands device user verification. A feature that wants a client-held encryption
 key beyond the vault is a **PRF consumer** in the same shape:
 
@@ -116,10 +117,14 @@ key beyond the vault is a **PRF consumer** in the same shape:
    so the same context always evaluates the same secret for a given credential.
 2. `verifyDerivation()` returns `[User $user, Passkey $credential, string $prf_output_32]`.
    The 32-byte output is per-**credential** — two enrolled passkeys derive two
-   different secrets for the same context. A consumer must hold one wrapping of
-   its protected key per enrolled PRF-capable credential
-   (`PasskeyService::listCredentials($user)` to enumerate them, `pkc_prf_capable`
-   to filter).
+   different secrets for the same context. A consumer holds one wrapping of its
+   protected key per credential the user has activated for it
+   (`PasskeyService::listCredentials($user)` to enumerate credentials).
+   `pkc_prf_capable` is registration-time reporting and is never load-bearing:
+   derivation options list **every** live credential (the ceremony itself is
+   the capability test — some authenticators, notably Windows Hello, omit the
+   creation-time report while evaluating PRF fine), and a successful
+   `verifyDerivation()` upgrades a false flag to true from that evidence.
 3. The derived secret is produced in the browser and transits TLS to the server,
    which uses it transiently (e.g. as a KEK) and holds it at most in session RAM —
    never at rest.
@@ -181,12 +186,35 @@ verify action.
 No feature may *require* PRF support: `isPrfLikely()` is a coarse, best-effort
 probe (platform authenticator availability, or the client-capabilities API where
 present) — a consumer branches its UI on it but must still offer a non-PRF
-fallback (recovery codes, a passphrase) since some authenticators only reveal PRF
+fallback (recovery codes, a bypass phrase) since some authenticators only reveal PRF
 support at the first real evaluation.
+
+## Diagnostics
+
+`/admin/admin_passkey_lab` (superadmin only) runs assertion ceremonies whose
+request shape is chosen per run — user verification required or preferred, PRF
+extension on or off, credential subset — against the signed-in superadmin's own
+passkeys, so a misbehaving browser/authenticator combination can be isolated
+one variable at a time. Every outcome is recorded in the request log under
+feature `passkey_lab`, including browser-side rejections that never reach the
+server (the page posts the error name back). Completing a lab ceremony grants
+nothing: `verifyDiagnostic()` sets no step-up marker and unlocks nothing.
+Backed by `PasskeyService::getDiagnosticOptions()` / `verifyDiagnostic()`.
+
+Independently of the lab, the JS helper reports **every** ceremony rejection
+(register or authenticate, any page) to `passkey_client_report`, which logs it
+under request-log feature `passkey_client` with the surface path, error name,
+elapsed milliseconds, and the document's focus/visibility state. Browser-layer
+refusals such as `NotAllowedError` never reach a verify action, so this
+telemetry is the only server-side trace they leave. The domain editor's
+step-up interceptor additionally reports a `stepup-fallthrough` row when it
+declines to run because the helper is absent.
 
 ## Settings
 
-- `passkeys_enabled` (default `"0"`) — master switch for passkey sign-in,
-  enrollment, and PRF derivation. Declared in core `settings.json`.
+- `passkeys_enabled` (default `"1"`) — emergency kill switch for passkey
+  sign-in, enrollment, and PRF derivation. Declared in core `settings.json`.
+  Turning it off disables all passkey operations deployment-wide, including
+  vault setup.
 
 No RP-ID or origin setting — both come from the site's own domain.

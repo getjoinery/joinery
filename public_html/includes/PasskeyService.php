@@ -21,7 +21,10 @@
  * for the same reason. RP ID/origin come from the site's own domain
  * (LibraryFunctions::get_absolute_url()) - no separate setting.
  *
- * @version 1.1
+ * @version 1.5
+ * @changelog 1.5 - Diagnostics: getDiagnosticOptions()/verifyDiagnostic() mint a
+ *   parameterized assertion ceremony (UV / PRF / credential subset) for the
+ *   superadmin passkey lab; grants nothing on success.
  */
 
 use ParagonIE\ConstantTime\Base64UrlSafe;
@@ -70,7 +73,10 @@ class PasskeyFlaggingCounterChecker implements CounterChecker {
 
 class PasskeyService {
 
-	const CHALLENGE_TTL_SECONDS = 120;
+	// 5 minutes, matching the WebAuthn-recommended ceremony timeout: the
+	// cross-device flow (QR code + phone) and first-time dialog reading
+	// routinely exceed a 2-minute window.
+	const CHALLENGE_TTL_SECONDS = 300;
 	const STEPUP_MARKER_TTL_SECONDS = 3600;
 
 	/** PRF contexts a consumer may request. Add a new entry when a new
@@ -229,7 +235,7 @@ class PasskeyService {
 		}
 
 		$challenge = random_bytes(32);
-		$options = PublicKeyCredentialRequestOptions::create($challenge, $this->rp_id, $allow, 'preferred');
+		$options = PublicKeyCredentialRequestOptions::create($challenge, $this->rp_id, $allow, 'preferred', 120000);
 		$this->_stashChallenge('authenticate', $challenge);
 		return json_decode($this->serializer->serialize($options, 'json'), true);
 	}
@@ -279,7 +285,10 @@ class PasskeyService {
 		}
 
 		$challenge = random_bytes(32);
-		$options = PublicKeyCredentialRequestOptions::create($challenge, $this->rp_id, $allow, 'preferred');
+		// UV required, not preferred: a step-up guards a sensitive action, and
+		// the required+timeout shape is also the one Windows' credential UI
+		// handles reliably with a mixed platform/security-key allow list.
+		$options = PublicKeyCredentialRequestOptions::create($challenge, $this->rp_id, $allow, 'required', 120000);
 		$this->_stashChallenge('stepup:' . $user->key, $challenge);
 		return json_decode($this->serializer->serialize($options, 'json'), true);
 	}
@@ -331,7 +340,12 @@ class PasskeyService {
 			throw new PasskeyException('Unknown passkey secret context: ' . $context);
 		}
 
-		$creds = new MultiPasskey(['user_id' => $user->key, 'prf_capable' => true]);
+		// Every live credential may attempt derivation — pkc_prf_capable is
+		// registration-time reporting, which some authenticators (notably
+		// Windows Hello) omit while evaluating PRF fine at assertion. The
+		// ceremony itself is the real capability test; verifyDerivation()
+		// upgrades the flag on the first successful evaluation.
+		$creds = new MultiPasskey(['user_id' => $user->key]);
 		$creds->load();
 		$allow = [];
 		foreach ($creds as $passkey) {
@@ -341,7 +355,7 @@ class PasskeyService {
 			);
 		}
 		if (!$allow) {
-			throw new PasskeyException('No PRF-capable passkeys are enrolled on this account.');
+			throw new PasskeyException('No passkeys are enrolled on this account.');
 		}
 
 		$extensions = AuthenticationExtensions::create([
@@ -355,7 +369,7 @@ class PasskeyService {
 		// user verification, not merely preferred (specs/mailbox_security_levels.md
 		// § Authentication).
 		$challenge = random_bytes(32);
-		$options = PublicKeyCredentialRequestOptions::create($challenge, $this->rp_id, $allow, 'required', null, $extensions);
+		$options = PublicKeyCredentialRequestOptions::create($challenge, $this->rp_id, $allow, 'required', 120000, $extensions);
 		$this->_stashChallenge('derive:' . $context . ':' . $user->key, $challenge);
 		return json_decode($this->serializer->serialize($options, 'json'), true);
 	}
@@ -383,7 +397,93 @@ class PasskeyService {
 
 		$user = new User($user_id, TRUE);
 		$prf_output = Base64UrlSafe::decodeNoPadding($prf_output_b64url);
+
+		// Evidence beats registration-time reporting: this credential just
+		// evaluated PRF, so correct a false-at-creation capability flag.
+		if (!$passkey->get('pkc_prf_capable')) {
+			$passkey->set('pkc_prf_capable', true);
+			$passkey->save();
+		}
+
 		return [$user, $passkey, $prf_output];
+	}
+
+	// ========================================================================
+	// Diagnostics (superadmin passkey lab)
+	// ========================================================================
+
+	/**
+	 * Mints an assertion-ceremony options payload whose shape is fully caller-
+	 * chosen, so a misbehaving browser/authenticator combination can be
+	 * isolated one variable at a time (adm/admin_passkey_lab.php). Uses the
+	 * same building blocks as the real ceremonies. Completing the ceremony
+	 * grants nothing - verifyDiagnostic() sets no step-up marker.
+	 *
+	 * $variant keys (all optional):
+	 *   'uv'             => 'required' (default) | 'preferred'
+	 *   'prf'            => bool - attach a throwaway PRF eval input
+	 *   'credential_ids' => base64url pkc_credential_id whitelist; empty = all live
+	 */
+	public function getDiagnosticOptions(User $user, array $variant = []): array {
+		$uv = ($variant['uv'] ?? 'required') === 'preferred' ? 'preferred' : 'required';
+		$whitelist = array_values(array_filter((array)($variant['credential_ids'] ?? []), 'is_string'));
+
+		$creds = new MultiPasskey(['user_id' => $user->key]);
+		$creds->load();
+		$allow = [];
+		foreach ($creds as $passkey) {
+			if ($whitelist && !in_array($passkey->get('pkc_credential_id'), $whitelist, true)) {
+				continue;
+			}
+			$allow[] = PublicKeyCredentialDescriptor::create(
+				PublicKeyCredentialDescriptor::CREDENTIAL_TYPE_PUBLIC_KEY,
+				Base64UrlSafe::decodeNoPadding($passkey->get('pkc_credential_id'))
+			);
+		}
+		if (!$allow) {
+			throw new PasskeyException('No passkeys match this variant.');
+		}
+
+		$extensions = null;
+		if (!empty($variant['prf'])) {
+			$extensions = AuthenticationExtensions::create([
+				PseudoRandomFunctionInputExtensionBuilder::create()
+					->withInputs($this->_prfSalt('lab-diagnostic'))
+					->build(),
+			]);
+		}
+
+		$challenge = random_bytes(32);
+		$options = PublicKeyCredentialRequestOptions::create($challenge, $this->rp_id, $allow, $uv, 120000, $extensions);
+		$this->_stashChallenge('lab:' . $user->key, $challenge);
+		return json_decode($this->serializer->serialize($options, 'json'), true);
+	}
+
+	/**
+	 * Verifies a diagnostic assertion. Signature/origin/challenge checks are
+	 * real; user verification is checked as 'preferred' because the lab
+	 * deliberately mints UV-preferred variants. No marker, no side effects
+	 * beyond the credential's routine sign-count/last-used update.
+	 *
+	 * @return array{credential_id:int, label:string, prf_returned:bool}
+	 */
+	public function verifyDiagnostic(string $client_response_json, User $user): array {
+		$challenge = $this->_consumeChallenge('lab:' . $user->key);
+		$pk_credential = $this->_decodeAssertionResponse($client_response_json);
+		$passkey = $this->_findLivePasskeyByRawId($pk_credential->rawId);
+
+		if ((int)$passkey->get('pkc_usr_user_id') !== (int)$user->key) {
+			throw new PasskeyException('This passkey does not belong to your account.');
+		}
+
+		$this->_checkAssertion($pk_credential, $passkey, $challenge);
+
+		$data = json_decode($client_response_json, true);
+		return [
+			'credential_id' => (int)$passkey->key,
+			'label' => (string)$passkey->get('pkc_label'),
+			'prf_returned' => !empty($data['clientExtensionResults']['prf']['results']['first']),
+		];
 	}
 
 	// ========================================================================

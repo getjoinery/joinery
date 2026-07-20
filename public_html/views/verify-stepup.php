@@ -80,7 +80,7 @@
             if (!opt || !opt.options) {
                 throw new Error('Could not start confirmation.');
             }
-            var credential = (await JoineryPasskeys.derive(opt.options)).response;
+            var credential = await JoineryPasskeys.authenticate(opt.options);
             var res = await joineryApi.post('passkey_stepup_verify', { credential: credential });
             if (res && res.success === false) {
                 throw new Error(res.message || 'Confirmation failed.');
@@ -89,7 +89,10 @@
             window.location = RETURN;
         } catch (e) {
             btn.disabled = false;
-            errEl.textContent = e.message || 'Could not confirm with your passkey.';
+            // Include the error name: a bare WebAuthn message is ambiguous
+            // about which layer refused (browser vs server vs helper).
+            errEl.textContent = ((e && e.name && e.name !== 'Error') ? e.name + ': ' : '')
+                + ((e && e.message) || 'Could not confirm with your passkey.');
         }
     });
 })();
