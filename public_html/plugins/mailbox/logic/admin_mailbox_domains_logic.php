@@ -10,6 +10,7 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
 	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 	require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protection_ceremony.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
@@ -46,6 +47,35 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 	// The domain editor is reached from the Accounts tree; saves and the bare
 	// (non-editing) view both land back on Accounts.
 	$accounts_url = '/plugins/mailbox/admin/admin_mailbox_accounts';
+	$editor_base = '/plugins/mailbox/admin/admin_mailbox_domains';
+
+	// --- Protection ceremony inline fixes (specs/mailbox_protection_ceremony.md) ---
+	// Both act on a domain being edited and land back on its editor so the
+	// checklist re-evaluates immediately.
+	if ($input && ($input['action'] ?? '') === 'ceremony_remove_grant') {
+		$domain_id = intval($input['ied_inbound_email_domain_id'] ?? 0);
+		$alias = new InboundEmailAlias(intval($input['alias_id'] ?? 0), TRUE);
+		if ($alias->key && intval($alias->get('iea_ied_inbound_email_domain_id')) === $domain_id) {
+			$remaining = array();
+			foreach (InboundEmailMailboxGrant::user_ids_for_alias(intval($alias->key)) as $uid) {
+				if (intval($uid) !== intval($input['user_id'] ?? 0)) {
+					$remaining[] = intval($uid);
+				}
+			}
+			InboundEmailMailboxGrant::sync_for_alias($alias->key, $remaining);
+		}
+		return LogicResult::redirect($editor_base . '?ied_inbound_email_domain_id=' . $domain_id);
+	}
+	if ($input && ($input['action'] ?? '') === 'ceremony_seal_batch') {
+		$domain_id = intval($input['ied_inbound_email_domain_id'] ?? 0);
+		$domain = new InboundEmailDomain($domain_id, TRUE);
+		if ($domain->key && $domain->seals_content()) {
+			mailbox_protection_seal_batch($domain);
+		}
+		$then = (($input['then'] ?? '') === 'protect') ? '&then=protect' : '';
+		return LogicResult::redirect($editor_base . '?ied_inbound_email_domain_id=' . $domain_id
+			. '&sealed_now=1' . $then);
+	}
 
 	// Known IMAP-source provider domains (shared with the IMAP editor). Selecting
 	// one of these "Type" options implies the domain (the local part is the
@@ -118,7 +148,11 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 		// redirects to the ceremony and returns to this domain's editor; the user
 		// re-submits, now recently confirmed.
 		if ($domain->key && $new_level !== $old_level) {
-			$return_url = '/plugins/mailbox/admin/admin_mailbox_domains?ied_inbound_email_domain_id=' . (int)$domain->key;
+			// target_level rides the return URL so the editor preselects the
+			// chosen card after the ceremony — the lost form POST must not
+			// silently discard the operator's intent.
+			$return_url = '/plugins/mailbox/admin/admin_mailbox_domains?ied_inbound_email_domain_id=' . (int)$domain->key
+				. '&target_level=' . rawurlencode($new_level);
 			$stepup = $session->require_recent_second_factor($return_url);
 			if ($stepup !== null) {
 				return $stepup;
@@ -132,22 +166,23 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 			return $level_error('This domain hosts a shared (group) mailbox, so it can only use the Standard level.');
 		}
 
-		// Vault gates (structural, not policy). The ingest seal gate requires a
-		// vault (InboundEmailRouter::storeMessage), so a sealing level with no
-		// vault would label the domain protected while every message still stores
-		// plaintext — a false promise. Refuse the raise until a vault exists; the
-		// guided ceremony (Phase 3) creates one, opens the window, and re-runs
-		// this save. With a vault, raising and lowering both need the key open.
+		// Ceremony verification (specs/mailbox_protection_ceremony.md): a raise
+		// into a sealing level is refused until every required prerequisite row
+		// passes — the reader-vault rows are evaluated per HOLDER (the sealing
+		// target, InboundEmailRouter::storeMessage keys off the holder's vault),
+		// never the admin running the save. The editor's checklist renders these
+		// same rows with in-place fixes; this re-verification is the enforcement,
+		// the button state is the convenience.
 		$acting_user_id = intval($session->get_user_id());
-		$acting_vault = ($acting_user_id > 0) ? UserEncryptionVault::loadForUser($acting_user_id) : null;
-		if ($raising && $new_seals) {
-			if ($acting_vault === null) {
-				return $level_error('Set up your vault before choosing Private or Fortress — create it in your account security settings, then set the level. Until then this domain would be labeled protected while its mail stays unencrypted.');
-			}
-			if (!VaultUnlock::isOpen($acting_user_id)) {
-				return $level_error('Unlock your vault before raising protection on this domain.');
+		if ($raising && $new_seals && $domain->key) {
+			$rows = mailbox_protection_rows(mailbox_protection_facts($domain), $new_level, $acting_user_id);
+			if (!mailbox_protection_required_ok($rows)) {
+				return $level_error(mailbox_protection_first_failure($rows));
 			}
 		}
+		// Lowering a sealing level needs the acting user's key open — an idle
+		// admin session must not quietly downgrade protection.
+		$acting_vault = ($acting_user_id > 0) ? UserEncryptionVault::loadForUser($acting_user_id) : null;
 		if ($lowering && $old_seals && $acting_vault !== null && !VaultUnlock::isOpen($acting_user_id)) {
 			return $level_error('Unlock your vault before lowering protection on this domain.');
 		}
@@ -169,6 +204,25 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 			// A level change may alter the acting user's max posture — drop the
 			// session cache so the Fortress mandatory-2FA gate (§ 5.3) re-evaluates.
 			unset($_SESSION['max_security_level']);
+
+			// A raise into a sealing level converges the backlog: earlier mail was
+			// stored plaintext (sealing is per-row) and "my mail is now private"
+			// must not be quietly untrue for history. The editor auto-runs sealing
+			// batches (ceremony_seal_batch) until the backlog is empty; Fortress
+			// continues to the protect ceremony after.
+			if ($raising && $new_seals && mailbox_protection_backlog_count((int)$domain->key) > 0) {
+				$then = ($new_level === InboundEmailDomain::LEVEL_FORTRESS && !$domain->is_protected_identity())
+					? '&then=protect' : '';
+				$session->save_message(new DisplayMessage(
+					'Domain saved — sealing earlier messages now.',
+					'Saved',
+					'~/plugins/mailbox/admin/~',
+					DisplayMessage::MESSAGE_ANNOUNCEMENT,
+					DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+				));
+				return LogicResult::redirect($editor_base . '?ied_inbound_email_domain_id=' . (int)$domain->key
+					. '&sealed_now=1' . $then);
+			}
 
 			// Fortress records the level immediately (sealing at ingest is safe
 			// from this moment) but never writes ied_is_protected_identity here —
@@ -292,11 +346,34 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 		return LogicResult::redirect($accounts_url);
 	}
 
+	// Ceremony state for the editor (specs/mailbox_protection_ceremony.md): the
+	// checklist for each raise target, and the backlog-sealing progress state.
+	$ceremony = null;
+	if ($edit_domain && $edit_domain->key) {
+		$acting_user_id = intval($session->get_user_id());
+		$facts = mailbox_protection_facts($edit_domain);
+		$backlog = mailbox_protection_backlog_count(intval($edit_domain->key));
+		$ceremony = array(
+			'facts' => $facts,
+			'rows_private' => mailbox_protection_rows($facts, InboundEmailDomain::LEVEL_PRIVATE, $acting_user_id),
+			'rows_fortress' => mailbox_protection_rows($facts, InboundEmailDomain::LEVEL_FORTRESS, $acting_user_id),
+			'backlog' => $backlog,
+			// The sealing pass runs whenever a protected domain has unsealed rows —
+			// not only right after a raise — so a backlog that appears later (e.g. a
+			// vault recreated after deletion) converges on the next editor visit.
+			'sealing_active' => $edit_domain->seals_content()
+				&& ($backlog > 0 || !empty($input['sealed_now'])),
+			'then_protect' => (($input['then'] ?? '') === 'protect'),
+			'editor_url' => $editor_base . '?ied_inbound_email_domain_id=' . intval($edit_domain->key),
+		);
+	}
+
 	return LogicResult::render(array(
 		'edit_domain' => $edit_domain,
 		'domain_type' => $domain_type,
 		'session' => $session,
 		'settings' => $settings,
+		'ceremony' => $ceremony,
 	));
 }
 ?>

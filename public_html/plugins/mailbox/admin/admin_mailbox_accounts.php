@@ -13,7 +13,7 @@
  * every Edit jump to the existing per-object editors with context pre-filled.
  * DNS/host diagnostics live on the Setup tab.
  *
- * @version 1.3
+ * @version 1.4
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -108,6 +108,15 @@ $connect_button = function ($imap) use ($imap_action) {
 				<span class="iea-badge <?php echo $enabled ? 'iea-badge-on' : 'iea-badge-off'; ?>">
 					<?php echo $enabled ? 'Enabled' : 'Disabled'; ?></span>
 			<?php endif; ?>
+			<?php
+			// Protection level (specs/mailbox_protection_ceremony.md): every domain
+			// shows its level, and the badge IS the path to raising it — click
+			// through to the domain editor's ceremony.
+			$level = $domain->security_level();
+			echo ' <a class="iea-badge iea-badge-level iea-badge-level-' . htmlspecialchars($level)
+				. '" href="' . $domain_base . '?ied_inbound_email_domain_id=' . (int)$domain->key . '"'
+				. ' title="Mail protection level — click to change">' . htmlspecialchars(ucfirst($level)) . '</a>';
+			?>
 			<span class="iea-spacer"></span>
 			<a class="btn btn-sm btn-outline-secondary"
 			   href="<?php echo $domain_base . '?ied_inbound_email_domain_id=' . $domain->key; ?>">Edit domain</a>
@@ -142,6 +151,12 @@ $connect_button = function ($imap) use ($imap_action) {
 					<div class="iea-mb-addr"><?php echo htmlspecialchars($alias->get_full_address()); ?>
 						<?php if (!$alias->get('iea_is_enabled')): ?>
 							<span class="iea-badge iea-badge-off">disabled</span>
+						<?php endif; ?>
+						<?php $mb_level = $domain->security_level();
+						if ($mb_level !== InboundEmailDomain::LEVEL_STANDARD): ?>
+							<a class="iea-badge iea-badge-level iea-badge-level-<?php echo htmlspecialchars($mb_level); ?>"
+							   href="<?php echo $domain_base . '?ied_inbound_email_domain_id=' . (int)$domain->key; ?>"
+							   title="Mail protection level — set on the domain"><?php echo htmlspecialchars(ucfirst($mb_level)); ?></a>
 						<?php endif; ?>
 					</div>
 					<div class="iea-mb-route"><?php echo $mode_label($alias); ?></div>

@@ -4,9 +4,13 @@
  *
  * The add/edit domain form, reached from the Accounts tree (which is the domain
  * list). DNS and host verification live on the Setup tab
- * (admin_mailbox_setup), driven by InboundEmailSetupCheck.
+ * (admin_mailbox_setup), driven by InboundEmailSetupCheck. Raising the security
+ * level runs the protection ceremony (specs/mailbox_protection_ceremony.md):
+ * choosing a higher card reveals the prerequisite checklist and the save is
+ * gated until its required rows pass; a successful raise auto-seals the
+ * domain's earlier messages.
  *
- * @version 2.4
+ * @version 3.2
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -14,9 +18,11 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/admin_tabs.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/logic/admin_mailbox_domains_logic.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protection_ceremony.php'));
 
 $page_vars = process_logic(admin_mailbox_domains_logic(array_merge($_GET, $_POST, $params ?? [])));
 extract($page_vars);
+$ceremony = $ceremony ?? null;
 
 $page = new AdminPage();
 $page->admin_header(
@@ -55,9 +61,11 @@ if ($show_form) {
 	$form_domain = $edit_domain ?: new InboundEmailDomain(NULL);
 	$form_title = $edit_domain ? 'Edit Domain' : 'Add Domain';
 
-	// A new domain defaults to enabled (the common case).
+	// A new domain defaults to enabled with a store-locally catch-all (the
+	// common case).
 	if (!$form_domain->key) {
 		$form_domain->set('ied_is_enabled', true);
+		$form_domain->set('ied_catch_all_mode', 'store');
 		// Pre-fill the domain name when arriving from the Fortress "add a Standard
 		// subdomain for automated mail" action (specs/mailbox_security_levels.md
 		// Phase 3). Level defaults to Standard (the picker default), which is what
@@ -91,7 +99,7 @@ if ($show_form) {
 
 	$formwriter->dropinput('domain_type', 'Type', [
 		'options' => [
-			'custom'         => 'Custom domain (hosted — mail arrives by MX)',
+			'custom'         => 'Hosted mail',
 			'imap_gmail'     => 'IMAP — Gmail',
 			'imap_microsoft' => 'IMAP — Microsoft 365 / Outlook',
 			'imap_yahoo'     => 'IMAP — Yahoo',
@@ -113,10 +121,18 @@ if ($show_form) {
 	// (no mechanism names at the point of choice); defaults to Standard. The
 	// Fortress card is hidden for IMAP-source domains via the domain_type
 	// visibility rule above.
+	// After a step-up round-trip the chosen level rides back as target_level —
+	// preselect it so the operator's intent survives the ceremony.
+	$level_value = $form_domain->get('ied_security_level') ?: InboundEmailDomain::LEVEL_STANDARD;
+	$valid_levels = [InboundEmailDomain::LEVEL_STANDARD, InboundEmailDomain::LEVEL_PRIVATE, InboundEmailDomain::LEVEL_FORTRESS];
+	if (!empty($_GET['target_level']) && in_array($_GET['target_level'], $valid_levels, true)) {
+		$level_value = $_GET['target_level'];
+	}
+
 	$formwriter->radioinput('ied_security_level', 'Security level', [
 		'card' => true,
 		'required' => true,
-		'value' => $form_domain->get('ied_security_level') ?: InboundEmailDomain::LEVEL_STANDARD,
+		'value' => $level_value,
 		'options' => [
 			InboundEmailDomain::LEVEL_STANDARD => 'Standard',
 			InboundEmailDomain::LEVEL_PRIVATE  => 'Private',
@@ -156,11 +172,184 @@ if ($show_form) {
 
 	$formwriter->checkboxinput('ied_reject_unmatched', 'Reject Unmatched', []);
 
+	// Protection ceremony (specs/mailbox_protection_ceremony.md): choosing a
+	// card ABOVE the current level reveals the prerequisite checklist for that
+	// target and gates the submit until its required rows pass. The save
+	// re-verifies server-side regardless — this is the guided surface, not the
+	// enforcement.
+	if ($ceremony !== null) {
+		$urls = array(
+			'editor_url' => $ceremony['editor_url'],
+			'alias_url'  => '/plugins/mailbox/admin/admin_mailbox_alias',
+		);
+		echo str_replace('id="protection-ceremony"', 'id="protection-ceremony-private"',
+			mailbox_protection_render($ceremony['rows_private'], $edit_domain, $urls));
+		echo str_replace('id="protection-ceremony"', 'id="protection-ceremony-fortress"',
+			mailbox_protection_render($ceremony['rows_fortress'], $edit_domain, $urls));
+	}
+
 	$formwriter->submitbutton('btn_submit', $edit_domain ? 'Update Domain' : 'Add Domain');
 
 	echo $formwriter->end_form();
 
 	$page->end_box();
+
+	// Backlog sealing progress (auto-continuing): each pass seals a bounded
+	// batch server-side and redirects back here until nothing remains.
+	if ($ceremony !== null && !empty($ceremony['sealing_active'])) {
+		if ($ceremony['backlog'] > 0) {
+			echo '<div class="alert alert-warning" id="sealing-progress">'
+				. 'Sealing earlier messages — ' . (int)$ceremony['backlog'] . ' remaining&hellip;</div>';
+			echo '<form method="post" action="' . htmlspecialchars($ceremony['editor_url']) . '" id="sealing-continue">'
+				. '<input type="hidden" name="action" value="ceremony_seal_batch">'
+				. '<input type="hidden" name="ied_inbound_email_domain_id" value="' . (int)$edit_domain->key . '">'
+				. ($ceremony['then_protect'] ? '<input type="hidden" name="then" value="protect">' : '')
+				. '<noscript><button type="submit" class="btn btn-primary">Continue sealing</button></noscript>'
+				. '</form>';
+			echo '<script>setTimeout(function () { document.getElementById("sealing-continue").submit(); }, 400);</script>';
+		} else {
+			echo '<div class="alert alert-success">All earlier messages on this domain are sealed.</div>';
+			if (!empty($ceremony['then_protect'])) {
+				echo '<a class="btn btn-primary" href="/plugins/mailbox/admin/admin_mailbox_protect?ied_inbound_email_domain_id='
+					. (int)$edit_domain->key . '">Continue to outbound protection</a>';
+			}
+		}
+	}
+
+	// Ceremony reveal + submit gating.
+	if ($ceremony !== null) {
+		$current_rank = array(
+			InboundEmailDomain::LEVEL_STANDARD => 0,
+			InboundEmailDomain::LEVEL_PRIVATE  => 1,
+			InboundEmailDomain::LEVEL_FORTRESS => 2,
+		)[$edit_domain->security_level()] ?? 0;
+		?>
+		<script defer src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
+		<script>
+		(function () {
+			var currentRank = <?php echo (int)$current_rank; ?>;
+			var currentLevel = <?php echo json_encode($edit_domain->security_level()); ?>;
+			var ranks = { standard: 0, private: 1, fortress: 2 };
+			var form = document.querySelector('form[name="domain_form"], #domain_form') ||
+				(document.querySelector('input[name="ied_security_level"]') || {}).form;
+			if (!form) return;
+			var submit = form.querySelector('button[type="submit"], input[type="submit"]');
+			function refresh() {
+				var chosen = form.querySelector('input[name="ied_security_level"]:checked');
+				var level = chosen ? chosen.value : 'standard';
+				var raising = (ranks[level] || 0) > currentRank;
+				var privBox = document.getElementById('protection-ceremony-private');
+				var fortBox = document.getElementById('protection-ceremony-fortress');
+				var active = null;
+				if (privBox) privBox.classList.add('d-none');
+				if (fortBox) fortBox.classList.add('d-none');
+				if (raising) {
+					active = (level === 'fortress') ? fortBox : privBox;
+					if (active) {
+						// The checklist lives inside the chosen level's card,
+						// and only appears when something needs attention.
+						var card = document.getElementById('ied_security_level_' + level + '_card');
+						if (card && active.parentElement !== card) card.appendChild(active);
+						if (active.dataset.allGreen !== '1') active.classList.remove('d-none');
+					}
+				}
+				if (submit) {
+					submit.disabled = !!(active && active.dataset.requiredOk === '0');
+				}
+			}
+			form.addEventListener('change', function (e) {
+				if (e.target && e.target.name === 'ied_security_level') refresh();
+			});
+			refresh();
+
+			// A level change is a sensitive action. Run the passkey step-up
+			// INLINE before the form leaves the page, so the submission is
+			// never lost to the redirect ceremony. Always — a render-time
+			// freshness snapshot goes stale while the form sits open.
+			// Fallback (no passkey, or the ceremony fails): plain submit —
+			// the server redirects through /verify-stepup and target_level
+			// preserves the choice.
+			var stepupDone = false;
+			var stepupInFlight = false;
+			form.addEventListener('submit', function (e) {
+				if (stepupDone) return;
+				var chosen = form.querySelector('input[name="ied_security_level"]:checked');
+				var level = chosen ? chosen.value : currentLevel;
+				if (level === currentLevel) return;
+				if (!window.JoineryPasskeys || !JoineryPasskeys.isSupported()) {
+					// The helper is absent, so it cannot report this itself -
+					// record the fallthrough (keepalive survives the native
+					// submit's navigation) so a server-ceremony detour is
+					// never invisible in the request log.
+					try {
+						var fallthroughHeaders = { 'Content-Type': 'application/json' };
+						var fallthroughToken = ((document.querySelector('meta[name="joinery-api-csrf"]') || {}).content || '');
+						if (fallthroughToken) fallthroughHeaders['X-Joinery-Csrf'] = fallthroughToken;
+						fetch('/api/v1/action/passkey_client_report', {
+							method: 'POST', headers: fallthroughHeaders, keepalive: true,
+							body: JSON.stringify({
+								context: 'stepup-fallthrough:' + location.pathname,
+								error_name: 'NoHelper',
+								error_message: window.JoineryPasskeys ? 'WebAuthn unsupported' : 'passkeys.js not loaded at submit',
+								focus: document.hasFocus(),
+								visibility: document.visibilityState,
+								elapsed_ms: 0,
+							}),
+						}).catch(function () {});
+					} catch (te) { /* never block the fallback submit */ }
+					return;
+				}
+				e.preventDefault();
+				// One ceremony at a time: a second submit (double click, or the
+				// validation layer re-dispatching) must not start a parallel
+				// WebAuthn request — the browser kills the first with
+				// NotAllowedError.
+				if (stepupInFlight) return;
+				stepupInFlight = true;
+				var btnLabel = submit ? submit.textContent : '';
+				if (submit) { submit.disabled = true; submit.textContent = 'Confirm with your passkey…'; }
+				var csrf = (document.querySelector('meta[name="joinery-api-csrf"]') || {}).content || '';
+				function api(url, body) {
+					return fetch(url, {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': csrf },
+						body: JSON.stringify(body || {})
+					}).then(async function (r) {
+						var j = await r.json();
+						if (!r.ok) throw new Error(j.error || 'Request failed.');
+						return j;
+					});
+				}
+				api('/api/v1/action/passkey_stepup_options').catch(function (err) {
+					// The server could not even start a passkey ceremony (e.g.
+					// no passkeys enrolled — TOTP-only admin): hand the whole
+					// submission to the server-side redirect ceremony instead.
+					err.useServerCeremony = true;
+					throw err;
+				}).then(function (opts) {
+					return JoineryPasskeys.authenticate(opts.data.options);
+				}).then(function (credential) {
+					return api('/api/v1/action/passkey_stepup_verify', { credential: credential });
+				}).then(function () {
+					stepupDone = true;
+					form.submit();
+				}).catch(async function (err) {
+					if (err && err.useServerCeremony) { form.submit(); return; }
+					stepupInFlight = false;
+					if (submit) { submit.disabled = false; submit.textContent = btnLabel; }
+					var msg = ((err && err.name) ? err.name + ': ' : '') + ((err && err.message) ? err.message : 'Passkey confirmation failed.');
+					// A refused passkey must never dead-end the save — offer the
+					// authenticator-code ceremony as the alternate path.
+					if (window.JoineryModal && JoineryModal.confirmAsync) {
+						var useCode = await JoineryModal.confirmAsync(msg + ' You can try the passkey again, or confirm with your authenticator code instead.', { confirmLabel: 'Use authenticator code', cancelLabel: 'Try passkey again', confirmStyle: 'primary' });
+						if (useCode) { stepupDone = true; form.submit(); }
+					}
+				});
+			});
+		})();
+		</script>
+		<?php
+	}
 
 	// Protected sending identity — the outbound send protection ceremony lives on
 	// its own page (in-window key sealing, DNS shape, activation). Offered only for

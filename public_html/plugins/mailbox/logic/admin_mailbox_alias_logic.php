@@ -75,6 +75,25 @@ function admin_mailbox_alias_logic(array $input): LogicResult {
 			}
 		}
 
+		// Protected-domain invariants enforce at the mutation point
+		// (specs/mailbox_protection_ceremony.md § 2b): the ceremony guards the
+		// raise, and this refusal makes the raised state impossible to corrupt
+		// afterward — never merely alarmed about.
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protection_ceremony.php'));
+		$alias_domain = new InboundEmailDomain(intval($alias->get('iea_ied_inbound_email_domain_id')), TRUE);
+		$protected_error = mailbox_protected_grant_error($alias_domain, $submitted_grant_users);
+		if ($protected_error !== null) {
+			return LogicResult::render(array(
+				'alias' => $alias,
+				'error' => $protected_error,
+				'session' => $session,
+				'settings' => $settings,
+				'domains' => new MultiInboundEmailDomain(array('deleted' => false), array('ied_domain' => 'ASC')),
+				'user_options' => $user_options,
+				'granted_user_ids' => $submitted_grant_users,
+			));
+		}
+
 		// The routing change this mailbox's owner must actively consent to
 		// (an open unlock window) — see the capture above. A new alias has no
 		// established owner/grant relationship yet, so it is never gated.

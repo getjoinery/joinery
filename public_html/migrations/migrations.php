@@ -1035,3 +1035,13 @@
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
 
+
+	// passkeys_enabled becomes an emergency kill switch defaulting to on
+	// (specs/mailbox_protection_ceremony.md § 4): vault setup and protected
+	// mailboxes depend on passkeys, so rows still at the old factory '0' flip.
+	$migration = array();
+	$migration['database_version'] = '152';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'passkeys_enabled_default_on.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
