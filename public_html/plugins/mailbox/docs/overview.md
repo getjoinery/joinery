@@ -121,11 +121,16 @@ Under a fronted topology:
   every registered domain, and at domain registration while a slot exists),
   re-verified on every check pass, and shown with the copy-ready TXT record
   until it goes green. There are no buttons and no claim/verify vocabulary.
-- **Cutover completion** (`plugin.relay_enable`): while the relay row is
-  disabled, a neutral INFO row points at the Relay section; once every hosted
-  domain's MX targets the relay (and every ownership proof is published), it
-  becomes a REQUIRED FAIL — mail is arriving at the relay with no consumer —
-  until the admin enables the relay.
+- **Cutover progress** (`plugin.relay_enable`): relays are born enabled, so
+  this row reports how far the DNS move has come — INFO with the first
+  incomplete reason while MX records move, PASS once every hosted domain's MX
+  targets the relay (and every ownership proof is published). The one bad
+  state — cutover complete while the relay sits emergency-disabled (mail
+  arriving with no consumer) — is a REQUIRED FAIL. Every evaluation records
+  its verdict in the `mailbox_relay_cutover_complete` setting, which is what
+  the outbound doctrine enforcement and the origin-hidden health check read —
+  a fronted deployment keeps sending the legacy way until the cutover verdict
+  flips, so nothing breaks mid-move and nothing leaks after it.
 
 Fleet state (slot + ownership proofs) is read live from the fleet service once
 per check run — never cached; if the service is unreachable, the ownership row
@@ -1290,12 +1295,45 @@ The **Setup tab's Relay section** (rendered whenever the receive mode is relay
 or a relay row exists) is the dashboard: it lists each relay with the four
 provisioning checks (tunnel, spool draining, map fresh, origin hidden), and its
 guided controls provision, rebuild, enable/disable, and delete.
-"Provision" picks a managed node and fires a `provision_relay` job through
-`server_manager` (`JobCommandBuilder::build_provision_relay`); on success the job
-result processor registers the relay as a `ManagedNode` (health dot) and creates a
-**disabled** `MailboxRelay` row the admin then enables (enabling makes the relay
-front every hosted domain). "Rebuild" re-runs provisioning on the same node.
-Without `server_manager`, run `provision_relay.sh` by hand — the standalone floor.
+
+**Provisioning paths**, primary first:
+
+- **The customer's own cloud account** (specs — mailbox_relay_cloud_provisioning):
+  the section's form takes a mail hostname, region, and instance type;
+  submitting shows the **just-in-time credential step**, which has two
+  branches: with a `linode` OAuth client configured (Admin > OAuth
+  Providers), a single **Approve at Linode** button (consent lands via
+  `RelayCloudConsumer`, purpose `relay_cloud`); otherwise — the universal
+  floor — a short-lived Linode API token the customer mints for this one act
+  (scope Linodes read/write only, numbered walkthrough with a direct link to
+  the provider's token page), verified live with a cheap read call. Either
+  way the credential is sealed onto the run and nothing is configured
+  beforehand. The platform never deletes a customer's running server —
+  removing a cloud relay's instance happens at the provider, by the customer;
+  a relay's Delete here removes only the deployment's row (and says so). The `AdvanceRelayCloudProvisions` scheduled task drives the
+  `RelayCloudProvision` state machine: create the instance on the customer's
+  account (`includes/cloud_compute/` — `LinodeComputeDriver`, per-run SSH key
+  injected), wait for boot (the cheap transitions — create, boot poll — also advance on
+  every Setup page load, so a watching admin is never waiting on cron), run
+  the same tarball → `provision_relay.sh` →
+  add-tenant `main` → markers sequence over root SSH
+  (`RelayCloudProvisioner`), register the `MailboxRelay` row **born enabled**
+  (pulling and address-list pushes start immediately, so the relay is ready
+  before any MX points at it; Disable is an emergency stop, and doctrine
+  effects key off the recorded cutover verdict, not this flag — carrying
+  `mrl_cloud_provider`/`mrl_cloud_instance_id`), peer the main
+  box's WireGuard, and attempt reverse DNS through the provider API (refused
+  until the hostname's A record resolves; the PTR check carries it from
+  there). **Grant-per-act custody**: the token and per-run SSH key live
+  SecretBox-sealed on the run row and are erased at every terminal state; a
+  failed run destroys the instance it created within the same grant.
+  Requires only the main box's relay identity (`provision_relay_main.sh`).
+- **A Server Manager node** (operator deployments): picks a managed node and
+  fires a `provision_relay` job (`JobCommandBuilder::build_provision_relay`);
+  the job result processor registers the `MailboxRelay` row, born enabled the
+  same way. "Rebuild" re-runs provisioning on the same node.
+- **By hand** — run `provision_relay.sh` as root on any fresh VPS: the
+  standalone floor.
 
 ### The shrunken main box
 
@@ -1308,6 +1346,30 @@ only the milter mode is unused. The setup/health checks retarget to the relay
 deployment-wide origin-hidden check (`checkOriginHidden`) that fails if the main
 box IP appears in any hosted domain's mail DNS.
 
+**Decommission is a guarded platform action, never manual host surgery**
+(`includes/listener_admin.php`). The Setup tab's Relay section shows the offer
+only when it is actually possible: once every guardrail passes, an amber
+**Uninstall local mail** block appears (one sentence — the relay makes the
+local mail software unnecessary and a security risk — plus the button); while
+any guardrail fails, nothing renders at all (the Setup rows already walk the
+missing pieces), and the server-side re-check on POST remains the
+enforcement. The button runs `/usr/local/sbin/joinery-mail-listener off` — a
+narrow root helper installed by `provision_relay_main.sh` alongside the
+peer/addr helpers — which stops and disables Postfix/opendkim/opendmarc and
+closes 25/tcp at the firewall; after an uninstall a quiet state line offers
+**Reinstall local mail** (`on`, the always-safe inverse). The guardrails: an enabled relay exists, DNS has fully cut over
+(`InboundEmailSetupCheck::relayCutoverState()`, the same evaluation behind the
+cutover-completion row), the spool pull is healthy
+(`checkRelaySpoolDraining`), and outbound does not lean on the local Postfix
+(no provider, or SMTP aimed at localhost). The outcome is **recorded, not
+inferred**: the `mailbox_local_listener` setting (`active` |
+`decommissioned`) is written only on a successful helper run, and the
+`host.port25` / `host.postfix` / `host.opendkim` setup rows and
+`InboundEmailHealth::checkInboundMailServer()` compare it with reality — under
+`decommissioned`, an answering port 25 is the failure, and silence is the
+healthy state. The helper runs on the deployment's own box via a sudoers rule,
+so standalone tenants get the same button with no server_manager dependency.
+
 ### Hosted relay fleet
 
 The platform operator runs a shared fleet of hardened relays as a service
@@ -1319,10 +1381,19 @@ while actively compromised — the same position any hosted MX occupies. It can
 never reach the tenant's archive, keys, drive, passwords, or sending identity
 (DKIM keys never leave the tenant's app). The exit ramp: point your MX at your
 own relay whenever you want — same stack, nothing else changes
-(`fleet_release`).
+(`fleet_release`). Release revokes the slot's domain claims immediately, so
+the domains' next home (a new slot here or another fleet) can claim them
+before the old slot finishes evicting.
 
-**Tenant side** (any deployment): the Settings tab's *Hosted relay connection*
-box takes the operator's service URL + the customer account's API key
+**Tenant side** (any deployment): every tenant-facing hosted-relay surface —
+the Setup Relay section's Hosted relay block, the Settings connection box, and
+the live fleet-status fetch — is gated behind
+`mailbox_hosted_relay_offered()` (`includes/receive_mode.php`), which is off:
+the hosted offering is not customer-facing yet, and the choice card/Relay
+section describe only the run-your-own path. The fleet API actions and the
+operator console are unaffected. When offered, the Settings tab's *Hosted
+relay connection* box takes the operator's service URL + the customer
+account's API key
 (`mailbox_fleet_service_url` / `mailbox_fleet_api_public_key` /
 `mailbox_fleet_api_secret_key`); enrollment itself is a button in the Setup
 tab's Relay section. `FleetClient` calls the operator's

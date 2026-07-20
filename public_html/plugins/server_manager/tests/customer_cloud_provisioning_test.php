@@ -32,7 +32,7 @@ harness_boot();
 require_once(PathHelper::getComposerAutoloadPath());
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_account_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/includes/cloud_compute/LinodeComputeDriver.php'));
+require_once(PathHelper::getIncludePath('includes/cloud_compute/LinodeComputeDriver.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/oauth_consumers/CustomerCloudConsumer.php'));
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Token.php'));
 require_once(PathHelper::getIncludePath('includes/SecretBox.php'));

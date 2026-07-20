@@ -12,6 +12,10 @@
 #     one relay as a peer, plus a sudoers rule letting the web user invoke it —
 #     that is how the provision job's result processor peers a freshly
 #     provisioned relay with no manual step
+#   - installs /usr/local/sbin/joinery-mail-listener (off|on|status), the guarded
+#     local-listener decommission switch the Setup tab's Relay section drives
+#     (specs/mailbox_listener_decommission.md) — re-run this script on an
+#     existing relay-fronted box to add it
 #   - generates the RELAY PULL KEY at {site root}/config/relay_pull_key, a
 #     dedicated SSH identity owned by the web user (spool pull, map push and the
 #     health battery all run as the web user, and ssh requires the key file to
@@ -145,9 +149,99 @@ echo "ADDR_SET ${IP}/24"
 ADDRHELPER
 chmod 755 "${ADDR_HELPER}"
 
+# Third narrow helper: the local mail listener switch
+# (specs/mailbox_listener_decommission.md). Once a relay fronts the deployment
+# the box's own public Postfix is dead weight with live attack surface; the
+# platform's guarded Decommission action (Setup tab's Relay section) runs
+# 'off', its Restore runs 'on'. Idempotent verbs, machine-readable markers.
+LISTENER_HELPER="/usr/local/sbin/joinery-mail-listener"
+cat > "${LISTENER_HELPER}" <<'LISTENERHELPER'
+#!/usr/bin/env bash
+# joinery-mail-listener off|on|status
+# off:    stop+disable postfix/opendkim/opendmarc, close 25/tcp at the firewall -> LISTENER_OFF
+# on:     enable+start them, reopen 25/tcp                                     -> LISTENER_ON
+# status: report unit + firewall + port state                                  -> LISTENER_STATUS ...
+# rspamd is deliberately untouched (deferred ingest still scores pulled mail).
+# Installed by provision_relay_main.sh; invoked via sudo by the web user.
+set -euo pipefail
+UNITS="postfix opendkim opendmarc"
+VERB="${1:-}"
+
+unit_known() {
+    systemctl list-unit-files "$1.service" --no-legend 2>/dev/null | grep -q "$1" || return 1
+}
+
+ufw_active() {
+    command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "^Status: active"
+}
+
+case "${VERB}" in
+    off)
+        for u in ${UNITS}; do
+            if unit_known "$u"; then
+                systemctl disable --now "$u" >/dev/null 2>&1 || true
+            fi
+        done
+        if ufw_active; then
+            ufw delete allow 25/tcp >/dev/null 2>&1 || true
+            ufw deny 25/tcp >/dev/null 2>&1 || true
+        fi
+        echo "LISTENER_OFF"
+        ;;
+    on)
+        if ufw_active; then
+            ufw delete deny 25/tcp >/dev/null 2>&1 || true
+            ufw allow 25/tcp >/dev/null 2>&1 || true
+        fi
+        for u in ${UNITS}; do
+            if unit_known "$u"; then
+                systemctl enable --now "$u" >/dev/null 2>&1 || true
+            fi
+        done
+        if ! systemctl is-active --quiet postfix; then
+            echo "joinery-mail-listener: postfix failed to start" >&2
+            exit 4
+        fi
+        echo "LISTENER_ON"
+        ;;
+    status)
+        for u in ${UNITS}; do
+            if unit_known "$u"; then
+                echo "${u}=$(systemctl is-active "$u" 2>/dev/null || true)"
+            else
+                echo "${u}=absent"
+            fi
+        done
+        if ufw_active; then
+            if ufw status 2>/dev/null | grep -q "^25/tcp.*ALLOW"; then
+                echo "firewall_25=open"
+            else
+                echo "firewall_25=closed"
+            fi
+        else
+            echo "firewall_25=no-ufw"
+        fi
+        if (exec 3<>/dev/tcp/127.0.0.1/25) 2>/dev/null; then
+            exec 3>&- 3<&-
+            echo "port25=listening"
+            echo "LISTENER_STATUS active"
+        else
+            echo "port25=closed"
+            echo "LISTENER_STATUS off"
+        fi
+        ;;
+    *)
+        echo "usage: joinery-mail-listener off|on|status" >&2
+        exit 2
+        ;;
+esac
+LISTENERHELPER
+chmod 755 "${LISTENER_HELPER}"
+
 {
     echo "${WEB_USER} ALL=(root) NOPASSWD: ${PEER_HELPER}"
     echo "${WEB_USER} ALL=(root) NOPASSWD: ${ADDR_HELPER}"
+    echo "${WEB_USER} ALL=(root) NOPASSWD: ${LISTENER_HELPER}"
 } > "${SUDOERS_FILE}"
 chmod 440 "${SUDOERS_FILE}"
 if ! visudo -cf "${SUDOERS_FILE}" >/dev/null; then
@@ -155,7 +249,7 @@ if ! visudo -cf "${SUDOERS_FILE}" >/dev/null; then
     echo "ERROR: generated sudoers rule failed validation - removed." >&2
     exit 1
 fi
-echo "sudoers: ${WEB_USER} may run ${PEER_HELPER} and ${ADDR_HELPER}"
+echo "sudoers: ${WEB_USER} may run ${PEER_HELPER}, ${ADDR_HELPER} and ${LISTENER_HELPER}"
 
 # --- 4. relay pull key (the web user's own SSH identity for the tunnel) --------
 # Must match RelaySsh::pullKeyPath(): {site root}/config/relay_pull_key.

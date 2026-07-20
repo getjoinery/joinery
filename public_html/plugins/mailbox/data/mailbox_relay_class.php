@@ -107,6 +107,10 @@ class MailboxRelay extends SystemBase {
 		'mrl_last_push_time'     => array('type'=>'timestamp(6)'),
 		'mrl_last_pull_time'     => array('type'=>'timestamp(6)'),
 		'mrl_mgn_managed_node_id'=> array('type'=>'int8'),
+		// Cloud-provisioned relays (specs/mailbox_relay_cloud_provisioning.md):
+		// the customer-account instance a destroy/rebuild targets.
+		'mrl_cloud_provider'     => array('type'=>'varchar(32)'),
+		'mrl_cloud_instance_id'  => array('type'=>'varchar(50)'),
 		'mrl_create_time'        => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'mrl_update_time'        => array('type'=>'timestamp(6)'),
 		'mrl_delete_time'        => array('type'=>'timestamp(6)'),

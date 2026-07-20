@@ -10,7 +10,7 @@
  */
 
 require_once(PathHelper::getComposerAutoloadPath());
-require_once(PathHelper::getIncludePath('plugins/server_manager/includes/cloud_compute/CloudComputeProvider.php'));
+require_once(PathHelper::getIncludePath('includes/cloud_compute/CloudComputeProvider.php'));
 
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;

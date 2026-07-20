@@ -137,6 +137,23 @@ access). The consumer stores the token set (encrypted) on the buyer's
 `CustomerCloudAccount` and releases their waiting provisions. See
 [Server Manager → Customer-Cloud Fulfillment](/plugins/server_manager/docs/overview.md#customer-cloud-fulfillment).
 
+### Consumer: Relay Cloud (Mailbox) — the grant-per-act shape
+
+The Mailbox plugin's relay cloud provisioning (purpose `relay_cloud`, in
+`plugins/mailbox/includes/oauth_consumers/`) uses a different custody shape:
+**grant-per-act**. No account link is created and no refresh token is kept —
+the consumer seals the access token onto the specific `RelayCloudProvision`
+run it was granted for, the run uses it for that one act (create/build or
+destroy an instance), and every terminal state erases it. A later act starts
+a fresh consent. Use this shape whenever a token's power (here: create and
+destroy servers) outweighs the convenience of a standing connection. Scope
+requested: `linodes:read_write` only.
+
+This consumer is the *one-click branch* of the credential step: it runs only
+when the `linode` OAuth client is configured. Deployments without one get the
+same custody through a just-in-time pasted API token instead — the flow's
+universal floor.
+
 ## Settings
 
 | Setting | Default | Notes |

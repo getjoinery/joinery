@@ -1,7 +1,7 @@
 {
     "name": "Mailbox",
     "description": "Self-hosted email: receiving, forwarding, local mailboxes, webmail reader, IMAP sync, DKIM/SRS",
-    "version": "1.41.0",
+    "version": "1.44.3",
     "author": "Joinery",
     "receives_upgrades": true,
     "included_in_publish": true,
@@ -97,7 +97,7 @@
         {
             "key": "relay_tunnel",
             "label": "Hardened relay tunnel",
-            "details": "In smarthost mode compose sends leave through the relay over WireGuard. Runs a real SMTP submission handshake over the tunnel (EHLO, MAIL FROM, RCPT to a reserved domain, QUIT — nothing is sent): port 25 listens in both modes, so only accepting relay of an external recipient proves the submission listener is open. Fails until a relay provisioned inbound-only is rebuilt in smarthost mode. No-op in provider mode and on colocated deployments.",
+            "details": "In smarthost mode compose sends leave through the relay over WireGuard. Runs a real SMTP submission handshake over the tunnel (EHLO, MAIL FROM, RCPT to a reserved domain, QUIT \u2014 nothing is sent): port 25 listens in both modes, so only accepting relay of an external recipient proves the submission listener is open. Fails until a relay provisioned inbound-only is rebuilt in smarthost mode. No-op in provider mode and on colocated deployments.",
             "check": {
                 "type": "code",
                 "call": "InboundEmailHealth::checkRelayTunnel"
@@ -107,7 +107,7 @@
         {
             "key": "relay_spool_draining",
             "label": "Relay spool draining",
-            "details": "The main box pulls sealed mail off the relay spool every cron pass. Verifies a pull ran in the last 10 minutes so sealed mail is reaching the inbox. No-op on colocated deployments.",
+            "details": "The main box pulls sealed mail off the relay spool every cron pass. Verifies a pull ran in the last 30 minutes so sealed mail is reaching the inbox. No-op on colocated deployments.",
             "check": {
                 "type": "code",
                 "call": "InboundEmailHealth::checkRelaySpoolDraining"
@@ -159,6 +159,10 @@
     "settings": [
         {
             "name": "mailbox_enabled",
+            "default": "0"
+        },
+        {
+            "name": "mailbox_relay_cutover_complete",
             "default": "0"
         },
         {
@@ -252,6 +256,10 @@
         {
             "name": "mailbox_relay_outbound_mode",
             "default": "provider"
+        },
+        {
+            "name": "mailbox_local_listener",
+            "default": "active"
         },
         {
             "name": "mailbox_fleet_service_url",

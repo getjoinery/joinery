@@ -16,7 +16,7 @@
  *      gate it; report what it is doing (relay row => 'relay', else 'direct').
  *   3. Otherwise '' — undecided; gated pages render the choice card only.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 /**
@@ -32,6 +32,17 @@ function mailbox_receive_mode_resolve(bool $has_relay, string $setting, bool $ha
 		return $has_relay ? 'relay' : 'direct';
 	}
 	return '';
+}
+
+/**
+ * Whether renting a slot on the operator's shared relay is offered to users.
+ * Off for V1 launch — the fleet is not customer-facing yet. Gates every
+ * tenant-side hosted-relay surface (the Setup Relay section's Hosted relay
+ * block, the Settings connection box, the live fleet-status fetch) in one
+ * place; flip to true when the hosted offering launches.
+ */
+function mailbox_hosted_relay_offered(): bool {
+	return false;
 }
 
 /** True when a live relay row (hosted slot or self-hosted) exists. */
@@ -89,7 +100,7 @@ function mailbox_receive_gate_handle(array $input): ?LogicResult {
 	if ($mode === 'relay') {
 		$flash(mailbox_receive_relay_exists()
 			? 'A relay fronts this server. Finish its setup in the Relay section below.'
-			: 'A relay will front this server. Get one in the Relay section below — a hosted relay slot, or one you run yourself.');
+			: 'A relay will front this server. Set one up in the Relay section below.');
 		return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_setup');
 	}
 	$flash('Mail comes straight to this server. Add a domain to start receiving.'
@@ -119,7 +130,9 @@ function mailbox_receive_gate_render(): string {
 			'Nothing extra — your domains\' DNS points at this server.',
 			$relay_ready
 				? 'A relay spot is already reserved for this server — choosing this continues its setup.'
-				: 'A relay to set up — a hosted slot, or one you run yourself.'),
+				: (mailbox_hosted_relay_offered()
+					? 'A relay to set up — a hosted slot, or one you run yourself.'
+					: 'A relay to set up on a server you control.')),
 		array('Your server\'s address',
 			'Public. DNS names this server and the internet connects to it directly.',
 			'Hidden. DNS names the relay; mail is passed along over a private tunnel.'),

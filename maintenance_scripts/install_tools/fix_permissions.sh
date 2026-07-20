@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#VERSION 2.2 - Added explicit empty string validation for defensive programming
+#VERSION 2.3 - Re-pin SSH private keys to 600 after the blanket sweep (ssh refuses group-accessible keys; the relay mail pull broke on every deploy)
 #
 # Fix permissions for a Joinery site
 #
@@ -91,5 +91,16 @@ else
     echo "  Setting permissions to 777 (dev mode)..."
     chmod -R 777 "$SITE_ROOT"
 fi
+
+# SSH private keys demand 0600 and caller-only ownership — the blanket sweep
+# above would make ssh refuse them, silently breaking the relay mail pull on
+# every deploy. Re-pin them last, in both modes.
+for keyfile in "$SITE_ROOT/config/relay_pull_key"; do
+    if [ -f "$keyfile" ]; then
+        echo "  Pinning SSH key $keyfile to 600 www-data:www-data..."
+        chown www-data:www-data "$keyfile"
+        chmod 600 "$keyfile"
+    fi
+done
 
 echo -e "${GREEN}Done. Permissions fixed for $SITE_NAME.${NC}"

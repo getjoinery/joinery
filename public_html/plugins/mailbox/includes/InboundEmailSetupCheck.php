@@ -23,7 +23,7 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
- * @version 1.18
+ * @version 1.20
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -294,11 +294,24 @@ class InboundEmailSetupCheck {
 	private function checkHost() {
 		$out = array();
 
+		// The recorded listener state (specs/mailbox_listener_decommission.md):
+		// once decommissioned, the expectation for the local Postfix stack and
+		// port 25 inverts — gone is healthy, present is a mismatch.
+		$decommissioned = (strtolower(trim((string)$this->settings->get_setting('mailbox_local_listener'))) === 'decommissioned');
+
 		exec('which postfix 2>/dev/null', $o1, $e1);
 		$installed = ($e1 === 0);
 		exec('pgrep -x master 2>/dev/null', $o2, $e2);
 		$running = ($e2 === 0);
-		if ($installed && $running) {
+		if ($decommissioned) {
+			$out[] = $running
+				? $this->r('host.postfix', '', 'host', 'Postfix installed and running', self::REQUIRED, self::FAIL,
+					'The local listener is recorded as decommissioned, but Postfix is running.',
+					'Something restarted it outside this platform. Decommission again from the Relay section, '
+					. 'or Restore to make the record honest.')
+				: $this->r('host.postfix', '', 'host', 'Postfix installed and running', self::RECOMMENDED, self::PASS,
+					'Postfix is stopped — the local listener is decommissioned; the relay receives all mail.');
+		} elseif ($installed && $running) {
 			$out[] = $this->r('host.postfix', '', 'host', 'Postfix installed and running', self::REQUIRED, self::PASS,
 				'Postfix is installed and running.');
 		} else {
@@ -330,6 +343,14 @@ class InboundEmailSetupCheck {
 		$dkInstalled = ($e3 === 0);
 		exec('pgrep -x opendkim 2>/dev/null', $o4, $e4);
 		$dkRunning = ($e4 === 0);
+		if ($decommissioned) {
+			$out[] = $dkRunning
+				? $this->r('host.opendkim', '', 'host', 'opendkim (DKIM signing)', self::RECOMMENDED, self::WARN,
+					'The local listener is recorded as decommissioned, but opendkim is running.',
+					'Decommission again from the Relay section, or Restore to make the record honest.')
+				: $this->r('host.opendkim', '', 'host', 'opendkim (DKIM signing)', self::RECOMMENDED, self::PASS,
+					'opendkim is stopped — decommissioned with the listener; sent mail is signed on its own outbound path.');
+		} else {
 		$out[] = ($dkInstalled && $dkRunning)
 			? $this->r('host.opendkim', '', 'host', 'opendkim (DKIM signing)', self::RECOMMENDED, self::PASS,
 				'opendkim is installed and running.')
@@ -338,18 +359,29 @@ class InboundEmailSetupCheck {
 				             : 'opendkim is not installed — outbound DKIM signing is disabled.',
 				'Forwarding still works without it; only outbound DKIM signing is affected.',
 				$this->installerFix());
+		}
 
 		$p = @stream_socket_client('tcp://127.0.0.1:25', $en, $es, 2);
 		$listening = (bool)$p;
 		if ($p) { @fclose($p); }
-		if ($this->fronted()) {
+		if ($decommissioned) {
+			// Expectation inverted: the listener is recorded as gone, so an
+			// answering port 25 is a real mismatch, and silence is the healthy state.
+			$out[] = $listening
+				? $this->r('host.port25', '', 'host', 'SMTP port 25 listening', self::REQUIRED, self::FAIL,
+					'The local listener is recorded as decommissioned, but port 25 answers on this box.',
+					'Something reopened it outside this platform. Decommission again from the Relay section, '
+					. 'or Restore to make the record honest.')
+				: $this->r('host.port25', '', 'host', 'SMTP port 25 listening', self::RECOMMENDED, self::PASS,
+					'Port 25 is closed — the local listener is decommissioned; the relay is the only mail door.');
+		} elseif ($this->fronted()) {
 			// The relay is the public MX; the box's own listener is dead weight
 			// awaiting decommission (specs/mailbox_listener_decommission.md) —
 			// its state is informational, never a required condition.
 			$out[] = $this->r('host.port25', '', 'host', 'SMTP port 25 listening', self::RECOMMENDED, self::INFO,
 				'The relay is this deployment\'s public MX; this box\'s own mail listener is pending decommission.',
 				'Port 25 ' . ($listening ? 'is' : 'is not') . ' listening locally. Once every domain\'s MX points '
-				. 'at the relay, close port 25 on this box.');
+				. 'at the relay, decommission the listener from the Setup tab\'s Relay section.');
 		} elseif ($listening) {
 			$out[] = $this->r('host.port25', '', 'host', 'SMTP port 25 listening', self::REQUIRED, self::PASS,
 				'Port 25 is listening locally.',
@@ -937,10 +969,10 @@ class InboundEmailSetupCheck {
 				array('text' => 'Check the active email provider credential, or the forwarding SMTP relay settings, on the Settings page.'));
 		}
 
-		// Cutover completion: a relay row exists but is not enabled yet. Once
-		// DNS is fully cut over, mail is arriving at the relay with no consumer
-		// — the last step is the admin's explicit enable in the Setup tab's Relay section.
-		if ($this->fronted() && !$this->topology()['enabled']) {
+		// Cutover progress: relays are born enabled, so this row reports how
+		// far the DNS move has come (and flags the one bad state — cutover
+		// complete while the relay sits emergency-disabled).
+		if ($this->fronted()) {
 			$out[] = $this->relayEnableResult();
 		}
 
@@ -948,15 +980,23 @@ class InboundEmailSetupCheck {
 	}
 
 	/**
-	 * The 'plugin.relay_enable' row: REQUIRED FAIL when every enabled hosted
-	 * domain's MX already points at the relay (and, on a fleet slot, every
-	 * ownership proof is published) but the relay row is still disabled;
-	 * neutral INFO while DNS is still moving.
+	 * Whether DNS has fully cut over to the relay: every enabled, non-IMAP
+	 * hosted domain's MX names the relay MX hostname and, on a fleet slot,
+	 * every ownership proof is verified. THE shared evaluation — the
+	 * cutover-completion row and the listener-decommission guardrails
+	 * (specs/mailbox_listener_decommission.md) both read it; there is no
+	 * second copy.
+	 *
+	 * @return array{complete:bool,reason:string} reason names the first
+	 *         blocker ('' when complete).
 	 */
-	private function relayEnableResult() {
+	public function relayCutoverState(): array {
 		$t = $this->topology();
 		$expected = $t['mx_hostname'];
 		$is_fleet = ($t['mode'] === 'fleet');
+		if ($expected === '') {
+			return $this->recordCutover(array('complete' => false, 'reason' => 'The relay has no MX hostname recorded yet.'));
+		}
 
 		$domains = array();
 		try {
@@ -968,36 +1008,100 @@ class InboundEmailSetupCheck {
 				}
 			}
 		} catch (\Throwable $e) {
-			// Fall through to the INFO shape below.
+			return $this->recordCutover(array('complete' => false, 'reason' => 'The hosted domains could not be read.'));
+		}
+		if (empty($domains)) {
+			return $this->recordCutover(array('complete' => false, 'reason' => 'No enabled hosted domain is registered yet.'));
 		}
 
-		$ready = ($expected !== '' && !empty($domains));
-		foreach ($ready ? $domains : array() as $domain) {
+		foreach ($domains as $domain) {
 			list($mx, $ok) = $this->dns(function () use ($domain) { return DnsResolver::getMx($domain); });
-			if (!$ok || empty($mx) || strtolower(rtrim($mx[0]['host'], '.')) !== $expected) {
-				$ready = false;
-				break;
+			if (!$ok) {
+				return $this->recordCutover(array('complete' => false, 'reason' => 'The MX lookup for ' . $domain . ' failed.'));
+			}
+			if (empty($mx) || strtolower(rtrim($mx[0]['host'], '.')) !== $expected) {
+				return $this->recordCutover(array('complete' => false, 'reason'
+					=> $domain . '\'s MX does not point at the relay (' . $expected . ') yet.'));
 			}
 			if ($is_fleet) {
 				$claim = $this->fleetClaimFor($domain);
 				if ($claim === null || (string)($claim['status'] ?? '') !== 'verified') {
-					$ready = false;
-					break;
+					return $this->recordCutover(array('complete' => false, 'reason'
+						=> $domain . '\'s ownership proof is not published yet.'));
 				}
 			}
 		}
+		return $this->recordCutover(array('complete' => true, 'reason' => ''));
+	}
 
-		if ($ready) {
-			return $this->r('plugin.relay_enable', '', 'plugin', 'Relay enabled', self::REQUIRED, self::FAIL,
-				'DNS is cut over but the relay is not enabled — mail is arriving at the relay with no consumer.',
+	/**
+	 * Persist the computed cutover verdict (mailbox_relay_cutover_complete) so
+	 * per-send and per-check consumers — outbound doctrine enforcement, the
+	 * origin-hidden health check — can read it without DNS lookups. Recorded
+	 * on every evaluation; check passes and Setup page loads keep it fresh.
+	 */
+	private function recordCutover(array $state): array {
+		try {
+			require_once(PathHelper::getIncludePath('data/settings_class.php'));
+			$value = $state['complete'] ? '1' : '0';
+			$existing = new MultiSetting(array('setting_name' => 'mailbox_relay_cutover_complete'));
+			$existing->load();
+			$setting = count($existing) ? $existing->get(0) : null;
+			if ($setting === null || (string)$setting->get('stg_value') !== $value) {
+				$was_allowed = SystemBase::$allow_get_mutation;
+				SystemBase::$allow_get_mutation = true;
+				try {
+					if ($setting === null) {
+						$setting = new Setting(NULL);
+						$setting->set('stg_name', 'mailbox_relay_cutover_complete');
+					}
+					$setting->set('stg_value', $value);
+					$setting->save();
+				} finally {
+					SystemBase::$allow_get_mutation = $was_allowed;
+				}
+			}
+		} catch (\Throwable $e) {
+			error_log('InboundEmailSetupCheck::recordCutover failed: ' . $e->getMessage());
+		}
+		return $state;
+	}
+
+	/**
+	 * The 'plugin.relay_enable' row — cutover progress. Relays are born
+	 * enabled, so the normal life is: INFO with the first incomplete reason
+	 * while DNS moves, PASS once every enabled hosted domain's MX points at
+	 * the relay (and, on a fleet slot, every ownership proof is published).
+	 * The one bad state: cutover complete while the relay sits disabled (the
+	 * emergency stop was left on) — mail arrives with no consumer, REQUIRED
+	 * FAIL.
+	 */
+	private function relayEnableResult() {
+		$t = $this->topology();
+		$expected = $t['mx_hostname'];
+		$is_fleet = ($t['mode'] === 'fleet');
+		$state = $this->relayCutoverState();
+
+		if ($state['complete'] && !$t['enabled']) {
+			return $this->r('plugin.relay_enable', '', 'plugin', 'Relay cutover', self::REQUIRED, self::FAIL,
+				'DNS is cut over but the relay is disabled — mail is arriving at the relay with no consumer.',
 				'Every hosted domain\'s MX points at ' . $expected
 				. ($is_fleet ? ' and every ownership proof is published.' : '.'),
-				array('text' => 'Enable the relay in the Relay section above.'));
+				array('text' => 'Re-enable the relay in the Relay section above.'));
 		}
-		return $this->r('plugin.relay_enable', '', 'plugin', 'Relay enabled', self::RECOMMENDED, self::INFO,
-			'The relay is not enabled yet — enable it in the Relay section above after the rows below go green.',
-			'Enabling it makes the relay front every hosted domain; do it once the MX'
-			. ($is_fleet ? ' and ownership rows' : ' rows') . ' pass.');
+		if ($state['complete']) {
+			return $this->r('plugin.relay_enable', '', 'plugin', 'Relay cutover', self::REQUIRED, self::PASS,
+				'DNS is cut over — the relay fronts every hosted domain.');
+		}
+		if (!$t['enabled']) {
+			return $this->r('plugin.relay_enable', '', 'plugin', 'Relay cutover', self::RECOMMENDED, self::INFO,
+				'The relay is disabled, and the DNS cutover is not finished: ' . $state['reason'],
+				'Re-enable the relay in the Relay section above; it should stay enabled through the cutover.');
+		}
+		return $this->r('plugin.relay_enable', '', 'plugin', 'Relay cutover', self::RECOMMENDED, self::INFO,
+			'The DNS cutover is not finished yet: ' . $state['reason'],
+			'The relay is running and ready — mail moves to it as each domain\'s MX'
+			. ($is_fleet ? ' and ownership rows' : ' rows') . ' go green.');
 	}
 
 	// ===================================================================

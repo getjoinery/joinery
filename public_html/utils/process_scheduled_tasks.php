@@ -8,7 +8,7 @@
  * Crontab (one line per site):
  * STAR/15 * * * * php /var/www/html/{sitename}/public_html/utils/process_scheduled_tasks.php >> /var/www/html/{sitename}/logs/cron_scheduled_tasks.log 2>&1
  *
- * @version 1.3
+ * @version 1.4
  */
 
 // Reject non-CLI access
@@ -139,10 +139,12 @@ foreach ($tasks as $task) {
 				$message = null;
 			}
 
-			// Update task record
+			// Update task record. The message column is 500 chars — a long task
+			// message must truncate, never abort the record update (an aborted
+			// update reads as a task failure and eats the real message).
 			$task->set('sct_last_run_time', 'now()');
-			$task->set('sct_last_run_status', $status);
-			$task->set('sct_last_run_message', $message);
+			$task->set('sct_last_run_status', mb_substr((string)$status, 0, 50));
+			$task->set('sct_last_run_message', $message !== null ? mb_substr((string)$message, 0, 500) : null);
 			if ($deactivate) {
 				$task->set('sct_is_active', false);
 			}

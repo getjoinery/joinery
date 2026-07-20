@@ -23,8 +23,9 @@ function fleet_release_logic(array $input): LogicResult {
 		return LogicResult::error('No fleet slot to release.');
 	}
 
-	$slot->set('mft_status', MailboxFleetSlot::STATUS_RELEASED);
-	$slot->save();
+	// Release + immediate claim revocation (the domains' next home must be
+	// able to claim them before this slot finishes evicting).
+	FleetService::releaseSlot($slot);
 
 	return LogicResult::render(array(
 		'released' => true,

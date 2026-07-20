@@ -22,7 +22,7 @@
  *
  * Run: php tests/run.php db --filter=relay_fleet
  *
- * @version 1.0
+ * @version 1.2
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -113,6 +113,16 @@ class RelayFleetTest {
 		$rebuilt = (new RelayMapExporter($relay))->build();
 		check(RelayMapSync::contentHash($artifacts) === RelayMapSync::contentHash($rebuilt),
 			'unchanged routing state hashes identically (push-skip contract)');
+
+		// The merge's typed unmarshal needs empty maps as JSON OBJECTS — a
+		// domainless deployment's first push ships exactly that shape.
+		$body = RelayMapSync::encodeFragmentBody(array(
+			'tenant' => 'main', 'recipients' => array(), 'domains' => array(), 'forwarding_domains' => array(),
+		));
+		check(strpos($body, '"recipients": {}') !== false && strpos($body, '"domains": {}') !== false,
+			'empty recipients/domains encode as objects for the Go merge');
+		check(strpos($body, '"forwarding_domains": []') !== false,
+			'list-typed fields stay arrays');
 	}
 
 	// The operator-side brain: allocation and claim uniqueness.
@@ -193,6 +203,26 @@ class RelayFleetTest {
 		$claim->save();
 		check(MailboxFleetDomainClaim::liveClaimByOtherSlot('relay-fleet-test.example', intval($slot_b->key)) === null,
 			'a revoked claim frees the domain');
+
+		// Release is the exit ramp: the slot goes released AND its live claims
+		// are revoked immediately — the domains' next home must be able to
+		// claim them before this slot finishes evicting.
+		$claim2 = new MailboxFleetDomainClaim(NULL);
+		$claim2->set('mfd_mft_slot_id', intval($slot_a->key));
+		$claim2->set('mfd_domain', 'relay-fleet-release.example');
+		$claim2->set('mfd_txt_token', 'joinery-fleet-verify-test2');
+		$claim2->set('mfd_status', MailboxFleetDomainClaim::STATUS_VERIFIED);
+		$claim2->save();
+		$this->cleanup[] = array('mfd_mailbox_fleet_domain_claims', 'mfd_mailbox_fleet_domain_claim_id', intval($claim2->key));
+
+		FleetService::releaseSlot($slot_a);
+		check((string)$slot_a->get('mft_status') === MailboxFleetSlot::STATUS_RELEASED,
+			'releaseSlot marks the slot released');
+		$claim2_reload = new MailboxFleetDomainClaim(intval($claim2->key), TRUE);
+		check((string)$claim2_reload->get('mfd_status') === MailboxFleetDomainClaim::STATUS_REVOKED,
+			'releaseSlot revokes the slot\'s live claims');
+		check(MailboxFleetDomainClaim::liveClaimByOtherSlot('relay-fleet-release.example', intval($slot_b->key)) === null,
+			'a released slot\'s domains are claimable elsewhere');
 	}
 
 	private function cleanupRows() {

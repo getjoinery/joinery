@@ -19,7 +19,7 @@
  * is a no-op; with smarthost on, checkRelayTunnel applies and the two provider
  * checks are no-ops. The check list always matches the chosen path.
  *
- * @version 1.10
+ * @version 1.12
  */
 
 require_once(PathHelper::getIncludePath('includes/ProvisioningCheckFailed.php'));
@@ -40,10 +40,24 @@ class InboundEmailHealth {
      */
     public static function checkInboundMailServer() {
         // Relay-fronted deployment (specs/…hardened_ingest_relay § Phase 8/9): the
-        // MTA runs on the relay, not here — the main box's local port 25 is
-        // decommissioned. The relay's own port 25 / milters / tunnel are covered by
-        // checkRelayTunnel, so this local check no longer applies.
+        // MTA runs on the relay, not here — the main box's local port 25 is not a
+        // health requirement. The relay's own port 25 / milters / tunnel are covered
+        // by checkRelayTunnel. Setting-aware inversion
+        // (specs/mailbox_listener_decommission.md): once the listener is recorded as
+        // decommissioned, an ANSWERING port 25 is the failure — the attack surface
+        // the decommission removed has come back.
         if (self::activeRelay() !== null) {
+            $recorded = strtolower(trim((string)Globalvars::get_instance()->get_setting('mailbox_local_listener')));
+            if ($recorded === 'decommissioned') {
+                $sock = @stream_socket_client('tcp://127.0.0.1:25', $errno, $errstr, 2);
+                if ($sock) {
+                    @fclose($sock);
+                    throw new ProvisioningCheckFailed(
+                        'The local mail listener is recorded as decommissioned, but port 25 answers on this box — '
+                        . 'decommission again (or Restore) from the Setup tab\'s Relay section.'
+                    );
+                }
+            }
             return;
         }
 
@@ -375,10 +389,11 @@ class InboundEmailHealth {
         if ($last === '') {
             throw new ProvisioningCheckFailed('The relay spool has never been pulled — is the PullRelaySpool task enabled?');
         }
-        // The pull runs every cron pass; more than 10 minutes stale means it stopped.
-        if (strtotime($last . ' UTC') < time() - 600) {
+        // The pull runs every cron pass; the threshold allows several missed
+        // 5-minute passes before calling it stalled.
+        if (strtotime($last . ' UTC') < time() - 1800) {
             throw new ProvisioningCheckFailed(
-                'The relay spool has not been pulled since ' . $last . ' UTC (over 10 minutes) — the pull task may be stalled.'
+                'The relay spool has not been pulled since ' . $last . ' UTC (over 30 minutes) — the pull task may be stalled.'
             );
         }
     }
@@ -415,6 +430,12 @@ class InboundEmailHealth {
     public static function checkOriginHidden() {
         $relay = self::activeRelay();
         if ($relay === null) {
+            return;
+        }
+        // Before the DNS cutover completes, the box's address is expected in
+        // mail DNS — the Setup tab rows walk the move. Assert only once the
+        // recorded cutover verdict says the relay fronts everything.
+        if ((string)Globalvars::get_instance()->get_setting('mailbox_relay_cutover_complete') !== '1') {
             return;
         }
         $settings = Globalvars::get_instance();

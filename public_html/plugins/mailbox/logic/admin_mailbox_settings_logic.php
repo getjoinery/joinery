@@ -107,8 +107,11 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 	$fleet_secret_set = trim((string)$settings->get_setting('mailbox_fleet_api_secret_key')) !== '';
 	$outbound_mode = (strtolower(trim((string)$settings->get_setting('mailbox_relay_outbound_mode'))) === 'smarthost')
 		? 'smarthost' : 'provider';
-	$show_relay_config = (mailbox_receive_mode() === 'relay')
-		|| mailbox_receive_relay_exists() || $fleet_url !== '';
+	// The connection box is hosted-relay-only, so it is also gated behind the
+	// hosted offering's launch flag.
+	$show_relay_config = mailbox_hosted_relay_offered()
+		&& ((mailbox_receive_mode() === 'relay')
+			|| mailbox_receive_relay_exists() || $fleet_url !== '');
 
 	return LogicResult::render(array(
 		'session'           => $session,

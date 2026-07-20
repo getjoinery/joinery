@@ -98,3 +98,7 @@ Re-enable (`on`) has no guardrails — restoring a listener is always safe.
 - Any change to rspamd.
 - Automating the decision — decommission stays an explicit admin act with a
   typed confirm, given its blast radius if guardrails were somehow wrong.
+
+## UI revision (owner, 2026-07-20, same build cycle)
+
+The surface was reworked for plainness: the box appears ONLY when the action is possible — an amber **Uninstall local mail** offer (one sentence: with a relay fronting mail, the local mail software is unnecessary and a security risk) with a plain-confirm button. Guardrail refusals render nothing at all instead of a refusal list (the Setup rows already walk each missing piece); the server-side guardrail re-check on POST remains the enforcement. The typed confirm was dropped with the refusal list — the guardrails are the safety. After an uninstall, a quiet state line offers **Reinstall local mail**; a recorded-uninstalled-but-port-answering mismatch renders red with the uninstall offered again. "Uninstall/Reinstall" is user-facing vocabulary for the same off/on helper verbs (services disabled, packages kept for instant restore).
