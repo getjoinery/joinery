@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.17
+ * No framework. @version 2.18
  *
  * Two-pane layout: the main pane swaps between the conversation list and an
  * opened conversation (toggled by the `reading` class on #mbx-reader); a back
@@ -148,7 +148,7 @@
 		list.innerHTML = '';
 
 		state.mailboxes.forEach(function (m) {
-			list.appendChild(mailboxItem(m.address, m.alias_id, m.unread, m.folders, m.own));
+			list.appendChild(mailboxItem(m.address, m.alias_id, m.unread, m.folders, m.own, m.security_level));
 		});
 		if (state.allAccess && data.unmatched && data.unmatched.total > 0) {
 			var li = mailboxItem('Unmatched', 'unmatched', data.unmatched.unread, []);
@@ -184,12 +184,20 @@
 		if (newBtn) newBtn.hidden = !state.mailboxes.length;
 	}
 
-	function mailboxItem(label, aliasId, unread, folders, own) {
+	function mailboxItem(label, aliasId, unread, folders, own, securityLevel) {
 		var li = el('li', 'mbx-mailbox');
 		li.dataset.alias = (aliasId == null ? '' : String(aliasId));
 		li._folders = folders || [];
 		var addr = el('span', 'mbx-mailbox-addr', label);
 		li.appendChild(addr);
+		// Protection-level badge (specs/mailbox_protection_ceremony.md): a
+		// protected mailbox shows its level wherever the mailbox shows.
+		if (securityLevel && securityLevel !== 'standard') {
+			var lvl = el('span', 'mbx-level-badge mbx-level-' + securityLevel,
+				securityLevel.charAt(0).toUpperCase() + securityLevel.slice(1));
+			lvl.title = 'Mail protection level (set on the domain)';
+			li.appendChild(lvl);
+		}
 		// Signature gear (§ Phase 3) — only on mailboxes the viewer is a member of
 		// (a signature lives on a grant), never the superadmin's all-access extras.
 		if (own && aliasId != null && aliasId !== 'unmatched' && !isNaN(Number(aliasId))) {

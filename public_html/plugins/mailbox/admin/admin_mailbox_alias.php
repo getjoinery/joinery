@@ -2,7 +2,7 @@
 /**
  * Inbound Email - Create/Edit Alias
  *
- * @version 1.6
+ * @version 1.7
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -64,6 +64,23 @@ $formwriter->dropinput('iea_ied_inbound_email_domain_id', 'Domain', [
 	'options' => $domain_options,
 	'validation' => ['required' => true],
 ]);
+
+// Mail protection is a property of the DOMAIN — surface the level here with a
+// path to the domain editor, so the mailbox page is never a dead end for
+// someone looking to change it.
+if ($is_edit && $alias->get('iea_ied_inbound_email_domain_id')) {
+	$alias_domain_id = intval($alias->get('iea_ied_inbound_email_domain_id'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
+	$alias_domain = new InboundEmailDomain($alias_domain_id, TRUE);
+	if ($alias_domain->key) {
+		$alias_level = $alias_domain->security_level();
+		echo '<p class="jy-security-note" style="margin-top:-0.5rem;">Mail protection: '
+			. '<a class="iea-badge iea-badge-level iea-badge-level-' . htmlspecialchars($alias_level)
+			. '" href="/plugins/mailbox/admin/admin_mailbox_domains?ied_inbound_email_domain_id=' . $alias_domain_id
+			. '" title="Mail protection level — set on the domain">' . htmlspecialchars(ucfirst($alias_level)) . '</a>'
+			. '</p>';
+	}
+}
 
 $formwriter->textinput('iea_alias', 'Mailbox', [
 	'validation' => ['required' => true],

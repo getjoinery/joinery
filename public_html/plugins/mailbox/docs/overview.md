@@ -798,9 +798,55 @@ editor as a required three-card picker (outcome language only, default **Standar
   key) for any Fortress domain, from the moment the level is chosen — before the
   protect ceremony flips `ied_is_protected_identity`.
 
+**Raising a level runs the protection ceremony**
+(specs/mailbox_protection_ceremony.md, `includes/protection_ceremony.php`).
+Choosing a card above the current level reveals a prerequisite checklist on the
+domain editor — every row a verdict with an in-place fix — and the save is
+refused server-side until every required row passes (the button state is a
+convenience, `mailbox_protection_rows()` re-verification at save is the
+enforcement):
+
+- **One reader per mailbox** — protected mail seals to one person's key; a
+  shared mailbox renders its holders with inline remove-access buttons, a
+  holderless one an add-owner link.
+- **Every reader holds a vault** — evaluated per HOLDER (the sealing target),
+  never the admin running the save. The session user's own missing vault links
+  to `/profile/security?return=…`, which bounces straight back after setup;
+  another holder's names them (an admin cannot create someone's zero-knowledge
+  vault).
+- **Unlock by touch** (recommended) — a PRF-capable passkey per holder.
+- With the `passkeys_enabled` kill switch off, one required blocker row says
+  so — vault setup itself runs through a PRF passkey.
+- **Fortress adds** a relay-fronted required row and an info row announcing
+  the DNS/protect stage; activation saves the level (relay-side sealing and
+  the inverted-DNS prescriptions start immediately) and routes into the
+  verify-gated protect ceremony exactly as before.
+
+**A raise converges history.** Sealing is per-row, so earlier mail was stored
+plaintext; after a raise the editor auto-runs bounded sealing batches
+(`mailbox_protection_seal_batch`, 200 rows per pass — sealing needs only the
+holder's vault PUBLIC key, so any admin session drives it) until the domain's
+backlog is empty, with a progress line. The Setup tab carries a per-domain
+**Mail sealed at rest** row: PASS when every stored message on a protected
+domain is sealed, REQUIRED FAIL naming the unsealed count when protection has
+silently degraded (e.g. a vault deleted after the raise) — and the editor
+resumes the sealing pass on its next visit whenever a backlog exists.
+
+**Protected-domain invariants enforce at the mutation points**: on a domain
+that seals content, the alias editor refuses a second member on a mailbox and
+refuses a memberless mailbox (`mailbox_protected_grant_error()`), so the
+raised state cannot be corrupted afterward.
+
+**Protection badges.** Every domain row on the Accounts tree shows its level
+as a badge linking to the domain editor (the badge IS the path to raising
+protection); mailboxes on protected domains carry the badge on their Accounts
+rows and in the reader's mailbox rail (both the staff reader and
+`/profile/mailbox/mailbox`).
+
 **Rows are sealed per-row** (`iem_content_sealed`): mail sealed under one posture stays
 readable after the domain's level changes — the read hooks key off the row, not the
-domain. Lowering a level changes future ingest only.
+domain. Lowering a level changes future ingest only, and never unseals: sealed
+rows stay sealed and readable in-window.
 
 **IMAP-source domains** offer Standard and Private only — the remote provider holds the
 plaintext and the sending identity, and there is no MX to move, so the picker hides the
