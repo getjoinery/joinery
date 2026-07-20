@@ -8,9 +8,10 @@
  * To add a new provider, create a single file in includes/email_providers/
  * implementing this interface. No other files need modification.
  *
- * This file also declares the optional RawMessageRelay capability (below).
+ * This file also declares the optional RawMessageRelay, ApiSubmissionRelay,
+ * and DkimRecordSource capabilities (below).
  *
- * @version 1.3
+ * @version 1.4
  */
 interface EmailServiceProvider {
     /**
@@ -134,4 +135,41 @@ interface RawMessageRelay {
  * @version 1.0
  */
 interface ApiSubmissionRelay extends RawMessageRelay {
+}
+
+/**
+ * DkimRecordSource - optional capability for providers that DKIM-sign outbound
+ * mail themselves and can report, from their own API, the DNS records a sending
+ * domain must publish for that signing to verify and align.
+ *
+ * The mailbox Setup tab uses this to drive the domain DKIM row: when the
+ * outbound path for a domain's mail is an API provider, the correct DKIM record
+ * is the one the PROVIDER issues for that domain — a locally generated opendkim
+ * key signs nothing on that path. A provider opts in by adding this interface
+ * to its `implements` list; providers without it get generic naming-the-provider
+ * guidance instead. Local-submission providers (Postfix, SMTP) never implement
+ * it — opendkim owns their signing.
+ *
+ * Providers that implement it: Mailgun (sending DNS records from the domains
+ * API), SES (Easy DKIM CNAME tokens from GetEmailIdentity).
+ *
+ * @version 1.0
+ */
+interface DkimRecordSource {
+    /**
+     * The DKIM DNS records the provider requires for $domain, from the
+     * provider's API. Never throws.
+     *
+     * @return array{status:string, records:array<int,array{type:string,name:string,value:string}>}
+     *   status:
+     *     'ok'             — $domain is registered with the provider; records
+     *                        lists what must be published (may be empty when the
+     *                        provider reports signing configured with nothing
+     *                        left to publish).
+     *     'not_registered' — the API answered and $domain is not a sending
+     *                        domain there; the fix is at the provider dashboard.
+     *     'unreachable'    — the API did not answer; callers must render an
+     *                        unknown verdict, never a fabricated one.
+     */
+    public static function getDkimStatus(string $domain): array;
 }

@@ -241,7 +241,7 @@
 	if($_SESSION['permission'] == 10){
 		
 		echo '<b>NOTE: These settings will not override the settings if they are located in the Globalvars_site.php file in the /config directory</b><br>';
-		if(StripeHelper::isTestMode()){
+		if((isset($_SESSION['test_mode']) && $_SESSION['test_mode']) || $settings->get_setting('debug')){
 			echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Test or debug mode is on.</div>';
 		}		
 		
@@ -466,6 +466,10 @@
 		]);
 		$formwriter->textinput('defaultemailname', 'Default Email Name', [
 			'value' => $settings->get_setting('defaultemailname')
+		]);
+		$formwriter->textinput('defaultreplyto', 'Default Reply-To', [
+			'value' => $settings->get_setting('defaultreplyto'),
+			'helptext' => 'Applied to system mail that sets no Reply-To of its own'
 		]);
 
 		$formwriter->textinput('site_name', 'Site Name', [

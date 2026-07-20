@@ -11,6 +11,7 @@ class EmailSender {
     private $settings;
     private $defaultFrom;
     private $defaultFromName;
+    private $defaultReplyTo;
     private $debugMode;
 
     /** @var array|null Cached provider registry: key => class name */
@@ -20,6 +21,7 @@ class EmailSender {
         $this->settings = Globalvars::get_instance();
         $this->defaultFrom = $this->settings->get_setting('defaultemail');
         $this->defaultFromName = $this->settings->get_setting('defaultemailname');
+        $this->defaultReplyTo = $this->settings->get_setting('defaultreplyto');
         $this->debugMode = $this->settings->get_setting('email_debug_mode') == '1';
     }
 
@@ -138,6 +140,13 @@ class EmailSender {
         // Set defaults if not specified
         if (!$message->getFrom()) {
             $message->from($this->defaultFrom, $this->defaultFromName);
+        }
+
+        // Default Reply-To applies to ambient sends only: an injected transport is
+        // send-as-a-mailbox (a human identity whose replies belong to that mailbox),
+        // never the site's system mail.
+        if ($transport === null && $this->defaultReplyTo && !$message->getReplyTo()) {
+            $message->replyTo($this->defaultReplyTo);
         }
 
         // Protected-identity ambient-send guard (specs/mailbox_outbound_send_protection.md,
@@ -294,6 +303,10 @@ class EmailSender {
         // Set defaults if not specified
         if (!$message->getFrom()) {
             $message->from($this->defaultFrom, $this->defaultFromName);
+        }
+
+        if ($this->defaultReplyTo && !$message->getReplyTo()) {
+            $message->replyTo($this->defaultReplyTo);
         }
 
         // Batch sends are always ambient (no per-send session transport), so a

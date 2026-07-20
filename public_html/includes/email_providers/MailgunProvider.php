@@ -7,9 +7,15 @@
  * Also implements ApiSubmissionRelay (messages.mime) so inbound forwarding and
  * the hidden-origin compose path can relay raw MIME through the same
  * mailgun_api_key, with no separate SMTP credential — over an HTTP API, so the
- * submitting box's IP never enters the delivered Received: chain.
+ * submitting box's IP never enters the delivered Received: chain. Raw relays
+ * submit through the envelope sender's own Mailgun sending domain when the
+ * account has it active, so Mailgun's DKIM signature aligns with the From
+ * domain (DMARC); otherwise the configured mailgun_domain carries the send.
  *
- * @version 1.4
+ * Implements DkimRecordSource: the domains API reports the DKIM records a
+ * sending domain must publish, which drives the mailbox Setup tab's DKIM row.
+ *
+ * @version 1.5
  */
 
 require_once(PathHelper::getComposerAutoloadPath());
@@ -17,10 +23,22 @@ require_once(PathHelper::getIncludePath('includes/InboundEmailProvider.php'));
 
 use Mailgun\Mailgun;
 
-class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubmissionRelay {
+class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubmissionRelay, DkimRecordSource {
+
+    /** @var array<string,string> Per-request cache: sending domain => account state ('' = not in account / lookup failed). */
+    private static $sending_domain_state = [];
 
     public static function getKey(): string {
         return 'mailgun';
+    }
+
+    /** The configured Mailgun SDK client (honors the EU API link when set). */
+    private static function client(): Mailgun {
+        $settings = Globalvars::get_instance();
+        $eu_link = $settings->get_setting('mailgun_eu_api_link');
+        return $eu_link
+            ? Mailgun::create($settings->get_setting('mailgun_api_key'), $eu_link)
+            : Mailgun::create($settings->get_setting('mailgun_api_key'));
     }
 
     public static function getLabel(): string {
@@ -327,6 +345,76 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
         ];
     }
 
+    // ── DkimRecordSource ────────────────────────────────────────────────
+
+    /**
+     * The DKIM records Mailgun requires for a sending domain: the sending DNS
+     * records from the domains API whose name carries a _domainkey selector.
+     * A 404 means the domain is not registered in the account.
+     */
+    public static function getDkimStatus(string $domain): array {
+        try {
+            $show = self::client()->domains()->show($domain);
+        } catch (\Mailgun\Exception\HttpClientException $e) {
+            return ($e->getCode() === 404)
+                ? ['status' => 'not_registered', 'records' => []]
+                : ['status' => 'unreachable', 'records' => []];
+        } catch (\Throwable $e) {
+            error_log('[MailgunProvider] getDkimStatus(' . $domain . ') failed: ' . $e->getMessage());
+            return ['status' => 'unreachable', 'records' => []];
+        }
+
+        $records = [];
+        foreach ($show->getOutboundDNSRecords() as $rec) {
+            $name = (string)$rec->getName();
+            if (stripos($name, '_domainkey') === false) {
+                continue;
+            }
+            $records[] = [
+                'type'  => strtoupper((string)$rec->getType()),
+                'name'  => $name,
+                'value' => (string)$rec->getValue(),
+            ];
+        }
+        return ['status' => 'ok', 'records' => $records];
+    }
+
+    // ── Submission-domain alignment ─────────────────────────────────────
+
+    /**
+     * Which account domain a raw relay should submit through for a given
+     * envelope sender. The API path domain is Mailgun's signing identity, so
+     * submitting through the sender's own domain (when the account has it
+     * active) makes the DKIM signature align with the From domain for DMARC.
+     * Anything else — no domain, not in the account, not active, lookup
+     * failure — falls back to the configured mailgun_domain, so a send never
+     * breaks because the domains API hiccuped.
+     */
+    public static function apiDomainForSender(string $envelope_sender): string {
+        $configured = (string)Globalvars::get_instance()->get_setting('mailgun_domain');
+        $at = strrpos($envelope_sender, '@');
+        $domain = ($at !== false) ? strtolower(rtrim(substr($envelope_sender, $at + 1), '.')) : '';
+        if ($domain === '' || strcasecmp($domain, $configured) === 0) {
+            return $configured;
+        }
+        if (!array_key_exists($domain, self::$sending_domain_state)) {
+            $state = '';
+            try {
+                $d = self::client()->domains()->show($domain)->getDomain();
+                $state = ($d && method_exists($d, 'getState')) ? strtolower((string)$d->getState()) : '';
+            } catch (\Throwable $e) {
+                // Not in the account, or the API did not answer — fall back.
+            }
+            self::$sending_domain_state[$domain] = $state;
+        }
+        return self::pickApiDomain($domain, self::$sending_domain_state[$domain], $configured);
+    }
+
+    /** Pure pick: an active account domain wins; anything else falls back. */
+    public static function pickApiDomain(string $sender_domain, string $account_state, string $configured): string {
+        return ($sender_domain !== '' && $account_state === 'active') ? $sender_domain : $configured;
+    }
+
     // ── RawMessageRelay ─────────────────────────────────────────────────
 
     /**
@@ -341,15 +429,12 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
      * matching the per-destination shape forwardEmail() expects.
      */
     public function relayRawMessage(string $raw_mime, string $envelope_sender, array $destinations): array {
-        $settings = Globalvars::get_instance();
+        $mg = self::client();
 
-        if ($settings->get_setting('mailgun_eu_api_link')) {
-            $mg = Mailgun::create($settings->get_setting('mailgun_api_key'), $settings->get_setting('mailgun_eu_api_link'));
-        } else {
-            $mg = Mailgun::create($settings->get_setting('mailgun_api_key'));
-        }
-
-        $domain = $settings->get_setting('mailgun_domain');
+        // Submit through the envelope sender's own sending domain when the
+        // account has it active — the API path domain is Mailgun's signing
+        // identity, and this is what makes DKIM align with the From domain.
+        $domain = self::apiDomainForSender($envelope_sender);
 
         // Best-effort envelope sender: Mailgun honors o:sender on the MIME
         // endpoint where it can; it otherwise owns the return-path.
