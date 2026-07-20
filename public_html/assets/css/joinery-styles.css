@@ -375,6 +375,53 @@ body.jy-default blockquote {
   text-decoration: none;
 }
 
+/* Actions dropdown — generic <details>/<summary> menu for row or panel
+   actions. Markup:
+     <details class="jy-actions-dropdown">
+       <summary class="btn btn-secondary">Actions</summary>
+       <div class="jy-actions-menu">
+         <button type="button">…</button>
+       </div>
+     </details>
+   base.js closes any open one on an outside click or after a menu click. */
+.jy-actions-dropdown { position: relative; display: inline-block; }
+.jy-actions-dropdown > summary { list-style: none; }
+.jy-actions-dropdown > summary::-webkit-details-marker { display: none; }
+.jy-actions-dropdown > summary::after { content: ' \25BE'; }
+.jy-actions-dropdown.jy-actions-left .jy-actions-menu { left: 0; right: auto; }
+.jy-actions-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 220px;
+  background: var(--jy-color-bg);
+  border: 1px solid var(--jy-color-border);
+  border-radius: var(--jy-radius-md);
+  box-shadow: var(--jy-shadow-md);
+  padding: var(--jy-space-2) 0;
+  z-index: 200;
+  text-align: left;
+}
+.jy-actions-menu button {
+  display: block;
+  width: 100%;
+  padding: var(--jy-space-2) var(--jy-space-4);
+  border: 0;
+  background: none;
+  font-family: var(--jy-font-sans);
+  font-size: var(--jy-text-sm);
+  color: var(--jy-color-text);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.jy-actions-menu button:hover {
+  background: var(--jy-color-surface);
+  color: var(--jy-color-primary);
+}
+.jy-actions-menu button.jy-action-danger { color: var(--jy-color-danger, #b42318); }
+.jy-actions-menu button.jy-action-danger:hover { background: var(--jy-color-surface); }
+
 .jy-menu-toggle {
   display: none;
   flex-direction: column;
@@ -1729,7 +1776,7 @@ dialog.jy-ui::backdrop { background: rgba(0, 0, 0, 0.45); }
 
 /* ─── Security settings (views/profile/security.php) ────────────── */
 .jy-ui .jy-security-codes { background: #f5f5f5; padding: 1em; border-radius: 4px; font-size: 1.1em; }
-.jy-ui .jy-security-secret { background: #f5f5f5; padding: 1em; border-radius: 4px; word-break: break-all; }
+.jy-ui .jy-security-secret { background: #f5f5f5; padding: 1em; border-radius: 4px; word-break: break-all; white-space: pre-wrap; }
 .jy-ui .jy-security-note { margin-top: var(--jy-space-4); font-size: .9em; color: #666; }
 .jy-ui .jy-security-qr { text-align: center; margin: var(--jy-space-4) 0; }
 .jy-ui .jy-security-qr-img { max-width: 240px; }

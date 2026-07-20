@@ -409,6 +409,34 @@ class VaultUnlock {
 				);
 			}
 		}
+
+		// Possession-factor invariant (the other edge is the disable-2FA gate
+		// in security_logic): a vault holder must always retain a second
+		// factor beyond memorized secrets. Revoking the last live passkey
+		// while TOTP is off would leave the vault openable with a phished
+		// password + recovery code alone.
+		if ($vaults->count()) {
+			require_once(PathHelper::getIncludePath('data/users_class.php'));
+			require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+			$user = new User($user_id, TRUE);
+			if (!$user->has_totp_enabled()) {
+				$live = new MultiPasskey(['user_id' => $user_id, 'deleted' => false]);
+				$live->load();
+				$remaining = 0;
+				foreach ($live as $pk) {
+					if ((int)$pk->key !== $credential_id) {
+						$remaining++;
+					}
+				}
+				if ($remaining === 0) {
+					throw new PasskeyRevocationVetoException(
+						'This is your last passkey and two-factor authentication is off - revoking it '
+						. 'would leave your encrypted vault protected by memorized secrets alone. Enable '
+						. 'two-factor authentication or add another passkey first.'
+					);
+				}
+			}
+		}
 	}
 
 	/**

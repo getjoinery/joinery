@@ -97,7 +97,7 @@ img { max-width: 100%; height: auto; }
 .d-grid { display: grid; }
 .d-block { display: block; }
 .d-inline-block { display: inline-block; }
-.d-none { display: none; }
+.d-none { display: none !important; }
 .flex-column { flex-direction: column; }
 .flex-wrap { flex-wrap: wrap; }
 .flex-grow-1 { flex-grow: 1; }
@@ -130,7 +130,7 @@ img { max-width: 100%; height: auto; }
 }
 /* Fix: d-none d-sm-block means hidden below sm, visible at sm+ */
 @media (min-width: 576px) {
-    .d-none.d-sm-block { display: block; }
+    .d-none.d-sm-block { display: block !important; }
 }
 
 /* --- Spacing Utilities --- */

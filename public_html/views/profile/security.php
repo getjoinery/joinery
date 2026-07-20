@@ -41,7 +41,19 @@
                 }
                 ?>
 
-                <h2>Two-Factor Authentication</h2>
+                <div class="d-flex justify-content-between align-items-center">
+                    <h2>Two-Factor Authentication</h2>
+                    <?php if (!empty($page_vars['totp_enabled']) && empty($page_vars['backup_codes'])): ?>
+                    <details class="jy-actions-dropdown">
+                        <summary class="btn btn-secondary">Actions</summary>
+                        <div class="jy-actions-menu">
+                            <button type="button" id="totp-regen-menu-btn">Regenerate Backup Codes</button>
+                            <button type="button" id="totp-revoke-trusted-menu-btn">Forget Trusted Devices</button>
+                            <button type="button" class="jy-action-danger" id="totp-disable-menu-btn">Disable 2FA…</button>
+                        </div>
+                    </details>
+                    <?php endif; ?>
+                </div>
 
                 <?php if (!empty($page_vars['just_enabled']) && !empty($page_vars['backup_codes'])): ?>
                     <div class="jy-alert jy-alert-success">
@@ -83,25 +95,42 @@
                     <?php endif; ?>
                     </p>
 
-                    <h3>Backup codes</h3>
-                    <p>Generate a fresh set of 10 single-use codes. This invalidates any previous codes.</p>
-                    <form action="/profile/security" method="POST" class="jy-inline">
+                    <form action="/profile/security" method="POST" class="d-none" id="totp-regen-form"
+                          data-jy-confirm="Generate a fresh set of 10 single-use backup codes? This invalidates any previous codes.">
                         <input type="hidden" name="action" value="regenerate_backup_codes">
-                        <button type="submit" class="btn btn-secondary">Regenerate Backup Codes</button>
                     </form>
 
-                    <h3 class="jy-mt-4">Disable 2FA</h3>
-                    <p>Confirm with a current 6-digit code or an 8-character backup code. Disabling will also invalidate any trusted devices.</p>
-                    <form action="/profile/security" method="POST" onsubmit="return confirm('Disable two-factor authentication for your account?');">
-                        <input type="hidden" name="action" value="disable">
-                        <input type="text" name="confirm_code" placeholder="6-digit or backup code" autocomplete="one-time-code" required>
-                        <button type="submit" class="btn btn-danger">Disable 2FA</button>
+                    <form action="/profile/security" method="POST" class="d-none" id="totp-revoke-trusted-form"
+                          data-jy-confirm="Forget all trusted devices? No one is signed out - each device, including this one, will simply be asked for a 2FA code at its next sign-in.">
+                        <input type="hidden" name="action" value="revoke_trusted_devices">
                     </form>
 
-                    <p class="jy-security-note">
-                        <strong>Lost a trusted device?</strong> To revoke trusted-device cookies on other devices,
-                        disable and re-enable 2FA — this rotates the device-trust key.
-                    </p>
+                    <div class="d-none jy-mt-2" id="totp-disable-block">
+                        <p>Confirm with a current 6-digit code or an 8-character backup code. Disabling will also invalidate any trusted devices.</p>
+                        <form action="/profile/security" method="POST">
+                            <input type="hidden" name="action" value="disable">
+                            <input type="text" name="confirm_code" placeholder="6-digit or backup code" autocomplete="one-time-code" required>
+                            <button type="submit" class="btn btn-danger">Disable 2FA</button>
+                        </form>
+                    </div>
+
+                    <script defer>
+                    document.addEventListener('DOMContentLoaded', function () {
+                        document.getElementById('totp-regen-menu-btn').addEventListener('click', function () {
+                            var f = document.getElementById('totp-regen-form');
+                            if (f.requestSubmit) f.requestSubmit(); else f.submit();
+                        });
+                        document.getElementById('totp-revoke-trusted-menu-btn').addEventListener('click', function () {
+                            var f = document.getElementById('totp-revoke-trusted-form');
+                            if (f.requestSubmit) f.requestSubmit(); else f.submit();
+                        });
+                        document.getElementById('totp-disable-menu-btn').addEventListener('click', function () {
+                            var block = document.getElementById('totp-disable-block');
+                            block.classList.remove('d-none');
+                            block.querySelector('input[name="confirm_code"]').focus();
+                        });
+                    });
+                    </script>
 
                 <?php elseif (!empty($page_vars['setup_in_progress'])): ?>
                     <p>Scan this QR code with your authenticator app
@@ -112,7 +141,7 @@
                     </div>
 
                     <p>If you can't scan, enter this key manually:</p>
-                    <pre class="jy-security-secret"><?php echo htmlspecialchars($page_vars['secret']); ?></pre>
+                    <pre class="jy-security-secret"><?php echo htmlspecialchars(trim(chunk_split($page_vars['secret'], 4, ' '))); ?></pre>
 
                     <p>Once added to your app, enter the current 6-digit code to confirm:</p>
                     <form action="/profile/security" method="POST">
@@ -140,7 +169,7 @@
 
             <?php if (!empty($page_vars['has_second_factor'])): $cadence = $page_vars['cadence'] ?? 'every_login'; ?>
             <div class="jy-panel jy-mt-4">
-                <h2>When your second factor is asked</h2>
+                <h2>Ask for my second factor</h2>
                 <form action="/profile/security" method="POST" class="jy-mt-2">
                     <input type="hidden" name="action" value="set_cadence">
                     <label class="jy-block jy-mt-2">
@@ -149,19 +178,12 @@
                     </label>
                     <label class="jy-block jy-mt-2">
                         <input type="radio" name="cadence" value="sensitive_only" <?php echo $cadence === 'sensitive_only' ? 'checked' : ''; ?>>
-                        Only at sensitive actions (password-only sign-in)
-                        <small class="jy-auth-hint jy-block">Faster sign-in, but a phished password can then see your Standard mail and mailbox metadata until a sensitive action asks for your factor.</small>
+                        Only at sensitive actions (less secure)
                     </label>
-                    <div class="jy-mt-2">
+                    <div class="jy-mt-3">
                         <button type="submit" class="btn btn-secondary">Save</button>
                     </div>
                 </form>
-            </div>
-            <?php endif; ?>
-
-            <?php if (!empty($page_vars['separation_nudge'])): ?>
-            <div class="jy-alert jy-alert-warning jy-mt-4">
-                One of your passkeys both signs you in and unlocks your vault, so a single stolen device could hold both. Consider keeping them separate — a phone authenticator app for your login second factor, and a laptop or hardware-key passkey for your vault.
             </div>
             <?php endif; ?>
 
@@ -170,7 +192,7 @@
                 <?php if (!empty($page_vars['recovery_email']) && !empty($page_vars['recovery_email_verified'])): ?>
                     <p><strong>Status:</strong> Active — <?php echo htmlspecialchars($page_vars['recovery_email']); ?></p>
                     <p class="jy-auth-hint">Password reset links are also sent here. Anyone who controls this inbox can start a reset of your account session (they still cannot open your sealed mail).</p>
-                    <form action="/profile/security" method="POST" onsubmit="return confirm('Remove your recovery address?');">
+                    <form action="/profile/security" method="POST" data-jy-confirm="Remove your recovery address?">
                         <input type="hidden" name="action" value="remove_recovery_email">
                         <button type="submit" class="btn btn-secondary">Remove Recovery Address</button>
                     </form>
@@ -199,6 +221,19 @@
             </div>
 
             <?php if ($page_vars['settings']->get_setting('passkeys_enabled')): ?>
+            <script>
+            // Guided-flow return (specs/mailbox_protection_ceremony.md): a page that
+            // sent the user here to set up a vault or passkey passes ?return=<path>;
+            // completing that setup navigates straight back. Same-origin paths only.
+            window.jyMaybeReturn = function () {
+                var target = new URLSearchParams(window.location.search).get('return') || '';
+                if (target.charAt(0) !== '/' || target.charAt(1) === '/' || target.indexOf(':') !== -1) {
+                    return false;
+                }
+                window.location.assign(target);
+                return true;
+            };
+            </script>
             <div class="jy-panel jy-mt-4 d-none" id="passkeys-panel">
                 <h2>Passkeys</h2>
 
@@ -208,6 +243,7 @@
                             <th>Passkey</th>
                             <th>Added</th>
                             <th>Last used</th>
+                            <th class="d-none" id="passkeys-vault-th">Vault</th>
                             <th></th>
                         </tr>
                     </thead>
@@ -223,6 +259,7 @@
                 </div>
 
                 <button type="button" class="btn btn-primary jy-mt-2" id="passkey-add-btn">Add a Passkey</button>
+                <p class="jy-auth-hint jy-mt-2 d-none" id="passkey-flow-hint"></p>
             </div>
 
             <script defer src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
@@ -258,7 +295,34 @@
                     });
                 }
 
-                function renderRow(passkey) {
+                // Vault activation state for the badge column. null = no vault
+                // set up (column hidden, no vault menu items).
+                var vaultStatus = null;
+                function loadVaultStatus() {
+                    return apiFetch('/api/v1/action/vault_status', { method: 'POST', body: '{}' }).then(function (json) {
+                        vaultStatus = (json.data && json.data.set_up) ? json.data : null;
+                    }).catch(function () { vaultStatus = null; });
+                }
+                function vaultActiveIds() {
+                    var ids = {};
+                    if (vaultStatus) {
+                        (vaultStatus.wrappings || []).forEach(function (w) {
+                            if (w.unlocker_type === 'passkey' && w.credential_id) ids[w.credential_id] = true;
+                        });
+                    }
+                    return ids;
+                }
+
+                function menuItem(label, handler, danger) {
+                    var b = document.createElement('button');
+                    b.type = 'button';
+                    if (danger) b.className = 'jy-action-danger';
+                    b.textContent = label;
+                    b.addEventListener('click', handler);
+                    return b;
+                }
+
+                function renderRow(passkey, activeIds) {
                     var tr = document.createElement('tr');
 
                     var nameTd = document.createElement('td');
@@ -273,22 +337,46 @@
                     lastUsedTd.textContent = passkey.pkc_last_used_time ? new Date(passkey.pkc_last_used_time + 'Z').toLocaleString() : 'Never';
                     tr.appendChild(lastUsedTd);
 
+                    var active = !!activeIds[passkey.pkc_passkey_credential_id];
+                    if (vaultStatus) {
+                        var vaultTd = document.createElement('td');
+                        var badge = document.createElement('span');
+                        if (active) {
+                            badge.className = 'badge badge-success';
+                            badge.textContent = 'Vault active';
+                        } else {
+                            badge.className = 'badge badge-warning';
+                            badge.textContent = 'Not activated';
+                            badge.title = passkey.pkc_prf_capable
+                                ? 'This passkey signs you in but cannot unlock your vault yet — activate it from Actions.'
+                                : 'This passkey signs you in but cannot unlock your vault yet. Activating will test whether this authenticator supports vault unlock.';
+                        }
+                        vaultTd.appendChild(badge);
+                        tr.appendChild(vaultTd);
+                    }
+
                     var actionsTd = document.createElement('td');
                     actionsTd.className = 'text-end';
 
-                    var renameBtn = document.createElement('button');
-                    renameBtn.type = 'button';
-                    renameBtn.className = 'btn btn-secondary';
-                    renameBtn.textContent = 'Rename';
-                    renameBtn.addEventListener('click', function () { renamePasskey(passkey); });
-                    actionsTd.appendChild(renameBtn);
-
-                    var revokeBtn = document.createElement('button');
-                    revokeBtn.type = 'button';
-                    revokeBtn.className = 'btn btn-danger';
-                    revokeBtn.textContent = 'Revoke';
-                    revokeBtn.addEventListener('click', function () { revokePasskey(passkey); });
-                    actionsTd.appendChild(revokeBtn);
+                    var dd = document.createElement('details');
+                    dd.className = 'jy-actions-dropdown';
+                    var summary = document.createElement('summary');
+                    summary.className = 'btn btn-secondary';
+                    summary.textContent = 'Actions';
+                    dd.appendChild(summary);
+                    var menu = document.createElement('div');
+                    menu.className = 'jy-actions-menu';
+                    menu.appendChild(menuItem('Rename', function () { renamePasskey(passkey); }));
+                    if (vaultStatus) {
+                        if (active) {
+                            menu.appendChild(menuItem('Deactivate for vault', function () { deactivateForVault(passkey); }));
+                        } else {
+                            menu.appendChild(menuItem('Activate for vault', function () { activateForVault(passkey); }));
+                        }
+                    }
+                    menu.appendChild(menuItem('Revoke', function () { revokePasskey(passkey); }, true));
+                    dd.appendChild(menu);
+                    actionsTd.appendChild(dd);
 
                     tr.appendChild(actionsTd);
                     return tr;
@@ -298,15 +386,21 @@
                     return apiFetch('/api/v1/Passkeys?user_id=<?php echo (int)SessionControl::get_instance()->get_user_id(); ?>').then(function (json) {
                         var credentials = json.data || [];
                         credentialCount = credentials.length;
+                        var activeIds = vaultActiveIds();
+                        document.getElementById('passkeys-vault-th').classList.toggle('d-none', !vaultStatus);
                         tableBody.innerHTML = '';
-                        credentials.forEach(function (passkey) { tableBody.appendChild(renderRow(passkey)); });
+                        credentials.forEach(function (passkey) { tableBody.appendChild(renderRow(passkey, activeIds)); });
                         table.classList.toggle('d-none', !credentials.length);
                         empty.classList.toggle('d-none', !!credentials.length);
                     });
                 }
+                function reloadAll() {
+                    return loadVaultStatus().then(loadPasskeys);
+                }
+                document.addEventListener('joinery:vault-changed', reloadAll);
 
                 async function renamePasskey(passkey) {
-                    var label = prompt('Rename this passkey:', passkey.pkc_label || '');
+                    var label = await JoineryModal.promptAsync('Rename this passkey:', { defaultValue: passkey.pkc_label || '', confirmLabel: 'Rename' });
                     if (label === null || label.trim() === '') return;
                     try {
                         await apiFetch('/api/v1/action/passkey_rename', {
@@ -315,12 +409,12 @@
                         });
                         await loadPasskeys();
                     } catch (e) {
-                        alert(e.message || 'Could not rename passkey.');
+                        JoineryModal.alert(e.message || 'Could not rename passkey.');
                     }
                 }
 
                 async function revokePasskey(passkey) {
-                    if (!confirm('Revoke "' + (passkey.pkc_label || 'this passkey') + '"? It will no longer be able to sign in to this account.')) return;
+                    if (!await JoineryModal.confirmAsync('Revoke "' + (passkey.pkc_label || 'this passkey') + '"? It will no longer be able to sign in to this account.', { confirmLabel: 'Revoke' })) return;
                     try {
                         // Revoking is a sensitive action — re-confirm the second factor
                         // first (the server also enforces this).
@@ -331,7 +425,7 @@
                         });
                         await loadPasskeys();
                     } catch (e) {
-                        alert(e.message || 'Could not revoke passkey.');
+                        JoineryModal.alert(e.message || 'Could not revoke passkey.');
                     }
                 }
 
@@ -344,16 +438,62 @@
                     });
                 }
 
+                // Wrap the vault key under a passkey (an unlock-capable
+                // "activation"). The derivation ceremony decides which passkey
+                // gets activated — the one the user actually touches.
+                async function runVaultActivation() {
+                    var options = await apiFetch('/api/v1/action/vault_add_passkey_options', { method: 'POST', body: '{}' });
+                    var credential = (await JoineryPasskeys.derive(options.data.options)).response;
+                    await apiFetch('/api/v1/action/vault_add_passkey_verify', { method: 'POST', body: JSON.stringify({ credential: credential }) });
+                    document.dispatchEvent(new CustomEvent('joinery:vault-changed'));
+                }
+
+                async function activateForVault(passkey) {
+                    if (!await JoineryModal.confirmAsync('Activate "' + (passkey.pkc_label || 'this passkey') + '" for your vault? Use that passkey when the browser prompts.', { confirmLabel: 'Activate', confirmStyle: 'primary' })) return;
+                    try {
+                        await runVaultActivation();
+                    } catch (e) {
+                        JoineryModal.alert(e.message || 'Could not activate this passkey for your vault.');
+                    }
+                }
+
+                async function deactivateForVault(passkey) {
+                    if (!await JoineryModal.confirmAsync('Deactivate "' + (passkey.pkc_label || 'this passkey') + '" for your vault? It will still sign you in, but can no longer unlock your sealed content.', { confirmLabel: 'Deactivate' })) return;
+                    try {
+                        // Sensitive: the server demands a recent step-up.
+                        await stepUp();
+                        await apiFetch('/api/v1/action/vault_passkey_deactivate', {
+                            method: 'POST',
+                            body: JSON.stringify({ credential_id: passkey.pkc_passkey_credential_id }),
+                        });
+                        document.dispatchEvent(new CustomEvent('joinery:vault-changed'));
+                    } catch (e) {
+                        JoineryModal.alert(e.message || 'Could not deactivate this passkey for your vault.');
+                    }
+                }
+
                 var pwRow = document.getElementById('passkey-password-row');
                 var pwInput = document.getElementById('passkey-current-password');
 
+                var flowHint = document.getElementById('passkey-flow-hint');
+                function showFlowHint(text) {
+                    flowHint.textContent = text;
+                    flowHint.classList.remove('d-none');
+                }
+                function clearFlowHint() {
+                    flowHint.classList.add('d-none');
+                    flowHint.textContent = '';
+                }
+
                 async function addPasskey(currentPassword) {
-                    var label = prompt('Label this passkey (e.g. "MacBook Touch ID"):', '');
+                    var label = await JoineryModal.promptAsync('Label this passkey (e.g. "MacBook Touch ID"):', { confirmLabel: 'Continue' });
                     if (label === null) return;
                     addBtn.disabled = true;
                     try {
                         if (credentialCount > 0) {
+                            showFlowHint('Step 1 of 2 — Confirm it\'s you with a passkey you already have. The prompt to create the new one comes next.');
                             await stepUp();
+                            showFlowHint('Step 2 of 2 — Now create the new passkey. This is where you pick a security key or another device.');
                         }
                         // Always request PRF: the extension can only be enabled at
                         // creation time, and vault consumers need PRF-capable
@@ -368,10 +508,26 @@
                         });
                         pwRow.classList.add('d-none');
                         pwInput.value = '';
-                        await loadPasskeys();
+                        await reloadAll();
+                        // Vault-active by default: when a vault exists and is
+                        // unlocked, chain straight into activation so the new
+                        // passkey can unlock it too — one more touch, of the
+                        // new passkey. Skipped/failed just leaves the badge on
+                        // "Not activated" with the action in its menu.
+                        if (vaultStatus && vaultStatus.unlocked) {
+                            showFlowHint('One more touch — use the NEW passkey again to let it unlock your vault.');
+                            try {
+                                await runVaultActivation();
+                            } catch (e) {
+                                JoineryModal.alert('The passkey was added, but is not activated for your vault yet: '
+                                    + (e.message || 'activation failed.') + ' You can activate it any time from its Actions menu.');
+                            }
+                        }
+                        if (window.jyMaybeReturn && jyMaybeReturn()) return;
                     } catch (e) {
-                        alert(e.message || 'Could not add passkey.');
+                        JoineryModal.alert(e.message || 'Could not add passkey.');
                     } finally {
+                        clearFlowHint();
                         addBtn.disabled = false;
                     }
                 }
@@ -393,17 +549,28 @@
                     pwRow.classList.add('d-none');
                     pwInput.value = '';
                 });
-                loadPasskeys();
+                reloadAll();
             });
             </script>
             <?php endif; ?>
 
             <?php if ($page_vars['settings']->get_setting('passkeys_enabled')): ?>
             <div class="jy-panel jy-mt-4 d-none" id="vault-panel">
-                <h2>Encrypted Vault</h2>
+                <div class="d-flex justify-content-between align-items-center">
+                    <h2>Encrypted Vault</h2>
+                    <details class="jy-actions-dropdown d-none" id="vault-actions-dropdown">
+                        <summary class="btn btn-secondary">Actions</summary>
+                        <div class="jy-actions-menu">
+                            <button type="button" id="vault-regenerate-codes-btn">Regenerate Recovery Codes</button>
+                            <button type="button" id="vault-passphrase-enroll-btn">Add/Replace Bypass Phrase</button>
+                            <button type="button" class="d-none" id="vault-passphrase-remove-btn">Remove Bypass Phrase</button>
+                            <button type="button" class="jy-action-danger" id="vault-rotate-btn">Rotate Vault Key</button>
+                        </div>
+                    </details>
+                </div>
 
                 <div id="vault-not-set-up">
-                    <p>Seal your mail and chat content so it's readable only when you unlock it with a passkey, a recovery code, or a passphrase.</p>
+                    <p>Seal your mail and chat content so it's readable only when you unlock it with a passkey or a recovery code.</p>
                     <button type="button" class="btn btn-primary" id="vault-setup-btn">Set Up Your Vault</button>
                 </div>
 
@@ -411,7 +578,7 @@
                     <p><strong>Status:</strong> Locked</p>
                     <button type="button" class="btn btn-primary" id="vault-unlock-passkey-btn">Unlock with Passkey</button>
                     <button type="button" class="btn btn-secondary" id="vault-unlock-recovery-btn">Unlock with Recovery Code</button>
-                    <button type="button" class="btn btn-secondary" id="vault-unlock-passphrase-btn">Unlock with Passphrase</button>
+                    <button type="button" class="btn btn-secondary d-none" id="vault-unlock-passphrase-btn">Unlock with Bypass Phrase</button>
                 </div>
 
                 <div class="d-none" id="vault-unlocked">
@@ -425,15 +592,7 @@
                         <tbody id="vault-wrappings-body"></tbody>
                     </table>
 
-                    <h3 class="jy-mt-4">Manage Unlockers</h3>
-                    <button type="button" class="btn btn-secondary" id="vault-add-passkey-btn">Add Another Passkey</button>
-                    <button type="button" class="btn btn-secondary" id="vault-regenerate-codes-btn">Regenerate Recovery Codes</button>
-                    <button type="button" class="btn btn-secondary" id="vault-passphrase-enroll-btn">Enroll/Replace Passphrase</button>
-                    <button type="button" class="btn btn-secondary" id="vault-passphrase-remove-btn">Remove Passphrase</button>
-
-                    <h3 class="jy-mt-4">Rotate Vault Key</h3>
-                    <p class="jy-security-note">Generates a fresh vault key and re-seals your content. Only the passkey you rotate with (and a passphrase you re-enter) carry forward — other passkeys need re-adding afterward. Recovery codes are always replaced.</p>
-                    <button type="button" class="btn btn-danger" id="vault-rotate-btn">Rotate Vault Key</button>
+                    <p class="jy-security-note jy-mt-2">Passkey unlockers are managed from each passkey's Actions menu in the Passkeys section above.</p>
                 </div>
 
                 <div class="d-none" id="vault-codes-display">
@@ -457,6 +616,11 @@
                 var locked = document.getElementById('vault-locked');
                 var unlocked = document.getElementById('vault-unlocked');
                 var codesDisplay = document.getElementById('vault-codes-display');
+                var actionsDd = document.getElementById('vault-actions-dropdown');
+                function setActionsVisible(visible) {
+                    actionsDd.classList.toggle('d-none', !visible);
+                    if (!visible) actionsDd.removeAttribute('open');
+                }
                 var codesPre = document.getElementById('vault-codes-pre');
                 var lastKeyFile = null;
 
@@ -487,8 +651,12 @@
                     notSetUp.classList.add('d-none');
                     locked.classList.add('d-none');
                     unlocked.classList.add('d-none');
+                    setActionsVisible(false);
                     codesDisplay.classList.remove('d-none');
                 }
+
+                var unlockerNames = { passkey: 'Passkey', recovery: 'Recovery code', passphrase: 'Bypass phrase' };
+                var hasPassphrase = false;
 
                 function renderWrappings(status) {
                     var body = document.getElementById('vault-wrappings-body');
@@ -496,7 +664,7 @@
                     (status.wrappings || []).forEach(function (w) {
                         var tr = document.createElement('tr');
                         var nameTd = document.createElement('td');
-                        nameTd.textContent = w.unlocker_type + (w.label ? ' (' + w.label + ')' : '');
+                        nameTd.textContent = (unlockerNames[w.unlocker_type] || w.unlocker_type) + (w.label ? ' (' + w.label + ')' : '');
                         var addedTd = document.createElement('td');
                         addedTd.textContent = w.created_time ? new Date(w.created_time + 'Z').toLocaleDateString() : '';
                         var statusTd = document.createElement('td');
@@ -510,6 +678,7 @@
                 function refresh() {
                     return apiFetch('/api/v1/action/vault_status', { method: 'POST', body: '{}' }).then(function (json) {
                         var status = json.data;
+                        hasPassphrase = !!status.has_passphrase;
                         // Presence beacon (assets/js/vault-presence.js): follow the
                         // window state, so an unlock on this page starts site-wide
                         // presence without a reload and a lock stops it.
@@ -522,14 +691,19 @@
                             notSetUp.classList.remove('d-none');
                             locked.classList.add('d-none');
                             unlocked.classList.add('d-none');
+                            setActionsVisible(false);
                         } else if (!status.unlocked) {
                             notSetUp.classList.add('d-none');
                             locked.classList.remove('d-none');
                             unlocked.classList.add('d-none');
+                            setActionsVisible(false);
+                            document.getElementById('vault-unlock-passphrase-btn').classList.toggle('d-none', !status.has_passphrase);
                         } else {
                             notSetUp.classList.add('d-none');
                             locked.classList.add('d-none');
                             unlocked.classList.remove('d-none');
+                            setActionsVisible(true);
+                            document.getElementById('vault-passphrase-remove-btn').classList.toggle('d-none', !status.has_passphrase);
                             renderWrappings(status);
                         }
                     });
@@ -540,23 +714,21 @@
                         await apiFetch('/api/v1/action/vault_setup_options', { method: 'POST', body: '{}' });
                     } catch (e) {
                         if (e.data && e.data.requires_password) {
-                            alert('Set an account password first (see the top of this page), then try again.');
+                            JoineryModal.alert('Set an account password first (see the top of this page), then try again.');
                         } else {
-                            alert(e.message || 'Could not begin vault setup.');
+                            JoineryModal.alert(e.message || 'Could not begin vault setup.');
                         }
                         return;
                     }
-                    if (!confirm('If you lose every unlocker (passkey, recovery codes, and passphrase), everything sealed in your vault is permanently lost - there is no support-desk recovery. Continue?')) return;
-                    var passphrase = prompt('Optional: set a vault passphrase now (12+ characters), or leave blank to skip:', '') || '';
+                    if (!await JoineryModal.confirmAsync('If you lose every unlocker (your passkey and your recovery codes), everything sealed in your vault is permanently lost - there is no support-desk recovery. Continue?', { confirmLabel: 'I understand' })) return;
                     try {
                         var options = await apiFetch('/api/v1/action/vault_setup_options', { method: 'POST', body: '{}' });
                         var credential = (await JoineryPasskeys.derive(options.data.options)).response;
                         var body = { credential: credential, acknowledged: true };
-                        if (passphrase) body.passphrase = passphrase;
                         var result = await apiFetch('/api/v1/action/vault_setup_verify', { method: 'POST', body: JSON.stringify(body) });
                         showCodes(result.data.recovery_codes, result.data.key_file);
                     } catch (e) {
-                        alert(e.message || 'Could not set up your vault.');
+                        JoineryModal.alert(e.message || 'Could not set up your vault.');
                     }
                 });
 
@@ -567,12 +739,12 @@
                         await apiFetch('/api/v1/action/vault_unlock_passkey', { method: 'POST', body: JSON.stringify({ credential: credential }) });
                         await refresh();
                     } catch (e) {
-                        alert(e.message || 'Could not unlock your vault.');
+                        JoineryModal.alert(e.message || 'Could not unlock your vault.');
                     }
                 });
 
                 document.getElementById('vault-unlock-recovery-btn').addEventListener('click', async function () {
-                    var code = prompt('Enter a recovery code:', '');
+                    var code = await JoineryModal.promptAsync('Enter a recovery code:', { confirmLabel: 'Unlock' });
                     if (!code) return;
                     try {
                         // A second_factor_required render (§ 5.6, recovery-code unlock)
@@ -580,22 +752,22 @@
                         // ceremony), so it never resolves here.
                         var result = await apiFetch('/api/v1/action/vault_unlock_recovery', { method: 'POST', body: JSON.stringify({ code: code }) });
                         if (result.data && result.data.regenerate_recommended) {
-                            alert('Unlocked. Fewer than 3 unused recovery codes remain - consider regenerating them.');
+                            JoineryModal.alert('Unlocked. Fewer than 3 unused recovery codes remain - consider regenerating them.');
                         }
                         await refresh();
                     } catch (e) {
-                        alert(e.message || 'Could not unlock your vault.');
+                        JoineryModal.alert(e.message || 'Could not unlock your vault.');
                     }
                 });
 
                 document.getElementById('vault-unlock-passphrase-btn').addEventListener('click', async function () {
-                    var passphrase = prompt('Enter your vault passphrase:', '');
+                    var passphrase = await JoineryModal.promptAsync('Enter your bypass phrase:', { inputType: 'password', confirmLabel: 'Unlock' });
                     if (!passphrase) return;
                     try {
                         await apiFetch('/api/v1/action/vault_unlock_passphrase', { method: 'POST', body: JSON.stringify({ passphrase: passphrase }) });
                         await refresh();
                     } catch (e) {
-                        alert(e.message || 'Could not unlock your vault.');
+                        JoineryModal.alert(e.message || 'Could not unlock your vault.');
                     }
                 });
 
@@ -604,57 +776,50 @@
                         await apiFetch('/api/v1/action/vault_lock', { method: 'POST', body: '{}' });
                         await refresh();
                     } catch (e) {
-                        alert(e.message || 'Could not lock your vault.');
-                    }
-                });
-
-                document.getElementById('vault-add-passkey-btn').addEventListener('click', async function () {
-                    try {
-                        var options = await apiFetch('/api/v1/action/vault_add_passkey_options', { method: 'POST', body: '{}' });
-                        var credential = (await JoineryPasskeys.derive(options.data.options)).response;
-                        await apiFetch('/api/v1/action/vault_add_passkey_verify', { method: 'POST', body: JSON.stringify({ credential: credential }) });
-                        await refresh();
-                        alert('Passkey added to your vault.');
-                    } catch (e) {
-                        alert(e.message || 'Could not add this passkey to your vault.');
+                        JoineryModal.alert(e.message || 'Could not lock your vault.');
                     }
                 });
 
                 document.getElementById('vault-regenerate-codes-btn').addEventListener('click', async function () {
-                    if (!confirm('This invalidates all existing recovery codes. Continue?')) return;
+                    if (!await JoineryModal.confirmAsync('This invalidates all existing recovery codes. Continue?', { confirmLabel: 'Regenerate' })) return;
                     try {
                         var result = await apiFetch('/api/v1/action/vault_regenerate_codes', { method: 'POST', body: '{}' });
                         showCodes(result.data.recovery_codes, null);
                     } catch (e) {
-                        alert(e.message || 'Could not regenerate recovery codes.');
+                        JoineryModal.alert(e.message || 'Could not regenerate recovery codes.');
                     }
                 });
 
                 document.getElementById('vault-passphrase-enroll-btn').addEventListener('click', async function () {
-                    var passphrase = prompt('Set a vault passphrase (12+ characters):', '');
+                    if (!await JoineryModal.confirmAsync('A bypass phrase is a memorized phrase that opens your vault without your passkey - it is not your login password. It lowers your vault\'s strength to the strength of the phrase: anyone who learns or guesses it can unlock. Add one only if you need to unlock where your passkey is not available.', { confirmLabel: 'I understand' })) return;
+                    var passphrase = await JoineryModal.promptAsync('Set a bypass phrase (12+ characters):', { inputType: 'password', confirmLabel: 'Save' });
                     if (!passphrase) return;
                     try {
                         await apiFetch('/api/v1/action/vault_passphrase_enroll', { method: 'POST', body: JSON.stringify({ passphrase: passphrase }) });
                         await refresh();
-                        alert('Vault passphrase enrolled.');
+                        JoineryModal.alert('Bypass phrase added.');
                     } catch (e) {
-                        alert(e.message || 'Could not enroll a vault passphrase.');
+                        JoineryModal.alert(e.message || 'Could not add a bypass phrase.');
                     }
                 });
 
                 document.getElementById('vault-passphrase-remove-btn').addEventListener('click', async function () {
-                    if (!confirm('Remove your vault passphrase?')) return;
+                    if (!await JoineryModal.confirmAsync('Remove your bypass phrase?', { confirmLabel: 'Remove' })) return;
                     try {
                         await apiFetch('/api/v1/action/vault_passphrase_remove', { method: 'POST', body: '{}' });
                         await refresh();
                     } catch (e) {
-                        alert(e.message || 'Could not remove your vault passphrase.');
+                        JoineryModal.alert(e.message || 'Could not remove your bypass phrase.');
                     }
                 });
 
                 document.getElementById('vault-rotate-btn').addEventListener('click', async function () {
-                    if (!confirm('Rotate your vault key now? Passkeys other than the one you use here, and your passphrase unless re-entered, will need to be re-added afterward. Continue?')) return;
-                    var passphrase = prompt('Re-enter your vault passphrase to carry it forward, or leave blank to drop it:', '') || '';
+                    if (!await JoineryModal.confirmAsync('Rotate your vault key now? Passkeys other than the one you use here' + (hasPassphrase ? ', and your bypass phrase unless re-entered,' : '') + ' will need to be re-added afterward. Continue?', { confirmLabel: 'Rotate' })) return;
+                    var passphrase = '';
+                    if (hasPassphrase) {
+                        passphrase = await JoineryModal.promptAsync('Re-enter your bypass phrase to carry it forward, or leave blank to drop it:', { inputType: 'password', confirmLabel: 'Continue' });
+                        if (passphrase === null) return;
+                    }
                     try {
                         var options = await apiFetch('/api/v1/action/vault_rotate_options', { method: 'POST', body: '{}' });
                         var credential = (await JoineryPasskeys.derive(options.data.options)).response;
@@ -663,15 +828,15 @@
                         var result = await apiFetch('/api/v1/action/vault_rotate_verify', { method: 'POST', body: JSON.stringify(body) });
                         showCodes(result.data.recovery_codes, null);
                         if (result.data.dropped_passkeys && result.data.dropped_passkeys.length) {
-                            alert('These passkeys need to be re-added to your vault: ' + result.data.dropped_passkeys.map(function (p) { return p.label || 'Passkey'; }).join(', '));
+                            JoineryModal.alert('These passkeys need to be re-added to your vault: ' + result.data.dropped_passkeys.map(function (p) { return p.label || 'Passkey'; }).join(', '));
                         }
                     } catch (e) {
-                        alert(e.message || 'Could not rotate your vault key.');
+                        JoineryModal.alert(e.message || 'Could not rotate your vault key.');
                     }
                 });
 
                 document.getElementById('vault-download-keyfile-btn').addEventListener('click', function () {
-                    if (!lastKeyFile) { alert('No key file available for this action.'); return; }
+                    if (!lastKeyFile) { JoineryModal.alert('No key file available for this action.'); return; }
                     var blob = new Blob([JSON.stringify(lastKeyFile, null, 2)], { type: 'application/json' });
                     var url = URL.createObjectURL(blob);
                     var a = document.createElement('a');
@@ -683,9 +848,13 @@
 
                 document.getElementById('vault-codes-done-btn').addEventListener('click', function () {
                     codesDisplay.classList.add('d-none');
-                    refresh();
+                    if (window.jyMaybeReturn && jyMaybeReturn()) return;
+                    // One event refreshes both this panel and the passkey
+                    // badges (a rotate drops other passkeys' wrappings).
+                    document.dispatchEvent(new CustomEvent('joinery:vault-changed'));
                 });
 
+                document.addEventListener('joinery:vault-changed', refresh);
                 refresh();
             });
             </script>
@@ -728,7 +897,7 @@
                 </table>
 
                 <form action="/profile/security" method="POST" class="jy-mt-2"
-                      onsubmit="return confirm('Sign out every device signed in to your account?');">
+                      data-jy-confirm="Sign out every device signed in to your account?">
                     <input type="hidden" name="action" value="revoke_all_app_sessions">
                     <button type="submit" class="btn btn-secondary">Revoke All</button>
                 </form>

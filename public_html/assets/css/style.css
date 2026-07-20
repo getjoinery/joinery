@@ -176,7 +176,7 @@ table { width: 100%; border-collapse: collapse; }
 .d-grid { display: grid; }
 .d-block { display: block; }
 .d-inline-block { display: inline-block; }
-.d-none { display: none; }
+.d-none { display: none !important; }
 .flex-column { flex-direction: column; }
 .flex-wrap { flex-wrap: wrap; }
 .align-center { align-items: center; }

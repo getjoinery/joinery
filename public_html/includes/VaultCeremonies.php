@@ -42,7 +42,7 @@ class VaultCeremonies {
 	public function setup(User $user, int $passkey_credential_id, ?string $passkey_label, string $kek,
 			string $passphrase = '', int $code_count = 10, bool $open_window = true): array {
 		if ($passphrase !== '' && strlen($passphrase) < SealedBox::PASSPHRASE_MIN_CHARS) {
-			throw new VaultCeremonyException('Your vault passphrase must be at least ' . SealedBox::PASSPHRASE_MIN_CHARS . ' characters.');
+			throw new VaultCeremonyException('Your bypass phrase must be at least ' . SealedBox::PASSPHRASE_MIN_CHARS . ' characters.');
 		}
 		$code_count = max(5, min(20, $code_count));
 
@@ -128,7 +128,7 @@ class VaultCeremonies {
 	public function rotate(User $user, UserEncryptionVault $vault, int $passkey_credential_id, ?string $passkey_label,
 			string $kek, string $passphrase = '', bool $open_window = true): array {
 		if ($passphrase !== '' && strlen($passphrase) < SealedBox::PASSPHRASE_MIN_CHARS) {
-			throw new VaultCeremonyException('Your vault passphrase must be at least ' . SealedBox::PASSPHRASE_MIN_CHARS . ' characters.');
+			throw new VaultCeremonyException('Your bypass phrase must be at least ' . SealedBox::PASSPHRASE_MIN_CHARS . ' characters.');
 		}
 
 		$all_wrappings = new MultiUserEncryptionWrapping(['vault_id' => $vault->key]);
@@ -476,13 +476,13 @@ class VaultCeremonies {
 	public function unlockWithPassphrase(User $user, UserEncryptionVault $vault, string $passphrase): string {
 		$this->assertVaultOwnership($user, $vault);
 		if ($passphrase === '') {
-			throw new VaultCeremonyException('Enter your vault passphrase.');
+			throw new VaultCeremonyException('Enter your bypass phrase.');
 		}
 
 		$wrappings = new MultiUserEncryptionWrapping(['vault_id' => $vault->key, 'unlocker_type' => UserEncryptionWrapping::TYPE_PASSPHRASE]);
 		$wrappings->load();
 		if ($wrappings->count() === 0) {
-			throw new VaultCeremonyException('No vault passphrase is enrolled.');
+			throw new VaultCeremonyException('No bypass phrase is enrolled.');
 		}
 
 		$keks = [];
@@ -514,7 +514,7 @@ class VaultCeremonies {
 			}
 		}
 
-		throw new VaultCeremonyException('Incorrect vault passphrase.');
+		throw new VaultCeremonyException('Incorrect bypass phrase.');
 	}
 
 	/** The backup payload setup and rotation hand the client to download. */

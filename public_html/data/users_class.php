@@ -750,6 +750,16 @@ private static function UcName($string) {
 	}
 
 	/**
+	 * Rotate the trusted-device HMAC key. Every outstanding trusted-device
+	 * cookie embeds an HMAC under this key, so rotation signs them all out of
+	 * the skip-2FA grant at once. TOTP itself is untouched.
+	 */
+	function rotate_totp_hmac_key() {
+		$this->set('usr_totp_hmac_key', bin2hex(random_bytes(64)));
+		$this->save();
+	}
+
+	/**
 	 * Disable TOTP 2FA for this user. Clears all TOTP state including the
 	 * per-user HMAC key, which invalidates outstanding trusted-device cookies.
 	 */

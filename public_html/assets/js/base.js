@@ -86,8 +86,15 @@ document.addEventListener('DOMContentLoaded', function() {
 // reach it even though it renders outside any page-level .jy-ui wrapper. Buttons
 // are plain kit buttons (.btn / .btn-*), not a bespoke dialog-button family.
 //   confirm/alert/prompt — text modes (message + optional input).
+//   alertAsync/confirmAsync/promptAsync — the same modes as promises, for
+//   async flows: confirmAsync resolves boolean, promptAsync resolves the
+//   entered string or null on cancel/Esc. options.inputType sets the input
+//   type ('password' for passphrases).
 //   open(content, { buttons }) — content mode for arbitrary DOM + a custom
 //   button set; each button is { label, style, onClick(dialog), close }.
+// Form confirms: a <form data-jy-confirm="message"> gets a kit confirm modal
+// in place of submitting; confirming submits it for real. Delegated, no
+// per-form wiring.
 // Click-to-copy: any <button data-jy-copy="text"> copies that text to the
 // clipboard and briefly confirms on the button itself. Delegated, so markup
 // rendered at any time (including inside modals) works without wiring.
@@ -152,6 +159,7 @@ const JoineryModal = (() => {
 
         inputEl.style.display = showInput ? 'block' : 'none';
         if (showInput) {
+            inputEl.type        = options.inputType     || 'text';
             inputEl.value       = options.defaultValue || '';
             inputEl.placeholder = options.placeholder   || '';
         }
@@ -236,5 +244,62 @@ const JoineryModal = (() => {
         return { dialog: dialog, content: contentEl };
     }
 
-    return { confirm, confirmTyped, alert, prompt, open };
+    // Promise variants for async flows. Each resolves exactly once, on the
+    // dialog's close event, so Esc and the Cancel button settle the promise
+    // too (as false / null) instead of leaving it hanging.
+    function alertAsync(message, options) {
+        return new Promise((resolve) => {
+            const opts = Object.assign({ confirmLabel: 'OK', confirmStyle: 'primary' }, options);
+            const confirmBtn = _open(message, opts, false, false);
+            confirmBtn.onclick = () => dialog.close();
+            dialog.addEventListener('close', () => resolve(), { once: true });
+        });
+    }
+
+    function confirmAsync(message, options) {
+        return new Promise((resolve) => {
+            let result = false;
+            const confirmBtn = _open(message, options, false, true);
+            confirmBtn.onclick = () => { result = true; dialog.close(); };
+            dialog.addEventListener('close', () => resolve(result), { once: true });
+        });
+    }
+
+    function promptAsync(message, options) {
+        return new Promise((resolve) => {
+            let result = null;
+            const opts = Object.assign({ confirmStyle: 'primary' }, options);
+            const confirmBtn = _open(message, opts, true, true);
+            const submit = () => { result = inputEl.value; dialog.close(); };
+            confirmBtn.onclick = submit;
+            inputEl.onkeydown  = (e) => { if (e.key === 'Enter') submit(); };
+            dialog.addEventListener('close', () => resolve(result), { once: true });
+        });
+    }
+
+    return { confirm, confirmTyped, alert, prompt, open, alertAsync, confirmAsync, promptAsync };
 })();
+
+// Actions dropdowns (<details class="jy-actions-dropdown">): close any open
+// menu when the click lands outside it, and after a menu item is clicked.
+document.addEventListener('click', function (e) {
+    document.querySelectorAll('details.jy-actions-dropdown[open]').forEach(function (dd) {
+        if (!dd.contains(e.target) || e.target.closest('.jy-actions-menu button')) {
+            dd.removeAttribute('open');
+        }
+    });
+});
+
+// Kit confirm for plain forms: <form data-jy-confirm="Are you sure?"> shows
+// the modal instead of submitting; confirming re-submits with a one-shot
+// bypass flag so this handler lets it through.
+document.addEventListener('submit', function (e) {
+    const form = e.target;
+    if (!form.hasAttribute || !form.hasAttribute('data-jy-confirm')) return;
+    if (form.dataset.jyConfirmed === '1') { delete form.dataset.jyConfirmed; return; }
+    e.preventDefault();
+    JoineryModal.confirm(form.getAttribute('data-jy-confirm'), function () {
+        form.dataset.jyConfirmed = '1';
+        if (form.requestSubmit) form.requestSubmit(); else form.submit();
+    });
+});
