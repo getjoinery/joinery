@@ -95,6 +95,15 @@ function harness_unmet_needs(array $needs) {
 				case 'node':
 					$cache[$need] = trim((string)shell_exec('command -v node 2>/dev/null')) !== '';
 					break;
+				case 'rust':
+					// rustup installs per-user without touching PATH for other
+					// accounts (the web dashboard runs as a different user than
+					// the CLI), so probe the default rustup location too.
+					$home = (string)getenv('HOME');
+					$cache[$need] = trim((string)shell_exec('command -v cargo 2>/dev/null')) !== ''
+						|| ($home !== '' && is_executable($home . '/.cargo/bin/cargo'))
+						|| is_executable('/home/user1/.cargo/bin/cargo');
+					break;
 				case 'macmini':
 					$rc = 1; @exec('ssh -o ConnectTimeout=5 -o BatchMode=yes macmini true 2>/dev/null', $o, $rc);
 					$cache[$need] = ($rc === 0);

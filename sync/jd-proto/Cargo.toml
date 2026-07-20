@@ -1,0 +1,20 @@
+[package]
+name = "jd-proto"
+description = "Joinery server API client: session-key auth, action calls, resumable chunk uploads, downloads. Carries the joinery-drive plumbing CLI until jd-daemon lands (Phase 2)."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+ureq = { version = "2", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "1"
+rand_core = { version = "0.6", features = ["getrandom"] }
+rpassword = "7"
+
+[[bin]]
+name = "joinery-drive"
+path = "src/bin/joinery_drive.rs"
