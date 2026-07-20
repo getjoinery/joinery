@@ -17,7 +17,7 @@ An account has up to two doors, and they are deliberately different:
   not sealed.
 - **The vault** — proves *presence*. Opened only by a live unlocker ceremony
   (a passkey assertion with user verification, a one-time recovery code, or
-  an enrolled passphrase). Content sealed to the vault — and nothing else —
+  an enrolled bypass phrase). Content sealed to the vault — and nothing else —
   is behind this door. See [Sealed Vault](sealed_vault.md).
 
 Everything below follows from keeping those doors separate.
@@ -103,10 +103,13 @@ from the vault: a
 passkey used here confirms *presence for the session*; it does not open the
 vault (that is a distinct user-verification ceremony).
 
-**Separation nudge.** When a passkey both signs the user in and unlocks their
-vault, one stolen device holds both gates. The security page warns — never
-blocks — steering toward a separate login factor (a phone authenticator) from
-the vault passkey (a laptop or hardware key).
+**Dual-role passkeys.** Any live passkey may complete the second-factor step
+at sign-in — there is no per-credential role scoping — so a vault-active
+passkey necessarily also serves as a sign-in factor. The mitigations are
+structural, not advisory: vault unlock always demands device user
+verification (a stolen device without its PIN/biometric opens neither gate),
+and the possession-factor invariant keeps a second factor enrolled at all
+times.
 
 ## Enrollment is guarded
 
@@ -116,8 +119,16 @@ be able to quietly enroll their own key:
 - **First passkey** on an account: requires the account password re-entered.
 - **Additional passkeys**: require a recent step-up with an existing passkey.
 - **Vault unlockers** (another passkey wrapping, regenerated recovery codes,
-  a passphrase): require an open unlock window, and code regeneration and
-  passphrase changes additionally require a recent step-up.
+  a bypass phrase): require an open unlock window, and code regeneration and
+  bypass-phrase changes additionally require a recent step-up.
+
+**Possession-factor invariant:** a vault holder must always retain a second
+factor beyond memorized secrets — TOTP or at least one live passkey. Both
+mutation points enforce it: disabling TOTP is refused when no live passkey
+remains, and revoking the last passkey is refused while TOTP is off. Without
+it, the vault's knowledge-factor unlocks (recovery code, bypass phrase) would
+lose their step-up gate and a phished password + recovery code would open the
+vault remotely.
 
 ## The unlock window
 
@@ -184,8 +195,12 @@ One account setting, two values (`usr_2fa_cadence`, `User::two_factor_cadence()`
   notified. Consuming one drops the vault into a *regenerate recommended* state
   once fewer than 3 remain unused. **Recovery codes are vault-only**: they
   answer "give me my data," never "log me in."
-- **Passphrase** — optional fallback (Argon2id-derived), for accounts that
-  want a memorized unlocker alongside hardware.
+- **Bypass phrase** — optional fallback (Argon2id-derived, internally `passphrase`), for accounts that
+  want a memorized unlocker alongside hardware. Never offered during vault
+  setup — added deliberately from unlocker management, behind a warning that
+  it lowers the vault's strength to the strength of the phrase. Like a
+  recovery code, unlocking with it requires a recent step-up **regardless of
+  the 2FA cadence** when the account has a second factor.
 
 **The unlocker floor:** any change that would leave a vault with fewer than 1
 passkey wrapping *and* fewer than 3 unused recovery codes is refused at the
@@ -291,11 +306,14 @@ core dependency on any one plugin.
 | Sign in | Password — or passkey, only while the account has no vault |
 | Second factor at sign-in | Asked when cadence is `every_login` and the account holds any factor: a TOTP/backup code or a passkey step-up |
 | Read sealed content | Open unlock window |
-| Open the window | Unlocker ceremony (passkey + user verification / recovery code / passphrase) |
+| Open the window | Unlocker ceremony (passkey + user verification / recovery code / bypass phrase) |
 | Enroll first passkey | Session + password re-entry |
 | Enroll additional passkey | Session + recent step-up |
-| Add a vault unlocker | Open window (+ step-up for codes/passphrase) |
-| Revoke a passkey | Session; refused if it breaks the unlocker floor |
+| Add a vault unlocker | Open window (+ step-up for codes/bypass phrase) |
+| Deactivate a passkey for the vault | Session + recent step-up; refused if it breaks the unlocker floor |
+| Revoke a passkey | Session; refused if it breaks the unlocker floor, or if it is a vault holder's last passkey while TOTP is off |
+| Disable TOTP | Session + valid TOTP/backup code; refused for a vault holder with no live passkey |
+| Forget trusted devices | Session; rotates the device-trust HMAC key so every skip-2FA cookie dies — no session ends, TOTP untouched |
 | Rotate the vault key | Live PRF assertion from an enrolled passkey |
 | Password reset | An authorizer — email link, passkey, TOTP (no-vault only), or verified recovery address; never opens a vault |
 | Passkey reset on a vault account | Passkey **plus** an independent second factor (TOTP or a different passkey), when one is enrolled |
@@ -307,6 +325,7 @@ core dependency on any one plugin.
 | Change 2FA cadence | Session + recent step-up |
 | Change a domain's security level | Session + recent second-factor step-up |
 | Unlock the vault with a recovery code | Session + recent step-up (if a factor is enrolled); ends all other windows + alerts |
+| Unlock the vault with a bypass phrase | Session + recent step-up (if a factor is enrolled) |
 | Change a sealed mailbox's filters or alias routing | Session + open unlock window (the owner's own) |
 | Send as a protected identity domain | Open unlock window, via the mailbox compose path only — ambient/transactional senders are refused outright |
 | Protect a domain / stage or cut over a DKIM rotation | Admin session + open unlock window (the key seals to the owner's vault) |

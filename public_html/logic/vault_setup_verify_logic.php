@@ -25,7 +25,7 @@ function vault_setup_verify_logic(array $input): LogicResult {
 
 	if (empty($input['acknowledged'])) {
 		return LogicResult::error(
-			'You must acknowledge that losing every unlocker (passkey, recovery codes, and passphrase) permanently loses everything sealed in your vault - there is no support-desk recovery.'
+			'You must acknowledge that losing every unlocker (passkey and recovery codes) permanently loses everything sealed in your vault - there is no support-desk recovery.'
 		);
 	}
 

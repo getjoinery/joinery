@@ -26,23 +26,23 @@ function vault_passphrase_enroll_logic(array $input): LogicResult {
 
 	$service = new PasskeyService();
 	if (!$service->hasRecentStepUp()) {
-		return LogicResult::error('Please re-confirm with an existing passkey before enrolling a vault passphrase.');
+		return LogicResult::error('Please re-confirm with an existing passkey before adding a bypass phrase.');
 	}
 
 	$secret_key = VaultUnlock::secretKey($user->key, UserEncryptionVault::SCOPE_USER);
 	if ($secret_key === null) {
-		return LogicResult::error('Unlock your vault before enrolling a passphrase.', ['locked' => true]);
+		return LogicResult::error('Unlock your vault before adding a bypass phrase.', ['locked' => true]);
 	}
 
 	$passphrase = isset($input['passphrase']) ? (string)$input['passphrase'] : '';
 	if (strlen($passphrase) < SealedBox::PASSPHRASE_MIN_CHARS) {
-		return LogicResult::error('Your vault passphrase must be at least ' . SealedBox::PASSPHRASE_MIN_CHARS . ' characters.');
+		return LogicResult::error('Your bypass phrase must be at least ' . SealedBox::PASSPHRASE_MIN_CHARS . ' characters.');
 	}
 
 	// A wrapping must be tagged with a single truthful generation, and in a
 	// partially-rotated vault the in-window secret's generation is ambiguous.
 	if (count(UserEncryptionWrapping::liveGenerations((int)$vault->key)) > 1) {
-		return LogicResult::error('Your vault has an unfinished key rotation. Run the rotation again to complete it, then enroll your passphrase.');
+		return LogicResult::error('Your vault has an unfinished key rotation. Run the rotation again to complete it, then add your bypass phrase again.');
 	}
 
 	$existing = new MultiUserEncryptionWrapping(['vault_id' => $vault->key, 'unlocker_type' => UserEncryptionWrapping::TYPE_PASSPHRASE]);
@@ -63,7 +63,7 @@ function vault_passphrase_enroll_logic_api() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
-		'description' => 'Enroll (or replace) the optional vault passphrase unlocker; requires a recent step-up and an unlocked vault',
+		'description' => 'Add (or replace) the optional vault bypass phrase unlocker; requires a recent step-up and an unlocked vault',
 	];
 }
 ?>

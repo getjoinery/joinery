@@ -25,13 +25,13 @@ function vault_passphrase_remove_logic(array $input): LogicResult {
 
 	$service = new PasskeyService();
 	if (!$service->hasRecentStepUp()) {
-		return LogicResult::error('Please re-confirm with an existing passkey before removing your vault passphrase.');
+		return LogicResult::error('Please re-confirm with an existing passkey before removing your bypass phrase.');
 	}
 
 	$existing = new MultiUserEncryptionWrapping(['vault_id' => $vault->key, 'unlocker_type' => UserEncryptionWrapping::TYPE_PASSPHRASE]);
 	$existing->load();
 	if ($existing->count() === 0) {
-		return LogicResult::error('No vault passphrase is enrolled.');
+		return LogicResult::error('No bypass phrase is enrolled.');
 	}
 
 	// A passphrase never counts toward the floor itself, but it can be the
@@ -42,7 +42,7 @@ function vault_passphrase_remove_logic(array $input): LogicResult {
 		VaultUnlock::assertWrappingDeleteSafe((int)$vault->key);
 	} catch (RuntimeException $e) {
 		return LogicResult::error(
-			'Removing your vault passphrase would lock you out of your encrypted vault - add a '
+			'Removing your bypass phrase would lock you out of your encrypted vault - add a '
 			. 'vault-enrolled passkey, or make sure you have at least 3 unused recovery codes, '
 			. 'before removing it.'
 		);
@@ -59,7 +59,7 @@ function vault_passphrase_remove_logic_api() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
-		'description' => 'Remove the vault passphrase unlocker; requires a recent step-up',
+		'description' => 'Remove the vault bypass phrase unlocker; requires a recent step-up',
 	];
 }
 ?>

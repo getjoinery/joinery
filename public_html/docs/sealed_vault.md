@@ -2,7 +2,7 @@
 
 A per-user encryption identity shared by every feature that seals content the
 server should only read while the user has proven presence. One lock (a
-passkey, a recovery code, or an optional passphrase), one bounded unlock
+passkey, a recovery code, or an optional bypass phrase), one bounded unlock
 window, and any number of consumers behind it — mail and chat seal server-custody
 content; the [password manager](../plugins/vault/docs/overview.md) and
 [Drive encryption](drive_encryption.md) are client-custody consumers (their keys
@@ -16,8 +16,17 @@ builds the server-custody `user` scope, shared by mail and chat). The
 **public** key is cleartext at rest — anything can seal to it, even while the
 user is offline. The **secret** key never touches disk unwrapped: it exists
 only as **wrappings**, one per enrolled unlocker (a passkey's WebAuthn PRF
-output, a recovery code, an optional passphrase), and is unwrapped only
+output, a recovery code, an optional bypass phrase), and is unwrapped only
 transiently into server RAM for the duration of an **unlock window**.
+
+**Naming:** the memorized unlocker is a **bypass phrase** everywhere a user
+sees it (internally `passphrase` in identifiers and API action names). The
+name carries its own warning: it bypasses the passkey requirement, it is not
+the login password, and enrolling one lowers the vault's strength to the
+strength of the phrase. It is never offered during setup — the ceremony is
+passkey + recovery codes only — and is added deliberately from the unlocker
+management panel by users who need to unlock where their passkey is not
+available (another device, CLI tooling).
 
 **One unlock opens everything in that scope.** A single passkey tap puts the
 secret key in the window; every server-custody consumer's
@@ -110,10 +119,11 @@ contract rather than left to fail incidentally.
 
 | Action pair | Purpose |
 |---|---|
-| `vault_setup_options` / `vault_setup_verify` | First-time setup: generate the keypair, wrap it under the enrolling passkey + N fresh recovery codes + an optional passphrase, open the window. Requires an account password first (see *The vault-activation flip*) and an explicit permanent-loss acknowledgment. |
-| `vault_add_passkey_options` / `vault_add_passkey_verify` | Wrap the (already-unlocked) secret key under another PRF-capable passkey. |
+| `vault_setup_options` / `vault_setup_verify` | First-time setup: generate the keypair, wrap it under the enrolling passkey + N fresh recovery codes, open the window. The verify action also accepts an optional `passphrase` (a bypass-phrase wrapping) for non-web clients; the web ceremony never offers it. Requires an account password first (see *The vault-activation flip*) and an explicit permanent-loss acknowledgment. |
+| `vault_add_passkey_options` / `vault_add_passkey_verify` | Wrap the (already-unlocked) secret key under another PRF-capable passkey — "activating" that passkey for the vault. The security page chains this automatically after enrolling a new passkey while the vault is unlocked, so passkeys end up vault-active by default; each passkey row carries a vault badge with activate/deactivate in its Actions menu. |
+| `vault_passkey_deactivate` | Remove one passkey's vault wrapping (it still signs in; it can no longer unlock). Requires a recent step-up; refused if it would break the unlocker floor. |
 | `vault_regenerate_codes` | Invalidate all recovery codes and mint a fresh set. Requires a recent step-up and an unlocked vault. |
-| `vault_passphrase_enroll` / `vault_passphrase_remove` | Enroll or remove the optional passphrase fallback. Requires a recent step-up; enroll also requires an unlocked vault. |
+| `vault_passphrase_enroll` / `vault_passphrase_remove` | Add or remove the optional bypass phrase. Requires a recent step-up; enroll also requires an unlocked vault. |
 | `vault_status` | Read-only: set-up/unlock state and the wrapping list (no secret material) for the keyring UI. |
 
 ## The unlock window
@@ -153,6 +163,9 @@ Unlock endpoints (`logic/vault_unlock_options_logic.php` and its
 siblings, plus `vault_lock`) mint the WebAuthn PRF assertion options with
 `userVerification: required` (`PasskeyService::getDerivationOptions()`) —
 every vault unlock demands device user verification, not merely preferred.
+The two knowledge-factor unlocks (recovery code, bypass phrase) additionally
+demand the account's second factor regardless of the 2FA cadence setting: a
+remote attacker must hold a possession factor, never just stolen strings.
 
 ### Host hardening
 
@@ -172,9 +185,9 @@ wrapping **and** fewer than 3 unused recovery codes — the refusal names what
 to enroll first. `VaultUnlock::assertWrappingDeleteSafe($vault_id,
 $exclude_credential_id = null)` is the shared counting logic behind every such
 refusal: passkey revocation (excluding the credential being revoked from the
-count) and passphrase removal (nothing to exclude — a passphrase never counts
-toward the floor itself, so removing one only matters when the passkey/recovery
-counts are already at the floor). A passkey wrapping counts only if its
+count) and bypass-phrase removal (nothing to exclude — a bypass phrase never
+counts toward the floor itself, so removing one only matters when the
+passkey/recovery counts are already at the floor). A passkey wrapping counts only if its
 credential row is still live (`pkc_delete_time IS NULL`) — belt-and-suspenders
 against old data predating the cleanup below.
 

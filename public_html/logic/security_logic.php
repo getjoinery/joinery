@@ -33,25 +33,6 @@ function security_logic(array $input): LogicResult{
 	$page_vars['recovery_email'] = trim((string)$user->get('usr_recovery_email'));
 	$page_vars['recovery_email_verified'] = $user->has_verified_recovery_email();
 
-	// Separation nudge (specs/mailbox_security_levels.md § 5.4 / § Separation
-	// guidance): a passkey can serve as the login second factor AND unlock the
-	// vault. When the same credential fills both roles, one stolen credential holds
-	// both gates. Warn — never block. Fires when the account has a vault and at
-	// least one passkey that is also a vault unlocker (a uew wrapping references it).
-	$page_vars['separation_nudge'] = false;
-	require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
-	$sep_vault = UserEncryptionVault::loadForUser((int)$user->key);
-	if ($sep_vault) {
-		require_once(PathHelper::getIncludePath('data/user_encryption_wrappings_class.php'));
-		$passkey_unlockers = new MultiUserEncryptionWrapping(array(
-			'vault_id' => $sep_vault->key,
-			'unlocker_type' => UserEncryptionWrapping::TYPE_PASSKEY,
-			'deleted' => false,
-		));
-		$passkey_unlockers->load();
-		$page_vars['separation_nudge'] = count($passkey_unlockers) > 0;
-	}
-
 	$msgtxt_from_get = $input['msgtext'] ?? null;
 	if ($msgtxt_from_get) {
 		$message = new DisplayMessage(htmlspecialchars($msgtxt_from_get), 'Two-Factor Authentication',
@@ -167,7 +148,11 @@ function security_logic(array $input): LogicResult{
 	}
 
 	if ($action === 'start_enable' && !$page_vars['totp_enabled']) {
-		$totp = \OTPHP\TOTP::generate();
+		// 20-byte secret (RFC 4226 recommendation for SHA-1) -> 32 base32
+		// chars, the industry-standard length for manual entry. The library
+		// default of 64 bytes produces a 103-char key with no practical
+		// security gain.
+		$totp = \OTPHP\TOTP::generate(null, 20);
 		$_SESSION['totp_setup_secret'] = $totp->getSecret();
 		// Fall through to display the QR
 	}
@@ -251,7 +236,38 @@ function security_logic(array $input): LogicResult{
 		return LogicResult::render($page_vars);
 	}
 
+	if ($action === 'revoke_trusted_devices' && $page_vars['totp_enabled']) {
+		$user->rotate_totp_hmac_key();
+		$session->delete_trusted_device_cookie();
+		$msgtxt = 'All trusted devices forgotten. Every device will be asked for a 2FA code at its next sign-in.';
+		$message = new DisplayMessage($msgtxt, 'Trusted devices forgotten', '/\/profile\/security.*/',
+			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'securitybox', TRUE);
+		$session->save_message($message);
+		return LogicResult::redirect('/profile/security');
+	}
+
 	if ($action === 'disable' && $page_vars['totp_enabled']) {
+		// Possession-factor invariant: a vault holder must always retain a
+		// second factor beyond memorized secrets — TOTP or a live passkey.
+		// Without this, disabling 2FA after revoking every passkey would
+		// leave the vault openable with a phished password + recovery code.
+		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
+		require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+		$vaults = new MultiUserEncryptionVault(['user_id' => $user->key]);
+		$vaults->load();
+		if ($vaults->count()) {
+			$live_passkeys = new MultiPasskey(['user_id' => $user->key, 'deleted' => false]);
+			$live_passkeys->load();
+			if ($live_passkeys->count() === 0) {
+				$msgtxt = 'Your encrypted vault needs a second factor that is not just a memorized code. '
+					. 'Add a passkey first, then disable two-factor authentication.';
+				$message = new DisplayMessage($msgtxt, 'Vault protection', '/\/profile\/security.*/',
+					DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'securitybox', TRUE);
+				$session->save_message($message);
+				return LogicResult::redirect('/profile/security');
+			}
+		}
+
 		$confirmation = isset($input['confirm_code']) ? trim($input['confirm_code']) : '';
 		$confirmed = false;
 		if ($confirmation !== '') {

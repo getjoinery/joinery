@@ -1074,7 +1074,7 @@ select.form-control {
 /* ===== Utility Classes ===== */
 .d-flex        { display: flex; }
 .d-block       { display: block; }
-.d-none        { display: none; }
+.d-none        { display: none !important; }
 .d-inline-flex { display: inline-flex; }
 .align-items-center   { align-items: center; }
 .align-items-start    { align-items: flex-start; }
