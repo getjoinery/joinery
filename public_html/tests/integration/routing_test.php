@@ -711,10 +711,11 @@ class HttpRoutingTestRunner {
         
         // Test real product URLs from database. Product pages are store-plugin
         // routes: 200 when the store is active, 404 (route gated off) otherwise.
+        // Active products only — an inactive product's page 404s by design.
         try {
             require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php'));
             $product_status = PluginHelper::isPluginActive('store') ? 200 : 404;
-            $products = new MultiProduct(['deleted' => false], ['pro_product_id' => 'DESC'], 2);
+            $products = new MultiProduct(['deleted' => false, 'is_active' => true], ['pro_product_id' => 'DESC'], 2);
             if ($products->count_all() > 0) {
                 $products->load();
                 $index = 1;
