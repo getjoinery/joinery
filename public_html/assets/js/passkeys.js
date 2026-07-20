@@ -5,7 +5,10 @@
  * pass them to register()/authenticate()/derive(), then POST the returned
  * object back to the matching verify action.
  *
- * @version 1.0
+ * @version 1.2
+ * @changelog 1.2 - Automatic failure telemetry: every register/authenticate
+ *   rejection is reported to passkey_client_report (surface, error name,
+ *   timing, focus state) so browser-layer refusals are visible server-side.
  */
 window.JoineryPasskeys = (function () {
 	'use strict';
@@ -134,20 +137,78 @@ window.JoineryPasskeys = (function () {
 		};
 	}
 
+	/**
+	 * Failure telemetry: a browser-layer refusal (NotAllowedError etc.) never
+	 * reaches any server action, so the helper posts it to
+	 * passkey_client_report - surface, error name, timing, and focus state.
+	 * Fire-and-forget with keepalive (survives an immediate navigation);
+	 * diagnostics must never break or delay the ceremony itself.
+	 */
+	function reportFailure(kind, err, startedMs) {
+		try {
+			var headers = { 'Content-Type': 'application/json' };
+			var m = document.cookie.match(/(?:^|; )joinery_api_csrf=([^;]+)/);
+			var token = m ? decodeURIComponent(m[1])
+				: ((document.querySelector('meta[name="joinery-api-csrf"]') || {}).content || '');
+			if (token) headers['X-Joinery-Csrf'] = token;
+			fetch('/api/v1/action/passkey_client_report', {
+				method: 'POST',
+				headers: headers,
+				keepalive: true,
+				body: JSON.stringify({
+					context: kind + ':' + location.pathname,
+					error_name: (err && err.name) || 'Error',
+					error_message: String((err && err.message) || err).slice(0, 140),
+					focus: document.hasFocus(),
+					visibility: document.visibilityState,
+					elapsed_ms: Math.round(performance.now() - startedMs),
+				}),
+			}).catch(function () {});
+		} catch (e) { /* never let telemetry interfere */ }
+	}
+
+	// One WebAuthn ceremony at a time, enforced at the helper layer: the
+	// browser rejects an interrupted ceremony with an opaque NotAllowedError,
+	// so a racing second call must fail HERE with a message that names the
+	// real problem instead of reaching the platform authenticator.
+	var ceremonyInFlight = false;
+	async function exclusiveCeremony(kind, run) {
+		var started = performance.now();
+		if (ceremonyInFlight) {
+			var lockErr = new Error('A passkey request is already in progress. Finish or dismiss it, then try again.');
+			lockErr.name = 'CeremonyLockError';
+			reportFailure(kind, lockErr, started);
+			throw lockErr;
+		}
+		ceremonyInFlight = true;
+		try {
+			return await run();
+		} catch (err) {
+			reportFailure(kind, err, started);
+			throw err;
+		} finally {
+			ceremonyInFlight = false;
+		}
+	}
+
 	/** Runs the creation ceremony; returns a JSON-ready object for passkey_register_verify. */
 	async function register(optionsJson) {
-		var publicKey = decodeCreationOptions(optionsJson);
-		var credential = await navigator.credentials.create({ publicKey: publicKey });
-		if (!credential) throw new Error('Passkey creation was cancelled.');
-		return encodeAttestationResponse(credential);
+		return exclusiveCeremony('register', async function () {
+			var publicKey = decodeCreationOptions(optionsJson);
+			var credential = await navigator.credentials.create({ publicKey: publicKey });
+			if (!credential) throw new Error('Passkey creation was cancelled.');
+			return encodeAttestationResponse(credential);
+		});
 	}
 
 	/** Runs the request ceremony; returns a JSON-ready object for the login/step-up verify actions. */
 	async function authenticate(optionsJson) {
-		var publicKey = decodeRequestOptions(optionsJson);
-		var credential = await navigator.credentials.get({ publicKey: publicKey });
-		if (!credential) throw new Error('Passkey sign-in was cancelled.');
-		return encodeAssertionResponse(credential);
+		return exclusiveCeremony('authenticate', async function () {
+			var publicKey = decodeRequestOptions(optionsJson);
+			var credential = await navigator.credentials.get({ publicKey: publicKey });
+			if (!credential) throw new Error('Passkey sign-in was cancelled.');
+			return encodeAssertionResponse(credential);
+		});
 	}
 
 	/**
