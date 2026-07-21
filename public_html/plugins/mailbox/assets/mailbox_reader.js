@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.18
+ * No framework. @version 2.19
  *
  * Two-pane layout: the main pane swaps between the conversation list and an
  * opened conversation (toggled by the `reading` class on #mbx-reader); a back
@@ -2066,6 +2066,18 @@
 			clearTimeout(searchTimer);
 			var v = e.target.value.trim();
 			searchTimer = setTimeout(function () { state.search = v; loadThreads(true); }, 300);
+		});
+		// Enter commits the search now and leaves any open conversation — the
+		// reading view replaces the list entirely, so results would otherwise
+		// land behind the message being read. Same idiom as selectFolder /
+		// selectMailbox: a view switch closes the thread first.
+		$('#mbx-search').addEventListener('keydown', function (e) {
+			if (e.key !== 'Enter') { return; }
+			e.preventDefault();
+			clearTimeout(searchTimer);
+			state.search = e.target.value.trim();
+			closeThread();
+			loadThreads(true);
 		});
 
 		$('#mbx-refresh').addEventListener('click', function () { refreshMailboxes(); loadThreads(true); });

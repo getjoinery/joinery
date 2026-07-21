@@ -331,12 +331,56 @@ class DatabaseUpdater {
             }
         }
 
+        // A retired column (live, but absent from the specifications) is never
+        // written again, so a NOT NULL on it makes the whole table
+        // un-insertable — every INSERT the platform builds omits it and dies on
+        // the constraint. Relax it on every run, not just cleanup: dropping the
+        // column is destructive and stays cleanup-only, but the requirement to
+        // supply a value the platform no longer knows about is incoherent and
+        // safe to lift.
+        $this->relaxRetiredColumnConstraints($table_name, $field_specifications, $live_columns, $dblink, $results);
+
         // Handle column cleanup if cleanup mode is enabled and not deferred
         if ($this->cleanup && $include_cleanup) {
             $this->processColumnCleanup($table_name, $field_specifications, $live_columns, $dblink, $results);
         }
     }
-    
+
+    /**
+     * Drop NOT NULL from live columns that no longer appear in the class's
+     * $field_specifications. Non-destructive (the column and its data stay) and
+     * self-healing: an upgraded site that carries a retired required column
+     * keeps working instead of failing every INSERT into that table.
+     */
+    private function relaxRetiredColumnConstraints($table_name, $field_specifications, $live_columns, $dblink, &$results) {
+        if (empty($field_specifications)) {
+            return; // nothing declared — the table isn't spec-managed, so no column is "retired"
+        }
+        foreach ($live_columns as $column_name => $column_info) {
+            if (isset($field_specifications[$column_name])) {
+                continue;
+            }
+            $nullable = strtoupper((string)($column_info['is_nullable'] ?? 'YES'));
+            if ($nullable !== 'NO') {
+                continue;
+            }
+            // A NOT NULL primary key column is structural, not drift.
+            if ($this->isPrimaryKeyColumn($table_name, $column_name, $dblink)) {
+                continue;
+            }
+            $sql = "ALTER TABLE {$table_name} ALTER COLUMN {$column_name} DROP NOT NULL";
+            try {
+                $q = $dblink->prepare($sql);
+                $q->execute();
+                $results['columns_modified'][] = "{$table_name}.{$column_name} (retired, NOT NULL relaxed)";
+                $results['messages'][] = "Relaxed NOT NULL on retired column: {$table_name}.{$column_name}";
+            } catch (PDOException $e) {
+                $results['warnings'][] = "Could not relax NOT NULL on retired column {$table_name}.{$column_name}: " . $e->getMessage();
+            }
+        }
+    }
+
+
     /**
      * Process potential column modifications (type changes, constraint changes)
      */
