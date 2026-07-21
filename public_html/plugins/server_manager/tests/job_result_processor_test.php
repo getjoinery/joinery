@@ -249,6 +249,30 @@ check(jrp_call('format_size', array(512)) !== jrp_call('format_size', array(512 
 	'different magnitudes format differently');
 
 // ---------------------------------------------------------------------------
+section('Upgrades that stopped to refresh their own tooling');
+
+// upgrade.php exits 0 after copying new deployment files into place. Versions
+// before 0.8.112 then wait for a human. Nothing in the exit code says so, so the
+// job result has to read it out of the output or report a success that never was.
+$halt_old = "=== SELF-UPDATE REQUIRED ===\n"
+	. "  - utils/upgrade.php\n\n"
+	. "  SELF-UPDATE COMPLETE — PLEASE RE-RUN THE UPGRADE\n\n"
+	. "  Re-run with the same command to continue.\n";
+check(jrp_call('halted_at_self_update', array($halt_old)) === true,
+	'an upgrade that asked to be re-run is recognised as unfinished');
+
+check(jrp_call('halted_at_self_update',
+	array("  Automatic re-run already attempted once and deployment files still differ.\n")) === true,
+	'an automatic re-run that gave up is recognised as unfinished');
+
+check(jrp_call('halted_at_self_update',
+	array("=== SYNCING THEMES AND PLUGINS ===\n<h2>✓ Upgrade Complete!</h2>System upgraded to version: 0.8.177\n")) === false,
+	'a completed upgrade is not mistaken for one that stopped early');
+
+check(jrp_call('halted_at_self_update', array('')) === false,
+	'empty output is not treated as a self-update halt');
+
+// ---------------------------------------------------------------------------
 section('End to end');
 
 // A completed check_status job should leave the node carrying what it reported.

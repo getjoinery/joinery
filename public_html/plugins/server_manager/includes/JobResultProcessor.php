@@ -5,7 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
- * @version 1.6
+ * @version 1.7
  */
 
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
@@ -285,6 +285,13 @@ class JobResultProcessor {
 	 * Updates tab reflects reality the moment the job completes, instead of
 	 * waiting for someone to refresh the dashboard. The running site is the
 	 * authority — X-Joinery-Version from a HEAD probe of the node's site URL.
+	 *
+	 * The probe is also the verdict. upgrade.php exits 0 in states where nothing
+	 * was installed — most notably after refreshing its own deployment tooling,
+	 * where a version predating the automatic re-run stops and waits for a human.
+	 * Trusting the exit code alone reports those jobs as successful upgrades and
+	 * the node silently stays on its old version. A job is therefore only a
+	 * success if the node is actually running the version it was sent.
 	 */
 	private static function process_apply_update($job) {
 		$node_id = $job->get('mjb_mgn_node_id');
@@ -326,12 +333,51 @@ class JobResultProcessor {
 			$node->save();
 		}
 
-		self::record_apply_update_result($job, [
-			'probed'   => true,
-			'site_url' => $site_url,
-			'version'  => $version,
-			'error'    => $curl_error !== '' ? $curl_error : null,
-		]);
+		require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+		$target = LibraryFunctions::get_joinery_version();
+
+		$result = [
+			'probed'         => true,
+			'site_url'       => $site_url,
+			'version'        => $version,
+			'target_version' => $target !== '' ? $target : null,
+			'error'          => $curl_error !== '' ? $curl_error : null,
+		];
+
+		// Only a positive reading counts against the target. An unreachable node
+		// or a missing header tells us nothing, and guessing failure there would
+		// turn every probe hiccup into a red job.
+		$is_behind = $version !== null
+			&& $target !== ''
+			&& preg_match('/^\d+\.\d+\.\d+$/', $version)
+			&& version_compare($version, $target) < 0;
+
+		$result['upgraded'] = !$is_behind;
+
+		if ($is_behind) {
+			$result['reason'] = self::halted_at_self_update($job->get('mjb_output') ?: '')
+				? 'Upgrade stopped after refreshing its own deployment tooling. '
+					. 'The node is still on ' . $version . ' and needs a second pass to reach ' . $target . '.'
+				: 'Upgrade finished but the node is still on ' . $version . ', not ' . $target . '.';
+			$job->set('mjb_status', 'failed');
+			$job->set('mjb_error_message', $result['reason']);
+		}
+
+		self::record_apply_update_result($job, $result);
+	}
+
+	/**
+	 * Did this upgrade stop to refresh its own deployment tooling?
+	 *
+	 * upgrade.php copies new deployment files over the live ones and restarts the
+	 * pipeline. Versions from 0.8.112 onward re-run themselves; older ones print
+	 * this request and exit 0, which is the case worth naming in the job result
+	 * because the remedy is simply to run it again.
+	 */
+	private static function halted_at_self_update(string $output): bool {
+		return stripos($output, 'PLEASE RE-RUN THE UPGRADE') !== false
+			|| stripos($output, 'Re-run with the same command to continue') !== false
+			|| stripos($output, 'Automatic re-run already attempted once') !== false;
 	}
 
 	/**
