@@ -29,10 +29,13 @@
  *
  * DISPOSABLE CACHE: every stored byte here is reconstructible from the sealed
  * message rows. Missing, stale, corrupt, or post-rotation — rebuild(), never
- * an error. Index source: sender + subject + both bodies + attachment
- * filenames. Attachment CONTENTS are never indexed.
+ * an error. That extends to writing the cache: persisting the sealed blob is
+ * best-effort and never throws, so a storage-layer failure costs a slower next
+ * unlock rather than breaking the search in flight. Index source: sender +
+ * subject + both bodies + attachment filenames. Attachment CONTENTS are never
+ * indexed.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
@@ -197,8 +200,27 @@ class MailboxIndex {
 		return $this->tryOpenDb($this->shmPath($user_id)) !== null;
 	}
 
-	/** Seal-after-fold: read the /dev/shm bytes, seal fresh, persist as a private File. */
+	/**
+	 * Seal-after-fold: read the /dev/shm bytes, seal fresh, persist as a private
+	 * File.
+	 *
+	 * Never throws. The persisted blob is a restore shortcut for the next
+	 * unlock, not the index itself — the working copy in /dev/shm is already
+	 * folded and searchable by the time this runs, and everything here is
+	 * reconstructible from the sealed message rows. A failure to write the
+	 * shortcut (storage misconfigured, disk full, quota) costs one slower
+	 * unlock later; it must never take down the search that triggered it.
+	 */
 	private function persist(int $user_id, string $secret_key): void {
+		try {
+			$this->persistOrThrow($user_id, $secret_key);
+		} catch (Throwable $e) {
+			error_log('MailboxIndex: persist failed for user ' . $user_id
+				. ' (index still searchable, next unlock rebuilds): ' . $e->getMessage());
+		}
+	}
+
+	private function persistOrThrow(int $user_id, string $secret_key): void {
 		$path = $this->shmPath($user_id);
 		if (!file_exists($path)) {
 			return;
