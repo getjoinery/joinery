@@ -23,7 +23,7 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
- * @version 1.22
+ * @version 1.23
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -950,6 +950,33 @@ class InboundEmailSetupCheck {
 				$out[] = $this->r('domain.sealed_backlog', $domain, 'domain', 'Mail sealed at rest',
 					self::REQUIRED, self::PASS,
 					'Every stored message on this protected domain is sealed.');
+			}
+		}
+
+		// Sealed leftovers on a domain that no longer seals
+		// (specs/mailbox_lowering_unseal.md § 7): safe but not yet converged —
+		// each row unseals from its own reader's next unlocked session, so this
+		// stays INFO, never a failure.
+		if ($model && !$model->seals_content()) {
+			$leftover = 0;
+			try {
+				$db = DbConnector::get_instance()->get_db_link();
+				$stmt = $db->prepare(
+					"SELECT COUNT(*) FROM iem_inbound_email_messages
+					 WHERE iem_ied_inbound_email_domain_id = ?
+					   AND (iem_content_sealed = true OR iem_pending_parse = true)
+					   AND iem_delete_time IS NULL");
+				$stmt->execute(array(intval($model->key)));
+				$leftover = intval($stmt->fetchColumn());
+			} catch (\Throwable $e) {
+				$leftover = 0; // count unavailable — say nothing rather than fabricate
+			}
+			if ($leftover > 0) {
+				$out[] = $this->r('domain.unseal_leftovers', $domain, 'domain', 'Sealed leftovers',
+					self::INFO, self::INFO,
+					$leftover . ' message(s) remain sealed from an earlier protection level.',
+					'They unseal automatically the next time their readers open the mailbox with '
+					. 'an unlocked vault; until then reading them takes an unlock.');
 			}
 		}
 

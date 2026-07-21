@@ -24,7 +24,12 @@
  * textarea is a rich-text contenteditable + toolbar; a Bcc field hides behind a
  * toggle; inline images paste/drag into the editor. The reader JS owns all of it.
  *
- * @version 1.5.0
+ * The mount also emits the quiet lowering convergence
+ * (specs/mailbox_lowering_unseal.md § 6): a signed-in holder with sealed rows
+ * on non-sealing domains converges them in the background via
+ * mailbox/unseal_batch, silently stopping while their vault is locked.
+ *
+ * @version 1.6.0
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSender.php'));
@@ -208,5 +213,60 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
      below runs. Same include convention as views/login.php and profile/security.php. -->
 <script src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
 <script src="<?php echo htmlspecialchars($asset_ver('mailbox_reader.js')); ?>"></script>
+	<?php
+	mailbox_reader_emit_unseal_convergence();
+}
+
+/**
+ * Quiet lowering convergence (specs/mailbox_lowering_unseal.md § 6): when the
+ * signed-in user still owns sealed (or pending-parse) rows on domains that no
+ * longer seal, loop mailbox/unseal_batch in the background until done. The
+ * domain owner already made the decision when they lowered the level — no
+ * banner, no prompt. Window closed → the action answers locked and the loop
+ * stops silently; the next unlock-and-visit converges the rest.
+ */
+function mailbox_reader_emit_unseal_convergence(): void {
+	$user_id = (int)SessionControl::get_instance()->get_user_id();
+	if (!$user_id) {
+		return;
+	}
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
+	try {
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare(
+			"SELECT 1 FROM iem_inbound_email_messages
+			 WHERE iem_sealed_owner_user_id = ?
+			   AND (iem_content_sealed = true OR iem_pending_parse = true)
+			   AND iem_delete_time IS NULL
+			   AND iem_ied_inbound_email_domain_id IN (
+					SELECT ied_inbound_email_domain_id FROM ied_inbound_email_domains
+					WHERE ied_security_level NOT IN ('" . InboundEmailDomain::LEVEL_PRIVATE . "','"
+						. InboundEmailDomain::LEVEL_FORTRESS . "') AND ied_delete_time IS NULL)
+			 LIMIT 1");
+		$stmt->execute(array($user_id));
+		if (!$stmt->fetchColumn()) {
+			return;
+		}
+	} catch (\Throwable $e) {
+		return; // a probe failure must never break the reader
+	}
+	?>
+<script>
+(function () {
+	var csrf = (document.querySelector('meta[name="joinery-api-csrf"]') || {}).content || '';
+	function batch() {
+		fetch('/api/v1/action/mailbox/unseal_batch', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': csrf },
+			body: JSON.stringify({})
+		}).then(function (r) { return r.json(); }).then(function (j) {
+			var d = (j && j.data) || {};
+			if (d.locked || !d.unsealed || !(d.own_remaining > 0)) return;
+			batch();
+		}).catch(function () { /* silent — the next visit resumes */ });
+	}
+	batch();
+})();
+</script>
 	<?php
 }

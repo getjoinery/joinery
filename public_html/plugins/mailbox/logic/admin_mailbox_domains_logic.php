@@ -72,9 +72,17 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 		if ($domain->key && $domain->seals_content()) {
 			mailbox_protection_seal_batch($domain);
 		}
-		$then = (($input['then'] ?? '') === 'protect') ? '&then=protect' : '';
 		return LogicResult::redirect($editor_base . '?ied_inbound_email_domain_id=' . $domain_id
-			. '&sealed_now=1' . $then);
+			. '&sealed_now=1');
+	}
+	if ($input && ($input['action'] ?? '') === 'ceremony_unseal_batch') {
+		$domain_id = intval($input['ied_inbound_email_domain_id'] ?? 0);
+		$domain = new InboundEmailDomain($domain_id, TRUE);
+		if ($domain->key && !$domain->seals_content()) {
+			mailbox_protection_unseal_batch($domain, intval($session->get_user_id()));
+		}
+		return LogicResult::redirect($editor_base . '?ied_inbound_email_domain_id=' . $domain_id
+			. '&unsealed_now=1');
 	}
 
 	// Known IMAP-source provider domains (shared with the IMAP editor). Selecting
@@ -207,21 +215,30 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 
 			// A raise into a sealing level converges the backlog: earlier mail was
 			// stored plaintext (sealing is per-row) and "my mail is now private"
-			// must not be quietly untrue for history. The editor auto-runs sealing
-			// batches (ceremony_seal_batch) until the backlog is empty; Fortress
-			// continues to the protect ceremony after.
-			if ($raising && $new_seals && mailbox_protection_backlog_count((int)$domain->key) > 0) {
-				$then = ($new_level === InboundEmailDomain::LEVEL_FORTRESS && !$domain->is_protected_identity())
-					? '&then=protect' : '';
-				$session->save_message(new DisplayMessage(
-					'Domain saved — sealing earlier messages now.',
-					'Saved',
-					'~/plugins/mailbox/admin/~',
-					DisplayMessage::MESSAGE_ANNOUNCEMENT,
-					DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
-				));
+			// must not be quietly untrue for history. Every raise lands on the
+			// editor's receipt card (specs/mailbox_raise_receipt.md) — it runs
+			// the sealing batches in place and resolves into the completed
+			// facts; no flash message, the card is the whole voice. The one
+			// exception is a zero-backlog Fortress raise, which has nothing to
+			// seal and a required next step — it routes straight into the
+			// protect ceremony below.
+			if ($raising && $new_seals) {
+				$fortress_handoff = ($new_level === InboundEmailDomain::LEVEL_FORTRESS
+					&& !$domain->is_protected_identity());
+				if (mailbox_protection_backlog_count((int)$domain->key) > 0 || !$fortress_handoff) {
+					return LogicResult::redirect($editor_base . '?ied_inbound_email_domain_id=' . (int)$domain->key
+						. '&sealed_now=1');
+				}
+			}
+
+			// A lowering out of the sealing levels converges history back to
+			// plaintext (specs/mailbox_lowering_unseal.md): land on the
+			// lowering receipt, which unseals the acting user's rows in place
+			// (the vault-open gate above guaranteed their window is open) and
+			// names any other holders' rows that must wait for their sessions.
+			if ($lowering && $old_seals && !$new_seals) {
 				return LogicResult::redirect($editor_base . '?ied_inbound_email_domain_id=' . (int)$domain->key
-					. '&sealed_now=1' . $then);
+					. '&unsealed_now=1');
 			}
 
 			// Fortress records the level immediately (sealing at ingest is safe
@@ -358,14 +375,30 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 			'rows_private' => mailbox_protection_rows($facts, InboundEmailDomain::LEVEL_PRIVATE, $acting_user_id),
 			'rows_fortress' => mailbox_protection_rows($facts, InboundEmailDomain::LEVEL_FORTRESS, $acting_user_id),
 			'backlog' => $backlog,
-			// The sealing pass runs whenever a protected domain has unsealed rows —
-			// not only right after a raise — so a backlog that appears later (e.g. a
-			// vault recreated after deletion) converges on the next editor visit.
+			'sealed_total' => mailbox_protection_sealed_count(intval($edit_domain->key)),
+			'acting_user_id' => $acting_user_id,
+			// The receipt card renders on arrival from a raise (sealed_now) or
+			// whenever a protected domain has unsealed rows — not only right
+			// after a raise — so a backlog that appears later (e.g. a vault
+			// recreated after deletion) converges on the next editor visit.
 			'sealing_active' => $edit_domain->seals_content()
 				&& ($backlog > 0 || !empty($input['sealed_now'])),
-			'then_protect' => (($input['then'] ?? '') === 'protect'),
 			'editor_url' => $editor_base . '?ied_inbound_email_domain_id=' . intval($edit_domain->key),
 		);
+		// Lowering receipt state (specs/mailbox_lowering_unseal.md): a domain
+		// that no longer seals but still carries sealed history converges it —
+		// on arrival from the lowering (unsealed_now) or any later visit while
+		// leftovers remain.
+		if (!$edit_domain->seals_content()) {
+			$unseal_counts = mailbox_protection_unseal_counts($edit_domain, $acting_user_id);
+			$ceremony['unseal_own_backlog'] = $unseal_counts['own'];
+			$ceremony['unseal_others_backlog'] = $unseal_counts['others'];
+			$ceremony['unseal_active'] = ($unseal_counts['own'] + $unseal_counts['others'] > 0)
+				|| !empty($input['unsealed_now']);
+			$ceremony['window_open'] = ($acting_user_id > 0) && VaultUnlock::isOpen($acting_user_id);
+		} else {
+			$ceremony['unseal_active'] = false;
+		}
 	}
 
 	return LogicResult::render(array(

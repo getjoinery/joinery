@@ -43,7 +43,7 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
- * @version 1.12
+ * @version 1.13
  */
 
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
@@ -572,18 +572,20 @@ class MailboxService {
 		// 6): a sealed mailbox's content columns are ciphertext, unsearchable in
 		// SQL — MailboxIndex (a sealed, in-window SQLite FTS5 working copy) is the
 		// only way to search it. This resolves per single-mailbox scope, since the
-		// index is per owner: a single alias whose owner holds a Sealed Vault
+		// index is per owner: a single alias whose owner holds a Sealed Vault AND
+		// whose mailbox still has sealed content — its domain seals, or sealed
+		// rows remain from an earlier level (specs/mailbox_lowering_unseal.md) —
 		// searches via the index (locked → an explicit signal, not silently empty
-		// forever); every other scope (all-mail, an unsealed mailbox, "unmatched")
-		// keeps the Postgres tsvector search on the plaintext columns — a sealed
-		// row elsewhere in a broad scope simply never matches its own ciphertext,
-		// which is inert degradation, not a leak.
+		// forever). Every other scope (all-mail, a converged lowered mailbox,
+		// "unmatched") keeps the Postgres tsvector search on the plaintext
+		// columns — a sealed row elsewhere in a broad scope simply never matches
+		// its own ciphertext, which is inert degradation, not a leak.
 		$search_locked = false;
 		if (!empty($filters['q'])) {
 			$owner_id = ($aliasId !== null && $aliasId > 0) ? InboundEmailMessage::singleOwnerUserId($aliasId) : null;
 			$vault = $owner_id !== null ? UserEncryptionVault::loadForUser($owner_id) : null;
 
-			if ($vault !== null) {
+			if ($vault !== null && InboundEmailMessage::aliasSealedContentActive((int)$aliasId)) {
 				$secret = VaultUnlock::secretKey($owner_id);
 				if ($secret === null) {
 					$search_locked = true;
