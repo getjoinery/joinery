@@ -337,13 +337,18 @@ function harness_jar_new($prefix = 'jyjar') {
  *
  * Jars are Netscape format: tab-separated, domain first, name in field 6 and
  * value in field 7.
+ *
+ * An HttpOnly cookie — the session id, among others — is written with its domain
+ * prefixed by "#HttpOnly_", so treating every line starting with "#" as a comment
+ * makes exactly those cookies unreadable. That reads as "no such cookie" rather
+ * than as an error, which turns an assertion about a session id into null === null.
  */
 function harness_jar_cookie($jar, $name) {
 	if (!$jar || !file_exists($jar)) {
 		return null;
 	}
 	foreach (explode("\n", (string)file_get_contents($jar)) as $line) {
-		if ($line === '' || strpos($line, '#') === 0) {
+		if ($line === '' || (strpos($line, '#') === 0 && strpos($line, '#HttpOnly_') !== 0)) {
 			continue;
 		}
 		$parts = explode("\t", trim($line));

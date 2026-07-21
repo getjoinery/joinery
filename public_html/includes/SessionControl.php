@@ -589,18 +589,52 @@ class SessionControl{
 		// successful factor completes the auto-login.
 		if ($this->user_has_second_factor($user_obj) && $user_obj->two_factor_cadence() === 'every_login'
 				&& !$this->has_valid_trusted_device_cookie($user_obj)) {
-			session_regenerate_id(true);
-			$_SESSION['totp_pending_user_id']  = $user_obj->key;
-			$_SESSION['totp_pending_remember'] = false; // Already had a remember cookie
-			$_SESSION['totp_pending_return']   = $this->get_return();
-			$_SESSION['totp_pending_expires']  = time() + 600;
-			header('Location: /verify-totp');
-			exit();
+			// Stash the pending state once per pending login. This runs on every
+			// request until the factor is proved, and re-stashing would rotate the
+			// session id each time — the id the browser was just handed is the one
+			// carrying the pending state.
+			if (empty($_SESSION['totp_pending_user_id'])
+					|| (int)$_SESSION['totp_pending_user_id'] !== (int)$user_obj->key
+					|| empty($_SESSION['totp_pending_expires'])
+					|| $_SESSION['totp_pending_expires'] < time()) {
+				session_regenerate_id(true);
+				$_SESSION['totp_pending_user_id']  = $user_obj->key;
+				$_SESSION['totp_pending_remember'] = false; // Already had a remember cookie
+				$_SESSION['totp_pending_return']   = $this->get_return();
+				$_SESSION['totp_pending_expires']  = time() + 600;
+			}
+			// Never divert a request that is already how the factor gets proved, or
+			// how the user backs out of it: sending the factor page to itself is an
+			// infinite redirect, and sending /logout there traps the browser with no
+			// way out. Return not-logged-in and let the request run.
+			if (!self::is_second_factor_handoff()) {
+				header('Location: /verify-totp');
+				exit();
+			}
+			return FALSE;
 		}
 
 		$this->store_session_variables($user_obj);
 		LoginClass::StoreUserLogin($user_obj->key, LoginClass::LOGIN_COOKIE);
 		return TRUE;
+	}
+
+	/**
+	 * Is this request part of proving — or abandoning — a pending second factor?
+	 *
+	 * These are the only requests a pending user is allowed to make before the
+	 * factor is proved: the page that collects it, the two passkey actions that
+	 * page calls instead of a code, and the way out. Everything else is diverted
+	 * to the factor page.
+	 */
+	private static function is_second_factor_handoff() {
+		$path = rtrim(strtok($_SERVER['REQUEST_URI'] ?? '', '?'), '/');
+		return in_array($path, array(
+			'/verify-totp',
+			'/logout',
+			'/api/v1/action/login_2fa_passkey_options',
+			'/api/v1/action/login_2fa_passkey_verify',
+		), true);
 	}
 
 	/**

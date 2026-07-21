@@ -103,6 +103,17 @@ from the vault: a
 passkey used here confirms *presence for the session*; it does not open the
 vault (that is a distinct user-verification ceremony).
 
+**The divert runs on every request, and exempts its own hand-off.** The pending
+state is stashed by the sign-in itself and by the remember-me cookie path
+(`get_user_from_cookie()`), so a browser remembered on an account that owes a
+factor is diverted on each request until the factor is proved — including after
+the trusted-device cookie is gone, which is what forgetting trusted devices
+leaves behind. Four requests are exempt, because they *are* how the factor is
+proved or abandoned: `/verify-totp`, the two passkey actions that page calls,
+and `/logout`. Diverting any of them is an infinite redirect. The pending state
+is stashed once per pending login rather than per request, because stashing
+rotates the session id that carries it.
+
 **Dual-role passkeys.** Any live passkey may complete the second-factor step
 at sign-in — there is no per-credential role scoping — so a vault-active
 passkey necessarily also serves as a sign-in factor. The mitigations are
