@@ -6,13 +6,14 @@
  * Lists published upgrade archives (with delete), and provides the
  * Publish New Upgrade form with optional version override.
  *
- * @version 1.3
+ * @version 1.4
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('data/upgrades_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/UpgradeRetention.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(10);
@@ -53,6 +54,65 @@ if ($_POST && ($_POST['action'] ?? '') === 'delete_upgrade') {
 	exit;
 }
 
+// ── Toggle Keep (exempt a release from retention pruning) ──
+if ($_POST && ($_POST['action'] ?? '') === 'toggle_keep') {
+	$keep_id = intval($_POST['upgrade_id'] ?? 0);
+	if ($keep_id) {
+		try {
+			$u = new Upgrade($keep_id, TRUE);
+			if ($u->key) {
+				$now_kept = !$u->get('upg_keep');
+				$u->set('upg_keep', $now_kept);
+				$u->save();
+				$version_string = UpgradeRetention::versionString($u);
+				$session->save_message(new DisplayMessage(
+					$now_kept
+						? "Upgrade $version_string will be kept — retention will not remove its archive."
+						: "Upgrade $version_string is no longer pinned; retention may remove its archive.",
+					'Success', $page_regex,
+					DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+				));
+			}
+		} catch (Exception $e) {
+			$session->save_message(new DisplayMessage(
+				'Could not update: ' . $e->getMessage(), 'Error', $page_regex,
+				DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+			));
+		}
+	}
+	header('Location: /admin/server_manager/publish_upgrade');
+	exit;
+}
+
+// ── Reclaim old archives now ──
+if ($_POST && ($_POST['action'] ?? '') === 'prune_archives') {
+	try {
+		$report = UpgradeRetention::prune();
+		if ($report['keep_count'] === 0) {
+			$msg = 'Retention is set to keep all archives; nothing removed.';
+		} elseif (empty($report['removed'])) {
+			$msg = 'Nothing to reclaim — every archive on disk is protected.';
+		} else {
+			$msg = 'Reclaimed ' . UpgradeRetention::formatBytes($report['bytes']) . ' from '
+				. count($report['removed']) . ' archive(s). Release history kept.';
+		}
+		if (!empty($report['failed'])) {
+			$msg .= ' Could not remove: ' . implode(', ', $report['failed']) . '.';
+		}
+		$session->save_message(new DisplayMessage(
+			$msg, 'Retention', $page_regex,
+			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+		));
+	} catch (Exception $e) {
+		$session->save_message(new DisplayMessage(
+			'Retention aborted: ' . $e->getMessage(), 'Error', $page_regex,
+			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+		));
+	}
+	header('Location: /admin/server_manager/publish_upgrade');
+	exit;
+}
+
 // ── Publish upgrade ──
 if ($_POST && ($_POST['action'] ?? '') === 'publish_upgrade') {
 	$release_notes = trim($_POST['release_notes'] ?? '');
@@ -72,6 +132,33 @@ if ($_POST && ($_POST['action'] ?? '') === 'publish_upgrade') {
 }
 
 // ── Load upgrade history ──
+// classify() walks every release (needed to know which fall outside the
+// newest-N window) and reports why each archive is protected, if it is.
+$retention_error = '';
+$rows = [];
+try {
+	$rows = UpgradeRetention::classify();
+} catch (Exception $e) {
+	$retention_error = $e->getMessage();
+}
+$keep_count = UpgradeRetention::getKeepCount();
+
+$on_disk = 0;
+$on_disk_bytes = 0;
+$reclaimable = 0;
+$reclaimable_bytes = 0;
+foreach ($rows as $r) {
+	if (!$r['archive_exists']) continue;
+	$on_disk++;
+	$on_disk_bytes += $r['bytes'];
+	if ($r['protected_by'] === null) {
+		$reclaimable++;
+		$reclaimable_bytes += $r['bytes'];
+	}
+}
+$display_rows = array_slice($rows, 0, 50);
+
+// Still needed for next-version auto-detection below.
 $upgrades = new MultiUpgrade([], ['upgrade_id' => 'DESC'], 50);
 $upgrades->load();
 
@@ -121,9 +208,34 @@ $session->clear_clearable_messages();
 $pageoptions = ['title' => 'Upgrade History'];
 $page->begin_box($pageoptions);
 ?>
-<?php if ($upgrades->count() === 0): ?>
+<?php if ($retention_error): ?>
+	<div class="alert alert-danger" role="alert">
+		<strong>Retention unavailable:</strong> <?php echo htmlspecialchars($retention_error); ?>
+		Archives are left untouched until this is resolved.
+	</div>
+<?php endif; ?>
+<?php if (empty($rows)): ?>
 	<p class="text-muted mb-0">No upgrades published yet.</p>
 <?php else: ?>
+	<p class="text-muted">
+		<?php if ($keep_count === 0): ?>
+			Keeping every archive.
+		<?php else: ?>
+			Keeping the newest <?php echo (int)$keep_count; ?>.
+		<?php endif; ?>
+		<?php echo (int)$on_disk; ?> archive<?php echo $on_disk === 1 ? '' : 's'; ?> on disk
+		(<?php echo htmlspecialchars(UpgradeRetention::formatBytes($on_disk_bytes)); ?>).
+		<?php if ($reclaimable > 0): ?>
+			<?php echo (int)$reclaimable; ?> reclaimable
+			(<?php echo htmlspecialchars(UpgradeRetention::formatBytes($reclaimable_bytes)); ?>).
+		<?php endif; ?>
+	</p>
+	<?php if ($reclaimable > 0 && !$retention_error): ?>
+		<form method="post" class="svm-inline-form mb-2">
+			<input type="hidden" name="action" value="prune_archives">
+			<button type="button" class="btn btn-sm btn-outline-secondary" onclick="var f=this.parentElement; JoineryModal.confirm('Remove <?php echo (int)$reclaimable; ?> old archive file(s) and reclaim <?php echo htmlspecialchars(UpgradeRetention::formatBytes($reclaimable_bytes)); ?>? Release history is kept, and versions in use or marked Keep are never removed.', function(){ f.submit(); })">Reclaim old archives</button>
+		</form>
+	<?php endif; ?>
 	<table class="table table-sm mb-0">
 		<thead>
 			<tr>
@@ -135,33 +247,39 @@ $page->begin_box($pageoptions);
 			</tr>
 		</thead>
 		<tbody>
-			<?php foreach ($upgrades as $u): ?>
+			<?php foreach ($display_rows as $r): ?>
 				<?php
-				$version = $u->get('upg_major_version') . '.' . $u->get('upg_minor_version') . '.' . $u->get('upg_patch_version');
-				$archive_filename = $u->get('upg_name');
-				$archive_path = $archive_dir . '/' . $archive_filename;
-				$archive_exists = file_exists($archive_path);
-				$archive_size = '';
-				if ($archive_exists) {
-					$bytes = filesize($archive_path);
-					if ($bytes >= 1073741824) $archive_size = round($bytes / 1073741824, 1) . 'G';
-					elseif ($bytes >= 1048576) $archive_size = round($bytes / 1048576, 1) . 'M';
-					elseif ($bytes >= 1024) $archive_size = round($bytes / 1024, 1) . 'K';
-					else $archive_size = $bytes . 'B';
-				}
+				$u        = $r['upgrade'];
+				$version  = $r['version'];
+				$is_kept  = (bool)$u->get('upg_keep');
 				?>
 				<tr>
-					<td><strong><?php echo htmlspecialchars($version); ?></strong></td>
+					<td>
+						<strong><?php echo htmlspecialchars($version); ?></strong>
+						<?php if ($r['in_use_by']): ?>
+							<br><small class="text-muted">in use by <?php echo htmlspecialchars($r['in_use_by']); ?></small>
+						<?php endif; ?>
+					</td>
 					<td><small><?php echo LibraryFunctions::convert_time($u->get('upg_create_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A'); ?></small></td>
 					<td>
-						<?php if ($archive_exists): ?>
-							<small class="text-muted"><?php echo htmlspecialchars($archive_filename); ?><?php echo $archive_size ? ' (' . htmlspecialchars($archive_size) . ')' : ''; ?></small>
+						<?php if ($r['archive_exists']): ?>
+							<small class="text-muted"><?php echo htmlspecialchars($r['filename']); ?> (<?php echo htmlspecialchars(UpgradeRetention::formatBytes($r['bytes'])); ?>)</small>
+							<?php if ($r['protected_by'] === null): ?>
+								<br><small class="text-muted">reclaimable</small>
+							<?php endif; ?>
+						<?php elseif ($r['protected_by'] === null): ?>
+							<span class="badge bg-secondary">reclaimed</span>
 						<?php else: ?>
 							<span class="badge bg-danger">missing</span>
 						<?php endif; ?>
 					</td>
 					<td><small><?php echo nl2br(htmlspecialchars($u->get('upg_release_notes') ?? '')); ?></small></td>
 					<td class="text-end">
+						<form method="post" class="svm-inline-form">
+							<input type="hidden" name="action" value="toggle_keep">
+							<input type="hidden" name="upgrade_id" value="<?php echo $u->key; ?>">
+							<button type="submit" class="btn btn-sm <?php echo $is_kept ? 'btn-secondary' : 'btn-outline-secondary'; ?>" title="<?php echo $is_kept ? 'Retention will never remove this archive' : 'Pin this archive so retention never removes it'; ?>"><?php echo $is_kept ? 'Kept' : 'Keep'; ?></button>
+						</form>
 						<form method="post" class="svm-inline-form">
 							<input type="hidden" name="action" value="delete_upgrade">
 							<input type="hidden" name="upgrade_id" value="<?php echo $u->key; ?>">
@@ -172,6 +290,9 @@ $page->begin_box($pageoptions);
 			<?php endforeach; ?>
 		</tbody>
 	</table>
+	<?php if (count($rows) > count($display_rows)): ?>
+		<p class="text-muted mt-2 mb-0"><small>Showing the newest <?php echo count($display_rows); ?> of <?php echo count($rows); ?> releases.</small></p>
+	<?php endif; ?>
 <?php endif; ?>
 <?php
 $page->end_box();
