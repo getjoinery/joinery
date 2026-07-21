@@ -49,17 +49,51 @@ still land in a human mailbox. Surface it on the admin settings page next to
 
 ### 2. ScrollDaddy site: move transactional From off the bare domain
 
-- **DECISION (owner):** the sender address the site's mail reads as —
-  - `hello@mg.scrolldaddy.app` (or `info@mg…`): zero new Mailgun setup,
-    `mg.scrolldaddy.app` is already registered and DKIM-published; reads
-    machine-ish.
-  - an address on a friendlier subdomain, e.g. `mail.scrolldaddy.app`: one
-    more Mailgun sending-domain registration + its DKIM/SPF records; reads
-    better in inboxes.
-- Then on the scrolldaddy node: set `defaultemail` to the chosen subdomain
-  address, `mailgun_domain` to that subdomain (keeps the API path = signing
-  identity = From domain, exactly aligned), and `defaultreplyto` to
-  `info@scrolldaddy.app` so replies land in the hosted mailbox.
+- **DECIDED (owner, 2026-07-21):** the sending subdomain is
+  **`mail.scrolldaddy.app`**, sender address `hello@mail.scrolldaddy.app`.
+  Rejected `mg.scrolldaddy.app` (already registered, zero setup) because the
+  name is Mailgun's own convention — the visible sender identity would be tied
+  to a vendor that can be swapped, and it reads as a machine artifact.
+  `mail.` is the most conventional vendor-neutral choice. `news.scrolldaddy.app`
+  is reserved for marketing/bulk mail if that traffic ever starts, so
+  transactional reputation stays isolated from it.
+  - Naming constraint that follows: `mail.scrolldaddy.app` is now a *sending
+    identity*, not a host — do not also use it as the mail server's A/PTR
+    hostname. The relay-fronted deployment does not need it as a host record.
+- Register `mail.scrolldaddy.app` as a Mailgun sending domain and publish its
+  DKIM/SPF records.
+- Then on the scrolldaddy node: set `defaultemail` to
+  `hello@mail.scrolldaddy.app`, `mailgun_domain` to `mail.scrolldaddy.app`
+  (keeps the API path = signing identity = From domain, exactly aligned), and
+  `defaultreplyto` to `info@scrolldaddy.app` so replies land in the hosted
+  mailbox.
+- `mg.scrolldaddy.app` stays registered until step 5 verifies the new identity,
+  then is retired.
+
+**DNS + provider registration DONE (2026-07-21).** Both sending domains are
+registered and `active` at Mailgun, records published to Cloudflare:
+
+| Name | Type | Purpose |
+|---|---|---|
+| `krs._domainkey.mail.scrolldaddy.app` | TXT | DKIM for the site's machine identity |
+| `mail.scrolldaddy.app` | TXT | `v=spf1 include:mailgun.org -all` (hardfail, matching the apex — Mailgun's suggested `~all` deliberately not used) |
+| `mx._domainkey.scrolldaddy.app` | TXT | DKIM for the hosted mailbox's own identity |
+
+The apex SPF was left untouched — Mailgun validates the bare domain against the
+existing `v=spf1 include:mailgun.org -all`. Publishing the second SPF record
+Mailgun offers would have broken SPF for every sender on the domain.
+
+**Account consolidation (2026-07-21).** All of it lives in the Mailgun account
+the jeremytunnell mailbox deployment (node 176) already uses — the same account
+holding `mail.jeremytunnell.com`, `mg.dev.getjoinery.com`, `phillyzouk.org`. So
+the mailbox deployment needs no credential change. Two blockers found on the
+ScrollDaddy site node while checking:
+
+1. Its `mailgun_api_key` is **disabled** at Mailgun — that site's transactional
+   mail is broken at the API level today, independent of this work. Needs the
+   consolidated account's key.
+2. It runs **0.8.87** against a 0.8.174 control plane, so `defaultreplyto` (step
+   1's setting) is not seeded there. Upgrade required before step 2 completes.
 
 ### 3. Mailbox side: register the bare domain at the provider
 
@@ -90,7 +124,7 @@ sender inventory is exactly two systems, both verified aligned in step 5.)
   received headers: `DKIM d=scrolldaddy.app`, SPF domain =
   scrolldaddy.app-aligned envelope, `dmarc=pass` with strict identifiers.
 - Trigger a ScrollDaddy site transactional send (e.g. password reset);
-  confirm `DKIM d=<chosen subdomain>`, `dmarc=pass`, and that replying lands
+  confirm `DKIM d=mail.scrolldaddy.app`, `dmarc=pass`, and that replying lands
   in the info@ mailbox on jeremytunnell (Reply-To honored).
 - Confirm relay-forwarded/received mail is unaffected (DMARC on our domain
   governs mail *from* it, not to it).

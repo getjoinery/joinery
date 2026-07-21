@@ -5,7 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
- * @version 1.5
+ * @version 1.6
  */
 
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
@@ -288,11 +288,15 @@ class JobResultProcessor {
 	 */
 	private static function process_apply_update($job) {
 		$node_id = $job->get('mjb_mgn_node_id');
-		if (!$node_id) { return; }
-		try { $node = new ManagedNode($node_id, TRUE); } catch (Exception $e) { return; }
-		if (!$node->key) { return; }
+		if (!$node_id) { return self::record_apply_update_result($job, ['probed' => false, 'reason' => 'no node on job']); }
+		try {
+			$node = new ManagedNode($node_id, TRUE);
+		} catch (Exception $e) {
+			return self::record_apply_update_result($job, ['probed' => false, 'reason' => 'node could not be loaded']);
+		}
+		if (!$node->key) { return self::record_apply_update_result($job, ['probed' => false, 'reason' => 'node not found']); }
 		$site_url = rtrim((string)$node->get('mgn_site_url'), '/');
-		if ($site_url === '') { return; }
+		if ($site_url === '') { return self::record_apply_update_result($job, ['probed' => false, 'reason' => 'node has no site URL']); }
 
 		$version = null;
 		$ch = curl_init($site_url . '/');
@@ -314,12 +318,34 @@ class JobResultProcessor {
 			},
 		]);
 		curl_exec($ch);
+		$curl_error = curl_error($ch);
 		curl_close($ch);
 
 		if ($version) {
 			$node->set('mgn_joinery_version', $version);
 			$node->save();
 		}
+
+		self::record_apply_update_result($job, [
+			'probed'   => true,
+			'site_url' => $site_url,
+			'version'  => $version,
+			'error'    => $curl_error !== '' ? $curl_error : null,
+		]);
+	}
+
+	/**
+	 * Mark an apply_update job as processed.
+	 *
+	 * Every terminal path must land here. The dashboard selects finished jobs
+	 * with mjb_result IS NULL, so a path that returns without recording leaves
+	 * the job permanently unprocessed — and its HTTPS probe then re-runs on
+	 * every page load, forever, once per accumulated job.
+	 */
+	private static function record_apply_update_result($job, array $result) {
+		$result['processed_time'] = gmdate('Y-m-d H:i:s');
+		$job->set('mjb_result', json_encode($result));
+		$job->save();
 	}
 
 	/**

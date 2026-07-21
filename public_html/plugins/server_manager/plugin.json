@@ -1,6 +1,6 @@
 {
     "name": "Server Manager",
-    "version": "1.7.18",
+    "version": "1.7.19",
     "description": "Remote server management for Joinery instances",
     "author": "Joinery",
     "receives_upgrades": true,
@@ -46,6 +46,7 @@
         { "name": "server_manager_customer_cloud_ssh_key_path",     "default": "", "helptext": "Private key path the management agent uses for customer-cloud nodes; its .pub sibling is installed on created instances via authorized_keys. Required for customer-cloud provisioning." },
         { "name": "server_manager_customer_cloud_region",           "default": "us-southeast", "helptext": "Default region for customer-cloud instances." },
         { "name": "server_manager_customer_cloud_type",             "default": "g6-nanode-1", "helptext": "Default instance type for customer-cloud instances." },
-        { "name": "server_manager_customer_cloud_image",            "default": "linode/ubuntu24.04", "helptext": "OS image for customer-cloud instances. Must be an Ubuntu LTS the installer supports." }
+        { "name": "server_manager_customer_cloud_image",            "default": "linode/ubuntu24.04", "helptext": "OS image for customer-cloud instances. Must be an Ubuntu LTS the installer supports." },
+        { "name": "server_manager_upgrade_retention_count",         "default": "10", "helptext": "How many recent core upgrade archives to keep on disk. Older archives are removed after each publish; their release-history records are always kept. Archives marked Keep, and any version a managed node is running, are never removed. Set to 0 to keep every archive." }
     ]
 }

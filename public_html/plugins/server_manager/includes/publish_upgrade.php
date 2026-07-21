@@ -603,6 +603,34 @@
 
 		publish_output("\nAll archives created successfully!");
 
+		// =====================================================
+		// Retention: reclaim old core archives
+		// =====================================================
+		// Deletes archive files only — every release row survives as history.
+		// Never touches the newest N, anything flagged Keep, or a version a
+		// managed node is running (that archive is its rollback target).
+		try {
+			require_once(PathHelper::getIncludePath('plugins/server_manager/includes/UpgradeRetention.php'));
+			$retention = UpgradeRetention::prune();
+			if ($retention['keep_count'] === 0) {
+				publish_output("\nRetention: keeping all archives (retention count set to 0).");
+			} elseif (empty($retention['removed']) && empty($retention['failed'])) {
+				publish_output("\nRetention: nothing to reclaim (keeping newest {$retention['keep_count']}).");
+			} else {
+				$freed = UpgradeRetention::formatBytes($retention['bytes']);
+				$count = count($retention['removed']);
+				publish_output("\nRetention: removed {$count} old archive(s), reclaimed {$freed}. Release history kept.");
+				foreach ($retention['removed'] as $v) {
+					publish_output("  - archive for $v removed");
+				}
+				foreach ($retention['failed'] as $v) {
+					publish_output("  - WARNING: could not remove archive for $v");
+				}
+			}
+		} catch (Exception $e) {
+			publish_output("\nRetention skipped: " . $e->getMessage());
+		}
+
 	}
 	else{
 		$page = new AdminPage();
