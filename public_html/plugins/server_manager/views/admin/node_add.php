@@ -25,7 +25,7 @@ if ($_POST && isset($_POST['mgn_name'])) {
 		'mgn_name', 'mgn_slug', 'mgn_host', 'mgn_ssh_user', 'mgn_ssh_key_path',
 		'mgn_ssh_port', 'mgn_container_name', 'mgn_container_user', 'mgn_web_root',
 		'mgn_site_url', 'mgn_health_check_url', 'mgn_notes', 'mgn_enabled', 'mgn_skip_joinery_checks',
-		'mgn_uptime_enabled', 'mgn_uptime_check_type',
+		'mgn_uptime_enabled', 'mgn_uptime_check_type', 'mgn_uptime_tcp_port',
 	];
 
 	foreach ($editable_fields as $field) {
@@ -413,16 +413,26 @@ echo '<h6 class="text-muted mt-4 mb-3">Uptime Monitoring</h6>';
 
 $formwriter->checkboxinput('mgn_uptime_enabled', 'Monitor uptime', [
 	'checked' => true,
-	'helptext' => 'When checked, the site is polled on every cron tick (~15 min). Down/recovered transitions trigger an email alert.',
+	'helptext' => 'When checked, the node is probed on its own interval. Down/recovered transitions trigger an email alert.',
 ]);
 
 $formwriter->dropinput('mgn_uptime_check_type', 'Check type', [
 	'options' => [
 		'api'         => 'API probe (authenticated /api/v1/management/stats)',
 		'http_status' => 'HTTP status (plain GET, any 2xx/3xx is up)',
+		'tcp_port'    => 'TCP port (connection accepted means up)',
 	],
 	'value'    => 'api',
-	'helptext' => 'API probe gives richer info but requires API keys. When "Skip Joinery-specific checks" is on, http_status is forced regardless of this setting.',
+	'helptext' => 'API probe gives richer info but requires API keys — without them the check cannot conclude and the node is reported as misconfigured. TCP port suits services with no web endpoint, such as a mail relay. When "Skip Joinery-specific checks" is on, an API probe falls back to HTTP status; an explicitly chosen HTTP or TCP check is left alone.',
+	'visibility_rules' => [
+		'mgn_uptime_tcp_port' => ['tcp_port'],
+	],
+]);
+
+$formwriter->numberinput('mgn_uptime_tcp_port', 'TCP port', [
+	'min'      => 1,
+	'max'      => 65535,
+	'helptext' => 'Port to connect to on this node\'s host address. 25 for an inbound mail relay.',
 ]);
 
 $formwriter->textbox('mgn_notes', 'Notes', ['rows' => 3]);

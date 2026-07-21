@@ -12,7 +12,7 @@
  * (over the wire, pinned to the node's own IP) that warns before a
  * self-renewed cert lapses. See check_cert_expiry().
  *
- * @version 1.2
+ * @version 1.4
  */
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 
@@ -24,6 +24,7 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 
 	public function run(array $config): array {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeMonitorHealth.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 		require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 		require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -37,17 +38,33 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 		$alerts      = 0;
 		$cert_alerts = 0;
 		$skipped     = 0;
+		$not_due     = 0;
 		$errors      = [];
+
+		$now_utc = gmdate('Y-m-d H:i:s');
 
 		foreach ($nodes as $node) {
 			if (!$node->get('mgn_enabled') || !$node->get('mgn_uptime_enabled')) {
 				continue;
 			}
-			$site_url = trim((string)$node->get('mgn_site_url'));
-			if ($site_url === '') {
+			// Whether this node can be probed at all depends on its check type,
+			// so ask the shared evaluator rather than assuming a site URL.
+			$target = NodeMonitorHealth::describe_target($node);
+			if ($target['problem'] !== '') {
 				$skipped++;
+				$node->set('mgn_uptime_last_error', substr($target['problem'], 0, 255));
+				$node->save();
+				$errors[] = "Node '" . $node->get('mgn_slug') . "': " . $target['problem'];
 				continue;
 			}
+
+			// Task frequency is only a floor. The node's own interval is the real
+			// cadence, so probe volume stays fixed no matter how often cron ticks.
+			if (!$this->is_node_due($node, $now_utc)) {
+				$not_due++;
+				continue;
+			}
+			$node->set('mgn_uptime_last_check', $now_utc);
 
 			$result = $this->run_check($node);
 
@@ -55,11 +72,24 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 			// cert check below still runs — it is independent of the up/down probe.
 			if ($result['status'] === 'skip') {
 				$skipped++;
+				// Record WHY it could not conclude. Without this the node is
+				// indistinguishable from a healthy one on every surface, which is
+				// how broken monitoring stays invisible.
+				$node->set('mgn_uptime_last_error',
+					substr($result['message'] ?? 'check could not conclude up or down', 0, 255));
+				// Persist the attempt stamp anyway: a node that cannot conclude
+				// up/down must still respect its interval, or it would be retried
+				// on every single tick.
+				$node->save();
 				if (!empty($result['message'])) {
 					$errors[] = "Node '" . $node->get('mgn_slug') . "': " . $result['message'];
 				}
 			} else {
 				$checked++;
+				// Conclusive: clear any recorded fault and stamp the success, so
+				// staleness is measured from real results only.
+				$node->set('mgn_uptime_last_error', null);
+				$node->set('mgn_uptime_last_conclusive', $now_utc);
 				$transition = $this->apply_state($node, $result['ok']);
 				$node->save();
 
@@ -81,7 +111,7 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 			}
 		}
 
-		$message = sprintf('Checked %d node(s); %d up/down alert(s); %d cert alert(s); %d skipped.', $checked, $alerts, $cert_alerts, $skipped);
+		$message = sprintf('Checked %d node(s); %d up/down alert(s); %d cert alert(s); %d skipped; %d not due.', $checked, $alerts, $cert_alerts, $skipped, $not_due);
 		if (!empty($errors)) {
 			$message .= ' Notes: ' . implode(' | ', array_slice($errors, 0, 5));
 		}
@@ -89,20 +119,73 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	}
 
 	/**
+	 * Is this node due for a probe?
+	 *
+	 * The task fires every cron pass, but each node carries its own interval
+	 * (mgn_uptime_interval_seconds, default 300). Probe volume therefore
+	 * depends on the node's interval, not on how often cron ticks — tightening
+	 * the tick to improve mail latency does not multiply monitoring traffic.
+	 *
+	 * A node never checked before is always due.
+	 */
+	private function is_node_due($node, $now_utc): bool {
+		$last = trim((string)$node->get('mgn_uptime_last_check'));
+		if ($last === '') {
+			return true;
+		}
+		$interval = (int)$node->get('mgn_uptime_interval_seconds');
+		if ($interval <= 0) {
+			return true; // 0 or unset means every pass
+		}
+		$elapsed = strtotime($now_utc) - strtotime($last);
+		// A clock skew or bad stored value must not wedge a node permanently.
+		if ($elapsed < 0) {
+			return true;
+		}
+		return $elapsed >= $interval;
+	}
+
+	/**
 	 * Dispatch to the configured check type and return:
 	 *   ['ok' => bool, 'message' => ?string, 'status' => 'done'|'skip']
 	 */
 	private function run_check($node): array {
-		$type = $node->get('mgn_uptime_check_type') ?: 'api';
-		// skip_joinery_checks forces http_status regardless of stored value
-		if ($node->get('mgn_skip_joinery_checks')) {
-			$type = 'http_status';
-		}
+		$type = NodeMonitorHealth::effective_check_type($node);
 
+		if ($type === 'tcp_port') {
+			return $this->check_tcp_port($node);
+		}
 		if ($type === 'http_status') {
 			return $this->check_http_status($node);
 		}
 		return $this->check_api($node);
+	}
+
+	/**
+	 * tcp_port check: open a TCP connection to the node's host on the
+	 * configured port. For services with no web endpoint — an inbound mail
+	 * relay is proven alive by accepting connections on 25, which is exactly
+	 * what it exists to do. A refused or timed-out connection is down; there
+	 * is no inconclusive case once host and port are set, so this check never
+	 * returns 'skip'.
+	 */
+	private function check_tcp_port($node): array {
+		$host = trim((string)$node->get('mgn_host'));
+		$port = (int)$node->get('mgn_uptime_tcp_port');
+
+		$errno = 0;
+		$errstr = '';
+		$sock = @fsockopen($host, $port, $errno, $errstr, self::TIMEOUT_SECONDS);
+		if ($sock === false) {
+			$detail = trim($errstr) !== '' ? $errstr : ('error ' . $errno);
+			return [
+				'ok'      => false,
+				'status'  => 'done',
+				'message' => sprintf('TCP %s:%d unreachable (%s)', $host, $port, $detail),
+			];
+		}
+		fclose($sock);
+		return ['ok' => true, 'message' => null, 'status' => 'done'];
 	}
 
 	/**

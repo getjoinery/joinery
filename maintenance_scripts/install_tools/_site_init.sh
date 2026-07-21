@@ -543,8 +543,14 @@ log "Setting up cron jobs..."
 # Write to /etc/cron.d/ — more durable than user crontab (survives script re-runs,
 # works identically on bare metal and Docker as long as the cron service is running).
 # /etc/cron.d/ format requires the username in the line; file must not be world-writable.
+#
+# Every minute, not every five: the tick interval is the floor on latency for
+# every every_run task, and inbound mail is the one users feel — a relay-fronted
+# deployment cannot see a message until the next PullRelaySpool. A full pass
+# costs about a second, and the runner holds a per-task advisory lock, so a
+# slow task is skipped rather than run concurrently.
 CRON_FILE="/etc/cron.d/joinery-${SITENAME}"
-CRON_LINE="*/5 * * * * www-data php ${SITE_ROOT}/public_html/utils/process_scheduled_tasks.php >> ${SITE_ROOT}/logs/cron_scheduled_tasks.log 2>&1"
+CRON_LINE="* * * * * www-data php ${SITE_ROOT}/public_html/utils/process_scheduled_tasks.php >> ${SITE_ROOT}/logs/cron_scheduled_tasks.log 2>&1"
 printf '%s\n' "$CRON_LINE" > "$CRON_FILE" && chmod 644 "$CRON_FILE" && {
     log "Scheduled tasks cron entry installed: $CRON_FILE"
 } || {
