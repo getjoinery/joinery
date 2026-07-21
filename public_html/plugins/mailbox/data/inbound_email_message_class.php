@@ -94,7 +94,12 @@
  * iem_direction='draft' rows (saved drafts). Both are compose-only sealed fields — see
  * isComposeOnlyField()/isComposedDirection() and the direction guard in decryptSealedField*().
  *
- * @version 1.14
+ * LOWERING UNSEAL (specs/mailbox_lowering_unseal.md). unsealAndPersistContent() is the
+ * per-row inverse of sealing — owner-window-only, recovery-safe ordering (key wrapping
+ * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
+ * serves a mailbox only while sealed content actually remains.
+ *
+ * @version 1.15
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -541,6 +546,163 @@ class InboundEmailMessage extends SystemBase {
 			. ' WHERE iem_inbound_email_message_id = ?');
 		$stmt->execute($params);
 		return $dek;
+	}
+
+	/**
+	 * Unseal one row back to plaintext — the inverse of sealAndPersistContent(),
+	 * for a domain that no longer seals (specs/mailbox_lowering_unseal.md). Runs
+	 * only inside the sealed OWNER's unlock window: unsealing needs the
+	 * per-message DEK, which unwraps only with their in-window secret key.
+	 * Returns false — row untouched — when the window is closed, no owner
+	 * resolves, or any decrypt fails (logged).
+	 *
+	 * Recovery-safe ordering: every ciphertext decrypts into memory FIRST (any
+	 * failure aborts before a byte is written), attachment and raw bytes write
+	 * back next (per-file/per-flag as each write lands — readers key on those
+	 * flags, so a partial pass stays consistent), and the column UPDATE that
+	 * clears the key wrapping runs LAST. An interruption always leaves a
+	 * still-sealed row whose next pass converges — never a stranded ciphertext
+	 * whose key was already discarded.
+	 */
+	public static function unsealAndPersistContent(InboundEmailMessage $msg): bool {
+		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachment_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RawMessageStore.php'));
+
+		$message_id = intval($msg->key);
+		if (!$message_id || !$msg->get('iem_content_sealed')) {
+			return false;
+		}
+		$owner_id = self::sealedOwnerUserId($msg->get('iem_sealed_owner_user_id'), $msg->get('iem_iea_inbound_email_alias_id'));
+		$db = DbConnector::get_instance()->get_db_link();
+
+		// Ciphertext straight from the row — the model's get() decrypts sealed
+		// fields, and this pass needs the stored bytes.
+		$stmt = $db->prepare('SELECT * FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = ?');
+		$stmt->execute(array($message_id));
+		$row = $stmt->fetch(PDO::FETCH_ASSOC);
+		if (!$row || empty($row['iem_sealed_key']) || $owner_id === null) {
+			return false;
+		}
+		$dek = self::unwrapDekInWindow($owner_id, (string)$row['iem_sealed_key']);
+		if ($dek === null) {
+			return false; // window closed — locked, not an error
+		}
+		$crypto = new VaultCrypto();
+
+		try {
+			// 1. Decrypt every sealed column into memory. The compose-only
+			// fields open only on composed directions; optional columns only
+			// when they hold ciphertext.
+			$composed = self::isComposedDirection((string)($row['iem_direction'] ?? 'inbound'));
+			$columns = array();
+			foreach (static::$sealed_fields as $field) {
+				if (self::isComposeOnlyField($field) && !$composed) {
+					continue;
+				}
+				$stored = (string)($row[$field] ?? '');
+				if ($stored === '' && in_array($field, array('iem_bcc', 'iem_draft_state', 'iem_ai_summary'), true)) {
+					continue; // optional column, never sealed when empty
+				}
+				$columns[$field] = $crypto->openField($stored, $dek, self::sealAd($message_id, $field));
+			}
+
+			// 2. Decrypt sealed attachment bytes into memory.
+			$att_writes = array();
+			$atts = new MultiInboundMessageAttachment(array('message_id' => $message_id));
+			$atts->load();
+			foreach ($atts as $att) {
+				if (!$att->get('ima_is_sealed') || !$att->get('ima_fil_file_id')) {
+					continue;
+				}
+				$file = new File(intval($att->get('ima_fil_file_id')), TRUE);
+				if (!$file->key) {
+					continue;
+				}
+				$bytes = $file->read_bytes('original');
+				if ($bytes === null) {
+					throw new \RuntimeException('attachment bytes unreadable for File ' . $file->key);
+				}
+				$att_writes[] = array(
+					'att' => $att, 'file' => $file,
+					'plain' => $crypto->openField($bytes, $dek, self::attachmentAd($message_id, (string)$att->get('ima_mime_part'))),
+				);
+			}
+
+			// 3. Decrypt a sealed stored raw (extraction-failure fallback shape).
+			$raw_plain = null;
+			if (!empty($row['iem_raw_sealed'])) {
+				$raw = $msg->getRawMessage(); // opens in-window; plaintext out
+				if ($raw === null) {
+					throw new \RuntimeException('sealed raw unreadable');
+				}
+				$raw_plain = $raw;
+			}
+		} catch (\Throwable $e) {
+			error_log('unsealAndPersistContent: decrypt failed for message ' . $message_id . ': ' . $e->getMessage());
+			return false;
+		}
+
+		// 4. Write back. Attachments first (per-file flags keep readers
+		// consistent mid-pass), raw next, the key-clearing column UPDATE last.
+		try {
+			foreach ($att_writes as $w) {
+				if (!$w['file']->replace_bytes($w['plain'])) {
+					throw new \RuntimeException('attachment write-back failed for File ' . $w['file']->key);
+				}
+				$w['att']->set('ima_is_sealed', false);
+				$w['att']->save();
+			}
+			if ($raw_plain !== null) {
+				RawMessageStore::write($message_id, $raw_plain);
+				$columns['iem_raw_sealed'] = false;
+			}
+			$columns['iem_content_sealed'] = false;
+			$columns['iem_sealed_key'] = null;
+			$columns['iem_sealed_owner_user_id'] = null;
+			$columns['iem_key_generation'] = 0;
+			self::updateColumns($message_id, $columns);
+		} catch (\Throwable $e) {
+			error_log('unsealAndPersistContent: write-back failed for message ' . $message_id . ': ' . $e->getMessage());
+			return false;
+		}
+		return true;
+	}
+
+	/**
+	 * Whether a single-mailbox scope still has sealed content to honor — its
+	 * domain seals, or sealed rows remain from an earlier protection level
+	 * (specs/mailbox_lowering_unseal.md § search follows posture). The search
+	 * path keys on this: the sealed FTS index serves the scope only while this
+	 * is true; a fully-converged lowered mailbox searches plain Postgres FTS
+	 * with no unlock.
+	 */
+	public static function aliasSealedContentActive(int $alias_id): bool {
+		if ($alias_id <= 0) {
+			return false;
+		}
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
+		try {
+			$alias = new InboundEmailAlias($alias_id, TRUE);
+			$domain_id = intval($alias->get('iea_ied_inbound_email_domain_id'));
+			if ($domain_id) {
+				$domain = new InboundEmailDomain($domain_id, TRUE);
+				if ($domain->key && $domain->seals_content()) {
+					return true;
+				}
+			}
+		} catch (\Throwable $e) {
+			return true; // unresolvable — fail toward the sealed path, never a silent leak
+		}
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare(
+			'SELECT 1 FROM iem_inbound_email_messages
+			 WHERE iem_iea_inbound_email_alias_id = ?
+			   AND (iem_content_sealed = true OR iem_pending_parse = true)
+			   AND iem_delete_time IS NULL LIMIT 1');
+		$stmt->execute(array($alias_id));
+		return (bool)$stmt->fetchColumn();
 	}
 
 	/**

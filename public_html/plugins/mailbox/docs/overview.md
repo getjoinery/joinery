@@ -822,15 +822,49 @@ enforcement):
   the inverted-DNS prescriptions start immediately) and routes into the
   verify-gated protect ceremony exactly as before.
 
-**A raise converges history.** Sealing is per-row, so earlier mail was stored
-plaintext; after a raise the editor auto-runs bounded sealing batches
-(`mailbox_protection_seal_batch`, 200 rows per pass — sealing needs only the
-holder's vault PUBLIC key, so any admin session drives it) until the domain's
-backlog is empty, with a progress line. The Setup tab carries a per-domain
-**Mail sealed at rest** row: PASS when every stored message on a protected
-domain is sealed, REQUIRED FAIL naming the unsealed count when protection has
-silently degraded (e.g. a vault deleted after the raise) — and the editor
-resumes the sealing pass on its next visit whenever a backlog exists.
+**A raise lands on the receipt card** (specs/mailbox_raise_receipt.md,
+`mailbox_protection_receipt_render()`), the same surface that guided the raise
+in. Its title states the event ("This domain is now Private"), its green-dot
+rows state the completed facts (earlier messages sealed with the real count,
+new mail seals on arrival, reading takes the holder's unlock), and one button
+opens the mailbox. Sealing is per-row, so earlier mail was stored plaintext —
+the card converges history in place: page JS loops the `mailbox/seal_batch`
+API action (bounded batches via `mailbox_protection_seal_batch`, 200 rows per
+pass — sealing needs only the holder's vault PUBLIC key, so any admin session
+drives it), counting the progress row down until the backlog is empty, then
+resolves it into the sealed-count fact. A batch that seals nothing while rows
+remain (a holder's vault deleted after the raise) stops the loop with a red
+row pointing at the Setup tab; without JS a noscript form runs the same
+batches one page load at a time. A Fortress raise before outbound protection
+is activated renders the card as a handoff — the title stays honest
+("Earlier messages sealed — one step left") and the button continues into the
+protect ceremony. The Setup tab carries a per-domain **Mail sealed at rest**
+row: PASS when every stored message on a protected domain is sealed, REQUIRED
+FAIL naming the unsealed count when protection has silently degraded — and
+the editor resumes the sealing pass on its next visit whenever a backlog
+exists.
+
+**A lowering converges history back out**
+(specs/mailbox_lowering_unseal.md). Leaving a sealing level lands on the
+lowering receipt card — "This domain is now Standard" — which unseals earlier
+messages in place. Unsealing is the asymmetric twin of sealing: it needs each
+row's DEK, which unwraps only inside the sealed owner's browser-session
+unlock window, so convergence is always caller-scoped
+(`mailbox_protection_unseal_batch`, driven by the `mailbox/unseal_batch`
+action; the lowering save's vault-open gate guarantees the acting user's own
+rows can converge immediately). Rows sealed to other holders wait for those
+holders: the reader mount quietly runs the same batches for any signed-in
+user with sealed rows on non-sealing domains, so each holder's next unlocked
+visit finishes their share. Pending-parse rows (a lowered Fortress domain's
+relay blobs) drain through `DeferredIngest` first and unseal on a later pass.
+`unsealAndPersistContent()` is recovery-safe: plaintext writes back
+per-file/per-flag and the key wrapping clears last, so an interrupted pass
+always leaves a still-sealed row for the next pass, never a stranded
+ciphertext. Search follows the mailbox's actual sealed content
+(`aliasSealedContentActive()`): the sealed FTS index serves a scope only
+while its domain seals or sealed rows remain — a fully-converged lowered
+mailbox searches plain Postgres FTS with no unlock. The Setup tab carries an
+INFO **Sealed leftovers** row naming any not-yet-converged count.
 
 **Protected-domain invariants enforce at the mutation points**: on a domain
 that seals content, the alias editor refuses a second member on a mailbox and

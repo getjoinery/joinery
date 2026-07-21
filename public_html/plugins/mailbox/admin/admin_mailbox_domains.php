@@ -7,10 +7,12 @@
  * (admin_mailbox_setup), driven by InboundEmailSetupCheck. Raising the security
  * level runs the protection ceremony (specs/mailbox_protection_ceremony.md):
  * choosing a higher card reveals the prerequisite checklist and the save is
- * gated until its required rows pass; a successful raise auto-seals the
- * domain's earlier messages.
+ * gated until its required rows pass. A raise lands on the receipt card
+ * (specs/mailbox_raise_receipt.md), which seals the domain's earlier messages
+ * in place and resolves into the completed facts. A lowering lands on its
+ * mirror (specs/mailbox_lowering_unseal.md), which unseals them back.
  *
- * @version 3.2
+ * @version 3.4
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -73,6 +75,28 @@ if ($show_form) {
 		if (!empty($_GET['prefill_domain'])) {
 			$form_domain->set('ied_domain', strtolower(trim((string)$_GET['prefill_domain'])));
 		}
+	}
+
+	// The raise receipt (specs/mailbox_raise_receipt.md): the headline of the
+	// event, at the top of the page. Present on arrival from a raise or while
+	// a backlog remains to converge; the JS loop below drives the sealing row.
+	if ($ceremony !== null && !empty($ceremony['sealing_active'])) {
+		echo mailbox_protection_receipt_render($edit_domain, $ceremony['facts'], array(
+			'backlog' => $ceremony['backlog'],
+			'sealed_total' => $ceremony['sealed_total'],
+			'acting_user_id' => $ceremony['acting_user_id'],
+			'editor_url' => $ceremony['editor_url'],
+		));
+	}
+	// The lowering receipt (specs/mailbox_lowering_unseal.md): the downgrade
+	// mirror — history converges back to plaintext in place.
+	if ($ceremony !== null && !empty($ceremony['unseal_active'])) {
+		echo mailbox_lowering_receipt_render($edit_domain, array(
+			'own_backlog' => $ceremony['unseal_own_backlog'],
+			'others_backlog' => $ceremony['unseal_others_backlog'],
+			'window_open' => $ceremony['window_open'],
+			'editor_url' => $ceremony['editor_url'],
+		));
 	}
 
 	$page->begin_box(array('title' => $form_title));
@@ -183,9 +207,9 @@ if ($show_form) {
 			'alias_url'  => '/plugins/mailbox/admin/admin_mailbox_alias',
 		);
 		echo str_replace('id="protection-ceremony"', 'id="protection-ceremony-private"',
-			mailbox_protection_render($ceremony['rows_private'], $edit_domain, $urls));
+			mailbox_protection_render($ceremony['rows_private'], $edit_domain, $urls, InboundEmailDomain::LEVEL_PRIVATE));
 		echo str_replace('id="protection-ceremony"', 'id="protection-ceremony-fortress"',
-			mailbox_protection_render($ceremony['rows_fortress'], $edit_domain, $urls));
+			mailbox_protection_render($ceremony['rows_fortress'], $edit_domain, $urls, InboundEmailDomain::LEVEL_FORTRESS));
 	}
 
 	$formwriter->submitbutton('btn_submit', $edit_domain ? 'Update Domain' : 'Add Domain');
@@ -194,26 +218,153 @@ if ($show_form) {
 
 	$page->end_box();
 
-	// Backlog sealing progress (auto-continuing): each pass seals a bounded
-	// batch server-side and redirects back here until nothing remains.
-	if ($ceremony !== null && !empty($ceremony['sealing_active'])) {
-		if ($ceremony['backlog'] > 0) {
-			echo '<div class="alert alert-warning" id="sealing-progress">'
-				. 'Sealing earlier messages — ' . (int)$ceremony['backlog'] . ' remaining&hellip;</div>';
-			echo '<form method="post" action="' . htmlspecialchars($ceremony['editor_url']) . '" id="sealing-continue">'
-				. '<input type="hidden" name="action" value="ceremony_seal_batch">'
-				. '<input type="hidden" name="ied_inbound_email_domain_id" value="' . (int)$edit_domain->key . '">'
-				. ($ceremony['then_protect'] ? '<input type="hidden" name="then" value="protect">' : '')
-				. '<noscript><button type="submit" class="btn btn-primary">Continue sealing</button></noscript>'
-				. '</form>';
-			echo '<script>setTimeout(function () { document.getElementById("sealing-continue").submit(); }, 400);</script>';
-		} else {
-			echo '<div class="alert alert-success">All earlier messages on this domain are sealed.</div>';
-			if (!empty($ceremony['then_protect'])) {
-				echo '<a class="btn btn-primary" href="/plugins/mailbox/admin/admin_mailbox_protect?ied_inbound_email_domain_id='
-					. (int)$edit_domain->key . '">Continue to outbound protection</a>';
+	// Receipt sealing loop (specs/mailbox_raise_receipt.md): drive bounded
+	// mailbox/seal_batch passes and resolve the card's progress row in place —
+	// no page reloads. A pass that seals nothing while rows remain means an
+	// unsealable backlog (a holder lost their vault after the raise): stop and
+	// say so instead of spinning forever. Without JS the card's noscript form
+	// runs the same batches one page load at a time.
+	if ($ceremony !== null && !empty($ceremony['sealing_active']) && $ceremony['backlog'] > 0) {
+		?>
+		<script>
+		(function () {
+			var card = document.getElementById('raise-receipt');
+			if (!card) return;
+			var remaining = parseInt(card.dataset.backlog, 10) || 0;
+			if (remaining <= 0) return;
+			var sealedTotal = parseInt(card.dataset.sealedTotal, 10) || 0;
+			var dot = document.querySelector('#receipt-seal-row .receipt-dot');
+			var text = document.getElementById('receipt-seal-text');
+			var csrf = (document.querySelector('meta[name="joinery-api-csrf"]') || {}).content || '';
+			var noscriptForm = document.getElementById('sealing-continue');
+			if (noscriptForm) noscriptForm.remove();
+			function setDot(color) { if (dot) dot.style.background = color; }
+			function finish() {
+				setDot('#28a745');
+				text.textContent = sealedTotal > 0
+					? sealedTotal + ' earlier message' + (sealedTotal === 1 ? '' : 's') + ' sealed'
+					: 'No earlier messages needed sealing';
+				var title = document.getElementById('receipt-title');
+				if (title && card.dataset.titleDone) title.textContent = card.dataset.titleDone;
+				var btn = document.getElementById('receipt-action');
+				if (btn) btn.classList.remove('d-none');
 			}
-		}
+			function stuck(n) {
+				setDot('#dc3545');
+				text.innerHTML = n + ' message' + (n === 1 ? '' : 's') + ' could not be sealed — see the '
+					+ '<a href="/plugins/mailbox/admin/admin_mailbox_setup">Setup tab</a>.';
+			}
+			function batch() {
+				fetch('/api/v1/action/mailbox/seal_batch', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': csrf },
+					body: JSON.stringify({ domain_id: parseInt(card.dataset.domainId, 10) })
+				}).then(async function (r) {
+					var j = await r.json();
+					if (!r.ok) throw new Error((j && j.error) || 'Request failed.');
+					return j.data;
+				}).then(function (d) {
+					var sealed = parseInt(d.sealed, 10) || 0;
+					remaining = parseInt(d.remaining, 10) || 0;
+					sealedTotal += sealed;
+					if (remaining > 0 && sealed === 0) { stuck(remaining); return; }
+					if (remaining > 0) {
+						text.textContent = 'Sealing earlier messages — ' + remaining + ' remaining…';
+						batch();
+					} else {
+						finish();
+					}
+				}).catch(function () {
+					setDot('#dc3545');
+					text.textContent = 'Sealing paused — reload this page to resume.';
+				});
+			}
+			batch();
+		})();
+		</script>
+		<?php
+	}
+
+	// Lowering unseal loop (specs/mailbox_lowering_unseal.md): the downgrade
+	// mirror of the sealing loop — bounded mailbox/unseal_batch passes resolve
+	// the card's progress row in place. Runs only while the acting user's
+	// window is open (the card renders the unlock hint otherwise). A pass that
+	// converges nothing while own rows remain stops red (undecryptable rows,
+	// logged server-side); a locked answer stops with the unlock hint.
+	if ($ceremony !== null && !empty($ceremony['unseal_active'])
+			&& $ceremony['unseal_own_backlog'] > 0 && !empty($ceremony['window_open'])) {
+		?>
+		<script>
+		(function () {
+			var card = document.getElementById('lowering-receipt');
+			if (!card || card.dataset.windowOpen !== '1') return;
+			var remaining = parseInt(card.dataset.ownBacklog, 10) || 0;
+			if (remaining <= 0) return;
+			var unsealedTotal = 0;
+			var dot = document.querySelector('#lowering-unseal-row .receipt-dot');
+			var text = document.getElementById('lowering-unseal-text');
+			var csrf = (document.querySelector('meta[name="joinery-api-csrf"]') || {}).content || '';
+			var noscriptForm = document.getElementById('unsealing-continue');
+			if (noscriptForm) noscriptForm.remove();
+			function setDot(color) { if (dot) dot.style.background = color; }
+			function finish() {
+				setDot('#28a745');
+				text.textContent = unsealedTotal > 0
+					? unsealedTotal + ' earlier message' + (unsealedTotal === 1 ? '' : 's') + ' unsealed'
+					: 'All earlier messages are readable';
+				var btn = document.getElementById('lowering-action');
+				if (btn) btn.classList.remove('d-none');
+			}
+			function updateOthers(n) {
+				var row = document.getElementById('lowering-others-text');
+				if (row && n > 0) {
+					row.textContent = n + ' message' + (n === 1 ? '' : 's') + ' stay sealed until their readers next unlock';
+				} else if (row && n === 0) {
+					var li = document.getElementById('lowering-others-row');
+					if (li) li.remove();
+				}
+			}
+			function batch() {
+				fetch('/api/v1/action/mailbox/unseal_batch', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': csrf },
+					body: JSON.stringify({ domain_id: parseInt(card.dataset.domainId, 10) })
+				}).then(async function (r) {
+					var j = await r.json();
+					if (!r.ok) throw new Error((j && j.error) || 'Request failed.');
+					return j.data;
+				}).then(function (d) {
+					var unsealed = parseInt(d.unsealed, 10) || 0;
+					remaining = parseInt(d.own_remaining, 10) || 0;
+					unsealedTotal += unsealed;
+					updateOthers(parseInt(d.others_remaining, 10) || 0);
+					if (d.locked) {
+						setDot('#ffc107');
+						text.textContent = 'Unlock your vault, then reload this page to continue unsealing — '
+							+ remaining + ' remaining.';
+						return;
+					}
+					if (remaining > 0 && unsealed === 0) {
+						setDot('#dc3545');
+						text.textContent = remaining + ' message' + (remaining === 1 ? '' : 's')
+							+ ' could not be unsealed — see the error log.';
+						return;
+					}
+					if (remaining > 0) {
+						text.textContent = 'Unsealing earlier messages — ' + remaining + ' remaining…';
+						batch();
+					} else {
+						finish();
+					}
+				}).catch(function () {
+					setDot('#dc3545');
+					text.textContent = 'Unsealing paused — reload this page to resume.';
+				});
+			}
+			batch();
+		})();
+		</script>
+		<?php
 	}
 
 	// Ceremony reveal + submit gating.
