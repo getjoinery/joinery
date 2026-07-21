@@ -15,6 +15,7 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nod
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeMonitorHealth.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(10);
@@ -401,6 +402,7 @@ if ($_POST && isset($_POST['action'])) {
 			'mgn_site_url', 'mgn_bkt_backup_target_id', 'mgn_notes', 'mgn_enabled',
 			'mgn_delete_local_after_upload', 'mgn_skip_joinery_checks',
 			'mgn_uptime_enabled', 'mgn_uptime_check_type',
+			'mgn_uptime_tcp_port', 'mgn_uptime_interval_seconds',
 		];
 		$bool_fields = ['mgn_enabled', 'mgn_delete_local_after_upload', 'mgn_skip_joinery_checks', 'mgn_uptime_enabled'];
 		foreach ($editable_fields as $field) {
@@ -416,9 +418,17 @@ if ($_POST && isset($_POST['action'])) {
 				if ($field === 'mgn_bkt_backup_target_id' && $value === '') {
 					$value = null;
 				}
+				if (($field === 'mgn_uptime_tcp_port' || $field === 'mgn_uptime_interval_seconds') && $value === '') {
+					$value = $field === 'mgn_uptime_interval_seconds' ? 300 : 0;
+				}
 				$node->set($field, $value);
 			}
 		}
+
+		// Clear the recorded monitoring fault so a corrected configuration stops
+		// reporting the old problem immediately. The next check re-records it if
+		// the fix did not actually work.
+		$node->set('mgn_uptime_last_error', null);
 
 		try {
 			$node->prepare();
@@ -614,6 +624,7 @@ if ($tab === 'overview') {
 	$uptime_enabled = $node->get('mgn_uptime_enabled');
 	$uptime_status  = $node->get('mgn_uptime_last_status');
 	$uptime_down    = $node->get('mgn_uptime_down_since');
+	$monitor_health = NodeMonitorHealth::evaluate($node);
 	echo '<div class="mt-1 ps-3"><small>';
 	if (!$uptime_enabled) {
 		echo '<span class="text-muted">Uptime monitoring: disabled</span>';
@@ -628,6 +639,17 @@ if ($tab === 'overview') {
 		echo '<span class="text-muted">Uptime: not yet checked</span>';
 	}
 	echo '</small></div>';
+
+	// Monitoring-health banner. A node whose checks cannot conclude reports no
+	// up/down at all, so without this it reads as merely unchecked — which is
+	// how a broken check hides indefinitely behind a healthy-looking node.
+	if ($monitor_health['is_problem']) {
+		echo '<div class="alert alert-warning mt-2 mb-0" role="alert">';
+		echo '<strong>' . htmlspecialchars($monitor_health['label']) . ':</strong> ';
+		echo htmlspecialchars($monitor_health['detail']);
+		echo ' <a href="' . $base_url . '&tab=overview#node-settings">Fix in settings</a>';
+		echo '</div>';
+	}
 
 	// TLS certificate expiry — populated by the uptime tick for self-renewed,
 	// directly-exposed nodes (e.g. the Caddy DNS servers the SSL tile can't see).
@@ -1187,9 +1209,26 @@ if ($tab === 'overview') {
 		'options' => [
 			'api'         => 'API probe (authenticated /api/v1/management/stats)',
 			'http_status' => 'HTTP status (plain GET, any 2xx/3xx is up)',
+			'tcp_port'    => 'TCP port (connection accepted means up)',
 		],
 		'value'    => $uptime_check_type,
-		'helptext' => 'API probe gives richer info but requires API keys. When "Skip Joinery-specific checks" is on, http_status is forced regardless of this setting.',
+		'helptext' => 'API probe gives richer info but requires API keys — without them the check cannot conclude and the node is reported as misconfigured. TCP port suits services with no web endpoint, such as a mail relay. When "Skip Joinery-specific checks" is on, an API probe falls back to HTTP status; an explicitly chosen HTTP or TCP check is left alone.',
+		'visibility_rules' => [
+			'mgn_uptime_tcp_port' => ['tcp_port'],
+		],
+	]);
+
+	$formwriter->numberinput('mgn_uptime_tcp_port', 'TCP port', [
+		'value'    => (int)$node->get('mgn_uptime_tcp_port') ?: '',
+		'min'      => 1,
+		'max'      => 65535,
+		'helptext' => 'Port to connect to on this node\'s host address. 25 for an inbound mail relay.',
+	]);
+
+	$formwriter->numberinput('mgn_uptime_interval_seconds', 'Check interval (seconds)', [
+		'value'    => (int)$node->get('mgn_uptime_interval_seconds') ?: 300,
+		'min'      => 0,
+		'helptext' => 'How often this node is probed, independent of how often cron runs. 0 probes on every cron pass.',
 	]);
 
 	$formwriter->textbox('mgn_notes', 'Notes', ['rows' => 3]);

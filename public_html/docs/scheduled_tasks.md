@@ -308,6 +308,41 @@ are per-account and non-fatal — one unreachable mailbox is recorded in that
 account's status and never fails the run. See
 [Receiving by IMAP poll](/plugins/mailbox/docs/overview.md#receiving-by-imap-poll).
 
+### RunNodeUptimeChecks — task-floor vs. per-node cadence
+
+The Server Manager's **RunNodeUptimeChecks** task (`every_run`) uses the same
+two-level cadence. Each managed node carries `mgn_uptime_interval_seconds`
+(default 300) and `mgn_uptime_last_check`; the task probes only nodes whose
+interval has elapsed. Probe volume is therefore a function of the node's
+interval, not of how often cron ticks — the cron interval can be tightened to
+reduce inbound mail latency without multiplying outbound monitoring traffic.
+
+The attempt stamp is written even when a check cannot conclude up/down (for
+example an `api` check on a node without API credentials), so an inconclusive
+node still honours its interval instead of being retried every pass. A node
+that has never been checked is always due, and a negative elapsed time — clock
+skew, a bad stored value — is treated as due rather than allowed to wedge the
+node permanently.
+
+Set a node's interval to `0` to probe it on every pass.
+
+A check that cannot conclude — an `api` check on a node without API
+credentials, a `tcp_port` check with no port set — records the reason in
+`mgn_uptime_last_error` and leaves `mgn_uptime_last_conclusive` untouched.
+`NodeMonitorHealth` reads those two fields to classify a node as `ok`,
+`misconfigured`, `stale`, `pending` or `disabled`, and both the Server Manager
+dashboard and the node detail page render its verdict. A node that cannot
+report up or down is therefore visible as a problem rather than presenting as
+a node that simply has not alerted.
+
+Three check types are available: `api` (authenticated management endpoint),
+`http_status` (plain GET), and `tcp_port` (connection accepted on
+`mgn_uptime_tcp_port` at the node's host). `tcp_port` covers services with no
+web endpoint — an inbound mail relay proves it is alive by accepting
+connections on port 25. `mgn_skip_joinery_checks` redirects `api` to
+`http_status`, and leaves an explicitly chosen `http_status` or `tcp_port`
+alone.
+
 ## Related Files
 
 | File | Purpose |

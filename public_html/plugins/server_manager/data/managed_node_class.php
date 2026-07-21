@@ -50,6 +50,22 @@ class ManagedNode extends SystemBase {
 		'mgn_notes'               => array('type'=>'text'),
 		'mgn_uptime_enabled'              => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),
 		'mgn_uptime_check_type'           => array('type'=>'varchar(20)', 'default'=>'api', 'is_nullable'=>false),
+		// Real cadence for uptime probing. RunNodeUptimeChecks fires every cron
+		// pass as a floor, but only probes a node whose interval has elapsed —
+		// the same task-floor/per-item pattern PollImapAccounts uses. Keeps
+		// probe volume independent of how often cron ticks.
+		'mgn_uptime_interval_seconds'     => array('type'=>'int4', 'default'=>'300', 'is_nullable'=>false),
+		'mgn_uptime_last_check'           => array('type'=>'timestamp(6)'),
+		// Last check that actually concluded up or down. A check that cannot
+		// conclude (misconfigured, no target) advances mgn_uptime_last_check but
+		// not this, so a node whose monitoring has silently stopped working is
+		// detectable instead of looking like one that was simply never checked.
+		'mgn_uptime_last_conclusive'      => array('type'=>'timestamp(6)'),
+		'mgn_uptime_last_error'           => array('type'=>'varchar(255)'),
+		// Port for the tcp_port check type — services with no web endpoint
+		// (an inbound mail relay, for example) are proven alive by accepting a
+		// TCP connection on the port they exist to serve.
+		'mgn_uptime_tcp_port'             => array('type'=>'int4', 'default'=>'0', 'is_nullable'=>false),
 		'mgn_uptime_last_status'          => array('type'=>'varchar(20)'),
 		'mgn_uptime_consecutive_failures' => array('type'=>'int4', 'default'=>'0', 'is_nullable'=>false),
 		'mgn_uptime_down_since'           => array('type'=>'timestamp(6)'),

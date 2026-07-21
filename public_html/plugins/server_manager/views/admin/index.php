@@ -66,6 +66,10 @@ $inflight_provisions = new MultiCustomerCloudProvision([
 ], ['cvp_id' => 'DESC']);
 $inflight_provisions->load();
 
+// Nodes whose uptime monitoring cannot currently conclude up or down.
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeMonitorHealth.php'));
+$monitor_problems = NodeMonitorHealth::problems();
+
 // Cron health: active if ran within 20 minutes
 $settings        = Globalvars::get_instance();
 $last_cron_run   = $settings->get_setting('scheduled_tasks_last_cron_run');
@@ -130,6 +134,24 @@ $agent_label  = $agent_online ? 'Online'  : 'Offline';
 		</div>
 	<?php endif; ?>
 </div>
+
+<?php // Nodes whose monitoring cannot report up or down. Surfaced here because a
+      // broken check is silent everywhere else — the node simply never alerts,
+      // which is indistinguishable from never having had a problem. ?>
+<?php if (!empty($monitor_problems)): ?>
+<div class="alert alert-warning" role="alert">
+	<strong>Monitoring not reporting on <?php echo count($monitor_problems); ?> node<?php echo count($monitor_problems) === 1 ? '' : 's'; ?>.</strong>
+	These nodes cannot raise a down alert until fixed.
+	<ul class="mb-0 mt-2">
+		<?php foreach ($monitor_problems as $p): ?>
+			<li>
+				<a href="/admin/server_manager/node_detail?mgn_id=<?php echo (int)$p['id']; ?>" class="alert-link"><?php echo htmlspecialchars($p['name'] ?: $p['slug']); ?></a>
+				&mdash; <?php echo htmlspecialchars($p['health']['detail']); ?>
+			</li>
+		<?php endforeach; ?>
+	</ul>
+</div>
+<?php endif; ?>
 
 <?php if (count($inflight_provisions)): ?>
 <!-- Cloud provisions in flight -->
