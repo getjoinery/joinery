@@ -863,10 +863,21 @@ class JobCommandBuilder {
 
 		$steps[] = ['type' => 'ssh', 'label' => 'Run project restore', 'cmd' => $restore_cmd, 'timeout' => 3600];
 
-		// 5. Verify
-		$verify_cmd = "ls -la " . escapeshellarg($web_root) . " | head -8";
+		// 5. Verify. A directory listing always succeeds, so it confirms nothing —
+		// assert the restored web root actually holds a site, and that a restored
+		// database came back with a populated schema. restore_project.sh checks
+		// every file individually and fails on a partial copy; this is the cheap
+		// second gate that catches a restore which ran against the wrong target.
+		$web_root_esc = escapeshellarg($web_root);
+		$verify_cmd = "test -s {$web_root_esc}/serve.php || "
+		            . "{ echo 'VERIFY FAILED: no serve.php under the web root after restore'; exit 1; }; "
+		            . "echo \"restore verify: \$(find {$web_root_esc} -type f | wc -l) files under the web root\"";
 		if (!$skip_db) {
-			$verify_cmd .= " && {$creds} && psql -U \"\$DB_USER\" \"\$DB_NAME\" -c \"SELECT count(*) AS table_count FROM information_schema.tables WHERE table_schema = 'public'\"";
+			$verify_cmd .= "; {$creds} && "
+			            . "TABLES=\$(psql -U \"\$DB_USER\" \"\$DB_NAME\" -tAc \"SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'\") && "
+			            . "echo \"restore verify: \$TABLES tables in the restored schema\" && "
+			            . "test \"\$TABLES\" -gt 0 || "
+			            . "{ echo 'VERIFY FAILED: the restored database has no tables'; exit 1; }";
 		}
 		$steps[] = ['type' => 'ssh', 'label' => 'Verify restore', 'cmd' => $verify_cmd];
 
@@ -1640,9 +1651,43 @@ class JobCommandBuilder {
 				'cmd' => "{$creds} && psql -U \"\$DB_USER\" \"\$DB_NAME\" -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' && gunzip -c {$remote_db_dump} | psql -U \"\$DB_USER\" \"\$DB_NAME\"",
 				'timeout' => 3600]);
 
+			// backup_project.sh archives are two levels deep:
+			//   {backup_name}/project_files/{public_html,uploads,config,...}
+			// with the archive's own metadata (apache_config/, backup_info.txt, the
+			// .sql dump) as siblings of project_files. Both levels have to come off,
+			// and only the project_files subtree may be extracted — stripping one
+			// level buries the whole site a directory deep under project_files/ and
+			// scatters the metadata across the site root. The site still comes up
+			// (the fresh install ran first, the DB restore succeeded), so the failure
+			// is silent: every uploaded file is simply absent from where the database
+			// says it is. The extract must also be allowed to fail the job, since a
+			// clone that lost its files is not a usable clone.
 			$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Extract project files',
-				'cmd' => "tar xzf {$remote_project_tar} -C /var/www/html/{$sitename} --strip-components=1 --exclude='config/Globalvars_site.php'",
-				'timeout' => 3600, 'continue_on_error' => true]);
+				'cmd' => "tar xzf {$remote_project_tar} -C /var/www/html/{$sitename} --strip-components=2 --wildcards --exclude='config/Globalvars_site.php' '*/project_files/*'",
+				'timeout' => 3600]);
+
+			// Prove the files actually landed. Every regular file the archive carries
+			// must now exist at the site root; the target keeps its own
+			// Globalvars_site.php, so that one is excluded on both sides. A leftover
+			// project_files/ directory is checked by name because it is the exact
+			// signature of an extract at the wrong depth.
+			$site_dir_esc = escapeshellarg("/var/www/html/{$sitename}");
+			$tar_esc      = escapeshellarg($remote_project_tar);
+			$verify_cmd =
+				  "SITE={$site_dir_esc}; TAR={$tar_esc}; "
+				. "if [ -d \"\$SITE/project_files\" ]; then "
+				.   "echo 'VERIFY FAILED: project_files/ present in the site root - archive extracted at the wrong depth'; exit 1; fi; "
+				. "LIST=\$(tar tzf \"\$TAR\" | sed -n 's|^[^/]*/project_files/||p' | grep -v '/\$' | grep -v '^config/Globalvars_site\\.php\$'); "
+				. "TOTAL=\$(printf '%s\\n' \"\$LIST\" | grep -c . || true); "
+				. "MISSING=\$(printf '%s\\n' \"\$LIST\" | while IFS= read -r f; do "
+				.   "if [ -n \"\$f\" ] && [ ! -e \"\$SITE/\$f\" ]; then printf '%s\\n' \"\$f\"; fi; done); "
+				. "MCOUNT=\$(printf '%s\\n' \"\$MISSING\" | grep -c . || true); "
+				. "echo \"restore verify: \$TOTAL files expected, \$MCOUNT missing\"; "
+				. "if [ \"\$MCOUNT\" -gt 0 ]; then echo 'missing (first 20):'; printf '%s\\n' \"\$MISSING\" | head -20; exit 1; fi; "
+				. "echo 'restore verify: OK'";
+			$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Verify restored files',
+				'cmd' => $verify_cmd,
+				'timeout' => 3600]);
 
 			$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Fix permissions',
 				'cmd' => "bash /var/www/html/{$sitename}/maintenance_scripts/install_tools/fix_permissions.sh {$sitename}",

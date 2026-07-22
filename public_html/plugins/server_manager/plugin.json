@@ -1,6 +1,6 @@
 {
     "name": "Server Manager",
-    "version": "1.7.23",
+    "version": "1.7.24",
     "description": "Remote server management for Joinery instances",
     "author": "Joinery",
     "receives_upgrades": true,

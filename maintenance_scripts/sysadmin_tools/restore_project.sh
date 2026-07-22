@@ -41,7 +41,7 @@
 set -euo pipefail
 
 # Version information
-SCRIPT_VERSION="1.0.0"
+SCRIPT_VERSION="1.1.0"
 
 # Colors for output
 RED='\033[0;31m'
@@ -374,22 +374,45 @@ perform_restore() {
             sudo mkdir -p "$PROJECT_DIR"
         fi
 
-        # Copy files from backup to project directory
-        if sudo cp -r "$backup_dir/project_files/"* "$PROJECT_DIR/" 2>/dev/null || \
-           sudo cp -r "$backup_dir/project_files/".[^.]* "$PROJECT_DIR/" 2>/dev/null; then
-
-            # Set proper permissions using centralized script (production mode)
-            sudo "$SCRIPT_DIR/../install_tools/fix_permissions.sh" "$PROJECT_NAME" --production
-
-            # Make maintenance scripts executable
-            if [ -d "$PROJECT_DIR/maintenance_scripts" ]; then
-                sudo find "$PROJECT_DIR/maintenance_scripts" -type f -name "*.sh" -exec chmod 755 {} \;
-            fi
-
-            print_success "Project files restored to: $PROJECT_DIR"
-        else
-            print_warning "No files to restore or restore partially failed"
+        # Copy files from backup to project directory.
+        #
+        # The trailing /. copies the directory's contents, dotfiles included, in a
+        # single pass. The glob form needs a second command for hidden entries, and
+        # chaining the two with || reports success whenever the fallback succeeds —
+        # even if the first copy died halfway through. Errors are not discarded
+        # either: a copy that cannot be trusted has to be visible.
+        if ! sudo cp -a "$backup_dir/project_files/." "$PROJECT_DIR/"; then
+            print_error "Failed to copy project files to: $PROJECT_DIR"
+            return 1
         fi
+
+        # Verify every file landed before declaring success. A partial restore
+        # produces a site that serves pages perfectly well while uploaded files are
+        # missing from where the restored database says they live, so this is a
+        # gate rather than a report.
+        print_info "Verifying restored files..."
+        missing_list=$(cd "$backup_dir/project_files" && find . -type f | while IFS= read -r f; do
+            if [ ! -e "$PROJECT_DIR/${f#./}" ]; then printf '%s\n' "${f#./}"; fi
+        done)
+
+        if [ -n "$missing_list" ]; then
+            missing_count=$(printf '%s\n' "$missing_list" | grep -c .)
+            print_error "Restore verification failed: $missing_count file(s) did not land in $PROJECT_DIR"
+            printf '%s\n' "$missing_list" | head -20 | sed 's/^/    /'
+            return 1
+        fi
+
+        restored_count=$(find "$backup_dir/project_files" -type f | wc -l)
+
+        # Set proper permissions using centralized script (production mode)
+        sudo "$SCRIPT_DIR/../install_tools/fix_permissions.sh" "$PROJECT_NAME" --production
+
+        # Make maintenance scripts executable
+        if [ -d "$PROJECT_DIR/maintenance_scripts" ]; then
+            sudo find "$PROJECT_DIR/maintenance_scripts" -type f -name "*.sh" -exec chmod 755 {} \;
+        fi
+
+        print_success "Project files restored and verified ($restored_count files): $PROJECT_DIR"
     fi
 
     # Step 3: Restore Apache configuration

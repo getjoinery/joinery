@@ -434,4 +434,150 @@ $threw = false;
 try { JobCommandBuilder::build_run_plugin_installers($rootless); } catch (Exception $e) { $threw = true; }
 check($threw, 'a node without mgn_web_root is refused at build time');
 
+section('From-backup clone: extract depth and restore verification');
+
+// backup_project.sh writes archives two levels deep —
+//   {backup_name}/project_files/{public_html,uploads,config,...}
+// — with the archive's own metadata (apache_config/, backup_info.txt, the .sql
+// dump) as siblings of project_files. Extracting with one level stripped buries
+// the entire site under a project_files/ directory at the site root and leaves
+// the metadata scattered beside it. Nothing about the resulting site looks
+// broken: the fresh install already ran and the database restore succeeded, so
+// it serves pages while every uploaded file is absent from where the database
+// says it lives. That combination is why this is asserted on the emitted text
+// AND executed below rather than trusted to review.
+$source_node = jcb_node(array(
+	'mgn_web_root' => '/var/www/html/sourcesite/public_html',
+	'mgn_site_url' => 'https://source.example.com'));
+$target_node = jcb_node(array(
+	'mgn_web_root' => '/var/www/html/clonesite/public_html',
+	'mgn_site_url' => 'https://clone.example.com'));
+
+$clone_steps = JobCommandBuilder::build_install_node($target_node, array(
+	'mode'           => 'from_backup',
+	'sitename'       => 'clonesite',
+	'domain'         => 'source.example.com',
+	'docker_mode'    => 'bare-metal',
+	'source_node_id' => $source_node->key,
+	'backup_source'  => 'new',
+));
+
+$extract_step = null;
+$verify_step  = null;
+foreach ($clone_steps as $step) {
+	if (($step['label'] ?? '') === 'Extract project files') { $extract_step = $step; }
+	if (($step['label'] ?? '') === 'Verify restored files')  { $verify_step  = $step; }
+}
+
+check($extract_step !== null, 'the clone emits an extract step');
+check($verify_step !== null, 'the clone emits a restore-verification step');
+
+$extract_cmd = $extract_step['cmd'] ?? '';
+check(strpos($extract_cmd, '--strip-components=2') !== false,
+	'both archive levels are stripped, so content lands at the site root', $extract_cmd);
+check(strpos($extract_cmd, '--strip-components=1') === false,
+	'the one-level strip that buries the site under project_files/ is gone', $extract_cmd);
+check(strpos($extract_cmd, "'*/project_files/*'") !== false,
+	'only the project_files subtree is extracted, not the archive metadata', $extract_cmd);
+check(empty($extract_step['continue_on_error']),
+	'a failed extract fails the clone rather than continuing to a fileless site');
+check(empty($verify_step['continue_on_error']),
+	'a failed verification fails the clone');
+
+// Execute the emitted verification against real fixtures. The command opens by
+// assigning SITE and TAR; everything after that is the logic under test, so the
+// body is re-hosted onto a throwaway site directory and a replica archive.
+$verify_body = '';
+$body_at = strpos($verify_step['cmd'] ?? '', 'if [ -d');
+if ($body_at !== false) { $verify_body = substr($verify_step['cmd'], $body_at); }
+check($verify_body !== '', 'the verification body can be isolated for execution');
+
+$fx = $tmpdir . '/clonefx';
+@mkdir($fx . '/src/mysite-2026-01-01-000000/project_files/public_html', 0777, true);
+@mkdir($fx . '/src/mysite-2026-01-01-000000/project_files/uploads/avatar', 0777, true);
+@mkdir($fx . '/src/mysite-2026-01-01-000000/project_files/config', 0777, true);
+@mkdir($fx . '/src/mysite-2026-01-01-000000/apache_config', 0777, true);
+file_put_contents($fx . '/src/mysite-2026-01-01-000000/project_files/public_html/index.php', "code\n");
+file_put_contents($fx . '/src/mysite-2026-01-01-000000/project_files/uploads/avatar/pic.jpg', "bytes\n");
+file_put_contents($fx . '/src/mysite-2026-01-01-000000/project_files/config/Globalvars_site.php', "sourcecfg\n");
+file_put_contents($fx . '/src/mysite-2026-01-01-000000/apache_config/mysite.conf', "vhost\n");
+file_put_contents($fx . '/src/mysite-2026-01-01-000000/backup_info.txt', "meta\n");
+$archive = $fx . '/archive.tar.gz';
+@shell_exec('tar -czf ' . escapeshellarg($archive) . ' -C ' . escapeshellarg($fx . '/src') . ' mysite-2026-01-01-000000 2>/dev/null');
+check(file_exists($archive), 'a replica backup archive was built for the verification fixtures');
+
+/** Run the emitted verification body against $site_dir; returns the exit code. */
+$run_verify = function ($site_dir) use ($verify_body, $archive) {
+	$cmd = 'SITE=' . escapeshellarg($site_dir) . '; TAR=' . escapeshellarg($archive) . '; ' . $verify_body;
+	// A subshell, not a brace group: the body ends in `exit 1` on failure, which
+	// in a brace group would terminate the whole shell before the status is read.
+	@shell_exec('( ' . $cmd . ' ) >/dev/null 2>&1; echo $? > ' . escapeshellarg($site_dir . '/.rc'));
+	$rc = trim((string)@file_get_contents($site_dir . '/.rc'));
+	@unlink($site_dir . '/.rc');
+	return $rc === '' ? -1 : (int)$rc;
+};
+
+// The corrected command, run for real: content lands at the site root.
+$good = $fx . '/good';
+@mkdir($good, 0777, true);
+@shell_exec('tar xzf ' . escapeshellarg($archive) . ' -C ' . escapeshellarg($good)
+	. " --strip-components=2 --wildcards --exclude='config/Globalvars_site.php' '*/project_files/*' 2>/dev/null");
+check(file_exists($good . '/uploads/avatar/pic.jpg'),
+	'the corrected extract puts uploads at the site root');
+check(!file_exists($good . '/config/Globalvars_site.php'),
+	'the target keeps its own Globalvars_site.php');
+check($run_verify($good) === 0, 'verification passes a correctly restored site');
+
+// The defect itself: one level stripped.
+$bad = $fx . '/bad';
+@mkdir($bad, 0777, true);
+@shell_exec('tar xzf ' . escapeshellarg($archive) . ' -C ' . escapeshellarg($bad)
+	. " --strip-components=1 --exclude='config/Globalvars_site.php' 2>/dev/null");
+check(is_dir($bad . '/project_files'),
+	'the one-level strip reproduces the buried-site layout');
+check($run_verify($bad) === 1, 'verification rejects a site whose files landed a level too deep');
+
+// A partial copy with no structural tell: the site looks right, one file is gone.
+$partial = $fx . '/partial';
+@mkdir($partial, 0777, true);
+@shell_exec('cp -r ' . escapeshellarg($good) . '/. ' . escapeshellarg($partial) . '/ 2>/dev/null');
+@unlink($partial . '/uploads/avatar/pic.jpg');
+check(file_exists($partial . '/public_html/index.php') && !file_exists($partial . '/uploads/avatar/pic.jpg'),
+	'the partial fixture has site code but a missing upload');
+check($run_verify($partial) === 1, 'verification rejects a restore that silently lost one file');
+
+section('Restore-project job: the verification step is a gate');
+
+// The restore job's own verify step used to be a directory listing, which
+// succeeds whether or not anything was restored — a green step that proves
+// nothing. It has to be able to fail.
+$restore_node = jcb_node(array(
+	'mgn_web_root' => '/var/www/html/restoresite/public_html',
+	'mgn_ssh_user' => 'root'));
+$restore_steps = JobCommandBuilder::build_restore_project($restore_node, array(
+	'local_path' => '/backups/restoresite-2026-01-01-000000.tar.gz',
+));
+
+$rp_verify = null;
+foreach ($restore_steps as $step) {
+	if (($step['label'] ?? '') === 'Verify restore') { $rp_verify = $step; }
+}
+check($rp_verify !== null, 'the restore job emits a verification step');
+$rp_cmd = $rp_verify['cmd'] ?? '';
+check(strpos($rp_cmd, 'exit 1') !== false,
+	'the verification can fail the job', $rp_cmd);
+check(strpos($rp_cmd, 'serve.php') !== false,
+	'it asserts the web root actually holds a site', $rp_cmd);
+check(!preg_match('/^ls -la/', $rp_cmd),
+	'it is not a bare directory listing', $rp_cmd);
+
+// Run it against a web root that has no site: it must fail rather than report.
+$empty_root = $tmpdir . '/emptyroot';
+@mkdir($empty_root, 0777, true);
+$probe = 'test -s ' . escapeshellarg($empty_root) . '/serve.php || '
+	. "{ echo 'VERIFY FAILED'; exit 1; }";
+@shell_exec('( ' . $probe . ' ) >/dev/null 2>&1; echo $? > ' . escapeshellarg($empty_root . '/.rc'));
+$probe_rc = trim((string)@file_get_contents($empty_root . '/.rc'));
+check($probe_rc === '1', 'that assertion fails on a web root with no site', 'rc: ' . $probe_rc);
+
 harness_finish();
