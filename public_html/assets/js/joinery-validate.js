@@ -1,14 +1,19 @@
 /**
  * Joinery Validation System - Pure JavaScript validation library
  * No jQuery dependencies, works alongside jQuery validation if present
- * @version 1.1.0
+ * @version 1.1.1
+ * @changelog 1.1.1 - The native re-dispatch is deferred out of the submit
+ *   event's own dispatch. requestSubmit() returns silently while a form's
+ *   submit event is still firing, and a validation pass with no real I/O
+ *   resolves in a microtask - which, on a trusted click, still runs inside
+ *   that dispatch. The submission was therefore dropped with no error.
  * @changelog 1.1.0 - A valid form re-submits NATIVELY (requestSubmit + a
  *   one-shot stand-aside flag) instead of form.submit(), so other submit
  *   listeners (step-up interceptors, payment tokenizers, analytics) see the
  *   validated submission and may cancel it. form.submit() remains only as
  *   the no-requestSubmit legacy fallback.
  */
-console.log('%c=== JOINERY VALIDATION v1.1.0 ===', 'color: blue; font-weight: bold');
+console.log('%c=== JOINERY VALIDATION v1.1.1 ===', 'color: blue; font-weight: bold');
 
 (function() {
     'use strict';
@@ -126,9 +131,17 @@ console.log('%c=== JOINERY VALIDATION v1.1.0 ===', 'color: blue; font-weight: bo
                         // clicked button's name/value natively.
                         this.form.dataset.jyValidated = '1';
                         if (this.debug) console.log('→ Valid, re-dispatching natively via requestSubmit');
-                        this.form.requestSubmit(
-                            (submitter && submitter.form === this.form) ? submitter : undefined
-                        );
+                        // Deferred by a task on purpose. requestSubmit() returns
+                        // silently while this form's submit event is still being
+                        // dispatched, and validation that needs no network call
+                        // resolves in a microtask - which, on a real click, runs
+                        // inside that same dispatch. Calling it here directly
+                        // drops the submission with no error and no request.
+                        const validatedSubmitter =
+                            (submitter && submitter.form === this.form) ? submitter : undefined;
+                        setTimeout(() => {
+                            this.form.requestSubmit(validatedSubmitter);
+                        }, 0);
                     } else {
                         // Legacy fallback (no requestSubmit): preserve the
                         // clicked button's name/value - form.submit() drops the
