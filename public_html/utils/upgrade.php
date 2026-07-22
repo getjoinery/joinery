@@ -74,7 +74,7 @@
 	// One-shot: if the re-run lands in a self-update state again (a copy that
 	// silently didn't take), stop and ask rather than loop.
 	function self_update_cli_rerun() {
-		global $argv;
+		global $argv, $upgrade_lock_handle;
 		if (getenv('JOINERY_UPGRADE_RERUN') === '1') {
 			echo "  Automatic re-run already attempted once and deployment files still differ.\n";
 			echo "  Investigate before re-running manually.\n";
@@ -88,6 +88,13 @@
 		$cmd = 'JOINERY_UPGRADE_RERUN=1 ' . escapeshellarg(PHP_BINARY);
 		foreach ($argv as $arg) {
 			$cmd .= ' ' . escapeshellarg($arg);
+		}
+		// The re-exec'd child acquires the upgrade lock from scratch; holding it
+		// here through passthru() would deadlock the child against its parent.
+		if (!empty($upgrade_lock_handle)) {
+			flock($upgrade_lock_handle, LOCK_UN);
+			fclose($upgrade_lock_handle);
+			$upgrade_lock_handle = null;
 		}
 		passthru($cmd, $exit_code);
 		exit($exit_code);
@@ -143,6 +150,24 @@
 			exec('rm -rf ' . escapeshellarg($stage_location) . '/*');
 		}
 		exit(1);
+	}
+
+	// One upgrade at a time. Staging (uploads/upgrades/) is shared state: a second
+	// run's staging-clear wipes the first run's extraction mid-flight, and whichever
+	// run swaps first deploys a broken tree. flock is kernel-held, so a killed run
+	// can never wedge the next one. Returns the held handle (keep it for process
+	// life) or false when another run holds the lock.
+	function acquire_upgrade_lock($lock_path) {
+		$handle = @fopen($lock_path, 'c');
+		if ($handle === false) {
+			return false;
+		}
+		@chmod($lock_path, 0666);
+		if (!flock($handle, LOCK_EX | LOCK_NB)) {
+			fclose($handle);
+			return false;
+		}
+		return $handle;
 	}
 
 	$stage_location = $full_site_dir.'/uploads/upgrades/';
@@ -259,6 +284,15 @@
 	$sourceFile = $decode_response['upgrade_location'] ?? null;
 
 	if (($_POST && $_POST['confirm']) || $is_cli){
+
+		// Abort without clearing staging: the concurrent run owns it.
+		$upgrade_lock_path = $full_site_dir . '/uploads/.upgrade.lock';
+		$upgrade_lock_handle = acquire_upgrade_lock($upgrade_lock_path);
+		if ($upgrade_lock_handle === false) {
+			upgrade_abort('Another upgrade is already running',
+				'A concurrent run holds ' . htmlspecialchars($upgrade_lock_path) . '. Wait for it to finish, then retry.',
+				false);
+		}
 
 		// Abort if upgrade server connection failed
 		if ($upgrade_server_error) {
@@ -1342,6 +1376,19 @@
 				if ($verbose) upgrade_echo("✓ Removed rollback backup (public_html_last)<br>");
 			} else {
 				upgrade_echo("⚠ Could not remove rollback backup (non-fatal): " . htmlspecialchars(implode(' ', $rm_out)) . "<br>");
+			}
+		}
+
+		// Remove preserved failed-deployment trees (public_html_failed_*). A
+		// rollback keeps the broken tree for diagnosis, but a completed newer
+		// deploy ends that usefulness — and each tree parks a full site copy
+		// on disk forever otherwise. Rollback safety lives in public_html_last.
+		foreach (glob($full_site_dir . '/public_html_failed_*', GLOB_ONLYDIR) as $old_failed_dir) {
+			exec('rm -rf ' . escapeshellarg($old_failed_dir) . ' 2>&1', $fr_out, $fr_exit);
+			if ($fr_exit === 0) {
+				if ($verbose) upgrade_echo('✓ Removed preserved failed deployment: ' . htmlspecialchars(basename($old_failed_dir)) . '<br>');
+			} else {
+				upgrade_echo('⚠ Could not remove ' . htmlspecialchars(basename($old_failed_dir)) . ' (non-fatal)<br>');
 			}
 		}
 
