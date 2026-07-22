@@ -14,6 +14,8 @@
  * rsync push into its own fragment drop area, joinery-ack, joinery-merge,
  * joinery-ping (specs/mailbox_relay_shared_fleet.md § Multi-tenancy on a shard).
  *
+ * @version 1.3 - forgetHostKey(): a rebuilt relay reuses the tunnel address with
+ *                a new host key, which accept-new refuses until the old one goes
  * @version 1.2 - login derives from the relay row's tenant identity (pullUser);
  *                the root default is gone
  */
@@ -99,5 +101,51 @@ class RelaySsh {
 		$code = 0;
 		exec($cmd . ' 2>&1', $output, $code);
 		return array($code, implode("\n", $output));
+	}
+
+	/**
+	 * Forget the host key recorded for a tunnel address.
+	 *
+	 * Every relay answers on the SAME fixed tunnel address (10.99.0.1), but a
+	 * rebuilt relay is a NEW machine presenting a NEW SSH host key. The
+	 * accept-new policy above learns an unknown host automatically and REFUSES a
+	 * changed one, so unless the previous machine's key is forgotten at the
+	 * moment the address changes hands, every rebuild breaks the map push and
+	 * the spool pull with REMOTE HOST IDENTIFICATION HAS CHANGED. This is the
+	 * SSH-identity half of replacing the WireGuard peer: same address, new
+	 * machine, so the old identity has to go.
+	 *
+	 * Called when a relay row is bound to a new machine. Best-effort: a failure
+	 * is logged, and the health checks surface the connection error.
+	 */
+	public static function forgetHostKey(string $host): void {
+		$host = trim($host);
+		if ($host === '') {
+			return;
+		}
+		$home = '';
+		if (function_exists('posix_geteuid') && function_exists('posix_getpwuid')) {
+			$pw = @posix_getpwuid(posix_geteuid());
+			if (is_array($pw) && !empty($pw['dir'])) {
+				$home = (string)$pw['dir'];
+			}
+		}
+		if ($home === '') {
+			$home = (string)getenv('HOME');
+		}
+		if ($home === '') {
+			error_log('RelaySsh::forgetHostKey: no home directory for the web user — '
+				. 'stale host key for ' . $host . ' left in place.');
+			return;
+		}
+		$known = $home . '/.ssh/known_hosts';
+		if (!is_file($known)) {
+			return; // nothing learned yet; accept-new will record the new key
+		}
+		list($code, $out) = self::run('ssh-keygen -f ' . escapeshellarg($known)
+			. ' -R ' . escapeshellarg($host));
+		if ($code !== 0) {
+			error_log('RelaySsh::forgetHostKey: ssh-keygen -R failed for ' . $host . ': ' . $out);
+		}
 	}
 }
