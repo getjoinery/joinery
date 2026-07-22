@@ -1,7 +1,8 @@
 <?php
 /**
  * LearnSpamFeedback — trains rspamd's Bayes classifier from manual spam/ham
- * corrections in the Mailbox Reader (specs/inbound_email_content_spam_filtering.md).
+ * corrections in the Mailbox Reader
+ * (specs/mailbox_spam_filtering_simplification.md D3).
  *
  * There is no job queue. iem_spam_verdict is the source of truth and
  * iem_learned_verdict is a per-row marker of what has actually been taught. A
@@ -16,47 +17,49 @@
  * The controller binds to loopback and trusts loopback via secure_ip, so the learn
  * command is authorized by originating inside the container — no password to store.
  *
- * Permanent no-ops (mark handled, never retry): a webhook deployment (no local
- * rspamd), a webhook-sourced row, and a row whose raw is gone (pruned, or IMAP
- * reference-backed). Transient failures (controller down / learn error): leave the
- * row diverged so it retries next pass — which is what makes the loop self-heal
- * through an outage. There is no per-row attempt counter: the dominant failure
- * (controller down) is global, so a cap would strand every pending correction.
+ * Where the corpus is taught is a deployment-wide question, not a per-message one:
+ * with learning on, EVERY correction that still has a raw message teaches it,
+ * whatever path the message arrived by. Webhook-sourced and relay-sourced mail
+ * included — the local scanner scores those at ingest, so its corpus is exactly
+ * where their corrections belong.
  *
- * @version 1.0
+ * Permanent no-ops (mark handled, never retry): a row whose raw is gone (pruned,
+ * IMAP reference-backed, or sealed out of reach of this keyless cron pass).
+ * Transient failures (controller down / learn error): leave the row diverged so it
+ * retries next pass — which is what makes the loop self-heal through an outage,
+ * and through a wiped corpus. There is no per-row attempt counter: the dominant
+ * failure (controller down) is global, so a cap would strand every pending
+ * correction.
+ *
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundProviderRegistry.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSpamPolicy.php'));
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
 
 class LearnSpamFeedback implements ScheduledTaskInterface {
-
-	/** Webhook provider auth-sources whose rows have no local rspamd to teach. */
-	const WEBHOOK_SOURCES = array('mailgun', 'sendgrid', 'ses');
 
 	/** Bound the per-run batch; the unreconciled set is small and human-paced. */
 	const MAX_PER_RUN = 200;
 
 	public function run(array $config) {
-		$settings = Globalvars::get_instance();
-		if (!$settings->get_setting('mailbox_content_spam_filtering_enabled')) {
-			return array('status' => 'skipped', 'message' => 'Content spam filtering is disabled.');
+		if (!MailboxSpamPolicy::learningEnabled()) {
+			return array('status' => 'skipped',
+				'message' => 'Learning from spam corrections is turned off.');
 		}
 
-		// A webhook deployment has no local rspamd: every correction is a permanent
-		// no-op. Mark the whole diverged set handled so it never retries.
-		$provider = InboundProviderRegistry::active();
-		if ($provider::isWebhook()) {
-			$n = $this->markAllHandled();
-			return array('status' => 'success',
-				'message' => 'Webhook provider active (no local rspamd); marked ' . $n . ' correction(s) handled.');
-		}
+		$controller = MailboxSpamPolicy::controllerUrl();
 
-		$controller = rtrim((string)$settings->get_setting('mailbox_rspamd_controller_url'), '/');
-		if ($controller === '') {
-			$controller = 'http://127.0.0.1:11334';
+		// Expected but not yet installed (an owner just turned learning on), or
+		// down mid-run. Neither is an error: the rows stay diverged and are taught
+		// on a later pass, and the health probe carries the durable signal with the
+		// install command.
+		if (!MailboxSpamPolicy::controllerReachable()) {
+			return array('status' => 'skipped',
+				'message' => 'The spam scanner is not answering on ' . $controller
+					. ' — corrections are held and will be taught once it is installed and running.');
 		}
 
 		$rows = $this->divergedRows(self::MAX_PER_RUN);
@@ -68,13 +71,6 @@ class LearnSpamFeedback implements ScheduledTaskInterface {
 		foreach ($rows as $r) {
 			$id = (int)$r['iem_inbound_email_message_id'];
 			$verdict = (string)$r['iem_spam_verdict'];
-
-			// Webhook-sourced row (provider scanned upstream) → permanent no-op.
-			if (in_array((string)$r['iem_auth_source'], self::WEBHOOK_SOURCES, true)) {
-				$this->markReconciled($id);
-				$handled++;
-				continue;
-			}
 
 			$msg = new InboundEmailMessage($id, true);
 			try {
@@ -113,7 +109,7 @@ class LearnSpamFeedback implements ScheduledTaskInterface {
 	 */
 	private function divergedRows(int $limit): array {
 		$db = DbConnector::get_instance()->get_db_link();
-		$sql = "SELECT iem_inbound_email_message_id, iem_spam_verdict, iem_auth_source
+		$sql = "SELECT iem_inbound_email_message_id, iem_spam_verdict
 				FROM iem_inbound_email_messages
 				WHERE iem_spam_verdict IS DISTINCT FROM iem_learned_verdict
 				  AND iem_spam_verdict IS NOT NULL
@@ -132,18 +128,6 @@ class LearnSpamFeedback implements ScheduledTaskInterface {
 			 SET iem_learned_verdict = iem_spam_verdict
 			 WHERE iem_inbound_email_message_id = ?");
 		$stmt->execute(array($id));
-	}
-
-	/** Mark every diverged row handled at once (webhook deployment). Returns count. */
-	private function markAllHandled(): int {
-		$db = DbConnector::get_instance()->get_db_link();
-		$stmt = $db->prepare(
-			"UPDATE iem_inbound_email_messages
-			 SET iem_learned_verdict = iem_spam_verdict
-			 WHERE iem_spam_verdict IS DISTINCT FROM iem_learned_verdict
-			   AND iem_spam_verdict IS NOT NULL");
-		$stmt->execute();
-		return $stmt->rowCount();
 	}
 
 	/**

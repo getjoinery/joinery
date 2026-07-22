@@ -10,7 +10,7 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  * hostname/IP, SRS, the relay, and the health run). One POST saves the whole
  * form; values are read back fresh on the redirect.
  *
- * @version 1.0
+ * @version 1.2
  */
 function admin_mailbox_settings_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -42,6 +42,16 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 		// Unchecked checkboxes are absent from the POST → '0'.
 		foreach ($bool_keys as $k) {
 			mailbox_settings_write_setting($k, empty($input[$k]) ? '0' : '1');
+		}
+
+		// Learning renders DISABLED when no scanner is running (a disabled
+		// checkbox never posts), so its absence is only "unchecked" while the
+		// scanner is present — otherwise saving would stomp the stored
+		// preference with '0' every time.
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSpamPolicy.php'));
+		if (MailboxSpamPolicy::controllerReachable()) {
+			mailbox_settings_write_setting('mailbox_spam_learning_enabled',
+				empty($input['mailbox_spam_learning_enabled']) ? '0' : '1');
 		}
 		foreach ($int_keys as $k => $min) {
 			$value = max($min, intval($input[$k] ?? 0));
@@ -92,6 +102,8 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 	foreach ($bool_keys as $k) {
 		$values[$k] = (string)$settings->get_setting($k) === '1';
 	}
+	$values['mailbox_spam_learning_enabled'] =
+		(string)$settings->get_setting('mailbox_spam_learning_enabled') === '1';
 	foreach ($int_keys as $k => $min) {
 		$values[$k] = intval($settings->get_setting($k));
 	}
@@ -113,14 +125,51 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 		&& ((mailbox_receive_mode() === 'relay')
 			|| mailbox_receive_relay_exists() || $fleet_url !== '');
 
+	// Where spam scanning happens is shown, not asked — it follows from the
+	// provider and topology already configured. Learning is offered only where
+	// a scanner is actually running (observed, not stored): the scanner ships
+	// with the mail stack, so on any box that hosts its own mail this is
+	// simply true; a webhook-only or relay-fronted-from-birth box never ran a
+	// root script of ours and gets a disabled checkbox with the reason instead
+	// of a command to paste.
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSpamPolicy.php'));
+	$upstream = MailboxSpamPolicy::upstreamScanner();
+	$scanner_present = MailboxSpamPolicy::controllerReachable();
+	if (!MailboxSpamPolicy::filingEnabled()) {
+		$scanner_state = 'Spam filing is off, so nothing is being moved out of the inbox. '
+			. 'Every message still records its SPF, DKIM and DMARC results, so turning it '
+			. 'on takes effect on the next message.';
+	} else {
+		switch ($upstream) {
+			case 'provider':
+				$scanner_state = 'Mail is scanned by your email provider before it reaches this server.';
+				break;
+			case 'relay':
+				$scanner_state = 'Mail is scanned by your relay before it reaches this server.';
+				break;
+			default:
+				$scanner_state = 'This server receives mail directly, so it scans mail itself.';
+		}
+		if (MailboxSpamPolicy::learningEnabled() && $upstream !== 'none') {
+			$scanner_state .= ' Because this deployment is learning, it scores that mail again'
+				. ' itself using what it has learned.';
+		}
+		if (!$scanner_present) {
+			$scanner_state .= ' No spam scanner is running on this server, so learning from '
+				. 'user corrections is unavailable.';
+		}
+	}
+
 	return LogicResult::render(array(
-		'session'           => $session,
-		'base'              => $base,
-		'values'            => $values,
-		'show_relay_config' => $show_relay_config,
-		'fleet_secret_set'  => $fleet_secret_set,
-		'has_active_relay'  => (MailboxRelay::active() !== null),
-		'outbound_mode'     => $outbound_mode,
+		'session'                 => $session,
+		'base'                    => $base,
+		'values'                  => $values,
+		'show_relay_config'       => $show_relay_config,
+		'fleet_secret_set'        => $fleet_secret_set,
+		'has_active_relay'        => (MailboxRelay::active() !== null),
+		'outbound_mode'           => $outbound_mode,
+		'scanner_state'           => $scanner_state,
+		'scanner_present'         => $scanner_present,
 	));
 }
 

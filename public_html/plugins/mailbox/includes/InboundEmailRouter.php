@@ -53,12 +53,21 @@
  * the stored row, and a judged-spam message is never relayed — the forward is
  * suppressed (logged spam_held) while forward_and_store still keeps a reviewable copy.
  *
- * Content spam (specs/inbound_email_content_spam_filtering.md): a second verdict source
- * is OR'd into classifySpam() — a content scanner signal resolved per ingest path by
- * resolveContentSpam() (the rspamd milter's X-Spam header read by readSpamHeader() on
- * the Postfix path; a webhook provider's own spam flag passed in as $provider_spam).
- * The scanner's numeric score is recorded on the row (iem_spam_score) for transparency
- * only — never read for disposition. Gated on mailbox_content_spam_filtering_enabled.
+ * Content spam (specs/mailbox_spam_filtering_simplification.md): a second verdict
+ * source is OR'd into classifySpam() — a content scanner signal resolved per ingest
+ * path by resolveContentSpam(). An arriving verdict is ALWAYS read, whatever this
+ * box runs: the X-Spam header readSpamHeader() parses (stamped by the relay's rspamd
+ * on a relay-fronted deployment, by the local milter on a colocated one) or a webhook
+ * provider's own spam flag passed in as $provider_spam. On top of that, a deployment
+ * that learns from its users' corrections re-scores relay- and webhook-sourced mail
+ * through its own rspamd at ingest (scanContentSpam), and that verdict REPLACES the
+ * upstream one — the local scanner runs the same static rules plus a corpus of this
+ * deployment's own mail, so it is the better-informed of the two, and only it can
+ * rescue a false positive. Colocated mail is not re-scored: its milter already did
+ * exactly this scan. A scanner that is absent or down costs nothing — the upstream
+ * verdict stands and the message stores normally. The scanner's numeric score is
+ * recorded on the row (iem_spam_score) for transparency only — never read for
+ * disposition. MailboxSpamPolicy owns every one of these decisions.
  *
  * Inbound filters (specs/implemented/inbound_email_filters.md): after a locally-received
  * message is persisted and its spam verdict set, storeMessage runs every in-scope operator
@@ -66,7 +75,7 @@
  * paths alike, never IMAP-polled mail. forwardStoredMessage() relays a copy for a filter's
  * "Forward to" action, reusing the alias-forward envelope rebuild + relay.
  *
- * @version 1.21
+ * @version 1.23
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -89,14 +98,21 @@ class InboundEmailRouter {
 	// Content-spam header contract (specs/inbound_email_content_spam_filtering.md).
 	// rspamd's milter_headers module stamps these on the Postfix path and
 	// readSpamHeader() parses the same names — this is the single place the name is
-	// pinned. The rspamd config in provisioning/install_email.sh stamps the IDENTICAL
-	// names; keep the two in step. SPAM_FLAG_HEADER is the binary flag ('X-Spam: Yes').
+	// pinned. The rspamd config in provisioning/provision_spam_scanner.sh stamps the
+	// IDENTICAL names; keep the two in step. SPAM_FLAG_HEADER is the binary flag ('X-Spam: Yes').
 	// The numeric score is read from SPAM_SCORE_HEADER when present (SpamAssassin-style
 	// 'X-Spam-Score'), else from the 'score=' field of SPAM_STATUS_HEADER (rspamd's
 	// native 'X-Spam-Status: Yes, score=N').
 	const SPAM_FLAG_HEADER   = 'X-Spam';
 	const SPAM_SCORE_HEADER  = 'X-Spam-Score';
 	const SPAM_STATUS_HEADER = 'X-Spam-Status';
+
+	// Ingest-time scan budget. Deliberately tight: the scan is an improvement on
+	// a verdict already in hand, never a precondition for storing the message, so
+	// a slow scanner must cost a few seconds and then be abandoned. The scanned
+	// paths are the spool cron and webhook POSTs — never a live SMTP session.
+	const SCAN_CONNECT_TIMEOUT = 3;
+	const SCAN_TIMEOUT         = 10;
 
 	private $settings;
 
@@ -162,10 +178,10 @@ class InboundEmailRouter {
 		// message's Authentication-Results header. No verdict => 'unverified'.
 		$auth = $this->readAuthResults($raw_email, $provider_auth);
 
-		// Content-spam signal, resolved per ingest path (rspamd milter X-Spam header
-		// on the Postfix path; the provider's own spam flag on webhook paths). Off
-		// (signal 'none', no score) unless content filtering is enabled. OR'd into the
-		// verdict by classifySpam(); the score is recorded for transparency only.
+		// Content-spam signal, resolved per ingest path (the X-Spam header a relay or
+		// local milter stamped; the provider's own spam flag on webhook paths). No
+		// scanner verdict on the message => signal 'none'. OR'd into the verdict by
+		// classifySpam(); the score is recorded for transparency only.
 		$content_spam = $this->resolveContentSpam($raw_email, $provider_spam);
 
 		// Look up alias
@@ -1740,12 +1756,12 @@ class InboundEmailRouter {
 	 * The strict rule is safe because the disposition is a reviewable Spam view,
 	 * never rejection: a false positive costs a click, not a lost message.
 	 *
-	 * Content layer (specs/inbound_email_content_spam_filtering.md): the message is
+	 * Content layer (specs/mailbox_spam_filtering_simplification.md): the message is
 	 * spam if the content scanner flagged it OR the auth rule fires —
 	 *   verdict = spam  if  content_signal == 'spam'  OR  auth_rule == spam
-	 * The $content_signal is already gated (resolveContentSpam returns 'none' unless
-	 * content filtering is enabled), so this just OR's it in. The master gate below
-	 * still governs the whole feature: with it off the verdict stays NULL regardless.
+	 * The $content_signal is whichever scanner verdict resolveContentSpam() settled
+	 * on, so this just OR's it in. The filing switch below governs the whole feature:
+	 * with it off the verdict stays NULL regardless of what any scanner said.
 	 *
 	 * @param array{dkim:string,spf:string,dmarc:string,source:string} $auth
 	 * @param string $content_signal  'spam' | 'ham' | 'none' (from resolveContentSpam).
@@ -1780,12 +1796,14 @@ class InboundEmailRouter {
 
 	/**
 	 * Resolve the content-spam signal for a message, per ingest path
-	 * (specs/inbound_email_content_spam_filtering.md). Returns
+	 * (specs/mailbox_spam_filtering_simplification.md). Returns
 	 * ['signal' => 'spam'|'ham'|'none', 'score' => ?float].
 	 *
-	 * Gated on mailbox_content_spam_filtering_enabled: off → ('none', null), so
-	 * nothing downstream changes until the feature is turned on. (The master spam gate
-	 * is still enforced separately, in classifySpam.)
+	 * A verdict another system already computed is always read — reading a header
+	 * costs nothing and needs no scanner here, and a relay-fronted deployment has
+	 * no local rspamd by design while its relay stamps X-Spam on every message.
+	 * Whether the signal changes any disposition is the filing switch's call,
+	 * enforced separately in classifySpam.
 	 *
 	 *   - Webhook providers (Mailgun/SendGrid/SES) supply their own content/reputation
 	 *     spam flag in the authenticated payload; the dispatcher hands it in as
@@ -1795,15 +1813,40 @@ class InboundEmailRouter {
 	 *     the raw, trusted on the same basis as the Authentication-Results line (the
 	 *     milter is ours; an external X-Spam is stripped by rspamd before it re-stamps).
 	 *
+	 * When this deployment learns from its users' corrections AND the arriving
+	 * verdict came from something other than this box's own milter (a relay or a
+	 * webhook provider), the message is re-scored here through the local rspamd
+	 * and that verdict REPLACES the upstream one — see MailboxSpamPolicy::
+	 * scanAtIngest() for why replacement rather than OR. A scanner that is
+	 * missing, down or slow simply yields the upstream verdict: no message is
+	 * ever held, bounced or retried on the scanner's account.
+	 *
 	 * @param string     $raw_email
 	 * @param array|null $provider_spam  ['result'=>spam|ham|none,'score'=>?float,'source'=>key]
 	 * @return array{signal:string,score:?float}
 	 */
 	private function resolveContentSpam($raw_email, $provider_spam = null): array {
-		if (!$this->settings->get_setting('mailbox_content_spam_filtering_enabled')) {
-			return array('signal' => 'none', 'score' => null);
+		$upstream = $this->readUpstreamContentSpam($raw_email, $provider_spam);
+
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSpamPolicy.php'));
+		if (MailboxSpamPolicy::scanAtIngest() && (string)$raw_email !== '') {
+			$local = $this->scanContentSpam((string)$raw_email);
+			if ($local !== null) {
+				return $local;
+			}
 		}
 
+		return $upstream;
+	}
+
+	/**
+	 * The content-spam verdict that arrived WITH the message — a webhook
+	 * provider's flag, or the X-Spam header a relay or local milter stamped.
+	 * Never computes anything.
+	 *
+	 * @return array{signal:string,score:?float}
+	 */
+	private function readUpstreamContentSpam($raw_email, $provider_spam = null): array {
 		// Webhook provider signal (only honored with a non-empty source).
 		if (is_array($provider_spam) && !empty($provider_spam['source'])) {
 			$result = strtolower(trim((string)($provider_spam['result'] ?? 'none')));
@@ -1813,8 +1856,101 @@ class InboundEmailRouter {
 			return array('signal' => $signal, 'score' => $score);
 		}
 
-		// Postfix milter path.
+		// Postfix milter / relay header path.
 		return $this->readSpamHeader($raw_email);
+	}
+
+	/**
+	 * Score a message through the local rspamd controller's /checkv2 and turn the
+	 * answer into a content-spam signal.
+	 *
+	 * Unlike readSpamHeader() this asserts BOTH directions: a scan that comes
+	 * back under the threshold returns 'ham', which is what lets a locally
+	 * trained corpus rescue a message an upstream static ruleset flagged. That
+	 * is the whole point of scanning here rather than trusting the header.
+	 *
+	 * Scoring over HTTP lacks the live SMTP client context a milter has, but the
+	 * upstream Received headers ride in the raw, so header-based network rules
+	 * still fire; content rules and Bayes are unaffected.
+	 *
+	 * Protected so a test can substitute the transport; the reading of whatever
+	 * comes back is interpretScanResponse(), which is pure and tested directly.
+	 *
+	 * @return array{signal:string,score:?float}|null  null on any failure — the
+	 *         caller then keeps the upstream verdict. Never throws.
+	 */
+	protected function scanContentSpam(string $raw_email): ?array {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSpamPolicy.php'));
+		$url = MailboxSpamPolicy::controllerUrl() . '/checkv2';
+
+		$body = null;
+		if (function_exists('curl_init')) {
+			$ch = curl_init($url);
+			curl_setopt_array($ch, array(
+				CURLOPT_POST           => true,
+				CURLOPT_POSTFIELDS     => $raw_email,
+				CURLOPT_HTTPHEADER     => array('Content-Type: text/plain'),
+				CURLOPT_RETURNTRANSFER => true,
+				CURLOPT_CONNECTTIMEOUT => self::SCAN_CONNECT_TIMEOUT,
+				CURLOPT_TIMEOUT        => self::SCAN_TIMEOUT,
+			));
+			$body = curl_exec($ch);
+			$code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+			$err  = curl_error($ch);
+			curl_close($ch);
+			if ($body === false || $code !== 200) {
+				error_log('InboundEmailRouter: ingest spam scan failed (HTTP ' . $code . '): '
+					. ($err !== '' ? $err : substr((string)$body, 0, 200)));
+				return null;
+			}
+		} else {
+			$ctx = stream_context_create(array('http' => array(
+				'method'        => 'POST',
+				'header'        => "Content-Type: text/plain\r\n",
+				'content'       => $raw_email,
+				'timeout'       => self::SCAN_TIMEOUT,
+				'ignore_errors' => true,
+			)));
+			$body = @file_get_contents($url, false, $ctx);
+			if ($body === false) {
+				error_log('InboundEmailRouter: ingest spam scan failed (stream).');
+				return null;
+			}
+		}
+
+		return $this->interpretScanResponse((string)$body);
+	}
+
+	/**
+	 * Turn an rspamd /checkv2 response body into a content-spam signal.
+	 *
+	 * rspamd's own disposition is the primary signal; the score comparison is the
+	 * fallback for a response that omits 'action'. The provisioned actions.conf
+	 * disables reject and greylist, so in practice the spam actions are
+	 * add-header and rewrite-subject — but reject is matched too, in case an
+	 * operator re-enabled it on their own scanner.
+	 *
+	 * @return array{signal:string,score:?float}|null  null when the body cannot
+	 *         be read as a verdict at all.
+	 */
+	private function interpretScanResponse(string $body): ?array {
+		$decoded = json_decode($body, true);
+		if (!is_array($decoded) || !isset($decoded['score']) || !is_numeric($decoded['score'])) {
+			error_log('InboundEmailRouter: ingest spam scan returned an unreadable body.');
+			return null;
+		}
+
+		$action = strtolower(trim((string)($decoded['action'] ?? '')));
+		$score  = (float)$decoded['score'];
+		if ($action !== '') {
+			$is_spam = in_array($action, array('add header', 'add_header',
+				'rewrite subject', 'rewrite_subject', 'reject'), true);
+		} else {
+			$required = isset($decoded['required_score']) ? (float)$decoded['required_score'] : 6.0;
+			$is_spam = ($score >= $required);
+		}
+
+		return array('signal' => $is_spam ? 'spam' : 'ham', 'score' => $score);
 	}
 
 	/**

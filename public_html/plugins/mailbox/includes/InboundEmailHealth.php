@@ -9,9 +9,10 @@
  * rethrows any failure as ProvisioningCheckFailed with a clean message. It
  * must be side-effect-free, time-bounded, and cheap to run.
  *
- * The inbound_mail_server, domain DNS, and content-spam-scanner checks are
- * provider-aware: they consult InboundProviderRegistry::active() and dispatch
- * accordingly.
+ * The inbound_mail_server and domain DNS checks are provider-aware: they
+ * consult InboundProviderRegistry::active() and dispatch accordingly. The
+ * spam-scanner check goes one step further and asks MailboxSpamPolicy, which
+ * folds provider and topology into a single expected/present question.
  *
  * The relay outbound checks are MODE-aware (specs/mailbox_relay_inbound_only.md):
  * with the relay smarthost off (the default) compose rides the provider's API, so
@@ -19,7 +20,7 @@
  * is a no-op; with smarthost on, checkRelayTunnel applies and the two provider
  * checks are no-ops. The check list always matches the chosen path.
  *
- * @version 1.12
+ * @version 1.14
  */
 
 require_once(PathHelper::getIncludePath('includes/ProvisioningCheckFailed.php'));
@@ -201,60 +202,62 @@ class InboundEmailHealth {
         }
     }
 
-    /** Port the rspamd milter (proxy worker) listens on locally. */
-    const RSPAMD_MILTER_PORT = 11332;
-
     /**
-     * Verify the content spam scanner (specs/inbound_email_content_spam_filtering.md).
+     * Verify this server's own spam scanner
+     * (specs/mailbox_spam_filtering_simplification.md D6/D7).
      *
-     * Optional feature, provider-aware:
-     *   - Disabled (mailbox_content_spam_filtering_enabled off) → nothing to
-     *     verify; passes silently.
-     *   - Webhook providers (Mailgun/SendGrid/SES) get the content-spam signal from the
-     *     provider's own upstream scanning — there is no local milter — so this passes.
-     *   - Postfix path: the rspamd milter must be listening locally (same shape as
-     *     checkInboundMailServer's port-25 probe).
+     * The scanner SHIPS with the mail stack — install_email.sh installs it
+     * unconditionally and the platform never removes it — so the rule is
+     * simply: a box hosting its own mail stack must have a working, wired
+     * scanner. There is no "installed" setting; presence is observed.
      *
-     * @throws ProvisioningCheckFailed if the local rspamd milter is unreachable.
+     *   - No local mail stack (webhook-only, relay-fronted from birth): passes
+     *     silently. Nothing of ours ever ran as root there, so nothing can be
+     *     required; a hand-installed scanner (an operator opting such a box
+     *     into learning) is equally fine.
+     *   - Mail stack present, controller not answering: fails with the install
+     *     command — the box was provisioned before the scanner shipped with
+     *     the stack, or the service is down.
+     *   - Direct-receiving (nothing upstream scans) with the scanner running
+     *     but absent from Postfix's milter chain: fails — mail would flow
+     *     unscored. Re-running the idempotent installer repairs the wiring.
+     *
+     * A missing scanner is never a delivery problem: ingest keeps whatever
+     * verdict arrived with each message and the learn task defers its rows.
+     *
+     * @throws ProvisioningCheckFailed when the scanner is missing or unwired.
      */
     public static function checkContentSpamScanner() {
-        $settings = Globalvars::get_instance();
-        if (!$settings->get_setting('mailbox_content_spam_filtering_enabled')) {
+        require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSpamPolicy.php'));
+
+        if (!MailboxSpamPolicy::mailStackPresent()) {
             return;
         }
 
-        // Relay-fronted: the local MILTER is unused (the relay's rspamd stamps
-        // X-Spam into the sealed raw), but deferred ingest still scores through
-        // the local rspamd CONTROLLER at parse time — so probe that instead of
-        // the milter port.
-        if (self::activeRelay() !== null) {
-            $controller = (string)$settings->get_setting('mailbox_rspamd_controller_url');
-            $host = parse_url($controller, PHP_URL_HOST) ?: '127.0.0.1';
-            $port = parse_url($controller, PHP_URL_PORT) ?: 11334;
-            $sock = @stream_socket_client('tcp://' . $host . ':' . $port, $errno, $errstr, 2);
-            if (!$sock) {
-                throw new ProvisioningCheckFailed(
-                    'The rspamd controller (' . $host . ':' . $port . ') is not accepting connections'
-                    . ' — deferred ingest cannot spam-score parsed messages: ' . ($errstr ?: 'connection refused')
-                );
-            }
-            @fclose($sock);
-            return;
-        }
-
-        $provider = InboundProviderRegistry::active();
-        if ($provider::isWebhook()) {
-            return;
-        }
-
-        $sock = @stream_socket_client('tcp://127.0.0.1:' . self::RSPAMD_MILTER_PORT, $errno, $errstr, 2);
-        if (!$sock) {
+        if (!MailboxSpamPolicy::controllerReachable()) {
+            $url = MailboxSpamPolicy::controllerUrl();
             throw new ProvisioningCheckFailed(
-                'The rspamd content-spam milter (port ' . self::RSPAMD_MILTER_PORT
-                . ') is not accepting connections: ' . ($errstr ?: 'connection refused')
+                'The spam scanner that ships with the mail stack is not answering ('
+                . $url . '). Mail is unaffected — each message keeps whatever verdict '
+                . 'arrived with it — but nothing is scored here and user spam/ham '
+                . 'corrections are not being learned. Install or repair it with: '
+                . MailboxSpamPolicy::installCommand()
             );
         }
-        @fclose($sock);
+
+        // Direct-receiving only: the scanner must actually be in Postfix's
+        // milter chain. A relay-fronted or webhook box reaches it over HTTP at
+        // ingest and needs no wiring — and a box whose scanner went in while
+        // Postfix was decommissioned, then restored its own listener, is
+        // exactly where this drift shows up.
+        if (MailboxSpamPolicy::upstreamScanner() === 'none' && !MailboxSpamPolicy::milterWired()) {
+            throw new ProvisioningCheckFailed(
+                'The spam scanner is running but Postfix is not handing mail to it ('
+                . MailboxSpamPolicy::MILTER_ENTRY . ' is missing from smtpd_milters), so inbound '
+                . 'mail is never scored. Re-run the idempotent installer to repair the wiring: '
+                . MailboxSpamPolicy::installCommand()
+            );
+        }
     }
 
     /**

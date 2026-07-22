@@ -1045,3 +1045,16 @@
 	$migration['migration_file'] = 'passkeys_enabled_default_on.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// Spam filtering collapses to one switch, on by default
+	// (specs/mailbox_spam_filtering_simplification.md D5). Carries the stored
+	// content-scanner preference over to its outcome-named replacement
+	// (mailbox_spam_learning_enabled) and flips master rows still at the old
+	// factory '0' — a deployment that never found the switch was filing spam
+	// into the inbox while its relay scored every message.
+	$migration = array();
+	$migration['database_version'] = '153';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'spam_filtering_one_switch.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

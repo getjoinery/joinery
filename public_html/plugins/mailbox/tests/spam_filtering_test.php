@@ -20,18 +20,45 @@
  *   - no-DMARC fallback: SPF+DKIM both fail → spam; only one fails → ham;
  *     both pass → ham
  *   - the fallback fires for 'none' AND 'unverified' DMARC (Mailgun/SendGrid shape)
- *   - content layer (specs/inbound_email_content_spam_filtering.md): classifySpam OR
- *     semantics, readSpamHeader parsing, resolveContentSpam gating + provider branch
+ *   - content layer (specs/mailbox_spam_filtering_simplification.md): classifySpam
+ *     OR semantics, readSpamHeader parsing, and that resolveContentSpam reads an
+ *     arriving verdict whether or not this box runs its own scanner
+ *   - ingest-time re-scan: with learning on and something upstream having scanned,
+ *     the local verdict REPLACES the upstream one in BOTH directions — local spam
+ *     overrides an upstream ham, and local ham RESCUES a message the upstream
+ *     flagged. A scanner that is down leaves the upstream verdict standing.
+ *   - the /checkv2 response reading, including the score fallback and garbage
+ *
+ * The ingest scan is exercised through a router subclass that substitutes the
+ * transport, so the test needs no rspamd; the response READING is tested against
+ * literal rspamd bodies. Topology stays out of it — the webhook provider makes
+ * "something upstream scanned" true from settings alone, so this stays a safe
+ * (no DB write, no host state) test. The topology matrix is spam_policy_test.
  *
  * Run: php plugins/mailbox/tests/spam_filtering_test.php
  *
- * @version 1.1
+ * @version 1.3
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSpamPolicy.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+
+/**
+ * Router with a scripted local scanner. $scan_result is what the substituted
+ * transport returns — an array to stand in for a successful scan, null for a
+ * scanner that is missing, down or unreadable.
+ */
+class ScriptedScanRouter extends InboundEmailRouter {
+	public $scan_result = null;
+	public $scan_calls = 0;
+	protected function scanContentSpam(string $raw_email): ?array {
+		$this->scan_calls++;
+		return $this->scan_result;
+	}
+}
 
 class SpamFilteringTest {
 
@@ -59,9 +86,37 @@ class SpamFilteringTest {
 		$this->setSetting('mailbox_spam_filtering_enabled', $on ? '1' : '0');
 	}
 
-	/** Force the content spam-filtering gate on/off. */
-	private function setContentGate(bool $on): void {
-		$this->setSetting('mailbox_content_spam_filtering_enabled', $on ? '1' : '0');
+	/** Force the learning switch (and with it the local scanner) on/off. */
+	private function setLearning(bool $on): void {
+		$this->setSetting('mailbox_spam_learning_enabled', $on ? '1' : '0');
+		MailboxSpamPolicy::reset();
+	}
+
+	/**
+	 * Put the deployment behind a webhook provider (or back on local Postfix).
+	 * A webhook provider makes "something upstream already scanned" true without
+	 * any relay row, which is what keeps the ingest-scan cases DB-free.
+	 */
+	private function setUpstreamScanned(bool $on): void {
+		$this->setSetting('mailbox_provider', $on ? 'mailgun' : 'postfix');
+		MailboxSpamPolicy::reset();
+	}
+
+	/** Invoke resolveContentSpam() on a router with a scripted local scanner. */
+	private function resolveWithScan($scan_result, string $raw, $provider_spam = null): array {
+		$router = new ScriptedScanRouter();
+		$router->scan_result = $scan_result;
+		$m = new ReflectionMethod('InboundEmailRouter', 'resolveContentSpam');
+		$m->setAccessible(true);
+		return $m->invoke($router, $raw, $provider_spam);
+	}
+
+	/** Invoke the router's private interpretScanResponse() on a literal body. */
+	private function interpret(string $body) {
+		$router = new InboundEmailRouter();
+		$m = new ReflectionMethod('InboundEmailRouter', 'interpretScanResponse');
+		$m->setAccessible(true);
+		return $m->invoke($router, $body);
 	}
 
 	/** Invoke the router's private classifySpam() with an auth array (+ content signal). */
@@ -165,14 +220,21 @@ class SpamFilteringTest {
 		$noRaw = "From: a@b.com\nX-Spam: No\n\nbody";
 		$this->eq('none', $this->readSpamHeader($noRaw)['signal'], 'X-Spam: No → none (header never asserts ham)');
 
-		// --- resolveContentSpam() gating + provider branch ---
+		// --- resolveContentSpam(): an arriving verdict is always read ---
 		section('resolveContentSpam');
-		$this->setContentGate(false);
-		$this->eq('none', $this->resolveContentSpam($spamRaw)['signal'],
-			'content gate off → none even with X-Spam: Yes present');
-		$this->setContentGate(true);
+		$hamBody = "From: a@b.com\nSubject: hi\n\nbody";
+		// A relay-fronted deployment runs no local rspamd, so nothing about the
+		// local scanner may decide whether the relay's verdict is believed.
+		$this->setLearning(false);
 		$this->eq('spam', $this->resolveContentSpam($spamRaw)['signal'],
-			'content gate on → reads the milter header');
+			'no local scanner → the relay-stamped X-Spam header is still read');
+		$this->setLearning(true);
+		$this->setUpstreamScanned(false); // colocated: the milter already scored it
+		$this->eq('spam', $this->resolveContentSpam($spamRaw)['signal'],
+			'local scanner on → same reading, same result');
+		$this->setLearning(false);
+		$this->eq('none', $this->resolveContentSpam($hamBody)['signal'],
+			'no scanner verdict on the message → none');
 		// Webhook provider signal arrives as a sibling argument.
 		$prov = $this->resolveContentSpam('', array('result' => 'spam', 'score' => 4.2, 'source' => 'mailgun'));
 		$this->eq('spam', $prov['signal'], 'provider spam signal → spam');
@@ -180,7 +242,126 @@ class SpamFilteringTest {
 		$provNone = $this->resolveContentSpam('', array('result' => 'none', 'score' => 1.0, 'source' => 'sendgrid'));
 		$this->eq('none', $provNone['signal'], 'provider result=none → none (score recorded, no flag)');
 		$this->eq(1.0, $provNone['score'], 'provider score still recorded');
-		$this->setContentGate(false);
+
+		// --- ingest-time re-scan replaces the upstream verdict ---
+		section('ingest re-scan');
+		$LOCAL_SPAM = array('signal' => 'spam', 'score' => 11.5);
+		$LOCAL_HAM  = array('signal' => 'ham',  'score' => -1.2);
+
+		// Learning off: no re-scan happens at all, whatever the topology.
+		$this->setUpstreamScanned(true);
+		$this->setLearning(false);
+		$r = $this->resolveWithScan($LOCAL_SPAM, $hamBody);
+		$this->eq('none', $r['signal'], 'learning off → no local scan, upstream verdict stands');
+
+		// Learning on, something upstream scanned: the local verdict wins.
+		$this->setLearning(true);
+		$r = $this->resolveWithScan($LOCAL_SPAM, $hamBody);
+		$this->eq('spam', $r['signal'], 'local scan says spam → overrides an upstream that said nothing');
+		$this->eq(11.5, $r['score'], 'the local score is the one recorded');
+
+		// The direction that only a local corpus can produce: rescuing a message
+		// the upstream static ruleset flagged. This is the whole reason the local
+		// verdict replaces rather than OR's.
+		$r = $this->resolveWithScan($LOCAL_HAM, $spamRaw);
+		$this->eq('ham', $r['signal'], 'local scan says ham → RESCUES a message the relay flagged');
+		$this->eq(-1.2, $r['score'], 'the rescuing scan\'s score is recorded');
+
+		// Same rescue against a webhook provider's own flag.
+		$r = $this->resolveWithScan($LOCAL_HAM, $hamBody,
+			array('result' => 'spam', 'score' => 9.9, 'source' => 'mailgun'));
+		$this->eq('ham', $r['signal'], 'local scan overrides a webhook provider spam flag too');
+		// ...but a provider payload carrying no raw message cannot be re-scanned,
+		// so its own flag is all there is.
+		$r = $this->resolveWithScan($LOCAL_HAM, '',
+			array('result' => 'spam', 'score' => 9.9, 'source' => 'mailgun'));
+		$this->eq('spam', $r['signal'], 'no raw to scan → the provider flag stands');
+
+		// Scanner missing or down: the message keeps whatever arrived with it and
+		// stores normally. Nothing is held, bounced or retried.
+		$r = $this->resolveWithScan(null, $spamRaw);
+		$this->eq('spam', $r['signal'], 'scanner down → the upstream verdict stands');
+		$r = $this->resolveWithScan(null, $hamBody);
+		$this->eq('none', $r['signal'], 'scanner down on an unflagged message → none');
+
+		// An empty raw is nothing to scan; do not spend a request on it.
+		$router = new ScriptedScanRouter();
+		$router->scan_result = $LOCAL_SPAM;
+		$m = new ReflectionMethod('InboundEmailRouter', 'resolveContentSpam');
+		$m->setAccessible(true);
+		$m->invoke($router, '', null);
+		check($router->scan_calls === 0, 'empty raw → the scanner is not called',
+			'scan_calls = ' . $router->scan_calls);
+
+		// Colocated: the milter already ran this exact scan, so ingest does not
+		// repeat it even with learning on.
+		$this->setUpstreamScanned(false);
+		$router = new ScriptedScanRouter();
+		$router->scan_result = $LOCAL_SPAM;
+		$m->invoke($router, $hamBody, null);
+		check($router->scan_calls === 0,
+			'colocated + learning on → no ingest re-scan (the milter already scored it)',
+			'scan_calls = ' . $router->scan_calls);
+
+		// --- reading an rspamd /checkv2 response ---
+		section('interpretScanResponse');
+		$r = $this->interpret('{"score":12.4,"required_score":6.0,"action":"add header"}');
+		$this->eq('spam', $r['signal'], 'action=add header → spam');
+		$this->eq(12.4, $r['score'], 'score read from the response');
+		$this->eq('spam', $this->interpret('{"score":30,"action":"reject"}')['signal'],
+			'action=reject → spam (an operator may have re-enabled it)');
+		$this->eq('spam', $this->interpret('{"score":8,"action":"rewrite subject"}')['signal'],
+			'action=rewrite subject → spam');
+		$this->eq('ham', $this->interpret('{"score":0.4,"required_score":6.0,"action":"no action"}')['signal'],
+			'action=no action → ham (an assertion the X-Spam header never makes)');
+		$this->eq('ham', $this->interpret('{"score":2.0,"action":"greylist"}')['signal'],
+			'action=greylist → ham (not a spam disposition here)');
+		// Score fallback for a response without an action.
+		$this->eq('spam', $this->interpret('{"score":7.5,"required_score":6.0}')['signal'],
+			'no action + score at or over required → spam');
+		$this->eq('ham', $this->interpret('{"score":5.9,"required_score":6.0}')['signal'],
+			'no action + score under required → ham');
+		$this->eq('spam', $this->interpret('{"score":6.0,"required_score":6.0}')['signal'],
+			'no action + score exactly at required → spam');
+		// Unreadable bodies must yield null so the caller falls back, never a guess.
+		$this->eq(null, $this->interpret('not json at all'), 'garbage body → null');
+		$this->eq(null, $this->interpret('{"error":"scan failed"}'), 'no score in the body → null');
+		$this->eq(null, $this->interpret('{"score":"high"}'), 'non-numeric score → null');
+		$this->eq(null, $this->interpret(''), 'empty body → null');
+
+		$this->setLearning(false);
+		$this->setUpstreamScanned(false);
+
+		// --- what the plugin manifest declares ---
+		// The factory defaults ARE the behavior on a fresh deployment, so they
+		// are worth asserting: a default that quietly reverts to 0 would file
+		// spam straight into the inbox on every new install.
+		section('declared settings');
+		$manifest = json_decode((string)file_get_contents(
+			PathHelper::getAbsolutePath('plugins/mailbox/plugin.json')), true);
+		$declared = array();
+		foreach (($manifest['settings'] ?? array()) as $s) {
+			$declared[(string)($s['name'] ?? '')] = (string)($s['default'] ?? '');
+		}
+		$this->eq('1', $declared['mailbox_spam_filtering_enabled'] ?? null,
+			'mailbox_spam_filtering_enabled ships on');
+		$this->eq('0', $declared['mailbox_spam_learning_enabled'] ?? null,
+			'mailbox_spam_learning_enabled ships off (it costs a scanner)');
+		check(!array_key_exists('mailbox_content_spam_filtering_enabled', $declared),
+			'the conflated content-scanner setting is gone from the manifest');
+		$this->eq('http://127.0.0.1:11334',
+			$declared['mailbox_rspamd_controller_url'] ?? null,
+			'the controller endpoint stays loopback');
+
+		// The health entry must point at the script that can actually fix it.
+		$prov = array();
+		foreach (($manifest['provisioners'] ?? array()) as $p) {
+			$prov[(string)($p['key'] ?? '')] = $p;
+		}
+		check(isset($prov['content_spam_scanner']), 'the scanner health entry exists');
+		$this->eq('provisioning/provision_spam_scanner.sh',
+			$prov['content_spam_scanner']['script'] ?? null,
+			'its fix command is the standalone scanner provisioner');
 	}
 }
 

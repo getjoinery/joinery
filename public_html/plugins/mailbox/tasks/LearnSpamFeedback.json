@@ -1,5 +1,5 @@
 {
     "name": "Train spam filter from corrections",
-    "description": "Reconciles manual Mark-as-spam / Not-spam corrections in the Mailbox Reader into rspamd's Bayes classifier. Runs every cron pass (every_run) but is a no-op unless content spam filtering is enabled; teaches each row whose verdict diverges from what was last taught, over the loopback rspamd controller.",
+    "description": "Reconciles manual Mark-as-spam / Not-spam corrections in the Mailbox Reader into rspamd's Bayes classifier. Runs every cron pass (every_run) but is a no-op unless this deployment learns from spam corrections; teaches each row whose verdict diverges from what was last taught, over the loopback rspamd controller.",
     "default_frequency": "every_run"
 }

@@ -476,9 +476,9 @@ identity and provisioning (provider, mail hostname/IP, SRS, the relay) live on t
 | `mailbox_forwarding_smtp_port` | (empty) | Falls back to `smtp_port` |
 | `mailbox_forwarding_smtp_username` | (empty) | Falls back to `smtp_username` |
 | `mailbox_forwarding_smtp_password` | (empty) | Falls back to `smtp_password` |
-| `mailbox_spam_filtering_enabled` | `0` | Act on auth verdicts to assign a spam verdict and split the inbox/Spam view. See [Spam filtering](#spam-filtering). |
-| `mailbox_content_spam_filtering_enabled` | `0` | Read the content scanner's signal (rspamd `X-Spam` header / webhook provider spam flag) into the spam verdict. Requires the master gate above. See [Content scanner](#content-scanner-rspamd). |
-| `mailbox_rspamd_controller_url` | `http://127.0.0.1:11334` | Loopback rspamd controller endpoint the spam/ham feedback loop POSTs learn requests to. No password (loopback-trusted). |
+| `mailbox_spam_filtering_enabled` | `1` | Move suspected spam to the Spam view. The one spam question; on by default. See [Spam filtering](#spam-filtering). |
+| `mailbox_spam_learning_enabled` | `0` | Learn from what users mark as spam; with it on, relay/webhook mail is re-scored at ingest through the tenant corpus. Clamped off whenever filing is off; offered only where a scanner is running (it ships with the mail stack). See [Content scanner](#content-scanner-rspamd). |
+| `mailbox_rspamd_controller_url` | `http://127.0.0.1:11334` | Loopback rspamd controller endpoint the ingest scan and the spam/ham feedback loop POST to. No password (loopback-trusted). |
 | `mailbox_relay_outbound_mode` | `provider` | On a relay-fronted deployment, where compose sends leave: `provider` (default — the configured provider's raw-MIME API, hiding the origin) or `smarthost` (through the relay over the tunnel; the deployment owns the relay IP's sending reputation). See [Outbound sending](#outbound-sending). |
 
 ## Plugin Structure
@@ -488,9 +488,12 @@ identity and provisioning (provider, mail hostname/IP, SRS, the relay) live on t
 ├── plugin.json
 ├── data/          — Domain, Alias, Log models (auto-create tables)
 ├── includes/      — InboundEmailRouter (processing), InboundEmailHealth,
-│                    InboundEmailSetupCheck (guided-setup verification engine), SRSRewriter
-├── utils/         — Postfix pipe script (inbound_email_handler.php)
-├── provisioning/  — Host setup: install_email.sh, render_pgsql_map.php
+│                    InboundEmailSetupCheck (guided-setup verification engine),
+│                    MailboxSpamPolicy (derived spam posture), SRSRewriter
+├── utils/         — Postfix pipe script (inbound_email_handler.php),
+│                    spam_policy.php (spam posture readout for shell sessions)
+├── provisioning/  — Host setup: install_email.sh, provision_spam_scanner.sh,
+│                    render_pgsql_map.php
 ├── admin/         — Admin pages (setup, aliases, alias edit, domains, logs)
 ├── logic/         — Logic files for admin pages
 ├── tasks/         — PurgeOldInboundEmailLogs scheduled task
@@ -1435,9 +1438,14 @@ guided controls provision, rebuild, enable/disable, and delete.
 
 With every domain fronted, the relay is the sole mail listener: the main box's
 Postfix/opendkim/opendmarc are decommissioned and port 25 closed — the box holding
-the data no longer exposes a mail listener. **rspamd stays**: deferred ingest
-still scores each message through rspamd's controller interface at parse time;
-only the milter mode is unused. The setup/health checks retarget to the relay
+the data no longer exposes a mail listener. **rspamd stays where it was
+running**: the scanner ships with the mail stack, so it is on every box that
+ever ran the mail installer, and the decommission leaves it alone — a learning
+deployment simply switches it from milter mode to scoring pulled mail over
+HTTP at ingest, carrying its Bayes corpus across the move with no reinstall.
+The relay scores regardless
+(`provision_relay.sh` installs rspamd unconditionally, stateless) and stamps
+its X-Spam header inside the sealed raw. The setup/health checks retarget to the relay
 (`checkRelayTunnel`, `checkRelaySpoolDraining`, `checkRelayMapFresh`) and add a
 deployment-wide origin-hidden check (`checkOriginHidden`) that fails if the main
 box IP appears in any hosted domain's mail DNS.
@@ -1452,8 +1460,14 @@ missing pieces), and the server-side re-check on POST remains the
 enforcement. The button runs `/usr/local/sbin/joinery-mail-listener off` — a
 narrow root helper installed by `provision_relay_main.sh` alongside the
 peer/addr helpers — which stops and disables Postfix/opendkim/opendmarc and
-closes 25/tcp at the firewall; after an uninstall a quiet state line offers
-**Reinstall local mail** (`on`, the always-safe inverse). The guardrails: an enabled relay exists, DNS has fully cut over
+closes 25/tcp at the firewall. After an uninstall the block goes quiet while a
+relay is still receiving mail — reinstalling would reopen attack surface no
+mail would use — and returns only once no enabled relay remains, as an amber
+warning that this server has no way left to receive mail plus **Reinstall
+local mail** (`on`, the always-safe inverse; it has no guardrails of its own).
+The one exception is a setting/reality mismatch: if port 25 answers while the
+record says uninstalled, the red block appears regardless of the relay and
+re-offers the uninstall. The guardrails: an enabled relay exists, DNS has fully cut over
 (`InboundEmailSetupCheck::relayCutoverState()`, the same evaluation behind the
 cutover-completion row), the spool pull is healthy
 (`checkRelaySpoolDraining`), and outbound does not lean on the local Postfix
@@ -1919,8 +1933,11 @@ bulk spam** (junk that passes its own DMARC/SPF/DKIM: lookalike domains, bulk ma
 from real ESPs, a compromised aligned account). All three feed the same
 `iem_spam_verdict`.
 
-Gated by `mailbox_spam_filtering_enabled` (default off), toggled on the
-**Settings** tab. When off, the verdict stays NULL and nothing changes.
+Gated by `mailbox_spam_filtering_enabled` (default **on**), toggled on the
+**Settings** tab as *Move suspected spam to the Spam view*. When off, the verdict
+stays NULL and nothing changes. Default-on is safe because the disposition is
+reviewable — spam is moved, never rejected, bounced, deleted, or forwarded — and
+because the auth verdicts it acts on are recorded for every message regardless.
 
 **Classification rule.** The router acts on the SPF/DKIM/DMARC verdicts it already
 records (it never computes them — see [Inbound authentication](#inbound-authentication-spf--dkim--dmarc)).
@@ -1977,24 +1994,108 @@ suppression. The signal is resolved per ingest path:
   `required_score`; tunable on the Setup tab). The raw score is recorded either way.
 - **IMAP-polled mail.** Unchanged — the remote already classified it (junk-folder mapping).
 
-Gated by `mailbox_content_spam_filtering_enabled` (default off), which **requires
-the master `mailbox_spam_filtering_enabled`** to be on — content filtering is a
-source feeding the same disposition. With the content gate off the milter may still stamp
-headers (harmless); the router ignores them.
+**Reading a verdict and computing one are separate concerns.** Whatever scanner
+verdict arrives with a message is always read: the `X-Spam` header a relay or a
+local milter stamped, or a webhook provider's own flag. That costs a header parse
+and needs no scanner here, so it works on every box whatever it runs. Whether any
+verdict changes a message's disposition is `mailbox_spam_filtering_enabled`'s
+call — with it off, the stored verdict stays NULL no matter what any scanner
+said.
+
+**Learning.** `mailbox_spam_learning_enabled` (default off, shown on the
+Settings tab as *Learn from what users mark as spam*, and only while filing is
+on) is the one advanced choice. It is the single capability no upstream scanner
+can provide: a Bayes corpus of **this deployment's own mail**, taught by its own
+users' corrections. A shared relay is deliberately stateless — one model trained
+across every tenant's mail would be both a privacy leak and a poisoning vector —
+so learning cannot be delegated upstream; it runs on the scanner that ships with
+the mail stack, whatever the topology.
+
+**Which mail is re-scored here.** With learning on, relay- and webhook-sourced
+messages are scanned again locally at ingest through the controller's `/checkv2`,
+and that verdict **replaces** the one that arrived with the message. Replacement
+rather than OR is the point: a Bayes-less relay verdict OR'd in could only ever
+add spam, never subtract it, so a user's *Not spam* corrections would never
+change a disposition. The local scanner runs the same static ruleset **plus** the
+tenant corpus, so it is strictly better informed, and only it can rescue a false
+positive. Colocated mail is not re-scored — its own milter already ran exactly
+that scan. A scanner that is absent, down or slow costs nothing: the upstream
+verdict stands, the message stores normally, and nothing is ever held, bounced or
+retried on the scanner's account.
+
+**The scanner ships with the mail stack.** `install_email.sh` installs rspamd +
+redis unconditionally on every box that hosts its own mail, and the platform
+never removes them, so enabling learning later is a pure settings toggle —
+nothing to install, no command to paste. There is no "scanner installed"
+setting: presence is observed (the controller answering on its port), and the
+Settings page offers the learning checkbox only where a scanner is running. A
+box with no local mail stack (webhook-only, or relay-fronted from birth) never
+ran a root script of ours and has none; learning is unavailable there — the
+checkbox is disabled with the reason — unless an operator hand-runs
+`provision_spam_scanner.sh install`.
+
+How the scanner is *used* is decided in software by `MailboxSpamPolicy`, and
+every consumer (the health probe, the learning task, the ingest scan, the admin
+pages) asks it rather than re-reading settings or re-deriving topology. The
+provider is read resolved (`InboundProviderRegistry::active()`), never as the
+raw `mailbox_provider` row, so an empty or misspelled setting cannot flip an
+answer. `learningEnabled()` is clamped by `filingEnabled()`, so "learning with
+nothing filing" is unreachable rather than merely discouraged — the stored row
+survives as a remembered preference and takes effect again when filing returns.
+
+| topology | provider | filing | learning | scoring path | re-scored at ingest |
+|---|---|---|---|---|---|
+| colocated | postfix | on | off | the box's own milter | no |
+| colocated | postfix | on | on | the milter, corpus included | no — the milter already scored it |
+| relay / fleet | postfix | on | off | the relay's stateless rspamd | no |
+| relay / fleet | postfix | on | on | relay, then re-scored here | yes |
+| any | webhook | on | off | the provider's own signal | no |
+| any | webhook | on | on | provider, then re-scored here | yes |
+| any | any | off | either | verdicts read but not filed | no |
 
 **Recorded score.** `iem_spam_score` (nullable) holds the scanner's/provider's numeric
 score as reported, for display and tuning only — **nothing in PHP ever branches on it**.
 The reader shows it on the message detail when present.
 
-**Provisioning (Postfix path only).** `provisioning/install_email.sh` installs `rspamd`
-and its `redis-server` dependency when the content gate is on, wires the milter on
-`inet:localhost:11332` after opendkim/opendmarc, pins the `X-Spam` header contract, puts
-the Bayes classifier on redis, and exposes the rspamd **controller** on loopback
-`127.0.0.1:11334` (trusted via `secure_ip` — **no password**, since a privileged learn
-command is authorized by originating inside the container). The
-`content_spam_scanner` provisioner (`InboundEmailHealth::checkContentSpamScanner`) probes
-the milter port. Webhook deployments install none of this — the provider scans upstream.
-rspamd queries DNS RBLs while scanning, so the host needs outbound DNS egress.
+**Provisioning.** `provisioning/provision_spam_scanner.sh install|remove|status` owns
+the scanner as a standalone, idempotent, verb-driven step. `install_email.sh` calls
+`install` unconditionally — the scanner is part of the mail stack — and re-running
+`install` is also the repair for config or milter-wiring drift. `install` installs
+`rspamd` and `redis-server`, pins the `X-Spam` header contract, sets
+header-stamping-only actions, puts the Bayes classifier on redis with autolearn, and
+exposes the rspamd **controller** on loopback `127.0.0.1:11334` (trusted via
+`secure_ip` — **no password**, since a privileged learn command is authorized by
+originating inside the container). It wires the milter on `inet:localhost:11332`
+after opendkim/opendmarc **only when Postfix is present**; on a box without local
+Postfix the scanner is HTTP-only and the milter worker idles. `remove` is an
+operator escape hatch the platform never runs or surfaces: it unwires the milter,
+deletes the joinery-managed `local.d` files and purges both packages — the corpus
+goes with redis deliberately, because it is the tenant's private model and Postgres
+holds the durable verdicts it rebuilds from. `status` prints machine-readable
+markers. `utils/spam_policy.php show` prints the resolved posture for a shell
+session. rspamd queries DNS RBLs while scanning, so the host needs outbound DNS
+egress.
+
+**Day 2: turning the scanner on and off.** Installed-ness is observed, never
+declared, so the `content_spam_scanner` provisioner
+(`InboundEmailHealth::checkContentSpamScanner`) compares two facts — *expected*
+(`localScannerExpected()`) and *present* (the controller answers):
+
+| expected | present | outcome |
+|---|---|---|
+| yes | yes | passes; on a colocated deployment the Postfix milter wiring is verified too, since a scanner installed while Postfix was absent never got wired |
+| yes | no | fails, naming `provision_spam_scanner.sh install` |
+| no | yes | passes — dead weight, not a fault; the Settings tab offers the removal command |
+| no | no | passes silently |
+
+So turning learning on shows a red row until the one install command is run; mail
+is unaffected in the meantime. Turning it off on a colocated box changes nothing
+on the host (the milter keeps scoring, it just stops being taught); on a
+relay/webhook box the scanner becomes unexpected and removal is offered. The
+listener-decommission and listener-restore helpers are untouched by any of this:
+decommissioning deliberately leaves rspamd alone so a learning deployment carries
+its corpus across the move, and restoring the listener surfaces any missing milter
+wiring through the drift check above.
 
 **redis is disposable.** The Bayes corpus lives in redis (the container's writable layer)
 and a recreate/rebuild wipes it. That is acceptable: the **durable** signal is
@@ -2007,14 +2108,19 @@ correctness requirement.
 spam**) is the whole trigger — there is no separate "report" control. Flipping
 `iem_spam_verdict` leaves the row *diverged* from `iem_learned_verdict` (the marker of
 what was last taught). The **`LearnSpamFeedback`** scheduled task (every cron pass, gated
-on the content setting) reconciles the divergence out-of-band: for each diverged row it
-POSTs the raw RFC822 to the controller's `/learnspam` | `/learnham` over loopback and, on
-success, stamps `iem_learned_verdict = iem_spam_verdict` so the row stops re-selecting.
-Flip-backs and idempotency fall out for free. Webhook-sourced rows and rows whose raw is
-gone (pruned, or IMAP reference-backed) are marked handled as permanent no-ops; a
-controller outage leaves rows diverged to retry on the next pass, so the loop self-heals
-rather than stranding corrections. (rspamd's classifier needs roughly 200 messages of each
-class before it contributes, so early corrections have little visible effect.)
+on `MailboxSpamPolicy::learningEnabled()`) reconciles the divergence out-of-band: for each
+diverged row it POSTs the raw RFC822 to the controller's `/learnspam` | `/learnham` over
+loopback and, on success, stamps `iem_learned_verdict = iem_spam_verdict` so the row stops
+re-selecting. Flip-backs and idempotency fall out for free. Every correction that still
+has a raw message teaches the corpus, whatever path the message arrived by —
+webhook- and IMAP-sourced rows included, since the corpus is a deployment-wide asset
+and the local scanner is what scores that mail. Rows whose raw is gone (pruned, IMAP
+reference-backed, or sealed out of reach of this keyless cron pass) are marked handled as
+permanent no-ops. A controller that is unreachable — not yet installed, or down — returns
+`skipped` and leaves rows diverged to retry on the next pass, so the loop self-heals
+through an outage and rebuilds the corpus after a wipe rather than stranding corrections.
+(rspamd's classifier needs roughly 200 messages of each class before it contributes, so
+early corrections have little visible effect.)
 
 ## AI security scan
 
