@@ -3,7 +3,9 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
- * @version 1.9 - Relay Fleet console link (mailbox plugin)
+ * @version 1.10 - Agent self-update surfacing: pending/refused/rolled-back
+ *                 alerts from the heartbeat row (specs/agent_release_channel.md)
+ *          1.9 - Relay Fleet console link (mailbox plugin)
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -87,6 +89,28 @@ $page->admin_header([
 $agent_online = $agent && $agent->is_online();
 $agent_class  = $agent_online ? 'success' : 'danger';
 $agent_label  = $agent_online ? 'Online'  : 'Offline';
+
+// Self-update surfacing: the agent reports what the shipped agent_dist offers
+// (bundled version) and its update state. A lagging or refused update is a
+// problem someone must see — the agent will never install an artifact that
+// fails signature verification.
+$agent_update_alert = '';
+$agent_update_class = 'warning';
+if ($agent_online) {
+	$update_state = $agent->get('ahb_update_state');
+	$bundled      = $agent->get('ahb_bundled_version');
+	if ($update_state === 'verify_failed') {
+		$agent_update_alert = "Agent update to v{$bundled} REFUSED: the shipped artifact failed checksum or signature verification. The agent will not retry until a corrected release is published.";
+		$agent_update_class = 'danger';
+	} elseif ($update_state === 'version_rejected') {
+		$agent_update_alert = "Agent v{$bundled} failed to start on this host and was rolled back; the agent is holding at v{$agent->get('ahb_agent_version')} until a newer release ships.";
+		$agent_update_class = 'danger';
+	} elseif ($update_state === 'unsigned_build') {
+		$agent_update_alert = "Agent v{$bundled} is available, but the running agent was built without an update key and cannot self-update. Reinstall once from a published build (Run Plugin Installers on this control plane).";
+	} elseif ($bundled && $agent->get('ahb_agent_version') && $bundled !== $agent->get('ahb_agent_version')) {
+		$agent_update_alert = "Agent update to v{$bundled} pending (running v{$agent->get('ahb_agent_version')}). The agent installs it automatically between jobs.";
+	}
+}
 ?>
 
 <!-- Agent Status Bar -->
@@ -120,6 +144,11 @@ $agent_label  = $agent_online ? 'Online'  : 'Offline';
 			<a href="/admin/server_manager/publish_upgrade" class="btn btn-sm btn-primary">Publish New Upgrade</a>
 		</div>
 	</div>
+	<?php if ($agent_update_alert): ?>
+		<div class="card-footer text-<?php echo $agent_update_class; ?>">
+			<small><?php echo htmlspecialchars($agent_update_alert); ?></small>
+		</div>
+	<?php endif; ?>
 	<?php if (!$agent_online): ?>
 		<div class="card-footer">
 			<small class="text-muted">

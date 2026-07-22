@@ -2,7 +2,9 @@
 /**
  * AgentHeartbeat - Tracks agent liveness for the server manager.
  *
- * @version 1.0
+ * @version 1.1 - ahb_bundled_version + ahb_update_state: the agent reports
+ *                what the shipped agent_dist offers and where its self-update
+ *                stands (specs/agent_release_channel.md).
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -17,6 +19,8 @@ class AgentHeartbeat extends SystemBase {
 		'ahb_agent_name'      => array('type'=>'varchar(100)', 'is_nullable'=>false, 'unique'=>true),
 		'ahb_last_heartbeat'  => array('type'=>'timestamp(6)'),
 		'ahb_agent_version'   => array('type'=>'varchar(20)'),
+		'ahb_bundled_version' => array('type'=>'varchar(20)'),
+		'ahb_update_state'    => array('type'=>'varchar(30)'),
 		'ahb_status'          => array('type'=>'varchar(20)'),
 		'ahb_create_time'     => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'ahb_update_time'     => array('type'=>'timestamp(6)'),
