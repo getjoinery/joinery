@@ -65,12 +65,12 @@ else
     ( umask 077; wg pubkey < "${PRIV}" > "${PUB}" )
 fi
 
-# --- 2. interface (dial-out only; peers are appended by the helper) -----------
+# --- 2. interface (dial-out only; the peer is set by the helper) --------------
 if [[ ! -f "/etc/wireguard/${WG_IF}.conf" ]]; then
     cat > "/etc/wireguard/${WG_IF}.conf" <<WGCONF
 [Interface]
 # Main-box side of the Joinery relay tunnel. No ListenPort: this box dials out.
-# Relay peers are appended by ${PEER_HELPER}.
+# The relay peer is set by ${PEER_HELPER}.
 PrivateKey = $(cat "${PRIV}")
 Address = ${WG_ADDR}
 WGCONF
@@ -89,9 +89,10 @@ systemctl start "wg-quick@${WG_IF}" 2>/dev/null || true  # peerless start is fin
 cat > "${PEER_HELPER}" <<'HELPER'
 #!/usr/bin/env bash
 # joinery-relay-peer <wireguard-public-key> <endpoint-host:port>
-# Adds (or refreshes) one Joinery relay as a WireGuard peer of jyrelay0 and
-# applies the config live. Installed by provision_relay_main.sh; invoked via
-# sudo by the provision job's result processor.
+# Makes the named relay THE WireGuard peer of jyrelay0 and applies the config
+# live, replacing whatever peer was there before. Installed by
+# provision_relay_main.sh; invoked via sudo by the provision job's result
+# processor.
 set -euo pipefail
 WG_IF="jyrelay0"
 CONF="/etc/wireguard/${WG_IF}.conf"
@@ -106,10 +107,17 @@ fi
 if [[ ! -f "${CONF}" ]]; then
     echo "joinery-relay-peer: ${CONF} missing - run provision_relay_main.sh first" >&2; exit 3
 fi
-if ! grep -qF "${KEY}" "${CONF}"; then
-    printf '\n[Peer]\nPublicKey = %s\nEndpoint = %s\nAllowedIPs = 10.99.0.1/32\nPersistentKeepalive = 25\n' \
-        "${KEY}" "${ENDPOINT}" >> "${CONF}"
-fi
+# The tunnel carries exactly ONE relay peer, pinned at 10.99.0.1/32. A rebuild
+# hands us a new key for that same address, so the peer set is REPLACED rather
+# than added to: two peers claiming one AllowedIPs address leaves WireGuard with
+# no deterministic route, and appending would strand a dead peer on every
+# rotation until the config held nothing but corpses.
+TMP="$(mktemp)"
+trap 'rm -f "${TMP}"' EXIT
+awk '/^[[:space:]]*\[Peer\]/{exit} {print}' "${CONF}" > "${TMP}"
+printf '\n[Peer]\nPublicKey = %s\nEndpoint = %s\nAllowedIPs = 10.99.0.1/32\nPersistentKeepalive = 25\n' \
+    "${KEY}" "${ENDPOINT}" >> "${TMP}"
+install -m 600 "${TMP}" "${CONF}"
 systemctl enable "wg-quick@${WG_IF}" >/dev/null 2>&1 || true
 if wg show "${WG_IF}" >/dev/null 2>&1; then
     wg syncconf "${WG_IF}" <(wg-quick strip "${WG_IF}")

@@ -2,6 +2,9 @@
 #
 # install_email.sh - host installer + base configurator for Mailbox.
 #
+# Version: 2.12 - Converge the relay tunnel helpers on every run (relay-fronted boxes
+#                only): they are installed copies, so a corrected provisioner that
+#                merely deploys would never replace a stale helper on disk
 # Version: 2.11 - Converge myhostname and milter AuthservID to mailbox_mail_hostname on every run
 # Version: 2.10 - Create /etc/opendkim on fresh boxes (package ships only opendkim.conf)
 # Version: 2.9 - Renamed for the Mailbox plugin (spec
@@ -681,6 +684,33 @@ if postfix check; then
 else
     echo "WARNING: 'postfix check' reported problems - NOT restarting. Review above." >&2
     exit 1
+fi
+
+# --- 9. relay tunnel helpers: converge them if this box fronts a relay --------
+# provision_relay_main.sh writes root helpers (joinery-relay-peer and its
+# siblings) into /usr/local/sbin. Those are INSTALLED COPIES, so shipping a
+# corrected script does not correct a helper already sitting on disk: without
+# this step a fix can deploy and still never take effect, and the box keeps
+# running whatever version happened to be installed the day someone last ran the
+# provisioner by hand. This installer IS the declared host_installer and runs on
+# deploys, so converge the helpers here.
+#
+# Only on a box that already carries relay identity, though — running the
+# provisioner unprompted would mint tunnel keys and register a WireGuard public
+# key on hosts that front no relay at all. Converge what exists; never conjure it.
+RELAY_MAIN="${SCRIPT_DIR}/provision_relay_main.sh"
+if [[ -f "/etc/wireguard/jyrelay0.conf" || -x "/usr/local/sbin/joinery-relay-peer" ]]; then
+    if [[ ! -f "${RELAY_MAIN}" ]]; then
+        echo "WARNING: relay identity present but ${RELAY_MAIN} is missing - helpers NOT converged." >&2
+    elif bash "${RELAY_MAIN}"; then
+        echo "Relay tunnel helpers converged."
+    else
+        # Never fail the mail install over this: the mail stack is configured and
+        # running by now, and the Setup tab surfaces a broken tunnel on its own.
+        echo "WARNING: relay helper convergence failed - run 'sudo bash ${RELAY_MAIN}' manually." >&2
+    fi
+else
+    echo "No relay identity on this box - skipping relay helper convergence."
 fi
 
 # --- summary -----------------------------------------------------------------

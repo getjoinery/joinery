@@ -19,6 +19,8 @@
  *
  * Test seams: $driver_factory and $runner are injectable statics.
  *
+ * @version 1.4 - instance labels name the relay (hostname + run id) instead of a
+ *                bare counter; forgetHostKey on binding a row to a new machine
  * @version 1.3
  */
 
@@ -30,6 +32,7 @@ require_once(PathHelper::getIncludePath('includes/cloud_compute/LinodeComputeDri
 class RelayCloudProvisioner {
 
 	const BOOT_TIMEOUT_SECONDS = 1800; // instance create -> running + IP
+	const LABEL_MAX_LENGTH = 64;       // provider cap on an instance label (Linode)
 
 	/** @var callable|null fn(RelayCloudProvision): CloudComputeProvider — test seam. */
 	public static $driver_factory = null;
@@ -53,6 +56,37 @@ class RelayCloudProvisioner {
 		}
 	}
 
+	/**
+	 * The provider-side instance label.
+	 *
+	 * Cosmetic to the platform — every lookup, destroy and reverse-DNS call keys
+	 * on the numeric instance id, never on this — but it is the ONLY thing
+	 * naming a box in the provider's dashboard, so it carries the relay's mail
+	 * hostname instead of a bare counter that says nothing about what the
+	 * machine is or whether it is the live one.
+	 *
+	 * The run id stays on the end because a rebuild creates the replacement
+	 * while the predecessor is still running (retiring the old box is a
+	 * deliberate manual act), and provider labels must be unique within an
+	 * account: a bare hostname would collide and fail the create on every
+	 * rotation. Hostname for humans, suffix for the provider.
+	 */
+	public static function instanceLabel(string $mail_hostname, int $run_id): string {
+		$suffix = '-' . $run_id;
+		$slug = preg_replace('/[^a-z0-9]+/', '-', strtolower(trim($mail_hostname)));
+		$slug = trim((string)$slug, '-');
+		if ($slug === '') {
+			return 'joinery-relay' . $suffix;
+		}
+		// Providers cap label length (Linode: 64). The suffix is what guarantees
+		// uniqueness, so it is kept whole and the readable half gives way.
+		$max = self::LABEL_MAX_LENGTH - strlen($suffix);
+		if (strlen($slug) > $max) {
+			$slug = rtrim(substr($slug, 0, $max), '-');
+		}
+		return $slug . $suffix;
+	}
+
 	// ------------------------------------------------------------ transitions
 
 	/** ready -> booting: create the instance on the customer's account. */
@@ -70,7 +104,8 @@ class RelayCloudProvisioner {
 
 		try {
 			$instance = $driver->createInstance(array(
-				'label'           => 'joinery-relay-' . intval($run->key),
+				'label'           => self::instanceLabel(
+					(string)$run->get('rcp_mail_hostname'), intval($run->key)),
 				'region'          => (string)$run->get('rcp_region'),
 				'type'            => (string)$run->get('rcp_instance_type'),
 				'image'           => $this->imageId(),
@@ -254,6 +289,11 @@ class RelayCloudProvisioner {
 				break;
 			}
 		}
+		// No row for this instance means the tunnel address is changing hands:
+		// a different machine is about to answer on 10.99.0.1 with its own SSH
+		// host key, and the previous relay's key must be forgotten or every
+		// connection fails with REMOTE HOST IDENTIFICATION HAS CHANGED.
+		$is_new_machine = ($relay === null);
 		if ($relay === null) {
 			$relay = new MailboxRelay(NULL);
 			// Born enabled: the relay starts pulling and receives its address
@@ -283,6 +323,9 @@ class RelayCloudProvisioner {
 		$relay->set('mrl_cloud_provider', (string)$run->get('rcp_provider'));
 		$relay->set('mrl_cloud_instance_id', (string)$run->get('rcp_instance_id'));
 		$relay->save();
+		if ($is_new_machine) {
+			RelaySsh::forgetHostKey((string)$relay->get('mrl_host'));
+		}
 		// Mint the ambient transport keypair now so the first map push can seal
 		// Standard/Private mail immediately once enabled.
 		$relay->ensureTransportKeypair();
