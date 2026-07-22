@@ -188,7 +188,7 @@ Health dot colors reflect actual server health, not check recency:
 | `delete_backup` | Delete backup files from local, cloud, or both | **Yes** |
 | `copy_database` | Dump source DB, transfer, restore on target | **Yes** |
 | `restore_database` | Restore a backup file on a node | **Yes** |
-| `restore_project` | Restore a full project `.tar.gz` (files + DB + Apache config) in place on an existing node. Runs `restore_project.sh --force`, which cascades `--non-interactive` into `restore_database.sh`. Pre-restore snapshots of DB and files written to `/backups/auto_pre_project_restore_*` | **Yes** |
+| `restore_project` | Restore a full project `.tar.gz` (files + DB + Apache config) in place on an existing node. Runs `restore_project.sh --force`, which cascades `--non-interactive` into `restore_database.sh`. Pre-restore snapshots of DB and files written to `/backups/auto_pre_project_restore_*`. Every file in the archive must exist under the project directory afterwards or the restore fails and names what is missing | **Yes** |
 | `apply_update` | Run `upgrade.php` on target | **Yes** |
 | `publish_upgrade` | Run `publish_upgrade.php` locally on control plane (in plugin) | No |
 | `discover_nodes` | Scan a remote host for Joinery instances (Docker + bare metal) | No |
@@ -214,6 +214,17 @@ Two install types:
 - **From Backup**: fresh install + restore of a source node's DB and project files. Target inherits the source's domain — admin cuts over DNS after install. Use source admin credentials to log in.
 
 The job composes existing primitives: the installer artifacts from `maintenance_scripts/install_tools/` are packaged locally, SCP'd, extracted on the target, and `install.sh -y -q site SITENAME - DOMAIN` runs non-interactively. Docker installs add a follow-up step that invokes `manage_domain.sh set SITENAME DOMAIN --no-ssl` on the target to auto-install Apache + mod_proxy (if missing) and wire up an HTTP reverse proxy on port 80 — so the site is reachable at `http://DOMAIN/` as soon as DNS points here. SSL stays a separate admin step (`certbot --apache -d DOMAIN` on the target). For From-Backup, source backups are captured (or an existing cached backup is used), fetched to the control plane, and pushed to the target after install.
+
+From-Backup restores files by extracting the source archive with **both** of its
+leading path components stripped, taking only the `project_files/` subtree —
+`backup_project.sh` writes archives as `{backup_name}/project_files/{public_html,
+uploads,config,...}` with the archive's own metadata (`apache_config/`,
+`backup_info.txt`, the `.sql` dump) as siblings. The target keeps its own
+`Globalvars_site.php`. A verification step then requires every regular file the
+archive carries to exist at the site root and fails the job otherwise, because a
+clone whose files did not land still serves pages: the fresh install ran first
+and the database restore succeeded, so the only symptom is uploaded files
+missing from where the restored database says they are.
 
 The `mgn_install_state` column tracks the lifecycle: `installing` → `NULL` (success) or `install_failed` (failure). On failure, the node detail page surfaces a **Retry Install** button; the target must be cleaned manually (e.g. `rm -rf /var/www/html/SITENAME`) before retry because `install.sh` refuses to overwrite an existing site. Postgres passwords are auto-generated and stored in the target's `Globalvars_site.php` — Server Manager does not capture or display them.
 
