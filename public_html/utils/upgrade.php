@@ -1092,13 +1092,35 @@
 				}
 			}
 
-			// Remove this run's downloaded core archive (staging is cleared and we're
-			// past the point of needing the tarball). isset() guards the self-update
-			// resume path, which skips the download block and never sets this.
-			if (isset($file_download_location) && file_exists($file_download_location)) {
-				if (@unlink($file_download_location)) {
-					if ($verbose) upgrade_echo('Removed downloaded core archive: ' . basename($file_download_location) . '<br>');
+			// Purge the whole downloaded-upgrade-package cache in uploads/. The
+			// deploy has succeeded and the staging area is cleared, so nothing
+			// needs these tarballs anymore; a fresh upgrade always re-downloads.
+			// This clears not just this run's core archive but every earlier
+			// version left behind by past upgrades (they accumulated because only
+			// the current download was ever removed). Consumer-side only: served
+			// archives on a publisher live in static_files/, never uploads/, so
+			// this can never touch what a control plane hands out. Non-fatal —
+			// the deploy already succeeded.
+			$upload_cache_dir = $full_site_dir . '/uploads';
+			$cached_pkgs = array_merge(
+				glob($upload_cache_dir . '/joinery-core-*.tar.gz')   ?: array(),
+				glob($upload_cache_dir . '/joinery-plugin-*.tar.gz') ?: array(),
+				glob($upload_cache_dir . '/joinery-theme-*.tar.gz')  ?: array(),
+				glob($upload_cache_dir . '/*.upg.zip')               ?: array()
+			);
+			$purged_count = 0;
+			$purged_bytes = 0;
+			foreach ($cached_pkgs as $pkg) {
+				if (!is_file($pkg)) continue;
+				$pkg_size = @filesize($pkg);
+				if (@unlink($pkg)) {
+					$purged_count++;
+					$purged_bytes += (int) $pkg_size;
 				}
+			}
+			if ($verbose && $purged_count > 0) {
+				upgrade_echo('Purged ' . $purged_count . ' cached upgrade package(s) from uploads/ ('
+					. round($purged_bytes / 1024 / 1024, 1) . ' MB freed)<br>');
 			}
 
 		// ============================================
