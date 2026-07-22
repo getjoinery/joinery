@@ -12,7 +12,7 @@
  * the mailbox_local_listener setting ('active' | 'decommissioned') so the
  * setup and health checks can compare expectation with reality.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 /** The recorded listener state: 'active' (factory) or 'decommissioned'. */
@@ -38,15 +38,18 @@ function mailbox_listener_helper_path(): string {
 
 /**
  * Everything the "Local mail listener" box needs: the recorded state, the
- * live port-25 reality, whether the helper is installed, and — while the
- * listener is still active — the guardrail verdict for the Decommission button.
+ * live port-25 reality, whether the helper is installed, whether a relay is
+ * still receiving mail for this deployment, and — while the listener is still
+ * active — the guardrail verdict for the Decommission button.
  */
 function mailbox_listener_state(): array {
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
 	$setting = mailbox_listener_setting();
 	$state = array(
 		'setting'          => $setting,
 		'listening'        => mailbox_listener_port25_listening(),
 		'helper_installed' => is_file(mailbox_listener_helper_path()),
+		'relay_enabled'    => (MailboxRelay::active() !== null),
 		'guardrail_failures' => array(),
 	);
 	if ($setting === 'active') {
@@ -216,8 +219,10 @@ function mailbox_listener_actions(array $input, $session, string $self_url): ?Lo
  * The local-mail block (Setup tab's Relay section). Shown only when there is
  * something actionable: the amber uninstall offer once every guardrail passes
  * (a refusal renders NOTHING — the Setup rows already walk the missing
- * pieces), and, after an uninstall, a small state line so Restore is always
- * reachable. The server-side guardrail re-check on POST stays the enforcement.
+ * pieces), and, after an uninstall, the reinstall offer only once no relay is
+ * receiving mail — while one is, reinstalling would reopen attack surface
+ * nothing would use. The server-side guardrail re-check on POST stays the
+ * enforcement.
  */
 function mailbox_listener_box_render($page, array $state): void {
 	if ($state['setting'] === 'decommissioned') {
@@ -233,14 +238,22 @@ function mailbox_listener_box_render($page, array $state): void {
 				. '</div>';
 			return;
 		}
-		echo '<div style="margin-top:1rem;">'
-			. '<p class="text-muted">Local mail is uninstalled — mail reaches this server only through your relay. '
+		// A relay is still receiving mail, so there is nothing to offer and
+		// nothing to say: reinstalling would reopen attack surface no mail
+		// would ever use. The offer appears only once the relay is gone and
+		// this server has no way left to receive mail.
+		if (!empty($state['relay_enabled'])) {
+			return;
+		}
+		echo '<div class="alert alert-warning" style="margin-top:1rem;">'
+			. '<p>No relay is receiving mail for this server and local mail is uninstalled, so nothing can '
+			. 'deliver mail here. Set up a relay above, or put mail back on this server directly.</p>'
 			. PublicPageBase::action_button('Reinstall local mail', '', array(
 				'hidden'  => array('action' => 'listener_restore'),
 				'confirm' => 'Reinstall local mail? Postfix, opendkim and opendmarc start again and port 25 reopens.',
-				'class'   => 'btn btn-secondary btn-sm',
+				'class'   => 'btn btn-warning btn-sm',
 			))
-			. '</p></div>';
+			. '</div>';
 		return;
 	}
 

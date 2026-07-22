@@ -16,7 +16,7 @@
  *
  * Run: php tests/run.php db --filter=listener_decommission
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -150,26 +150,52 @@ $render = function (array $state): string {
 	return (string)ob_get_clean();
 };
 
-$html = $render(array('setting' => 'decommissioned', 'listening' => false, 'helper_installed' => true, 'guardrail_failures' => array()));
+$html = $render(array('setting' => 'decommissioned', 'listening' => false, 'helper_installed' => true,
+	'relay_enabled' => false, 'guardrail_failures' => array()));
 check(strpos($html, 'Reinstall local mail') !== false && strpos($html, 'listener_restore') !== false,
-	'uninstalled + silent port renders the Reinstall action');
+	'uninstalled + no relay renders the Reinstall action');
+check(strpos($html, 'nothing can deliver mail here') !== false,
+	'the reinstall offer names the consequence: no inbound path at all', $html);
 
-$html = $render(array('setting' => 'decommissioned', 'listening' => true, 'helper_installed' => true, 'guardrail_failures' => array()));
+$html = $render(array('setting' => 'decommissioned', 'listening' => false, 'helper_installed' => true,
+	'relay_enabled' => true, 'guardrail_failures' => array()));
+check(trim($html) === '',
+	'uninstalled while a relay still receives mail renders nothing — reinstalling has no purpose', $html);
+
+$html = $render(array('setting' => 'decommissioned', 'listening' => true, 'helper_installed' => true,
+	'relay_enabled' => true, 'guardrail_failures' => array()));
 check(strpos($html, 'answers') !== false && strpos($html, 'listener_decommission') !== false,
-	'uninstalled + answering port surfaces the mismatch and offers the uninstall again');
+	'uninstalled + answering port surfaces the mismatch even with a relay up');
 
-$html = $render(array('setting' => 'active', 'listening' => true, 'helper_installed' => true, 'guardrail_failures' => array()));
+$html = $render(array('setting' => 'decommissioned', 'listening' => true, 'helper_installed' => true,
+	'relay_enabled' => false, 'guardrail_failures' => array()));
+check(strpos($html, 'answers') !== false && strpos($html, 'listener_decommission') !== false,
+	'the setting/reality mismatch outranks the relay question');
+
+$html = $render(array('setting' => 'active', 'listening' => true, 'helper_installed' => true,
+	'relay_enabled' => true, 'guardrail_failures' => array()));
 check(strpos($html, 'Uninstall local mail') !== false && strpos($html, 'alert-warning') !== false,
 	'green guardrails render the amber uninstall offer');
 
-$html = $render(array('setting' => 'active', 'listening' => true, 'helper_installed' => true,
+$html = $render(array('setting' => 'active', 'listening' => true, 'helper_installed' => true, 'relay_enabled' => false,
 	'guardrail_failures' => array('No enabled relay fronts this deployment — the listener is its only way to receive mail.')));
 check(trim($html) === '',
 	'guardrail failures render nothing at all (the Setup rows carry the missing pieces)');
 
-$html = $render(array('setting' => 'active', 'listening' => true, 'helper_installed' => false, 'guardrail_failures' => array()));
+$html = $render(array('setting' => 'active', 'listening' => true, 'helper_installed' => false,
+	'relay_enabled' => true, 'guardrail_failures' => array()));
 check(trim($html) === '',
 	'missing helper renders nothing at all');
+
+section('the state assembler reports the relay fact');
+
+harness_set_setting_mem('mailbox_local_listener', 'decommissioned');
+$assembled = mailbox_listener_state();
+check(array_key_exists('relay_enabled', $assembled) && is_bool($assembled['relay_enabled']),
+	'mailbox_listener_state carries relay_enabled as a bool');
+check($assembled['relay_enabled'] === (MailboxRelay::active() !== null),
+	'relay_enabled tracks the active relay, not a re-derivation');
+harness_set_setting_mem('mailbox_local_listener', 'active');
 
 section('helper runner');
 

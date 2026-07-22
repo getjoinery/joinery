@@ -17,7 +17,7 @@
  *
  * Run: php tests/run.php db --filter=relay_cloud_provision
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -155,7 +155,14 @@ class RelayCloudProvisionTest {
 		check((string)$run->get('rcp_status') === 'booting', 'ready -> booting');
 		check((string)$run->get('rcp_instance_id') === 'fake-1', 'instance id recorded at create');
 		check(!empty($this->driver->instances['fake-1']['authorized_keys'][0]), 'per-run public key injected at create');
-		check(strpos((string)$this->driver->instances['fake-1']['label'], 'joinery-relay-') === 0, 'instance label names the platform');
+		// The naming RULES belong to relay_instance_label_test; what matters here is
+		// that create() is fed this run's own hostname and id, so each rebuild gets a
+		// distinct label instead of colliding with its predecessor.
+		$expect_label = RelayCloudProvisioner::instanceLabel(
+			(string)$run->get('rcp_mail_hostname'), intval($run->key));
+		check((string)$this->driver->instances['fake-1']['label'] === $expect_label,
+			'instance label is built from this run\'s hostname and id',
+			'got ' . (string)$this->driver->instances['fake-1']['label'] . ', want ' . $expect_label);
 
 		$p->advance($run);
 		check((string)$run->get('rcp_status') === 'booting', 'not running yet stays booting');
