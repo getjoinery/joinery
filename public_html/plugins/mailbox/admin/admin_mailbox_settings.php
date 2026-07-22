@@ -6,7 +6,7 @@
  * retention/storage caps. One form, grouped into boxes, saved in a single POST.
  * Provisioning and server identity live on the Setup tab, not here.
  *
- * @version 1.0
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -33,11 +33,31 @@ echo $form->begin_form();
 $form->hiddeninput('save_settings', '', array('value' => '1'));
 
 // --- Spam filtering ---
+// One question, plus one genuinely optional capability. Where the scanning
+// happens is SHOWN, not asked — it follows from the deployment's topology.
+// Learning is offered only where a scanner is running (it ships with the mail
+// stack, so that is every box hosting its own mail); elsewhere the checkbox is
+// disabled and the state line says why. A disabled checkbox never posts — the
+// logic writes the learning setting only while the scanner is present.
 $page->begin_box(array('title' => 'Spam filtering'));
-$form->checkboxinput('mailbox_spam_filtering_enabled', 'Move spam to the spam folder', array(
+// Saved state, above the controls: below them it would read as a consequence of
+// the checkbox just ticked and contradict it until the form is saved.
+echo '<p class="text-muted small">' . htmlspecialchars($scanner_state) . '</p>';
+$form->checkboxinput('mailbox_spam_filtering_enabled', 'Move suspected spam to the Spam view', array(
 	'checked'   => $values['mailbox_spam_filtering_enabled'],
-	'help_text' => 'Acts on the SPF/DKIM/DMARC verdicts already recorded for each message. '
-		. 'Suspected spam is moved to the Spam view and is not forwarded — it is never rejected or deleted.',
+	'helptext'  => 'Suspected spam is moved out of the inbox and is not forwarded. It is never '
+		. 'rejected, bounced or deleted, so a wrong guess costs a click.',
+	'visibility_rules' => array(
+		'checked'   => array('show' => array('mailbox_spam_learning_enabled')),
+		'unchecked' => array('hide' => array('mailbox_spam_learning_enabled')),
+	),
+));
+$form->checkboxinput('mailbox_spam_learning_enabled', 'Learn from what users mark as spam', array(
+	'checked'   => $values['mailbox_spam_learning_enabled'],
+	'disabled'  => !$scanner_present,
+	'helptext'  => 'Corrections in the reader train a spam filter on this deployment\'s own mail. '
+		. 'What it learns is yours alone — a shared relay is deliberately stateless and cannot '
+		. 'learn for you.',
 ));
 $page->end_box();
 
@@ -61,7 +81,7 @@ $page->end_box();
 $page->begin_box(array('title' => 'Forwarded mail display'));
 $form->checkboxinput('mailbox_from_show_via', 'Show "via Site Name" in the From line of forwarded mail', array(
 	'checked'   => $values['mailbox_from_show_via'],
-	'help_text' => 'Off shows just the original sender name. The From address is the site\'s verified '
+	'helptext'  => 'Off shows just the original sender name. The From address is the site\'s verified '
 		. 'address either way (required for deliverability); the original sender stays in Reply-To.',
 ));
 $page->end_box();
@@ -84,7 +104,7 @@ if (!empty($show_relay_config)) {
 	$page->begin_box(array('title' => 'Hosted relay connection'));
 	$form->textinput('mailbox_fleet_service_url', 'Relay service URL', array(
 		'value' => $values['mailbox_fleet_service_url'], 'placeholder' => 'https://getjoinery.com',
-		'help_text' => 'The service this deployment rents its relay spot from. Enrollment itself happens on the Setup tab.',
+		'helptext'  => 'The service this deployment rents its relay spot from. Enrollment itself happens on the Setup tab.',
 	));
 	$form->textinput('mailbox_fleet_api_public_key', 'API public key', array(
 		'value' => $values['mailbox_fleet_api_public_key'],

@@ -1,7 +1,7 @@
 {
     "name": "Mailbox",
     "description": "Self-hosted email: receiving, forwarding, local mailboxes, webmail reader, IMAP sync, DKIM/SRS",
-    "version": "1.48.3",
+    "version": "1.49.1",
     "author": "Joinery",
     "receives_upgrades": true,
     "included_in_publish": true,
@@ -86,13 +86,13 @@
         },
         {
             "key": "content_spam_scanner",
-            "label": "Content spam scanner (rspamd)",
-            "details": "Optional. rspamd milter scores inbound mail for content spam and stamps X-Spam; the router reads it into the spam verdict. Webhook providers supply their own spam signal instead.",
+            "label": "Spam scanner on this server",
+            "details": "Ships with the mail stack: install_email.sh installs rspamd + redis unconditionally, so spam learning can be enabled later as a pure settings toggle. Verified answering, and wired into Postfix's milter chain where this server receives mail directly. A box with no local mail stack (webhook-only, relay-fronted from birth) needs none and is not checked. provision_spam_scanner.sh install repairs drift; boxes provisioned before the scanner shipped with the stack get it the same way.",
             "check": {
                 "type": "code",
                 "call": "InboundEmailHealth::checkContentSpamScanner"
             },
-            "script": "provisioning/install_email.sh"
+            "script": "provisioning/provision_spam_scanner.sh"
         },
         {
             "key": "relay_tunnel",
@@ -239,10 +239,10 @@
         },
         {
             "name": "mailbox_spam_filtering_enabled",
-            "default": "0"
+            "default": "1"
         },
         {
-            "name": "mailbox_content_spam_filtering_enabled",
+            "name": "mailbox_spam_learning_enabled",
             "default": "0"
         },
         {
