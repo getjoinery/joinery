@@ -20,20 +20,35 @@ The plugin creates its database tables automatically: `mgn_managed_nodes`, `mjb_
 
 ### 2. Install and start the Go agent
 
-#### Build
+#### Release channel (how the agent normally arrives and stays current)
+
+The agent ships inside the platform release. Publishing an upgrade bundles a signed agent artifact into `plugins/server_manager/agent_dist/`:
+
+- `manifest.json` — agent version plus, per architecture, the artifact filename, its sha256, and an Ed25519 signature over the raw binary
+- `joinery-agent-linux-amd64.gz` / `joinery-agent-linux-arm64.gz` — the binaries
+- `joinery-agent.service` — the systemd unit
+
+On the publishing control plane, `publish_upgrade.php` cross-compiles both architectures from the checkout named by the `server_manager_agent_source_path` setting (default `/home/user1/joinery-agent`) whenever the source version differs from the bundled one, and signs them with the key at `{site root}/config/agent_signing_key` (generated on first publish; the `.pub` sibling holds the base64 public key that gets baked into the built agent). A control plane without the agent source carries the existing artifact forward unchanged — publishing never depends on a Go toolchain being present.
+
+**First install** is handled by the plugin's `host_installer` (`provisioning/install_agent.sh`), which runs at every root moment — site install, code upgrade, container start, and the node-detail **Run Plugin Installers** action. It installs the bundled binary, writes the env file with the right `JOINERY_CONFIG`, and sets up systemd or cron supervision automatically.
+
+**Every later version change is handled by the agent itself.** Between jobs, the agent compares its own version with the bundled manifest. When they differ, it decompresses the artifact, checks the sha256, verifies the Ed25519 signature against the public key embedded in its binary, keeps the current binary as `.bak`, renames the new one into place, and exits cleanly for its supervisor to restart. The signature check is the security boundary: the site tree is writable by the web user while the agent runs as root, so the agent never installs anything the publisher did not sign. An artifact that fails verification is refused, logged under a `=== Self-update ===` header, and not retried until the manifest changes.
+
+If the new binary fails to initialise (config, DB, or schema), it restores the `.bak` over itself and records the bad version in a `.rejected` marker — the supervisor restarts the previous working agent, and that version is never reinstalled; the next release supersedes the rejection. On the first fully healthy start after an update, the `.bak` and any stale marker are removed.
+
+The dashboard's Agent Status bar surfaces all of this from the heartbeat row (`ahb_bundled_version`, `ahb_update_state`): a pending update, a refused (verification-failed) artifact, a rolled-back version, or an agent built without an update key.
+
+#### Manual install (bootstrap fallback)
+
+For a control plane that has no bundled artifact yet, build and install by hand:
 
 ```bash
 cd /home/user1/joinery-agent
-make release VERSION=1.0.0
-```
-
-This compiles the binary and packages it into `joinery-agent-installer.sh` — a self-extracting script that handles both fresh installs and upgrades.
-
-#### Install
-
-```bash
+PUBKEY=$(cat /var/www/html/joinerytest/config/agent_signing_key.pub) make release
 sudo bash joinery-agent-installer.sh --verbose [--config /path/to/Globalvars_site.php]
 ```
+
+`make release` compiles the binary (passing `PUBKEY` bakes in the update-verification key so the manual build can still self-update later) and packages it into `joinery-agent-installer.sh`, a self-extracting script that handles both fresh installs and upgrades with automatic rollback if the new version fails to start.
 
 The installer detects the host's supervision capability:
 
@@ -89,13 +104,7 @@ Common startup errors are self-explanatory — missing `DB_NAME`, wrong password
 
 #### Upgrade
 
-```bash
-cd /home/user1/joinery-agent
-make release VERSION=1.x.x
-sudo bash joinery-agent-installer.sh --verbose
-```
-
-The installer auto-detects upgrades: stops the service, swaps the binary, restarts, and rolls back automatically if the new version fails to start.
+Agents upgrade themselves from the bundled artifact after each platform release lands (see **Release channel** above). The manual-install path also accepts upgrades: re-running the generated installer stops the service, swaps the binary, restarts, and rolls back automatically if the new version fails to start.
 
 ### 3. Add managed nodes
 

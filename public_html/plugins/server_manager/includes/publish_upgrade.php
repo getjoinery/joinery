@@ -496,6 +496,16 @@
 		}
 
 		// =====================================================
+		// Bundle the management agent artifact (release channel)
+		// Runs before plugin archives so the fresh agent_dist is
+		// captured in the server_manager plugin archive and its
+		// tree hash.
+		// =====================================================
+		publish_output("\nBundling management agent artifact...");
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/AgentDistPublisher.php'));
+		AgentDistPublisher::publish($full_site_dir, 'publish_output');
+
+		// =====================================================
 		// Create individual PLUGIN archives
 		// =====================================================
 		publish_output("\nCreating individual plugin archives...");
