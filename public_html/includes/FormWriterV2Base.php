@@ -7,7 +7,8 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
- * @version 2.11.0
+ * @version 2.12.0
+ * @changelog 2.12.0 - getDefaultFormAction() keeps the query string, matching the browser default for a form with no explicit action (a stripped query orphaned POST handlers that read $_GET context like ?mgn_id=)
  * @changelog 2.10.0 - buildAjaxSelectScript() speaks the /api/v1 action contract for /api/v1/ endpoints (POST {q, ...}, CSRF header, read data.items); query-string suffixes fold into the POST body. Legacy GET ?q= array contract retained for other URLs
  * @changelog 2.9.0 - outputJavascriptValidation() emits `remote` rules (and `custom` rules carrying a url) to the client `remote` validator, which speaks the /api/v1 JSON-envelope contract for API-action URLs
  * @changelog 2.8.0 - Added fromDescriptor() to render a form body from a *_logic_descriptor() input map (scaffolding generator)
@@ -197,26 +198,31 @@ abstract class FormWriterV2Base {
      * Get default form action based on current page
      *
      * Automatically determines the form's action attribute if none is specified.
-     * Returns the current page URL without the .php extension (for routing compatibility).
+     * Returns the current page URL without the .php extension (for routing
+     * compatibility), query string included — a form with no explicit action
+     * posts back to the full current URL, matching browser behavior, so page
+     * context carried in the query (e.g. ?mgn_id=) survives the round trip.
      *
      * @return string The form action URL
      */
     protected function getDefaultFormAction() {
-        // Get the current request URI from $_SERVER
-        // The routing system removes .php extensions, so we need to reconstruct the URL
-
         if (isset($_SERVER['REQUEST_URI'])) {
             $uri = $_SERVER['REQUEST_URI'];
 
-            // Remove query string if present
-            $uri = strtok($uri, '?');
+            // Split off the query string so the .php check sees the bare path
+            $query = '';
+            $qpos = strpos($uri, '?');
+            if ($qpos !== false) {
+                $query = substr($uri, $qpos);
+                $uri = substr($uri, 0, $qpos);
+            }
 
             // Remove .php extension if present (for backward compatibility with direct .php calls)
             if (substr($uri, -4) === '.php') {
                 $uri = substr($uri, 0, -4);
             }
 
-            return $uri;
+            return $uri . $query;
         }
 
         // Fallback: return empty string (form posts to itself)

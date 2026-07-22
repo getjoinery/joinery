@@ -156,7 +156,7 @@ The node detail page (`/admin/server_manager/node_detail?mgn_id=N&tab=...`) has 
 | Tab | Purpose |
 |-----|---------|
 | **Overview** | Status summary (health dot, disk/memory/load/postgres/version), action buttons (Check Status, Test Connection), recent jobs for this node, connection settings (collapsed by default), delete node. The Actions dropdown also offers **Run Plugin Installers** — queues a `run_plugin_installers` job that executes every active plugin's declared `host_installer` on the node as root (idempotent); this is how a bare-metal node picks up system-service configuration (e.g. the mail stack) after a plugin is activated, since it has no container-start moment |
-| **Backups** | Target indicator, run database/project backup, fetch backup file, backup file browser with scan and delete, restore full project from a `.tar.gz` archive |
+| **Backups** | Target indicator, run database/project backup, backup file browser with scan and delete, restore full project from a `.tar.gz` archive |
 | **Database** | Copy database from another node to this one, restore from backup file |
 | **Updates** | Version comparison (node vs control plane), apply update |
 | **Jobs** | Job history filtered to this node, with status and type filters |
@@ -183,7 +183,6 @@ Health dot colors reflect actual server health, not check recency:
 | `check_status` | SSH-probe disk, memory, uptime, PostgreSQL, version; subsumes the old `test_connection` since its first step is the SSH handshake | No |
 | `backup_database` | Run `backup_database.sh`, optionally upload to cloud | No |
 | `backup_project` | Run `backup_project.sh` (DB + files + Apache config), optionally upload | No |
-| `fetch_backup` | SCP a backup file from remote to control plane | No |
 | `list_backups` | List backup files on local server and cloud target | No |
 | `delete_backup` | Delete backup files from local, cloud, or both | **Yes** |
 | `copy_database` | Dump source DB, transfer, restore on target | **Yes** |
@@ -455,8 +454,8 @@ All job-type intelligence lives in `JobCommandBuilder.php`. The Go agent is a ge
 1. PHP looks up the node's connection details (host, SSH key, container, etc.)
 2. `JobCommandBuilder::build_<type>()` generates an ordered array of steps
 3. PHP writes a job row with the steps in `mjb_commands` (JSON)
-4. Go agent picks up the job, executes each step in order, streams output
-5. Agent marks job completed or failed
+4. Go agent picks up the job, executes each main step in order, streams output
+5. Agent runs the job's teardown steps (if any), then marks the job completed or failed
 6. `JobResultProcessor` optionally parses the output into structured data
 
 **Example: what a `check_status` job looks like in the database:**
@@ -477,6 +476,46 @@ All job-type intelligence lives in `JobCommandBuilder.php`. The Go agent is a ge
 ```
 
 The agent doesn't know this is a "status check." It just runs each step's command via SSH, captures output, and moves on.
+
+### Execution phases: main and teardown
+
+A job's steps form two phases. Steps without the `teardown` flag are the **main
+phase**: they run in order, and a hard failure (no `continue_on_error`) stops
+the phase and determines the job's outcome. Steps flagged `"teardown": true`
+are the **teardown phase**: they run on *every* exit path — success, mid-job
+failure, or none-of-the-main-steps-ran — so the scratch files a job creates
+(dumps, staged archives, unpacked installers) are removed even when the job
+aborts on a shared production host.
+
+Teardown semantics:
+
+- **Teardown never changes the outcome.** A failed job stays failed with the
+  original failing step in `mjb_error_message`; a teardown step erroring is
+  logged under the `=== Teardown ===` output header and ignored.
+- **Teardown runs before the terminal status is written.** The job stays
+  `running` while teardown executes, so the per-node concurrency lock holds
+  (no re-run can race the deletions) and the job detail view keeps streaming.
+- **Progress counts main steps only.** `mjb_total_steps` excludes teardown
+  steps and teardown output never advances `mjb_current_step`.
+- **Stale-job replay.** Jobs force-failed at agent startup (left `running` by
+  a crash or restart) get their teardown steps replayed from `mjb_commands` —
+  safe because every teardown command is an idempotent `rm` on a per-job path.
+- **Placement.** Builders put teardown steps at the tail of the array, after
+  every main step, and keep `continue_on_error` on them. An agent that ignores
+  the flag runs the array sequentially, so tail placement makes the steps
+  plain trailing cleanup there — correct, just not failure-proof.
+
+**Which cleanup belongs in which phase:** only **scratch** may be teardown —
+an intermediate the job created purely to move data, where the original still
+exists, at a per-job unique path. Two things look like cleanup and must stay
+main steps: a *policy deletion* of real data (the offsite backup job's "Clean
+up local backup" removes a node's actual backup after upload, and must stay
+behind its upload-succeeded guard), and the *job's deliverable* (the
+publish-upgrade job's release archives are its product; their lifecycle
+belongs to the upgrade repository, never to teardown). The test: if this step
+ran the moment the job ended — including right after a mid-job failure —
+could it destroy data that exists nowhere else, or the thing the job was run
+to produce? If either, it is not teardown.
 
 ## Adding a New Job Type
 
@@ -523,12 +562,13 @@ header('Location: /admin/server_manager/job_detail?job_id=' . $job->key);
 | `expect_status` | api | HTTP status code that counts as success (default 200) |
 | `query` | api | Object of query-string params (e.g. `{"path": "/backups/foo.sql.gz"}`) |
 | `body` | api | Request body object (serialized as JSON; ignored for GET/DELETE) |
-| `continue_on_error` | No | If `true`, don't abort the job when this step fails. Used for cleanup steps. |
-| `timeout` | No | Max seconds for this step (default: 1800 = 30 minutes) |
+| `continue_on_error` | No | If `true`, don't abort the job when this step fails |
+| `timeout` | No | Max seconds for this step (default: 1800 = 30 minutes; teardown steps carry 120) |
+| `teardown` | No | If `true`, the step is teardown-phase: it runs on every exit path, its failure never affects the job outcome, and it must be an idempotent removal of a per-job scratch path. Always placed at the tail of the step array with `continue_on_error` set. |
 
 ## Management API (Read-Only)
 
-Every Joinery instance exposes a namespaced read-only HTTP surface at `/api/v1/management/*`. The control plane prefers this over SSH for observability operations (`check_status`, `list_backups`, `fetch_backup`) because it's faster, parallelizable, and auditable.
+Every Joinery instance exposes a namespaced read-only HTTP surface at `/api/v1/management/*`. The control plane prefers this over SSH for observability operations (`check_status`, `list_backups`) because it's faster, parallelizable, and auditable.
 
 **Endpoints** (all under `/api/v1/management/`, all `GET`, all JSON except `backups/fetch` which streams binary):
 
@@ -540,7 +580,7 @@ Every Joinery instance exposes a namespaced read-only HTTP surface at `/api/v1/m
 | `databases` | `List databases` |
 | `errors/recent` | `Recent errors` |
 | `backups/list` | `list_backups` |
-| `backups/fetch?path=...` | `fetch_backup` (SCP) |
+| `backups/fetch?path=...` | (no control-plane consumer — streams a backup file as binary) |
 
 Discovery: `GET /api/v1/management` returns every endpoint with its description.
 
@@ -700,15 +740,17 @@ This is distinct from `mgn_ssl_state` / the SSL tile, which track certbot **prov
 
 1. **Auto-backup before destructive operations** -- `copy_database`, `restore_database`, and `restore_project` automatically prepend backup steps. `restore_project` snapshots both the current database (`auto_pre_project_restore_*.sql.gz`) and the current project tree (`auto_pre_project_restore_*.tar.gz`) to `/backups/` before overwriting; either can be skipped if the corresponding component is unchecked in the form. If any pre-backup step fails, the destructive steps never run.
 
-2. **Per-node concurrency lock** -- The agent skips jobs if another job is already running on the same node, preventing conflicts.
+2. **Database restores replace** -- A database restore leaves the target equal to the snapshot. Every restore site (`restore_database`, both copy jobs, the from-backup install) verifies the archive with `gunzip -t` before anything is destroyed, drops and recreates the `public` schema so target-only objects are removed too, and loads with `psql -v ON_ERROR_STOP=1` so the first load error fails the job instead of completing a partial restore. Dumps are plain `pg_dump` snapshots -- the restore step owns the replacement guarantee, so it holds for any file it is fed. Job-internal dumps (copy jobs, install clone) add `--no-owner --no-acl` because they are restored as the *target* site's DB user; backup files restore onto the site that made them, where the role matches.
 
-3. **Stale job recovery** -- On agent startup, any orphaned `running` jobs are marked `failed` with a descriptive message.
+3. **Per-node concurrency lock** -- The agent skips jobs if another job is already running on the same node, preventing conflicts.
 
-4. **Step timeout** -- 30-minute default per step, overridable. On timeout, the SSH session is killed.
+4. **Stale job recovery** -- On agent startup, any orphaned `running` jobs are marked `failed` with a descriptive message.
 
-5. **Single-threaded agent** -- One job at a time. Queued jobs run sequentially.
+5. **Step timeout** -- 30-minute default per step, overridable. On timeout, the SSH session is killed.
 
-6. **Remote credentials at runtime** -- Database credentials for backup/copy/restore are extracted from each node's `Globalvars_site.php` at execution time, never stored on the control plane.
+6. **Single-threaded agent** -- One job at a time. Queued jobs run sequentially.
+
+7. **Remote credentials at runtime** -- Database credentials for backup/copy/restore are extracted from each node's `Globalvars_site.php` at execution time, never stored on the control plane.
 
 ## API Actions
 

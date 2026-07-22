@@ -2,7 +2,7 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -52,7 +52,11 @@ class ManagementJob extends SystemBase {
 		$job->set('mjb_status', 'pending');
 		$job->set('mjb_commands', json_encode(['steps' => $steps]));
 		$job->set('mjb_parameters', $parameters ? json_encode($parameters) : null);
-		$job->set('mjb_total_steps', count($steps));
+		// Progress counts the main phase only: teardown appends never advance
+		// mjb_current_step, so counting teardown steps would leave every job
+		// looking short of its total.
+		$main_steps = array_filter($steps, function ($s) { return empty($s['teardown']); });
+		$job->set('mjb_total_steps', count($main_steps));
 		$job->set('mjb_current_step', 0);
 		$job->set('mjb_created_by', $created_by);
 		$job->save();

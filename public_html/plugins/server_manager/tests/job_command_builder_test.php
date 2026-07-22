@@ -31,7 +31,7 @@
  * shell in a temporary directory and confirming the payload did not fire.
  *
  * Sections: transport gating; input refusals; shell safety; path construction;
- * step structure.
+ * step structure; teardown phase.
  *
  * Run: php plugins/server_manager/tests/job_command_builder_test.php
  */
@@ -579,5 +579,299 @@ $probe = 'test -s ' . escapeshellarg($empty_root) . '/serve.php || '
 @shell_exec('( ' . $probe . ' ) >/dev/null 2>&1; echo $? > ' . escapeshellarg($empty_root . '/.rc'));
 $probe_rc = trim((string)@file_get_contents($empty_root . '/.rc'));
 check($probe_rc === '1', 'that assertion fails on a web root with no site', 'rc: ' . $probe_rc);
+
+section('Copy database: docker source staging');
+
+// SSH steps against a container node are docker exec'd, so the dump lands
+// inside the container — but SCP reads the host filesystem. A docker source
+// therefore needs the dump staged out with docker cp before the download, or
+// the job fails at "Download dump from source" with No such file (job #80's
+// signature). The target side has had this staging all along; the source side
+// is what these checks pin down.
+$dock_source = jcb_node(array(
+	'mgn_container_name' => 'sourcedock',
+	'mgn_web_root' => '/var/www/html/sourcedock/public_html'));
+$bare_source = jcb_node(array(
+	'mgn_web_root' => '/var/www/html/sourcebare/public_html'));
+$copy_target = jcb_node(array(
+	'mgn_web_root' => '/var/www/html/copytarget/public_html'));
+
+$steps = JobCommandBuilder::build_copy_database($dock_source, $copy_target);
+$labels = array_map(function ($s) { return $s['label']; }, $steps);
+
+$stage_at = array_search('Copy dump out of container', $labels);
+$download_at = array_search('Download dump from source', $labels);
+check($stage_at !== false, 'a docker source emits a copy-out-of-container step');
+check($download_at !== false && $stage_at !== false && $stage_at < $download_at,
+	'the dump is staged onto the host before SCP tries to download it',
+	implode(' | ', $labels));
+
+$stage = $stage_at === false ? array() : $steps[$stage_at];
+check(!empty($stage['on_host']), 'the staging step runs on the host, not docker exec\'d');
+check(($stage['node_id'] ?? 0) === $dock_source->key,
+	'the staging step addresses the source node');
+check(strpos($stage['cmd'] ?? '', "docker cp 'sourcedock':") !== false,
+	'the staging step copies out of the source container', $stage['cmd'] ?? '');
+
+check(in_array('Clean up staged dump on source host', $labels),
+	'the staged host copy gets its own cleanup step');
+
+// A bare source needs no staging — the dump is already on the host.
+$steps = JobCommandBuilder::build_copy_database($bare_source, $copy_target);
+$labels = array_map(function ($s) { return $s['label']; }, $steps);
+check(!in_array('Copy dump out of container', $labels),
+	'a bare source emits no container staging step');
+check(!in_array('Clean up staged dump on source host', $labels),
+	'a bare source emits no host staging cleanup');
+
+section('Restore semantics: replace, verified, loud');
+
+// A restore must leave the database equal to the snapshot. A plain psql pipe
+// over a populated schema collides on every CREATE, aborts a whole table's
+// COPY on one duplicate key, and still exits 0 — the job reports completed
+// over a silent mix of old and new rows (copy_database job #830, 429 errors,
+// 31 tables kept their old data). So every restore site must: verify the
+// archive before destroying anything, drop and recreate the schema, and run
+// psql with ON_ERROR_STOP so a load error fails the job.
+/** Assert one restore command carries the full replace contract. */
+function jcb_check_restore_cmd($label, $cmd) {
+	check(strpos($cmd, 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;') !== false,
+		$label . ': the restore drops and recreates the schema', $cmd);
+	check(substr_count($cmd, 'ON_ERROR_STOP=1') >= 2,
+		$label . ': both the drop and the load run under ON_ERROR_STOP', $cmd);
+	$gate = strpos($cmd, 'gunzip -t');
+	$drop = strpos($cmd, 'DROP SCHEMA');
+	if ($gate !== false) {
+		check($gate < $drop, $label . ': the integrity check precedes the drop', $cmd);
+	}
+	return $gate !== false;
+}
+
+$restore_builders = [
+	'copy_database' => JobCommandBuilder::build_copy_database($dock_source, $copy_target),
+	'copy_database_by_name' => JobCommandBuilder::build_copy_database_by_name($copy_target,
+		['source_db_name' => 'otherdb']),
+	'restore_database' => JobCommandBuilder::build_restore_database($copy_target,
+		['local_path' => '/backups/copytarget-2026-01-01-000000.sql.gz']),
+];
+
+foreach ($restore_builders as $name => $steps) {
+	$restore_cmd = '';
+	$restore_at = null;
+	$verify_at = null;
+	$backup_at = null;
+	foreach ($steps as $i => $step) {
+		$label = $step['label'] ?? '';
+		if (strpos($label, 'Restore') === 0) { $restore_cmd = $step['cmd']; $restore_at = $i; }
+		if ($label === 'Verify backup archive') { $verify_at = $i; }
+		if (strpos($label, 'Auto-backup') === 0) { $backup_at = $i; }
+	}
+	check($restore_cmd !== '', $name . ': a restore step is emitted');
+	$inline_gate = jcb_check_restore_cmd($name, $restore_cmd);
+	check($inline_gate || ($verify_at !== null && $verify_at < $restore_at),
+		$name . ': destruction is gated on a gunzip -t integrity check');
+	check($backup_at !== null && $backup_at < $restore_at,
+		$name . ': the pre-restore safety dump precedes the restore');
+}
+
+// The install-node clone restore follows the same contract.
+$clone_restore = '';
+foreach ($clone_steps as $step) {
+	if (($step['label'] ?? '') === 'Restore source database') { $clone_restore = $step['cmd']; }
+}
+check($clone_restore !== '', 'install_node from-backup: a DB restore step is emitted');
+check(jcb_check_restore_cmd('install_node from-backup', $clone_restore),
+	'install_node from-backup: destruction is gated on a gunzip -t integrity check');
+
+// Dumps are plain snapshots: never self-cleaning (the restore owns replacement),
+// and job-internal dumps are role-portable because the restore runs as the
+// TARGET site's own DB user under ON_ERROR_STOP — an OWNER TO naming the
+// source site's role would fail the job.
+$dump_sets = $restore_builders;
+$dump_sets['install_node from-backup'] = $clone_steps;
+foreach ($dump_sets as $name => $steps) {
+	foreach ($steps as $step) {
+		$label = $step['label'] ?? '';
+		if (strpos($step['cmd'] ?? '', 'pg_dump') === false) { continue; }
+		check(strpos($step['cmd'], '--clean') === false,
+			$name . ' / ' . $label . ': no dump is self-cleaning', $step['cmd']);
+		if (strpos($label, 'Dump source database') === 0) {
+			check(strpos($step['cmd'], '--no-owner --no-acl') !== false,
+				$name . ' / ' . $label . ': job-internal dumps carry no role names', $step['cmd']);
+		}
+	}
+}
+
+section('Teardown phase: scratch is torn down, deliverables are not');
+
+// A job that fails mid-way never reaches trailing cleanup steps, so scratch —
+// dumps, staged archives, unpacked installers — piles up on shared production
+// hosts (353 MB per attempted clone, and the failure path is the COMMON path:
+// 15 of 28 install jobs failed). Steps flagged 'teardown' run on every exit.
+// These checks pin the two builder-side guarantees the agent relies on:
+// every scratch path has a teardown step, and teardown steps sit at the tail
+// of the array so an un-upgraded agent (which ignores the flag and runs
+// sequentially) never deletes an artifact before the step that uses it.
+
+/** Collect the per-job scratch paths mentioned by a builder's MAIN steps. */
+function jcb_scratch_paths($steps) {
+	$paths = array();
+	$pattern = '#(?:/tmp/(?:local_copy|copy|install|joinery_restore|joinery_install|joinery_discover)_[A-Za-z0-9][A-Za-z0-9_.]*|/backups/install_[A-Za-z0-9][A-Za-z0-9_.]*)#';
+	foreach ($steps as $step) {
+		if (!empty($step['teardown'])) { continue; }
+		foreach (array($step['cmd'] ?? '', $step['remote_path'] ?? '', $step['local_path'] ?? '') as $text) {
+			if ($text !== '' && preg_match_all($pattern, $text, $m)) {
+				foreach ($m[0] as $p) { $paths[$p] = true; }
+			}
+		}
+	}
+	return array_keys($paths);
+}
+
+/** Every scratch path a builder creates must appear in some teardown step. */
+function jcb_assert_teardown_coverage($name, $steps) {
+	$teardown_text = '';
+	foreach ($steps as $step) {
+		if (!empty($step['teardown'])) { $teardown_text .= ($step['cmd'] ?? '') . "\n"; }
+	}
+	$paths = jcb_scratch_paths($steps);
+	check(count($paths) > 0, $name . ': scratch paths were found to audit');
+	foreach ($paths as $p) {
+		check(strpos($teardown_text, $p) !== false,
+			$name . ': scratch path ' . $p . ' has a matching teardown step');
+	}
+}
+
+/** No main step may follow a teardown step (the old-agent placement rule). */
+function jcb_assert_tail_placement($name, $steps) {
+	$offender = '';
+	$seen_teardown = false;
+	foreach ($steps as $step) {
+		if (!empty($step['teardown'])) { $seen_teardown = true; continue; }
+		if ($seen_teardown) { $offender = $step['label'] ?? '(unlabeled)'; break; }
+	}
+	check($offender === '', $name . ': no main step follows a teardown step', $offender);
+}
+
+/** Teardown steps must be idempotent, short-fused, and safe on old agents. */
+function jcb_assert_teardown_shape($name, $steps) {
+	foreach ($steps as $step) {
+		if (empty($step['teardown'])) { continue; }
+		$label = $step['label'] ?? '(unlabeled)';
+		check(preg_match('/rm -r?f /', $step['cmd'] ?? '') === 1,
+			$name . ' / ' . $label . ': teardown is an idempotent rm', $step['cmd'] ?? '');
+		check(!empty($step['timeout']) && $step['timeout'] <= 120,
+			$name . ' / ' . $label . ': teardown carries a short timeout');
+		check(!empty($step['continue_on_error']),
+			$name . ' / ' . $label . ': continue_on_error is spelled out for old agents');
+	}
+}
+
+$dock_target = jcb_node(array(
+	'mgn_container_name' => 'targetdock',
+	'mgn_web_root' => '/var/www/html/targetdock/public_html'));
+$clone_docker_target = jcb_node(array(
+	'mgn_web_root' => '/var/www/html/dockclone/public_html',
+	'mgn_site_url' => 'https://dockclone.example.com'));
+
+// Every builder in the spec's inventory, in its scratch-heaviest variant.
+$teardown_suites = array(
+	'copy_database docker→docker' => JobCommandBuilder::build_copy_database($dock_source, $dock_target),
+	'copy_database bare→bare'     => JobCommandBuilder::build_copy_database($bare_source, $copy_target),
+	'copy_database_by_name'       => JobCommandBuilder::build_copy_database_by_name($copy_target,
+		array('source_db_name' => 'otherdb')),
+	'discover_nodes'              => JobCommandBuilder::build_discover_nodes(array(
+		'host' => '192.0.2.50', 'ssh_user' => 'root',
+		'ssh_key_path' => '/home/user1/.ssh/id_ed25519_claude')),
+	'install_node fresh'          => JobCommandBuilder::build_install_node($clone_docker_target, array(
+		'mode' => 'fresh', 'sitename' => 'freshsite', 'domain' => 'fresh.example.com',
+		'docker_mode' => 'bare-metal')),
+	'install_node clone bare'     => $clone_steps,
+	'install_node clone docker'   => JobCommandBuilder::build_install_node($clone_docker_target, array(
+		'mode' => 'from_backup', 'sitename' => 'dockclone', 'domain' => 'source.example.com',
+		'docker_mode' => 'docker', 'source_node_id' => $dock_source->key,
+		'backup_source' => 'new')),
+);
+
+foreach ($teardown_suites as $name => $suite_steps) {
+	jcb_assert_teardown_coverage($name, $suite_steps);
+	jcb_assert_tail_placement($name, $suite_steps);
+	jcb_assert_teardown_shape($name, $suite_steps);
+}
+
+// Rule 2 (deliverables): the publish-upgrade job exists to place release
+// archives in the upgrade repository — nothing about it may be teardown.
+$pub_steps = JobCommandBuilder::build_publish_upgrade(array('release_notes' => 'harness test'));
+$pub_has_teardown = false;
+foreach ($pub_steps as $step) {
+	if (!empty($step['teardown'])) { $pub_has_teardown = true; }
+}
+check(!$pub_has_teardown, 'publish_upgrade emits no teardown step — its archives are the deliverable');
+
+// Rule 1 (policy deletions): the offsite retention step removes a REAL backup
+// after a successful upload. Marked teardown, it would run after a FAILED
+// upload and delete the only surviving copy. It must stay a guarded main step.
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_target_class.php'));
+$bkt = new BackupTarget(NULL);
+$bkt->set('bkt_name', 'HarnessTest Target ' . bin2hex(random_bytes(3)));
+$bkt->set('bkt_provider', 'b2');
+$bkt->set('bkt_bucket', 'harness-test-bucket');
+$bkt->set('bkt_credentials', json_encode(array('key_id' => 'k', 'application_key' => 'a')));
+$bkt->save();
+harness_register_row('bkt_backup_targets', 'bkt_id', $bkt->key);
+
+$offsite_node = jcb_node(array(
+	'mgn_web_root' => '/var/www/html/offsite/public_html',
+	'mgn_bkt_backup_target_id' => $bkt->key,
+	'mgn_delete_local_after_upload' => true));
+$offsite_steps = JobCommandBuilder::build_backup_database($offsite_node);
+$retention = null;
+$upload_at = null;
+$retention_at = null;
+foreach ($offsite_steps as $i => $step) {
+	if (($step['label'] ?? '') === 'Clean up local backup') { $retention = $step; $retention_at = $i; }
+	if (strpos($step['label'] ?? '', 'Upload backup') === 0) { $upload_at = $i; }
+}
+check($retention !== null, 'the offsite retention step exists to audit');
+check(empty($retention['teardown']),
+	'the offsite retention step is NOT teardown — it deletes a real backup as policy');
+check($upload_at !== null && $retention_at !== null && $upload_at < $retention_at,
+	'retention stays behind its upload guard');
+
+// From-EXISTING-backup clones: the named /backups/ paths are the user's real
+// backup files, not job scratch. No teardown step may touch them.
+$existing_steps = JobCommandBuilder::build_install_node($clone_docker_target, array(
+	'mode' => 'from_backup', 'sitename' => 'dockclone', 'domain' => 'source.example.com',
+	'docker_mode' => 'bare-metal', 'source_node_id' => $source_node->key,
+	'backup_source' => 'existing',
+	'db_backup_path' => '/backups/keep_me.sql.gz',
+	'project_backup_path' => '/backups/keep_me_project.tar.gz'));
+$touches_named = false;
+foreach ($existing_steps as $step) {
+	if (!empty($step['teardown']) && strpos($step['cmd'] ?? '', '/backups/keep_me') !== false) {
+		$touches_named = true;
+	}
+}
+check(!$touches_named, 'a from-existing-backup clone never tears down the named backup files');
+// The staged and target-side copies are still scratch in that variant.
+jcb_assert_teardown_coverage('install_node clone existing', $existing_steps);
+jcb_assert_tail_placement('install_node clone existing', $existing_steps);
+
+// The installer directory is per-job: a failed install's teardown (or a
+// stale-recovery replay) must never delete it out from under a later install.
+$fresh_a = jcb_cmds($teardown_suites['install_node fresh']);
+check(preg_match('#/tmp/joinery_install_[a-f0-9]{12}#', $fresh_a) === 1,
+	'the installer directory carries the per-job transfer id');
+check(strpos($fresh_a, "/tmp/joinery_install ") === false
+	&& strpos($fresh_a, "/tmp/joinery_install/") === false
+	&& strpos($fresh_a, "/tmp/joinery_install\n") === false,
+	'the fixed /tmp/joinery_install path is gone');
+$fresh_b = jcb_cmds(JobCommandBuilder::build_install_node($clone_docker_target, array(
+	'mode' => 'fresh', 'sitename' => 'freshsite', 'domain' => 'fresh.example.com',
+	'docker_mode' => 'bare-metal')));
+preg_match('#/tmp/joinery_install_[a-f0-9]{12}#', $fresh_a, $ma);
+preg_match('#/tmp/joinery_install_[a-f0-9]{12}#', $fresh_b, $mb);
+check(!empty($ma[0]) && !empty($mb[0]) && $ma[0] !== $mb[0],
+	'two installs never share an installer directory', ($ma[0] ?? '?') . ' vs ' . ($mb[0] ?? '?'));
 
 harness_finish();

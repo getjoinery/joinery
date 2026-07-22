@@ -6,7 +6,7 @@
  * Consolidated node management page with tabs:
  * Overview, Backups, Database, Updates, Jobs
  *
- * @version 1.8
+ * @version 1.9
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -1788,7 +1788,7 @@ function deleteBackup(target, filename, localPath, cloudPath) {
 				$status_options[$s] = ucfirst($s);
 			}
 			$type_options = ['' => 'All'];
-			foreach (['check_status', 'backup_database', 'backup_project', 'fetch_backup', 'copy_database', 'copy_database_local', 'restore_database', 'restore_project', 'apply_update'] as $t) {
+			foreach (['check_status', 'backup_database', 'backup_project', 'copy_database', 'copy_database_local', 'restore_database', 'restore_project', 'apply_update'] as $t) {
 				$type_options[$t] = str_replace('_', ' ', $t);
 			}
 			$fw_filter = $page->getFormWriter('jobs_filter_form', ['method' => 'GET']);

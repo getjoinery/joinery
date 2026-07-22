@@ -5,7 +5,7 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
- * @version 1.7
+ * @version 1.10
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -574,49 +574,6 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * Download a backup file from a node to the control plane. Dispatches
-	 * between API (streaming HTTP GET) and SCP based on has_api().
-	 */
-	public static function build_fetch_backup($node, $params) {
-		if (self::has_api($node, 'fetch_backup')) {
-			return self::build_fetch_backup_api($node, $params);
-		}
-		if (self::has_ssh($node)) {
-			return self::build_fetch_backup_ssh($node, $params);
-		}
-		throw new Exception(
-			"Node '{$node->get('mgn_slug')}' cannot run fetch_backup: "
-			. "no API credentials (or health probe failed) and no SSH credentials configured."
-		);
-	}
-
-	public static function build_fetch_backup_api($node, $params) {
-		$remote_path = $params['remote_path'];
-		$filename = basename($remote_path);
-		$local_path = "/tmp/fetched_{$filename}";
-
-		return [
-			['type' => 'api', 'label' => 'Download backup via API',
-			 'method' => 'GET', 'endpoint' => 'backups/fetch',
-			 'query' => ['path' => $remote_path],
-			 'local_path' => $local_path,
-			 // Large files — allow plenty of time for the stream. Matches old SCP default.
-			 'timeout' => 3600],
-		];
-	}
-
-	public static function build_fetch_backup_ssh($node, $params) {
-		$remote_path = $params['remote_path'];
-		$filename = basename($remote_path);
-		$local_path = "/tmp/fetched_{$filename}";
-
-		return [
-			['type' => 'scp', 'label' => 'Download backup to control plane',
-			 'direction' => 'download', 'remote_path' => $remote_path, 'local_path' => $local_path],
-		];
-	}
-
-	/**
 	 * Copy database from source node to target node.
 	 * Auto-prepends a backup of the target before overwrite.
 	 */
@@ -633,17 +590,34 @@ class JobCommandBuilder {
 		$target_sudo = self::sudo_prefix($target_node);
 		$source_sudo = self::sudo_prefix($source_node);
 
-		// Safety: auto-backup target database first (ensure /backups exists)
+		// Safety: auto-backup target database first. chmod matches the Ensure
+		// backup directory pattern in build_backup_database: the gzip redirect
+		// runs as the SSH user, so sudo on mkdir alone leaves /backups unwritable
+		// on nodes with a non-root SSH user.
 		$steps[] = ['type' => 'ssh', 'label' => 'Auto-backup target database before overwrite',
-			'cmd' => "{$target_sudo}mkdir -p /backups && {$target_creds} && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_overwrite_\$(date +%Y%m%d_%H%M%S).sql.gz",
+			'cmd' => "{$target_sudo}mkdir -p /backups && {$target_sudo}chmod 777 /backups && {$target_creds} && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_overwrite_\$(date +%Y%m%d_%H%M%S).sql.gz",
 			'node_id' => $target_node->key,
 			'timeout' => 3600];
 
-		// Dump source — must run on source node
+		// Dump source — must run on source node. --no-owner --no-acl because the
+		// restore runs as the TARGET site's own DB user: owner/grant statements
+		// naming the source site's role would error there, and the restore is
+		// ON_ERROR_STOP so any error fails the job.
 		$steps[] = ['type' => 'ssh', 'label' => 'Dump source database',
-			'cmd' => "{$source_creds} && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > {$dump_file}",
+			'cmd' => "{$source_creds} && pg_dump --no-owner --no-acl -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > {$dump_file}",
 			'node_id' => $source_node->key,
 			'timeout' => 3600];
+
+		// Docker sources: the dump step above is docker exec'd, so the file lands
+		// inside the container — but SCP reads the host filesystem. Stage it out.
+		$source_container = $source_node->get('mgn_container_name');
+		if ($source_container) {
+			$sc = escapeshellarg($source_container);
+			$df = escapeshellarg($dump_file);
+			$steps[] = ['type' => 'ssh', 'label' => 'Copy dump out of container',
+				'cmd' => "docker cp {$sc}:{$df} {$dump_file}",
+				'node_id' => $source_node->key, 'on_host' => true];
+		}
 
 		// Download from source to control plane — must pull from source node
 		$steps[] = ['type' => 'scp', 'label' => 'Download dump from source',
@@ -666,30 +640,46 @@ class JobCommandBuilder {
 				'node_id' => $target_node->key, 'on_host' => true];
 		}
 
-		// Restore on target
+		// Restore on target: verify the archive, then replace the schema.
+		// Restores replace — the drop is what removes objects that exist on the
+		// target but not in the snapshot — and ON_ERROR_STOP fails the job on
+		// the first error rather than completing a partial restore.
 		$steps[] = ['type' => 'ssh', 'label' => 'Restore database on target',
-			'cmd' => "{$target_creds} && gunzip -c {$dump_file} | psql -U \"\$DB_USER\" \"\$DB_NAME\"",
+			'cmd' => "gunzip -t {$dump_file} && {$target_creds} && psql -v ON_ERROR_STOP=1 -U \"\$DB_USER\" \"\$DB_NAME\" -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' && gunzip -c {$dump_file} | psql -v ON_ERROR_STOP=1 -U \"\$DB_USER\" \"\$DB_NAME\"",
 			'node_id' => $target_node->key,
 			'timeout' => 3600];
 
-		// Cleanup steps (continue on error) — source cleanup on source node
+		// Teardown: the scratch dump everywhere the job staged one. Tail
+		// placement (nothing after these) keeps un-upgraded agents correct —
+		// they ignore the flag and run the array sequentially, which is
+		// exactly today's trailing-cleanup behaviour. continue_on_error stays
+		// for the same reason: an upgraded agent implies it during teardown,
+		// an old agent needs it spelled out.
 		$steps[] = ['type' => 'ssh', 'label' => 'Clean up source dump',
-			'cmd' => "rm -f {$dump_file}", 'node_id' => $source_node->key, 'continue_on_error' => true];
+			'cmd' => "rm -f {$dump_file}", 'node_id' => $source_node->key,
+			'teardown' => true, 'timeout' => 120, 'continue_on_error' => true];
+		if ($source_container) {
+			$steps[] = ['type' => 'ssh', 'label' => 'Clean up staged dump on source host',
+				'cmd' => "rm -f {$dump_file}", 'node_id' => $source_node->key, 'on_host' => true,
+				'teardown' => true, 'timeout' => 120, 'continue_on_error' => true];
+		}
 		// For Docker target: clean up both the copy inside container and the file on host
 		if ($target_container) {
 			$tc = escapeshellarg($target_container);
 			$steps[] = ['type' => 'ssh', 'label' => 'Clean up dump in container',
-				'cmd' => "docker exec {$tc} rm -f {$dump_file}", 'node_id' => $target_node->key,
-				'on_host' => true, 'continue_on_error' => true];
+				'cmd' => "docker exec {$tc} rm -f {$dump_file}", 'node_id' => $target_node->key, 'on_host' => true,
+				'teardown' => true, 'timeout' => 120, 'continue_on_error' => true];
 			$steps[] = ['type' => 'ssh', 'label' => 'Clean up dump on target host',
-				'cmd' => "rm -f {$dump_file}", 'node_id' => $target_node->key,
-				'on_host' => true, 'continue_on_error' => true];
+				'cmd' => "rm -f {$dump_file}", 'node_id' => $target_node->key, 'on_host' => true,
+				'teardown' => true, 'timeout' => 120, 'continue_on_error' => true];
 		} else {
 			$steps[] = ['type' => 'ssh', 'label' => 'Clean up target dump',
-				'cmd' => "rm -f {$dump_file}", 'node_id' => $target_node->key, 'continue_on_error' => true];
+				'cmd' => "rm -f {$dump_file}", 'node_id' => $target_node->key,
+				'teardown' => true, 'timeout' => 120, 'continue_on_error' => true];
 		}
 		$steps[] = ['type' => 'local', 'label' => 'Clean up control plane',
-			'cmd' => "rm -f {$dump_file}", 'continue_on_error' => true];
+			'cmd' => "rm -f {$dump_file}",
+			'teardown' => true, 'timeout' => 120, 'continue_on_error' => true];
 
 		return $steps;
 	}
@@ -706,19 +696,21 @@ class JobCommandBuilder {
 		$source_db = $params['source_db_name'];
 		$transfer_id = substr(md5(uniqid(mt_rand(), true)), 0, 12);
 		$dump_file = "/tmp/local_copy_{$transfer_id}.sql.gz";
+		$sudo = self::sudo_prefix($node);
 
 		return [
 			['type' => 'ssh', 'label' => 'Auto-backup target database before overwrite',
-			 'cmd' => "{$creds} && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_overwrite_\$(date +%Y%m%d_%H%M%S).sql.gz",
+			 'cmd' => "{$sudo}mkdir -p /backups && {$sudo}chmod 777 /backups && {$creds} && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_overwrite_\$(date +%Y%m%d_%H%M%S).sql.gz",
 			 'timeout' => 3600],
 			['type' => 'ssh', 'label' => "Dump source database ({$source_db})",
-			 'cmd' => "{$creds} && pg_dump -U \"\$DB_USER\" " . escapeshellarg($source_db) . " | gzip > {$dump_file}",
+			 'cmd' => "{$creds} && pg_dump --no-owner --no-acl -U \"\$DB_USER\" " . escapeshellarg($source_db) . " | gzip > {$dump_file}",
 			 'timeout' => 3600],
 			['type' => 'ssh', 'label' => 'Restore to target',
-			 'cmd' => "{$creds} && gunzip -c {$dump_file} | psql -U \"\$DB_USER\" \"\$DB_NAME\"",
+			 'cmd' => "gunzip -t {$dump_file} && {$creds} && psql -v ON_ERROR_STOP=1 -U \"\$DB_USER\" \"\$DB_NAME\" -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' && gunzip -c {$dump_file} | psql -v ON_ERROR_STOP=1 -U \"\$DB_USER\" \"\$DB_NAME\"",
 			 'timeout' => 3600],
 			['type' => 'ssh', 'label' => 'Clean up temp dump',
-			 'cmd' => "rm -f {$dump_file}", 'continue_on_error' => true],
+			 'cmd' => "rm -f {$dump_file}",
+			 'teardown' => true, 'timeout' => 120, 'continue_on_error' => true],
 		];
 	}
 
@@ -767,9 +759,16 @@ class JobCommandBuilder {
 
 		$restore_path = escapeshellarg($local_path);
 
-		// Restore
+		// Verify the archive before anything is dropped: a truncated or corrupt
+		// file fails here with the database intact.
+		$steps[] = ['type' => 'ssh', 'label' => 'Verify backup archive',
+			'cmd' => "gunzip -t {$restore_path}"];
+
+		// Restores replace: drop the schema so the result equals the snapshot
+		// (target-only objects included), and fail on the first load error
+		// rather than completing a partial restore.
 		$steps[] = ['type' => 'ssh', 'label' => 'Restore database from backup',
-			'cmd' => "{$creds} && gunzip -c {$restore_path} | psql -U \"\$DB_USER\" \"\$DB_NAME\"",
+			'cmd' => "{$creds} && psql -v ON_ERROR_STOP=1 -U \"\$DB_USER\" \"\$DB_NAME\" -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' && gunzip -c {$restore_path} | psql -v ON_ERROR_STOP=1 -U \"\$DB_USER\" \"\$DB_NAME\"",
 			'timeout' => 3600];
 
 		// Verify
@@ -999,7 +998,7 @@ class JobCommandBuilder {
 
 		$steps[] = ['type' => 'local', 'label' => 'Clean up scan script',
 			'cmd' => "rm -f {$script_path}",
-			'continue_on_error' => true];
+			'teardown' => true, 'timeout' => 120, 'continue_on_error' => true];
 
 		return $steps;
 	}
@@ -1370,7 +1369,9 @@ class JobCommandBuilder {
 		}
 
 		$transfer_id = substr(md5(uniqid(mt_rand(), true)), 0, 12);
-		$remote_install_dir = '/tmp/joinery_install';
+		// Per-job path: teardown (including a stale-recovery replay) must never
+		// delete the unpacked installer out from under a concurrent install.
+		$remote_install_dir = "/tmp/joinery_install_{$transfer_id}";
 		$remote_tools_dir = "{$remote_install_dir}/maintenance_scripts/install_tools";
 
 		// Control plane URL — where the target fetches the Joinery release tarball from.
@@ -1386,6 +1387,10 @@ class JobCommandBuilder {
 		$port_arg = '';
 
 		$steps = [];
+		// Teardown steps collect here and go at the tail of the array, after
+		// every main step — an un-upgraded agent runs the array sequentially,
+		// so tail placement is what keeps it correct.
+		$teardown = [];
 
 		// 1. Pre-flight: verify the control plane is serving a release archive
 		$steps[] = ['type' => 'local', 'label' => 'Pre-flight: check release archive is available',
@@ -1418,7 +1423,7 @@ class JobCommandBuilder {
 					'node_id' => $source_node_id, 'cmd' => "{$source_sudo}mkdir -p /backups && {$source_sudo}chmod 777 /backups"];
 				$steps[] = ['type' => 'ssh', 'label' => 'Dump source database',
 					'node_id' => $source_node_id,
-					'cmd' => "{$source_creds} && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > {$db_backup_remote}",
+					'cmd' => "{$source_creds} && pg_dump --no-owner --no-acl -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > {$db_backup_remote}",
 					'timeout' => 3600];
 				$steps[] = ['type' => 'ssh', 'label' => 'Archive source project files',
 					'node_id' => $source_node_id,
@@ -1590,8 +1595,8 @@ class JobCommandBuilder {
 
 		// Docker mode: set up an HTTP reverse proxy on the host so port 80 serves the site.
 		// In docker mode, maintenance_scripts/ is baked into the container image — not on
-		// the host — so we use the still-extracted copy under /tmp/joinery_install. This runs
-		// before the cleanup step. manage_domain.sh auto-installs Apache + mod_proxy if
+		// the host — so we use the still-extracted copy under the per-job install dir
+		// (removed only at teardown). manage_domain.sh auto-installs Apache + mod_proxy if
 		// missing, writes {sitename}-proxy.conf, and reloads. Idempotent. SSL stays a
 		// separate admin action after DNS cutover.
 		// Skip for localhost / bare IP — a ServerName-based proxy needs a routable domain.
@@ -1648,7 +1653,7 @@ class JobCommandBuilder {
 				'timeout' => 3600]);
 
 			$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Restore source database',
-				'cmd' => "{$creds} && psql -U \"\$DB_USER\" \"\$DB_NAME\" -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' && gunzip -c {$remote_db_dump} | psql -U \"\$DB_USER\" \"\$DB_NAME\"",
+				'cmd' => "gunzip -t {$remote_db_dump} && {$creds} && psql -v ON_ERROR_STOP=1 -U \"\$DB_USER\" \"\$DB_NAME\" -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' && gunzip -c {$remote_db_dump} | psql -v ON_ERROR_STOP=1 -U \"\$DB_USER\" \"\$DB_NAME\"",
 				'timeout' => 3600]);
 
 			// backup_project.sh archives are two levels deep:
@@ -1718,28 +1723,49 @@ class JobCommandBuilder {
 				);
 			}
 
-			$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Clean up restore artifacts on target',
+			$teardown[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Clean up restore artifacts on target',
 				'cmd' => "rm -f {$remote_db_dump} {$remote_project_tar}",
-				'continue_on_error' => true]);
+				'teardown' => true, 'timeout' => 120, 'continue_on_error' => true]);
 
 			// For Docker: also clean up the staged files on the host
 			if ($is_docker_install) {
-				$steps[] = ['type' => 'ssh', 'label' => 'Clean up restore artifacts on host',
+				$teardown[] = ['type' => 'ssh', 'label' => 'Clean up restore artifacts on host',
 					'on_host' => true,
 					'cmd' => "rm -f {$remote_db_dump} {$remote_project_tar}",
-					'continue_on_error' => true];
+					'teardown' => true, 'timeout' => 120, 'continue_on_error' => true];
 			}
 
-			$steps[] = ['type' => 'local', 'label' => 'Clean up backup files on control plane',
+			$teardown[] = ['type' => 'local', 'label' => 'Clean up backup files on control plane',
 				'cmd' => "rm -f {$local_db_backup} {$local_project_backup}",
-				'continue_on_error' => true];
+				'teardown' => true, 'timeout' => 120, 'continue_on_error' => true];
+
+			// The dump and the project archive were written on the source too. A
+			// Docker source holds two copies - one inside the container where the
+			// dump was written, one on the host where docker cp staged it for SCP -
+			// and both are the full site, so a few copies fill the disk of a shared
+			// host serving live sites. Only the backup_source === 'new' variant may
+			// touch /backups/ on the source: when an EXISTING backup was named,
+			// those paths are the user's real backup files, not job scratch.
+			if (($params['backup_source'] ?? 'new') === 'new') {
+				$teardown[] = ['type' => 'ssh', 'label' => 'Clean up backup files on source',
+					'node_id' => $source_node_id,
+					'cmd' => 'rm -f ' . escapeshellarg($db_backup_remote) . ' ' . escapeshellarg($project_backup_remote),
+					'teardown' => true, 'timeout' => 120, 'continue_on_error' => true];
+
+				if ($source_container) {
+					$teardown[] = ['type' => 'ssh', 'label' => 'Clean up staged backup files on source host',
+						'node_id' => $source_node_id, 'on_host' => true,
+						'cmd' => 'rm -f ' . escapeshellarg($local_db_backup) . ' ' . escapeshellarg($local_project_backup),
+						'teardown' => true, 'timeout' => 120, 'continue_on_error' => true];
+				}
+			}
 		}
 
 		// Cleanup installer on target (release tarball was piped through tar; no local file)
-		$steps[] = ['type' => 'ssh', 'label' => 'Clean up installer on target',
+		$teardown[] = ['type' => 'ssh', 'label' => 'Clean up installer on target',
 			'on_host' => true,
 			'cmd' => "sudo rm -rf {$remote_install_dir}",
-			'continue_on_error' => true];
+			'teardown' => true, 'timeout' => 120, 'continue_on_error' => true];
 
 		// Post-install verification. Globalvars_site.php is chmod 640 root:www-data so
 		// user1 needs sudo to test-read it.
@@ -1755,7 +1781,7 @@ class JobCommandBuilder {
 			'on_host' => true,
 			'cmd' => $verify_cmd];
 
-		return $steps;
+		return array_merge($steps, $teardown);
 	}
 
 	/**
