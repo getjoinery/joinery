@@ -35,7 +35,7 @@ Joinery uses a custom **JoineryValidation** library - pure JavaScript with no jQ
 
 ### Library File
 - Location: `/assets/js/joinery-validate.js`
-- Version: 1.0.8
+- Version: 1.1.1
 - Dependencies: None (standalone)
 
 ### Built-in Validators
@@ -132,31 +132,66 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         },
         submitHandler: function(form) {
-            // Optional custom submit logic
-            console.log('Form is valid, submitting...');
-            form.submit();
+            // Optional. If you provide one, YOU own submission — see the
+            // contract below. Submit natively so other listeners still fire:
+            form.requestSubmit();
         }
     });
 });
 </script>
 ```
 
-### Styling Classes (Bootstrap 5)
+### How a validated form submits — the re-dispatch contract
 
-JoineryValidation automatically applies Bootstrap classes:
+When a form passes validation, JoineryValidation does **not** call `form.submit()`.
+A programmatic `form.submit()` fires no `submit` event, so it silently navigates
+over every other submit listener on the form — step-up confirmation interceptors,
+payment tokenizers (Stripe/PayPal), and analytics all get skipped. That exact
+behavior was the root cause of a multi-day passkey step-up outage: the validator
+submitted the form out from under the step-up ceremony before it could run.
+
+Instead, on a valid form the validator:
+
+1. Sets a one-shot `data-jy-validated="1"` stand-aside flag on the form.
+2. Re-dispatches **natively** via `form.requestSubmit(submitter)` (deferred by a
+   task), which fires a real `submit` event and carries the clicked button's
+   name/value.
+3. On that second event it sees its own flag, clears it, and passes through so
+   the browser performs the navigation.
+
+Two rules follow from this, and both are load-bearing:
+
+- **Never call `form.submit()` on a validated form from page JS.** It bypasses
+  all submit listeners. If you must submit programmatically, use
+  `form.requestSubmit()`. A custom `submitHandler` takes over submission
+  entirely — inside it, submit natively (`form.requestSubmit()`), never
+  `form.submit()`.
+- **Any `submit` listener you add must be idempotent.** The validated submission
+  fires the `submit` event **twice** (once caught-and-prevented by the validator,
+  once on the native re-dispatch). An interceptor that runs a one-time ceremony
+  must guard with its own flag so the second pass falls through instead of
+  re-triggering. `form.submit()` remains only as the legacy fallback for browsers
+  without `requestSubmit`.
+
+### Styling Classes
+
+On each field JoineryValidation toggles two classes — `is-invalid` when a rule
+fails, `is-valid` when it passes — and injects the message as a sibling
+`div.invalid-feedback` (also tagged `.joinery-error-label`). The class names are
+Bootstrap-compatible, but nothing here loads Bootstrap: the active theme's
+`.jy-ui` form kit styles these states, so validation looks consistent across
+every theme (vanilla HTML5 and framework themes alike). Override the class names
+per-form with the `errorClass` / `validClass` / `errorLabelClass` init options.
 
 ```html
-<!-- Invalid field -->
-<input type="email" id="email" class="form-control is-invalid">
-<div class="invalid-feedback">
+<!-- Invalid field: is-invalid added, message injected after it -->
+<input type="email" id="email" class="is-invalid">
+<div class="invalid-feedback joinery-error-label">
     Please provide a valid email address.
 </div>
 
 <!-- Valid field -->
-<input type="text" id="username" class="form-control is-valid">
-<div class="valid-feedback">
-    Username looks good!
-</div>
+<input type="text" id="username" class="is-valid">
 ```
 
 ### Array Fields (Checkboxes, Multi-select)

@@ -443,10 +443,11 @@ mutations:
   and Cancel (a confirmation alert into `orders_recurring_action`, which
   cancels at period end unconditionally once called — the confirmation is
   purely client-side, matching the web flow). Change Plan and Manage Billing
-  open the web pages through `context.web` — deliberately: Apple IAP policy
-  means purchase/upgrade UI cannot be rebuilt natively around Stripe until
-  `specs/mobile_app_billing.md` lands, and the Stripe Billing Portal is a
-  hosted web flow regardless.
+  open the web pages through `context.web` — deliberately: store-policy rules
+  keep Stripe purchase/upgrade UI off the native surface, and the Stripe Billing
+  Portal is a hosted web flow regardless. Native purchases that go through the
+  app stores use JoineryBillingKit (Apple IAP / Google Play Billing) instead —
+  see the billing section below.
 - **Events** (`EventsScreen` + `EventListStore`, registry name `events`) — a
   status-tabbed (all / active / expired / canceled / completed), paginated
   (10/page) registration list. Rows open the session content page (video

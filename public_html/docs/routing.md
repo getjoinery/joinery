@@ -205,16 +205,21 @@ Admin files live in `/adm/`, not `/admin/`. The wildcard route handles mapping:
 ```
 So `/admin/admin_users` loads `adm/admin_users.php`. Plugin admin pages auto-discover at `/plugins/{plugin}/admin/*`.
 
-### Flat `/ajax/*` namespace (webhooks only)
+### Flat `/ajax/*` namespace (external webhooks + retained endpoints)
 ```php
 '/ajax/*' => ['view' => 'ajax/{file}']
 ```
 This route survives for **external webhooks** — the store's Stripe/PayPal
 handlers (`plugins/store/ajax/`) and the mailbox inbound-email webhook
-(`plugins/mailbox/ajax/inbound_email_webhook.php`). Page JavaScript does **not**
-use it: browser-facing endpoints are `/api/v1` actions
-(`_logic_descriptor()` opt-in, browser-session credential — see
-[API](api.md#authentication)). Do not add new `/ajax/` endpoints.
+(`plugins/mailbox/ajax/inbound_email_webhook.php`) — and for a small set of
+**retained page endpoints** that predate the API surface. The one browser-facing
+holdover is the entity-photo manager (`ajax/entity_photos_ajax`, driven by
+`PhotoHelper`'s upload/reorder/delete UI); it is documented in
+[Photo System](photo_system.md).
+
+All *new* browser-facing endpoints are `/api/v1` actions (`_logic_descriptor()`
+opt-in, browser-session credential — see [API](api.md#authentication)). Do not
+add new `/ajax/` endpoints.
 
 ### Permission-protected route
 ```php
