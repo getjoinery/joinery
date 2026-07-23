@@ -26,6 +26,22 @@ The Store plugin (`/plugins/store/`) is the platform's commerce subsystem: produ
 
 The plugin registers its providers with core registries at load time: SEO metadata (`product`), tier-gated content summary (`Products`), entity photos (`product`), the header cart menu provider, profile-dashboard sections (recent orders, subscriptions), and admin-user panels (Orders, Subscriptions).
 
+## Checkout callers and guest checkout
+
+Checkout page JS drives the cart and charge through `/api/v1` actions using the
+browser-session credential (session cookie + the `X-Joinery-Csrf` header), the
+same as the rest of the platform — see [API § Authentication](../../../docs/api.md).
+
+Checkout does not require an account. The charge-side actions declare
+`allow_guest`, so an **anonymous browser session** — a visitor with a session
+cookie but no login — can complete a purchase. Guest-reachable page JS reads its
+CSRF token from the `joinery_api_csrf` cookie (falling back to the
+`joinery-api-csrf` meta tag) rather than the meta tag alone, because product and
+checkout pages may be cached and the meta tag cannot be baked into a cached page.
+Everything else stays locked down: an anonymous caller is denied by default and
+reaches only the actions that opt in with `allow_guest`. See
+[API § Authentication](../../../docs/api.md) for the anonymous-principal contract.
+
 ## Activation
 
 `activate.php` is idempotent and self-guarded. It backfills `stc_stripe_customers` from the pre-extraction user columns and product fulfillment columns where those still exist, claims the plugin's scheduled-task rows, and drops the superseded columns. On upgrade, `update_database` runs a one-time auto-activation: the store activates when the install shows store evidence (product/order rows, or a Stripe/PayPal key configured); a store-less install stays inactive.

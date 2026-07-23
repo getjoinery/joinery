@@ -28,8 +28,8 @@ tasks/
   WeeklyEventsDigest.json      ← Metadata and default configuration
 
 plugins/bookings/tasks/
-  BookingReminder.php
-  BookingReminder.json
+  BookingEmailsTask.php
+  BookingEmailsTask.json
 ```
 
 ## Creating a New Task
