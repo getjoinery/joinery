@@ -19,6 +19,9 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.6 - backup key escrow runs as a job step on the control plane (the web user cannot read
+ *                node SSH keys); the web request only checks that recovery is set up before letting
+ *                an encrypting backup be created
  * @version 1.5 - purge_node refuses while offsite backups exist for the slug (or a target can't be
  *                listed) — deleting the record would orphan them; clear them from the target first
  * @version 1.4 - purge_node action: hard-delete a removed node's record (guarded — only after
@@ -123,15 +126,15 @@ class NodeDetailActions {
 				return self::jobUrl($job);
 			}
 
-			// Escrow this node's existing backup key (migration action). Reads the
-			// key over the direct SSH channel, seals it, appends an escrow row —
-			// never via a job (job rows persist forever; the key must not).
+			// Seal this node's backup key to the recovery key. The reading and
+			// sealing happen in a control-plane step (the node's SSH key is not
+			// readable by the web user), and the key itself never reaches a job
+			// row — the step prints only its fingerprint.
 			case 'escrow_backup_key': {
-				BackupKeyCustody::ensureNodeKey($node);
-				$session->save_message(new DisplayMessage(
-					'Backup key escrowed for this node.',
-					'Escrowed', NULL, DisplayMessage::MESSAGE_ANNOUNCEMENT));
-				return $base_url . '&tab=backups';
+				BackupKeyCustody::escrow_public_key(); // refuse now if recovery is not set up
+				$steps = JobCommandBuilder::build_escrow_backup_key($node);
+				$job = ManagementJob::createJob($node->key, 'escrow_backup_key', $steps, null, $uid);
+				return self::jobUrl($job);
 			}
 
 			case 'copy_database': {
@@ -490,14 +493,20 @@ class NodeDetailActions {
 	}
 
 	/**
-	 * Mint (and escrow) the node's backup key before an encrypting backup runs.
-	 * Encryption is forced when the node has a cloud target, so treat that as
-	 * encrypting too. Throws on failure — the central catch reports it.
+	 * Refuse an encrypting backup while backup key recovery is unfinished, before
+	 * the job is created — an encrypted archive nobody can open is not a backup.
+	 * Encryption is forced when the node has a cloud target, so that counts as
+	 * encrypting too. Throws (message shown on the tab) when recovery is not set
+	 * up and verified.
+	 *
+	 * Only the settings are checked here. Sealing this node's key rides along as
+	 * the job's first step, where the agent — which can read the node's SSH key —
+	 * does the work.
 	 */
 	private static function ensure_backup_key_if_encrypting($node, $params): void {
 		$will_encrypt = !empty($params['encryption']) || JobCommandBuilder::get_target($node);
 		if ($will_encrypt) {
-			BackupKeyCustody::ensureNodeKey($node);
+			BackupKeyCustody::escrow_public_key();
 		}
 	}
 

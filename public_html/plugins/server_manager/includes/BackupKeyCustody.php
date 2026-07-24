@@ -10,14 +10,31 @@
  * node knows.
  *
  * Key material NEVER touches a ManagementJob: job cmd/output rows are persisted
- * forever, so the key is read and written over a direct in-process SSH channel
- * (the same transport node_exec.php uses), and only ever crosses the wire on
- * stdin — never in a command string or in this process's argv.
+ * forever, so the key is read and written over a direct SSH channel (the same
+ * transport node_exec.php uses), and only ever crosses the wire on stdin —
+ * never in a command string or in this process's argv.
+ *
+ * That channel needs the node's admin SSH key, which is operator-owned at mode
+ * 600 and unreadable by the web-server user. So the calls that touch a node —
+ * ensureNodeKey / escrowExistingKey — run in the agent's process, as the job
+ * step escrow_node_key.php, rather than in the web request that asks for them.
  *
  * The escrow-before-push invariant: a generated key is sealed and its row saved
  * BEFORE it is written to the node. A key that exists on a node without an
  * escrow row is therefore impossible on this path.
  *
+ * @version 1.7 - node-touching escrow runs on the agent side (escrow_node_key.php), where the node
+ *                SSH keys are readable; the web request only checks that recovery is set up
+ * @version 1.6 - setup_state() covers the recovery key only (create + prove); whether a node's key
+ *                is sealed yet is that node's own business, surveyed separately by the dashboard
+ *                and acted on from the node's Backups tab
+ * @version 1.5 - the possession proof is a readable sentence (still bound to the key fingerprint);
+ *                browser_challenge() lets the operator prove possession by pasting the key they
+ *                actually keep, opened in-page with WebCrypto
+ * @version 1.4 - setup_state() is the single source of truth for how far setup has got (the
+ *                guided walkthrough, the node Backups tab, and the dashboard all read it);
+ *                set_escrow_public_key/clear_escrow_public_key own the setting write path
+ *                (parse-before-write, proof cleared on write, silent rotation refused)
  * @version 1.3 - writeNodeKey is no-clobber (a racing mint fails loudly instead of overwriting
  *                the winner's key); sshExec drains stdout/stderr concurrently (select loop)
  * @version 1.2 - prove-possession: the recovery public key is honored only after the operator
@@ -30,6 +47,7 @@
 
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_key_escrow_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_target_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 
 class BackupKeyCustodyException extends Exception {}
@@ -41,6 +59,9 @@ class BackupKeyCustody {
 
 	/** stg_settings name holding the sha256 of the PROVEN recovery public key. */
 	const PROOF_SETTING = 'server_manager_escrow_public_key_proven_fpr';
+
+	/** stg_settings name holding the base64 recovery PUBLIC key. */
+	const PUBLIC_KEY_SETTING = 'server_manager_escrow_public_key';
 
 	/**
 	 * The configured recovery public key (raw binary), or throw. Callers that
@@ -58,17 +79,16 @@ class BackupKeyCustody {
 		$raw = self::parse_public_key();
 		if (self::read_proof_setting() !== hash('sha256', $raw)) {
 			throw new BackupKeyCustodyException(
-				'The recovery public key has not been verified. Complete the possession check on the '
-				. 'Backup Targets page (unseal the challenge with escrow_keypair.php and paste the result) '
-				. 'before backup keys can be escrowed to it.');
+				'The recovery public key has not been verified. Finish step 2 of Backup key recovery on the '
+				. 'Backup Targets page — open the challenge with your recovery key — before backup keys can '
+				. 'be escrowed to it.');
 		}
 		return $raw;
 	}
 
 	/** Parse the configured public key without the possession check, or throw. */
 	public static function parse_public_key() {
-		$settings = Globalvars::get_instance();
-		$b64 = trim((string)$settings->get_setting('server_manager_escrow_public_key'));
+		$b64 = trim((string)self::read_public_key_setting());
 		if ($b64 === '') {
 			throw new BackupKeyCustodyException(
 				'Backup-key escrow is not configured (server_manager_escrow_public_key is empty). '
@@ -92,12 +112,19 @@ class BackupKeyCustody {
 	}
 
 	/**
-	 * The exact string the operator must recover from the challenge blob. Bound
-	 * to the public key's fingerprint, so a proof recorded for one key can never
-	 * satisfy a different one.
+	 * The exact string the operator must recover from the challenge blob.
+	 *
+	 * A plain sentence, because the operator reads it: recovering something that
+	 * says what happened is self-evidently a success, where a hash-shaped token
+	 * just looks like more ciphertext to shuttle around. It ends with the key's
+	 * full fingerprint, which is what binds it — a proof recovered for one key
+	 * can never satisfy a different one. ASCII only and free of any timestamp or
+	 * randomness: it has to survive a copy-paste through a terminal and compare
+	 * byte for byte.
 	 */
 	public static function expected_proof_string() {
-		return 'sm-escrow-proof:' . hash('sha256', self::parse_public_key());
+		return 'Your recovery key opened this message. Backup key recovery is proven for key fingerprint '
+			. hash('sha256', self::parse_public_key()) . '.';
 	}
 
 	/**
@@ -110,6 +137,47 @@ class BackupKeyCustody {
 		return base64_encode(sodium_crypto_box_seal(self::expected_proof_string(), self::parse_public_key()));
 	}
 
+	/** HKDF context for the browser challenge — never reused by another blob. */
+	const BROWSER_INFO = 'sm-escrow-possession:';
+
+	/**
+	 * The same challenge in a form a browser can open with WebCrypto alone
+	 * (X25519 + HKDF-SHA256 + AES-256-GCM), so the operator can prove possession
+	 * by pasting the key straight out of their password manager — which is the
+	 * copy that has to work in a disaster, not the file left on a server.
+	 *
+	 * Opening it needs exactly the same X25519 secret key as a sealed box does;
+	 * only the packaging differs, because libsodium's sealed-box construction
+	 * (XSalsa20-Poly1305 with a blake2b nonce) has no WebCrypto equivalent.
+	 *
+	 * Layout: base64( ephemeralPub[32] || iv[12] || ciphertext || tag[16] ).
+	 */
+	public static function browser_challenge(): string {
+		$recipient = self::parse_public_key();
+
+		$eph    = sodium_crypto_box_keypair();
+		$eph_sk = sodium_crypto_box_secretkey($eph);
+		$eph_pk = sodium_crypto_box_publickey($eph);
+
+		$shared  = sodium_crypto_scalarmult($eph_sk, $recipient);
+		$aes_key = hash_hkdf('sha256', $shared, 32, self::BROWSER_INFO . $eph_pk . $recipient, '');
+
+		$iv  = random_bytes(12);
+		$tag = '';
+		$ct  = openssl_encrypt(self::expected_proof_string(), 'aes-256-gcm', $aes_key,
+			OPENSSL_RAW_DATA, $iv, $tag);
+
+		sodium_memzero($eph_sk);
+		sodium_memzero($eph);
+		sodium_memzero($shared);
+		sodium_memzero($aes_key);
+
+		if ($ct === false) {
+			throw new BackupKeyCustodyException('Could not build the verification challenge.');
+		}
+		return base64_encode($eph_pk . $iv . $ct . $tag);
+	}
+
 	/**
 	 * Record proof of possession: the pasted value must be the unsealed
 	 * challenge content. On match, the public key's fingerprint is persisted
@@ -119,11 +187,33 @@ class BackupKeyCustody {
 		$expected = self::expected_proof_string();
 		if (!is_string($pasted) || !hash_equals($expected, trim($pasted))) {
 			throw new BackupKeyCustodyException(
-				'That is not the unsealed challenge for the configured public key. Unseal the challenge '
-				. 'shown on this page with escrow_keypair.php and your offline private key, and paste the '
-				. 'exact output.');
+				'That is not what the challenge on this page opens to. Paste your recovery key into the box '
+				. 'above (or unseal the challenge with escrow_keypair.php) and use the exact sentence it '
+				. 'produces.');
 		}
 		self::write_proof_setting(hash('sha256', self::parse_public_key()));
+	}
+
+	/**
+	 * Direct stg_settings read of the public key, falling back to the settings
+	 * singleton (which also serves file-config values). Direct because the
+	 * singleton memoizes non-blank values for the life of the process: a caller
+	 * that saves a key and then asks what the key is — the setup panel, a CLI
+	 * run, a test — must see what it just wrote.
+	 */
+	private static function read_public_key_setting() {
+		try {
+			$db = DbConnector::get_instance()->get_db_link();
+			$q = $db->prepare('SELECT stg_value FROM stg_settings WHERE stg_name = ?');
+			$q->execute([self::PUBLIC_KEY_SETTING]);
+			$v = $q->fetchColumn();
+			if ($v !== false) {
+				return (string)$v;
+			}
+		} catch (\Throwable $e) {
+			error_log('BackupKeyCustody: public key read failed: ' . $e->getMessage());
+		}
+		return (string)Globalvars::get_instance()->get_setting(self::PUBLIC_KEY_SETTING, true, true);
 	}
 
 	/** Direct stg_settings read — this internal marker is not a declared plugin setting. */
@@ -140,17 +230,245 @@ class BackupKeyCustody {
 	}
 
 	private static function write_proof_setting($value) {
+		self::write_setting(self::PROOF_SETTING, $value);
+	}
+
+	/** Upsert a server_manager setting row. */
+	private static function write_setting($name, $value) {
 		$db = DbConnector::get_instance()->get_db_link();
 		$up = $db->prepare(
 			"INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name)
 			 VALUES (?, ?, 1, NOW(), NOW(), 'server_manager')
 			 ON CONFLICT (stg_name) DO UPDATE SET stg_value = EXCLUDED.stg_value, stg_update_time = NOW()");
-		$up->execute([self::PROOF_SETTING, $value]);
+		$up->execute([$name, $value]);
 	}
 
 	public static function is_escrow_configured() {
 		try { self::escrow_public_key(); return true; }
 		catch (BackupKeyCustodyException $e) { return false; }
+	}
+
+	/**
+	 * Whether backup key recovery is set up, in one shape every surface reads:
+	 * the setup panel on Backup Targets, the per-node Backups tab, and the
+	 * dashboard health rows. Keeping the decision here is what stops those three
+	 * from disagreeing.
+	 *
+	 * This is about the RECOVERY KEY only — creating it and proving possession.
+	 * Whether any individual node's key is sealed yet is that node's business,
+	 * shown and acted on from its own Backups tab (and done automatically by the
+	 * next encrypting backup there), so it is surveyed separately.
+	 *
+	 * state:
+	 *   unconfigured - no recovery public key set
+	 *   invalid      - a value is set but is not a box public key
+	 *   unproven     - key set, possession not yet demonstrated
+	 *   ready        - proven; nodes can seal their keys to it
+	 */
+	public static function setup_state(): array {
+		$state = [
+			'state'         => 'unconfigured',
+			'error'         => '',
+			'fingerprint'   => '',
+			'agent_signing' => 'unknown',
+			'is_ready'      => false,
+		];
+
+		$key = self::classify_key(self::read_public_key_setting(), self::read_proof_setting());
+		$state['error']       = $key['error'];
+		$state['fingerprint'] = $key['fingerprint'];
+
+		if ($key['state'] !== 'proven') {
+			$state['state'] = $key['state'];
+			return $state;
+		}
+
+		$state['agent_signing'] = self::agent_signing_status();
+		$state['state']         = 'ready';
+		$state['is_ready']      = true;
+		return $state;
+	}
+
+	/**
+	 * Classify a stored key value + proof marker: unconfigured | invalid |
+	 * unproven | proven, with the short fingerprint and the reason when there is
+	 * one. Pure — no settings, no database — so the state rules can be exercised
+	 * without a test ever making a throwaway key look live to a backup job.
+	 */
+	public static function classify_key($b64, $proof_marker): array {
+		$out = ['state' => 'unconfigured', 'fingerprint' => '', 'error' => ''];
+		$b64 = trim((string)$b64);
+		if ($b64 === '') {
+			$out['error'] = 'Backup-key escrow is not configured (' . self::PUBLIC_KEY_SETTING . ' is empty). '
+				. 'Encrypted backups refuse to run until a recovery public key is set.';
+			return $out;
+		}
+		$raw = base64_decode($b64, true);
+		if ($raw === false || strlen($raw) !== SODIUM_CRYPTO_BOX_PUBLICKEYBYTES) {
+			$out['state'] = 'invalid';
+			$out['error'] = self::PUBLIC_KEY_SETTING . ' is not a valid base64 box public key.';
+			return $out;
+		}
+		$out['fingerprint'] = substr(hash('sha256', $raw), 0, 16);
+		$out['state']       = ((string)$proof_marker === hash('sha256', $raw)) ? 'proven' : 'unproven';
+		return $out;
+	}
+
+	/**
+	 * Nodes whose backups depend on escrow (they have a cloud target, so
+	 * encryption is forced), split into escrowed and pending. Reasons:
+	 *   never_escrowed - no escrow row at all for this node
+	 *   regenerated    - the key seen on the node matches no escrow row
+	 *
+	 * Read by the dashboard health rows. Each node's own Backups tab checks
+	 * itself; nothing here changes a node, it only reports.
+	 */
+	public static function survey_nodes(): array {
+		$out = ['targeted' => 0, 'escrowed' => 0, 'pending' => []];
+		try {
+			$nodes = new MultiManagedNode(['deleted' => false], ['mgn_name' => 'ASC'], 1000, 0);
+			$nodes->load();
+		} catch (\Throwable $e) {
+			error_log('BackupKeyCustody: node survey failed: ' . $e->getMessage());
+			return $out;
+		}
+
+		foreach ($nodes as $node) {
+			if (!JobCommandBuilder::get_target($node)) {
+				continue; // no cloud target -> no forced encryption -> no escrow dependency
+			}
+			$out['targeted']++;
+			$entry = [
+				'id'   => $node->key,
+				'name' => $node->get('mgn_name') ?: $node->get('mgn_slug'),
+				'slug' => $node->get('mgn_slug'),
+			];
+
+			if (MultiBackupKeyEscrow::newest_for_node($node->key) === null) {
+				$entry['reason'] = 'never_escrowed';
+				$out['pending'][] = $entry;
+				continue;
+			}
+			$seen = trim((string)$node->get('mgn_backup_key_fingerprint'));
+			if ($seen !== '' && MultiBackupKeyEscrow::matching_for_node($node->key, $seen) === null) {
+				$entry['reason'] = 'regenerated';
+				$out['pending'][] = $entry;
+				continue;
+			}
+			$out['escrowed']++;
+		}
+		return $out;
+	}
+
+	/**
+	 * escrowed | pending | none (no signing key minted yet) | unknown.
+	 *
+	 * The key file is 0600 and owned by whoever publishes releases, so the web
+	 * user usually cannot read it. That is "unknown", not "none" — reporting a
+	 * key that exists as never minted would be a comfortable lie about the one
+	 * secret the whole fleet's trust hangs on.
+	 */
+	private static function agent_signing_status(): string {
+		try {
+			$path = PathHelper::getSiteRoot() . '/config/agent_signing_key';
+			if (!file_exists($path)) {
+				return 'none';
+			}
+			$raw = @file_get_contents($path);
+			if ($raw === false) {
+				return 'unknown'; // exists, not readable from here
+			}
+			if (trim($raw) === '') {
+				return 'none';
+			}
+			return self::agent_signing_key_unescrowed() ? 'pending' : 'escrowed';
+		} catch (\Throwable $e) {
+			error_log('BackupKeyCustody: signing-key escrow check failed: ' . $e->getMessage());
+			return 'unknown';
+		}
+	}
+
+	/**
+	 * Set the recovery public key. Parses before writing (a value that cannot
+	 * seal is never stored), and clears the possession proof so the new value
+	 * must be proven before anything is sealed to it.
+	 *
+	 * Replacing a PROVEN key that already has blobs sealed to it is a rotation,
+	 * not an edit — those blobs stay openable only with the old private key — so
+	 * it is refused unless the caller passes $allow_rotation.
+	 */
+	public static function set_escrow_public_key($b64, $allow_rotation = false) {
+		$b64 = trim((string)$b64);
+		if ($b64 === '') {
+			throw new BackupKeyCustodyException(
+				'Paste the recovery public key printed by "escrow_keypair.php generate".');
+		}
+		$raw = base64_decode($b64, true);
+		if ($raw === false || strlen($raw) !== SODIUM_CRYPTO_BOX_PUBLICKEYBYTES) {
+			throw new BackupKeyCustodyException(
+				'That is not a recovery public key. Paste the single base64 line that '
+				. '"escrow_keypair.php generate" prints — not the private key, and not the path to a file.');
+		}
+
+		$current = null;
+		try { $current = self::parse_public_key(); } catch (BackupKeyCustodyException $e) { /* none yet */ }
+
+		if ($current !== null && hash_equals($current, $raw)) {
+			return; // same key re-pasted: leave any existing proof intact
+		}
+		if (!$allow_rotation
+			&& self::key_in_use($current, self::read_proof_setting(), self::escrow_row_count())) {
+			throw new BackupKeyCustodyException(
+				'A verified recovery key is already in use and backup keys are sealed to it. Replacing it '
+				. 'is a key rotation — the sealed copies already stored stay openable only with the current '
+				. 'private key — so it cannot be done by pasting a new value here. Follow the rotation '
+				. 'procedure in the Server Manager documentation.');
+		}
+
+		self::write_setting(self::PUBLIC_KEY_SETTING, $b64);
+		self::write_proof_setting(''); // possession must be proven for the new value
+	}
+
+	/**
+	 * Discard an unproven recovery public key (the "use a different key" path in
+	 * step 2). Refused once a proven key has blobs sealed to it — that is
+	 * rotation, and clearing the setting would strand the recovery path.
+	 */
+	public static function clear_escrow_public_key() {
+		try {
+			$current = self::parse_public_key();
+			if (self::key_in_use($current, self::read_proof_setting(), self::escrow_row_count())) {
+				throw new BackupKeyCustodyException(
+					'Backup keys are already sealed to this recovery key; it cannot be cleared here.');
+			}
+		} catch (BackupKeyCustodyException $e) {
+			if (strpos($e->getMessage(), 'already sealed') !== false) { throw $e; }
+			// unparseable/empty value: clearing is exactly the fix
+		}
+		self::write_setting(self::PUBLIC_KEY_SETTING, '');
+		self::write_proof_setting('');
+	}
+
+	/**
+	 * Pure: is this key the one blobs are already sealed to? Only a PROVEN key
+	 * is ever sealed to, so an unproven value — however long it has sat in the
+	 * setting — is always free to replace or discard.
+	 */
+	public static function key_in_use($current_raw, $proof_marker, $row_count): bool {
+		return is_string($current_raw) && $current_raw !== ''
+			&& (string)$proof_marker === hash('sha256', $current_raw)
+			&& (int)$row_count > 0;
+	}
+
+	/** Total escrow rows (any kind) — "is anything sealed to the current key yet". */
+	private static function escrow_row_count() {
+		try {
+			$db = DbConnector::get_instance()->get_db_link();
+			return (int)$db->query('SELECT COUNT(*) FROM bke_backup_key_escrow')->fetchColumn();
+		} catch (\Throwable $e) {
+			error_log('BackupKeyCustody: escrow row count failed: ' . $e->getMessage());
+			return 0; // unknown -> do not block the operator on a query failure
+		}
 	}
 
 	/** Base64 sealed-box of a key string, sealed to the recovery public key. */

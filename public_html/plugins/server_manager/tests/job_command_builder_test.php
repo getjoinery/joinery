@@ -272,6 +272,25 @@ check(strpos($cmd, 'CANARY_FIRED') === false,
 	'a numeric option discards trailing text entirely rather than quoting it', $cmd);
 
 // ---------------------------------------------------------------------------
+section('Local backup delete privilege');
+
+// Backups under /backups are written as root. On a bare-metal node jobs run as a
+// non-root user, so the rm must be sudo-prefixed or it fails Permission denied
+// while the continue_on_error step still reports done. A Docker node runs the job
+// as root inside the container and must NOT carry a sudo prefix.
+$bm_del = jcb_cmds(JobCommandBuilder::build_delete_backup(
+	jcb_node(array('mgn_ssh_user' => 'user1')),
+	array('target' => 'local', 'local_path' => '/backups/auto_pre_install_x.sql.gz')));
+check(strpos($bm_del, 'sudo rm -f ') !== false,
+	'a bare-metal (non-root) node deletes a local backup with sudo', $bm_del);
+
+$dk_del = jcb_cmds(JobCommandBuilder::build_delete_backup(
+	jcb_node(array('mgn_container_name' => 'somesite')),
+	array('target' => 'local', 'local_path' => '/backups/auto_pre_install_x.sql.gz')));
+check(strpos($dk_del, 'sudo ') === false && strpos($dk_del, 'rm -f ') !== false,
+	'a Docker node deletes a local backup without sudo (already root)', $dk_del);
+
+// ---------------------------------------------------------------------------
 section('Path construction');
 
 // escapeshellarg returns its value WITH quotes. Interpolated inside a
@@ -962,7 +981,28 @@ foreach (['build_backup_database', 'build_backup_project'] as $builder) {
 		$builder . ': no node-side key generation remains anywhere in the job', $all_cmd);
 	check(strpos($all_cmd, 'BACKUP_KEY_FPR') !== false,
 		$builder . ': reports the on-disk key fingerprint for mismatch detection');
+
+	// Sealing comes first, and on the control plane: the node's SSH key is only
+	// readable by the agent, and verifying a key that was never escrowed would
+	// pass while leaving the archives unrecoverable.
+	$escrow_at = $verify_at = -1;
+	foreach ($steps as $i => $s) {
+		if (($s['label'] ?? '') === 'Seal backup key to the recovery key') { $escrow_at = $i; }
+		if (($s['label'] ?? '') === 'Verify encryption key present') { $verify_at = $i; }
+	}
+	check($escrow_at !== -1 && $escrow_at < $verify_at,
+		$builder . ': seals the node key to the recovery key before verifying it is present');
+	check(($steps[$escrow_at]['type'] ?? '') === 'local',
+		$builder . ': the sealing step runs on the control plane, where node SSH keys are readable');
 }
+
+// A plaintext backup on a node with no cloud target neither seals nor verifies —
+// there is no key in play at all.
+$plain_node = jcb_node(array('mgn_web_root' => '/var/www/html/plainnode/public_html'));
+$plain_labels = array_map(function ($s) { return $s['label'] ?? ''; },
+	JobCommandBuilder::build_backup_database($plain_node));
+check(!in_array('Seal backup key to the recovery key', $plain_labels, true),
+	'an unencrypted backup does not seal a key', implode(' | ', $plain_labels));
 
 section('Cloud credentials: placeholder-only (S-8) — no inline fallback exists');
 

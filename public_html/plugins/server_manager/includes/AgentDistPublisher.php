@@ -19,6 +19,8 @@
  * - Signing keypair is generated on first use at {site}/config/
  *   agent_signing_key(.pub) — zero-config, same pattern as provisioning_key.
  *
+ * @version 1.3 - only the site's own config/agent_signing_key is escrowed; a key minted into any
+ *                other directory is not the fleet trust root, so it files no recovery record
  * @version 1.2 - signing key escrowed on every load (idempotent), not only at first mint,
  *                with truthful source (generated vs migrated)
  * @version 1.1
@@ -226,11 +228,21 @@ class AgentDistPublisher {
 		// configured (or a mint that happened before the recovery key was set).
 		// Best-effort — never blocks a publish; the dashboard surfaces a key
 		// that remains unescrowed.
-		try {
-			require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupKeyCustody.php'));
-			BackupKeyCustody::escrowAgentSigningKey(trim($secret_b64), $minted ? 'generated' : 'migrated');
-		} catch (\Throwable $e) {
-			error_log('AgentDistPublisher: agent signing key escrow failed: ' . $e->getMessage());
+		//
+		// Only for the key that IS the fleet trust root, though: the one at this
+		// site's own config/agent_signing_key, which is what the health check
+		// inspects. A key minted into any other directory is not that key, so
+		// filing a recovery record for it would be recording recovery for
+		// something nothing will ever need recovering.
+		$real_secret = realpath($secret_path);
+		$trust_root  = realpath(PathHelper::getSiteRoot() . '/config/agent_signing_key');
+		if ($real_secret !== false && $real_secret === $trust_root) {
+			try {
+				require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupKeyCustody.php'));
+				BackupKeyCustody::escrowAgentSigningKey(trim($secret_b64), $minted ? 'generated' : 'migrated');
+			} catch (\Throwable $e) {
+				error_log('AgentDistPublisher: agent signing key escrow failed: ' . $e->getMessage());
+			}
 		}
 
 		$secret = base64_decode(trim($secret_b64), true);
