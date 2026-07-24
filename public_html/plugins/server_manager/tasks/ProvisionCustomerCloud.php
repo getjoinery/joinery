@@ -34,7 +34,7 @@
  *   server_manager_customer_cloud_type          default instance type
  *   server_manager_customer_cloud_image         default OS image
  *
- * @version 1.3
+ * @version 1.4
  */
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 
@@ -54,6 +54,7 @@ class ProvisionCustomerCloud implements ScheduledTaskInterface {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
 		require_once(PathHelper::getIncludePath('includes/cloud_compute/LinodeComputeDriver.php'));
 		require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Client.php'));
+		require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 
 		$actionable = new MultiCustomerCloudProvision(array(
 			'statuses' => array('ready', 'booting', 'installing', 'failed'),
@@ -255,9 +256,6 @@ class ProvisionCustomerCloud implements ScheduledTaskInterface {
 			'admin_email' => $provision->get('cvp_buyer_email'),
 			'user_name'   => $provision->get('cvp_buyer_name'),
 		];
-		if ($docker_mode === 'docker') {
-			$job_params['port'] = $port;
-		}
 		if ($install_mode === 'from_backup') {
 			$job_params['source_node_id'] = (int)$provision->get('cvp_source_node_id');
 			$job_params['backup_source']  = $provision->get('cvp_backup_source') ?: 'new';

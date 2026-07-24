@@ -5,7 +5,10 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
- * @version 1.7
+ * @version 1.11 - every terminal job records a result (sweep never re-processes); CF SSL gated on
+ *                 CF_ROUTING_VERIFIED (no rDNS on the CF path); escrow reconcile matches ANY row;
+ *                 install records the ACTUAL published container port (CONTAINER_PORT readback)
+ * @version 1.10 - processable_types() drives the dashboard sweep (P-17: relay/ssl/backup results no longer skipped)
  */
 
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
@@ -16,6 +19,25 @@ class JobResultProcessor {
 	/**
 	 * Process a completed job. Dispatches to type-specific handler if one exists.
 	 */
+	/**
+	 * Every job type this processor can reconcile — i.e. each type with a
+	 * process_<type> handler. The dashboard sweep derives its list from this so
+	 * an unwatched terminal job of ANY handled type (relay, SSL, backups, …) is
+	 * reconciled, not just a hardcoded few. Before this, only check_status /
+	 * install_node / apply_update were swept, so an unwatched provision_relay
+	 * left its relay row + WG pubkey unregistered forever (P-17), and the same
+	 * for provision_ssl and the backup types.
+	 */
+	public static function processable_types(): array {
+		$types = [];
+		foreach ((new ReflectionClass(self::class))->getMethods() as $m) {
+			if ($m->isStatic() && strpos($m->getName(), 'process_') === 0) {
+				$types[] = substr($m->getName(), strlen('process_'));
+			}
+		}
+		return $types;
+	}
+
 	public static function process($job) {
 		$type = $job->get('mjb_job_type');
 		$method = 'process_' . $type;
@@ -30,6 +52,16 @@ class JobResultProcessor {
 		SystemBase::$allow_get_mutation = true;
 		try {
 			self::$method($job);
+			// Sweep invariant: a terminal job must never leave processing without
+			// a recorded result — the dashboard sweep keys on mjb_result IS NULL
+			// and would re-process it on every render, forever. Handlers record
+			// their own richer shapes; this backstop covers every path that
+			// returns without recording.
+			if (in_array($job->get('mjb_status'), ['completed', 'failed'], true)
+				&& !$job->get('mjb_result')) {
+				$job->set('mjb_result', json_encode(['status' => (string)$job->get('mjb_status')]));
+				$job->save();
+			}
 		} finally {
 			SystemBase::$allow_get_mutation = false;
 		}
@@ -267,9 +299,47 @@ class JobResultProcessor {
 			$result['backup_size'] = $m[1];
 		}
 
-		if (!empty($result)) {
-			$job->set('mjb_result', json_encode($result));
-			$job->save();
+		// ALWAYS record a result. The dashboard sweep selects on
+		// mjb_result IS NULL, so a handler that returns without recording
+		// leaves the job re-processed on every sweep forever (the invariant
+		// record_apply_update_result documents). A failed backup — no path in
+		// the output — records what is known instead of nothing.
+		if (empty($result)) {
+			$result = [
+				'status' => (string)$job->get('mjb_status'),
+				'note'   => 'no backup file path in output',
+			];
+		}
+		$job->set('mjb_result', json_encode($result));
+		$job->save();
+
+		// Record the on-disk backup-key fingerprint and reconcile escrow. A
+		// fingerprint with NO matching escrow row (any row — a node legitimately
+		// runs an older escrowed key after a restore) means the node key was
+		// regenerated out of band (unrecoverable) — the dashboard surfaces it.
+		// Also re-upload the matching sealed blob offsite so a lost control
+		// plane still leaves the blob beside the archives in the bucket.
+		if (preg_match('/BACKUP_KEY_FPR=([0-9a-f]{64})/', $output, $fm)) {
+			$fpr = $fm[1];
+			$node_id = $job->get('mjb_mgn_node_id');
+			if ($node_id) {
+				try {
+					require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+					require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_key_escrow_class.php'));
+					require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupKeyCustody.php'));
+					$node = new ManagedNode(intval($node_id), true);
+					if ($node->get('mgn_backup_key_fingerprint') !== $fpr) {
+						$node->set('mgn_backup_key_fingerprint', $fpr);
+						$node->save();
+					}
+					$match = MultiBackupKeyEscrow::matching_for_node($node->key, $fpr);
+					if ($match) {
+						BackupKeyCustody::replicateBlob($node, $match);
+					}
+				} catch (\Throwable $e) {
+					error_log('JobResultProcessor: backup-key reconcile failed: ' . $e->getMessage());
+				}
+			}
 		}
 	}
 
@@ -416,6 +486,15 @@ class JobResultProcessor {
 			if ($node->get('mgn_ssl_state') !== 'active') {
 				$node->set('mgn_ssl_state', 'pending');
 			}
+			// Ground truth for the port ledger: install.sh auto-picks a different
+			// port when the pinned one is busy, so the recorded port is whatever
+			// Docker actually publishes (the CONTAINER_PORT= readback step).
+			if (preg_match('/CONTAINER_PORT=(\d{2,5})\b/', $output, $pm)) {
+				$actual_port = (int)$pm[1];
+				if ($actual_port > 0 && $actual_port !== (int)$node->get('mgn_port')) {
+					$node->set('mgn_port', $actual_port);
+				}
+			}
 			$node->save();
 			// Send welcome email for auto-provisioned orders
 			if ($job->get('mjb_external_order_item_id')) {
@@ -469,7 +548,8 @@ class JobResultProcessor {
 			$node->save();
 
 			// Register (or refresh) the MailboxRelay row the mailbox plugin drives —
-			// created DISABLED so the admin enables it after verifying (Fix 10).
+			// born ENABLED so pulling and map pushes start immediately, before any
+			// MX points at it (Fix 10). Disable is the emergency stop.
 			// The output carries the TENANT_* markers (pull account, spool subdir).
 			// Fleet SHARDS (skeleton_only) are not this deployment's relay — the
 			// operator's box is not a tenant of them — so no relay row is minted.
@@ -517,8 +597,8 @@ class JobResultProcessor {
 	/**
 	 * Create or update the mailbox plugin's MailboxRelay row for a provisioned node
 	 * (Fix 10). Owned by the mailbox plugin, so it is required lazily and skipped
-	 * (no fatal) when that plugin is inactive. The row is left DISABLED — enabling
-	 * it (which makes the relay front every hosted domain) is an explicit admin act.
+	 * (no fatal) when that plugin is inactive. A newly created row is born ENABLED
+	 * so pulling and map pushes start immediately; Disable is the emergency stop.
 	 */
 	private static function register_relay_row($node, string $public_ip, string $wg_pubkey, string $job_output = '', string $mail_hostname = ''): void {
 		$relay_class = PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php');
@@ -603,12 +683,13 @@ class JobResultProcessor {
 	 */
 	public static function send_provisioning_welcome_email($job, $node) {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/GetJoineryApiClient.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/ProvisioningSetup.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_host_class.php'));
 
 		$settings   = Globalvars::get_instance();
 		$api_url    = $settings->get_setting('server_manager_getjoinery_api_url');
 		$pub_key    = $settings->get_setting('server_manager_getjoinery_api_public_key');
-		$sec_key    = $settings->get_setting('server_manager_getjoinery_api_secret_key');
+		$sec_key    = ProvisioningSetup::readApiSecret();
 		$from_email = $settings->get_setting('server_manager_provisioning_welcome_from_email') ?: 'support@getjoinery.com';
 		$from_name  = $settings->get_setting('server_manager_provisioning_welcome_from_name')  ?: 'Get Joinery Support';
 
@@ -692,6 +773,21 @@ HTML;
 
 		$rdns_attempt = null;
 		if ($job->get('mjb_status') === 'completed') {
+			$output = $job->get('mjb_output') ?: '';
+			$is_cf  = (strpos($output, 'SSL_SKIPPED_CLOUDFLARE') !== false);
+
+			// Belt-and-braces on the Cloudflare path: the build fails the job
+			// when the routing probe misses, so a completed CF job should always
+			// carry CF_ROUTING_VERIFIED — but "active" is a promise to stop
+			// watching this domain, so it is only made on explicit evidence that
+			// traffic for the domain reaches this node.
+			if ($is_cf && strpos($output, 'CF_ROUTING_VERIFIED') === false) {
+				$result = ['ssl_state' => $node->get('mgn_ssl_state'), 'note' => 'cloudflare path completed without routing verification'];
+				$job->set('mjb_result', json_encode($result));
+				$job->save();
+				return;
+			}
+
 			$was_active = ($node->get('mgn_ssl_state') === 'active');
 			$node->set('mgn_ssl_state', 'active');
 			$node->save();
@@ -702,8 +798,10 @@ HTML;
 			// standalone site never needs the control-plane panel. Best-effort
 			// and first-issuance-only: a stale grant or manual node leaves the
 			// PTR to the mailbox Setup tab checklist, and a later custom PTR
-			// is never overwritten by a cert renewal.
-			if (!$was_active) {
+			// is never overwritten by a cert renewal. Not on the Cloudflare
+			// path: there the domain's A records are Cloudflare's, which is
+			// exactly what the PTR provider would reject.
+			if (!$was_active && !$is_cf) {
 				$params = json_decode($job->get('mjb_parameters') ?: '', true);
 				$rdns_domain = is_array($params) && !empty($params['domain'])
 					? $params['domain']

@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 
 # restore_project.sh - Complete project restore script
-# Version: 1.1.0 - Centralized permissions to fix_permissions.sh
+# Version: 1.2.1 - mkdir/fix_permissions failures inside perform_restore are checked
+#                  (set -e is suppressed there by the if-condition call) — a failed
+#                  permission fix no longer ends in "RESTORE COMPLETE"
+# Version: 1.2.0 - Informational output to stderr; verify_archive returns the
+#                  path cleanly; --key-file/--db-user forwarded to the DB engine
 #
 # Description:
 #   Restores a web project from a backup archive created by backup_project.sh
@@ -41,7 +45,7 @@
 set -euo pipefail
 
 # Version information
-SCRIPT_VERSION="1.1.0"
+SCRIPT_VERSION="1.2.0"
 
 # Colors for output
 RED='\033[0;31m'
@@ -51,25 +55,31 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-# Function to print colored output
+# Function to print colored output.
+#
+# Every informational helper writes to STDERR. stdout is reserved so that
+# verify_archive can hand back the backup directory path as its single clean
+# line of output — the capture `BACKUP_DIR=$(verify_archive ...)` must not pick
+# up any of these lines, or every downstream directory test fails while the
+# script still exits 0 (a restore that restores nothing).
 print_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
+    echo -e "${BLUE}[INFO]${NC} $1" >&2
 }
 
 print_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
+    echo -e "${GREEN}[SUCCESS]${NC} $1" >&2
 }
 
 print_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
+    echo -e "${YELLOW}[WARNING]${NC} $1" >&2
 }
 
 print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    echo -e "${RED}[ERROR]${NC} $1" >&2
 }
 
 print_dry_run() {
-    echo -e "${CYAN}[DRY-RUN]${NC} $1"
+    echo -e "${CYAN}[DRY-RUN]${NC} $1" >&2
 }
 
 # Function to show help
@@ -111,6 +121,8 @@ FORCE=false
 SKIP_DATABASE=false
 SKIP_FILES=false
 SKIP_APACHE=false
+KEY_FILE=""
+DB_USER=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -120,6 +132,22 @@ while [[ $# -gt 0 ]]; do
             ;;
         --force|-f)
             FORCE=true
+            shift
+            ;;
+        --key-file)
+            KEY_FILE="$2"
+            shift 2
+            ;;
+        --key-file=*)
+            KEY_FILE="${1#*=}"
+            shift
+            ;;
+        --db-user)
+            DB_USER="$2"
+            shift 2
+            ;;
+        --db-user=*)
+            DB_USER="${1#*=}"
             shift
             ;;
         --skip-database)
@@ -217,20 +245,20 @@ verify_archive() {
         return 1
     fi
 
-    echo "$backup_dir"
-
     print_info "Archive structure:"
-    echo "----------------------------------------"
+    echo "----------------------------------------" >&2
 
     # Check for backup info file
     if [ -f "$backup_dir/backup_info.txt" ]; then
         print_success "✓ Backup info file found"
         if [ "$DRY_RUN" = true ]; then
-            echo ""
-            echo "=== Backup Information ==="
-            head -20 "$backup_dir/backup_info.txt"
-            echo "==========================="
-            echo ""
+            {
+                echo ""
+                echo "=== Backup Information ==="
+                head -20 "$backup_dir/backup_info.txt"
+                echo "==========================="
+                echo ""
+            } >&2
         fi
     else
         print_warning "⚠ No backup info file found"
@@ -244,7 +272,7 @@ verify_archive() {
 
         if [ -n "$db_file" ] && [ -f "$db_file" ]; then
             print_success "✓ Database backup found: $(basename "$db_file")"
-            echo "  Size: $(ls -lh "$db_file" | awk '{print $5}')"
+            echo "  Size: $(ls -lh "$db_file" | awk '{print $5}')" >&2
         elif [ -f "$backup_dir/NO_DATABASE.txt" ]; then
             print_warning "⚠ No database backup (database did not exist during backup)"
         else
@@ -258,11 +286,13 @@ verify_archive() {
             local file_count=$(find "$backup_dir/project_files" -type f | wc -l)
             local dir_count=$(find "$backup_dir/project_files" -type d | wc -l)
             print_success "✓ Project files found"
-            echo "  Files: $file_count, Directories: $dir_count"
+            echo "  Files: $file_count, Directories: $dir_count" >&2
 
             if [ "$DRY_RUN" = true ]; then
-                echo "  Top-level contents:"
-                ls -la "$backup_dir/project_files" | head -10 | sed 's/^/    /'
+                {
+                    echo "  Top-level contents:"
+                    ls -la "$backup_dir/project_files" | head -10 | sed 's/^/    /'
+                } >&2
             fi
         else
             print_error "✗ Project files directory not found"
@@ -284,8 +314,11 @@ verify_archive() {
         fi
     fi
 
-    echo "----------------------------------------"
+    echo "----------------------------------------" >&2
 
+    # The backup directory path is this function's ONLY stdout line, emitted
+    # last so nothing can append to it. The caller captures exactly this.
+    echo "$backup_dir"
     return 0
 }
 
@@ -314,28 +347,41 @@ perform_restore() {
             # Check if database exists and warn
             DB_EXISTS=$(psql -U postgres -lqt 2>/dev/null | cut -d \| -f 1 | grep -qw "$PROJECT_NAME" && echo "yes" || echo "no")
 
+            # Declining the DB stage must skip ONLY the DB stage — files and
+            # Apache config still restore. A bare `return 0` here used to abort
+            # the whole restore after the user declined one stage.
+            local do_db_restore=true
             if [ "$DB_EXISTS" = "yes" ] && [ "$FORCE" = false ]; then
                 print_warning "Database '$PROJECT_NAME' already exists!"
-                echo "The restore_database.sh script will backup the existing database before restoring."
+                print_info "The restore engine will back up the existing database before restoring."
                 read -p "Continue with database restore? (y/N): " -n 1 -r
                 echo
                 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-                    print_info "Skipping database restore"
-                    return 0
+                    print_info "Skipping database restore (files and Apache config still restore)"
+                    do_db_restore=false
                 fi
             fi
 
-            # Run restore_database.sh — pass --non-interactive when --force is set
-            # so the inner script never blocks on prompts or openssl password reads.
-            local db_flags=""
-            if [ "$FORCE" = true ]; then
-                db_flags="--non-interactive"
-            fi
-            if bash "$RESTORE_DB_SCRIPT" "$PROJECT_NAME" "$db_file" $db_flags; then
-                print_success "Database restored successfully"
-            else
-                print_error "Database restoration failed"
-                return 1
+            if [ "$do_db_restore" = true ]; then
+                # Run restore_database.sh (the single restore engine). --force ->
+                # --non-interactive; forward the caller's key path and DB user so
+                # an encrypted archive can decrypt and psql runs as the site user.
+                local db_flags=()
+                if [ "$FORCE" = true ]; then
+                    db_flags+=(--non-interactive)
+                fi
+                if [ -n "$DB_USER" ]; then
+                    db_flags+=(--db-user "$DB_USER")
+                fi
+                if [ -n "$KEY_FILE" ]; then
+                    db_flags+=(--key-file "$KEY_FILE")
+                fi
+                if bash "$RESTORE_DB_SCRIPT" "$PROJECT_NAME" "$db_file" ${db_flags[@]+"${db_flags[@]}"}; then
+                    print_success "Database restored successfully"
+                else
+                    print_error "Database restoration failed"
+                    return 1
+                fi
             fi
         elif [ ! -f "$backup_dir/NO_DATABASE.txt" ]; then
             print_warning "No database backup found to restore"
@@ -366,12 +412,21 @@ perform_restore() {
                     return 1
                 fi
 
-                # Create new project directory and restore files
-                sudo mkdir -p "$PROJECT_DIR"
+                # Create new project directory and restore files.
+                # Explicitly checked: perform_restore runs as an `if` condition,
+                # which suppresses `set -e` for the whole function body — any
+                # command without its own check silently continues on failure.
+                if ! sudo mkdir -p "$PROJECT_DIR"; then
+                    print_error "Failed to create project directory: $PROJECT_DIR"
+                    return 1
+                fi
             fi
         else
-            # Create project directory if it doesn't exist
-            sudo mkdir -p "$PROJECT_DIR"
+            # Create project directory if it doesn't exist (checked — see above)
+            if ! sudo mkdir -p "$PROJECT_DIR"; then
+                print_error "Failed to create project directory: $PROJECT_DIR"
+                return 1
+            fi
         fi
 
         # Copy files from backup to project directory.
@@ -404,8 +459,13 @@ perform_restore() {
 
         restored_count=$(find "$backup_dir/project_files" -type f | wc -l)
 
-        # Set proper permissions using centralized script (production mode)
-        sudo "$SCRIPT_DIR/../install_tools/fix_permissions.sh" "$PROJECT_NAME" --production
+        # Set proper permissions using centralized script (production mode).
+        # Checked: a permission-fix failure otherwise ends in "RESTORE COMPLETE"
+        # with root-owned files and a site that 500s on every upload path.
+        if ! sudo "$SCRIPT_DIR/../install_tools/fix_permissions.sh" "$PROJECT_NAME" --production; then
+            print_error "fix_permissions.sh failed — restored files may have wrong ownership/modes"
+            return 1
+        fi
 
         # Make maintenance scripts executable
         if [ -d "$PROJECT_DIR/maintenance_scripts" ]; then
@@ -491,10 +551,10 @@ echo "Mode: $(if [ "$DRY_RUN" = true ]; then echo "DRY RUN (verification only)";
 echo "========================================="
 echo ""
 
-# Extract and verify archive
-BACKUP_DIR=$(verify_archive "$BACKUP_FILE" "$TEMP_DIR")
-
-if [ $? -ne 0 ]; then
+# Extract and verify archive. Capture inside the `if !` guard so that under
+# `set -e` a verification failure actually reaches this branch instead of
+# aborting the script at the assignment (and leaving the check unreachable).
+if ! BACKUP_DIR=$(verify_archive "$BACKUP_FILE" "$TEMP_DIR"); then
     print_error "Archive verification failed"
     exit 1
 fi

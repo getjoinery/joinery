@@ -7,7 +7,8 @@
  * provision_ssl job to run certbot. Retries hourly on failure; after ~16 hours
  * of failed attempts it flips mgn_ssl_state='failed' for manual resolution.
  *
- * @version 1.0
+ * @version 1.2 - CF domains awaiting routing (CF_ROUTING_UNVERIFIED) are exempt from the 16h give-up
+ * @version 1.1 - P-6: dispatch Cloudflare-proxied domains (builder's CF branch) instead of skipping on the A-record gate
  */
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -96,8 +97,17 @@ class ProvisionPendingSsl implements ScheduledTaskInterface {
 						continue;
 					}
 
-					// Give up after ~16 hours of attempts
-					if ((time() - strtotime($first['mjb_create_time'])) > 57600) {
+					// Give up after ~16 hours of attempts — EXCEPT when the failure
+					// is the Cloudflare routing probe reporting the domain does not
+					// reach this node yet. That is "waiting on the customer's DNS
+					// cutover", the same state the A-record gate models for non-CF
+					// domains, and a cutover legitimately takes days: keep quietly
+					// retrying instead of flipping to failed.
+					$oq = $db->prepare("SELECT mjb_output FROM mjb_management_jobs WHERE mjb_id = ?");
+					$oq->execute([$last['mjb_id']]);
+					$awaiting_routing = (strpos((string)$oq->fetchColumn(), 'CF_ROUTING_UNVERIFIED') !== false);
+
+					if (!$awaiting_routing && (time() - strtotime($first['mjb_create_time'])) > 57600) {
 						$node->set('mgn_ssl_state', 'failed');
 						$node->save();
 						$errors[] = "Node '{$slug}': SSL provisioning failed after 16+ hours — manual intervention required.";
@@ -106,15 +116,24 @@ class ProvisionPendingSsl implements ScheduledTaskInterface {
 				}
 			}
 
-			// DNS check: domain must resolve to the host IP
-			try {
-				$resolved_ips = DnsResolver::getA($domain);
-			} catch (DnsLookupException $e) {
-				$resolved_ips = []; // resolver failure — skip, retry next run
-			}
-			if (!in_array($host_ip, $resolved_ips, true)) {
-				$skipped++;
-				continue;
+			// DNS gate. A Cloudflare-proxied domain resolves to Cloudflare edge IPs,
+			// never the host, so the A-record gate would skip it forever (P-6).
+			// Detect Cloudflare the same way the builder does and dispatch anyway —
+			// build_provision_ssl's Cloudflare branch skips certbot, proves routing
+			// with a webroot probe fetched through the domain (the job fails until
+			// Cloudflare actually proxies to this node), then patches the proxy
+			// proto. The A-record gate still applies to non-CF domains, so certbot
+			// never runs before DNS actually points at this host.
+			if (!JobCommandBuilder::is_cloudflare_domain($domain)) {
+				try {
+					$resolved_ips = DnsResolver::getA($domain);
+				} catch (DnsLookupException $e) {
+					$resolved_ips = []; // resolver failure — skip, retry next run
+				}
+				if (!in_array($host_ip, $resolved_ips, true)) {
+					$skipped++;
+					continue;
+				}
 			}
 
 			$job_params = [

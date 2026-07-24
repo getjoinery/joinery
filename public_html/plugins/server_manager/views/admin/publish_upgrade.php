@@ -6,7 +6,7 @@
  * Lists published upgrade archives (with delete), and provides the
  * Publish New Upgrade form with optional version override.
  *
- * @version 1.4
+ * @version 1.6
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -14,6 +14,7 @@ require_once(PathHelper::getIncludePath('data/upgrades_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/UpgradeRetention.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAdminCsrf.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(10);
@@ -26,6 +27,7 @@ $archive_dir = rtrim($static_dir, '/');
 
 // ── Delete upgrade ──
 if ($_POST && ($_POST['action'] ?? '') === 'delete_upgrade') {
+	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager/publish_upgrade'); exit; }
 	$delete_id = intval($_POST['upgrade_id'] ?? 0);
 	if ($delete_id) {
 		try {
@@ -56,6 +58,7 @@ if ($_POST && ($_POST['action'] ?? '') === 'delete_upgrade') {
 
 // ── Toggle Keep (exempt a release from retention pruning) ──
 if ($_POST && ($_POST['action'] ?? '') === 'toggle_keep') {
+	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager/publish_upgrade'); exit; }
 	$keep_id = intval($_POST['upgrade_id'] ?? 0);
 	if ($keep_id) {
 		try {
@@ -86,6 +89,7 @@ if ($_POST && ($_POST['action'] ?? '') === 'toggle_keep') {
 
 // ── Reclaim old archives now ──
 if ($_POST && ($_POST['action'] ?? '') === 'prune_archives') {
+	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager/publish_upgrade'); exit; }
 	try {
 		$report = UpgradeRetention::prune();
 		if ($report['keep_count'] === 0) {
@@ -115,6 +119,7 @@ if ($_POST && ($_POST['action'] ?? '') === 'prune_archives') {
 
 // ── Publish upgrade ──
 if ($_POST && ($_POST['action'] ?? '') === 'publish_upgrade') {
+	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager/publish_upgrade'); exit; }
 	$release_notes = trim($_POST['release_notes'] ?? '');
 	$params = ['release_notes' => $release_notes];
 	if (isset($_POST['version_major'], $_POST['version_minor'], $_POST['version_patch'])
@@ -156,7 +161,22 @@ foreach ($rows as $r) {
 		$reclaimable_bytes += $r['bytes'];
 	}
 }
-$display_rows = array_slice($rows, 0, 50);
+// Default view: the newest 10 releases whose archive is still on disk.
+// "Show all" (?show=all) reveals the full history, including releases whose
+// archive has already been reclaimed by retention.
+$show_all      = (($_GET['show'] ?? '') === 'all');
+$default_limit = 10;
+$is_reclaimed  = static function ($r) {
+	return !$r['archive_exists'] && $r['protected_by'] === null;
+};
+if ($show_all) {
+	$display_rows = $rows;
+} else {
+	$live_rows    = array_values(array_filter($rows, static function ($r) use ($is_reclaimed) {
+		return !$is_reclaimed($r);
+	}));
+	$display_rows = array_slice($live_rows, 0, $default_limit);
+}
 
 // Still needed for next-version auto-detection below.
 $upgrades = new MultiUpgrade([], ['upgrade_id' => 'DESC'], 50);
@@ -232,6 +252,7 @@ $page->begin_box($pageoptions);
 	</p>
 	<?php if ($reclaimable > 0 && !$retention_error): ?>
 		<form method="post" class="svm-inline-form mb-2">
+			<?php echo SmAdminCsrf::field(); ?>
 			<input type="hidden" name="action" value="prune_archives">
 			<button type="button" class="btn btn-sm btn-outline-secondary" onclick="var f=this.parentElement; JoineryModal.confirm('Remove <?php echo (int)$reclaimable; ?> old archive file(s) and reclaim <?php echo htmlspecialchars(UpgradeRetention::formatBytes($reclaimable_bytes)); ?>? Release history is kept, and versions in use or marked Keep are never removed.', function(){ f.submit(); })">Reclaim old archives</button>
 		</form>
@@ -276,11 +297,13 @@ $page->begin_box($pageoptions);
 					<td><small><?php echo nl2br(htmlspecialchars($u->get('upg_release_notes') ?? '')); ?></small></td>
 					<td class="text-end">
 						<form method="post" class="svm-inline-form">
+							<?php echo SmAdminCsrf::field(); ?>
 							<input type="hidden" name="action" value="toggle_keep">
 							<input type="hidden" name="upgrade_id" value="<?php echo $u->key; ?>">
 							<button type="submit" class="btn btn-sm <?php echo $is_kept ? 'btn-secondary' : 'btn-outline-secondary'; ?>" title="<?php echo $is_kept ? 'Retention will never remove this archive' : 'Pin this archive so retention never removes it'; ?>"><?php echo $is_kept ? 'Kept' : 'Keep'; ?></button>
 						</form>
 						<form method="post" class="svm-inline-form">
+							<?php echo SmAdminCsrf::field(); ?>
 							<input type="hidden" name="action" value="delete_upgrade">
 							<input type="hidden" name="upgrade_id" value="<?php echo $u->key; ?>">
 							<button type="button" class="btn btn-sm btn-outline-danger" onclick="var f=this.parentElement; JoineryModal.confirm('Delete upgrade <?php echo htmlspecialchars($version); ?>? This removes both the archive file and the database record.', function(){ f.submit(); })">Delete</button>
@@ -290,8 +313,16 @@ $page->begin_box($pageoptions);
 			<?php endforeach; ?>
 		</tbody>
 	</table>
-	<?php if (count($rows) > count($display_rows)): ?>
-		<p class="text-muted mt-2 mb-0"><small>Showing the newest <?php echo count($display_rows); ?> of <?php echo count($rows); ?> releases.</small></p>
+	<?php if (!$show_all && count($rows) > count($display_rows)): ?>
+		<p class="text-muted mt-2 mb-0">
+			<small>Showing <?php echo count($display_rows); ?> of <?php echo count($rows); ?> releases.</small>
+			<a href="/admin/server_manager/publish_upgrade?show=all">Show all</a>
+		</p>
+	<?php elseif ($show_all && count($rows) > $default_limit): ?>
+		<p class="text-muted mt-2 mb-0">
+			<small>Showing all <?php echo count($rows); ?> releases.</small>
+			<a href="/admin/server_manager/publish_upgrade">Show fewer</a>
+		</p>
 	<?php endif; ?>
 <?php endif; ?>
 <?php
@@ -306,6 +337,7 @@ $page->begin_box($pageoptions);
 $formwriter = $page->getFormWriter('publish_form');
 $formwriter->begin_form();
 $formwriter->hiddeninput('action', '', ['value' => 'publish_upgrade']);
+$formwriter->hiddeninput(SmAdminCsrf::FIELD, '', ['value' => SmAdminCsrf::token()]);
 $formwriter->numberinput('version_major', 'Major', [
 	'required' => true,
 	'value'    => $next_major,

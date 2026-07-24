@@ -5,7 +5,12 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
- * @version 1.10
+ * @version 1.15 - retention rm rides the heredoc redirect line (a chain after the terminator is
+ *                 swallowed into the uploader's stdin); credentials are placeholder-only (no inline
+ *                 fallback); Cloudflare SSL requires a routing probe; one container-port allocator
+ * @version 1.14 - fingerprint step hashes the key VALUE (matches escrow) + quote-robust for the agent
+ * @version 1.13 - P-18: allocate + record + pass the container published port to install.sh (mgn_port no longer diverges)
+ * @version 1.12 - is_cloudflare_domain made public (ProvisionPendingSsl P-6 dispatch)
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -502,15 +507,18 @@ class JobCommandBuilder {
 
 		$steps = [];
 
-		// Ensure encryption key exists, auto-generate if missing
+		// The escrowed key must already be on the node — the control plane pushes
+		// it (BackupKeyCustody::ensureNodeKey) after sealing it to the recovery
+		// key. Verify-or-fail rather than auto-generate: a node-only key that was
+		// never escrowed is exactly the unrecoverable-after-loss footgun.
 		if (!empty($params['encryption'])) {
-			$steps[] = ['type' => 'ssh', 'label' => 'Ensure encryption key',
-				'cmd' => 'if [ -f ~/.joinery_backup_key ]; then echo "ENCRYPTION_KEY_OK"; else openssl rand -base64 32 > ~/.joinery_backup_key && chmod 600 ~/.joinery_backup_key && echo "ENCRYPTION_KEY_GENERATED — retrieve it via SSH: cat ~/.joinery_backup_key"; fi'];
+			$steps[] = self::step_verify_backup_key();
+			$steps[] = self::step_report_key_fingerprint();
 		}
 
 		$sudo = self::sudo_prefix($node);
 		$steps[] = ['type' => 'ssh', 'label' => 'Ensure backup directory',
-			'cmd' => "{$sudo}mkdir -p /backups && {$sudo}chmod 777 /backups"];
+			'cmd' => "{$sudo}mkdir -p /backups && {$sudo}chmod 1777 /backups"];
 
 		$steps[] = ['type' => 'ssh', 'label' => 'Run database backup',
 			'cmd' => "{$creds} && cd /backups && bash {$scripts}/sysadmin_tools/backup_database.sh {$flags} \"\$DB_NAME\"",
@@ -552,16 +560,20 @@ class JobCommandBuilder {
 		$steps = [];
 
 		if (!empty($params['encryption'])) {
-			$steps[] = ['type' => 'ssh', 'label' => 'Ensure encryption key',
-				'cmd' => 'if [ -f ~/.joinery_backup_key ]; then echo "ENCRYPTION_KEY_OK"; else openssl rand -base64 32 > ~/.joinery_backup_key && chmod 600 ~/.joinery_backup_key && echo "ENCRYPTION_KEY_GENERATED — retrieve it via SSH: cat ~/.joinery_backup_key"; fi'];
+			$steps[] = self::step_verify_backup_key();
+			$steps[] = self::step_report_key_fingerprint();
 		}
 
 		$sudo = self::sudo_prefix($node);
 		$steps[] = ['type' => 'ssh', 'label' => 'Ensure backup directory',
-			'cmd' => "{$sudo}mkdir -p /backups && {$sudo}chmod 777 /backups"];
+			'cmd' => "{$sudo}mkdir -p /backups && {$sudo}chmod 1777 /backups"];
 
+		// Emit the credentials preamble so the script inherits DB_NAME/DB_USER/
+		// PGPASSWORD from the environment instead of self-harvesting the config,
+		// which the unprivileged SSH user may not be able to read (P-10).
+		$creds = self::get_db_credentials_script($node);
 		$steps[] = ['type' => 'ssh', 'label' => 'Run full project backup',
-			'cmd' => "bash {$scripts}/sysadmin_tools/backup_project.sh {$project_name} {$flags}",
+			'cmd' => "{$creds} && bash {$scripts}/sysadmin_tools/backup_project.sh {$project_name} {$flags}",
 			'timeout' => 3600];
 
 		self::append_upload_steps($steps, $node);
@@ -595,7 +607,7 @@ class JobCommandBuilder {
 		// runs as the SSH user, so sudo on mkdir alone leaves /backups unwritable
 		// on nodes with a non-root SSH user.
 		$steps[] = ['type' => 'ssh', 'label' => 'Auto-backup target database before overwrite',
-			'cmd' => "{$target_sudo}mkdir -p /backups && {$target_sudo}chmod 777 /backups && {$target_creds} && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_overwrite_\$(date +%Y%m%d_%H%M%S).sql.gz",
+			'cmd' => "{$target_sudo}mkdir -p /backups && {$target_sudo}chmod 1777 /backups && {$target_creds} && umask 077 && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_overwrite_\$(date +%Y%m%d_%H%M%S).sql.gz",
 			'node_id' => $target_node->key,
 			'timeout' => 3600];
 
@@ -604,7 +616,7 @@ class JobCommandBuilder {
 		// naming the source site's role would error there, and the restore is
 		// ON_ERROR_STOP so any error fails the job.
 		$steps[] = ['type' => 'ssh', 'label' => 'Dump source database',
-			'cmd' => "{$source_creds} && pg_dump --no-owner --no-acl -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > {$dump_file}",
+			'cmd' => "{$source_creds} && umask 077 && pg_dump --no-owner --no-acl -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > {$dump_file}",
 			'node_id' => $source_node->key,
 			'timeout' => 3600];
 
@@ -700,10 +712,10 @@ class JobCommandBuilder {
 
 		return [
 			['type' => 'ssh', 'label' => 'Auto-backup target database before overwrite',
-			 'cmd' => "{$sudo}mkdir -p /backups && {$sudo}chmod 777 /backups && {$creds} && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_overwrite_\$(date +%Y%m%d_%H%M%S).sql.gz",
+			 'cmd' => "{$sudo}mkdir -p /backups && {$sudo}chmod 1777 /backups && {$creds} && umask 077 && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_overwrite_\$(date +%Y%m%d_%H%M%S).sql.gz",
 			 'timeout' => 3600],
 			['type' => 'ssh', 'label' => "Dump source database ({$source_db})",
-			 'cmd' => "{$creds} && pg_dump --no-owner --no-acl -U \"\$DB_USER\" " . escapeshellarg($source_db) . " | gzip > {$dump_file}",
+			 'cmd' => "{$creds} && umask 077 && pg_dump --no-owner --no-acl -U \"\$DB_USER\" " . escapeshellarg($source_db) . " | gzip > {$dump_file}",
 			 'timeout' => 3600],
 			['type' => 'ssh', 'label' => 'Restore to target',
 			 'cmd' => "gunzip -t {$dump_file} && {$creds} && psql -v ON_ERROR_STOP=1 -U \"\$DB_USER\" \"\$DB_NAME\" -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' && gunzip -c {$dump_file} | psql -v ON_ERROR_STOP=1 -U \"\$DB_USER\" \"\$DB_NAME\"",
@@ -726,6 +738,8 @@ class JobCommandBuilder {
 	 */
 	public static function build_restore_database($node, $params) {
 		$creds      = self::get_db_credentials_script($node);
+		$scripts    = self::get_scripts_path($node);
+		$sudo       = self::sudo_prefix($node);
 		$local_path = $params['local_path'] ?? $params['backup_path'] ?? null;
 		$cloud_path = $params['cloud_path'] ?? null;
 		$filename   = $params['filename'] ?? basename((string)($local_path ?: $cloud_path));
@@ -734,18 +748,17 @@ class JobCommandBuilder {
 
 		// Auto-backup target before overwrite
 		$steps[] = ['type' => 'ssh', 'label' => 'Auto-backup database before restore',
-			'cmd' => "{$creds} && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_restore_\$(date +%Y%m%d_%H%M%S).sql.gz",
+			'cmd' => "{$sudo}mkdir -p /backups && {$sudo}chmod 1777 /backups && {$creds} && umask 077 && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_restore_\$(date +%Y%m%d_%H%M%S).sql.gz",
 			'timeout' => 3600];
 
 		// If cloud-only: download to /backups/ on the remote server first
 		if (!$local_path && $cloud_path) {
 			$target = self::get_target($node);
 			if ($target) {
-				$cred_vals = $target->get_credentials();
 				$bucket    = $target->get('bkt_bucket');
 				$dl_path   = '/backups/' . basename($filename);
 
-				$uploader_script = self::build_node_uploader_script($cred_vals, $bucket);
+				$uploader_script = self::build_node_uploader_script($bucket, $target->key);
 				$eof = '__JOINERY_UPLOADER_EOF__';
 				$cp_arg = escapeshellarg($cloud_path);
 				$dl_arg = escapeshellarg($dl_path);
@@ -758,17 +771,15 @@ class JobCommandBuilder {
 		}
 
 		$restore_path = escapeshellarg($local_path);
+		$engine       = escapeshellarg("{$scripts}/sysadmin_tools/restore_database.sh");
 
-		// Verify the archive before anything is dropped: a truncated or corrupt
-		// file fails here with the database intact.
-		$steps[] = ['type' => 'ssh', 'label' => 'Verify backup archive',
-			'cmd' => "gunzip -t {$restore_path}"];
-
-		// Restores replace: drop the schema so the result equals the snapshot
-		// (target-only objects included), and fail on the first load error
-		// rather than completing a partial restore.
+		// One restore engine for every path: it verifies the archive (decrypting
+		// an .enc with the node key) BEFORE dropping anything, replaces the schema,
+		// and loads under ON_ERROR_STOP — a bad key or corrupt file leaves the
+		// database intact. The key path is resolved in this non-sudo shell and
+		// passed absolute so it survives any sudo context (B-2).
 		$steps[] = ['type' => 'ssh', 'label' => 'Restore database from backup',
-			'cmd' => "{$creds} && psql -v ON_ERROR_STOP=1 -U \"\$DB_USER\" \"\$DB_NAME\" -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' && gunzip -c {$restore_path} | psql -v ON_ERROR_STOP=1 -U \"\$DB_USER\" \"\$DB_NAME\"",
+			'cmd' => "{$creds} && KEY_PATH=\"\$HOME/.joinery_backup_key\" && bash {$engine} \"\$DB_NAME\" {$restore_path} --non-interactive --db-user \"\$DB_USER\" --key-file \"\$KEY_PATH\"",
 			'timeout' => 3600];
 
 		// Verify
@@ -816,11 +827,10 @@ class JobCommandBuilder {
 			if (!$target) {
 				throw new Exception('Cannot restore cloud-only backup: node has no backup target configured.');
 			}
-			$cred_vals = $target->get_credentials();
 			$bucket    = $target->get('bkt_bucket');
 			$dl_path   = '/backups/' . basename($filename);
 
-			$uploader_script = self::build_node_uploader_script($cred_vals, $bucket);
+			$uploader_script = self::build_node_uploader_script($bucket, $target->key);
 			$eof    = '__JOINERY_UPLOADER_EOF__';
 			$cp_arg = escapeshellarg($cloud_path);
 			$dl_arg = escapeshellarg($dl_path);
@@ -835,7 +845,7 @@ class JobCommandBuilder {
 		// 2. Auto-backup current DB before overwrite (plaintext — fast recovery, no key needed)
 		if (!$skip_db) {
 			$steps[] = ['type' => 'ssh', 'label' => 'Auto-backup database before restore',
-				'cmd' => "{$sudo}mkdir -p /backups && {$creds} && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_project_restore_\$(date +%Y%m%d_%H%M%S).sql.gz",
+				'cmd' => "{$sudo}mkdir -p /backups && {$sudo}chmod 1777 /backups && {$creds} && umask 077 && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_project_restore_\$(date +%Y%m%d_%H%M%S).sql.gz",
 				'timeout' => 3600];
 		}
 
@@ -844,7 +854,7 @@ class JobCommandBuilder {
 			$parent = escapeshellarg(dirname($project_dir));
 			$base   = escapeshellarg(basename($project_dir));
 			$steps[] = ['type' => 'ssh', 'label' => 'Auto-backup project files before restore',
-				'cmd' => "{$sudo}mkdir -p /backups && {$sudo}tar czf /backups/auto_pre_project_restore_\$(date +%Y%m%d_%H%M%S).tar.gz -C {$parent} {$base}",
+				'cmd' => "{$sudo}mkdir -p /backups && {$sudo}chmod 1777 /backups && {$sudo}tar czf /backups/auto_pre_project_restore_\$(date +%Y%m%d_%H%M%S).tar.gz -C {$parent} {$base}",
 				'timeout' => 3600];
 		}
 
@@ -855,10 +865,14 @@ class JobCommandBuilder {
 		if ($skip_files)  $skip_flags .= ' --skip-files';
 		if ($skip_apache) $skip_flags .= ' --skip-apache';
 
-		$restore_cmd = "cd /backups && {$sudo}bash " . escapeshellarg("{$scripts}/sysadmin_tools/restore_project.sh")
+		// Resolve DB user + key path in this NON-sudo shell and pass them absolute
+		// into the sudo'd restore, which forwards them to the DB restore engine
+		// (B-2: a $HOME-relative key lookup breaks once sudo changes $HOME).
+		$restore_cmd = "{$creds} && KEY_PATH=\"\$HOME/.joinery_backup_key\" && cd /backups && {$sudo}bash " . escapeshellarg("{$scripts}/sysadmin_tools/restore_project.sh")
 			. ' ' . escapeshellarg($project_name)
 			. ' ' . escapeshellarg($local_path)
-			. ' --force' . $skip_flags;
+			. ' --force' . $skip_flags
+			. ' --db-user "$DB_USER" --key-file "$KEY_PATH"';
 
 		$steps[] = ['type' => 'ssh', 'label' => 'Run project restore', 'cmd' => $restore_cmd, 'timeout' => 3600];
 
@@ -1006,10 +1020,39 @@ class JobCommandBuilder {
 	// ── Backup target helpers ──
 
 	/**
+	 * Verify-or-fail step: the escrowed backup key must already be present on the
+	 * node. Node-side generation is deleted — the control plane mints and pushes
+	 * keys (BackupKeyCustody) so nothing exists on a node without an escrow row.
+	 */
+	private static function step_verify_backup_key() {
+		return ['type' => 'ssh', 'label' => 'Verify encryption key present',
+			'cmd' => '[ -s ~/.joinery_backup_key ] || { echo BACKUP_KEY_MISSING; exit 1; }'];
+	}
+
+	/**
+	 * Report the on-disk key fingerprint so JobResultProcessor can detect a key
+	 * that was manually regenerated on the node (fingerprint no longer matches the
+	 * newest escrow row) on the next backup rather than at restore time.
+	 *
+	 * The fingerprint must equal BackupKeyCustody::fingerprint() = sha256 of the
+	 * key VALUE, so JobResultProcessor can compare it to bke_key_fingerprint. Hence
+	 * `tr -d` strips the trailing newline the key file carries before hashing —
+	 * hashing the file directly (sha256sum ~/.joinery_backup_key) would fold in the
+	 * newline and never match. And no double quotes inside the command: the agent
+	 * sends the step verbatim to the remote shell, and a backslash-escaped inner
+	 * quote (the old `cut -d" "`) mangles on the JSON round-trip and yields empty.
+	 */
+	private static function step_report_key_fingerprint() {
+		return ['type' => 'ssh', 'label' => 'Report backup key fingerprint',
+			'cmd' => "echo \"BACKUP_KEY_FPR=\$(tr -d '\\n\\r' < ~/.joinery_backup_key | sha256sum | cut -c1-64)\"",
+			'continue_on_error' => true];
+	}
+
+	/**
 	 * Load the backup target for a node, if configured.
 	 * Returns BackupTarget or null.
 	 */
-	private static function get_target($node) {
+	public static function get_target($node) {
 		$target_id = $node->get('mgn_bkt_backup_target_id');
 		if (!$target_id) return null;
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_target_class.php'));
@@ -1035,7 +1078,6 @@ class JobCommandBuilder {
 
 		$slug = $node->get('mgn_slug');
 		$prefix = $target->get('bkt_path_prefix') ?: 'joinery-backups';
-		$creds = $target->get_credentials();
 		$bucket = $target->get('bkt_bucket');
 
 		// Find the newest backup file
@@ -1043,43 +1085,54 @@ class JobCommandBuilder {
 		$check = 'test -n "$NEWEST_BACKUP"';
 		$remote_key = "REMOTE_KEY=\"{$prefix}/{$slug}/\$(basename \"\$NEWEST_BACKUP\")\"";
 
-		$uploader_script = self::build_node_uploader_script($creds, $bucket);
+		$uploader_script = self::build_node_uploader_script($bucket, $target->key);
 		$eof = '__JOINERY_UPLOADER_EOF__';
-		$upload_cmd = "php -- upload \"\$NEWEST_BACKUP\" \"\$REMOTE_KEY\" <<'{$eof}'\n{$uploader_script}\n{$eof}";
 
-		// No continue_on_error: if upload fails, halt so (a) the local cleanup step below
-		// does not delete the only surviving copy, and (b) the job is marked failed so the
-		// failure is visible in the UI instead of silently being labeled "completed".
+		// Optional local cleanup is folded into the SAME step as the upload so it
+		// deletes exactly the file it just uploaded (one NEWEST_BACKUP evaluation).
+		// A separate cleanup step re-globs "the newest now" and would delete a
+		// backup that landed in between, un-uploaded (P-23). The rm is chained
+		// with && ON THE REDIRECT LINE, before the heredoc body: the shell keeps
+		// parsing the command list on that line and only then reads the body, so
+		// the rm runs iff the upload succeeded. Chaining after the terminator
+		// line instead would not parse — the terminator must be the entire line,
+		// so the chain is swallowed into the uploader's stdin and the step dies.
+		$rm = $node->get('mgn_delete_local_after_upload') ? " && rm -f \"\$NEWEST_BACKUP\"" : '';
+		$upload_cmd = "php -- upload \"\$NEWEST_BACKUP\" \"\$REMOTE_KEY\" <<'{$eof}'{$rm}\n{$uploader_script}\n{$eof}";
+
+		$cmd = "{$find_newest} && {$check} && {$remote_key} && {$upload_cmd}";
+
+		// No continue_on_error: if upload fails, halt so (a) the local copy — the
+		// only surviving one — is not deleted, and (b) the job is marked failed so
+		// the failure is visible in the UI instead of silently labeled "completed".
 		$steps[] = [
 			'type' => 'ssh',
 			'label' => 'Upload backup to ' . $target->get('bkt_name'),
-			'cmd' => "{$find_newest} && {$check} && {$remote_key} && {$upload_cmd}",
+			'cmd' => $cmd,
 			'timeout' => 3600,
 		];
-
-		if ($node->get('mgn_delete_local_after_upload')) {
-			$steps[] = [
-				'type' => 'ssh',
-				'label' => 'Clean up local backup',
-				'cmd' => "{$find_newest} && {$check} && rm -f \"\$NEWEST_BACKUP\"",
-				'continue_on_error' => true,
-			];
-		}
 	}
 
 	/**
 	 * Assemble the standalone PHP uploader script that will be heredoc'd onto
 	 * the node. Concatenates S3Signer.php + node_uploader.php + a credentials
 	 * block. The result runs under `php -` on the node with no file deps.
+	 *
+	 * Credentials never persist in the step command: the block reads a
+	 * __SM_CREDS_<id>__ token that the agent (>= 0.4.0) replaces with the
+	 * unsealed credentials in memory just before the step runs (S-8). There is
+	 * deliberately no inline fallback — a job an old agent cannot run fails
+	 * visibly, whereas inlined credentials would persist in the job row forever.
 	 */
-	private static function build_node_uploader_script($creds, $bucket) {
+	private static function build_node_uploader_script($bucket, $target_id) {
 		$signer_path = PathHelper::getIncludePath('plugins/server_manager/includes/S3Signer.php');
 		$dispatcher_path = PathHelper::getIncludePath('plugins/server_manager/includes/node_uploader.php');
 
 		$signer = self::strip_php_tags(file_get_contents($signer_path));
 		$dispatcher = self::strip_php_tags(file_get_contents($dispatcher_path));
 
-		$creds_block = '$creds = ' . var_export($creds, true) . ";\n"
+		$token = '__SM_CREDS_' . (int)$target_id . '__';
+		$creds_block = '$creds = json_decode(base64_decode(' . var_export($token, true) . '), true);' . "\n"
 		             . '$bucket = ' . var_export($bucket, true) . ";\n";
 
 		return "<?php\n" . $signer . "\n" . $creds_block . "\n" . $dispatcher;
@@ -1150,10 +1203,9 @@ class JobCommandBuilder {
 		if (($which === 'cloud' || $which === 'both') && $cloud_path) {
 			$target = self::get_target($node);
 			if ($target) {
-				$creds = $target->get_credentials();
 				$bucket = $target->get('bkt_bucket');
 
-				$uploader_script = self::build_node_uploader_script($creds, $bucket);
+				$uploader_script = self::build_node_uploader_script($bucket, $target->key);
 				$eof = '__JOINERY_UPLOADER_EOF__';
 				$remote_key = escapeshellarg($cloud_path);
 				$cmd = "php -- delete {$remote_key} <<'{$eof}'\n{$uploader_script}\n{$eof}";
@@ -1234,21 +1286,47 @@ class JobCommandBuilder {
 		$sudo = self::sudo_prefix($node);
 
 		if (self::is_cloudflare_domain($domain)) {
-			// Cloudflare proxied: certbot not needed (Cloudflare provides edge SSL).
-			// Just ensure the HTTP proxy passes X-Forwarded-Proto "https" to the backend.
+			// Cloudflare-proxied: certbot is skipped (Cloudflare terminates TLS at
+			// its edge). But "resolves to Cloudflare" only proves the domain is
+			// behind Cloudflare — not that the zone proxies to THIS node. So
+			// completion is gated on a routing probe: the node writes a one-time
+			// token into the site's webroot, and the control plane fetches it
+			// through the domain. A mismatch fails the job before any config is
+			// touched — the domain stays pending (ProvisionPendingSsl keeps
+			// retrying and exempts this case from its give-up window) and the
+			// proxy conf keeps its correct pre-cutover X-Forwarded-Proto until
+			// traffic genuinely arrives through Cloudflare.
+			$web_root   = rtrim($node->get('mgn_web_root'), '/') ?: '/var/www/html/' . $sitename . '/public_html';
+			$token      = 'sm-ssl-probe-' . substr(md5(uniqid(mt_rand(), true)), 0, 24);
+			$probe_path = escapeshellarg($web_root . '/sm-ssl-probe.txt');
+			$probe_url  = escapeshellarg("http://{$domain}/sm-ssl-probe.txt");
+
 			return [
+				['type' => 'ssh', 'label' => 'Place routing probe token in webroot',
+				 'cmd' => "echo {$token} | {$sudo}tee {$probe_path} >/dev/null && echo PROBE_PLACED",
+				 'timeout' => 30],
+				['type' => 'local', 'label' => 'Verify the domain routes to this node',
+				 'cmd' => "RESP=\$(curl -fsSL --max-time 15 {$probe_url} 2>/dev/null); "
+				        . "if [ \"\$RESP\" = \"{$token}\" ]; then echo CF_ROUTING_VERIFIED; "
+				        . "else echo CF_ROUTING_UNVERIFIED; exit 1; fi",
+				 'timeout' => 60],
 				['type' => 'ssh', 'label' => 'Cloudflare detected — skip certbot, patch proxy config', 'on_host' => $is_docker,
 				 'cmd' => $site_var
-				          . self::proto_patch_cmd('"/etc/apache2/sites-enabled/${SITE}-proxy.conf"', $sudo)
-				          . '; echo \'SSL_SKIPPED_CLOUDFLARE\'',
+				          . self::proto_patch_cmd('"/etc/apache2/sites-enabled/${SITE}-proxy.conf"', $sudo, $is_docker)
+				          . ' && echo SSL_SKIPPED_CLOUDFLARE',
 				 'timeout' => 30],
+				['type' => 'ssh', 'label' => 'Remove routing probe token',
+				 'cmd' => "{$sudo}rm -f {$probe_path}",
+				 'continue_on_error' => true],
 			];
 		}
 
 		// certbot's Apache plugin copies X-Forwarded-Proto "http" from the HTTP VHost into
 		// the SSL VHost it generates — always patch it to "https" after certbot runs.
+		// The conf is only guaranteed to exist behind the Docker host proxy; on
+		// bare metal there is no proxy vhost, so a missing conf is informational.
 		$ssl_patch_cmd = $site_var
-		               . self::proto_patch_cmd('"/etc/apache2/sites-enabled/${SITE}-proxy-le-ssl.conf"', $sudo);
+		               . self::proto_patch_cmd('"/etc/apache2/sites-enabled/${SITE}-proxy-le-ssl.conf"', $sudo, $is_docker);
 
 		return [
 			['type' => 'ssh', 'label' => 'Ensure certbot is installed', 'on_host' => $is_docker,
@@ -1286,13 +1364,18 @@ class JobCommandBuilder {
 	 *
 	 * @param string $conf_shell_path Shell expression for the config path,
 	 *                                already quoted for the remote shell.
+	 * @param string $sudo            Sudo prefix ('' or 'sudo ').
+	 * @param bool   $required        True where the conf must exist (Docker host
+	 *                                proxy): a missing conf then fails the step
+	 *                                instead of being reported and skipped.
 	 * @return string
 	 */
-	private static function proto_patch_cmd($conf_shell_path, $sudo = '') {
+	private static function proto_patch_cmd($conf_shell_path, $sudo = '', $required = false) {
 		$http_pattern  = 'X-Forwarded-Proto "http"';
 		$https_pattern = 'X-Forwarded-Proto "https"';
+		$missing = $required ? 'echo PROTO_CONF_MISSING; exit 1; ' : 'echo PROTO_CONF_MISSING; ';
 		return 'CONF=' . $conf_shell_path . '; '
-		     . 'if [ ! -f "$CONF" ]; then echo PROTO_CONF_MISSING; '
+		     . 'if [ ! -f "$CONF" ]; then ' . $missing
 		     . 'elif grep -q \'' . $http_pattern . '\' "$CONF"; then '
 		     .   $sudo . 'sed -i \'s/' . $http_pattern . '/' . $https_pattern . '/\' "$CONF" '
 		     .   '&& ' . $sudo . 'systemctl reload apache2 && echo PROTO_PATCHED; '
@@ -1300,7 +1383,7 @@ class JobCommandBuilder {
 		     . 'else echo PROTO_HEADER_ABSENT; fi';
 	}
 
-	private static function is_cloudflare_domain($domain) {
+	public static function is_cloudflare_domain($domain) {
 		try {
 			$ips = DnsResolver::getA($domain);
 		} catch (DnsLookupException $e) {
@@ -1327,11 +1410,17 @@ class JobCommandBuilder {
 		if ($ranges !== null) {
 			return $ranges;
 		}
-		$fetched = @file_get_contents('https://www.cloudflare.com/ips-v4');
+		// Short timeout (this runs inside a scheduled-task tick) and strict CIDR
+		// validation: a captive-portal/HTML response must fall through to the
+		// baked-in list, not silently reclassify every CF domain as non-CF.
+		$ctx = stream_context_create(['http' => ['timeout' => 5]]);
+		$fetched = @file_get_contents('https://www.cloudflare.com/ips-v4', false, $ctx);
 		if ($fetched !== false) {
-			$parsed = array_filter(array_map('trim', explode("\n", $fetched)));
+			$parsed = array_values(array_filter(array_map('trim', explode("\n", $fetched)), function ($line) {
+				return (bool)preg_match('/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2}$/', $line);
+			}));
 			if (!empty($parsed)) {
-				return $ranges = array_values($parsed);
+				return $ranges = $parsed;
 			}
 		}
 		return $ranges = [
@@ -1359,6 +1448,36 @@ class JobCommandBuilder {
 	 *   backup_source  - (from-backup only) 'new' or 'existing'
 	 *   db_backup_path / project_backup_path - (existing backup) remote paths on source
 	 */
+	/**
+	 * Next free published port for a host's Docker containers (base 8080). THE
+	 * single allocator — every path that assigns a container port goes through
+	 * here so one set of rules applies. Uses MAX(mgn_port)+1 over ALL nodes on
+	 * the host — deleted rows included, so a removed-but-still-running
+	 * container's port is never handed out again (P-18 collision-safety). Rows
+	 * are matched by host string AND host id, because nodes carry one or the
+	 * other depending on how they were created. Excludes the node being
+	 * installed.
+	 */
+	public static function next_container_port($host, $host_id = null, $exclude_node_id = 0) {
+		$db = DbConnector::get_instance()->get_db_link();
+		$where  = "(mgn_host = ?" . ($host_id ? " OR mgn_mgh_host_id = ?" : "") . ") AND mgn_id <> ?";
+		$params = $host_id
+			? [$host, (int)$host_id, (int)$exclude_node_id]
+			: [$host, (int)$exclude_node_id];
+		$q = $db->prepare("SELECT COALESCE(MAX(mgn_port), 0) FROM mgn_managed_nodes WHERE {$where}");
+		$q->execute($params);
+		$max = (int)$q->fetchColumn();
+		return $max >= 8080 ? $max + 1 : 8080;
+	}
+
+	private static function allocate_container_port($node) {
+		return self::next_container_port(
+			$node->get('mgn_host'),
+			$node->get('mgn_mgh_host_id') ?: null,
+			(int)$node->key
+		);
+	}
+
 	public static function build_install_node($node, $params) {
 		$mode      = $params['mode'] ?? 'fresh';
 		$sitename  = $params['sitename'] ?? $node->get('mgn_slug');
@@ -1384,7 +1503,22 @@ class JobCommandBuilder {
 		$sitename_esc = escapeshellarg($sitename);
 		$domain_esc = escapeshellarg($domain);
 		$mode_flag = ($docker === 'docker') ? ' --docker' : ' --bare-metal';
+		// P-18: pin the container's published port. Without this $port_arg was
+		// empty, so install.sh self-allocated a port the control plane never
+		// recorded — mgn_port stayed blank and diverged from reality, and the
+		// next container's MAX(mgn_port)+1 allocation collided. Allocate the port
+		// here (if not already set by a cloud caller), record it, and pass it so
+		// install.sh publishes exactly that port.
 		$port_arg = '';
+		if ($docker === 'docker') {
+			$port = (int)$node->get('mgn_port');
+			if (!$port) {
+				$port = self::allocate_container_port($node);
+				$node->set('mgn_port', $port);
+				$node->save();
+			}
+			$port_arg = ' ' . escapeshellarg((string)$port);
+		}
 
 		$steps = [];
 		// Teardown steps collect here and go at the tail of the array, after
@@ -1420,10 +1554,10 @@ class JobCommandBuilder {
 
 				$source_sudo = self::sudo_prefix($source_node);
 				$steps[] = ['type' => 'ssh', 'label' => 'Ensure backup directory on source',
-					'node_id' => $source_node_id, 'cmd' => "{$source_sudo}mkdir -p /backups && {$source_sudo}chmod 777 /backups"];
+					'node_id' => $source_node_id, 'cmd' => "{$source_sudo}mkdir -p /backups && {$source_sudo}chmod 1777 /backups"];
 				$steps[] = ['type' => 'ssh', 'label' => 'Dump source database',
 					'node_id' => $source_node_id,
-					'cmd' => "{$source_creds} && pg_dump --no-owner --no-acl -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > {$db_backup_remote}",
+					'cmd' => "{$source_creds} && umask 077 && pg_dump --no-owner --no-acl -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > {$db_backup_remote}",
 					'timeout' => 3600];
 				$steps[] = ['type' => 'ssh', 'label' => 'Archive source project files',
 					'node_id' => $source_node_id,
@@ -1576,6 +1710,16 @@ class JobCommandBuilder {
 		$steps[] = ['type' => 'ssh', 'label' => 'Create the site',
 			'on_host' => true, 'cmd' => $install_cmd, 'timeout' => 3600];
 
+		// Docker mode: report the port the container ACTUALLY publishes. install.sh
+		// auto-picks a different port when the pinned one is busy, so the ledger is
+		// only trustworthy if it records ground truth read back from Docker —
+		// JobResultProcessor parses CONTAINER_PORT= and corrects mgn_port.
+		if ($docker === 'docker') {
+			$steps[] = ['type' => 'ssh', 'label' => 'Report published container port', 'on_host' => true,
+				'cmd' => "echo \"CONTAINER_PORT=\$(docker port {$sitename_esc} 80/tcp | head -1 | awk -F: '{print \$NF}')\"",
+				'continue_on_error' => true];
+		}
+
 		// Docker mode: record the container name in the control plane DB so future jobs
 		// (backups, restores, status checks) correctly use docker exec to reach the site.
 		if ($docker === 'docker') {
@@ -1649,11 +1793,17 @@ class JobCommandBuilder {
 			$step_base = $restore_on_host ? ['on_host' => true] : [];
 
 			$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Auto-backup fresh DB before restore',
-				'cmd' => "{$sudo}mkdir -p /backups && {$creds} && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_install_restore_\$(date +%Y%m%d_%H%M%S).sql.gz",
+				'cmd' => "{$sudo}mkdir -p /backups && {$sudo}chmod 1777 /backups && {$creds} && umask 077 && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_install_restore_\$(date +%Y%m%d_%H%M%S).sql.gz",
 				'timeout' => 3600]);
 
+			// Same restore engine as every other path: verify-before-destroy,
+			// schema replace, ON_ERROR_STOP. Handles a plaintext clone dump or an
+			// .enc archive identically (audit finding 9 — an .enc dump used to die
+			// at gunzip -t after the fresh site was already installed).
+			$restore_engine = "/var/www/html/{$sitename}/maintenance_scripts/sysadmin_tools/restore_database.sh";
+			$db_dump_arg = escapeshellarg($remote_db_dump);
 			$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Restore source database',
-				'cmd' => "gunzip -t {$remote_db_dump} && {$creds} && psql -v ON_ERROR_STOP=1 -U \"\$DB_USER\" \"\$DB_NAME\" -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' && gunzip -c {$remote_db_dump} | psql -v ON_ERROR_STOP=1 -U \"\$DB_USER\" \"\$DB_NAME\"",
+				'cmd' => "{$creds} && KEY_PATH=\"\$HOME/.joinery_backup_key\" && bash " . escapeshellarg($restore_engine) . " \"\$DB_NAME\" {$db_dump_arg} --non-interactive --db-user \"\$DB_USER\" --key-file \"\$KEY_PATH\"",
 				'timeout' => 3600]);
 
 			// backup_project.sh archives are two levels deep:

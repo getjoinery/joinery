@@ -15,7 +15,7 @@
  * set up from here — the key must be minted on the store site and its values
  * entered in the settings fields.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -97,6 +97,47 @@ class ProvisioningSetup {
 	}
 
 	/**
+	 * The pipeline API secret, decrypted for use. It is stored SecretBox-encrypted
+	 * at rest; a legacy plaintext value (written before encryption existed, or on a
+	 * site without a secret_box_key) is returned as-is, so callers migrate lazily.
+	 * This is the one accessor every pipeline consumer reads the secret through.
+	 */
+	public static function readApiSecret(): string {
+		$settings = Globalvars::get_instance();
+		return self::decryptSecret((string)$settings->get_setting('server_manager_getjoinery_api_secret_key'));
+	}
+
+	/**
+	 * Encrypt a secret for storage. Returns a SecretBox blob when a key is
+	 * available; falls back to the plaintext untouched when SecretBox cannot be
+	 * constructed (no configured key), keeping the zero-config install path alive.
+	 */
+	private static function encryptSecret(string $plaintext): string {
+		require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
+		try {
+			return (new SecretBox())->encrypt($plaintext);
+		} catch (\Throwable $e) {
+			return $plaintext;
+		}
+	}
+
+	/** Decrypt a stored secret; a non-encrypted (legacy) value passes through. */
+	private static function decryptSecret(string $stored): string {
+		if ($stored === '') {
+			return '';
+		}
+		require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
+		if (!SecretBox::looksEncrypted($stored)) {
+			return $stored;
+		}
+		try {
+			return (new SecretBox())->decrypt($stored);
+		} catch (\Throwable $e) {
+			return '';
+		}
+	}
+
+	/**
 	 * Mint the store API credential set for the self-store case: service
 	 * user (permission 3), machine API key, and the three settings the
 	 * pipeline reads. Idempotent — a configured credential set is left
@@ -158,7 +199,7 @@ class ProvisioningSetup {
 
 		self::writeSetting('server_manager_getjoinery_api_url', self::selfApiUrl());
 		self::writeSetting('server_manager_getjoinery_api_public_key', $public_key);
-		self::writeSetting('server_manager_getjoinery_api_secret_key', $secret_plaintext);
+		self::writeSetting('server_manager_getjoinery_api_secret_key', self::encryptSecret($secret_plaintext));
 
 		return array(
 			'ok' => true,
@@ -179,7 +220,7 @@ class ProvisioningSetup {
 	public static function probeApi(): bool {
 		$url = self::readSetting('server_manager_getjoinery_api_url');
 		$pub = self::readSetting('server_manager_getjoinery_api_public_key');
-		$sec = self::readSetting('server_manager_getjoinery_api_secret_key');
+		$sec = self::readApiSecret();
 		if ($url === '' || $pub === '' || $sec === '') {
 			return false;
 		}

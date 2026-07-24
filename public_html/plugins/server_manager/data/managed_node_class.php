@@ -2,7 +2,7 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the control plane.
  *
- * @version 1.3.2
+ * @version 1.3.4
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -41,6 +41,10 @@ class ManagedNode extends SystemBase {
 		'mgn_tls_insecure'        => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'mgn_bkt_backup_target_id' => array('type'=>'int8'),
 		'mgn_delete_local_after_upload' => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+		// Last on-disk backup-key fingerprint seen by a backup job (BACKUP_KEY_FPR).
+		// Compared against the newest escrow row to detect a manually regenerated
+		// (un-escrowed) node key.
+		'mgn_backup_key_fingerprint' => array('type'=>'varchar(64)'),
 		'mgn_enabled'             => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),
 		'mgn_skip_joinery_checks' => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'mgn_mgh_host_id'         => array('type'=>'int8'),
@@ -49,7 +53,7 @@ class ManagedNode extends SystemBase {
 		'mgn_install_state'       => array('type'=>'varchar(20)'),
 		'mgn_notes'               => array('type'=>'text'),
 		'mgn_uptime_enabled'              => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),
-		'mgn_uptime_check_type'           => array('type'=>'varchar(20)', 'default'=>'api', 'is_nullable'=>false),
+		'mgn_uptime_check_type'           => array('type'=>'varchar(20)', 'default'=>'http_status', 'is_nullable'=>false),
 		// Real cadence for uptime probing. RunNodeUptimeChecks fires every cron
 		// pass as a floor, but only probes a node whose interval has elapsed —
 		// the same task-floor/per-item pattern PollImapAccounts uses. Keeps

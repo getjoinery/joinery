@@ -12,7 +12,7 @@
  * (over the wire, pinned to the node's own IP) that warns before a
  * self-renewed cert lapses. See check_cert_expiry().
  *
- * @version 1.4
+ * @version 1.5 - P-19: recovered alert reports real down duration (capture down_since before apply_state clears it)
  */
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 
@@ -90,11 +90,15 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 				// staleness is measured from real results only.
 				$node->set('mgn_uptime_last_error', null);
 				$node->set('mgn_uptime_last_conclusive', $now_utc);
+				// Capture down_since before apply_state clears it on the up->up
+				// recovery, so the recovered alert reports the real down duration
+				// instead of "unknown".
+				$down_since_for_alert = $node->get('mgn_uptime_down_since');
 				$transition = $this->apply_state($node, $result['ok']);
 				$node->save();
 
 				if ($transition === 'down' || $transition === 'recovered') {
-					if ($this->send_alert($node, $transition, $result)) {
+					if ($this->send_alert($node, $transition, $result, $down_since_for_alert)) {
 						$alerts++;
 					}
 				}
@@ -314,7 +318,7 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	 * Build and send the alert email. Returns true on send, false if no
 	 * recipient could be resolved (logged to error log).
 	 */
-	private function send_alert($node, string $transition, array $result): bool {
+	private function send_alert($node, string $transition, array $result, ?string $down_since = null): bool {
 		$to = $this->resolve_alert_recipient();
 		if (!$to) {
 			error_log('RunNodeUptimeChecks: no alert recipient resolved for node ' . $node->get('mgn_slug'));
@@ -332,7 +336,7 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 			         . "Time: {$now}\n"
 			         . "Error: " . ($result['message'] ?? 'unknown') . "\n";
 		} else { // recovered
-			$down_since = $node->get('mgn_uptime_down_since');
+			// $down_since is captured by the caller before apply_state clears it.
 			$duration   = $down_since ? $this->format_duration(time() - strtotime($down_since . ' UTC')) : 'unknown';
 			$subject    = '[' . $name . '] recovered after ' . $duration;
 			$body       = "Node: {$name}\n"

@@ -2,7 +2,7 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
- * @version 1.3
+ * @version 1.4
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -68,6 +68,66 @@ class ManagementJob extends SystemBase {
 			throw new ManagementJobException('Job type is required.');
 		}
 		$this->set('mjb_update_time', gmdate('Y-m-d H:i:s'));
+	}
+
+	/**
+	 * Canonical job-type list for the filter dropdowns. One source so the node
+	 * detail Jobs tab and the all-jobs page cannot drift apart (U-5). The
+	 * all-jobs page also offers publish_upgrade (which is not node-scoped).
+	 *
+	 * @param bool $include_publish Append 'publish_upgrade' (all-jobs page).
+	 * @return string[]
+	 */
+	static function filterTypes($include_publish = false) {
+		$types = [
+			'check_status', 'backup_database', 'backup_project',
+			'copy_database', 'copy_database_local', 'restore_database',
+			'restore_project', 'apply_update',
+		];
+		if ($include_publish) {
+			$types[] = 'publish_upgrade';
+		}
+		return $types;
+	}
+
+	/**
+	 * The subset of job types that count as "database operations" — used to
+	 * filter the Recent Database Operations table. Derived from filterTypes()
+	 * so it stays a genuine subset of the canonical list (U-5).
+	 *
+	 * @return string[]
+	 */
+	static function databaseOpTypes() {
+		$db_ops = ['copy_database', 'copy_database_local', 'restore_database'];
+		return array_values(array_intersect(self::filterTypes(), $db_ops));
+	}
+
+	/**
+	 * The newest non-deleted job of a given type for a node, or null if none.
+	 *
+	 * Replaces the copy-pasted "SELECT mjb_id ... ORDER BY mjb_id DESC LIMIT 1"
+	 * query the node detail page repeated for install banners, SSL status, the
+	 * last check, backup-scan state, and the install-retry param carry-forward.
+	 * Returns a fully loaded model so callers can read whatever field they need
+	 * (->key for a link, ->get('mjb_status'), ->get('mjb_parameters'), ...).
+	 *
+	 * @param int    $node_id
+	 * @param string $type
+	 * @return ManagementJob|null
+	 */
+	static function latestForNode($node_id, $type) {
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare(
+			"SELECT mjb_id FROM mjb_management_jobs
+			 WHERE mjb_mgn_node_id = ? AND mjb_job_type = ? AND mjb_delete_time IS NULL
+			 ORDER BY mjb_id DESC LIMIT 1"
+		);
+		$q->execute([(int)$node_id, (string)$type]);
+		$row = $q->fetch(PDO::FETCH_ASSOC);
+		if (!$row) {
+			return null;
+		}
+		return new ManagementJob($row['mjb_id'], TRUE);
 	}
 }
 

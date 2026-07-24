@@ -1058,3 +1058,14 @@
 	$migration['migration_file'] = 'spam_filtering_one_switch.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// Management-job rows persist forever; rows built before credential
+	// placeholders carried decrypted cloud-storage credentials inline in
+	// mjb_commands. Replace stored secret values with __SM_SCRUBBED__ in
+	// mjb_commands/mjb_output (idempotent, value-match).
+	$migration = array();
+	$migration['database_version'] = '154';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'scrub_job_row_inline_credentials.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

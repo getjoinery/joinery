@@ -10,7 +10,12 @@
  * Every surface that reports monitoring state uses this class, so the
  * dashboard, the node detail page and the uptime task cannot disagree.
  *
- * @version 1.0
+ * It also surfaces backup-key escrow problems (backup_escrow_problems), in the
+ * same shape, so an unrecoverable-backup node is as visible as broken monitoring.
+ *
+ * @version 1.3 - escrow check matches ANY escrow row (a restored older key is still recoverable);
+ *                un-escrowed agent signing key surfaced as a control-plane problem row
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
@@ -130,7 +135,7 @@ class NodeMonitorHealth {
 	 * configured on purpose (a mail relay has no web endpoint to fall back to).
 	 */
 	public static function effective_check_type($node): string {
-		$stored = $node->get('mgn_uptime_check_type') ?: 'api';
+		$stored = $node->get('mgn_uptime_check_type') ?: 'http_status';
 		if ($stored === 'api' && $node->get('mgn_skip_joinery_checks')) {
 			return 'http_status';
 		}
@@ -168,6 +173,72 @@ class NodeMonitorHealth {
 			];
 		}
 		return $problems;
+	}
+
+	/**
+	 * Backup-key escrow problems across all nodes, in the same shape as
+	 * problems() so the dashboard renders them identically. A backup you cannot
+	 * restore is as silent as monitoring that cannot alert, so it is surfaced the
+	 * same way. Two problem types:
+	 *   - a node has a backup target (encryption forced) but NO escrow row →
+	 *     "Backup key not escrowed — offsite backups unrecoverable if lost"
+	 *   - the last on-disk key fingerprint matches NO escrow row (any row — a
+	 *     node legitimately runs an older escrowed key after a restore) → the
+	 *     node key was regenerated out of band and is not escrowed.
+	 *   - the agent signing key exists but has no escrow row while escrow is
+	 *     configured → the fleet trust root dies with the control plane.
+	 */
+	public static function backup_escrow_problems(): array {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_key_escrow_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupKeyCustody.php'));
+
+		$nodes = new MultiManagedNode(['deleted' => false], ['mgn_name' => 'ASC'], 1000, 0);
+		$nodes->load();
+
+		$problems = [];
+		foreach ($nodes as $node) {
+			if (!JobCommandBuilder::get_target($node)) {
+				continue; // no target -> no forced encryption -> no escrow dependency
+			}
+			$newest = MultiBackupKeyEscrow::newest_for_node($node->key);
+			if ($newest === null) {
+				$problems[] = self::escrow_problem($node,
+					'Backup key not escrowed — offsite backups are unrecoverable if this node is lost.');
+				continue;
+			}
+			$seen = trim((string)$node->get('mgn_backup_key_fingerprint'));
+			if ($seen !== '' && MultiBackupKeyEscrow::matching_for_node($node->key, $seen) === null) {
+				$problems[] = self::escrow_problem($node,
+					'Node backup key was regenerated out of band and is not escrowed — new backups cannot be recovered.');
+			}
+		}
+
+		try {
+			if (BackupKeyCustody::agent_signing_key_unescrowed()) {
+				$problems[] = [
+					'node'   => null,
+					'slug'   => 'control-plane',
+					'name'   => 'Control plane',
+					'id'     => 0,
+					'health' => self::result('escrow', 'Agent signing key not escrowed',
+						'The agent signing key (fleet trust root) has no escrow row — it is lost with the control plane. Publishing a release escrows it automatically.', true),
+				];
+			}
+		} catch (\Throwable $e) {
+			error_log('NodeMonitorHealth: signing-key escrow check failed: ' . $e->getMessage());
+		}
+		return $problems;
+	}
+
+	private static function escrow_problem($node, $detail): array {
+		return [
+			'node'   => $node,
+			'slug'   => $node->get('mgn_slug'),
+			'name'   => $node->get('mgn_name'),
+			'id'     => $node->key,
+			'health' => self::result('escrow', 'Backup key not escrowed', $detail, true),
+		];
 	}
 
 	private static function result($state, $label, $detail, $is_problem): array {

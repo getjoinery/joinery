@@ -271,9 +271,11 @@ The **Overview** tab shows an **SSL Setup card** when `mgn_ssl_state` is not `ac
 
 The `provision_ssl` job runs `certbot --apache -d DOMAIN` on the node's host (for Docker nodes, certbot runs on the reverse-proxy host, not inside the container). On success, `mgn_ssl_state` is set to `active` by `JobResultProcessor`.
 
+**Cloudflare-proxied domains** skip certbot (Cloudflare terminates TLS at its edge) but are gated on a routing probe: the job writes a one-time token into the site's webroot, and the control plane fetches it through the domain. Only a match — proof that traffic for the domain actually lands on this node — patches the proxy's `X-Forwarded-Proto` and marks SSL `active` (`JobResultProcessor` additionally requires the `CF_ROUTING_VERIFIED` marker). A miss fails the job and the domain stays pending until the customer's DNS actually routes here.
+
 ### Automated Provisioning (installs only)
 
-For nodes installed via **Install New Node**, `ProvisionPendingSsl` (scheduled hourly) watches for nodes with `mgn_ssl_state = 'pending'`, checks DNS, and kicks off `provision_ssl` jobs automatically. After ~16 hours of DNS check failures it flips state to `failed`. Manual provisioning via the Setup card is the fallback.
+For nodes installed via **Install New Node**, `ProvisionPendingSsl` (scheduled hourly) watches for nodes with `mgn_ssl_state = 'pending'`, checks DNS, and kicks off `provision_ssl` jobs automatically. After ~16 hours of failed attempts it flips state to `failed` — except a Cloudflare domain still waiting on its DNS cutover (`CF_ROUTING_UNVERIFIED`), which keeps quietly retrying. Manual provisioning via the Setup card is the fallback.
 
 ## Hosting Provisioning
 
@@ -687,7 +689,7 @@ A lightweight per-node uptime check runs on each scheduled-task tick (~15 min). 
 **Augmented `mgn_managed_nodes` fields:**
 
 - `mgn_uptime_enabled` (bool, default true) — per-node on/off
-- `mgn_uptime_check_type` (varchar, default `'api'`) — which check method to use (see below)
+- `mgn_uptime_check_type` (varchar, default `'http_status'`) — which check method to use (see below). `http_status` is the default because it concludes up/down for any node with a site URL and needs no setup; `api` is an opt-in that requires API keys provisioned on the node.
 - `mgn_uptime_last_status` (varchar) — `'up'` / `'down'` / null (never checked)
 - `mgn_uptime_consecutive_failures` (int) — streak counter for threshold logic
 - `mgn_uptime_down_since` (timestamp) — when current outage started, null when up

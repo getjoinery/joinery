@@ -21,7 +21,7 @@
  *
  * Run: php plugins/server_manager/tests/provisioning_setup_test.php
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -115,9 +115,24 @@ check(!empty($r1['api_key_id']), 'api key minted');
 check(ProvisioningSetup::readSetting('server_manager_getjoinery_api_url') === ProvisioningSetup::selfApiUrl(),
 	'api url setting is self');
 $pub1 = ProvisioningSetup::readSetting('server_manager_getjoinery_api_public_key');
-$sec1 = ProvisioningSetup::readSetting('server_manager_getjoinery_api_secret_key');
+$sec1 = ProvisioningSetup::readApiSecret();
 check(strpos($pub1, 'public_') === 0, 'public key setting written');
-check(strpos($sec1, 'secret_') === 0, 'secret key setting written');
+check(strpos($sec1, 'secret_') === 0, 'secret key readable (decrypted) via readApiSecret');
+
+// The secret is SecretBox-encrypted at rest — the raw setting is a ciphertext
+// blob, never the plaintext. Only assertable where a secret_box_key exists:
+// without one, encryptSecret() deliberately falls back to plaintext (the
+// zero-config path), so on such a site these two checks would fail by design.
+require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
+$has_box_key = true;
+try { new SecretBox(); } catch (\Throwable $e) { $has_box_key = false; }
+if ($has_box_key) {
+	$sec_raw = ProvisioningSetup::readSetting('server_manager_getjoinery_api_secret_key');
+	check(SecretBox::looksEncrypted($sec_raw), 'secret stored encrypted at rest');
+	check(strpos($sec_raw, 'secret_') !== 0, 'raw stored secret is not plaintext');
+} else {
+	section('secret at-rest encryption checks skipped: no secret_box_key configured (zero-config plaintext path)');
+}
 
 $user = User::GetByEmail(ProvisioningSetup::serviceUserEmail());
 check($user !== NULL, 'service user exists');

@@ -302,4 +302,44 @@ check($node->get('mgn_joinery_version') === '2.14.3',
 	'a failed poll leaves the previously known version in place',
 	var_export($node->get('mgn_joinery_version'), true));
 
+// ---------------------------------------------------------------------------
+section('Terminal jobs always record a result (the sweep can never re-process forever)');
+
+// The dashboard sweep selects mjb_result IS NULL; a handler path that returns
+// without recording would make that job re-processed on every render, forever.
+$fb = jrp_job($node, 'backup_database', "BACKUP_KEY_MISSING\nssh step failed");
+$fb->set('mjb_status', 'failed');
+$fb->save();
+JobResultProcessor::process($fb);
+check((string)$fb->get('mjb_result') !== '',
+	'a failed backup with no path in its output still records a result',
+	var_export($fb->get('mjb_result'), true));
+
+// Handler early-returns (no node on the job) are covered by the process()
+// backstop, for every job type at once.
+$orphan = jrp_job(null, 'provision_ssl', 'whatever');
+JobResultProcessor::process($orphan);
+check((string)$orphan->get('mjb_result') !== '',
+	'a job whose handler returns early still records a result via the backstop',
+	var_export($orphan->get('mjb_result'), true));
+
+// CF gating: a completed Cloudflare-path job without routing verification must
+// NOT flip ssl_state active (and still records a result).
+$cf_node = jrp_node(array('mgn_ssl_state' => 'pending'));
+$cf_job = jrp_job($cf_node, 'provision_ssl', "PROTO_ALREADY_HTTPS\nSSL_SKIPPED_CLOUDFLARE");
+JobResultProcessor::process($cf_job);
+$cf_node->load();
+check($cf_node->get('mgn_ssl_state') !== 'active',
+	'a CF-path completion without CF_ROUTING_VERIFIED does not mark SSL active',
+	var_export($cf_node->get('mgn_ssl_state'), true));
+check((string)$cf_job->get('mjb_result') !== '', 'and the unverified CF job still records a result');
+
+$cf_ok_node = jrp_node(array('mgn_ssl_state' => 'pending'));
+$cf_ok = jrp_job($cf_ok_node, 'provision_ssl', "PROBE_PLACED\nCF_ROUTING_VERIFIED\nPROTO_PATCHED\nSSL_SKIPPED_CLOUDFLARE");
+JobResultProcessor::process($cf_ok);
+$cf_ok_node->load();
+check($cf_ok_node->get('mgn_ssl_state') === 'active',
+	'a routing-verified CF completion marks SSL active',
+	var_export($cf_ok_node->get('mgn_ssl_state'), true));
+
 harness_finish();

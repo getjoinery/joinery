@@ -6,11 +6,14 @@
  * Auto-detect panel and manual add form for new nodes.
  * After save, redirects to node_detail.
  *
- * @version 1.0
+ * @version 1.4 - CSRF on the save handler; tcp_port check requires a port at save time
+ * @version 1.3
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAssets.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAdminCsrf.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(10);
@@ -21,6 +24,9 @@ $node = new ManagedNode(NULL);
 // Handle form save
 $error = null;
 if ($_POST && isset($_POST['mgn_name'])) {
+	// A forged cross-origin POST must not be able to plant a node record
+	// pointed at attacker infrastructure.
+	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager/node_add'); exit; }
 	$editable_fields = [
 		'mgn_name', 'mgn_slug', 'mgn_host', 'mgn_ssh_user', 'mgn_ssh_key_path',
 		'mgn_ssh_port', 'mgn_container_name', 'mgn_container_user', 'mgn_web_root',
@@ -37,6 +43,11 @@ if ($_POST && isset($_POST['mgn_name'])) {
 			if ($field === 'mgn_ssh_port' && $value === '') {
 				$value = 22;
 			}
+			// TCP port is only filled for tcp_port checks; an empty value must fall
+			// back to the column default (0), never NULL — the column is NOT NULL.
+			if ($field === 'mgn_uptime_tcp_port' && $value === '') {
+				$value = 0;
+			}
 			$node->set($field, $value);
 		}
 	}
@@ -52,6 +63,13 @@ if ($_POST && isset($_POST['mgn_name'])) {
 	}
 
 	try {
+		// A TCP check with no port would save port 0 and only surface later as a
+		// dashboard "Monitoring misconfigured" row — reject it at the form.
+		if ($node->get('mgn_uptime_enabled')
+			&& $node->get('mgn_uptime_check_type') === 'tcp_port'
+			&& (int)$node->get('mgn_uptime_tcp_port') < 1) {
+			throw new Exception('A TCP port is required when the check type is TCP port.');
+		}
 		$node->prepare();
 		$node->save();
 		$node->load();
@@ -132,6 +150,7 @@ if ($error) {
 	</div>
 </div>
 
+<?php echo SmAssets::script_tag(); ?>
 <script>
 function detectServers() {
 	var host = document.getElementById('detect_host').value.trim();
@@ -148,7 +167,7 @@ function detectServers() {
 	btn.disabled = true;
 	btn.textContent = 'Scanning...';
 	status.hidden = false;
-	status.innerHTML = '<div class="text-muted"><span class="spinner-border spinner-border-sm me-2"></span>Creating discovery job... The agent will SSH to ' + host + ' and scan for Joinery instances.</div>';
+	status.innerHTML = '<div class="text-muted"><span class="spinner-border spinner-border-sm me-2"></span>Creating discovery job... The agent will SSH to ' + smEsc(host) + ' and scan for Joinery instances.</div>';
 	results.innerHTML = '';
 
 	smApiPost('discover_nodes', { host: host, ssh_user: user, ssh_key_path: key, ssh_port: port })
@@ -156,23 +175,17 @@ function detectServers() {
 			if (!data.success) {
 				btn.disabled = false;
 				btn.textContent = 'Detect';
-				status.innerHTML = '<div class="alert alert-danger">' + data.message + '</div>';
+				status.innerHTML = '<div class="alert alert-danger">' + smEsc(data.message) + '</div>';
 				return;
 			}
-			status.innerHTML = '<div class="text-muted"><span class="spinner-border spinner-border-sm me-2"></span>Agent is scanning ' + host + '... <a href="/admin/server_manager/job_detail?job_id=' + data.job_id + '" target="_blank" class="ms-2">View job #' + data.job_id + '</a></div>';
+			status.innerHTML = '<div class="text-muted"><span class="spinner-border spinner-border-sm me-2"></span>Agent is scanning ' + smEsc(host) + '... <a href="/admin/server_manager/job_detail?job_id=' + encodeURIComponent(data.job_id) + '" target="_blank" class="ms-2">View job #' + smEsc(data.job_id) + '</a></div>';
 			pollDiscoveryJob(data.job_id, host);
 		})
 		.catch(function(err) {
 			btn.disabled = false;
 			btn.textContent = 'Detect';
-			status.innerHTML = '<div class="alert alert-danger">Request failed: ' + err.message + '</div>';
+			status.innerHTML = '<div class="alert alert-danger">Request failed: ' + smEsc(err.message) + '</div>';
 		});
-}
-
-function smApiPost(action, params) {
-	// Error envelopes resolve {} (soft-failure shape); network errors reject.
-	return joineryApi.post('server_manager/' + action, params || {})
-		.catch(function(err) { if (err && err.status) return {}; throw err; });
 }
 
 function pollDiscoveryJob(jobId, host) {
@@ -185,7 +198,7 @@ function pollDiscoveryJob(jobId, host) {
 			if (!data.success) {
 				btn.disabled = false;
 				btn.textContent = 'Detect';
-				status.innerHTML = '<div class="alert alert-danger">' + (data.message || 'Poll failed') + '</div>';
+				status.innerHTML = '<div class="alert alert-danger">' + smEsc(data.message || 'Poll failed') + '</div>';
 				return;
 			}
 
@@ -199,43 +212,49 @@ function pollDiscoveryJob(jobId, host) {
 
 			if (data.status === 'failed') {
 				var msg = data.error_message || 'Discovery job failed';
-				status.innerHTML = '<div class="alert alert-danger"><strong>Detection failed:</strong> ' + msg + '</div>';
+				status.innerHTML = '<div class="alert alert-danger"><strong>Detection failed:</strong> ' + smEsc(msg) + '</div>';
 				return;
 			}
 
 			if (!data.result || !data.result.instances || data.result.instances.length === 0) {
 				var hostname = (data.result && data.result.hostname) ? data.result.hostname : host;
 				var hasDocker = data.result && data.result.has_docker;
-				status.innerHTML = '<div class="alert alert-warning">Connected to <strong>' + hostname + '</strong> but no Joinery instances were found'
+				status.innerHTML = '<div class="alert alert-warning">Connected to <strong>' + smEsc(hostname) + '</strong> but no Joinery instances were found'
 					+ (hasDocker ? ' in any Docker container' : '') + '. You can still add a node manually using the form below.</div>';
 				return;
 			}
 
 			var r = data.result;
+			// Keep the discovered result in JS state and reference instances by
+			// index from the button handlers — never serialize objects into an
+			// attribute, where an apostrophe in a remote-controlled field breaks
+			// out of the onclick (S-2).
+			window._smDetected = r;
 			var unadded = r.instances.filter(function(i) { return !i.already_added; }).length;
 			var addAllBtn = unadded >= 2
-				? ' <button type="button" class="btn btn-sm btn-primary ms-3" id="add_all_btn" onclick=\'addAllDetected(' + JSON.stringify(r) + ')\'>Add All (' + unadded + ')</button>'
+				? ' <button type="button" class="btn btn-sm btn-primary ms-3" id="add_all_btn" onclick="addAllDetected(window._smDetected)">Add All (' + smEsc(unadded) + ')</button>'
 				: '';
 			status.innerHTML = '<div class="alert alert-success d-flex align-items-center justify-content-between">'
-				+ '<div>Found <strong>' + r.instances.length + '</strong> Joinery instance(s) on <strong>' + (r.hostname || host) + '</strong>' + (r.has_docker ? ' (Docker)' : '') + ':</div>'
+				+ '<div>Found <strong>' + smEsc(r.instances.length) + '</strong> Joinery instance(s) on <strong>' + smEsc(r.hostname || host) + '</strong>' + (r.has_docker ? ' (Docker)' : '') + ':</div>'
 				+ addAllBtn
 				+ '</div>';
 
 			var html = '<div class="row">';
-			r.instances.forEach(function(inst) {
+			r.instances.forEach(function(inst, idx) {
 				var disabled = inst.already_added ? ' disabled' : '';
 				var badge = inst.already_added ? '<span class="badge bg-secondary ms-2">Already added</span>' : '';
+				var url = smSafeUrl(inst.site_url);
 				html += '<div class="col-md-6 col-lg-4 mb-3">'
 					+ '<div class="card">'
 					+ '<div class="card-body">'
-					+ '<h6 class="card-title">' + inst.name + badge + '</h6>'
-					+ (inst.container_name ? '<p class="mb-1"><small class="text-muted">Container: ' + inst.container_name + '</small></p>' : '')
-					+ (inst.site_url ? '<p class="mb-1"><small><a href="' + inst.site_url + '" target="_blank">' + inst.site_url + '</a></small></p>' : '')
-					+ (inst.version ? '<p class="mb-1"><small>Version: ' + inst.version + '</small></p>' : '')
-					+ '<p class="mb-1"><small class="text-muted">' + inst.web_root + '</small></p>'
+					+ '<h6 class="card-title">' + smEsc(inst.name) + badge + '</h6>'
+					+ (inst.container_name ? '<p class="mb-1"><small class="text-muted">Container: ' + smEsc(inst.container_name) + '</small></p>' : '')
+					+ (url ? '<p class="mb-1"><small><a href="' + smEsc(url) + '" target="_blank">' + smEsc(url) + '</a></small></p>' : '')
+					+ (inst.version ? '<p class="mb-1"><small>Version: ' + smEsc(inst.version) + '</small></p>' : '')
+					+ '<p class="mb-1"><small class="text-muted">' + smEsc(inst.web_root) + '</small></p>'
 					+ '<button type="button" class="btn btn-sm btn-primary mt-2' + disabled + '"'
 					+ disabled
-					+ ' onclick=\'fillFromDetected(' + JSON.stringify(inst) + ', ' + JSON.stringify(r) + ')\'>'
+					+ ' onclick="fillFromDetected(window._smDetected.instances[' + idx + '], window._smDetected)">'
 					+ (inst.already_added ? 'Already Added' : 'Add This Node')
 					+ '</button>'
 					+ '</div></div></div>';
@@ -295,19 +314,19 @@ function addAllDetected(data) {
 	smApiPost('add_discovered_nodes', payload)
 		.then(function(j) {
 			if (!j.ok) {
-				status.innerHTML = '<div class="alert alert-danger">' + (j.message || 'Bulk add failed') + '</div>';
+				status.innerHTML = '<div class="alert alert-danger">' + smEsc(j.message || 'Bulk add failed') + '</div>';
 				if (btn) { btn.disabled = false; btn.textContent = 'Add All (' + unadded.length + ')'; }
 				return;
 			}
-			var parts = [j.created + ' added'];
-			if (j.skipped) parts.push(j.skipped + ' already present');
+			var parts = [smEsc(j.created) + ' added'];
+			if (j.skipped) parts.push(smEsc(j.skipped) + ' already present');
 			if (j.errors && j.errors.length) parts.push(j.errors.length + ' failed');
 			var cls = (j.errors && j.errors.length) ? 'alert-warning' : 'alert-success';
 			var html = '<div class="alert ' + cls + '"><strong>' + parts.join(', ') + '.</strong>';
 			if (j.errors && j.errors.length) {
 				html += '<ul class="mb-0 mt-2">';
 				j.errors.forEach(function(e) {
-					html += '<li><code>' + e.slug + '</code>: ' + e.message + '</li>';
+					html += '<li><code>' + smEsc(e.slug) + '</code>: ' + smEsc(e.message) + '</li>';
 				});
 				html += '</ul>';
 			}
@@ -334,6 +353,7 @@ $formwriter = $page->getFormWriter('node_form', [
 ]);
 
 echo $formwriter->begin_form();
+echo SmAdminCsrf::field();
 
 echo '<h6 class="text-muted mt-2 mb-3">Connection Settings</h6>';
 
@@ -418,12 +438,12 @@ $formwriter->checkboxinput('mgn_uptime_enabled', 'Monitor uptime', [
 
 $formwriter->dropinput('mgn_uptime_check_type', 'Check type', [
 	'options' => [
-		'api'         => 'API probe (authenticated /api/v1/management/stats)',
 		'http_status' => 'HTTP status (plain GET, any 2xx/3xx is up)',
+		'api'         => 'API probe (authenticated /api/v1/management/stats)',
 		'tcp_port'    => 'TCP port (connection accepted means up)',
 	],
-	'value'    => 'api',
-	'helptext' => 'API probe gives richer info but requires API keys — without them the check cannot conclude and the node is reported as misconfigured. TCP port suits services with no web endpoint, such as a mail relay. When "Skip Joinery-specific checks" is on, an API probe falls back to HTTP status; an explicitly chosen HTTP or TCP check is left alone.',
+	'value'    => 'http_status',
+	'helptext' => 'HTTP status works with no setup — any Joinery site with a URL concludes up or down immediately. API probe gives richer info but requires API keys provisioned on the node; without them the check cannot conclude and the node is reported as misconfigured. TCP port suits services with no web endpoint, such as a mail relay. When "Skip Joinery-specific checks" is on, an API probe falls back to HTTP status; an explicitly chosen HTTP or TCP check is left alone.',
 	'visibility_rules' => [
 		'mgn_uptime_tcp_port' => ['tcp_port'],
 	],
