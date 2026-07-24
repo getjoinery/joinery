@@ -35,13 +35,11 @@ $db = DbConnector::get_instance()->get_db_link();
 
 // Every action the node-detail page dispatches. CSRF is a single gate ahead of
 // all of them, so the reject path is asserted for the whole set.
-$ALL_ACTIONS = [
-	'check_status', 'backup_database', 'backup_project', 'escrow_backup_key',
-	'copy_database', 'copy_database_local', 'restore_database', 'restore_project',
-	'apply_update', 'apply_update_all_on_host', 'retry_install', 'provision_ssl',
-	'run_plugin_installers', 'set_reverse_dns', 'save_api_credential',
-	'clear_api_credential', 'save_node', 'delete_node',
-];
+// Derive the action list from the dispatcher's own error-tab map, so a newly
+// added action is covered automatically and the count can never drift from reality.
+$error_tab_prop = new ReflectionProperty('NodeDetailActions', 'error_tab');
+$error_tab_prop->setAccessible(true);
+$ALL_ACTIONS = array_keys($error_tab_prop->getValue());
 
 /** Count non-deleted jobs for a node (any created mutation shows up here). */
 function job_count($db, $node_id) {
@@ -88,7 +86,7 @@ try {
 		}
 	}
 	if ($all_rejected) {
-		check(true, 'all 18 actions returned the reject redirect without a token');
+		check(true, 'all ' . count($ALL_ACTIONS) . ' actions returned the reject redirect without a token');
 	}
 	check(job_count($db, $node_id) === $before, 'no job was created by any tokenless action');
 

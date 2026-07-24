@@ -19,6 +19,12 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.5 - purge_node refuses while offsite backups exist for the slug (or a target can't be
+ *                listed) — deleting the record would orphan them; clear them from the target first
+ * @version 1.4 - purge_node action: hard-delete a removed node's record (guarded — only after
+ *                soft-delete; escrow + job history preserved via cascade rules)
+ * @version 1.3 - decommission_node action: type-to-confirm guarded permanent site deletion
+ *                (host teardown job); delete_node message clarifies it is record-only
  * @version 1.2 - reverse-DNS messages are plain text (display loop escapes); ensureNodeKey failures fail loud
  * @version 1.1
  */
@@ -52,6 +58,8 @@ class NodeDetailActions {
 		'clear_api_credential'     => 'api_keys',
 		'save_node'                => 'overview',
 		'delete_node'              => 'overview',
+		'decommission_node'        => 'overview',
+		'purge_node'               => 'overview',
 	];
 
 	/**
@@ -352,8 +360,87 @@ class NodeDetailActions {
 				}
 				$node->soft_delete();
 				$session->save_message(new DisplayMessage(
-					'Site deleted.', 'Success', $page_regex,
+					'Removed from dashboard. The site itself keeps running on its host.', 'Success', $page_regex,
 					DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+				));
+				return '/admin/server_manager';
+			}
+
+			case 'decommission_node': {
+				if (!$node->key) {
+					return $base_url;
+				}
+				// Server-side guard behind the type-to-confirm modal: the pasted site
+				// name must match the one derived from the node's own fields, or the
+				// destructive job is not built.
+				$expected = JobCommandBuilder::decommission_site_name($node);
+				$typed = trim($_POST['confirm_site_name'] ?? '');
+				if ($typed !== $expected) {
+					$session->save_message(new DisplayMessage(
+						'Type the exact site name to permanently delete it. Nothing was deleted.', 'Error',
+						$page_regex, DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+					));
+					return $base_url . '&tab=overview';
+				}
+				$steps = JobCommandBuilder::build_decommission_node($node, []);
+				$job = ManagementJob::createJob($node->key, 'decommission_node', $steps, [], $uid);
+				$session->save_message(new DisplayMessage(
+					'Permanent deletion started. The record is removed once the host teardown is verified.', 'Success',
+					$page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+				));
+				return self::jobUrl($job);
+			}
+
+			case 'purge_node': {
+				if (!$node->key) {
+					return $base_url;
+				}
+				// Guard: never hard-delete the record of a node that is still tracked.
+				// Purging a live node's record is exactly how a running site becomes an
+				// untracked orphan — remove it from the dashboard (or permanently delete
+				// the site) first, which soft-deletes the record.
+				if (!$node->get('mgn_delete_time')) {
+					$session->save_message(new DisplayMessage(
+						'Remove this node from the dashboard first, then permanently delete its entry.', 'Error',
+						$page_regex, DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+					));
+					return $base_url . '&tab=overview';
+				}
+				$typed = trim($_POST['confirm_slug'] ?? '');
+				if ($typed !== (string)$node->get('mgn_slug')) {
+					$session->save_message(new DisplayMessage(
+						'Type the exact site slug to permanently delete the entry. Nothing was deleted.', 'Error',
+						$page_regex, DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+					));
+					return $base_url . '&tab=overview';
+				}
+				// Refuse while offsite backups still exist for this slug: hard-deleting the
+				// record would orphan them from the node they belong to. Delete them from the
+				// target's Stored Backups panel first. Fail safe — if a target can't be
+				// listed we cannot confirm zero, so we also refuse.
+				require_once(PathHelper::getIncludePath('plugins/server_manager/includes/TargetBackups.php'));
+				$bk = TargetBackups::slug_backup_count($node->get('mgn_slug'));
+				if ($bk['count'] > 0) {
+					$session->save_message(new DisplayMessage(
+						'This site still has ' . $bk['count'] . ' offsite backup' . ($bk['count'] === 1 ? '' : 's')
+						. '. Delete them from the backup target\'s Stored Backups panel before deleting the record.',
+						'Error', $page_regex, DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+					));
+					return $base_url . '&tab=overview';
+				}
+				if (!empty($bk['unchecked'])) {
+					$session->save_message(new DisplayMessage(
+						'Could not verify backups on: ' . implode(', ', $bk['unchecked'])
+						. '. Resolve those targets before deleting the record.',
+						'Error', $page_regex, DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+					));
+					return $base_url . '&tab=overview';
+				}
+				// Hard delete. Escrow rows (SET NULL) and job history (nulled) survive.
+				$node->permanent_delete();
+				$session->save_message(new DisplayMessage(
+					'Server Manager entry permanently deleted.', 'Success',
+					$page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 				));
 				return '/admin/server_manager';
 			}

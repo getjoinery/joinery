@@ -3,6 +3,7 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.14 - Show-all-sites toggle (?show_all=1) surfaces removed (soft-deleted) nodes with a Removed badge
  * @version 1.13 - control-plane-level escrow problems (agent signing key) render without a node link
  * @version 1.12 - Sweep reconciles all JobResultProcessor-handled types (P-17), not a hardcoded 3
  * @version 1.11 - Shared server_manager.js asset (smApiPost/smEsc/smSafeUrl)
@@ -53,8 +54,13 @@ foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
 $hosts = new MultiManagedHost(['deleted' => false], ['mgh_name' => 'ASC']);
 $hosts->load();
 
-// Load all active nodes and group by host_id
-$nodes = new MultiManagedNode(['deleted' => false, 'enabled' => true], ['mgn_name' => 'ASC']);
+// Load nodes and group by host_id. Removed (soft-deleted) sites are hidden by
+// default; ?show_all=1 includes them, so a decommissioned site can be found
+// again — its record, its history, and a link into its detail page.
+$show_all = !empty($_GET['show_all']);
+$node_opts = ['enabled' => true];
+if (!$show_all) { $node_opts['deleted'] = false; }
+$nodes = new MultiManagedNode($node_opts, ['mgn_name' => 'ASC']);
 $nodes->load();
 
 $nodes_by_host = [];
@@ -349,6 +355,14 @@ if ($agent_online) {
 
 			</div>
 		<?php endif; ?>
+		<div class="p-2 border-top small">
+			<?php if ($show_all): ?>
+				<a href="/admin/server_manager">Hide removed sites</a>
+				<span class="text-muted ms-2">Showing all sites, including removed ones.</span>
+			<?php else: ?>
+				<a href="/admin/server_manager?show_all=1">Show all sites (including removed)</a>
+			<?php endif; ?>
+		</div>
 		<?php $page->end_box(); ?>
 	</div>
 
@@ -441,7 +455,8 @@ function render_node_row($node, $db, $session) {
 	}
 
 	$api_refreshable = !empty($node->get('mgn_site_url'))
-		&& !in_array($install_state, ['installing', 'install_failed'], true);
+		&& !in_array($install_state, ['installing', 'install_failed'], true)
+		&& !$node->get('mgn_delete_time'); // never poll a removed site
 
 	$ssl_state = $node->get('mgn_ssl_state');
 
@@ -456,6 +471,9 @@ function render_node_row($node, $db, $session) {
 			<span class="badge bg-<?php echo $status_color; ?> me-2 js-status-badge">&bull;</span>
 			<div class="svm-minw0">
 				<strong><?php echo htmlspecialchars($node->get('mgn_name')); ?></strong>
+				<?php if ($node->get('mgn_delete_time')): ?>
+					<span class="badge bg-secondary ms-1" title="Removed <?php echo htmlspecialchars(LibraryFunctions::convert_time($node->get('mgn_delete_time'), 'UTC', $session->get_timezone(), 'M j, Y')); ?>">Removed</span>
+				<?php endif; ?>
 				<?php if ($install_state === 'installing'): ?>
 					<span class="badge bg-info ms-1">Installing…</span>
 				<?php elseif ($install_state === 'install_failed'): ?>

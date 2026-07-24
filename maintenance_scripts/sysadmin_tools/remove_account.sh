@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 2.1 - Machine-readable terminal markers (REMOVE_ACCOUNT_OK / REMOVE_ACCOUNT_NOTHING);
+#              nothing-to-remove is now idempotent success (exit 0) so re-runs are safe as a job step
 #VERSION 2.0 - Added Docker support
 #Usage:  ./remove_account.sh site_name [-y]
 #
@@ -74,11 +76,15 @@ if [ -d "$SITE_ROOT" ] || [ -f "$VIRTUALHOST_FILE" ]; then
 fi
 
 if [ "$IS_DOCKER" = false ] && [ "$IS_BAREMETAL" = false ]; then
-    echo "ERROR: No site found with name '$SITE_NAME'"
+    # Nothing to remove. This is idempotent success, not an error: a decommission
+    # job re-run (or a teardown that already happened) must not fail here. The
+    # marker lets the caller distinguish "already gone" from "removed just now".
+    echo "No site found with name '$SITE_NAME':"
     echo "  - No Docker container named '$SITE_NAME'"
     echo "  - No directory at $SITE_ROOT"
     echo "  - No virtual host at $VIRTUALHOST_FILE"
-    exit 1
+    echo "REMOVE_ACCOUNT_NOTHING $SITE_NAME"
+    exit 0
 fi
 
 # =============================================================================
@@ -257,4 +263,5 @@ echo "=========================================="
 echo "Site '$SITE_NAME' has been removed."
 echo "=========================================="
 echo ""
+echo "REMOVE_ACCOUNT_OK $SITE_NAME"
 echo "You can now run 'install.sh site' to create a new site."

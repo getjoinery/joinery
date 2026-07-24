@@ -202,6 +202,7 @@ Health dot colors reflect actual server health, not check recency:
 | `discover_nodes` | Scan a remote host for Joinery instances (Docker + bare metal) | No |
 | `install_node` | Provision a fresh Joinery site on a remote host (fresh or from-backup) | No (target must be clean) |
 | `provision_ssl` | Run certbot on the node's host to obtain a Let's Encrypt cert | No |
+| `decommission_node` | Ship and run `remove_account.sh` on the host to permanently delete the site, verify it is gone, then soft-delete the node record | **Yes** |
 
 Destructive operations auto-backup the target database before proceeding. The UI requires explicit confirmation checkboxes.
 
@@ -426,6 +427,32 @@ The **Backups** tab on each node includes a file browser that lists backup files
 - **Restore Full Project** — for `.tar.gz` archives, see the `restore_project` row in the Job Types table
 
 Cloud listings are fetched live via `TargetLister` on every page render (one SigV4 HTTP GET, ~200–500ms). The local listing comes from the most recent completed `list_backups` job; both the Backups and Database tabs auto-trigger a refresh on page load when that scan is more than 60 seconds stale, so the listing is effectively always current. Both the merge logic and the staleness window are owned by `BackupListHelper::get_for_node()`.
+
+### Stored Backups (target-side)
+
+The **Backup Targets** edit page has a **Stored Backups** panel that lists the target's objects directly from the bucket and groups them by site. It runs entirely on the control plane via `TargetBackups` (which lists through `S3Signer::list`, a continuation-token-paged ListObjectsV2), so it needs no live node — the authoritative view of what is actually stored offsite. Each group is tagged against the node table:
+
+- **live** — a current node owns the slug; a link jumps to that node's Backups tab for granular local+cloud management
+- **decommissioned** — a soft-deleted node owned the slug; the site is gone but its offsite backups remain here, reachable and deletable
+- **orphaned** — no node, present or deleted, matches the slug
+
+Delete acts through `S3Signer` from the control plane: a single object (guarded so the key must sit under the target's own prefix), or a whole site's prefix (type-to-confirm the slug). This is the deliberate path for erasing a retired site's offsite backups — deleting a node never touches them.
+
+## Retiring a node
+
+Two distinct actions on the node detail Overview tab, both permission-10 and CSRF-guarded:
+
+- **Remove from Dashboard** — soft-deletes the node record only. The site keeps running on its host; Server Manager simply stops tracking it. For a box handed back to its owner or managed elsewhere.
+- **Permanently Delete Site** — creates a `decommission_node` job that ships `remove_account.sh` to the host, runs it (`-y`), and re-probes to confirm the container, its `{site}_*` volumes, and the reverse-proxy vhost are all gone (`DECOMMISSION_VERIFIED`). Only on that verification does the result processor soft-delete the node record; a failed or unverified teardown leaves the node intact and enabled to retry. Type-to-confirm the site name; the name is derived from the node's own fields, never operator input. Relays are refused (they tear down through the relay flow).
+
+The record is soft-deleted, not hard-deleted, on purpose: the container port stays reserved on shared hosts, the job history stays joinable, and the backup-key **escrow rows are retained** — so a decommissioned site's offsite backups stay recoverable. Those backups are not purged by decommission; delete them deliberately from the Stored Backups panel above.
+
+Removed sites are hidden from the dashboard by default. The **Show all sites (including removed)** link at the bottom of the Hosts & Sites panel re-renders with them included, each carrying a **Removed** badge and linking into its still-reachable node detail page (`?show_all=1`).
+
+Opening a removed node's detail page offers two follow-up actions in its Danger Zone:
+
+- **Permanently Delete Site** — the same `decommission_node` host teardown, for a node that was only removed from the dashboard while its site kept running (e.g. an orphaned container). For a removed node it is offered only when this control plane once saw a live site there — a recorded status check, Joinery version, or uptime result. With no such evidence (for example an install that failed and never stood a site up) the action is hidden behind a short note and only **Permanently Delete Entry** is offered, since there is nothing on the host to tear down. (The page cannot probe the host directly — the web user holds no host SSH key — so this uses evidence already on the record; the `decommission_node` job itself is idempotent and reports `REMOVE_ACCOUNT_NOTHING` if it reaches a host with nothing to remove.)
+- **Permanently Delete Entry** — hard-deletes the Server Manager record itself (`purge_node`). Offered only for an already-removed node — purging a still-tracked node is refused, since that is how a live site becomes an untracked orphan. It is also refused while the node's slug still has offsite backups on any enabled target (or while a target cannot be listed to confirm): deleting the record would orphan those backups from the node they belong to, so they must be cleared from the target's Stored Backups panel first. Once allowed, the host is not touched; the escrow rows and job history survive the purge (cascade rules null the references).
 
 ## Backup Encryption
 

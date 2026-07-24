@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.12 - process_decommission_node: soft-delete the node only on a verified host teardown
+ *                 (escrow rows + job history preserved); leave it intact on any failure
  * @version 1.11 - every terminal job records a result (sweep never re-processes); CF SSL gated on
  *                 CF_ROUTING_VERIFIED (no rDNS on the CF path); escrow reconcile matches ANY row;
  *                 install records the ACTUAL published container port (CONTAINER_PORT readback)
@@ -938,6 +940,55 @@ HTML;
 		];
 
 		$job->set('mjb_result', json_encode($result));
+		$job->save();
+	}
+
+	/**
+	 * Finalize a permanent node deletion once the host teardown is verified.
+	 *
+	 * Only a completed job whose output carries DECOMMISSION_VERIFIED (and NOT
+	 * DECOMMISSION_FAILED_VERIFY) finalizes the record — the site is genuinely gone
+	 * from the host. A failed or unverified job leaves the node intact and enabled so
+	 * the operator can retry; we never leave a half-deleted record pointing at a live
+	 * site. The record is soft-deleted, not hard-deleted: the port reservation, the job
+	 * history, and the backup-key escrow rows all survive (the escrow FK is SET NULL and
+	 * soft-delete triggers no cascade), so the node's offsite backups stay recoverable.
+	 */
+	private static function process_decommission_node($job) {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+
+		$output = (string)($job->get('mjb_output') ?: '');
+		$status = (string)$job->get('mjb_status');
+		$verified = strpos($output, 'DECOMMISSION_VERIFIED') !== false
+			&& strpos($output, 'DECOMMISSION_FAILED_VERIFY') === false;
+
+		if ($status === 'completed' && $verified) {
+			$soft_deleted = false;
+			$node_id = $job->get('mjb_mgn_node_id');
+			if ($node_id) {
+				$node = new ManagedNode($node_id, TRUE);
+				if ($node->key && !$node->get('mgn_delete_time')) {
+					$node->soft_delete();
+					$soft_deleted = true;
+				}
+			}
+			$job->set('mjb_result', json_encode([
+				'status' => 'completed',
+				'decommissioned' => true,
+				'node_soft_deleted' => $soft_deleted,
+			]));
+			$job->save();
+			return;
+		}
+
+		$note = $status !== 'completed'
+			? 'Host teardown did not complete; node left intact.'
+			: 'Teardown ran but the site could not be verified gone; node left intact.';
+		$job->set('mjb_result', json_encode([
+			'status' => $status,
+			'decommissioned' => false,
+			'note' => $note,
+		]));
 		$job->save();
 	}
 

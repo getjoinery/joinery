@@ -342,4 +342,51 @@ check($cf_ok_node->get('mgn_ssl_state') === 'active',
 	'a routing-verified CF completion marks SSL active',
 	var_export($cf_ok_node->get('mgn_ssl_state'), true));
 
+// ---------------------------------------------------------------------------
+section('Decommission: soft-delete only when verified; escrow preserved');
+
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_key_escrow_class.php'));
+
+// A completed job that verified the site is gone soft-deletes the node — and its
+// backup-key escrow row must survive, or the node's offsite backups become
+// unrecoverable. Seed an escrow row, decommission, assert both.
+$dn = jrp_node(array('mgn_container_name' => 'decomrp', 'mgn_web_root' => '/var/www/html/decomrp/public_html'));
+$esc = new BackupKeyEscrow(NULL);
+$esc->set('bke_mgn_node_id', $dn->key);
+$esc->set('bke_key_fingerprint', str_repeat('a', 64));
+$esc->set('bke_sealed_blob', 'sealed-test-blob');
+$esc->set('bke_kind', 'backup');
+$esc->save();
+harness_register_row('bke_backup_key_escrow', 'bke_escrow_id', $esc->key);
+
+$dj = jrp_job($dn, 'decommission_node', "REMOVE_ACCOUNT_OK decomrp\nDECOMMISSION_VERIFIED");
+JobResultProcessor::process($dj);
+$dn->load();
+check(!empty($dn->get('mgn_delete_time')),
+	'a verified decommission soft-deletes the node record',
+	var_export($dn->get('mgn_delete_time'), true));
+
+$esc_still = new BackupKeyEscrow($esc->key, TRUE);
+check($esc_still->key && trim((string)$esc_still->get('bke_sealed_blob')) !== '',
+	'the node escrow row survives decommission (offsite backups stay recoverable)');
+
+// A failed job leaves the node intact — never a half-deleted record over a live site.
+$dn2 = jrp_node(array('mgn_container_name' => 'decomrp2', 'mgn_web_root' => '/var/www/html/decomrp2/public_html'));
+$dj2 = jrp_job($dn2, 'decommission_node', 'host teardown errored');
+$dj2->set('mjb_status', 'failed');
+$dj2->save();
+JobResultProcessor::process($dj2);
+$dn2->load();
+check(empty($dn2->get('mgn_delete_time')), 'a failed decommission leaves the node intact');
+check((string)$dj2->get('mjb_result') !== '', 'and the failed decommission still records a result');
+
+// A completed run whose verify FAILED (traces remained) must not delete the node,
+// even though the job itself completed.
+$dn3 = jrp_node(array('mgn_container_name' => 'decomrp3', 'mgn_web_root' => '/var/www/html/decomrp3/public_html'));
+$dj3 = jrp_job($dn3, 'decommission_node', "REMOVE_ACCOUNT_OK decomrp3\nDECOMMISSION_FAILED_VERIFY\nstill present: volumes");
+JobResultProcessor::process($dj3);
+$dn3->load();
+check(empty($dn3->get('mgn_delete_time')),
+	'a completed-but-unverified decommission leaves the node intact');
+
 harness_finish();

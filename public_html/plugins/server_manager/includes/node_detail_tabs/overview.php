@@ -9,6 +9,15 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.4 - Permanently Delete Entry: when offsite backups still exist for the slug, the menu item
+ *                shows a "removal not allowed" alert up front instead of the type-to-confirm box
+ * @version 1.3 - Danger Zone onclick values are htmlspecialchars(json_encode(), ENT_QUOTES) — a raw
+ *                json_encode string embeds a double quote that closed the double-quoted onclick attribute,
+ *                so Permanently Delete Site/Entry silently did nothing when clicked
+ * @version 1.2 - Danger Zone: a removed node is offered the host teardown only when this control
+ *                plane once saw a live site here (status/version/uptime); otherwise a note + purge only
+ * @version 1.1 - Danger Zone: two-tier delete (Remove from Dashboard / Permanently Delete Site),
+ *                plus Permanently Delete Entry (purge_node) on an already-removed node
  * @version 1.0
  */
 ?>
@@ -81,6 +90,51 @@
 	}
 	echo '</div>';
 	?>
+	<?php
+	// Permanent-delete-the-SITE is offered whenever the host teardown can actually
+	// run: SSH configured, not a relay, and a safe site name derivable from node
+	// fields. Available for a removed node too — its site may still be running on
+	// the host (Remove from Dashboard leaves it up).
+	$decommission_site = null;
+	if (!$node->get('mgn_is_relay') && JobCommandBuilder::has_ssh($node)) {
+		try { $decommission_site = JobCommandBuilder::decommission_site_name($node); }
+		catch (Throwable $e) { $decommission_site = null; }
+	}
+	$is_removed = (bool)$node->get('mgn_delete_time');
+	// The page cannot SSH to hosts (the web user has no host key), so "does the
+	// site still exist?" is answered from evidence this control plane already holds:
+	// a status check, a read version, or an uptime result all mean a live site was
+	// once seen here. With none of that — e.g. an install that failed and never
+	// stood a site up — there is nothing to tear down, so a removed node is not
+	// offered the host-teardown action (the decommission job would find nothing).
+	$site_ever_confirmed = $node->get('mgn_last_status_check')
+		|| $node->get('mgn_joinery_version')
+		|| $node->get('mgn_uptime_last_status');
+
+	// Whether the record may be purged: blocked while offsite backups still exist
+	// for the slug (or a target can't be listed). Checked here so the menu item
+	// says "not allowed" up front instead of only rejecting after the confirm box.
+	// Backup listing is a control-plane S3 call (the web user can do it), unlike the
+	// host SSH probe, so it is safe to run on render — only for a removed node.
+	$purge_block = null; // null = allowed; string = reason it is blocked
+	if ($is_removed) {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/TargetBackups.php'));
+		try {
+			$bk = TargetBackups::slug_backup_count($node->get('mgn_slug'));
+			if ($bk['count'] > 0) {
+				$purge_block = 'This site still has ' . $bk['count'] . ' offsite backup'
+					. ($bk['count'] === 1 ? '' : 's')
+					. '. Delete them from the backup target Stored Backups panel before deleting the record.';
+			} elseif (!empty($bk['unchecked'])) {
+				$purge_block = 'Backups could not be verified on: ' . implode(', ', $bk['unchecked'])
+					. '. Resolve those targets before deleting the record.';
+			}
+		} catch (Throwable $e) {
+			$purge_block = 'Could not check for existing backups (' . $e->getMessage()
+				. '). Resolve that before deleting the record.';
+		}
+	}
+	?>
 	<div class="btn-group svm-relative">
 		<button type="button" class="btn btn-sm btn-primary dropdown-toggle" onclick="var m=this.nextElementSibling;m.style.display=m.style.display==='block'?'none':'block'">Actions</button>
 		<ul class="dropdown-menu dropdown-menu-end svm-dropdown-menu">
@@ -88,14 +142,40 @@
 			<?php if (JobCommandBuilder::has_ssh($node) && $node->get('mgn_web_root')): ?>
 				<li><a class="dropdown-item" href="#" onclick="JoineryModal.confirm('Run every active plugin\'s host installer on this node (root, idempotent)? Needed after activating a plugin that configures system services, e.g. the mail stack.', function(){ document.getElementById('run_plugin_installers_form').submit(); }); return false;">Run Plugin Installers</a></li>
 			<?php endif; ?>
-			<?php if (!$node->get('mgn_delete_time')): ?>
-				<li><hr class="dropdown-divider"></li>
+			<li><hr class="dropdown-divider"></li>
+			<?php if (!$is_removed): ?>
 				<li>
 					<form method="post" action="<?php echo $base_url; ?>" id="delete_node_form" style="margin:0;">
 						<input type="hidden" name="action" value="delete_node">
 						<?php echo SmAdminCsrf::field(); ?>
-						<button type="button" class="dropdown-item text-danger" onclick="JoineryModal.confirm('Delete this site?', function(){ document.getElementById('delete_node_form').submit(); })">Delete Site</button>
+						<button type="button" class="dropdown-item text-danger" onclick="JoineryModal.confirm('Remove this site from the dashboard? The site keeps running on its host — only the tracking record is removed.', function(){ document.getElementById('delete_node_form').submit(); })">Remove from Dashboard</button>
 					</form>
+				</li>
+			<?php endif; ?>
+			<?php if ($decommission_site !== null && (!$is_removed || $site_ever_confirmed)): ?>
+				<li>
+					<form method="post" action="<?php echo $base_url; ?>" id="decommission_node_form" style="margin:0;">
+						<input type="hidden" name="action" value="decommission_node">
+						<input type="hidden" name="confirm_site_name" value="<?php echo htmlspecialchars($decommission_site); ?>">
+						<?php echo SmAdminCsrf::field(); ?>
+						<button type="button" class="dropdown-item text-danger" onclick="JoineryModal.confirmTyped(<?php echo htmlspecialchars(json_encode($is_removed ? 'Permanently delete the site on the host? If it is still running there, this destroys the container, its database, and every uploaded file. Offsite backups are kept. This cannot be undone.' : 'Permanently delete this site? This destroys the container, its database, and every uploaded file on the host. Offsite backups are kept. This cannot be undone.'), ENT_QUOTES); ?>, <?php echo htmlspecialchars(json_encode($decommission_site), ENT_QUOTES); ?>, function(){ document.getElementById('decommission_node_form').submit(); })">Permanently Delete Site&hellip;</button>
+					</form>
+				</li>
+			<?php elseif ($decommission_site !== null && $is_removed): ?>
+				<li><span class="dropdown-item-text text-muted small d-block px-3" style="max-width:22rem;white-space:normal;">No live site was ever confirmed on this host, so there is nothing to tear down. Use Permanently Delete Entry to remove the record.</span></li>
+			<?php endif; ?>
+			<?php if ($is_removed): ?>
+				<li>
+					<?php if ($purge_block !== null): ?>
+						<button type="button" class="dropdown-item text-danger" onclick="JoineryModal.alert(<?php echo htmlspecialchars(json_encode('Removal not allowed. ' . $purge_block), ENT_QUOTES); ?>)">Permanently Delete Entry&hellip;</button>
+					<?php else: ?>
+						<form method="post" action="<?php echo $base_url; ?>" id="purge_node_form" style="margin:0;">
+							<input type="hidden" name="action" value="purge_node">
+							<input type="hidden" name="confirm_slug" value="<?php echo htmlspecialchars($node->get('mgn_slug')); ?>">
+							<?php echo SmAdminCsrf::field(); ?>
+							<button type="button" class="dropdown-item text-danger" onclick="JoineryModal.confirmTyped(<?php echo htmlspecialchars(json_encode('Permanently delete the Server Manager entry for this site? This erases the tracking record and its history. It does NOT touch the host. This cannot be undone.'), ENT_QUOTES); ?>, <?php echo htmlspecialchars(json_encode($node->get('mgn_slug')), ENT_QUOTES); ?>, function(){ document.getElementById('purge_node_form').submit(); })">Permanently Delete Entry&hellip;</button>
+						</form>
+					<?php endif; ?>
 				</li>
 			<?php endif; ?>
 		</ul>
