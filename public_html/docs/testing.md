@@ -81,6 +81,32 @@ explicit choice. Each test runs in its own subprocess, so a fatal in one file
 cannot take down the run. The runner exits non-zero if any test failed — it is
 the CI entry point.
 
+### What each tier costs
+
+`safe` is the tier to run while working: 57 tests in about 15 seconds. `db`
+is the gate to run before a checkin or a publish: 165 tests in about five and a
+half minutes.
+
+That gap is not a matter of test count. Of the 165 tests in `db`, 111 finish in
+under a second each and account for 16 seconds between them; twelve tests carry
+two thirds of the total. The expensive ones are expensive for a legible reason —
+they drive a real subsystem end to end rather than a unit of one:
+
+| test | tier | ~time | what it drives |
+|---|---|---|---|
+| `plugin_sync` | db | 62s | a full `PluginManager::sync()` over every active plugin, twice (the idempotence check) |
+| `models_crud` | test-db | 39s | CRUD against every data class in the platform |
+| `multi_models_crud` | test-db | 23s | every Multi collection's filter surface |
+| `api_ajax_migration` | db | 15s | every migrated `/ajax/` action through the API |
+| `account_login` | db | 13s | the sign-in matrix, including deliberate lockout waits |
+
+Adding a small test costs the gate almost nothing. Adding a suite that boots a
+subsystem costs it seconds, so give one of those a `tier:` it has earned.
+
+The runner executes tests one at a time. Most of the `db` gate's wall clock is
+spent waiting on the database rather than on CPU, so its duration is closer to
+the sum of its parts than to the work it does.
+
 The `test-db` suites declare `needs: [test-db]`, and the runner probes the
 connection itself rather than trusting the setting. An install without the
 database copy skips them with a named reason instead of failing the gate; see
