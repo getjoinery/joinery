@@ -5,6 +5,11 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.20 - backup key escrow runs as a control-plane step (step_escrow_backup_key) instead of
+ *                 inside the web request: node SSH keys are operator-owned, so only the agent can read
+ *                 them, and encrypting backups seal the key on their way in
+ * @version 1.19 - local backup delete is sudo-prefixed on bare-metal nodes (root-owned /backups files;
+ *                 the job runs as user1 there, so a plain rm failed Permission denied)
  * @version 1.18 - status dot reflects uptime for skip-Joinery nodes (a relay's dot follows its TCP/HTTP
  *                 probe, not a status check that is expected to fail; also a general no-data uptime fallback)
  * @version 1.17 - decommission verify: join per-resource checks with '; ' (a space made `fi if`,
@@ -535,11 +540,12 @@ class JobCommandBuilder {
 
 		$steps = [];
 
-		// The escrowed key must already be on the node — the control plane pushes
-		// it (BackupKeyCustody::ensureNodeKey) after sealing it to the recovery
-		// key. Verify-or-fail rather than auto-generate: a node-only key that was
-		// never escrowed is exactly the unrecoverable-after-loss footgun.
+		// Seal the node's key to the recovery key first (minting it if the node has
+		// none), then verify-or-fail that it is there. Sealing first is what makes
+		// the verify meaningful: a node-only key that was never escrowed is exactly
+		// the unrecoverable-after-loss footgun.
 		if (!empty($params['encryption'])) {
+			$steps[] = self::step_escrow_backup_key($node);
 			$steps[] = self::step_verify_backup_key();
 			$steps[] = self::step_report_key_fingerprint();
 		}
@@ -588,6 +594,7 @@ class JobCommandBuilder {
 		$steps = [];
 
 		if (!empty($params['encryption'])) {
+			$steps[] = self::step_escrow_backup_key($node);
 			$steps[] = self::step_verify_backup_key();
 			$steps[] = self::step_report_key_fingerprint();
 		}
@@ -1052,6 +1059,31 @@ class JobCommandBuilder {
 	 * node. Node-side generation is deleted — the control plane mints and pushes
 	 * keys (BackupKeyCustody) so nothing exists on a node without an escrow row.
 	 */
+	/**
+	 * Seal this node's backup key to the recovery key — mints it first if the node
+	 * has none. Runs on the control plane, not on the node.
+	 *
+	 * Escrow has to read the key off the node over SSH, and a node's SSH key is
+	 * owned by the operator account at mode 600 — the web-server user cannot read
+	 * it, so doing this inside the web request that asks for it fails on every
+	 * node whose key is not web-readable. The agent owns those keys (it runs every
+	 * other node step), so the work belongs on its side of the fence.
+	 *
+	 * Key material still never reaches a job row: escrow_node_key.php reads, seals
+	 * and drops the key inside its own process, printing only the fingerprint.
+	 */
+	public static function step_escrow_backup_key($node) {
+		$script = PathHelper::getIncludePath('plugins/server_manager/includes/escrow_node_key.php');
+		return ['type' => 'local', 'label' => 'Seal backup key to the recovery key',
+			'cmd' => 'php ' . escapeshellarg($script) . ' --node=' . intval($node->key),
+			'timeout' => 120];
+	}
+
+	/** Escrow a node's backup key on its own (the node Backups tab action). */
+	public static function build_escrow_backup_key($node, $params = []) {
+		return [self::step_escrow_backup_key($node)];
+	}
+
 	private static function step_verify_backup_key() {
 		return ['type' => 'ssh', 'label' => 'Verify encryption key present',
 			'cmd' => '[ -s ~/.joinery_backup_key ] || { echo BACKUP_KEY_MISSING; exit 1; }'];
@@ -1331,9 +1363,14 @@ class JobCommandBuilder {
 		$steps = [];
 
 		if (($which === 'local' || $which === 'both') && $local_path) {
+			// Backups under /backups are written as root by the backup scripts; on a
+			// bare-metal node jobs run as user1, so the rm needs sudo (empty for a
+			// Docker node, where the job already runs as root). Without it the rm
+			// fails Permission denied while the step still reports done.
+			$sudo = self::sudo_prefix($node);
 			$steps[] = [
 				'type' => 'ssh', 'label' => 'Delete local backup',
-				'cmd' => "rm -f " . escapeshellarg($local_path) . " && echo 'LOCAL_DELETE_OK'",
+				'cmd' => "{$sudo}rm -f " . escapeshellarg($local_path) . " && echo 'LOCAL_DELETE_OK'",
 				'continue_on_error' => true,
 			];
 		}

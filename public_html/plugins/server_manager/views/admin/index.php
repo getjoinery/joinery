@@ -3,6 +3,8 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.15 - escrow alert covers recovery-not-set-up as its own row and links to the guided
+ *                 walkthrough; heading no longer assumes every row is a node
  * @version 1.14 - Show-all-sites toggle (?show_all=1) surfaces removed (soft-deleted) nodes with a Removed badge
  * @version 1.13 - control-plane-level escrow problems (agent signing key) render without a node link
  * @version 1.12 - Sweep reconciles all JobResultProcessor-handled types (P-17), not a hardcoded 3
@@ -205,17 +207,19 @@ if ($agent_online) {
       // so it is surfaced the same way. ?>
 <?php if (!empty($escrow_problems)): ?>
 <div class="alert alert-warning" role="alert">
-	<strong>Backup key not escrowed on <?php echo count($escrow_problems); ?> node<?php echo count($escrow_problems) === 1 ? '' : 's'; ?>.</strong>
-	Offsite backups for these nodes cannot be recovered if the node is lost.
+	<strong>Backups cannot be recovered yet.</strong>
 	<ul class="mb-0 mt-2">
 		<?php foreach ($escrow_problems as $p): ?>
 			<li>
 				<?php if ((int)$p['id'] > 0): ?>
 					<a href="/admin/server_manager/node_detail?mgn_id=<?php echo (int)$p['id']; ?>&tab=backups" class="alert-link"><?php echo htmlspecialchars($p['name'] ?: $p['slug']); ?></a>
-				<?php else: // control-plane-level problem (e.g. agent signing key) — no node to link ?>
+				<?php else: // control-plane-level problem (recovery setup, agent signing key) ?>
 					<strong><?php echo htmlspecialchars($p['name'] ?: $p['slug']); ?></strong>
 				<?php endif; ?>
 				&mdash; <?php echo htmlspecialchars($p['health']['detail']); ?>
+				<?php if (!empty($p['link'])): ?>
+					<a href="<?php echo htmlspecialchars($p['link']); ?>" class="alert-link">Set it up</a>.
+				<?php endif; ?>
 			</li>
 		<?php endforeach; ?>
 	</ul>

@@ -7,6 +7,8 @@
  * and delete_file create jobs; list_status returns the cached backup list.
  * Superadmin only (floor 10).
  *
+ * @version 1.1.0 - cloud deletes run control-plane-side via TargetBackups (no agent,
+ *                  real success/failure); local deletes still run as a node job.
  * @version 1.0.0
  */
 
@@ -53,16 +55,45 @@ function backup_actions_logic(array $input): LogicResult {
 			return LogicResult::render(['success' => false, 'message' => 'Invalid local path']);
 		}
 
-		$params = [
-			'target'     => $target,
-			'local_path' => $local_path,
-			'cloud_path' => $cloud_path,
-			'filename'   => basename($local_path ?: $cloud_path),
-		];
+		$want_cloud = ($target === 'cloud' || $target === 'both') && $cloud_path !== '';
+		$want_local = ($target === 'local' || $target === 'both') && $local_path !== '';
 
-		$steps = JobCommandBuilder::build_delete_backup($node, $params);
-		$job = ManagementJob::createJob($node->key, 'delete_backup', $steps, $params, $session->get_user_id());
-		return LogicResult::render(['success' => true, 'job_id' => $job->key]);
+		// The cloud copy is deleted straight from the control plane via S3Signer. It
+		// needs no live node and no agent, and it reports a real success/failure —
+		// unlike a node job, whose cloud-delete step can only unseal the target
+		// credentials on agent >= 0.4.0 and otherwise no-ops while the job still
+		// reports "completed" (the step is continue_on_error).
+		if ($want_cloud) {
+			require_once(PathHelper::getIncludePath('plugins/server_manager/includes/TargetBackups.php'));
+			require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_target_class.php'));
+			$target_id = (int) $node->get('mgn_bkt_backup_target_id');
+			if (!$target_id) {
+				return LogicResult::render(['success' => false, 'message' => 'This node has no cloud backup target configured.']);
+			}
+			try {
+				$tgt = new BackupTarget($target_id, TRUE);
+				TargetBackups::delete_object($tgt, $cloud_path);
+			} catch (Exception $e) {
+				return LogicResult::render(['success' => false, 'message' => 'Cloud delete failed: ' . $e->getMessage()]);
+			}
+		}
+
+		// The local copy lives on the node's disk, so its removal must run there —
+		// a plain rm over SSH with no sealed credentials, which any agent can run.
+		if ($want_local) {
+			$params = [
+				'target'     => 'local',
+				'local_path' => $local_path,
+				'cloud_path' => '',
+				'filename'   => basename($local_path),
+			];
+			$steps = JobCommandBuilder::build_delete_backup($node, $params);
+			$job = ManagementJob::createJob($node->key, 'delete_backup', $steps, $params, $session->get_user_id());
+			return LogicResult::render(['success' => true, 'job_id' => $job->key]);
+		}
+
+		// Cloud-only delete: already done, synchronously.
+		return LogicResult::render(['success' => true]);
 	}
 
 	if ($action === 'list_status') {

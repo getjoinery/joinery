@@ -454,34 +454,57 @@ Opening a removed node's detail page offers two follow-up actions in its Danger 
 - **Permanently Delete Site** — the same `decommission_node` host teardown, for a node that was only removed from the dashboard while its site kept running (e.g. an orphaned container). For a removed node it is offered only when this control plane once saw a live site there — a recorded status check, Joinery version, or uptime result. With no such evidence (for example an install that failed and never stood a site up) the action is hidden behind a short note and only **Permanently Delete Entry** is offered, since there is nothing on the host to tear down. (The page cannot probe the host directly — the web user holds no host SSH key — so this uses evidence already on the record; the `decommission_node` job itself is idempotent and reports `REMOVE_ACCOUNT_NOTHING` if it reaches a host with nothing to remove.)
 - **Permanently Delete Entry** — hard-deletes the Server Manager record itself (`purge_node`). Offered only for an already-removed node — purging a still-tracked node is refused, since that is how a live site becomes an untracked orphan. It is also refused while the node's slug still has offsite backups on any enabled target (or while a target cannot be listed to confirm): deleting the record would orphan those backups from the node they belong to, so they must be cleared from the target's Stored Backups panel first. Once allowed, the host is not touched; the escrow rows and job history survive the purge (cascade rules null the references).
 
-## Backup Encryption
+## Backup Encryption and Key Custody
 
 ### Default Behavior
 
-Encryption is **enabled by default** on both Database Backup and Full Project Backup forms. The existing `backup_database.sh` script handles encryption using AES-256-CBC with a key from `~/.joinery_backup_key` on the remote server.
+Encryption is **enabled by default** on both Database Backup and Full Project Backup forms. `backup_database.sh` / `backup_project.sh` encrypt with AES-256-CBC (PBKDF2, random salt) using the key at `~/.joinery_backup_key` on the node. When a node's backup target is Backblaze B2 encryption is **mandatory**: the UI replaces the checkbox with a message and the server enforces it regardless of form input.
 
-### B2 Enforcement
+### Custody model: sealed-box escrow
 
-When a node's backup target is Backblaze B2, encryption is **mandatory**. The UI replaces the checkbox with a message, and the server-side enforces it regardless of form input.
+The encryption key lives on the node, and a copy of it is **sealed to a recovery public key** the operator holds. The control plane can seal, never open — so a stolen bucket or a dumped control-plane database yields only unopenable blobs, while a node that burns down is still recoverable.
 
-### Auto-Generated Keys
+- The recovery keypair is generated with `maintenance_scripts/sysadmin_tools/escrow_keypair.php` (standalone PHP + sodium; no platform bootstrap, so it runs during disaster recovery when the platform is gone). The **private** key belongs in the operator's password manager and never touches a server.
+- The **public** key is stored in the `server_manager_escrow_public_key` setting.
+- Each sealed copy is a row in `bke_backup_key_escrow` (`bke_kind` = `backup` | `agent_signing`, `bke_source` = `generated` | `migrated` | `rotated`) and is replicated to every enabled cloud target as `escrow/{node_slug}/{fingerprint}.sealed`.
+- Rows are append-only: rotating a node's key adds a row, so archives written under an older key stay recoverable.
+- Key material never enters a `ManagementJob` — job `cmd` and output rows persist forever. `BackupKeyCustody` reads and writes node keys over a direct SSH channel, passing the key on stdin only.
+- Escrow happens **before** the key reaches the node: a generated key is sealed and its row saved first, so a key that exists on a node with no escrow row is impossible on that path.
 
-If an encryption key doesn't exist on the remote server, the backup job auto-generates one:
+Escrow runs on the **control plane, as a job step** (`JobCommandBuilder::step_escrow_backup_key()` → `plugins/server_manager/includes/escrow_node_key.php --node=<id>`), not inside the web request that asks for it. Reading a node's key means SSHing to it with that node's admin key, and those keys are owned by the operator account at mode 600 — readable by the agent, which runs every other node step, and not by the web-server user. The script seals, saves the row, stamps `mgn_backup_key_fingerprint`, and prints only `BACKUP_KEY_FPR` / `BACKUP_KEY_ESCROWED`, so the key-out-of-jobs rule holds. It is idempotent: an already-escrowed key produces no new row.
 
-1. The first step checks for `~/.joinery_backup_key`
-2. If missing, generates a random 32-byte base64 key with `openssl rand -base64 32`
-3. Saves it with 600 permissions
-4. Logs `ENCRYPTION_KEY_GENERATED` in the job output (the key value itself is never in the output)
+### Possession check
 
-### Key Security
+Sealing to a public key always appears to succeed, including when the pasted key is wrong — every blob would then be permanently unopenable, discovered only during a real recovery. So the key is honored only after the operator unseals a challenge with the private key. Until that proof is recorded (`server_manager_escrow_public_key_proven_fpr`), `escrow_public_key()` throws and encrypted backups refuse to run.
 
-The encryption key **never touches the control plane**. It exists only on the remote server. This ensures that compromising the B2 bucket or the control plane database does not expose the decryption key.
+The check runs against the copy of the key the operator is actually keeping, which is the copy that has to work in a disaster. Two ways to do it, both proving possession of the same X25519 secret:
 
-To retrieve the key (for decrypting backups on another machine), SSH to the remote server:
+- **In the page** — paste the key (from a password manager, typically) into the setup panel. `BackupKeyCustody::browser_challenge()` packages the same proof string as `ephemeralPub[32] || iv[12] || ciphertext || tag`, sealed with X25519 → HKDF-SHA256 (info `sm-escrow-possession:` + ephemeral public + recipient public) → AES-256-GCM, so `assets/js/backup_key_verify.js` opens it with WebCrypto alone. The key is read from an input outside the form, used in memory, and cleared; it is never submitted, stored, or sent anywhere. Only the recovered proof string is posted, and the server re-checks it.
+- **At the command line** — `escrow_keypair.php unseal` opens the libsodium sealed-box form of the same challenge with a key file.
 
-```bash
-cat ~/.joinery_backup_key
-```
+What the challenge contains is a plain sentence ending in the key's full sha256 fingerprint — readable, so recovering it is self-evidently a success, and bound, so a proof earned for one key can never satisfy another. It is ASCII with no timestamp or randomness, because it is compared byte for byte after a copy-paste through a terminal.
+
+### Guided setup
+
+The **Backup key recovery** panel on the Backup Targets page detects how far setup has got and walks the outstanding step. It covers the recovery key alone — create the keypair, then prove possession — after which it collapses to a one-line confirmation. `BackupKeyCustody::setup_state()` is the single source of truth for that state.
+
+Sealing an individual node's key belongs to that node, not to fleet setup: its Backups tab shows whether its key is sealed and offers **Seal backup key now**, which runs an `escrow_backup_key` job. Any encrypting backup seals the node's current key as its first step, before the step that verifies the key is present. The dashboard lists nodes still unsealed, from `BackupKeyCustody::survey_nodes()`.
+
+Until setup is finished the platform does not offer backups it would refuse: a node with a cloud target shows the explanation in place of the Run Backup forms, and a local-only node has encryption switched off with a link to the panel. Creating an encrypting backup checks the recovery settings up front and refuses on the page; on the node, `JobCommandBuilder` verifies the key file exists (`BACKUP_KEY_MISSING`) rather than generating one there.
+
+### Disaster recovery
+
+To rebuild a lost node from its offsite backups:
+
+1. Fetch the sealed key from the bucket: `escrow/{node_slug}/{fingerprint}.sealed` (the fingerprint is the sha256 of the raw key, shown on the node's Backups tab and stored in `bke_key_fingerprint`).
+2. Open it on a machine holding the private key:
+   `php escrow_keypair.php unseal --private /path/to/recovery.key --in blob.sealed`
+3. Provision the replacement node, write the recovered key to `~/.joinery_backup_key` (mode 600).
+4. Restore the archive through the dashboard, or with `restore_database.sh` / `restore_project.sh`, which decrypt with that key.
+
+This works when the control plane itself is the casualty: the sealed blobs are in the bucket alongside the archives, so bucket credentials plus the password-manager private key are sufficient.
+
+The **agent signing key** (the fleet trust root) is escrowed by the same mechanism, as an `agent_signing` row, when a release is published.
 
 ## How It Works: Smart Plugin, Dumb Agent
 

@@ -53,6 +53,13 @@ check(base64_decode($keys['public_b64']) === $keys['public'], 'public_b64 decode
 $again = AgentDistPublisher::ensureKeys($config_dir);
 check($again['public_b64'] === $keys['public_b64'], 'second call returns the same keypair');
 
+// A key minted into a temp dir is not this site's trust root, so it must not be
+// escrowed — otherwise this safe-tier test would write rows to the live table.
+$q = DbConnector::get_instance()->get_db_link()->prepare(
+	"SELECT COUNT(*) FROM bke_backup_key_escrow WHERE bke_key_fingerprint = ? AND bke_kind = 'agent_signing'");
+$q->execute([hash('sha256', trim(file_get_contents($config_dir . '/agent_signing_key')))]);
+check((int)$q->fetchColumn() === 0, 'a signing key outside the site config dir is not escrowed (no DB writes here)');
+
 $pub_file = trim(file_get_contents($config_dir . '/agent_signing_key.pub'));
 check($pub_file === $keys['public_b64'], '.pub sibling holds the base64 public key');
 

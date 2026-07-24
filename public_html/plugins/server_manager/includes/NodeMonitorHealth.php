@@ -13,6 +13,9 @@
  * It also surfaces backup-key escrow problems (backup_escrow_problems), in the
  * same shape, so an unrecoverable-backup node is as visible as broken monitoring.
  *
+ * @version 1.4 - escrow problems are derived from BackupKeyCustody::setup_state() (one survey
+ *                shared with the walkthrough and the node Backups tab), and "recovery not set up
+ *                at all" is surfaced as its own control-plane row linking to the walkthrough
  * @version 1.3 - escrow check matches ANY escrow row (a restored older key is still recoverable);
  *                un-escrowed agent signing key surfaced as a control-plane problem row
  * @version 1.2
@@ -187,35 +190,51 @@ class NodeMonitorHealth {
 	 *     node key was regenerated out of band and is not escrowed.
 	 *   - the agent signing key exists but has no escrow row while escrow is
 	 *     configured → the fleet trust root dies with the control plane.
+	 *   - recovery itself was never set up → no node can take an encrypted backup
+	 *     at all, which otherwise surfaces nowhere until a backup is refused.
+	 *
+	 * The survey comes from BackupKeyCustody::setup_state(), so the dashboard,
+	 * the walkthrough, and the node Backups tab cannot disagree about what is
+	 * outstanding.
 	 */
 	public static function backup_escrow_problems(): array {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_key_escrow_class.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupKeyCustody.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupKeyWalkthrough.php'));
 
-		$nodes = new MultiManagedNode(['deleted' => false], ['mgn_name' => 'ASC'], 1000, 0);
-		$nodes->load();
-
+		$setup    = BackupKeyCustody::setup_state();
+		$survey   = BackupKeyCustody::survey_nodes();
 		$problems = [];
-		foreach ($nodes as $node) {
-			if (!JobCommandBuilder::get_target($node)) {
-				continue; // no target -> no forced encryption -> no escrow dependency
-			}
-			$newest = MultiBackupKeyEscrow::newest_for_node($node->key);
-			if ($newest === null) {
-				$problems[] = self::escrow_problem($node,
-					'Backup key not escrowed — offsite backups are unrecoverable if this node is lost.');
-				continue;
-			}
-			$seen = trim((string)$node->get('mgn_backup_key_fingerprint'));
-			if ($seen !== '' && MultiBackupKeyEscrow::matching_for_node($node->key, $seen) === null) {
-				$problems[] = self::escrow_problem($node,
-					'Node backup key was regenerated out of band and is not escrowed — new backups cannot be recovered.');
-			}
+
+		if ($setup['state'] !== 'ready') {
+			$problems[] = [
+				'node'   => null,
+				'slug'   => 'control-plane',
+				'name'   => 'Control plane',
+				'id'     => 0,
+				'link'   => BackupKeyWalkthrough::URL,
+				'health' => self::result('escrow', 'Backup key recovery not set up',
+					BackupKeyWalkthrough::outstanding_summary($setup)
+					. ' Encrypted backups do not run until it is set up.', true),
+			];
+		}
+
+		foreach ($survey['pending'] as $pending) {
+			$problems[] = [
+				'node'   => null,
+				'slug'   => $pending['slug'],
+				'name'   => $pending['name'],
+				'id'     => (int)$pending['id'],
+				'health' => self::result('escrow', 'Backup key not escrowed',
+					$pending['reason'] === 'regenerated'
+						? 'Node backup key was regenerated out of band and is not escrowed — new backups cannot be recovered.'
+						: 'Backup key not escrowed — offsite backups are unrecoverable if this node is lost.',
+					true),
+			];
 		}
 
 		try {
-			if (BackupKeyCustody::agent_signing_key_unescrowed()) {
+			if ($setup['agent_signing'] === 'pending') {
 				$problems[] = [
 					'node'   => null,
 					'slug'   => 'control-plane',
@@ -229,16 +248,6 @@ class NodeMonitorHealth {
 			error_log('NodeMonitorHealth: signing-key escrow check failed: ' . $e->getMessage());
 		}
 		return $problems;
-	}
-
-	private static function escrow_problem($node, $detail): array {
-		return [
-			'node'   => $node,
-			'slug'   => $node->get('mgn_slug'),
-			'name'   => $node->get('mgn_name'),
-			'id'     => $node->key,
-			'health' => self::result('escrow', 'Backup key not escrowed', $detail, true),
-		];
 	}
 
 	private static function result($state, $label, $detail, $is_problem): array {

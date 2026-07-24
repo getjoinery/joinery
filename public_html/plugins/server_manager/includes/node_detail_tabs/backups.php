@@ -9,6 +9,13 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.2 - forced encryption is read from JobCommandBuilder::get_target(), the same source the
+ *                job builder uses (a non-B2 cloud target had the form offering a choice the builder
+ *                overruled, then the job was refused); Seal backup key now runs as a job
+ * @version 1.1 - never offers a backup that will be refused: a cloud-target node with backup key
+ *                recovery unfinished gets the explanation and a link to the walkthrough in place
+ *                of the Run Backup forms, and a local-only node has encryption switched off and
+ *                explained rather than failing at job creation
  * @version 1.0
  */
 
@@ -36,7 +43,19 @@
 	// Backup-key escrow status. Encryption is forced when a cloud target exists,
 	// so an un-escrowed key there means the offsite backups are unrecoverable if
 	// the node is lost — surface it and offer a one-click escrow.
-	if ($target_id) {
+	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupKeyWalkthrough.php'));
+	$escrow_setup = BackupKeyCustody::setup_state();
+	$escrow_ready = ($escrow_setup['state'] === 'ready');
+
+	// Encryption is forced for exactly the nodes whose archives leave the box —
+	// asked of the same function the job builder asks, so the form can never
+	// offer a choice the builder is going to overrule. (An enabled target is what
+	// counts: a disabled one uploads nothing, so nothing leaves.)
+	$require_encryption = (bool) JobCommandBuilder::get_target($node);
+
+	// When backups are paused outright (below), that box says everything this
+	// status alert would — so it is not repeated here.
+	if ($target_id && !($require_encryption && !$escrow_ready)) {
 		$newest_escrow = MultiBackupKeyEscrow::newest_for_node($node->key);
 		$seen_fpr = trim((string)$node->get('mgn_backup_key_fingerprint'));
 		$mismatch = $newest_escrow && $seen_fpr !== '' && $seen_fpr !== $newest_escrow->get('bke_key_fingerprint');
@@ -46,14 +65,15 @@
 			echo $mismatch
 				? 'This node&rsquo;s key was regenerated out of band and is not escrowed &mdash; new encrypted backups cannot be recovered.'
 				: 'Encrypted backups for this node cannot be recovered if the node is lost.';
-			if (BackupKeyCustody::is_escrow_configured()) {
+			if ($escrow_ready) {
 				echo '<form method="post" action="' . $base_url . '&tab=backups" class="mt-2">';
 				echo '<input type="hidden" name="action" value="escrow_backup_key">';
 				echo SmAdminCsrf::field();
-				echo '<button type="submit" class="btn btn-sm btn-warning">Escrow existing key</button>';
+				echo '<button type="submit" class="btn btn-sm btn-warning">Seal backup key now</button>';
 				echo '</form>';
 			} else {
-				echo ' <span class="small">Set <code>server_manager_escrow_public_key</code> first.</span>';
+				echo ' ' . htmlspecialchars(BackupKeyWalkthrough::outstanding_summary($escrow_setup));
+				echo ' <a href="' . BackupKeyWalkthrough::URL . '" class="alert-link">Set up backup key recovery</a>.';
 			}
 			echo '</div>';
 		} else {
@@ -63,9 +83,28 @@
 		}
 	}
 
+	// A backup nobody can decrypt is not a backup, so an encrypting backup is
+	// refused server-side until recovery is set up. Don't offer the button that
+	// is going to be refused: a cloud-target node (encryption forced) gets the
+	// explanation in place of the form, and a local-only node keeps its forms
+	// with encryption switched off and explained.
+	if ($require_encryption && !$escrow_ready) {
+		$pageoptions = ['title' => 'Run Backup'];
+		$page->begin_box($pageoptions);
+		echo '<div class="alert alert-warning mb-0">';
+		echo '<strong>Backups are paused until backup key recovery is set up.</strong> ';
+		echo 'This node backs up to cloud storage, so its backups are encrypted &mdash; and an encrypted backup '
+		   . 'nobody can open is not a backup. ';
+		echo htmlspecialchars(BackupKeyWalkthrough::outstanding_summary($escrow_setup));
+		echo ' <a href="' . BackupKeyWalkthrough::URL . '" class="alert-link">Set up backup key recovery</a>.';
+		echo '</div>';
+		$page->end_box();
+		$skip_backup_forms = true;
+	}
+
+	if (empty($skip_backup_forms)):
 	$pageoptions = ['title' => 'Run Backup'];
 	$page->begin_box($pageoptions);
-	$require_encryption = ($target_provider === 'b2');
 	?>
 	<div class="row">
 		<div class="col-md-6">
@@ -77,7 +116,11 @@
 			$fw_db->hiddeninput(SmAdminCsrf::FIELD, '', ['value' => SmAdminCsrf::token()]);
 			if ($require_encryption) {
 				$fw_db->hiddeninput('encryption', '', ['value' => '1']);
-				echo '<p class="text-muted small">Encryption required for Backblaze B2 targets</p>';
+				echo '<p class="text-muted small">Encrypted because this backup is uploaded off the node</p>';
+			} elseif (!$escrow_ready) {
+				$fw_db->checkboxinput('encryption', 'Encrypt backup', ['checked' => false, 'disabled' => true, 'id' => 'db_encrypt']);
+				echo '<p class="text-muted small">Encryption needs a recovery key so the backup can be opened again. '
+				   . '<a href="' . BackupKeyWalkthrough::URL . '">Set it up</a>.</p>';
 			} else {
 				$fw_db->checkboxinput('encryption', 'Encrypt backup', ['checked' => true, 'id' => 'db_encrypt']);
 			}
@@ -94,7 +137,11 @@
 			$fw_proj->hiddeninput(SmAdminCsrf::FIELD, '', ['value' => SmAdminCsrf::token()]);
 			if ($require_encryption) {
 				$fw_proj->hiddeninput('encryption', '', ['value' => '1']);
-				echo '<p class="text-muted small">Encryption required for Backblaze B2 targets</p>';
+				echo '<p class="text-muted small">Encrypted because this backup is uploaded off the node</p>';
+			} elseif (!$escrow_ready) {
+				$fw_proj->checkboxinput('encryption', 'Encrypt backup', ['checked' => false, 'disabled' => true, 'id' => 'proj_encrypt']);
+				echo '<p class="text-muted small">Encryption needs a recovery key so the backup can be opened again. '
+				   . '<a href="' . BackupKeyWalkthrough::URL . '">Set it up</a>.</p>';
 			} else {
 				$fw_proj->checkboxinput('encryption', 'Encrypt backup', ['checked' => true, 'id' => 'proj_encrypt']);
 			}
@@ -105,6 +152,7 @@
 	</div>
 <?php
 	$page->end_box();
+	endif; // $skip_backup_forms
 
 	// ── Backup File Browser ──
 	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupListHelper.php'));

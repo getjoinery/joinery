@@ -5,6 +5,9 @@
  *
  * CRUD page for managing backup storage targets (B2, S3, Linode).
  *
+ * @version 2.4 - guided backup key recovery walkthrough (detects the outstanding step and walks
+ *                it) replaces the bare verify card; public-key save/clear and bulk node escrow
+ *                actions added
  * @version 2.3 - Stored Backups panel: list + delete offsite objects from the control plane
  *                (node-independent), grouped by site with live/decommissioned/orphaned tags
  * @version 2.2 - possession check for the recovery key; CSRF on the save handler; undecryptable stored credentials surfaced instead of silently merged
@@ -60,27 +63,61 @@ if ($post_action === 'delete_target' && $is_edit) {
 	exit;
 }
 
+// ── Backup key recovery walkthrough actions ──
+// Steps 1-3 of the guided setup. Each is POST + CSRF-validated and redirects
+// back to the panel anchor so the operator lands on the next step.
+$escrow_return = '/admin/server_manager/targets#backup-key-setup';
+$page_regex    = '/\/admin\/server_manager/';
+
+/** Queue a message for the panel and bounce back to it. */
+$escrow_finish = function ($message, $ok) use ($session, $page_regex, $escrow_return) {
+	$session->save_message(new DisplayMessage(
+		$message, $ok ? 'Success' : 'Error', $page_regex,
+		$ok ? DisplayMessage::MESSAGE_ANNOUNCEMENT : DisplayMessage::MESSAGE_ERROR,
+		DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+	));
+	header('Location: ' . $escrow_return);
+	exit;
+};
+
+// Step 1: record the recovery PUBLIC key. Parsed before it is stored, and the
+// possession proof is cleared so the new value must be proven before use.
+if ($post_action === 'save_escrow_public_key') {
+	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager/targets'); exit; }
+	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupKeyCustody.php'));
+	try {
+		BackupKeyCustody::set_escrow_public_key($_POST['escrow_public_key'] ?? '');
+		$escrow_finish('Recovery public key saved. Now prove you hold the matching private key.', true);
+	} catch (Exception $e) {
+		$escrow_finish($e->getMessage(), false);
+	}
+}
+
+// Step 1 (redo): discard a public key whose private half is not to hand. Only
+// possible while nothing has been sealed to it.
+if ($post_action === 'clear_escrow_public_key') {
+	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager/targets'); exit; }
+	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupKeyCustody.php'));
+	try {
+		BackupKeyCustody::clear_escrow_public_key();
+		$escrow_finish('Recovery public key cleared. Paste a different one to start again.', true);
+	} catch (Exception $e) {
+		$escrow_finish($e->getMessage(), false);
+	}
+}
+
 // Verify possession of the escrow recovery key: the operator pastes the
 // unsealed challenge; until this succeeds the configured public key is not
 // honored (a mistyped key would otherwise seal every backup key unopenably).
 if ($post_action === 'verify_escrow_key') {
 	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager/targets'); exit; }
 	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupKeyCustody.php'));
-	$page_regex = '/\/admin\/server_manager/';
 	try {
 		BackupKeyCustody::record_possession_proof($_POST['escrow_proof'] ?? '');
-		$session->save_message(new DisplayMessage(
-			'Recovery key verified — backup-key escrow is now active.', 'Success', $page_regex,
-			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
-		));
+		$escrow_finish('Recovery key verified — backup-key escrow is now active.', true);
 	} catch (Exception $e) {
-		$session->save_message(new DisplayMessage(
-			$e->getMessage(), 'Error', $page_regex,
-			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
-		));
+		$escrow_finish($e->getMessage(), false);
 	}
-	header('Location: /admin/server_manager/targets');
-	exit;
 }
 
 // Delete every offsite backup object for one site (whole slug prefix). Run from the
@@ -282,30 +319,12 @@ if ($error) {
 	echo '<div class="alert alert-danger">' . htmlspecialchars($error) . '</div>';
 }
 
-// ── Recovery-key possession check ──
-// Shown while a recovery public key is configured but unproven. Escrow (and
-// with it encrypted backups) refuses to run until the operator demonstrates
-// the offline private key actually opens what this key seals.
-require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupKeyCustody.php'));
-if (BackupKeyCustody::needs_possession_proof()) {
-	$page->begin_box(['title' => 'Verify the backup recovery key']);
-	echo '<div class="alert alert-danger">The configured recovery public key is not verified. '
-	   . 'Backup-key escrow — and encrypted backups — will not run until you prove the matching '
-	   . 'private key can open what it seals.</div>';
-	echo '<p class="text-muted mb-1">Challenge (unseal on your own machine, never on this server):</p>';
-	echo '<pre class="border rounded p-2" style="white-space:pre-wrap;word-break:break-all;">'
-	   . htmlspecialchars(BackupKeyCustody::possession_challenge()) . '</pre>';
-	echo '<p class="text-muted">Save the challenge to a file, then: <code>php escrow_keypair.php unseal --private /path/to/recovery.key --in challenge.txt</code></p>';
-
-	$proof_form = $page->getFormWriter('escrow_proof_form');
-	$proof_form->begin_form();
-	echo SmAdminCsrf::field();
-	echo '<input type="hidden" name="action" value="verify_escrow_key">';
-	$proof_form->textinput('escrow_proof', 'Unsealed challenge output', ['required' => true]);
-	$proof_form->submitbutton('btn_verify_escrow', 'Verify');
-	$proof_form->end_form();
-	$page->end_box();
-}
+// ── Backup key recovery ──
+// The guided walkthrough: it detects how far setup has got and renders the one
+// outstanding step. Once every targeted node is escrowed it collapses to a
+// standing summary of what recovery would look like.
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupKeyWalkthrough.php'));
+BackupKeyWalkthrough::render($page, BackupKeyCustody::setup_state(), '/admin/server_manager/targets');
 
 // ── Target List ──
 $provider_labels = ['b2' => 'Backblaze B2', 's3' => 'Amazon S3', 'linode' => 'Linode Object Storage'];
