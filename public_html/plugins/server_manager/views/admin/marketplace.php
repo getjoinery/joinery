@@ -46,11 +46,11 @@ $page->begin_box(array('altlinks' => $altlinks));
 	<div class="row">
 		<div class="col-12">
 			<?php if ($message): ?>
-				<div class="alert alert-success"><?= $message ?></div>
+				<div class="alert alert-success"><?= htmlspecialchars($message) ?></div>
 			<?php endif; ?>
 
 			<?php if ($error): ?>
-				<div class="alert alert-danger"><?= $error ?></div>
+				<div class="alert alert-danger"><?= htmlspecialchars($error) ?></div>
 			<?php endif; ?>
 
 			<?php if ($catalog_error && empty($error)): ?>

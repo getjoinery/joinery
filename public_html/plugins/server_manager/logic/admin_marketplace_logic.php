@@ -8,7 +8,7 @@ function admin_marketplace_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/plugins_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
+	$session->check_permission(10);
 	$session->set_return();
 
 	$settings = Globalvars::get_instance();
@@ -16,7 +16,7 @@ function admin_marketplace_logic(array $input): LogicResult {
 
 	if (empty($upgrade_source)) {
 		return LogicResult::render(array(
-			'error' => 'No upgrade source configured. Set the <strong>upgrade_source</strong> setting in Admin &gt; Settings to use the marketplace.',
+			'error' => 'No upgrade source configured. Set the upgrade_source setting in Admin > Settings to use the marketplace.',
 			'themes' => array(),
 			'plugins' => array(),
 		));

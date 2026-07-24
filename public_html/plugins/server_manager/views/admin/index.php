@@ -3,7 +3,10 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
- * @version 1.10 - Agent self-update surfacing: pending/refused/rolled-back
+ * @version 1.13 - control-plane-level escrow problems (agent signing key) render without a node link
+ * @version 1.12 - Sweep reconciles all JobResultProcessor-handled types (P-17), not a hardcoded 3
+ * @version 1.11 - Shared server_manager.js asset (smApiPost/smEsc/smSafeUrl)
+ *          1.10 - Agent self-update surfacing: pending/refused/rolled-back
  *                 alerts from the heartbeat row (specs/agent_release_channel.md)
  *          1.9 - Relay Fleet console link (mailbox plugin)
  */
@@ -15,6 +18,7 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/agent_heartbeat_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAssets.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(10);
@@ -24,15 +28,22 @@ $session->set_return();
 // Skip nodes that are soft-deleted to avoid spawning chained jobs against
 // hosts that no longer exist.
 $db = DbConnector::get_instance()->get_db_link();
-$q = $db->query(
+// Reconcile every unprocessed terminal job whose type JobResultProcessor can
+// handle — the Go agent completes jobs by writing the DB directly, so without
+// this an unwatched job is never reconciled. The type list comes from the
+// processor itself, so relay/SSL/backup results aren't silently skipped (P-17).
+$processable  = JobResultProcessor::processable_types();
+$placeholders = implode(',', array_fill(0, count($processable), '?'));
+$q = $db->prepare(
 	"SELECT j.mjb_id FROM mjb_management_jobs j " .
 	"JOIN mgn_managed_nodes n ON n.mgn_id = j.mjb_mgn_node_id " .
 	"WHERE j.mjb_status IN ('completed','failed') " .
-	"  AND j.mjb_job_type IN ('check_status','install_node','apply_update') " .
+	"  AND j.mjb_job_type IN ($placeholders) " .
 	"  AND j.mjb_result IS NULL " .
 	"  AND j.mjb_delete_time IS NULL " .
 	"  AND n.mgn_delete_time IS NULL"
 );
+$q->execute($processable);
 foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
 	$unprocessed_job = new ManagementJob($row['mjb_id'], TRUE);
 	JobResultProcessor::process($unprocessed_job);
@@ -71,6 +82,7 @@ $inflight_provisions->load();
 // Nodes whose uptime monitoring cannot currently conclude up or down.
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeMonitorHealth.php'));
 $monitor_problems = NodeMonitorHealth::problems();
+$escrow_problems  = NodeMonitorHealth::backup_escrow_problems();
 
 // Cron health: active if ran within 20 minutes
 $settings        = Globalvars::get_instance();
@@ -175,6 +187,28 @@ if ($agent_online) {
 		<?php foreach ($monitor_problems as $p): ?>
 			<li>
 				<a href="/admin/server_manager/node_detail?mgn_id=<?php echo (int)$p['id']; ?>" class="alert-link"><?php echo htmlspecialchars($p['name'] ?: $p['slug']); ?></a>
+				&mdash; <?php echo htmlspecialchars($p['health']['detail']); ?>
+			</li>
+		<?php endforeach; ?>
+	</ul>
+</div>
+<?php endif; ?>
+
+<?php // Nodes whose backup key is not escrowed (or was regenerated out of band).
+      // A backup you cannot restore is as silent as monitoring that cannot alert,
+      // so it is surfaced the same way. ?>
+<?php if (!empty($escrow_problems)): ?>
+<div class="alert alert-warning" role="alert">
+	<strong>Backup key not escrowed on <?php echo count($escrow_problems); ?> node<?php echo count($escrow_problems) === 1 ? '' : 's'; ?>.</strong>
+	Offsite backups for these nodes cannot be recovered if the node is lost.
+	<ul class="mb-0 mt-2">
+		<?php foreach ($escrow_problems as $p): ?>
+			<li>
+				<?php if ((int)$p['id'] > 0): ?>
+					<a href="/admin/server_manager/node_detail?mgn_id=<?php echo (int)$p['id']; ?>&tab=backups" class="alert-link"><?php echo htmlspecialchars($p['name'] ?: $p['slug']); ?></a>
+				<?php else: // control-plane-level problem (e.g. agent signing key) — no node to link ?>
+					<strong><?php echo htmlspecialchars($p['name'] ?: $p['slug']); ?></strong>
+				<?php endif; ?>
 				&mdash; <?php echo htmlspecialchars($p['health']['detail']); ?>
 			</li>
 		<?php endforeach; ?>
@@ -455,6 +489,7 @@ function render_node_row($node, $db, $session) {
 }
 ?>
 
+<?php echo SmAssets::script_tag(); ?>
 <script>
 // Auto-refresh status for nodes with API credentials. Fires once on page load
 // in parallel, bypassing the agent/job pipeline. Silent on failure — the
@@ -464,12 +499,6 @@ function render_node_row($node, $db, $session) {
 	if (!rows.length) return;
 
 	var colorClasses = ['bg-secondary','bg-success','bg-warning','bg-danger','bg-info','bg-primary'];
-
-	function smApiPost(action, params) {
-		// Error envelopes resolve {} (soft-failure shape); network errors reject.
-		return joineryApi.post('server_manager/' + action, params || {})
-			.catch(function(err) { if (err && err.status) return {}; throw err; });
-	}
 
 	rows.forEach(function(row) {
 		var nodeId = row.getAttribute('data-node-id');

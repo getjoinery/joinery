@@ -14,7 +14,7 @@
  * Exits 0 on success, non-zero on failure. Prints a one-line status to
  * stdout on success or stderr on failure.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 // At runtime, the following are prepended to this file's content by the
@@ -54,8 +54,10 @@ if ($op === 'download') {
 		fwrite(STDERR, "DOWNLOAD_FAIL: missing arguments\n");
 		exit(2);
 	}
+	// Stream straight to the local file — a backup archive can be many GB and
+	// must never be buffered whole in the node's RAM.
 	try {
-		$resp = S3Signer::get($creds, $bucket, '/' . ltrim($remote, '/'));
+		$resp = S3Signer::get_to_file($creds, $bucket, '/' . ltrim($remote, '/'), $local);
 	} catch (Exception $e) {
 		fwrite(STDERR, "DOWNLOAD_FAIL: " . $e->getMessage() . "\n");
 		exit(1);
@@ -65,11 +67,8 @@ if ($op === 'download') {
 		fwrite(STDERR, "DOWNLOAD_FAIL: " . $err . "\n");
 		exit(1);
 	}
-	if (file_put_contents($local, $resp['body']) === false) {
-		fwrite(STDERR, "DOWNLOAD_FAIL: could not write " . $local . "\n");
-		exit(1);
-	}
-	echo "DOWNLOAD_OK " . strlen($resp['body']) . " bytes -> " . $local . "\n";
+	clearstatcache(true, $local);
+	echo "DOWNLOAD_OK " . (is_file($local) ? filesize($local) : 0) . " bytes -> " . $local . "\n";
 	exit(0);
 }
 

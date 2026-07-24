@@ -5,12 +5,13 @@
  *
  * CRUD page for managing backup storage targets (B2, S3, Linode).
  *
- * @version 2.1
+ * @version 2.2 - possession check for the recovery key; CSRF on the save handler; undecryptable stored credentials surfaced instead of silently merged
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_target_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/TargetTester.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAdminCsrf.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(10);
@@ -26,8 +27,11 @@ if (isset($_GET['bkt_id']) && $_GET['bkt_id']) {
 	$target = new BackupTarget(NULL);
 }
 
-// Handle test (from list row)
-if (isset($_GET['action']) && $_GET['action'] === 'test' && $is_edit) {
+// Test and delete are POST actions (a GET link is CSRF-triggerable), CSRF-validated.
+$post_action = ($_POST['action'] ?? '');
+
+if ($post_action === 'test_target' && $is_edit) {
+	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager/targets'); exit; }
 	$result = TargetTester::test($target);
 	$page_regex = '/\/admin\/server_manager/';
 	$session->save_message(new DisplayMessage(
@@ -41,8 +45,8 @@ if (isset($_GET['action']) && $_GET['action'] === 'test' && $is_edit) {
 	exit;
 }
 
-// Handle delete
-if (isset($_GET['action']) && $_GET['action'] === 'delete' && $is_edit) {
+if ($post_action === 'delete_target' && $is_edit) {
+	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager/targets'); exit; }
 	$target->soft_delete();
 	$page_regex = '/\/admin\/server_manager/';
 	$session->save_message(new DisplayMessage(
@@ -53,9 +57,35 @@ if (isset($_GET['action']) && $_GET['action'] === 'delete' && $is_edit) {
 	exit;
 }
 
+// Verify possession of the escrow recovery key: the operator pastes the
+// unsealed challenge; until this succeeds the configured public key is not
+// honored (a mistyped key would otherwise seal every backup key unopenably).
+if ($post_action === 'verify_escrow_key') {
+	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager/targets'); exit; }
+	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupKeyCustody.php'));
+	$page_regex = '/\/admin\/server_manager/';
+	try {
+		BackupKeyCustody::record_possession_proof($_POST['escrow_proof'] ?? '');
+		$session->save_message(new DisplayMessage(
+			'Recovery key verified — backup-key escrow is now active.', 'Success', $page_regex,
+			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+		));
+	} catch (Exception $e) {
+		$session->save_message(new DisplayMessage(
+			$e->getMessage(), 'Error', $page_regex,
+			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+		));
+	}
+	header('Location: /admin/server_manager/targets');
+	exit;
+}
+
 // Handle form save
 $error = null;
 if ($_POST && isset($_POST['bkt_name'])) {
+	// Same CSRF gate as every other mutation on this page: this handler writes
+	// storage credentials, the highest-value forgery target here.
+	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager/targets'); exit; }
 	if (!$target) {
 		$target = new BackupTarget(NULL);
 	}
@@ -66,6 +96,17 @@ if ($_POST && isset($_POST['bkt_name'])) {
 	$target->set('bkt_path_prefix', trim($_POST['bkt_path_prefix'] ?? 'joinery-backups'));
 	$target->set('bkt_enabled', isset($_POST['bkt_enabled']) ? true : false);
 
+	// Leave-blank-to-keep: secret fields are never prefilled into the form, so a
+	// blank secret on an edit means "keep the stored one" rather than wipe it (S-5).
+	// Undecryptable stored credentials mean there is nothing to keep — surface
+	// that instead of silently merging with nothing.
+	try {
+		$existing_creds = ($target->key ? $target->get_credentials() : []);
+	} catch (BackupTargetException $e) {
+		$existing_creds = [];
+		$error = $e->getMessage() . ' Re-enter BOTH the access key and the secret to replace them.';
+	}
+
 	// Build credentials JSON — canonical shape for all providers:
 	// {access_key, secret_key, region, endpoint}
 	$provider = $target->get('bkt_provider');
@@ -75,42 +116,54 @@ if ($_POST && isset($_POST['bkt_name'])) {
 		// endpoint automatically via b2_authorize_account; store unified shape.
 		$key_id = trim($_POST['cred_key_id'] ?? '');
 		$app_key = trim($_POST['cred_app_key'] ?? '');
-		$b2_region = '';
-		$b2_endpoint = '';
-		if ($key_id !== '' && $app_key !== '') {
-			$ch = curl_init('https://api.backblazeb2.com/b2api/v3/b2_authorize_account');
-			curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-			curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Basic ' . base64_encode($key_id . ':' . $app_key)]);
-			curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-			$body = curl_exec($ch);
-			$status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-			curl_close($ch);
-			if ($status === 200 && ($data = json_decode($body, true))) {
-				$s3_url = $data['apiInfo']['storageApi']['s3ApiUrl'] ?? '';
-				if (preg_match('#^https?://s3\.([^.]+)\.backblazeb2\.com#', $s3_url, $m)) {
-					$b2_region = $m[1];
-					$b2_endpoint = $s3_url;
+		if ($app_key === '' && !empty($existing_creds['secret_key'])) {
+			// Leave-blank-to-keep: preserve stored B2 credentials (and the detected
+			// region/endpoint) verbatim; do not re-authorize. A changed key ID with
+			// a blank secret still keeps the stored secret.
+			$creds = $existing_creds;
+			if ($key_id !== '') { $creds['access_key'] = $key_id; }
+		} else {
+			$b2_region = '';
+			$b2_endpoint = '';
+			if ($key_id !== '' && $app_key !== '') {
+				$ch = curl_init('https://api.backblazeb2.com/b2api/v3/b2_authorize_account');
+				curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+				curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Basic ' . base64_encode($key_id . ':' . $app_key)]);
+				curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+				$body = curl_exec($ch);
+				$status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+				curl_close($ch);
+				if ($status === 200 && ($data = json_decode($body, true))) {
+					$s3_url = $data['apiInfo']['storageApi']['s3ApiUrl'] ?? '';
+					if (preg_match('#^https?://s3\.([^.]+)\.backblazeb2\.com#', $s3_url, $m)) {
+						$b2_region = $m[1];
+						$b2_endpoint = $s3_url;
+					}
 				}
 			}
+			$creds = [
+				'access_key' => $key_id,
+				'secret_key' => $app_key,
+				'region' => $b2_region,
+				'endpoint' => $b2_endpoint,
+			];
 		}
-		$creds = [
-			'access_key' => $key_id,
-			'secret_key' => $app_key,
-			'region' => $b2_region,
-			'endpoint' => $b2_endpoint,
-		];
 	} elseif ($provider === 's3') {
 		$region = trim($_POST['cred_s3_region'] ?? 'us-east-1');
+		$secret = trim($_POST['cred_s3_secret_key'] ?? '');
+		if ($secret === '' && !empty($existing_creds['secret_key'])) { $secret = $existing_creds['secret_key']; }
 		$creds = [
 			'access_key' => trim($_POST['cred_s3_access_key'] ?? ''),
-			'secret_key' => trim($_POST['cred_s3_secret_key'] ?? ''),
+			'secret_key' => $secret,
 			'region' => $region,
 			'endpoint' => 'https://s3.' . $region . '.amazonaws.com',
 		];
 	} elseif ($provider === 'linode') {
+		$linode_secret = trim($_POST['cred_linode_secret_key'] ?? '');
+		if ($linode_secret === '' && !empty($existing_creds['secret_key'])) { $linode_secret = $existing_creds['secret_key']; }
 		$creds = [
 			'access_key' => trim($_POST['cred_linode_access_key'] ?? ''),
-			'secret_key' => trim($_POST['cred_linode_secret_key'] ?? ''),
+			'secret_key' => $linode_secret,
 			'region' => trim($_POST['cred_linode_region'] ?? ''),
 			'endpoint' => trim($_POST['cred_linode_endpoint'] ?? ''),
 		];
@@ -122,6 +175,9 @@ if ($_POST && isset($_POST['bkt_name'])) {
 	}
 
 	try {
+		if ($error !== null) {
+			throw new Exception($error); // undecryptable stored creds — do not save a silent merge-with-nothing
+		}
 		$target->prepare();
 		$target->save();
 		$target->load();
@@ -181,6 +237,31 @@ if ($error) {
 	echo '<div class="alert alert-danger">' . htmlspecialchars($error) . '</div>';
 }
 
+// ── Recovery-key possession check ──
+// Shown while a recovery public key is configured but unproven. Escrow (and
+// with it encrypted backups) refuses to run until the operator demonstrates
+// the offline private key actually opens what this key seals.
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupKeyCustody.php'));
+if (BackupKeyCustody::needs_possession_proof()) {
+	$page->begin_box(['title' => 'Verify the backup recovery key']);
+	echo '<div class="alert alert-danger">The configured recovery public key is not verified. '
+	   . 'Backup-key escrow — and encrypted backups — will not run until you prove the matching '
+	   . 'private key can open what it seals.</div>';
+	echo '<p class="text-muted mb-1">Challenge (unseal on your own machine, never on this server):</p>';
+	echo '<pre class="border rounded p-2" style="white-space:pre-wrap;word-break:break-all;">'
+	   . htmlspecialchars(BackupKeyCustody::possession_challenge()) . '</pre>';
+	echo '<p class="text-muted">Save the challenge to a file, then: <code>php escrow_keypair.php unseal --private /path/to/recovery.key --in challenge.txt</code></p>';
+
+	$proof_form = $page->getFormWriter('escrow_proof_form');
+	$proof_form->begin_form();
+	echo SmAdminCsrf::field();
+	echo '<input type="hidden" name="action" value="verify_escrow_key">';
+	$proof_form->textinput('escrow_proof', 'Unsealed challenge output', ['required' => true]);
+	$proof_form->submitbutton('btn_verify_escrow', 'Verify');
+	$proof_form->end_form();
+	$page->end_box();
+}
+
 // ── Target List ──
 $provider_labels = ['b2' => 'Backblaze B2', 's3' => 'Amazon S3', 'linode' => 'Linode Object Storage'];
 
@@ -204,7 +285,12 @@ foreach ($all_targets as $t) {
 	echo '<td>' . htmlspecialchars($t->get('bkt_path_prefix') ?: '-') . '</td>';
 	echo '<td><span class="badge bg-' . ($enabled ? 'success' : 'secondary') . '">' . ($enabled ? 'Enabled' : 'Disabled') . '</span></td>';
 	echo '<td><a href="/admin/server_manager/targets?bkt_id=' . $t->key . '" class="btn btn-sm btn-outline-primary">Edit</a> ';
-	echo '<a href="/admin/server_manager/targets?bkt_id=' . $t->key . '&action=test" class="btn btn-sm btn-outline-secondary">Test</a></td>';
+	// Test is a POST action (it hits the provider; a GET link is CSRF-triggerable).
+	echo '<form method="post" action="/admin/server_manager/targets?bkt_id=' . $t->key . '" style="display:inline;">';
+	echo '<input type="hidden" name="action" value="test_target">';
+	echo SmAdminCsrf::field();
+	echo '<button type="submit" class="btn btn-sm btn-outline-secondary">Test</button>';
+	echo '</form></td>';
 	echo '</tr>';
 }
 
@@ -217,7 +303,12 @@ $page->end_box();
 
 // ── Add/Edit Form ──
 if ($target !== null) {
-	$creds = $target->key ? $target->get_credentials() : [];
+	try {
+		$creds = $target->key ? $target->get_credentials() : [];
+	} catch (BackupTargetException $e) {
+		$creds = [];
+		echo '<div class="alert alert-danger">' . htmlspecialchars($e->getMessage()) . ' Re-enter both credential fields to replace them.</div>';
+	}
 	$current_provider = $target->get('bkt_provider') ?: 'b2';
 
 	$form_title = $is_edit ? 'Edit Target: ' . htmlspecialchars($target->get('bkt_name')) : 'Add Target';
@@ -231,7 +322,8 @@ if ($target !== null) {
 			'bkt_bucket'             => $target->get('bkt_bucket') ?: '',
 			'bkt_path_prefix'        => $target->get('bkt_path_prefix') ?: 'joinery-backups',
 			'cred_key_id'            => $creds['access_key'] ?? '',
-			'cred_app_key'           => $creds['secret_key'] ?? '',
+			// Secret fields are NEVER prefilled — leave blank to keep the stored key (S-5).
+			'cred_app_key'           => '',
 			'cred_s3_access_key'     => $current_provider === 's3' ? ($creds['access_key'] ?? '') : '',
 			'cred_s3_region'         => $current_provider === 's3' ? ($creds['region'] ?? 'us-east-1') : 'us-east-1',
 			'cred_linode_access_key' => $current_provider === 'linode' ? ($creds['access_key'] ?? '') : '',
@@ -241,6 +333,7 @@ if ($target !== null) {
 	]);
 
 	$formwriter->begin_form();
+	echo SmAdminCsrf::field();
 	if ($is_edit) {
 		$formwriter->hiddeninput('edit_primary_key_value', '', ['value' => $target->key]);
 	}
@@ -273,7 +366,7 @@ if ($target !== null) {
 		'helptext' => 'Create via Backblaze → Account → Application Keys. Must be a scoped key — the master account key will not work with the S3-compatible API.',
 	]);
 	$formwriter->passwordinput('cred_app_key', 'Application Key', [
-		'helptext' => 'Region is auto-detected on save.',
+		'helptext' => $is_edit ? 'Leave blank to keep the current key. Region is auto-detected on save.' : 'Region is auto-detected on save.',
 	]);
 	echo '</div>';
 
@@ -281,7 +374,7 @@ if ($target !== null) {
 	echo '<div id="s3Fields"' . ($current_provider === 's3' ? '' : ' hidden') . '>';
 	echo '<p class="fw-semibold text-muted mt-2 mb-1">Amazon S3 Credentials</p>';
 	$formwriter->textinput('cred_s3_access_key', 'Access Key');
-	$formwriter->passwordinput('cred_s3_secret_key', 'Secret Key');
+	$formwriter->passwordinput('cred_s3_secret_key', 'Secret Key', $is_edit ? ['helptext' => 'Leave blank to keep the current key.'] : []);
 	$formwriter->textinput('cred_s3_region', 'Region', ['placeholder' => 'us-east-1']);
 	echo '</div>';
 
@@ -289,7 +382,7 @@ if ($target !== null) {
 	echo '<div id="linodeFields"' . ($current_provider === 'linode' ? '' : ' hidden') . '>';
 	echo '<p class="fw-semibold text-muted mt-2 mb-1">Linode Object Storage Credentials</p>';
 	$formwriter->textinput('cred_linode_access_key', 'Access Key');
-	$formwriter->passwordinput('cred_linode_secret_key', 'Secret Key');
+	$formwriter->passwordinput('cred_linode_secret_key', 'Secret Key', $is_edit ? ['helptext' => 'Leave blank to keep the current key.'] : []);
 	$formwriter->textinput('cred_linode_region', 'Region', ['placeholder' => 'us-east-1']);
 	$formwriter->textinput('cred_linode_endpoint', 'Endpoint URL', ['placeholder' => 'https://us-east-1.linodeobjects.com']);
 	echo '</div>';
@@ -302,7 +395,11 @@ if ($target !== null) {
 
 	echo '<a href="/admin/server_manager/targets" class="btn btn-outline-secondary ms-2">Cancel</a>';
 	if ($is_edit) {
-		echo '<a href="#" class="btn btn-outline-danger ms-2" onclick="JoineryModal.confirm(\'Delete this target?\', function(){ window.location=\'/admin/server_manager/targets?bkt_id=' . $target->key . '&amp;action=delete\'; })">Delete</a>';
+		echo '<form method="post" action="/admin/server_manager/targets?bkt_id=' . $target->key . '" id="delete_target_form" style="display:inline;">';
+		echo '<input type="hidden" name="action" value="delete_target">';
+		echo SmAdminCsrf::field();
+		echo '<button type="button" class="btn btn-outline-danger ms-2" onclick="JoineryModal.confirm(\'Delete this target?\', function(){ document.getElementById(\'delete_target_form\').submit(); })">Delete</button>';
+		echo '</form>';
 	}
 
 	$page->end_box();

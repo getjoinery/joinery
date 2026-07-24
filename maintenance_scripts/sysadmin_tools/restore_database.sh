@@ -1,420 +1,293 @@
 #!/usr/bin/env bash
-#Version 2.10 - Added --non-interactive mode for automated restores
+#Version 3.2 - Stale-staging sweep at startup (SIGKILL strands run no trap); jy_restore_ temp prefix
+#Version 3.1 - Staging writes checked (a truncated staged file can never load); plain-SQL sanity
+#              check before destroy; key via stdin (never argv); DB probe failures distinguished
+#              (DB_UNREACHABLE) from load failures; every exit path emits a marker
+#Version 3.0 - Single restore engine: verify-before-destroy, schema-replace, machine-readable markers
 
-# Parse --non-interactive flag out of the argument list without disturbing the
-# DB_NAME / FILE positional order downstream. A second pass later handles
-# --help, required-arg validation, and strips a trailing --non-interactive if
-# present.
+# The one implementation of PostgreSQL restore used by every path (dashboard
+# jobs, project restore, from-backup install, manual ops). Contract:
+#
+#   restore_database.sh DB_NAME FILE [--non-interactive] [--key-file PATH] [--db-user USER]
+#
+#   * Verify before destroy: the archive is decrypted (if .enc) and integrity-
+#     checked into a temp file BEFORE the target database is touched. A bad key,
+#     truncated file, or corrupt archive exits with the database untouched.
+#   * Replace semantics: DROP SCHEMA public CASCADE; CREATE SCHEMA public; then
+#     load under ON_ERROR_STOP=1 as --db-user (no dropdb/createdb superuser need).
+#   * All informational output goes to stderr. stdout carries ONLY one terminal
+#     marker so callers (JobResultProcessor) can parse the outcome:
+#         RESTORE_OK | BACKUP_KEY_MISSING | DECRYPT_FAILED
+#         ARCHIVE_CORRUPT | RESTORE_LOAD_FAILED | DB_UNREACHABLE
+#         RESTORE_USAGE_ERROR
+#     Only RESTORE_LOAD_FAILED can leave the database modified; every other
+#     failure exits with it untouched.
+#   * Key resolution order: --key-file -> $BACKUP_ENCRYPTION_KEY ->
+#     ~/.joinery_backup_key -> interactive prompt (only when not --non-interactive).
+
+set -o pipefail
+
+# --- Everything informational goes to stderr; stdout is reserved for markers ---
+info() { echo "$@" >&2; }
+
+# --- Parse arguments -----------------------------------------------------------
 NON_INTERACTIVE=false
-_remaining=()
-for _a in "$@"; do
-    case "$_a" in
-        --non-interactive|-n) NON_INTERACTIVE=true ;;
-        *) _remaining+=("$_a") ;;
+KEY_FILE=""
+DB_USER="postgres"
+POSITIONAL=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --non-interactive|-n) NON_INTERACTIVE=true; shift ;;
+        --key-file)           KEY_FILE="$2"; shift 2 ;;
+        --key-file=*)         KEY_FILE="${1#*=}"; shift ;;
+        --db-user)            DB_USER="$2"; shift 2 ;;
+        --db-user=*)          DB_USER="${1#*=}"; shift ;;
+        --help|-h)
+            info "Usage: $0 DB_NAME FILE [--non-interactive] [--key-file PATH] [--db-user USER]"
+            info ""
+            info "Supported formats: .sql  .sql.gz  .sql.gz.enc"
+            info "Markers (stdout): RESTORE_OK BACKUP_KEY_MISSING DECRYPT_FAILED ARCHIVE_CORRUPT RESTORE_LOAD_FAILED DB_UNREACHABLE RESTORE_USAGE_ERROR"
+            exit 0
+            ;;
+        -*) info "✗ Unknown option: $1"; exit 1 ;;
+        *)  POSITIONAL+=("$1"); shift ;;
     esac
 done
-set -- "${_remaining[@]}"
-unset _remaining _a
+set -- "${POSITIONAL[@]}"
 
-# Resolve encryption key from env/file when running non-interactively so
-# openssl doesn't prompt. Matches the source lookup used by backup_database.sh.
-get_encryption_key() {
+DB_NAME="$1"
+INPUT_FILE="$2"
+
+if [ -z "$DB_NAME" ] || [ -z "$INPUT_FILE" ]; then
+    info "✗ Error: Missing required arguments."
+    info "Usage: $0 DB_NAME FILE [--non-interactive] [--key-file PATH] [--db-user USER]"
+    echo "RESTORE_USAGE_ERROR"
+    exit 1
+fi
+
+if [ ! -f "$INPUT_FILE" ]; then
+    info "✗ Error: File '$INPUT_FILE' does not exist."
+    echo "RESTORE_USAGE_ERROR"
+    exit 1
+fi
+
+# --- Temp-file bookkeeping / cleanup ------------------------------------------
+# Staging files use a recognizable jy_restore_ prefix so stranded ones are
+# identifiable. The EXIT trap covers every normal exit, but a hard kill
+# (SIGKILL — the agent's step timeout) runs no trap and can strand a decrypted
+# plaintext dump. Self-healing: every run deletes its own stale leftovers, so
+# an orphan survives at most until the next backup/restore touches the box.
+find /tmp -maxdepth 1 -name 'jy_restore_*' -user "$(id -un)" -mmin +1440 -delete 2>/dev/null
+GZ_TMP=""
+SQL_TMP=""
+cleanup() {
+    [ -n "$GZ_TMP" ]  && rm -f "$GZ_TMP"
+    [ -n "$SQL_TMP" ] && rm -f "$SQL_TMP"
+}
+trap cleanup EXIT
+
+# --- Database authentication (standalone convenience) --------------------------
+# The dashboard always exports PGPASSWORD in a creds preamble before invoking us,
+# so this block is a no-op there. For manual/standalone use it loads the site
+# password from the local config when PGPASSWORD/.pgpass are absent.
+if [[ -f ~/.pgpass ]]; then
+    info "✓ Using .pgpass authentication."
+elif [[ -n "$PGPASSWORD" ]]; then
+    info "✓ Using PGPASSWORD from environment."
+else
+    CONFIG_FILE=""
+    SITENAME="${DB_NAME%_test}"
+    if [[ -f "/var/www/html/${SITENAME}/config/Globalvars_site.php" ]]; then
+        CONFIG_FILE="/var/www/html/${SITENAME}/config/Globalvars_site.php"
+    elif [[ -f "/var/www/html/${DB_NAME}/config/Globalvars_site.php" ]]; then
+        CONFIG_FILE="/var/www/html/${DB_NAME}/config/Globalvars_site.php"
+    else
+        CONFIG_FILE=$(find /var/www/html/*/config/Globalvars_site.php 2>/dev/null | head -1)
+    fi
+    if [[ -n "$CONFIG_FILE" ]] && [[ -f "$CONFIG_FILE" ]]; then
+        CONFIG_PASSWORD=$(grep "dbpassword.*=" "$CONFIG_FILE" | head -1 | sed "s/.*'\(.*\)'.*/\1/")
+        if [[ -n "$CONFIG_PASSWORD" ]]; then
+            export PGPASSWORD="$CONFIG_PASSWORD"
+            info "✓ Loaded database password from $CONFIG_FILE"
+        fi
+    fi
+    if [[ -z "$PGPASSWORD" ]] && [ "$NON_INTERACTIVE" = true ]; then
+        info "✗ Error: no PGPASSWORD, .pgpass, or config password found (non-interactive)."
+        echo "DB_UNREACHABLE"
+        exit 7
+    fi
+fi
+
+# --- Encryption key resolution -------------------------------------------------
+ENCRYPTION_KEY=""
+resolve_key() {
+    if [ -n "$KEY_FILE" ]; then
+        [ -f "$KEY_FILE" ] || return 1
+        ENCRYPTION_KEY=$(head -1 "$KEY_FILE" | tr -d '\n\r')
+        [ -n "$ENCRYPTION_KEY" ] && return 0
+        return 1
+    fi
     if [ -n "$BACKUP_ENCRYPTION_KEY" ]; then
         ENCRYPTION_KEY="$BACKUP_ENCRYPTION_KEY"
         return 0
     fi
-    local key_file="$HOME/.joinery_backup_key"
-    if [ -f "$key_file" ]; then
-        ENCRYPTION_KEY=$(cat "$key_file" | head -1 | tr -d '\n\r')
-        if [ -n "$ENCRYPTION_KEY" ]; then
-            return 0
-        fi
+    local kf="$HOME/.joinery_backup_key"
+    if [ -f "$kf" ]; then
+        ENCRYPTION_KEY=$(head -1 "$kf" | tr -d '\n\r')
+        [ -n "$ENCRYPTION_KEY" ] && return 0
+    fi
+    if [ "$NON_INTERACTIVE" != true ]; then
+        read -rsp "Decryption key: " ENCRYPTION_KEY < /dev/tty 2>/dev/null
+        info ""
+        [ -n "$ENCRYPTION_KEY" ] && return 0
     fi
     return 1
 }
 
-ENCRYPTION_KEY=""
-if [ "$NON_INTERACTIVE" = true ]; then
-    get_encryption_key || true
-fi
+info "========================================="
+info "POSTGRESQL DATABASE RESTORE"
+info "Database:  $DB_NAME (user: $DB_USER)"
+info "Source:    $INPUT_FILE"
+info "========================================="
 
-# Authentication order: 1) .pgpass, 2) config file, 3) interactive prompt
+# --- Stage 1: produce a verified plaintext SQL temp file, DB UNTOUCHED ---------
+SQL_TMP=$(mktemp --suffix=.sql /tmp/jy_restore_XXXXXXXX)
 
-# Check for .pgpass file first
-if [[ -f ~/.pgpass ]]; then
-    echo "✓ Found .pgpass file - using passwordless authentication."
-elif [[ -n "$PGPASSWORD" ]]; then
-    echo "✓ Found PGPASSWORD environment variable - using passwordless authentication."
-else
-    # Try to find and load password from config file
-    CONFIG_FILE=""
-    CONFIG_PASSWORD=""
-    
-    # Strategy 1: Try database names with _test suffix removed
-    # Note: For restore script, we get the database name from command line argument
-    if [[ -n "$1" ]] && [[ "$1" != "--help" ]] && [[ "$1" != "-h" ]]; then
-        DB_NAME="$1"
-        # Remove _test suffix if present
-        SITENAME="${DB_NAME%_test}"
-        if [[ -f "/var/www/html/${SITENAME}/config/Globalvars_site.php" ]]; then
-            CONFIG_FILE="/var/www/html/${SITENAME}/config/Globalvars_site.php"
-        fi
-        
-        # Strategy 2: Try original database name as-is
-        if [[ -z "$CONFIG_FILE" ]] && [[ -f "/var/www/html/${DB_NAME}/config/Globalvars_site.php" ]]; then
-            CONFIG_FILE="/var/www/html/${DB_NAME}/config/Globalvars_site.php"
-        fi
-    fi
-    
-    # Strategy 3: Look for any config file in /var/www/html/*/config/
-    if [[ -z "$CONFIG_FILE" ]]; then
-        CONFIG_FILE=$(find /var/www/html/*/config/Globalvars_site.php 2>/dev/null | head -1)
-    fi
-    
-    if [[ -n "$CONFIG_FILE" ]] && [[ -f "$CONFIG_FILE" ]]; then
-        echo "✓ Found config file: $CONFIG_FILE"
-        # Extract password from config file
-        CONFIG_PASSWORD=$(grep "dbpassword.*=" "$CONFIG_FILE" | head -1 | sed "s/.*'\(.*\)'.*/\1/")
-        if [[ -n "$CONFIG_PASSWORD" ]]; then
-            export PGPASSWORD="$CONFIG_PASSWORD"
-            echo "✓ Using database password from config file."
-        fi
-    fi
-    
-    # If still no password, fall back to interactive prompt
-    if [[ -z "$PGPASSWORD" ]]; then
-        if [ "$NON_INTERACTIVE" = true ]; then
-            echo "✗ Error: no PGPASSWORD, .pgpass, or config file with dbpassword found."
-            echo "  Set PGPASSWORD or provide a config at /var/www/html/SITENAME/config/Globalvars_site.php"
-            exit 1
-        fi
-        echo "⚠️  No .pgpass file found, no config file found, and PGPASSWORD not set."
-        echo "You will be prompted for the postgres password multiple times."
-        echo ""
-        echo "To avoid this in the future, either:"
-        echo "  1) Create a .pgpass file: echo 'localhost:5432:*:postgres:YOUR_PASSWORD' > ~/.pgpass && chmod 600 ~/.pgpass"
-        echo "  2) Set PGPASSWORD: export PGPASSWORD='your_password'"
-        echo "  3) Ensure config file exists at /var/www/html/SITENAME/config/Globalvars_site.php"
-        echo ""
-        read -p "Press Enter to continue with password prompts..."
-        echo ""
-    fi
-fi
-
-# Function to show help
-show_help() {
-    echo "PostgreSQL Database Restore Script v2.01"
-    echo ""
-    echo "Usage:"
-    echo "  $0 DB_NAME FILE_TO_RESTORE"
-    echo ""
-    echo "Supported file formats:"
-    echo "  • .sql                 - Plain SQL dump"
-    echo "  • .sql.gz.enc          - Encrypted compressed dump (from backup script v2.00+)"
-    echo "  • .sql.gz              - Compressed SQL dump"
-    echo ""
-    echo "Examples:"
-    echo "  $0 myapp myapp-06_26_2025.sql"
-    echo "  $0 myapp myapp-06_26_2025.sql.gz.enc"
-    echo "  $0 myapp myapp-06_26_2025.sql.gz"
-    echo ""
-    echo "Features:"
-    echo "  • Automatic backup of existing database before restore"
-    echo "  • Support for encrypted backup files"
-    echo "  • Automatic file format detection"
-    echo "  • Safe database recreation with connection handling"
-    echo "  • Clear password prompts"
+stage_failed() {
+    info "✗ Could not stage the restore file (disk full or I/O error?). Database untouched."
+    echo "ARCHIVE_CORRUPT"
+    exit 5
 }
 
-# Function to decrypt and decompress file if needed
-prepare_restore_file() {
-    local input_file="$1"
-    local output_var="$2"
-    
-    if [[ ! -f "$input_file" ]]; then
-        echo "✗ Error: File '$input_file' does not exist."
-        exit 1
-    fi
-    
-    echo "📁 Analyzing file: $input_file"
-    echo "   File size: $(ls -lh "$input_file" | awk '{print $5}')"
-    
-    # Determine file type and prepare accordingly
-    if [[ "$input_file" == *.sql.gz.enc ]]; then
-        echo "🔍 Detected encrypted compressed file."
-        echo ""
-
-        local temp_file=$(mktemp --suffix=.sql)
-        local decrypt_ok=false
-        if [ "$NON_INTERACTIVE" = true ]; then
-            if [ -z "$ENCRYPTION_KEY" ]; then
-                echo "✗ Error: encrypted file requires a key in non-interactive mode."
-                echo "  Set BACKUP_ENCRYPTION_KEY or ~/.joinery_backup_key."
-                exit 1
-            fi
-            if openssl enc -aes-256-cbc -d -pbkdf2 -pass pass:"$ENCRYPTION_KEY" -in "$input_file" 2>/dev/null | gunzip > "$temp_file" 2>/dev/null; then
-                decrypt_ok=true
-            fi
-        else
-            echo "🔐 Enter decryption password for backup file:"
-            if openssl enc -aes-256-cbc -d -pbkdf2 -in "$input_file" 2>/dev/null | gunzip > "$temp_file" 2>/dev/null; then
-                decrypt_ok=true
-            fi
+case "$INPUT_FILE" in
+    *.enc)
+        info "🔍 Encrypted archive — resolving key and decrypting."
+        if ! resolve_key; then
+            info "✗ No decryption key available (--key-file / \$BACKUP_ENCRYPTION_KEY / ~/.joinery_backup_key)."
+            echo "BACKUP_KEY_MISSING"
+            exit 3
         fi
-        if [ "$decrypt_ok" = true ]; then
-            echo "✓ File decrypted and decompressed successfully."
-            echo "   Decompressed size: $(ls -lh "$temp_file" | awk '{print $5}')"
-            eval "$output_var='$temp_file'"
-            return 0
-        else
-            rm -f "$temp_file"
-            echo "✗ Error decrypting file. Please check your password."
-            exit 1
+        GZ_TMP=$(mktemp --suffix=.sql.gz /tmp/jy_restore_XXXXXXXX)
+        # Key crosses on stdin, never argv (visible in ps for the whole decrypt).
+        if ! printf '%s\n' "$ENCRYPTION_KEY" | openssl enc -aes-256-cbc -d -pbkdf2 -pass stdin -in "$INPUT_FILE" -out "$GZ_TMP" 2>/dev/null; then
+            info "✗ Decryption failed (wrong key or corrupt archive). Database untouched."
+            echo "DECRYPT_FAILED"
+            exit 4
         fi
-        
-    elif [[ "$input_file" == *.sql.gz ]]; then
-        echo "🔍 Detected compressed file."
-        
-        local temp_file=$(mktemp --suffix=.sql)
-        if gunzip < "$input_file" > "$temp_file" 2>/dev/null; then
-            echo "✓ File decompressed successfully."
-            echo "   Decompressed size: $(ls -lh "$temp_file" | awk '{print $5}')"
-            eval "$output_var='$temp_file'"
-            return 0
-        else
-            rm -f "$temp_file"
-            echo "✗ Error decompressing file."
-            exit 1
+        if ! gunzip -t "$GZ_TMP" 2>/dev/null; then
+            info "✗ Decrypted stream is not a valid gzip — almost certainly the wrong key. Database untouched."
+            echo "DECRYPT_FAILED"
+            exit 4
         fi
-        
-    elif [[ "$input_file" == *.sql ]]; then
-        echo "🔍 Detected plain SQL file."
-        eval "$output_var='$input_file'"
-        return 0
-        
-    else
-        echo "⚠️  Warning: Unknown file format. Treating as plain SQL file."
-        eval "$output_var='$input_file'"
-        return 0
-    fi
-}
-
-# Function to create backup of existing database
-backup_existing_database() {
-    local db_name="$1"
-    local now=$(date +"%m_%d_%Y_%H%M%S")
-    # In non-interactive mode we drop encryption for this automatic pre-restore
-    # dump so the job can't hang on an openssl password prompt and so the
-    # operator can always recover without a key. File is still chmod 600.
-    local backup_file
-    local encrypt_ok=false
-
-    echo "📦 Creating backup of existing database before restore..."
-    echo ""
-
-    local temp_file=$(mktemp --suffix=.sql)
-    if ! pg_dump -U postgres "$db_name" > "$temp_file" 2>/dev/null; then
-        rm -f "$temp_file"
-        echo "✗ Error creating backup of existing database."
-        return 1
-    fi
-    echo "✓ Database dump completed"
-    echo ""
-
-    if [ "$NON_INTERACTIVE" = true ]; then
-        backup_file="${db_name}-${now}-pre-restore.sql.gz"
-        if gzip -9 < "$temp_file" > "$backup_file" 2>/dev/null; then
-            encrypt_ok=true
+        # Checked: gunzip -t validated the ARCHIVE, but this write produces the
+        # file that actually loads — a disk-full/I/O failure here would otherwise
+        # stage a silently truncated dump that passes the non-empty check.
+        gunzip -c "$GZ_TMP" > "$SQL_TMP" || stage_failed
+        ;;
+    *.sql.gz)
+        info "🔍 Compressed archive — verifying integrity."
+        if ! gunzip -t "$INPUT_FILE" 2>/dev/null; then
+            info "✗ Archive failed gzip integrity check (truncated or corrupt). Database untouched."
+            echo "ARCHIVE_CORRUPT"
+            exit 5
         fi
-    else
-        backup_file="${db_name}-${now}-pre-restore.sql.gz.enc"
-        echo "🔐 Enter encryption password for backup file:"
-        if gzip -9 < "$temp_file" | openssl enc -aes-256-cbc -salt -pbkdf2 -out "$backup_file" 2>/dev/null; then
-            encrypt_ok=true
-        fi
-    fi
+        gunzip -c "$INPUT_FILE" > "$SQL_TMP" || stage_failed
+        ;;
+    *.sql)
+        info "🔍 Plain SQL file."
+        cp "$INPUT_FILE" "$SQL_TMP" || stage_failed
+        ;;
+    *)
+        info "⚠️  Unknown extension — treating as plain SQL."
+        cp "$INPUT_FILE" "$SQL_TMP" || stage_failed
+        ;;
+esac
 
-    rm -f "$temp_file"
-    if [ "$encrypt_ok" = true ]; then
-        chmod 600 "$backup_file"
-        echo "✓ Pre-restore backup complete: $backup_file"
-        echo "   File size: $(ls -lh "$backup_file" | awk '{print $5}')"
-        return 0
-    else
-        rm -f "$backup_file"
-        echo "✗ Error writing pre-restore backup."
-        return 1
-    fi
-}
-
-# Function to terminate connections to a database
-terminate_connections() {
-    local db_name="$1"
-    echo "🔌 Terminating active connections to database '$db_name'..."
-    if psql -U postgres -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$db_name' AND pid <> pg_backend_pid();" > /dev/null 2>&1; then
-        echo "✓ Connections terminated successfully."
-        sleep 2  # Give a moment for connections to close
-        return 0
-    else
-        echo "✗ Error terminating connections."
-        return 1
-    fi
-}
-
-# Check command line arguments
-if [ "$1" == "--help" ] || [ "$1" == "-h" ]; then
-    show_help
-    exit 0
+if [ ! -s "$SQL_TMP" ]; then
+    info "✗ Prepared restore file is empty. Database untouched."
+    echo "ARCHIVE_CORRUPT"
+    exit 5
 fi
 
-if [ -z "$1" ] || [ -z "$2" ]; then
-    echo "✗ Error: Missing required arguments."
-    echo ""
-    show_help
-    exit 1
-fi
-
-DB_NAME="$1"
-INPUT_FILE="$2"
-RESTORE_FILE=""
-TEMP_FILE_CREATED=false
-
-echo "========================================="
-echo "POSTGRESQL DATABASE RESTORE"
-echo "Database: $DB_NAME"
-echo "Source file: $INPUT_FILE"
-echo "Date: $(date)"
-echo "========================================="
-echo ""
-
-# Check if OpenSSL is available for encrypted files
-if [[ "$INPUT_FILE" == *.enc ]] && ! command -v openssl &> /dev/null; then
-    echo "✗ Error: OpenSSL is required to decrypt encrypted backup files."
-    echo "Please install OpenSSL first."
-    exit 1
-fi
-
-# Prepare the restore file (decrypt/decompress if needed)
-echo "🔄 Preparing restore file..."
-prepare_restore_file "$INPUT_FILE" RESTORE_FILE
-
-# Mark if we created a temporary file for cleanup
-if [[ "$RESTORE_FILE" != "$INPUT_FILE" ]]; then
-    TEMP_FILE_CREATED=true
-fi
-
-echo ""
-
-# Check if database exists
-echo "🔍 Checking if database '$DB_NAME' exists..."
-if [ "$( psql -U postgres -XtAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" 2>/dev/null )" = '1' ]; then
-    echo "✓ Database '$DB_NAME' exists."
-    echo ""
-    
-    if [ "$NON_INTERACTIVE" = true ]; then
-        REPLY="Y"
-        echo "Non-interactive: creating pre-restore backup."
-    else
-        read -p "Create backup before restore? (Y/n): " -n 1 -r
-        echo
-    fi
-    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-        if ! backup_existing_database "$DB_NAME"; then
-            echo "❌ Backup failed. Aborting restore."
-            if [ "$TEMP_FILE_CREATED" = true ]; then
-                rm -f "$RESTORE_FILE"
-            fi
-            exit 1
+# Gzip formats were integrity-checked above; a plain (or unknown-extension)
+# file has had NO verification yet, and this is the last moment before the
+# schema drop. A head-of-file shape check catches the wrong file entirely —
+# an HTML error page, a tarball, a log — though not a tail-truncated dump
+# (ON_ERROR_STOP catches those unless the cut lands on a statement boundary).
+case "$INPUT_FILE" in
+    *.enc|*.sql.gz) : ;;
+    *)
+        if ! head -n 50 "$SQL_TMP" | grep -qiE '^(--|SET |CREATE |INSERT |COPY |ALTER |BEGIN|START |\\)' ; then
+            info "✗ File does not look like SQL (no dump header or SQL statement in the first 50 lines). Database untouched."
+            echo "ARCHIVE_CORRUPT"
+            exit 5
         fi
-        echo ""
-    fi
-    
-    echo "🗑️  Dropping existing database..."
-    if dropdb "$DB_NAME" -U postgres 2>/dev/null; then
-        echo "✓ Database '$DB_NAME' dropped successfully."
-    else
-        echo "⚠️  Database drop failed (likely due to active connections)."
-        if [ "$NON_INTERACTIVE" = true ]; then
-            REPLY="Y"
-            echo "Non-interactive: terminating active connections and retrying."
+        ;;
+esac
+info "✓ Archive verified and staged ($(ls -lh "$SQL_TMP" | awk '{print $5}'))."
+
+# --- Stage 2: optional pre-restore safety dump (manual runs only) --------------
+# The dashboard always prepends its own auto-backup step, so we skip ours in
+# --non-interactive mode to avoid a duplicate dump and any openssl prompt.
+if [ "$NON_INTERACTIVE" != true ]; then
+    DB_EXISTS=$(psql -U "$DB_USER" -XtAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" 2>/dev/null)
+    if [ "$DB_EXISTS" = "1" ]; then
+        now=$(date +"%Y%m%d_%H%M%S")
+        safety="${DB_NAME}-${now}-pre-restore.sql.gz"
+        info "📦 Creating pre-restore safety dump: $safety"
+        if pg_dump -U "$DB_USER" "$DB_NAME" 2>/dev/null | gzip -9 > "$safety" 2>/dev/null; then
+            chmod 600 "$safety" 2>/dev/null
+            info "✓ Pre-restore safety dump written."
         else
-            read -p "Terminate active connections and retry? (Y/n): " -n 1 -r
-            echo
+            rm -f "$safety"
+            info "⚠️  Could not write pre-restore safety dump — continuing."
         fi
-        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-            if terminate_connections "$DB_NAME"; then
-                echo "🗑️  Retrying database drop..."
-                if dropdb "$DB_NAME" -U postgres 2>/dev/null; then
-                    echo "✓ Database '$DB_NAME' dropped successfully."
-                else
-                    echo "✗ Error dropping database even after terminating connections."
-                    if [ "$TEMP_FILE_CREATED" = true ]; then
-                        rm -f "$RESTORE_FILE"
-                    fi
-                    exit 1
-                fi
-            else
-                echo "✗ Could not terminate connections. Aborting restore."
-                if [ "$TEMP_FILE_CREATED" = true ]; then
-                    rm -f "$RESTORE_FILE"
-                fi
-                exit 1
-            fi
-        else
-            echo "❌ Cannot proceed without dropping existing database. Aborting."
-            if [ "$TEMP_FILE_CREATED" = true ]; then
-                rm -f "$RESTORE_FILE"
-            fi
-            exit 1
-        fi
+    fi
+fi
+
+# --- Stage 3: terminate connections, replace schema, load ----------------------
+info "🔌 Terminating active connections to '$DB_NAME'..."
+psql -U "$DB_USER" -d postgres -c \
+    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$DB_NAME' AND pid <> pg_backend_pid();" \
+    > /dev/null 2>&1
+sleep 1
+
+# Checked probe: a connectivity/auth failure here must NOT read as "database
+# absent" — that path runs createdb and misreports a connection problem as a
+# load failure. Nothing is destroyed either way, but the marker must be honest.
+if ! DB_EXISTS=$(psql -U "$DB_USER" -XtAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" 2>&1); then
+    info "✗ Could not query PostgreSQL: $DB_EXISTS"
+    echo "DB_UNREACHABLE"
+    exit 7
+fi
+if [ "$DB_EXISTS" = "1" ]; then
+    info "🧹 Replacing schema (DROP SCHEMA public CASCADE; CREATE SCHEMA public)..."
+    if ! psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+            -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;" 1>&2; then
+        info "✗ Schema replace failed. Load not attempted."
+        echo "RESTORE_LOAD_FAILED"
+        exit 6
     fi
 else
-    echo "ℹ️  Database '$DB_NAME' does not exist. Will create new database."
+    info "🏗️  Database '$DB_NAME' does not exist — creating it."
+    if ! createdb -T template0 -U "$DB_USER" "$DB_NAME" 1>&2; then
+        info "✗ Could not create database '$DB_NAME'."
+        echo "RESTORE_LOAD_FAILED"
+        exit 6
+    fi
 fi
 
-echo ""
-
-# Create database
-echo "🏗️  Creating database '$DB_NAME'..."
-if createdb -T template0 "$DB_NAME" -U postgres 2>/dev/null; then
-    echo "✓ Database '$DB_NAME' created successfully."
-else
-    echo "✗ Error creating database."
-    if [ "$TEMP_FILE_CREATED" = true ]; then
-        rm -f "$RESTORE_FILE"
-    fi
-    exit 1
-fi
-
-echo ""
-
-# Restore database
-echo "📥 Restoring database from file..."
-echo "   This may take a while for large databases..."
-if psql -U postgres -d "$DB_NAME" -f "$RESTORE_FILE" > /dev/null 2>&1; then
-    echo "✅ Restore of '$DB_NAME' completed successfully."
-    
-    # Clean up temporary file if created
-    if [ "$TEMP_FILE_CREATED" = true ]; then
-        rm -f "$RESTORE_FILE"
-        echo "🧹 Temporary files cleaned up."
-    fi
-    
-    echo ""
-    echo "========================================="
-    echo "✅ RESTORE COMPLETE"
-    echo "Database: $DB_NAME"
-    echo "Restored from: $INPUT_FILE"
-    echo "Completion time: $(date)"
-    echo "========================================="
+info "📥 Loading dump under ON_ERROR_STOP..."
+if psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$SQL_TMP" 1>&2; then
+    info "✅ Restore of '$DB_NAME' complete."
+    echo "RESTORE_OK"
     exit 0
 else
-    echo "✗ Error restoring database."
-    echo "💡 Check that the backup file is compatible with your PostgreSQL version."
-    
-    # Clean up temporary file if created
-    if [ "$TEMP_FILE_CREATED" = true ]; then
-        rm -f "$RESTORE_FILE"
-    fi
-    exit 1
+    info "✗ Load failed under ON_ERROR_STOP — the restore did not complete cleanly."
+    info "  The schema was replaced before the failure. Recover from the newest"
+    info "  /backups/auto_pre_*.sql.gz (the job's auto-backup step) or the"
+    info "  pre-restore safety dump if one was made."
+    echo "RESTORE_LOAD_FAILED"
+    exit 6
 fi

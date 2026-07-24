@@ -647,15 +647,15 @@ function jcb_check_restore_cmd($label, $cmd) {
 	return $gate !== false;
 }
 
-$restore_builders = [
+// The copy paths operate on a plaintext dump they just created, so they stay
+// inline and must carry the full drop+ON_ERROR_STOP contract in the command.
+$inline_restore_builders = [
 	'copy_database' => JobCommandBuilder::build_copy_database($dock_source, $copy_target),
 	'copy_database_by_name' => JobCommandBuilder::build_copy_database_by_name($copy_target,
 		['source_db_name' => 'otherdb']),
-	'restore_database' => JobCommandBuilder::build_restore_database($copy_target,
-		['local_path' => '/backups/copytarget-2026-01-01-000000.sql.gz']),
 ];
 
-foreach ($restore_builders as $name => $steps) {
+foreach ($inline_restore_builders as $name => $steps) {
 	$restore_cmd = '';
 	$restore_at = null;
 	$verify_at = null;
@@ -674,20 +674,50 @@ foreach ($restore_builders as $name => $steps) {
 		$name . ': the pre-restore safety dump precedes the restore');
 }
 
-// The install-node clone restore follows the same contract.
+// The dashboard restore and the from-backup install DB stage both delegate to
+// the single restore engine (restore_database.sh). The verify-before-destroy,
+// schema-replace, and ON_ERROR_STOP contract lives INSIDE the script, so the
+// emitted command must call the script with an explicit --key-file (so an
+// encrypted archive can decrypt) and must NOT drop the schema inline.
+/** Assert a restore step delegates to the engine rather than dropping inline. */
+function jcb_check_engine_restore_cmd($label, $cmd) {
+	check(strpos($cmd, 'restore_database.sh') !== false,
+		$label . ': the restore delegates to restore_database.sh', $cmd);
+	check(strpos($cmd, '--key-file') !== false,
+		$label . ': the restore passes an explicit --key-file for decryption', $cmd);
+	check(strpos($cmd, 'DROP SCHEMA') === false,
+		$label . ': the restore does not drop the schema inline (the engine owns it)', $cmd);
+}
+
+$engine_steps = JobCommandBuilder::build_restore_database($copy_target,
+	['local_path' => '/backups/copytarget-2026-01-01-000000.sql.gz']);
+$restore_cmd = '';
+$restore_at = null;
+$backup_at = null;
+foreach ($engine_steps as $i => $step) {
+	$label = $step['label'] ?? '';
+	if (strpos($label, 'Restore') === 0) { $restore_cmd = $step['cmd']; $restore_at = $i; }
+	if (strpos($label, 'Auto-backup') === 0) { $backup_at = $i; }
+}
+check($restore_cmd !== '', 'restore_database: a restore step is emitted');
+jcb_check_engine_restore_cmd('restore_database', $restore_cmd);
+check($backup_at !== null && $restore_at !== null && $backup_at < $restore_at,
+	'restore_database: the pre-restore safety dump precedes the restore');
+
+// The install-node clone restore follows the same engine contract.
 $clone_restore = '';
 foreach ($clone_steps as $step) {
 	if (($step['label'] ?? '') === 'Restore source database') { $clone_restore = $step['cmd']; }
 }
 check($clone_restore !== '', 'install_node from-backup: a DB restore step is emitted');
-check(jcb_check_restore_cmd('install_node from-backup', $clone_restore),
-	'install_node from-backup: destruction is gated on a gunzip -t integrity check');
+jcb_check_engine_restore_cmd('install_node from-backup', $clone_restore);
 
 // Dumps are plain snapshots: never self-cleaning (the restore owns replacement),
 // and job-internal dumps are role-portable because the restore runs as the
 // TARGET site's own DB user under ON_ERROR_STOP — an OWNER TO naming the
 // source site's role would fail the job.
-$dump_sets = $restore_builders;
+$dump_sets = $inline_restore_builders;
+$dump_sets['restore_database'] = $engine_steps;
 $dump_sets['install_node from-backup'] = $clone_steps;
 foreach ($dump_sets as $name => $steps) {
 	foreach ($steps as $step) {
@@ -808,9 +838,11 @@ foreach ($pub_steps as $step) {
 }
 check(!$pub_has_teardown, 'publish_upgrade emits no teardown step — its archives are the deliverable');
 
-// Rule 1 (policy deletions): the offsite retention step removes a REAL backup
-// after a successful upload. Marked teardown, it would run after a FAILED
-// upload and delete the only surviving copy. It must stay a guarded main step.
+// Rule 1 (policy deletions): the local-cleanup that follows a successful upload
+// is folded INTO the upload step (chained with && after the upload command), so
+// it deletes exactly the file it just uploaded and can never run on an upload
+// failure or delete a backup that landed between two steps (P-23). There must be
+// no separate cleanup step, and the rm must sit after the upload in the command.
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_target_class.php'));
 $bkt = new BackupTarget(NULL);
 $bkt->set('bkt_name', 'HarnessTest Target ' . bin2hex(random_bytes(3)));
@@ -825,18 +857,52 @@ $offsite_node = jcb_node(array(
 	'mgn_bkt_backup_target_id' => $bkt->key,
 	'mgn_delete_local_after_upload' => true));
 $offsite_steps = JobCommandBuilder::build_backup_database($offsite_node);
-$retention = null;
-$upload_at = null;
-$retention_at = null;
-foreach ($offsite_steps as $i => $step) {
-	if (($step['label'] ?? '') === 'Clean up local backup') { $retention = $step; $retention_at = $i; }
-	if (strpos($step['label'] ?? '', 'Upload backup') === 0) { $upload_at = $i; }
+$upload_step = null;
+$separate_cleanup = null;
+foreach ($offsite_steps as $step) {
+	if (strpos($step['label'] ?? '', 'Upload backup') === 0) { $upload_step = $step; }
+	if (($step['label'] ?? '') === 'Clean up local backup') { $separate_cleanup = $step; }
 }
-check($retention !== null, 'the offsite retention step exists to audit');
-check(empty($retention['teardown']),
-	'the offsite retention step is NOT teardown — it deletes a real backup as policy');
-check($upload_at !== null && $retention_at !== null && $upload_at < $retention_at,
-	'retention stays behind its upload guard');
+check($upload_step !== null, 'the upload step exists to audit');
+check($separate_cleanup === null,
+	'no separate local-cleanup step exists — cleanup is folded into the upload');
+$ucmd = $upload_step['cmd'] ?? '';
+// The rm must ride the heredoc REDIRECT line: the shell keeps parsing the
+// command list there and reads the body afterwards, so the rm runs iff the
+// upload succeeded. Anything chained after the TERMINATOR line does not parse
+// as shell at all — it is swallowed into the uploader's stdin and the step
+// dies on a PHP parse error before uploading anything.
+$ucmd_lines = explode("\n", $ucmd);
+$redirect_line = '';
+foreach ($ucmd_lines as $l) {
+	if (strpos($l, "<<'__JOINERY_UPLOADER_EOF__'") !== false) { $redirect_line = $l; break; }
+}
+check($redirect_line !== '', 'the upload step feeds the uploader via heredoc');
+check(strpos($redirect_line, 'rm -f "$NEWEST_BACKUP"') !== false,
+	'retention rm rides the heredoc redirect line (runs only on upload success)', $redirect_line);
+check(trim(end($ucmd_lines)) === '__JOINERY_UPLOADER_EOF__',
+	'the heredoc terminator is the entire final line — nothing chained after it', trim(end($ucmd_lines)));
+// Shell validity: bash warns "delimited by end-of-file" when the heredoc never
+// closes — the exact failure the old strpos-only check waved through.
+$ucmd_tmp = tempnam(sys_get_temp_dir(), 'jcbsh');
+file_put_contents($ucmd_tmp, $ucmd . "\n");
+exec('bash -n ' . escapeshellarg($ucmd_tmp) . ' 2>&1', $ucmd_lint, $ucmd_rc);
+unlink($ucmd_tmp);
+$ucmd_lint_text = implode("\n", $ucmd_lint);
+check($ucmd_rc === 0 && strpos($ucmd_lint_text, 'delimited by end-of-file') === false,
+	'the upload+retention command parses as valid bash with a closed heredoc', $ucmd_lint_text);
+
+// A node WITHOUT the retention flag must never delete its local backup.
+$keep_node = jcb_node(array(
+	'mgn_web_root' => '/var/www/html/keep/public_html',
+	'mgn_bkt_backup_target_id' => $bkt->key,
+	'mgn_delete_local_after_upload' => false));
+$keep_upload = '';
+foreach (JobCommandBuilder::build_backup_database($keep_node) as $step) {
+	if (strpos($step['label'] ?? '', 'Upload backup') === 0) { $keep_upload = $step['cmd']; }
+}
+check(strpos($keep_upload, 'rm -f "$NEWEST_BACKUP"') === false,
+	'without the retention flag the upload step deletes nothing', $keep_upload);
 
 // From-EXISTING-backup clones: the named /backups/ paths are the user's real
 // backup files, not job scratch. No teardown step may touch them.
@@ -873,5 +939,55 @@ preg_match('#/tmp/joinery_install_[a-f0-9]{12}#', $fresh_a, $ma);
 preg_match('#/tmp/joinery_install_[a-f0-9]{12}#', $fresh_b, $mb);
 check(!empty($ma[0]) && !empty($mb[0]) && $ma[0] !== $mb[0],
 	'two installs never share an installer directory', ($ma[0] ?? '?') . ' vs ' . ($mb[0] ?? '?'));
+
+section('Backup key: verify-or-fail, never node-side generation');
+
+// Encrypted backups must VERIFY the escrowed key is present and fail loudly if
+// not — the control plane mints and pushes keys, so a node must never generate
+// (and forget) its own key. A cloud target forces encryption.
+$enc_node = jcb_node(array(
+	'mgn_web_root' => '/var/www/html/encnode/public_html',
+	'mgn_bkt_backup_target_id' => $bkt->key));
+foreach (['build_backup_database', 'build_backup_project'] as $builder) {
+	$steps = JobCommandBuilder::$builder($enc_node);
+	$all_cmd = implode("\n", array_map(function ($s) { return $s['cmd'] ?? ''; }, $steps));
+	$verify_step = '';
+	foreach ($steps as $s) {
+		if (($s['label'] ?? '') === 'Verify encryption key present') { $verify_step = $s['cmd']; }
+	}
+	check($verify_step !== '', $builder . ': emits a verify-key step');
+	check(strpos($verify_step, 'BACKUP_KEY_MISSING') !== false && strpos($verify_step, 'exit 1') !== false,
+		$builder . ': the verify step fails loudly when the key is absent', $verify_step);
+	check(strpos($all_cmd, 'openssl rand') === false,
+		$builder . ': no node-side key generation remains anywhere in the job', $all_cmd);
+	check(strpos($all_cmd, 'BACKUP_KEY_FPR') !== false,
+		$builder . ': reports the on-disk key fingerprint for mismatch detection');
+}
+
+section('Cloud credentials: placeholder-only (S-8) — no inline fallback exists');
+
+// Job rows persist forever, so credentials must NEVER be inlined into a
+// command. The agent resolves __SM_CREDS_<id>__ in memory at run time; a job
+// an old agent cannot run fails visibly instead of leaking.
+$cloud_node = jcb_node(array(
+	'mgn_web_root' => '/var/www/html/credmode/public_html',
+	'mgn_bkt_backup_target_id' => $bkt->key,
+	'mgn_delete_local_after_upload' => false));
+
+$ph_cmd = '';
+foreach (JobCommandBuilder::build_backup_database($cloud_node) as $step) {
+	if (strpos($step['label'] ?? '', 'Upload backup') === 0) { $ph_cmd = $step['cmd']; }
+}
+$token = '__SM_CREDS_' . (int)$bkt->key . '__';
+check(strpos($ph_cmd, $token) !== false, 'upload command carries the __SM_CREDS_<id>__ token', $ph_cmd);
+check(strpos($ph_cmd, "base64_decode('" . $token . "')") !== false,
+	'creds line reads the token via base64_decode');
+// The uploader SOURCE may reference $creds['secret_key']; what must never
+// appear is inlined credential DATA — the var_export'd array the old
+// fallback emitted.
+check(strpos($ph_cmd, "'application_key'") === false && strpos($ph_cmd, '$creds = array') === false,
+	'no inlined credential data appears anywhere in the command', substr($ph_cmd, 0, 300));
+check(!property_exists('JobCommandBuilder', 'agent_placeholder_support_override'),
+	'the inline-credentials fallback (and its heartbeat gate) is gone entirely');
 
 harness_finish();

@@ -9,7 +9,7 @@
  * Expected credential shape: ['access_key' => ..., 'secret_key' => ...,
  *                             'region' => ..., 'endpoint' => ...]
  *
- * @version 1.0
+ * @version 1.1
  */
 
 class S3SignerException extends Exception {}
@@ -17,6 +17,9 @@ class S3SignerException extends Exception {}
 class S3Signer {
 
 	const TIMEOUT_SECONDS = 15;
+	// Object transfers (streamed upload/download of a backup archive) are not a
+	// 15-second operation — a multi-GB restore download would otherwise time out.
+	const DOWNLOAD_TIMEOUT_SECONDS = 3600;
 	const SERVICE = 's3';
 
 	/**
@@ -30,6 +33,17 @@ class S3Signer {
 	 */
 	public static function get($creds, $bucket, $path, $params = []) {
 		return self::request('GET', $creds, $bucket, $path, $params);
+	}
+
+	/**
+	 * Execute a signed GET that streams the object body directly to a local file
+	 * instead of buffering it in memory. Used for downloading backup archives,
+	 * which can be many gigabytes and must never be held whole in RAM on a node.
+	 * On success returns ['status' => 200, 'body' => '']; on an error status the
+	 * (small XML) body is read back for the caller and the sink file removed.
+	 */
+	public static function get_to_file($creds, $bucket, $path, $local_path) {
+		return self::request('GET', $creds, $bucket, $path, [], null, 0, null, $local_path);
 	}
 
 	/**
@@ -63,7 +77,7 @@ class S3Signer {
 	/**
 	 * Low-level signed request. $body can be null (GET/DELETE) or a stream resource (PUT).
 	 */
-	private static function request($method, $creds, $bucket, $path, $params, $body = null, $body_size = 0, $content_type = null) {
+	private static function request($method, $creds, $bucket, $path, $params, $body = null, $body_size = 0, $content_type = null, $sink_file = null) {
 		self::validate_creds($creds);
 
 		$endpoint = $creds['endpoint'];
@@ -140,9 +154,39 @@ class S3Signer {
 		$ch = curl_init();
 		curl_setopt($ch, CURLOPT_URL, $url);
 		curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
-		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 		curl_setopt($ch, CURLOPT_HTTPHEADER, $curl_headers);
 		curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, self::TIMEOUT_SECONDS);
+
+		// Streaming download to disk: write the body straight to the sink file so
+		// a multi-GB archive never lands whole in RAM, with a long transfer window.
+		if ($sink_file !== null) {
+			$sink = fopen($sink_file, 'wb');
+			if (!$sink) {
+				curl_close($ch);
+				throw new S3SignerException('Cannot open sink file: ' . $sink_file);
+			}
+			curl_setopt($ch, CURLOPT_FILE, $sink);
+			curl_setopt($ch, CURLOPT_TIMEOUT, self::DOWNLOAD_TIMEOUT_SECONDS);
+			$ok = curl_exec($ch);
+			$status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+			$curl_err = curl_error($ch);
+			curl_close($ch);
+			fclose($sink);
+			if ($ok === false) {
+				@unlink($sink_file);
+				throw new S3SignerException('curl failed: ' . $curl_err);
+			}
+			if ($status !== 200) {
+				// Error responses are small XML — hand them back, then drop the
+				// file so a failed download never leaves a bogus archive behind.
+				$body_back = @file_get_contents($sink_file);
+				@unlink($sink_file);
+				return ['status' => $status, 'body' => (string)$body_back, 'headers' => []];
+			}
+			return ['status' => $status, 'body' => '', 'headers' => []];
+		}
+
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 		curl_setopt($ch, CURLOPT_TIMEOUT, self::TIMEOUT_SECONDS);
 		curl_setopt($ch, CURLOPT_HEADER, true); // include response headers in body
 

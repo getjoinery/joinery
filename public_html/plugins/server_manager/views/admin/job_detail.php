@@ -5,7 +5,8 @@
  *
  * Shows job output with live polling for running jobs.
  *
- * @version 1.0
+ * @version 1.3 - structured result display redacted too
+ * @version 1.2
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -13,6 +14,9 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAdminCsrf.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmSecretRedactor.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAssets.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(10);
@@ -24,10 +28,18 @@ if (!$job_id) {
 	exit;
 }
 
-$job = new ManagementJob($job_id, TRUE);
+try {
+	$job = new ManagementJob($job_id, TRUE);
+} catch (Exception $e) {
+	header('Location: /admin/server_manager/jobs');
+	exit;
+}
 
-// Handle cancel action
-if (isset($_GET['action']) && $_GET['action'] === 'cancel' && $job->get('mjb_status') === 'pending') {
+$post_action = ($_POST['action'] ?? '');
+
+// Cancel and re-run are POST actions (a GET link is CSRF-triggerable), CSRF-validated.
+if ($post_action === 'cancel_job' && $job->get('mjb_status') === 'pending') {
+	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager/job_detail?job_id=' . $job_id); exit; }
 	$job->set('mjb_status', 'cancelled');
 	$job->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
 	$job->save();
@@ -36,7 +48,8 @@ if (isset($_GET['action']) && $_GET['action'] === 'cancel' && $job->get('mjb_sta
 }
 
 // Handle re-run action
-if (isset($_GET['action']) && $_GET['action'] === 'rerun') {
+if ($post_action === 'rerun_job') {
+	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager/job_detail?job_id=' . $job_id); exit; }
 	$new_job = ManagementJob::createJob(
 		$job->get('mjb_mgn_node_id'),
 		$job->get('mjb_job_type'),
@@ -186,10 +199,18 @@ $status_class = match($job->get('mjb_status')) {
 
 		<div class="mt-2">
 			<?php if ($job->get('mjb_status') === 'pending'): ?>
-				<a href="#" class="btn btn-sm btn-warning" onclick="JoineryModal.confirm('Cancel this job?', function(){ window.location='/admin/server_manager/job_detail?job_id=<?php echo $job->key; ?>&amp;action=cancel'; })">Cancel</a>
+				<form method="post" action="/admin/server_manager/job_detail?job_id=<?php echo $job->key; ?>" id="cancel_job_form" style="display:inline;">
+					<input type="hidden" name="action" value="cancel_job">
+					<?php echo SmAdminCsrf::field(); ?>
+					<button type="button" class="btn btn-sm btn-warning" onclick="JoineryModal.confirm('Cancel this job?', function(){ document.getElementById('cancel_job_form').submit(); })">Cancel</button>
+				</form>
 			<?php endif; ?>
 			<?php if (in_array($job->get('mjb_status'), ['completed', 'failed', 'cancelled'])): ?>
-				<a href="/admin/server_manager/job_detail?job_id=<?php echo $job->key; ?>&action=rerun" class="btn btn-sm btn-outline-primary">Re-run</a>
+				<form method="post" action="/admin/server_manager/job_detail?job_id=<?php echo $job->key; ?>" style="display:inline;">
+					<input type="hidden" name="action" value="rerun_job">
+					<?php echo SmAdminCsrf::field(); ?>
+					<button type="submit" class="btn btn-sm btn-outline-primary">Re-run</button>
+				</form>
 			<?php endif; ?>
 		</div>
 	</div>
@@ -199,7 +220,7 @@ $status_class = match($job->get('mjb_status')) {
 <div class="card mb-3">
 	<div class="card-header"><strong>Output</strong></div>
 	<div class="card-body">
-		<pre id="job-output" class="svm-logbox"><?php echo htmlspecialchars($job->get('mjb_output') ?: 'Waiting for output...'); ?></pre>
+		<pre id="job-output" class="svm-logbox"><?php echo htmlspecialchars(SmSecretRedactor::redact($job->get('mjb_output') ?: 'Waiting for output...')); ?></pre>
 	</div>
 </div>
 
@@ -210,7 +231,7 @@ if ($result) {
 	$result_data = is_string($result) ? json_decode($result, true) : $result;
 	if ($result_data) {
 		echo '<div class="card mb-3"><div class="card-header"><strong>Structured Result</strong></div><div class="card-body">';
-		echo '<pre>' . htmlspecialchars(json_encode($result_data, JSON_PRETTY_PRINT)) . '</pre>';
+		echo '<pre>' . htmlspecialchars(SmSecretRedactor::redact(json_encode($result_data, JSON_PRETTY_PRINT))) . '</pre>';
 		echo '</div></div>';
 	}
 }
@@ -243,13 +264,14 @@ if ($commands_data && isset($commands_data['steps'])) {
 		} else {
 			$icon = '<span class="text-muted me-2 svm-status-icon">&#9675;</span>';
 		}
-		echo '<li class="list-group-item">' . $icon . htmlspecialchars($step['label']) . ' <small class="text-muted">(' . $step['type'] . ')</small></li>';
+		echo '<li class="list-group-item">' . $icon . htmlspecialchars($step['label']) . ' <small class="text-muted">(' . htmlspecialchars($step['type']) . ')</small></li>';
 	}
 	echo '</ul></div>';
 }
 ?>
 
 <?php if (in_array($job->get('mjb_status'), ['pending', 'running'])): ?>
+<?php echo SmAssets::script_tag(); ?>
 <script>
 (function() {
 	var outputEl = document.getElementById('job-output');
@@ -257,12 +279,6 @@ if ($commands_data && isset($commands_data['steps'])) {
 	var progressEl = document.getElementById('job-progress');
 	var offset = <?php echo strlen($job->get('mjb_output') ?: ''); ?>;
 	var polling = true;
-
-	function smApiPost(action, params) {
-		// Error envelopes resolve {} (soft-failure shape); network errors reject.
-		return joineryApi.post('server_manager/' + action, params || {})
-			.catch(function(err) { if (err && err.status) return {}; throw err; });
-	}
 
 	function poll() {
 		if (!polling) return;

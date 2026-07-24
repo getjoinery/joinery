@@ -19,7 +19,9 @@
  * - Signing keypair is generated on first use at {site}/config/
  *   agent_signing_key(.pub) — zero-config, same pattern as provisioning_key.
  *
- * @version 1.0
+ * @version 1.2 - signing key escrowed on every load (idempotent), not only at first mint,
+ *                with truthful source (generated vs migrated)
+ * @version 1.1
  */
 
 class AgentDistPublisher {
@@ -136,7 +138,7 @@ class AgentDistPublisher {
 			self::rrmdir($old);
 
 			$say("Agent artifact: bundled v{$agent_version} for " . implode(', ', self::ARCHES));
-		} catch (Exception $e) {
+		} catch (\Throwable $e) {
 			$say('Agent artifact: WARNING - ' . $e->getMessage() . '; previous artifact (if any) carried forward');
 			if (isset($staging)) { self::rrmdir($staging); }
 		}
@@ -195,18 +197,42 @@ class AgentDistPublisher {
 			$pair = sodium_crypto_sign_keypair();
 			$secret_b64 = base64_encode(sodium_crypto_sign_secretkey($pair));
 			$public_b64 = base64_encode(sodium_crypto_sign_publickey($pair));
+			// Create the file 0600 BEFORE writing key material so the secret is
+			// never briefly world-readable (P-21).
+			if (file_put_contents($secret_path, '') === false) {
+				throw new Exception("cannot write {$secret_path}");
+			}
+			if (chmod($secret_path, 0600) === false) {
+				@unlink($secret_path);
+				throw new Exception("cannot secure {$secret_path} (chmod 600 failed)");
+			}
 			if (file_put_contents($secret_path, $secret_b64 . "\n") === false) {
 				throw new Exception("cannot write {$secret_path}");
 			}
-			chmod($secret_path, 0600);
 			file_put_contents($public_path, $public_b64 . "\n");
 			chmod($public_path, 0644);
+			$minted = true;
+		} else {
+			$minted = false;
 		}
 
 		$secret_b64 = @file_get_contents($secret_path);
 		if ($secret_b64 === false) {
 			throw new Exception("cannot read {$secret_path} (created by another user? fix ownership)");
 		}
+
+		// Escrow the signing key on EVERY load, not just at mint: idempotent by
+		// fingerprint, and this is what escrows a key that predates escrow being
+		// configured (or a mint that happened before the recovery key was set).
+		// Best-effort — never blocks a publish; the dashboard surfaces a key
+		// that remains unescrowed.
+		try {
+			require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupKeyCustody.php'));
+			BackupKeyCustody::escrowAgentSigningKey(trim($secret_b64), $minted ? 'generated' : 'migrated');
+		} catch (\Throwable $e) {
+			error_log('AgentDistPublisher: agent signing key escrow failed: ' . $e->getMessage());
+		}
+
 		$secret = base64_decode(trim($secret_b64), true);
 		if ($secret === false || strlen($secret) !== SODIUM_CRYPTO_SIGN_SECRETKEYBYTES) {
 			throw new Exception("agent signing key at {$secret_path} is malformed");

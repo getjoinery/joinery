@@ -17,8 +17,14 @@ $session->set_return();
 
 $numperpage = 30;
 $offset = LibraryFunctions::fetch_variable_local($_GET, 'offset', 0);
+// Whitelist sort column and direction — the Multi order_by interpolates the
+// column name raw (SystemBase), so an un-whitelisted value is SQL injection (S-6).
+$sort_whitelist = ['mjb_id', 'mjb_job_type', 'mjb_status', 'mjb_create_time',
+	'mjb_started_time', 'mjb_completed_time', 'mjb_mgn_node_id'];
 $sort = LibraryFunctions::fetch_variable_local($_GET, 'sort', 'mjb_id');
-$sdirection = LibraryFunctions::fetch_variable_local($_GET, 'sdirection', 'DESC');
+if (!in_array($sort, $sort_whitelist, true)) { $sort = 'mjb_id'; }
+$sdirection = strtoupper(LibraryFunctions::fetch_variable_local($_GET, 'sdirection', 'DESC'));
+if ($sdirection !== 'ASC' && $sdirection !== 'DESC') { $sdirection = 'DESC'; }
 
 $search_criteria = ['deleted' => false];
 
@@ -84,7 +90,7 @@ $page->admin_header([
 				<label class="form-label">Type</label>
 				<select name="job_type" class="form-select form-select-sm">
 					<option value="">All</option>
-					<?php foreach (['check_status', 'backup_database', 'backup_project', 'copy_database', 'copy_database_local', 'restore_database', 'restore_project', 'apply_update', 'publish_upgrade'] as $t): ?>
+					<?php foreach (ManagementJob::filterTypes(true) as $t): ?>
 						<option value="<?php echo $t; ?>" <?php echo (isset($_GET['job_type']) && $_GET['job_type'] === $t) ? 'selected' : ''; ?>><?php echo str_replace('_', ' ', $t); ?></option>
 					<?php endforeach; ?>
 				</select>

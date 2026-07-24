@@ -5,15 +5,15 @@
  * Input: job_id, output_offset. Returns status, new output tail, step counts,
  * and (once the job settles) the processed result. Superadmin only (floor 10).
  *
- * @version 1.0.0
+ * @version 1.2.0 - full-output redaction with offsets in redacted coordinates (no chunk-boundary leak)
+ * @version 1.1.0
  */
-
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
 
 function job_status_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
+	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmSecretRedactor.php'));
 
 	$job_id        = isset($input['job_id']) ? (int) $input['job_id'] : 0;
 	$output_offset = isset($input['output_offset']) ? (int) $input['output_offset'] : 0;
@@ -28,7 +28,13 @@ function job_status_logic(array $input): LogicResult {
 		return LogicResult::render(['success' => false, 'message' => 'Job not found']);
 	}
 
-	$full_output = $job->get('mjb_output') ?: '';
+	// Redact the FULL output and keep offsets in redacted coordinates: slicing
+	// first would let a secret straddling a poll-chunk boundary escape the
+	// pattern match (its second half arrives unredacted). Redaction is
+	// deterministic, so redacted offsets are stable across polls; the one edge
+	// (a secret only half-written at the previous poll) can reflow a few
+	// display characters, never leak.
+	$full_output = SmSecretRedactor::redact($job->get('mjb_output') ?: '');
 	$new_output = '';
 	if ($output_offset < strlen($full_output)) {
 		$new_output = substr($full_output, $output_offset);

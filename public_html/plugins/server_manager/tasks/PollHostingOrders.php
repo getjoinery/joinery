@@ -12,7 +12,8 @@
  *   server_manager_getjoinery_api_secret_key
  *   server_manager_provisioning_domain_question_id
  *
- * @version 1.0
+ * @version 1.2 - port allocation delegates to JobCommandBuilder::next_container_port (single allocator)
+ * @version 1.1
  */
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 
@@ -26,11 +27,12 @@ class PollHostingOrders implements ScheduledTaskInterface {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provision_class.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/GetJoineryApiClient.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/ProvisioningSetup.php'));
 
 		$settings    = Globalvars::get_instance();
 		$api_url     = $settings->get_setting('server_manager_getjoinery_api_url');
 		$public_key  = $settings->get_setting('server_manager_getjoinery_api_public_key');
-		$secret_key  = $settings->get_setting('server_manager_getjoinery_api_secret_key');
+		$secret_key  = ProvisioningSetup::readApiSecret();
 		$question_id = (int)$settings->get_setting('server_manager_provisioning_domain_question_id');
 
 		if (!$api_url || !$public_key || !$secret_key || !$question_id) {
@@ -175,13 +177,10 @@ class PollHostingOrders implements ScheduledTaskInterface {
 				continue;
 			}
 
-			// Pick next available Docker host port for this host (floor 8080)
-			$port_q = $db->prepare(
-				"SELECT MAX(mgn_port) FROM mgn_managed_nodes WHERE mgn_mgh_host_id = ? AND mgn_delete_time IS NULL"
-			);
-			$port_q->execute([$host->key]);
-			$max_port = (int)$port_q->fetchColumn();
-			$port = max(8080, $max_port + 1);
+			// Next available Docker host port — through the single allocator, so
+			// deleted-but-possibly-still-running containers keep their ports
+			// reserved and both node keyings (host string, host id) are counted.
+			$port = JobCommandBuilder::next_container_port($host->get('mgh_host'), $host->key);
 
 			// Create or reuse a failed node record
 			if ($existing_failed) {
@@ -220,7 +219,6 @@ class PollHostingOrders implements ScheduledTaskInterface {
 				'sitename'    => $slug,
 				'domain'      => $domain,
 				'docker_mode' => 'docker',
-				'port'        => $port,
 				'admin_email' => $admin_email,
 				'user_name'   => $user_name,
 			];

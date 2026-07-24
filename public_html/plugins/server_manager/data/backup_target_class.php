@@ -10,10 +10,19 @@
  * For B2, the endpoint is auto-detected at save time via b2_authorize_account
  * (its S3-compat URL format is https://s3.<region>.backblazeb2.com).
  *
- * @version 2.0
+ * Credentials are encrypted at rest with SecretBox: the plaintext credential
+ * JSON is sealed and stored as {"enc": "<blob>"} in the jsonb column. save()
+ * seals; get_credentials() unseals. A legacy plaintext credential object reads
+ * back unchanged, so existing rows migrate the next time they are saved.
+ *
+ * @version 2.2 - sealed credentials that cannot be decrypted FAIL LOUD (a rotated/missing
+ *                secret_box_key must not read as "no credentials"); seal_credentials only
+ *                tolerates the no-key zero-config case, never an encryption failure
+ * @version 2.1
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
+require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
 
 class BackupTargetException extends SystemBaseException {}
 
@@ -57,14 +66,76 @@ class BackupTarget extends SystemBase {
 	}
 
 	/**
-	 * Get credentials as an associative array.
+	 * Seal credentials before persisting. Encryption is mandatory data
+	 * transformation, so it lives in save() (prepare() is not guaranteed to run
+	 * before save()).
+	 */
+	function save($debug = false) {
+		$this->seal_credentials();
+		return parent::save($debug);
+	}
+
+	/**
+	 * Get credentials as an associative array. Transparently unseals an
+	 * encrypted value; a legacy plaintext credential object is returned as-is.
+	 *
+	 * A sealed value that cannot be decrypted throws instead of returning [] —
+	 * silence here would surface later as a baffling "missing access_key" job
+	 * failure while the real cause (rotated/missing secret_box_key, or a DB
+	 * restored to a machine without it) stays invisible.
 	 */
 	function get_credentials() {
-		$creds = $this->get('bkt_credentials');
-		if (is_string($creds)) {
-			return json_decode($creds, true) ?: [];
+		$arr = self::creds_to_array($this->get('bkt_credentials'));
+		if (self::looks_sealed($arr)) {
+			try {
+				$plain = (new SecretBox())->decrypt($arr['enc']);
+			} catch (\Throwable $e) {
+				throw new BackupTargetException(
+					'Backup target "' . $this->get('bkt_name') . '" credentials cannot be decrypted ('
+					. $e->getMessage() . '). The stored value is sealed with secret_box_key; if that key '
+					. 'was rotated or this database was moved to a machine without it, restore the '
+					. 'original key or re-enter the credentials on the target.');
+			}
+			$inner = json_decode($plain, true);
+			return is_array($inner) ? $inner : [];
 		}
-		return is_array($creds) ? $creds : [];
+		return $arr;
+	}
+
+	/**
+	 * Encrypt the stored credential object in place as {"enc": "<blob>"}.
+	 * Idempotent (an already-sealed value is left alone) and a no-op when there
+	 * are no credentials or no SecretBox key is configured — the latter keeps a
+	 * zero-config install writing readable plaintext rather than failing.
+	 */
+	private function seal_credentials() {
+		$arr = self::creds_to_array($this->get('bkt_credentials'));
+		if (empty($arr) || self::looks_sealed($arr)) {
+			return;
+		}
+		try {
+			$box = new SecretBox();
+		} catch (\Throwable $e) {
+			// No secret_box_key configured — the zero-config install writes
+			// readable plaintext by design. Only THIS case is tolerated.
+			return;
+		}
+		// An actual encryption failure propagates: silently persisting plaintext
+		// when encryption was expected would defeat at-rest protection unnoticed.
+		$this->set('bkt_credentials', array('enc' => $box->encrypt(json_encode($arr))));
+	}
+
+	/** Normalise the stored credential value (array or JSON string) to an array. */
+	private static function creds_to_array($creds) {
+		if (is_string($creds)) {
+			return json_decode($creds, true) ?: array();
+		}
+		return is_array($creds) ? $creds : array();
+	}
+
+	/** True when the credential array is the sealed {"enc": "<SecretBox blob>"} shape. */
+	private static function looks_sealed($arr) {
+		return isset($arr['enc']) && is_string($arr['enc']) && SecretBox::looksEncrypted($arr['enc']);
 	}
 
 }

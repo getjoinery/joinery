@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-#Version 3.0 - Added --non-interactive mode for automated backups
+#Version 3.3 - Stale-staging sweep at startup; jy_backup_ temp prefix
+#Version 3.2 - Encryption key passed via fd (never in argv/ps); pipefail on the encrypted pipeline
+#Version 3.1 - Full-timestamp filenames; plaintext path writes .sql.gz
 
 # Global flags
 ENCRYPT_BACKUPS=true
@@ -71,7 +73,9 @@ else
     fi
 fi
 
-now=$(date +"%m_%d_%Y")
+# Full timestamp so same-day backups never overwrite each other (locally or in
+# the bucket); matches backup_project.sh granularity.
+now=$(date +"%Y%m%d_%H%M%S")
 
 # Function to backup a single database
 backup_database() {
@@ -83,16 +87,23 @@ backup_database() {
         echo "📦 Backing up database (encrypted): $db_name"
         echo ""
 
-        # Create compressed + encrypted backup using temporary file
-        local temp_file=$(mktemp --suffix=.sql)
+        # Create compressed + encrypted backup using temporary file. The
+        # jy_backup_ prefix makes a stranded dump identifiable; a hard kill
+        # (SIGKILL) runs no cleanup, so every run sweeps its own stale
+        # leftovers instead.
+        find /tmp -maxdepth 1 -name 'jy_backup_*' -user "$(id -un)" -mmin +1440 -delete 2>/dev/null
+        local temp_file=$(mktemp --suffix=.sql /tmp/jy_backup_XXXXXXXX)
 
         if pg_dump -U postgres "$db_name" > "$temp_file"; then
             echo "✓ Database dump completed"
 
             local encrypt_result=1
             if [ -n "$ENCRYPTION_KEY" ]; then
-                # Non-interactive: use key from variable
-                if gzip -9 < "$temp_file" | openssl enc -aes-256-cbc -salt -pbkdf2 -pass pass:"$ENCRYPTION_KEY" -out "$backup_file" 2>/dev/null; then
+                # Non-interactive: key crosses on fd 3, never argv (visible in ps
+                # for the whole encrypt on shared boxes). pipefail in a subshell
+                # so a gzip read failure can't yield a valid-looking .enc of a
+                # truncated stream reported as success.
+                if ( set -o pipefail; gzip -9 < "$temp_file" | openssl enc -aes-256-cbc -salt -pbkdf2 -pass fd:3 -out "$backup_file" 2>/dev/null ) 3< <(printf '%s\n' "$ENCRYPTION_KEY"); then
                     encrypt_result=0
                 fi
             else
@@ -122,13 +133,16 @@ backup_database() {
             return 1
         fi
     else
-        backup_file="${db_name}-${now}.sql"
-        echo "📦 Backing up database (plaintext): $db_name"
+        # Plaintext still means compressed (.sql.gz) so it matches every backup
+        # glob the dashboard uses to find and upload the newest archive.
+        backup_file="${db_name}-${now}.sql.gz"
+        echo "📦 Backing up database (plaintext, compressed): $db_name"
         echo "⚠️  WARNING: Creating unencrypted backup file!"
         echo ""
-        
-        # Create plaintext backup
-        if pg_dump -U postgres "$db_name" > "$backup_file"; then
+
+        # Create compressed plaintext backup. pipefail in a subshell so a pg_dump
+        # failure isn't masked by gzip succeeding on empty input.
+        if ( set -o pipefail; pg_dump -U postgres "$db_name" | gzip -9 > "$backup_file" ); then
             # Set restrictive permissions on plaintext file
             chmod 600 "$backup_file"
             echo "✓ Plaintext backup of '$db_name' complete: $backup_file"
@@ -225,7 +239,7 @@ backup_all_databases() {
         echo "File extension: .sql.gz.enc"
         echo "To decrypt: openssl enc -aes-256-cbc -d -pbkdf2 -in [file] | gunzip > restored.sql"
     else
-        echo "File extension: .sql"
+        echo "File extension: .sql.gz"
         echo "⚠️  Remember: These files contain unencrypted database data!"
     fi
     echo "========================================="
