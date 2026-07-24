@@ -5,12 +5,15 @@
  *
  * CRUD page for managing backup storage targets (B2, S3, Linode).
  *
+ * @version 2.3 - Stored Backups panel: list + delete offsite objects from the control plane
+ *                (node-independent), grouped by site with live/decommissioned/orphaned tags
  * @version 2.2 - possession check for the recovery key; CSRF on the save handler; undecryptable stored credentials surfaced instead of silently merged
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_target_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/TargetTester.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/TargetBackups.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAdminCsrf.php'));
 
 $session = SessionControl::get_instance();
@@ -77,6 +80,48 @@ if ($post_action === 'verify_escrow_key') {
 		));
 	}
 	header('Location: /admin/server_manager/targets');
+	exit;
+}
+
+// Delete every offsite backup object for one site (whole slug prefix). Run from the
+// control plane against the bucket — no live node needed, so a decommissioned site's
+// backups are still reachable. Type-to-confirm on the client, slug-validated on the server.
+if ($post_action === 'delete_backup_prefix' && $is_edit) {
+	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager/targets'); exit; }
+	$page_regex = '/\/admin\/server_manager/';
+	$slug = trim($_POST['slug'] ?? '');
+	try {
+		$n = TargetBackups::delete_prefix($target, $slug);
+		$session->save_message(new DisplayMessage(
+			'Deleted ' . $n . ' backup object' . ($n === 1 ? '' : 's') . ' for "' . $slug . '".',
+			'Success', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+		));
+	} catch (Exception $e) {
+		$session->save_message(new DisplayMessage(
+			$e->getMessage(), 'Error', $page_regex, DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+		));
+	}
+	header('Location: /admin/server_manager/targets?bkt_id=' . $target->key);
+	exit;
+}
+
+// Delete a single offsite backup object. The key is validated to sit under this
+// target's prefix before the delete is issued.
+if ($post_action === 'delete_backup_object' && $is_edit) {
+	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager/targets'); exit; }
+	$page_regex = '/\/admin\/server_manager/';
+	try {
+		TargetBackups::delete_object($target, $_POST['key'] ?? '');
+		$session->save_message(new DisplayMessage(
+			'Backup object deleted.', 'Success', $page_regex,
+			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+		));
+	} catch (Exception $e) {
+		$session->save_message(new DisplayMessage(
+			$e->getMessage(), 'Error', $page_regex, DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+		));
+	}
+	header('Location: /admin/server_manager/targets?bkt_id=' . $target->key);
 	exit;
 }
 
@@ -403,6 +448,87 @@ if ($target !== null) {
 	}
 
 	$page->end_box();
+
+	// ── Stored Backups (control-plane view of the bucket) ──
+	if ($is_edit) {
+		$fmt_bytes = function ($b) {
+			if ($b >= 1073741824) return round($b / 1073741824, 1) . ' GB';
+			if ($b >= 1048576)    return round($b / 1048576, 1) . ' MB';
+			if ($b >= 1024)       return round($b / 1024, 1) . ' KB';
+			return $b . ' B';
+		};
+		$badge_for = ['live' => 'success', 'decommissioned' => 'warning', 'orphaned' => 'secondary'];
+
+		$page->begin_box(['title' => 'Stored Backups']);
+		try {
+			$listing = TargetBackups::list_grouped($target);
+			if ($listing['total_objects'] === 0) {
+				echo '<p class="text-muted">No backup objects found under '
+					. htmlspecialchars(TargetBackups::base_prefix($target)) . '</p>';
+			} else {
+				echo '<p class="text-muted">' . $listing['total_objects'] . ' object'
+					. ($listing['total_objects'] === 1 ? '' : 's') . ', ' . $fmt_bytes($listing['total_bytes'])
+					. ' total, grouped by site. A decommissioned site keeps its backups here until you delete them.</p>';
+
+				foreach ($listing['groups'] as $slug => $g) {
+					$badge = $badge_for[$g['status']] ?? 'secondary';
+					echo '<div class="card mb-2"><div class="card-body">';
+					echo '<div class="d-flex justify-content-between align-items-start">';
+
+					echo '<div><strong>' . htmlspecialchars($slug) . '</strong> ';
+					echo '<span class="badge bg-' . $badge . '">' . htmlspecialchars($g['status']) . '</span>';
+					if ($g['status'] === 'live' && $g['node_id']) {
+						echo ' <a class="small ms-1" href="/admin/server_manager/node_detail?mgn_id='
+							. (int)$g['node_id'] . '&tab=backups">manage on node</a>';
+					}
+					echo '<div class="text-muted small">' . $g['count'] . ' object'
+						. ($g['count'] === 1 ? '' : 's') . ', ' . $fmt_bytes($g['bytes']) . '</div>';
+
+					// Per-object detail with individual delete.
+					echo '<details class="mt-1"><summary class="small">Show files</summary>';
+					echo '<table class="table table-sm mt-1 mb-0"><tbody>';
+					foreach ($g['objects'] as $obj) {
+						$fname = basename($obj['key']);
+						$oid = 'delobj_' . md5($obj['key']);
+						echo '<tr>';
+						echo '<td class="small">' . htmlspecialchars($fname) . '</td>';
+						echo '<td class="small text-muted">' . $fmt_bytes((int)$obj['size']) . '</td>';
+						echo '<td class="small text-muted">' . htmlspecialchars($obj['last_modified']) . '</td>';
+						echo '<td class="text-end">';
+						echo '<form method="post" action="/admin/server_manager/targets?bkt_id=' . $target->key . '" id="' . $oid . '" style="margin:0;">';
+						echo '<input type="hidden" name="action" value="delete_backup_object">';
+						echo '<input type="hidden" name="key" value="' . htmlspecialchars($obj['key']) . '">';
+						echo SmAdminCsrf::field();
+						$obj_msg = 'Delete backup file ' . $fname . '? This cannot be undone.';
+						echo '<button type="button" class="btn btn-sm btn-outline-danger" onclick="JoineryModal.confirm('
+							. json_encode($obj_msg) . ', function(){ document.getElementById(' . json_encode($oid) . ').submit(); })">Delete</button>';
+						echo '</form>';
+						echo '</td></tr>';
+					}
+					echo '</tbody></table></details>';
+					echo '</div>'; // left column
+
+					// Delete-all-for-this-site (whole prefix), type-to-confirm the slug.
+					$pid = 'delpfx_' . md5($slug);
+					echo '<form method="post" action="/admin/server_manager/targets?bkt_id=' . $target->key . '" id="' . $pid . '" style="margin:0;">';
+					echo '<input type="hidden" name="action" value="delete_backup_prefix">';
+					echo '<input type="hidden" name="slug" value="' . htmlspecialchars($slug) . '">';
+					echo SmAdminCsrf::field();
+					$pfx_msg = 'Delete all ' . $g['count'] . ' backup object' . ($g['count'] === 1 ? '' : 's')
+						. ' for this site? This cannot be undone.';
+					echo '<button type="button" class="btn btn-sm btn-outline-danger ms-2" onclick="JoineryModal.confirmTyped('
+						. json_encode($pfx_msg) . ', ' . json_encode($slug) . ', function(){ document.getElementById(' . json_encode($pid) . ').submit(); })">Delete all</button>';
+					echo '</form>';
+
+					echo '</div>'; // d-flex
+					echo '</div></div>'; // card-body, card
+				}
+			}
+		} catch (Exception $e) {
+			echo '<div class="alert alert-warning">Could not list backups: ' . htmlspecialchars($e->getMessage()) . '</div>';
+		}
+		$page->end_box();
+	}
 }
 
 $page->admin_footer();

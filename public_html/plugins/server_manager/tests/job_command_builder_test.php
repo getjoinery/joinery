@@ -990,4 +990,112 @@ check(strpos($ph_cmd, "'application_key'") === false && strpos($ph_cmd, '$creds 
 check(!property_exists('JobCommandBuilder', 'agent_placeholder_support_override'),
 	'the inline-credentials fallback (and its heartbeat gate) is gone entirely');
 
+section('Decommission: ship + run remove_account.sh, then verify gone');
+
+// A Docker node's teardown runs entirely on the host (docker + apache live there):
+// the tested remover is shipped via scp, run on_host with the derived site name, and
+// a verify step re-probes the host and gates on DECOMMISSION_VERIFIED.
+$decom_docker = jcb_node(array(
+	'mgn_container_name' => 'decomsite',
+	'mgn_web_root'       => '/var/www/html/decomsite/public_html'));
+$dsteps = JobCommandBuilder::build_decommission_node($decom_docker);
+$scp = null; $run = null; $verify = null;
+foreach ($dsteps as $s) {
+	if (($s['type'] ?? '') === 'scp') { $scp = $s; }
+	if (strpos($s['label'] ?? '', 'Remove the site') === 0) { $run = $s; }
+	if (strpos($s['label'] ?? '', 'Verify the site') === 0) { $verify = $s; }
+}
+check($scp !== null && ($scp['direction'] ?? '') === 'upload'
+	&& substr((string)($scp['local_path'] ?? ''), -strlen('sysadmin_tools/remove_account.sh')) === 'sysadmin_tools/remove_account.sh',
+	'ships remove_account.sh to the host via scp upload', $scp['local_path'] ?? '?');
+check($run !== null && !empty($run['on_host']),
+	'docker teardown runs on the host (on_host)');
+check($run !== null && strpos($run['cmd'], "'decomsite'") !== false && strpos($run['cmd'], ' -y') !== false,
+	'runs the remover with the escaped, node-derived site name and -y', $run['cmd'] ?? '?');
+check($verify !== null && strpos($verify['cmd'], 'DECOMMISSION_VERIFIED') !== false
+	&& strpos($verify['cmd'], 'DECOMMISSION_FAILED_VERIFY') !== false && strpos($verify['cmd'], 'exit 1') !== false,
+	'verify step gates on DECOMMISSION_VERIFIED and fails when any trace remains', $verify['cmd'] ?? '?');
+
+// Site name is derived from node fields only — never from operator input.
+check(JobCommandBuilder::decommission_site_name($decom_docker) === 'decomsite',
+	'docker site name = container name');
+$decom_bare = jcb_node(array('mgn_web_root' => '/var/www/html/baremetalsite/public_html'));
+check(JobCommandBuilder::decommission_site_name($decom_bare) === 'baremetalsite',
+	'bare-metal site name = web-root parent directory');
+foreach (JobCommandBuilder::build_decommission_node($decom_bare) as $s) {
+	if (strpos($s['label'] ?? '', 'Remove the site') === 0) {
+		check(empty($s['on_host']), 'bare-metal teardown runs on the node itself (not on_host)');
+	}
+}
+
+// A relay is not a remove_account.sh-shaped site: decommission_node refuses it.
+$relay = jcb_node(array('mgn_is_relay' => true, 'mgn_web_root' => '/var/www/html/relaysite/public_html'));
+$relay_refused = false;
+try { JobCommandBuilder::build_decommission_node($relay); } catch (Exception $e) { $relay_refused = true; }
+check($relay_refused, 'a relay node refuses decommission_node');
+
+// A malformed site name (no safe value derivable) refuses rather than guessing.
+$bad = jcb_node(array('mgn_web_root' => ''));
+$bad_refused = false;
+try { JobCommandBuilder::decommission_site_name($bad); } catch (Exception $e) { $bad_refused = true; }
+check($bad_refused, 'an underivable site name refuses instead of building a dangerous command');
+
+// No credential material anywhere in the built steps.
+$all_decom = implode("\n", array_map(function ($s) { return ($s['cmd'] ?? '') . '|' . ($s['local_path'] ?? ''); }, $dsteps));
+check(strpos($all_decom, '__SM_CREDS_') === false && strpos($all_decom, 'secret_key') === false,
+	'decommission steps carry no credentials');
+
+// Shell validity: every ssh step must parse as bash. The verify step joins one
+// check per resource, and a bad separator (`fi if` on one line) is a syntax
+// error — exit 2 at run time — that the substring asserts above wave through.
+// This runs the actual command text through `bash -n` for both topologies.
+$decom_sets = [
+	'docker'     => JobCommandBuilder::build_decommission_node($decom_docker),
+	'bare-metal' => JobCommandBuilder::build_decommission_node($decom_bare),
+];
+foreach ($decom_sets as $kind => $steps_set) {
+	foreach ($steps_set as $s) {
+		if (($s['type'] ?? '') !== 'ssh' || empty($s['cmd'])) { continue; }
+		$tmp = tempnam(sys_get_temp_dir(), 'jcbdecom');
+		file_put_contents($tmp, $s['cmd'] . "\n");
+		$lint = [];
+		exec('bash -n ' . escapeshellarg($tmp) . ' 2>&1', $lint, $rc);
+		unlink($tmp);
+		check($rc === 0, "{$kind}: step '" . ($s['label'] ?? '?') . "' parses as valid bash", implode("\n", $lint));
+	}
+}
+
+section('Status dot: uptime fallback when there is no status-check data');
+
+// An uptime-only / skip-Joinery node (a relay) never runs the SSH status check, so
+// it has no status_data. The dot must reflect the uptime result rather than sit grey.
+$dot_up = jcb_node(array('mgn_uptime_enabled' => true, 'mgn_uptime_last_status' => 'up'));
+check(JobCommandBuilder::status_color_for_node($dot_up, null, false) === 'success',
+	'uptime-up node with no status data shows green');
+$dot_down = jcb_node(array('mgn_uptime_enabled' => true, 'mgn_uptime_last_status' => 'down'));
+check(JobCommandBuilder::status_color_for_node($dot_down, null, false) === 'danger',
+	'uptime-down node with no status data shows red');
+$dot_pending = jcb_node(array('mgn_uptime_enabled' => true, 'mgn_uptime_last_status' => ''));
+check(JobCommandBuilder::status_color_for_node($dot_pending, null, false) === 'secondary',
+	'uptime enabled but not yet checked stays grey');
+$dot_none = jcb_node(array('mgn_uptime_enabled' => false));
+check(JobCommandBuilder::status_color_for_node($dot_none, null, false) === 'secondary',
+	'no status data and no uptime monitoring stays grey');
+// A hard state still dominates the uptime fallback.
+$dot_failed = jcb_node(array('mgn_uptime_enabled' => true, 'mgn_uptime_last_status' => 'up',
+	'mgn_install_state' => 'install_failed'));
+check(JobCommandBuilder::status_color_for_node($dot_failed, null, false) === 'danger',
+	'install_failed still shows red even when uptime is up');
+
+// A skip-Joinery node (relay): a FAILED status check must not override uptime-up —
+// the SSH status check is expected to fail on it and is not its health signal.
+$dot_relay = jcb_node(array('mgn_skip_joinery_checks' => true,
+	'mgn_uptime_enabled' => true, 'mgn_uptime_last_status' => 'up'));
+check(JobCommandBuilder::status_color_for_node($dot_relay, null, true) === 'success',
+	'skip-Joinery uptime-up node stays green even when its status check failed');
+$dot_relay_down = jcb_node(array('mgn_skip_joinery_checks' => true,
+	'mgn_uptime_enabled' => true, 'mgn_uptime_last_status' => 'down'));
+check(JobCommandBuilder::status_color_for_node($dot_relay_down, null, false) === 'danger',
+	'skip-Joinery uptime-down node shows red');
+
 harness_finish();

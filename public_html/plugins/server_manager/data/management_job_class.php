@@ -82,7 +82,7 @@ class ManagementJob extends SystemBase {
 		$types = [
 			'check_status', 'backup_database', 'backup_project',
 			'copy_database', 'copy_database_local', 'restore_database',
-			'restore_project', 'apply_update',
+			'restore_project', 'apply_update', 'decommission_node',
 		];
 		if ($include_publish) {
 			$types[] = 'publish_upgrade';

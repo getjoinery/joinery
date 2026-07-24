@@ -5,6 +5,12 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.18 - status dot reflects uptime for skip-Joinery nodes (a relay's dot follows its TCP/HTTP
+ *                 probe, not a status check that is expected to fail; also a general no-data uptime fallback)
+ * @version 1.17 - decommission verify: join per-resource checks with '; ' (a space made `fi if`,
+ *                 a bash syntax error that exited 2 and failed the verify step)
+ * @version 1.16 - build_decommission_node: ship + run the tested remove_account.sh on the host, then
+ *                 verify the site is gone (container/volumes/vhost/root all absent)
  * @version 1.15 - retention rm rides the heredoc redirect line (a chain after the terminator is
  *                 swallowed into the uploader's stdin); credentials are placeholder-only (no inline
  *                 fallback); Cloudflare SSL requires a routing probe; one container-port allocator
@@ -320,10 +326,32 @@ class JobCommandBuilder {
 		$install_state = $node->get('mgn_install_state');
 		if ($install_state === 'installing')    return 'info';
 		if ($install_state === 'install_failed') return 'danger';
+
+		// Skip-Joinery infrastructure (a mail relay, a DNS box) is health-checked by
+		// its uptime probe, not by the SSH status check — a failed status check against
+		// it is expected, not a health signal. So the uptime result is authoritative for
+		// these nodes and takes precedence over a failed status job.
+		if ($node->get('mgn_skip_joinery_checks') && $node->get('mgn_uptime_enabled')) {
+			$uptime = $node->get('mgn_uptime_last_status');
+			if ($uptime === 'up')   return 'success';
+			if ($uptime === 'down') return 'danger';
+			return 'secondary'; // not yet probed
+		}
+
 		if ($last_job_failed) return 'danger';
 
 		$last_check = $node->get('mgn_last_status_check');
-		if (!$last_check || !is_array($status_data) || empty($status_data)) return 'secondary';
+		if (!$last_check || !is_array($status_data) || empty($status_data)) {
+			// No status-check data yet, but the node may still be uptime-monitored
+			// (a Joinery node awaiting its first status check). Prefer the uptime
+			// result over a grey "unknown" dot.
+			if ($node->get('mgn_uptime_enabled')) {
+				$uptime = $node->get('mgn_uptime_last_status');
+				if ($uptime === 'up')   return 'success';
+				if ($uptime === 'down') return 'danger';
+			}
+			return 'secondary';
+		}
 
 		if ((isset($status_data['disk_usage_percent']) && $status_data['disk_usage_percent'] > 90) ||
 			(isset($status_data['postgres_status']) && $status_data['postgres_status'] !== 'accepting connections')) {
@@ -1180,6 +1208,116 @@ class JobCommandBuilder {
 			        . "done 2>/dev/null; echo 'LOCAL_LIST_DONE'",
 			 'continue_on_error' => true],
 		];
+	}
+
+	/**
+	 * The site name remove_account.sh operates on: the Docker container name for a
+	 * containerized node, or the project directory name (the parent of the web root)
+	 * for a bare-metal node. Both map to /var/www/html/<site>, the container, the
+	 * ${site}_* volumes, the ${site}.conf vhost, and the ${site} database — the
+	 * naming convention install.sh established. Derived from node fields only, never
+	 * from operator input, so it cannot be steered at a different site.
+	 */
+	public static function decommission_site_name($node) {
+		$container = trim((string)$node->get('mgn_container_name'));
+		if ($container !== '') {
+			$site = $container;
+		} else {
+			$web_root = rtrim((string)$node->get('mgn_web_root'), '/');
+			$site = $web_root !== '' ? basename(dirname($web_root)) : '';
+		}
+		if ($site === '' || !preg_match('/^[A-Za-z0-9_-]+$/', $site)) {
+			throw new Exception(
+				"Cannot decommission node '{$node->get('mgn_slug')}': could not derive a safe site "
+				. "name from its container name or web root."
+			);
+		}
+		return $site;
+	}
+
+	/**
+	 * Permanently remove a site from its host and confirm it is gone.
+	 *
+	 * Ships the tested remove_account.sh (sysadmin_tools) to the host, runs it with
+	 * -y, then re-probes the host and emits DECOMMISSION_VERIFIED only when the
+	 * container, its ${site}_* volumes, and the ${site}.conf vhost are all absent.
+	 * For a Docker node every step runs on the host (on_host); for bare-metal the
+	 * commands run on the node directly. remove_account.sh self-selects docker vs
+	 * bare-metal and is idempotent (REMOVE_ACCOUNT_NOTHING when there is nothing left).
+	 *
+	 * Relays are refused: a relay is not a remove_account.sh-shaped site and is torn
+	 * down through the relay flow (rebuild_relay / relay_remove_tenant) instead.
+	 */
+	public static function build_decommission_node($node, $params = []) {
+		if ($node->get('mgn_is_relay')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' is a relay. Decommission relays through the relay "
+				. "teardown flow (remove its tenants first), not site removal."
+			);
+		}
+		if (!self::has_ssh($node)) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' has no SSH credentials configured; the host teardown "
+				. "cannot run without them."
+			);
+		}
+
+		$is_docker = (bool)$node->get('mgn_container_name');
+		$site      = self::decommission_site_name($node);
+		$site_esc  = escapeshellarg($site);
+
+		$transfer_id  = substr(md5(uniqid(mt_rand(), true)), 0, 12);
+		$remote_script = "/tmp/joinery_remove_account_{$transfer_id}.sh";
+		$remote_esc    = escapeshellarg($remote_script);
+
+		// The control plane's own copy of the remover (this is where the agent runs).
+		$local_script = PathHelper::getSiteRoot() . '/maintenance_scripts/sysadmin_tools/remove_account.sh';
+
+		$steps = [];
+
+		// 1. Ship the tested remover to the host. On a Docker host this MUST run at
+		//    host scope (docker + apache live there), so the script goes to the host
+		//    filesystem and every following step is on_host.
+		$steps[] = ['type' => 'scp', 'label' => 'Ship site remover to host',
+			'direction' => 'upload', 'local_path' => $local_script, 'remote_path' => $remote_script];
+
+		// 2. Run it. -y skips the interactive prompt; the marker lands in the output.
+		$steps[] = ['type' => 'ssh', 'label' => 'Remove the site from the host',
+			'on_host' => $is_docker, 'timeout' => 600,
+			'cmd' => "bash {$remote_esc} {$site_esc} -y"];
+
+		// 3. Verify gone. This is what the result processor gates the record finalize
+		//    on — never trust the run step alone.
+		$steps[] = ['type' => 'ssh', 'label' => 'Verify the site is gone',
+			'on_host' => $is_docker, 'continue_on_error' => false,
+			'cmd' => self::decommission_verify_cmd($site, $is_docker)];
+
+		// 4. Teardown: drop the shipped script. Never fail the job over cleanup.
+		$steps[] = ['type' => 'ssh', 'label' => 'Clean up shipped remover',
+			'on_host' => $is_docker, 'teardown' => true, 'continue_on_error' => true,
+			'cmd' => "rm -f {$remote_esc}"];
+
+		return $steps;
+	}
+
+	/**
+	 * Shell that re-probes the host and prints DECOMMISSION_VERIFIED only when every
+	 * trace of the site is gone, else DECOMMISSION_FAILED_VERIFY and a non-zero exit.
+	 */
+	private static function decommission_verify_cmd($site, $is_docker) {
+		$site_esc = escapeshellarg($site);
+		$checks = [];
+		if ($is_docker) {
+			$checks[] = "if command -v docker >/dev/null 2>&1 && docker ps -a --format '{{.Names}}' | grep -qx {$site_esc}; then GONE=0; echo 'still present: container'; fi";
+			$checks[] = "if command -v docker >/dev/null 2>&1 && docker volume ls --format '{{.Name}}' | grep -q \"^${site}_\"; then GONE=0; echo 'still present: volumes'; fi";
+		}
+		// The reverse-proxy vhost and project dir live on the host for both topologies.
+		$checks[] = "if [ -f /etc/apache2/sites-available/{$site}.conf ]; then GONE=0; echo 'still present: vhost'; fi";
+		$checks[] = "if [ -d /var/www/html/{$site} ]; then GONE=0; echo 'still present: web root'; fi";
+		// Join with '; ' — each check ends in `fi`, and `fi if` on one line is a
+		// bash syntax error (exit 2). `fi; if` is valid.
+		return "GONE=1; " . implode('; ', $checks)
+		     . "; if [ \"\$GONE\" = 1 ]; then echo DECOMMISSION_VERIFIED; else echo DECOMMISSION_FAILED_VERIFY; exit 1; fi";
 	}
 
 	/**

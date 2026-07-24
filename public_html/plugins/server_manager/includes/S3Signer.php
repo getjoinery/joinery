@@ -9,6 +9,8 @@
  * Expected credential shape: ['access_key' => ..., 'secret_key' => ...,
  *                             'region' => ..., 'endpoint' => ...]
  *
+ * @version 1.2 - list() (ListObjectsV2, continuation-token paged) so the control plane
+ *                can enumerate a bucket prefix without a live node
  * @version 1.1
  */
 
@@ -52,6 +54,68 @@ class S3Signer {
 	 */
 	public static function delete($creds, $bucket, $path) {
 		return self::request('DELETE', $creds, $bucket, $path, []);
+	}
+
+	/**
+	 * List every object under a prefix (ListObjectsV2), following the continuation
+	 * token so a large bucket pages fully. Runs from anywhere the target credentials
+	 * are available — the control plane included — so a decommissioned node's backups
+	 * stay enumerable with no live host to proxy through.
+	 *
+	 * Returns a flat array of ['key' => string, 'size' => int, 'last_modified' => string].
+	 * Throws S3SignerException on a non-200 status (with the provider's error message).
+	 *
+	 * @param string $prefix Key prefix to scope the listing (e.g. 'joinery-backups/slug/').
+	 */
+	public static function list($creds, $bucket, $prefix = '') {
+		$objects = [];
+		$token = null;
+		// Hard page cap: a runaway loop guard, far above any real backup count.
+		for ($page = 0; $page < 10000; $page++) {
+			$params = ['list-type' => '2', 'prefix' => $prefix];
+			if ($token !== null && $token !== '') {
+				$params['continuation-token'] = $token;
+			}
+			$resp = self::get($creds, $bucket, '/', $params);
+			if ((int)$resp['status'] !== 200) {
+				$msg = self::extract_error($resp['body']) ?: ('HTTP ' . $resp['status']);
+				throw new S3SignerException('List failed for bucket ' . $bucket . ': ' . $msg);
+			}
+			foreach (self::parse_list_contents($resp['body']) as $obj) {
+				$objects[] = $obj;
+			}
+			$token = self::parse_next_token($resp['body']);
+			if ($token === null) {
+				break;
+			}
+		}
+		return $objects;
+	}
+
+	/** Parse <Contents> entries out of a ListObjectsV2 XML body. Regex-based to
+	 *  avoid a hard dependency on ext-simplexml and to tolerate namespace noise. */
+	private static function parse_list_contents($xml) {
+		$out = [];
+		if (!is_string($xml) || $xml === '') return $out;
+		if (preg_match_all('#<Contents>(.*?)</Contents>#s', $xml, $blocks)) {
+			foreach ($blocks[1] as $block) {
+				if (!preg_match('#<Key>(.*?)</Key>#s', $block, $km)) continue;
+				$key = html_entity_decode($km[1], ENT_XML1 | ENT_QUOTES, 'UTF-8');
+				$size = preg_match('#<Size>(\d+)</Size>#', $block, $sm) ? (int)$sm[1] : 0;
+				$lm = preg_match('#<LastModified>(.*?)</LastModified>#s', $block, $lmm) ? trim($lmm[1]) : '';
+				$out[] = ['key' => $key, 'size' => $size, 'last_modified' => $lm];
+			}
+		}
+		return $out;
+	}
+
+	/** Return the NextContinuationToken when the listing is truncated, else null. */
+	private static function parse_next_token($xml) {
+		if (is_string($xml) && preg_match('#<IsTruncated>\s*true\s*</IsTruncated>#i', $xml)
+			&& preg_match('#<NextContinuationToken>(.*?)</NextContinuationToken>#s', $xml, $m)) {
+			return html_entity_decode(trim($m[1]), ENT_XML1 | ENT_QUOTES, 'UTF-8');
+		}
+		return null;
 	}
 
 	/**
