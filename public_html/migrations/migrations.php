@@ -1069,3 +1069,15 @@
 	$migration['migration_file'] = 'scrub_job_row_inline_credentials.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// The settings save walked the whole POST, so form and request plumbing —
+	// _csrf_token, submit_button, __route, the captcha response fields, and the
+	// General page's *_readonly path mirrors — became settings rows and were
+	// re-written on every save. The save path now refuses those names; this
+	// removes the rows that accumulated before it did. Nothing reads them.
+	$migration = array();
+	$migration['database_version'] = '155';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'purge_reserved_setting_rows.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

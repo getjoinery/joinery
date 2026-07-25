@@ -93,6 +93,41 @@ private function _check_for_duplicate_setting() {
 	}
 
 	/**
+	 * Names that are never settings, however they arrive.
+	 *
+	 * The settings pages save by walking the POST, so every field a browser
+	 * submits is a candidate setting — including the ones the form machinery
+	 * puts there itself. Without this boundary those become rows: a CSRF token,
+	 * a submit button and a captcha response all ended up stored as settings and
+	 * re-written on every save.
+	 *
+	 * Two families:
+	 *   - request/form infrastructure that rides along in any POST
+	 *   - `*_readonly` display mirrors of Globalvars_site.php values, which are
+	 *     rendered readonly and post their value straight back. They are output,
+	 *     not input — the real setting is the name without the suffix.
+	 *
+	 * @param string $name candidate stg_name
+	 * @return bool true when the name must never be written as a setting
+	 */
+	public static function isReservedName(string $name): bool {
+		static $reserved = array(
+			'_csrf_token',            // FormWriterV2Base 'csrf_field' default
+			'__route',                // serve.php rewrite parameter
+			'edit_primary_key_value', // FormWriter record-id hidden field
+			'plugin_settings_target', // Plugin Settings tab section marker
+			'g-recaptcha-response',   // reCAPTCHA widget
+			'h-captcha-response',     // hCaptcha widget
+			'submit_button',
+			'btn_submit',
+		);
+		if (in_array($name, $reserved, true)) {
+			return true;
+		}
+		return substr($name, -9) === '_readonly';
+	}
+
+	/**
 	 * Bulk-insert declared default settings, skipping any stg_name that
 	 * already exists. Used by PluginManager (plugin.json settings array) and
 	 * update_database (core settings.json). Seed-only — never overwrites.

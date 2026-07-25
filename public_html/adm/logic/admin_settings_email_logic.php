@@ -63,6 +63,11 @@ function admin_settings_email_logic(array $input): LogicResult {
 
 		foreach($user_settings as $user_setting) {
 			if(isset($input[$user_setting->get('stg_name')])){
+				// Form and request plumbing rides along in this POST and is
+				// never a setting — see Setting::isReservedName().
+				if (Setting::isReservedName($user_setting->get('stg_name'))) {
+					continue;
+				}
 				$user_setting->set('stg_value', $input[$user_setting->get('stg_name')]);
 				$user_setting->set('stg_update_time', 'NOW()');
 				$user_setting->set('stg_usr_user_id', $session->get_user_id());

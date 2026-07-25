@@ -380,10 +380,33 @@ $page_vars['user'] = $user;
 These don't need their own pattern — they're composed from the basics above:
 
 - **Dashboard**: Stat cards (`.card` / `.card-header` / `.card-body`), Chart.js or similar, date-range selectors.
-- **Settings**: Tabs or `<details>` groups; group related fields into card-style sections; show success/error after save.
+- **Settings**: Tabs or `<details>` groups; group related fields into card-style sections; show success/error after save. To add a tab to the settings group specifically, see [Settings Tabs](#settings-tabs).
 - **Log/Monitoring**: Filter inputs feed `MultiX` criteria; `<details>` / `<summary>` for expandable rows; CSV export via a `?action=export` branch in the logic.
 
 ## Advanced Patterns
+
+### Settings Tabs
+
+The settings pages are siblings sharing one tab strip. Every one of them renders
+it the same way, passing only its own label:
+
+```php
+echo AdminPage::settings_tab_menu('Email Settings');
+```
+
+`AdminPage::settings_tab_menu()` holds the whole tab list, so **adding a settings
+tab means editing that one method** — a page that builds its own array is how the
+strip starts differing depending on which tab you are standing on.
+
+A tab may be conditional: Payment Settings appears only when the store plugin is
+active, and Plugin Settings only when some active plugin ships a
+`settings_form.php`. Follow that pattern — a tab leading to an empty page is
+worse than no tab.
+
+Each settings tab is an ordinary admin page with its own logic file. Do not reuse
+another tab's logic: `admin_settings_logic()` does General-tab-specific work
+(the theme-activation check, the `preview_image` increment) that reads input
+fields a different tab never posts.
 
 ### Options Dropdown (Action Menu)
 

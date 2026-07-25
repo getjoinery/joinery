@@ -91,10 +91,27 @@ caller ever learns them:
 - **Post-write verification hooks**, where a vendor must be told to re-read DNS
   before it will trust a record.
 
-Credentials are per-deployment, sealed with SecretBox. A deployment with none
-configured behaves exactly as it does today: the plan renders as instructions
-and nothing writes. That is a supported state, not a degraded one — see
+### Credentials are a list, and a domain finds its own
+
+A deployment holds zero or more DNS credentials, each sealed with SecretBox.
+Publishing for a domain uses whichever credential can actually see that zone —
+the same longest-suffix zone lookup the driver already performs, run across the
+configured credentials rather than against one.
+
+This costs nothing in the common case: with a single credential it behaves
+exactly like a single deployment-wide login, and no domain names a credential
+anywhere. It buys the case that a single login cannot serve at all — domains
+split across two providers, or a zone moved to a new account — without making
+every domain carry a setup step for the sake of the exception.
+
+Where **no** configured credential can see a zone, that domain falls back to
+rendered instructions. So does a deployment with no credentials at all: the plan
+renders and nothing writes. That is a supported state, not a degraded one — see
 [[project-zero-config-install]].
+
+Two credentials that can both see the same zone is a real possibility and not an
+error. The first match wins, deterministically ordered, and the diff names which
+credential it will publish through so the choice is never invisible.
 
 ### Reconciliation is a diff, and the diff is the UI
 
@@ -108,17 +125,45 @@ without the diff having been displayed.
 
 ### Ownership is explicit
 
-The platform manages only records it created or was explicitly told to adopt.
-A `dnr_dns_records` table records domain, type, name and the owning subsystem.
-Consequences:
+The platform manages only records it created or adopted. A `dnr_dns_records`
+table records domain, type, name and the owning subsystem. Consequences:
 
 - It never deletes a record it does not own.
-- A conflicting unowned record is surfaced with both values and an explicit
-  *adopt and overwrite* choice.
 - Removing a domain from the platform offers to withdraw the records it owns,
   and touches nothing else.
 
 `NS` and `SOA` are never written under any circumstances.
+
+**Ownership is acquired by agreement, not only by authorship.** A record whose
+live value is already exactly what the plan wants is adopted on first publish
+without touching DNS: the platform and the zone already agree, so recording who
+is responsible is bookkeeping, not a change. A record that exists and *differs*
+is a conflict — shown with both values, resolved by an explicit *adopt and
+overwrite* choice, never silently.
+
+The alternative, where ownership comes strictly from having created a record,
+was rejected for punishing exactly the deployments that did the work by hand:
+every correct record they published would sit permanently unowned, showing as a
+conflict the platform could not act on until it was deleted and recreated
+through the platform. Adopting on exact match means a domain that is already
+correct converges with no clicking and no DNS write.
+
+### Adding a domain publishes what is safe to publish
+
+Adding a domain reconciles it immediately, but only the outcomes that cannot
+take anything away: records the zone does not have at all. SPF, DKIM, DMARC and
+new hostnames appear without a second step, because creating a record where
+none exists breaks nothing — the worst case is a record nothing yet uses.
+
+Everything else waits. A cutover, and a conflict with an unowned differing
+value, still require their own explicit confirmation. So adding a domain does
+the bulk of the work by itself and leaves exactly the decisions that deserve a
+human in front of them, rather than making someone press a button to do the
+part that was never in question.
+
+This is the shape of the simplification being asked for. A page that requires
+confirmation for everything, including creating a TXT record in empty space,
+has moved the checklist rather than removed it.
 
 ### Cutovers stay deliberate
 
@@ -163,16 +208,13 @@ confirmation, stating what currently receives and that it will stop.
    today, with no new required configuration.
 7. Re-running publish on an already-correct domain writes nothing and reports
    no changes.
+8. A domain whose live records already match the plan is adopted on first
+   publish with no DNS write, and shows no conflicts afterwards.
+9. Adding a domain creates its missing records without a second step, and does
+   not perform a cutover or overwrite a conflicting unowned record.
+10. A deployment holding two credentials publishes each domain through the one
+    that can see its zone, and the diff names which.
 
 ## Open decisions
 
-- **Credential scope.** One deployment-wide credential is simplest and matches
-  how the cloud-compute grants work. Per-domain credentials would suit a
-  deployment whose domains live in different accounts — real, but nothing here
-  needs it yet.
-- **Adoption default.** Whether a first publish offers to adopt existing
-  matching records (fewer conflicts, more implicit ownership) or only ever
-  manages what it created (slower to converge, no surprises).
-- **Publish on create.** Whether adding a domain offers to publish immediately
-  or always waits for the button. The button is safer; the automatic path is
-  the actual simplification being asked for.
+None — all resolved 2026-07-25.
