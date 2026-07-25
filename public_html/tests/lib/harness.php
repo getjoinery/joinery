@@ -165,10 +165,20 @@ function harness_boot(array $overrides = array()) {
 	// stranding fixtures / Stripe objects / emulator processes. Converting
 	// SIGTERM into exit(1) lets the shutdown reporter run teardown and emit a
 	// failing contract inside the 5s grace window. Needs the pcntl extension.
+	//
+	// Ctrl-C is the same problem arriving as a different signal: PHP's default
+	// disposition for SIGINT terminates the process outright, so the cleanup
+	// closures — which live only in this process's memory — are lost and every
+	// fixture the test created is stranded in the dev database. Converting the
+	// interrupt into exit(1) runs teardown on the way out.
 	if (php_sapi_name() === 'cli' && function_exists('pcntl_signal')) {
 		pcntl_async_signals(true);
 		pcntl_signal(SIGTERM, function () {
 			$GLOBALS['__harness']['sigterm'] = true;
+			exit(1);
+		});
+		pcntl_signal(SIGINT, function () {
+			$GLOBALS['__harness']['sigint'] = true;
 			exit(1);
 		});
 	}
@@ -547,7 +557,11 @@ function harness_shutdown_report() {
 	$h = &$GLOBALS['__harness'];
 	if ($h['finished'] || !$h['booted']) return;
 
-	if (!empty($h['sigterm'])) {
+	if (!empty($h['sigint'])) {
+		// Ctrl-C. Our handler exit()ed here so teardown still runs.
+		check(false, 'interrupted before harness_finish()',
+			'the run was interrupted (SIGINT); teardown ran, so no fixtures were left behind');
+	} elseif (!empty($h['sigterm'])) {
 		// timeout(1) sent SIGTERM (the test exceeded its wall-clock cap); our
 		// handler exit()ed here so teardown could still run before SIGKILL.
 		check(false, 'killed by timeout before harness_finish()',

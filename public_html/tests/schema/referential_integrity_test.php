@@ -18,8 +18,10 @@
  *      references the old ID left behind (the vault-suite flakiness root
  *      cause; see specs/test_gate_flakiness.md).
  *   4. No stray harness fixtures survive (harnesstest_% users, vault-test-%
- *      passkey credentials) — a leak here names its leaker's table instead of
- *      surfacing later as unexplainable flakiness in an unrelated suite.
+ *      passkey credentials, and the 'HarnessTest ...' named families) — a leak
+ *      here names its leaker's table instead of surfacing later as
+ *      unexplainable flakiness in an unrelated suite, or as phantom rows
+ *      someone eventually notices in an admin screen.
  */
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
@@ -120,6 +122,36 @@ if (isset($existing_tables['pkc_passkey_credentials'])) {
 	$q->execute();
 	$stray_pkc = (int)$q->fetchColumn();
 	check($stray_pkc === 0, 'no leftover vault-test-% passkey credentials', "$stray_pkc row(s)");
+}
+
+// The fixture families that name themselves 'HarnessTest ...'. Naming the table
+// and the surviving row turns a leak into a one-line fix instead of an
+// investigation — the alternative is noticing phantom rows in an admin screen
+// weeks later. Tables absent on this install are simply skipped.
+$named_fixtures = array(
+	'evt_events'        => 'evt_name',
+	'svy_surveys'       => 'svy_name',
+	'grp_groups'        => 'grp_name',
+	'pro_products'      => 'pro_name',
+	'bkt_booking_types' => 'bkt_name',
+	'mgn_managed_nodes' => 'mgn_name',
+	'qst_questions'     => 'qst_question',
+);
+foreach ($named_fixtures as $table => $column) {
+	if (!isset($existing_tables[$table])) {
+		harness_skip("no leftover HarnessTest rows in $table", 'table not present on this install');
+		continue;
+	}
+	$q = $dblink->prepare("SELECT count(*) FROM {$table} WHERE {$column} LIKE 'HarnessTest %'");
+	$q->execute();
+	$stray = (int)$q->fetchColumn();
+	$detail = '';
+	if ($stray > 0) {
+		$q = $dblink->prepare("SELECT {$column} FROM {$table} WHERE {$column} LIKE 'HarnessTest %' ORDER BY 1 LIMIT 5");
+		$q->execute();
+		$detail = "$stray row(s): " . implode(', ', $q->fetchAll(PDO::FETCH_COLUMN));
+	}
+	check($stray === 0, "no leftover HarnessTest rows in $table", $detail);
 }
 
 harness_finish();
