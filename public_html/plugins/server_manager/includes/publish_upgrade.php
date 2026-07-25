@@ -20,6 +20,10 @@
 	$site_template = $settings->get_setting('site_template');
 	$full_site_dir = $baseDir.$site_template;
 
+	// Resolved here, in the scope that owns $full_site_dir, so the log helpers
+	// below never have to assume this file was included at global scope.
+	$GLOBALS['publish_log_dir'] = $full_site_dir . '/logs/publish';
+
 	// =====================================================
 	// CLI MODE: parse arguments and populate $_REQUEST
 	// Usage: php publish_upgrade.php [major.minor] ["release notes"]
@@ -93,11 +97,22 @@
 	// Increase execution time for large zip file creation (5 minutes)
 	set_time_limit(300);
 
+	// Keep a durable record of this run. Registered before any work so that an
+	// early exit or a fatal is logged as faithfully as a clean finish — those
+	// are the runs whose explanation is otherwise lost with the terminal.
+	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/PublishLog.php'));
+	PublishLog::start($GLOBALS['publish_log_dir']);
+	register_shutdown_function(function () {
+		PublishLog::write(error_get_last());
+	});
+
 	// Output helper: strips HTML for CLI, flushes for web
 	function publish_output($text) {
 		global $is_cli;
+		$plain = strip_tags(str_replace(['<br>', '<br />', '<br/>'], "\n", $text));
+		PublishLog::record($plain);
 		if ($is_cli) {
-			echo strip_tags(str_replace(['<br>', '<br />', '<br/>'], "\n", $text)) . "\n";
+			echo $plain . "\n";
 		} else {
 			echo nl2br(htmlspecialchars($text)) . "<br>\n";
 			flush();
@@ -159,6 +174,7 @@
 
 		// Use form-provided version consistently for both archive and SQL filenames
 		$version = $version_major . '.' . $version_minor . '.' . $version_patch;
+		PublishLog::setVersion($version);
 
 		// Downgrade guard: refuse if the new version is less than what's in VERSION. Cheap
 		// safeguard against accidentally re-publishing a lower number than the file already
@@ -167,6 +183,29 @@
 		$current_version = LibraryFunctions::get_joinery_version();
 		if ($current_version !== '' && version_compare($version, $current_version, '<')) {
 			publish_output("Refusing to publish {$version} — VERSION file is already at {$current_version}. Publish a higher version or update the VERSION file first.");
+			exit;
+		}
+
+		// =====================================================
+		// Bundle the management agent artifact (release channel)
+		// =====================================================
+		// Runs here — before the VERSION file, the core archive, the release
+		// row or any plugin archive — because a bundle this box owed and could
+		// not build is a reason to publish nothing at all. Refusing at this
+		// point leaves the tree exactly as it was found.
+		//
+		// It also still precedes plugin archive creation, so a freshly built
+		// agent_dist is captured in the server_manager archive and its tree hash.
+		publish_output("Bundling management agent artifact...");
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/AgentDistPublisher.php'));
+		$agent_bundle = AgentDistPublisher::publish($full_site_dir, 'publish_output');
+
+		if ($agent_bundle['status'] === AgentDistPublisher::STATUS_FAILED) {
+			publish_output("\nRefusing to publish {$version} — the agent bundle is at v"
+				. ($agent_bundle['bundled_version'] ?: 'none')
+				. " but this box has agent source at v" . ($agent_bundle['source_version'] ?: '?')
+				. ", and the rebuild failed. Publishing now would ship an agent known to be stale.");
+			publish_output("Fix the agent build and publish again. Nothing has been written.");
 			exit;
 		}
 
@@ -496,16 +535,6 @@
 		}
 
 		// =====================================================
-		// Bundle the management agent artifact (release channel)
-		// Runs before plugin archives so the fresh agent_dist is
-		// captured in the server_manager plugin archive and its
-		// tree hash.
-		// =====================================================
-		publish_output("\nBundling management agent artifact...");
-		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/AgentDistPublisher.php'));
-		AgentDistPublisher::publish($full_site_dir, 'publish_output');
-
-		// =====================================================
 		// Create individual PLUGIN archives
 		// =====================================================
 		publish_output("\nCreating individual plugin archives...");
@@ -611,6 +640,13 @@
 			}
 		}
 
+		// Name the agent version this release actually carries. Without this the
+		// only way to know is to unpack the server_manager archive.
+		$agent_shipped = $agent_bundle['source_version'] ?: $agent_bundle['bundled_version'];
+		publish_output("\nManagement agent shipped in this release: v"
+			. ($agent_shipped ?: 'none')
+			. " ({$agent_bundle['status']})");
+
 		publish_output("\nAll archives created successfully!");
 
 		// =====================================================
@@ -640,6 +676,8 @@
 		} catch (Exception $e) {
 			publish_output("\nRetention skipped: " . $e->getMessage());
 		}
+
+		publish_output("\nPublish log: " . PublishLog::path());
 
 	}
 	else{

@@ -140,4 +140,79 @@ if (is_dir($real_src) && file_exists($real_src . '/main.go')) {
 	harness_skip('real agent source absent on this box - carry-forward path applies');
 }
 
+// ---------------------------------------------------------------------------
+section('publish() status contract: a failed rebuild is distinguishable from a carry-forward');
+
+// The distinction is what lets publish_upgrade.php refuse a release rather than
+// ship a bundle it already knows is stale. Getting it wrong in either direction
+// is costly: treat a failure as benign and the release goes out wrong; treat a
+// box without agent source as a failure and control planes cannot publish.
+//
+// Everything below runs against throwaway directories with the agent source
+// path overridden in memory for this process only.
+
+/** Build a disposable site tree with an agent_dist manifest at $bundled_version. */
+$make_site = function ($label, $bundled_version) use ($tmp_root) {
+	$site = $tmp_root . '/site_' . $label;
+	$dist = $site . '/public_html/plugins/server_manager/agent_dist';
+	mkdir($dist, 0777, true);
+	mkdir($site . '/config', 0777, true);
+	if ($bundled_version !== null) {
+		file_put_contents($dist . '/manifest.json', json_encode(array(
+			'version'  => $bundled_version,
+			'binaries' => array('linux-amd64' => array(
+				'file' => 'joinery-agent-linux-amd64.gz', 'sha256' => 'x', 'signature' => 'y',
+			)),
+		)));
+		file_put_contents($dist . '/joinery-agent-linux-amd64.gz', 'placeholder');
+	}
+	return array($site, $dist);
+};
+
+// -- no agent source on this box: carry forward, never fail ------------------
+harness_set_setting_mem('server_manager_agent_source_path', $tmp_root . '/no_such_agent_src');
+list($site_a, $dist_a) = $make_site('carried', '1.0.0');
+$res = AgentDistPublisher::publish($site_a, null);
+check($res['status'] === AgentDistPublisher::STATUS_CARRIED,
+	'no agent source -> carried (publish continues)',
+	'got ' . var_export($res['status'], true));
+check($res['bundled_version'] === '1.0.0', 'carried result reports the bundled version');
+
+// -- source and bundle agree: skip, without invoking the toolchain -----------
+$same_src = $tmp_root . '/agent_src_same';
+mkdir($same_src, 0777, true);
+file_put_contents($same_src . '/main.go', "package main\n\nvar version = \"2.0.0\"\n");
+harness_set_setting_mem('server_manager_agent_source_path', $same_src);
+list($site_b, $dist_b) = $make_site('skipped', '2.0.0');
+$before_b = file_get_contents($dist_b . '/manifest.json');
+$res = AgentDistPublisher::publish($site_b, null);
+check($res['status'] === AgentDistPublisher::STATUS_SKIPPED,
+	'source version == bundled version -> skipped',
+	'got ' . var_export($res['status'], true));
+check(file_get_contents($dist_b . '/manifest.json') === $before_b,
+	'skipped leaves agent_dist byte-identical');
+
+// -- rebuild owed but the build breaks: failed, and nothing is disturbed -----
+// main.go declares a newer version and does not compile, which is the shape of
+// the real incident: the publisher knew it owed a rebuild and could not deliver.
+$bad_src = $tmp_root . '/agent_src_bad';
+mkdir($bad_src, 0777, true);
+file_put_contents($bad_src . '/main.go', "package main\n\nvar version = \"9.9.9\"\n\nthis is not go\n");
+file_put_contents($bad_src . '/go.mod', "module joinery-agent-broken\n\ngo 1.21\n");
+harness_set_setting_mem('server_manager_agent_source_path', $bad_src);
+list($site_c, $dist_c) = $make_site('failed', '1.0.0');
+$before_c = file_get_contents($dist_c . '/manifest.json');
+$res = AgentDistPublisher::publish($site_c, null);
+
+check($res['status'] === AgentDistPublisher::STATUS_FAILED,
+	'rebuild owed + build fails -> failed (publish must refuse)',
+	'got ' . var_export($res['status'], true));
+check($res['source_version'] === '9.9.9' && $res['bundled_version'] === '1.0.0',
+	'failed result names both versions so the refusal can explain itself',
+	'got source=' . var_export($res['source_version'], true)
+	. ' bundled=' . var_export($res['bundled_version'], true));
+check(file_get_contents($dist_c . '/manifest.json') === $before_c,
+	'failed rebuild leaves the previous agent_dist in place');
+check(!is_dir($dist_c . '.staging'), 'failed rebuild cleans up its staging directory');
+
 harness_finish();

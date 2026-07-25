@@ -19,6 +19,14 @@
  * - Signing keypair is generated on first use at {site}/config/
  *   agent_signing_key(.pub) — zero-config, same pattern as provisioning_key.
  *
+ * publish() never throws, so a broken agent build cannot abort an unrelated
+ * platform publish. It returns a status instead and leaves the policy to the
+ * caller: STATUS_FAILED means a rebuild was known to be required and did not
+ * happen, which publish_upgrade.php treats as a reason to refuse the release
+ * rather than ship a bundle it already knows is stale.
+ *
+ * @version 1.4 - publish() returns a status result (built/skipped/carried/failed) so the
+ *                pipeline can refuse a release whose agent rebuild failed
  * @version 1.3 - only the site's own config/agent_signing_key is escrowed; a key minted into any
  *                other directory is not the fleet trust root, so it files no recovery record
  * @version 1.2 - signing key escrowed on every load (idempotent), not only at first mint,
@@ -31,6 +39,15 @@ class AgentDistPublisher {
 	const DEFAULT_SOURCE_PATH = '/home/user1/joinery-agent';
 	const ARCHES = array('amd64', 'arm64');
 
+	/** A rebuild was required and completed. */
+	const STATUS_BUILT = 'built';
+	/** Source and bundle already agree; agent_dist left byte-identical. */
+	const STATUS_SKIPPED = 'skipped';
+	/** No usable agent source here; the existing bundle carries forward. */
+	const STATUS_CARRIED = 'carried';
+	/** A rebuild was required and did not happen. The bundle is stale. */
+	const STATUS_FAILED = 'failed';
+
 	/**
 	 * Bundle (or carry forward) the agent artifact. Never throws — a broken
 	 * agent build must not abort a platform publish; problems are reported
@@ -38,9 +55,27 @@ class AgentDistPublisher {
 	 *
 	 * @param string $full_site_dir e.g. /var/www/html/joinerytest
 	 * @param callable|null $out    line-output callback (publish_output)
+	 * @return array{status:string, message:string, source_version:?string, bundled_version:?string}
+	 *         status is one of the STATUS_* constants. Only STATUS_FAILED means
+	 *         the release would ship an artifact known to be wrong.
 	 */
 	public static function publish($full_site_dir, $out = null) {
 		$say = function ($msg) use ($out) { if ($out) { call_user_func($out, $msg); } };
+
+		$result = function ($status, $message, $source_version = null, $bundled_version = null) {
+			return array(
+				'status'          => $status,
+				'message'         => $message,
+				'source_version'  => $source_version,
+				'bundled_version' => $bundled_version,
+			);
+		};
+
+		// Set once a rebuild is known to be required, so the catch block can
+		// tell a genuine build failure from a benign carry-forward.
+		$rebuild_required = false;
+		$agent_version = null;
+		$bundled_version = null;
 
 		try {
 			$dist_dir = $full_site_dir . '/public_html/plugins/server_manager/agent_dist';
@@ -50,31 +85,40 @@ class AgentDistPublisher {
 			$src = self::sourcePath();
 			if (!is_dir($src) || !file_exists($src . '/main.go')) {
 				if ($bundled_version) {
-					$say("Agent artifact: source not present on this box - carrying forward v{$bundled_version}");
+					$msg = "Agent artifact: source not present on this box - carrying forward v{$bundled_version}";
 				} else {
-					$say("Agent artifact: WARNING - no agent source at {$src} and no existing artifact; this release ships without an agent bundle");
+					$msg = "Agent artifact: WARNING - no agent source at {$src} and no existing artifact; this release ships without an agent bundle";
 				}
-				return;
+				$say($msg);
+				return $result(self::STATUS_CARRIED, $msg, null, $bundled_version);
 			}
 
 			$agent_version = self::readSourceVersion($src);
 			if ($agent_version === null) {
-				$say("Agent artifact: WARNING - could not read agent version from {$src}/main.go; carrying forward" . ($bundled_version ? " v{$bundled_version}" : ' nothing'));
-				return;
+				$msg = "Agent artifact: WARNING - could not read agent version from {$src}/main.go; carrying forward" . ($bundled_version ? " v{$bundled_version}" : ' nothing');
+				$say($msg);
+				return $result(self::STATUS_CARRIED, $msg, null, $bundled_version);
 			}
 
 			if ($agent_version === $bundled_version && self::artifactsPresent($dist_dir, $manifest)) {
-				$say("Agent artifact: v{$agent_version} already bundled - unchanged");
-				return;
+				$msg = "Agent artifact: v{$agent_version} already bundled - unchanged";
+				$say($msg);
+				return $result(self::STATUS_SKIPPED, $msg, $agent_version, $bundled_version);
 			}
+
+			// Past this point the bundle is known to be wrong for this release:
+			// anything that goes wrong now is a failure, not a carry-forward.
+			$rebuild_required = true;
 
 			$keys = self::ensureKeys($full_site_dir . '/config');
 			$say("Agent artifact: building v{$agent_version} (was " . ($bundled_version ?: 'none') . ") - signing key read from config/agent_signing_key");
 
 			$go = self::findGo();
 			if ($go === null) {
-				$say("Agent artifact: WARNING - Go toolchain not found; carrying forward" . ($bundled_version ? " v{$bundled_version}" : ' nothing'));
-				return;
+				// A box holding agent source newer than the bundle is a
+				// publishing control plane; a missing toolchain there is a
+				// broken box, not a reason to ship the old agent.
+				throw new Exception('Go toolchain not found');
 			}
 
 			$staging = $dist_dir . '.staging';
@@ -139,10 +183,24 @@ class AgentDistPublisher {
 			}
 			self::rrmdir($old);
 
-			$say("Agent artifact: bundled v{$agent_version} for " . implode(', ', self::ARCHES));
+			$msg = "Agent artifact: bundled v{$agent_version} for " . implode(', ', self::ARCHES);
+			$say($msg);
+			return $result(self::STATUS_BUILT, $msg, $agent_version, $bundled_version);
 		} catch (\Throwable $e) {
-			$say('Agent artifact: WARNING - ' . $e->getMessage() . '; previous artifact (if any) carried forward');
 			if (isset($staging)) { self::rrmdir($staging); }
+
+			if (!$rebuild_required) {
+				// Nothing was owed for this release, so the existing bundle is
+				// still the right one to ship.
+				$msg = 'Agent artifact: WARNING - ' . $e->getMessage() . '; previous artifact (if any) carried forward';
+				$say($msg);
+				return $result(self::STATUS_CARRIED, $msg, $agent_version, $bundled_version);
+			}
+
+			$msg = 'Agent artifact: FAILED to build v' . $agent_version
+			     . ' (bundle is at ' . ($bundled_version ?: 'none') . ') - ' . $e->getMessage();
+			$say($msg);
+			return $result(self::STATUS_FAILED, $msg, $agent_version, $bundled_version);
 		}
 	}
 
