@@ -223,6 +223,17 @@ Per component, before archiving, the publisher applies a four-way decision again
 
 Auto-bumped manifests are ordinary working-copy edits — the publish summary lists them so the maintainer can commit the change, the same workflow as the core `VERSION` file. Authors still bump minor/major for meaningful releases; auto patch-bump is the floor that keeps archive filenames honest when a content change ships without one.
 
+**Publish log:**
+
+Every publish writes the full text of its run to `{site root}/logs/publish/publish-{version}-{YmdHis}.log`, outside `public_html` so it is not web-served. The log is written by a shutdown handler rather than at the end of a successful run, so a publish that exits early — a refusal, a `die` on a missing prerequisite, a fatal error — is captured too. Those are the runs worth reading: a stage that reports a problem through the publish summary and continues leaves no other trace once the page or terminal is gone. The header records the version, whether the run was CLI or web, and which account it ran as; a fatal error is appended to the end. The newest 20 logs are kept and older ones removed on each publish. A successful run names its log path as the last line of the summary.
+
+**Publish refusals:**
+
+Two conditions stop a publish before anything is written — no VERSION change, no archives, no release row:
+
+1. The requested version is lower than the one already in the `VERSION` file.
+2. This box holds agent source newer than the bundled agent artifact and the rebuild fails (see [Server Manager](../plugins/server_manager/docs/overview.md)).
+
 ---
 
 ### publish_theme.php

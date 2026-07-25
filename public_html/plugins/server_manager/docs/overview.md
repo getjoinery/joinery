@@ -28,7 +28,16 @@ The agent ships inside the platform release. Publishing an upgrade bundles a sig
 - `joinery-agent-linux-amd64.gz` / `joinery-agent-linux-arm64.gz` — the binaries
 - `joinery-agent.service` — the systemd unit
 
-On the publishing control plane, `publish_upgrade.php` cross-compiles both architectures from the checkout named by the `server_manager_agent_source_path` setting (default `/home/user1/joinery-agent`) whenever the source version differs from the bundled one, and signs them with the key at `{site root}/config/agent_signing_key` (generated on first publish; the `.pub` sibling holds the base64 public key that gets baked into the built agent). A control plane without the agent source carries the existing artifact forward unchanged — publishing never depends on a Go toolchain being present.
+On the publishing control plane, `publish_upgrade.php` cross-compiles both architectures from the checkout named by the `server_manager_agent_source_path` setting (default `/home/user1/joinery-agent`) whenever the source version differs from the bundled one, and signs them with the key at `{site root}/config/agent_signing_key` (generated on first publish; the `.pub` sibling holds the base64 public key that gets baked into the built agent).
+
+Bundling is the first thing a publish does, before the VERSION file, the archives or the release row, because its outcome decides whether the release happens at all:
+
+- **No agent source on this box** — the existing artifact carries forward unchanged and the publish proceeds. Publishing never depends on a Go toolchain being present.
+- **Source version matches the bundle** — `agent_dist` is left byte-identical, which keeps the `server_manager` plugin tree hash stable between publishes.
+- **Source is newer and the rebuild succeeds** — the fresh artifact is bundled, and because this happens before plugin archives are built it is captured in the `server_manager` archive and its tree hash.
+- **Source is newer and the rebuild fails** — the publish is refused. The build error is printed, and the VERSION file, archives and release row are all left untouched. Shipping here would mean releasing an agent the publisher already knows is out of date, and the resulting fleet has no way to tell.
+
+The last line of a publish names the agent version the release carries. `plugins/server_manager/tests/agent_bundle_drift_test.php` asserts the same invariant on its own, so a bundle that falls behind its source is caught by the safe test tier rather than by the next release.
 
 **First install** is handled by the plugin's `host_installer` (`provisioning/install_agent.sh`), which runs at every root moment — site install, code upgrade, container start, and the node-detail **Run Plugin Installers** action. It installs the bundled binary, writes the env file with the right `JOINERY_CONFIG`, and sets up systemd or cron supervision automatically.
 
