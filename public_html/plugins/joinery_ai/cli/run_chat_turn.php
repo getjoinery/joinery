@@ -69,7 +69,10 @@ try {
         ChatTurn::runAndFinalize($conversation, $uid, $msg);
     }
 } catch (Throwable $e) {
-    error_log('[joinery_ai chat cli] uncaught for message #' . $message_id . ': ' . $e->getMessage());
+    // ChatAsync::log rather than error_log: the spawner redirects stdio to the same
+    // file, but a direct CLI invocation has no such redirect and would lose this.
+    ChatAsync::log('[chat cli] uncaught for message #' . $message_id . ': '
+        . get_class($e) . ': ' . $e->getMessage());
     try { ChatTurn::markFailed($msg, 'The assistant could not complete this turn.'); } catch (Throwable $e2) {}
 }
 

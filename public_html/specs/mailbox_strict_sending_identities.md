@@ -118,6 +118,15 @@ Raise `p=quarantine` to `p=reject` after the rua reports show nothing
 legitimate failing. (`p=none` first is optional monitoring theater here — the
 sender inventory is exactly two systems, both verified aligned in step 5.)
 
+**PUBLISHED 2026-07-25.** The record above is live on `_dmarc.scrolldaddy.app`
+(Cloudflare, TTL auto), confirmed resolving through 1.1.1.1. Sender inventory
+re-checked before publishing: the ScrollDaddy site sends as
+`hello@mail.scrolldaddy.app`, the mailbox deployment as `info@scrolldaddy.app`,
+and no other node carries a `scrolldaddy.app` sending identity. Aggregate
+reports to `postmaster@scrolldaddy.app` are deliverable — the domain's
+catch-all is `store` with `reject_unmatched` off, so they land in the hosted
+mailbox rather than nowhere.
+
 ### 5. Verification
 
 - From the jeremytunnell mailbox, compose to a Gmail account; confirm in the

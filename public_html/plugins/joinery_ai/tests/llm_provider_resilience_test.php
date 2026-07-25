@@ -107,4 +107,66 @@ check((int)($result['usage']['input_tokens'] ?? 0) === 5 && (int)($result['usage
     'usage tokens parsed from the stream',
     'in=' . ($result['usage']['input_tokens'] ?? '?') . ' out=' . ($result['usage']['output_tokens'] ?? '?'));
 
+// ---------------------------------------------------------------------------
+section('Unconfigured provider is reported in its own words');
+
+// A missing credential is not a transient server error: it classifies apart from
+// every other failure, and its message survives to the row instead of being
+// flattened into "try again in a moment" — a silent generic error here cost a
+// full diagnosis once, because the only text naming the empty setting was thrown
+// away at the point of failure.
+$config_failures = [
+    'anthropic'   => 'An Anthropic model is in use but joinery_ai_anthropic_api_key is empty. Set it on the Joinery AI settings page.',
+    'fireworks'   => 'A Fireworks model is in use but joinery_ai_fireworks_api_key is empty. Set it on the Joinery AI settings page.',
+    'local model' => 'A non-Anthropic model is in use but joinery_ai_local_model is empty. Set it to the model id served by your OpenAI-compatible host.',
+];
+foreach ($config_failures as $label => $message) {
+    $e = new LlmProviderException($message);
+    check(LlmProviderException::classify($e) === 'api_not_configured',
+        "$label empty-setting failure classifies as api_not_configured",
+        'code=' . LlmProviderException::classify($e));
+    check(LlmProviderException::operatorMessage($e) === $message,
+        "$label empty-setting message reaches the row verbatim");
+}
+
+// Every other class keeps the friendly text — the provider's own wording there is
+// third-party and not actionable, and the detail still reaches the worker log.
+$generic_failures = [
+    'api_network_error'   => 'The local model host is not reachable at http://127.0.0.1:1/v1',
+    'api_no_response'     => 'The model did not start responding within 60 seconds',
+    'api_auth_failed'     => 'Anthropic API 4xx: authentication_error invalid x-api-key',
+    'api_quota_exceeded'  => 'Anthropic API 4xx: rate_limit_error',
+    'api_request_invalid' => 'Anthropic API 4xx: invalid_request_error bad model',
+    'api_server_error'    => 'Anthropic API 5xx: overloaded_error',
+];
+foreach ($generic_failures as $expected_code => $message) {
+    $e = new LlmProviderException($message);
+    check(LlmProviderException::classify($e) === $expected_code,
+        "$message classifies as $expected_code", 'code=' . LlmProviderException::classify($e));
+    check(LlmProviderException::operatorMessage($e) === LlmProviderException::friendlyMessage($expected_code),
+        "$expected_code keeps its friendly message");
+}
+
+// ---------------------------------------------------------------------------
+section('Turn diagnostics survive the detached path');
+
+// ChatTurn logs through ChatAsync::log because error_log() is discarded after
+// fastcgi_finish_request closes the FastCGI stderr stream. If any of those call
+// sites regress to error_log(), a failing turn goes undiagnosable again.
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatAsync.php'));
+$log_path = PathHelper::getSiteRoot() . '/logs/joinery_ai_worker.log';
+$size_before = file_exists($log_path) ? filesize($log_path) : 0;
+$marker = 'harness-probe-' . bin2hex(random_bytes(6));
+ChatAsync::log('[test] ' . $marker);
+clearstatcache(true, $log_path);
+check(file_exists($log_path) && filesize($log_path) > $size_before,
+    'ChatAsync::log appends to the AI worker log', $log_path);
+check(strpos((string)@file_get_contents($log_path), $marker) !== false,
+    'the logged line is retrievable afterwards');
+
+$turn_source = (string)@file_get_contents(
+    PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatTurn.php'));
+check($turn_source !== '' && strpos($turn_source, 'error_log(') === false,
+    'ChatTurn logs via ChatAsync::log only (no error_log on the detached path)');
+
 harness_finish();
