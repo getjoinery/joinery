@@ -151,6 +151,7 @@ php /var/www/html/joinerytest/public_html/utils/upgrade.php --verbose
 - Database migrations and composer integration
 - **Declared-dependency install** — after the file swap, installs any PHP extension the new code declares (root `composer.json` `ext-*` + plugin `requires.extensions`, resolved by `utils/list_dependencies.php --apt`) and reloads web PHP. Needs root (Docker `docker exec` has it; a non-root run degrades to a warning naming the manual `apt-get install`). Then runs every active plugin's declared `host_installer` via `_plugin_installers_start.sh` so new host requirements land with the deploy.
 - **Graceful handling of missing archives** — if a theme or plugin archive returns 404, the upgrade warns and skips it instead of aborting. The core upgrade and all other themes/plugins proceed normally. A summary of skipped items is shown at the end.
+- **Site-root `maintenance_scripts/`** — the core archive carries `install_tools/` and `sysadmin_tools/` alongside `public_html/`, and the upgrade syncs them into the site root after the deploy swap and before `fix_permissions.sh` runs, so a release applies as one piece rather than with its own tooling a version behind. The sync compares by content (`rsync --checksum`), because the staged files carry the publishing box's timestamps while the node keeps its own and a same-size edit can otherwise look unchanged. It does not delete: a node can legitimately hold scripts the archive does not ship, so files absent from a release are left in place. `*.sh` are made executable afterwards. A failed sync is a warning, not an abort — `public_html` is already live — and it says explicitly that the node's backup, restore and permission scripts are still the previous version.
 
 **Plugin refresh scope:** the upgrade download loop iterates **plugins that are installed** (rows in `plg_plugins`) and attempts an archive fetch for each. Plugins published by the source succeed; plugins not in the source's catalog 404 at the upgrade endpoint (they were never packaged because they have `included_in_publish: false` — see [Extension Distribution Flags](#extension-distribution-flags) below) and are skipped via the warning path above. Uninstalling a plugin removes its row, so an uninstalled plugin is not re-downloaded on subsequent upgrades — the operator's removal sticks. Conversely, a new upstream plugin won't auto-appear on existing sites; the operator gets it via the admin Plugins page (install a plugin already on disk) or a plugin upload.
 
@@ -276,9 +277,10 @@ https://yoursite.com/admin/server_manager/publish_theme?list=themes
 3. DeploymentHelper preserves extensions marked `receives_upgrades: false`
 4. Backup current installation to public_html_last/
 5. Deploy staged files to public_html/
-6. Run database migrations (update_database.php)
-7. Run composer_install_if_needed.php
-8. Fix permissions (www-data:user1, 775)
+6. Sync staged maintenance_scripts/ into the site root
+7. Run database migrations (update_database.php)
+8. Run composer_install_if_needed.php
+9. Fix permissions (www-data:user1, 775)
 
 If ANY step fails → Automatic rollback
 ```

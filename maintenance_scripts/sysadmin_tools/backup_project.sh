@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # backup_project.sh - Complete project backup script
-# Version: 2.1.0
+# Version: 2.3.0
 #
 # Description:
 #   Creates a comprehensive backup of a web project including:
@@ -44,7 +44,7 @@
 set -euo pipefail
 
 # Version information
-SCRIPT_VERSION="2.2.0"
+SCRIPT_VERSION="2.3.0"
 
 # Deployment environment (Docker or bare metal) — read from the project's
 # Globalvars_site.php once PROJECT_DIR is known (spec deployment_environment_flag).
@@ -321,10 +321,30 @@ fi
 # Create project files subdirectory
 mkdir -p "${TEMP_DIR}/${BACKUP_NAME}/project_files"
 
+# A site tree contains files the invoking account is not meant to read. The
+# relay pull key (config/relay_pull_key) is the standing example: ssh refuses an
+# identity file that is readable by anyone but its owner, so it is pinned to 600
+# and owned by the web user, while this script runs over SSH as the deploy
+# account. Copying only what that account happens to be able to read would make
+# the backup quietly partial, so the copy is elevated and handed straight back —
+# tar and encryption below stay unprivileged.
+#
+# Ownership inside the archive is not load-bearing: restore_project.sh re-derives
+# it by running fix_permissions.sh, which re-pins the relay key itself.
+SUDO=""
+if [ "$(id -u)" -ne 0 ]; then
+    if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+        SUDO="sudo"
+    else
+        print_warning "No passwordless sudo — copying as $(whoami); any unreadable file will fail the backup"
+    fi
+fi
+
 # Use rsync to copy project files
 # Included: uploads/, static_files/, config/, public_html/, maintenance_scripts/
 # Excluded: vendor/, node_modules/, .git/, logs/, cache/, tmp/, sessions/
-rsync -a \
+RSYNC_STATUS=0
+$SUDO rsync -a \
     --exclude='vendor/' \
     --exclude='node_modules/' \
     --exclude='.git/' \
@@ -332,21 +352,33 @@ rsync -a \
     --exclude='cache/' \
     --exclude='tmp/' \
     --exclude='sessions/' \
-    "$PROJECT_DIR/" "${TEMP_DIR}/${BACKUP_NAME}/project_files/"
+    "$PROJECT_DIR/" "${TEMP_DIR}/${BACKUP_NAME}/project_files/" || RSYNC_STATUS=$?
 
-if [ $? -eq 0 ]; then
-    print_success "Project files backed up successfully"
-    # Show what key directories were backed up
-    for dir in uploads static_files config public_html; do
-        if [ -d "${TEMP_DIR}/${BACKUP_NAME}/project_files/${dir}" ]; then
-            dir_size=$(du -sh "${TEMP_DIR}/${BACKUP_NAME}/project_files/${dir}" 2>/dev/null | cut -f1)
-            print_info "  - ${dir}/: ${dir_size}"
-        fi
-    done
-else
-    print_error "Failed to backup project files"
+# set -e would abort at the rsync line and skip this entirely, so the status is
+# captured above instead — an operator reading the log needs the script's own
+# account of what went wrong, not a bare rsync exit code.
+if [ "$RSYNC_STATUS" -ne 0 ]; then
+    print_error "Failed to backup project files (rsync exit ${RSYNC_STATUS})"
+    if [ "$RSYNC_STATUS" -eq 23 ]; then
+        print_error "Exit 23 means at least one file could not be read. The copy is"
+        print_error "incomplete, so it is being discarded rather than stored as a backup."
+    fi
     exit 1
 fi
+
+# Elevated rsync leaves root-owned files behind; the rest of the run is unprivileged.
+if [ -n "$SUDO" ]; then
+    $SUDO chown -R "$(id -u):$(id -g)" "${TEMP_DIR}/${BACKUP_NAME}/project_files"
+fi
+
+print_success "Project files backed up successfully"
+# Show what key directories were backed up
+for dir in uploads static_files config public_html; do
+    if [ -d "${TEMP_DIR}/${BACKUP_NAME}/project_files/${dir}" ]; then
+        dir_size=$(du -sh "${TEMP_DIR}/${BACKUP_NAME}/project_files/${dir}" 2>/dev/null | cut -f1)
+        print_info "  - ${dir}/: ${dir_size}"
+    fi
+done
 
 # Step 3: Backup Apache virtualhost configuration (if available)
 if [ -n "$VHOST_FILE" ]; then
@@ -416,26 +448,27 @@ print_success "Metadata file created"
 print_info "Creating final archive: $FINAL_ARCHIVE"
 
 cd "$TEMP_DIR"
-tar -czf "${BACKUP_DIR}/${FINAL_ARCHIVE}" "$BACKUP_NAME"
+TAR_STATUS=0
+tar -czf "${BACKUP_DIR}/${FINAL_ARCHIVE}" "$BACKUP_NAME" || TAR_STATUS=$?
 
-if [ $? -eq 0 ]; then
-    cd "$BACKUP_DIR"
-    ARCHIVE_SIZE=$(ls -lh "$FINAL_ARCHIVE" | awk '{print $5}')
-    print_success "Backup archive created successfully!"
-    echo ""
-    echo "========================================="
-    echo "BACKUP COMPLETE"
-    echo "========================================="
-    echo "Archive: $FINAL_ARCHIVE"
-    echo "Size: $ARCHIVE_SIZE"
-    echo "Location: $(pwd)/$FINAL_ARCHIVE"
-    echo ""
-    echo "To extract: tar -xzf $FINAL_ARCHIVE"
-    echo "========================================="
-else
-    print_error "Failed to create archive"
+if [ "$TAR_STATUS" -ne 0 ]; then
+    print_error "Failed to create archive (tar exit ${TAR_STATUS})"
     exit 1
 fi
+
+cd "$BACKUP_DIR"
+ARCHIVE_SIZE=$(ls -lh "$FINAL_ARCHIVE" | awk '{print $5}')
+print_success "Backup archive created successfully!"
+echo ""
+echo "========================================="
+echo "BACKUP COMPLETE"
+echo "========================================="
+echo "Archive: $FINAL_ARCHIVE"
+echo "Size: $ARCHIVE_SIZE"
+echo "Location: $(pwd)/$FINAL_ARCHIVE"
+echo ""
+echo "To extract: tar -xzf $FINAL_ARCHIVE"
+echo "========================================="
 
 # Cleanup is handled by trap
 exit 0

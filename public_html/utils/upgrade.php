@@ -1033,15 +1033,67 @@
 				upgrade_abort('Deployment Failed', 'Could not move staged files to live. Error: ' . htmlspecialchars(implode(' ', $mv_output)) . '. Rollback attempted.', false);
 			}
 
-			// Fix permissions using centralized script (production mode).
-			// The script chowns to www-data and therefore requires root. In a
+			// Both the site-root sync below and fix_permissions.sh after it write
+			// outside the agent user's ownership and therefore require root. In a
 			// docker container this process IS root; on bare metal it runs as
 			// the agent user, so prefix sudo -n (passwordless, non-interactive).
-			// Without the chown, the deployed tree stays owned by the agent
-			// user with mode 770 and Apache cannot read a single file — the
-			// site 500s until permissions are fixed by hand.
 			$is_root = function_exists('posix_geteuid') ? (posix_geteuid() === 0) : (trim((string)shell_exec('id -u')) === '0');
 			$root_prefix = $is_root ? '' : 'sudo -n ';
+
+			// Deploy maintenance_scripts/ from the staging area.
+			//
+			// The core archive ships install_tools/ and sysadmin_tools/ alongside
+			// public_html, and install.sh lays them down at install time. The
+			// deploy swap above moves public_html alone, so without this step the
+			// staged copies are unpacked and then discarded with the staging
+			// directory, and every node's backup, restore and permission tooling
+			// stays frozen at its install date while the release reports success.
+			//
+			// Runs before fix_permissions.sh below, so a release is applied as one
+			// piece rather than with its own tooling a version behind.
+			//
+			// No --delete: a node can legitimately carry scripts this archive does
+			// not ship — install.sh seeds an additional site's maintenance_scripts
+			// from the main site on the same host — and removing those is worse
+			// than leaving a stale file behind.
+			$staged_maintenance = rtrim($stage_location, '/') . '/maintenance_scripts';
+			$site_maintenance = $full_site_dir . '/maintenance_scripts';
+			if(is_dir($staged_maintenance)){
+				if($verbose) echo 'Deploying maintenance_scripts/<br>';
+				$ms_output = [];
+				$ms_exit = 0;
+				// --checksum, not rsync's default size+mtime quick check: the
+				// staged files carry the publishing box's timestamps and the node
+				// keeps its own, so a same-size edit can look unchanged and be
+				// skipped. Comparing content is exact and costs nothing across a
+				// directory this small.
+				exec(sprintf(
+					'%srsync -a --checksum %s/ %s/ 2>&1',
+					$root_prefix,
+					escapeshellarg($staged_maintenance),
+					escapeshellarg($site_maintenance)
+				), $ms_output, $ms_exit);
+				if($ms_exit === 0){
+					// Archive modes are whatever the publishing box had; a shell
+					// script that arrives non-executable fails only later, when
+					// something tries to run it. Same treatment restore applies.
+					exec($root_prefix . 'find ' . escapeshellarg($site_maintenance)
+						. ' -type f -name "*.sh" -exec chmod 755 {} + 2>&1');
+				} else {
+					// Not fatal — public_html is already live and serving. But the
+					// node now runs tooling older than the release it reports,
+					// which is the exact silent drift this step exists to end, so
+					// it is stated plainly rather than mentioned in passing.
+					out_alert('warning', 'Could not deploy maintenance_scripts (rsync exit ' . (int)$ms_exit . ')',
+						'The site is upgraded and serving, but its backup, restore and permission scripts are still the previous version.<br>'
+						. htmlspecialchars(implode(' ', array_slice($ms_output, -2))));
+				}
+			}
+
+			// Fix permissions using centralized script (production mode).
+			// The script chowns to www-data. Without it, the deployed tree stays
+			// owned by the agent user with mode 770 and Apache cannot read a
+			// single file — the site 500s until permissions are fixed by hand.
 			$fix_permissions_script = $full_site_dir . '/maintenance_scripts/install_tools/fix_permissions.sh';
 			if(file_exists($fix_permissions_script)) {
 				if($verbose) echo 'Setting permissions using fix_permissions.sh --production<br>';

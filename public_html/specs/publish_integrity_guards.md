@@ -2,10 +2,16 @@
 
 **Status: BUILT 2026-07-24.** All four phases implemented; safe tier green.
 Acceptance 1, 2, 4 and 6 are proven by test (`agent_release_channel`,
-`agent_bundle_drift`, `publish_log`). Acceptance 3 and 5 — a real publish
-bundling a new agent, and a log landing in `logs/publish/` from a live run —
-are exercised by the next publish, which is also what confirms the refusal
-never fires spuriously. Move to `implemented/` once that publish has run.
+`agent_bundle_drift`, `publish_log`).
+
+Live publishes 0.8.185, 0.8.186 and 0.8.187 each took the source-matches-bundle
+path, reported `v0.4.0 (skipped)`, and wrote a log to `logs/publish/` — proving
+acceptance 2 and the logging half of 5 on a real run, and confirming the refusal
+does not fire spuriously.
+
+Acceptance 3 is still open: no live publish has yet had agent source newer than
+the bundle, so the build-and-ship path has only ever run under test. Move to
+`implemented/` after a publish that actually rebuilds the agent.
 
 ## What this is
 
