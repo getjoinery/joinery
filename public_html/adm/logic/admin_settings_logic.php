@@ -73,7 +73,7 @@ function admin_settings_logic(array $input): LogicResult {
 			}
 		}
 
-		if($settings->get_setting('preview_image') != $input['preview_image']){
+		if(isset($input['preview_image']) && $settings->get_setting('preview_image') != $input['preview_image']){
 			//AUTO INCREMENT THE PREVIEW IMAGE INDEX IF IT HAS CHANGED
 			$search_criteria = array();
 			$search_criteria['setting_name'] = 'preview_image_increment';
@@ -121,6 +121,11 @@ function admin_settings_logic(array $input): LogicResult {
 		foreach($user_settings as $user_setting) {
 			if(isset($input[$user_setting->get('stg_name')])){
 				$stg_name = $user_setting->get('stg_name');
+				// A CSRF token, a submit button and a readonly path mirror all
+				// arrive in this POST and none of them is a setting.
+				if (Setting::isReservedName($stg_name)) {
+					continue;
+				}
 				$value = $input[$stg_name];
 				// Only gate a genuine change (unchanged value re-submitted is a no-op).
 				if ($acting_has_vault && !$vault_window_open
@@ -171,6 +176,11 @@ function admin_settings_logic(array $input): LogicResult {
 		foreach($input as $setting_name => $setting_value) {
 			// Skip if already processed (already exists in database)
 			if(in_array($setting_name, $processed_settings)) continue;
+
+			// Never mint a row for form or request plumbing. This loop is how
+			// _csrf_token, submit_button, __route and the captcha response
+			// fields became settings rows in the first place.
+			if (Setting::isReservedName($setting_name)) continue;
 
 			// Create new setting - only happens on explicit save
 			error_log("Settings: Creating new setting '{$setting_name}' with value '{$setting_value}'");

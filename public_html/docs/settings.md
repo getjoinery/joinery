@@ -17,11 +17,21 @@ For plugin-owned settings that need to exist on fresh install without admin inte
 
 ### Auto-Creation Feature
 
-Settings are automatically created when you:
-1. Add a form field to admin_settings.php (or plugin settings_form.php)
-2. An admin saves the form
-3. The system detects the setting doesn't exist in the database
-4. The setting is created with the submitted value
+A core setting rendered on the General Settings page is created on save if no row
+exists yet: add the field, an admin saves, and the row appears with the submitted
+value. Declaring it in `settings.json` is still the right way to give it a factory
+default and to make it exist on a fresh install.
+
+**Reserved names.** Not every field in the POST is a setting. The form machinery
+contributes a CSRF token, a submit button, captcha responses and the routing
+parameter, and the General page renders `*_readonly` mirrors of paths that come
+from `Globalvars_site.php`. `Setting::isReservedName()` names that boundary, and
+those names are never written or created — see the list in `data/settings_class.php`.
+
+**Plugin settings do not auto-create by name.** A plugin's section on the Plugin
+Settings tab writes only what that plugin declares in `plugin.json`, creating a
+declared row if it is missing. A field whose name is absent from the manifest is
+ignored.
 
 **Important:** Settings are NOT created when accessed via `get_setting()`. They return an empty string if missing, with a log entry for debugging.
 
@@ -84,7 +94,15 @@ Use Path A when the setting needs a sensible default from day one (feature gates
 
 ### For Plugin Settings
 
-Plugins can integrate their settings directly into the main settings page using a simple include-based approach.
+Plugin-owned settings are administered on the **Plugin Settings** tab
+(`/admin/admin_settings_plugins`), one section per plugin. A plugin gets a
+section by shipping `settings_form.php` plus a `settings` block in
+`plugin.json` — no registration step.
+
+Each section is an independent form with its own Save button, so an invalid
+field in one plugin cannot block saving another, and a save writes only the
+settings that plugin declares. Only active plugins get a section; a deactivated
+plugin's stored values stay in the database but are not shown or editable.
 
 #### Step 0: Declare defaults in plugin.json
 
@@ -105,8 +123,9 @@ Create `/plugins/{your_plugin}/settings_form.php`:
 
 ```php
 <?php
-// This file is included within admin_settings.php context
-// $formwriter, $settings, and $session are already available
+// Included inside this plugin's section on the Plugin Settings tab.
+// $formwriter, $settings, and $session are already available.
+// Output fields only — the page owns the form tag and the Save button.
 
 // IMPORTANT: All settings MUST be prefixed with your plugin name
 // to avoid conflicts with other plugins and core settings.
@@ -141,7 +160,9 @@ This prevents conflicts between plugins and with core settings.
 
 #### Step 3: That's It!
 
-Your plugin settings will automatically appear in the main Settings page under "Plugin Settings" section. When an admin saves the form, any new settings are automatically created.
+Your plugin gets its own section on the Plugin Settings tab as soon as the
+plugin is active. Saving that section writes the settings your `plugin.json`
+declares, creating any declared row that is missing.
 
 ### Available Form Field Types
 
@@ -233,10 +254,18 @@ An uninstall hook is still useful for cleaning up things the declarative systems
 
 ### Plugin Settings Not Showing
 
-1. Verify file exists: `/plugins/{plugin}/settings_form.php`
-2. Check file permissions (must be readable)
-3. Verify plugin is in the plugins directory
-4. Check for PHP syntax errors: `php -l /plugins/{plugin}/settings_form.php`
+1. Verify the plugin is **active** — only active plugins get a section, and the
+   Plugin Settings tab is hidden entirely when no active plugin ships a form
+2. Verify file exists: `/plugins/{plugin}/settings_form.php`
+3. Check file permissions (must be readable)
+4. Verify plugin is in the plugins directory
+5. Check for PHP syntax errors: `php -l /plugins/{plugin}/settings_form.php`
+
+### Plugin Setting Not Saving
+
+A section's save writes only the names that plugin declares in `plugin.json`.
+A field rendered by `settings_form.php` whose name is missing from the manifest's
+`settings` block is ignored on submit — add the declaration, then save again.
 
 ### Empty Values After Fresh Install
 

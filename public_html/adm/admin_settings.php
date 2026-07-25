@@ -58,14 +58,7 @@
 		   . '</div>';
 	}
 
-	// Tab menu for settings pages
-	$tab_menus = array('General Settings' => '/admin/admin_settings');
-	// Payment settings live in the store plugin — only offer the tab when active.
-	if (PluginHelper::isPluginActive('store')) {
-		$tab_menus['Payment Settings'] = '/plugins/store/admin/admin_settings_payments';
-	}
-	$tab_menus['Email Settings'] = '/admin/admin_settings_email';
-	echo AdminPage::tab_menu($tab_menus, 'General Settings');
+	echo AdminPage::settings_tab_menu('General Settings');
 
 	$formwriter = $page->getFormWriter('form1');
 
@@ -1336,29 +1329,6 @@
 	]);
 
 	echo '<hr>';
-
-	// Scan for plugin settings forms and only show section if any exist
-	$plugins = LibraryFunctions::list_plugins();
-	$plugin_settings_forms = array();
-	foreach($plugins as $plugin) {
-		if(!PluginHelper::isPluginActive($plugin)) {
-			continue;
-		}
-		$settings_form = PathHelper::getIncludePath("plugins/$plugin/settings_form.php");
-		if(file_exists($settings_form)) {
-			$plugin_settings_forms[$plugin] = $settings_form;
-		}
-	}
-
-	if(!empty($plugin_settings_forms)) {
-		echo '<hr><h2 id="plugin-settings">Plugin Settings</h2>';
-		foreach($plugin_settings_forms as $plugin => $settings_form) {
-			echo "<div class='plugin-settings-section'>";
-			echo "<h4>" . ucfirst($plugin) . " Plugin</h4>";
-			include($settings_form);
-			echo "</div>";
-		}
-	}
 
 	$formwriter->submitbutton('submit_button', 'Submit');
 	$formwriter->end_form();

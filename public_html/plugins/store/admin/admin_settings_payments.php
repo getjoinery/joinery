@@ -63,13 +63,7 @@
 	$pageoptions['title'] = "Settings";
 	$page->begin_box($pageoptions);
 
-	// Tab menu for settings pages
-	$tab_menus = array(
-		'General Settings' => '/admin/admin_settings',
-		'Payment Settings' => '/plugins/store/admin/admin_settings_payments',
-		'Email Settings' => '/admin/admin_settings_email',
-	);
-	echo AdminPage::tab_menu($tab_menus, 'Payment Settings');
+	echo AdminPage::settings_tab_menu('Payment Settings');
 
 	$formwriter = $page->getFormWriter('form1');
 

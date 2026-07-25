@@ -718,7 +718,7 @@ Profile menu items appear in the user dropdown. They are flat — no parent/item
 
 ### Plugin Settings (Declarative)
 
-> ⚠️ **Settings are a two-step setup.** Declaring in `plugin.json` only seeds the row in `stg_settings` — it does **not** make the setting appear in the admin UI. To expose a setting on `/admin/admin_settings`, you must also create a `settings_form.php` file in your plugin directory (see [Plugin Settings Form](#plugin-settings-form) below). Setting names in the two files must match exactly.
+> ⚠️ **Settings are a two-step setup.** Declaring in `plugin.json` only seeds the row in `stg_settings` — it does **not** make the setting appear in the admin UI. To expose a setting on the **Plugin Settings** tab (`/admin/admin_settings_plugins`), you must also create a `settings_form.php` file in your plugin directory (see [Plugin Settings Form](#plugin-settings-form) below). Setting names in the two files must match exactly: the manifest is both what gets seeded and what a save is allowed to write.
 
 Plugin default settings are declared in `plugin.json` under an optional `settings` key. On activate and on every sync, PluginManager seeds any declared row that doesn't already exist in `stg_settings`. Existing values are never overwritten.
 
@@ -754,7 +754,7 @@ Validation failures throw. On `activate()` the plugin does not activate; on `syn
 
 **Orphan rows:** Settings dropped from the manifest in a later version are **not** automatically deleted. Use an SQL migration if you need the row gone. Orphan setting rows are otherwise harmless — nothing reads them.
 
-**Blank defaults:** `default: ""` creates a row with an empty value. Use this for things that have no meaningful factory default but should still be present (API keys, SMTP hosts, custom CSS) so the row exists for `settings_form.php` to render and for admins to fill in. Omitting the declaration entirely means no row in `stg_settings`, even if `settings_form.php` references the name — the form-page save logic auto-creates missing rows on first submit, but until then `get_setting()` returns `''` (an empty string, and logs a notice — pass the `$fail_silently` flag to suppress it) and the field renders empty.
+**Blank defaults:** `default: ""` creates a row with an empty value. Use this for things that have no meaningful factory default but should still be present (API keys, SMTP hosts, custom CSS) so the row exists for `settings_form.php` to render and for admins to fill in. **Declaring is mandatory, not a convenience:** the manifest is also the write scope, so a field your `settings_form.php` renders but the manifest does not declare will display, accept typing, and silently fail to save. `get_setting()` returns `''` for it (and logs a notice — pass the `$fail_silently` flag to suppress it).
 
 **Uninstall:** On uninstall, PluginManager deletes rows matching the names in the current manifest. Settings declared in an earlier version but dropped from the current manifest are left in place.
 
@@ -922,9 +922,9 @@ Rules:
 
 ### Plugin Settings Form
 
-Settings declared in `plugin.json`'s `settings` array (see [Plugin Settings](#plugin-settings-declarative) above) are seeded into the database on plugin activate. The `settings_form.php` file renders them in the admin settings page. The names used in both must match exactly — the manifest handles seeding, the form file handles UI.
+Settings declared in `plugin.json`'s `settings` array (see [Plugin Settings](#plugin-settings-declarative) above) are seeded into the database on plugin activate. The `settings_form.php` file renders them in the admin settings page. The names used in both must match exactly — the manifest handles seeding, the form file handles UI, and **the manifest is also the write scope**: a field whose name the manifest does not declare renders but is ignored on save.
 
-If your plugin has configurable settings, create a `settings_form.php` file in your plugin directory. The admin settings page (`/adm/admin_settings`) **automatically discovers and includes** this file — no registration required.
+If your plugin has configurable settings, create a `settings_form.php` file in your plugin directory. The **Plugin Settings** tab (`/admin/admin_settings_plugins`) **automatically discovers and includes** this file as its own section — no registration required. The section appears while the plugin is active.
 
 ```
 plugins/my-plugin/settings_form.php
@@ -958,8 +958,9 @@ $formwriter->checkboxinput('my_plugin_enabled', 'Enable My Plugin', [
 - All setting names **must be prefixed** with your plugin name (e.g. `my_plugin_`) to avoid collisions with core settings or other plugins.
 - Use `$settings->get_setting('name')` to read current values — this handles missing rows gracefully.
 - Use `passwordinput` for secrets (API keys, tokens) so the value is masked in the browser.
-- The form submit is handled by the settings page — your fields are saved automatically alongside all other settings.
-- Declare the setting in `plugin.json`'s `settings` array so it exists on fresh installs (see [Plugin Settings](#plugin-settings-declarative) above).
+- **Output fields only.** Do not open or close a `<form>`, and do not add a submit button — your section is already a form, and the page adds its own Save. A nested `<form>` is invalid HTML and the inner one is dropped by the browser.
+- The form submit is handled by the settings page. Your section saves independently of every other plugin's, and writes only the settings your manifest declares.
+- Declare the setting in `plugin.json`'s `settings` array so it exists on fresh installs and is writable from the form (see [Plugin Settings](#plugin-settings-declarative) above).
 
 ### Uninstall Script
 

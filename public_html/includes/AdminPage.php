@@ -38,6 +38,30 @@ class AdminPage extends PublicPage {
 
 
 
+	/**
+	 * Render the settings tab strip.
+	 *
+	 * Every settings tab page calls this and passes only its own label, so the
+	 * tab list has one definition. Payment Settings and Plugin Settings are
+	 * conditional: each appears only when something is behind it.
+	 *
+	 * @param string|null $current Label of the calling page's tab
+	 * @return string HTML
+	 */
+	public static function settings_tab_menu($current = NULL) {
+		$tab_menus = array('General Settings' => '/admin/admin_settings');
+		// Payment settings live in the store plugin — only offer the tab when active.
+		if (PluginHelper::isPluginActive('store')) {
+			$tab_menus['Payment Settings'] = '/plugins/store/admin/admin_settings_payments';
+		}
+		$tab_menus['Email Settings'] = '/admin/admin_settings_email';
+		// Nothing to administer when no active plugin ships a settings form.
+		if (!empty(PluginHelper::getSettingsForms())) {
+			$tab_menus['Plugin Settings'] = '/admin/admin_settings_plugins';
+		}
+		return static::tab_menu($tab_menus, $current);
+	}
+
 	public function admin_header($options=array()) {
 		$session = SessionControl::get_instance();
 		$_GLOBALS['page_header_loaded'] = true;
