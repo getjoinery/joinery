@@ -17,7 +17,7 @@
  *   - The FleetReconcile scheduled task (cron, operator context) dispatches
  *     the flagged jobs, reconciles finished ones, and re-checks entitlement.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_fleet_shard_class.php'));
@@ -170,6 +170,10 @@ class FleetService {
 			'status'          => (string)$slot->get('mft_status'),
 			'slug'            => $slug,
 			'mx_hostname'     => (string)$slot->get('mft_mx_hostname'),
+			// The shard's own hostname, which its milters stamp Authentication-Results
+			// under. The tenant needs it to trust those stamps: the MX hostname above
+			// is a per-tenant name and never appears on a stamp.
+			'authserv_id'     => (string)$shard->get('mfs_hostname'),
 			'shard_public_ip' => (string)$shard->get('mfs_public_ip'),
 			'wg_endpoint'     => (string)$shard->get('mfs_wg_endpoint'),
 			'wg_public_key'   => (string)$shard->get('mfs_wg_public_key'),

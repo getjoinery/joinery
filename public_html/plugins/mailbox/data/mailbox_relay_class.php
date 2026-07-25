@@ -35,8 +35,8 @@
  * enrollment instead of self-provisioned ones. Either way this row remains the
  * deployment's ONE relay, so active() stays a singleton.
  *
- * @version 1.1 - tenant coordinates (slug, hosted-slot fields) + derived
- *                pull-account/spool/fragment-path helpers
+ * @version 1.2 - tenant coordinates (slug, hosted-slot fields) + derived
+ *                pull-account/spool/fragment-path helpers; recorded authserv-id
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -83,6 +83,13 @@ class MailboxRelay extends SystemBase {
 		'mrl_is_hosted'          => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		'mrl_mx_hostname'        => array('type'=>'varchar(255)'),
 		'mrl_fleet_slot_id'      => array('type'=>'int8'),
+		// The name the relay's milters stamp Authentication-Results under — its
+		// own mail hostname, and the only authserv-id trusted on a pulled message
+		// (InboundEmailRouter::authFromRelayMeta). It is NOT the MX hostname on a
+		// fleet slot: the MX name is per-tenant, while the stamp carries the
+		// shard's. Empty falls back to the MX hostname, which is the same host on
+		// a self-hosted relay.
+		'mrl_authserv_id'        => array('type'=>'varchar(255)'),
 		// WireGuard: the relay's public key + listen endpoint (host:port), and the
 		// tunnel IP assigned to the relay. Joinery always initiates the peering.
 		'mrl_wg_public_key'      => array('type'=>'varchar(255)'),
@@ -190,6 +197,27 @@ class MailboxRelay extends SystemBase {
 	public function spoolPath(): string {
 		$path = rtrim(trim((string)$this->get('mrl_spool_path')), '/');
 		return $path !== '' ? $path : ('/var/spool/joinery-relay/' . $this->tenantSlug());
+	}
+
+	/**
+	 * The name this relay's milters stamp Authentication-Results under, and so
+	 * the only authserv-id trusted on a message pulled from it
+	 * (InboundEmailRouter::authFromRelayMeta).
+	 *
+	 * The recorded value wins, because on a hosted fleet slot it is the only
+	 * correct answer: the MX hostname there is a per-tenant name the shard never
+	 * stamps under. The MX hostname is the fallback for a self-hosted relay, where
+	 * the two are the same host. Empty when neither is a hostname — mrl_name is a
+	 * label on a fleet slot, never a host.
+	 */
+	public function authservId(): string {
+		foreach (array('mrl_authserv_id', 'mrl_mx_hostname', 'mrl_name') as $field) {
+			$host = strtolower(trim((string)$this->get($field)));
+			if ($host !== '' && strpos($host, '.') !== false) {
+				return $host;
+			}
+		}
+		return '';
 	}
 
 	/** The tenant's map-fragment drop area on the relay (fixed relay layout). */

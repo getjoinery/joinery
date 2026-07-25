@@ -16,7 +16,7 @@
  * registration while a slot exists. The Setup tab's ownership row re-verifies
  * them on every check pass — publishing the TXT record is all the user does.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
@@ -147,6 +147,7 @@ class FleetClient {
 		$relay->set('mrl_name', 'Hosted fleet slot');
 		$relay->set('mrl_tenant_slug', substr((string)($c['slug'] ?? ''), 0, 28));
 		$relay->set('mrl_mx_hostname', substr((string)($c['mx_hostname'] ?? ''), 0, 255));
+		$relay->set('mrl_authserv_id', substr((string)($c['authserv_id'] ?? ''), 0, 255));
 		$relay->set('mrl_fleet_slot_id', intval($c['slot_id'] ?? 0) ?: null);
 		// The tunnel: the shard listens at .1; we dial out to its endpoint.
 		$relay->set('mrl_host', (string)($c['relay_tunnel_ip'] ?? '10.99.0.1'));

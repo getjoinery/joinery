@@ -23,7 +23,7 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
- * @version 1.23
+ * @version 1.24
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -422,6 +422,14 @@ class InboundEmailSetupCheck {
 		$provider = strtolower(trim((string)$this->settings->get_setting('mailbox_provider'))) ?: 'postfix';
 		$fix = $this->installerFix();
 
+		// (a0) Fronted topology: the RELAY is the verifying MTA. Inbound mail never
+		// reaches this box's milters — it is pulled off the relay spool — so their
+		// state here says nothing, and probing them would prescribe an installer run
+		// that cannot change the answer.
+		if ($this->fronted()) {
+			return $this->checkRelayInboundVerification($label);
+		}
+
 		// (a) Provider-support probe. Postfix verifies via milters; the webhook
 		// providers (Mailgun/SendGrid/SES) read verdicts from their own upstream
 		// verification — see specs/inbound_mailgun_verification.md. Anything else
@@ -549,6 +557,71 @@ class InboundEmailSetupCheck {
 			$name . ' supplies SPF/DKIM/DMARC verdicts on each inbound message; none received yet to confirm it.',
 			'When ' . $name . ' delivers a message through the inbound webhook, its verdicts are recorded '
 			. '(iem_auth_source = "' . $provider . '"). Send a test message and re-check to confirm end-to-end.',
+			null, true);
+	}
+
+	/**
+	 * Inbound-verification status under a fronted topology, where the relay runs
+	 * the verifying milters and hands the stamped Authentication-Results to this
+	 * box in the sealed .meta sidecar (InboundEmailRouter::authFromRelayMeta).
+	 *
+	 * The signal is behavioral, as everywhere else: recent mail carrying
+	 * iem_auth_source = 'relay'. What makes this check worth its own branch is the
+	 * middle case — mail arriving with NO relay verdict. That means the relay is
+	 * delivering but its stamps are being refused, and the reason is almost always
+	 * an authserv-id that is not the relay's mail hostname. Reporting that as
+	 * 'send a test message' would hide a live defect behind a to-do.
+	 */
+	private function checkRelayInboundVerification($label) {
+		$topo = $this->topology();
+		// The stamping name, not the MX name — on a fleet slot the MX hostname is a
+		// per-tenant record the shard never stamps under, so naming it here would
+		// send an operator looking at the wrong host.
+		$relay_host = ($topo['relay'] !== null) ? $topo['relay']->authservId() : '';
+		if ($relay_host === '') {
+			$relay_host = $topo['mx_hostname'] !== '' ? $topo['mx_hostname'] : 'the relay';
+		}
+		$where = ($topo['mode'] === 'fleet') ? 'hosted relay' : 'relay';
+
+		$relay_seen = 0;
+		$any_seen = 0;
+		try {
+			$db = DbConnector::get_instance()->get_db_link();
+			$row = $db->query(
+				"SELECT COUNT(*) AS total,
+				        COUNT(*) FILTER (WHERE iem_auth_source = 'relay') AS relayed
+				   FROM iem_inbound_email_messages
+				  WHERE iem_received_time > NOW() - INTERVAL '30 days'"
+			)->fetch(PDO::FETCH_ASSOC);
+			$any_seen = intval($row['total'] ?? 0);
+			$relay_seen = intval($row['relayed'] ?? 0);
+		} catch (\Throwable $e) {
+			return $this->r('host.inbound_verification', '', 'host', $label, self::REQUIRED, self::UNKNOWN,
+				'Could not read stored messages to confirm inbound verification.', $e->getMessage(), null, true);
+		}
+
+		if ($relay_seen > 0) {
+			return $this->r('host.inbound_verification', '', 'host', $label, self::REQUIRED, self::PASS,
+				'Inbound mail is being authentication-verified — recent messages carry SPF/DKIM/DMARC '
+				. 'verdicts stamped by ' . $relay_host . '.', '', null, true);
+		}
+
+		if ($any_seen > 0) {
+			return $this->r('host.inbound_verification', '', 'host', $label, self::REQUIRED, self::WARN,
+				'Mail is arriving from the ' . $where . ', but none of it carries a verdict — SPF/DKIM/DMARC '
+				. 'are recorded as "unverified".',
+				$any_seen . ' message(s) stored in the last 30 days, none stamped by the relay. The relay only '
+				. 'signs Authentication-Results under its own mail hostname (' . $relay_host . '), and this box '
+				. 'accepts a stamp only under that name. A relay provisioned with a different hostname, or with '
+				. 'its opendkim/opendmarc milters stopped, produces exactly this. Re-run the relay provisioner '
+				. 'on the relay host and send a test message.',
+				null, true);
+		}
+
+		return $this->r('host.inbound_verification', '', 'host', $label, self::REQUIRED, self::INFO,
+			'The ' . $where . ' verifies SPF/DKIM/DMARC and passes the verdicts through; no mail received yet '
+			. 'to confirm it.',
+			'Send a test message to an address on a hosted domain and re-check.',
 			null, true);
 	}
 
@@ -1229,7 +1302,14 @@ class InboundEmailSetupCheck {
 				'', array('text' => 'Create an alias for ' . $address . ' on the Forwarding Aliases tab.'));
 		}
 
-		// End-to-end: has a real inbound message for this address been logged?
+		// End-to-end: has a real inbound message for this address arrived?
+		//
+		// Two places record an arrival, because two ingest paths exist. The
+		// colocated path writes a transaction row per message (iel_*). The relay
+		// path stores the message and writes no transaction row — the relay already
+		// made the forwarding decisions, so there is no local transaction to log.
+		// Asking only the log would leave a relay deployment permanently warning
+		// that nothing has ever arrived while its mailbox fills up.
 		try {
 			$db = DbConnector::get_instance()->get_db_link();
 			$stmt = $db->prepare(
@@ -1237,20 +1317,37 @@ class InboundEmailSetupCheck {
 				. 'WHERE lower(iel_to_address) = ? ORDER BY iel_create_time DESC LIMIT 1');
 			$stmt->execute(array($address));
 			$row = $stmt->fetch(PDO::FETCH_ASSOC);
+			if (!$row) {
+				$stmt = $db->prepare(
+					'SELECT iem_received_time FROM iem_inbound_email_messages '
+					. 'WHERE lower(iem_recipient) = ? ORDER BY iem_received_time DESC LIMIT 1');
+				$stmt->execute(array($address));
+				$stored = $stmt->fetch(PDO::FETCH_ASSOC);
+			} else {
+				$stored = null;
+			}
+
 			if ($row) {
 				$out[] = $this->r('e2e.test_message', $address, 'e2e', 'End-to-end delivery', self::REQUIRED, self::PASS,
 					'Inbound mail for ' . $address . ' has been received and logged (last: '
 					. $row['iel_create_time'] . ', status ' . $row['iel_status'] . ').', '', null, true);
+			} elseif (!empty($stored)) {
+				$out[] = $this->r('e2e.test_message', $address, 'e2e', 'End-to-end delivery', self::REQUIRED, self::PASS,
+					'Inbound mail for ' . $address . ' has been received and stored (last: '
+					. $stored['iem_received_time'] . ').', '', null, true);
 			} else {
 				$out[] = $this->r('e2e.test_message', $address, 'e2e', 'End-to-end delivery', self::REQUIRED, self::WARN,
-					'No inbound message for ' . $address . ' has been logged yet.',
-					'This is the only real proof that inbound port 25 is reachable from the internet.',
+					'No inbound message for ' . $address . ' has arrived yet.',
+					$this->fronted()
+						? 'This is the only real proof that the relay is reachable from the internet and its '
+							. 'spool is being pulled.'
+						: 'This is the only real proof that inbound port 25 is reachable from the internet.',
 					array('text' => 'Send a test email to ' . $address
 						. ' from any external account, then press Re-check.'), true);
 			}
 		} catch (\Throwable $e) {
 			$out[] = $this->r('e2e.test_message', $address, 'e2e', 'End-to-end delivery', self::REQUIRED, self::UNKNOWN,
-				'Could not read the inbound email log.', $e->getMessage());
+				'Could not read the inbound email records.', $e->getMessage());
 		}
 
 		return $out;

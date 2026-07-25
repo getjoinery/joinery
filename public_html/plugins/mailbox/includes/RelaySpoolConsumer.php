@@ -28,7 +28,7 @@
  * own spool subdirectory and the ack is the tenant shell's joinery-ack verb —
  * ids only, no paths, no root.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySsh.php'));
@@ -202,14 +202,15 @@ class RelaySpoolConsumer {
 					. ' for ' . $recipient . ' — no single owner and no vault matches the seal key;'
 					. ' it cannot be parsed until an owner is assigned');
 			}
-			$result = $this->router->storeRelayPending($meta, $sealed_raw, $domain, $alias, intval($owner_id ?? 0));
+			$result = $this->router->storeRelayPending($meta, $sealed_raw, $domain, $alias,
+				intval($owner_id ?? 0), $this->relayAuthservId());
 			return $result['dedup'] ? 'dedup' : 'pending';
 		}
 
 		// Transport: open now with the ambient secret and run the store ingest.
 		$raw = (new SealedBox())->openDek($sealed_raw, $this->transportSecret());
 		$parsed = $this->router->parseEmail($raw);
-		$auth = $this->router->authFromRelayMeta($meta);
+		$auth = $this->router->authFromRelayMeta($meta, $this->relayAuthservId());
 		$result = $this->router->storeMessage($raw, $parsed, $alias, $domain, $recipient, $auth);
 		if (!$result['dedup'] && isset($result['message']) && $result['message'] !== null) {
 			// Stamp the spool id so a re-pull dedups on it directly. TARGETED UPDATE
@@ -229,6 +230,22 @@ class RelaySpoolConsumer {
 			$this->transport_secret = $this->relay->transportSecretKey();
 		}
 		return $this->transport_secret;
+	}
+
+	/**
+	 * The authserv-id whose Authentication-Results stamps we trust on a pulled
+	 * message: the relay's own mail hostname (MailboxRelay::authservId). The
+	 * relay's milters did the verification and stamp under this name, and its
+	 * opendkim strips sender-supplied lines carrying it (provision_relay.sh
+	 * RemoveARFrom), so it is the one name on the message a sender cannot have
+	 * written.
+	 *
+	 * Empty when the relay row records no hostname at all, which lets the router
+	 * fall back to this deployment's own mail hostname — right for a colocated
+	 * relay, where they are the same host.
+	 */
+	private function relayAuthservId(): string {
+		return $this->relay->authservId();
 	}
 
 	/**

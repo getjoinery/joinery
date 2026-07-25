@@ -229,6 +229,11 @@ precedence order:
    `Authentication-Results` header with our `AuthservID`. `AuthenticationResults`
    (in `includes/`) parses that header and the router records
    `iem_auth_source = 'milter'`.
+3. **Relay stamps.** Under a fronted topology the relay is the verifying MTA: its
+   own milters evaluate the message on receipt, and the sealer carries every
+   `Authentication-Results` line into the `.meta` sidecar.
+   `InboundEmailRouter::authFromRelayMeta()` reads them when the message is
+   pulled and records `iem_auth_source = 'relay'`.
 
 Either way the verdicts land in `iem_spf_result` / `iem_dkim_result` /
 `iem_dmarc_result`. Each provider normalizes its native field values to the same
@@ -247,9 +252,24 @@ everything). A forged `X-Mailgun-Spf`, `SPF`, or `receipt` blob on mail that did
 **not** arrive through the matching provider is never honored: the `auth` key
 only exists when that provider object handled the request. For the header path,
 a message can carry attacker-supplied `Authentication-Results` lines from
-upstream hops, so the parser honors **only** a line whose authserv-id equals our
-mail host (the milters' `AuthservID`, == `mailbox_mail_hostname` — they
-must match or verdicts are ignored). Lines stamped by anyone else are discarded.
+upstream hops, so the parser honors **only** a line whose authserv-id is the one
+belonging to the MTA that actually verified this message. Lines stamped by
+anyone else are discarded, and the trusted name differs by path:
+
+- **Colocated:** the local milters' `AuthservID`, which `install_email.sh`
+  converges on `mailbox_mail_hostname`. They must match or verdicts are ignored.
+- **Relay (self-hosted or fleet slot):** the relay's own mail hostname, resolved
+  by `MailboxRelay::authservId()` and passed in by `RelaySpoolConsumer`. That is
+  `mrl_authserv_id` when recorded, falling back to `mrl_mx_hostname`. The two
+  differ on a hosted fleet slot, where the MX hostname is a per-tenant record
+  (`<slug>.<zone>`) and the shard stamps under its own hostname — so the slot
+  carries the shard's name in `authserv_id` from the fleet coordinates. On a
+  self-hosted relay they are the same host. This pairs with the relay's
+  `RemoveARFrom <relay hostname>`, which strips
+  sender-supplied lines bearing that name before its milters stamp — so the one
+  authserv-id accepted here is the one name a sender cannot smuggle in. The
+  deployment's own `mailbox_mail_hostname` is **not** trusted on a pulled
+  message; nothing on the relay strips lines carrying it.
 
 **The `unverified` state is normal, not a failure.** When neither a provider
 verdict nor a trusted `Authentication-Results` header is present — no verifying
@@ -259,7 +279,7 @@ milter installed, or mail that arrived some other way — the verdicts read
 verdict. Misreading a provider field is fail-safe the same way: an unrecognized
 value falls through to `none` (or, when no verdict field is present at all,
 `unverified`) — never a synthesized `pass`. The valid `iem_auth_source` values
-are `milter`, `mailgun`, `sendgrid`, `ses`, and `none`.
+are `milter`, `relay`, `mailgun`, `sendgrid`, `ses`, and `none`.
 
 The message detail page and the Mailbox reader show the sourced verdicts, or an
 explicit "unverified — no verifying milter installed", never a bare red `fail`.
@@ -270,20 +290,48 @@ The Setup tab runs an **Inbound authentication verified** check
 (`host.inbound_verification` in `InboundEmailSetupCheck`) so a missing or broken
 verifier surfaces as an explained warning rather than a silent `unverified`:
 
+The check reads the topology first, because which verifier to interrogate
+follows from it. Under a fronted topology inbound mail never reaches this box's
+milters, so their state is not evidence of anything and is not probed — the
+question is whether the relay's stamps are arriving.
+
 - **WARN** — the selected provider has no inbound verification path at all,
   **or** the provider is Postfix but verification is broken (milter unreachable,
   opendmarc missing, config drift). Fix: run `install_email.sh`, then send a test
   message to confirm an `Authentication-Results` header appears.
-- **INFO** (neutral) — the provider verifies, but no verdict-carrying mail has
+- **WARN (fronted)** — mail is arriving from the relay but none of it carries a
+  verdict. The relay is delivering while its stamps are being refused, which is
+  what an authserv-id that is not the relay's mail hostname looks like, or a
+  relay whose own milters are stopped. Fix: re-run the relay provisioner on the
+  relay host, then send a test message. This case is called out separately
+  because the alternative — reporting it as *nothing has arrived yet* — hides a
+  live defect behind a to-do.
+- **INFO** (neutral) — the verifier is in place, but no verdict-carrying mail has
   arrived **yet** to confirm it. For Postfix this also covers a host whose config
   isn't readable by the web user; for a webhook provider (Mailgun/SendGrid/SES)
-  it simply means no message stamped with that provider's `iem_auth_source` has
+  or a relay it simply means no message stamped with that `iem_auth_source` has
   been received yet. We legitimately can't tell yet — not an alarm.
-- **PASS** — recent mail carries this provider's verdicts (`iem_auth_source` =
-  `milter` for Postfix, or `mailgun` / `sendgrid` / `ses` for a webhook
-  provider). The behavioral signal (verdict-carrying mail actually seen) is
-  authoritative, because a milter can be wired-but-unreachable; for Postfix the
-  config probe only enriches the reason.
+- **PASS** — recent mail carries verdicts (`iem_auth_source` = `milter` for
+  Postfix, `relay` under a fronted topology, or `mailgun` / `sendgrid` / `ses`
+  for a webhook provider). The behavioral signal (verdict-carrying mail actually
+  seen) is authoritative, because a milter can be wired-but-unreachable; for
+  Postfix the config probe only enriches the reason.
+
+#### End-to-end delivery check (Setup tab)
+
+The **End-to-end delivery** check (`e2e.test_message`) is the only proof that
+the outside world can actually reach an address: that inbound port 25 answers on
+a colocated deployment, or that the relay is reachable and its spool is being
+pulled on a fronted one.
+
+It asks both places an arrival is recorded, because the two ingest paths record
+in different ones. The colocated path writes a transaction row per message
+(`iel_inbound_email_logs`) and the check reports its status and time. The relay
+path stores the message and writes no transaction row — the relay already made
+the forwarding decisions, so there is no local transaction to log — and the
+check falls back to the stored message (`iem_inbound_email_messages`). Asking
+only the log would leave a relay deployment permanently warning that nothing has
+ever arrived while its mailbox fills up.
 
 ### The inbound-domain list is live, never "installed"
 

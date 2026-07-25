@@ -19,9 +19,7 @@
  *
  * Test seams: $driver_factory and $runner are injectable statics.
  *
- * @version 1.4 - instance labels name the relay (hostname + run id) instead of a
- *                bare counter; forgetHostKey on binding a row to a new machine
- * @version 1.3
+ * @version 1.5 - records the relay's authserv-id alongside its MX hostname
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provision_class.php'));
@@ -308,6 +306,11 @@ class RelayCloudProvisioner {
 		$relay->set('mrl_public_ip', $public_ip);
 		$relay->set('mrl_tenant_slug', 'main');
 		$relay->set('mrl_mx_hostname', substr($mail_hostname, 0, 255));
+		// provision_relay.sh sets the milters' AuthservID to this same hostname, so
+		// it is what the relay's Authentication-Results stamps carry. Recorded
+		// explicitly rather than inferred from the MX name, which is only the same
+		// value on a self-hosted relay.
+		$relay->set('mrl_authserv_id', substr($mail_hostname, 0, 255));
 		$relay->set('mrl_ssh_user', 'jt-main');
 		$relay->set('mrl_ssh_port', 22);
 		$pull_key = RelaySsh::pullKeyPath();
