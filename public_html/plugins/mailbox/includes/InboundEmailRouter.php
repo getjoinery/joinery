@@ -75,7 +75,7 @@
  * paths alike, never IMAP-polled mail. forwardStoredMessage() relays a copy for a filter's
  * "Forward to" action, reusing the alias-forward envelope rebuild + relay.
  *
- * @version 1.23
+ * @version 1.24
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -608,8 +608,9 @@ class InboundEmailRouter {
 	 * next unlock. Dedup is keyed on the spool id (idempotent re-pull) and, as a
 	 * backstop, the message-id unique constraint. $owner_id is the alias's single
 	 * grantee (recorded so deferred ingest knows whose vault to unseal with).
+	 * $authserv_id is the relay's mail hostname — see authFromRelayMeta().
 	 */
-	public function storeRelayPending(array $meta, string $sealed_raw, $domain, $alias, int $owner_id): array {
+	public function storeRelayPending(array $meta, string $sealed_raw, $domain, $alias, int $owner_id, ?string $authserv_id = null): array {
 		$recipient = strtolower(trim((string)($meta['recipient'] ?? '')));
 		$message_id_header = trim((string)($meta['message_id'] ?? ''));
 		$message_id_header = ($message_id_header !== '') ? substr($message_id_header, 0, 255) : null;
@@ -619,7 +620,7 @@ class InboundEmailRouter {
 			'in-reply-to' => (string)($meta['in_reply_to'] ?? ''),
 		));
 		$thread_key = $this->computeThreadKey($parsed, $message_id_header);
-		$auth = $this->authFromRelayMeta($meta);
+		$auth = $this->authFromRelayMeta($meta, $authserv_id);
 
 		$row = array(
 			'iem_ied_inbound_email_domain_id' => $domain->key,
@@ -661,14 +662,31 @@ class InboundEmailRouter {
 	 * (specs/…hardened_ingest_relay § Phase 5.3), parsed exactly like the milter
 	 * path but tagged source='relay'. Falls back to 'unverified' when the relay
 	 * stamped nothing trustworthy.
+	 *
+	 * $authserv_id is the name whose stamps to trust, and it is the RELAY's mail
+	 * hostname — the relay's milters verified this message, so the relay is the
+	 * authserv-id on the line worth trusting. It pairs exactly with the relay's
+	 * opendkim `RemoveARFrom <relay hostname>` (provision_relay.sh), which strips
+	 * sender-supplied lines bearing that same name before the milters stamp: the
+	 * one name a forger cannot smuggle in is the one name accepted here.
+	 *
+	 * Omitting it falls back to this deployment's own mail hostname, which is
+	 * correct only where the relay is colocated (the two names are then the same
+	 * host). A fronting relay — self-hosted or a fleet slot — always carries its
+	 * own name, so callers holding the relay row must pass it; otherwise nothing
+	 * ever matches and every relayed message records 'unverified'.
+	 *
+	 * @param array       $meta        The .meta sidecar the sealer wrote.
+	 * @param string|null $authserv_id The relay's mail hostname; null = this box's.
 	 */
-	public function authFromRelayMeta(array $meta): array {
+	public function authFromRelayMeta(array $meta, ?string $authserv_id = null): array {
 		$default = array('dkim'=>'unverified','spf'=>'unverified','dmarc'=>'unverified','source'=>'none');
 
 		// The relay records EVERY Authentication-Results header in document order.
 		// Milters prepend, so the trusted (milter-stamped) verdicts are the earliest
 		// entries; a sender-forged A-R sits below. Walk top-down and take the FIRST
-		// verdict per method from a header whose authserv-id matches ours — first-wins
+		// verdict per method from a header whose authserv-id is the trusted one —
+		// first-wins
 		// mirrors the milter prepend and never lets a lower forged line beat it.
 		// (specs/mailbox_relay_fix_pack.md § Fix 2.) Back-compat: tolerate a legacy
 		// single string.
@@ -680,7 +698,13 @@ class InboundEmailRouter {
 			return $default;
 		}
 
-		$authserv_id = strtolower(trim((string)$this->settings->get_setting('mailbox_mail_hostname')));
+		$authserv_id = strtolower(trim((string)$authserv_id));
+		if ($authserv_id === '') {
+			$authserv_id = strtolower(trim((string)$this->settings->get_setting('mailbox_mail_hostname')));
+		}
+		if ($authserv_id === '') {
+			return $default; // nothing to match against; trust nothing
+		}
 		$verdict = array('dkim'=>null, 'spf'=>null, 'dmarc'=>null);
 		$matched = false;
 
