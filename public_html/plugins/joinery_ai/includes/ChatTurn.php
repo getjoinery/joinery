@@ -27,7 +27,7 @@ class ChatTurn {
         $stamper('Starting…');
         $unreachable = self::reachabilityError($conversation);
         if ($unreachable !== null) {
-            error_log('[joinery_ai chat] preflight unreachable: ' . $unreachable);
+            ChatAsync::log('[chat] preflight unreachable: ' . $unreachable);
             self::markFailed($assistant_msg, LlmProviderException::friendlyMessage('api_network_error'));
             return;
         }
@@ -36,12 +36,13 @@ class ChatTurn {
                 ChatAsync::streamSink($assistant_msg, '', $sealed,
                     (int)$conversation->get('aic_owner_user_id')), $stamper);
         } catch (LlmProviderException $e) {
-            error_log('[joinery_ai chat] provider error: ' . $e->getMessage());
-            self::markFailed($assistant_msg,
-                LlmProviderException::friendlyMessage(LlmProviderException::classify($e)));
+            ChatAsync::log('[chat] provider error (' . LlmProviderException::classify($e)
+                . ') on message #' . (int)$assistant_msg->key . ': ' . $e->getMessage());
+            self::markFailed($assistant_msg, LlmProviderException::operatorMessage($e));
             return;
         } catch (Throwable $e) {
-            error_log('[joinery_ai chat] turn failed: ' . $e->getMessage());
+            ChatAsync::log('[chat] turn failed on message #' . (int)$assistant_msg->key . ': '
+                . get_class($e) . ': ' . $e->getMessage());
             self::markFailed($assistant_msg, 'The assistant could not complete this turn.');
             return;
         }
@@ -92,7 +93,7 @@ class ChatTurn {
         $stamper('Resuming…');
         $unreachable = self::reachabilityError($conversation);
         if ($unreachable !== null) {
-            error_log('[joinery_ai chat] resume preflight unreachable: ' . $unreachable);
+            ChatAsync::log('[chat] resume preflight unreachable: ' . $unreachable);
             self::markFailed($msg, LlmProviderException::friendlyMessage('api_network_error'));
             return;
         }
@@ -103,12 +104,13 @@ class ChatTurn {
             $turn = ChatRunner::resumeTurn($conversation, $uid, $pending, $lead_text, $decision,
                 (int)$msg->key, $sink, $stamper);
         } catch (LlmProviderException $e) {
-            error_log('[joinery_ai chat] resume provider error: ' . $e->getMessage());
-            self::markFailed($msg,
-                LlmProviderException::friendlyMessage(LlmProviderException::classify($e)));
+            ChatAsync::log('[chat] resume provider error (' . LlmProviderException::classify($e)
+                . ') on message #' . (int)$msg->key . ': ' . $e->getMessage());
+            self::markFailed($msg, LlmProviderException::operatorMessage($e));
             return;
         } catch (Throwable $e) {
-            error_log('[joinery_ai chat] resume failed: ' . $e->getMessage());
+            ChatAsync::log('[chat] resume failed on message #' . (int)$msg->key . ': '
+                . get_class($e) . ': ' . $e->getMessage());
             self::markFailed($msg, 'The action could not be completed.');
             return;
         }

@@ -116,6 +116,12 @@ class LlmProviderFactory {
 
     private static function anthropic(): LlmProviderInterface {
         $key = (string)Globalvars::get_instance()->get_setting('joinery_ai_anthropic_api_key');
+        if ($key === '') {
+            throw new LlmProviderException(
+                'An Anthropic model is in use but joinery_ai_anthropic_api_key is empty. '
+                . 'Set it on the Joinery AI settings page.'
+            );
+        }
         return new AnthropicProvider($key);
     }
 

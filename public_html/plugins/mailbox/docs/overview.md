@@ -22,6 +22,11 @@ required step of mailbox setup.
 
 **Features:** multiple domains, multiple destinations per alias, catch-all addresses, SRS for SPF compatibility, inbound authentication results (SPF/DKIM/DMARC) read from the verifying MTA / provider, outbound DKIM signing (opendkim), per-alias and per-domain rate limiting, RBL spam filtering, inbound email logs with admin viewer, live DNS validation.
 
+> **Putting a domain on hosted mail:** the sender-identity layout, the record
+> set, the cutover order, and the provider and DNS behaviours that produce a
+> setup which looks correct and is not — see
+> [Bringing a Domain onto Hosted Mail](domain_onboarding.md).
+
 ## Installation
 
 ### Prerequisites

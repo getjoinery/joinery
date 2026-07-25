@@ -52,6 +52,26 @@ class ChatAsync {
         set_time_limit(0);
     }
 
+    /**
+     * Append a diagnostic line to the AI worker log.
+     *
+     * Turn diagnostics cannot use error_log() on the detached path. Under php-fpm,
+     * error_log() with no ini destination travels to Apache as a FastCGI stderr
+     * record — and detach() has already closed that stream, so anything logged
+     * after it is dropped on the floor with no trace. Writing the file directly is
+     * immune to that, and lands in the same log the spawned CLI worker redirects
+     * its stdio to, keeping one AI audit trail across both paths.
+     */
+    public static function log(string $message): void {
+        $line = '[' . gmdate('Y-m-d H:i:s') . ' UTC] ' . $message . "\n";
+        $path = PathHelper::getSiteRoot() . '/logs/joinery_ai_worker.log';
+        // Never let logging break a turn: a missing/unwritable logs dir is a
+        // deployment problem, not a reason to lose the answer the model produced.
+        if (@file_put_contents($path, $line, FILE_APPEND | LOCK_EX) === false) {
+            error_log('[joinery_ai] could not write ' . $path . ': ' . $message);
+        }
+    }
+
     /** Flush the partial answer onto the row at most this often / this many new
      *  chars — bounds DB writes while keeping the poll feeling live. */
     const STREAM_FLUSH_SECONDS = 0.4;

@@ -132,6 +132,14 @@ function admin_settings_logic(array $input): LogicResult {
 				if ($stg_name === 'webDir') {
 					$value = rtrim(preg_replace('#^https?://#i', '', $value), '/');
 				}
+				// An unchanged field is not a write. The settings form posts every
+				// setting on the page, so without this a single Save re-stamped
+				// stg_update_time on ~160 rows — which makes the column useless for
+				// answering "when did this value actually change?" and destroys the
+				// audit trail for the ones that did.
+				if ((string)$value === (string)$user_setting->get('stg_value')) {
+					continue;
+				}
 				$user_setting->set('stg_value', $value);
 				$user_setting->set('stg_update_time', 'NOW()');
 				$user_setting->set('stg_usr_user_id', $session->get_user_id());

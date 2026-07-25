@@ -2,7 +2,7 @@
 /**
  * Inbound Email - Create/Edit Alias
  *
- * @version 1.7
+ * @version 1.8
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -89,16 +89,18 @@ $formwriter->textinput('iea_alias', 'Mailbox', [
 ]);
 
 $formwriter->dropinput('iea_delivery_mode', 'Delivery Mode', [
+	// Store is listed first so it is what a new mailbox gets: a dropdown with no
+	// matching value selects its first option, and a new alias carries none.
 	'options' => [
-		'forward'           => 'Forward to destination address(es)',
 		'store'             => 'Store locally (no forwarding)',
+		'forward'           => 'Forward to destination address(es)',
 		'forward_and_store' => 'Forward and store a copy',
 	],
-	'helptext' => 'Forward mode requires at least one destination. Store mode persists messages '
-		. 'to the local mailbox (visible on the Mailbox tab) and does not forward.',
+	'helptext' => 'Store mode keeps messages in the local mailbox (visible on the Mailbox tab) '
+		. 'and does not forward. Forward mode requires at least one destination.',
 	'visibility_rules' => [
-		'forward'           => ['show' => ['iea_destinations'], 'hide' => []],
 		'store'             => ['show' => [], 'hide' => ['iea_destinations']],
+		'forward'           => ['show' => ['iea_destinations'], 'hide' => []],
 		'forward_and_store' => ['show' => ['iea_destinations'], 'hide' => []],
 	],
 ]);

@@ -13,12 +13,20 @@ class LlmProviderException extends Exception {
      * Classify a provider failure into a stable code from its message. Shared by
      * RecipeRunner (records [code] on the run) and the chat endpoints (maps to a
      * user-facing message) so both surfaces read failures the same way. Codes:
-     * api_network_error, api_auth_failed, api_quota_exceeded,
+     * api_not_configured, api_network_error, api_auth_failed, api_quota_exceeded,
      * api_request_invalid, api_server_error.
      */
     public static function classify(Throwable $e): string {
         $msg = strtolower($e->getMessage());
 
+        // Nothing was ever sent: the provider's required setting is empty, so the
+        // factory refused to build it. A distinct code because the remedy is to
+        // configure a setting, not to retry — every provider phrases this as
+        // "<setting> is empty" (see LlmProviderFactory). Checked before the 4xx
+        // branch: this failure has no HTTP status to key on.
+        if (strpos($msg, 'is empty') !== false) {
+            return 'api_not_configured';
+        }
         // Local provider: connection refused to the configured base URL.
         if (strpos($msg, 'not reachable') !== false) {
             return 'api_network_error';
@@ -58,9 +66,28 @@ class LlmProviderException extends Exception {
         return 'api_server_error';
     }
 
+    /**
+     * The message to put on a failed row. A misconfiguration is reported in the
+     * provider's own words: those messages are written here in the plugin, name a
+     * setting rather than a value, and tell the operator exactly what to fill in —
+     * so collapsing them into generic text destroys the only useful thing about
+     * them. Every other failure class keeps the friendly text, since its detail is
+     * third-party wording that the operator cannot act on directly (the full
+     * message still reaches the worker log via the callers).
+     */
+    public static function operatorMessage(Throwable $e): string {
+        $code = self::classify($e);
+        if ($code === 'api_not_configured') {
+            return $e->getMessage();
+        }
+        return self::friendlyMessage($code);
+    }
+
     /** A user-facing message for a classify() code (for the chat surface). */
     public static function friendlyMessage(string $code): string {
         switch ($code) {
+            case 'api_not_configured':
+                return 'The AI provider is not configured — a required API key or model setting is empty. Set it on the Joinery AI settings page.';
             case 'api_network_error':
                 return 'Could not reach the AI provider. Check the provider settings (or that the local model server is running) and try again.';
             case 'api_no_response':
