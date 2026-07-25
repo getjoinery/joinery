@@ -208,6 +208,19 @@ fails the gate whenever a run leaves orphan rows, stray `harnesstest_%` users,
 or a serial sequence behind its table's `MAX(pkey)` — a leak surfaces in the
 very next run with the table named, not later as flakiness in another suite.
 
+It also names surviving rows in the fixture families that label themselves.
+Name any standalone fixture `HarnessTest <something>` in the table's name column
+(`evt_events`, `svy_surveys`, `grp_groups`, `pro_products`, `bkt_booking_types`,
+`mgn_managed_nodes`, `qst_questions` are covered) and a leak reports the table
+and the offending row instead of waiting to be noticed as a phantom entry in an
+admin screen. A fixture reachable from a registered parent needs no name.
+
+The cleanup list lives only in the test's own memory, so it survives a failure,
+an uncaught exception and a fatal error — all of which still run shutdown
+functions — plus `SIGTERM` (the runner's `timeout`) and `SIGINT` (`Ctrl-C`),
+both converted to `exit(1)` so teardown runs on the way out. Only `SIGKILL` and
+the OOM killer can strand fixtures.
+
 Settings and databases:
 
 - `get_setting_raw($name)` / `set_setting_raw($name, $value)` — persisted DB settings.
