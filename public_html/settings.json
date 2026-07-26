@@ -2,6 +2,7 @@
   "_comment": "Core settings seeded on every update_database run. Plugin-owned settings live in the plugin's plugin.json. See specs/declarative_plugin_settings.md for the scope principle. Values are always strings (use '0'/'1' for booleans, '42' for numbers).",
   "settingsGroups": {
     "general": "General settings",
+    "debug": "Debug",
     "paths": "Path configuration",
     "notifications": "Notification recipients",
     "upgrade": "Upgrade settings",
@@ -50,7 +51,7 @@
     { "name": "use_honeypot", "default": "1" },
     { "name": "vault_unlock_idle_minutes", "default": "30", "helptext": "Sealed Vault unlock window idle timeout, in minutes. One unlock opens every server-custody consumer (mail, chat); the window is extended on activity and wiped on close." },
     { "name": "videos_active", "default": "1" },
-    { "name": "debug", "default": "0" },
+    { "name": "debug", "default": "0", "group": "debug", "label": "Debug mode", "type": "select", "options": {"1": "Yes", "0": "No"}, "helptext": "Site-wide, not payments-only: it drives component render tracing, FormWriter debug output, and the Stripe and Google Play helpers' test behaviour. Leave off in production." },
     { "name": "debug_css", "default": "0" },
     { "name": "email_debug_mode", "default": "0" },
     { "name": "email_dry_run", "default": "0" },

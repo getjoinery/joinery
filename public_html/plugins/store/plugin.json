@@ -109,6 +109,7 @@
             "settingActivate": "subscriptions_active"
         }
     ],
+    "settingsMirrorGroups": ["debug"],
     "settingsGroups": {
         "storefront": "Storefront",
         "stripe": "Stripe",
