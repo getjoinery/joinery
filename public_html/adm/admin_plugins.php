@@ -194,11 +194,12 @@ $page->begin_box(array('altlinks' => $altlinks));
                     $status_cell .= '</div>';
                 }
 
-                // Warn if plugin is active, has a settings form, and all settings are blank/default
+                // Warn if an active plugin's settings are all still blank or
+                // at their factory default — a plugin declares settings, so
+                // having any is what makes the check meaningful.
                 if (
                     $plugin['plugin'] &&
-                    $plugin['plugin']->get('plg_status') === 'active' &&
-                    file_exists(PathHelper::getIncludePath('plugins/' . $plugin['name'] . '/settings_form.php'))
+                    $plugin['plugin']->get('plg_status') === 'active'
                 ) {
                     try {
                         $ph = PluginHelper::getInstance($plugin['name']);

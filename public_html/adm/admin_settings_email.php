@@ -1,4 +1,5 @@
 <?php
+	require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -200,7 +201,13 @@
 				}
 				$type = $field['type'] ?? 'text';
 				if ($type === 'password') {
-					$formwriter->passwordinput($field['key'], $field['label'], $opts);
+					// The credential field plus its Clear box — one contract,
+					// wherever a credential is drawn.
+					$stored = $opts['value'] ?? '';
+					unset($opts['value']);
+					SettingsFieldRenderer::secretField(
+						$formwriter, $field['key'], $field['label'], $stored, $opts
+					);
 				} else if ($type === 'textarea') {
 					$formwriter->textarea($field['key'], $field['label'], $opts);
 				} else {
@@ -424,9 +431,12 @@
 				}
 
 				if ($field_type === 'password') {
-					$formwriter->passwordinput($field_key, $field_label, [
-						'value' => $settings->get_setting($field_key),
-					]);
+					// The credential field plus its Clear box — one contract,
+					// wherever a credential is drawn.
+					SettingsFieldRenderer::secretField(
+						$formwriter, $field_key, $field_label,
+						$settings->get_setting($field_key)
+					);
 				} elseif ($field_type === 'dropdown') {
 					$formwriter->dropinput($field_key, $field_label, [
 						'options' => $field['options'] ?? [],

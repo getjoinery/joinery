@@ -399,14 +399,22 @@ tab means editing that one method** — a page that builds its own array is how 
 strip starts differing depending on which tab you are standing on.
 
 A tab may be conditional: Payment Settings appears only when the store plugin is
-active, and Plugin Settings only when some active plugin ships a
-`settings_form.php`. Follow that pattern — a tab leading to an empty page is
-worse than no tab.
+active, and Plugin Settings only when some active plugin declares a setting.
+Follow that pattern — a tab leading to an empty page is worse than no tab.
 
 Each settings tab is an ordinary admin page with its own logic file. Do not reuse
 another tab's logic: `admin_settings_logic()` does General-tab-specific work
 (the theme-activation check, the `preview_image` increment) that reads input
 fields a different tab never posts.
+
+**Settings fields come from the renderer, never from a FormWriter call in the
+page.** A page that needs to show a setting declares it in `settings.json` or the
+owning `plugin.json` and asks `SettingsFieldRenderer::renderGroup()` for its
+group; it saves through `SettingsWriter::write()`. A hand-drawn settings field is
+a field with no declared rules and no write scope — it renders, accepts typing,
+and does not save. The page still owns everything *around* the group: whether to
+render it at all, what state to print beside it, which fields to disable. See
+**[settings.md](settings.md)**.
 
 ### Options Dropdown (Action Menu)
 

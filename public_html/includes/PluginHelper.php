@@ -446,29 +446,6 @@ class PluginHelper extends ComponentBase {
         return $out;
     }
 
-    /**
-     * Active plugins that ship a settings form, as [plugin name => absolute path].
-     *
-     * A plugin exposes its settings to the admin by shipping
-     * plugins/{plugin}/settings_form.php. The file is included with $formwriter,
-     * $settings and $session already in scope and must not open a form, close
-     * one, or add a submit button — the including page owns all three.
-     *
-     * Sorted by plugin name so section order is stable across requests.
-     *
-     * @return array<string,string>
-     */
-    public static function getSettingsForms() {
-        $forms = [];
-        foreach (self::getActivePlugins() as $pluginName => $plugin) {
-            $path = PathHelper::getIncludePath("plugins/{$pluginName}/settings_form.php");
-            if (file_exists($path)) {
-                $forms[$pluginName] = $path;
-            }
-        }
-        ksort($forms);
-        return $forms;
-    }
 
     /**
      * Check if a plugin is active (static convenience method)

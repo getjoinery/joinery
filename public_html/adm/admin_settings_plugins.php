@@ -12,7 +12,8 @@
 	$session = SessionControl::get_instance();
 	$settings = Globalvars::get_instance();
 
-	$plugin_forms = $page_vars['plugin_forms'];
+	require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
+	$plugin_sources = $page_vars['plugin_sources'];
 
 	$page = new AdminPage();
 	$page->admin_header(
@@ -38,14 +39,17 @@
 
 	echo AdminPage::settings_tab_menu('Plugin Settings');
 
-	if (empty($plugin_forms)) {
+	if (empty($plugin_sources)) {
 		echo '<p>No active plugin has settings to configure.</p>';
 	}
 
 	// One independent form per plugin, each with its own Save. A field one plugin
 	// cannot validate must not be able to block saving another — which is why
 	// these are siblings and not one page-wide form.
-	foreach ($plugin_forms as $plugin => $settings_form) {
+	//
+	// The fields come from the plugin's declarations, so a plugin appears here
+	// because it declares settings, not because it remembered to ship a form.
+	foreach ($plugin_sources as $plugin) {
 
 		echo '<div class="plugin-settings-section" id="plugin-' . htmlspecialchars($plugin) . '">';
 		echo '<h3>' . htmlspecialchars(ucfirst($plugin)) . ' Plugin</h3>';
@@ -56,9 +60,7 @@
 		// Names the plugin whose settings this save is allowed to write.
 		$formwriter->hiddeninput('plugin_settings_target', '', ['value' => $plugin]);
 
-		// $formwriter, $settings and $session are in scope for the include —
-		// see PluginHelper::getSettingsForms() for the contract.
-		include($settings_form);
+		SettingsFieldRenderer::renderSource($formwriter, $plugin);
 
 		$formwriter->submitbutton('submit_' . $plugin, 'Save ' . ucfirst($plugin) . ' Settings');
 		$formwriter->end_form();

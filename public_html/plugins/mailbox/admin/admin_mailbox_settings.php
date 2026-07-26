@@ -1,4 +1,5 @@
 <?php
+require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
 /**
  * Inbound Email - Settings (server-wide delivery policy).
  *
@@ -109,9 +110,8 @@ if (!empty($show_relay_config)) {
 	$form->textinput('mailbox_fleet_api_public_key', 'API public key', array(
 		'value' => $values['mailbox_fleet_api_public_key'],
 	));
-	$form->passwordinput('mailbox_fleet_api_secret_key', 'API secret key', array(
-		'placeholder' => !empty($fleet_secret_set) ? '(stored — leave blank to keep)' : '',
-	));
+	SettingsFieldRenderer::secretField($form, 'mailbox_fleet_api_secret_key', 'API secret key',
+		!empty($fleet_secret_set) ? 'stored' : '');
 	$page->end_box();
 }
 

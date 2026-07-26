@@ -13,38 +13,72 @@
         "php": ">=8.0",
         "extensions": []
     },
+    "settingsGroups": {
+        "primary": "ScrollDaddy DNS service",
+        "secondary": "Secondary DNS server (optional)"
+    },
     "settings": [
         {
             "name": "dns_filtering_dns_host",
-            "default": ""
+            "default": "",
+            "group": "primary",
+            "label": "ScrollDaddy DNS Host",
+            "type": "text",
+            "helptext": "e.g. dns.example.com"
         },
         {
             "name": "dns_filtering_dns_internal_url",
-            "default": ""
+            "default": "",
+            "group": "primary",
+            "label": "ScrollDaddy Internal URL",
+            "type": "text",
+            "helptext": "e.g. http://127.0.0.1:8053"
         },
         {
             "name": "dns_filtering_dns_api_key",
-            "default": ""
+            "default": "",
+            "secret": true,
+            "group": "primary",
+            "label": "ScrollDaddy DNS API Key",
+            "helptext": "API key for the DNS server management endpoints."
         },
         {
             "name": "dns_filtering_dns_server_ip",
-            "default": ""
+            "default": "",
+            "group": "primary",
+            "label": "Server Public IP",
+            "type": "text",
+            "helptext": "e.g. 45.56.103.84 — shown in the Windows and router setup instructions."
         },
         {
             "name": "dns_filtering_dns_secondary_internal_url",
-            "default": ""
+            "default": "",
+            "group": "secondary",
+            "label": "Secondary Internal URL",
+            "type": "text",
+            "helptext": "e.g. http://10.0.0.2:8053. Leave blank for single-server mode."
         },
         {
             "name": "dns_filtering_dns_secondary_api_key",
-            "default": ""
+            "default": "",
+            "secret": true,
+            "group": "secondary",
+            "label": "Secondary DNS API Key",
+            "helptext": "Leave blank to use the primary API key."
         },
         {
             "name": "dns_filtering_dns_secondary_server_ip",
-            "default": ""
+            "default": "",
+            "group": "secondary",
+            "label": "Secondary Server Public IP",
+            "type": "text",
+            "helptext": "e.g. 172.16.0.2 — shown in the setup instructions when configured."
         },
         {
             "name": "dns_filtering_blocklist_version",
-            "default": ""
+            "default": "",
+            "managed": true,
+            "helptext": "Version of the blocklist data the resolvers were last given. Written by the publish job."
         }
     ],
     "profileMenu": [

@@ -68,36 +68,61 @@
             "settingActivate": "events_active"
         }
     ],
+    "settingsGroups": {
+        "events": "Events",
+        "email": "Event email templates"
+    },
     "settings": [
         {
             "name": "events_active",
             "default": "1",
-            "legacy_core": true
+            "legacy_core": true,
+                "group": "events",
+                "label": "Events enabled",
+                "type": "select",
+                "options": {"1": "Yes", "0": "No"}
         },
         {
             "name": "events_label",
             "default": "",
-            "legacy_core": true
+            "legacy_core": true,
+                "group": "events",
+                "label": "Word to use for events",
+                "type": "text",
+                "helptext": "Shown in menus and headings. Leave blank for “Events”."
         },
         {
             "name": "products_list_events_active",
             "default": "1",
-            "legacy_core": true
+            "legacy_core": true,
+                "group": "events",
+                "label": "Show events in product lists",
+                "type": "select",
+                "options": {"1": "Yes", "0": "No"}
         },
         {
             "name": "event_email_inner_template",
             "default": "blank_template",
-            "legacy_core": true
+            "legacy_core": true,
+                "group": "email",
+                "label": "Event email inner template",
+                "type": "text"
         },
         {
             "name": "event_email_outer_template",
             "default": "default_outer_template",
-            "legacy_core": true
+            "legacy_core": true,
+                "group": "email",
+                "label": "Event email outer template",
+                "type": "text"
         },
         {
             "name": "event_email_footer_template",
             "default": "event_bulk_footer",
-            "legacy_core": true
+            "legacy_core": true,
+                "group": "email",
+                "label": "Event email footer template",
+                "type": "text"
         }
     ],
     "signals": {

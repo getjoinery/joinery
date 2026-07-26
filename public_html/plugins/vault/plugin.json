@@ -12,9 +12,12 @@
         "php": ">=8.0",
         "extensions": ["sodium"]
     },
+    "settingsGroups": {
+        "vault": "Password vault"
+    },
     "settings": [
-        { "name": "vault_autolock_minutes", "default": "15" },
-        { "name": "vault_clipboard_clear_seconds", "default": "30" }
+        { "name": "vault_autolock_minutes", "default": "15", "group": "vault", "label": "Auto-lock after (minutes)", "type": "number", "validation": {"number": true, "min": 1, "messages": {"min": "Must be 1 or more."}}, "helptext": "How long the password vault stays unlocked without activity." },
+        { "name": "vault_clipboard_clear_seconds", "default": "30", "group": "vault", "label": "Clear clipboard after (seconds)", "type": "number", "validation": {"number": true, "min": 1, "messages": {"min": "Must be 1 or more."}}, "helptext": "A copied password is wiped from the clipboard after this long." }
     ],
     "profileMenu": [
         {

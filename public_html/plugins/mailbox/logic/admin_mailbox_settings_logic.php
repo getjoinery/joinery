@@ -39,9 +39,17 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 	);
 
 	if (!empty($input['save_settings'])) {
+		// This page decides WHICH settings a given deployment gets to change —
+		// a box that did not render contributes nothing, and a disabled control
+		// must not be read as "off". Deciding what a value has to look like is
+		// not this page's job: the rules live on the declarations in
+		// plugin.json and are enforced by SettingsWriter, so the Plugin
+		// Settings tab holds the same values to the same rules.
+		$to_write = array();
+
 		// Unchecked checkboxes are absent from the POST → '0'.
 		foreach ($bool_keys as $k) {
-			mailbox_settings_write_setting($k, empty($input[$k]) ? '0' : '1');
+			$to_write[$k] = empty($input[$k]) ? '0' : '1';
 		}
 
 		// Learning renders DISABLED when no scanner is running (a disabled
@@ -50,24 +58,27 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 		// preference with '0' every time.
 		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSpamPolicy.php'));
 		if (MailboxSpamPolicy::controllerReachable()) {
-			mailbox_settings_write_setting('mailbox_spam_learning_enabled',
-				empty($input['mailbox_spam_learning_enabled']) ? '0' : '1');
+			$to_write['mailbox_spam_learning_enabled'] =
+				empty($input['mailbox_spam_learning_enabled']) ? '0' : '1';
 		}
-		foreach ($int_keys as $k => $min) {
-			$value = max($min, intval($input[$k] ?? 0));
-			mailbox_settings_write_setting($k, (string)$value);
+		foreach ($int_keys as $k => $unused_min) {
+			if (array_key_exists($k, $input)) {
+				$to_write[$k] = trim((string)$input[$k]);
+			}
 		}
 
 		// Relay configuration — saved only when its box rendered (the fields
 		// are absent otherwise, and absence must not blank stored values).
 		if (array_key_exists('mailbox_fleet_service_url', $input)) {
-			mailbox_settings_write_setting('mailbox_fleet_service_url',
-				trim((string)$input['mailbox_fleet_service_url']));
-			mailbox_settings_write_setting('mailbox_fleet_api_public_key',
-				trim((string)($input['mailbox_fleet_api_public_key'] ?? '')));
-			$secret = trim((string)($input['mailbox_fleet_api_secret_key'] ?? ''));
-			if ($secret !== '') { // blank keeps the stored secret
-				mailbox_settings_write_setting('mailbox_fleet_api_secret_key', $secret);
+			$to_write['mailbox_fleet_service_url'] = trim((string)$input['mailbox_fleet_service_url']);
+			$to_write['mailbox_fleet_api_public_key'] = trim((string)($input['mailbox_fleet_api_public_key'] ?? ''));
+			// A blank secret keeps the stored one, and its Clear box wipes it —
+			// SettingsWriter applies both rules to every `secret` declaration,
+			// so the clear instruction has to be carried through with it.
+			$to_write['mailbox_fleet_api_secret_key'] = trim((string)($input['mailbox_fleet_api_secret_key'] ?? ''));
+			$clear_key = SettingsFieldRenderer::CLEAR_PREFIX . 'mailbox_fleet_api_secret_key';
+			if (!empty($input[$clear_key])) {
+				$to_write[$clear_key] = $input[$clear_key];
 			}
 		}
 
@@ -76,7 +87,7 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 			$prior = (strtolower(trim((string)$settings->get_setting('mailbox_relay_outbound_mode'))) === 'smarthost')
 				? 'smarthost' : 'provider';
 			$mode = ($input['mailbox_relay_outbound_mode'] === 'smarthost') ? 'smarthost' : 'provider';
-			mailbox_settings_write_setting('mailbox_relay_outbound_mode', $mode);
+			$to_write['mailbox_relay_outbound_mode'] = $mode;
 			// The relay's Postfix submission listener is baked at provision time,
 			// so a mode switch takes effect on the relay itself only at the next
 			// Rebuild (Setup tab). The tunnel check fails honestly until then.
@@ -88,6 +99,18 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 				$outbound_note = ' Sent mail now leaves through your email provider. The relay\'s submission '
 					. 'listener stays open until its next Rebuild.';
 			}
+		}
+
+		require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
+		require_once(PathHelper::getIncludePath('includes/SettingsWriter.php'));
+		$write = SettingsWriter::write($to_write, array(
+			'page'   => 'admin_mailbox_settings',
+			'source' => 'mailbox',
+		));
+		SettingsWriter::reportTo($write, '~/plugins/mailbox/admin/~');
+
+		if (!empty($write['errors'])) {
+			return LogicResult::redirect($base);
 		}
 
 		$session->save_message(new DisplayMessage(
@@ -173,22 +196,4 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 	));
 }
 
-/**
- * Upsert a single stg_settings row by name (the same model path Setup uses —
- * there is no set_setting()). A missing row is created.
- */
-if (!function_exists('mailbox_settings_write_setting')) {
-	function mailbox_settings_write_setting(string $name, string $value): void {
-		$existing = new MultiSetting(array('setting_name' => $name));
-		$existing->load();
-		if (count($existing)) {
-			$setting = $existing->get(0);
-		} else {
-			$setting = new Setting(NULL);
-			$setting->set('stg_name', $name);
-		}
-		$setting->set('stg_value', $value);
-		$setting->save();
-	}
-}
 ?>

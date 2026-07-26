@@ -2,459 +2,379 @@
 
 ## Overview
 
-The Joinery CMS settings system provides a flexible, auto-creating configuration management system that eliminates the need for migrations when adding new settings. Settings are stored in the `stg_settings` database table and can be managed through the admin interface.
+A setting is declared once, rendered by shared code, and validated on write
+regardless of which page it came from.
 
-For plugin-owned settings that need to exist on fresh install without admin intervention, declare them in `plugin.json` under the `settings` key — see the [Plugin Developer Guide](plugin_developer_guide.md#plugin-settings-declarative). For core settings with factory defaults, declare them in `settings.json` at the `public_html/` root. For settings that only need to exist once an admin fills them in (the historical pattern), the auto-create-on-save mechanism described below still applies.
+Every setting lives in the `stg_settings` table, and every setting is described
+by a **declaration** — an entry in `settings.json` at the `public_html/` root for
+core settings, or in a plugin's `plugin.json` under `settings` for plugin-owned
+ones. The declaration carries the setting's default *and* its field spec: label,
+type, options, validation rules, whether it is a credential, whether it needs an
+unlocked vault.
+
+**If it is not declared, it is not a setting.** Three rules follow:
+
+1. No page draws a settings field of its own. Pages ask `SettingsFieldRenderer`
+   for a group.
+2. Validation, credential handling and vault gating belong to the declaration,
+   so every write path enforces the same rules.
+3. A page may **wrap** declared fields with context — state lines, gating,
+   conditional groups, connection tests — but may never introduce a field the
+   manifest does not describe.
+
+Duplication is allowed and total: the same declared group may appear on the core
+settings tab and on a plugin's own page. That is one field shown twice, not two
+fields that can drift.
+
+There is no opt-out. Every non-`managed` setting renders on the settings pages,
+so a declared setting always has at least one place it can be edited.
 
 ## How the Settings System Works
 
-### Core Components
+### Core components
 
-1. **Globalvars::get_setting()** - Retrieves settings from config file or database
-2. **admin_settings.php** - Main settings management interface
-3. **Setting class** - Single setting CRUD operations
-4. **MultiSetting class** - Multiple settings queries
+| Piece | Job |
+|---|---|
+| `settings.json` / `plugin.json` | The declarations. The source of truth for what exists and what its rules are. |
+| `SettingsDeclarations` | Reads the manifests and answers questions about them. |
+| `SettingsFieldRenderer` | The only code that turns a setting into a form field. |
+| `SettingsWriter` | The only path that writes a setting. |
+| `Globalvars::get_setting()` | Reads a value, from the config file or the database. |
+| `Setting` / `MultiSetting` | Row-level CRUD, used by the writer and by seeding. |
 
-### Auto-Creation Feature
-
-A core setting rendered on the General Settings page is created on save if no row
-exists yet: add the field, an admin saves, and the row appears with the submitted
-value. Declaring it in `settings.json` is still the right way to give it a factory
-default and to make it exist on a fresh install.
-
-**Reserved names.** Not every field in the POST is a setting. The form machinery
-contributes a CSRF token, a submit button, captcha responses and the routing
-parameter, and the General page renders `*_readonly` mirrors of paths that come
-from `Globalvars_site.php`. `Setting::isReservedName()` names that boundary, and
-those names are never written or created — see the list in `data/settings_class.php`.
-
-**Plugin settings do not auto-create by name.** A plugin's section on the Plugin
-Settings tab writes only what that plugin declares in `plugin.json`, creating a
-declared row if it is missing. A field whose name is absent from the manifest is
-ignored.
-
-**Important:** Settings are NOT created when accessed via `get_setting()`. They return an empty string if missing, with a log entry for debugging.
-
-### Missing Settings Behavior
-
-When `Globalvars::get_setting('setting_name')` is called for a non-existent setting:
-
-- Returns empty string (`''`)
-- Logs the access: `"Settings: Returning empty default for missing setting 'setting_name'"`
-- Does NOT cache the empty value
-- Does NOT throw an exception
-
-This allows your code to work on fresh deployments without requiring migrations.
-
-## System-Managed Settings
-
-Some settings are managed by the system and should not be edited by hand via migrations or direct SQL — use the admin UI instead.
-
-| Setting name | What it controls | Where to change |
-|---|---|---|
-| `theme_template` | Active visual theme (e.g., `phillyzouk-html5`) | Admin > Settings |
-| `active_theme_plugin` | Plugin that provides the theme (if any) | Admin > Settings |
-
-**Do not confuse `theme_template` with `site_template` in `config/Globalvars_site.php`.** The latter is the site installation directory identifier and is almost never changed after setup.
-
-## Adding New Settings
-
-### For Core Settings
-
-Two paths, choose based on whether the setting needs a factory default:
-
-**Path A — Setting with a factory default** (recommended when the setting has a sensible value from day one):
-
-1. Add an entry to `settings.json` at the `public_html/` root:
-
-```json
-{ "name": "my_new_setting", "default": "1" }
-```
-
-2. Add the form field to `/adm/admin_settings.php` so admins can edit it.
-3. The setting is seeded on every `update_database` run — it exists immediately on fresh installs.
-
-**Path B — Setting created on first admin save** (the historical pattern, still works):
-
-1. Open `/adm/admin_settings.php`
-2. Add your form field using FormWriter where appropriate:
-
-```php
-echo $formwriter->textinput("My New Setting", 'my_new_setting', '', 20,
-    $settings->get_setting('my_new_setting'),
-    "Help text for the setting", 255, "");
-```
-
-3. Save the file
-4. Navigate to Settings page in admin
-5. Fill in the value and click Submit
-6. The setting is automatically created in the database
-
-Use Path A when the setting needs a sensible default from day one (feature gates, rate limits). Use Path B when the setting has no meaningful default and only exists once an admin configures it.
-
-### For Plugin Settings
-
-Plugin-owned settings are administered on the **Plugin Settings** tab
-(`/admin/admin_settings_plugins`), one section per plugin. A plugin gets a
-section by shipping `settings_form.php` plus a `settings` block in
-`plugin.json` — no registration step.
-
-Each section is an independent form with its own Save button, so an invalid
-field in one plugin cannot block saving another, and a save writes only the
-settings that plugin declares. Only active plugins get a section; a deactivated
-plugin's stored values stay in the database but are not shown or editable.
-
-#### Step 0: Declare defaults in plugin.json
-
-For any setting that should exist on fresh install with a default value, add it to the `settings` array in your plugin manifest. See the [Plugin Developer Guide](plugin_developer_guide.md#plugin-settings-declarative) for the full shape. This replaces writing `INSERT INTO stg_settings` statements in migrations.
+### The declaration
 
 ```json
 {
-  "settings": [
-    { "name": "myplugin_api_key", "default": "" },
-    { "name": "myplugin_feature_enabled", "default": "1" }
-  ]
+  "name": "mailbox_forwarding_rate_limit_window",
+  "default": "3600",
+  "group": "forwarding",
+  "label": "Rate-limit window (seconds)",
+  "type": "number",
+  "validation": { "number": true, "min": 1, "messages": { "min": "Must be 1 or more." } },
+  "helptext": "Rolling window the per-alias and per-domain limits are counted over."
 }
 ```
 
-#### Step 1: Create settings_form.php
+| Key | Meaning |
+|---|---|
+| `name` | The `stg_name`. Plugin settings must start with the plugin's directory name. |
+| `default` | Seed value. Always a string — `"0"`/`"1"` for booleans, `"42"` for numbers. |
+| `group` | Which box the field renders in. Pages request groups by name. Ungrouped core fields fall into `general`; ungrouped plugin fields fall into a group named after the plugin. |
+| `label` | Field label. Required for anything renderable. |
+| `type` | `text`, `number`, `checkbox`, `select`, `password`, `textarea`. Drives the FormWriter call. |
+| `options` | Literal `value: label` map, for `select`. |
+| `options_from` | `Class::method` returning a `value: label` map, for options that are discovered rather than fixed. |
+| `options_include` | Path to the file defining that class, when it is not one of the always-loaded core classes. |
+| `validation` | A FormWriter validation rule array, verbatim. |
+| `show_when` | `{ "other_setting": "value" }`. Compiles to FormWriter `visibility_rules`. |
+| `secret` | A credential: never emits its stored value, and only a non-empty submission is written. |
+| `vault_gated` | Changing it requires an open vault unlock window. |
+| `managed` | Machine-written. Never rendered on a form. Mutually exclusive with `label`. |
+| `rows` | Rows for a `textarea`. |
+| `helptext` | Explanation shown under the field. |
 
-Create `/plugins/{your_plugin}/settings_form.php`:
+Group headings come from a `settingsGroups` map alongside `settings` in the same
+manifest:
 
-```php
-<?php
-// Included inside this plugin's section on the Plugin Settings tab.
-// $formwriter, $settings, and $session are already available.
-// Output fields only — the page owns the form tag and the Save button.
-
-// IMPORTANT: All settings MUST be prefixed with your plugin name
-// to avoid conflicts with other plugins and core settings.
-// Pattern: {plugin_name}_{setting_name}
-
-echo '<p>Configure your plugin settings below.</p>';
-
-$formwriter->textinput('myplugin_api_key', 'API Key', [
-    'value' => $settings->get_setting('myplugin_api_key'),
-    'helptext' => 'Your API key'
-]);
-
-$formwriter->dropinput('myplugin_feature_enabled', 'Enable Feature', [
-    'options' => [1 => 'Yes', 0 => 'No'],
-    'value' => $settings->get_setting('myplugin_feature_enabled')
-]);
-?>
+```json
+"settingsGroups": {
+    "forwarding": "Forwarding",
+    "retention": "Retention and limits"
+},
 ```
 
-#### Step 2: Follow the Naming Convention
+A plugin page can also show a group declared elsewhere, with
+`"settingsMirrorGroups": ["inbound_provider"]`. The mirrored group is rendered
+*and* writable from that page — it is the same field in a second place.
 
-**All plugin settings MUST be prefixed with the plugin name:**
+### Validation
 
-- Pattern: `{plugin_name}_{setting_name}`
-- Examples:
-  - `scrolldaddy_dns_host`
-  - `bookings_default_duration`
-  - `events_timezone`
-  - `myplugin_api_key`
+`validation` is a FormWriter rule array, passed through unchanged and enforced by
+`FormWriterV2Base::validate()`. Same code path, same vocabulary (`required`,
+`min`, `max`, `minlength`, `maxlength`, `pattern`, `email`, `url`, `matches`,
+`custom`, …), same error output as every other form on the platform. Anything
+exotic registers through the static `FormWriterV2Base::registerValidator()`.
 
-This prevents conflicts between plugins and with core settings.
+Three things fall out of that: rules declared once drive both the browser check
+and the server check; failures render through the standard error path; and there
+is nothing new to learn.
 
-#### Step 3: That's It!
+`SettingsWriter` seeds the rule set from the **declarations** for the names being
+written, not from the fields the page happened to draw — so a page that never
+rendered a field still cannot write past its rule. A `pattern` rule needs regex
+delimiters (`"#^[a-z]+$#i"`), the same as anywhere else.
 
-Your plugin gets its own section on the Plugin Settings tab as soon as the
-plugin is active. Saving that section writes the settings your `plugin.json`
-declares, creating any declared row that is missing.
+Only *changed* values are validated. A settings form posts every field on the
+page, so validating unchanged re-submissions would let one stored value that
+predates its rule veto every save on that page — an invisible failure.
 
-### Available Form Field Types
+Rules about a *combination* of settings (a plugin theme requires an active theme
+plugin) and *side effects* of a change (a changed preview image bumps the
+cache-busting index) are not per-field, and stay in the page's logic file.
 
-The FormWriter provides various input types:
+### Credentials
+
+A field declared `secret` never carries its stored value into the page.
+`FormWriterV2Base::preparePasswordData()` discards any bound value and shows a
+`(stored — leave blank to keep)` placeholder instead, so no caller can put a
+credential into page source. The matching write rule is that a blank submission
+keeps what is stored.
+
+The two rules only work together: a field that renders empty, saved by a path
+that takes an empty submission literally, blanks every credential on the page.
+
+A `secret` normally renders as a password input. Declare `"type": "textarea"`
+alongside it for a genuinely multi-line credential — a PEM private key, a
+service-account JSON. The value is withheld either way.
+
+**Removing a credential.** A blank field cannot mean both "I did not touch this"
+and "delete this", so removal is said out loud. A credential that has something
+stored renders with a **Clear** checkbox beside it, named `clear__<setting>`.
+Three cases, and the writer honours all three:
+
+| What the admin does | What happens |
+|---|---|
+| types a value | that value is written |
+| leaves it blank | the stored value is kept |
+| leaves it blank and ticks Clear | the stored value is wiped |
+
+A typed value wins over a ticked Clear box, so pasting a new key after changing
+your mind cannot silently throw it away. The checkbox appears only when there is
+something to clear, and `clear__*` is a reserved name — it is an instruction
+about a setting, never a setting.
+
+`SettingsFieldRenderer::secretField()` draws the field and its Clear box
+together. A page that still draws its own credential field calls it directly so
+the contract is the same everywhere:
 
 ```php
-// Text input
-$formwriter->textinput('setting_name', 'Label', [
-    'value' => $settings->get_setting('setting_name'),
-    'helptext' => 'Help text'
-]);
-
-// Dropdown
-$formwriter->dropinput('setting_name', 'Label', [
-    'options' => [1 => 'Option 1', 2 => 'Option 2'],
-    'value' => $settings->get_setting('setting_name'),
-    'helptext' => 'Help text'
-]);
-
-// Textarea
-$formwriter->textbox('setting_name', 'Label', [
-    'value' => $settings->get_setting('setting_name'),
-    'rows' => 10,
-    'cols' => 80
-]);
-
-// Boolean toggle
-$formwriter->dropinput('setting_name', 'Enable Feature', [
-    'options' => [1 => 'Yes', 0 => 'No'],
-    'value' => $settings->get_setting('setting_name')
-]);
+SettingsFieldRenderer::secretField($formwriter, 'myplugin_api_key', 'API Key',
+    $settings->get_setting('myplugin_api_key'));
 ```
 
-## Using Settings in Code
+It also picks up the declared `validation` rules, so the browser check on that
+page matches what the writer enforces on save.
 
-### Basic Usage
+### Machine-written settings
+
+A value written by code rather than by an admin is declared `managed`. It is
+seeded and readable like any other setting, never appears on a form, and is
+refused by the writer however the request arrives. Schema versions, cron
+heartbeats, one-shot markers and keys minted on first use all belong here.
+
+### Missing settings
+
+`Globalvars::get_setting('name')` for a row that does not exist:
+
+- returns an empty string (`''`)
+- logs `Settings: Returning empty default for missing setting 'name'`
+- does not cache the empty value, and does not throw
+
+Pass the `$fail_silently` flag to suppress the log where absence is expected.
+
+### Reserved names
+
+Not every field in a POST is a setting. The form machinery contributes a CSRF
+token, submit buttons, captcha responses and the routing parameter, and the
+General page renders `*_readonly` mirrors of paths that come from
+`Globalvars_site.php`. `Setting::isReservedName()` names that boundary — the
+fixed list, the `submit_*` and `clear__*` prefixes, and the `*_readonly` suffix.
+Those names are never written and never created.
+
+## Adding a setting
+
+### Core
+
+Add an entry to `settings.json`:
+
+```json
+{ "name": "my_feature_enabled", "default": "0", "group": "general",
+  "label": "My feature enabled", "type": "select",
+  "options": { "1": "Yes", "0": "No" } }
+```
+
+Run `update_database` from admin utilities to seed the row. It appears on the
+settings pages automatically.
+
+### Plugin
+
+Add an entry to the plugin's `plugin.json` under `settings`. The name must start
+with the plugin's directory name:
+
+```json
+"settings": [
+    { "name": "myplugin_api_url", "default": "", "group": "connection",
+      "label": "API URL", "type": "text",
+      "helptext": "Base URL of the service." },
+    { "name": "myplugin_api_key", "default": "", "group": "connection",
+      "label": "API Key", "secret": true }
+],
+"settingsGroups": { "connection": "Connection" }
+```
+
+Run "Sync with Filesystem" from the admin Plugins page. The plugin gets its own
+section on **Admin → Settings → Plugin Settings**, one independent form with its
+own Save. Nothing else is needed — there is no form file to write.
+
+The manifest is also the write scope: a save writes only the names the submitting
+plugin declares.
+
+### Available field types
+
+| `type` | Renders as | Notes |
+|---|---|---|
+| `text` (default) | text input | |
+| `number` | number input | declared `min`/`max` also drive the browser spinner |
+| `checkbox` | checkbox | value is `"1"` or `"0"` |
+| `select` | dropdown | needs `options` or `options_from` |
+| `textarea` | multi-line box | `rows` sets the height |
+| `password` | password input | never emits a value |
+| plus `secret: true` | password input, or textarea with `type` | never emits a value; blank keeps |
+
+### Options that are discovered rather than fixed
+
+```json
+{ "name": "mailbox_provider", "default": "postfix", "group": "inbound",
+  "label": "Active inbound provider", "type": "select",
+  "options_from": "InboundProviderRegistry::labels",
+  "options_include": "plugins/mailbox/includes/InboundProviderRegistry.php" }
+```
+
+The method returns a `value => label` map. Adding a provider class adds its
+option — nothing else changes.
+
+### Conditional fields
+
+Declare `show_when` on the field that should appear, naming the setting and value
+that reveals it:
+
+```json
+{ "name": "joinery_ai_local_model", "group": "provider", "label": "Local Model",
+  "type": "text", "show_when": { "joinery_ai_llm_provider": "local" } }
+```
+
+The renderer inverts this into FormWriter `visibility_rules` on the trigger
+field, across the whole page — so a picker in one box can reveal fields in a
+later one. Never hand-roll a JS toggle.
+
+## Wrapping declared fields with context
+
+Some pages reason about the deployment rather than about a field. The mailbox
+settings tab decides whether a spam scanner is present, whether the deployment
+receives through a relay, and what happens when outbound mode flips. None of that
+is field metadata.
+
+The split:
+
+- **Value-driven visibility** — "show the SRS secret when SRS is on" — is
+  `show_when` in the declaration, and behaves identically on every page.
+- **Topology-driven gating** — "no scanner on this box, so disable learning" —
+  stays in the page, which decides *whether to render a group at all*, may
+  disable fields within it, and may print state lines around it.
+
+```php
+require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
+
+if ($scanner_present) {
+    $page->begin_box(array('title' => 'Spam filtering'));
+    echo '<p>' . htmlspecialchars($scanner_state) . '</p>';
+    SettingsFieldRenderer::renderGroup($form, 'spam', array(
+        'source'   => 'mailbox',
+        'disabled' => $learning_available ? array() : array('mailbox_spam_learning_enabled'),
+    ));
+    $page->end_box();
+}
+```
+
+A page may skip a group, gate a group, or annotate a group. It may not render a
+field the manifest does not declare.
+
+## Saving
+
+Every settings page posts through `SettingsWriter`:
+
+```php
+$write = SettingsWriter::write($input, array(
+    'page'   => 'admin_mailbox_settings',   // for the log and messages
+    'source' => 'mailbox',                  // restrict to one plugin's declarations
+));
+SettingsWriter::reportTo($write, '~/plugins/mailbox/admin/~');
+```
+
+It returns what happened:
+
+| Key | Meaning |
+|---|---|
+| `written` | names whose stored value changed |
+| `refused` | submitted names that are not writable settings |
+| `vault_blocked` | names held back for want of an unlock window |
+| `errors` | `name => messages` from the declared validation |
+| `kept_secrets` | credentials left alone because the field came back blank |
+| `cleared_secrets` | credentials wiped because the field came back blank with Clear ticked |
+
+`reportTo()` turns that into the messages an admin sees. A refused name is a
+manifest bug, not admin error, and it is said out loud — silence is how junk rows
+accumulated for two years.
+
+Behaviour worth knowing:
+
+- **An unchanged value is not a write.** The forms post every field on the page,
+  so writing unchanged values would re-stamp `stg_update_time` on a hundred-odd
+  rows and destroy the only record of when a value actually changed.
+- **A validation failure writes nothing at all**, rather than writing the valid
+  half and leaving the admin to guess.
+- **The vault gate blocks the change, not the save.** Everything else on the page
+  still saves, and the admin is told what was held back.
+
+### Enforcement and shadow mode
+
+`SettingsWriter::ENFORCE_SCOPE` controls whether an *undeclared* name submitted
+to an unscoped save is refused or written-and-logged. It is a code constant, not
+a setting — a setting governing settings writes is a circularity nobody wants to
+debug.
+
+With it off, an unscoped save behaves as it always did and logs what it would
+have refused. That log is the evidence for turning it on: the set of names a
+settings page can submit is not literal in its source (the Email tab builds its
+fields from each provider's declarations), so no source sweep can answer the
+question, but exercising the pages can.
+
+Scope refusals — a name belonging to core or another plugin when the caller named
+one source — are enforced unconditionally, in both modes.
+
+## Using settings in code
 
 ```php
 $settings = Globalvars::get_instance();
-$value = $settings->get_setting('setting_name');
 
-// Handle empty default
-if(empty($value)) {
-    $value = 'default_value';
-}
+$url = $settings->get_setting('myplugin_api_url');
+
+// Booleans are stored as the strings "1" and "0".
+if ($settings->get_setting('myplugin_enabled') === '1') { /* … */ }
+
+// Numbers need a cast, and a floor for the empty case.
+$limit = intval($settings->get_setting('myplugin_limit')) ?: 100;
+
+// JSON for structured values.
+$config = json_decode($settings->get_setting('myplugin_config'), true) ?: array();
 ```
 
-### Boolean Settings
+There is no `set_setting()`. Code that must write a setting goes through
+`SettingsWriter`, or through `Setting` directly for a `managed` value.
 
-```php
-if ($settings->get_setting('feature_enabled')) {
-    // Feature is enabled
-}
-```
+## Plugin uninstall
 
-### Numeric Settings
+Uninstalling a plugin deletes the rows it currently declares
+(`Setting::unseed_declared()`). Rows from settings the plugin used to declare and
+has since dropped are left in place by design — but they will then fail the
+"every row is declared" check, so drop them in a migration when you drop the
+declaration.
 
-```php
-$max_items = $settings->get_setting('max_items');
-if(empty($max_items)) {
-    $max_items = 10; // Default
-}
-$max_items = intval($max_items);
-```
+## OAuth provider settings
 
-## Plugin Uninstall
-
-Settings declared in a plugin's `plugin.json` are **automatically removed** on uninstall — PluginManager reads the current manifest and deletes each declared name. You do not need to repeat this work in `uninstall.php`.
-
-One caveat: settings that were declared in an earlier version of the plugin but dropped from the current manifest are left in place as orphan rows. The orphan has no runtime cost (nothing reads it), but if you need it gone, delete it with an SQL migration before removing the declaration, or clean it up by hand.
-
-An uninstall hook is still useful for cleaning up things the declarative systems don't cover — tables not created from a data class, external resources, scheduled tasks created outside the normal pattern, etc.
-
-## Troubleshooting
-
-### Setting Not Appearing
-
-1. Check error logs: `tail /var/www/html/joinerytest/logs/error.log`
-2. Look for: `"Settings: Returning empty default for missing setting 'setting_name'"`
-3. Verify form field name matches exactly
-4. Ensure you clicked Submit to save the form
-
-### Setting Not Saving
-
-1. Check error logs for: `"Settings: Failed to create 'setting_name'"`
-2. Verify the setting name follows naming conventions
-3. Check database permissions
-4. Verify Setting class validation rules
-
-### Plugin Settings Not Showing
-
-1. Verify the plugin is **active** — only active plugins get a section, and the
-   Plugin Settings tab is hidden entirely when no active plugin ships a form
-2. Verify file exists: `/plugins/{plugin}/settings_form.php`
-3. Check file permissions (must be readable)
-4. Verify plugin is in the plugins directory
-5. Check for PHP syntax errors: `php -l /plugins/{plugin}/settings_form.php`
-
-### Plugin Setting Not Saving
-
-A section's save writes only the names that plugin declares in `plugin.json`.
-A field rendered by `settings_form.php` whose name is missing from the manifest's
-`settings` block is ignored on submit — add the declaration, then save again.
-
-### Empty Values After Fresh Install
-
-This is expected behavior! Settings return empty strings until an admin:
-1. Navigates to Settings page
-2. Fills in the values
-3. Clicks Submit
-
-Your code should handle empty values gracefully with appropriate defaults.
-
-## Best Practices
-
-### 1. Always Use Prefixes for Plugin Settings
-
-```php
-// ✅ Good
-'myplugin_api_key'
-'myplugin_enabled'
-
-// ❌ Bad - will conflict!
-'api_key'
-'enabled'
-```
-
-### 2. Handle Empty Defaults in Code
-
-```php
-// ✅ Good
-$timeout = $settings->get_setting('api_timeout');
-if(empty($timeout)) {
-    $timeout = 30; // Default timeout
-}
-
-// ❌ Bad - assumes value exists
-$timeout = $settings->get_setting('api_timeout');
-$result = api_call($timeout); // Might fail with empty string
-```
-
-### 3. Provide Help Text
-
-```php
-// ✅ Good - clear help text
-echo $formwriter->textinput("API Timeout (seconds)", 'api_timeout', '', 20,
-    $settings->get_setting('api_timeout'),
-    "Timeout in seconds for API calls (default: 30)", 255, "");
-
-// ❌ Bad - no context
-echo $formwriter->textinput("Timeout", 'timeout', '', 20,
-    $settings->get_setting('timeout'), "", 255, "");
-```
-
-### 4. Use Meaningful Setting Names
-
-```php
-// ✅ Good
-'email_notification_enabled'
-'max_upload_size_mb'
-'default_user_timezone'
-
-// ❌ Bad
-'email_on'
-'max_size'
-'tz'
-```
-
-### 5. Group Related Settings
-
-In your settings_form.php, use headings to organize:
-
-```php
-echo '<h4>API Configuration</h4>';
-echo $formwriter->textinput("API Key", 'myplugin_api_key', ...);
-echo $formwriter->textinput("API Secret", 'myplugin_api_secret', ...);
-
-echo '<h4>Email Settings</h4>';
-echo $formwriter->textinput("From Email", 'myplugin_from_email', ...);
-```
-
-## Migration Guide: Converting SQL Migrations to Declarative Settings
-
-Older plugins seeded defaults with `INSERT INTO stg_settings` inside `migrations/migrations.php`. The declarative path (plugin.json) is now preferred. Here's how to convert.
-
-### Before
-
-`plugins/bookings/migrations/migrations.php`:
-
-```php
-'up' => function($dbconnector) {
-    $dblink = $dbconnector->get_db_link();
-    $sql = "INSERT INTO stg_settings (stg_name, stg_value, ...)
-            VALUES ('bookings_enabled', '1', ...)";
-    $dblink->prepare($sql)->execute();
-}
-```
-
-### After
-
-`plugins/bookings/plugin.json`:
-
-```json
-{
-  "name": "Bookings Management",
-  "version": "1.0.0",
-  "settings": [
-    { "name": "bookings_enabled", "default": "1" }
-  ]
-}
-```
-
-And remove the `INSERT INTO stg_settings` from the migration. If the migration is now empty, replace its body with `return true;` or delete the migration file entirely.
-
-### What happens to existing installs
-
-Nothing changes on existing sites. The old migration's tracking row in `plm_plugin_migrations` stays put, which prevents the (now-removed) INSERT from ever running again. The seed-only declarative path doesn't overwrite the existing value.
-
-### What happens on fresh installs
-
-The plugin.json `settings` array is seeded on activate. Existing sites pick it up on the next `sync()`.
-
-### Benefits
-
-- No SQL boilerplate for simple default-value seeding.
-- Declared settings are automatically removed on plugin uninstall.
-- One source of truth for "what settings does this plugin own" — the manifest.
-- Consistent with how admin menus already work.
-
-## Advanced Topics
-
-### Conditional Field Display
-
-You can use JavaScript to show/hide fields based on other settings:
-
-```php
-echo $formwriter->dropinput("Enable Feature", 'myplugin_feature_enabled', '',
-    array("Yes"=>1, 'No'=>0),
-    $settings->get_setting('myplugin_feature_enabled'), '', FALSE);
-
-echo '<div id="myplugin_feature_options" style="display:none;">';
-echo $formwriter->textinput("Feature Option", 'myplugin_feature_option', '', 20,
-    $settings->get_setting('myplugin_feature_option'), '', 255, "");
-echo '</div>';
-
-echo '<script>
-$(document).ready(function() {
-    function toggleFeatureOptions() {
-        if($("#myplugin_feature_enabled").val() == "1") {
-            $("#myplugin_feature_options").show();
-        } else {
-            $("#myplugin_feature_options").hide();
-        }
-    }
-    toggleFeatureOptions();
-    $("#myplugin_feature_enabled").change(toggleFeatureOptions);
-});
-</script>';
-```
-
-### Settings Validation
-
-The Setting class includes validation through the `prepare()` method. Settings validation happens:
-
-1. When admin saves the form
-2. Before the setting is written to database
-3. Validation errors are caught and logged
-
-### Complex Settings
-
-For complex configuration that doesn't fit the simple key-value model:
-
-- Store JSON in the setting value
-- Parse in your code
-
-```php
-// Saving complex data
-$complex_config = array(
-    'servers' => ['server1', 'server2'],
-    'options' => ['opt1' => true, 'opt2' => false]
-);
-$setting->set('stg_value', json_encode($complex_config));
-
-// Retrieving complex data
-$json = $settings->get_setting('myplugin_config');
-$config = json_decode($json, true);
-```
-
-## OAuth Provider Settings
-
-OAuth app credentials are core settings (shared across every consumer — inbound
-IMAP, social login, outbound send) and are entered at **Admin → System → OAuth
+OAuth app credentials are core settings, shared across every consumer (inbound
+IMAP, social login, outbound send), and are entered at **Admin → System → OAuth
 Providers**:
 
 | Setting | Notes |
@@ -465,30 +385,94 @@ Providers**:
 | `oauth_microsoft_client_secret` | stored **encrypted** via `SecretBox` |
 | `oauth_microsoft_tenant` | `common` / `organizations` / `consumers` / a tenant id |
 
-Client *secret* values are written through `SecretBox` before being persisted to
-`stg_settings` and decrypted on read by the provider's `getClientSecret()`, so a
-secret is never stored or displayed in plaintext. [`SecretBox`](secret_box.md) is
-keyed from `secret_box_key` in `config/Globalvars_site.php` and is a
-general-purpose secrets-at-rest helper. See [OAuth2 Core](oauth2.md) for the OAuth
-abstraction and [SecretBox](secret_box.md) for the encryption helper itself.
+Client *secret* values are written through `SecretBox` before being persisted and
+decrypted on read by the provider's `getClientSecret()`, so a secret is never
+stored in plaintext. [`SecretBox`](secret_box.md) is keyed from `secret_box_key`
+in `config/Globalvars_site.php`. See [OAuth2 Core](oauth2.md) for the OAuth
+abstraction.
 
-## Security Considerations
+## System-managed settings
 
-1. **Permission Control:** Only admins (permission level 8+) can access settings
-2. **Input Validation:** FormWriter provides client-side validation
-3. **SQL Injection:** All database queries use prepared statements
-4. **XSS Prevention:** Values are escaped when displayed
+Some settings are changed through a dedicated screen rather than the settings
+pages, because changing them has consequences the settings form cannot check.
 
-## Summary
+| Setting | What it controls | Where to change |
+|---|---|---|
+| `theme_template` | Active visual theme | Admin → Settings |
+| `active_theme_plugin` | Plugin that provides the theme | Admin → Settings |
 
-The new settings system provides:
+**Do not confuse `theme_template` with `site_template` in
+`config/Globalvars_site.php`.** The latter is the site installation directory
+identifier and is almost never changed after setup.
 
-- ✅ No migrations needed for new settings
-- ✅ Automatic setting creation on form save
-- ✅ Simple plugin integration via includes
-- ✅ Consistent UI across core and plugins
-- ✅ Empty string defaults for missing settings
-- ✅ Clear debugging via error logs
-- ✅ Namespace convention prevents conflicts
+## Troubleshooting
 
-For questions or issues, check error logs first, then consult this documentation.
+### A setting does not appear on any page
+
+Check that it is declared, and that it is not `managed` — a managed setting is
+deliberately never rendered. Then check the plugin is active; a deactivated
+plugin's rows persist but are neither shown nor writable.
+
+### A setting does not save
+
+Look in the error log for `SettingsWriter[<page>]`. A refused name is named
+there. The usual causes: the name is not declared, it is declared `managed`, or
+it belongs to a different source than the one the page named.
+
+### A whole page refuses to save
+
+Check the messages above the submit button: a declared validation rule failed, and
+nothing is written until it passes. Only changed fields are validated, so the
+offending field is one you just touched.
+
+### A credential came back blank after a save
+
+It should not — a blank credential submission keeps the stored value, and wiping
+one takes a ticked Clear box. If a value really was lost, check that the setting
+is declared `secret`; the write path keys off the declaration, not off the field
+type.
+
+### The Clear box is missing next to a credential
+
+It only renders when something is stored. An empty credential has nothing to
+clear, and an unconditional checkbox would invite an admin to tick it and wonder
+what happened.
+
+### Empty values after a fresh install
+
+Confirm the setting has a `default` in its manifest, and that `update_database`
+(core) or plugin sync ran. Seeding never overwrites an existing row.
+
+## Best practices
+
+1. **Prefix plugin settings** with the plugin's directory name. Sync enforces it.
+2. **Declare the field spec, not just the default.** A declaration without a
+   `label` renders with its raw name — legible to you, not to an admin.
+3. **Put the rule on the declaration**, not in the page. That is what makes two
+   pages agree.
+4. **Mark credentials `secret`.** It is what keeps them out of page source and
+   what makes a blank save mean "keep". A test enforces this by name: a setting
+   called `*_secret`, `*_password`, `*_token`, `*api_key*`, `*private_key*`,
+   `*signing_key*` or `*service_account*` must either be `secret` or be listed
+   in `$public_by_design` in
+   `tests/integration/password_field_no_value_test.php` with a reason. The
+   allowlist is short on purpose — today it holds only the visible halves of
+   credential pairs (Stripe's publishable key, PayPal's client id, Mailjet's
+   public key).
+5. **Mark machine-written values `managed`.** Otherwise they show up as editable
+   fields nobody should touch.
+6. **Group related settings** and give the group a heading in `settingsGroups`.
+7. **Handle empty defaults in code** — `get_setting()` returns `''` for anything
+   unset, so supply a floor: `intval(...) ?: 3600`.
+
+## Tests
+
+- `tests/integration/declared_settings_test.php` — every stored row is declared,
+  every declaration is well-formed, a declared rule binds every page, and the
+  behaviours the write path must keep.
+- `tests/integration/password_field_no_value_test.php` — no password field emits
+  a value, and a blank credential submission keeps the stored one.
+- `tests/integration/plugin_settings_tab_test.php` — discovery, the shared tab
+  list, rendered-is-declared, and write scope.
+- `tests/integration/settings_reserved_names_test.php` — the boundary between a
+  setting and the form plumbing that shares its POST.

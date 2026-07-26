@@ -718,18 +718,27 @@ Profile menu items appear in the user dropdown. They are flat — no parent/item
 
 ### Plugin Settings (Declarative)
 
-> ⚠️ **Settings are a two-step setup.** Declaring in `plugin.json` only seeds the row in `stg_settings` — it does **not** make the setting appear in the admin UI. To expose a setting on the **Plugin Settings** tab (`/admin/admin_settings_plugins`), you must also create a `settings_form.php` file in your plugin directory (see [Plugin Settings Form](#plugin-settings-form) below). Setting names in the two files must match exactly: the manifest is both what gets seeded and what a save is allowed to write.
-
-Plugin default settings are declared in `plugin.json` under an optional `settings` key. On activate and on every sync, PluginManager seeds any declared row that doesn't already exist in `stg_settings`. Existing values are never overwritten.
+Declaring a setting in `plugin.json` is the whole job: it seeds the row, gives
+the plugin a section on the **Plugin Settings** tab
+(`/admin/admin_settings_plugins`), and defines what a save is allowed to write.
+There is no form file. On activate and on every sync, PluginManager seeds any
+declared row that doesn't already exist in `stg_settings`; existing values are
+never overwritten.
 
 ```json
 {
   "name": "My Plugin",
   "version": "1.0.0",
+  "settingsGroups": { "connection": "Connection" },
   "settings": [
-    { "name": "myplugin_enabled", "default": "1" },
-    { "name": "myplugin_max_items", "default": "50" },
-    { "name": "myplugin_api_key", "default": "" }
+    { "name": "myplugin_enabled", "default": "1", "group": "connection",
+      "label": "My Plugin enabled", "type": "select",
+      "options": { "1": "Yes", "0": "No" } },
+    { "name": "myplugin_max_items", "default": "50", "group": "connection",
+      "label": "Max items", "type": "number",
+      "validation": { "number": true, "min": 1 } },
+    { "name": "myplugin_api_key", "default": "", "group": "connection",
+      "label": "API Key", "secret": true }
   ]
 }
 ```
@@ -740,7 +749,19 @@ Plugin default settings are declared in `plugin.json` under an optional `setting
 |---|---|---|---|
 | `name` | Yes | — | Setting key. Must start with the plugin's directory name (unless `legacy_core`). |
 | `default` | No | `""` | String value stored in `stg_value`. Always a string — use `"0"`/`"1"` for booleans, `"42"` for numbers. JSON-native booleans/numbers are rejected at validation time. |
+| `group` | No | plugin name | Which box the field renders in. Headings come from the `settingsGroups` map. |
+| `label` | For anything renderable | — | Field label. Without it the field renders under its raw name. |
+| `type` | No | `text` | `text`, `number`, `checkbox`, `select`, `password`, `textarea`. |
+| `options` / `options_from` | For `select` | — | Literal `value: label` map, or `Class::method` returning one. `options_from` needs `options_include` unless the class is core. |
+| `validation` | No | — | A FormWriter rule array, verbatim. Enforced on every write path. |
+| `show_when` | No | — | `{ "other_setting": "value" }` — reveals this field when that setting has that value. |
+| `secret` | No | `false` | A credential: never emits its stored value, a blank submission keeps it, and a Clear checkbox beside it wipes it. |
+| `vault_gated` | No | `false` | Changing it requires an open vault unlock window. |
+| `managed` | No | `false` | Machine-written. Never rendered. Mutually exclusive with `label`. |
 | `legacy_core` | No | `false` | Opts this one setting out of the prefix rule so it keeps an unprefixed core-era name. See below. |
+
+The full field-spec reference, including how a plugin admin page requests a group
+and wraps it with context, is in [Settings](settings.md).
 
 **Validation rules** (enforced on activate and sync):
 1. Every declared `name` must start with the plugin's directory name (e.g., a plugin at `/plugins/bookings/` must declare settings named `bookings_*`) — unless the entry sets `"legacy_core": true`.
@@ -754,7 +775,7 @@ Validation failures throw. On `activate()` the plugin does not activate; on `syn
 
 **Orphan rows:** Settings dropped from the manifest in a later version are **not** automatically deleted. Use an SQL migration if you need the row gone. Orphan setting rows are otherwise harmless — nothing reads them.
 
-**Blank defaults:** `default: ""` creates a row with an empty value. Use this for things that have no meaningful factory default but should still be present (API keys, SMTP hosts, custom CSS) so the row exists for `settings_form.php` to render and for admins to fill in. **Declaring is mandatory, not a convenience:** the manifest is also the write scope, so a field your `settings_form.php` renders but the manifest does not declare will display, accept typing, and silently fail to save. `get_setting()` returns `''` for it (and logs a notice — pass the `$fail_silently` flag to suppress it).
+**Blank defaults:** `default: ""` creates a row with an empty value. Use this for things that have no meaningful factory default but should still be present (API keys, SMTP hosts, custom CSS). `get_setting()` returns `''` for anything unset (and logs a notice — pass the `$fail_silently` flag to suppress it), so supply a floor in code: `intval(...) ?: 100`.
 
 **Uninstall:** On uninstall, PluginManager deletes rows matching the names in the current manifest. Settings declared in an earlier version but dropped from the current manifest are left in place.
 
@@ -920,47 +941,53 @@ Rules:
 - Execution is tracked in `plm_plugin_migrations`; each file runs exactly once per site.
 - Write idempotent SQL (`WHERE NOT EXISTS`, `ON CONFLICT DO NOTHING`) so a file that partially applied can be safely re-run after the tracking row is cleared.
 
-### Plugin Settings Form
+### Plugin Settings on Your Own Admin Page
 
-Settings declared in `plugin.json`'s `settings` array (see [Plugin Settings](#plugin-settings-declarative) above) are seeded into the database on plugin activate. The `settings_form.php` file renders them in the admin settings page. The names used in both must match exactly — the manifest handles seeding, the form file handles UI, and **the manifest is also the write scope**: a field whose name the manifest does not declare renders but is ignored on save.
-
-If your plugin has configurable settings, create a `settings_form.php` file in your plugin directory. The **Plugin Settings** tab (`/admin/admin_settings_plugins`) **automatically discovers and includes** this file as its own section — no registration required. The section appears while the plugin is active.
-
-```
-plugins/my-plugin/settings_form.php
-```
-
-The file is included inside an already-open FormWriter form, so you output fields directly using `$formwriter`. The variables `$formwriter`, `$settings`, and `$session` are all available in scope.
+A plugin's settings appear on the **Plugin Settings** tab automatically. When a
+plugin also wants them on one of its own admin pages — next to a connection test,
+a topology diagram, or state the settings page cannot show — ask the shared
+renderer for a group:
 
 ```php
-<?php
-// plugins/my-plugin/settings_form.php
-// $formwriter, $settings, and $session are already available
+require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
 
-echo '<p>Configure My Plugin settings below.</p>';
+$form = $page->getFormWriter('settings_form', array('action' => $base));
+$form->begin_form();
 
-$formwriter->textinput('my_plugin_api_url', 'API URL', [
-    'value' => $settings->get_setting('my_plugin_api_url'),
-    'placeholder' => 'e.g. https://api.example.com',
-]);
+$page->begin_box(array('title' => 'Connection'));
+echo '<p>' . htmlspecialchars($connection_state) . '</p>';
+SettingsFieldRenderer::renderGroup($form, 'connection', array('source' => 'myplugin'));
+$page->end_box();
 
-$formwriter->passwordinput('my_plugin_api_key', 'API Key', [
-    'value' => $settings->get_setting('my_plugin_api_key'),
-    'placeholder' => 'Your API key',
-]);
+$form->submitbutton('save_settings', 'Save settings');
+echo $form->end_form();
+```
 
-$formwriter->checkboxinput('my_plugin_enabled', 'Enable My Plugin', [
-    'value' => $settings->get_setting('my_plugin_enabled'),
-]);
+That is the **same field** as the one on the Plugin Settings tab, not a second
+one — same label, same rules, same credential handling. Two pages cannot drift.
+
+Save through the shared writer:
+
+```php
+require_once(PathHelper::getIncludePath('includes/SettingsWriter.php'));
+$write = SettingsWriter::write($input, array(
+    'page'   => 'admin_myplugin_settings',
+    'source' => 'myplugin',
+));
+SettingsWriter::reportTo($write, '~/plugins/myplugin/admin/~');
 ```
 
 **Rules:**
-- All setting names **must be prefixed** with your plugin name (e.g. `my_plugin_`) to avoid collisions with core settings or other plugins.
-- Use `$settings->get_setting('name')` to read current values — this handles missing rows gracefully.
-- Use `passwordinput` for secrets (API keys, tokens) so the value is masked in the browser.
-- **Output fields only.** Do not open or close a `<form>`, and do not add a submit button — your section is already a form, and the page adds its own Save. A nested `<form>` is invalid HTML and the inner one is dropped by the browser.
-- The form submit is handled by the settings page. Your section saves independently of every other plugin's, and writes only the settings your manifest declares.
-- Declare the setting in `plugin.json`'s `settings` array so it exists on fresh installs and is writable from the form (see [Plugin Settings](#plugin-settings-declarative) above).
+- **A page never draws a settings field of its own.** Declare it and render the
+  group. A hand-drawn field is a field with no rules and no write scope.
+- A page decides *whether* to render a group, may disable fields within it, and
+  may print any amount of state around it. That is reasoning about the
+  deployment, which is the page's job.
+- Value-driven visibility ("show the secret when the feature is on") belongs in
+  `show_when` on the declaration, so it works identically wherever the group is
+  shown. Never hand-roll a JS toggle.
+- **Output fields only** inside the page's form. `SettingsFieldRenderer` never
+  opens a form, closes one, or adds a submit button — the page owns all three.
 
 ### Uninstall Script
 
