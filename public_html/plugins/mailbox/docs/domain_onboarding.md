@@ -58,6 +58,17 @@ exact provider DKIM record, so it is the authority on what a given domain still
 needs. Publish `p=reject` in place of `p=quarantine` once aggregate reports show
 nothing legitimate failing.
 
+**The Setup tab can publish this record set for you.** Its publish box builds a
+diff of the whole set against live DNS — what is missing, what differs, what
+already matches, and what would be a cutover — and writes it through the
+deployment's DNS host. The diff itself needs no credential; only the write does,
+and that credential is authorized at the moment of the write and never stored.
+See [DNS Management](../../../docs/dns_management.md). A deployment whose DNS
+host is not one the platform drives, or that prefers to publish by hand, reads
+the same records from the table on this page and the Setup tab's per-check fixes
+— that is a supported path, not a degraded one, and the rest of this document is
+written for it.
+
 **`rua` must be an address that receives.** A report address on a domain you do
 not control needs that domain's authorization record, so the practical choice is
 one on the domain itself. A domain with catch-all storage or a `postmaster@`
@@ -67,6 +78,9 @@ unmonitored.
 ## Order of operations
 
 Each step is safe to sit in indefinitely. Only step 4 changes where mail goes.
+Publishing through the Setup tab's publish box follows the same order by
+construction: creating a record where none exists needs no confirmation, while
+the MX change in step 4 is flagged as a cutover and takes its own.
 
 1. **Register both identities with the outbound provider** — the bare domain and
    `mail.<domain>` — and publish their SPF and DKIM records. Purely additive:

@@ -152,6 +152,14 @@ $connect_button = function ($imap) use ($imap_action) {
 						<?php if (!$alias->get('iea_is_enabled')): ?>
 							<span class="iea-badge iea-badge-off">disabled</span>
 						<?php endif; ?>
+						<?php // A hint, not a verdict: it says go and look, and the Setup
+						      // tab is what actually checks. See specs/mailbox_setup_verdicts.md.
+						      $hint = $setup_hints[(int)$alias->key] ?? null;
+						      if ($hint): ?>
+							<a class="iea-badge iea-badge-warn"
+							   href="<?php echo htmlspecialchars($hint['url']); ?>"
+							   title="<?php echo htmlspecialchars($hint['title']); ?>"><?php echo htmlspecialchars($hint['text']); ?></a>
+						<?php endif; ?>
 						<?php $mb_level = $domain->security_level();
 						if ($mb_level !== InboundEmailDomain::LEVEL_STANDARD): ?>
 							<a class="iea-badge iea-badge-level iea-badge-level-<?php echo htmlspecialchars($mb_level); ?>"

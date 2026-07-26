@@ -29,7 +29,7 @@
  * on non-sealing domains converges them in the background via
  * mailbox/unseal_batch, silently stopping while their vault is locked.
  *
- * @version 1.6.0
+ * @version 1.7.0
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSender.php'));
@@ -44,6 +44,11 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSender.
  *   - attachment_url_base (string, required) per-attachment download endpoint
  *   - message_detail_base (string|null)      single-message deep-link page, or
  *                                            null to omit deep links (member mount)
+ *   - setup_url_base      (string|null)      admin Setup page prefix, ready for an
+ *                                            alias id. Null on the member mount:
+ *                                            mail setup is operator work, and a
+ *                                            member reading their own mail has no
+ *                                            business being sent to it.
  */
 function mailbox_render_mailbox_reader($page, array $opts): void {
 	$csrf_token = (string)$opts['csrf_token'];
@@ -77,6 +82,7 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 		// the endpoint enforces it, this flag just suppresses the fetch for non-admins.
 		'canSeeContext'     => (SessionControl::get_instance()->get_permission() >= 5),
 		'messageDetailBase' => $opts['message_detail_base'] ?? null,
+		'setupUrlBase'      => $opts['setup_url_base'] ?? null,
 		'attachmentUrlBase' => (string)$opts['attachment_url_base'],
 		'initialMailboxes'  => $opts['initial_mailboxes'],
 		'maxFiles'          => MailboxSender::MAX_UPLOAD_FILES,
@@ -186,6 +192,10 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 				<span id="mbx-list-title" class="mbx-list-title">All mail</span>
 				<div class="mbx-list-header-actions">
 					<button type="button" id="mbx-new-message" class="mbx-new-btn" hidden>+ New message</button>
+				<!-- Checking a mailbox's setup from the mailbox itself: an empty
+				     inbox is exactly where the question "is this even wired up?"
+				     occurs, and the answer lived two tabs away. Admin mount only. -->
+				<a id="mbx-setup" class="mbx-iconbtn" title="Check this mailbox's setup" hidden>Setup</a>
 					<!-- Explicit lock (specs/mailbox_security_levels.md § The Unlock Window):
 					     ends the vault window from any mail surface. Hidden until an
 					     unlock window is known to be open (the reader reveals it). -->

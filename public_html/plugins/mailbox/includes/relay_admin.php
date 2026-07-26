@@ -778,6 +778,125 @@ function admin_mailbox_relay_health(): array {
 }
 
 /**
+ * The relay's Setup-tab cards: one in Receiving, and one in Sending only when
+ * sent mail actually rides the relay.
+ *
+ * A relay is optional, so with none set up the Receiving card is a grey
+ * "optional" line pointing at the setup that lives under Advanced — present
+ * enough to be discoverable, quiet enough not to read as a to-do. Once a relay
+ * exists the card carries its health: green when every check for that side
+ * passes, red when any does not, naming which.
+ *
+ * **The Sending card appears only under a smarthost**, because that is the only
+ * arrangement where sent mail goes through the relay at all. With an API
+ * provider carrying outbound, a green relay card in the Sending group says
+ * "healthy" about a component that is not in the path — it is green because it
+ * is unused, which is the wrong thing to tell someone reading a checklist. The
+ * outbound origin-leak checks still run; they surface as health dots in the
+ * Relay section under Advanced, where they read as facts about the relay rather
+ * than as a verdict on sending.
+ *
+ * Cost note: the battery (TCP probe, map build, DNS) runs only when a relay
+ * exists. A deployment without one pays nothing for these cards.
+ *
+ * @return array{receiving:?array,sending:?array} Rows in InboundEmailSetupCheck's shape.
+ */
+function admin_mailbox_relay_check_rows(string $advanced_url = ''): array {
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailSetupCheck.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+
+	$setup_link = array(
+		'text' => 'Relay setup lives under Advanced server setup, at the bottom of this page.',
+	);
+	if ($advanced_url !== '') {
+		$setup_link['link'] = array('url' => $advanced_url, 'label' => 'Go to relay setup');
+	}
+
+	$row = function ($id, $label, $status, $summary, $detail = '', $fix = null) {
+		return array(
+			'id' => $id, 'scope' => '', 'layer' => 'relay', 'label' => $label,
+			'severity' => InboundEmailSetupCheck::RECOMMENDED, 'status' => $status,
+			'summary' => $summary, 'detail' => $detail, 'fix' => $fix, 'recheckable' => true,
+		);
+	};
+
+	$active = null;
+	try {
+		$active = MailboxRelay::active();
+	} catch (\Throwable $e) {
+		// Relay table absent (before update_database) — the same as no relay.
+	}
+
+	if ($active === null) {
+		// No Sending card: with no relay, nothing about sending goes through one.
+		return array(
+			'receiving' => $row('relay.receiving', 'Relay', InboundEmailSetupCheck::OPTIONAL,
+				'No relay — mail is delivered straight to this server.',
+				'A relay receives your mail on a separate server and hands it here over a private tunnel, '
+				. 'so this server\'s address never appears in public DNS.', $setup_link),
+			'sending'   => null,
+		);
+	}
+
+	$smarthost = (strtolower(trim((string)Globalvars::get_instance()
+		->get_setting('mailbox_relay_outbound_mode'))) === 'smarthost');
+
+	// Partition the battery by which side of the mail path each check speaks to.
+	// The sending side is the relay's tunnel and nothing else: the outbound
+	// origin-leak checks describe the provider path, not the relay, and putting
+	// them on a card headed "Relay" would claim the relay is doing a job it is
+	// not doing.
+	$receiving_checks = array('checkRelaySpoolDraining', 'checkRelayMapFresh', 'checkOriginHidden');
+	$sending_checks   = $smarthost ? array('checkRelayTunnel') : array();
+
+	$health = admin_mailbox_relay_health();
+	$name = trim((string)$active->get('mrl_name')) ?: trim((string)$active->get('mrl_mx_hostname'));
+	$enabled = (bool)$active->get('mrl_is_enabled');
+
+	$side = function (array $keys, $id, $ok_summary) use ($health, $row, $name, $enabled, $setup_link) {
+		$dots = array();
+		foreach ($keys as $key) {
+			if (isset($health[$key])) {
+				$dots[] = $health[$key];
+			}
+		}
+		if (empty($dots)) {
+			return null;   // nothing on this side applies to the chosen mode
+		}
+		$failing = array();
+		$labels  = array();
+		foreach ($dots as $dot) {
+			$labels[] = ($dot['ok'] ? '✓ ' : '✗ ') . $dot['label'];
+			if (!$dot['ok']) {
+				$failing[] = $dot['label'] . ($dot['message'] !== '' ? ' — ' . $dot['message'] : '');
+			}
+		}
+		$detail = implode(' · ', $labels);
+		if (!empty($failing)) {
+			return $row($id, 'Relay', InboundEmailSetupCheck::FAIL,
+				count($failing) === 1
+					? $name . ': ' . $failing[0]
+					: $name . ': ' . count($failing) . ' checks are failing.',
+				$detail . ($failing ? '  ' . implode('  ', $failing) : ''), $setup_link);
+		}
+		// A disabled relay passes its checks but is not doing its job — the
+		// emergency stop left on is worth saying out loud, not colouring green.
+		if (!$enabled) {
+			return $row($id, 'Relay', InboundEmailSetupCheck::WARN,
+				$name . ' is set up but disabled.', $detail, $setup_link);
+		}
+		return $row($id, 'Relay', InboundEmailSetupCheck::PASS, $ok_summary($name), $detail);
+	};
+
+	return array(
+		'receiving' => $side($receiving_checks, 'relay.receiving',
+			function ($n) { return $n . ' is receiving your mail and handing it to this server.'; }),
+		'sending'   => $side($sending_checks, 'relay.sending',
+			function ($n) { return 'Sent mail leaves through ' . $n . '\'s tunnel.'; }),
+	);
+}
+
+/**
  * Create a provision_relay / rebuild_relay job on the selected managed node via
  * server_manager's queue. The job result processor registers/updates the
  * MailboxRelay row on success.

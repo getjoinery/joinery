@@ -62,6 +62,13 @@ class InboundEmailDomain extends SystemBase {
 		'ied_is_imap_source'    => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		// Security posture (specs/mailbox_security_levels.md): the single switch
 		// that selects each mechanism's plaintext-vs-sealed branch.
+		// Persisted setup verdict (specs/mailbox_setup_verdicts.md). Written only
+		// by the CheckDomainSetup task, read only by the Accounts listing's
+		// badge. It is a NAVIGATION HINT — "go and look at this domain" — never
+		// an answer about the world: the Setup tab re-runs everything live and
+		// is the only thing that claims a domain is correct or broken.
+		'ied_setup_status'       => array('type'=>'varchar(16)'),   // ok | attention | unknown; empty = never checked
+		'ied_setup_checked_time' => array('type'=>'timestamp(6)'),
 		'ied_security_level'    => array('type'=>'varchar(10)', 'is_nullable'=>false, 'default'=>'standard'), // 'standard' | 'private' | 'fortress'
 		// Outbound send protection (specs/mailbox_outbound_send_protection.md).
 		'ied_is_protected_identity' => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),

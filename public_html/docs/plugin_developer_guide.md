@@ -1074,6 +1074,65 @@ The teal state is deliberate: a plugin whose green status rests on probes never 
 
 The CLI equivalent is `php utils/check_provisioning.php`, which prints the same results and exits non-zero when anything is `unmet` or `error`.
 
+## Declaring DNS Needs
+
+A plugin that needs records published in someone's DNS does not write DNS. It
+describes what it wants as a `DnsRecordPlan` and hands that to the shared publish
+box, which shows the operator a diff and writes it through whichever DNS host the
+deployment uses. Full reference: **📖 [DNS Management](dns_management.md)**.
+
+Build the plan wherever the plugin already knows the answer:
+
+```php
+require_once(PathHelper::getIncludePath('includes/dns/DnsRecordPlan.php'));
+
+$plan = new DnsRecordPlan('example.com', 'myplugin');   // domain, owning subsystem
+$plan->addRecord('MX', 'example.com', 'mail.example.com', null, 10,
+    'Inbound mail for example.com arrives here.');
+```
+
+Then two calls put the box on an admin page — one in the action path, one in the
+render path:
+
+```php
+require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
+
+$redirect = DnsPublishBox::handle($input, function () use ($id) {
+    return MyPlanSource::forThing($id);       // called only when needed
+}, $return_url);
+if ($redirect !== null) { return $redirect; }
+
+$dns_box = DnsPublishBox::build(MyPlanSource::forThing($id), $input, $return_url);
+```
+
+```php
+// view
+require_once(PathHelper::getIncludePath('includes/dns/dns_publish_box.php'));
+dns_publish_box_render($page, $dns_box);
+```
+
+Four rules that keep a plugin's plan honest:
+
+- **Only A, AAAA, CNAME, MX, TXT and CAA.** `NS` and `SOA` throw — a plan that
+  could rewrite delegation could take a zone away from its owner.
+- **Stay inside the domain's own zone.** A name that is not the domain or beneath
+  it does not belong in that domain's plan.
+- **Never plan a placeholder.** If the value is not known yet, leave the record
+  out; writing `YOUR_SERVER_IP` into a live zone is worse than writing nothing.
+- **Omit the TTL unless you genuinely need one.** A record with no TTL means
+  "provider default", and a live record whose only difference is a TTL you never
+  asked for matches rather than differs.
+
+A plugin never handles a DNS credential. The box authorizes the write at the
+moment of the write and discards the grant when the request returns; nothing
+DNS-write-capable is ever stored.
+
+To add support for a DNS host the platform does not drive yet, drop a
+`DnsProvider` implementation into `includes/dns/drivers/` — the registry
+discovers it by interface and the provider chooser picks it up with no page
+change. See the driver contract in
+[DNS Management](dns_management.md#writing-a-driver).
+
 ## Provider Abstractions
 
 The system has two pluggable provider abstractions for external services. Each follows the same shape: an interface, a service manager that auto-discovers concrete classes, and one provider class per third-party service. Adding a new provider is a single-file change — drop a class into the providers directory and the rest of the system picks it up.

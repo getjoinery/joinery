@@ -1,0 +1,55 @@
+<?php
+/**
+ * DigitalOceanOAuthProvider - DigitalOcean OAuth2 endpoints.
+ *
+ * DigitalOcean issues both an access token and a refresh token on the
+ * authorization-code grant. The DNS consumer discards both the moment its one
+ * publish returns — a refresh token is exactly the standing credential this
+ * platform declines to hold.
+ *
+ * Scopes are coarse: 'read write' covers the whole account API, DNS included.
+ *
+ * @version 1.0
+ */
+
+require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Provider.php'));
+require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
+
+class DigitalOceanOAuthProvider implements OAuth2Provider {
+
+    public static function getKey(): string { return 'digitalocean'; }
+    public static function getLabel(): string { return 'DigitalOcean'; }
+
+    public static function getAuthorizeEndpoint(): string {
+        return 'https://cloud.digitalocean.com/v1/oauth/authorize';
+    }
+
+    public static function getTokenEndpoint(): string {
+        return 'https://cloud.digitalocean.com/v1/oauth/token';
+    }
+
+    public static function getClientId(): string {
+        $settings = Globalvars::get_instance();
+        return trim((string)$settings->get_setting('oauth_digitalocean_client_id', false, true));
+    }
+
+    public static function getClientSecret(): string {
+        $settings = Globalvars::get_instance();
+        $stored = (string)$settings->get_setting('oauth_digitalocean_client_secret', false, true);
+        if ($stored === '') {
+            return '';
+        }
+        if (SecretBox::looksEncrypted($stored)) {
+            return (new SecretBox())->decrypt($stored);
+        }
+        return $stored;
+    }
+
+    public static function isConfigured(): bool {
+        return self::getClientId() !== '' && self::getClientSecret() !== '';
+    }
+
+    public static function extraAuthorizeParams(array $scopes): array {
+        return [];
+    }
+}
