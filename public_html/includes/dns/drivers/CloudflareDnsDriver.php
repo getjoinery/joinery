@@ -51,6 +51,22 @@ class CloudflareDnsDriver extends DnsDriverBase {
 		);
 	}
 
+	public static function credentialGuide(): ?array {
+		return array(
+			'title'     => 'Create a Cloudflare API token',
+			'url'       => 'https://dash.cloudflare.com/profile/api-tokens',
+			'url_label' => 'Open Cloudflare API tokens',
+			'steps'     => array(
+				'Sign in to Cloudflare and open My Profile, then API Tokens.',
+				'Choose Create Token and use the "Edit zone DNS" template.',
+				'Under Zone Resources pick Include, Specific zone, and this domain.',
+				'Create the token and copy it — it is shown once.',
+			),
+			'caution'   => 'Not the Global API Key sitting next to it — that is a different credential '
+				. 'and Cloudflare will refuse the write.',
+		);
+	}
+
 	public function zoneFor(string $domain): ?string {
 		$id = self::matchZone($domain, $this->zoneMap());
 		if ($id === null) {

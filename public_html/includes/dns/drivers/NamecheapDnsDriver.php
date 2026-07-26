@@ -72,6 +72,23 @@ class NamecheapDnsDriver extends DnsDriverBase {
 		);
 	}
 
+	public static function credentialGuide(): ?array {
+		return array(
+			'title'     => 'Enable Namecheap API access',
+			'url'       => 'https://ap.www.namecheap.com/settings/tools/apiaccess/',
+			'url_label' => 'Open Namecheap API access',
+			'steps'     => array(
+				'Sign in and open Profile, Tools, then Namecheap API Access, and switch it on.',
+				'Namecheap grants production API access only to accounts with 20 or more domains, '
+					. '$50 in the account balance, or $50 spent in the last two years.',
+				'Next to Whitelisted IPs choose Edit, then Add IP, and add this server\'s public '
+					. 'IPv4 address. IPv6 is not accepted.',
+				'Copy the API key shown on the same page.',
+				'Your API username is your Namecheap account username.',
+			),
+		);
+	}
+
 	public function zoneFor(string $domain): ?string {
 		$map = array();
 		foreach ($this->zoneNames() as $name) {

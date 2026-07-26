@@ -42,6 +42,22 @@ class NameComDnsDriver extends DnsDriverBase {
 		);
 	}
 
+	public static function credentialGuide(): ?array {
+		return array(
+			'title'     => 'Create a Name.com API token',
+			'url'       => 'https://www.name.com/account/settings/api',
+			'url_label' => 'Open Name.com API tokens',
+			'steps'     => array(
+				'Sign in, click the user icon, then Settings, then API Tokens under Security.',
+				'Choose Create API Token and issue a production token, not a test one.',
+				'Copy the token — it is shown once.',
+				'If the account uses two-step verification, also switch on Name.com API Access under '
+					. 'Account Settings, Security.',
+				'Your API username is your Name.com account username.',
+			),
+		);
+	}
+
 	public function zoneFor(string $domain): ?string {
 		$map = array();
 		foreach ($this->zoneNames() as $name) {

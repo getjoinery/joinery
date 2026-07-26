@@ -22,8 +22,26 @@ require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
 
 class LinodeOAuthProvider implements OAuth2Provider {
 
+    use DeclaresOAuthConfigFields;
+
     public static function getKey(): string { return 'linode'; }
     public static function getLabel(): string { return 'Linode'; }
+
+    public static function configGuide(): ?array {
+        return [
+            'title'     => 'Register a Linode OAuth app',
+            'url'       => 'https://cloud.linode.com/profile/clients',
+            'url_label' => 'Open Linode OAuth Apps',
+            'steps'     => [
+                'In Cloud Manager, click your username and choose My Profile, then the OAuth Apps tab.',
+                'Choose Add an OAuth App, give it a label, and paste the callback URL below.',
+                'Leave it private, then create it.',
+                'Copy the client secret from the window that appears — it cannot be retrieved later.',
+                'The client ID is listed with the app afterwards.',
+            ],
+            'copy'      => [self::callbackCopyRow()],
+        ];
+    }
 
     public static function getAuthorizeEndpoint(): string {
         return 'https://login.linode.com/oauth/authorize';

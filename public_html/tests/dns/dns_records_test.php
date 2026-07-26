@@ -24,6 +24,14 @@ harness_boot();
 require_once(PathHelper::getIncludePath('includes/dns/DnsDriverRegistry.php'));
 require_once(PathHelper::getIncludePath('includes/dns/DnsRecordPlan.php'));
 
+// FormWriter's CSRF setup starts a session, and PHP cannot start one after the
+// first byte of output. The rendering section at the end of this file builds a
+// FormWriter, so the session is established here — before any check prints —
+// rather than warning its way through the run.
+if (session_status() === PHP_SESSION_NONE) {
+	session_start();
+}
+
 // ---------------------------------------------------------------------------
 section('The vocabulary refuses what it must never publish');
 // ---------------------------------------------------------------------------
@@ -310,5 +318,155 @@ foreach (array_keys(ManagedDnsRecord::$field_specifications) as $column) {
 	}
 }
 check(empty($leaky), 'the ownership table has no column that could hold a credential', implode(', ', $leaky));
+
+// ---------------------------------------------------------------------------
+section('Every credential a driver asks for says where to get it');
+// ---------------------------------------------------------------------------
+
+// A field asking for an API token with no guide is the friction this exists to
+// remove, so an API driver without one fails here rather than shipping quietly.
+// The checks are about whether a guide can be trusted on screen: a stale deep
+// link teaches the operator that the box does not know what it is talking about,
+// which costs more than no link at all.
+$placeholders = array('YOUR_', 'your_', 'example.com', 'TODO', 'FIXME', 'xxx');
+
+foreach (DnsDriverRegistry::all() as $key => $class) {
+	$guide = $class::credentialGuide();
+
+	if ($class::credentialMode() === DnsProvider::CREDENTIAL_OAUTH2) {
+		// An OAuth driver collects nothing, so it has no field to hang a guide
+		// on — its registration guide lives on the OAuth provider instead.
+		check($class::credentialFields() === array(),
+			$key . ' is OAuth2 and collects no credential fields');
+		continue;
+	}
+
+	check(is_array($guide), $key . ' declares a credential guide');
+	if (!is_array($guide)) {
+		continue;
+	}
+
+	check(trim((string)($guide['title'] ?? '')) !== '', $key . ' guide has a title');
+	check(count($guide['steps'] ?? array()) >= 2, $key . ' guide has at least two steps');
+
+	$url = (string)($guide['url'] ?? '');
+	check($url === '' || stripos($url, 'https://') === 0,
+		$key . ' guide links over https or not at all', $url);
+
+	$blob = $guide['title'] . ' ' . implode(' ', $guide['steps'] ?? array())
+		. ' ' . (string)($guide['caution'] ?? '');
+	$found = array();
+	foreach ($placeholders as $needle) {
+		if (strpos($blob, $needle) !== false) { $found[] = $needle; }
+	}
+	check(empty($found), $key . ' guide has no placeholder text', implode(', ', $found));
+
+	// The copy rows exist for values we hand the vendor. A credential must never
+	// travel that way — nothing here is ours to give.
+	foreach ($guide['copy'] ?? array() as $row) {
+		$value = strtolower((string)($row['value'] ?? ''));
+		$leak = false;
+		foreach (array('secret', 'token', 'api_key', 'password') as $word) {
+			if (strpos($value, $word) !== false) { $leak = true; }
+		}
+		check(!$leak, $key . ' guide copy row carries no credential-shaped value');
+	}
+}
+
+// ---------------------------------------------------------------------------
+section('An OAuth app registration is declared once and reachable everywhere');
+// ---------------------------------------------------------------------------
+
+require_once(PathHelper::getIncludePath('includes/oauth/OAuth2ProviderRegistry.php'));
+
+// This is the assertion that would have caught DigitalOcean and DNSimple: they
+// had settings slots and no way to fill them, because the admin page carried its
+// own hardcoded list. Every provider now declares its own fields, and the page
+// renders whatever the registry returns.
+$declared = json_decode(file_get_contents(PathHelper::getIncludePath('settings.json')), true);
+$declared_names = array();
+foreach ($declared['settings'] ?? array() as $row) {
+	$declared_names[$row['name']] = true;
+}
+
+$providers = OAuth2ProviderRegistry::all();
+check(count($providers) > 0, 'the OAuth provider registry discovers providers');
+
+foreach ($providers as $key => $provider_class) {
+	$fields = $provider_class::configFields();
+	check(count($fields) >= 2, $key . ' declares at least a client id and secret');
+
+	$has_secret = false;
+	foreach ($fields as $setting => $spec) {
+		check(isset($declared_names[$setting]),
+			$key . ': ' . $setting . ' is declared in settings.json');
+		check(trim((string)($spec['label'] ?? '')) !== '',
+			$key . ': ' . $setting . ' has a label to render');
+		if (!empty($spec['secret'])) { $has_secret = true; }
+	}
+	check($has_secret, $key . ' marks its client secret as a secret');
+
+	$guide = $provider_class::configGuide();
+	check(is_array($guide), $key . ' declares an app registration guide');
+	if (!is_array($guide)) {
+		continue;
+	}
+	check(count($guide['steps'] ?? array()) >= 2, $key . ' registration guide has steps');
+
+	// The vendor's own form asks for the callback URL, so every guide offers it
+	// as a copy row rather than describing it.
+	$has_callback = false;
+	foreach ($guide['copy'] ?? array() as $row) {
+		if (stripos((string)($row['label'] ?? ''), 'callback') !== false) { $has_callback = true; }
+	}
+	check($has_callback, $key . ' registration guide offers the callback URL to copy');
+}
+
+// ---------------------------------------------------------------------------
+section('A guide renders as an inert template, never as markup it was handed');
+// ---------------------------------------------------------------------------
+
+require_once(PathHelper::getIncludePath('includes/FormWriterV2HTML5.php'));
+
+$fw = new FormWriterV2HTML5('guide_test');
+ob_start();
+$fw->passwordinput('some_token', 'Some token', array(
+	'help_modal' => array(
+		'title' => 'Get a <token>',
+		'url'   => 'https://vendor.test/tokens',
+		'steps'   => array('Open "settings" & pick New', 'Copy it'),
+		'caution' => 'Not the other key.',
+		'copy'    => array(array('label' => 'Callback URL', 'value' => 'https://site.test/oauth_callback')),
+	),
+));
+$html = ob_get_clean();
+
+check(strpos($html, 'data-jy-help="some_token_help"') !== false, 'the field emits a help trigger');
+check(strpos($html, '<template id="some_token_help">') !== false, 'the guide is emitted as a template');
+check(strpos($html, 'Get a &lt;token&gt;') !== false, 'guide text is escaped, not injected');
+check(strpos($html, 'jy-help-guide-caution') !== false
+	&& strpos($html, '<li>Not the other key.</li>') === false,
+	'a caution renders outside the numbered steps');
+check(strpos($html, '<token>') === false, 'no raw markup from guide text reaches the page');
+check(strpos($html, 'data-jy-copy="https://site.test/oauth_callback"') !== false,
+	'a copy row becomes a click-to-copy button');
+
+// A javascript: url in a guide must never become an href, even though guides are
+// authored data — the cost of the check is nothing and the failure is silent.
+ob_start();
+$fw->passwordinput('other_token', 'Other token', array(
+	'help_modal' => array(
+		'title' => 'Bad link',
+		'url'   => 'javascript:alert(1)',
+		'steps' => array('one', 'two'),
+	),
+));
+$bad = ob_get_clean();
+check(strpos($bad, 'javascript:') === false, 'a non-https guide url is not rendered as a link');
+
+ob_start();
+$fw->textinput('plain_field', 'Plain field', array());
+$plain = ob_get_clean();
+check(strpos($plain, 'data-jy-help') === false, 'a field with no guide emits no trigger');
 
 harness_finish();

@@ -41,6 +41,20 @@ class HetznerDnsDriver extends DnsDriverBase {
 		);
 	}
 
+	public static function credentialGuide(): ?array {
+		return array(
+			'title'     => 'Create a Hetzner DNS API token',
+			'url'       => 'https://dns.hetzner.com/settings/api-token',
+			'url_label' => 'Open Hetzner DNS API tokens',
+			'steps'     => array(
+				'Sign in to the Hetzner DNS Console.',
+				'Open API tokens from the user menu, or Manage API tokens on the dashboard.',
+				'Name the token and choose Create access token.',
+				'Copy it now — Hetzner will not show it again.',
+			),
+		);
+	}
+
 	public function zoneFor(string $domain): ?string {
 		$id = self::matchZone($domain, $this->zoneMap());
 		if ($id === null) {

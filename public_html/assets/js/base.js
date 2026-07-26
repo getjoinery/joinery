@@ -290,6 +290,21 @@ document.addEventListener('click', function (e) {
     });
 });
 
+// Field help guides: <button data-jy-help="{template id}"> opens that
+// <template>'s content in the kit modal. FormWriter's `help_modal` option emits
+// both halves, so a field that asks for a credential can say where to get one
+// with nothing wired per form. Delegated, so markup rendered at any time works.
+document.addEventListener('click', function (e) {
+    const trigger = e.target.closest ? e.target.closest('[data-jy-help]') : null;
+    if (!trigger) return;
+    const tpl = document.getElementById(trigger.getAttribute('data-jy-help'));
+    if (!tpl || !tpl.content) return;
+    e.preventDefault();
+    JoineryModal.open(tpl.content.cloneNode(true), {
+        buttons: [{ label: 'Done', style: 'primary' }],
+    });
+});
+
 // Kit confirm for plain forms: <form data-jy-confirm="Are you sure?"> shows
 // the modal instead of submitting; confirming re-submits with a one-shot
 // bypass flag so this handler lets it through.

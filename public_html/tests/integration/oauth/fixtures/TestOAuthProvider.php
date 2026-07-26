@@ -16,10 +16,18 @@ require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Provider.php'));
 
 class TestOAuthProvider implements OAuth2Provider {
 
+    // The usual client id / secret declaration. This stub hardcodes the values it
+    // returns, so nothing reads these settings — but declaring them keeps the
+    // fixture honest about the contract every real provider satisfies.
+    use DeclaresOAuthConfigFields;
+
     const DEFAULT_BASE = 'http://localhost:8080';
 
     public static function getKey(): string { return 'test'; }
     public static function getLabel(): string { return 'Test (mock)'; }
+
+    /** No vendor to register an app at. */
+    public static function configGuide(): ?array { return null; }
 
     public static function getAuthorizeEndpoint(): string {
         $settings = Globalvars::get_instance();

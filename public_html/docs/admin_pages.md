@@ -494,7 +494,27 @@ JoineryModal.prompt('Enter the item name to confirm:', function(value) {
 });
 ```
 
-All three accept an options object:
+For arbitrary content and a custom button set, use `open()`:
+
+```js
+JoineryModal.open(node, { buttons: [{ label: 'Done', style: 'primary' }] });
+```
+
+`content` may be a DOM node, a document fragment, or an HTML string; `buttons` is
+`[{label, style, onClick(dialog), close}]`, where an `onClick` returning `false`
+keeps the dialog open (as does `close: false`). It returns `{dialog, content}`.
+The `alertAsync` / `confirmAsync` / `promptAsync` variants return promises that
+settle on close, so Esc and Cancel resolve too instead of hanging.
+
+Two delegated behaviours ride on the same file, so markup rendered at any time —
+including inside an open modal — works with nothing wired:
+
+- `<button data-jy-copy="text">` copies that text and confirms on the button.
+- `<button data-jy-help="{template id}">` opens that `<template>`'s content in the
+  modal. FormWriter's [`help_modal` option](formwriter.md#telling-the-user-where-a-credential-comes-from-help_modal)
+  emits both halves for you — prefer it over hand-rolling a trigger.
+
+All three text modes accept an options object:
 
 | Option         | Type                       | Default                   | Notes                                |
 |----------------|----------------------------|---------------------------|--------------------------------------|

@@ -740,6 +740,21 @@ body.jy-default blockquote {
   color: var(--jy-color-text-muted);
 }
 
+/* "How do I get this?" — FormWriter's help_modal trigger. A link-weight button
+   under the field, not a heavy one: it is an offer, not the field's action. */
+.jy-ui .jy-help-trigger {
+  display: inline-block;
+  margin-top: var(--jy-space-1);
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: var(--jy-text-xs);
+  color: var(--jy-color-primary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.jy-ui .jy-help-trigger:hover { text-decoration: none; }
+
 .jy-ui .form-check {
   display: flex;
   align-items: center;
@@ -1164,11 +1179,16 @@ dialog.jy-ui {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
   max-width: 480px;
   width: calc(100% - 2rem);
+  max-height: calc(100vh - 4rem);
   z-index: 2000;
 }
+/* Content mode can be given more than fits: a column layout scrolls the content
+   area and keeps the action row on screen, so a long dialog never hides its own
+   buttons. Scoped to [open] so the closed dialog stays display:none. */
+dialog.jy-ui[open] { display: flex; flex-direction: column; }
 dialog.jy-ui::backdrop { background: rgba(0, 0, 0, 0.45); }
 .jy-ui .dialog-message { margin-bottom: var(--jy-space-5); line-height: 1.5; }
-.jy-ui .dialog-content { margin-bottom: var(--jy-space-5); }
+.jy-ui .dialog-content { margin-bottom: var(--jy-space-5); overflow-y: auto; }
 .jy-ui .dialog-input {
   display: block;
   width: 100%;
@@ -1189,6 +1209,40 @@ dialog.jy-ui::backdrop { background: rgba(0, 0, 0, 0.45); }
 /* Buttons are kit .btn / .btn-* (built by JoineryModal). The action row owns
    only layout. */
 .jy-ui .dialog-actions { display: flex; justify-content: flex-end; gap: var(--jy-space-2); }
+
+/* A field help guide rendered inside the modal (FormWriter help_modal). Steps
+   are the content; the copy rows and the provider link are the two things the
+   operator acts on, so both are given weight. */
+.jy-ui .jy-help-guide-title { margin: 0 0 var(--jy-space-3); font-size: var(--jy-text-lg); }
+.jy-ui .jy-help-guide-steps {
+  /* Stated rather than inherited: these are numbered clicks in order, and the
+     kit reset drops list markers. */
+  list-style: decimal;
+  margin: 0 0 var(--jy-space-4);
+  padding-left: var(--jy-space-5);
+  line-height: 1.6;
+}
+.jy-ui .jy-help-guide-steps li { margin-bottom: var(--jy-space-2); }
+.jy-ui .jy-help-guide-caution {
+  margin: 0 0 var(--jy-space-4);
+  padding: var(--jy-space-2) var(--jy-space-3);
+  border-left: 3px solid var(--jy-color-warning);
+  background: var(--jy-color-warning-bg);
+  font-size: var(--jy-text-sm);
+}
+.jy-ui .jy-help-guide-copy {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--jy-space-2);
+  margin-bottom: var(--jy-space-2);
+  padding: var(--jy-space-2) var(--jy-space-3);
+  background: var(--jy-color-surface-alt);
+  border-radius: var(--jy-radius-sm);
+}
+.jy-ui .jy-help-guide-copy-label { font-size: var(--jy-text-xs); color: var(--jy-color-text-muted); }
+.jy-ui .jy-help-guide-copy code { word-break: break-all; }
+.jy-ui .jy-help-guide-link { margin: var(--jy-space-4) 0 0; }
 
 /* ─── Component layout wrapper (ComponentRenderer) ──────────────
    Emitted by ComponentRenderer when a component instance overrides max-width /

@@ -7,7 +7,8 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
- * @version 2.12.0
+ * @version 2.13.0
+ * @changelog 2.13.0 - Added the help_modal input option: a field can declare where its credential comes from (title/steps/url/copy) and buildHelpModal() renders a trigger plus an inert template that the kit modal opens
  * @changelog 2.12.0 - getDefaultFormAction() keeps the query string, matching the browser default for a form with no explicit action (a stripped query orphaned POST handlers that read $_GET context like ?mgn_id=)
  * @changelog 2.10.0 - buildAjaxSelectScript() speaks the /api/v1 action contract for /api/v1/ endpoints (POST {q, ...}, CSRF header, read data.items); query-string suffixes fold into the POST body. Legacy GET ?q= array contract retained for other URLs
  * @changelog 2.9.0 - outputJavascriptValidation() emits `remote` rules (and `custom` rules carrying a url) to the client `remote` validator, which speaks the /api/v1 JSON-envelope contract for API-action URLs
@@ -3109,6 +3110,88 @@ document.addEventListener("DOMContentLoaded", function() {
     }
 
     /**
+     * Build the "How do I get this?" trigger and its guide content for a field.
+     *
+     * A field asking for a credential can say where that credential comes from.
+     * The guide is declared as data (see the 'help_modal' option) and rendered
+     * here as a trigger button plus an inert <template>; delegated JS in the
+     * kit's base.js opens it with JoineryModal. Nothing per-form is wired, and
+     * a page with JS off simply shows no trigger rather than broken markup.
+     *
+     * The guide array: title, steps (ordered strings), optional caution (a
+     * wrong-credential warning, kept out of the numbered steps), optional url +
+     * url_label, optional copy (rows of label/value the vendor's own form needs
+     * from us — a callback URL, an allowlist IP — offered as copy buttons so
+     * nobody transcribes them), optional trigger label.
+     *
+     * @param array $data Prepared field data carrying 'help_modal' and 'id'
+     * @return string HTML, or '' when the field declares no guide
+     */
+    protected function buildHelpModal($data) {
+        $guide = $data['help_modal'] ?? null;
+        if (empty($guide) || !is_array($guide)) {
+            return '';
+        }
+        $steps = $guide['steps'] ?? [];
+        $title = trim((string)($guide['title'] ?? ''));
+        if ($title === '' || empty($steps)) {
+            return '';
+        }
+
+        $template_id = $data['id'] . '_help';
+        $trigger = (string)($guide['trigger'] ?? 'How do I get this?');
+
+        $html = '<button type="button" class="jy-help-trigger" aria-haspopup="dialog"'
+            . ' data-jy-help="' . htmlspecialchars($template_id) . '">'
+            . htmlspecialchars($trigger) . '</button>';
+
+        $html .= '<template id="' . htmlspecialchars($template_id) . '">';
+        $html .= '<div class="jy-help-guide">';
+        $html .= '<h3 class="jy-help-guide-title">' . htmlspecialchars($title) . '</h3>';
+
+        $html .= '<ol class="jy-help-guide-steps">';
+        foreach ($steps as $step) {
+            $html .= '<li>' . htmlspecialchars((string)$step) . '</li>';
+        }
+        $html .= '</ol>';
+
+        // A "don't pick the adjacent wrong one" warning is not a step. Numbering
+        // it among them reads as an instruction to go and do it.
+        $caution = trim((string)($guide['caution'] ?? ''));
+        if ($caution !== '') {
+            $html .= '<p class="jy-help-guide-caution">' . htmlspecialchars($caution) . '</p>';
+        }
+
+        foreach ($guide['copy'] ?? [] as $row) {
+            $value = (string)($row['value'] ?? '');
+            if ($value === '') {
+                continue;
+            }
+            $html .= '<div class="jy-help-guide-copy">';
+            if (!empty($row['label'])) {
+                $html .= '<span class="jy-help-guide-copy-label">' . htmlspecialchars((string)$row['label']) . '</span>';
+            }
+            $html .= '<code>' . htmlspecialchars($value) . '</code>';
+            $html .= '<button type="button" class="btn btn-sm btn-secondary"'
+                . ' data-jy-copy="' . htmlspecialchars($value) . '">Copy</button>';
+            $html .= '</div>';
+        }
+
+        // Only an https link is ever emitted — a guide is authored data, but a
+        // scheme check here means no guide can smuggle javascript: into a href.
+        $url = trim((string)($guide['url'] ?? ''));
+        if ($url !== '' && stripos($url, 'https://') === 0) {
+            $html .= '<p class="jy-help-guide-link"><a href="' . htmlspecialchars($url) . '"'
+                . ' target="_blank" rel="noopener noreferrer">'
+                . htmlspecialchars((string)($guide['url_label'] ?? 'Open the provider')) . '</a></p>';
+        }
+
+        $html .= '</div></template>';
+
+        return $html;
+    }
+
+    /**
      * Build the inline AJAX search-select script for dropdown fields.
      * Shared by all theme renderers to avoid duplicating ~100 lines of JS.
      *
@@ -3275,6 +3358,7 @@ JS;
             'has_errors' => isset($this->errors[$name]),
             'errors' => $this->errors[$name] ?? [],
             'helptext' => $options['helptext'] ?? '',
+            'help_modal' => $options['help_modal'] ?? null,
         ];
     }
 

@@ -17,8 +17,25 @@ require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
 
 class DigitalOceanOAuthProvider implements OAuth2Provider {
 
+    use DeclaresOAuthConfigFields;
+
     public static function getKey(): string { return 'digitalocean'; }
     public static function getLabel(): string { return 'DigitalOcean'; }
+
+    public static function configGuide(): ?array {
+        return [
+            'title'     => 'Register a DigitalOcean OAuth app',
+            'url'       => 'https://cloud.digitalocean.com/account/api/applications',
+            'url_label' => 'Open DigitalOcean OAuth Applications',
+            'steps'     => [
+                'In the DigitalOcean control panel open API, then the OAuth Applications tab.',
+                'Choose Register OAuth Application and name it.',
+                'Paste the callback URL below as the application callback URL.',
+                'Register it — the client ID and client secret are shown on the next page.',
+            ],
+            'copy'      => [self::callbackCopyRow()],
+        ];
+    }
 
     public static function getAuthorizeEndpoint(): string {
         return 'https://cloud.digitalocean.com/v1/oauth/authorize';

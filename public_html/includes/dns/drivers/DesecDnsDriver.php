@@ -42,6 +42,19 @@ class DesecDnsDriver extends DnsRrsetDriverBase {
 		);
 	}
 
+	public static function credentialGuide(): ?array {
+		return array(
+			'title'     => 'Create a deSEC API token',
+			'url'       => 'https://desec.io/tokens',
+			'url_label' => 'Open deSEC token management',
+			'steps'     => array(
+				'Sign in at desec.io and open the Token Management tab.',
+				'Choose + and give the token a name.',
+				'Create it and copy the token — it is shown once.',
+			),
+		);
+	}
+
 	public function zoneFor(string $domain): ?string {
 		$map = array();
 		foreach ($this->zoneNames() as $name) {

@@ -87,6 +87,7 @@ abstract class DnsDriverBase implements DnsProvider {
 	public static function oauthScopes(): array { return array(); }
 	public static function credentialFields(): array { return array(); }
 	public static function prerequisiteNote(): string { return ''; }
+	public static function credentialGuide(): ?array { return null; }
 	public static function nameservers(): array { return array(); }
 	public static function supportsZones(): bool { return false; }
 

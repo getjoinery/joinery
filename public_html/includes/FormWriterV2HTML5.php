@@ -5,7 +5,8 @@
  * Pure HTML5 form generation with semantic markup and no CSS framework dependencies.
  * Provides accessible, standards-compliant forms that any theme can style.
  *
- * @version 2.2.0
+ * @version 2.3.0
+ * @changelog 2.3.0 - renderTextInput emits the help_modal trigger/template (text, password and number fields)
  * @changelog 2.2.0 - Phase 2: shared AJAX script, visibility moved to base, buildCommonAttributes in renderTextInput
  * @changelog 2.1.0 - Refactored to prepare/render split: output*() in base, render*() here
  * @changelog 2.0.7 - outputCheckboxInput: support 'checked' boolean option as override (same as Bootstrap/Tailwind)
@@ -75,6 +76,11 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
         if ($data['helptext']) {
             $html .= '<small class="form-help">' . htmlspecialchars($data['helptext']) . '</small>';
         }
+
+        // "How do I get this?" — the trigger sits under the field with the help
+        // text, because that is where someone looks when a field asks for
+        // something they do not have.
+        $html .= $this->buildHelpModal($data);
 
         $html .= '</div>';
 

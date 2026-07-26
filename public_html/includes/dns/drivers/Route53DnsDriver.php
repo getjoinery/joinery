@@ -54,6 +54,23 @@ class Route53DnsDriver extends DnsRrsetDriverBase {
 		);
 	}
 
+	public static function credentialGuide(): ?array {
+		return array(
+			'title'     => 'Create an AWS access key for Route 53',
+			'url'       => 'https://console.aws.amazon.com/iam/home#/users',
+			'url_label' => 'Open AWS IAM users',
+			'steps'     => array(
+				'In IAM, create a user with no console access, or pick an existing one.',
+				'Attach a policy allowing route53:ListHostedZones, route53:GetChange and '
+					. 'route53:ChangeResourceRecordSets on this hosted zone.',
+				'Open the user, then Security credentials, then Create access key, and choose '
+					. '"Application running outside AWS".',
+				'Copy the access key id and secret access key — the secret is shown once.',
+				'Leave the session token blank unless these are temporary STS credentials.',
+			),
+		);
+	}
+
 	public function zoneFor(string $domain): ?string {
 		$id = self::matchZone($domain, $this->zoneMap());
 		if ($id === null) {

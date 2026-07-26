@@ -289,6 +289,47 @@ $formwriter->passwordinput('password_confirm', 'Confirm Password', [
 ]);
 ```
 
+### Telling the user where a credential comes from (`help_modal`)
+
+A field that asks for an API key, token or secret can say where to get one. Pass
+`help_modal` and the field renders a **How do I get this?** link that opens the
+steps in the kit modal:
+
+```php
+$formwriter->passwordinput('api_token', 'Cloudflare API token', [
+    'help_modal' => [
+        'title'     => 'Create a Cloudflare API token',
+        'url'       => 'https://dash.cloudflare.com/profile/api-tokens',
+        'url_label' => 'Open Cloudflare API tokens',
+        'steps'     => [
+            'Sign in to Cloudflare and open My Profile, then API Tokens.',
+            'Choose Create Token and use the "Edit zone DNS" template.',
+            'Create the token and copy it — it is shown once.',
+        ],
+        'copy'      => [
+            ['label' => 'Callback URL', 'value' => 'https://example.test/oauth_callback'],
+        ],
+    ],
+]);
+```
+
+| Key | Purpose |
+|-----|---------|
+| `title` | What the user is about to create. Required — no title, no trigger |
+| `steps` | Ordered strings, one thing to click each. Required |
+| `caution` | A wrong-credential warning, rendered apart from the steps. Numbering "don't pick the Global API Key" among the clicks reads as an instruction to go and do it |
+| `url` | Deep link to where it starts. **Only `https://` is rendered**; anything else is dropped rather than becoming an href |
+| `url_label` | Link text (default "Open the provider") |
+| `copy` | `[['label' => …, 'value' => …]]` — values the *provider's* form needs from you, rendered as click-to-copy buttons |
+| `trigger` | Override the link text (default "How do I get this?") |
+
+Available on `textinput`, `passwordinput` and `numberinput`. Everything is
+HTML-escaped, and the content ships as an inert `<template>` opened by delegated
+JS in the kit's `base.js` — so nothing is wired per form, markup rendered later
+still works, and a page with JS off shows no trigger instead of broken output.
+
+Use `copy` for values you are giving the vendor, never for a credential you hold.
+
 ### Dropdown/Select
 
 ```php

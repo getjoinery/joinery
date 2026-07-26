@@ -41,6 +41,21 @@ class GandiDnsDriver extends DnsRrsetDriverBase {
 		);
 	}
 
+	public static function credentialGuide(): ?array {
+		return array(
+			'title'     => 'Create a Gandi personal access token',
+			'url'       => 'https://admin.gandi.net/',
+			'url_label' => 'Open Gandi admin',
+			'steps'     => array(
+				'Sign in, open the top-right menu, then User settings, then Authentication options.',
+				'Under Personal Access Tokens choose Create a token, and pick the organization that '
+					. 'owns this domain.',
+				'Give it the "Manage domain name technical configurations" permission.',
+				'Choose a duration and create it, then copy the token — it is shown once.',
+			),
+		);
+	}
+
 	public function zoneFor(string $domain): ?string {
 		$map = array();
 		foreach ($this->zoneNames() as $name) {
