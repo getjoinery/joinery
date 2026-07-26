@@ -13,7 +13,7 @@
  *
  * @see specs/implemented/inbound_email_filters.md
  * @see specs/inbound_email_filter_import.md
- * @version 1.3
+ * @version 1.4
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -700,7 +700,7 @@ function _filter_import_confirm(string $xml, array $checked, string $scope, arra
 	// Signatures already present in this scope, for the re-import skip.
 	$existing = _filter_existing_signatures($alias_id, $domain_id);
 
-	$created = 0; $newLabels = 0; $dupes = 0;
+	$created = 0; $newLabels = 0; $dupes = 0; $deleteFlagged = 0;
 	foreach ($candidates as $i => $cand) {
 		if (empty($cand['importable']) || !isset($checkedSet[$i])) {
 			continue;
@@ -719,6 +719,7 @@ function _filter_import_confirm(string $xml, array $checked, string $scope, arra
 			continue;
 		}
 		_filter_create_from_candidate($cand, $labelId, $alias_id, $domain_id);
+		if (!empty($cand['fields']['fil_action_delete'])) { $deleteFlagged++; }
 		$existing[$sig] = true; // also collapse exact duplicates within one file
 		$created++;
 	}
@@ -729,6 +730,13 @@ function _filter_import_confirm(string $xml, array $checked, string $scope, arra
 	}
 	if ($dupes > 0) {
 		$summary .= '; ' . $dupes . ' already present';
+	}
+	if ($deleteFlagged > 0) {
+		// Fix 9: a "delete on arrival" rule must never silently switch on during
+		// a migration, so delete-action filters land disabled and are called out.
+		$summary .= ($deleteFlagged === 1)
+			? '; 1 filter deletes mail and was imported disabled — review and enable it'
+			: '; ' . $deleteFlagged . ' filters delete mail and were imported disabled — review and enable them';
 	}
 	return $summary . '.';
 }
@@ -754,6 +762,14 @@ function _filter_create_from_candidate(array $cand, ?int $labelId, ?int $alias_i
 		$filter->set('fil_match_size_bytes', intval($fields['fil_match_size_bytes']));
 	}
 	$filter->set('fil_action_ilb_inbound_email_label_id', $labelId);
+
+	// Fix 9 (specs/mailbox_data_loss_fixes.md): a filter that carries a
+	// delete/trash action imports DISABLED, pending an explicit enable — a rule
+	// that auto-trashes matching mail on arrival must not silently activate
+	// during a migration. Every other filter imports enabled (schema default).
+	if (!empty($fields['fil_action_delete'])) {
+		$filter->set('fil_is_enabled', false);
+	}
 
 	$filter->prepare();
 	$filter->save();

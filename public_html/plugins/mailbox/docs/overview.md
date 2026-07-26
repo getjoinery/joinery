@@ -717,8 +717,8 @@ agent without the platform's untrusted-input markers (see
 `specs/implemented/joinery_ai_untrusted_input_markers.md`).
 
 **Settings:**
-- `mailbox_retention_days` (default `14`) — age after which the `PurgeOldMailboxMessages` scheduled task hard-deletes a stored message.
-- `mailbox_max_per_window` (default `500`, `0` disables) — max non-deleted stored messages per domain inside the forwarding rate-limit window. Stores above the cap are dropped with status `store_capped`.
+- `mailbox_max_per_window` (default `0`, which disables the cap) — max non-deleted stored messages per domain inside the forwarding rate-limit window. A store above the cap is deferred, not dropped: the delivery is temp-failed (Postfix retry / webhook 503) so the sender redelivers once the window rolls, and it is logged once as `store_capped`.
+- `mailbox_relay_orphan_grace_days` (default `30`) — how long the relay pull *holds* recoverable-but-not-yet-storable mail on the relay before aging it out. A blob whose domain is disabled/unconfigured, or whose Fortress owner is not yet resolvable, is held (not deleted) so re-enabling the domain or restoring the grant lets the next pull store it; past the grace window it is dropped with a loud log. The held count surfaces on the relay health as "No mail held on relay".
 
 A `store`-only deployment does not need the outbound forwarding relay
 provisioner — the `outbound_forwarding_relay` check may legitimately
@@ -2601,6 +2601,18 @@ the bytes live — a `File` for push mail, an IMAP fetch for `remote` mail, a ra
 section for a legacy/fallback row (see **Attachment & message storage**) — through the
 same endpoint, same table, same UI. The whole-message *.eml* download and raw-source
 view do not exist for any transport.
+
+**Deleting a feed with mirrored mail.** Because a `remote` message's attachments
+live on the source account, removing the IMAP feed — or permanently deleting the
+mailbox that owns it — presents a **keep/remove** choice rather than silently
+stranding those rows (`admin_mailbox_imap_delete`). *Keep* materializes each
+mirrored message into a self-contained local copy (fetch the full RFC822 while the
+account is still connected, split attachments into private `File`s, drop the IMAP
+locator) via `InboundEmailRouter::materializeRemoteMessage`, then removes the feed;
+it requires the account be connectable, and refuses the delete if any message can't
+be copied so nothing is lost. *Remove* permanent-deletes the mirrored rows (the mail
+stays on the source server) and removes the feed. A feed with no reference-backed
+mail deletes directly, no prompt.
 
 ### Setting up a Gmail account (end to end)
 

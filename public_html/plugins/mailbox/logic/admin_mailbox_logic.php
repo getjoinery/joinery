@@ -46,6 +46,19 @@ function admin_mailbox_logic(array $input): LogicResult {
 	if ($input && isset($input['action']) && $input['action'] === 'permanent_delete') {
 		$session->check_permission(10);
 		$alias = new InboundEmailAlias($input['iea_inbound_email_alias_id'], TRUE);
+
+		// Permanently deleting the alias cascades to permanent-delete its IMAP
+		// account, which would strand that account's reference-backed ('remote')
+		// messages (their attachments fetch from the account on demand). Route
+		// through the keep/remove choice first, which deletes the alias after
+		// (specs/mailbox_data_loss_fixes.md, Fix 8).
+		$stranded_account_id = _mailbox_alias_reference_backed_account($alias);
+		if ($stranded_account_id > 0) {
+			return LogicResult::redirect(
+				'/plugins/mailbox/admin/admin_mailbox_imap_delete?iia_inbound_imap_account_id='
+				. $stranded_account_id . '&also_permadelete_alias_id=' . intval($alias->key));
+		}
+
 		$alias->permanent_delete();
 
 		$session->save_message(new DisplayMessage(
@@ -69,5 +82,27 @@ function admin_mailbox_logic(array $input): LogicResult {
 	// The standalone alias list is retired — mailboxes live in the Accounts tree.
 	// This page is now only an action handler; any bare visit bounces to Accounts.
 	return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_accounts');
+}
+
+/**
+ * If this alias owns an IMAP account that has reference-backed ('remote')
+ * messages, return that account's id (so the caller can route the delete through
+ * the keep/remove choice). Returns 0 when there is nothing to strand.
+ */
+function _mailbox_alias_reference_backed_account(InboundEmailAlias $alias): int {
+	if (!$alias->key) { return 0; }
+	$db = DbConnector::get_instance()->get_db_link();
+	$stmt = $db->prepare(
+		"SELECT a.iia_inbound_imap_account_id
+		 FROM iia_inbound_imap_accounts a
+		 WHERE a.iia_iea_inbound_email_alias_id = ?
+		 AND EXISTS (
+			SELECT 1 FROM iem_inbound_email_messages m
+			WHERE m.iem_iia_inbound_imap_account_id = a.iia_inbound_imap_account_id
+			AND m.iem_raw_storage_driver = 'remote'
+		 )
+		 LIMIT 1");
+	$stmt->execute(array(intval($alias->key)));
+	return intval($stmt->fetchColumn());
 }
 ?>

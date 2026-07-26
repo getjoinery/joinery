@@ -239,7 +239,30 @@ class InboundEmailRouter {
 			return 0;
 		}
 
-		// 5. Rate limiting (gates the forward path only)
+		// 5. forward_and_store persists the retained copy BEFORE anything on the
+		// forward side runs (specs/mailbox_data_loss_fixes.md, Fix 5). The copy is
+		// the whole point of forward_and_store, so it must not depend on the
+		// forward succeeding — nor be silently skipped when a forward-side gate
+		// (rate limit, missing From) blocks the relay, which is what happened when
+		// the store was a best-effort tail after the forward. On a store failure
+		// we temp-fail (75 pipe / 503 webhook) so the sender retries: the forward
+		// has not run on this pass, so the retry's forward is the FIRST forward
+		// (no duplicate), and a re-store dedups (23505) and proceeds. If the store
+		// backend is genuinely down, forwarding is delayed until it recovers
+		// rather than forwarding and dropping the copy — the correct priority when
+		// the copy is the point.
+		if ($stores) {
+			try {
+				$this->storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $auth, $content_spam);
+			} catch (\Throwable $e) {
+				error_log('InboundEmailRouter: forward_and_store copy failed, deferring for retry: ' . $e->getMessage());
+				return 75; // sender retries; no forward happened this pass, so no double-forward
+			}
+		}
+
+		// 6. Rate limiting — gates the FORWARD only. A rate-limited or From-less
+		// forward_and_store message keeps its copy (already stored above); only
+		// the relay attempt is blocked.
 		if (!$this->checkAliasRateLimit($alias->key)) {
 			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_RATE_LIMITED, $envelope_recipient, null, null, $domain->key);
 			return 0;
@@ -249,13 +272,13 @@ class InboundEmailRouter {
 			return 0;
 		}
 
-		// 6. Basic header checks (forward path requires a usable From header)
+		// 7. Basic header checks (forward path requires a usable From header)
 		if (empty($parsed['from'])) {
 			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_REJECTED, $envelope_recipient, null, 'Missing From header', $domain->key);
 			return 0;
 		}
 
-		// 7. Forward
+		// 8. Forward
 		$destinations = $alias->get_destinations_array();
 		$results = $this->forwardEmail($raw_email, $parsed, $alias, $domain, $destinations);
 
@@ -275,18 +298,6 @@ class InboundEmailRouter {
 			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_ERROR, $envelope_recipient, $dest_str, 'Failed to deliver to: ' . implode(', ', $failed), $domain->key);
 		}
 
-		// 8. forward_and_store — best-effort copy after the forward. A failure
-		// here is logged but does NOT change the exit code, because the forward
-		// already happened and retrying would double-forward.
-		if ($stores) {
-			try {
-				$this->storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $auth, $content_spam);
-			} catch (\Throwable $e) {
-				error_log('InboundEmailRouter: store after forward failed: ' . $e->getMessage());
-				$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_ERROR, $envelope_recipient, null, 'Store after forward failed: ' . $e->getMessage(), $domain->key);
-			}
-		}
-
 		return 0;
 	}
 
@@ -295,22 +306,32 @@ class InboundEmailRouter {
 	 * Used by alias-store mode AND domain catch-all-store mode (alias=null).
 	 *
 	 * Exit code: 0 on success or successful dedup; 75 on transient DB
-	 * failure so Postfix retries. The dedup mechanism is the UNIQUE
-	 * constraint on (iem_message_id_header, iem_recipient).
+	 * failure OR when the per-domain volume cap is reached, so the sender
+	 * retries (the cap defers, it never drops). The dedup mechanism is the
+	 * UNIQUE constraint on (iem_message_id_header, iem_recipient).
 	 */
 	private function handleStoreOnly($parsed, $raw_email, $envelope_recipient, $domain, $alias, $auth = null, $content_spam = null) {
 		if ($auth === null) {
 			$auth = $this->readAuthResults($raw_email);
 		}
 
-		// Volume cap (per-domain stores within forwarding window)
+		// Volume cap (per-domain stores within forwarding window). The cap
+		// throttles, it never drops: over the cap we temp-fail (75) so the
+		// sender retries and the message stores once the window rolls. A
+		// sustained over-cap flood bounces at the sender after its retry window
+		// (sender is informed) — we never silently lose a message. Logging is
+		// throttled to at most one row per domain per window so the retries do
+		// not spam the transaction log (the transient-DB path below stays
+		// silent for the same reason).
 		$cap = intval($this->settings->get_setting('mailbox_max_per_window'));
 		if ($cap > 0) {
 			$window = intval($this->settings->get_setting('mailbox_forwarding_rate_limit_window')) ?: 3600;
 			$count = $this->countStoresInWindow($domain->key, $window);
 			if ($count >= $cap) {
-				$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_STORE_CAPPED, $envelope_recipient, null, 'Store volume cap reached (' . $cap . ')', $domain->key);
-				return 0;
+				if (!$this->storeCapLoggedInWindow($domain->key, $window)) {
+					$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_STORE_CAPPED, $envelope_recipient, null, 'Store volume cap reached (' . $cap . '); deferring for retry', $domain->key);
+				}
+				return 75;
 			}
 		}
 
@@ -420,59 +441,74 @@ class InboundEmailRouter {
 			'iem_received_time' => gmdate('Y-m-d H:i:s'),
 		];
 
-		// A sealing row's insert and its seal UPDATE are ONE transaction: the
-		// empty-content insert must never survive a seal failure. If it did,
-		// Postfix's retry (exit 75 from handleDelivery) would hit the dedup
-		// unique constraint and report success — a permanently empty message.
-		// Rolling back instead means the retry re-inserts from a clean slate.
-		$db = null;
-		if ($sealing) {
-			$db = DbConnector::get_instance()->get_db_link();
+		// The whole store — the row insert, the content seal (when sealing), and
+		// the attachment/raw persistence — is ONE transaction, committed only
+		// once the message is fully materialized (specs/mailbox_data_loss_fixes.md,
+		// Fix 4). If the process dies before the commit (kill, OOM, deploy
+		// restart, power loss), the entire unit rolls back — no row — so the
+		// sender's retry rebuilds from a clean slate. This is what makes the dedup
+		// short-circuit safe: a committed row ALWAYS carries its attachments, so a
+		// 23505 dedup hit genuinely means "fully stored" and can never discard a
+		// retry that would have repaired a bare, attachment-less row (on the
+		// sealed lean-record path the attachment Files are the only copy, so that
+		// window was real content loss).
+		//
+		// A sealing row is doubly protected: its empty-content insert must never
+		// survive a seal failure either, or the retry's dedup hit would report
+		// success on a permanently empty message.
+		$db = DbConnector::get_instance()->get_db_link();
+		$owns_tx = !$db->inTransaction();
+		if ($owns_tx) {
 			$db->beginTransaction();
 		}
 
 		try {
 			$msg = InboundEmailMessage::CreateEntry($row);
-		} catch (PDOException $e) {
-			if ($db !== null) {
-				$db->rollBack();
-			}
-			if ($e->getCode() === '23505') {
-				// Dedup before any file is written — a deduped message never orphans
-				// a stored object.
-				return ['message' => null, 'dedup' => true];
-			}
-			throw $e;
 		} catch (\Throwable $e) {
-			if ($db !== null) {
+			if ($owns_tx && $db->inTransaction()) {
 				$db->rollBack();
 			}
-			// Some SystemBase implementations may wrap the PDOException.
+			// Dedup: a unique violation (SQLSTATE 23505 on message-id/recipient/
+			// direction) means a fully stored message already exists — treat the
+			// retry as a success. Rolled back before any file was written, so no
+			// stored object is orphaned. Some SystemBase paths wrap the PDOException.
+			$code = ($e instanceof PDOException) ? $e->getCode() : null;
 			$prev = $e->getPrevious();
-			if ($prev instanceof PDOException && $prev->getCode() === '23505') {
+			if ($code === '23505' || ($prev instanceof PDOException && $prev->getCode() === '23505')) {
 				return ['message' => null, 'dedup' => true];
 			}
 			throw $e;
 		}
 
-		// With key material: seal the content columns now that the row has its
-		// serial id (the AD row-binding needs it) and UPDATE. $dek carries
-		// through to attachment sealing (persistRawAndManifest below) — one DEK
-		// seals the whole message, body and attachments alike.
-		$dek = null;
-		if ($sealing) {
-			try {
+		try {
+			// With key material: seal the content columns now the row has its
+			// serial id (the AD row-binding needs it) and UPDATE. $dek carries
+			// through to attachment sealing (persistRawAndManifest below) — one DEK
+			// seals the whole message, body and attachments alike.
+			$dek = null;
+			if ($sealing) {
 				$dek = $this->sealMessageContent(intval($msg->key), $vault, $sender, $subject, $bodies['plain'], $bodies['html']);
-				$db->commit();
-			} catch (\Throwable $e) {
-				$db->rollBack();
-				throw $e; // handleDelivery returns 75; no half-row survives to poison dedup
 			}
-		}
 
-		// Row inserted (we now have the serial id): split attachments into private
-		// Files and store the lean record (or fall back to raw storage on failure).
-		$this->persistRawAndManifest(intval($msg->key), $raw_email, $alias, $dek);
+			// Row inserted (we now have the serial id): split attachments into
+			// private Files and store the lean record (or fall back to raw storage
+			// on failure). Runs INSIDE the transaction so the row and its
+			// attachments/raw commit together — never a bare row.
+			$this->persistRawAndManifest(intval($msg->key), $raw_email, $alias, $dek);
+
+			if ($owns_tx) {
+				$db->commit();
+			}
+		} catch (\Throwable $e) {
+			if ($owns_tx && $db->inTransaction()) {
+				$db->rollBack();
+			}
+			// handleStoreOnly / the forward path returns 75 so the sender retries;
+			// no half-materialized row survives to poison dedup. Attachment File
+			// bytes / any local .eml already written are orphaned on disk —
+			// reclaimable garbage, never data loss.
+			throw $e;
+		}
 
 		// Inbound filters (specs/implemented/inbound_email_filters.md). storeMessage
 		// is the single local-only post-persist point, reached by every locally-
@@ -786,7 +822,7 @@ class InboundEmailRouter {
 	 * path never writes a sealed mailbox's plaintext to disk, and the message
 	 * keeps the same durability a plaintext mailbox gets.
 	 */
-	private function persistRawAndManifest(int $message_id, string $raw_email, $alias = null, ?string $dek = null) {
+	protected function persistRawAndManifest(int $message_id, string $raw_email, $alias = null, ?string $dek = null) {
 		try {
 			$this->extractAttachmentsToFiles($message_id, $raw_email, $alias, $dek);
 			return; // lean record: Files written, manifest linked, no raw retained
@@ -1200,6 +1236,74 @@ class InboundEmailRouter {
 	}
 
 	/**
+	 * Materialize a reference-backed ('remote') message into a self-contained
+	 * local copy (specs/mailbox_data_loss_fixes.md, Fix 8): fetch the full RFC822
+	 * from IMAP while the account is still connected, split its attachments into
+	 * private Files (a lean record, exactly like the Postfix store), and drop the
+	 * IMAP locator so the message stays fully functional after its account is
+	 * deleted. The plaintext bodies are already stored on the row, so only the
+	 * on-demand parts need to be brought local.
+	 *
+	 * The caller opens the ImapIngestor once and reuses it across the batch, then
+	 * close()s it. Returns ['ok'=>bool, 'message'=>?string].
+	 */
+	public function materializeRemoteMessage(InboundEmailMessage $message, ImapIngestor $ingestor): array {
+		if ((string)$message->get('iem_raw_storage_driver') !== 'remote') {
+			return array('ok' => true, 'message' => 'already self-contained'); // idempotent no-op
+		}
+		if ((bool)$message->get('iem_content_sealed')) {
+			// Reference-backed rows are stored plaintext; a sealed one is
+			// unexpected and would need the owner's DEK to re-seal attachments.
+			// Refuse rather than mishandle — surfaced to the caller as a failure.
+			return array('ok' => false, 'message' => 'a sealed reference-backed message cannot be materialized automatically');
+		}
+
+		$uid = intval($message->get('iem_imap_uid'));
+		$uidvalidity = ($message->get('iem_imap_uidvalidity') !== null && $message->get('iem_imap_uidvalidity') !== '')
+			? intval($message->get('iem_imap_uidvalidity')) : null;
+		$folder = (string)$message->get('iem_imap_folder');
+		$messageId = trim((string)$message->get('iem_message_id_header'));
+
+		$fetched = $ingestor->fetchFullRaw($uid, $uidvalidity, $folder, $messageId !== '' ? $messageId : null);
+		if (empty($fetched['ok'])) {
+			return array('ok' => false, 'message' => $fetched['message'] ?? 'could not fetch the message from the source mailbox');
+		}
+		$raw = (string)$fetched['raw'];
+		$message_id = intval($message->key);
+
+		$alias_id = intval($message->get('iem_iea_inbound_email_alias_id'));
+		$alias = $alias_id > 0 ? new InboundEmailAlias($alias_id, TRUE) : null;
+		if ($alias && !$alias->key) { $alias = null; }
+
+		$db = DbConnector::get_instance()->get_db_link();
+		$owns_tx = !$db->inTransaction();
+		if ($owns_tx) { $db->beginTransaction(); }
+		try {
+			// Drop the reference-backed manifest rows (no Files) before re-persisting
+			// the same parts as file-backed attachments.
+			$this->deleteManifestRows($message_id);
+			// Lean split — plaintext Files + manifest (dek=null: remote rows are plaintext).
+			$this->persistRawAndManifest($message_id, $raw, $alias, null);
+			// Flip the row to a self-contained lean record and drop the IMAP locator.
+			// The lean path leaves the driver as-is, so 'remote' → 'inline'; a
+			// raw-storage fallback already set its own driver, so leave that alone.
+			$db->prepare(
+				"UPDATE iem_inbound_email_messages
+				 SET iem_raw_storage_driver = CASE WHEN iem_raw_storage_driver = 'remote' THEN 'inline' ELSE iem_raw_storage_driver END,
+					 iem_iia_inbound_imap_account_id = NULL,
+					 iem_imap_uid = NULL, iem_imap_uidvalidity = NULL, iem_imap_folder = NULL
+				 WHERE iem_inbound_email_message_id = ?"
+			)->execute(array($message_id));
+			if ($owns_tx) { $db->commit(); }
+		} catch (\Throwable $e) {
+			if ($owns_tx && $db->inTransaction()) { $db->rollBack(); }
+			error_log('InboundEmailRouter::materializeRemoteMessage failed for message ' . $message_id . ': ' . $e->getMessage());
+			return array('ok' => false, 'message' => $e->getMessage());
+		}
+		return array('ok' => true);
+	}
+
+	/**
 	 * Compute the conversation root key for threading, from already-parsed
 	 * headers. Precedence:
 	 *   1. References present → the FIRST Message-ID token (the thread root).
@@ -1262,6 +1366,25 @@ class InboundEmailRouter {
 		$stmt->execute([$domain_id]);
 		$row = $stmt->fetch(PDO::FETCH_ASSOC);
 		return intval($row['cnt'] ?? 0);
+	}
+
+	/**
+	 * True if a store_capped transaction was already logged for this domain
+	 * within the current window. Used to throttle the deferred-store log so a
+	 * sustained over-cap burst (each message retried repeatedly by the sender)
+	 * records at most one store_capped row per domain per window.
+	 */
+	private function storeCapLoggedInWindow($domain_id, $window_seconds) {
+		$db = DbConnector::get_instance()->get_db_link();
+		$sql = "SELECT 1 FROM iel_inbound_email_logs
+				WHERE iel_ied_inbound_email_domain_id = ?
+				AND iel_status = ?
+				AND iel_delete_time IS NULL
+				AND iel_create_time > NOW() - INTERVAL '" . intval($window_seconds) . " seconds'
+				LIMIT 1";
+		$stmt = $db->prepare($sql);
+		$stmt->execute([$domain_id, InboundEmailLog::STATUS_STORE_CAPPED]);
+		return $stmt->fetchColumn() !== false;
 	}
 
 	/**
@@ -2044,7 +2167,7 @@ class InboundEmailRouter {
 	/**
 	 * Check per-alias rate limit using the inbound email log table.
 	 */
-	private function checkAliasRateLimit($alias_id) {
+	protected function checkAliasRateLimit($alias_id) {
 		$db = DbConnector::get_instance()->get_db_link();
 		$window = intval($this->settings->get_setting('mailbox_forwarding_rate_limit_window')) ?: 3600;
 		$max = intval($this->settings->get_setting('mailbox_forwarding_rate_limit_per_alias')) ?: 50;
@@ -2067,7 +2190,7 @@ class InboundEmailRouter {
 	 * transaction since the local-mailbox change, so catch-all stores are
 	 * also visible to per-domain counting without joining the alias table.
 	 */
-	private function checkDomainRateLimit($domain_id) {
+	protected function checkDomainRateLimit($domain_id) {
 		$db = DbConnector::get_instance()->get_db_link();
 		$window = intval($this->settings->get_setting('mailbox_forwarding_rate_limit_window')) ?: 3600;
 		$max = intval($this->settings->get_setting('mailbox_forwarding_rate_limit_per_domain')) ?: 200;

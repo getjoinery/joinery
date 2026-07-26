@@ -30,7 +30,7 @@
  * already classified it, so no auth rule runs. This gives the reader's Spam view
  * the same meaning for IMAP-polled mail as for locally-received mail.
  *
- * @version 1.3
+ * @version 1.4
  */
 
 require_once(PathHelper::getComposerAutoloadPath());
@@ -767,6 +767,50 @@ class ImapIngestor {
 				'ima_content_id'   => $cid ? substr(trim($cid, '<>'), 0, 255) : null,
 				'ima_is_inline'    => $isInline,
 			));
+		}
+	}
+
+	// ── Full-message fetch (materialize on account/alias deletion) ─────────
+
+	/**
+	 * Fetch a message's complete RFC822 raw by its locator — used to MATERIALIZE
+	 * a reference-backed ('remote') message into a self-contained local copy
+	 * before its IMAP account is deleted (specs/mailbox_data_loss_fixes.md,
+	 * Fix 8). Returns ['ok'=>true, 'raw'=>string] or ['ok'=>false,'message'=>...].
+	 *
+	 * Unlike fetchPart(), this does NOT close the connection: materialize walks
+	 * many messages on one account, so the caller opens once and calls close()
+	 * when the batch is done.
+	 */
+	public function fetchFullRaw(int $uid, ?int $uidvalidity, string $folder, ?string $messageId): array {
+		try {
+			$client = $this->client();
+			$folder = $folder ?: ($this->account->get('iia_imap_folder') ?: 'INBOX');
+
+			$resolvedUid = $this->resolveUid($client, $folder, $uid, $uidvalidity, $messageId);
+			if ($resolvedUid === null) {
+				return array('ok' => false, 'message' => 'This message is no longer available in the source mailbox.');
+			}
+
+			$ids = new Horde_Imap_Client_Ids(array($resolvedUid));
+			$fq = new Horde_Imap_Client_Fetch_Query();
+			$fq->fullText(array('peek' => true)); // whole RFC822, don't set \Seen
+			$res = $client->fetch($folder, $fq, array('ids' => $ids));
+			$fdata = $res[$resolvedUid] ?? null;
+			if ($fdata === null) {
+				return array('ok' => false, 'message' => 'This message is no longer available in the source mailbox.');
+			}
+
+			$raw = (string)$fdata->getFullMsg(false);
+			if ($raw === '') {
+				return array('ok' => false, 'message' => 'The source message returned no content.');
+			}
+			return array('ok' => true, 'raw' => $raw);
+		} catch (ImapIngestorException $e) {
+			return array('ok' => false, 'message' => $e->getMessage());
+		} catch (Throwable $e) {
+			error_log('ImapIngestor::fetchFullRaw error: ' . $e->getMessage());
+			return array('ok' => false, 'message' => 'Could not retrieve the message from the source mailbox.');
 		}
 	}
 
