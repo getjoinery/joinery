@@ -152,7 +152,9 @@ class InboundEmailMessage extends SystemBase {
 	public static $ai_untrusted_fields = array('iem_sender', 'iem_subject', 'iem_body_plain');
 
 	protected static $foreign_key_actions = [
-		'iem_ied_inbound_email_domain_id' => ['action' => 'cascade'],
+		// permanent_delete, not cascade: this model's permanent_delete() override
+		// deletes file-backed attachment bytes, and a flat SQL delete skips it.
+		'iem_ied_inbound_email_domain_id' => ['action' => 'permanent_delete'],
 		'iem_iea_inbound_email_alias_id'  => ['action' => 'null'],
 		'iem_iia_inbound_imap_account_id' => ['action' => 'null'],
 	];
