@@ -2,11 +2,13 @@
 /**
  * server_manager/backup_actions — backup browser actions.
  *
- * Input: action ∈ {refresh_list, delete_file, list_status} + node_id (+ target/
- * local_path/cloud_path for delete_file, job_id for list_status). refresh_list
- * and delete_file create jobs; list_status returns the cached backup list.
- * Superadmin only (floor 10).
+ * Input: action ∈ {refresh_list, delete_file, upload_file, list_status} + node_id
+ * (+ target/local_path/cloud_path for delete_file, local_path for upload_file,
+ * job_id for list_status). refresh_list, delete_file and upload_file create jobs;
+ * list_status returns the cached backup list. Superadmin only (floor 10).
  *
+ * @version 1.2.0 - upload_file: push a local-only backup to the node's cloud target, for a
+ *                  backup stranded on the node by a transient upload failure.
  * @version 1.1.0 - cloud deletes run control-plane-side via TargetBackups (no agent,
  *                  real success/failure); local deletes still run as a node job.
  * @version 1.0.0
@@ -96,6 +98,27 @@ function backup_actions_logic(array $input): LogicResult {
 		return LogicResult::render(['success' => true]);
 	}
 
+	if ($action === 'upload_file') {
+		$local_path = isset($input['local_path']) ? (string) $input['local_path'] : '';
+
+		// Same guard as delete_file: the path is operator-supplied and ends up in a
+		// shell command on the node, so it must be a plain file directly under
+		// /backups — no traversal, no subdirectories.
+		if (!preg_match('#^/backups/[^/]+$#', $local_path)) {
+			return LogicResult::render(['success' => false, 'message' => 'Invalid local path']);
+		}
+
+		try {
+			$params = ['filename' => basename($local_path)];
+			$steps = JobCommandBuilder::build_upload_backup($node, $params);
+		} catch (Exception $e) {
+			return LogicResult::render(['success' => false, 'message' => $e->getMessage()]);
+		}
+
+		$job = ManagementJob::createJob($node->key, 'upload_backup', $steps, $params, $session->get_user_id());
+		return LogicResult::render(['success' => true, 'job_id' => $job->key]);
+	}
+
 	if ($action === 'list_status') {
 		$job_id = isset($input['job_id']) ? (int) $input['job_id'] : 0;
 
@@ -116,6 +139,11 @@ function backup_actions_logic(array $input): LogicResult {
 				return LogicResult::render([
 					'success'     => true,
 					'status'      => 'complete',
+					// The job's own terminal status, kept distinct from 'complete'
+					// (which only means "no longer running"). A caller waiting on a
+					// job that does work — an upload — has to be able to tell a
+					// finished job from a successful one.
+					'job_status'  => $status,
 					'backup_list' => ['files' => $bl['files']],
 					'last_scan'   => $bl['last_scan'],
 					'cloud_error' => $bl['cloud_error'],
@@ -140,11 +168,11 @@ function backup_actions_logic(array $input): LogicResult {
 
 function backup_actions_logic_descriptor(): array {
 	return [
-		'description' => 'Backup browser actions (refresh_list / delete_file / list_status) for a managed node.',
+		'description' => 'Backup browser actions (refresh_list / delete_file / upload_file / list_status) for a managed node.',
 		'mutates'     => true,
 		'auth'        => ['requires_session' => true, 'min_user_permission' => 10],
 		'input'       => [
-			'action'     => ['type' => 'string', 'required' => false, 'enum' => ['refresh_list', 'delete_file', 'list_status'], 'label' => 'Action'],
+			'action'     => ['type' => 'string', 'required' => false, 'enum' => ['refresh_list', 'delete_file', 'upload_file', 'list_status'], 'label' => 'Action'],
 			'node_id'    => ['type' => 'int',    'required' => false, 'label' => 'Node ID'],
 			'job_id'     => ['type' => 'int',    'required' => false, 'label' => 'Job ID (list_status)'],
 			'target'     => ['type' => 'string', 'required' => false, 'label' => 'Delete target'],

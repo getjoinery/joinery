@@ -5,6 +5,9 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.21 - build_upload_backup(): push one already-existing backup from the node to its cloud
+ *                 target (the per-file Backups tab action), sharing upload_step() with the automatic
+ *                 post-backup upload; the step timeout is sized from S3Signer's retry budget
  * @version 1.20 - backup key escrow runs as a control-plane step (step_escrow_backup_key) instead of
  *                 inside the web request: node SSH keys are operator-owned, so only the agent can read
  *                 them, and encrypting backups seal the key on their way in
@@ -1126,30 +1129,63 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * Append upload (and optional local cleanup) steps to a steps array
-	 * if the node has a cloud backup target configured.
-	 *
-	 * The upload command uses NEWEST_BACKUP shell variable which should be set
-	 * by finding the most recently modified backup file.
+	 * Append the upload (and optional local cleanup) step to a steps array if the
+	 * node has a cloud backup target configured. Picks the newest backup file,
+	 * which is the one the preceding backup step just wrote.
 	 */
 	private static function append_upload_steps(&$steps, $node) {
 		$target = self::get_target($node);
 		if (!$target) return;
 
+		$resolve = 'UPLOAD_FILE=$(ls -t /backups/*.sql.gz /backups/*.sql.gz.enc /backups/*.tar.gz 2>/dev/null | head -1)';
+		$steps[] = self::upload_step($node, $target, $resolve, (bool) $node->get('mgn_delete_local_after_upload'));
+	}
+
+	/**
+	 * Upload one already-existing backup file from the node to its cloud target —
+	 * the Backups tab's per-file action, for a backup that is sitting local-only
+	 * because its original upload hit a transient provider failure.
+	 *
+	 * The file lives on the node, so the transfer runs there. Routing it through
+	 * the control plane instead would drag the whole archive down and push it back
+	 * up again for no reason.
+	 *
+	 * Never deletes the local copy, whatever the node's delete-after-upload setting
+	 * says: an operator asking for an offsite copy of a file they are looking at
+	 * did not ask for that file to disappear. Deleting stays an explicit action.
+	 */
+	public static function build_upload_backup($node, $params = []) {
+		$filename = basename(trim((string)($params['filename'] ?? '')));
+		if ($filename === '' || $filename === '.' || $filename === '..') {
+			throw new Exception('No backup filename given.');
+		}
+		$target = self::get_target($node);
+		if (!$target) {
+			throw new Exception("Node '{$node->get('mgn_slug')}' has no enabled cloud backup target.");
+		}
+		$resolve = 'UPLOAD_FILE=' . escapeshellarg('/backups/' . $filename);
+		return [self::upload_step($node, $target, $resolve, false)];
+	}
+
+	/**
+	 * The shared upload step. $resolve_cmd is a shell assignment that puts the
+	 * absolute path of the file to upload in UPLOAD_FILE.
+	 */
+	private static function upload_step($node, $target, $resolve_cmd, $delete_local) {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/S3Signer.php'));
+
 		$slug = $node->get('mgn_slug');
 		$prefix = $target->get('bkt_path_prefix') ?: 'joinery-backups';
 		$bucket = $target->get('bkt_bucket');
 
-		// Find the newest backup file
-		$find_newest = 'NEWEST_BACKUP=$(ls -t /backups/*.sql.gz /backups/*.sql.gz.enc /backups/*.tar.gz 2>/dev/null | head -1)';
-		$check = 'test -n "$NEWEST_BACKUP"';
-		$remote_key = "REMOTE_KEY=\"{$prefix}/{$slug}/\$(basename \"\$NEWEST_BACKUP\")\"";
+		$check = 'test -n "$UPLOAD_FILE" && test -f "$UPLOAD_FILE"';
+		$remote_key = "REMOTE_KEY=\"{$prefix}/{$slug}/\$(basename \"\$UPLOAD_FILE\")\"";
 
 		$uploader_script = self::build_node_uploader_script($bucket, $target->key);
 		$eof = '__JOINERY_UPLOADER_EOF__';
 
 		// Optional local cleanup is folded into the SAME step as the upload so it
-		// deletes exactly the file it just uploaded (one NEWEST_BACKUP evaluation).
+		// deletes exactly the file it just uploaded (one UPLOAD_FILE evaluation).
 		// A separate cleanup step re-globs "the newest now" and would delete a
 		// backup that landed in between, un-uploaded (P-23). The rm is chained
 		// with && ON THE REDIRECT LINE, before the heredoc body: the shell keeps
@@ -1157,19 +1193,22 @@ class JobCommandBuilder {
 		// the rm runs iff the upload succeeded. Chaining after the terminator
 		// line instead would not parse — the terminator must be the entire line,
 		// so the chain is swallowed into the uploader's stdin and the step dies.
-		$rm = $node->get('mgn_delete_local_after_upload') ? " && rm -f \"\$NEWEST_BACKUP\"" : '';
-		$upload_cmd = "php -- upload \"\$NEWEST_BACKUP\" \"\$REMOTE_KEY\" <<'{$eof}'{$rm}\n{$uploader_script}\n{$eof}";
+		$rm = $delete_local ? " && rm -f \"\$UPLOAD_FILE\"" : '';
+		$upload_cmd = "php -- upload \"\$UPLOAD_FILE\" \"\$REMOTE_KEY\" <<'{$eof}'{$rm}\n{$uploader_script}\n{$eof}";
 
-		$cmd = "{$find_newest} && {$check} && {$remote_key} && {$upload_cmd}";
+		$cmd = "{$resolve_cmd} && {$check} && {$remote_key} && {$upload_cmd}";
 
 		// No continue_on_error: if upload fails, halt so (a) the local copy — the
 		// only surviving one — is not deleted, and (b) the job is marked failed so
 		// the failure is visible in the UI instead of silently labeled "completed".
-		$steps[] = [
+		return [
 			'type' => 'ssh',
 			'label' => 'Upload backup to ' . $target->get('bkt_name'),
 			'cmd' => $cmd,
-			'timeout' => 3600,
+			// Sized from the uploader's own retry budget rather than a bare 3600, so
+			// the agent cannot kill a transfer part-way through a retry. The slack
+			// covers process start and feeding the heredoc.
+			'timeout' => S3Signer::transfer_budget_seconds() + 300,
 		];
 	}
 

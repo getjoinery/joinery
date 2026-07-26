@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.3 - per-file "Upload to cloud" action for a backup sitting local-only, with a poller that
+ *                reports the job's real verdict (a failed transfer must not read as done)
  * @version 1.2 - forced encryption is read from JobCommandBuilder::get_target(), the same source the
  *                job builder uses (a non-B2 cloud target had the form offering a choice the builder
  *                overruled, then the job was refused); Seal backup key now runs as a job
@@ -51,7 +53,8 @@
 	// asked of the same function the job builder asks, so the form can never
 	// offer a choice the builder is going to overrule. (An enabled target is what
 	// counts: a disabled one uploads nothing, so nothing leaves.)
-	$require_encryption = (bool) JobCommandBuilder::get_target($node);
+	$cloud_target = JobCommandBuilder::get_target($node);
+	$require_encryption = (bool) $cloud_target;
 
 	// When backups are paused outright (below), that box says everything this
 	// status alert would — so it is not repeated here.
@@ -224,6 +227,15 @@
 				    . htmlspecialchars(json_encode($local_path)) . ', '
 				    . htmlspecialchars(json_encode($cloud_path));
 				echo '<button type="button" class="btn btn-outline-warning btn-sm me-1" onclick="openRestoreModal(' . $ra . ')">Restore</button>';
+			}
+
+			// A backup that exists only on the node is one disk failure from gone —
+			// which is the state an upload interrupted by a transient provider error
+			// leaves behind. Offer the push whenever there is somewhere to push to.
+			if ($has_local && !$has_cloud && $cloud_target) {
+				$ua = htmlspecialchars(json_encode($fn)) . ', '
+				    . htmlspecialchars(json_encode($local_path)) . ', this';
+				echo '<button type="button" class="btn btn-outline-primary btn-sm me-1" onclick="uploadBackup(' . $ua . ')">Upload to cloud</button>';
 			}
 
 			if ($target) {
@@ -420,6 +432,66 @@ function submitRestoreModal() {
 	JoineryModal.confirm('Restore database from ' + fn + '? This will overwrite the current database. A pre-restore snapshot is written first.', function() {
 		document.getElementById('restoreForm').submit();
 	});
+}
+
+// Push a local-only backup to the node's cloud target. Non-destructive, so no
+// confirm — but it can be a multi-hundred-MB transfer, so it reports progress and
+// waits for the job's real verdict rather than assuming it worked.
+function uploadBackup(filename, localPath, btn) {
+	var status = document.getElementById('backupScanStatus');
+	if (btn) { btn.disabled = true; btn.textContent = 'Uploading...'; }
+	status.style.display = 'block';
+	status.innerHTML = '<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span> Uploading '
+		+ smEsc(filename) + ' to cloud storage...</span>';
+
+	smApiPost('backup_actions', { action: 'upload_file', node_id: backupNodeId, local_path: localPath })
+		.then(function(data) {
+			if (!data.success) {
+				uploadBackupFailed(btn, smEsc(data.message));
+				return;
+			}
+			pollUploadJob(data.job_id, btn, 0);
+		})
+		.catch(function() {
+			uploadBackupFailed(btn, 'Upload request failed');
+		});
+}
+
+function uploadBackupFailed(btn, html) {
+	if (btn) { btn.disabled = false; btn.textContent = 'Upload to cloud'; }
+	document.getElementById('backupScanStatus').innerHTML = '<span class="text-danger">' + html + '</span>';
+}
+
+// Deliberately not pollBackupList: that one treats any terminal job as success.
+// An upload can genuinely fail, and reporting a failed transfer as done is the
+// exact failure mode this button exists to fix.
+function pollUploadJob(jobId, btn, retries) {
+	retries = retries || 0;
+	var status = document.getElementById('backupScanStatus');
+
+	smApiPost('backup_actions', { action: 'list_status', node_id: backupNodeId, job_id: jobId })
+		.then(function(data) {
+			if (data.status === 'pending' || data.status === 'running') {
+				setTimeout(function() { pollUploadJob(jobId, btn, 0); }, 3000);
+				return;
+			}
+			if (data.job_status !== 'completed') {
+				uploadBackupFailed(btn, 'Upload failed. <a href="/admin/server_manager/job_detail?job_id='
+					+ encodeURIComponent(jobId) + '">See the job output</a> for the provider error.');
+				return;
+			}
+			status.innerHTML = '<span class="text-success">Uploaded to cloud storage</span>';
+			window.location.reload();
+		})
+		.catch(function() {
+			if (retries >= BACKUP_POLL_MAX_RETRIES) {
+				uploadBackupFailed(btn, 'Lost contact while the upload was running. '
+					+ '<a href="/admin/server_manager/job_detail?job_id=' + encodeURIComponent(jobId)
+					+ '">Check the job</a> before retrying.');
+				return;
+			}
+			setTimeout(function() { pollUploadJob(jobId, btn, retries + 1); }, 3000);
+		});
 }
 
 function deleteBackup(target, filename, localPath, cloudPath) {

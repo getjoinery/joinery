@@ -9,6 +9,8 @@
  * Expected credential shape: ['access_key' => ..., 'secret_key' => ...,
  *                             'region' => ..., 'endpoint' => ...]
  *
+ * @version 1.3 - transient provider failures (5xx, 429, transport errors) are retried with
+ *                backoff inside request(), bounded by a wall-clock budget
  * @version 1.2 - list() (ListObjectsV2, continuation-token paged) so the control plane
  *                can enumerate a bucket prefix without a live node
  * @version 1.1
@@ -21,8 +23,20 @@ class S3Signer {
 	const TIMEOUT_SECONDS = 15;
 	// Object transfers (streamed upload/download of a backup archive) are not a
 	// 15-second operation — a multi-GB restore download would otherwise time out.
-	const DOWNLOAD_TIMEOUT_SECONDS = 3600;
+	const TRANSFER_TIMEOUT_SECONDS = 3600;
 	const SERVICE = 's3';
+
+	// Retry policy. Every request this class makes is idempotent — a PUT overwrites
+	// its key (single PUT, never multipart, so there are no orphaned parts), and
+	// GET/DELETE/list have no cumulative effect — so a repeat is a no-op rather than
+	// a duplicate. That is what makes retrying safe here.
+	const MAX_ATTEMPTS = 3;
+	const RETRY_BASE_DELAY_SECONDS = 2;
+	// Extra wall clock, on top of one attempt's timeout, that retries may consume.
+	// This is what bounds the total: an attempt that burns the entire transfer
+	// timeout leaves no room for another, which is the right answer — a transfer
+	// that cannot finish in an hour will not finish on the second try either.
+	const RETRY_WINDOW_SECONDS = 1200;
 
 	/**
 	 * Execute a signed GET against a bucket path with querystring params.
@@ -140,6 +154,12 @@ class S3Signer {
 
 	/**
 	 * Low-level signed request. $body can be null (GET/DELETE) or a stream resource (PUT).
+	 *
+	 * Transient provider failures are retried with backoff. A single HTTP 500 from
+	 * the storage provider used to strand a backup on the node with no offsite copy
+	 * and no way to retry short of running the whole backup again; see is_retryable()
+	 * for what counts as transient and MAX_ATTEMPTS/RETRY_WINDOW_SECONDS for the
+	 * bound. Returns ['status','body','headers','attempts','retry_log'].
 	 */
 	private static function request($method, $creds, $bucket, $path, $params, $body = null, $body_size = 0, $content_type = null, $sink_file = null) {
 		self::validate_creds($creds);
@@ -151,7 +171,11 @@ class S3Signer {
 			throw new S3SignerException('Invalid endpoint: ' . $endpoint);
 		}
 		$scheme = $parsed['scheme'] ?? 'https';
-		$host = $parsed['host'];
+		// A non-default port belongs in the host, for the URL and for the signature
+		// alike: curl sends `Host: host:port`, and SigV4 signs the host header, so
+		// dropping the port here produces a signature the provider rejects. Matters
+		// for self-hosted endpoints (MinIO and friends), which are usually host:port.
+		$host = $parsed['host'] . (isset($parsed['port']) ? ':' . $parsed['port'] : '');
 
 		// Canonical URI is "/{bucket}{path}" path-style. Encode bucket but leave "/" in path unescaped.
 		$canonical_uri = '/' . rawurlencode($bucket) . self::encode_path($path);
@@ -163,6 +187,99 @@ class S3Signer {
 			if ($canonical_qs !== '') $canonical_qs .= '&';
 			$canonical_qs .= rawurlencode($k) . '=' . rawurlencode($v);
 		}
+
+		// A streamed upload or a download-to-file gets the long per-attempt window;
+		// everything else is a small control call.
+		$is_transfer = ($body !== null || $sink_file !== null);
+		$attempt_timeout = $is_transfer ? self::TRANSFER_TIMEOUT_SECONDS : self::TIMEOUT_SECONDS;
+		$deadline = microtime(true) + $attempt_timeout + self::RETRY_WINDOW_SECONDS;
+
+		$retry_log = [];
+		$attempts_used = 0;
+		$last = null;            // last real HTTP response, if any attempt got one
+		$last_transport_error = '';
+
+		while (true) {
+			$attempts_used++;
+
+			// A retry must replay the body from byte zero. curl consumed the stream
+			// on the previous attempt while CURLOPT_INFILESIZE still claims the full
+			// length, so without this rewind curl sends nothing and then blocks
+			// waiting for data that never arrives until the timeout expires — a
+			// silent hang, not an error. A stream that cannot seek cannot be
+			// replayed at all, so stop rather than PUT a truncated object.
+			if ($attempts_used > 1 && $body !== null && !@rewind($body)) {
+				$retry_log[] = 'not retried: upload stream could not be rewound';
+				$attempts_used--;
+				break;
+			}
+
+			$result = self::attempt(
+				$method, $creds, $region, $scheme, $host, $canonical_uri, $canonical_qs,
+				$body, $body_size, $content_type, $sink_file, $attempt_timeout
+			);
+
+			if (!$result['retryable']) {
+				if ($result['transport_failed']) {
+					throw new S3SignerException('curl failed: ' . $result['curl_error']
+						. ($attempts_used > 1 ? ' (after ' . $attempts_used . ' attempts)' : ''));
+				}
+				return [
+					'status'    => $result['status'],
+					'body'      => $result['body'],
+					'headers'   => $result['headers'],
+					'attempts'  => $attempts_used,
+					'retry_log' => $retry_log,
+				];
+			}
+
+			if ($result['transport_failed']) {
+				$last_transport_error = $result['curl_error'];
+				$why = 'transport error ' . $result['curl_errno'] . ' (' . $result['curl_error'] . ')';
+			} else {
+				$last = $result;
+				$msg = self::extract_error($result['body']);
+				$why = 'HTTP ' . $result['status'] . ($msg ? ' ' . $msg : '');
+			}
+
+			if ($attempts_used >= self::MAX_ATTEMPTS) {
+				$retry_log[] = "attempt {$attempts_used} failed ({$why}); no attempts left";
+				break;
+			}
+			$delay = self::RETRY_BASE_DELAY_SECONDS * (1 << ($attempts_used - 1));
+			if (microtime(true) + $delay >= $deadline) {
+				$retry_log[] = "attempt {$attempts_used} failed ({$why}); out of time budget";
+				break;
+			}
+			$retry_log[] = "attempt {$attempts_used} failed ({$why}); retrying in {$delay}s";
+			sleep($delay);
+			// Jitter, so a fleet-wide provider blip does not resynchronise every
+			// node's retry into the same instant.
+			usleep(mt_rand(0, 500000));
+		}
+
+		if ($last === null) {
+			throw new S3SignerException('curl failed after ' . $attempts_used . ' attempt(s): ' . $last_transport_error);
+		}
+		return [
+			'status'    => $last['status'],
+			'body'      => $last['body'],
+			'headers'   => $last['headers'],
+			'attempts'  => $attempts_used,
+			'retry_log' => $retry_log,
+		];
+	}
+
+	/**
+	 * One signed HTTP attempt. Signing lives here, not in the caller, because
+	 * x-amz-date is part of the signature: SigV4 rejects a stale timestamp, so a
+	 * replayed request would start failing with 403 the moment a backoff pushed it
+	 * past the provider's clock-skew window. Every attempt signs afresh.
+	 *
+	 * Returns the raw outcome plus a 'retryable' verdict; the caller owns the loop.
+	 */
+	private static function attempt($method, $creds, $region, $scheme, $host, $canonical_uri, $canonical_qs,
+	                                $body, $body_size, $content_type, $sink_file, $attempt_timeout) {
 
 		$amz_date = gmdate('Ymd\THis\Z');
 		$date_stamp = gmdate('Ymd');
@@ -220,62 +337,108 @@ class S3Signer {
 		curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
 		curl_setopt($ch, CURLOPT_HTTPHEADER, $curl_headers);
 		curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, self::TIMEOUT_SECONDS);
+		curl_setopt($ch, CURLOPT_TIMEOUT, $attempt_timeout);
 
-		// Streaming download to disk: write the body straight to the sink file so
-		// a multi-GB archive never lands whole in RAM, with a long transfer window.
+		$sink = null;
 		if ($sink_file !== null) {
+			// Streaming download to disk: write the body straight to the sink file
+			// so a multi-GB archive never lands whole in RAM. Opened fresh on every
+			// attempt — 'wb' truncates, so a partial body from a failed attempt can
+			// never be prepended to the next one's.
 			$sink = fopen($sink_file, 'wb');
 			if (!$sink) {
 				curl_close($ch);
 				throw new S3SignerException('Cannot open sink file: ' . $sink_file);
 			}
 			curl_setopt($ch, CURLOPT_FILE, $sink);
-			curl_setopt($ch, CURLOPT_TIMEOUT, self::DOWNLOAD_TIMEOUT_SECONDS);
-			$ok = curl_exec($ch);
-			$status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-			$curl_err = curl_error($ch);
-			curl_close($ch);
-			fclose($sink);
-			if ($ok === false) {
-				@unlink($sink_file);
-				throw new S3SignerException('curl failed: ' . $curl_err);
+		} else {
+			curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+			curl_setopt($ch, CURLOPT_HEADER, true); // include response headers in body
+			if ($body !== null) {
+				curl_setopt($ch, CURLOPT_UPLOAD, true);
+				curl_setopt($ch, CURLOPT_INFILE, $body);
+				curl_setopt($ch, CURLOPT_INFILESIZE, $body_size);
 			}
-			if ($status !== 200) {
-				// Error responses are small XML — hand them back, then drop the
-				// file so a failed download never leaves a bogus archive behind.
-				$body_back = @file_get_contents($sink_file);
-				@unlink($sink_file);
-				return ['status' => $status, 'body' => (string)$body_back, 'headers' => []];
-			}
-			return ['status' => $status, 'body' => '', 'headers' => []];
-		}
-
-		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-		curl_setopt($ch, CURLOPT_TIMEOUT, self::TIMEOUT_SECONDS);
-		curl_setopt($ch, CURLOPT_HEADER, true); // include response headers in body
-
-		if ($body !== null) {
-			curl_setopt($ch, CURLOPT_UPLOAD, true);
-			curl_setopt($ch, CURLOPT_INFILE, $body);
-			curl_setopt($ch, CURLOPT_INFILESIZE, $body_size);
-			curl_setopt($ch, CURLOPT_TIMEOUT, 3600); // uploads can take longer
 		}
 
 		$raw = curl_exec($ch);
 		$status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-		$header_size = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+		$header_size = (int)curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+		$curl_errno = curl_errno($ch);
 		$curl_err = curl_error($ch);
 		curl_close($ch);
-
-		if ($raw === false) {
-			throw new S3SignerException('curl failed: ' . $curl_err);
+		if ($sink !== null) {
+			fclose($sink);
 		}
 
-		$resp_headers_raw = substr($raw, 0, $header_size);
-		$resp_body = substr($raw, $header_size);
-		$resp_headers = self::parse_headers($resp_headers_raw);
+		$transport_failed = ($raw === false);
+		$resp_body = '';
+		$resp_headers = [];
 
-		return ['status' => $status, 'body' => $resp_body, 'headers' => $resp_headers];
+		if ($sink_file !== null) {
+			if ($transport_failed || $status !== 200) {
+				// Error responses are small XML — hand them back, then drop the
+				// file so a failed download never leaves a bogus archive behind.
+				if (!$transport_failed) {
+					$resp_body = (string) @file_get_contents($sink_file);
+				}
+				@unlink($sink_file);
+			}
+		} elseif (!$transport_failed) {
+			$resp_headers = self::parse_headers(substr($raw, 0, $header_size));
+			$resp_body = substr($raw, $header_size);
+		}
+
+		return [
+			'transport_failed' => $transport_failed,
+			'curl_errno'       => $curl_errno,
+			'curl_error'       => $curl_err,
+			'status'           => $status,
+			'body'             => $resp_body,
+			'headers'          => $resp_headers,
+			'retryable'        => $transport_failed
+				? self::is_retryable(0, $curl_errno)
+				: self::is_retryable($status, 0),
+		];
+	}
+
+	/**
+	 * Is this failure worth trying again?
+	 *
+	 * Transient: the provider's own 5xx (Backblaze B2 answers a blip with
+	 * `500 internal incident`), throttling, request timeout, and the transport
+	 * errors that mean the connection died rather than the request being wrong.
+	 * Everything else — 403 signature, 404, 400 — is deterministic, so a retry
+	 * only burns the time budget and buries the real message.
+	 *
+	 * Pure and public so the policy can be tested without a network.
+	 */
+	public static function is_retryable($status, $curl_errno = 0) {
+		if ($curl_errno) {
+			return in_array((int)$curl_errno, [
+				CURLE_COULDNT_RESOLVE_HOST,
+				CURLE_COULDNT_CONNECT,
+				CURLE_OPERATION_TIMEDOUT,
+				CURLE_SSL_CONNECT_ERROR,
+				CURLE_PARTIAL_FILE,
+				CURLE_GOT_NOTHING,
+				CURLE_SEND_ERROR,
+				CURLE_RECV_ERROR,
+			], true);
+		}
+		$status = (int)$status;
+		if ($status === 408 || $status === 429) return true;
+		return $status >= 500 && $status <= 599;
+	}
+
+	/**
+	 * Wall-clock ceiling one transfer can occupy, retries and backoff included.
+	 * Job steps that shell out to the node uploader size their own timeout from
+	 * this so the two cannot drift apart — a step budget smaller than the retry
+	 * budget would have the agent kill the upload mid-retry.
+	 */
+	public static function transfer_budget_seconds() {
+		return self::TRANSFER_TIMEOUT_SECONDS + self::RETRY_WINDOW_SECONDS;
 	}
 
 	public static function extract_error($xml_body) {

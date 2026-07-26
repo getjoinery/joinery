@@ -174,7 +174,7 @@ The node detail page (`/admin/server_manager/node_detail?mgn_id=N&tab=...`) has 
 | Tab | Purpose |
 |-----|---------|
 | **Overview** | Status summary (health dot, disk/memory/load/postgres/version), action buttons (Check Status, Test Connection), recent jobs for this node, connection settings (collapsed by default), delete node. The Actions dropdown also offers **Run Plugin Installers** — queues a `run_plugin_installers` job that executes every active plugin's declared `host_installer` on the node as root (idempotent); this is how a bare-metal node picks up system-service configuration (e.g. the mail stack) after a plugin is activated, since it has no container-start moment |
-| **Backups** | Target indicator, run database/project backup, backup file browser with scan and delete, restore full project from a `.tar.gz` archive |
+| **Backups** | Target indicator, run database/project backup, backup file browser with scan, per-file upload-to-cloud and delete, restore full project from a `.tar.gz` archive |
 | **Database** | Copy database from another node to this one, restore from backup file |
 | **Updates** | Version comparison (node vs control plane), apply update |
 | **Jobs** | Job history filtered to this node, with status and type filters |
@@ -202,6 +202,7 @@ Health dot colors reflect actual server health, not check recency:
 | `backup_database` | Run `backup_database.sh`, optionally upload to cloud | No |
 | `backup_project` | Run `backup_project.sh` (DB + files + Apache config), optionally upload | No |
 | `list_backups` | List backup files on local server and cloud target | No |
+| `upload_backup` | Push one existing backup file from the node to its cloud target; keeps the local copy | No |
 | `delete_backup` | Delete backup files from local, cloud, or both | **Yes** |
 | `copy_database` | Dump source DB, transfer, restore on target | **Yes** |
 | `restore_database` | Restore a backup file on a node | **Yes** |
@@ -426,12 +427,28 @@ Credentials are stored in the `bkt_credentials` JSON column on the `bkt_backup_t
 
 For node-side operations (upload, delete, download), the credentials are embedded into a self-contained PHP script that is piped to the node via a heredoc'd `php --` invocation — never written to a file on the node and never visible in process listings as positional arguments. The `S3Signer.php` and `node_uploader.php` source is composed at job-build time by `JobCommandBuilder::build_node_uploader_script()`.
 
+Because the script is composed from the control plane's own copy of those two files, changes to the signer or the uploader reach every node on its next job — there is no agent release or node upgrade in the loop.
+
+### Transient Failures
+
+A storage provider that answers a request with a 5xx does not fail the job. `S3Signer::request()` retries — `MAX_ATTEMPTS` tries, exponential backoff with jitter — for the failures that are worth another go: 5xx, 429, 408, and the transport errors that mean the connection died rather than the request being wrong. A deterministic error (403 signature, 404, 400) is returned immediately; retrying it would only burn the budget and bury the message. `S3Signer::is_retryable()` is the whole policy and is pure, so the classification is testable without a network.
+
+Retrying is safe because every request the class makes is idempotent: a PUT overwrites its key (a single PUT, never multipart, so no orphaned parts survive a failure), and GET/DELETE/list have no cumulative effect.
+
+Two bounds keep a retry from doing harm:
+
+- **Wall clock.** Total time is capped at one attempt's timeout plus `RETRY_WINDOW_SECONDS`. An attempt that burns the entire transfer timeout leaves no room for another — the right answer, since a transfer that cannot finish in an hour will not finish on the second try. Job steps that shell out to the uploader take their own `timeout` from `S3Signer::transfer_budget_seconds()`, so the agent can never kill a transfer part-way through a retry.
+- **Replay.** A retried upload rewinds the body stream before resending. curl consumes the stream on the first attempt while `CURLOPT_INFILESIZE` still claims the full length, so a retry without the rewind sends nothing and then blocks until the timeout — a hang rather than an error. A stream that cannot seek is not retried at all, rather than being sent truncated.
+
+Each retry is named in the job output (`RETRY: attempt 1 failed (HTTP 500 internal incident); retrying in 2s`), and a transfer that only succeeded on a later attempt says so. A provider that is degrading looks exactly like a healthy one unless the attempts are visible.
+
 ### Backup Browser
 
 The **Backups** tab on each node includes a file browser that lists backup files from both local storage and the cloud target. Features:
 
 - **Scan for Backups** — creates a `list_backups` job to scan local `/backups/` on the node
 - **Unified file table** — shows filename, size, date, and location (Local / Cloud / Both)
+- **Upload to cloud** — offered on rows that exist only on the node, when the node has an enabled cloud target. Creates an `upload_backup` job that pushes that one file from the node to the target. The transfer runs on the node, where the file already is; routing it through the control plane would drag the archive down and push it straight back up. The local copy is kept regardless of the node's delete-after-upload setting — an operator asking for an offsite copy of a file they are looking at did not ask for that file to disappear, and deleting stays an explicit action. The button waits for the job's real verdict, so a failed transfer reports as failed with a link to the job output rather than reading as done
 - **Delete** — single Delete button per row that removes the file from every location it exists in (local, cloud, or both); the confirmation dialog names the file and locations explicitly
 - **Restore Full Project** — for `.tar.gz` archives, see the `restore_project` row in the Job Types table
 
