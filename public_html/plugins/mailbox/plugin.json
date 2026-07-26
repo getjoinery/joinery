@@ -1,7 +1,7 @@
 {
     "name": "Mailbox",
     "description": "Self-hosted email: receiving, forwarding, local mailboxes, webmail reader, IMAP sync, DKIM/SRS",
-    "version": "1.49.6",
+    "version": "1.49.7",
     "author": "Joinery",
     "receives_upgrades": true,
     "included_in_publish": true,
@@ -49,10 +49,10 @@
         {
             "key": "inbound_mail_server",
             "label": "Inbound mail server",
-            "details": "Provider-specific. For Postfix, verifies port 25 is listening locally. For webhook providers (Mailgun, etc.) this is informational \u2014 the provider's own infrastructure handles MX.",
+            "details": "Provider-specific. For Postfix, verifies port 25 is listening locally. For webhook providers (Mailgun, etc.) this is informational — the provider's own infrastructure handles MX.",
             "check": {
-            "type": "code",
-            "call": "InboundEmailHealth::checkInboundMailServer"
+                "type": "code",
+                "call": "InboundEmailHealth::checkInboundMailServer"
             },
             "script": "provisioning/install_email.sh"
         },
@@ -61,8 +61,8 @@
             "label": "Outbound mail relay for forwarding",
             "details": "Forwarded messages are relayed out through this SMTP server.",
             "check": {
-            "type": "code",
-            "call": "InboundEmailHealth::checkForwardingRelay"
+                "type": "code",
+                "call": "InboundEmailHealth::checkForwardingRelay"
             }
         },
         {
@@ -70,8 +70,8 @@
             "label": "DNS records for inbound domains",
             "details": "Each enabled inbound domain needs an MX record pointing here and an SPF record.",
             "check": {
-            "type": "code",
-            "call": "InboundEmailHealth::checkDomainDns"
+                "type": "code",
+                "call": "InboundEmailHealth::checkDomainDns"
             }
         },
         {
@@ -79,8 +79,8 @@
             "label": "Sealed mailbox search index (ext-sqlite3 + FTS5)",
             "details": "A vault-holding mailbox's sender/subject/body columns are ciphertext at rest and cannot be searched in SQL; MailboxIndex builds a disposable, in-window-only FTS5 index instead.",
             "check": {
-            "type": "code",
-            "call": "InboundEmailHealth::checkSearchIndexEngine"
+                "type": "code",
+                "call": "InboundEmailHealth::checkSearchIndexEngine"
             },
             "script": "provisioning/install_email.sh"
         },
@@ -89,18 +89,18 @@
             "label": "Spam scanner on this server",
             "details": "Ships with the mail stack: install_email.sh installs rspamd + redis unconditionally, so spam learning can be enabled later as a pure settings toggle. Verified answering, and wired into Postfix's milter chain where this server receives mail directly. A box with no local mail stack (webhook-only, relay-fronted from birth) needs none and is not checked. provision_spam_scanner.sh install repairs drift; boxes provisioned before the scanner shipped with the stack get it the same way.",
             "check": {
-            "type": "code",
-            "call": "InboundEmailHealth::checkContentSpamScanner"
+                "type": "code",
+                "call": "InboundEmailHealth::checkContentSpamScanner"
             },
             "script": "provisioning/provision_spam_scanner.sh"
         },
         {
             "key": "relay_tunnel",
             "label": "Hardened relay tunnel",
-            "details": "In smarthost mode compose sends leave through the relay over WireGuard. Runs a real SMTP submission handshake over the tunnel (EHLO, MAIL FROM, RCPT to a reserved domain, QUIT \u2014 nothing is sent): port 25 listens in both modes, so only accepting relay of an external recipient proves the submission listener is open. Fails until a relay provisioned inbound-only is rebuilt in smarthost mode. No-op in provider mode and on colocated deployments.",
+            "details": "In smarthost mode compose sends leave through the relay over WireGuard. Runs a real SMTP submission handshake over the tunnel (EHLO, MAIL FROM, RCPT to a reserved domain, QUIT — nothing is sent): port 25 listens in both modes, so only accepting relay of an external recipient proves the submission listener is open. Fails until a relay provisioned inbound-only is rebuilt in smarthost mode. No-op in provider mode and on colocated deployments.",
             "check": {
-            "type": "code",
-            "call": "InboundEmailHealth::checkRelayTunnel"
+                "type": "code",
+                "call": "InboundEmailHealth::checkRelayTunnel"
             },
             "script": "provisioning/provision_relay.sh"
         },
@@ -109,8 +109,8 @@
             "label": "Relay spool draining",
             "details": "The main box pulls sealed mail off the relay spool every cron pass. Verifies a pull ran in the last 30 minutes so sealed mail is reaching the inbox. No-op on colocated deployments.",
             "check": {
-            "type": "code",
-            "call": "InboundEmailHealth::checkRelaySpoolDraining"
+                "type": "code",
+                "call": "InboundEmailHealth::checkRelaySpoolDraining"
             }
         },
         {
@@ -118,8 +118,8 @@
             "label": "Relay alias map fresh",
             "details": "The relay validates recipients against a synced alias map. Verifies the map the relay is running matches the current domains/aliases, so a newly created alias is not bounced. No-op on colocated deployments.",
             "check": {
-            "type": "code",
-            "call": "InboundEmailHealth::checkRelayMapFresh"
+                "type": "code",
+                "call": "InboundEmailHealth::checkRelayMapFresh"
             }
         },
         {
@@ -127,8 +127,8 @@
             "label": "Origin IP not in mail DNS",
             "details": "Once a relay exists, the main box IP must not appear in any hosted domain's mail DNS (a single leak defeats the hidden origin). Checks every hosted domain's MX. No-op on colocated deployments.",
             "check": {
-            "type": "code",
-            "call": "InboundEmailHealth::checkOriginHidden"
+                "type": "code",
+                "call": "InboundEmailHealth::checkOriginHidden"
             }
         },
         {
@@ -136,8 +136,8 @@
             "label": "Sent mail leaves via an API provider",
             "details": "With the relay smarthost off (the default), compose sends leave through the configured provider's HTTP API so the box IP never enters the Received chain. Verifies that provider submits over an API, not SMTP. No-op in smarthost mode or on colocated deployments.",
             "check": {
-            "type": "code",
-            "call": "InboundEmailHealth::checkOutboundTransportClass"
+                "type": "code",
+                "call": "InboundEmailHealth::checkOutboundTransportClass"
             }
         },
         {
@@ -145,8 +145,8 @@
             "label": "No origin leak in sent mail",
             "details": "Scans the delivered headers of the most recent out-and-back origin-leak probe for the main box IP or hostname. No-op in smarthost mode, on colocated deployments, or until a probe has been round-tripped (run one from the Relay tab).",
             "check": {
-            "type": "code",
-            "call": "InboundEmailHealth::checkOutboundOriginLeak"
+                "type": "code",
+                "call": "InboundEmailHealth::checkOutboundOriginLeak"
             }
         }
     ],
@@ -156,7 +156,9 @@
         "mailbox_forwarding_smtp_username",
         "mailbox_forwarding_smtp_password"
     ],
-    "settingsMirrorGroups": ["inbound_provider"],
+    "settingsMirrorGroups": [
+        "inbound_provider"
+    ],
     "settingsGroups": {
         "relay": "Relay",
         "fleet": "Hosted relay service",
@@ -170,67 +172,99 @@
         {
             "name": "mailbox_enabled",
             "default": "0",
-                "group": "inbound",
-                "label": "Mailbox enabled",
-                "type": "checkbox"
+            "group": "inbound",
+            "label": "Mailbox enabled",
+            "type": "checkbox"
         },
         {
             "name": "mailbox_relay_cutover_complete",
             "default": "0",
-                "group": "relay",
-                "label": "Relay cutover complete",
-                "type": "select",
-                "options": {"1": "Yes", "0": "No"},
-                "helptext": "Set once inbound mail is confirmed arriving through the relay. Until then the direct path stays live."
+            "group": "relay",
+            "label": "Relay cutover complete",
+            "type": "select",
+            "options": {
+                "1": "Yes",
+                "0": "No"
+            },
+            "helptext": "Set once inbound mail is confirmed arriving through the relay. Until then the direct path stays live."
         },
         {
             "name": "mailbox_receive_mode",
             "default": "",
-                "group": "inbound",
-                "label": "How this deployment receives mail",
-                "type": "select",
-                "options": {"": "Not set", "direct": "Directly (this server holds the MX)", "relay": "Through a relay"},
-                "helptext": "Set by the Setup tab when a relay is connected. Changing it here does not move any mail."
+            "group": "inbound",
+            "label": "How this deployment receives mail",
+            "type": "select",
+            "options": {
+                "": "Not set",
+                "direct": "Directly (this server holds the MX)",
+                "relay": "Through a relay"
+            },
+            "helptext": "Set by the Setup tab when a relay is connected. Changing it here does not move any mail."
         },
         {
             "name": "mailbox_from_show_via",
             "default": "1",
             "group": "forwarding",
-            "label": "Show \"via\" in the From header of forwarded mail",
-            "type": "checkbox"
+            "label": "Show via Site Name in the From line of forwarded mail",
+            "type": "checkbox",
+            "helptext": "Off shows just the original sender name. The From address is the site verified address either way, which deliverability requires; the original sender stays in Reply-To."
         },
         {
             "name": "mailbox_log_retention_days",
             "default": "30",
             "group": "retention",
-            "label": "Log retention (days)",
+            "label": "Transaction-log retention (days)",
             "type": "number",
-            "validation": {"number": true, "min": 0, "messages": {"min": "Must be 0 or more."}}
+            "validation": {
+                "number": true,
+                "min": 0,
+                "messages": {
+                    "min": "Must be 0 or more."
+                }
+            }
         },
         {
             "name": "mailbox_forwarding_max_destinations",
             "default": "10",
             "group": "forwarding",
-            "label": "Max forwarding destinations per alias",
+            "label": "Max destinations per alias",
             "type": "number",
-            "validation": {"number": true, "min": 1, "messages": {"min": "Must be 1 or more."}}
+            "validation": {
+                "number": true,
+                "min": 1,
+                "messages": {
+                    "min": "Must be 1 or more."
+                }
+            }
         },
         {
             "name": "mailbox_forwarding_rate_limit_per_alias",
             "default": "50",
             "group": "forwarding",
-            "label": "Rate limit per alias",
+            "label": "Forwards per alias, per window",
             "type": "number",
-            "validation": {"number": true, "min": 0, "messages": {"min": "Must be 0 or more."}},
+            "validation": {
+                "number": true,
+                "min": 0,
+                "messages": {
+                    "min": "Must be 0 or more."
+                }
+            },
             "helptext": "Messages allowed per alias within the window. 0 disables the per-alias limit."
         },
         {
             "name": "mailbox_forwarding_rate_limit_per_domain",
             "default": "200",
             "group": "forwarding",
-            "label": "Rate limit per domain",
+            "label": "Forwards per domain, per window",
             "type": "number",
-            "validation": {"number": true, "min": 0, "messages": {"min": "Must be 0 or more."}},
+            "validation": {
+                "number": true,
+                "min": 0,
+                "messages": {
+                    "min": "Must be 0 or more."
+                }
+            },
             "helptext": "Messages allowed per domain within the window. 0 disables the per-domain limit."
         },
         {
@@ -239,188 +273,226 @@
             "group": "forwarding",
             "label": "Rate-limit window (seconds)",
             "type": "number",
-            "validation": {"number": true, "min": 1, "messages": {"min": "Must be 1 or more."}},
+            "validation": {
+                "number": true,
+                "min": 1,
+                "messages": {
+                    "min": "Must be 1 or more."
+                }
+            },
             "helptext": "Rolling window the per-alias and per-domain limits are counted over."
         },
         {
             "name": "mailbox_srs_enabled",
             "default": "0",
-                "group": "srs",
-                "label": "Enable SRS (Sender Rewriting Scheme)",
-                "type": "checkbox"
+            "group": "srs",
+            "label": "Enable SRS (Sender Rewriting Scheme)",
+            "type": "checkbox"
         },
         {
             "name": "mailbox_srs_secret",
             "default": "",
             "secret": true,
-                "group": "srs",
-                "label": "SRS Secret",
-                "helptext": "Random secret used to sign and verify SRS-rewritten addresses. Required when SRS is enabled."
+            "group": "srs",
+            "label": "SRS Secret",
+            "helptext": "Random secret used to sign and verify SRS-rewritten addresses. Required when SRS is enabled."
         },
         {
             "name": "mailbox_mail_hostname",
             "default": "",
-                "group": "inbound",
-                "label": "Mail hostname",
-                "type": "text",
-                "helptext": "The name this server gives in SMTP, e.g. mail.example.com."
+            "group": "inbound",
+            "label": "Mail hostname",
+            "type": "text",
+            "helptext": "The name this server gives in SMTP, e.g. mail.example.com."
         },
         {
             "name": "mailbox_public_ip",
             "default": "",
-                "group": "inbound",
-                "label": "Public IP",
-                "type": "text",
-                "helptext": "The address other mail servers see. Used to build the SPF and PTR guidance."
+            "group": "inbound",
+            "label": "Public IP",
+            "type": "text",
+            "helptext": "The address other mail servers see. Used to build the SPF and PTR guidance."
         },
         {
             "name": "mailbox_forwarding_smtp_host",
             "default": "",
-                "group": "forwarding",
-                "label": "Forwarding SMTP Host",
-                "type": "text"
+            "group": "forwarding",
+            "label": "Forwarding SMTP Host",
+            "type": "text"
         },
         {
             "name": "mailbox_forwarding_smtp_port",
             "default": "",
-                "group": "forwarding",
-                "label": "Forwarding SMTP Port",
-                "type": "text"
+            "group": "forwarding",
+            "label": "Forwarding SMTP Port",
+            "type": "text"
         },
         {
             "name": "mailbox_forwarding_smtp_username",
             "default": "",
-                "group": "forwarding",
-                "label": "Forwarding SMTP Username",
-                "type": "text"
+            "group": "forwarding",
+            "label": "Forwarding SMTP Username",
+            "type": "text"
         },
         {
             "name": "mailbox_forwarding_smtp_password",
             "default": "",
             "secret": true,
-                "group": "forwarding",
-                "label": "Forwarding SMTP Password"
+            "group": "forwarding",
+            "label": "Forwarding SMTP Password"
         },
         {
             "name": "mailbox_retention_days",
             "default": "14",
             "group": "retention",
-            "label": "Message retention (days)",
+            "label": "Stored-message retention (days)",
             "type": "number",
-            "validation": {"number": true, "min": 0, "messages": {"min": "Must be 0 or more."}}
+            "validation": {
+                "number": true,
+                "min": 0,
+                "messages": {
+                    "min": "Must be 0 or more."
+                }
+            }
         },
         {
             "name": "mailbox_max_per_window",
             "default": "500",
             "group": "retention",
-            "label": "Max messages per window",
+            "label": "Max stored messages per domain, per window",
             "type": "number",
-            "validation": {"number": true, "min": 0, "messages": {"min": "Must be 0 or more."}}
+            "validation": {
+                "number": true,
+                "min": 0,
+                "messages": {
+                    "min": "Must be 0 or more."
+                }
+            }
         },
         {
             "name": "mailbox_provider",
             "default": "postfix",
-                "group": "inbound",
-                "label": "Active inbound provider",
-                "type": "select",
-                "options_from": "InboundProviderRegistry::labels",
-                "options_include": "plugins/mailbox/includes/InboundProviderRegistry.php",
-                "helptext": "How the platform receives inbound mail. Postfix (self-hosted) handles MX locally; webhook providers deliver over HTTP POST."
+            "group": "inbound",
+            "label": "Active inbound provider",
+            "type": "select",
+            "options_from": "InboundProviderRegistry::labels",
+            "options_include": "plugins/mailbox/includes/InboundProviderRegistry.php",
+            "helptext": "How the platform receives inbound mail. Postfix (self-hosted) handles MX locally; webhook providers deliver over HTTP POST."
         },
         {
             "name": "mailbox_spam_filtering_enabled",
             "default": "1",
             "group": "spam",
-            "label": "Scan inbound mail for spam",
-            "type": "checkbox"
+            "label": "Move suspected spam to the Spam view",
+            "type": "checkbox",
+            "helptext": "Suspected spam is moved out of the inbox and is not forwarded. It is never rejected, bounced or deleted, so a wrong guess costs a click."
         },
         {
             "name": "mailbox_spam_learning_enabled",
             "default": "0",
-                "group": "spam",
-                "label": "Learn from what users mark as spam",
-                "type": "select",
-                "options": {"1": "Yes", "0": "No"},
-                "helptext": "Corrections in the reader train a spam filter on this deployment's own mail. Needs a scanner running on this server."
+            "group": "spam",
+            "label": "Learn from what users mark as spam",
+            "type": "checkbox",
+            "helptext": "Corrections in the reader train a spam filter on this deployment own mail. What it learns is yours alone — a shared relay is deliberately stateless and cannot learn for you.",
+            "show_when": {
+                "mailbox_spam_filtering_enabled": "1"
+            }
         },
         {
             "name": "mailbox_rspamd_controller_url",
             "default": "http://127.0.0.1:11334",
-                "group": "spam",
-                "label": "Rspamd controller URL",
-                "type": "text",
-                "helptext": "Where the spam scanner's controller listens, e.g. http://127.0.0.1:11334."
+            "group": "spam",
+            "label": "Rspamd controller URL",
+            "type": "text",
+            "helptext": "Where the spam scanner's controller listens, e.g. http://127.0.0.1:11334."
         },
         {
             "name": "mailbox_relay_wg_public_key",
             "default": "",
-                "group": "relay",
-                "label": "Relay WireGuard public key",
-                "type": "text",
-                "helptext": "This deployment's tunnel key, as the relay knows it."
+            "group": "relay",
+            "label": "Relay WireGuard public key",
+            "type": "text",
+            "helptext": "This deployment's tunnel key, as the relay knows it."
         },
         {
             "name": "mailbox_relay_outbound_mode",
             "default": "provider",
-                "group": "relay",
-                "label": "Outbound sending",
-                "type": "select",
-                "options": {"provider": "Through your email provider", "smarthost": "Through the relay smarthost"},
-                "helptext": "Smarthost means this deployment owns the relay IP's sending reputation. A mode switch takes effect on the relay at its next Rebuild."
+            "group": "relay",
+            "label": "Sent mail leaves through",
+            "type": "select",
+            "options": {
+                "provider": "Through your email provider",
+                "smarthost": "Through the relay smarthost"
+            },
+            "helptext": "Smarthost means this deployment owns the relay IP's sending reputation. A mode switch takes effect on the relay at its next Rebuild."
         },
         {
             "name": "mailbox_local_listener",
             "default": "active",
-                "group": "inbound",
-                "label": "Local SMTP listener",
-                "type": "select",
-                "options": {"active": "Active", "inactive": "Inactive"}
+            "group": "inbound",
+            "label": "Local SMTP listener",
+            "type": "select",
+            "options": {
+                "active": "Active",
+                "inactive": "Inactive"
+            }
         },
         {
             "name": "mailbox_fleet_service_url",
             "default": "",
-                "group": "fleet",
-                "label": "Relay service URL",
-                "type": "text"
+            "group": "fleet",
+            "label": "Relay service URL",
+            "type": "text",
+            "helptext": "The service this deployment rents its relay spot from. Enrolment itself happens on the Setup tab."
         },
         {
             "name": "mailbox_fleet_api_public_key",
             "default": "",
-                "group": "fleet",
-                "label": "Relay API public key",
-                "type": "text"
+            "group": "fleet",
+            "label": "API public key",
+            "type": "text"
         },
         {
             "name": "mailbox_fleet_api_secret_key",
             "default": "",
             "secret": true,
-                "group": "fleet",
-                "label": "Relay API secret key"
+            "group": "fleet",
+            "label": "API secret key"
         },
         {
             "name": "mailbox_fleet_service_enabled",
             "default": "0",
-                "group": "fleet",
-                "label": "Use the hosted relay service",
-                "type": "select",
-                "options": {"1": "Yes", "0": "No"}
+            "group": "fleet",
+            "label": "Run a hosted relay fleet",
+            "type": "select",
+            "options": {
+                "1": "Yes",
+                "0": "No"
+            },
+            "helptext": "Turn on to let other deployments enrol with this one as their relay. This is the fleet operator side; a deployment that only wants to use someone else relay leaves it off."
         },
         {
             "name": "mailbox_fleet_mx_zone",
             "default": "",
-                "group": "fleet",
-                "label": "Relay MX zone",
-                "type": "text",
-                "helptext": "The zone whose MX records point at the relay."
+            "group": "fleet",
+            "label": "Fleet MX zone",
+            "type": "text",
+            "helptext": "A DNS zone you control. Each tenant MX hostname is <slug>.<zone>, with slug in the form t<id>, published by you as an A record pointing at that tenant shard."
         },
         {
             "name": "mailbox_fleet_grace_days",
             "default": "14",
-                "group": "fleet",
-                "label": "Grace period (days)",
-                "type": "number",
-                "validation": {"number": true, "min": 0, "messages": {"min": "Must be 0 or more."}},
-                "helptext": "How long mail keeps flowing after the relay subscription lapses."
+            "group": "fleet",
+            "label": "Grace period (days)",
+            "type": "number",
+            "validation": {
+                "number": true,
+                "min": 0,
+                "messages": {
+                    "min": "Must be 0 or more."
+                }
+            },
+            "helptext": "How long mail keeps flowing after the relay subscription lapses."
         }
     ]
 }

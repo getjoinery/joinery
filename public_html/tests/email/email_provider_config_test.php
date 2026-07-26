@@ -51,12 +51,24 @@ foreach ($discovered as $key => $class) {
 }
 check($classes_exist, 'every discovered provider maps to a real class');
 
-check(is_array(EmailSender::getProviderSettings('mailgun')) && count(EmailSender::getProviderSettings('mailgun')) > 0,
-	'getProviderSettings returns fields for mailgun');
-check(is_array(EmailSender::getProviderSettings('smtp')) && count(EmailSender::getProviderSettings('smtp')) > 0,
-	'getProviderSettings returns fields for smtp');
+// A provider's fields come from its declared group in settings.json, not from
+// a method on the provider class, so every path that renders or writes them
+// reads the same rules.
+$mailgun_fields = EmailSender::getProviderSettings('mailgun');
+$smtp_fields    = EmailSender::getProviderSettings('smtp');
+check(is_array($mailgun_fields) && count($mailgun_fields) > 0,
+	'getProviderSettings returns fields for mailgun', 'count: ' . count($mailgun_fields));
+check(is_array($smtp_fields) && count($smtp_fields) > 0,
+	'getProviderSettings returns fields for smtp', 'count: ' . count($smtp_fields));
 check(EmailSender::getProviderSettings('zz_nonexistent_provider') === [],
 	'getProviderSettings for an unknown key returns an empty array (no fabricated fields)');
+
+$named = array_column($mailgun_fields, 'name');
+check(in_array('mailgun_api_key', $named, true),
+	'the returned fields are declarations, carrying the setting name', implode(', ', $named));
+$labelled = array_filter($mailgun_fields, function ($f) { return !empty($f['label']); });
+check(count($labelled) === count($mailgun_fields),
+	'every provider field carries a label, so a page never has to invent one');
 
 section('the configured active provider resolves to a real instance');
 $active = EmailSender::getActiveProvider();

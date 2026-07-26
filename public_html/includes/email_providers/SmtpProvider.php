@@ -55,54 +55,6 @@ class SmtpProvider implements EmailServiceProvider, RawMessageRelay {
         return 'a:' . $host;
     }
 
-    public static function getSettingsFields(): array {
-        return [
-            [
-                'key' => 'smtp_host',
-                'label' => 'SMTP Host',
-                'type' => 'text',
-            ],
-            [
-                'key' => 'smtp_port',
-                'label' => 'SMTP Port (25, 465, 587, 2525)',
-                'type' => 'text',
-            ],
-            [
-                'key' => 'smtp_helo',
-                'label' => 'SMTP HELO/EHLO Hostname',
-                'type' => 'text',
-            ],
-            [
-                'key' => 'smtp_hostname',
-                'label' => 'SMTP Hostname (for headers)',
-                'type' => 'text',
-            ],
-            [
-                'key' => 'smtp_sender',
-                'label' => 'SMTP Bounce Address',
-                'type' => 'text',
-            ],
-            [
-                'key' => 'smtp_auth',
-                'label' => 'SMTP Authentication Required',
-                'type' => 'dropdown',
-                'options' => [0 => 'No', 1 => 'Yes'],
-            ],
-            [
-                'key' => 'smtp_username',
-                'label' => 'SMTP Username',
-                'type' => 'text',
-                'show_when' => ['smtp_auth' => '1'],
-            ],
-            [
-                'key' => 'smtp_password',
-                'label' => 'SMTP Password',
-                'type' => 'password',
-                'show_when' => ['smtp_auth' => '1'],
-            ],
-        ];
-    }
-
     public static function validateConfiguration(): array {
         $settings = Globalvars::get_instance();
         $errors = [];

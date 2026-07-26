@@ -56,165 +56,29 @@
 
 	$formwriter = $page->getFormWriter('form1');
 
-		?>
-		<script type="text/javascript">
-
-		function set_smtp_auth_choices(){
-			const smtpAuth = document.getElementById('smtp_auth');
-			const value = smtpAuth ? smtpAuth.value : '';
-
-			const wrapperIds = ['smtp_username_wrapper', 'smtp_password_wrapper'];
-			wrapperIds.forEach(function(id) {
-				const el = document.getElementById(id);
-				if (el) {
-					el.style.display = (value == 0 || value == '') ? 'none' : 'block';
-				}
-			});
-		}
-
-		function set_email_test_choices(){
-			const emailTestMode = document.getElementById('email_test_mode');
-			const value = emailTestMode ? emailTestMode.value : '';
-
-			const emailTestFields = document.getElementById('email_test_fields');
-			if (emailTestFields) {
-				emailTestFields.style.display = (value == 0 || value == '') ? 'none' : 'block';
-			}
-		}
-
-		function isValidEmail(email) {
-			const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-			return re.test(email);
-		}
-
-		document.addEventListener('DOMContentLoaded', function() {
-
-			// SMTP Authentication toggle
-			const smtpAuth = document.getElementById('smtp_auth');
-			if (smtpAuth) {
-				smtpAuth.addEventListener('change', set_smtp_auth_choices);
-			}
-			set_smtp_auth_choices();
-
-			// Email test mode toggle
-			const emailTestMode = document.getElementById('email_test_mode');
-			if (emailTestMode) {
-				emailTestMode.addEventListener('change', set_email_test_choices);
-			}
-			set_email_test_choices();
-
-			// SMTP port validation
-			const smtpPort = document.getElementById('smtp_port');
-			if (smtpPort) {
-				smtpPort.addEventListener('blur', function(){
-					const port = this.value;
-					if(port && ![25, 465, 587, 2525].includes(parseInt(port))){
-						this.classList.add('is-invalid');
-						if(!this.nextElementSibling || !this.nextElementSibling.classList.contains('invalid-feedback')){
-							const feedback = document.createElement('div');
-							feedback.className = 'invalid-feedback';
-							feedback.textContent = 'Common ports: 25, 465, 587, 2525';
-							this.parentNode.insertBefore(feedback, this.nextSibling);
-						}
-					} else {
-						this.classList.remove('is-invalid');
-						const feedback = this.nextElementSibling;
-						if(feedback && feedback.classList.contains('invalid-feedback')){
-							feedback.remove();
-						}
-					}
-				});
-			}
-
-			// Email validation for test recipient
-			const emailTestRecipient = document.getElementById('email_test_recipient');
-			if (emailTestRecipient) {
-				emailTestRecipient.addEventListener('blur', function(){
-					const email = this.value;
-					if(email && !isValidEmail(email)){
-						this.classList.add('is-invalid');
-						if(!this.nextElementSibling || !this.nextElementSibling.classList.contains('invalid-feedback')){
-							const feedback = document.createElement('div');
-							feedback.className = 'invalid-feedback';
-							feedback.textContent = 'Please enter a valid email address';
-							this.parentNode.insertBefore(feedback, this.nextSibling);
-						}
-					} else {
-						this.classList.remove('is-invalid');
-						const feedback = this.nextElementSibling;
-						if(feedback && feedback.classList.contains('invalid-feedback')){
-							feedback.remove();
-						}
-					}
-				});
-			}
-		});
-
-		</script>
-		<?php
-
 	$formwriter->begin_form();
-	
+
 	if($_SESSION['permission'] == 10){
-		
+
 		if((isset($_SESSION['test_mode']) && $_SESSION['test_mode']) || $settings->get_setting('debug')){
 			echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Test or debug mode is on.</div>';
-		}		
+		}
 
-		$formwriter->textinput('webmaster_email', 'Webmaster Email', [
-			'value' => $settings->get_setting('webmaster_email')
-		]);
-		$formwriter->textinput('defaultemail', 'Default Email', [
-			'value' => $settings->get_setting('defaultemail')
-		]);
-		$formwriter->textinput('defaultemailname', 'Default Email Name', [
-			'value' => $settings->get_setting('defaultemailname')
-		]);
-		$formwriter->textinput('defaultreplyto', 'Default Reply-To', [
-			'value' => $settings->get_setting('defaultreplyto'),
-			'helptext' => 'Applied to system mail that sets no Reply-To of its own'
-		]);
+		SettingsFieldRenderer::renderGroups($formwriter, array('email_identity'), array(
+			'heading_level' => 'h5',
+		));
 
-		// Mailing List Provider section — dynamically rendered from MailingListService.
-		// Adding a new provider class auto-populates this block.
+		// Mailing list provider, with its connection status beside it. Which
+		// provider's credentials are on screen follows the declared show_when,
+		// so adding a provider is a manifest change, not a page change.
 		require_once(PathHelper::getIncludePath('includes/MailingListService.php'));
-		$mailing_list_services = MailingListService::getAvailableServices();
 		$current_mailing_list_provider = $settings->get_setting('mailing_list_provider');
 
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
-		echo '<h5>Mailing List Provider</h5>';
-		$formwriter->dropinput('mailing_list_provider', 'Provider', [
-			'options' => $mailing_list_services,
-			'value' => $current_mailing_list_provider,
-			'helptext' => 'Service used for syncing mailing list subscriptions',
-			'empty_option' => true,
-		]);
-
-		// Render the configured provider's setting fields
-		if ($current_mailing_list_provider) {
-			$provider_fields = MailingListService::getProviderSettings($current_mailing_list_provider);
-			foreach ($provider_fields as $field) {
-				$opts = ['value' => $settings->get_setting($field['key'])];
-				if (!empty($field['helptext'])) {
-					$opts['helptext'] = $field['helptext'];
-				}
-				$type = $field['type'] ?? 'text';
-				if ($type === 'password') {
-					// The credential field plus its Clear box — one contract,
-					// wherever a credential is drawn.
-					$stored = $opts['value'] ?? '';
-					unset($opts['value']);
-					SettingsFieldRenderer::secretField(
-						$formwriter, $field['key'], $field['label'], $stored, $opts
-					);
-				} else if ($type === 'textarea') {
-					$formwriter->textarea($field['key'], $field['label'], $opts);
-				} else {
-					$formwriter->textinput($field['key'], $field['label'], $opts);
-				}
-			}
-		}
+		SettingsFieldRenderer::renderGroups($formwriter, array('mailing_list'), array(
+			'heading_level' => 'h5',
+		));
 		echo '</div>';
 
 		echo '<div class="col-md-6">';
@@ -260,28 +124,13 @@
 		echo '</div>';
 		echo '<div style="margin: 50px 0;"></div>';
 
-		// Email Settings Section
+		// Which services send, with the status of each beside them.
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
-		echo '<h3>Email Settings</h3>';
-		
-		// Email service selection settings (auto-discovered from provider classes)
 		require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
-		$service_optionvals = EmailSender::getAvailableServices();
-
-		$formwriter->dropinput('email_service', 'Primary Email Service', [
-			'options' => $service_optionvals,
-			'value' => $settings->get_setting('email_service'),
-			'helptext' => 'Service used for sending emails',
-			'empty_option' => true
-		]);
-		$formwriter->dropinput('email_fallback_service', 'Fallback Email Service', [
-			'options' => $service_optionvals,
-			'value' => $settings->get_setting('email_fallback_service'),
-			'helptext' => 'Service used if primary fails',
-			'empty_option' => true
-		]);
-		
+		SettingsFieldRenderer::renderGroups($formwriter, array('email_delivery'), array(
+			'heading_level' => 'h3',
+		));
 		echo '</div>';
 		echo '<div class="col-md-6">';
 		echo '<h5>Service Status</h5>';
@@ -397,63 +246,21 @@
 			echo '</div>';
 		}
 
-		// Dynamic provider settings sections — auto-discovered from provider classes
+		// One section per sending service. The fields come from the service's
+		// declared group, so a new provider appears here by declaring settings
+		// in settings.json — this loop never learns its field names.
 		$discovered_providers = EmailSender::getDiscoveredProviders();
 		foreach ($discovered_providers as $provider_key => $provider_class) {
 			$provider_label = $provider_class::getLabel();
-			$provider_fields = $provider_class::getSettingsFields();
+			$provider_group = 'email_provider_' . $provider_key;
 			$has_api_validation = method_exists($provider_class, 'validateApiConnection');
+
+			if (!SettingsFieldRenderer::namesFor($provider_group, 'core')) continue;
 
 			echo '<div class="row">';
 			echo '<div class="col-md-6">';
 			echo '<h5>' . htmlspecialchars($provider_label) . ' Settings</h5>';
-
-			foreach ($provider_fields as $field) {
-				$field_key = $field['key'];
-				$field_label = $field['label'];
-				$field_type = $field['type'] ?? 'text';
-
-				// Handle show_when conditional visibility
-				$wrapper_style = '';
-				$wrapper_id = '';
-				if (isset($field['show_when'])) {
-					foreach ($field['show_when'] as $dep_key => $dep_val) {
-						$current_dep = $settings->get_setting($dep_key);
-						if ($current_dep != $dep_val) {
-							$wrapper_style = 'display:none;';
-						}
-						$wrapper_id = $field_key . '_wrapper';
-					}
-				}
-
-				if ($wrapper_id) {
-					echo '<div id="' . htmlspecialchars($wrapper_id) . '" style="' . $wrapper_style . '">';
-				}
-
-				if ($field_type === 'password') {
-					// The credential field plus its Clear box — one contract,
-					// wherever a credential is drawn.
-					SettingsFieldRenderer::secretField(
-						$formwriter, $field_key, $field_label,
-						$settings->get_setting($field_key)
-					);
-				} elseif ($field_type === 'dropdown') {
-					$formwriter->dropinput($field_key, $field_label, [
-						'options' => $field['options'] ?? [],
-						'value' => $settings->get_setting($field_key),
-						'empty_option' => $field['empty_option'] ?? false,
-					]);
-				} else {
-					$formwriter->textinput($field_key, $field_label, [
-						'value' => $settings->get_setting($field_key),
-					]);
-				}
-
-				if ($wrapper_id) {
-					echo '</div>';
-				}
-			}
-
+			SettingsFieldRenderer::renderGroup($formwriter, $provider_group, array('source' => 'core'));
 			echo '</div>';
 
 			// API validation column
@@ -520,29 +327,7 @@
 		echo '(<code>$_SESSION[\'send_emails\']</code>) used for programmatic testing that logs to debug_email_logs.';
 		echo '</div>';
 
-		$test_optionvals = array(0 => 'No', 1 => 'Yes');
-		$formwriter->dropinput('email_test_mode', 'Global Test Mode (redirect all emails to test recipient)', [
-			'options' => $test_optionvals,
-			'value' => $settings->get_setting('email_test_mode'),
-			'empty_option' => false
-		]);
-
-		echo '<div id="email_test_fields" style="' . ($settings->get_setting('email_test_mode') ? '' : 'display:none;') . '">';
-		$formwriter->textinput('email_test_recipient', 'Test Recipient Email (receives all redirected emails)', [
-			'value' => $settings->get_setting('email_test_recipient')
-		]);
-		echo '</div>';
-
-		$formwriter->dropinput('email_dry_run', 'Dry Run Mode (prevent all sending, just log)', [
-			'options' => $test_optionvals,
-			'value' => $settings->get_setting('email_dry_run'),
-			'empty_option' => false
-		]);
-		$formwriter->dropinput('email_debug_mode', 'Debug Mode (log all emails to debug_email_logs)', [
-			'options' => $test_optionvals,
-			'value' => $settings->get_setting('email_debug_mode'),
-			'empty_option' => false
-		]);
+		SettingsFieldRenderer::renderGroup($formwriter, 'email_testing', array('source' => 'core'));
 
 		echo '</div>';
 		echo '</div>';
@@ -550,127 +335,19 @@
 
 	}
 
-	echo '<h3>Email Settings</h3>';
-	$optionvals = array(1=>"Yes", 0=>'No');
-	$formwriter->dropinput('emails_active', 'Email module active', [
-		'options' => $optionvals,
-		'value' => $settings->get_setting('emails_active'),
-		'empty_option' => false
-	]);
-	$formwriter->dropinput('email_validation_mx_check', 'Verify email domains accept mail (MX lookup)', [
-		'options' => $optionvals,
-		'value' => $settings->get_setting('email_validation_mx_check'),
-		'empty_option' => false,
-		'help' => 'On (default): reject addresses whose domain has no mail server. Off: accept any syntactically valid address without a DNS lookup — faster for bulk imports, and allows internal/unroutable domains.'
-	]);
-
-	$templates = new MultiMailingList(
-		array('deleted' => false),
-		NULL,		//SORT BY => DIRECTION
-		NULL,  //NUM PER PAGE
-		NULL);  //OFFSET
-	$templates->load();
-	$numtemplates = $templates->count_all();
-	$outer_optionvals = array('all' => 'All Lists');
-	$outer_optionvals += $templates->get_dropdown_array();
-	
-	if($settings->get_setting('default_mailing_list')){
-		$formwriter->dropinput('default_mailing_list', 'Default mailing list', [
-			'options' => $outer_optionvals,
-			'value' => $settings->get_setting('default_mailing_list'),
-			'empty_option' => true
-		]);
-	}
-	else if($numtemplates){
-		$first_template = $templates->get(0);
-		$formwriter->dropinput('default_mailing_list', 'Default mailing list', [
-			'options' => $outer_optionvals,
-			'value' => $first_template->key,
-			'empty_option' => true
-		]);
-	}
-	else{
-		$formwriter->dropinput('default_mailing_list', 'Default mailing list', [
-			'options' => $outer_optionvals,
-			'value' => $settings->get_setting('default_mailing_list'),
-			'empty_option' => true
-		]);
-	}
-	
-	$templates = new MultiEmailTemplateStore(
-		array('template_type' => EmailTemplateStore::TEMPLATE_TYPE_OUTER),
-		NULL,		//SORT BY => DIRECTION
-		NULL,  //NUM PER PAGE
-		NULL);  //OFFSET
-	$templates->load();
-	$outer_optionvals = $templates->get_dropdown_array();
-
-	$templates = new MultiEmailTemplateStore(
-		array('template_type' => EmailTemplateStore::TEMPLATE_TYPE_INNER),
-		NULL,		//SORT BY => DIRECTION
-		NULL,  //NUM PER PAGE
-		NULL);  //OFFSET
-	$templates->load();
-	$inner_optionvals = $templates->get_dropdown_array();
-
-	$templates = new MultiEmailTemplateStore(
-		array('template_type' => EmailTemplateStore::TEMPLATE_TYPE_FOOTER),
-		NULL,		//SORT BY => DIRECTION
-		NULL,  //NUM PER PAGE
-		NULL);  //OFFSET
-	$templates->load();
-	$footer_optionvals = $templates->get_dropdown_array();
-
-	$formwriter->dropinput('bulk_outer_template', 'Bulk email outer template', [
-		'options' => $outer_optionvals,
-		'value' => $settings->get_setting('bulk_outer_template'),
-		'empty_option' => false
-	]);
-	$formwriter->dropinput('bulk_footer', 'Bulk email footer', [
-		'options' => $footer_optionvals,
-		'value' => $settings->get_setting('bulk_footer'),
-		'empty_option' => false
-	]);
-	$formwriter->dropinput('individual_email_inner_template', 'Individual email inner template', [
-		'options' => $inner_optionvals,
-		'value' => $settings->get_setting('individual_email_inner_template'),
-		'empty_option' => false
-	]);
-	$formwriter->dropinput('group_email_footer_template', 'Group email footer template', [
-		'options' => $footer_optionvals,
-		'value' => $settings->get_setting('group_email_footer_template'),
-		'empty_option' => false
-	]);
-	$formwriter->dropinput('group_email_outer_template', 'Group email outer template', [
-		'options' => $outer_optionvals,
-		'value' => $settings->get_setting('group_email_outer_template'),
-		'empty_option' => false
-	]);
-	$formwriter->dropinput('group_email_inner_template', 'Group email inner template', [
-		'options' => $inner_optionvals,
-		'value' => $settings->get_setting('group_email_inner_template'),
-		'empty_option' => false
-	]);
-	$formwriter->dropinput('event_email_footer_template', 'Event email footer template', [
-		'options' => $footer_optionvals,
-		'value' => $settings->get_setting('event_email_footer_template'),
-		'empty_option' => false
-	]);
-	$formwriter->dropinput('event_email_outer_template', 'Event email outer template', [
-		'options' => $outer_optionvals,
-		'value' => $settings->get_setting('event_email_outer_template'),
-		'empty_option' => false
-	]);
-	$formwriter->dropinput('event_email_inner_template', 'Event email inner template', [
-		'options' => $inner_optionvals,
-		'value' => $settings->get_setting('event_email_inner_template'),
-		'empty_option' => false
-	]);
-
-	//$optionvals = array("General"=>'general', 'Emails' => 'emails');
-	//echo $formwriter->dropinput("Setting group", "stg_group_name", '', $optionvals, $setting->get('stg_group_name'), '', FALSE);
+	// Templates the sending paths reach for. The event templates are declared
+	// by the event_manager plugin and shown here too — one field, two places,
+	// never two fields that can drift.
+	SettingsFieldRenderer::renderGroups($formwriter, array('email_module', 'email_templates'), array(
+		'heading_level' => 'h3',
+	));
+	SettingsFieldRenderer::renderGroups($formwriter, array('email'), array(
+		'source'        => 'event_manager',
+		'heading_level' => 'h3',
+	));
 
 	$formwriter->submitbutton('btn_submit', 'Submit');
+	$formwriter->end_form();
 
 	$page->end_box();
 

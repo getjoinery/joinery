@@ -61,52 +61,6 @@ class ConnectedMailboxProvider implements EmailServiceProvider {
     }
 
     /**
-     * A dropdown of the connected accounts. Built dynamically (this provider may
-     * query the DB) so every account the operator has connected is selectable.
-     */
-    public static function getSettingsFields(): array {
-        $options = array();
-        if (!self::accountModelAvailable()) {
-            return array(array(
-                'key' => self::SETTING_ACCOUNT,
-                'label' => 'Account to send through',
-                'type' => 'dropdown',
-                'options' => $options,
-                'empty_option' => true,
-                'helptext' => 'The Inbound Email plugin must be installed to connect an account.',
-            ));
-        }
-        try {
-            $accounts = new MultiInboundImapAccount(array('deleted' => false));
-            $accounts->load();
-            foreach ($accounts as $account) {
-                $label = $account->get('iia_label') ?: $account->get('iia_username');
-                $username = $account->get('iia_username');
-                if ($username && $username !== $label) {
-                    $label .= ' (' . $username . ')';
-                }
-                $options[$account->key] = $label;
-            }
-        } catch (\Throwable $e) {
-            // Plugin not installed / table missing — leave the dropdown empty.
-            error_log('[ConnectedMailboxProvider] Could not list connected accounts: ' . $e->getMessage());
-        }
-
-        return array(
-            array(
-                'key' => self::SETTING_ACCOUNT,
-                'label' => 'Account to send through',
-                'type' => 'dropdown',
-                'options' => $options,
-                'empty_option' => true,
-                'helptext' => 'All site email — transactional, notifications, replies, and forwarding — '
-                    . 'will be sent as this account address. To send as a hosted alias or to relay '
-                    . 'forwarded mail with the original sender intact, use an SMTP host, Mailgun, or SES instead.',
-            ),
-        );
-    }
-
-    /**
      * Valid when an account is selected and authorized to send. Surfaces the
      * proactive "Reconnect to allow sending" case (§4.1): an account connected for
      * IMAP only (e.g. Microsoft without SMTP.Send) is reported as needing a

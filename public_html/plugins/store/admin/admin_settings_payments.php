@@ -117,17 +117,9 @@
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
 		echo '<h5>Stripe Live API Settings</h5>';
-		$formwriter->textinput('stripe_api_key', 'Stripe Publishable Key (Example: pk_live_xxxx)', [
-			'value' => $settings->get_setting('stripe_api_key'),
-			'validation' => [
-				'pattern' => '#^pk_(live|test)_[a-zA-Z0-9]{24,}$#',
-				'messages' => ['pattern' => 'Must start with pk_live_ or pk_test_ (not sk_)']
-			],
-			'help_text' => 'Must start with pk_live_ or pk_test_ (not sk_)'
-		]);
-		SettingsFieldRenderer::secretField($formwriter, 'stripe_api_pkey', 'Stripe Secret/Private Key (Example: sk_live_xxxx)',
-			$settings->get_setting('stripe_api_pkey'), array(
-			'help_text' => 'Must start with sk_live_ or sk_test_ (not pk_)'
+		SettingsFieldRenderer::renderGroup($formwriter, 'stripe', array(
+			'source' => 'store',
+			'only'   => array('stripe_api_key', 'stripe_api_pkey'),
 		));
 		echo '</div>';
 		echo '<div class="col-md-6">';
@@ -211,17 +203,9 @@
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
 		echo '<h5>Stripe Test API Settings</h5>';
-		$formwriter->textinput('stripe_api_key_test', 'Test Stripe Publishable Key (Example: pk_test_xxxx)', [
-			'value' => $settings->get_setting('stripe_api_key_test'),
-			'validation' => [
-				'pattern' => '#^pk_(live|test)_[a-zA-Z0-9]{24,}$#',
-				'messages' => ['pattern' => 'Must start with pk_live_ or pk_test_ (not sk_)']
-			],
-			'help_text' => 'Must start with pk_live_ or pk_test_ (not sk_)'
-		]);
-		SettingsFieldRenderer::secretField($formwriter, 'stripe_api_pkey_test', 'Test Stripe Secret/Private Key (Example: sk_test_xxxx)',
-			$settings->get_setting('stripe_api_pkey_test'), array(
-			'help_text' => 'Must start with sk_live_ or sk_test_ (not pk_)'
+		SettingsFieldRenderer::renderGroup($formwriter, 'stripe', array(
+			'source' => 'store',
+			'only'   => array('stripe_api_key_test', 'stripe_api_pkey_test'),
 		));
 		echo '</div>';
 		echo '<div class="col-md-6">';
@@ -305,8 +289,10 @@
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
 		echo '<h5>Stripe Webhook Settings</h5>';
-		SettingsFieldRenderer::secretField($formwriter, 'stripe_endpoint_secret', 'Stripe Endpoint Secret (Example: whsec_xxxx)',
-			$settings->get_setting('stripe_endpoint_secret'), array());
+		SettingsFieldRenderer::renderGroup($formwriter, 'stripe', array(
+			'source' => 'store',
+			'only'   => array('stripe_endpoint_secret'),
+		));
 		echo '</div>';
 		echo '<div class="col-md-6">';
 		echo '<h5>Webhook Configuration</h5>';
@@ -356,44 +342,27 @@
 		
 		// Checkout Configuration Section
 		echo '<h4>Checkout Configuration</h4>';
-		$formwriter->dropinput('cart_intermediate_page', 'Show Cart Review Page', [
-			'options' => array(1 => 'Yes — show /cart before /checkout', 0 => 'No — go straight to /checkout'),
-			'value' => $settings->get_setting('cart_intermediate_page'),
-			'empty_option' => false,
-			'help_text' => 'When enabled, customers see a cart review page after adding items. When disabled, they go directly to the checkout accordion.'
-		]);
-		$optionvals = array('stripe_regular'=>"Stripe Regular", 'stripe_checkout' => 'Stripe Checkout', 'none' => 'None');
-		$formwriter->dropinput('checkout_type', 'Checkout Type', [
-			'options' => $optionvals,
-			'value' => $settings->get_setting('checkout_type'),
-			'empty_option' => false
-		]);
+		SettingsFieldRenderer::renderGroup($formwriter, 'storefront', array(
+			'source' => 'store',
+			'only'   => array('cart_intermediate_page', 'checkout_type'),
+		));
 		echo '<div style="margin: 50px 0;"></div>';
 		
 		// PayPal Configuration Section
 		echo '<h4>PayPal Configuration</h4>';
-		$optionvals = array(1=>"Yes", 0=>'No');
-		$formwriter->dropinput('use_paypal_checkout', 'Enable Paypal Checkout', [
-			'options' => $optionvals,
-			'value' => $settings->get_setting('use_paypal_checkout'),
-			'empty_option' => false
-		]);
-
-		$formwriter->dropinput('use_venmo_checkout', 'Enable Venmo at Checkout', [
-			'options' => array(1 => "Yes", 0 => 'No'),
-			'value' => $settings->get_setting('use_venmo_checkout'),
-			'empty_option' => false
-		]);
+		SettingsFieldRenderer::renderGroup($formwriter, 'paypal', array(
+			'source' => 'store',
+			'only'   => array('use_paypal_checkout', 'use_venmo_checkout'),
+		));
 
 		// PayPal Live API section with two-column layout and API validation
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
 		echo '<h5>PayPal Live API Settings</h5>';
-		$formwriter->textinput('paypal_api_key', 'Paypal Client ID (Example: ATF46g-L-ler2xxxx)', [
-			'value' => $settings->get_setting('paypal_api_key')
-		]);
-		SettingsFieldRenderer::secretField($formwriter, 'paypal_api_secret', 'Paypal Client Secret (Example: ELTF_ie6uGhueKxxxx)',
-			$settings->get_setting('paypal_api_secret'), array());
+		SettingsFieldRenderer::renderGroup($formwriter, 'paypal', array(
+			'source' => 'store',
+			'only'   => array('paypal_api_key', 'paypal_api_secret'),
+		));
 		echo '</div>';
 		echo '<div class="col-md-6">';
 		echo '<h5>Live API Status</h5>';
@@ -534,11 +503,10 @@
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
 		echo '<h5>PayPal Test API Settings</h5>';
-		$formwriter->textinput('paypal_api_key_test', 'Test Paypal Client ID (Example: ATF46g-L-ler2xxxx)', [
-			'value' => $settings->get_setting('paypal_api_key_test')
-		]);
-		SettingsFieldRenderer::secretField($formwriter, 'paypal_api_secret_test', 'Test Paypal Client Secret (Example: ELTF_ie6uGhueKxxxx)',
-			$settings->get_setting('paypal_api_secret_test'), array());
+		SettingsFieldRenderer::renderGroup($formwriter, 'paypal', array(
+			'source' => 'store',
+			'only'   => array('paypal_api_key_test', 'paypal_api_secret_test'),
+		));
 		echo '</div>';
 		echo '<div class="col-md-6">';
 		echo '<h5>Test API Status</h5>';
@@ -683,12 +651,10 @@
 		echo '</div>';
 		echo '<div style="margin: 50px 0;"></div>';
 
-	$optionvals = array('usd'=>"US Dollar", 'eur' => 'Euro');
-	$formwriter->dropinput('site_currency', 'Site Currency', [
-		'options' => $optionvals,
-		'value' => $settings->get_setting('site_currency'),
-		'empty_option' => false
-	]);
+	SettingsFieldRenderer::renderGroup($formwriter, 'storefront', array(
+		'source' => 'store',
+		'only'   => array('site_currency'),
+	));
 
 	$formwriter->submitbutton('submit_button', 'Submit');
 	$formwriter->end_form();

@@ -2,6 +2,7 @@
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
 
 	require_once(PathHelper::getIncludePath('data/settings_class.php'));
 	require_once(PathHelper::getIncludePath('data/email_templates_class.php'));
@@ -19,21 +20,21 @@
 	$error_message = $page_vars['error_message'] ?? null;
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> NULL,
 		'page_title' => 'Settings',
 		'readable_title' => 'Settings',
 		'breadcrumbs' => array(
-			'Settings'=>'', 
+			'Settings'=>'',
 		),
 		'session' => $session,
 	)
-	);	
+	);
 
 	$pageoptions['altlinks'] = array('Public Menu'=>'/admin/admin_public_menu');
-	$pageoptions['altlinks'] += array('Admin Menu'=>'/admin/admin_admin_menu'); 
-	$pageoptions['altlinks'] += array('API Keys'=>'/admin/admin_api_keys'); 
+	$pageoptions['altlinks'] += array('Admin Menu'=>'/admin/admin_admin_menu');
+	$pageoptions['altlinks'] += array('API Keys'=>'/admin/admin_api_keys');
 	$pageoptions['altlinks'] += array('Upgrade'=>'/utils/upgrade');
 	$pageoptions['altlinks'] += array('Refresh Themes'=>'/utils/upgrade?theme-only=1');
 
@@ -62,167 +63,6 @@
 
 	$formwriter = $page->getFormWriter('form1');
 
-		?>
-		<script type="text/javascript">
-
-		function set_blog_choices(){
-			const blogActive = document.getElementById('blog_active');
-			const value = blogActive ? blogActive.value : '';
-
-			const containers = [
-				'show_comments_container',
-				'comments_active_container',
-				'comments_unregistered_users_container',
-				'default_comment_status_container',
-				'comment_notification_emails_container',
-				'use_captcha_comments_container',
-				'blog_footer_text_container'
-			];
-
-			const display = (value == 0 || value == '') ? 'none' : 'block';
-
-			containers.forEach(function(containerId) {
-				const container = document.getElementById(containerId);
-				if (container) {
-					container.style.display = display;
-				}
-			});
-		}
-
-		function check_social_content(){
-			// Check if any social field has content
-			const social_field_ids = [
-				'social_facebook_link',
-				'social_instagram_link',
-				'social_soundcloud_link',
-				'social_spotify_link',
-				'social_youtube_link',
-				'social_mixcloud_link',
-				'social_discord_link',
-				'social_google_link',
-				'social_linkedin_link',
-				'social_pinterest_link',
-				'social_stack_link',
-				'social_telegram_link',
-				'social_tiktok_link',
-				'social_snapchat_link',
-				'social_slack_link',
-				'social_github_link',
-				'social_reddit_link',
-				'social_whatsapp_link',
-				'social_twitch_link'
-			];
-
-			let has_content = false;
-			for(let i = 0; i < social_field_ids.length; i++){
-				const field = document.getElementById(social_field_ids[i]);
-				if(field && field.value && field.value.trim() !== ''){
-					has_content = true;
-					break;
-				}
-			}
-
-			// Set the dropdown value based on content
-			const socialSettingsActive = document.getElementById('social_settings_active');
-			if (socialSettingsActive) {
-				socialSettingsActive.value = has_content ? '1' : '0';
-			}
-		}
-
-		function set_social_choices(){
-			const socialSettingsActive = document.getElementById('social_settings_active');
-			const value = socialSettingsActive ? socialSettingsActive.value : '';
-
-			const containers = [
-				'social_facebook_link_container',
-				'social_instagram_link_container',
-				'social_soundcloud_link_container',
-				'social_spotify_link_container',
-				'social_youtube_link_container',
-				'social_mixcloud_link_container',
-				'social_discord_link_container',
-				'social_google_link_container',
-				'social_linkedin_link_container',
-				'social_pinterest_link_container',
-				'social_stack_link_container',
-				'social_telegram_link_container',
-				'social_tiktok_link_container',
-				'social_snapchat_link_container',
-				'social_slack_link_container',
-				'social_github_link_container',
-				'social_reddit_link_container',
-				'social_whatsapp_link_container',
-				'social_twitch_link_container'
-			];
-
-			const display = (value == 0 || value == '') ? 'none' : 'block';
-
-			containers.forEach(function(containerId) {
-				const container = document.getElementById(containerId);
-				if (container) {
-					container.style.display = display;
-				}
-			});
-		}
-
-		function set_tracking_choices(){
-			const tracking = document.getElementById('tracking');
-			const value = tracking ? tracking.value : '';
-
-			const trackingCodeContainer = document.getElementById('tracking_code_container');
-			if (trackingCodeContainer) {
-				trackingCodeContainer.style.display = (value == 'custom') ? 'block' : 'none';
-			}
-		}
-
-		function set_plugin_theme_choices(){
-			const themeTemplate = document.getElementById('theme_template');
-			const value = themeTemplate ? themeTemplate.value : '';
-
-			const pluginThemeSelector = document.getElementById('plugin_theme_selector');
-			if (pluginThemeSelector) {
-				pluginThemeSelector.style.display = (value === 'plugin') ? 'block' : 'none';
-			}
-		}
-
-		function isValidEmail(email) {
-			const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-			return re.test(email);
-		}
-
-		document.addEventListener('DOMContentLoaded', function() {
-
-			set_blog_choices();
-			check_social_content(); // Check content before setting visibility
-			set_social_choices();
-			set_tracking_choices();
-			set_plugin_theme_choices();
-
-			const blogActive = document.getElementById('blog_active');
-			if (blogActive) {
-				blogActive.addEventListener('change', set_blog_choices);
-			}
-
-			const socialSettingsActive = document.getElementById('social_settings_active');
-			if (socialSettingsActive) {
-				socialSettingsActive.addEventListener('change', set_social_choices);
-			}
-
-			const tracking = document.getElementById('tracking');
-			if (tracking) {
-				tracking.addEventListener('change', set_tracking_choices);
-			}
-
-			const themeTemplate = document.getElementById('theme_template');
-			if (themeTemplate) {
-				themeTemplate.addEventListener('change', set_plugin_theme_choices);
-			}
-
-		});
-
-		</script>
-		<?php
-
 	$formwriter->begin_form();
 
 	if ($error_message): ?>
@@ -232,31 +72,31 @@
 	<?php endif;
 
 	if($_SESSION['permission'] == 10){
-		
+
 		echo '<b>NOTE: These settings will not override the settings if they are located in the Globalvars_site.php file in the /config directory</b><br>';
 		if((isset($_SESSION['test_mode']) && $_SESSION['test_mode']) || $settings->get_setting('debug')){
 			echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Test or debug mode is on.</div>';
-		}		
-		
+		}
+
 		echo '<h3>System Settings</h3>';
 
-		// Path Configuration Section
-		echo '<h5>Path Configuration</h5>';
-		
-		// Read Globalvars_site.php to determine what's actually hardcoded
+		// A path pinned in Globalvars_site.php cannot be changed from here, so
+		// the page shows it read-only under a reserved *_readonly name and asks
+		// the renderer to leave the editable field out. Which paths those are is
+		// a property of this deployment, not of the setting.
 		$globalvars_site_path = dirname(__DIR__, 2) . '/config/Globalvars_site.php';
 		$globalvars_hardcoded = array();
-		
+
 		if (file_exists($globalvars_site_path)) {
 			$globalvars_content = file_get_contents($globalvars_site_path);
-			
+
 			// Parse the file to find $this->settings assignments
 			if (preg_match_all('/\$this->settings\[\'([^\']+)\'\]\s*=\s*[\'"]([^\'"]*)[\'"];/', $globalvars_content, $matches, PREG_SET_ORDER)) {
 				foreach ($matches as $match) {
 					$globalvars_hardcoded[$match[1]] = $match[2];
 				}
 			}
-			
+
 			// Also check for $this->settings["key"] = "value" format
 			if (preg_match_all('/\$this->settings\["([^"]+)"\]\s*=\s*[\'"]([^\'"]*)[\'"];/', $globalvars_content, $matches, PREG_SET_ORDER)) {
 				foreach ($matches as $match) {
@@ -265,224 +105,64 @@
 			}
 		}
 
-		// Base path - check if hardcoded in Globalvars_site.php
-		if (isset($globalvars_hardcoded['baseDir'])) {
-			$formwriter->textinput('baseDir_readonly', 'Base path (Loaded from Globalvars_site.php)', [
-				'value' => $settings->get_setting('baseDir'),
-				'readonly' => true
-			]);
-		} else {
-			$formwriter->textinput('baseDir', 'Base path', [
-				'value' => $settings->get_setting('baseDir')
-			]);
-		}
-
-		// Site path - always calculated, read-only
-		$formwriter->textinput('siteDir_readonly', 'Site path (Auto-calculated)', [
-			'value' => $settings->get_setting('siteDir'),
-			'readonly' => true
-		]);
-
-		// Static files path - always calculated, read-only
-		$formwriter->textinput('static_files_dir_readonly', 'Static files path (Auto-calculated)', [
-			'value' => $settings->get_setting('static_files_dir'),
-			'readonly' => true
-		]);
-
-		// Upload path - always calculated, read-only
-		$formwriter->textinput('upload_dir_readonly', 'Upload path (Auto-calculated)', [
-			'value' => $settings->get_setting('upload_dir'),
-			'readonly' => true
-		]);
-
-		// Upload web directory - check if hardcoded in Globalvars_site.php
-		if (isset($globalvars_hardcoded['upload_web_dir'])) {
-			$formwriter->textinput('upload_web_dir_readonly', 'Upload web directory (Loaded from Globalvars_site.php)', [
-				'value' => $settings->get_setting('upload_web_dir'),
-				'readonly' => true
-			]);
-		} else {
-			$formwriter->textinput('upload_web_dir', 'Upload web directory', [
-				'value' => $settings->get_setting('upload_web_dir'),
-				'placeholder' => 'Usually just "uploads" - relative path visible on web'
-			]);
-		}
-		
-		// Create dropdown for site folder based on directories under base path
-		// Note: baseDir is loaded from Globalvars_site.php and is not editable through admin
-		$base_path = $settings->get_setting('baseDir');
-		$site_optionvals = array();
-		$site_folder_error = '';
-		
-		if ($base_path && is_dir($base_path)) {
-			$site_directories = LibraryFunctions::list_directories_in_directory($base_path, 'filename');
-			foreach($site_directories as $site_directory){
-				// Skip hidden directories and common system directories
-				if (substr($site_directory, 0, 1) !== '.' && $site_directory !== 'lost+found') {
-					$site_optionvals[$site_directory] = $site_directory;
-				}
-			}
-			// Add current value if it's not in the list
-			$current_site_template = $settings->get_setting('site_template');
-			if ($current_site_template && !isset($site_optionvals[$current_site_template])) {
-				$site_optionvals[$current_site_template] = $current_site_template . ' (missing)';
-			}
-		} else {
-			// Base path is invalid, show error
-			$site_folder_error = '';
-			$site_optionvals[''] = 'Base path not configured or invalid';
-		}
-		
-		// Site location - check if it's hardcoded in Globalvars_site.php
-		if (isset($globalvars_hardcoded['site_template'])) {
-			// It's hardcoded, make it read-only
-			$formwriter->textinput('site_template_readonly', 'Site location (Loaded from Globalvars_site.php)', [
-				'value' => $settings->get_setting('site_template'),
-				'readonly' => true
-			]);
-		} else {
-			// It's database-driven, make it editable
-			$formwriter->dropinput('site_template', "Site location (The site we are running, basically the folder at " . htmlspecialchars($base_path) . ")", [
-				'options' => $site_optionvals,
-				'value' => $settings->get_setting('site_template')
-			]);
-		}
-
-		// Web URL - check if hardcoded in Globalvars_site.php
-		$current_webDir = $settings->get_setting('webDir');
-		$webDir_valid = true;
-
-		// Validate webDir format regardless of source (for display purposes)
-		if ($current_webDir && (preg_match('/^https?:\/\//', $current_webDir) || substr($current_webDir, -1) === '/')) {
-			$webDir_valid = false;
-		}
-
-		if (isset($globalvars_hardcoded['webDir'])) {
-			$readonly_label = $webDir_valid ? "Web Domain (Loaded from Globalvars_site.php)" : "Web Domain (Loaded from Globalvars_site.php - INVALID FORMAT)";
-			$formwriter->textinput('webDir_readonly', $readonly_label, [
-				'value' => $current_webDir,
-				'readonly' => true
-			]);
-			if (!$webDir_valid) {
-				echo '<div class="text-danger small">webDir should contain domain only (e.g. \'example.com\' or \'localhost:8080\'). Protocol is set by Protocol Mode.</div>';
-			}
-		} else {
-			$formwriter->textinput('webDir', 'Web Domain', [
-				'value' => $current_webDir,
-				'placeholder' => 'Enter domain only (e.g. example.com or localhost:8080). Protocol is set by Protocol Mode below.',
-				'validation' => ['weburl' => true]
-			]);
-		}
-		
-		$optionvals = array(
-			'auto' => 'Auto-detect',
-			'http' => 'HTTP only',
-			'https' => 'HTTPS only',
-			'https_redirect' => 'HTTPS with redirects'
+		$pinned_paths = array_intersect(
+			array('baseDir', 'webDir', 'site_template', 'upload_web_dir'),
+			array_keys($globalvars_hardcoded)
 		);
-		// Handle case where protocol_mode setting doesn't exist or is empty
-		$protocol_mode_value = $settings->get_setting('protocol_mode', true, true); // fail_silently = true
-		if (empty($protocol_mode_value)) {
-			$protocol_mode_value = 'auto'; // Default value
+
+		SettingsFieldRenderer::renderGroups($formwriter, array('paths'), array(
+			'heading_level' => 'h5',
+			'skip'          => $pinned_paths,
+			'field_options' => array(
+				'site_template' => array(
+					'helptext_append' => 'Folders found under ' . htmlspecialchars((string)$settings->get_setting('baseDir')) . '.',
+				),
+				'apache_error_log' => array(
+					'helptext_append' => 'For example /var/www/html/'
+						. htmlspecialchars((string)$settings->get_setting('site_template')) . '/logs/error.log.',
+					'validation' => array(
+						'remote' => array(
+							'url' => '/api/v1/action/validate_server_file',
+							'dataFieldName' => 'value',
+							'data' => array('field' => 'apache_error_log'),
+							'message' => 'File does not exist or is not readable',
+						),
+					),
+				),
+			),
+		));
+
+		// Paths this deployment does not let anyone edit: the ones Globalvars
+		// calculates, and the ones Globalvars_site.php pins.
+		$readonly_paths = array(
+			'siteDir'          => 'Site path (auto-calculated)',
+			'static_files_dir' => 'Static files path (auto-calculated)',
+			'upload_dir'       => 'Upload path (auto-calculated)',
+		);
+		foreach ($pinned_paths as $name) {
+			$declaration = SettingsDeclarations::get($name);
+			$readonly_paths[$name] = ($declaration['label'] ?? $name) . ' (loaded from Globalvars_site.php)';
 		}
-		$formwriter->dropinput('protocol_mode', 'Protocol Mode', [
-			'options' => $optionvals,
-			'value' => $protocol_mode_value,
-			'helptext' => 'Controls protocol for generated URLs and redirect behavior'
-		]);
-
-		$formwriter->checkboxinput('Enable HSTS Security Header', 'enable_hsts', NULL, 'normal', 1, $settings->get_setting('enable_hsts') ? 1 : 0, 'Strict-Transport-Security header tells browsers to use HTTPS only for this domain (max-age 1 year). Recommended for any production site with stable HTTPS. Disable for dev environments where you need plain HTTP.');
-
-		$formwriter->checkboxinput('Enable X-Frame-Options Header', 'enable_x_frame_options', NULL, 'normal', 1, $settings->get_setting('enable_x_frame_options') ? 1 : 0, 'Prevents your site from being embedded in iframes on other websites (clickjacking protection). Safe to enable on all sites.');
-
-		$formwriter->checkboxinput('Enable Referrer-Policy Header', 'enable_referrer_policy', NULL, 'normal', 1, $settings->get_setting('enable_referrer_policy') ? 1 : 0, 'Controls what URL information is sent when users click links to external sites. Improves privacy but may affect analytics. Set to strict-origin-when-cross-origin.');
-
-		$formwriter->dropinput('debug_css', 'CSS Debug Mode (tailwind themes only)', [
-			'options' => [1 => 'Yes', 0 => 'No'],
-			'value' => $settings->get_setting('debug_css')
-		]);
-
-		$formwriter->dropinput('show_errors', 'Show errors', [
-			'options' => [1 => 'Yes (show to screen)', 0 => 'No (logged)'],
-			'value' => $settings->get_setting('show_errors')
-		]);		
-		
-		// Get themes from directory only
-		$directory_themes = ThemeHelper::getAvailableThemes();
-
-		// Build options array
-		$optionvals = array();
-
-		// Add directory themes only
-		foreach($directory_themes as $theme_name => $theme_helper) {
-			$display_name = $theme_helper->get('display_name', $theme_name);
-			$optionvals[$theme_name] = $display_name;  // FormWriter format: [value => label]
-		}
-
-		$formwriter->dropinput('theme_template', 'Active theme', [
-			'options' => $optionvals,
-			'value' => $settings->get_setting('theme_template')
-		]);
-
-		// Always render plugin selector dropdown, JavaScript will control visibility
-		// Use existing method to get available plugins
-		$available_plugins = PluginHelper::getAvailablePlugins();
-
-		// Create FormWriter dropdown following existing admin_settings pattern
-		$current_plugin = $settings->get_setting('active_theme_plugin');
-
-		// Build options array for FormWriter
-		$plugin_options = array('' => '-- Select Plugin --');
-		foreach ($available_plugins as $plugin_name => $plugin_helper) {
-			// PluginHelper::getAvailablePlugins returns array of PluginHelper instances
-			$display_name = $plugin_helper->getPluginName();
-			$plugin_options[$plugin_name] = $display_name;  // FormWriter format: [value => label]
+		foreach ($readonly_paths as $name => $label) {
+			$formwriter->textinput($name . '_readonly', $label, array(
+				'value'    => $settings->get_setting($name),
+				'readonly' => true,
+			));
 		}
 
-		// Wrap in a div that JavaScript can show/hide
-		// Note: The dropdown inside needs to be ignored by validation when hidden
-		$current_theme = $settings->get_setting('theme_template');
-		$initial_display = ($current_theme === 'plugin') ? 'block' : 'none';
-		echo '<div id="plugin_theme_selector" style="display: ' . $initial_display . ';">';
-		$formwriter->dropinput('active_theme_plugin', 'Active Theme Plugin', [
-			'options' => $plugin_options,
-			'value' => $current_plugin,
-			'helptext' => 'Select which plugin provides the user interface'
-		]);
-		echo '</div>';
+		// webDir is what every absolute URL is built from, so a value the rest
+		// of the platform cannot use is worth saying out loud even when the
+		// field itself is not editable here.
+		$current_webDir = $settings->get_setting('webDir');
+		if (in_array('webDir', $pinned_paths, true) && $current_webDir
+			&& (preg_match('/^https?:\/\//', $current_webDir) || substr($current_webDir, -1) === '/')) {
+			echo '<div class="text-danger small">webDir should be the domain only (e.g. example.com or '
+			   . 'localhost:8080). The protocol comes from Protocol Mode.</div>';
+		}
 
-		$formwriter->textinput('webmaster_email', 'Webmaster Email', [
-			'value' => $settings->get_setting('webmaster_email')
-		]);
-		$formwriter->textinput('defaultemail', 'Default Email', [
-			'value' => $settings->get_setting('defaultemail')
-		]);
-		$formwriter->textinput('defaultemailname', 'Default Email Name', [
-			'value' => $settings->get_setting('defaultemailname')
-		]);
-		$formwriter->textinput('defaultreplyto', 'Default Reply-To', [
-			'value' => $settings->get_setting('defaultreplyto'),
-			'helptext' => 'Applied to system mail that sets no Reply-To of its own'
-		]);
-
-		$formwriter->textinput('site_name', 'Site Name', [
-			'value' => $settings->get_setting('site_name')
-		]);
-		$formwriter->textinput('site_description', 'Site Description', [
-			'value' => $settings->get_setting('site_description')
-		]);
-
-		$formwriter->textinput('logo_link', 'Link to Logo', [
-			'value' => $settings->get_setting('logo_link'),
-			'validation' => [
-				'remote' => [
-					'url' => '/api/v1/action/validate_server_file',
-					'dataFieldName' => 'value',
-					'data' => ['field' => 'logo_link'],
-					'message' => 'Must start with / and file must exist'
-				]
-			]
-		]);
+		SettingsFieldRenderer::renderGroups($formwriter, array('protocol', 'debug', 'diagnostics', 'theme'), array(
+			'heading_level' => 'h5',
+		));
 
 		echo '<h3>Brand &amp; Appearance</h3>';
 		echo '<p class="text-muted">Override the UI kit brand colors. Leave blank to use the active theme&rsquo;s declared brand (shown under each field), or the kit default if the theme declares none.</p>';
@@ -494,68 +174,37 @@
 			$theme_brand = ThemeHelper::getInstance()->get('brand_tokens', []);
 			if (!is_array($theme_brand)) { $theme_brand = []; }
 		} catch (Throwable $e) { /* no resolvable theme — kit defaults apply */ }
-		$brand_default_note = function ($key) use ($theme_brand) {
-			return (isset($theme_brand[$key]) && is_string($theme_brand[$key]))
-				? ' Theme default: ' . htmlspecialchars($theme_brand[$key]) . '.'
-				: '';
-		};
 
-		$formwriter->colorpicker('jy_color_primary', 'Primary / Button Color', [
-			'value'    => $settings->get_setting('jy_color_primary'),
-			'helptext' => 'Buttons, checkboxes, links, focus rings.' . $brand_default_note('jy_color_primary'),
-			'sort'     => 'frequency',
-		]);
-
-		$formwriter->colorpicker('jy_color_primary_hover', 'Primary Hover Color', [
-			'value'    => $settings->get_setting('jy_color_primary_hover'),
-			'helptext' => 'Button hover state. Typically a darker shade of the primary color.' . $brand_default_note('jy_color_primary_hover'),
-			'sort'     => 'frequency',
-		]);
-
-		$formwriter->colorpicker('jy_color_primary_text', 'Primary Button Text Color', [
-			'value'    => $settings->get_setting('jy_color_primary_text'),
-			'helptext' => 'Text on filled primary buttons. Usually white; change for light primaries.' . $brand_default_note('jy_color_primary_text'),
-			'sort'     => 'frequency',
-		]);
-
-		$formwriter->colorpicker('jy_color_surface', 'Surface / Card Background', [
-			'value'    => $settings->get_setting('jy_color_surface'),
-			'helptext' => 'Background of auth cards, panels, table rows. White removes the gray tint.' . $brand_default_note('jy_color_surface'),
-			'sort'     => 'frequency',
-		]);
-
-		$formwriter->colorpicker('jy_color_bg', 'Page Background', [
-			'value'    => $settings->get_setting('jy_color_bg'),
-			'helptext' => 'Overall page background behind cards.' . $brand_default_note('jy_color_bg'),
-			'sort'     => 'frequency',
-		]);
-
-		$formwriter->textinput('node_dir', 'Node Path (Example: /var/www/html/test/node)', [
-			'value' => $settings->get_setting('node_dir')
-		]);
+		$brand_notes = array();
+		foreach (SettingsFieldRenderer::namesFor('brand', 'core') as $token) {
+			if (isset($theme_brand[$token]) && is_string($theme_brand[$token])) {
+				$brand_notes[$token] = array('helptext_append' => 'Theme default: ' . $theme_brand[$token] . '.');
+			}
+		}
+		SettingsFieldRenderer::renderGroup($formwriter, 'brand', array(
+			'source'        => 'core',
+			'field_options' => $brand_notes,
+		));
 
 		// Composer section with two-column layout and package validation
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
-		echo '<h5>Composer Settings</h5>';
-		$formwriter->textinput('composerAutoLoad', 'Composer Path (Example: /home/user1/vendor/)', [
-			'value' => $settings->get_setting('composerAutoLoad')
-		]);
+		SettingsFieldRenderer::renderGroups($formwriter, array('composer'), array('heading_level' => 'h5'));
 		echo '</div>';
 		echo '<div class="col-md-6">';
 		echo '<h5>Installed Packages</h5>';
 		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px; overflow-y: auto;">';
-		
+
 		if ($run_validation) {
 			$composer_path = $settings->get_setting('composerAutoLoad');
 			if ($composer_path && !empty(trim($composer_path))) {
 				$autoload_path = rtrim($composer_path, '/') . '/autoload.php';
 				$composer_lock = rtrim($composer_path, '/') . '/../composer.lock';
 				$composer_json = rtrim($composer_path, '/') . '/../composer.json';
-				
+
 				if (file_exists($autoload_path)) {
 					echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ Valid Composer installation</strong></div>';
-				
+
 				// Get direct dependencies from composer.json
 				$direct_dependencies = [];
 				if (file_exists($composer_json)) {
@@ -567,12 +216,12 @@
 						}
 					}
 				}
-				
+
 				// Get all installed packages from composer.lock
 				$all_packages = [];
 				$direct_packages = [];
 				$sub_packages = [];
-				
+
 				if (file_exists($composer_lock)) {
 					$lock_content = @file_get_contents($composer_lock);
 					if ($lock_content) {
@@ -583,9 +232,9 @@
 									'name' => $package['name'],
 									'version' => $package['version'] ?? 'unknown'
 								];
-								
+
 								$all_packages[] = $pkg_info;
-								
+
 								// Separate direct vs sub-dependencies
 								if (in_array($package['name'], $direct_dependencies)) {
 									$direct_packages[] = $pkg_info;
@@ -596,16 +245,16 @@
 						}
 					}
 				}
-				
+
 				// For backward compatibility, keep $packages as all packages
 				$packages = $all_packages;
-				
+
 				// Show key packages we use FIRST
 				$key_packages = ['mailgun/mailgun-php', 'stripe/stripe-php', 'phpmailer/phpmailer'];
 				$found_key_packages = array_filter($packages, function($pkg) use ($key_packages) {
 					return in_array($pkg['name'], $key_packages);
 				});
-				
+
 				if (!empty($found_key_packages)) {
 					echo '<div style="margin-bottom: 12px; padding: 8px; background: #d4edda; border-radius: 4px;">';
 					echo '<div style="font-size: 12px; color: #155724; font-weight: bold; margin-bottom: 4px;">Key packages detected:</div>';
@@ -621,11 +270,11 @@
 					echo '<div style="font-size: 11px; color: #856404;">⚠ No key packages detected (mailgun, stripe, phpmailer)</div>';
 					echo '</div>';
 				}
-				
+
 				if (!empty($packages)) {
 					echo '<div style="font-size: 12px; color: #666; margin-bottom: 8px;"><strong>' . count($packages) . ' total packages installed:</strong></div>';
 					echo '<div style="font-size: 11px; color: #666; margin-bottom: 8px;">' . count($direct_packages) . ' direct dependencies, ' . count($sub_packages) . ' sub-dependencies</div>';
-					
+
 					// Show direct dependencies first
 					if (!empty($direct_packages)) {
 						echo '<div style="margin-bottom: 12px;">';
@@ -640,13 +289,13 @@
 						}
 						echo '</div>';
 					}
-					
+
 					// Show sub-dependencies (collapsed by default if many)
 					if (!empty($sub_packages)) {
 						$show_all_sub = count($sub_packages) <= 10;
 						echo '<div style="margin-bottom: 8px;">';
 						echo '<div style="font-size: 11px; color: #6c757d; font-weight: bold; margin-bottom: 4px; padding: 2px 5px; background: #f8f9fa; border-radius: 3px;">🔗 Sub-Dependencies</div>';
-						
+
 						if ($show_all_sub) {
 							// Show all if 10 or fewer
 							foreach ($sub_packages as $package) {
@@ -674,7 +323,7 @@
 				} else {
 					echo '<div style="color: #ffc107; font-size: 12px;">No packages found in composer.lock</div>';
 				}
-				
+
 			} else {
 				echo '<div style="color: #dc3545;"><strong>✗ Invalid path</strong></div>';
 				echo '<div style="color: #666; font-size: 12px; margin-top: 5px;">Could not find: <code>' . htmlspecialchars($autoload_path) . '</code></div>';
@@ -690,578 +339,92 @@
 			echo '<a href="?run_validation=1" class="btn btn-primary btn-sm">Run All Validations</a>';
 			echo '</div>';
 		}
-		
-		echo '</div>';
-		echo '</div>';
-		echo '</div>';
-		echo '<div style="margin: 50px 0;"></div>';
-		
-		$site_template = $settings->get_setting('site_template');
-		$formwriter->textinput('apache_error_log', "Apache Error Log Path (Example: /var/www/html/{$site_template}/logs/error.log)", [
-			'value' => $settings->get_setting('apache_error_log'),
-			'validation' => [
-				'remote' => [
-					'url' => '/api/v1/action/validate_server_file',
-					'dataFieldName' => 'value',
-					'data' => ['field' => 'apache_error_log'],
-					'message' => 'File does not exist or is not readable'
-				]
-			]
-		]);
 
-		$formwriter->textinput('standard_error', 'Standard Error Message', [
-			'value' => $settings->get_setting('standard_error')
-		]);
-		
+		echo '</div>';
+		echo '</div>';
+		echo '</div>';
 		echo '<div style="margin: 50px 0;"></div>';
-		
-		// hCaptcha section with two-column layout
+
+		// Captcha keys, with a live widget beside them so a wrong key is
+		// obvious without leaving the page.
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
-		echo '<h5>hCaptcha Settings</h5>';
-		$formwriter->textinput('hcaptcha_public', 'HCaptcha Public Key', [
-			'value' => $settings->get_setting('hcaptcha_public')
-		]);
-		$formwriter->textinput('hcaptcha_private', 'HCaptcha Private Key', [
-			'value' => $settings->get_setting('hcaptcha_private')
-		]);
+		SettingsFieldRenderer::renderGroups($formwriter, array('captcha'), array('heading_level' => 'h5'));
 		echo '</div>';
 		echo '<div class="col-md-6">';
 		echo '<h5>Live Preview</h5>';
 		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border-radius: 5px;">';
-		
-		// Show live hCaptcha preview if both keys are configured
+
 		if($settings->get_setting('hcaptcha_public') && $settings->get_setting('hcaptcha_private')) {
 			echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ hCaptcha is configured</strong></div>';
-			// Use the same captcha rendering method from FormWriter
 			echo "<script src='https://www.hCaptcha.com/1/api.js' async defer></script>";
-			echo '<div class="h-captcha" data-sitekey="'.$settings->get_setting('hcaptcha_public').'"></div>';
+			echo '<div class="h-captcha" data-sitekey="'.htmlspecialchars($settings->get_setting('hcaptcha_public')).'"></div>';
 		} else if($settings->get_setting('hcaptcha_public')) {
-			echo '<div style="color: #ffc107;"><strong>⚠ Only public key configured</strong></div>';
-			echo '<div style="color: #666; font-size: 14px; margin-top: 5px;">Enter private key to complete setup</div>';
-		} else {
-			echo '<div style="color: #666; text-align: center; padding: 20px;">Enter both keys to see preview</div>';
+			echo '<div style="color: #ffc107;"><strong>⚠ hCaptcha: only the site key is set</strong></div>';
+			echo '<div style="color: #666; font-size: 14px; margin-top: 5px;">Enter the secret key to complete setup</div>';
 		}
-		
-		echo '</div>';
-		echo '</div>';
-		echo '</div>';
-		echo '<div style="margin: 50px 0;"></div>';
-		
-		// Google Captcha section with two-column layout
-		echo '<div class="row">';
-		echo '<div class="col-md-6">';
-		echo '<h5>Google reCAPTCHA Settings</h5>';
-		$formwriter->textinput('captcha_public', 'Google Captcha Public Key', [
-			'value' => $settings->get_setting('captcha_public')
-		]);
-		$formwriter->textinput('captcha_private', 'Google Captcha Private Key', [
-			'value' => $settings->get_setting('captcha_private')
-		]);
-		echo '</div>';
-		echo '<div class="col-md-6">';
-		echo '<h5>Live Preview</h5>';
-		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border-radius: 5px;">';
-		
-		// Show live Google Captcha preview if both keys are configured
+
 		if($settings->get_setting('captcha_public') && $settings->get_setting('captcha_private')) {
-			echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ Google reCAPTCHA is configured</strong></div>';
-			// Use the same captcha rendering method from FormWriter
+			echo '<div style="color: #28a745; margin: 10px 0;"><strong>✓ Google reCAPTCHA is configured</strong></div>';
 			echo '<script src="https://www.google.com/recaptcha/api.js" async defer></script>';
-			echo '<div class="g-recaptcha" data-sitekey="'.$settings->get_setting('captcha_public').'"></div>';
+			echo '<div class="g-recaptcha" data-sitekey="'.htmlspecialchars($settings->get_setting('captcha_public')).'"></div>';
 		} else if($settings->get_setting('captcha_public')) {
-			echo '<div style="color: #ffc107;"><strong>⚠ Only public key configured</strong></div>';
-			echo '<div style="color: #666; font-size: 14px; margin-top: 5px;">Enter private key to complete setup</div>';
-		} else {
-			echo '<div style="color: #666; text-align: center; padding: 20px;">Enter both keys to see preview</div>';
+			echo '<div style="color: #ffc107; margin-top: 10px;"><strong>⚠ reCAPTCHA: only the site key is set</strong></div>';
+			echo '<div style="color: #666; font-size: 14px; margin-top: 5px;">Enter the secret key to complete setup</div>';
 		}
-		
+
+		if(!$settings->get_setting('hcaptcha_public') && !$settings->get_setting('captcha_public')) {
+			echo '<div style="color: #666; text-align: center; padding: 20px;">Enter a site key and its secret to see a preview</div>';
+		}
+
 		echo '</div>';
 		echo '</div>';
 		echo '</div>';
 		echo '<div style="margin: 50px 0;"></div>';
 
+		SettingsFieldRenderer::renderGroups($formwriter, array(
+			'email_identity',
+			'api',
+			'api_rate_limits',
+			'logging',
+			'upgrade',
+			'cloud_storage',
+			'oauth',
+			'dns',
+			'mobile_apps',
+		), array('heading_level' => 'h5'));
 
+		echo '<hr>';
 	}
 
-	echo '<h3>General Settings</h3>';
-
-	$yes_no_options = [1=>"Yes", 0=>'No'];
-
-	$formwriter->textbox('custom_css', 'Custom CSS', [
-		'value' => $settings->get_setting('custom_css'),
-		'rows' => 10,
-		'cols' => 80,
-		'htmlmode' => 'no'
-	]);
-
-	$formwriter->textinput('preview_image', 'Preview image (for facebook, google, etc)', [
-		'value' => $settings->get_setting('preview_image'),
-		'validation' => [
-			'remote' => [
-				'url' => '/api/v1/action/validate_server_file',
-				'dataFieldName' => 'value',
-				'data' => ['field' => 'preview_image'],
-				'message' => 'File does not exist or is not readable'
-			]
-		]
-	]);
-
-	$formwriter->dropinput('tracking', 'Visit tracking', [
-		'options' => ["Use built in tracking"=>'internal', 'Use custom tracking' => 'custom'],
-		'value' => $settings->get_setting('tracking')
-	]);
-	$formwriter->textinput('tracking_code', 'Tracking code', [
-		'value' => $settings->get_setting('tracking_code')
-	]);
-
-	$formwriter->dropinput('register_active', 'Registration active', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('register_active')
-	]);
-
-	$formwriter->dropinput('subscriptions_active', 'Subscriptions active', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('subscriptions_active')
-	]);
-
-	$formwriter->dropinput('default_timezone', 'Default timezone', [
-		'options' => Address::get_timezone_drop_array(),
-		'value' => $settings->get_setting('default_timezone')
-	]);
-
-	$formwriter->textinput('nickname_display_as', 'Nickname display as (blank for no nicknames)', [
-		'value' => $settings->get_setting('nickname_display_as')
-	]);
-
-	$formwriter->dropinput('activation_required_login', 'Require email activation to log on', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('activation_required_login')
-	]);
-
-	$formwriter->dropinput('newsletter_active', 'Newsletter active', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('newsletter_active')
-	]);
-
-	$formwriter->textinput('subscription_notification_emails', 'Emails to receive subscription notifications (separate with comma)', [
-		'value' => $settings->get_setting('subscription_notification_emails')
-	]);
-
-	$formwriter->textinput('single_purchase_notification_emails', 'Emails to receive one time purchase notifications (separate with comma)', [
-		'value' => $settings->get_setting('single_purchase_notification_emails')
-	]);
-
-	$formwriter->dropinput('site_currency', 'Site Currency', [
-		'options' => ['usd' => 'US Dollar', 'eur' => 'Euro'],
-		'value' => $settings->get_setting('site_currency')
-	]);
-
-	$formwriter->textbox('robots_text', 'Robots.txt entry', [
-		'value' => $settings->get_setting('robots_text'),
-		'rows' => 10,
-		'cols' => 80,
-		'htmlmode' => 'no'
-	]);
-
-	echo '<h3>Survey Settings</h3>';
-	$formwriter->dropinput('surveys_active', 'Survey module active', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('surveys_active')
-	]);
-
-	echo '<h3>Blog Settings</h3>';
-	$formwriter->dropinput('blog_active', 'Blog module active', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('blog_active')
-	]);
-
-	/*DEPRECATED
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Use blog as homepage", "use_blog_as_homepage", '', $optionvals, $settings->get_setting('use_blog_as_homepage'), '', FALSE);
-*/	
-
-	$formwriter->dropinput('show_comments', 'Show comments', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('show_comments')
-	]);
-
-	$formwriter->dropinput('comments_active', 'Allow comments', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('comments_active')
-	]);
-
-	$formwriter->dropinput('comments_unregistered_users', 'Allow comments from unregistered users', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('comments_unregistered_users')
-	]);
-
-	$formwriter->dropinput('default_comment_status', 'Default comment status', [
-		'options' => ["Approved"=>'approved', 'Unapproved' => 'unapproved'],
-		'value' => $settings->get_setting('default_comment_status')
-	]);
-
-	$formwriter->textinput('comment_notification_emails', 'Emails to receive comment notifications (separate with comma)', [
-		'value' => $settings->get_setting('comment_notification_emails')
-	]);
-
-	$formwriter->dropinput('use_captcha_comments', 'Use captcha on comments', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('use_captcha_comments')
-	]);
-
-	$formwriter->textbox('blog_footer_text', 'Blog footer text', [
-		'value' => $settings->get_setting('blog_footer_text'),
-		'rows' => 10,
-		'cols' => 80,
-		'htmlmode' => 'no'
-	]);	
- 
-	echo '<hr>';
- 
- 	echo '<h3>Spam Settings</h3>';
-	$formwriter->dropinput('use_honeypot', 'Use form honeypots', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('use_honeypot')
-	]);
-
-	$formwriter->textinput('anti_spam_answer', 'Anti spam word (blank for none)', [
-		'value' => $settings->get_setting('anti_spam_answer')
-	]);
-
-	$formwriter->dropinput('use_captcha', 'Use captcha', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('use_captcha')
-	]);	
-	
-	echo '<hr>';
-
- 	echo '<h3>Social Settings</h3>';
-
-	$formwriter->dropinput('social_settings_active', 'Social settings active', [
-		'options' => $yes_no_options,
-		'value' => '0'
-	]);
-
-	$formwriter->textinput('social_facebook_link', 'Facebook link', [
-		'value' => $settings->get_setting('social_facebook_link')
-	]);
-
-	$formwriter->textinput('social_instagram_link', 'Instagram link', [
-		'value' => $settings->get_setting('social_instagram_link')
-	]);
-
-	$formwriter->textinput('social_soundcloud_link', 'Soundcloud link', [
-		'value' => $settings->get_setting('social_soundcloud_link')
-	]);
-
-	$formwriter->textinput('social_spotify_link', 'Spotify link', [
-		'value' => $settings->get_setting('social_spotify_link')
-	]);
-
-	$formwriter->textinput('social_youtube_link', 'Youtube link', [
-		'value' => $settings->get_setting('social_youtube_link')
-	]);
-
-	$formwriter->textinput('social_mixcloud_link', 'Mixcloud link', [
-		'value' => $settings->get_setting('social_mixcloud_link')
-	]);
-
-	$formwriter->textinput('social_discord_link', 'Discord link', [
-		'value' => $settings->get_setting('social_discord_link')
-	]);
-
-	$formwriter->textinput('social_google_link', 'Google link', [
-		'value' => $settings->get_setting('social_google_link')
-	]);
-
-	$formwriter->textinput('social_linkedin_link', 'Linkedin link', [
-		'value' => $settings->get_setting('social_linkedin_link')
-	]);
-
-	$formwriter->textinput('social_pinterest_link', 'Pinterest link', [
-		'value' => $settings->get_setting('social_pinterest_link')
-	]);
-
-	$formwriter->textinput('social_stack_link', 'Stack Overflow link', [
-		'value' => $settings->get_setting('social_stack_link')
-	]);
-
-	$formwriter->textinput('social_telegram_link', 'Telegram link', [
-		'value' => $settings->get_setting('social_telegram_link')
-	]);
-
-	$formwriter->textinput('social_tiktok_link', 'Tiktok link', [
-		'value' => $settings->get_setting('social_tiktok_link')
-	]);
-
-	$formwriter->textinput('social_snapchat_link', 'Snapchat link', [
-		'value' => $settings->get_setting('social_snapchat_link')
-	]);
-
-	$formwriter->textinput('social_slack_link', 'Slack link', [
-		'value' => $settings->get_setting('social_slack_link')
-	]);
-	$formwriter->textinput('social_github_link', 'Github link', [
-		'value' => $settings->get_setting('social_github_link')
-	]);
-	$formwriter->textinput('social_reddit_link', 'Reddit link', [
-		'value' => $settings->get_setting('social_reddit_link')
-	]);
-	$formwriter->textinput('social_whatsapp_link', 'Whatsapp link', [
-		'value' => $settings->get_setting('social_whatsapp_link')
-	]);
-	$formwriter->textinput('social_twitch_link', 'Twitch link', [
-		'value' => $settings->get_setting('social_twitch_link')
-	]);
-
-	echo '<h3>Booking Settings</h3>';
-
-	$formwriter->dropinput('bookings_active', 'Booking module active', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('bookings_active')
-	]);
-
- 	echo '<h3>Events Settings</h3>';
-	$formwriter->dropinput('events_active', 'Event module active', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('events_active')
-	]);
-
-	$formwriter->textinput('events_label', 'Events label', [
-		'value' => $settings->get_setting('events_label')
-	]);
-
- 	echo '<h3>Product Settings</h3>';
-	$formwriter->dropinput('products_active', 'Product module active', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('products_active')
-	]);
-
-	$formwriter->dropinput('products_list_items_active', 'List regular products on product index', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('products_list_items_active')
-	]);
-
-	$formwriter->dropinput('products_list_events_active', 'List event products on product index', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('products_list_events_active')
-	]);
-
-	$formwriter->dropinput('coupons_active', 'Allow coupon codes', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('coupons_active')
-	]);
-
-	$formwriter->dropinput('pricing_page', 'Activate pricing (/pricing) page', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('pricing_page')
-	]);
-
-	$max_subscriptions_per_user = 0;
-	if($settings->get_setting('max_subscriptions_per_user')){
-		$max_subscriptions_per_user = $settings->get_setting('max_subscriptions_per_user');
-	}
-	$formwriter->textinput('max_subscriptions_per_user', 'Max number of subscriptions per user (0 for no limit)', [
-		'value' => $max_subscriptions_per_user
-	]);
-
-	// Subscription Tier Management Settings
-	echo '<h4>Subscription Tier Management</h4>';
-	echo '<p class="text-muted">Control how users can change their subscription tiers</p>';
-
-	$formwriter->dropinput('subscription_downgrades_enabled', 'Allow subscription downgrades', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('subscription_downgrades_enabled'),
-		'helptext' => 'Allow users to downgrade to lower subscription tiers'
-	]);
-
-	$formwriter->dropinput('subscription_downgrade_timing', 'Downgrade timing', [
-		'options' => ["Immediate"=>'immediate', 'End of billing period' => 'end_of_period'],
-		'value' => $settings->get_setting('subscription_downgrade_timing'),
-		'helptext' => 'When downgrades take effect (only applies if downgrades are enabled)'
-	]);
-
-	$formwriter->dropinput('subscription_cancellation_enabled', 'Allow subscription cancellations', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('subscription_cancellation_enabled'),
-		'helptext' => 'Allow users to cancel their subscriptions'
-	]);
-
-	$formwriter->dropinput('subscription_cancellation_timing', 'Cancellation timing', [
-		'options' => ["Immediate"=>'immediate', 'End of billing period' => 'end_of_period'],
-		'value' => $settings->get_setting('subscription_cancellation_timing'),
-		'helptext' => 'When cancellations take effect'
-	]);
-
-	$formwriter->dropinput('subscription_cancellation_prorate', 'Issue prorated refunds on cancellation', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('subscription_cancellation_prorate'),
-		'helptext' => 'Issue refunds for unused time (only for immediate cancellations)'
-	]);
-
-	$formwriter->dropinput('subscription_reactivation_enabled', 'Allow subscription reactivation', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('subscription_reactivation_enabled'),
-		'helptext' => 'Allow users to reactivate cancelled subscriptions before they expire'
-	]);
-
-	// Tier Gating Settings
-	echo '<h4>Tier Gating (Content Access Control)</h4>';
-	echo '<p class="text-muted">Control how tier-restricted content is displayed to users</p>';
-
-	$formwriter->textinput('tier_gate_preview_length', 'Preview length (characters)', [
-		'value' => $settings->get_setting('tier_gate_preview_length') ?: '0',
-		'helptext' => 'Characters of body text to show before the paywall (0 for no preview)'
-	]);
-
-	$formwriter->dropinput('tier_gate_hide_from_listings', 'Hide gated content from listings', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('tier_gate_hide_from_listings'),
-		'helptext' => 'Hide gated content from blog/event listings for users who lack the required tier. RSS feeds always hide gated items regardless of this setting.'
-	]);
-
-	echo '<hr>';
-
-	echo '<h3>File Hosting Settings</h3>';
-	$formwriter->dropinput('files_active', 'File hosting module active', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('files_active')
-	]);
-
-	if(!$settings->get_setting('allowed_upload_extensions')){
-		$allowed_upload_extensions = 'gif,jpeg,jpg,png,pdf,xls,doc,xlsx,docx,mp3,mp4,m4a';
-	} else {
-		$allowed_upload_extensions = $settings->get_setting('allowed_upload_extensions');
-	}
-	$formwriter->textinput('allowed_upload_extensions', 'Allowed file upload extensions (comma separated)', [
-		'value' => $allowed_upload_extensions
-	]);
-
-	echo '<h3>Two-Factor Authentication</h3>';
-	$formwriter->dropinput('totp_require_admins', 'Require 2FA for admin accounts (permission 5+)', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('totp_require_admins'),
-		'helptext' => 'When enabled, admins without 2FA are redirected to /profile/security until they enroll.'
-	]);
-	$formwriter->textinput('totp_remember_device_days', 'Trust device for N days (0 = always require)', [
-		'value' => $settings->get_setting('totp_remember_device_days') ?: '0',
-		'helptext' => 'After a successful 2FA verification, set a trusted-device cookie that skips the TOTP step for this many days. 0 means always require TOTP.'
-	]);
-	$formwriter->textinput('totp_issuer_name', 'App name shown in authenticator', [
-		'value' => $settings->get_setting('totp_issuer_name'),
-		'helptext' => 'Optional. Displayed by the user\'s authenticator app (Google Authenticator, etc.). Falls back to the site name if blank.'
-	]);
-
-	echo '<h3>Cookie Consent</h3>';
-	$formwriter->dropinput('cookie_consent_mode', 'Cookie consent mode', [
-		'options' => [
-			'off' => 'Off',
-			'auto' => 'Auto-detect by location (Recommended)',
-			'gdpr' => 'GDPR (Opt-in required)',
-			'ccpa' => 'CCPA (Opt-out)'
-		],
-		'value' => $settings->get_setting('cookie_consent_mode'),
-		'helptext' => 'Auto detects visitor location. GDPR requires consent before setting cookies. CCPA allows opt-out.'
-	]);
-	$formwriter->textinput('cookie_privacy_policy_link', 'Privacy policy URL', [
-		'value' => $settings->get_setting('cookie_privacy_policy_link'),
-		'prepend' => rtrim($settings->get_setting('webDir'), '/') . '/',
-		'helptext' => 'Path to your privacy policy page (shown in consent banner)'
-	]);
-
-	echo '<h3>Video Settings</h3>';
-	$formwriter->dropinput('videos_active', 'Video module active', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('videos_active')
-	]);
-
-	echo '<h3>CMS Settings</h3>';
-	$formwriter->dropinput('page_contents_active', 'CMS module active', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('page_contents_active')
-	]);
-
-	$pages = new MultiPage(
-		array('deleted' => false, 'published' => true),
-		NULL,		//SORT BY => DIRECTION
-		NULL,  //NUM PER PAGE
-		NULL);  //OFFSET
-	$pages->load();
-	$optionvals = $pages->get_dropdown_array_link();
-	// Prepend "Page - " to each page label for clarity
-	foreach ($optionvals as $url => $label) {
-		$optionvals[$url] = 'Page - ' . $label;
-	}
-	$optionvals['/blog'] = 'Blog homepage';
-	$formwriter->dropinput('alternate_homepage', 'Alternate page to use as homepage (optional)', [
-		'options' => $optionvals,
-		'value' => $settings->get_setting('alternate_homepage'),
-		'empty_option' => true
-	]);
-
-	$formwriter->textinput('alternate_loggedin_homepage', 'Alternate page to use as logged in homepage (optional)', [
-		'value' => $settings->get_setting('alternate_loggedin_homepage')
-	]);
-
-	echo '<h3>Url Rewrite Settings</h3>';
-	$formwriter->dropinput('urls_active', 'Url rewrite module active', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('urls_active')
-	]);
-
-	echo '<h3>Upgrade Settings</h3>';
-	if(!$upgrade_source = $settings->get_setting('upgrade_source')){
-		$upgrade_source = 'https://getjoinery.com';
-	}
-	$formwriter->textinput('upgrade_source', 'Upgrade source', [
-		'value' => $upgrade_source
-	]);
-
-	echo '<hr>';
-
-	echo '<h3>API Settings</h3>';
-
-	$true_false_options = ['true' => 'Yes', 'false' => 'No'];
-	$formwriter->dropinput('api_require_https', 'Require HTTPS for API requests', [
-		'options' => $true_false_options,
-		'value' => $settings->get_setting('api_require_https') ?: 'true',
-		'helptext' => 'Disable for local development only. Always enable in production.'
-	]);
-
-	$formwriter->textinput('api_allowed_origins', 'Allowed CORS origins (comma-separated)', [
-		'value' => $settings->get_setting('api_allowed_origins'),
-		'helptext' => 'Example: https://example.com,https://app.example.com. Leave blank to disable CORS.'
-	]);
-
-	echo '<h5>Rate Limiting</h5>';
-
-	$formwriter->textinput('api_rate_limit_requests', 'Max API requests per window', [
-		'value' => $settings->get_setting('api_rate_limit_requests') ?: '1000',
-		'helptext' => 'Maximum number of API requests per IP within the time window'
-	]);
-
-	$formwriter->textinput('api_rate_limit_window', 'API rate limit window (seconds)', [
-		'value' => $settings->get_setting('api_rate_limit_window') ?: '3600',
-		'helptext' => 'Time window in seconds (3600 = 1 hour)'
-	]);
-
-	$formwriter->textinput('api_auth_rate_limit_requests', 'Max failed auth attempts per window', [
-		'value' => $settings->get_setting('api_auth_rate_limit_requests') ?: '10',
-		'helptext' => 'Maximum failed authentication attempts per IP within the time window'
-	]);
-
-	$formwriter->textinput('api_auth_rate_limit_window', 'Auth rate limit window (seconds)', [
-		'value' => $settings->get_setting('api_auth_rate_limit_window') ?: '900',
-		'helptext' => 'Time window in seconds for auth failures (900 = 15 minutes)'
-	]);
-
-	echo '<h5>Request Log Retention</h5>';
-
-	$formwriter->textinput('request_log_retention_days', 'Days to keep request logs', [
-		'value' => $settings->get_setting('request_log_retention_days') ?: '90',
-		'helptext' => 'Logs older than this are purged by the scheduled task. Set to 0 to keep indefinitely.'
-	]);
+	SettingsFieldRenderer::renderGroups($formwriter, array(
+		'site_identity',
+		'general',
+		'tracking',
+		'notifications',
+		'surveys',
+		'blog',
+		'spam',
+		'social',
+		'files',
+		'drive',
+		'videos',
+		'cms',
+		'urls',
+		'messaging',
+		'two_factor',
+		'passkeys',
+		'vault_unlock',
+		'cookie_consent',
+		'tier_gating',
+	), array(
+		'heading_level' => 'h3',
+		'field_options' => array(
+			'cookie_privacy_policy_link' => array(
+				'prepend' => rtrim((string)$settings->get_setting('webDir'), '/') . '/',
+			),
+		),
+	));
 
 	echo '<hr>';
 

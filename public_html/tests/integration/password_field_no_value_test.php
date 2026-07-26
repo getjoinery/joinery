@@ -175,7 +175,7 @@ $public_by_design = array(
 	'mailjet_api_key'     => 'Mailjet documents this as the public part of the pair',
 );
 
-$credential_shaped = '/(secret|password|passwd|_token$|api_key|apikey|_pkey|private_key|signing_key|service_account|credential)/i';
+$credential_shaped = '/(secret|password|passwd|_token$|api_key|apikey|_pkey|_private$|private_key|signing_key|service_account|credential)/i';
 $unmarked = array();
 foreach (SettingsDeclarations::all() as $name => $declaration) {
 	// A machine-written value never reaches a form, so it cannot leak through one.

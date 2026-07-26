@@ -411,8 +411,9 @@ fields a different tab never posts.
 page.** A page that needs to show a setting declares it in `settings.json` or the
 owning `plugin.json` and asks `SettingsFieldRenderer::renderGroup()` for its
 group; it saves through `SettingsWriter::write()`. A hand-drawn settings field is
-a field with no declared rules and no write scope — it renders, accepts typing,
-and does not save. The page still owns everything *around* the group: whether to
+a field with no declared rules and no write scope, so FormWriter refuses it: on a
+box with `debug` on the page throws, naming the setting and the manifest to edit.
+The page still owns everything *around* the group: whether to
 render it at all, what state to print beside it, which fields to disable. See
 **[settings.md](settings.md)**.
 

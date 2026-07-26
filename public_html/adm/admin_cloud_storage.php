@@ -8,10 +8,11 @@
  * Carries the optional private-store bucket field + its privacy-gate results,
  * and a private-store "Disable and Pull Back" off-ramp when it holds cloud objects.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
 require_once(PathHelper::getIncludePath('adm/logic/admin_cloud_storage_logic.php'));
 
 $page_vars = process_logic(admin_cloud_storage_logic(array_merge($_GET, $_POST)));
@@ -260,41 +261,28 @@ $formwriter = $page->getFormWriter('cloud_storage_form', ['action' => '/admin/ad
 $formwriter->begin_form();
 $formwriter->hiddeninput('action', '', array('value' => 'save'));
 
-$formwriter->textinput('cloud_storage_endpoint', 'Endpoint Hostname', array(
-	'value' => $settings_values['endpoint'],
-	'helptext' => 'e.g. s3.us-west-002.backblazeb2.com or s3.amazonaws.com. With or without https://.',
-));
-
-$formwriter->textinput('cloud_storage_region', 'Region', array(
-	'value' => $settings_values['region'],
-	'helptext' => 'e.g. us-east-1, us-west-002. Auto-fills on endpoint blur if recognizable.',
-));
-
-$formwriter->textinput('cloud_storage_bucket', 'Bucket Name', array(
-	'value' => $settings_values['bucket'],
-));
-
-$formwriter->textinput('cloud_storage_access_key', 'Access Key', array(
-	'value' => $settings_values['access_key'],
-));
-
-$formwriter->passwordinput('cloud_storage_secret_key', 'Secret Key', array(
-	'value' => $settings_values['secret_key'],
-	'helptext' => 'Stored in stg_settings; rotate via the bucket provider if exposure is suspected. '
-		. 'Leave blank to keep the stored key.',
-));
-
-$formwriter->textinput('cloud_storage_public_base_url', 'Public Base URL (optional)', array(
-	'value' => $settings_values['public_base_url'],
-	'helptext' => 'Leave empty to auto-derive from endpoint+bucket. Set this when fronting the bucket with a CDN (e.g. https://cdn.example.com).',
-));
-
-// Private store — one more bucket on the SAME credentials above. Verified
-// non-public (anonymous-read-denied) before any byte lands. Leave empty for
-// no private store.
-$formwriter->textinput('cloud_storage_private_bucket', 'Private Bucket Name (optional)', array(
-	'value' => $settings_values['private_bucket'],
-	'helptext' => 'A separate bucket on the SAME provider/account (shares the endpoint, region, and keys above). On Save it is tested to confirm anonymous reads are DENIED before it is enabled. Leave empty for no private store.',
+// The fields come from the cloud_storage declarations, so this page and the
+// core settings tab show the same thing. The enabled and draining flags are
+// declared machine-written: this page sets them after a live bucket test,
+// which is not something an admin can assert by ticking a box.
+SettingsFieldRenderer::renderGroup($formwriter, 'cloud_storage', array(
+	'source' => 'core',
+	// No Clear box on the secret key: this page writes its own settings after a
+	// live bucket test, so it has no way to honour one, and a bucket configured
+	// with no key is not a state worth offering. Removing cloud storage is what
+	// Disable and Pull Back below is for.
+	'field_options' => array(
+		'cloud_storage_secret_key' => array('clearable' => false),
+	),
+	'values' => array(
+		'cloud_storage_endpoint'        => $settings_values['endpoint'],
+		'cloud_storage_region'          => $settings_values['region'],
+		'cloud_storage_bucket'          => $settings_values['bucket'],
+		'cloud_storage_access_key'      => $settings_values['access_key'],
+		'cloud_storage_secret_key'      => $settings_values['secret_key'],
+		'cloud_storage_public_base_url' => $settings_values['public_base_url'],
+		'cloud_storage_private_bucket'  => $settings_values['private_bucket'],
+	),
 ));
 
 // Egress-cost inline banner (live as the admin types — reflects current value).

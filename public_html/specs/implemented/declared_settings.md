@@ -1,21 +1,64 @@
 # Declared Settings
 
-> **Status 2026-07-26 — built and enforcing; one conversion outstanding.**
-> Phases 1-4 and 6 are complete, and `SettingsWriter::ENFORCE_SCOPE` is `true`
-> after shadow mode ran clean across all six settings pages. `update_database`
-> has run (migrations 154-156).
+> **Status 2026-07-26 — implemented.**
+> All six phases are done. `SettingsWriter::ENFORCE_SCOPE` is `true`, every core
+> and plugin declaration carries its field spec, and no page in the tree draws
+> its own field for a declared setting — `FormWriterV2Base::registerField()`
+> refuses one, so that is a property rather than a claim.
 >
-> Phase 5 is complete except for its last step: the General and Email tabs still
-> draw their own fields. They already save through `SettingsWriter`, so scope,
-> validation and credential handling apply to them — only the rendering trails.
-> Converting them needs the 197 core declarations to carry `label` and `group`
-> first. That conversion also removes the `?: 'fallback'` values those pages
-> pass, which make a cleared setting redisplay its default and look unsaved.
+> What the conversion found, recorded because each was a live defect rather than
+> a tidy-up:
 >
-> Enforcement immediately found one thing worth recording: the store's Payment
-> Settings page was writing the core `debug` setting under the label *Payment
-> Debug Mode*, though `debug` is read site-wide. It is now declared honestly and
-> mirrored into the store, which is what `settingsMirrorGroups` is for.
+> - **The store's Payment Settings page wrote the core `debug` setting** under
+>   the label *Payment Debug Mode*, though `debug` is read site-wide. Now
+>   declared honestly and mirrored into the store.
+> - **`enable_x_frame_options` and `enable_referrer_policy` had never saved.**
+>   Both were drawn with the arguments in the wrong order, so the field posted
+>   under the label text and no row was ever created. `PublicPageBase` reads
+>   both, so those two security headers were off and no admin could turn them
+>   on.
+> - **`default_comment_status` stored `Approved`** where `comments_class.php`
+>   compares against `approved`, so no comment was ever auto-approved.
+> - **`api_require_https` was read as `!== 'false'`** while everything else
+>   stores `1`/`0`. Turning it off would not have turned it off. `apiv1.php` now
+>   reads it as a yes/no setting.
+> - **Ten email template settings stored row ids** where every consumer looks
+>   the template up by name, so `EmailTemplate` could not resolve any of them.
+>   The dropdowns now offer names, and a stored value that is not a template
+>   name is shown marked rather than silently reselected. The ten rows on dev
+>   were converted to names with the owner's agreement; every id mapped to a
+>   real template, so nothing about which template was meant changed.
+> - **`checkout_type` was declared with an option no reader understands**
+>   (`stripe_embedded`), and **`site_currency` was declared as free text** with
+>   the default `US Dollar` while `CurrencyHelper` keys on `usd`.
+> - **`connected_account_id` was declared by the store as a Stripe field.** Its
+>   only consumer is `ConnectedMailboxProvider`; it is a core email setting.
+> - **`mailbox_fleet_service_enabled` was labelled from the tenant's side**
+>   ("Use the hosted relay service") while the page and every reader mean the
+>   operator's side.
+> - **An unticked checkbox could never be saved off.** The shared renderer now
+>   writes a hidden `0` before the box, so absence and unticked stop being the
+>   same submission.
+>
+> Ten settings were found to have no reader anywhere in the tree and are declared
+> `managed` with a DEAD note rather than being offered as controls that do
+> nothing: `force_https`, `form_style`, `use_blog_as_homepage`,
+> `anti_spam_answer_comments`, `blog_subdirectory`, `mailchimp_list_id`,
+> `upgrade_location`, `standard_error`, `newsletter_active`, `tracking`.
+>
+> Deviations from this spec, decided during the build:
+>
+> - **`adm/admin_cloud_storage.php` renders from the declarations but does not
+>   save through `SettingsWriter`.** The spec's disposition table missed this
+>   page. Its save only persists after a live bucket test decides whether the
+>   credentials work at all, which the writer has no concept of; routing it
+>   through would mean teaching the writer about connection tests. Its four
+>   enable/drain flags are declared `managed`, since the page sets them from a
+>   test result rather than from an admin's assertion.
+> - **Store, events and bookings settings left the General tab.** They are
+>   declared by their plugins and render on the Plugin Settings tab, so they
+>   still have a home; showing them twice was not worth the length it added to
+>   an already long page.
 
 ## Problem
 

@@ -66,12 +66,6 @@ function admin_settings_logic(array $input): LogicResult {
 			}
 		}
 
-		// A changed preview image needs a new cache-busting index. This is a
-		// side effect of a change, not a rule about a value, so it stays here
-		// rather than moving to the declaration.
-		$preview_image_changed = isset($input['preview_image'])
-			&& $settings->get_setting('preview_image') != $input['preview_image'];
-
 		// One save path for every settings page. Scope, validation, credential
 		// handling and the vault gate all come from the declarations rather
 		// than from this page — see includes/SettingsWriter.php.
@@ -85,7 +79,16 @@ function admin_settings_logic(array $input): LogicResult {
 			));
 		}
 
-		if ($preview_image_changed) {
+		// Side effects key off what actually changed, never off what was posted.
+		// The form submits every field on the page, so isset($input[...]) is true
+		// on every save — a test written that way fires the side effect each time
+		// anyone touches any setting on this tab.
+		$changed = array_flip($write['written']);
+
+		// A changed preview image needs a new cache-busting index. This is a
+		// side effect of a change, not a rule about a value, so it stays here
+		// rather than moving to the declaration.
+		if (isset($changed['preview_image'])) {
 			$increments = new MultiSetting(
 				array('setting_name' => 'preview_image_increment'),
 				NULL, NULL, NULL, NULL
@@ -100,14 +103,15 @@ function admin_settings_logic(array $input): LogicResult {
 			}
 		}
 
-		// Invalidate homepage cache if homepage-routing settings changed
-		if (isset($input['alternate_homepage']) || isset($input['alternate_loggedin_homepage'])) {
+		// Which page the homepage serves changed, so only the homepage is stale.
+		if (isset($changed['alternate_homepage']) || isset($changed['alternate_loggedin_homepage'])) {
 			require_once(PathHelper::getIncludePath('includes/StaticPageCache.php'));
 			StaticPageCache::invalidateUrl('/');
 		}
 
-		// Flush entire cache if active theme changed
-		if (isset($input['active_theme'])) {
+		// A different theme means different markup on every page, so nothing
+		// already cached is still right.
+		if (isset($changed['theme_template']) || isset($changed['active_theme_plugin'])) {
 			require_once(PathHelper::getIncludePath('includes/StaticPageCache.php'));
 			StaticPageCache::clearAll();
 		}

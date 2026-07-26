@@ -25,23 +25,6 @@ class MailChimpProvider extends AbstractMailingListProvider {
         return 'MailChimp';
     }
 
-    public static function getSettingsFields(): array {
-        return [
-            [
-                'key' => 'mailchimp_api_key',
-                'label' => 'MailChimp API Key',
-                'type' => 'password',
-                'helptext' => 'Your MailChimp API key (e.g., abcd1234efgh5678-us21)',
-            ],
-            [
-                'key' => 'mailchimp_default_merge_fields',
-                'label' => 'Default Merge Fields (JSON)',
-                'type' => 'textarea',
-                'helptext' => 'JSON object of MailChimp merge tags applied to every subscribe call. Example: {"MMERGE3":"Yes"}. Leave empty or {} for none.',
-            ],
-        ];
-    }
-
     public static function validateConfiguration(): array {
         $settings = Globalvars::get_instance();
         $errors = [];

@@ -24,44 +24,6 @@ class SendGridProvider implements EmailServiceProvider, InboundEmailProvider {
         return 'include:sendgrid.net';
     }
 
-    public static function getSettingsFields(): array {
-        return [
-            [
-                'key' => 'sendgrid_api_key',
-                'label' => 'SendGrid API Key',
-                'type' => 'password',
-            ],
-            [
-                'key' => 'sendgrid_verified_domain',
-                'label' => 'Verified Sender Domain (Example: mail.example.com)',
-                'type' => 'text',
-                'helptext' => 'For display only — SendGrid validates the From at send time. Must be a domain you have verified in SendGrid.',
-            ],
-            [
-                'key' => 'sendgrid_region',
-                'label' => 'Region',
-                'type' => 'dropdown',
-                'empty_option' => 'Select a region…',
-                'options' => [
-                    'global' => 'Global (api.sendgrid.com)',
-                    'eu' => 'EU (api.eu.sendgrid.com)',
-                ],
-            ],
-            [
-                'key' => 'sendgrid_sandbox_mode',
-                'label' => 'Sandbox Mode (no real delivery)',
-                'type' => 'dropdown',
-                'options' => [0 => 'Off', 1 => 'On'],
-            ],
-            [
-                'key' => 'sendgrid_click_tracking',
-                'label' => 'Click Tracking (default Off)',
-                'type' => 'dropdown',
-                'options' => [0 => 'Off', 1 => 'On'],
-            ],
-        ];
-    }
-
     public static function validateConfiguration(): array {
         $settings = Globalvars::get_instance();
         $errors = [];

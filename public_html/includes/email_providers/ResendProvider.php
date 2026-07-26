@@ -78,23 +78,6 @@ class ResendProvider implements EmailServiceProvider {
         return implode(' ', $terms);
     }
 
-    public static function getSettingsFields(): array {
-        return [
-            [
-                'key' => 'resend_api_key',
-                'label' => 'Resend API Key',
-                'type' => 'password',
-                'helptext' => 'API key from resend.com → API Keys. Starts with "re_".',
-            ],
-            [
-                'key' => 'resend_verified_domain',
-                'label' => 'Verified Sender Domain',
-                'type' => 'text',
-                'helptext' => 'For display only — Resend validates the From at send time. Domains must be DNS-verified in Resend.',
-            ],
-        ];
-    }
-
     public static function validateConfiguration(): array {
         $settings = Globalvars::get_instance();
         $errors = [];

@@ -95,14 +95,21 @@ class EmailSender {
     }
 
     /**
-     * Return settings fields for a specific provider.
+     * The settings a provider is configured with, as declared in settings.json
+     * under the group email_provider_<key>.
+     *
+     * A provider does not describe its own fields: they are declared once, in
+     * the manifest, so the settings page, the writer and the validator all read
+     * the same rules. An unknown key, or one with nothing declared, has no
+     * settings.
      */
     public static function getProviderSettings(string $key): array {
         $providers = self::discoverProviders();
         if (!isset($providers[$key])) {
             return [];
         }
-        return $providers[$key]::getSettingsFields();
+        require_once(PathHelper::getIncludePath('includes/SettingsDeclarations.php'));
+        return SettingsDeclarations::forGroup('email_provider_' . $key, 'core');
     }
 
     /**

@@ -1,242 +1,2142 @@
 {
   "_comment": "Core settings seeded on every update_database run. Plugin-owned settings live in the plugin's plugin.json. See specs/declarative_plugin_settings.md for the scope principle. Values are always strings (use '0'/'1' for booleans, '42' for numbers).",
   "settingsGroups": {
-    "general": "General settings",
-    "debug": "Debug",
     "paths": "Path configuration",
+    "composer": "Composer",
+    "protocol": "Protocol and security headers",
+    "debug": "Debug",
+    "diagnostics": "Diagnostics",
+    "theme": "Theme",
+    "brand": "Brand and appearance",
+    "site_identity": "Site identity",
+    "captcha": "Captcha keys",
+    "general": "General settings",
+    "tracking": "Visitor tracking",
     "notifications": "Notification recipients",
+    "blog": "Blog",
+    "surveys": "Surveys",
+    "spam": "Spam",
+    "social": "Social links",
+    "files": "File hosting",
+    "drive": "Drive",
+    "videos": "Video",
+    "cms": "Pages and homepage",
+    "urls": "URL rewriting",
+    "messaging": "Messaging",
+    "two_factor": "Two-factor authentication",
+    "passkeys": "Passkeys",
+    "vault_unlock": "Sealed vault",
+    "cookie_consent": "Cookie consent",
+    "api": "API",
+    "api_rate_limits": "API rate limiting",
+    "logging": "Log retention",
     "upgrade": "Upgrade settings",
+    "cloud_storage": "Cloud storage",
+    "oauth": "OAuth providers",
+    "mobile_apps": "Mobile apps",
+    "tier_gating": "Tier gating",
+    "dns": "DNS",
+    "email_identity": "Sender identity",
+    "email_delivery": "Email delivery",
+    "email_module": "Email module",
+    "email_templates": "Email templates",
+    "email_testing": "Email testing and debug",
+    "mailing_list": "Mailing list provider",
+    "email_provider_brevo": "Brevo",
+    "email_provider_connected_account": "Connected email account",
+    "email_provider_mailgun": "Mailgun",
+    "email_provider_mailjet": "Mailjet",
+    "email_provider_postmark": "Postmark",
+    "email_provider_resend": "Resend",
+    "email_provider_sendgrid": "SendGrid",
+    "email_provider_ses": "Amazon SES",
+    "email_provider_smtp": "SMTP",
     "inbound_provider": "Inbound provider settings"
   },
   "settings": [
-    { "name": "activation_required_login", "default": "1" },
-    { "name": "api_min_client_versions", "default": "{}", "helptext": "JSON map of client_app header value to minimum allowed client_version (semver). Clients below their minimum receive HTTP 426 UpgradeRequired on every API request. Empty map disables enforcement." },
-    { "name": "api_require_https", "default": "1" },
-    { "name": "api_session_key_lifetime_days", "default": "365", "helptext": "Days until an API session key minted by /api/v1/auth/login expires (apk_expires_time). Existing keys keep the expiry they were minted with." },
-    { "name": "app_bridge_key_check_seconds", "default": "60", "helptext": "How often (seconds) an app-context web session re-verifies that its originating API session key is still live. 0 checks on every request. Lower values make key revocation propagate to app webviews faster at the cost of a key lookup per interval." },
-    { "name": "app_navigation", "default": "{\"default\": [\"core-profile\", \"core-calendar\", \"mailbox\"], \"scrolldaddy-ios\": [\"dns-filtering\", \"dns-filtering-devices\", \"core-profile\"], \"scrolldaddy-android\": [\"dns-filtering\", \"dns-filtering-devices\", \"core-profile\"]}", "helptext": "JSON map of client_app to the ordered menu slugs pinned to that app's tab bar (GET /api/v1/app/navigation). The default key applies to apps without their own entry; all other entries land in the app's More list." },
-    { "name": "blog_active", "default": "1" },
-    { "name": "comments_active", "default": "1" },
-    { "name": "comments_unregistered_users", "default": "0" },
-    { "name": "dns_default_provider", "default": "linode", "helptext": "The DNS host the publish box leads with. A provider NAME, never a secret — the key of a driver in includes/dns/drivers/ (linode, cloudflare, route53, …). Any other driver stays available behind the box's \"use another provider\" link." },
-    { "name": "emails_active", "default": "1" },
-    { "name": "enable_hsts", "default": "1" },
-    { "name": "files_active", "default": "1" },
-    { "name": "mailing_lists_active", "default": "1" },
-    { "name": "messaging_active", "default": "1" },
-    { "name": "newsletter_active", "default": "1" },
-    { "name": "oauth_digitalocean_client_id", "default": "" },
-    { "name": "oauth_digitalocean_client_secret", "default": "", "secret": true },
-    { "name": "oauth_dnsimple_client_id", "default": "" },
-    { "name": "oauth_dnsimple_client_secret", "default": "", "secret": true },
-    { "name": "oauth_google_client_id", "default": "" },
-    { "name": "oauth_google_client_secret", "default": "", "secret": true },
-    { "name": "oauth_linode_client_id", "default": "" },
-    { "name": "oauth_linode_client_secret", "default": "", "secret": true },
-    { "name": "oauth_microsoft_client_id", "default": "" },
-    { "name": "oauth_microsoft_client_secret", "default": "", "secret": true },
-    { "name": "oauth_microsoft_tenant", "default": "common" },
-    { "name": "page_contents_active", "default": "1" },
-    { "name": "passkeys_enabled", "default": "1", "helptext": "Emergency kill switch for passkey sign-in, enrollment, and PRF-based secret derivation. On by default — vault setup and protected mailboxes depend on it. Turn off only to disable all passkey operations deployment-wide." },
-    { "name": "register_active", "default": "1" },
-    { "name": "show_admin_bar", "default": "1" },
-    { "name": "show_comments", "default": "1" },
-    { "name": "show_errors", "default": "0" },
-    { "name": "signal_bus_debug", "default": "0", "helptext": "When on, the signal bus logs every dispatch (signal name + JSON payload) to the error log and flags any non-JSON-serializable payload value. Debug only; leave off in production." },
-    { "name": "smtp_auth", "default": "1" },
-    { "name": "surveys_active", "default": "1" },
-    { "name": "tier_upgrade_url", "default": "" },
-    { "name": "urls_active", "default": "1" },
-    { "name": "use_captcha_comments", "default": "1" },
-    { "name": "use_honeypot", "default": "1" },
-    { "name": "vault_unlock_idle_minutes", "default": "30", "helptext": "Sealed Vault unlock window idle timeout, in minutes. One unlock opens every server-custody consumer (mail, chat); the window is extended on activity and wiped on close." },
-    { "name": "videos_active", "default": "1" },
-    { "name": "debug", "default": "0", "group": "debug", "label": "Debug mode", "type": "select", "options": {"1": "Yes", "0": "No"}, "helptext": "Site-wide, not payments-only: it drives component render tracing, FormWriter debug output, and the Stripe and Google Play helpers' test behaviour. Leave off in production." },
-    { "name": "debug_css", "default": "0" },
-    { "name": "email_debug_mode", "default": "0" },
-    { "name": "email_dry_run", "default": "0" },
-    { "name": "email_test_mode", "default": "0" },
-    { "name": "email_validation_mx_check", "default": "1" },
-    { "name": "force_https", "default": "0" },
-    { "name": "social_settings_active", "default": "0" },
-    { "name": "tier_gate_hide_from_listings", "default": "0" },
-    { "name": "tier_gate_preview_length", "default": "0" },
-    { "name": "totp_remember_device_days", "default": "0" },
-    { "name": "totp_require_admins", "default": "0" },
-    { "name": "totp_issuer_name", "default": "" },
-    { "name": "use_blog_as_homepage", "default": "0" },
-    { "name": "use_captcha", "default": "0" },
-    { "name": "api_auth_rate_limit_requests", "default": "10" },
-    { "name": "api_auth_rate_limit_window", "default": "900" },
-    { "name": "api_rate_limit_requests", "default": "1000" },
-    { "name": "api_rate_limit_window", "default": "3600" },
-    { "name": "max_entity_photos", "default": "{\"user\": 6, \"mailing_list\": 10}" },
-    { "name": "request_log_retention_days", "default": "90" },
-    { "name": "allowed_upload_extensions", "default": "gif,jpeg,jpg,png,avif,webp,pdf,xls,doc,xlsx,docx,mp3,mp4,m4a" },
-    { "name": "anti_spam_answer", "default": "" },
-    { "name": "anti_spam_answer_comments", "default": "" },
-    { "name": "cloud_storage_access_key", "default": "" },
-    { "name": "cloud_storage_bucket", "default": "" },
-    { "name": "cloud_storage_draining", "default": "0", "helptext": "Internal flag; set to 1 by Disable-and-Pull-Back so the offload tick pulls public cloud files back to local. Cleared automatically when no public cloud rows remain. Not edited directly." },
-    { "name": "cloud_storage_enabled", "default": "0" },
-    { "name": "cloud_storage_endpoint", "default": "" },
-    { "name": "cloud_storage_private_bucket", "default": "", "helptext": "Bucket on the SAME provider/account as public cloud storage (shares its endpoint/region/keys), used for the verified-private store. Empty = no private store. Latched usable only after a Save whose anonymous-read-denied privacy gate passed." },
-    { "name": "cloud_storage_private_draining", "default": "0", "helptext": "Internal flag; set to 1 by the private store's Disable-and-Pull-Back so the offload tick pulls private cloud objects back to local. Cleared automatically when no private cloud rows remain. Not edited directly." },
-    { "name": "cloud_storage_private_enabled", "default": "0", "helptext": "Internal latch; set to 1 only after a private-bucket Save whose privacy gate passed. Not edited directly." },
-    { "name": "cloud_storage_public_base_url", "default": "" },
-    { "name": "cloud_storage_region", "default": "" },
-    { "name": "cloud_storage_secret_key", "default": "", "secret": true },
-    { "name": "cookie_consent_mode", "default": "auto" },
-    { "name": "default_comment_status", "default": "Approved" },
-    { "name": "default_email_template", "default": "default_outer_template" },
-    { "name": "default_timezone", "default": "UTC" },
-    { "name": "email_fallback_service", "default": "smtp" },
-    { "name": "email_service", "default": "smtp" },
-    { "name": "mailing_list_provider", "default": "mailchimp" },
-    { "name": "mailchimp_default_merge_fields", "default": "" },
-    { "name": "form_style", "default": "Default (UIKit)" },
-    { "name": "protocol_mode", "default": "auto" },
-    { "name": "standard_error", "default": "Sorry, that operation caused an error." },
-    { "name": "tracking", "default": "Use built in tracking" },
-    { "name": "composerAutoLoad", "default": "../vendor/" },
-    { "name": "theme_template", "default": "default" },
-    { "name": "upload_web_dir", "default": "uploads" },
-    { "name": "default_mailing_list", "default": "1" },
-    { "name": "bulk_footer", "default": "default_footer" },
-    { "name": "bulk_outer_template", "default": "default_outer_template" },
-    { "name": "group_email_inner_template", "default": "blank_template" },
-    { "name": "group_email_outer_template", "default": "default_outer_template" },
-    { "name": "group_email_footer_template", "default": "event_bulk_footer" },
-    { "name": "individual_email_inner_template", "default": "blank_template" },
-    { "name": "alternate_homepage", "default": "" },
-    { "name": "alternate_loggedin_homepage", "default": "" },
-    { "name": "api_allowed_origins", "default": "" },
-    { "name": "blog_footer_text", "default": "" },
-    { "name": "blog_subdirectory", "default": "" },
-    { "name": "captcha_private", "default": "" },
-    { "name": "captcha_public", "default": "" },
-    { "name": "contact_address", "default": "" },
-    { "name": "contact_email", "default": "" },
-    { "name": "contact_phone", "default": "" },
-    { "name": "cookie_privacy_policy_link", "default": "" },
-    { "name": "custom_css", "default": "" },
-    { "name": "defaultemail", "default": "" },
-    { "name": "defaultemailname", "default": "" },
-    { "name": "defaultreplyto", "default": "" },
-    { "name": "hcaptcha_private", "default": "" },
-    { "name": "hcaptcha_public", "default": "" },
-    { "name": "logo_link", "default": "" },
-    { "name": "mailchimp_api_key", "default": "", "secret": true },
-    { "name": "mailchimp_list_id", "default": "" },
-    { "name": "mailjet_api_key", "default": "" },
-    { "name": "mailjet_api_secret", "default": "", "secret": true },
-    { "name": "mailjet_sandbox_mode", "default": "0" },
-    { "name": "mailjet_verified_domain", "default": "" },
-    { "name": "mailgun_api_key", "default": "", "secret": true },
-    { "name": "mailgun_domain", "default": "" },
-    { "name": "mailgun_eu_api_link", "default": "" },
-    { "name": "mailgun_webhook_signing_key", "default": "", "secret": true, "group": "inbound_provider", "label": "Mailgun Webhook Signing Key", "show_when": {"mailbox_provider": "mailgun"}, "helptext": "HTTP Webhook Signing Key from your Mailgun dashboard (separate from the API key)." },
-    { "name": "brevo_api_key", "default": "", "secret": true },
-    { "name": "brevo_sandbox_mode", "default": "0" },
-    { "name": "brevo_verified_domain", "default": "" },
-    { "name": "postmark_message_stream", "default": "outbound" },
-    { "name": "postmark_server_token", "default": "", "secret": true },
-    { "name": "postmark_track_links", "default": "None" },
-    { "name": "postmark_track_opens", "default": "0" },
-    { "name": "postmark_verified_domain", "default": "" },
-    { "name": "privacy_url", "default": "", "group": "general", "label": "Privacy Policy URL", "type": "text", "validation": {"pattern": "#^(/|https?://)#i", "messages": {"pattern": "Must start with '/', 'http://' or 'https://'."}} },
-    { "name": "resend_api_key", "default": "", "secret": true },
-    { "name": "resend_verified_domain", "default": "" },
-    { "name": "sendgrid_api_key", "default": "", "secret": true },
-    { "name": "sendgrid_click_tracking", "default": "0" },
-    { "name": "sendgrid_inbound_secret", "default": "", "secret": true, "group": "inbound_provider", "label": "Inbound Parse Shared Secret", "show_when": {"mailbox_provider": "sendgrid"}, "helptext": "SendGrid Inbound Parse does not sign its POSTs. Set a secret here and append it to the Destination URL as ?secret=… so only SendGrid can deliver mail. Inbound is rejected while this is blank." },
-    { "name": "sendgrid_inbound_spam_threshold", "default": "5.0", "group": "inbound_provider", "label": "Inbound spam score threshold", "type": "text", "show_when": {"mailbox_provider": "sendgrid"}, "validation": {"number": true, "min": 0, "messages": {"number": "Enter a number, e.g. 5.0."}}, "helptext": "When content spam filtering is on, an inbound spam_score at or above this value is judged spam. Default 5.0; lower is stricter." },
-    { "name": "sendgrid_region", "default": "global" },
-    { "name": "sendgrid_sandbox_mode", "default": "0" },
-    { "name": "sendgrid_verified_domain", "default": "" },
-    { "name": "ses_access_key_id", "default": "" },
-    { "name": "ses_configuration_set", "default": "" },
-    { "name": "ses_region", "default": "us-east-1" },
-    { "name": "ses_secret_access_key", "default": "", "secret": true },
-    { "name": "ses_verified_domain", "default": "" },
-    { "name": "site_description", "default": "" },
-    { "name": "site_name", "default": "" },
-    { "name": "smtp_helo", "default": "" },
-    { "name": "smtp_host", "default": "" },
-    { "name": "smtp_hostname", "default": "" },
-    { "name": "smtp_password", "default": "", "secret": true },
-    { "name": "smtp_port", "default": "" },
-    { "name": "smtp_sender", "default": "" },
-    { "name": "smtp_username", "default": "" },
-    { "name": "terms_url", "default": "", "group": "general", "label": "Terms of Service URL", "type": "text", "validation": {"pattern": "#^(/|https?://)#i", "messages": {"pattern": "Must start with '/', 'http://' or 'https://'."}} },
-    { "name": "tracking_code", "default": "" },
-    { "name": "upgrade_location", "default": "" },
-    { "name": "upgrade_source", "default": "https://getjoinery.com" },
-    { "name": "webmaster_email", "default": "" },
-    { "name": "active_theme_plugin", "default": "" },
-    { "name": "email_test_recipient", "default": "" },
-    { "name": "nickname_display_as", "default": "" },
-    { "name": "preview_image", "default": "" },
-    { "name": "preview_image_increment", "default": "" },
-    { "name": "robots_text", "default": "" },
-    { "name": "site_template", "default": "" },
-    { "name": "jy_color_bg", "default": "" },
-    { "name": "jy_color_primary", "default": "" },
-    { "name": "jy_color_primary_hover", "default": "" },
-    { "name": "jy_color_primary_text", "default": "" },
-    { "name": "jy_color_surface", "default": "" },
-    { "name": "social_discord_link", "default": "" },
-    { "name": "social_facebook_link", "default": "" },
-    { "name": "social_github_link", "default": "" },
-    { "name": "social_google_link", "default": "" },
-    { "name": "social_instagram_link", "default": "" },
-    { "name": "social_linkedin_link", "default": "" },
-    { "name": "social_messenger_link", "default": "" },
-    { "name": "social_mixcloud_link", "default": "" },
-    { "name": "social_pinterest_link", "default": "" },
-    { "name": "social_reddit_link", "default": "" },
-    { "name": "social_slack_link", "default": "" },
-    { "name": "social_snapchat_link", "default": "" },
-    { "name": "social_soundcloud_link", "default": "" },
-    { "name": "social_spotify_link", "default": "" },
-    { "name": "social_stack_link", "default": "" },
-    { "name": "social_telegram_link", "default": "" },
-    { "name": "social_tiktok_link", "default": "" },
-    { "name": "social_twitch_link", "default": "" },
-    { "name": "social_twitter_link", "default": "" },
-    { "name": "social_whatsapp_link", "default": "" },
-    { "name": "social_youtube_link", "default": "" },
-
-    { "name": "drive_active", "default": "0", "helptext": "Master switch for the member Drive (/drive). Off by default; enable per instance." },
-    { "name": "drive_max_folder_depth", "default": "32", "helptext": "Maximum nesting depth for Drive folders." },
-    { "name": "drive_upload_chunk_bytes", "default": "8388608", "helptext": "Chunk size (bytes) the Drive resumable upload protocol requests. Default 8 MiB." },
-    { "name": "api_upload_rate_limit_requests", "default": "10000", "helptext": "Max Drive chunk-upload requests per window per IP (own bucket, not the general API limit)." },
-    { "name": "api_upload_rate_limit_window", "default": "3600", "helptext": "Window (seconds) for the Drive chunk-upload rate limit." },
-
-    { "name": "webDir", "default": "", "group": "paths", "label": "Web Domain", "type": "text", "validation": { "pattern": "#^(?!https?://)[^/]+$#i", "messages": { "pattern": "Enter the domain only — no http:// or https://, and no slashes." } }, "helptext": "The site's domain, e.g. example.com. Everything that builds an absolute URL reads this." },
-    { "name": "baseDir", "default": "", "group": "paths", "label": "Base path", "type": "text", "helptext": "Filesystem path to the deployment root. Overridden when Globalvars_site.php hardcodes it, in which case the field is shown read-only." },
-    { "name": "node_dir", "default": "", "group": "paths", "label": "Node Path", "type": "text", "helptext": "Path to the node install used for asset builds, e.g. /var/www/html/mysite/node. Empty when the deployment has none." },
-    { "name": "apache_error_log", "default": "", "group": "paths", "label": "Apache Error Log Path", "type": "text", "helptext": "Read by the admin log viewer. Must be a readable file — an unreadable path makes the settings page refuse every save." },
-
-    { "name": "siteDir", "default": "", "managed": true, "helptext": "Auto-calculated from baseDir by Globalvars. Shown read-only on the settings page; never edited directly." },
-    { "name": "upload_dir", "default": "", "managed": true, "helptext": "Auto-calculated from baseDir by Globalvars. Shown read-only on the settings page; never edited directly." },
-    { "name": "static_files_dir", "default": "", "managed": true, "helptext": "Auto-calculated from baseDir by Globalvars. Shown read-only on the settings page; never edited directly." },
-
-    { "name": "comment_notification_emails", "default": "", "group": "notifications", "label": "Emails to receive comment notifications (separate with comma)", "type": "text" },
-    { "name": "single_purchase_notification_emails", "default": "", "group": "notifications", "label": "Emails to receive one time purchase notifications (separate with comma)", "type": "text" },
-    { "name": "subscription_notification_emails", "default": "", "group": "notifications", "label": "Emails to receive subscription notifications (separate with comma)", "type": "text" },
-
-    { "name": "upgrade_server_active", "default": "0", "group": "upgrade", "label": "This deployment publishes upgrades", "type": "checkbox", "helptext": "Marks the deployment as an upgrade source. utils/upgrade.php also treats an active server_manager plugin as one." },
-
-    { "name": "database_version", "default": "", "managed": true, "helptext": "Schema version reached by update_database. Written by the updater; read to decide which migrations still owe a run." },
-    { "name": "db_migration_version", "default": "", "managed": true, "helptext": "Highest migration version applied. Written by the migration runner." },
-    { "name": "system_version", "default": "", "managed": true, "helptext": "Release version of the deployed code. Written by the upgrade process." },
-    { "name": "scheduled_tasks_last_cron_run", "default": "", "managed": true, "helptext": "Timestamp of the last scheduled-task cron tick. Written by the runner; read by the health display." },
-    { "name": "file_signed_url_key", "default": "", "managed": true, "secret": true, "helptext": "HMAC key for signed file URLs, minted on first use by data/files_class.php with a race-safe INSERT. Never entered by hand." },
-    { "name": "_store_event_autoactivate_v1", "default": "", "managed": true, "helptext": "One-shot marker: update_database auto-activated the store and event_manager plugins on this deployment. Presence is the whole meaning." },
-
-    { "name": "mailgun_version", "default": "2", "managed": true, "helptext": "DEAD. The Mailgun SDK version switch was removed (specs/implemented/remove_mailgun_version_setting.md); nothing reads or writes this. Declared so the surviving row is not an orphan. Safe to purge." },
-    { "name": "allow_remote_archive_refresh", "default": "0", "managed": true, "helptext": "DEAD. No reader or writer anywhere in the tree. Declared so the surviving row is not an orphan. Safe to purge." },
-    { "name": "archive_refresh_allowed_ips", "default": "[]", "managed": true, "helptext": "DEAD. No reader or writer anywhere in the tree. Declared so the surviving row is not an orphan. Safe to purge." }
+    {
+      "name": "activation_required_login",
+      "default": "1",
+      "group": "general",
+      "label": "Require email activation to sign in",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      }
+    },
+    {
+      "name": "api_min_client_versions",
+      "default": "{}",
+      "helptext": "JSON map of client_app header value to minimum allowed client_version (semver). Clients below their minimum receive HTTP 426 UpgradeRequired on every API request. Empty map disables enforcement.",
+      "group": "api",
+      "label": "Minimum client versions (JSON)",
+      "type": "textarea",
+      "rows": 4
+    },
+    {
+      "name": "api_require_https",
+      "default": "1",
+      "group": "api",
+      "label": "Require HTTPS for API requests",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      },
+      "helptext": "Turn off for local development only."
+    },
+    {
+      "name": "api_session_key_lifetime_days",
+      "default": "365",
+      "helptext": "Days until an API session key minted by /api/v1/auth/login expires (apk_expires_time). Existing keys keep the expiry they were minted with.",
+      "group": "api",
+      "label": "Session key lifetime (days)",
+      "type": "number",
+      "validation": {
+        "min": 1
+      }
+    },
+    {
+      "name": "app_bridge_key_check_seconds",
+      "default": "60",
+      "helptext": "How often (seconds) an app-context web session re-verifies that its originating API session key is still live. 0 checks on every request. Lower values make key revocation propagate to app webviews faster at the cost of a key lookup per interval.",
+      "group": "mobile_apps",
+      "label": "App bridge key check interval (seconds)",
+      "type": "number",
+      "validation": {
+        "min": 1
+      }
+    },
+    {
+      "name": "app_navigation",
+      "default": "{\"default\": [\"core-profile\", \"core-calendar\", \"mailbox\"], \"scrolldaddy-ios\": [\"dns-filtering\", \"dns-filtering-devices\", \"core-profile\"], \"scrolldaddy-android\": [\"dns-filtering\", \"dns-filtering-devices\", \"core-profile\"]}",
+      "helptext": "JSON map of client_app to the ordered menu slugs pinned to that app's tab bar (GET /api/v1/app/navigation). The default key applies to apps without their own entry; all other entries land in the app's More list.",
+      "group": "mobile_apps",
+      "label": "App navigation (JSON)",
+      "type": "textarea",
+      "rows": 6
+    },
+    {
+      "name": "blog_active",
+      "default": "1",
+      "group": "blog",
+      "label": "Blog module active",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      }
+    },
+    {
+      "name": "comments_active",
+      "default": "1",
+      "group": "blog",
+      "label": "Allow comments",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      },
+      "show_when": {
+        "blog_active": "1"
+      }
+    },
+    {
+      "name": "comments_unregistered_users",
+      "default": "0",
+      "group": "blog",
+      "label": "Allow comments from signed-out visitors",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      },
+      "show_when": {
+        "blog_active": "1"
+      }
+    },
+    {
+      "name": "dns_default_provider",
+      "default": "linode",
+      "helptext": "The DNS host the publish box leads with. A provider NAME, never a secret — the key of a driver in includes/dns/drivers/ (linode, cloudflare, route53, …). Any other driver stays available behind the box's \"use another provider\" link.",
+      "group": "dns",
+      "label": "Default DNS provider",
+      "type": "text"
+    },
+    {
+      "name": "emails_active",
+      "default": "1",
+      "group": "email_module",
+      "label": "Email module active",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      }
+    },
+    {
+      "name": "enable_hsts",
+      "default": "1",
+      "group": "protocol",
+      "label": "Send Strict-Transport-Security",
+      "type": "checkbox",
+      "helptext": "Tells browsers to reach this domain over HTTPS only, for a year. Leave off where plain HTTP is still needed."
+    },
+    {
+      "name": "files_active",
+      "default": "1",
+      "group": "files",
+      "label": "File hosting module active",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      }
+    },
+    {
+      "name": "mailing_lists_active",
+      "default": "1",
+      "group": "mailing_list",
+      "label": "Mailing list module active",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      }
+    },
+    {
+      "name": "messaging_active",
+      "default": "1",
+      "group": "messaging",
+      "label": "Member messaging active",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      }
+    },
+    {
+      "name": "newsletter_active",
+      "default": "1",
+      "managed": true,
+      "helptext": "DEAD. No reader. Declared so the surviving row is not an orphan. Safe to purge."
+    },
+    {
+      "name": "oauth_digitalocean_client_id",
+      "default": "",
+      "group": "oauth",
+      "label": "DigitalOcean client id",
+      "type": "text"
+    },
+    {
+      "name": "oauth_digitalocean_client_secret",
+      "default": "",
+      "secret": true,
+      "group": "oauth",
+      "label": "DigitalOcean client secret"
+    },
+    {
+      "name": "oauth_dnsimple_client_id",
+      "default": "",
+      "group": "oauth",
+      "label": "DNSimple client id",
+      "type": "text"
+    },
+    {
+      "name": "oauth_dnsimple_client_secret",
+      "default": "",
+      "secret": true,
+      "group": "oauth",
+      "label": "DNSimple client secret"
+    },
+    {
+      "name": "oauth_google_client_id",
+      "default": "",
+      "group": "oauth",
+      "label": "Google client id",
+      "type": "text"
+    },
+    {
+      "name": "oauth_google_client_secret",
+      "default": "",
+      "secret": true,
+      "group": "oauth",
+      "label": "Google client secret"
+    },
+    {
+      "name": "oauth_linode_client_id",
+      "default": "",
+      "group": "oauth",
+      "label": "Linode client id",
+      "type": "text"
+    },
+    {
+      "name": "oauth_linode_client_secret",
+      "default": "",
+      "secret": true,
+      "group": "oauth",
+      "label": "Linode client secret"
+    },
+    {
+      "name": "oauth_microsoft_client_id",
+      "default": "",
+      "group": "oauth",
+      "label": "Microsoft client id",
+      "type": "text"
+    },
+    {
+      "name": "oauth_microsoft_client_secret",
+      "default": "",
+      "secret": true,
+      "group": "oauth",
+      "label": "Microsoft client secret"
+    },
+    {
+      "name": "oauth_microsoft_tenant",
+      "default": "common",
+      "group": "oauth",
+      "label": "Microsoft tenant",
+      "type": "text",
+      "helptext": "common accepts any Microsoft account. Name a directory id to restrict sign-in to one tenant."
+    },
+    {
+      "name": "page_contents_active",
+      "default": "1",
+      "group": "cms",
+      "label": "CMS module active",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      }
+    },
+    {
+      "name": "passkeys_enabled",
+      "default": "1",
+      "helptext": "Emergency kill switch for passkey sign-in, enrollment, and PRF-based secret derivation. On by default — vault setup and protected mailboxes depend on it. Turn off only to disable all passkey operations deployment-wide.",
+      "group": "passkeys",
+      "label": "Passkeys enabled",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      }
+    },
+    {
+      "name": "register_active",
+      "default": "1",
+      "group": "general",
+      "label": "Registration active",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      }
+    },
+    {
+      "name": "show_admin_bar",
+      "default": "1",
+      "group": "theme",
+      "label": "Show the admin bar",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      },
+      "helptext": "The bar shown to signed-in admins on public pages."
+    },
+    {
+      "name": "show_comments",
+      "default": "1",
+      "group": "blog",
+      "label": "Show comments",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      },
+      "show_when": {
+        "blog_active": "1"
+      }
+    },
+    {
+      "name": "show_errors",
+      "default": "0",
+      "group": "diagnostics",
+      "label": "Show errors",
+      "type": "select",
+      "options": {
+        "1": "Yes (show on screen)",
+        "0": "No (log them)"
+      }
+    },
+    {
+      "name": "signal_bus_debug",
+      "default": "0",
+      "helptext": "When on, the signal bus logs every dispatch (signal name + JSON payload) to the error log and flags any non-JSON-serializable payload value. Debug only; leave off in production.",
+      "group": "diagnostics",
+      "label": "Signal bus debug logging",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      }
+    },
+    {
+      "name": "smtp_auth",
+      "default": "1",
+      "group": "email_provider_smtp",
+      "label": "Authentication required",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      }
+    },
+    {
+      "name": "surveys_active",
+      "default": "1",
+      "group": "surveys",
+      "label": "Survey module active",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      }
+    },
+    {
+      "name": "tier_upgrade_url",
+      "default": "",
+      "group": "tier_gating",
+      "label": "Where the upgrade prompt links to",
+      "type": "text",
+      "helptext": "Optional. A path, e.g. /pricing."
+    },
+    {
+      "name": "urls_active",
+      "default": "1",
+      "group": "urls",
+      "label": "URL rewrite module active",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      }
+    },
+    {
+      "name": "use_captcha_comments",
+      "default": "1",
+      "group": "blog",
+      "label": "Use captcha on comments",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      },
+      "show_when": {
+        "blog_active": "1"
+      }
+    },
+    {
+      "name": "use_honeypot",
+      "default": "1",
+      "group": "spam",
+      "label": "Use form honeypots",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      }
+    },
+    {
+      "name": "vault_unlock_idle_minutes",
+      "default": "30",
+      "helptext": "Sealed Vault unlock window idle timeout, in minutes. One unlock opens every server-custody consumer (mail, chat); the window is extended on activity and wiped on close.",
+      "group": "vault_unlock",
+      "label": "Lock the vault after idle (minutes)",
+      "type": "number",
+      "validation": {
+        "min": 1
+      }
+    },
+    {
+      "name": "videos_active",
+      "default": "1",
+      "group": "videos",
+      "label": "Video module active",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      }
+    },
+    {
+      "name": "debug",
+      "default": "0",
+      "group": "debug",
+      "label": "Debug mode",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      },
+      "helptext": "Site-wide, not payments-only: it drives component render tracing, FormWriter debug output, and the Stripe and Google Play helpers' test behaviour. Leave off in production."
+    },
+    {
+      "name": "debug_css",
+      "default": "0",
+      "group": "diagnostics",
+      "label": "CSS debug mode",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      },
+      "helptext": "Tailwind themes only."
+    },
+    {
+      "name": "email_debug_mode",
+      "default": "0",
+      "group": "email_testing",
+      "label": "Log every message to debug_email_logs",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      }
+    },
+    {
+      "name": "email_dry_run",
+      "default": "0",
+      "group": "email_testing",
+      "label": "Dry run (log, never send)",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      }
+    },
+    {
+      "name": "email_test_mode",
+      "default": "0",
+      "group": "email_testing",
+      "label": "Redirect all mail to one address",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      }
+    },
+    {
+      "name": "email_validation_mx_check",
+      "default": "1",
+      "group": "email_module",
+      "label": "Check that an address domain accepts mail",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      },
+      "helptext": "On rejects addresses whose domain has no mail server. Off skips the DNS lookup, which suits bulk imports and internal domains."
+    },
+    {
+      "name": "force_https",
+      "default": "0",
+      "managed": true,
+      "helptext": "DEAD. Superseded by protocol_mode, which is what the platform reads. Only migrations/protocol_mode_migration.php still names it. Declared so the surviving row is not an orphan. Safe to purge."
+    },
+    {
+      "name": "social_settings_active",
+      "default": "0",
+      "group": "social",
+      "label": "Edit social links",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      },
+      "helptext": "Reveals the link fields below. It is a disclosure for this page only — a theme shows whichever links are filled in regardless of this switch."
+    },
+    {
+      "name": "tier_gate_hide_from_listings",
+      "default": "0",
+      "group": "tier_gating",
+      "label": "Hide gated content from listings",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      },
+      "helptext": "Applies to members who lack the tier. RSS always hides gated items regardless."
+    },
+    {
+      "name": "tier_gate_preview_length",
+      "default": "0",
+      "group": "tier_gating",
+      "label": "Preview length (characters)",
+      "type": "number",
+      "validation": {
+        "min": 0
+      },
+      "helptext": "Body text shown before the paywall. 0 shows no preview."
+    },
+    {
+      "name": "totp_remember_device_days",
+      "default": "0",
+      "group": "two_factor",
+      "label": "Trust a device for this many days",
+      "type": "number",
+      "validation": {
+        "min": 0
+      },
+      "helptext": "After a successful check, skip the code on that device for this long. 0 always asks."
+    },
+    {
+      "name": "totp_require_admins",
+      "default": "0",
+      "group": "two_factor",
+      "label": "Require 2FA for admin accounts",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      },
+      "helptext": "Admins at permission 5 and above without 2FA are sent to /profile/security until they enrol."
+    },
+    {
+      "name": "totp_issuer_name",
+      "default": "",
+      "group": "two_factor",
+      "label": "Name shown in the authenticator app",
+      "type": "text",
+      "helptext": "Optional. Falls back to the site name."
+    },
+    {
+      "name": "use_blog_as_homepage",
+      "default": "0",
+      "managed": true,
+      "helptext": "DEAD. No reader. The homepage override is alternate_homepage. Declared so the surviving row is not an orphan. Safe to purge."
+    },
+    {
+      "name": "use_captcha",
+      "default": "0",
+      "group": "spam",
+      "label": "Use captcha",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      }
+    },
+    {
+      "name": "api_auth_rate_limit_requests",
+      "default": "10",
+      "group": "api_rate_limits",
+      "label": "Max failed sign-in attempts per window",
+      "type": "number",
+      "validation": {
+        "min": 1
+      },
+      "helptext": "Counted per IP."
+    },
+    {
+      "name": "api_auth_rate_limit_window",
+      "default": "900",
+      "group": "api_rate_limits",
+      "label": "Failed sign-in window (seconds)",
+      "type": "number",
+      "validation": {
+        "min": 1
+      },
+      "helptext": "900 is fifteen minutes."
+    },
+    {
+      "name": "api_rate_limit_requests",
+      "default": "1000",
+      "group": "api_rate_limits",
+      "label": "Max API requests per window",
+      "type": "number",
+      "validation": {
+        "min": 1
+      },
+      "helptext": "Counted per IP."
+    },
+    {
+      "name": "api_rate_limit_window",
+      "default": "3600",
+      "group": "api_rate_limits",
+      "label": "API rate limit window (seconds)",
+      "type": "number",
+      "validation": {
+        "min": 1
+      },
+      "helptext": "3600 is one hour."
+    },
+    {
+      "name": "max_entity_photos",
+      "default": "{\"user\": 6, \"mailing_list\": 10}",
+      "group": "files",
+      "label": "Photo limit per entity (JSON)",
+      "type": "textarea",
+      "rows": 4,
+      "helptext": "How many photos each kind of record may carry, as a JSON object. Example: {\"user\": 6}."
+    },
+    {
+      "name": "request_log_retention_days",
+      "default": "90",
+      "group": "logging",
+      "label": "Days to keep request logs",
+      "type": "number",
+      "validation": {
+        "min": 0
+      },
+      "helptext": "The scheduled task purges anything older. 0 keeps them indefinitely."
+    },
+    {
+      "name": "allowed_upload_extensions",
+      "default": "gif,jpeg,jpg,png,avif,webp,pdf,xls,doc,xlsx,docx,mp3,mp4,m4a",
+      "group": "files",
+      "label": "Allowed upload extensions",
+      "type": "text",
+      "helptext": "Comma separated, no dots. An extension absent from this list is refused on upload."
+    },
+    {
+      "name": "anti_spam_answer",
+      "default": "",
+      "group": "spam",
+      "label": "Anti-spam word",
+      "type": "text",
+      "helptext": "Leave blank for none."
+    },
+    {
+      "name": "anti_spam_answer_comments",
+      "default": "",
+      "managed": true,
+      "helptext": "DEAD. No reader. Comment spam control is use_captcha_comments. Declared so the surviving row is not an orphan. Safe to purge."
+    },
+    {
+      "name": "cloud_storage_access_key",
+      "default": "",
+      "group": "cloud_storage",
+      "label": "Access key",
+      "type": "text"
+    },
+    {
+      "name": "cloud_storage_bucket",
+      "default": "",
+      "group": "cloud_storage",
+      "label": "Bucket name",
+      "type": "text"
+    },
+    {
+      "name": "cloud_storage_draining",
+      "default": "0",
+      "managed": true,
+      "helptext": "Written by the cloud storage page. Set while files are being moved back off the public bucket."
+    },
+    {
+      "name": "cloud_storage_enabled",
+      "default": "0",
+      "managed": true,
+      "helptext": "Written by the cloud storage page once a bucket passes its connection test, and by the pause control. Never set by hand — turning it on without a working bucket breaks uploads."
+    },
+    {
+      "name": "cloud_storage_endpoint",
+      "default": "",
+      "group": "cloud_storage",
+      "label": "Endpoint hostname",
+      "type": "text",
+      "helptext": "For example s3.us-west-002.backblazeb2.com or s3.amazonaws.com. With or without https://."
+    },
+    {
+      "name": "cloud_storage_private_bucket",
+      "default": "",
+      "helptext": "A second bucket on the same account, sharing the endpoint, region and keys above. On save it is tested to confirm anonymous reads are denied before anything is stored there. Leave empty for no private store.",
+      "group": "cloud_storage",
+      "label": "Private bucket name",
+      "type": "text"
+    },
+    {
+      "name": "cloud_storage_private_draining",
+      "default": "0",
+      "managed": true,
+      "helptext": "Written by the cloud storage page. Set while files are being moved back off the private bucket."
+    },
+    {
+      "name": "cloud_storage_private_enabled",
+      "default": "0",
+      "managed": true,
+      "helptext": "Written by the cloud storage page once the private bucket is confirmed to deny anonymous reads."
+    },
+    {
+      "name": "cloud_storage_public_base_url",
+      "default": "",
+      "group": "cloud_storage",
+      "label": "Public base URL",
+      "type": "text",
+      "helptext": "Leave empty to derive it from the endpoint and bucket. Set it when a CDN fronts the bucket, e.g. https://cdn.example.com."
+    },
+    {
+      "name": "cloud_storage_region",
+      "default": "",
+      "group": "cloud_storage",
+      "label": "Region",
+      "type": "text",
+      "helptext": "For example us-east-1 or us-west-002. Auto-fills from the endpoint where the endpoint says."
+    },
+    {
+      "name": "cloud_storage_secret_key",
+      "default": "",
+      "secret": true,
+      "group": "cloud_storage",
+      "label": "Secret key",
+      "helptext": "Rotate it with the bucket provider if you suspect it has been exposed."
+    },
+    {
+      "name": "cookie_consent_mode",
+      "default": "auto",
+      "group": "cookie_consent",
+      "label": "Cookie consent mode",
+      "type": "select",
+      "options": {
+        "off": "Off",
+        "auto": "Auto-detect by location (recommended)",
+        "gdpr": "GDPR (opt-in required)",
+        "ccpa": "CCPA (opt-out)"
+      },
+      "helptext": "Auto picks by visitor location. GDPR asks before setting cookies; CCPA offers an opt-out."
+    },
+    {
+      "name": "default_comment_status",
+      "default": "Approved",
+      "group": "blog",
+      "label": "Default comment status",
+      "type": "select",
+      "options": {
+        "approved": "Approved",
+        "unapproved": "Unapproved"
+      },
+      "show_when": {
+        "blog_active": "1"
+      }
+    },
+    {
+      "name": "default_email_template",
+      "default": "default_outer_template",
+      "group": "email_templates",
+      "label": "Default outer template",
+      "type": "select",
+      "options_from": "CoreSettingOptions::outerTemplates",
+      "options_include": "includes/CoreSettingOptions.php"
+    },
+    {
+      "name": "default_timezone",
+      "default": "UTC",
+      "group": "general",
+      "label": "Default timezone",
+      "type": "select",
+      "options_from": "CoreSettingOptions::timezones",
+      "options_include": "includes/CoreSettingOptions.php"
+    },
+    {
+      "name": "email_fallback_service",
+      "default": "smtp",
+      "group": "email_delivery",
+      "label": "Fallback email service",
+      "type": "select",
+      "options_from": "CoreSettingOptions::emailServices",
+      "options_include": "includes/CoreSettingOptions.php",
+      "empty_option": true,
+      "helptext": "Used when the primary service fails."
+    },
+    {
+      "name": "email_service",
+      "default": "smtp",
+      "group": "email_delivery",
+      "label": "Primary email service",
+      "type": "select",
+      "options_from": "CoreSettingOptions::emailServices",
+      "options_include": "includes/CoreSettingOptions.php",
+      "empty_option": true
+    },
+    {
+      "name": "mailing_list_provider",
+      "default": "mailchimp",
+      "group": "mailing_list",
+      "label": "Provider",
+      "type": "select",
+      "options_from": "CoreSettingOptions::mailingListServices",
+      "options_include": "includes/CoreSettingOptions.php",
+      "empty_option": true,
+      "helptext": "Service subscriptions are synced to."
+    },
+    {
+      "name": "mailchimp_default_merge_fields",
+      "default": "",
+      "group": "mailing_list",
+      "label": "Default merge fields (JSON)",
+      "type": "textarea",
+      "rows": 4,
+      "show_when": {
+        "mailing_list_provider": "mailchimp"
+      },
+      "helptext": "Merge tags applied to every subscribe call. Example: {\"MMERGE3\":\"Yes\"}. Blank or {} for none."
+    },
+    {
+      "name": "form_style",
+      "default": "Default (UIKit)",
+      "managed": true,
+      "helptext": "DEAD. No reader. Form appearance comes from the .jy-ui kit. Declared so the surviving row is not an orphan. Safe to purge."
+    },
+    {
+      "name": "protocol_mode",
+      "default": "auto",
+      "group": "protocol",
+      "label": "Protocol mode",
+      "type": "select",
+      "options": {
+        "auto": "Auto-detect",
+        "http": "HTTP only",
+        "https": "HTTPS only",
+        "https_redirect": "HTTPS with redirects"
+      },
+      "helptext": "Controls the protocol on generated URLs and whether plain HTTP is redirected."
+    },
+    {
+      "name": "standard_error",
+      "default": "Sorry, that operation caused an error.",
+      "managed": true,
+      "helptext": "DEAD. No reader. Error copy comes from the page that raises it. Declared so the surviving row is not an orphan. Safe to purge."
+    },
+    {
+      "name": "tracking",
+      "default": "Use built in tracking",
+      "managed": true,
+      "helptext": "DEAD. No reader. tracking_code is emitted whenever it is set, without consulting a mode. Declared so the surviving row is not an orphan. Safe to purge."
+    },
+    {
+      "name": "composerAutoLoad",
+      "default": "../vendor/",
+      "group": "composer",
+      "label": "Composer path",
+      "type": "text",
+      "helptext": "Directory holding autoload.php, e.g. ../vendor/. The directory, not the file."
+    },
+    {
+      "name": "theme_template",
+      "default": "default",
+      "group": "theme",
+      "label": "Active theme",
+      "type": "select",
+      "options_from": "CoreSettingOptions::themes",
+      "options_include": "includes/CoreSettingOptions.php"
+    },
+    {
+      "name": "upload_web_dir",
+      "default": "uploads",
+      "group": "paths",
+      "label": "Upload web directory",
+      "type": "text",
+      "helptext": "Web-visible path uploads are served from, relative to the site root. Usually just uploads."
+    },
+    {
+      "name": "default_mailing_list",
+      "default": "1",
+      "group": "email_module",
+      "label": "Default mailing list",
+      "type": "select",
+      "options_from": "CoreSettingOptions::mailingLists",
+      "options_include": "includes/CoreSettingOptions.php",
+      "empty_option": true
+    },
+    {
+      "name": "bulk_footer",
+      "default": "default_footer",
+      "group": "email_templates",
+      "label": "Bulk email footer",
+      "type": "select",
+      "options_from": "CoreSettingOptions::footerTemplates",
+      "options_include": "includes/CoreSettingOptions.php"
+    },
+    {
+      "name": "bulk_outer_template",
+      "default": "default_outer_template",
+      "group": "email_templates",
+      "label": "Bulk email outer template",
+      "type": "select",
+      "options_from": "CoreSettingOptions::outerTemplates",
+      "options_include": "includes/CoreSettingOptions.php"
+    },
+    {
+      "name": "group_email_inner_template",
+      "default": "blank_template",
+      "group": "email_templates",
+      "label": "Group email inner template",
+      "type": "select",
+      "options_from": "CoreSettingOptions::innerTemplates",
+      "options_include": "includes/CoreSettingOptions.php"
+    },
+    {
+      "name": "group_email_outer_template",
+      "default": "default_outer_template",
+      "group": "email_templates",
+      "label": "Group email outer template",
+      "type": "select",
+      "options_from": "CoreSettingOptions::outerTemplates",
+      "options_include": "includes/CoreSettingOptions.php"
+    },
+    {
+      "name": "group_email_footer_template",
+      "default": "event_bulk_footer",
+      "group": "email_templates",
+      "label": "Group email footer template",
+      "type": "select",
+      "options_from": "CoreSettingOptions::footerTemplates",
+      "options_include": "includes/CoreSettingOptions.php"
+    },
+    {
+      "name": "individual_email_inner_template",
+      "default": "blank_template",
+      "group": "email_templates",
+      "label": "Individual email inner template",
+      "type": "select",
+      "options_from": "CoreSettingOptions::innerTemplates",
+      "options_include": "includes/CoreSettingOptions.php"
+    },
+    {
+      "name": "alternate_homepage",
+      "default": "",
+      "group": "cms",
+      "label": "Page to use as the homepage",
+      "type": "select",
+      "options_from": "CoreSettingOptions::homepageTargets",
+      "options_include": "includes/CoreSettingOptions.php",
+      "empty_option": true,
+      "helptext": "Optional. Leave blank to use the built-in homepage."
+    },
+    {
+      "name": "alternate_loggedin_homepage",
+      "default": "",
+      "group": "cms",
+      "label": "Page to use as the signed-in homepage",
+      "type": "text",
+      "helptext": "Optional. A path, e.g. /dashboard."
+    },
+    {
+      "name": "api_allowed_origins",
+      "default": "",
+      "group": "api",
+      "label": "Allowed CORS origins",
+      "type": "text",
+      "helptext": "Comma separated, e.g. https://example.com,https://app.example.com. Blank disables CORS."
+    },
+    {
+      "name": "blog_footer_text",
+      "default": "",
+      "group": "blog",
+      "label": "Blog footer text",
+      "type": "textarea",
+      "rows": 10,
+      "show_when": {
+        "blog_active": "1"
+      }
+    },
+    {
+      "name": "blog_subdirectory",
+      "default": "",
+      "managed": true,
+      "helptext": "DEAD. No reader. The setting was retired in migration 32; only a comment in migrations.php still names it. Declared so the surviving row is not an orphan. Safe to purge."
+    },
+    {
+      "name": "captcha_private",
+      "default": "",
+      "group": "captcha",
+      "label": "Google reCAPTCHA secret key",
+      "secret": true
+    },
+    {
+      "name": "captcha_public",
+      "default": "",
+      "group": "captcha",
+      "label": "Google reCAPTCHA site key",
+      "type": "text"
+    },
+    {
+      "name": "contact_address",
+      "default": "",
+      "group": "site_identity",
+      "label": "Contact address",
+      "type": "text"
+    },
+    {
+      "name": "contact_email",
+      "default": "",
+      "group": "site_identity",
+      "label": "Contact email",
+      "type": "text",
+      "helptext": "Public contact address. Shown by themes that carry a contact block."
+    },
+    {
+      "name": "contact_phone",
+      "default": "",
+      "group": "site_identity",
+      "label": "Contact phone",
+      "type": "text"
+    },
+    {
+      "name": "cookie_privacy_policy_link",
+      "default": "",
+      "group": "cookie_consent",
+      "label": "Privacy policy URL",
+      "type": "text",
+      "helptext": "Path to the privacy policy page, shown in the consent banner."
+    },
+    {
+      "name": "custom_css",
+      "default": "",
+      "group": "site_identity",
+      "label": "Custom CSS",
+      "type": "textarea",
+      "rows": 10
+    },
+    {
+      "name": "defaultemail",
+      "default": "",
+      "group": "email_identity",
+      "label": "Default From address",
+      "type": "text"
+    },
+    {
+      "name": "defaultemailname",
+      "default": "",
+      "group": "email_identity",
+      "label": "Default From name",
+      "type": "text"
+    },
+    {
+      "name": "defaultreplyto",
+      "default": "",
+      "group": "email_identity",
+      "label": "Default Reply-To",
+      "type": "text",
+      "helptext": "Applied to system mail that sets no Reply-To of its own."
+    },
+    {
+      "name": "hcaptcha_private",
+      "default": "",
+      "group": "captcha",
+      "label": "hCaptcha secret key",
+      "secret": true
+    },
+    {
+      "name": "hcaptcha_public",
+      "default": "",
+      "group": "captcha",
+      "label": "hCaptcha site key",
+      "type": "text"
+    },
+    {
+      "name": "logo_link",
+      "default": "",
+      "group": "site_identity",
+      "label": "Link to logo",
+      "type": "text",
+      "validation": {
+        "remote": {
+          "url": "/api/v1/action/validate_server_file",
+          "dataFieldName": "value",
+          "data": {
+            "field": "logo_link"
+          },
+          "message": "Must start with / and the file must exist"
+        }
+      }
+    },
+    {
+      "name": "mailchimp_api_key",
+      "default": "",
+      "secret": true,
+      "group": "mailing_list",
+      "label": "MailChimp API key",
+      "show_when": {
+        "mailing_list_provider": "mailchimp"
+      },
+      "helptext": "Ends with a datacentre suffix, e.g. -us21."
+    },
+    {
+      "name": "mailchimp_list_id",
+      "default": "",
+      "managed": true,
+      "helptext": "DEAD. No reader. A list is chosen per mailing list, in mlt_provider_list_id. Declared so the surviving row is not an orphan. Safe to purge."
+    },
+    {
+      "name": "mailjet_api_key",
+      "default": "",
+      "group": "email_provider_mailjet",
+      "label": "Mailjet API key",
+      "type": "text",
+      "helptext": "Public half of the pair, from Mailjet under Account, API Keys."
+    },
+    {
+      "name": "mailjet_api_secret",
+      "default": "",
+      "secret": true,
+      "group": "email_provider_mailjet",
+      "label": "Mailjet API secret",
+      "helptext": "Secret half of the pair. Mailjet shows it once, at issue."
+    },
+    {
+      "name": "mailjet_sandbox_mode",
+      "default": "0",
+      "group": "email_provider_mailjet",
+      "label": "Sandbox mode (no real delivery)",
+      "type": "select",
+      "options": {
+        "1": "On",
+        "0": "Off"
+      }
+    },
+    {
+      "name": "mailjet_verified_domain",
+      "default": "",
+      "group": "email_provider_mailjet",
+      "label": "Verified sender domain",
+      "type": "text",
+      "helptext": "For reference only. Mailjet checks the From at send time."
+    },
+    {
+      "name": "mailgun_api_key",
+      "default": "",
+      "secret": true,
+      "group": "email_provider_mailgun",
+      "label": "Mailgun API key"
+    },
+    {
+      "name": "mailgun_domain",
+      "default": "",
+      "group": "email_provider_mailgun",
+      "label": "Mailgun domain",
+      "type": "text",
+      "helptext": "For example mg.example.com."
+    },
+    {
+      "name": "mailgun_eu_api_link",
+      "default": "",
+      "group": "email_provider_mailgun",
+      "label": "Mailgun EU API URL",
+      "type": "text",
+      "helptext": "EU-region accounts only, e.g. https://api.eu.mailgun.net."
+    },
+    {
+      "name": "mailgun_webhook_signing_key",
+      "default": "",
+      "secret": true,
+      "group": "inbound_provider",
+      "label": "Mailgun Webhook Signing Key",
+      "show_when": {
+        "mailbox_provider": "mailgun"
+      },
+      "helptext": "HTTP Webhook Signing Key from your Mailgun dashboard (separate from the API key)."
+    },
+    {
+      "name": "brevo_api_key",
+      "default": "",
+      "secret": true,
+      "group": "email_provider_brevo",
+      "label": "Brevo API key",
+      "helptext": "v3 API key from Brevo, under SMTP and API. Starts with xkeysib-."
+    },
+    {
+      "name": "brevo_sandbox_mode",
+      "default": "0",
+      "group": "email_provider_brevo",
+      "label": "Sandbox mode (no real delivery)",
+      "type": "select",
+      "options": {
+        "1": "On",
+        "0": "Off"
+      }
+    },
+    {
+      "name": "brevo_verified_domain",
+      "default": "",
+      "group": "email_provider_brevo",
+      "label": "Verified sender domain",
+      "type": "text",
+      "helptext": "For reference only. Brevo checks the From at send time against senders verified in Brevo."
+    },
+    {
+      "name": "postmark_message_stream",
+      "default": "outbound",
+      "group": "email_provider_postmark",
+      "label": "Message stream",
+      "type": "text",
+      "helptext": "outbound is the default transactional stream. Broadcast mail uses the broadcast stream id on the server."
+    },
+    {
+      "name": "postmark_server_token",
+      "default": "",
+      "secret": true,
+      "group": "email_provider_postmark",
+      "label": "Postmark server token",
+      "helptext": "A Server token, found under Servers, then API Tokens. Not an Account token."
+    },
+    {
+      "name": "postmark_track_links",
+      "default": "None",
+      "group": "email_provider_postmark",
+      "label": "Track links",
+      "type": "select",
+      "options": {
+        "None": "None",
+        "HtmlAndText": "HTML and text",
+        "HtmlOnly": "HTML only",
+        "TextOnly": "Text only"
+      }
+    },
+    {
+      "name": "postmark_track_opens",
+      "default": "0",
+      "group": "email_provider_postmark",
+      "label": "Track opens",
+      "type": "select",
+      "options": {
+        "1": "On",
+        "0": "Off"
+      }
+    },
+    {
+      "name": "postmark_verified_domain",
+      "default": "",
+      "group": "email_provider_postmark",
+      "label": "Verified sender domain",
+      "type": "text",
+      "helptext": "For reference only. Postmark checks the From against your sender signatures at send time."
+    },
+    {
+      "name": "privacy_url",
+      "default": "",
+      "group": "general",
+      "label": "Privacy Policy URL",
+      "type": "text",
+      "validation": {
+        "pattern": "#^(/|https?://)#i",
+        "messages": {
+          "pattern": "Must start with '/', 'http://' or 'https://'."
+        }
+      }
+    },
+    {
+      "name": "resend_api_key",
+      "default": "",
+      "secret": true,
+      "group": "email_provider_resend",
+      "label": "Resend API key",
+      "helptext": "From resend.com under API Keys. Starts with re_."
+    },
+    {
+      "name": "resend_verified_domain",
+      "default": "",
+      "group": "email_provider_resend",
+      "label": "Verified sender domain",
+      "type": "text",
+      "helptext": "For reference only. The domain must be DNS-verified in Resend."
+    },
+    {
+      "name": "sendgrid_api_key",
+      "default": "",
+      "secret": true,
+      "group": "email_provider_sendgrid",
+      "label": "SendGrid API key"
+    },
+    {
+      "name": "sendgrid_click_tracking",
+      "default": "0",
+      "group": "email_provider_sendgrid",
+      "label": "Click tracking",
+      "type": "select",
+      "options": {
+        "1": "On",
+        "0": "Off"
+      }
+    },
+    {
+      "name": "sendgrid_inbound_secret",
+      "default": "",
+      "secret": true,
+      "group": "inbound_provider",
+      "label": "Inbound Parse Shared Secret",
+      "show_when": {
+        "mailbox_provider": "sendgrid"
+      },
+      "helptext": "SendGrid Inbound Parse does not sign its POSTs. Set a secret here and append it to the Destination URL as ?secret=… so only SendGrid can deliver mail. Inbound is rejected while this is blank."
+    },
+    {
+      "name": "sendgrid_inbound_spam_threshold",
+      "default": "5.0",
+      "group": "inbound_provider",
+      "label": "Inbound spam score threshold",
+      "type": "text",
+      "show_when": {
+        "mailbox_provider": "sendgrid"
+      },
+      "validation": {
+        "number": true,
+        "min": 0,
+        "messages": {
+          "number": "Enter a number, e.g. 5.0."
+        }
+      },
+      "helptext": "When content spam filtering is on, an inbound spam_score at or above this value is judged spam. Default 5.0; lower is stricter."
+    },
+    {
+      "name": "sendgrid_region",
+      "default": "global",
+      "group": "email_provider_sendgrid",
+      "label": "Region",
+      "type": "select",
+      "options": {
+        "global": "Global (api.sendgrid.com)",
+        "eu": "EU (api.eu.sendgrid.com)"
+      }
+    },
+    {
+      "name": "sendgrid_sandbox_mode",
+      "default": "0",
+      "group": "email_provider_sendgrid",
+      "label": "Sandbox mode (no real delivery)",
+      "type": "select",
+      "options": {
+        "1": "On",
+        "0": "Off"
+      }
+    },
+    {
+      "name": "sendgrid_verified_domain",
+      "default": "",
+      "group": "email_provider_sendgrid",
+      "label": "Verified sender domain",
+      "type": "text",
+      "helptext": "For reference only, e.g. mail.example.com. Must be verified in SendGrid."
+    },
+    {
+      "name": "ses_access_key_id",
+      "default": "",
+      "group": "email_provider_ses",
+      "label": "AWS access key id",
+      "type": "text",
+      "helptext": "Leave blank to use the instance IAM role on EC2, ECS or Lambda."
+    },
+    {
+      "name": "ses_configuration_set",
+      "default": "",
+      "group": "email_provider_ses",
+      "label": "Configuration set",
+      "type": "text",
+      "helptext": "Optional. An SES configuration set for engagement tracking, event publishing or IP pool selection."
+    },
+    {
+      "name": "ses_region",
+      "default": "us-east-1",
+      "group": "email_provider_ses",
+      "label": "AWS region",
+      "type": "select",
+      "options": {
+        "us-east-1": "us-east-1 (N. Virginia)",
+        "us-east-2": "us-east-2 (Ohio)",
+        "us-west-1": "us-west-1 (N. California)",
+        "us-west-2": "us-west-2 (Oregon)",
+        "eu-west-1": "eu-west-1 (Ireland)",
+        "eu-west-2": "eu-west-2 (London)",
+        "eu-central-1": "eu-central-1 (Frankfurt)",
+        "ap-southeast-1": "ap-southeast-1 (Singapore)",
+        "ap-southeast-2": "ap-southeast-2 (Sydney)",
+        "ap-northeast-1": "ap-northeast-1 (Tokyo)"
+      }
+    },
+    {
+      "name": "ses_secret_access_key",
+      "default": "",
+      "secret": true,
+      "group": "email_provider_ses",
+      "label": "AWS secret access key",
+      "helptext": "Leave blank when using IAM role credentials."
+    },
+    {
+      "name": "ses_verified_domain",
+      "default": "",
+      "group": "email_provider_ses",
+      "label": "Verified sender domain",
+      "type": "text",
+      "helptext": "For reference only. Must be verified in this AWS region."
+    },
+    {
+      "name": "site_description",
+      "default": "",
+      "group": "site_identity",
+      "label": "Site description",
+      "type": "text"
+    },
+    {
+      "name": "site_name",
+      "default": "",
+      "group": "site_identity",
+      "label": "Site name",
+      "type": "text"
+    },
+    {
+      "name": "smtp_helo",
+      "default": "",
+      "group": "email_provider_smtp",
+      "label": "HELO/EHLO hostname",
+      "type": "text"
+    },
+    {
+      "name": "smtp_host",
+      "default": "",
+      "group": "email_provider_smtp",
+      "label": "SMTP host",
+      "type": "text"
+    },
+    {
+      "name": "smtp_hostname",
+      "default": "",
+      "group": "email_provider_smtp",
+      "label": "Hostname used in headers",
+      "type": "text"
+    },
+    {
+      "name": "smtp_password",
+      "default": "",
+      "secret": true,
+      "group": "email_provider_smtp",
+      "label": "Password",
+      "show_when": {
+        "smtp_auth": "1"
+      }
+    },
+    {
+      "name": "smtp_port",
+      "default": "",
+      "group": "email_provider_smtp",
+      "label": "SMTP port",
+      "type": "number",
+      "validation": {
+        "min": 1,
+        "max": 65535
+      },
+      "helptext": "Usually 25, 465, 587 or 2525."
+    },
+    {
+      "name": "smtp_sender",
+      "default": "",
+      "group": "email_provider_smtp",
+      "label": "Bounce address",
+      "type": "text"
+    },
+    {
+      "name": "smtp_username",
+      "default": "",
+      "group": "email_provider_smtp",
+      "label": "Username",
+      "type": "text",
+      "show_when": {
+        "smtp_auth": "1"
+      }
+    },
+    {
+      "name": "terms_url",
+      "default": "",
+      "group": "general",
+      "label": "Terms of Service URL",
+      "type": "text",
+      "validation": {
+        "pattern": "#^(/|https?://)#i",
+        "messages": {
+          "pattern": "Must start with '/', 'http://' or 'https://'."
+        }
+      }
+    },
+    {
+      "name": "tracking_code",
+      "default": "",
+      "group": "tracking",
+      "label": "Tracking code",
+      "type": "textarea",
+      "rows": 5,
+      "helptext": "Analytics snippet injected into every public page. Subject to cookie consent when consent is on."
+    },
+    {
+      "name": "upgrade_location",
+      "default": "",
+      "managed": true,
+      "helptext": "DEAD. No reader. utils/upgrade.php reads a key of that name out of the publish response, not out of settings. Declared so the surviving row is not an orphan. Safe to purge."
+    },
+    {
+      "name": "upgrade_source",
+      "default": "https://getjoinery.com",
+      "group": "upgrade",
+      "label": "Upgrade source",
+      "type": "text",
+      "helptext": "The deployment this site pulls upgrades from."
+    },
+    {
+      "name": "webmaster_email",
+      "default": "",
+      "group": "email_identity",
+      "label": "Webmaster email",
+      "type": "text"
+    },
+    {
+      "name": "active_theme_plugin",
+      "default": "",
+      "group": "theme",
+      "label": "Active theme plugin",
+      "type": "select",
+      "options_from": "CoreSettingOptions::themePlugins",
+      "options_include": "includes/CoreSettingOptions.php",
+      "empty_option": true,
+      "show_when": {
+        "theme_template": "plugin"
+      },
+      "helptext": "Which plugin provides the user interface. Used when the active theme is plugin."
+    },
+    {
+      "name": "email_test_recipient",
+      "default": "",
+      "group": "email_testing",
+      "label": "Address that receives the redirected mail",
+      "type": "text",
+      "show_when": {
+        "email_test_mode": "1"
+      },
+      "validation": {
+        "email": true
+      }
+    },
+    {
+      "name": "nickname_display_as",
+      "default": "",
+      "group": "general",
+      "label": "Nickname display as",
+      "type": "text",
+      "helptext": "Leave blank to turn nicknames off."
+    },
+    {
+      "name": "preview_image",
+      "default": "",
+      "group": "site_identity",
+      "label": "Preview image",
+      "type": "text",
+      "helptext": "Shown when the site is shared on Facebook, Google and similar.",
+      "validation": {
+        "remote": {
+          "url": "/api/v1/action/validate_server_file",
+          "dataFieldName": "value",
+          "data": {
+            "field": "preview_image"
+          },
+          "message": "File does not exist or is not readable"
+        }
+      }
+    },
+    {
+      "name": "preview_image_increment",
+      "default": "",
+      "managed": true,
+      "helptext": "Cache-buster for the preview image. Bumped by the settings save when the image changes; read when the tag is built."
+    },
+    {
+      "name": "robots_text",
+      "default": "",
+      "group": "site_identity",
+      "label": "Robots.txt entry",
+      "type": "textarea",
+      "rows": 10
+    },
+    {
+      "name": "site_template",
+      "default": "",
+      "group": "paths",
+      "label": "Site location",
+      "type": "select",
+      "options_from": "CoreSettingOptions::siteFolders",
+      "options_include": "includes/CoreSettingOptions.php",
+      "helptext": "The folder under the base path this deployment runs from."
+    },
+    {
+      "name": "jy_color_bg",
+      "default": "",
+      "group": "brand",
+      "label": "Page background",
+      "type": "color",
+      "helptext": "Overall page background behind cards."
+    },
+    {
+      "name": "jy_color_primary",
+      "default": "",
+      "group": "brand",
+      "label": "Primary / button colour",
+      "type": "color",
+      "helptext": "Buttons, checkboxes, links, focus rings."
+    },
+    {
+      "name": "jy_color_primary_hover",
+      "default": "",
+      "group": "brand",
+      "label": "Primary hover colour",
+      "type": "color",
+      "helptext": "Button hover state. Typically a darker shade of the primary colour."
+    },
+    {
+      "name": "jy_color_primary_text",
+      "default": "",
+      "group": "brand",
+      "label": "Primary button text colour",
+      "type": "color",
+      "helptext": "Text on filled primary buttons. Usually white; change it for light primaries."
+    },
+    {
+      "name": "jy_color_surface",
+      "default": "",
+      "group": "brand",
+      "label": "Surface / card background",
+      "type": "color",
+      "helptext": "Background of auth cards, panels and table rows. White removes the grey tint."
+    },
+    {
+      "name": "social_discord_link",
+      "default": "",
+      "group": "social",
+      "label": "Discord link",
+      "type": "text",
+      "show_when": {
+        "social_settings_active": "1"
+      }
+    },
+    {
+      "name": "social_facebook_link",
+      "default": "",
+      "group": "social",
+      "label": "Facebook link",
+      "type": "text",
+      "show_when": {
+        "social_settings_active": "1"
+      }
+    },
+    {
+      "name": "social_github_link",
+      "default": "",
+      "group": "social",
+      "label": "GitHub link",
+      "type": "text",
+      "show_when": {
+        "social_settings_active": "1"
+      }
+    },
+    {
+      "name": "social_google_link",
+      "default": "",
+      "group": "social",
+      "label": "Google link",
+      "type": "text",
+      "show_when": {
+        "social_settings_active": "1"
+      }
+    },
+    {
+      "name": "social_instagram_link",
+      "default": "",
+      "group": "social",
+      "label": "Instagram link",
+      "type": "text",
+      "show_when": {
+        "social_settings_active": "1"
+      }
+    },
+    {
+      "name": "social_linkedin_link",
+      "default": "",
+      "group": "social",
+      "label": "LinkedIn link",
+      "type": "text",
+      "show_when": {
+        "social_settings_active": "1"
+      }
+    },
+    {
+      "name": "social_messenger_link",
+      "default": "",
+      "group": "social",
+      "label": "Messenger link",
+      "type": "text",
+      "show_when": {
+        "social_settings_active": "1"
+      }
+    },
+    {
+      "name": "social_mixcloud_link",
+      "default": "",
+      "group": "social",
+      "label": "Mixcloud link",
+      "type": "text",
+      "show_when": {
+        "social_settings_active": "1"
+      }
+    },
+    {
+      "name": "social_pinterest_link",
+      "default": "",
+      "group": "social",
+      "label": "Pinterest link",
+      "type": "text",
+      "show_when": {
+        "social_settings_active": "1"
+      }
+    },
+    {
+      "name": "social_reddit_link",
+      "default": "",
+      "group": "social",
+      "label": "Reddit link",
+      "type": "text",
+      "show_when": {
+        "social_settings_active": "1"
+      }
+    },
+    {
+      "name": "social_slack_link",
+      "default": "",
+      "group": "social",
+      "label": "Slack link",
+      "type": "text",
+      "show_when": {
+        "social_settings_active": "1"
+      }
+    },
+    {
+      "name": "social_snapchat_link",
+      "default": "",
+      "group": "social",
+      "label": "Snapchat link",
+      "type": "text",
+      "show_when": {
+        "social_settings_active": "1"
+      }
+    },
+    {
+      "name": "social_soundcloud_link",
+      "default": "",
+      "group": "social",
+      "label": "Soundcloud link",
+      "type": "text",
+      "show_when": {
+        "social_settings_active": "1"
+      }
+    },
+    {
+      "name": "social_spotify_link",
+      "default": "",
+      "group": "social",
+      "label": "Spotify link",
+      "type": "text",
+      "show_when": {
+        "social_settings_active": "1"
+      }
+    },
+    {
+      "name": "social_stack_link",
+      "default": "",
+      "group": "social",
+      "label": "Stack Overflow link",
+      "type": "text",
+      "show_when": {
+        "social_settings_active": "1"
+      }
+    },
+    {
+      "name": "social_telegram_link",
+      "default": "",
+      "group": "social",
+      "label": "Telegram link",
+      "type": "text",
+      "show_when": {
+        "social_settings_active": "1"
+      }
+    },
+    {
+      "name": "social_tiktok_link",
+      "default": "",
+      "group": "social",
+      "label": "TikTok link",
+      "type": "text",
+      "show_when": {
+        "social_settings_active": "1"
+      }
+    },
+    {
+      "name": "social_twitch_link",
+      "default": "",
+      "group": "social",
+      "label": "Twitch link",
+      "type": "text",
+      "show_when": {
+        "social_settings_active": "1"
+      }
+    },
+    {
+      "name": "social_twitter_link",
+      "default": "",
+      "group": "social",
+      "label": "X / Twitter link",
+      "type": "text",
+      "show_when": {
+        "social_settings_active": "1"
+      }
+    },
+    {
+      "name": "social_whatsapp_link",
+      "default": "",
+      "group": "social",
+      "label": "WhatsApp link",
+      "type": "text",
+      "show_when": {
+        "social_settings_active": "1"
+      }
+    },
+    {
+      "name": "social_youtube_link",
+      "default": "",
+      "group": "social",
+      "label": "YouTube link",
+      "type": "text",
+      "show_when": {
+        "social_settings_active": "1"
+      }
+    },
+    {
+      "name": "drive_active",
+      "default": "0",
+      "helptext": "Master switch for the member Drive (/drive). Off by default; enable per instance.",
+      "group": "drive",
+      "label": "Drive module active",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      }
+    },
+    {
+      "name": "drive_max_folder_depth",
+      "default": "32",
+      "helptext": "Maximum nesting depth for Drive folders.",
+      "group": "drive",
+      "label": "Maximum folder depth",
+      "type": "number",
+      "validation": {
+        "min": 1
+      }
+    },
+    {
+      "name": "drive_upload_chunk_bytes",
+      "default": "8388608",
+      "helptext": "Chunk size (bytes) the Drive resumable upload protocol requests. Default 8 MiB.",
+      "group": "drive",
+      "label": "Upload chunk size (bytes)",
+      "type": "number",
+      "validation": {
+        "min": 1
+      }
+    },
+    {
+      "name": "api_upload_rate_limit_requests",
+      "default": "10000",
+      "helptext": "Max Drive chunk-upload requests per window per IP (own bucket, not the general API limit).",
+      "group": "api_rate_limits",
+      "label": "Max uploads per window",
+      "type": "number",
+      "validation": {
+        "min": 1
+      }
+    },
+    {
+      "name": "api_upload_rate_limit_window",
+      "default": "3600",
+      "helptext": "Window (seconds) for the Drive chunk-upload rate limit.",
+      "group": "api_rate_limits",
+      "label": "Upload rate limit window (seconds)",
+      "type": "number",
+      "validation": {
+        "min": 1
+      }
+    },
+    {
+      "name": "webDir",
+      "default": "",
+      "group": "paths",
+      "label": "Web Domain",
+      "type": "text",
+      "validation": {
+        "pattern": "#^(?!https?://)[^/]+$#i",
+        "messages": {
+          "pattern": "Enter the domain only — no http:// or https://, and no slashes."
+        }
+      },
+      "helptext": "The site's domain, e.g. example.com. Everything that builds an absolute URL reads this."
+    },
+    {
+      "name": "baseDir",
+      "default": "",
+      "group": "paths",
+      "label": "Base path",
+      "type": "text",
+      "helptext": "Filesystem path to the deployment root. Overridden when Globalvars_site.php hardcodes it, in which case the field is shown read-only."
+    },
+    {
+      "name": "node_dir",
+      "default": "",
+      "group": "paths",
+      "label": "Node Path",
+      "type": "text",
+      "helptext": "Path to the node install used for asset builds, e.g. /var/www/html/mysite/node. Empty when the deployment has none."
+    },
+    {
+      "name": "apache_error_log",
+      "default": "",
+      "group": "paths",
+      "label": "Apache Error Log Path",
+      "type": "text",
+      "helptext": "Read by the admin log viewer. Must be a readable file — an unreadable path makes the settings page refuse every save."
+    },
+    {
+      "name": "siteDir",
+      "default": "",
+      "managed": true,
+      "helptext": "Auto-calculated from baseDir by Globalvars. Shown read-only on the settings page; never edited directly."
+    },
+    {
+      "name": "upload_dir",
+      "default": "",
+      "managed": true,
+      "helptext": "Auto-calculated from baseDir by Globalvars. Shown read-only on the settings page; never edited directly."
+    },
+    {
+      "name": "static_files_dir",
+      "default": "",
+      "managed": true,
+      "helptext": "Auto-calculated from baseDir by Globalvars. Shown read-only on the settings page; never edited directly."
+    },
+    {
+      "name": "comment_notification_emails",
+      "default": "",
+      "group": "notifications",
+      "label": "Emails to receive comment notifications (separate with comma)",
+      "type": "text"
+    },
+    {
+      "name": "single_purchase_notification_emails",
+      "default": "",
+      "group": "notifications",
+      "label": "Emails to receive one time purchase notifications (separate with comma)",
+      "type": "text"
+    },
+    {
+      "name": "subscription_notification_emails",
+      "default": "",
+      "group": "notifications",
+      "label": "Emails to receive subscription notifications (separate with comma)",
+      "type": "text"
+    },
+    {
+      "name": "upgrade_server_active",
+      "default": "0",
+      "group": "upgrade",
+      "label": "This deployment publishes upgrades",
+      "type": "checkbox",
+      "helptext": "Marks the deployment as an upgrade source. utils/upgrade.php also treats an active server_manager plugin as one."
+    },
+    {
+      "name": "database_version",
+      "default": "",
+      "managed": true,
+      "helptext": "Schema version reached by update_database. Written by the updater; read to decide which migrations still owe a run."
+    },
+    {
+      "name": "db_migration_version",
+      "default": "",
+      "managed": true,
+      "helptext": "Highest migration version applied. Written by the migration runner."
+    },
+    {
+      "name": "system_version",
+      "default": "",
+      "managed": true,
+      "helptext": "Release version of the deployed code. Written by the upgrade process."
+    },
+    {
+      "name": "scheduled_tasks_last_cron_run",
+      "default": "",
+      "managed": true,
+      "helptext": "Timestamp of the last scheduled-task cron tick. Written by the runner; read by the health display."
+    },
+    {
+      "name": "file_signed_url_key",
+      "default": "",
+      "managed": true,
+      "secret": true,
+      "helptext": "HMAC key for signed file URLs, minted on first use by data/files_class.php with a race-safe INSERT. Never entered by hand."
+    },
+    {
+      "name": "_store_event_autoactivate_v1",
+      "default": "",
+      "managed": true,
+      "helptext": "One-shot marker: update_database auto-activated the store and event_manager plugins on this deployment. Presence is the whole meaning."
+    },
+    {
+      "name": "mailgun_version",
+      "default": "2",
+      "managed": true,
+      "helptext": "DEAD. The Mailgun SDK version switch was removed (specs/implemented/remove_mailgun_version_setting.md); nothing reads or writes this. Declared so the surviving row is not an orphan. Safe to purge."
+    },
+    {
+      "name": "allow_remote_archive_refresh",
+      "default": "0",
+      "managed": true,
+      "helptext": "DEAD. No reader or writer anywhere in the tree. Declared so the surviving row is not an orphan. Safe to purge."
+    },
+    {
+      "name": "archive_refresh_allowed_ips",
+      "default": "[]",
+      "managed": true,
+      "helptext": "DEAD. No reader or writer anywhere in the tree. Declared so the surviving row is not an orphan. Safe to purge."
+    },
+    {
+      "name": "enable_x_frame_options",
+      "default": "1",
+      "group": "protocol",
+      "label": "Send X-Frame-Options",
+      "type": "checkbox",
+      "helptext": "Stops other sites embedding this one in a frame. Safe on any site that is not meant to be embedded."
+    },
+    {
+      "name": "enable_referrer_policy",
+      "default": "1",
+      "group": "protocol",
+      "label": "Send Referrer-Policy",
+      "type": "checkbox",
+      "helptext": "Limits what URL detail is passed to sites a visitor clicks through to (strict-origin-when-cross-origin)."
+    },
+    {
+      "name": "connected_account_id",
+      "default": "",
+      "group": "email_provider_connected_account",
+      "label": "Account to send through",
+      "type": "select",
+      "options_from": "CoreSettingOptions::connectedAccounts",
+      "options_include": "includes/CoreSettingOptions.php",
+      "empty_option": true,
+      "helptext": "All site mail is sent as this account address. To send as a hosted alias, or to relay forwarded mail with the original sender intact, use SMTP, Mailgun or SES instead."
+    }
   ]
 }

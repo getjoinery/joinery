@@ -38,53 +38,6 @@ class SesProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubm
         return 'include:amazonses.com';
     }
 
-    public static function getSettingsFields(): array {
-        return [
-            [
-                'key' => 'ses_access_key_id',
-                'label' => 'AWS Access Key ID',
-                'type' => 'text',
-                'helptext' => 'Leave blank to use IAM role / instance credentials (EC2, ECS, Lambda).',
-            ],
-            [
-                'key' => 'ses_secret_access_key',
-                'label' => 'AWS Secret Access Key',
-                'type' => 'password',
-                'helptext' => 'Leave blank when using IAM role credentials.',
-            ],
-            [
-                'key' => 'ses_region',
-                'label' => 'AWS Region',
-                'type' => 'dropdown',
-                'empty_option' => 'Select a region…',
-                'options' => [
-                    'us-east-1' => 'us-east-1 (N. Virginia)',
-                    'us-east-2' => 'us-east-2 (Ohio)',
-                    'us-west-1' => 'us-west-1 (N. California)',
-                    'us-west-2' => 'us-west-2 (Oregon)',
-                    'eu-west-1' => 'eu-west-1 (Ireland)',
-                    'eu-west-2' => 'eu-west-2 (London)',
-                    'eu-central-1' => 'eu-central-1 (Frankfurt)',
-                    'ap-southeast-1' => 'ap-southeast-1 (Singapore)',
-                    'ap-southeast-2' => 'ap-southeast-2 (Sydney)',
-                    'ap-northeast-1' => 'ap-northeast-1 (Tokyo)',
-                ],
-            ],
-            [
-                'key' => 'ses_configuration_set',
-                'label' => 'Configuration Set (optional)',
-                'type' => 'text',
-                'helptext' => 'Name of an SES Configuration Set for engagement tracking, custom event publishing, or IP pool selection. Leave blank to send without one.',
-            ],
-            [
-                'key' => 'ses_verified_domain',
-                'label' => 'Verified Sender Domain',
-                'type' => 'text',
-                'helptext' => 'For display only — SES validates the From at send time. Must be verified in this AWS region.',
-            ],
-        ];
-    }
-
     public static function validateConfiguration(): array {
         $settings = Globalvars::get_instance();
         $errors = [];
