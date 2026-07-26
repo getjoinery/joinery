@@ -45,6 +45,15 @@ abstract class SystemBase {
 	static $permanent_delete_actions = array();
 
 	/**
+	 * Every action name permanent_delete() knows how to execute. Anything outside
+	 * this set is rejected — at rule-registration time by DeletionRule, and again
+	 * at delete time by permanent_delete(). See docs/deletion_system.md.
+	 */
+	public static $valid_deletion_actions = array(
+		'cascade', 'permanent_delete', 'null', 'set_value', 'prevent'
+	);
+
+	/**
 	 * The universal "unreadable floor": fields that must never leave the server over
 	 * ANY API surface (REST or AI). Two parts, both honored by is_unreadable_field():
 	 *
@@ -1034,6 +1043,16 @@ abstract class SystemBase {
 					$results['total_affected'] += $count;
 				}
 
+				// Surface a bad rule here rather than letting the preview look clean
+				// and the real delete throw. permanent_delete() rejects these too.
+				if (!in_array($rule['del_action'], self::$valid_deletion_actions, true)) {
+					$results['can_delete'] = false;
+					$results['blocking_reasons'][] =
+						"Unknown deletion action '{$rule['del_action']}' for " .
+						static::$tablename . " -> {$dep_table}.{$dep_column}";
+					$dependency['blocks_deletion'] = true;
+				}
+
 				$results['dependencies'][] = $dependency;
 			}
 		}
@@ -1142,6 +1161,17 @@ abstract class SystemBase {
 								}
 							}
 							break;
+
+						default:
+							// An unrecognised action must never be a silent no-op: that
+							// would leave the dependents untouched and delete the parent
+							// anyway. A misspelled 'prevent' would then permit exactly the
+							// deletion it was written to block.
+							throw new SystemBaseException(
+								"Unknown deletion action '{$rule['del_action']}' for " .
+								static::$tablename . " -> {$dep_table}.{$dep_column}. " .
+								"Valid actions: " . implode(', ', self::$valid_deletion_actions)
+							);
 					}
 				}
 			}

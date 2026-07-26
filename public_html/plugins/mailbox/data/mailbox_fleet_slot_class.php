@@ -30,7 +30,8 @@ class MailboxFleetSlot extends SystemBase {
 	const STATUS_EVICTED      = 'evicted';
 
 	protected static $foreign_key_actions = [
-		'mft_mfs_shard_id'  => ['action' => 'restrict'],
+		'mft_mfs_shard_id'  => ['action' => 'prevent',
+			'message' => 'Shard still has slots on it — release or evict them first.'],
 		'mft_usr_user_id'   => ['action' => 'null'],
 	];
 

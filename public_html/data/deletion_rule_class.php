@@ -135,6 +135,16 @@ class DeletionRule extends SystemBase {
             // Determine action: explicit override or default cascade
             $rule = $override ?? ['action' => 'cascade'];
 
+            // A typo here used to register silently and then no-op at delete time,
+            // so a misspelled 'prevent' permitted the very deletion it was meant to
+            // block. Refuse to register it and tell the developer which name is bad.
+            if (!in_array($rule['action'], SystemBase::$valid_deletion_actions, true)) {
+                $warnings[] = "$model_class: \$foreign_key_actions['$column'] declares unknown action "
+                    . "'{$rule['action']}' - this rule was NOT registered. Valid actions: "
+                    . implode(', ', SystemBase::$valid_deletion_actions) . ".";
+                continue;
+            }
+
             // Store in database
             $deletion_rule = new DeletionRule(NULL);
             $deletion_rule->set('del_source_table', $source_table);

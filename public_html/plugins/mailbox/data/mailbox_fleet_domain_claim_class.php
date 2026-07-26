@@ -31,7 +31,7 @@ class MailboxFleetDomainClaim extends SystemBase {
 	const CHALLENGE_LABEL = '_joinery-fleet-challenge';
 
 	protected static $foreign_key_actions = [
-		'mfd_mft_slot_id' => ['action' => 'delete'],
+		'mfd_mft_slot_id' => ['action' => 'cascade'],
 	];
 
 	public static $permanent_delete_actions = [];

@@ -24,7 +24,9 @@ class InboundEmailAlias extends SystemBase {
 	const MODE_FORWARD_AND_STORE = 'forward_and_store';
 
 	protected static $foreign_key_actions = [
-		'iea_ied_inbound_email_domain_id' => ['action' => 'cascade'],
+		// permanent_delete, not cascade: an alias owns filters, grants and IMAP
+		// feeds, and a flat SQL delete here would strand all of them.
+		'iea_ied_inbound_email_domain_id' => ['action' => 'permanent_delete'],
 	];
 
 	public static $field_specifications = array(

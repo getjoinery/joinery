@@ -74,6 +74,10 @@ class User extends SystemBase {	public static $prefix = 'usr';
 		// 'pic' isn't a model prefix (the column stores a File id directly),
 		// so it doesn't fit the {prefix}_{target_prefix}_..._id convention.
 		'usr_pic_picture_id' => ['action' => 'null', 'source_table' => 'fil_files'],
+		// A phone number is an attribute of the user, not its owner. Without this
+		// the inferred default is 'cascade', which flat-deletes the user row when
+		// their phone number is deleted — orphaning every table that hangs off it.
+		'usr_phn_phone_number_id' => ['action' => 'null'],
 	];
 
 	// Password-change detection for API session key revocation. The hash as

@@ -40,6 +40,7 @@ require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
+require_once(PathHelper::getIncludePath('data/deletion_rule_class.php'));
 
 $_SERVER['REQUEST_METHOD'] = 'POST'; // mutation context — permanent_delete refuses on GET
 
@@ -53,9 +54,27 @@ class ZZDelParentModel extends SystemBase {
 	);
 }
 
+/**
+ * Declares an action name the engine does not implement. Registration must
+ * refuse it rather than writing a rule that would later no-op. 'source_table'
+ * is explicit because the scratch tables don't follow the prefix convention.
+ */
+class ZZDelBogusActionModel extends SystemBase {
+	public static $tablename = 'zzdel_bogus_child';
+	public static $prefix = 'zzdb';
+	public static $pkey_column = 'id';
+	protected static $foreign_key_actions = array(
+		'zzdb_parent_id' => array('action' => 'restrict', 'source_table' => 'zzdel_parent'),
+	);
+	public static $field_specifications = array(
+		'id'             => array('type' => 'int8', 'serial' => true),
+		'zzdb_parent_id' => array('type' => 'int8'),
+	);
+}
+
 $db = DbConnector::get_instance()->get_db_link();
 
-$SCRATCH = array('zzdel_cascade_child', 'zzdel_null_child', 'zzdel_setval_child', 'zzdel_prevent_child', 'zzdel_parent');
+$SCRATCH = array('zzdel_cascade_child', 'zzdel_null_child', 'zzdel_setval_child', 'zzdel_prevent_child', 'zzdel_bogus_child', 'zzdel_parent');
 $drop_all = function () use ($db, $SCRATCH) {
 	foreach ($SCRATCH as $t) { $db->exec("DROP TABLE IF EXISTS {$t} CASCADE"); }
 	$db->prepare("DELETE FROM del_deletion_rules WHERE del_source_table = 'zzdel_parent'")->execute();
@@ -87,6 +106,7 @@ try {
 	$db->exec("CREATE TABLE zzdel_null_child   (id bigserial PRIMARY KEY, zzdn_parent_id bigint)");
 	$db->exec("CREATE TABLE zzdel_setval_child (id bigserial PRIMARY KEY, zzdv_parent_id bigint)");
 	$db->exec("CREATE TABLE zzdel_prevent_child(id bigserial PRIMARY KEY, zzdr_parent_id bigint)");
+	$db->exec("CREATE TABLE zzdel_bogus_child  (id bigserial PRIMARY KEY, zzdb_parent_id bigint)");
 
 	rule_row($db, 'zzdel_cascade_child', 'zzdc_parent_id', 'cascade');
 	rule_row($db, 'zzdel_null_child',    'zzdn_parent_id', 'null');
@@ -163,6 +183,47 @@ try {
 	$null_rows = $db->prepare("SELECT COUNT(*) FROM zzdel_null_child WHERE zzdn_parent_id IS NULL");
 	$null_rows->execute();
 	check((int)$null_rows->fetchColumn() === 2, 'null children had their foreign key set to NULL');
+
+	// -------------------------------------------------------------------------
+	section('an unrecognised action is refused, never silently skipped');
+
+	// A typo'd action used to fall through the switch: the dependents were left
+	// alone and the parent was deleted anyway, so a misspelled 'prevent' would
+	// permit the very deletion it was written to block.
+	$db->exec("INSERT INTO zzdel_parent DEFAULT VALUES");
+	$bogus_parent_id = (int)$db->lastInsertId('zzdel_parent_zzdp_id_seq');
+	$db->prepare("INSERT INTO zzdel_bogus_child (zzdb_parent_id) VALUES (?), (?)")
+		->execute(array($bogus_parent_id, $bogus_parent_id));
+	rule_row($db, 'zzdel_bogus_child', 'zzdb_parent_id', 'restrict'); // not a valid action
+
+	$bogus_parent = new ZZDelParentModel(NULL);
+	$bogus_parent->key = $bogus_parent_id;
+
+	$dry3 = $bogus_parent->permanent_delete_dry_run();
+	check($dry3['can_delete'] === false, 'dry run refuses to clear a rule with an unknown action');
+	check(count(array_filter($dry3['blocking_reasons'], function ($r) { return stripos($r, 'unknown deletion action') !== false; })) > 0,
+		'dry run names the unknown action in its blocking reason', json_encode($dry3['blocking_reasons']));
+
+	$bogus_threw = false;
+	try {
+		$bogus_parent->permanent_delete();
+	} catch (\Throwable $e) {
+		$bogus_threw = stripos($e->getMessage(), 'unknown deletion action') !== false;
+	}
+	check($bogus_threw, 'permanent_delete throws on an unknown action rather than no-opping');
+	check(count_where($db, 'zzdel_parent', 'zzdp_id', $bogus_parent_id) === 1,
+		'parent survives — the bad rule did not let the delete through');
+	check(count_where($db, 'zzdel_bogus_child', 'zzdb_parent_id', $bogus_parent_id) === 2,
+		'dependents of the bad rule are untouched');
+
+	// Registration refuses the same name, so it can never reach the rules table.
+	$reg_warnings = DeletionRule::registerModelRules('ZZDelBogusActionModel');
+	check(count(array_filter($reg_warnings, function ($w) { return stripos($w, 'unknown action') !== false; })) > 0,
+		'registerModelRules warns instead of registering an unknown action', json_encode($reg_warnings));
+	$registered_bogus = (int)$db->query(
+		"SELECT COUNT(*) FROM del_deletion_rules WHERE del_target_table='zzdel_bogus_child'"
+	)->fetchColumn();
+	check($registered_bogus === 0, 'no rule row was written for the unknown action', "found $registered_bogus");
 
 	// -------------------------------------------------------------------------
 	section('permanent_delete action recurses multi-level through real models');

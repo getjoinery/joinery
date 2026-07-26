@@ -40,7 +40,8 @@ class InboundImapFolder extends SystemBase {
 	const ROLE_CUSTOM  = 'custom';
 
 	protected static $foreign_key_actions = array(
-		'iif_iia_inbound_imap_account_id' => array('action' => 'cascade'),
+		// permanent_delete, not cascade: a folder owns its label memberships.
+		'iif_iia_inbound_imap_account_id' => array('action' => 'permanent_delete'),
 	);
 
 	public static $field_specifications = array(

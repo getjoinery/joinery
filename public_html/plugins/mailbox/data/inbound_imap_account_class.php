@@ -113,7 +113,9 @@ class InboundImapAccount extends SystemBase {
 	}
 
 	protected static $foreign_key_actions = array(
-		'iia_iea_inbound_email_alias_id' => array('action' => 'cascade'),
+		// permanent_delete, not cascade: a feed owns its folder rows, which in
+		// turn own label memberships.
+		'iia_iea_inbound_email_alias_id' => array('action' => 'permanent_delete'),
 	);
 
 	public static $field_specifications = array(
