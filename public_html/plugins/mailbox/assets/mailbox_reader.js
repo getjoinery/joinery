@@ -320,10 +320,23 @@
 		state.spamView = false;
 		state.mailboxLabel = label || 'All mail';
 		$('#mbx-list-title').textContent = state.mailboxLabel;
+		updateSetupLink();
 		highlightMailbox();
 		highlightDrafts();
 		renderFolderRail();
 		loadThreads(true);
+	}
+
+	// The Setup link points at whichever single mailbox is open. It is hidden for
+	// the aggregate views (All mail, Drafts, Contacts), which have no one mailbox
+	// to check, and absent entirely on the member mount where setUpUrlBase is
+	// null — mail setup is operator work.
+	function updateSetupLink() {
+		var link = $('#mbx-setup');
+		if (!link) return;
+		var show = !!CFG.setupUrlBase && !!state.aliasId && !state.draftsView && !state.contactsView;
+		link.hidden = !show;
+		if (show) link.setAttribute('href', CFG.setupUrlBase + encodeURIComponent(state.aliasId));
 	}
 
 	// The Drafts pseudo-mailbox: list the viewer's saved drafts (server-scoped to
@@ -338,6 +351,7 @@
 		state.spamView = false;
 		state.mailboxLabel = 'Drafts';
 		$('#mbx-list-title').textContent = 'Drafts';
+		updateSetupLink();
 		var prior = $('#mbx-folder-rail');
 		if (prior) prior.parentNode.removeChild(prior);
 		highlightMailbox();
@@ -1468,6 +1482,7 @@
 		state.draftsView = false;
 		state.mailboxLabel = 'Contacts';
 		$('#mbx-list-title').textContent = 'Contacts';
+		updateSetupLink();
 		var prior = $('#mbx-folder-rail');
 		if (prior) prior.parentNode.removeChild(prior);
 		highlightMailbox();

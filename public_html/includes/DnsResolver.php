@@ -14,7 +14,7 @@
  * DnsAuthChecker and every other consumer testable. Production code never
  * touches it.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsLookupException.php'));
@@ -114,6 +114,28 @@ class DnsResolver {
             if (!empty($r['target'])) { return $r['target']; }
         }
         return null;
+    }
+
+    /**
+     * CAA records for a name, each in the canonical presentation form
+     * (`0 issue "letsencrypt.org"`).
+     *
+     * A wrong or missing CAA record blocks certificate issuance in the same
+     * silent way a missing challenge record does, so the DNS reconciler treats
+     * CAA as part of the record vocabulary and needs to read it here.
+     *
+     * @param string $name
+     * @return string[]
+     * @throws DnsLookupException on resolver failure.
+     */
+    public static function getCaa($name) {
+        $caa = [];
+        foreach (self::rawLookup($name, DNS_CAA) as $r) {
+            if (!isset($r['value'])) { continue; }
+            $caa[] = (int)($r['flags'] ?? 0) . ' ' . strtolower((string)($r['tag'] ?? 'issue'))
+                . ' "' . trim((string)$r['value'], '"') . '"';
+        }
+        return $caa;
     }
 
     /**

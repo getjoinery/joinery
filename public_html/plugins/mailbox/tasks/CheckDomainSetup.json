@@ -1,0 +1,5 @@
+{
+  "name": "Check inbound domain DNS setup",
+  "description": "Runs the per-domain DNS checks (MX, SPF, DKIM, DMARC) against every enabled inbound domain and stores a verdict on the domain row, so the Accounts page can badge a domain that needs attention without doing DNS lookups on every page load. Only REQUIRED failures flag a domain; a check the resolver could not answer is never counted as a failure. The verdict is a navigation hint — the Setup tab re-checks everything live and remains the authority.",
+  "default_frequency": "daily"
+}

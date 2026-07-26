@@ -16,7 +16,7 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  * plugin, enable SRS, register a domain, or apply a one-click fix — each writes
  * through a model and redirects so the next render reads fresh settings.
  *
- * @version 2.3
+ * @version 2.6
  */
 function admin_mailbox_setup_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -51,6 +51,17 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	$base = '/plugins/mailbox/admin/admin_mailbox_setup';
 	$selected_alias_id = isset($input['alias_id']) ? (int)$input['alias_id'] : 0;
 	$advanced = !empty($input['advanced']);
+
+	// DNS publish actions (specs/dns_record_management.md). Handled before the
+	// setting saves below so a publish never also writes the hostname form.
+	require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
+	$dns_return_url = $base . ($selected_alias_id ? '?alias_id=' . (int)$selected_alias_id : '');
+	$dns_redirect = DnsPublishBox::handle($input, function () use ($input, $selected_alias_id) {
+		return _setup_dns_plan_for_alias($selected_alias_id);
+	}, $dns_return_url);
+	if ($dns_redirect !== null) {
+		return $dns_redirect;
+	}
 
 	// Build a redirect URL that keeps the chosen mailbox and the advanced state,
 	// so a POST action returns the operator to exactly where they were.
@@ -129,7 +140,10 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 					$announce('Could not add domain: ' . $e->getMessage(), 'Error');
 				}
 			}
-			return LogicResult::redirect($redirect_url);
+			// Land on the publish box with the diff already on screen: adding a
+			// domain should leave exactly the decisions that deserve a human,
+			// not a checklist to go and find.
+			return LogicResult::redirect(DnsPublishBox::urlWith($redirect_url, array('dns_show' => '1')));
 		}
 	}
 
@@ -162,9 +176,13 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		}
 	}
 
-	// Default to the first mailbox so the page is never an empty shell.
+	// No mailbox is chosen by default. Every check below costs DNS lookups and
+	// host probes, and running a full suite against an arbitrary first mailbox
+	// is work nobody asked for — the page waits to be told what to check.
+	// An alias_id that no longer resolves falls back to unchosen rather than
+	// silently checking something else.
 	if (!isset($mailbox_options[$selected_alias_id])) {
-		$selected_alias_id = $mailbox_options ? (int)array_key_first($mailbox_options) : 0;
+		$selected_alias_id = 0;
 	}
 
 	// --- Inbound provider (global) — needed for arrival shape + Advanced ---
@@ -220,10 +238,24 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 					$forwarding_rows[] = $r;
 				} elseif (!$forwards && _setup_is_sending_row($r)) {
 					$forwarding_rows[] = $r;
-				} elseif (_setup_is_receiving_row($r)) {
+				} elseif (_setup_is_receiving_row($r, $focus_domain)) {
 					$receiving_rows[] = $r;
 				}
 			}
+		}
+
+		// The relay reads as two cards among the checks — one per side of the
+		// mail path — rather than a section of its own above everything. Grey
+		// and optional until a relay exists; its health once one does. The
+		// receiving card only applies to mail this deployment actually receives,
+		// so an IMAP-pull mailbox gets the sending card alone.
+		$relay_cards = admin_mailbox_relay_check_rows(
+			$state_qs(array('advanced' => true)) . '#relay-section');
+		if ($arrival !== 'imap' && $relay_cards['receiving'] !== null) {
+			$receiving_rows[] = $relay_cards['receiving'];
+		}
+		if ($relay_cards['sending'] !== null) {
+			$forwarding_rows[] = $relay_cards['sending'];
 		}
 	}
 
@@ -272,17 +304,43 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 
 	// The Relay section renders whenever the deployment's receive mode is
 	// relay, or a relay row exists whatever the stored choice says.
+	// Also assembled whenever Advanced is open, so the relay cards' "Go to relay
+	// setup" always lands on something. A deployment that chose direct receive
+	// and has no relay would otherwise be invited to set one up and find no form.
 	$relay_section = null;
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/listener_admin.php'));
-	if (mailbox_receive_mode() === 'relay' || mailbox_receive_relay_exists()
+	if ($advanced || mailbox_receive_mode() === 'relay' || mailbox_receive_relay_exists()
 			|| mailbox_listener_setting() === 'decommissioned') {
 		$relay_section = admin_mailbox_relay_tenant_vars();
 	}
 
+	// The DNS publish box: the plan for the focused domain, plus whatever state
+	// the box is in. Costs one plan build and (only when the diff is on screen)
+	// a handful of credential-free public DNS lookups.
+	// The box's forms post back to a URL carrying the RESOLVED mailbox, not the
+	// one the request arrived with — otherwise a page loaded without ?alias_id
+	// would post back without it and the handler would have no domain to plan for.
+	$dns_box = DnsPublishBox::build(
+		($focus_domain !== '' && $arrival !== 'imap') ? $checker->dnsPlan($focus_domain) : null,
+		$input,
+		$base . ($selected_alias_id ? '?alias_id=' . (int)$selected_alias_id : '')
+	);
+
+	// Where the publish box belongs: up front while there is DNS to fix, behind
+	// Advanced once there is not. A domain whose records are all correct should
+	// not be led with an invitation to configure them — the page already knows
+	// they are correct, because the checks it just rendered say so. Asking for
+	// the diff explicitly always keeps the box in view, so pressing the button
+	// never makes it jump somewhere else.
+	$dns_box_in_advanced = !_setup_has_dns_work($receiving_rows, $forwarding_rows)
+		&& empty($input['dns_show']);
+
 	return LogicResult::render(array(
+		'dns_box_in_advanced'        => $dns_box_in_advanced,
 		'session'                    => $session,
 		'settings'                   => $settings,
 		'base'                       => $base,
+		'dns_box'                    => $dns_box,
 		'relay_section'              => $relay_section,
 		// Mailbox-first view
 		'mailbox_options'            => $mailbox_options,
@@ -317,6 +375,48 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 }
 
 /**
+ * Does any rendered check still want a DNS record published?
+ *
+ * The check rows carry the prescription itself (`fix.dns_record`), and a passing
+ * row carries none — so "is there DNS work" is answerable from what the page
+ * already computed, with no extra lookups and no second opinion that could
+ * disagree with the checks the operator is looking at.
+ *
+ * @param array[] ...$groups Row lists.
+ */
+function _setup_has_dns_work(array ...$groups): bool {
+	foreach ($groups as $rows) {
+		foreach ($rows as $r) {
+			if (!empty($r['fix']['dns_record'])) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+/**
+ * The DNS plan for the domain behind one mailbox, for the publish box's action
+ * handler — which runs before the page has resolved anything and must not pay
+ * for the whole mailbox index to find one domain.
+ */
+function _setup_dns_plan_for_alias(int $alias_id): ?DnsRecordPlan {
+	if ($alias_id <= 0) {
+		return null;
+	}
+	$alias = new InboundEmailAlias($alias_id, TRUE);
+	if (!$alias->key) {
+		return null;
+	}
+	$domain = new InboundEmailDomain($alias->get('iea_ied_inbound_email_domain_id'), TRUE);
+	$name = strtolower(trim((string)$domain->get('ied_domain')));
+	if ($name === '' || $domain->get('ied_is_imap_source')) {
+		return null;   // an IMAP-pull mailbox has no MX/host stack to publish
+	}
+	return (new InboundEmailSetupCheck())->dnsPlan($name);
+}
+
+/**
  * Forwarding (outbound) rows: the relay, SRS, and DKIM signing — the only
  * checks that matter when a mailbox forwards mail back out.
  */
@@ -338,15 +438,51 @@ function _setup_is_sending_row(array $r): bool {
  * Receiving rows for a mailbox: the domain's inbound DNS (including the
  * fleet ownership proof), the inbound-auth verifier, that the plugin is on,
  * the relay cutover-completion row, that the alias resolves, and the
- * end-to-end proof. Server-internal host/mailhost rows are intentionally
- * excluded — they live in the Advanced server view.
+ * end-to-end proof. Server-internal host/mailhost rows are otherwise excluded —
+ * they live in the Advanced server view.
+ *
+ * The exception is the mail host's own A record. When the mail hostname sits
+ * inside the focused domain (mail.example.com under example.com), that record is
+ * one this domain's owner has to publish in the same zone as its MX and SPF, so
+ * it belongs beside them rather than behind a disclosure. Both rows come along:
+ * one says the record exists, the other says it points at the right server —
+ * an A record resolving to somebody else's address is a distinct failure and
+ * hiding it would be the silent-wrong-answer this page exists to prevent.
+ *
+ * A mail host outside the domain (a shared devmail.example.net, a relay in the
+ * operator's zone) stays in Advanced: it is not this domain owner's record.
  */
-function _setup_is_receiving_row(array $r): bool {
+function _setup_is_receiving_row(array $r, string $focus_domain = ''): bool {
 	if ($r['id'] === 'domain.dkim') { return false; }      // DKIM signing is outbound
 	if ($r['layer'] === 'domain')   { return true; }
 	if ($r['layer'] === 'address')  { return true; }
 	if ($r['layer'] === 'e2e')      { return true; }
-	return in_array($r['id'], array('plugin.enabled', 'host.inbound_verification', 'plugin.relay_enable'), true);
+	if (in_array($r['id'], array('mailhost.a_record', 'mailhost.a_matches_ip'), true)) {
+		return _setup_row_is_in_zone($r, $focus_domain);
+	}
+	// 'plugin.relay_enable' (Relay cutover) is deliberately absent: it is a
+	// DEPLOYMENT-WIDE roll-up that reports the first domain whose MX has not
+	// moved yet, so inside "Receiving — info@example.com" it reads as a verdict
+	// on that mailbox while actually describing a different domain entirely.
+	// The per-domain question it looks like it answers is already answered
+	// properly one row above by 'domain.mx'. The roll-up lives in Advanced with
+	// the other server-wide facts.
+	return in_array($r['id'], array('plugin.enabled', 'host.inbound_verification'), true);
+}
+
+/**
+ * Is the hostname a check row is about inside the focused domain's own zone?
+ * Mailhost rows carry that hostname in their scope, so this works whether the
+ * row passed or failed — a card that vanished once it went green would be worse
+ * than one that was never there.
+ */
+function _setup_row_is_in_zone(array $r, string $focus_domain): bool {
+	$host = strtolower(rtrim(trim((string)($r['scope'] ?? '')), '.'));
+	$domain = strtolower(rtrim(trim($focus_domain), '.'));
+	if ($host === '' || $domain === '') {
+		return false;
+	}
+	return $host === $domain || substr($host, -(strlen($domain) + 1)) === '.' . $domain;
 }
 
 /**

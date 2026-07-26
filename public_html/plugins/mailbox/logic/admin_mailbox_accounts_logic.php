@@ -11,7 +11,7 @@
  * through the existing per-object editors (domain, alias, IMAP) which highlight
  * the Accounts tab.
  *
- * @version 1.3
+ * @version 1.4
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -103,10 +103,17 @@ function admin_mailbox_accounts_logic(array $input): LogicResult {
 		}
 	}
 
+	// "This mailbox looks unfinished" hints (specs/mailbox_setup_verdicts.md).
+	// Deliberately cheap: free domain-row signals, two bounded arrival queries,
+	// and whatever verdict the scheduled task last stored — never a live check.
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/mailbox_setup_hints.php'));
+	$setup_hints = mailbox_setup_hints($tree);
+
 	return LogicResult::render(array(
 		'session'            => $session,
 		'settings'           => $settings,
 		'tree'               => $tree,
+		'setup_hints'        => $setup_hints,
 		'deleted_domains'    => $deleted_domains,
 		'can_imap'           => $can_imap,
 		'presets'            => InboundImapAccount::PRESETS,

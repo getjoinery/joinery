@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.5 - DNS publish box above the Reverse DNS panel
  * @version 1.4 - Permanently Delete Entry: when offsite backups still exist for the slug, the menu item
  *                shows a "removal not allowed" alert up front instead of the type-to-confirm box
  * @version 1.3 - Danger Zone onclick values are htmlspecialchars(json_encode(), ENT_QUOTES) — a raw
@@ -580,6 +581,15 @@
 
 	echo '</tbody></table>';
 	$page->end_box();
+
+	// ── DNS publish box ──
+	// Above Reverse DNS deliberately: a provider only accepts a PTR once the
+	// forward record it names already resolves, so the forward record is the
+	// step that comes first.
+	if (!empty($dns_box)) {
+		require_once(PathHelper::getIncludePath('includes/dns/dns_publish_box.php'));
+		dns_publish_box_render($page, $dns_box);
+	}
 
 	// ── Reverse DNS panel (cloud-born nodes only) ──
 	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeReverseDns.php'));

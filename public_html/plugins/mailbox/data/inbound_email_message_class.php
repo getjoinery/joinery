@@ -282,6 +282,22 @@ class InboundEmailMessage extends SystemBase {
 		'iem_delete_time'         => array('type'=>'timestamp(6)'),
 	);
 
+	/**
+	 * "Has mail ever arrived for this address" — the Setup tab's end-to-end check
+	 * and the Accounts listing's badge both ask it, and both must filter on
+	 * lower(iem_recipient) because stored addresses are genuinely mixed-case.
+	 * A plain btree on the raw column cannot serve that, so this is an
+	 * expression index.
+	 *
+	 * Partial on inbound, which is both smaller and semantically right:
+	 * iem_recipient is the plain routing address only on an inbound row. On a
+	 * composed row (outbound or draft) it is sealed content, and indexing
+	 * ciphertext by lower() would be meaningless.
+	 */
+	public static $index_specifications = array(
+		array('columns' => array('LOWER(iem_recipient)'), 'where' => "iem_direction = 'inbound'"),
+	);
+
 	function authenticate_write($data) {
 		if ($data['current_user_permission'] < 5) {
 			throw new SystemAuthenticationError(

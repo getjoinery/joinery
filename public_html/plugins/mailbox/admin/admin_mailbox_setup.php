@@ -10,7 +10,7 @@
  * full Postfix/relay health run — live behind the Advanced disclosure so they
  * don't clutter the per-mailbox view.
  *
- * @version 2.4
+ * @version 2.6
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -43,13 +43,10 @@ if (mailbox_receive_mode() === '') {
 	return;
 }
 
-// Relay section — present whenever the deployment receives through a relay
-// (or a relay row exists). Renders above the mailbox picker: the relay is
-// server-wide and gates every domain's DNS below it.
-if (!empty($relay_section)) {
-	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/relay_section.php'));
-	mailbox_relay_section_render($page, $relay_section);
-}
+// The relay's setup and lifecycle machinery lives in Advanced, with the rest of
+// the server-wide plumbing. Its STATE reads as a card in Receiving and one in
+// Sending, so the common path sees the relay where the relay matters instead of
+// a provisioning panel above every page.
 
 // The per-check "Details & how to fix" disclosure reads as a link, not a field.
 
@@ -62,8 +59,13 @@ $status_badge = function ($status) {
 		case InboundEmailSetupCheck::PASS:    return '<span class="badge bg-success">PASS</span>';
 		case InboundEmailSetupCheck::FAIL:    return '<span class="badge bg-danger">FAIL</span>';
 		case InboundEmailSetupCheck::WARN:    return '<span class="badge bg-warning text-dark">WARN</span>';
-		case InboundEmailSetupCheck::INFO:    return '<span class="badge bg-info text-dark">INFO</span>';
-		default:                              return '<span class="badge bg-secondary">UNKNOWN</span>';
+		// badge-info / badge-secondary, not bg-*: the admin theme colours badges
+		// through .badge-{variant} and defines no .bg-info or .bg-secondary, so
+		// those two rendered as unstyled text.
+		case InboundEmailSetupCheck::INFO:    return '<span class="badge badge-info">INFO</span>';
+		// Grey, because nothing is wrong: a capability nobody turned on.
+		case InboundEmailSetupCheck::OPTIONAL: return '<span class="badge badge-secondary">OPTIONAL</span>';
+		default:                              return '<span class="badge badge-secondary">UNKNOWN</span>';
 	}
 };
 
@@ -89,6 +91,11 @@ $render_fix = function ($fix) use ($address) {
 		echo '<td>' . PublicPageBase::copy_field($rec['value']) . '</td>';
 		echo '</tr></tbody></table>';
 	}
+	if (!empty($fix['link'])) {
+		echo '<p class="mb-2"><a class="btn btn-sm btn-outline-secondary" href="'
+			. htmlspecialchars($fix['link']['url']) . '">'
+			. htmlspecialchars($fix['link']['label']) . '</a></p>';
+	}
 	if (!empty($fix['action'])) {
 		$act = $fix['action'];
 		echo '<form method="post" class="mb-1">';
@@ -112,8 +119,11 @@ $render_check = function ($c) use ($status_badge, $render_fix) {
 		: ($c['status'] === InboundEmailSetupCheck::INFO ? 'border-info' : 'border-secondary')));
 	echo '<div class="card mb-2 ' . $border . '"><div class="card-body py-2">';
 	echo '<div>' . $status_badge($c['status']) . ' <strong>' . htmlspecialchars($c['label']) . '</strong>';
-	if ($c['severity'] === InboundEmailSetupCheck::RECOMMENDED) {
-		echo ' <span class="badge bg-light text-dark">recommended</span>';
+	// "OPTIONAL recommended" contradicts itself — the grey badge already says
+	// there is nothing to do here.
+	if ($c['severity'] === InboundEmailSetupCheck::RECOMMENDED
+			&& $c['status'] !== InboundEmailSetupCheck::OPTIONAL) {
+		echo ' <span class="badge badge-subtle-secondary">recommended</span>';
 	}
 	echo '</div>';
 	echo '<div class="mt-1">' . htmlspecialchars($c['summary']) . '</div>';
@@ -139,12 +149,17 @@ if (empty($mailbox_options)) {
 } else {
 	$mbform = $page->getFormWriter('mbform', array('method' => 'GET', 'action' => $base));
 	echo $mbform->begin_form();
+	// The empty first option is the default state: checking a mailbox is real
+	// work (DNS lookups, host probes), so the page does none until asked.
 	$mbform->dropinput('alias_id', 'Mailbox to check', array(
-		'options' => $mailbox_options,
-		'value'   => $selected_alias_id,
+		'options' => array('' => 'Choose a mailbox…') + $mailbox_options,
+		'value'   => $selected_alias_id ?: '',
 	));
 	$mbform->submitbutton('btn_view', 'Check this mailbox');
 	echo $mbform->end_form();
+	if (!$selected) {
+		echo '<p class="text-muted small mb-0">Pick a mailbox to check how it receives and sends mail.</p>';
+	}
 }
 $page->end_box();
 
@@ -154,9 +169,6 @@ $page->end_box();
 if ($selected) {
 	$arrival_label = $arrival === 'imap' ? 'pulled by IMAP'
 		: ($arrival === 'webhook' ? 'received via webhook provider' : 'received by this mail server');
-
-	$recheck_url = $base . '?alias_id=' . (int)$selected_alias_id;
-	echo '<p><a href="' . htmlspecialchars($recheck_url) . '" class="btn btn-sm btn-outline-secondary">Re-check</a></p>';
 
 	// ---- Guided setup for this domain's security level (Phase 3) ----
 	// Standard needs nothing beyond the checks below; Private and Fortress add the
@@ -204,6 +216,15 @@ if ($selected) {
 		$page->end_box();
 	}
 
+	// The DNS publish box: everything below this point is a check, and this is
+	// the one control that can make those checks pass without leaving the page.
+	// Once there is no DNS left to fix it moves to Advanced — a finished domain
+	// should not be led with an offer to configure it.
+	if (!empty($dns_box) && empty($dns_box_in_advanced)) {
+		require_once(PathHelper::getIncludePath('includes/dns/dns_publish_box.php'));
+		dns_publish_box_render($page, $dns_box);
+	}
+
 	$page->begin_box(array('title' => 'Receiving — ' . $address));
 	echo '<p class="text-muted small mb-3">Mail for this address is ' . htmlspecialchars($arrival_label) . '.</p>';
 	if (empty($receiving_rows)) {
@@ -239,6 +260,14 @@ if (!$advanced) {
 	echo '<h4 class="mb-1">Advanced server setup</h4>';
 	echo '<p class="text-muted small mb-3">Server-wide settings and the full inbound health run — shared by every hosted mailbox. '
 		. '<a href="' . htmlspecialchars($adv_base) . '">Hide advanced</a></p>';
+
+	// --- Relay ---
+	// Server-wide, and mostly provisioning: the cards above report its state,
+	// this is where one is set up, rebuilt, enabled or removed.
+	if (!empty($relay_section)) {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/relay_section.php'));
+		mailbox_relay_section_render($page, $relay_section);
+	}
 
 	// --- Inbound provider ---
 	$page->begin_box(array('title' => 'Inbound provider'));
@@ -280,6 +309,13 @@ if (!$advanced) {
 	$formwriter->submitbutton('btn_save', 'Save & Run Checks');
 	echo $formwriter->end_form();
 	$page->end_box();
+
+	// --- DNS publish box, once there is nothing left to fix ---
+	// Above the copy-paste table, which is the manual version of the same thing.
+	if (!empty($dns_box) && !empty($dns_box_in_advanced)) {
+		require_once(PathHelper::getIncludePath('includes/dns/dns_publish_box.php'));
+		dns_publish_box_render($page, $dns_box);
+	}
 
 	// --- Provider-supplied DNS records for the focused domain ---
 	if (!empty($dns_records) && $focus_domain !== '') {

@@ -9,7 +9,7 @@
  * includes/, not views/, so a partial is never reachable as a standalone URL
  * that would bypass this file's node loading and check_permission(10).
  *
- * @version 2.0
+ * @version 2.1
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -65,6 +65,21 @@ if ($redirect !== null) {
 	header('Location: ' . $redirect);
 	exit;
 }
+
+// ── DNS publish actions (specs/dns_record_management.md) ──
+// The node's site A record — the one certificate issuance waits on — is
+// publishable through the shared box instead of hand-typed into a dashboard.
+require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeDnsPlan.php'));
+$dns_return_url = $base_url . '&tab=overview';
+$dns_result = DnsPublishBox::handle(array_merge($_GET, $_POST), function () use ($node) {
+	return NodeDnsPlan::forNode($node);
+}, $dns_return_url);
+if ($dns_result !== null && $dns_result->redirect !== null) {
+	header('Location: ' . $dns_result->redirect);
+	exit;
+}
+$dns_box = DnsPublishBox::build(NodeDnsPlan::forNode($node), array_merge($_GET, $_POST), $dns_return_url);
 
 // ── Page rendering ──
 

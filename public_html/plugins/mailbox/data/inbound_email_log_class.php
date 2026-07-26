@@ -52,6 +52,16 @@ class InboundEmailLog extends SystemBase {
 	);
 
 	/**
+	 * Serves the "has mail ever arrived for this address" lookups on the Setup
+	 * tab and the Accounts listing. Both filter on lower(iel_to_address) —
+	 * stored addresses are genuinely mixed-case — which a plain btree on the raw
+	 * column cannot answer, hence an expression index.
+	 */
+	public static $index_specifications = array(
+		array('columns' => array('LOWER(iel_to_address)')),
+	);
+
+	/**
 	 * Create a log entry from inbound email data.
 	 *
 	 * @param mixed $alias_id Alias id (int) or null. Catch-all stores have no alias.

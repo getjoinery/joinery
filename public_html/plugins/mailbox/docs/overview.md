@@ -615,6 +615,56 @@ The **Outbound forwarding relay** check on the Setup tab verifies the
 credential is configured (so a healthy API key reads PASS even with empty
 `smtp_*`); on the SMTP fallback path it connects to the SMTP relay and closes.
 
+## Knowing a mailbox is unfinished
+
+The Setup tab tells you whether a mailbox is configured correctly, but only if
+you go and ask it. The Accounts listing badges the ones worth asking about, so a
+half-finished mailbox does not sit broken until somebody happens to open the
+page that would have said so.
+
+A badge is a **navigation hint, not a verdict**. It says go and look; the Setup
+tab re-runs everything live and is the only thing that claims a domain is
+correct or broken. That is why the copy reads *needs attention* rather than
+*broken*, and why nothing else in the platform reads these signals — they never
+gate sending, provisioning or cutover.
+
+Three signals feed it, tiered by cost, assembled in
+`plugins/mailbox/includes/mailbox_setup_hints.php`:
+
+| Tier | Signal | Cost |
+|---|---|---|
+| Free | Fortress domain whose protect ceremony never ran; protected domain with no sealed signing key; domain switched off | Already on the loaded row |
+| One query | No mail has ever arrived at this address | Two lookups bounded by the mailboxes on screen |
+| Persisted | A required DNS record was missing when last checked | A column read |
+
+The arrival lookup asks both `iel_inbound_email_logs` and
+`iem_inbound_email_messages`, because the colocated path writes a transaction row
+per message while the relay path stores the message and writes none — asking
+only the log would report a relay deployment's whole estate as having never
+received anything. It filters `iem_direction = 'inbound'`, since `iem_recipient`
+is a plain routing address only on an inbound row; on a composed row it is sealed
+content. Both tables carry a `LOWER()` expression index for these queries:
+stored addresses are genuinely mixed-case, so a plain index on the raw column
+would not be used.
+
+The persisted tier comes from the **Check inbound domain DNS setup** scheduled
+task (`CheckDomainSetup`, daily), which runs the DNS-only check entry point
+against each enabled non-IMAP domain and stores `ied_setup_status` plus
+`ied_setup_checked_time`. Two rules keep it worth reading:
+
+- **Only a required failure flags a domain.** A missing DMARC record is graded
+  *recommended* — real advice, but a domain receiving mail perfectly well should
+  not wear a badge saying otherwise.
+- **A check that could not run is not a failure.** An unanswered resolver would
+  otherwise make every badge flap with the first DNS hiccup, and flapping badges
+  get ignored. When nothing could be evaluated at all the previous verdict is
+  left alone rather than overwritten with an absence of information.
+
+A stored verdict older than seven days is not displayed: pointing at a domain
+that was fixed last week wastes exactly the attention the badge is buying.
+
+See `specs/mailbox_setup_verdicts.md`.
+
 ## Testing
 
 Test without Postfix by piping raw email to the handler:

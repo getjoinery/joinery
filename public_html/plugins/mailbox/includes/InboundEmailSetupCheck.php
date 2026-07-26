@@ -23,7 +23,7 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
- * @version 1.24
+ * @version 1.26
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -42,6 +42,10 @@ class InboundEmailSetupCheck {
 	// without the pass/warn/fail traffic-light alarm. Introduced for the
 	// inbound-verification capability check (configured but not yet confirmed).
 	const INFO = 'info';
+	// OPTIONAL is a capability nobody has turned on: correct as it stands, and
+	// nothing to do unless the operator wants it. Grey, so it never reads as an
+	// unfinished task the way a warning does. The relay's Setup cards use it.
+	const OPTIONAL = 'optional';
 
 	// severity values
 	const REQUIRED = 'required';
@@ -276,6 +280,163 @@ class InboundEmailSetupCheck {
 	}
 	public function checkMailHostLayer() {
 		return $this->checkMailHost();
+	}
+
+	/**
+	 * Every DNS record this deployment wants for one domain, as a plan the core
+	 * DNS reconciler can publish (specs/dns_record_management.md).
+	 *
+	 * The prescriptions are not restated here — they are harvested from the very
+	 * checks the Setup tab renders, so the plan and the copy-paste instructions
+	 * can never disagree, and every topology and security-level branch above
+	 * (relay vs colocated, protected vs ambient, fleet ownership proofs) reaches
+	 * the plan for free.
+	 *
+	 * Only records inside the domain's own zone are included: a fleet relay's
+	 * A record lives in the operator's zone, not the tenant's, and a plan that
+	 * reached across zones would ask a credential to write somewhere it has no
+	 * business.
+	 */
+	public function dnsPlan($domain) {
+		require_once(PathHelper::getIncludePath('includes/dns/DnsRecordPlan.php'));
+		$domain = strtolower(trim((string)$domain));
+		$plan = new DnsRecordPlan($domain, 'mailbox');
+		if ($domain === '') {
+			return $plan;
+		}
+
+		$model = InboundEmailDomain::GetByDomain($domain);
+		$fronted = $this->fronted();
+		$topology = $this->topology();
+
+		// MX — the relay when one fronts the deployment, this server otherwise.
+		$mx_target = $fronted ? $topology['mx_hostname'] : $this->mailHostname;
+		$this->planAdd($plan, 'MX', $domain, $mx_target, 10,
+			$fronted ? 'Routes inbound mail for ' . $domain . ' to the relay.'
+			         : 'Routes inbound mail for ' . $domain . ' to this server.');
+
+		// The mail host's own address record, but only when that host lives
+		// inside this domain's zone — a relay's A record belongs to whoever runs
+		// the relay, and a plan that reached across zones would ask a credential
+		// to write somewhere it has no business.
+		if (!$fronted && $this->mailHostname !== '' && $this->inZone($this->mailHostname, $domain)) {
+			$this->planAdd($plan, 'A', $this->mailHostname, $this->publicIp, null,
+				'Points the mail hostname at this server.');
+		}
+
+		$protected = ($model && ($model->is_protected_identity()
+			|| $model->security_level() === InboundEmailDomain::LEVEL_FORTRESS));
+
+		if ($protected) {
+			// The protected shape is INVERTED: SPF must not authorize the box,
+			// DMARC must be strict, DKIM comes from the in-app sealed key, and
+			// forwarding moves to its own subdomain.
+			$this->planAdd($plan, 'TXT', $domain, 'v=spf1 -all', null,
+				'SPF — a protected identity authorizes no ambient sender.');
+			$this->planAdd($plan, 'TXT', '_dmarc.' . $domain,
+				'v=DMARC1; p=reject; aspf=s; adkim=s; rua=mailto:postmaster@' . $domain, null,
+				'DMARC — strict alignment, so only the sealed key can send as this domain.');
+
+			$selector = trim((string)$model->get('ied_dkim_selector'));
+			$public   = trim((string)$model->get('ied_dkim_public_dns'));
+			if ($selector !== '' && $public !== '') {
+				$this->planAdd($plan, 'TXT', $selector . '._domainkey.' . $domain, $public, null,
+					'DKIM — the in-app sealed key\'s public half.');
+			}
+			$pending_selector = trim((string)$model->get('ied_dkim_pending_selector'));
+			$pending_public   = trim((string)$model->get('ied_dkim_pending_public_dns'));
+			if ($pending_selector !== '' && $pending_public !== '') {
+				$this->planAdd($plan, 'TXT', $pending_selector . '._domainkey.' . $domain, $pending_public, null,
+					'DKIM — the staged rotation key, published before it takes over.');
+			}
+
+			$sub = $model->forwarding_subdomain();
+			if ($sub !== '' && strcasecmp($sub, $domain) !== 0) {
+				$sender_ip = $fronted ? $topology['public_ip'] : $this->publicIp;
+				$fwd_mech = $fronted ? ''
+					: $this->providerMechanism($this->relayInfo()['provider_class'], $domain);
+				if ($sender_ip !== '') {
+					$this->planAdd($plan, 'TXT', $sub,
+						'v=spf1 ip4:' . $sender_ip . ($fwd_mech !== '' ? ' ' . $fwd_mech : '') . ' -all', null,
+						'SPF for the forwarding subdomain — forwarded mail still has to pass.');
+				}
+				$this->planAdd($plan, 'MX', $sub, $mx_target, 10,
+					'MX for the forwarding subdomain — bounce notices have to come back.');
+			}
+		} else {
+			$spf = $this->spfPlan($domain);
+			if ($spf['prescribe'] === 'record') {
+				$this->planAdd($plan, 'TXT', $domain, $spf['value'], null,
+					'SPF — authorizes ' . $spf['label'] . ' to send for ' . $domain . '.');
+			}
+
+			$dkim = $this->dkimPlan();
+			if (!empty($dkim['local'])) {
+				$local = $this->readDkimKey('/etc/opendkim/keys/' . $domain . '/mail.txt');
+				if ($local !== '') {
+					$this->planAdd($plan, 'TXT', 'mail._domainkey.' . $domain, $local, null,
+						'DKIM — matches the signing key on this server.');
+				}
+			}
+			if (!empty($dkim['provider']) && $dkim['class'] !== null) {
+				$status = $this->providerDkimStatus($dkim['class'], $domain);
+				foreach ((array)($status['records'] ?? array()) as $record) {
+					$this->planAdd($plan, (string)($record['type'] ?? 'TXT'),
+						(string)($record['name'] ?? ''), (string)($record['value'] ?? ''), null,
+						'DKIM — required by ' . $dkim['label'] . '.');
+				}
+			}
+
+			$this->planAdd($plan, 'TXT', '_dmarc.' . $domain,
+				'v=DMARC1; p=none; rua=mailto:postmaster@' . $domain, null,
+				'DMARC — reporting policy, recommended once SPF and DKIM pass.');
+		}
+
+		// A hosted fleet slot accepts no mail for a domain until its owner proves
+		// control, so the ownership challenge is part of the record set.
+		if ($topology['mode'] === 'fleet') {
+			$claim = $this->fleetClaimFor($domain);
+			if (is_array($claim) && !empty($claim['txt_host']) && !empty($claim['txt_value'])) {
+				$this->planAdd($plan, 'TXT', (string)$claim['txt_host'], (string)$claim['txt_value'], null,
+					'Proves you own ' . $domain . ' to the hosted relay.');
+			}
+		}
+
+		return $plan;
+	}
+
+	/**
+	 * Add one record to a plan, refusing anything the platform cannot honestly
+	 * publish: an empty value, a name outside the domain's own zone, or a
+	 * placeholder from a prescription the check could not complete (no public IP
+	 * yet, no relay hostname) — publishing one of those would write a literal
+	 * "YOUR_SERVER_IP" into someone's DNS.
+	 */
+	private function planAdd(DnsRecordPlan $plan, $type, $name, $value, $priority, $note) {
+		$name  = strtolower(rtrim(trim((string)$name), '.'));
+		$value = trim((string)$value);
+		if ($name === '' || $value === '' || strpos($value, 'YOUR_') !== false) {
+			return;
+		}
+		if (!$this->inZone($name, $plan->getDomain())) {
+			return;
+		}
+		try {
+			$plan->addRecord((string)$type, $name, $value, null,
+				$priority !== null ? (int)$priority : null, (string)$note);
+		} catch (\Throwable $e) {
+			// A type outside the platform's vocabulary is never published; the
+			// check row still renders it as copy-paste instructions.
+			error_log('InboundEmailSetupCheck::dnsPlan skipped a record for '
+				. $plan->getDomain() . ': ' . $e->getMessage());
+		}
+	}
+
+	/** Is $name the domain itself or a name beneath it? */
+	private function inZone($name, $domain) {
+		$name = strtolower(rtrim(trim((string)$name), '.'));
+		$domain = strtolower(rtrim(trim((string)$domain), '.'));
+		return $name === $domain || substr($name, -(strlen($domain) + 1)) === '.' . $domain;
 	}
 
 	/** Roll a result list up into a one-line summary: counts per status (required only for fail). */
@@ -673,7 +834,10 @@ class InboundEmailSetupCheck {
 			return $out;
 		}
 
-		// A record for the mail host.
+		// A record for the mail host. The SCOPE carries the hostname these rows
+		// are about, so a caller can tell whether the record falls inside a
+		// given domain's own zone — the Setup tab uses it to show the row
+		// alongside that domain's other DNS instead of burying it in Advanced.
 		if ($canonical === '') {
 			$out[] = $this->r('mailhost.a_record', '', 'mailhost', 'Mail host A record', self::REQUIRED, self::UNKNOWN,
 				'Cannot check — no mail hostname is configured yet.');
@@ -682,21 +846,21 @@ class InboundEmailSetupCheck {
 		} else {
 			list($aRecords, $aOk) = $this->dns(function () use ($canonical) { return DnsResolver::getA($canonical); });
 			if (!$aOk) {
-				$out[] = $this->r('mailhost.a_record', '', 'mailhost', 'Mail host A record', self::REQUIRED, self::UNKNOWN,
+				$out[] = $this->r('mailhost.a_record', $canonical, 'mailhost', 'Mail host A record', self::REQUIRED, self::UNKNOWN,
 					'DNS lookup for ' . $canonical . ' failed — try again.');
-				$out[] = $this->r('mailhost.a_matches_ip', '', 'mailhost', 'Mail host A record points here', self::REQUIRED, self::UNKNOWN,
+				$out[] = $this->r('mailhost.a_matches_ip', $canonical, 'mailhost', 'Mail host A record points here', self::REQUIRED, self::UNKNOWN,
 					'DNS lookup for ' . $canonical . ' failed — try again.');
 			} elseif (empty($aRecords)) {
-				$out[] = $this->r('mailhost.a_record', '', 'mailhost', 'Mail host A record', self::REQUIRED, self::FAIL,
+				$out[] = $this->r('mailhost.a_record', $canonical, 'mailhost', 'Mail host A record', self::REQUIRED, self::FAIL,
 					$canonical . ' has no A record.', '',
 					$this->dnsFix('A', $canonical, $this->publicIp !== '' ? $this->publicIp : 'YOUR_SERVER_IP'));
-				$out[] = $this->r('mailhost.a_matches_ip', '', 'mailhost', 'Mail host A record points here', self::REQUIRED, self::FAIL,
+				$out[] = $this->r('mailhost.a_matches_ip', $canonical, 'mailhost', 'Mail host A record points here', self::REQUIRED, self::FAIL,
 					'No A record to compare against this server.', '',
 					$this->dnsFix('A', $canonical, $this->publicIp !== '' ? $this->publicIp : 'YOUR_SERVER_IP'));
 			} else {
-				$out[] = $this->r('mailhost.a_record', '', 'mailhost', 'Mail host A record', self::REQUIRED, self::PASS,
+				$out[] = $this->r('mailhost.a_record', $canonical, 'mailhost', 'Mail host A record', self::REQUIRED, self::PASS,
 					$canonical . ' resolves to ' . implode(', ', $aRecords) . '.');
-				$out[] = $this->ipMatchResult('mailhost.a_matches_ip', '', 'mailhost', 'Mail host A record points here',
+				$out[] = $this->ipMatchResult('mailhost.a_matches_ip', $canonical, 'mailhost', 'Mail host A record points here',
 					$aRecords, $canonical . "'s A record");
 			}
 		}
@@ -777,22 +941,22 @@ class InboundEmailSetupCheck {
 
 		list($aRecords, $aOk) = $this->dns(function () use ($host) { return DnsResolver::getA($host); });
 		if (!$aOk) {
-			$out[] = $this->r('mailhost.a_record', '', 'mailhost', 'Relay MX hostname A record', self::REQUIRED, self::UNKNOWN,
+			$out[] = $this->r('mailhost.a_record', $host, 'mailhost', 'Relay MX hostname A record', self::REQUIRED, self::UNKNOWN,
 				'DNS lookup for ' . $host . ' failed — try again.');
 		} elseif (empty($aRecords) || ($relay_ip !== '' && !in_array($relay_ip, $aRecords, true))) {
 			$resolved = empty($aRecords) ? 'does not resolve' : 'resolves to ' . implode(', ', $aRecords);
 			if ($is_fleet) {
-				$out[] = $this->r('mailhost.a_record', '', 'mailhost', 'Relay MX hostname A record', self::RECOMMENDED, self::INFO,
+				$out[] = $this->r('mailhost.a_record', $host, 'mailhost', 'Relay MX hostname A record', self::RECOMMENDED, self::INFO,
 					$host . ' ' . $resolved . ' — the fleet operator\'s DNS is not in place yet.',
 					'This record is published by the fleet operator (' . $host . ' → '
 					. ($relay_ip !== '' ? $relay_ip : 'the relay IP') . '); no action needed on your side.');
 			} else {
-				$out[] = $this->r('mailhost.a_record', '', 'mailhost', 'Relay MX hostname A record', self::REQUIRED, self::FAIL,
+				$out[] = $this->r('mailhost.a_record', $host, 'mailhost', 'Relay MX hostname A record', self::REQUIRED, self::FAIL,
 					$host . ' ' . $resolved . ', not the relay (' . ($relay_ip !== '' ? $relay_ip : 'IP unknown') . ').', '',
 					$this->dnsFix('A', $host, $relay_ip !== '' ? $relay_ip : 'YOUR_RELAY_IP'));
 			}
 		} else {
-			$out[] = $this->r('mailhost.a_record', '', 'mailhost', 'Relay MX hostname A record', self::REQUIRED, self::PASS,
+			$out[] = $this->r('mailhost.a_record', $host, 'mailhost', 'Relay MX hostname A record', self::REQUIRED, self::PASS,
 				$host . ' resolves to the relay (' . implode(', ', $aRecords) . ').');
 		}
 
@@ -1343,7 +1507,7 @@ class InboundEmailSetupCheck {
 							. 'spool is being pulled.'
 						: 'This is the only real proof that inbound port 25 is reachable from the internet.',
 					array('text' => 'Send a test email to ' . $address
-						. ' from any external account, then press Re-check.'), true);
+						. ' from any external account, then reload this page.'), true);
 			}
 		} catch (\Throwable $e) {
 			$out[] = $this->r('e2e.test_message', $address, 'e2e', 'End-to-end delivery', self::REQUIRED, self::UNKNOWN,
