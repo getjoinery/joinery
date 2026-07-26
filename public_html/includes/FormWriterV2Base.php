@@ -7,7 +7,10 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
- * @version 2.13.0
+ * @version 2.16.0
+ * @changelog 2.16.0 - min/max validation tests presence against ''/null instead of empty(), so a `min: 1` rule rejects 0 (empty('0') is true, so it had been accepting the one value it exists to reject)
+ * @changelog 2.15.0 - Added registerValidationField(): a caller with authoritative rules (SettingsWriter, from the setting declarations) can validate names this form never drew, so validation scope stops depending on what a page happened to render
+ * @changelog 2.14.0 - preparePasswordData() discards any bound value and shows a "(stored — leave blank to keep)" placeholder instead: a password input never emits value="", so a stored credential can no longer reach the page source
  * @changelog 2.13.0 - Added the help_modal input option: a field can declare where its credential comes from (title/steps/url/copy) and buildHelpModal() renders a trigger plus an inert template that the kit modal opens
  * @changelog 2.12.0 - getDefaultFormAction() keeps the query string, matching the browser default for a form with no explicit action (a stripped query orphaned POST handlers that read $_GET context like ?mgn_id=)
  * @changelog 2.10.0 - buildAjaxSelectScript() speaks the /api/v1 action contract for /api/v1/ endpoints (POST {q, ...}, CSRF header, read data.items); query-string suffixes fold into the POST body. Legacy GET ?q= array contract retained for other URLs
@@ -468,14 +471,17 @@ abstract class FormWriterV2Base {
                     }
                     break;
 
+                // Presence is tested against '' and null rather than empty(),
+                // because empty('0') is true — which made a `min: 1` rule
+                // silently accept 0, the one value it exists to reject.
                 case 'min':
-                    if (!empty($value) && is_numeric($value) && $value < $param) {
+                    if ($value !== null && $value !== '' && is_numeric($value) && $value < $param) {
                         $errors[] = $rules['messages']['min'] ?? "Must be at least {$param}";
                     }
                     break;
 
                 case 'max':
-                    if (!empty($value) && is_numeric($value) && $value > $param) {
+                    if ($value !== null && $value !== '' && is_numeric($value) && $value > $param) {
                         $errors[] = $rules['messages']['max'] ?? "Must be no more than {$param}";
                     }
                     break;
@@ -2414,6 +2420,34 @@ abstract class FormWriterV2Base {
     }
 
     /**
+     * Register validation rules for a field this form never drew.
+     *
+     * validate() checks the fields registered on the instance — that is,
+     * whatever the page happened to render. That is page scope, and it is why
+     * two pages writing the same value could enforce different rules. A caller
+     * that knows the authoritative rules (SettingsWriter reads them from the
+     * setting declarations) registers them here and gets the same validator,
+     * the same rule vocabulary and the same getErrors() output, without a form.
+     *
+     * Distinct from the static registerValidator(), which names a reusable rule
+     * set for fields to refer to. This attaches rules to one field on one form.
+     *
+     * @param string $name  Field name
+     * @param array  $rules FormWriter validation rule array
+     * @param string $label Human label used in error messages
+     */
+    public function registerValidationField($name, array $rules, $label = '') {
+        $this->fields[$name] = [
+            'name' => $name,
+            'input_type' => 'text',
+            'label' => $label !== '' ? $label : $name,
+            'options' => [],
+            'validation' => $rules,
+            'model_class' => null,
+        ];
+    }
+
+    /**
      * Register a field for validation tracking
      *
      * @param string $name Field name
@@ -3362,8 +3396,31 @@ JS;
         ];
     }
 
+    /**
+     * A password field never carries its stored value into the page.
+     *
+     * `renderPasswordInput()` delegates to `renderTextInput()`, which emits
+     * `value="..."` — so any caller passing the stored credential as the field
+     * value put that credential in the page source, in the browser cache and in
+     * anything that archives a rendered page. The value is discarded here rather
+     * than at the call sites so no future caller can reintroduce it.
+     *
+     * A field with something stored says so in its placeholder. Every write path
+     * that handles a password treats an empty submission as "keep the stored
+     * value" — the two rules only work together.
+     */
     protected function preparePasswordData($name, $label, $options) {
+        $bound = $options['value'] ?? ($this->values[$name] ?? '');
+        $has_stored = ($bound !== null && (string)$bound !== '');
+
+        $options['value'] = '';
         $data = $this->prepareTextData($name, $label, $options);
+        $data['value'] = '';
+
+        if ($has_stored && $data['placeholder'] === '') {
+            $data['placeholder'] = '(stored — leave blank to keep)';
+        }
+
         $data['type'] = 'password';
         $data['strength_meter'] = !empty($options['strength_meter']);
         return $data;

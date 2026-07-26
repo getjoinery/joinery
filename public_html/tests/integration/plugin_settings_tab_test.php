@@ -11,15 +11,16 @@
  *
  * The invariants worth guarding:
  *
- *   A. Discovery. Only an ACTIVE plugin that ships settings_form.php gets a
- *      section, and the tab itself disappears when nothing is behind it.
+ *   A. Discovery. Only an ACTIVE plugin that DECLARES a renderable setting gets
+ *      a section, and the tab itself disappears when nothing is behind it.
  *
  *   B. One tab list. Four pages render the settings tab strip; they must all
  *      render the SAME set, which only holds while they share one definition.
  *
- *   C. The include contract. Per-section forms are only safe because no plugin
- *      form opens a form, closes one, or adds a submit button — the page owns
- *      all three. Break that and the page emits nested forms.
+ *   C. Rendered is declared. Every field the shared renderer emits comes from a
+ *      manifest, so a field cannot render, accept typing and silently fail to
+ *      save. This is the check done by rendering rather than by grepping, which
+ *      is why it is trustworthy where a source sweep is not.
  *
  *   D. Write scope. A save writes ONLY the submitting plugin's declared
  *      settings: not a core row, not a sibling plugin's row, and not a row of a
@@ -38,6 +39,8 @@ require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+require_once(PathHelper::getIncludePath('includes/SettingsDeclarations.php'));
+require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
 require_once(PathHelper::getIncludePath('includes/VaultGatedSettings.php'));
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
@@ -83,39 +86,42 @@ $stamp_of = function ($name) use ($db) {
 
 
 // =========================================================================
-section('A. Discovery — active plugins that ship a settings form');
+section('A. Discovery — active plugins that declare a renderable setting');
 // =========================================================================
 
-$forms = PluginHelper::getSettingsForms();
+$sources = SettingsDeclarations::renderableSources();
 
-check(!empty($forms), 'at least one active plugin ships a settings form', count($forms) . ' found');
+check(!empty($sources), 'at least one active plugin declares settings', implode(', ', $sources));
 
-$all_exist = true;
 $all_active = true;
-foreach ($forms as $plugin => $path) {
-	if (!file_exists($path))                      $all_exist = false;
-	if (!PluginHelper::isPluginActive($plugin))   $all_active = false;
+foreach ($sources as $plugin) {
+	if (!PluginHelper::isPluginActive($plugin)) $all_active = false;
 }
-check($all_exist, 'every discovered path is a real file');
 check($all_active, 'every discovered plugin is active');
 
-$names = array_keys($forms);
-$sorted = $names;
+$sorted = $sources;
 sort($sorted);
-check($names === $sorted, 'sections come back in a stable (sorted) order', implode(', ', $names));
+check($sources === $sorted, 'sections come back in a stable (sorted) order', implode(', ', $sources));
 
-// An inactive plugin must not contribute a section even though its file is on
-// disk. Assert against the filesystem rather than a fixture: every plugin dir
-// carrying settings_form.php is either active-and-listed or inactive-and-absent.
+// An inactive plugin must not contribute a section even though its manifest is
+// on disk. Assert against the filesystem: every plugin declaring settings is
+// either active-and-listed or inactive-and-absent.
 $leaked = array();
-foreach (glob(PathHelper::getIncludePath('plugins') . '/*/settings_form.php') as $path) {
+foreach (glob(PathHelper::getIncludePath('plugins') . '/*/plugin.json') as $path) {
 	$plugin = basename(dirname($path));
-	$is_active = PluginHelper::isPluginActive($plugin);
-	if (!$is_active && isset($forms[$plugin])) {
+	if (!PluginHelper::isPluginActive($plugin) && in_array($plugin, $sources, true)) {
 		$leaked[] = $plugin;
 	}
 }
 check(empty($leaked), 'no inactive plugin contributes a section', implode(', ', $leaked));
+
+// A plugin whose every declaration is `managed` has nothing to administer and
+// must not get an empty section.
+$empty_sections = array();
+foreach ($sources as $plugin) {
+	if (empty(SettingsFieldRenderer::renderSourceNames($plugin))) $empty_sections[] = $plugin;
+}
+check(empty($empty_sections), 'no section renders zero fields', implode(', ', $empty_sections));
 
 
 // =========================================================================
@@ -128,9 +134,9 @@ check(strpos($strip, 'General Settings') !== false, 'the strip offers General Se
 check(strpos($strip, 'Email Settings') !== false,   'the strip offers Email Settings');
 check(strpos($strip, '/admin/admin_settings_plugins') === false
 	|| strpos($strip, 'Plugin Settings') !== false,
-	'the strip offers Plugin Settings when a plugin form exists');
-check(!empty($forms) === (strpos($strip, 'Plugin Settings') !== false),
-	'the Plugin Settings tab appears exactly when a plugin form exists');
+	'the strip offers Plugin Settings when a plugin declares one');
+check(!empty($sources) === (strpos($strip, 'Plugin Settings') !== false),
+	'the Plugin Settings tab appears exactly when a plugin declares a setting');
 
 // The current tab is marked and does not link to itself.
 check(strpos($strip, 'active') !== false, 'the calling page\'s tab is marked active');
@@ -157,36 +163,34 @@ foreach ($tab_pages as $rel) {
 
 
 // =========================================================================
-section('C. The include contract per-section forms depend on');
+section('C. Rendered is declared');
 // =========================================================================
 
-foreach ($forms as $plugin => $path) {
-	$src = file_get_contents($path);
-	check(strpos($src, 'begin_form') === false && strpos($src, '<form') === false,
-		"$plugin's form does not open a form (nested forms are invalid HTML)");
-	check(strpos($src, 'end_form') === false && strpos($src, '</form') === false,
-		"$plugin's form does not close the page's form");
-	check(strpos($src, 'submitbutton') === false,
-		"$plugin's form adds no submit button of its own");
+// Driven by the renderer rather than by reading page source. The set of names a
+// settings page emits is not literal in its source — the inbound-provider
+// fields, for one, are chosen at render time — so a grep-based sweep reports
+// clean and is wrong.
+foreach ($sources as $plugin) {
+	$names = SettingsFieldRenderer::renderSourceNames($plugin);
+	check(!empty($names), "$plugin renders at least one field", count($names) . ' fields');
 
-	// The write scope is the manifest, so a rendered field the manifest does not
-	// declare would render, accept typing, and silently fail to save. Catch that
-	// at the source rather than in a bug report.
-	$declared = array();
-	foreach (PluginHelper::getInstance($plugin)->getDeclaredSettings() as $declaration) {
-		if (is_array($declaration) && !empty($declaration['name'])) {
-			$declared[(string)$declaration['name']] = true;
-		}
-	}
-	preg_match_all('/\$formwriter->\w+\(\s*[\'"]([A-Za-z0-9_]+)[\'"]/', $src, $matches);
 	$undeclared = array();
-	foreach (array_unique($matches[1]) as $field) {
-		if (!isset($declared[$field])) $undeclared[] = $field;
+	$managed = array();
+	foreach ($names as $field) {
+		if (!SettingsDeclarations::isDeclared($field)) $undeclared[] = $field;
+		if (SettingsDeclarations::isManaged($field))   $managed[] = $field;
 	}
-	check(empty($undeclared),
-		"every field $plugin renders is declared in its plugin.json",
-		implode(', ', $undeclared));
+	check(empty($undeclared), "every field $plugin renders is declared", implode(', ', $undeclared));
+	check(empty($managed), "$plugin renders no machine-written setting", implode(', ', $managed));
 }
+
+// The plugin sections are siblings, not nested forms: the page owns begin_form,
+// end_form and the submit button, and the renderer emits fields only.
+$renderer_src = file_get_contents(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
+check(strpos($renderer_src, 'begin_form') === false && strpos($renderer_src, '<form') === false,
+	'the renderer never opens a form');
+check(strpos($renderer_src, 'end_form') === false && strpos($renderer_src, 'submitbutton') === false,
+	'the renderer never closes one or adds a submit button');
 
 
 // =========================================================================
@@ -196,6 +200,8 @@ section('D. General Settings no longer carries plugin fields');
 $general_src = file_get_contents(PathHelper::getIncludePath('adm/admin_settings.php'));
 check(strpos($general_src, 'settings_form.php') === false,
 	'the General page includes no plugin settings form');
+check(!file_exists(PathHelper::getIncludePath('plugins/mailbox/settings_form.php')),
+	'settings_form.php files are gone — a plugin declares fields, it does not draw them');
 check(strpos($general_src, 'plugin-settings') === false,
 	'the General page carries no plugin-settings heading');
 
@@ -276,10 +282,12 @@ if (!$no_vault_uid) {
 	));
 	check($unknown->error !== null, 'a save naming an unknown plugin is refused');
 
-	// An active plugin that ships NO settings form is not addressable either.
+	// An active plugin that declares NO renderable setting is not addressable
+	// either. Every active plugin now declares something, so this only runs
+	// where one genuinely does not.
 	$formless = null;
 	foreach (PluginHelper::getActivePlugins() as $plugin_name => $plugin_obj) {
-		if (!isset($forms[$plugin_name])) { $formless = $plugin_name; break; }
+		if (!in_array($plugin_name, $sources, true)) { $formless = $plugin_name; break; }
 	}
 	if ($formless !== null) {
 		$no_form = admin_settings_plugins_logic(array(
@@ -287,7 +295,7 @@ if (!$no_vault_uid) {
 			$own                     => '198.51.100.7',
 		));
 		check($no_form->error !== null,
-			"an active plugin with no settings form is not addressable ($formless)");
+			"an active plugin with no declared settings is not addressable ($formless)");
 	}
 
 	check($value_of($own) === $before, 'no refused save wrote anything');
@@ -302,8 +310,8 @@ section('F. The vault gate came across with the mailbox fields');
 // silently empties, so assert the list is live before trusting the behaviour.
 check(VaultGatedSettings::isGated('mailbox_forwarding_smtp_host'),
 	'mailbox_forwarding_smtp_host is still a declared vault-gated setting');
-check(isset($forms['mailbox']),
-	'the mailbox fields are on this page, making this logic their only write path');
+check(in_array('mailbox', $sources, true),
+	'the mailbox fields are on this page, making this logic one of their write paths');
 
 // A vault-holding account with no open unlock window must be refused. In CLI
 // there is no session id, so VaultUnlock::isOpen() is false by construction.

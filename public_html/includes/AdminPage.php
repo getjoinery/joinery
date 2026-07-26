@@ -55,8 +55,9 @@ class AdminPage extends PublicPage {
 			$tab_menus['Payment Settings'] = '/plugins/store/admin/admin_settings_payments';
 		}
 		$tab_menus['Email Settings'] = '/admin/admin_settings_email';
-		// Nothing to administer when no active plugin ships a settings form.
-		if (!empty(PluginHelper::getSettingsForms())) {
+		// Nothing to administer when no active plugin declares a setting.
+		require_once(PathHelper::getIncludePath('includes/SettingsDeclarations.php'));
+		if (!empty(SettingsDeclarations::renderableSources())) {
 			$tab_menus['Plugin Settings'] = '/admin/admin_settings_plugins';
 		}
 		return static::tab_menu($tab_menus, $current);

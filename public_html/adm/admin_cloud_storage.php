@@ -278,9 +278,10 @@ $formwriter->textinput('cloud_storage_access_key', 'Access Key', array(
 	'value' => $settings_values['access_key'],
 ));
 
-$formwriter->textinput('cloud_storage_secret_key', 'Secret Key', array(
+$formwriter->passwordinput('cloud_storage_secret_key', 'Secret Key', array(
 	'value' => $settings_values['secret_key'],
-	'helptext' => 'Stored in stg_settings; rotate via the bucket provider if exposure is suspected.',
+	'helptext' => 'Stored in stg_settings; rotate via the bucket provider if exposure is suspected. '
+		. 'Leave blank to keep the stored key.',
 ));
 
 $formwriter->textinput('cloud_storage_public_base_url', 'Public Base URL (optional)', array(

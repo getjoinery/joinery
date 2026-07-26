@@ -55,7 +55,7 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
             [
                 'key' => 'mailgun_api_key',
                 'label' => 'Mailgun API Key (Example: key-6eac34eed3afb3df055f81aa20d878e4)',
-                'type' => 'text',
+                'type' => 'password',
             ],
             [
                 'key' => 'mailgun_domain',

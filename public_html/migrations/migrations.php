@@ -1081,3 +1081,13 @@
 	$migration['migration_file'] = 'purge_reserved_setting_rows.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// The Acuity scheduling client and the Urbit endpoint settings are gone —
+	// Acuity was a closed loop whose only reader was its own connection test,
+	// and the Urbit rows never had a reader. Remove the rows they left behind.
+	$migration = array();
+	$migration['database_version'] = '156';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'purge_dead_integration_settings.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

@@ -40,12 +40,19 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 
 		if ($action === 'save') {
 			// ---- Public store -------------------------------------------------
+			// The secret key is a password field, so it never carries its stored
+			// value into the page. A blank submission therefore means "keep the
+			// stored key" — the connection test below needs a real key to run.
+			$secret_key = trim($input['cloud_storage_secret_key'] ?? '');
+			if ($secret_key === '') {
+				$secret_key = (string)$settings->get_setting('cloud_storage_secret_key');
+			}
 			$opts = array(
 				'endpoint'        => trim($input['cloud_storage_endpoint'] ?? ''),
 				'region'          => trim($input['cloud_storage_region'] ?? ''),
 				'bucket'          => trim($input['cloud_storage_bucket'] ?? ''),
 				'access_key'      => trim($input['cloud_storage_access_key'] ?? ''),
-				'secret_key'      => trim($input['cloud_storage_secret_key'] ?? ''),
+				'secret_key'      => $secret_key,
 				'public_base_url' => trim($input['cloud_storage_public_base_url'] ?? ''),
 			);
 			$public_ok = false;

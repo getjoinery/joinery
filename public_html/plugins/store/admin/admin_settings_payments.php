@@ -1,6 +1,7 @@
 <?php
 	
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+	require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 	require_once(PathHelper::getIncludePath('data/settings_class.php'));
@@ -17,26 +18,16 @@
 	$run_validation = isset($_GET['run_validation']) && $_GET['run_validation'] == '1';
 
 	if($_POST){
+		// One save path for every settings page — scope, validation and
+		// credential handling all come from the store's declarations in
+		// plugin.json. See includes/SettingsWriter.php.
+		require_once(PathHelper::getIncludePath('includes/SettingsWriter.php'));
+		$write = SettingsWriter::write($_POST, array(
+			'page'   => 'admin_settings_payments',
+			'source' => 'store',
+		));
+		SettingsWriter::reportTo($write, '~/admin/admin_settings_payments~');
 
-		$search_criteria = array();
-		//$search_criteria['setting_like'] = $searchterm;
-		$user_settings = new MultiSetting(
-			$search_criteria,
-			NULL,
-			NULL,
-			NULL,
-			NULL);
-		$user_settings->load();		 
-
-		foreach($user_settings as $user_setting) {
-			if(isset($_POST[$user_setting->get('stg_name')])){
-				$user_setting->set('stg_value', $_POST[$user_setting->get('stg_name')]);
-				$user_setting->set('stg_update_time', 'NOW()'); 
-				$user_setting->set('stg_usr_user_id', $session->get_user_id());
-				$user_setting->prepare();
-				$user_setting->save();
-			}
-		}
 		LibraryFunctions::redirect('/admin/admin_settings');
 	}
 
@@ -129,19 +120,15 @@
 		$formwriter->textinput('stripe_api_key', 'Stripe Publishable Key (Example: pk_live_xxxx)', [
 			'value' => $settings->get_setting('stripe_api_key'),
 			'validation' => [
-				'pattern' => '^pk_(live|test)_[a-zA-Z0-9]{24,}$',
+				'pattern' => '#^pk_(live|test)_[a-zA-Z0-9]{24,}$#',
 				'messages' => ['pattern' => 'Must start with pk_live_ or pk_test_ (not sk_)']
 			],
 			'help_text' => 'Must start with pk_live_ or pk_test_ (not sk_)'
 		]);
-		$formwriter->textinput('stripe_api_pkey', 'Stripe Secret/Private Key (Example: sk_live_xxxx)', [
-			'value' => $settings->get_setting('stripe_api_pkey'),
-			'validation' => [
-				'pattern' => '^sk_(live|test)_[a-zA-Z0-9]{24,}$',
-				'messages' => ['pattern' => 'Must start with sk_live_ or sk_test_ (not pk_)']
-			],
+		SettingsFieldRenderer::secretField($formwriter, 'stripe_api_pkey', 'Stripe Secret/Private Key (Example: sk_live_xxxx)',
+			$settings->get_setting('stripe_api_pkey'), array(
 			'help_text' => 'Must start with sk_live_ or sk_test_ (not pk_)'
-		]);
+		));
 		echo '</div>';
 		echo '<div class="col-md-6">';
 		echo '<h5>Live API Status</h5>';
@@ -227,19 +214,15 @@
 		$formwriter->textinput('stripe_api_key_test', 'Test Stripe Publishable Key (Example: pk_test_xxxx)', [
 			'value' => $settings->get_setting('stripe_api_key_test'),
 			'validation' => [
-				'pattern' => '^pk_(live|test)_[a-zA-Z0-9]{24,}$',
+				'pattern' => '#^pk_(live|test)_[a-zA-Z0-9]{24,}$#',
 				'messages' => ['pattern' => 'Must start with pk_live_ or pk_test_ (not sk_)']
 			],
 			'help_text' => 'Must start with pk_live_ or pk_test_ (not sk_)'
 		]);
-		$formwriter->textinput('stripe_api_pkey_test', 'Test Stripe Secret/Private Key (Example: sk_test_xxxx)', [
-			'value' => $settings->get_setting('stripe_api_pkey_test'),
-			'validation' => [
-				'pattern' => '^sk_(live|test)_[a-zA-Z0-9]{24,}$',
-				'messages' => ['pattern' => 'Must start with sk_live_ or sk_test_ (not pk_)']
-			],
+		SettingsFieldRenderer::secretField($formwriter, 'stripe_api_pkey_test', 'Test Stripe Secret/Private Key (Example: sk_test_xxxx)',
+			$settings->get_setting('stripe_api_pkey_test'), array(
 			'help_text' => 'Must start with sk_live_ or sk_test_ (not pk_)'
-		]);
+		));
 		echo '</div>';
 		echo '<div class="col-md-6">';
 		echo '<h5>Test API Status</h5>';
@@ -322,9 +305,8 @@
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
 		echo '<h5>Stripe Webhook Settings</h5>';
-		$formwriter->textinput('stripe_endpoint_secret', 'Stripe Endpoint Secret (Example: whsec_xxxx)', [
-			'value' => $settings->get_setting('stripe_endpoint_secret')
-		]);
+		SettingsFieldRenderer::secretField($formwriter, 'stripe_endpoint_secret', 'Stripe Endpoint Secret (Example: whsec_xxxx)',
+			$settings->get_setting('stripe_endpoint_secret'), array());
 		echo '</div>';
 		echo '<div class="col-md-6">';
 		echo '<h5>Webhook Configuration</h5>';
@@ -410,9 +392,8 @@
 		$formwriter->textinput('paypal_api_key', 'Paypal Client ID (Example: ATF46g-L-ler2xxxx)', [
 			'value' => $settings->get_setting('paypal_api_key')
 		]);
-		$formwriter->textinput('paypal_api_secret', 'Paypal Client Secret (Example: ELTF_ie6uGhueKxxxx)', [
-			'value' => $settings->get_setting('paypal_api_secret')
-		]);
+		SettingsFieldRenderer::secretField($formwriter, 'paypal_api_secret', 'Paypal Client Secret (Example: ELTF_ie6uGhueKxxxx)',
+			$settings->get_setting('paypal_api_secret'), array());
 		echo '</div>';
 		echo '<div class="col-md-6">';
 		echo '<h5>Live API Status</h5>';
@@ -556,9 +537,8 @@
 		$formwriter->textinput('paypal_api_key_test', 'Test Paypal Client ID (Example: ATF46g-L-ler2xxxx)', [
 			'value' => $settings->get_setting('paypal_api_key_test')
 		]);
-		$formwriter->textinput('paypal_api_secret_test', 'Test Paypal Client Secret (Example: ELTF_ie6uGhueKxxxx)', [
-			'value' => $settings->get_setting('paypal_api_secret_test')
-		]);
+		SettingsFieldRenderer::secretField($formwriter, 'paypal_api_secret_test', 'Test Paypal Client Secret (Example: ELTF_ie6uGhueKxxxx)',
+			$settings->get_setting('paypal_api_secret_test'), array());
 		echo '</div>';
 		echo '<div class="col-md-6">';
 		echo '<h5>Test API Status</h5>';

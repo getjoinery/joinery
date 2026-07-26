@@ -1,5 +1,12 @@
 # Declared Settings
 
+> **Status 2026-07-26 — built, one gate open.** Phases 1-6 are implemented.
+> `SettingsWriter::ENFORCE_SCOPE` is still `false`: shadow mode runs clean across
+> all six settings pages on dev, but the spec's own procedure asks for a window
+> that includes at least one production node before the constant flips. Two
+> database changes are also pending an operator: `update_database` (runs the
+> dead-row purge, migration 156) and a repair of the `webDir` row on dev.
+
 ## Problem
 
 A setting can be edited from more than one page, and the pages disagree about the

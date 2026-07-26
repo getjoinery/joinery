@@ -6,6 +6,8 @@ function admin_settings_email_logic(array $input): LogicResult {
 
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('data/settings_class.php'));
+	require_once(PathHelper::getIncludePath('includes/SettingsDeclarations.php'));
+	require_once(PathHelper::getIncludePath('includes/SettingsWriter.php'));
 	require_once(PathHelper::getIncludePath('data/email_templates_class.php'));
 	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
 	require_once(PathHelper::getIncludePath('data/pages_class.php'));
@@ -51,30 +53,19 @@ function admin_settings_email_logic(array $input): LogicResult {
 			));
 		}
 
-		$search_criteria = array();
-		//$search_criteria['setting_like'] = $searchterm;
-		$user_settings = new MultiSetting(
-			$search_criteria,
-			NULL,
-			NULL,
-			NULL,
-			NULL);
-		$user_settings->load();
+		// One save path for every settings page — scope, validation, credential
+		// handling and the vault gate all come from the declarations. See
+		// includes/SettingsWriter.php.
+		$write = SettingsWriter::write($input, array('page' => 'admin_settings_email'));
+		SettingsWriter::reportTo($write, '~/admin/admin_settings_email~');
 
-		foreach($user_settings as $user_setting) {
-			if(isset($input[$user_setting->get('stg_name')])){
-				// Form and request plumbing rides along in this POST and is
-				// never a setting — see Setting::isReservedName().
-				if (Setting::isReservedName($user_setting->get('stg_name'))) {
-					continue;
-				}
-				$user_setting->set('stg_value', $input[$user_setting->get('stg_name')]);
-				$user_setting->set('stg_update_time', 'NOW()');
-				$user_setting->set('stg_usr_user_id', $session->get_user_id());
-				$user_setting->prepare();
-				$user_setting->save();
-			}
+		if (!empty($write['errors'])) {
+			return LogicResult::render(array(
+				'run_validation' => true,
+				'errors' => array('Nothing was saved — fix the fields flagged above and save again.')
+			));
 		}
+
 		return LogicResult::redirect('/admin/admin_settings');
 	}
 

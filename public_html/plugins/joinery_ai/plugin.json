@@ -76,146 +76,328 @@
             ]
         }
     ],
+    "settingsGroups": {
+        "provider": "LLM provider",
+        "keys": "API keys",
+        "caps": "Runtime caps and behavior",
+        "chat": "Chat"
+    },
     "settings": [
         {
             "name": "joinery_ai_llm_provider",
-            "default": "anthropic"
+            "default": "anthropic",
+            "group": "provider",
+            "label": "LLM Provider",
+            "type": "select",
+            "options": {"anthropic": "Anthropic (cloud)", "fireworks": "Fireworks (cloud · no-train, private)", "local": "Local / self-hosted (OpenAI-compatible)"},
+            "helptext": "Which backend drives recipes. The recipe model is reinterpreted by whichever provider is active."
         },
         {
             "name": "joinery_ai_anthropic_api_key",
-            "default": ""
+            "default": "",
+            "secret": true,
+            "group": "keys",
+            "label": "Anthropic API Key",
+            "helptext": "Required when the provider is Anthropic. Get one from console.anthropic.com."
         },
         {
             "name": "joinery_ai_local_base_url",
-            "default": "http://localhost:11434/v1"
+            "default": "http://localhost:11434/v1",
+            "group": "provider",
+            "label": "Local Base URL",
+            "type": "text",
+            "show_when": {"joinery_ai_llm_provider": "local"},
+            "helptext": "OpenAI-compatible endpoint (Ollama, llama.cpp, vLLM, LM Studio). Use the host URL if the server is not on this box."
         },
         {
             "name": "joinery_ai_local_model",
-            "default": ""
+            "default": "",
+            "group": "provider",
+            "label": "Local Model",
+            "type": "text",
+            "show_when": {"joinery_ai_llm_provider": "local"},
+            "helptext": "Model id(s) served by the host. Must be set before the local provider runs. Comma-separate multiple ids to offer them all in the chat model dropdown — the first is the default."
         },
         {
             "name": "joinery_ai_local_api_key",
-            "default": ""
+            "default": "",
+            "secret": true,
+            "group": "provider",
+            "label": "Local API Key",
+            "show_when": {"joinery_ai_llm_provider": "local"},
+            "helptext": "Only for servers that require a key; Ollama ignores it."
         },
         {
             "name": "joinery_ai_local_timeout_seconds",
-            "default": "300"
+            "default": "300",
+            "group": "provider",
+            "label": "Local Timeout (s)",
+            "type": "number",
+            "show_when": {"joinery_ai_llm_provider": "local"},
+            "validation": {"number": true, "min": 1, "messages": {"min": "Must be 1 or more."}},
+            "helptext": "Per-call HTTP timeout — the max quiet gap between tokens once the model is generating. CPU-only local generation is slow, so keep this high."
         },
         {
             "name": "joinery_ai_local_first_token_timeout_seconds",
-            "default": "60"
+            "default": "60",
+            "group": "provider",
+            "label": "Local First-Token Timeout (s)",
+            "type": "number",
+            "show_when": {"joinery_ai_llm_provider": "local"},
+            "validation": {"number": true, "min": 1, "messages": {"min": "Must be 1 or more."}},
+            "helptext": "How long to wait for the model to start responding before failing the turn. Bounds a cold model load or an overloaded host so a stalled request fails fast."
         },
         {
             "name": "joinery_ai_fireworks_api_key",
-            "default": ""
+            "default": "",
+            "secret": true,
+            "group": "keys",
+            "label": "Fireworks API Key",
+            "helptext": "Required to use Fireworks models. Get one from fireworks.ai. Fireworks does not train on open-model traffic."
         },
         {
             "name": "joinery_ai_fireworks_base_url",
-            "default": "https://api.fireworks.ai/inference/v1"
+            "default": "https://api.fireworks.ai/inference/v1",
+            "group": "provider",
+            "label": "Fireworks Base URL",
+            "type": "text",
+            "show_when": {"joinery_ai_llm_provider": "fireworks"},
+            "helptext": "OpenAI-compatible Fireworks endpoint. The default is correct for the public API."
         },
         {
             "name": "joinery_ai_brave_search_api_key",
-            "default": ""
+            "default": "",
+            "secret": true,
+            "group": "keys",
+            "label": "Brave Search API Key",
+            "helptext": "Required only for recipes that use the web_search tool. Free tier (2,000 queries/month) at api.search.brave.com."
         },
         {
             "name": "joinery_ai_market_data_provider",
-            "default": "finnhub"
+            "default": "finnhub",
+                "group": "keys",
+                "label": "Market data provider",
+                "type": "text",
+                "helptext": "Which market-data service get_stock_data calls. Currently finnhub."
         },
         {
             "name": "joinery_ai_market_data_api_key",
-            "default": ""
+            "default": "",
+            "secret": true,
+            "group": "keys",
+            "label": "Market Data API Key (Finnhub)",
+            "helptext": "Required only for recipes that use get_stock_data. Free tier at finnhub.io."
         },
         {
             "name": "joinery_ai_default_model",
-            "default": "claude-haiku-4-5"
+            "default": "claude-haiku-4-5",
+            "group": "caps",
+            "label": "Default Model for new recipes",
+            "type": "text",
+            "helptext": "Used when creating a new recipe. Each recipe can override."
         },
         {
             "name": "joinery_ai_failure_email_throttle_seconds",
-            "default": "86400"
+            "default": "86400",
+            "group": "caps",
+            "label": "Failure Email Throttle (s)",
+            "type": "number",
+            "validation": {"number": true, "min": 0, "messages": {"min": "Must be 0 or more."}},
+            "helptext": "Minimum seconds between failure-notification emails per recipe."
         },
         {
             "name": "joinery_ai_workspace_max_chars",
-            "default": "8000"
+            "default": "8000",
+            "group": "caps",
+            "label": "Workspace Size Cap (chars)",
+            "type": "number",
+            "validation": {"number": true, "min": 1000, "messages": {"min": "Must be 1000 or more."}},
+            "helptext": "Hard cap on the per-recipe workspace blob; set_workspace rejects oversize writes."
         },
         {
             "name": "joinery_ai_max_concurrent_workers",
-            "default": "3"
+            "default": "3",
+            "group": "caps",
+            "label": "Max Concurrent Workers",
+            "type": "number",
+            "validation": {"number": true, "min": 1, "messages": {"min": "Must be 1 or more."}},
+            "helptext": "Limits how many recipe runs can be in flight simultaneously."
         },
         {
             "name": "joinery_ai_global_monthly_token_cap",
-            "default": "25000000"
+            "default": "25000000",
+            "group": "caps",
+            "label": "Global Monthly Token Cap",
+            "type": "number",
+            "validation": {"number": true, "min": 0, "messages": {"min": "Must be 0 or more."}},
+            "helptext": "Hard ceiling across all recipes per calendar month."
         },
         {
             "name": "joinery_ai_chat_enabled",
-            "default": "1"
+            "default": "1",
+                "group": "chat",
+                "label": "Chat enabled",
+                "type": "select",
+                "options": {"1": "Yes", "0": "No"},
+                "helptext": "Turns the AI chat surface on or off for everyone."
         },
         {
             "name": "joinery_ai_chat_max_iterations",
-            "default": "12"
+            "default": "12",
+                "group": "chat",
+                "label": "Max tool iterations per turn",
+                "type": "number",
+                "validation": {"number": true, "min": 1, "messages": {"min": "Must be 1 or more."}},
+                "helptext": "How many times the assistant may call a tool and think again before it must answer."
         },
         {
             "name": "joinery_ai_chat_max_tokens",
-            "default": "32000"
+            "default": "32000",
+                "group": "chat",
+                "label": "Max tokens per reply",
+                "type": "number",
+                "validation": {"number": true, "min": 1, "messages": {"min": "Must be 1 or more."}}
         },
         {
             "name": "joinery_ai_chat_system_prompt",
-            "default": ""
+            "default": "",
+            "group": "chat",
+            "label": "Chat System Prompt",
+            "type": "textarea",
+            "rows": 6,
+            "helptext": "Sets the chat assistant's voice. Leave blank to use the default. The date/time, tool rules and safety instructions are always added automatically and cannot be removed here."
         },
         {
             "name": "joinery_ai_default_chat_level",
-            "default": "standard"
+            "default": "standard",
+            "group": "chat",
+            "label": "Default privacy for new chats",
+            "type": "select",
+            "options": {"standard": "Standard — the server manages the chat for you", "private": "Private — only you can read the stored chat (unlock required)", "fortress": "Fortress — chat content never leaves your hardware (local model only)"},
+            "helptext": "Applied to every new chat; each chat can override it. Private and Fortress seal the stored chat under your vault, so they need a set-up vault to unlock — a chat falls back to Standard when you have none. Fortress additionally pins a local model, so nothing is sent to a cloud AI provider."
         },
         {
             "name": "joinery_ai_default_temperature",
-            "default": "0.3"
+            "default": "0.3",
+                "group": "chat",
+                "label": "Default temperature",
+                "type": "text",
+                "helptext": "0 is deterministic, higher is more varied. Each chat can override."
         },
         {
             "name": "joinery_ai_default_top_p",
-            "default": ""
+            "default": "",
+                "group": "chat",
+                "label": "Default top-p",
+                "type": "text",
+                "helptext": "Leave blank to let the provider decide."
         },
         {
             "name": "joinery_ai_default_thinking_level",
-            "default": "medium"
+            "default": "medium",
+                "group": "chat",
+                "label": "Default thinking level",
+                "type": "select",
+                "options": {"low": "Low", "medium": "Medium", "high": "High"}
         },
         {
             "name": "joinery_ai_default_web_search",
-            "default": "1"
+            "default": "1",
+                "group": "chat",
+                "label": "Web search on by default",
+                "type": "select",
+                "options": {"1": "Yes", "0": "No"}
         },
         {
             "name": "joinery_ai_memory_default_on",
-            "default": "1"
+            "default": "1",
+            "group": "chat",
+            "label": "Memory on by default for new chats",
+            "type": "select",
+            "options": {"1": "Yes", "0": "No"},
+            "helptext": "New chats start with the Memory capability enabled; each chat can toggle it off. Memories are managed under Joinery AI → Memory."
         },
         {
             "name": "joinery_ai_memory_prefetch_max",
-            "default": "5"
+            "default": "5",
+            "group": "chat",
+            "label": "Memory pre-retrieval cap (count)",
+            "type": "number",
+            "validation": {"number": true, "min": 1, "messages": {"min": "Must be 1 or more."}},
+            "helptext": "Most memory bodies auto-opened per turn when their words match the message."
         },
         {
             "name": "joinery_ai_memory_prefetch_max_chars",
-            "default": "6000"
+            "default": "6000",
+            "group": "chat",
+            "label": "Memory pre-retrieval cap (chars)",
+            "type": "number",
+            "validation": {"number": true, "min": 100, "messages": {"min": "Must be 100 or more."}},
+            "helptext": "Total character budget for those auto-opened bodies; overflow is truncated with a marker the assistant can follow up on with recall."
         },
         {
             "name": "joinery_ai_memory_context_max_entries",
-            "default": "200"
+            "default": "200",
+            "group": "chat",
+            "label": "Memory index cap (entries)",
+            "type": "number",
+            "validation": {"number": true, "min": 1, "messages": {"min": "Must be 1 or more."}},
+            "helptext": "Most personal memories listed (titles only) in each turn's memory index. Shared memories are always listed and do not count against this."
         },
         {
             "name": "joinery_ai_local_vision",
-            "default": "0"
+            "default": "0",
+                "group": "provider",
+                "label": "Local model can read images",
+                "type": "select",
+                "options": {"1": "Yes", "0": "No"},
+                "helptext": "Turn on only when the local model actually accepts images."
         },
         {
             "name": "joinery_ai_attach_image_max_bytes",
-            "default": "5242880"
+            "default": "5242880",
+                "group": "chat",
+                "label": "Max image attachment (bytes)",
+                "type": "number",
+                "validation": {"number": true, "min": 0, "messages": {"min": "Must be 0 or more."}}
         },
         {
             "name": "joinery_ai_attach_pdf_max_bytes",
-            "default": "10485760"
+            "default": "10485760",
+                "group": "chat",
+                "label": "Max PDF attachment (bytes)",
+                "type": "number",
+                "validation": {"number": true, "min": 0, "messages": {"min": "Must be 0 or more."}}
         },
         {
             "name": "joinery_ai_attach_text_max_bytes",
-            "default": "2097152"
+            "default": "2097152",
+                "group": "chat",
+                "label": "Max text attachment (bytes)",
+                "type": "number",
+                "validation": {"number": true, "min": 0, "messages": {"min": "Must be 0 or more."}}
         },
         {
             "name": "joinery_ai_attach_max_per_message",
-            "default": "5"
+            "default": "5",
+                "group": "chat",
+                "label": "Max attachments per message",
+                "type": "number",
+                "validation": {"number": true, "min": 0, "messages": {"min": "Must be 0 or more."}}
+        },
+        {
+            "name": "joinery_ai_chat_default_tools",
+            "default": "",
+            "label": "Default chat tools",
+            "type": "text",
+            "helptext": "Comma-separated tool names offered to a new chat when the user has not chosen their own. Empty means every tool the chat level allows.",
+                "group": "chat"
+        },
+        {
+            "name": "joinery_ai_last_failure_email_recipe_2",
+            "default": "",
+            "managed": true,
+            "helptext": "Throttle marker: when the recipe-2 failure alert was last sent. Written by the failure notifier."
         }
     ]
 }

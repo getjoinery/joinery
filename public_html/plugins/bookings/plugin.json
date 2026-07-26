@@ -33,7 +33,10 @@
             ]
         }
     ],
+    "settingsGroups": {
+        "bookings": "Bookings"
+    },
     "settings": [
-        { "name": "bookings_active", "default": "1" }
+        { "name": "bookings_active", "default": "1", "group": "bookings", "label": "Bookings enabled", "type": "select", "options": {"1": "Yes", "0": "No"} }
     ]
 }

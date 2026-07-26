@@ -30,7 +30,7 @@ class MailChimpProvider extends AbstractMailingListProvider {
             [
                 'key' => 'mailchimp_api_key',
                 'label' => 'MailChimp API Key',
-                'type' => 'text',
+                'type' => 'password',
                 'helptext' => 'Your MailChimp API key (e.g., abcd1234efgh5678-us21)',
             ],
             [

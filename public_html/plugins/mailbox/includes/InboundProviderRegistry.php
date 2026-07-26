@@ -61,6 +61,18 @@ class InboundProviderRegistry {
     }
 
     /**
+     * Discovered providers as [key => human label], for the mailbox_provider
+     * setting's `options_from`. Adding a provider class adds its option.
+     */
+    public static function labels(): array {
+        $labels = array();
+        foreach (self::all() as $key => $class) {
+            $labels[$key] = method_exists($class, 'getLabel') ? $class::getLabel() : $key;
+        }
+        return $labels;
+    }
+
+    /**
      * Look up a provider class by key.
      */
     public static function get(string $key): ?string {

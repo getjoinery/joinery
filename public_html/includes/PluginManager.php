@@ -1486,6 +1486,20 @@ class PluginManager extends AbstractExtensionManager {
                 throw new Exception("Plugin '$plugin_name' setting '$name' has non-string default — use \"0\"/\"1\" for booleans and \"42\" for numbers.");
             }
         }
+
+        // The field spec itself — type, options, validation, secret, managed.
+        // Checked here so a malformed declaration is reported when the plugin
+        // syncs, rather than when a page tries to render it.
+        require_once(PathHelper::getIncludePath('includes/SettingsDeclarations.php'));
+        SettingsDeclarations::reset();
+        $schema_errors = array();
+        foreach (SettingsDeclarations::schemaErrors() as $error) {
+            if (strpos($error, $plugin_name . ':') === 0) $schema_errors[] = $error;
+        }
+        if (!empty($schema_errors)) {
+            throw new Exception("Plugin '$plugin_name' has malformed setting declarations:\n  "
+                . implode("\n  ", $schema_errors));
+        }
     }
 
     /**

@@ -103,7 +103,7 @@ abstract class PublicPageBase {
 		// Recommended approach: add Content-Security-Policy-Report-Only first with a
 		// strict policy and a report-uri endpoint to identify violations in production
 		// before enforcing. Known external origins to allowlist: js.stripe.com,
-		// www.paypal.com, embed.acuityscheduling.com, www.google.com, www.hcaptcha.com,
+		// www.paypal.com, www.google.com, www.hcaptcha.com,
 		// cdn.tailwindcss.com, cdnjs.cloudflare.com, cdn.jsdelivr.net,
 		// fonts.googleapis.com, fonts.gstatic.com.
 

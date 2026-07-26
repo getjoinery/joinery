@@ -442,6 +442,25 @@ runs regardless** of any of this — client-side detection is a convenience, not
 
 See **[formwriter.md - Section 5: Validation Integration](formwriter.md#5-validation-integration)**
 
+### Settings carry their rules in the manifest
+
+A setting cannot hang its rules on a model's `field_specifications`: every
+setting is a row in `stg_settings` with the same `stg_name` / `stg_value` shape,
+so there is no per-setting column to attach them to. The rules live on the
+setting's declaration in `settings.json` or a `plugin.json` instead, under a
+`validation` key holding a rule array in exactly the form above. The vocabulary
+is unchanged — `SettingsWriter` seeds those rules into a FormWriter instance with
+`registerValidationField()` and runs the same `validate()`.
+
+That indirection is the point: rules seeded from the *declarations* apply to
+every page that can write the value, including one that never rendered the field.
+Rules read from the fields a form happened to draw would only ever apply to that
+form, which is how two pages editing the same setting came to enforce different
+limits. See **[settings.md](settings.md)**.
+
+Note that a `pattern` rule needs regex delimiters (`"#^[a-z]+$#i"`) — a bare
+`^…$` makes `preg_match` fail and rejects every value.
+
 ---
 
 ## 4. Complete Validation Example

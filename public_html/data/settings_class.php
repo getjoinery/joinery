@@ -101,8 +101,13 @@ private function _check_for_duplicate_setting() {
 	 * a submit button and a captcha response all ended up stored as settings and
 	 * re-written on every save.
 	 *
-	 * Two families:
+	 * Four families:
 	 *   - request/form infrastructure that rides along in any POST
+	 *   - `submit_*` buttons. A page with several independent forms names each
+	 *     button after its section (`submit_vault`, `submit_store`), so the
+	 *     fixed list cannot cover them — the prefix can.
+	 *   - `clear__*` checkboxes, which tell the save to wipe a credential. An
+	 *     instruction about a setting, never a setting.
 	 *   - `*_readonly` display mirrors of Globalvars_site.php values, which are
 	 *     rendered readonly and post their value straight back. They are output,
 	 *     not input — the real setting is the name without the suffix.
@@ -122,6 +127,18 @@ private function _check_for_duplicate_setting() {
 			'btn_submit',
 		);
 		if (in_array($name, $reserved, true)) {
+			return true;
+		}
+		// No real setting is named submit_*, and every per-section submit
+		// button is. Narrow enough to be safe, broad enough to cover a button
+		// naming scheme that is generated rather than written down.
+		if (strncmp($name, 'submit_', 7) === 0) {
+			return true;
+		}
+		// clear__<setting> is the "wipe this credential" checkbox that rides
+		// alongside a secret field. It is an instruction about a setting, not a
+		// setting — SettingsWriter reads it and it is never stored.
+		if (strncmp($name, 'clear__', 7) === 0) {
 			return true;
 		}
 		return substr($name, -9) === '_readonly';

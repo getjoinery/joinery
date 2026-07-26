@@ -46,7 +46,7 @@ reaches only the actions that opt in with `allow_guest`. See
 
 `activate.php` is idempotent and self-guarded. It backfills `stc_stripe_customers` from the pre-extraction user columns and product fulfillment columns where those still exist, claims the plugin's scheduled-task rows, and drops the superseded columns. On upgrade, `update_database` runs a one-time auto-activation: the store activates when the install shows store evidence (product/order rows, or a Stripe/PayPal key configured); a store-less install stays inactive.
 
-Settings keep their pre-extraction core names (`products_active`, `checkout_type`, `stripe_api_key`, ...) via the per-setting `legacy_core: true` flag in `plugin.json`. The plugin's `settings_form.php` surfaces store settings on **Admin → Settings** under Plugin Settings.
+Settings keep their pre-extraction core names (`products_active`, `checkout_type`, `stripe_api_key`, ...) via the per-setting `legacy_core: true` flag in `plugin.json`. Declaring them there is also what puts them on **Admin → Settings → Plugin Settings**; the payment credentials additionally appear on the store's own Payment Settings tab, which wraps them with live connection tests.
 
 ### Optional piggyback donation
 
