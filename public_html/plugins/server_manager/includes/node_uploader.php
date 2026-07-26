@@ -14,6 +14,9 @@
  * Exits 0 on success, non-zero on failure. Prints a one-line status to
  * stdout on success or stderr on failure.
  *
+ * @version 1.2 - reports S3Signer's retry attempts, so a transfer that only
+ *                succeeded on the second or third try says so in the job output
+ *                instead of looking identical to a clean first-attempt run
  * @version 1.1
  */
 
@@ -24,6 +27,19 @@
 //   - $bucket = '...';
 
 $op = $argv[1] ?? '';
+
+/**
+ * Echo each retry S3Signer had to make. A provider that is flaking looks exactly
+ * like a healthy one in the job output unless the attempts are named, and that
+ * signal is the difference between "one bad night" and "this target is degrading".
+ */
+function report_retries($resp) {
+	foreach (($resp['retry_log'] ?? []) as $line) {
+		fwrite(STDERR, "RETRY: " . $line . "\n");
+	}
+	$n = (int)($resp['attempts'] ?? 1);
+	return $n > 1 ? " (succeeded on attempt {$n})" : '';
+}
 
 if ($op === 'upload') {
 	$local = $argv[2] ?? '';
@@ -38,12 +54,13 @@ if ($op === 'upload') {
 		fwrite(STDERR, "UPLOAD_FAIL: " . $e->getMessage() . "\n");
 		exit(1);
 	}
+	$note = report_retries($resp);
 	if ($resp['status'] === 200) {
-		echo "UPLOAD_OK " . filesize($local) . " bytes -> " . $remote . "\n";
+		echo "UPLOAD_OK " . filesize($local) . " bytes -> " . $remote . $note . "\n";
 		exit(0);
 	}
 	$err = S3Signer::extract_error($resp['body']) ?: ('HTTP ' . $resp['status']);
-	fwrite(STDERR, "UPLOAD_FAIL: " . $err . "\n");
+	fwrite(STDERR, "UPLOAD_FAIL: " . $err . " after " . (int)($resp['attempts'] ?? 1) . " attempt(s)\n");
 	exit(1);
 }
 
@@ -62,13 +79,14 @@ if ($op === 'download') {
 		fwrite(STDERR, "DOWNLOAD_FAIL: " . $e->getMessage() . "\n");
 		exit(1);
 	}
+	$note = report_retries($resp);
 	if ($resp['status'] !== 200) {
 		$err = S3Signer::extract_error($resp['body']) ?: ('HTTP ' . $resp['status']);
-		fwrite(STDERR, "DOWNLOAD_FAIL: " . $err . "\n");
+		fwrite(STDERR, "DOWNLOAD_FAIL: " . $err . " after " . (int)($resp['attempts'] ?? 1) . " attempt(s)\n");
 		exit(1);
 	}
 	clearstatcache(true, $local);
-	echo "DOWNLOAD_OK " . (is_file($local) ? filesize($local) : 0) . " bytes -> " . $local . "\n";
+	echo "DOWNLOAD_OK " . (is_file($local) ? filesize($local) : 0) . " bytes -> " . $local . $note . "\n";
 	exit(0);
 }
 
@@ -84,12 +102,13 @@ if ($op === 'delete') {
 		fwrite(STDERR, "DELETE_FAIL: " . $e->getMessage() . "\n");
 		exit(1);
 	}
+	$note = report_retries($resp);
 	if ($resp['status'] === 204 || $resp['status'] === 200) {
-		echo "DELETE_OK " . $remote . "\n";
+		echo "DELETE_OK " . $remote . $note . "\n";
 		exit(0);
 	}
 	$err = S3Signer::extract_error($resp['body']) ?: ('HTTP ' . $resp['status']);
-	fwrite(STDERR, "DELETE_FAIL: " . $err . "\n");
+	fwrite(STDERR, "DELETE_FAIL: " . $err . " after " . (int)($resp['attempts'] ?? 1) . " attempt(s)\n");
 	exit(1);
 }
 
