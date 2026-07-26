@@ -70,10 +70,15 @@ own redirect URI in their own cloud app.
 ## Add a provider
 
 One class in `includes/oauth/providers/` implementing `OAuth2Provider`, plus two
-settings for its credentials. Endpoints are constants; credentials read from
-settings via the registry. See `GoogleOAuthProvider` / `MicrosoftOAuthProvider`
-for the shape. `getClientSecret()` reads its setting through `SecretBox` so the
-stored value is encrypted at rest.
+settings for its credentials declared in `settings.json`. Endpoints are
+constants; credentials read from settings via the registry. See
+`GoogleOAuthProvider` / `MicrosoftOAuthProvider` for the shape.
+`getClientSecret()` reads its setting through `SecretBox` so the stored value is
+encrypted at rest.
+
+Use `DeclaresOAuthConfigFields` and write a `configGuide()` — that is what makes
+the provider appear on the admin page and collectable in place wherever it is
+needed. See [A provider declares its own fields](#a-provider-declares-its-own-fields).
 
 ## Add a consumer
 
@@ -165,10 +170,61 @@ universal floor.
 | `oauth_microsoft_client_id` | `""` | |
 | `oauth_microsoft_client_secret` | `""` | stored via SecretBox |
 | `oauth_microsoft_tenant` | `common` | `common` / `organizations` / `consumers` / a tenant id |
+| `oauth_digitalocean_client_id` | `""` | |
+| `oauth_digitalocean_client_secret` | `""` | stored via SecretBox |
+| `oauth_dnsimple_client_id` | `""` | |
+| `oauth_dnsimple_client_secret` | `""` | stored via SecretBox |
 
 Enter them at **Admin → System → OAuth Providers** (permission 10). The page
 shows the exact redirect URI to paste into each cloud console and never displays
 a stored secret back.
+
+### A provider declares its own fields
+
+`configFields()` names the settings a provider's app registration is made of, and
+every surface that collects one renders from that declaration:
+
+```php
+class MyOAuthProvider implements OAuth2Provider {
+    use DeclaresOAuthConfigFields;   // the whole declaration, for the usual pair
+    // …
+}
+```
+
+The trait derives `oauth_{key}_client_id` and `oauth_{key}_client_secret` from
+`getKey()`, which the interface already fixes as the settings prefix. A provider
+needing more overrides `configFields()` and calls `self::defaultConfigFields()`
+to keep the pair — `MicrosoftOAuthProvider` does this to add its tenant.
+
+Adding a provider is therefore one file. The admin page iterates
+`OAuth2ProviderRegistry::all()`, and `OAuth2ProviderConfig::save()` is the single
+writer both it and the DNS publish box use, so a provider cannot exist in the
+registry yet be unconfigurable, and the two surfaces cannot disagree about how a
+secret is stored.
+
+`configGuide()` carries the steps that produce the credential, in the same shape
+as FormWriter's `help_modal` — a title, ordered steps, an https deep link, and
+the callback URL as a click-to-copy row, since every vendor's registration form
+asks for it and it has to match byte-for-byte. It renders as a **How do I get
+this?** link on the provider's first field.
+
+### Registering an app while using it
+
+An OAuth app registration is collected wherever it is needed, not only on the
+admin page. The DNS publish box renders the same `configFields()` inline when the
+provider it needs is unconfigured, saves through the same helper, and continues
+to consent in that one request — so a publish is never interrupted by a trip to a
+settings page.
+
+Two properties make that safe rather than merely convenient:
+
+- **An app registration is not a write credential.** It cannot act alone; a
+  per-publish user grant is still required, and that grant is still discarded
+  with the request that used it.
+- **It is global.** `oauth_google_client_id` is the same value Google sign-in
+  uses, so overwriting it affects every consumer. Saving one requires permission
+  10 even where the surrounding page opens at 5; a lesser admin is told what is
+  missing rather than shown a control that would be refused.
 
 ### `secret_box_key`
 

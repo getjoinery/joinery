@@ -17,7 +17,8 @@
  * publish box reads those to decide what to show without instantiating
  * anything.
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - Added credentialGuide(): a driver says where its credential comes from, rendered beside the field it fills
  */
 
 require_once(PathHelper::getIncludePath('includes/dns/DnsRecord.php'));
@@ -85,6 +86,28 @@ interface DnsProvider {
 	 * none. Surfaced in the publish box rather than left to fail silently.
 	 */
 	public static function prerequisiteNote(): string;
+
+	/**
+	 * Where this provider's credential comes from: the clicks that produce it,
+	 * in the vendor's own words. NULL when there is no guide.
+	 *
+	 * Distinct from prerequisiteNote() on purpose. A prerequisite blocks the
+	 * publish and is shown unconditionally; a guide is optional reading behind a
+	 * link, for the operator who does not already know their way around this
+	 * vendor's dashboard. Namecheap has both, and they read differently.
+	 *
+	 * The shape is FormWriter's help_modal option, rendered by the publish box:
+	 *   title     — what the operator is about to create
+	 *   steps     — ordered strings, each one thing to click
+	 *   caution   — a wrong-credential warning, kept out of the numbered steps
+	 *               (Cloudflare's Global API Key, GoDaddy's OTE key) (optional)
+	 *   url       — https deep link to the page where it starts (optional)
+	 *   url_label — link text (optional)
+	 *   copy      — [['label' => string, 'value' => string]] for values the
+	 *               vendor's own form needs from us, offered as copy buttons
+	 *               (optional)
+	 */
+	public static function credentialGuide(): ?array;
 
 	/**
 	 * The provider's nameservers, where it publishes a fixed set. Empty when

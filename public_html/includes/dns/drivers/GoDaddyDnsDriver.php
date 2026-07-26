@@ -52,6 +52,21 @@ class GoDaddyDnsDriver extends DnsRrsetDriverBase {
 		);
 	}
 
+	public static function credentialGuide(): ?array {
+		return array(
+			'title'     => 'Create a GoDaddy production API key',
+			'url'       => 'https://developer.godaddy.com/keys',
+			'url_label' => 'Open the GoDaddy developer portal',
+			'steps'     => array(
+				'Sign in at developer.godaddy.com and choose Create New API Key.',
+				'Set Environment to Production, then create the key.',
+				'Copy the Key and the Secret — they are shown once.',
+			),
+			'caution'   => 'An OTE key is for GoDaddy\'s test environment. It looks valid and cannot '
+				. 'change live DNS.',
+		);
+	}
+
 	public function zoneFor(string $domain): ?string {
 		$map = array();
 		foreach ($this->zoneNames() as $name) {

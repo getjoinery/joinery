@@ -14,7 +14,8 @@
  * where it already is has no blast radius; moving a zone takes the website and
  * every other name with it, and is not something this platform offers.
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - Renders the credential guide on the first credential field, and the OAuth app registration form when one is missing
  */
 
 require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
@@ -182,9 +183,20 @@ function dns_publish_box_diff($page, array $vars): void {
 			. ' could not be checked — the resolver did not answer.</p>';
 	}
 
+	// An OAuth provider with no app registration yet is configured here, in the
+	// same press that authorizes — nobody is sent to a settings page to finish a
+	// publish they already started. Saving one is a full-admin action because the
+	// credential is shared site-wide, so a lesser admin sees what is missing
+	// instead of a button that would be refused.
+	$needs_oauth_config = !empty($vars['oauth_needs_config']);
+	$can_oauth_config   = !empty($vars['oauth_can_config']);
+	$blocked            = $needs_oauth_config && !$can_oauth_config;
+
 	$form = $page->getFormWriter('dns_apply_form', array('action' => $vars['return_url']));
 	echo $form->begin_form();
-	$form->hiddeninput('dns_action', '', array('value' => 'dns_apply'));
+	$form->hiddeninput('dns_action', '', array(
+		'value' => $needs_oauth_config ? 'dns_oauth_config' : 'dns_apply',
+	));
 	$form->hiddeninput('dns_provider', '', array('value' => $vars['provider_key']));
 
 	$conflicts = array();
@@ -247,11 +259,18 @@ function dns_publish_box_diff($page, array $vars): void {
 
 	// An API-credential provider collects its key here, at the moment of the
 	// write. Nothing entered is stored — not in the session, not sealed.
+	//
+	// The guide hangs off the first field only. One guide covers the whole
+	// credential, so repeating the link beside a username and an IP address
+	// would be three offers of the same help.
+	$guide = $vars['credential_guide'];
 	foreach ($vars['credential_fields'] as $field => $spec) {
 		$options = array(
 			'help_text'    => $spec['help'] ?? '',
 			'autocomplete' => 'off',
+			'help_modal'   => $guide,
 		);
+		$guide = null;
 		if (!empty($spec['secret'])) {
 			$form->passwordinput('dns_cred_' . $field, $spec['label'] ?? $field, $options);
 		} else {
@@ -259,8 +278,46 @@ function dns_publish_box_diff($page, array $vars): void {
 		}
 	}
 
-	$form->submitbutton('btn_dns_apply', 'Apply');
+	// The app registration, when this deployment has not connected this provider
+	// before. It is stored — but an app registration cannot write DNS on its own,
+	// so the rule it must not break (nothing DNS-write-capable at rest) holds:
+	// the grant that does the writing still lives and dies inside one request.
+	if ($needs_oauth_config && $can_oauth_config) {
+		echo '<p class="mb-2"><strong>Connect ' . htmlspecialchars($vars['provider_label'])
+			. '</strong> &mdash; this deployment has not been registered as an application at '
+			. htmlspecialchars($vars['provider_label']) . ' yet. Do it once and every later publish '
+			. 'goes straight to approval.</p>';
+		$oauth_guide = $vars['oauth_config_guide'];
+		foreach ($vars['oauth_config_fields'] as $setting => $spec) {
+			$options = array(
+				'help_text'    => $spec['help'] ?? '',
+				'autocomplete' => 'off',
+				'help_modal'   => $oauth_guide,
+			);
+			$oauth_guide = null;
+			if (!empty($spec['secret'])) {
+				$form->passwordinput('dns_oauth_' . $setting, $spec['label'] ?? $setting, $options);
+			} else {
+				$form->textinput('dns_oauth_' . $setting, $spec['label'] ?? $setting, $options);
+			}
+		}
+	} elseif ($blocked) {
+		echo '<p class="mb-2">Publishing through ' . htmlspecialchars($vars['provider_label'])
+			. ' needs this deployment registered as an application there first. That credential is '
+			. 'shared by the whole site, so a full administrator sets it up once &mdash; after that '
+			. 'this page works normally.</p>';
+	}
+
+	if (!$blocked) {
+		$form->submitbutton('btn_dns_apply', $needs_oauth_config
+			? 'Connect and publish'
+			: 'Apply');
+	}
 	echo $form->end_form();
+
+	if ($blocked) {
+		return;
+	}
 
 	echo '<p class="text-muted small mb-0">'
 		. ($vars['provider_class'] !== null

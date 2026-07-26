@@ -14,8 +14,40 @@ require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
 
 class MicrosoftOAuthProvider implements OAuth2Provider {
 
+    use DeclaresOAuthConfigFields;
+
     public static function getKey(): string { return 'microsoft'; }
     public static function getLabel(): string { return 'Microsoft'; }
+
+    /**
+     * The usual pair plus the tenant segment the endpoints are templated on.
+     */
+    public static function configFields(): array {
+        $fields = self::defaultConfigFields();
+        $fields['oauth_microsoft_tenant'] = [
+            'label'  => 'Microsoft tenant',
+            'help'   => 'common, organizations, consumers, or a specific tenant id. Blank means common.',
+            'secret' => false,
+        ];
+        return $fields;
+    }
+
+    public static function configGuide(): ?array {
+        return [
+            'title'     => 'Register a Microsoft Entra app',
+            'url'       => 'https://portal.azure.com/#view/Microsoft_AAD_IAM/ActiveDirectoryMenuBlade/~/RegisteredApps',
+            'url_label' => 'Open Entra ID app registrations',
+            'steps'     => [
+                'In the Azure portal open Microsoft Entra ID, then App registrations, then New registration.',
+                'Name it, and under Redirect URI choose Web and paste the callback URL below.',
+                'Register it — the Application (client) ID is on the Overview page.',
+                'Open Certificates & secrets, choose New client secret, then copy the Value column immediately.',
+                'Copy the Directory (tenant) ID from Overview if you want to lock this to one tenant.',
+                'For Azure DNS, give the account you will consent as the DNS Zone Contributor role on the zone.',
+            ],
+            'copy'      => [self::callbackCopyRow()],
+        ];
+    }
 
     /** Configured tenant segment, defaulting to 'common'. */
     public static function getTenant(): string {

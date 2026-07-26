@@ -17,8 +17,25 @@ require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
 
 class DnsimpleOAuthProvider implements OAuth2Provider {
 
+    use DeclaresOAuthConfigFields;
+
     public static function getKey(): string { return 'dnsimple'; }
     public static function getLabel(): string { return 'DNSimple'; }
+
+    public static function configGuide(): ?array {
+        return [
+            'title'     => 'Register a DNSimple OAuth app',
+            'url'       => 'https://dnsimple.com/a',
+            'url_label' => 'Open DNSimple account settings',
+            'steps'     => [
+                'Open your DNSimple account page and choose the OAuth Applications tab on the left.',
+                'In the Developer applications card, create a new application.',
+                'Give it a name and a homepage URL, and paste the callback URL below as the authorization callback URL.',
+                'Create it — the client ID and client secret are shown on the application page.',
+            ],
+            'copy'      => [self::callbackCopyRow()],
+        ];
+    }
 
     public static function getAuthorizeEndpoint(): string {
         return 'https://dnsimple.com/oauth/authorize';

@@ -271,6 +271,7 @@ The static half declares capability, read before any credential exists:
 | `oauthProviderKey()` / `oauthScopes()` | The `OAuth2Provider` to consent through |
 | `credentialFields()` | What an API driver collects at the publish moment |
 | `prerequisiteNote()` | A setup step that must happen first (Namecheap's IP allowlist) — surfaced in the box rather than failing silently |
+| `credentialGuide()` | Where that credential comes from: the clicks that produce it, opened in a modal from the field itself |
 | `nameservers()` | The vendor's fixed nameserver set, where it publishes one |
 | `nameserverSuffixes()` | **How the driver is recognised.** Fragments of a nameserver name, matched as substrings. Defaults to `nameservers()`; override with the shared fragment for a vendor that assigns per-zone names, or the box can never lead with it |
 | `supportsZones()` | Whether `createZone()`/`deleteZone()` work |
@@ -279,6 +280,51 @@ The static half declares capability, read before any credential exists:
 The instance half is `zoneFor()`, `listRecords()`, `createRecord()`,
 `updateRecord()`, `deleteRecord()`, and optionally `createZone()`,
 `deleteZone()`, `accounts()` and `afterPublish()`.
+
+### Saying where the credential comes from
+
+The box asks for a scoped API credential at the publish moment, and fifteen
+vendors hide theirs in fifteen different places. `credentialGuide()` answers
+that in place: a **How do I get this?** link on the credential field opens the
+steps for that vendor, deep-linked to the page where it starts.
+
+```php
+public static function credentialGuide(): ?array {
+    return array(
+        'title'     => 'Create a Cloudflare API token',
+        'url'       => 'https://dash.cloudflare.com/profile/api-tokens',
+        'url_label' => 'Open Cloudflare API tokens',
+        'steps'     => array('Sign in to Cloudflare and open My Profile, then API Tokens.', /* … */),
+        'copy'      => array(),
+    );
+}
+```
+
+The shape is FormWriter's `help_modal` option, so the box passes it straight
+through and the kit modal renders it. `copy` rows are values the *vendor's* form
+needs from us — an allowlist IP, a callback URL — rendered as click-to-copy
+buttons, because a mistyped one fails in a way that looks like our bug. A
+credential never travels in a `copy` row; nothing there is ours to give.
+
+Three rules for writing one:
+
+- **Steps are what the operator clicks**, in order, in the vendor's own words for
+  its buttons and menus.
+- **Name the exact scope.** "Zone · DNS · Edit", not "DNS permissions".
+- **Say what not to pick** where a wrong-but-adjacent credential exists —
+  Cloudflare's Global API Key, GoDaddy's OTE environment, an AWS root key. That
+  goes in `caution`, not in `steps`: a warning numbered among the clicks reads as
+  an instruction to go and do it.
+
+`prerequisiteNote()` is the other half and stays separate. A prerequisite blocks
+the publish and is shown unconditionally; a guide is optional reading behind a
+link. Namecheap, Porkbun, GoDaddy and Vultr have both — an eligibility rule or a
+per-domain toggle that no amount of correct clicking in the guide can substitute
+for.
+
+The guide hangs off the **first** credential field only. One guide covers the
+whole credential, so a driver collecting a username, a key and an IP address
+offers the link once rather than three times.
 
 **Quirks are the driver's job, not the caller's.** The general ones live in the
 base:

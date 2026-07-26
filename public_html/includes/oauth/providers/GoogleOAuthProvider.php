@@ -15,8 +15,27 @@ require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
 
 class GoogleOAuthProvider implements OAuth2Provider {
 
+    use DeclaresOAuthConfigFields;
+
     public static function getKey(): string { return 'google'; }
     public static function getLabel(): string { return 'Google'; }
+
+    public static function configGuide(): ?array {
+        return [
+            'title'     => 'Create a Google OAuth client',
+            'url'       => 'https://console.cloud.google.com/apis/credentials',
+            'url_label' => 'Open Google Cloud credentials',
+            'steps'     => [
+                'Pick the Google Cloud project that holds what you are connecting, or create one.',
+                'Configure the OAuth consent screen once if the project has none.',
+                'Under Clients (APIs & Services) choose Create client, type Web application.',
+                'Add the callback URL below under Authorized redirect URIs — it must match exactly.',
+                'Create it, then copy the client ID and client secret.',
+                'For Cloud DNS, also enable the Cloud DNS API in this project.',
+            ],
+            'copy'      => [self::callbackCopyRow()],
+        ];
+    }
 
     public static function getAuthorizeEndpoint(): string {
         return 'https://accounts.google.com/o/oauth2/v2/auth';

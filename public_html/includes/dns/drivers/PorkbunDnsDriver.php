@@ -52,6 +52,21 @@ class PorkbunDnsDriver extends DnsDriverBase {
 		);
 	}
 
+	public static function credentialGuide(): ?array {
+		return array(
+			'title'     => 'Create a Porkbun API key',
+			'url'       => 'https://porkbun.com/account/api',
+			'url_label' => 'Open Porkbun API access',
+			'steps'     => array(
+				'Sign in, open Account, then API Access, name the key and choose Create API Key.',
+				'Copy both the API key and the secret key before leaving the page — the secret is '
+					. 'shown once.',
+				'Open Account, then Domain Management, choose Details on this domain, and switch '
+					. 'API Access to Enabled. Porkbun keeps it off per domain.',
+			),
+		);
+	}
+
 	public function zoneFor(string $domain): ?string {
 		$map = array();
 		foreach ($this->zoneNames() as $name) {

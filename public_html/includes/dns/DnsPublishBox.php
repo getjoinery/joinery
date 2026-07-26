@@ -24,7 +24,8 @@
  *   diff           the four outcomes, with cutovers called out
  *   all_green      every record is published as planned
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - Collects an OAuth app registration in place when the chosen provider has none, gated at permission 10, then continues to consent in the same request; carries credentialGuide() through to the box
  */
 
 require_once(PathHelper::getIncludePath('includes/dns/DnsDriverRegistry.php'));
@@ -80,6 +81,16 @@ class DnsPublishBox {
 			return LogicResult::redirect($return_url);
 		}
 
+		// Connecting a provider for the first time: save the app registration and
+		// carry straight on to consent, so one press finishes what it started.
+		if ($action === 'dns_oauth_config') {
+			$blocked = self::saveOauthConfig($input, $driver_class, $return_url, $session);
+			if ($blocked !== null) {
+				return $blocked;
+			}
+			return self::startApply($input, $plan, $driver_class, $return_url, $session);
+		}
+
 		if ($action === 'dns_apply') {
 			return self::startApply($input, $plan, $driver_class, $return_url, $session);
 		}
@@ -123,8 +134,10 @@ class DnsPublishBox {
 					$return_url
 				);
 			} catch (Throwable $e) {
-				self::flash($session, $e->getMessage() . ' An admin sets the OAuth app credentials for '
-					. $driver_class::getLabel() . ' on the Settings page.', 'Could not start authorization');
+				// The box collects the app registration itself when it is missing,
+				// so this is a genuine failure rather than a setup step: say what
+				// went wrong and leave the diff on screen.
+				self::flash($session, $e->getMessage(), 'Could not start authorization');
 				return LogicResult::redirect(self::urlWith($return_url, array('dns_show' => '1')));
 			}
 			return LogicResult::redirect($consent_url);
@@ -154,6 +167,81 @@ class DnsPublishBox {
 
 		self::flash($session, self::summarizeResults($results), 'DNS publish');
 		return LogicResult::redirect(self::urlWith($return_url, array('dns_show' => '1')));
+	}
+
+	/** The level that may write an OAuth app registration. See saveOauthConfig(). */
+	const OAUTH_CONFIG_PERMISSION = 10;
+
+	/**
+	 * What the box needs to know about an OAuth driver's app registration.
+	 *
+	 * Nothing here is a secret: configFields() names settings and configGuide()
+	 * describes clicks, both read before any value exists.
+	 */
+	private static function oauthConfigVars(string $driver_class, array &$vars): void {
+		require_once(PathHelper::getIncludePath('includes/oauth/OAuth2ProviderRegistry.php'));
+		$provider_class = OAuth2ProviderRegistry::get($driver_class::oauthProviderKey());
+		if ($provider_class === null) {
+			return;
+		}
+		if ($provider_class::isConfigured()) {
+			return;
+		}
+
+		$session = SessionControl::get_instance();
+		$vars['oauth_needs_config']  = true;
+		$vars['oauth_can_config']    = $session->get_permission() >= self::OAUTH_CONFIG_PERMISSION;
+		$vars['oauth_config_fields'] = $provider_class::configFields();
+		$vars['oauth_config_guide']  = $provider_class::configGuide();
+	}
+
+	/**
+	 * Save an OAuth app registration from the box, then carry on to consent.
+	 *
+	 * Configuration happens where it is needed — nobody is sent to a settings
+	 * page to finish a publish they already started. Two things make that safe
+	 * rather than merely convenient:
+	 *
+	 *  - **An app registration is not a DNS-write credential.** It cannot write
+	 *    anything on its own; a per-publish user grant is still required and is
+	 *    still discarded with the request that used it. So storing it does not
+	 *    weaken the rule that nothing DNS-write-capable is ever stored.
+	 *  - **It is still a global credential**, shared with any other consumer of
+	 *    the same provider — oauth_google_client_id is the same value Google
+	 *    sign-in uses. Overwriting it can break sign-in for everyone, which is
+	 *    why the write needs permission 10 even though the box itself opens at 5.
+	 */
+	private static function saveOauthConfig(array $input, string $driver_class, string $return_url, $session): ?LogicResult {
+		require_once(PathHelper::getIncludePath('includes/oauth/OAuth2ProviderRegistry.php'));
+		require_once(PathHelper::getIncludePath('includes/oauth/OAuth2ProviderConfig.php'));
+
+		$provider_class = OAuth2ProviderRegistry::get($driver_class::oauthProviderKey());
+		if ($provider_class === null) {
+			self::flash($session, 'This deployment has no OAuth provider for '
+				. $driver_class::getLabel() . '.', 'Cannot authorize');
+			return LogicResult::redirect(self::urlWith($return_url, array('dns_show' => '1')));
+		}
+
+		if ($session->get_permission() < self::OAUTH_CONFIG_PERMISSION) {
+			self::flash($session, 'Connecting ' . $provider_class::getLabel()
+				. ' for the first time sets an application credential the whole site shares, '
+				. 'so it needs a full administrator.', 'Not permitted');
+			return LogicResult::redirect(self::urlWith($return_url, array('dns_show' => '1')));
+		}
+
+		$error = OAuth2ProviderConfig::save($provider_class, $input, 'dns_oauth_', $session);
+		if ($error !== '') {
+			self::flash($session, $error, 'Could not save');
+			return LogicResult::redirect(self::urlWith($return_url, array('dns_show' => '1')));
+		}
+
+		if (!$provider_class::isConfigured()) {
+			self::flash($session, 'Enter both the client ID and the client secret for '
+				. $provider_class::getLabel() . '.', 'Incomplete');
+			return LogicResult::redirect(self::urlWith($return_url, array('dns_show' => '1')));
+		}
+
+		return null;   // configured — the caller continues straight to consent
 	}
 
 	/**
@@ -226,6 +314,11 @@ class DnsPublishBox {
 			'detected_label' => '',
 			'prerequisite'  => '',
 			'credential_fields' => array(),
+			'credential_guide'  => null,
+			'oauth_config_fields' => array(),
+			'oauth_config_guide'  => null,
+			'oauth_needs_config'  => false,
+			'oauth_can_config'    => false,
 			'domain'        => $plan ? $plan->getDomain() : '',
 		);
 
@@ -257,7 +350,16 @@ class DnsPublishBox {
 		$vars['provider_label']    = $driver_class::getLabel();
 		$vars['prerequisite']      = $driver_class::prerequisiteNote();
 		$vars['credential_fields'] = $driver_class::credentialFields();
+		$vars['credential_guide']  = $driver_class::credentialGuide();
 		$vars['state']             = self::STATE_READY;
+
+		// An OAuth2 driver needs the deployment's app registration before consent
+		// can happen at all. When it is missing, the box collects it here rather
+		// than sending the operator to a settings page — configuration belongs at
+		// the moment it is needed.
+		if ($driver_class::credentialMode() === DnsProvider::CREDENTIAL_OAUTH2) {
+			self::oauthConfigVars($driver_class, $vars);
+		}
 
 		if (!empty($input['dns_show'])) {
 			$reconciler = new DnsReconciler();

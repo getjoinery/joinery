@@ -45,6 +45,26 @@ class VultrDnsDriver extends DnsDriverBase {
 		return self::quoteTxt($value);
 	}
 
+	public static function prerequisiteNote(): string {
+		return 'Vultr keeps API access off until you enable it, and its Access Control list decides which '
+			. 'addresses may call. Enable the API and add this server\'s public IP under Account · API, '
+			. 'or the key is refused before it reaches a zone.';
+	}
+
+	public static function credentialGuide(): ?array {
+		return array(
+			'title'     => 'Create a Vultr personal access token',
+			'url'       => 'https://my.vultr.com/settings/#settingsapi',
+			'url_label' => 'Open Vultr API settings',
+			'steps'     => array(
+				'In the Vultr portal open Account, then API.',
+				'Under Personal Access Token choose Enable API if it is off.',
+				'Under Access Control add this server\'s public IP, or Vultr refuses calls from it.',
+				'Copy the API key from the same page.',
+			),
+		);
+	}
+
 	public function zoneFor(string $domain): ?string {
 		$map = array();
 		foreach ($this->zoneNames() as $name) {
