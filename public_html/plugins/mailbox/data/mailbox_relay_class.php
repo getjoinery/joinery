@@ -113,6 +113,12 @@ class MailboxRelay extends SystemBase {
 		'mrl_map_content_hash'   => array('type'=>'varchar(64)'),
 		'mrl_last_push_time'     => array('type'=>'timestamp(6)'),
 		'mrl_last_pull_time'     => array('type'=>'timestamp(6)'),
+		// Held blobs from the last pull: recoverable mail left on the relay
+		// because its domain is disabled/unconfigured or its Fortress owner is
+		// not yet resolvable (specs/mailbox_data_loss_fixes.md, Fixes 6/7). A
+		// live gauge — held blobs are re-counted each pull until the domain
+		// returns / the owner resolves, or they age out past the grace window.
+		'mrl_last_pull_held'     => array('type'=>'int4', 'is_nullable'=>false, 'default'=>0),
 		'mrl_mgn_managed_node_id'=> array('type'=>'int8'),
 		// Cloud-provisioned relays (specs/mailbox_relay_cloud_provisioning.md):
 		// the customer-account instance a destroy/rebuild targets.

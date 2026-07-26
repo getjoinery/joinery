@@ -13,7 +13,7 @@
  *   67 = unknown user (permanent rejection)
  *   75 = temporary failure (Postfix will retry)
  *
- * @version 1.2
+ * @version 1.3
  */
 
 // Bootstrap Joinery (outside normal web request)
@@ -48,7 +48,12 @@ try {
 	$router = new InboundEmailRouter();
 	$exit_code = $router->processEmail($result['raw_mime'], $result['recipient']);
 	exit($exit_code);
-} catch (Exception $e) {
+} catch (\Throwable $e) {
+	// Catch Throwable, not Exception: a PHP Error (TypeError, an OOM-adjacent
+	// fatal in a dependency) is not an Exception, so catching only Exception
+	// lets it escape and the process exits 255 — which Postfix does not read
+	// as its tempfail code and may bounce as a permanent failure, losing mail
+	// the box would have accepted on retry. Exit 75 so Postfix retries.
 	error_log('InboundEmailRouter fatal: ' . $e->getMessage());
 	exit(75); // Temp failure — Postfix will retry
 }

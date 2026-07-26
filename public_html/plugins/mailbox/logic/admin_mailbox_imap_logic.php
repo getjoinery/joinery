@@ -6,7 +6,7 @@
  * (begin an OAuth2 consent flow through the OAuth2 Core for Gmail/Microsoft
  * accounts). Loads the accounts plus their bound-alias labels for display.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -35,6 +35,15 @@ function admin_mailbox_imap_logic(array $input): LogicResult {
 		}
 
 		if ($action === 'delete') {
+			// If the feed has reference-backed ('remote') messages, deleting it
+			// would strand them (attachments fetch from this account on demand).
+			// Route through the keep/remove choice instead of a silent orphan
+			// (specs/mailbox_data_loss_fixes.md, Fix 8).
+			if (_imap_has_reference_backed(intval($account->key))) {
+				return LogicResult::redirect(
+					'/plugins/mailbox/admin/admin_mailbox_imap_delete?iia_inbound_imap_account_id='
+					. intval($account->key));
+			}
 			$account->soft_delete();
 			return _imap_msg_redirect($session, 'IMAP account deleted.', $list_url);
 		}
@@ -112,6 +121,16 @@ function _imap_begin_consent(InboundImapAccount $account, $session, string $list
 	} catch (Throwable $e) {
 		return _imap_msg_redirect($session, 'Could not start the connect flow: ' . $e->getMessage(), $list_url);
 	}
+}
+
+/** True if this IMAP account has any reference-backed ('remote') messages. */
+function _imap_has_reference_backed(int $account_id): bool {
+	$db = DbConnector::get_instance()->get_db_link();
+	$stmt = $db->prepare(
+		"SELECT 1 FROM iem_inbound_email_messages
+		 WHERE iem_iia_inbound_imap_account_id = ? AND iem_raw_storage_driver = 'remote' LIMIT 1");
+	$stmt->execute(array($account_id));
+	return (bool)$stmt->fetchColumn();
 }
 
 function _imap_msg_redirect($session, string $message, string $url): LogicResult {

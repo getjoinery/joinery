@@ -2,8 +2,15 @@
 
 ## Status
 
-Active. Decided fixes below are ready to build. Open items are resolved one at a
-time with the owner and moved up into "Decided" as they're settled.
+**Built (2026-07-26), uncommitted.** All nine fixes are implemented and tested;
+`php tests/run.php safe` is green and the new/changed db-tier suites pass. New
+tests: `inbound_email_attachment_storage` (atomic-store rollback, Fix 4),
+`forward_and_store_ordering` (Fix 5), `relay_spool_hold` (Fixes 6/7),
+`filter_import_delete_disabled` (Fix 9), `imap_materialize` (Fix 8). Live
+settings `mailbox_retention_days` and `mailbox_max_per_window` were flipped to 0
+immediately for migration safety; the migrations make that permanent. Not yet
+run against a live IMAP account (Fix 8's fetch is stubbed in the test) or a live
+relay pull (Fixes 6/7 outcomes are unit-tested via reflection).
 
 ## Motivation
 

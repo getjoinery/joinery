@@ -754,6 +754,7 @@ function admin_mailbox_relay_health(): array {
 	// failure.
 	$run = array(
 		'checkRelaySpoolDraining' => 'Mail pickup',
+		'checkRelaySpoolHeld'     => 'No mail held on relay',
 		'checkRelayMapFresh'      => 'Address list current',
 		'checkOriginHidden'       => 'Server address hidden',
 	);
@@ -846,7 +847,7 @@ function admin_mailbox_relay_check_rows(string $advanced_url = ''): array {
 	// origin-leak checks describe the provider path, not the relay, and putting
 	// them on a card headed "Relay" would claim the relay is doing a job it is
 	// not doing.
-	$receiving_checks = array('checkRelaySpoolDraining', 'checkRelayMapFresh', 'checkOriginHidden');
+	$receiving_checks = array('checkRelaySpoolDraining', 'checkRelaySpoolHeld', 'checkRelayMapFresh', 'checkOriginHidden');
 	$sending_checks   = $smarthost ? array('checkRelayTunnel') : array();
 
 	$health = admin_mailbox_relay_health();

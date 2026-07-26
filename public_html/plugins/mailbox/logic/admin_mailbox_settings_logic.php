@@ -10,7 +10,7 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  * hostname/IP, SRS, the relay, and the health run). One POST saves the whole
  * form; values are read back fresh on the redirect.
  *
- * @version 1.2
+ * @version 1.3
  */
 function admin_mailbox_settings_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -34,8 +34,7 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 		'mailbox_forwarding_rate_limit_per_domain' => 0,
 		'mailbox_forwarding_rate_limit_window'     => 1,
 		'mailbox_log_retention_days'               => 0,
-		'mailbox_retention_days'           => 0,
-		'mailbox_max_per_window'           => 0,
+		'mailbox_max_per_window'                   => 0,
 	);
 
 	if (!empty($input['save_settings'])) {

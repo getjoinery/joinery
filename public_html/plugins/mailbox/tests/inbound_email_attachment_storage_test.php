@@ -36,6 +36,18 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRo
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxViewer.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSender.php'));
 
+/**
+ * Router whose attachment/raw persistence always fails — simulates a mid-store
+ * abort (process death after the row insert, before attachments are written)
+ * to prove the atomic-store transaction (specs/mailbox_data_loss_fixes.md,
+ * Fix 4) rolls the whole unit back so no bare, attachment-less row survives.
+ */
+class AtomicAbortRouter extends InboundEmailRouter {
+	protected function persistRawAndManifest(int $message_id, string $raw_email, $alias = null, ?string $dek = null) {
+		throw new \RuntimeException('simulated mid-store abort before attachment persistence');
+	}
+}
+
 class InboundAttachmentStorageTest {
 	private $db;
 	private $suffix;
@@ -62,6 +74,7 @@ class InboundAttachmentStorageTest {
 			$this->testSingleGranteeOwnsAttachment();
 			$this->testSharedMailboxOwnedBySystem();
 			$this->testForwardReEmbedsInline();
+			$this->testAtomicStoreRollback();
 		} catch (\Throwable $e) {
 			check(false, 'EXCEPTION', $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
 		} finally {
@@ -241,6 +254,53 @@ class InboundAttachmentStorageTest {
 			'inline part re-embedded with its original Content-ID');
 		$this->ok($inline !== null && $inline['data'] === $this->png_bytes,
 			'inline part carries the original image bytes');
+	}
+
+	/**
+	 * Fix 4 — the store is atomic. A mid-store abort (attachment persistence
+	 * throws after the row is inserted) must leave NO row behind, so the
+	 * sender's retry rebuilds from a clean slate and stores fully. Proves the
+	 * old crash window — a committed bare row whose retry dedups away the copy
+	 * carrying the attachments — is closed.
+	 */
+	private function testAtomicStoreRollback() {
+		$alias = $this->makeAlias('atomic' . $this->suffix);
+		$owner = $this->makeUser('ias_atomic_' . $this->suffix . '@example.test', 0);
+		InboundEmailMailboxGrant::sync_for_alias(intval($alias->key), array($owner));
+
+		$token = 'atomic-' . $this->suffix;
+		$raw = $this->buildRaw($alias, $token);
+		$parsed = $this->router->parseEmail($raw);
+		$auth = array('dkim' => 'unverified', 'spf' => 'unverified', 'dmarc' => 'unverified', 'source' => 'none');
+		$msgid = '<' . $token . '@example.com>';
+
+		// First delivery aborts inside the store (after insert, before attachments).
+		$abort = new AtomicAbortRouter();
+		$threw = false;
+		try {
+			$abort->storeMessage($raw, $parsed, $alias,
+				new InboundEmailDomain($this->domain_id, TRUE), $this->recipientFor($alias), $auth);
+		} catch (\Throwable $e) {
+			$threw = true;
+		}
+		$this->ok($threw, 'aborted store surfaced the failure (did not swallow it)');
+		$this->ok($this->countRowsForMessageId($msgid) === 0,
+			'aborted store left NO row behind (whole unit rolled back)');
+
+		// The sender retries: a clean, full store with its attachment.
+		$id = $this->ingest($alias, $token);
+		$this->ok($id > 0, 're-delivery after abort stored a fresh row');
+		$manifest = new MultiInboundMessageAttachment(array('message_id' => $id, 'file_backed' => true));
+		$manifest->load();
+		$this->ok(count($manifest) === 1 && intval($manifest->get(0)->get('ima_fil_file_id')) > 0,
+			're-delivered message is fully stored with its file-backed attachment');
+	}
+
+	private function countRowsForMessageId($msgid) {
+		$stmt = $this->db->prepare(
+			"SELECT COUNT(*) FROM iem_inbound_email_messages WHERE iem_message_id_header = ?");
+		$stmt->execute(array($msgid));
+		return intval($stmt->fetchColumn());
 	}
 
 	private function preClean() {

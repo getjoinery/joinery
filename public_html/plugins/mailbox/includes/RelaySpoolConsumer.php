@@ -28,7 +28,7 @@
  * own spool subdirectory and the ack is the tenant shell's joinery-ack verb —
  * ids only, no paths, no root.
  *
- * @version 1.3
+ * @version 1.4
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySsh.php'));
@@ -87,11 +87,11 @@ class RelaySpoolConsumer {
 			}
 
 			$seals = glob($stage . '/*.seal') ?: array();
-			$stored = 0; $pending = 0; $errors = 0;
+			$stored = 0; $pending = 0; $errors = 0; $held = 0;
 			$acked_ids = array();
 
 			foreach ($seals as $seal_path) {
-				if (($stored + $pending + $errors) >= $max) {
+				if (($stored + $pending + $errors + $held) >= $max) {
 					break;
 				}
 				$spool_id = basename($seal_path, '.seal');
@@ -100,9 +100,19 @@ class RelaySpoolConsumer {
 					$outcome = $this->ingestOne($seal_path, $meta_path, $spool_id);
 					if ($outcome === 'stored')  { $stored++; }
 					if ($outcome === 'pending') { $pending++; }
-					// Every non-throwing outcome (including dedup/orphan) is durable →
-					// safe to ack.
-					$acked_ids[] = $spool_id;
+					// 'hold' is recoverable mail we deliberately leave on the relay
+					// (domain disabled/unconfigured, or Fortress owner not yet
+					// resolvable) — do NOT ack it, so a later pull stores it once the
+					// domain returns or the owner resolves. It is NOT an error, so it
+					// does not inflate the error count or log per pass; the aggregate
+					// held count below is the operator-visible signal. Every other
+					// non-throwing outcome (stored/pending/dedup/bounce/unroutable/
+					// aged_out) is durable or a deliberate ack-drop → safe to ack.
+					if ($outcome === 'hold') {
+						$held++;
+					} else {
+						$acked_ids[] = $spool_id;
+					}
 				} catch (\Throwable $e) {
 					$errors++;
 					error_log('RelaySpoolConsumer: failed on ' . $spool_id . ': ' . $e->getMessage());
@@ -112,21 +122,37 @@ class RelaySpoolConsumer {
 
 			$acked = $this->ack($spool_path, $acked_ids);
 
+			if ($held > 0) {
+				// One aggregate line per pass — never per-blob (the pull runs every
+				// cron pass and held blobs persist across passes).
+				error_log('RelaySpoolConsumer: ' . $held . ' blob(s) HELD on the relay '
+					. '(domain disabled/unconfigured or Fortress owner unresolved) — '
+					. 'recoverable, awaiting the domain/owner or the grace-window age-out.');
+			}
+
 			$this->relay->set('mrl_last_pull_time', gmdate('Y-m-d H:i:s'));
+			$this->relay->set('mrl_last_pull_held', $held);
 			$this->relay->save();
 
 			$status = $errors > 0 && ($stored + $pending) === 0 ? 'error' : 'success';
-			$msg = sprintf('pulled %d entr(y/ies): %d stored, %d pending-parse, %d acked, %d error(s)',
-				count($seals), $stored, $pending, $acked, $errors);
+			$msg = sprintf('pulled %d entr(y/ies): %d stored, %d pending-parse, %d held, %d acked, %d error(s)',
+				count($seals), $stored, $pending, $held, $acked, $errors);
 			return array('status' => $status, 'message' => $msg,
-				'stored' => $stored, 'pending' => $pending, 'acked' => $acked);
+				'stored' => $stored, 'pending' => $pending, 'held' => $held, 'acked' => $acked);
 		} finally {
 			$this->cleanup($stage);
 		}
 	}
 
 	/**
-	 * Store one spool entry. Returns 'stored' | 'pending' | 'dedup' | 'orphan'.
+	 * Store one spool entry. Returns one of:
+	 *   'stored' | 'pending' | 'dedup' | 'bounce'  — durable (or handled) → ack;
+	 *   'unroutable' — genuinely undeliverable (no/malformed recipient) → ack-drop
+	 *                  with a loud log;
+	 *   'hold'       — recoverable mail whose domain is disabled/unconfigured or
+	 *                  whose Fortress owner is not yet resolvable → do NOT ack,
+	 *                  leave on the relay for a later pull (Fixes 6/7);
+	 *   'aged_out'   — a held blob past the grace window → ack-drop with a loud log.
 	 * Throws only on a real failure (so the caller leaves it un-acked to retry).
 	 */
 	private function ingestOne(string $seal_path, string $meta_path, string $spool_id): string {
@@ -156,7 +182,11 @@ class RelaySpoolConsumer {
 		$recipient_raw = trim((string)($meta['recipient'] ?? ''));
 		$recipient = strtolower($recipient_raw);
 		if ($recipient === '' || strpos($recipient, '@') === false) {
-			return 'orphan'; // nothing routable; ack to avoid a re-pull loop
+			// Genuinely undeliverable — no recovery is possible, so ack-drop, but
+			// never silently (specs/mailbox_data_loss_fixes.md, Fix 6).
+			error_log('RelaySpoolConsumer: UNROUTABLE blob ' . $spool_id
+				. ' — empty or malformed recipient (' . var_export($recipient_raw, true) . '); dropping.');
+			return 'unroutable';
 		}
 
 		$key_kind = (string)($meta['key_kind'] ?? 'transport');
@@ -184,7 +214,12 @@ class RelaySpoolConsumer {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 		$domain = InboundEmailDomain::GetByDomain($domain_name);
 		if (!$domain || !$domain->get('ied_is_enabled')) {
-			return 'orphan'; // domain removed/disabled since sealing; ack and drop
+			// The domain was removed/disabled (temporarily or accidentally) since
+			// the relay sealed this blob. HOLD it — don't ack — so re-enabling the
+			// domain lets a later pull store the still-sealed mail. Age it out only
+			// past the grace window (Fix 6).
+			return $this->holdOrAgeOut($meta, $spool_id,
+				"domain '" . $domain_name . "' is missing or disabled");
 		}
 		$alias = $this->router->lookupAlias($local, $domain);
 
@@ -198,12 +233,18 @@ class RelaySpoolConsumer {
 				$owner_id = $this->ownerByPublicKey((string)($meta['public_key'] ?? ''));
 			}
 			if ($owner_id === null) {
-				error_log('RelaySpoolConsumer: storing OWNERLESS Fortress blob ' . $spool_id
-					. ' for ' . $recipient . ' — no single owner and no vault matches the seal key;'
-					. ' it cannot be parsed until an owner is assigned');
+				// No single owner AND no vault matches the seal key: an ownerless
+				// pending row would be durable but permanently INVISIBLE (deferred
+				// ingest selects by a specific owner), and since the blob is sealed
+				// to one vault's key, assigning a fallback owner could not decrypt
+				// it anyway. HOLD instead (Fix 7): a restored grant or re-enrolled
+				// vault lets a later pull resolve the owner and store it correctly;
+				// otherwise it ages out loudly rather than sitting invisibly stuck.
+				return $this->holdOrAgeOut($meta, $spool_id,
+					'Fortress blob for ' . $recipient . ' has no resolvable owner (no single grantee and no vault matches the seal key)');
 			}
 			$result = $this->router->storeRelayPending($meta, $sealed_raw, $domain, $alias,
-				intval($owner_id ?? 0), $this->relayAuthservId());
+				intval($owner_id), $this->relayAuthservId());
 			return $result['dedup'] ? 'dedup' : 'pending';
 		}
 
@@ -267,6 +308,34 @@ class RelaySpoolConsumer {
 			return intval($multi->get(0)->get('uev_usr_user_id'));
 		}
 		return null;
+	}
+
+	/**
+	 * Decide the outcome for recoverable-but-not-yet-storable mail (Fixes 6/7):
+	 * HOLD it on the relay while there's a realistic chance of recovery (the
+	 * domain is re-enabled, or the owner's grant/vault is restored), and age it
+	 * out only once it is older than the grace window — so a permanently
+	 * disabled domain or a deleted vault can't accumulate blobs forever.
+	 *
+	 * Age is measured from the .meta received_utc (RFC3339, stamped by the
+	 * sealer and immutable), so the decision is stable across pulls. A missing
+	 * or unparseable timestamp is treated as "keep holding" (never age out on
+	 * doubt). 'hold' is logged only in aggregate by the caller, never per pass.
+	 */
+	private function holdOrAgeOut(array $meta, string $spool_id, string $reason): string {
+		$grace_days = intval(Globalvars::get_instance()->get_setting('mailbox_relay_orphan_grace_days'));
+		if ($grace_days <= 0) {
+			$grace_days = 30;
+		}
+		$received = trim((string)($meta['received_utc'] ?? ''));
+		$received_ts = ($received !== '') ? strtotime($received) : false;
+		if ($received_ts !== false && $received_ts < (time() - $grace_days * 86400)) {
+			error_log('RelaySpoolConsumer: AGED-OUT blob ' . $spool_id . ' (' . $reason
+				. ') — held past the ' . $grace_days . '-day grace window (received ' . $received
+				. '); dropping.');
+			return 'aged_out';
+		}
+		return 'hold';
 	}
 
 	/** True if a message row already carries this spool id (durable). */

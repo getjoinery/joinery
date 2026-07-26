@@ -11,7 +11,7 @@
  * the Mailbox Reader's thread-key index is created here (same pattern as the
  * server_manager plugin's index migration).
  *
- * @version 1.23.0
+ * @version 1.24.0
  */
 return [
 	[
@@ -503,6 +503,42 @@ return [
 			$dblink = $dbconnector->get_db_link();
 			$stmt = $dblink->prepare("DELETE FROM stg_settings WHERE stg_name = ?");
 			$stmt->execute(array('mailbox_forwarding_subdomain'));
+		},
+	],
+
+	[
+		// Data-loss hardening (specs/mailbox_data_loss_fixes.md, Fix 1): the
+		// retention purge is removed outright — it hard-deleted every stored
+		// message older than mailbox_retention_days with no exemption, a
+		// test-capture-era housekeeping behavior that is wrong for a real
+		// archive. Drop its seeded setting and tombstone any scheduled-task
+		// registration so the deleted task class can never be re-armed.
+		'id' => 'stg_002_remove_retention_purge',
+		'version' => '1.35.0',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$stmt = $dblink->prepare("DELETE FROM stg_settings WHERE stg_name = ?");
+			$stmt->execute(array('mailbox_retention_days'));
+			$stmt = $dblink->prepare(
+				"UPDATE sct_scheduled_tasks SET sct_delete_time = now()
+				 WHERE sct_task_class = ? AND sct_delete_time IS NULL");
+			$stmt->execute(array('PurgeOldMailboxMessages'));
+		},
+	],
+
+	[
+		// Data-loss hardening (specs/mailbox_data_loss_fixes.md, Fix 3): the
+		// per-window store cap now defaults to 0 (disabled) and defers rather
+		// than drops when set. Adopt the new default only on deployments still
+		// on the old 500 default; a deliberately-customized cap is left alone.
+		'id' => 'stg_003_disable_default_store_cap',
+		'version' => '1.35.0',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$stmt = $dblink->prepare(
+				"UPDATE stg_settings SET stg_value = '0'
+				 WHERE stg_name = ? AND stg_value = '500'");
+			$stmt->execute(array('mailbox_max_per_window'));
 		},
 	],
 ];

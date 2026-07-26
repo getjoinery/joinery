@@ -402,6 +402,29 @@ class InboundEmailHealth {
     }
 
     /**
+     * No recoverable mail is stranded on the relay. The pull HOLDS (does not
+     * delete) blobs whose domain is disabled/unconfigured or whose Fortress
+     * owner is not yet resolvable, so an operator needs to see when mail is
+     * waiting — re-enabling the domain (or restoring the grant/vault) drains it
+     * on the next pull; left alone it ages out past the grace window. No-op on
+     * colocated deployments (specs/mailbox_data_loss_fixes.md, Fixes 6/7).
+     */
+    public static function checkRelaySpoolHeld() {
+        $relay = self::activeRelay();
+        if ($relay === null) {
+            return;
+        }
+        $held = intval($relay->get('mrl_last_pull_held'));
+        if ($held > 0) {
+            throw new ProvisioningCheckFailed(
+                $held . ' message(s) are held on the relay — their domain is disabled/unconfigured '
+                . 'or their mailbox owner is not yet resolvable. Re-enable the domain (or restore the '
+                . 'grant/vault) and they store on the next pull; otherwise they age out after the grace window.'
+            );
+        }
+    }
+
+    /**
      * The relay's alias map is fresh: the map the relay is running matches what the
      * current domains/aliases would produce. A stale map risks bouncing newly
      * created aliases (reject_unmatched). No-op on colocated deployments.
