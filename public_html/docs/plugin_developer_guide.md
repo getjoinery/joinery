@@ -979,10 +979,15 @@ SettingsWriter::reportTo($write, '~/plugins/myplugin/admin/~');
 
 **Rules:**
 - **A page never draws a settings field of its own.** Declare it and render the
-  group. A hand-drawn field is a field with no rules and no write scope.
+  group. A hand-drawn field is a field with no rules and no write scope, and
+  FormWriter refuses it — on a box with `debug` on, the page throws and names the
+  setting, its group, and the manifest file to edit.
 - A page decides *whether* to render a group, may disable fields within it, and
   may print any amount of state around it. That is reasoning about the
   deployment, which is the page's job.
+- To split one declared group across two boxes, pass `only` with the names each
+  box shows. `only` and `skip` narrow a set the manifest decided; neither adds a
+  field. The full option list is in **[settings.md](settings.md)**.
 - Value-driven visibility ("show the secret when the feature is on") belongs in
   `show_when` on the declaration, so it works identically wherever the group is
   shown. Never hand-roll a JS toggle.

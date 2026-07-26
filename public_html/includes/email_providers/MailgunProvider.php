@@ -50,27 +50,6 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
         return 'include:mailgun.org';
     }
 
-    public static function getSettingsFields(): array {
-        return [
-            [
-                'key' => 'mailgun_api_key',
-                'label' => 'Mailgun API Key (Example: key-6eac34eed3afb3df055f81aa20d878e4)',
-                'type' => 'password',
-            ],
-            [
-                'key' => 'mailgun_domain',
-                'label' => 'Mailgun Domain (Example: mg.domain.net)',
-                'type' => 'text',
-            ],
-            [
-                'key' => 'mailgun_eu_api_link',
-                'label' => 'Mailgun EU API Link (Example: https://api.eu.mailgun.net)',
-                'type' => 'text',
-                'helptext' => 'Only needed for EU region accounts',
-            ],
-        ];
-    }
-
     public static function validateConfiguration(): array {
         $settings = Globalvars::get_instance();
         $errors = [];

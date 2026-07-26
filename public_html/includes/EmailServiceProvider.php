@@ -45,13 +45,6 @@ interface EmailServiceProvider {
     public static function getSpfMechanism(string $domain): string;
 
     /**
-     * Return an array of setting field definitions this provider requires.
-     * Each entry: ['key' => 'setting_name', 'label' => 'Human Label', 'type' => 'text|password', 'helptext' => '...']
-     * Used by the admin settings page to dynamically render fields.
-     */
-    public static function getSettingsFields(): array;
-
-    /**
      * Validate that this provider's required settings are configured.
      * Returns ['valid' => bool, 'errors' => string[]]
      */

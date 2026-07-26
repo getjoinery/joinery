@@ -1,6 +1,6 @@
 {
     "name": "Event Manager",
-    "version": "1.0.9",
+    "version": "1.0.10",
     "description": "Events toolkit: events, locations, event sessions and waiting lists, with store integration for ticketed events and event surveys at checkout",
     "author": "Joinery",
     "receives_upgrades": true,
@@ -77,52 +77,64 @@
             "name": "events_active",
             "default": "1",
             "legacy_core": true,
-                "group": "events",
-                "label": "Events enabled",
-                "type": "select",
-                "options": {"1": "Yes", "0": "No"}
+            "group": "events",
+            "label": "Events enabled",
+            "type": "select",
+            "options": {
+                "1": "Yes",
+                "0": "No"
+            }
         },
         {
             "name": "events_label",
             "default": "",
             "legacy_core": true,
-                "group": "events",
-                "label": "Word to use for events",
-                "type": "text",
-                "helptext": "Shown in menus and headings. Leave blank for “Events”."
+            "group": "events",
+            "label": "Word to use for events",
+            "type": "text",
+            "helptext": "Shown in menus and headings. Leave blank for “Events”."
         },
         {
             "name": "products_list_events_active",
             "default": "1",
             "legacy_core": true,
-                "group": "events",
-                "label": "Show events in product lists",
-                "type": "select",
-                "options": {"1": "Yes", "0": "No"}
+            "group": "events",
+            "label": "Show events in product lists",
+            "type": "select",
+            "options": {
+                "1": "Yes",
+                "0": "No"
+            }
         },
         {
             "name": "event_email_inner_template",
             "default": "blank_template",
             "legacy_core": true,
-                "group": "email",
-                "label": "Event email inner template",
-                "type": "text"
+            "group": "email",
+            "label": "Event email inner template",
+            "type": "select",
+            "options_from": "CoreSettingOptions::innerTemplates",
+            "options_include": "includes/CoreSettingOptions.php"
         },
         {
             "name": "event_email_outer_template",
             "default": "default_outer_template",
             "legacy_core": true,
-                "group": "email",
-                "label": "Event email outer template",
-                "type": "text"
+            "group": "email",
+            "label": "Event email outer template",
+            "type": "select",
+            "options_from": "CoreSettingOptions::outerTemplates",
+            "options_include": "includes/CoreSettingOptions.php"
         },
         {
             "name": "event_email_footer_template",
             "default": "event_bulk_footer",
             "legacy_core": true,
-                "group": "email",
-                "label": "Event email footer template",
-                "type": "text"
+            "group": "email",
+            "label": "Event email footer template",
+            "type": "select",
+            "options_from": "CoreSettingOptions::footerTemplates",
+            "options_include": "includes/CoreSettingOptions.php"
         }
     ],
     "signals": {

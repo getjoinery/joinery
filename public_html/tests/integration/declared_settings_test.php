@@ -26,10 +26,12 @@
  *      not a clear, and the vault gate blocks the change without blocking the
  *      rest of the save.
  *   E. Scope: a save cannot reach a name outside the source it named.
+ *   F. Rendering: every field a page shows came from a declaration, and a page
+ *      that tries to draw its own version of one is refused.
  *
  * Run: php tests/integration/declared_settings_test.php
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
@@ -296,5 +298,116 @@ if (!$admin_uid) {
 	$count->execute();
 	check((int)$count->fetchColumn() === 0, 'and mints no row');
 }
+
+// =========================================================================
+section('F. Rendering comes from the declarations, and only from them');
+// =========================================================================
+// The set of names a settings page emits is not literal in its source: the
+// email tab builds its fields per discovered provider, and the plugin tab per
+// active plugin. A sweep that reads page source therefore reports clean and is
+// wrong. These checks drive the renderer instead and look at what came out.
+
+require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
+require_once(PathHelper::getIncludePath('includes/FormWriterV2HTML5.php'));
+
+$declared = SettingsDeclarations::all();
+
+// Every group of every source, rendered for real, and every name it emitted
+// checked against the manifests.
+$emitted   = array();
+$undeclared_emitted = array();
+$sources   = array_merge(array('core'), SettingsDeclarations::renderableSources());
+foreach ($sources as $source) {
+	foreach (SettingsDeclarations::groupsFor($source) as $group) {
+		foreach (SettingsFieldRenderer::namesFor($group, $source) as $name) {
+			$emitted[] = $name;
+			if (!isset($declared[$name])) $undeclared_emitted[] = "$source:$group:$name";
+		}
+	}
+}
+check(count($emitted) > 100, 'the renderer has a real amount of work to describe',
+	count($emitted) . ' fields across ' . count($sources) . ' sources');
+check(empty($undeclared_emitted), 'every name the renderer emits is declared',
+	implode(', ', $undeclared_emitted));
+
+// A managed setting is machine-written and must never reach a form.
+$managed_emitted = array();
+foreach ($emitted as $name) {
+	if (!empty($declared[$name]['managed'])) $managed_emitted[] = $name;
+}
+check(empty($managed_emitted), 'a machine-written setting is never offered as a field',
+	implode(', ', $managed_emitted));
+
+// Renderable means labelled: a field titled with its own setting name is a
+// declaration somebody forgot to finish.
+$unlabelled = array();
+foreach ($emitted as $name) {
+	if (empty($declared[$name]['label'])) $unlabelled[] = $name;
+}
+check(empty($unlabelled), 'every renderable declaration carries a label',
+	implode(', ', $unlabelled));
+
+// A select must have somewhere to get its choices, and that source must
+// actually answer — an options_from that resolves to nothing renders an empty
+// dropdown, which reads as "no choices exist" rather than "this is broken".
+$empty_options = array();
+foreach ($emitted as $name) {
+	$d = $declared[$name];
+	if (($d['type'] ?? '') !== 'select') continue;
+	if (empty($d['options_from'])) continue;
+	if (empty(SettingsDeclarations::resolveOptions($d))) $empty_options[] = $name;
+}
+check(empty($empty_options), 'every discovered option list returns something on this install',
+	implode(', ', $empty_options));
+
+// The lock on the door: a page that draws its own field for a declared setting
+// is stopped where the violation happens rather than being found later by
+// reading source. Asserted by provoking it, not by re-implementing the check.
+$form = new FormWriterV2HTML5('guard_probe');
+$threw = false;
+$message = '';
+ob_start();
+try {
+	$form->textinput('site_name', 'Site Name', array('value' => 'x'));
+} catch (Throwable $e) {
+	$threw = true;
+	$message = $e->getMessage();
+}
+ob_end_clean();
+check($threw, 'a page drawing a declared setting itself is refused', $message);
+check($threw && strpos($message, 'site_name') !== false
+	&& strpos($message, 'site_identity') !== false
+	&& strpos($message, 'settings.json') !== false,
+	'and the refusal names the setting, its group, and the manifest to edit', $message);
+
+// The same call through the renderer is allowed — otherwise the guard would
+// have banned settings fields outright rather than banning hand-drawn ones.
+$rendered = array();
+ob_start();
+try {
+	$rendered = SettingsFieldRenderer::renderGroup($form, 'site_identity', array(
+		'source' => 'core',
+		'only'   => array('site_name'),
+	));
+} catch (Throwable $e) {
+	$message = $e->getMessage();
+}
+ob_end_clean();
+check($rendered === array('site_name'), 'the same field drawn through the renderer goes through',
+	json_encode($rendered) . ' ' . $message);
+
+// The guard must not leak: an ordinary model field that happens to pass
+// through the same choke point is untouched.
+ob_start();
+$ordinary_ok = true;
+try {
+	$form->textinput('usr_first_name', 'First name', array('value' => 'x'));
+} catch (Throwable $e) {
+	$ordinary_ok = false;
+	$message = $e->getMessage();
+}
+ob_end_clean();
+check($ordinary_ok, 'a field that is not a setting is drawn as before', $message);
+
 
 harness_finish();

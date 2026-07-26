@@ -22,13 +22,6 @@ interface MailingListProvider {
     public static function getLabel(): string;
 
     /**
-     * Return an array of setting field definitions this provider requires.
-     * Each entry: ['key' => 'setting_name', 'label' => 'Human Label',
-     *              'type' => 'text|password|textarea', 'helptext' => '...']
-     */
-    public static function getSettingsFields(): array;
-
-    /**
      * Validate that this provider's required settings are configured.
      * Static, cheap — checks settings are non-empty / well-formed.
      * Does NOT make network calls.

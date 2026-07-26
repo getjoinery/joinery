@@ -229,8 +229,14 @@ plugin declares.
 | `checkbox` | checkbox | value is `"1"` or `"0"` |
 | `select` | dropdown | needs `options` or `options_from` |
 | `textarea` | multi-line box | `rows` sets the height |
+| `color` | colour picker | stores the hex value |
 | `password` | password input | never emits a value |
 | plus `secret: true` | password input, or textarea with `type` | never emits a value; blank keeps |
+
+A `checkbox` is drawn with a hidden `0` of the same name in front of it, so an
+unticked box still submits. Without that, a browser sends nothing for an unticked
+box, "absent" is indistinguishable from "not on this page", and the setting could
+be turned on but never off.
 
 ### Options that are discovered rather than fixed
 
@@ -243,6 +249,20 @@ plugin declares.
 
 The method returns a `value => label` map. Adding a provider class adds its
 option — nothing else changes.
+
+Core lists live in `CoreSettingOptions`: themes, theme plugins, timezones, site
+folders, homepage candidates, email and mailing list services, email templates,
+connected mail accounts. Anything whose choices can be written down belongs in
+the manifest as a literal `options` map instead.
+
+An option list keys on **what gets stored**, which is whatever the code that
+reads the setting looks the value up by. The email template settings key on the
+template *name*, because `EmailTemplate` filters on `emt_name`; keying them on
+the row id would produce a dropdown that reads correctly and stores a value no
+consumer can resolve. Where a stored value is not in the list, `CoreSettingOptions`
+keeps it and labels it rather than dropping it, so a wrong value stays visible
+and survives a save instead of being quietly swapped for whichever option sorted
+first.
 
 ### Conditional fields
 
@@ -289,6 +309,38 @@ if ($scanner_present) {
 
 A page may skip a group, gate a group, or annotate a group. It may not render a
 field the manifest does not declare.
+
+### What the renderer takes
+
+| Method | Use |
+|---|---|
+| `renderGroup($form, $group, $options)` | one group, no heading — the page supplies its own box |
+| `renderGroups($form, [$group, …], $options)` | several groups, each under its declared heading; this is how the settings tabs are built |
+| `renderSource($form, $plugin)` | every group a plugin declares, in manifest order — what the Plugin Settings tab hands each plugin |
+| `secretField($form, $name, $label, $stored)` | one credential, when a page needs it outside a group |
+
+`$options`:
+
+| Key | Effect |
+|---|---|
+| `source` | `core` or a plugin name |
+| `only` | render just these names — a page splitting one group across two boxes calls `only` twice rather than declaring the group twice |
+| `skip` | leave these out |
+| `disabled` | render these, but not editable |
+| `values` | show these values instead of the stored ones |
+| `field_options` | extra FormWriter options per field, for page context. Two keys are read by the renderer: `helptext_append` adds to the declared help rather than replacing it, and `clearable => false` drops a credential's Clear box on a page whose save cannot honour it |
+| `heading_level` | tag for `renderGroups` headings, default `h4` |
+
+`only` and `skip` both narrow a set the manifest decided; neither can add a field.
+
+### If a page draws one anyway
+
+Every FormWriter render method funnels through `registerField()`, so that is the
+one place that sees every field however its name was computed — the case a grep
+cannot catch. Drawing a declared setting outside the renderer throws on a box
+with `debug` on, naming the setting, its group, and the manifest file to edit. In
+production it is logged and the field is drawn: a live site refusing to render a
+settings page over a manifest problem would be the worse failure.
 
 ## Saving
 
@@ -436,7 +488,22 @@ type.
 
 It only renders when something is stored. An empty credential has nothing to
 clear, and an unconditional checkbox would invite an admin to tick it and wonder
-what happened.
+what happened. A page that writes outside `SettingsWriter` can also suppress it
+with `clearable => false`, because a control the save path cannot honour is worse
+than no control.
+
+### A page throws saying it may not draw its own field
+
+The page called a FormWriter method with a declared setting's name. Ask
+`SettingsFieldRenderer` for the group the exception names, and move whatever the
+page was saying about the field — its label, type, help text or validation — into
+the manifest, where every other page showing that setting will pick it up too.
+
+### A dropdown shows a value labelled "not a template name"
+
+The stored value is not one of the choices. That is deliberate: the wrong value
+is shown rather than dropped, because silently selecting the first valid option
+would change which template the site uses on the next save. Pick the right one.
 
 ### Empty values after a fresh install
 

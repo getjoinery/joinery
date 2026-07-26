@@ -82,14 +82,26 @@ class MailingListService {
     }
 
     /**
-     * Return setting field definitions for a specific provider.
+     * The settings a provider is configured with, as declared in settings.json.
+     *
+     * The mailing list providers share one group, each field carrying a
+     * show_when on the selected provider, so a page renders the group and the
+     * right credentials appear.
      */
     public static function getProviderSettings(string $key): array {
         $providers = self::discoverProviders();
         if (!isset($providers[$key])) {
             return [];
         }
-        return $providers[$key]::getSettingsFields();
+        require_once(PathHelper::getIncludePath('includes/SettingsDeclarations.php'));
+
+        $fields = array();
+        foreach (SettingsDeclarations::forGroup('mailing_list', 'core') as $declaration) {
+            if (($declaration['show_when']['mailing_list_provider'] ?? null) === $key) {
+                $fields[] = $declaration;
+            }
+        }
+        return $fields;
     }
 
     /**

@@ -27,35 +27,6 @@ class MailjetProvider implements EmailServiceProvider {
         return 'include:spf.mailjet.com';
     }
 
-    public static function getSettingsFields(): array {
-        return [
-            [
-                'key' => 'mailjet_api_key',
-                'label' => 'Mailjet API Key',
-                'type' => 'text',
-                'helptext' => 'Public part of the credential pair. Found in Mailjet dashboard → Account → API Keys.',
-            ],
-            [
-                'key' => 'mailjet_api_secret',
-                'label' => 'Mailjet API Secret',
-                'type' => 'password',
-                'helptext' => 'Secret part of the credential pair. Visible in Mailjet only at first issue — store it somewhere safe.',
-            ],
-            [
-                'key' => 'mailjet_sandbox_mode',
-                'label' => 'Sandbox Mode (no real delivery)',
-                'type' => 'dropdown',
-                'options' => [0 => 'Off', 1 => 'On'],
-            ],
-            [
-                'key' => 'mailjet_verified_domain',
-                'label' => 'Verified Sender Domain',
-                'type' => 'text',
-                'helptext' => 'For display only — Mailjet validates the From at send time.',
-            ],
-        ];
-    }
-
     public static function validateConfiguration(): array {
         $settings = Globalvars::get_instance();
         $errors = [];

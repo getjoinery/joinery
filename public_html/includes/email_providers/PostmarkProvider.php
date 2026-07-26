@@ -26,46 +26,6 @@ class PostmarkProvider implements EmailServiceProvider {
         return 'include:spf.mtasv.net';
     }
 
-    public static function getSettingsFields(): array {
-        return [
-            [
-                'key' => 'postmark_server_token',
-                'label' => 'Postmark Server Token',
-                'type' => 'password',
-                'helptext' => 'Must be a Server token (per-Server, found under Servers → [Server] → API Tokens). Not an Account token.',
-            ],
-            [
-                'key' => 'postmark_message_stream',
-                'label' => 'Message Stream',
-                'type' => 'text',
-                'helptext' => 'Default transactional stream is "outbound". For broadcast/marketing mail, use the broadcast stream ID configured on the Server.',
-            ],
-            [
-                'key' => 'postmark_track_opens',
-                'label' => 'Track Opens',
-                'type' => 'dropdown',
-                'options' => [0 => 'Off', 1 => 'On'],
-            ],
-            [
-                'key' => 'postmark_track_links',
-                'label' => 'Track Links',
-                'type' => 'dropdown',
-                'options' => [
-                    'None' => 'None',
-                    'HtmlAndText' => 'HTML and Text',
-                    'HtmlOnly' => 'HTML only',
-                    'TextOnly' => 'Text only',
-                ],
-            ],
-            [
-                'key' => 'postmark_verified_domain',
-                'label' => 'Verified Sender Domain',
-                'type' => 'text',
-                'helptext' => 'For display only — Postmark validates the From at send time against your Sender Signatures / verified domains.',
-            ],
-        ];
-    }
-
     public static function validateConfiguration(): array {
         $settings = Globalvars::get_instance();
         $errors = [];

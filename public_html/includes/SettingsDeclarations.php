@@ -12,7 +12,7 @@
  *   group        Which box the field renders in. Ungrouped fields fall into
  *                the source's default group.
  *   label        Field label. Required for anything renderable.
- *   type         text | number | checkbox | select | password | textarea
+ *   type         text | number | checkbox | select | password | textarea | color
  *   options      Literal value => label map, for `select`.
  *   options_from  'Class::method' returning a value => label map, for options
  *                that are discovered rather than fixed.
@@ -251,7 +251,7 @@ class SettingsDeclarations {
 	 */
 	public static function schemaErrors(): array {
 		$errors = array();
-		$valid_types = array('text', 'number', 'checkbox', 'select', 'password', 'textarea');
+		$valid_types = array('text', 'number', 'checkbox', 'select', 'password', 'textarea', 'color');
 
 		foreach (self::all() as $name => $d) {
 			$where = "{$d['_source']}:{$name}";

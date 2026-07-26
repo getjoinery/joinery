@@ -7,7 +7,7 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
- * @version 2.16.0
+ * @version 2.17.0
  * @changelog 2.16.0 - min/max validation tests presence against ''/null instead of empty(), so a `min: 1` rule rejects 0 (empty('0') is true, so it had been accepting the one value it exists to reject)
  * @changelog 2.15.0 - Added registerValidationField(): a caller with authoritative rules (SettingsWriter, from the setting declarations) can validate names this form never drew, so validation scope stops depending on what a page happened to render
  * @changelog 2.14.0 - preparePasswordData() discards any bound value and shows a "(stored — leave blank to keep)" placeholder instead: a password input never emits value="", so a stored credential can no longer reach the page source
@@ -2455,7 +2455,45 @@ abstract class FormWriterV2Base {
      * @param string $label Field label
      * @param array $options Field options
      */
+    /**
+     * A page may not draw its own version of a declared setting.
+     *
+     * Every render method funnels through registerField(), which makes this the
+     * one place that sees every field however its name was computed — the case
+     * a grep-based check misses. A setting is declared once and rendered by
+     * SettingsFieldRenderer, so two pages showing the same setting show the
+     * same field and cannot drift apart. See docs/settings.md.
+     *
+     * On a development box this stops the page, naming the setting, the moment
+     * the developer loads their own work. In production it is logged and the
+     * field is drawn: a live site refusing to render a settings page over a
+     * manifest problem would be the worse failure.
+     */
+    private function refuseHandDrawnSetting($name) {
+        if (!is_string($name) || $name === '') return;
+
+        require_once(PathHelper::getIncludePath('includes/SettingsDeclarations.php'));
+        require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
+        if (SettingsFieldRenderer::isEmitting()) return;
+        if (!SettingsDeclarations::isDeclared($name)) return;
+
+        $declaration = SettingsDeclarations::get($name);
+        $where = $declaration['_source'] === 'core'
+            ? 'settings.json'
+            : 'plugins/' . $declaration['_source'] . '/plugin.json';
+        $message = "FormWriter: '{$name}' is a declared setting, so the page may not draw its own field for it. "
+            . "Ask SettingsFieldRenderer for the '{$declaration['_group']}' group instead, and put any change to "
+            . "the label, type or validation in {$where}.";
+
+        if (Globalvars::get_instance()->get_setting('debug', false, true)) {
+            throw new Exception($message);
+        }
+        error_log($message);
+    }
+
     protected function registerField($name, $input_type, $label, &$options) {
+        $this->refuseHandDrawnSetting($name);
+
         // Auto-fill value from values array if not explicitly provided
         if (!isset($options['value']) && isset($this->values[$name])) {
             $options['value'] = $this->values[$name];

@@ -8,10 +8,11 @@
  * Reached from the Server Manager dashboard; tenant relay surfaces live on
  * the mailbox Setup/Settings tabs.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/logic/admin_mailbox_fleet_logic.php'));
 
 $page_vars = process_logic(admin_mailbox_fleet_logic(array_merge($_GET, $_POST, $params ?? [])));
@@ -33,13 +34,16 @@ $page->begin_box(array('title' => 'Relay fleet service'));
 $oform = $page->getFormWriter('fleet_service_config');
 echo $oform->begin_form();
 $oform->hiddeninput('action', '', array('value' => 'fleet_service_config'));
-$oform->checkboxinput('mailbox_fleet_service_enabled', 'Run a hosted relay fleet other deployments can enroll in', array(
-	'checked' => !empty($fleet_service_on),
-));
-$oform->textinput('mailbox_fleet_mx_zone', 'Fleet MX zone', array(
-	'value'       => (string)($fleet_mx_zone ?? ''),
-	'placeholder' => 'mx.example.com',
-	'helptext'    => 'A DNS zone you control. Each tenant\'s MX hostname is <slug>.<zone> (slug format t<id>), published by you as an A record pointing at its shard.',
+SettingsFieldRenderer::renderGroup($oform, 'fleet', array(
+	'source' => 'mailbox',
+	'skip'   => array_diff(
+		SettingsFieldRenderer::namesFor('fleet', 'mailbox'),
+		array('mailbox_fleet_service_enabled', 'mailbox_fleet_mx_zone')
+	),
+	'values' => array(
+		'mailbox_fleet_service_enabled' => !empty($fleet_service_on) ? '1' : '0',
+		'mailbox_fleet_mx_zone'         => (string)($fleet_mx_zone ?? ''),
+	),
 ));
 $oform->submitbutton('btn_fleet_service', 'Save');
 echo $oform->end_form();

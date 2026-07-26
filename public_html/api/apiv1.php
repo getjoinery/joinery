@@ -261,8 +261,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 	exit;
 }
 
-// Enforce HTTPS (check both direct HTTPS and reverse proxy headers)
-if ($settings->get_setting('api_require_https') !== 'false') {
+// Enforce HTTPS (check both direct HTTPS and reverse proxy headers).
+// Read as a yes/no setting, the way every other toggle is read — an unset
+// value therefore still requires HTTPS.
+if ((string)$settings->get_setting('api_require_https', false, true) !== '0') {
 	$is_https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
 		|| (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https')
 		|| (isset($_SERVER['SERVER_PORT']) && $_SERVER['SERVER_PORT'] == 443);

@@ -30,29 +30,6 @@ class BrevoProvider implements EmailServiceProvider {
         return 'include:spf.brevo.com';
     }
 
-    public static function getSettingsFields(): array {
-        return [
-            [
-                'key' => 'brevo_api_key',
-                'label' => 'Brevo API Key',
-                'type' => 'password',
-                'helptext' => 'v3 API key from Brevo dashboard → SMTP & API → API Keys. Starts with "xkeysib-".',
-            ],
-            [
-                'key' => 'brevo_sandbox_mode',
-                'label' => 'Sandbox Mode (no real delivery)',
-                'type' => 'dropdown',
-                'options' => [0 => 'Off', 1 => 'On'],
-            ],
-            [
-                'key' => 'brevo_verified_domain',
-                'label' => 'Verified Sender Domain',
-                'type' => 'text',
-                'helptext' => 'For display only — Brevo validates the From at send time. Senders must be verified per-address or per-domain in Brevo.',
-            ],
-        ];
-    }
-
     public static function validateConfiguration(): array {
         $settings = Globalvars::get_instance();
         $errors = [];

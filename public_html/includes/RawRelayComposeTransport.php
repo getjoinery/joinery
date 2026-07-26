@@ -67,10 +67,6 @@ class RawRelayComposeTransport implements EmailServiceProvider {
         return '';
     }
 
-    public static function getSettingsFields(): array {
-        return [];
-    }
-
     public static function validateConfiguration(): array {
         // This transport carries no settings of its own — it relays through the
         // active provider, whose configuration is validated in its own right.
