@@ -103,12 +103,12 @@
 			echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Test or debug mode is on.</div>';
 		}		
 
-		$optionvals = array(1=>"Yes", 0=>'No');
-		$formwriter->dropinput('debug', 'Payment Debug Mode', [
-			'options' => $optionvals,
-			'value' => $settings->get_setting('debug'),
-			'empty_option' => false
-		]);
+		// `debug` is a core, site-wide switch — component render tracing,
+		// FormWriter debug output, and the Stripe / Google Play helpers all
+		// read it. This page long labelled it "Payment Debug Mode", which reads
+		// as payments-only. Rendering the declared field says what it is, and
+		// says it the same way wherever it appears.
+		SettingsFieldRenderer::renderGroup($formwriter, 'debug', array('source' => 'core'));
 
 		// Stripe Configuration Section
 		echo '<h4>Stripe Configuration</h4>';

@@ -1,11 +1,21 @@
 # Declared Settings
 
-> **Status 2026-07-26 — built, one gate open.** Phases 1-6 are implemented.
-> `SettingsWriter::ENFORCE_SCOPE` is still `false`: shadow mode runs clean across
-> all six settings pages on dev, but the spec's own procedure asks for a window
-> that includes at least one production node before the constant flips. Two
-> database changes are also pending an operator: `update_database` (runs the
-> dead-row purge, migration 156) and a repair of the `webDir` row on dev.
+> **Status 2026-07-26 — built and enforcing; one conversion outstanding.**
+> Phases 1-4 and 6 are complete, and `SettingsWriter::ENFORCE_SCOPE` is `true`
+> after shadow mode ran clean across all six settings pages. `update_database`
+> has run (migrations 154-156).
+>
+> Phase 5 is complete except for its last step: the General and Email tabs still
+> draw their own fields. They already save through `SettingsWriter`, so scope,
+> validation and credential handling apply to them — only the rendering trails.
+> Converting them needs the 197 core declarations to carry `label` and `group`
+> first. That conversion also removes the `?: 'fallback'` values those pages
+> pass, which make a cleared setting redisplay its default and look unsaved.
+>
+> Enforcement immediately found one thing worth recording: the store's Payment
+> Settings page was writing the core `debug` setting under the label *Payment
+> Debug Mode*, though `debug` is read site-wide. It is now declared honestly and
+> mirrored into the store, which is what `settingsMirrorGroups` is for.
 
 ## Problem
 

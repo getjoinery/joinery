@@ -44,10 +44,12 @@ class SettingsWriter {
 	/**
 	 * Refuse to write undeclared names, instead of writing them and logging.
 	 *
-	 * Turn on once a full window of the refusal log is clean — see
-	 * specs/declared_settings.md § Shadow mode.
+	 * On since 2026-07-26. Shadow mode ran clean across all six settings pages
+	 * — General, Email, Plugin Settings, Payment Settings, the mailbox settings
+	 * tab and Cloud Storage — with every stored row declared. Rollback is
+	 * setting this back to false; nothing else changes with it.
 	 */
-	const ENFORCE_SCOPE = false;
+	const ENFORCE_SCOPE = true;
 
 	/**
 	 * Write the declared settings found in a submitted request.
