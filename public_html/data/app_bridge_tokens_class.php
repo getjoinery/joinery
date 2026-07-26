@@ -30,8 +30,8 @@ class AppBridgeToken extends SystemBase {	public static $prefix = 'abt';
 	const TTL_SECONDS = 60;
 
 	protected static $foreign_key_actions = [
-		'abt_apk_api_key_id' => ['action' => 'delete'],
-		'abt_usr_user_id' => ['action' => 'delete'],
+		'abt_apk_api_key_id' => ['action' => 'cascade'],
+		'abt_usr_user_id' => ['action' => 'cascade'],
 	];
 
 	// Rows are transient (used or expired within a minute); nothing references them.
