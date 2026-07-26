@@ -897,8 +897,26 @@ foreach ($ucmd_lines as $l) {
 	if (strpos($l, "<<'__JOINERY_UPLOADER_EOF__'") !== false) { $redirect_line = $l; break; }
 }
 check($redirect_line !== '', 'the upload step feeds the uploader via heredoc');
-check(strpos($redirect_line, 'rm -f "$NEWEST_BACKUP"') !== false,
+
+// Read the variable the command uploads out of the command itself rather than
+// naming it here. The literal name was NEWEST_BACKUP until the upload-retry
+// work renamed it to UPLOAD_FILE, and both assertions in this block kept
+// checking the old name: this one started failing, and the negative one below
+// started passing for the wrong reason. Deriving it means a future rename
+// cannot rot either check.
+preg_match('/php -- upload "\$(\w+)"/', $redirect_line, $upload_var);
+$uploaded = $upload_var[1] ?? '';
+check($uploaded !== '', 'the redirect line names the file it uploads', $redirect_line);
+
+check($uploaded !== '' && strpos($redirect_line, '&& rm -f "$' . $uploaded . '"') !== false,
 	'retention rm rides the heredoc redirect line (runs only on upload success)', $redirect_line);
+
+// The rm must target the file that was just uploaded, not some other path a
+// rename or a copy-paste could leave behind — deleting the wrong file here
+// destroys a backup that was never sent anywhere.
+preg_match('/rm -f "\$(\w+)"/', $redirect_line, $removed_var);
+check(($removed_var[1] ?? '') === $uploaded,
+	'and removes exactly the file it uploaded', 'uploaded ' . $uploaded . ', removed ' . ($removed_var[1] ?? '(none)'));
 check(trim(end($ucmd_lines)) === '__JOINERY_UPLOADER_EOF__',
 	'the heredoc terminator is the entire final line — nothing chained after it', trim(end($ucmd_lines)));
 // Shell validity: bash warns "delimited by end-of-file" when the heredoc never
@@ -920,7 +938,10 @@ $keep_upload = '';
 foreach (JobCommandBuilder::build_backup_database($keep_node) as $step) {
 	if (strpos($step['label'] ?? '', 'Upload backup') === 0) { $keep_upload = $step['cmd']; }
 }
-check(strpos($keep_upload, 'rm -f "$NEWEST_BACKUP"') === false,
+// Any rm at all, not one spelled a particular way. Checking for a specific
+// variable name is what let this pass while naming a variable that no longer
+// existed.
+check(strpos($keep_upload, 'rm -f') === false,
 	'without the retention flag the upload step deletes nothing', $keep_upload);
 
 // From-EXISTING-backup clones: the named /backups/ paths are the user's real
