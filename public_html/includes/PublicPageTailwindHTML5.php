@@ -582,6 +582,7 @@ class PublicPageTailwindHTML5 extends PublicPageBase {
     </div>
   </div>
 
+<?php $this->render_member_subnav($menu_data); ?>
 
 
 

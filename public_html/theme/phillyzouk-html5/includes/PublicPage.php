@@ -4,7 +4,7 @@
  * profile menu store via get_menu_data() — themes style the markup but do
  * not own the list (docs/plugin_developer_guide.md § Plugin Menus).
  *
- * @version 1.1.0
+ * @version 1.2.0
  */
 require_once(PathHelper::getIncludePath('includes/PublicPageBase.php'));
 require_once(PathHelper::getIncludePath('includes/Pager.php'));
@@ -151,6 +151,8 @@ class PublicPage extends PublicPageBase {
             </div>
         </div>
     </div>
+
+    <?php $this->render_member_subnav($menu_data); ?>
     <?php endif; ?>
 
 	<?php

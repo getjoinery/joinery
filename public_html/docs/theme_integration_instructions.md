@@ -13,6 +13,23 @@ This document provides step-by-step instructions for integrating HTML/CSS templa
 - Theme directories live in `public_html/theme/{theme-name}/`
 - The `site_template` setting in `config/Globalvars_site.php` is **not the visual theme** — it is the site installation directory identifier (e.g., `phillyzouk`, `joinerytest`). Almost never needs changing.
 
+### Where the theme applies — the member-area boundary
+
+A theme styles the **public site**. The admin area always renders with the
+Joinery System chrome, and the **member area** (`/profile`, `/drive`, and
+plugin member namespaces like `/profile/mailbox/...`) renders with the core
+`PublicPage` class and the `.jy-ui` kit — full-width app chrome — while the
+`member_area_app_chrome` setting (theme group, default on) is enabled. The
+pin lives in `PathHelper::getActiveThemeDirectory()`, which returns `null`
+for member-area requests so every `getThemeFilePath()` call resolves past
+the theme; the boundary itself is defined once in
+`RouteHelper::isMemberAreaPath()`. Brand tokens still apply (
+`render_brand_token_overrides()` resolves against `theme_template`), so
+member pages carry the site's colors without the theme's layout. Turn the
+setting off to render member pages through the active theme like any other
+page. Themes therefore do not need to design for app surfaces (calendar,
+mailbox, drive) — a content-column blog layout is fine.
+
 ## Default Theme CSS Kit & `.jy-ui` Namespace
 
 The `default` theme ships a scoped CSS component kit in `assets/css/joinery-styles.css`. This file is loaded by **every** theme (via `PublicPageBase::render_base_assets()`), making it safe to use the kit's classes in base views (`/views/*.php`) regardless of which theme is active.
@@ -376,6 +393,9 @@ class PublicPage extends PublicPageBase {
                 <a href="/login">Login</a>
             <?php endif; ?>
         </div>
+
+        <!-- CRITICAL: Member section nav - ALWAYS call, immediately after the header -->
+        <?php $this->render_member_subnav($menu_data); ?>
         <?php
     }
 
@@ -418,6 +438,39 @@ class PublicPage extends PublicPageBase {
 }
 ?>
 ```
+
+#### Member Section Nav (`render_member_subnav`)
+
+A signed-in member moves between the account pages — Profile, Calendar, Drive, Email, Orders, AI — through a row of links below the site header. Every theme shows it, and no theme owns the list: the links come from the seeded profile menu, so a plugin that contributes a member page (or a permission or setting that hides one) reaches every theme at once.
+
+Call it once in `public_header()`, immediately after your header markup and inside the `show_site_chrome()` check:
+
+```php
+<?php $this->render_member_subnav($menu_data); ?>
+```
+
+Pass the `$menu_data` your header already fetched; omit the argument and the method fetches its own. It emits nothing when the visitor is signed out or is outside `/profile` and `/drive`, so no guard of your own is needed.
+
+The default markup uses the shared kit classes (`.jy-member-subnav`, styled in `assets/css/joinery-styles.css`, which every theme loads) and sits in normal document flow. To pin it below a sticky header, add a rule in your theme CSS:
+
+```css
+.my-theme .jy-member-subnav { position: sticky; top: 64px; z-index: 99; }
+```
+
+To emit different markup, override the method and take the item list from the base so the gates stay in one place:
+
+```php
+public function render_member_subnav($menu_data = NULL) {
+    $items = $this->member_subnav_items($menu_data);
+    if (empty($items)) {
+        return;
+    }
+    $request_path = $this->request_path();
+    // ...theme markup, one <a> per $items entry, `active` when link === $request_path
+}
+```
+
+`tests/unit/member_subnav_coverage_test.php` fails the build if a theme defines `public_header()` without calling or overriding this, so a new theme cannot ship without the nav.
 
 #### Content Container Pattern (BeginPage / EndPage)
 

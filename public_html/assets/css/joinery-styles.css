@@ -181,10 +181,15 @@ body.jy-default blockquote {
   justify-content: flex-end;
 }
 
-/* Secondary member nav (Profile / Email / Calendar / Drive / AI ...) */
+/* Secondary member nav (Profile / Email / Calendar / Drive / AI ...).
+   Rendered by PublicPageBase::render_member_subnav() on every theme, so the
+   base rules stay position-neutral — a theme with its own sticky header opts
+   into a sticky bar by pinning it below that header, as .jy-default does. */
 .jy-member-subnav {
   background: var(--jy-color-bg);
   border-bottom: 1px solid var(--jy-color-border);
+}
+.jy-default .jy-member-subnav {
   position: sticky;
   top: 60px;
   z-index: 99;

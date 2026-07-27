@@ -14,6 +14,21 @@ class RouteHelper {
 
     private static $current_plugin = null;
 
+    /**
+     * Whether a path is in the member area — the signed-in app surfaces
+     * (/profile, /drive, and everything beneath them, including plugin member
+     * namespaces like /profile/mailbox). The single source for this boundary:
+     * the member nav (PublicPageBase::in_member_area()) and the member-area
+     * app chrome pin (PathHelper::getActiveThemeDirectory(),
+     * specs/member_area_app_chrome.md) both consult it.
+     */
+    public static function isMemberAreaPath($path = null) {
+        if ($path === null) {
+            $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+        }
+        return (bool)preg_match('#^/(profile|drive)(/|$)#', $path);
+    }
+
     // ========================================
     // MATCH-ONLY MODE (for route testing)
     // ========================================

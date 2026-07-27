@@ -5,7 +5,7 @@
  * themes style the markup but do not own the list
  * (docs/plugin_developer_guide.md § Plugin Menus).
  *
- * @version 1.1.0
+ * @version 1.2.0
  */
 require_once(PathHelper::getIncludePath('includes/PublicPageBase.php'));
 
@@ -411,6 +411,8 @@ Career Area
             </div>
         </div>
     </header>
+
+    <?php $this->render_member_subnav(); ?>
     <?php endif; ?>
 <?php
 
