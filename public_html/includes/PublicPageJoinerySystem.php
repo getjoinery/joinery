@@ -467,6 +467,9 @@ class PublicPageJoinerySystem extends PublicPageBase {
         </li>
         <?php endif;
 
+        // --- Vault lock chip mount (docs/sealed_vault.md § The lock chip) ---
+        $this->render_vault_lock_slot('li', 'nav-item');
+
         // --- Notifications ---
         if ($menu_data['notifications']['enabled']): ?>
         <li class="nav-item" style="position:relative;">

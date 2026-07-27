@@ -14,6 +14,14 @@ abstract class PublicPageBase {
 	protected $rowcount;
 
 	/**
+	 * Whether this render includes the vault lock chip (set during
+	 * global_includes_top for signed-in users with a set-up vault). Header
+	 * renderers consult it via render_vault_lock_slot() so no slot markup is
+	 * emitted for users who will never mount a chip.
+	 */
+	protected $vault_lock_enabled = false;
+
+	/**
 	 * Header-menu providers, keyed by the $menu_data key they populate (e.g.
 	 * 'cart'). A provider is `function(SessionControl $session): ?array` and is
 	 * registered from a plugin's request bootstrap. Returning null contributes
@@ -26,6 +34,18 @@ abstract class PublicPageBase {
 	/** Register a header-menu provider (e.g. the store's cart). */
 	public static function register_header_menu_provider(string $key, callable $provider): void {
 		self::$header_menu_providers[$key] = $provider;
+	}
+
+	/**
+	 * Emit the vault lock chip's mount point (docs/sealed_vault.md § The lock
+	 * chip). Page classes call this from their header icon cluster;
+	 * vault-lock.js mounts the padlock into it. Emits nothing when the user
+	 * has no vault, so the slot never leaves an empty gap in the header.
+	 */
+	public function render_vault_lock_slot(string $tag = 'span', string $class = ''): void {
+		if (!$this->vault_lock_enabled) { return; }
+		$class_attr = $class !== '' ? ' class="' . htmlspecialchars($class, ENT_QUOTES, 'UTF-8') . '"' : '';
+		echo '<' . $tag . $class_attr . ' data-vault-lock-slot></' . $tag . '>';
 	}
 
 	protected static $header_defaults = array(
@@ -601,11 +621,32 @@ abstract class PublicPageBase {
 			// check); the script itself is inert without the flag or a
 			// 'joinery:vault-unlocked' event from an in-page unlock ceremony.
 			require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
-			if (VaultUnlock::isOpen((int)$session->get_user_id())) {
+			$vault_window_open = VaultUnlock::isOpen((int)$session->get_user_id());
+			if ($vault_window_open) {
 				echo '<meta name="joinery-vault-window" content="open" />' . "\n";
 			}
 			echo '<script src="/assets/js/vault-presence.js?v='
 				. $this->asset_mtime('assets/js/vault-presence.js') . '"></script>' . "\n";
+
+			// Vault lock chip (docs/sealed_vault.md § The lock chip): a user
+			// with a set-up server-custody vault gets the padlock on every
+			// page — a fixed place to see the locked/unlocked state and to run
+			// the unlock or lock ceremony from anywhere. Users without a vault
+			// never load any of it.
+			require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
+			if (UserEncryptionVault::loadForUser((int)$session->get_user_id())) {
+				$this->vault_lock_enabled = true;
+				$idle_minutes = (int)$settings->get_setting('vault_unlock_idle_minutes');
+				if ($idle_minutes <= 0) { $idle_minutes = 30; }
+				echo '<meta name="joinery-vault" content="' . ($vault_window_open ? 'open' : 'locked')
+					. '" data-idle-minutes="' . $idle_minutes . '" />' . "\n";
+				echo '<link rel="stylesheet" href="/assets/css/vault-lock.css?v='
+					. $this->asset_mtime('assets/css/vault-lock.css') . '">' . "\n";
+				echo '<script src="/assets/js/passkeys.js?v='
+					. $this->asset_mtime('assets/js/passkeys.js') . '"></script>' . "\n";
+				echo '<script src="/assets/js/vault-lock.js?v='
+					. $this->asset_mtime('assets/js/vault-lock.js') . '"></script>' . "\n";
+			}
 		}
 
 		$this->render_base_assets();

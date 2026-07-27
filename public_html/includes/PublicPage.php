@@ -29,6 +29,9 @@ class PublicPage extends PublicPageBase {
         $cart       = $menu_data['cart'] ?? null;
         $user_menu  = $menu_data['user_menu'];
 
+        // Vault lock chip mount (docs/sealed_vault.md § The lock chip)
+        $this->render_vault_lock_slot();
+
         // Cart (only when the store plugin registered a cart provider)
         if (!empty($cart['has_items'])) {
             echo '<a href="' . htmlspecialchars($cart['link'], ENT_QUOTES, 'UTF-8') . '" class="jy-header-cart-link" title="Cart (' . (int)$cart['item_count'] . ' items)">';
