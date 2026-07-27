@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.19
+ * No framework. @version 2.20
  *
  * Two-pane layout: the main pane swaps between the conversation list and an
  * opened conversation (toggled by the `reading` class on #mbx-reader); a back
@@ -515,6 +515,9 @@
 		$('#mbx-read-pane').scrollTop = 0;
 
 		var pane = $('#mbx-thread');
+		parkCompose();        // the compose box lives inside an open thread — move it
+		                      // out before clearing, or re-opening a thread in place
+		                      // (the unlock-and-reopen path) destroys it
 		pane.innerHTML = '<div class="mbx-loading">Loading…</div>';
 
 		var url = CFG.threadUrl + '?thread_key=' + encodeURIComponent(t.thread_key)
@@ -1801,7 +1804,7 @@
 	}
 
 	function markDraftDirty() {
-		if ($('#mbx-compose').hidden) return;
+		if (composeHidden()) return;
 		state.draftDirty = true;
 		clearTimeout(draftTimer);
 		draftTimer = setTimeout(function () { autosaveDraft(false); }, 3000);
@@ -1953,9 +1956,19 @@
 		} else {
 			resetDraftState();
 		}
-		$('#mbx-compose').hidden = true;
+		var panel = $('#mbx-compose');
+		if (panel) panel.hidden = true;
 		var chips = document.querySelector('.mbx-reply-actions');
 		if (chips) chips.hidden = false;
+	}
+
+	// True when there is no open compose panel — either it is hidden or (defensively)
+	// it is not in the DOM. Navigation must never depend on the panel being present:
+	// closeThread() runs closeCompose() first, so a throw here would strand the reader
+	// in the reading view with a dead back button and a dead mailbox rail.
+	function composeHidden() {
+		var panel = $('#mbx-compose');
+		return !panel || panel.hidden;
 	}
 
 	// The compose box is a single element moved into the open thread. Park it back
@@ -2152,7 +2165,7 @@
 
 		// Last-ditch save when the page is being torn down mid-compose.
 		window.addEventListener('beforeunload', function () {
-			if (!$('#mbx-compose').hidden && state.draftDirty && hasComposeContent()) {
+			if (!composeHidden() && state.draftDirty && hasComposeContent()) {
 				autosaveDraft(true);
 			}
 		});
@@ -2239,7 +2252,7 @@
 			if (e.key !== 'Escape') return;
 			var open = document.querySelector('.mbx-kebab-menu:not([hidden]), .mbx-folder-panel:not([hidden])');
 			if (open) { closeAllKebabs(); closeAllFolderPanels(); }
-			else if (!$('#mbx-compose').hidden) { closeCompose(); }
+			else if (!composeHidden()) { closeCompose(); }
 			else if (state.threadKey != null) { closeThread(); }
 		});
 
