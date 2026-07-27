@@ -170,7 +170,8 @@ One unlocker ceremony opens the vault for a bounded window
   device **user verification** (biometric or key PIN), not merely presence.
 - **Extends** on activity; idles out after `vault_unlock_idle_minutes`
   (default 30).
-- **Ends** at the idle timeout, on the explicit Lock control, or with the
+- **Ends** at the idle timeout, on the lock chip's explicit **Lock now**
+  ([Sealed Vault § The lock chip](sealed_vault.md)), or with the
   browser session — the window is keyed to the session and never survives
   it. `VaultUnlock::lock()` / `lockAll()` are the generic wipe surface policy
   events call.

@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.24
+ * No framework. @version 2.25
  *
  * Two-pane layout: the main pane swaps between the conversation list and an
  * opened conversation (toggled by the `reading` class on #mbx-reader); a back
@@ -93,21 +93,19 @@
 		return joineryApi.post(action, payload || {});
 	}
 
-	// Run the passkey unlock ceremony; resolves true on success. Reveals the
-	// Lock control once a window is open. Delegates to the shared platform
-	// ceremony (assets/js/vault-lock.js) when it's loaded, so the header lock
-	// chip and the presence beacon stay in sync with reader-initiated unlocks;
-	// the inline ceremony is the fallback for a page without the chip.
-	// selfUnlocking suppresses the generic vault-unlocked refresh listener
-	// while a reader action is about to re-run itself with fresher state.
+	// Run the passkey unlock ceremony; resolves true on success. Delegates to
+	// the shared platform ceremony (assets/js/vault-lock.js) when it's loaded,
+	// so the header lock chip and the presence beacon stay in sync with
+	// reader-initiated unlocks; the inline ceremony is the fallback for a page
+	// without the chip. selfUnlocking suppresses the generic vault-unlocked
+	// refresh listener while a reader action is about to re-run itself with
+	// fresher state.
 	var selfUnlocking = false;
 	async function unlockVault() {
 		selfUnlocking = true;
 		try {
 			if (window.JoineryVaultLock) {
-				var ok = await JoineryVaultLock.unlock();
-				if (ok) { showLockControl(true); }
-				return ok;
+				return await JoineryVaultLock.unlock();
 			}
 			if (!window.JoineryPasskeys) { alert('Unlocking is unavailable on this page.'); return false; }
 			try {
@@ -120,7 +118,6 @@
 				if (res && res.success === false) {
 					throw new Error(res.message || 'Unlock failed.');
 				}
-				showLockControl(true);
 				startHeartbeat();
 				document.dispatchEvent(new CustomEvent('joinery:vault-unlocked'));
 				return true;
@@ -131,11 +128,6 @@
 		} finally {
 			selfUnlocking = false;
 		}
-	}
-
-	function showLockControl(on) {
-		var btn = document.getElementById('mbx-lock');
-		if (btn) btn.hidden = !on;
 	}
 
 	// Presence is site-wide, not mail-page-only: the vault-presence beacon
@@ -156,12 +148,12 @@
 	function renderMailboxes(data) {
 		state.allAccess = !!data.all_access;
 		state.mailboxes = data.mailboxes || [];
-		// Reveal the explicit Lock control when a sealed mailbox currently has an
-		// open window (sealed but not locked) — there is something to lock.
+		// A sealed mailbox with an open window (sealed but not locked) means a
+		// live unlock window — make sure the presence beacon is beating.
 		var anyOpen = state.mailboxes.some(function (m) {
 			return m.security_level && m.security_level !== 'standard' && !m.locked;
 		});
-		if (anyOpen) { showLockControl(true); startHeartbeat(); }
+		if (anyOpen) { startHeartbeat(); }
 		var list = $('#mbx-mailboxes');
 		list.innerHTML = '';
 
@@ -604,7 +596,6 @@
 				});
 				banner.appendChild(btn);
 				pane.insertBefore(banner, pane.firstChild);
-				showLockControl(true);
 			}
 			// Opening marks the whole thread read (shared per mailbox).
 			if (t.unread_count > 0) {
@@ -2185,27 +2176,12 @@
 		});
 		$('#mbx-more').addEventListener('click', function () { state.page += 1; loadThreads(false); });
 
-		// Explicit lock (specs/mailbox_security_levels.md § The Unlock Window):
-		// end the vault window now; the vault-locked listener below re-reads so
-		// sealed rows re-seal to placeholders and the Lock control hides itself.
-		var lockBtn = document.getElementById('mbx-lock');
-		if (lockBtn) lockBtn.addEventListener('click', async function () {
-			lockBtn.disabled = true;
-			if (window.JoineryVaultLock) {
-				await JoineryVaultLock.lock();
-			} else {
-				try { await apiV1('vault_lock', {}); } catch (e) {}
-				document.dispatchEvent(new CustomEvent('joinery:vault-locked'));
-			}
-			lockBtn.disabled = false;
-		});
-
-		// Any lock — the Lock control above, the header chip's Lock now, or a
-		// heartbeat learning the window ended elsewhere — re-seals the reader:
-		// sealed rows back to placeholders, Lock control hidden.
+		// Any lock — the header chip's Lock now, or a heartbeat learning the
+		// window ended elsewhere — re-seals the reader: sealed rows back to
+		// placeholders. Explicit lock lives on the platform lock chip
+		// (docs/sealed_vault.md § The lock chip), not in the reader.
 		document.addEventListener('joinery:vault-locked', function () {
 			stopHeartbeat();
-			showLockControl(false);
 			refreshMailboxes();
 			loadThreads(true);
 			// Collapse any open sealed thread back to placeholders.
@@ -2219,7 +2195,6 @@
 		// sealed content in place; a reader-initiated unlock re-runs its own
 		// action instead (selfUnlocking).
 		document.addEventListener('joinery:vault-unlocked', function () {
-			showLockControl(true);
 			if (selfUnlocking) { return; }
 			refreshMailboxes();
 			loadThreads(true);

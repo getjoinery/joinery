@@ -1043,10 +1043,9 @@ normally.
   `locked` flag; opening a sealed thread or searching sealed mail shows an inline
   *Unlock to read* button that runs the shared platform ceremony
   (`JoineryVaultLock`, [Sealed Vault § The lock chip](../../../docs/sealed_vault.md))
-  and re-runs the original request. A header **Lock** control ends the window from the
-  reader, and the reader listens for the platform's `joinery:vault-locked` /
-  `joinery:vault-unlocked` events, so a lock or unlock from the header padlock re-seals
-  or reveals content in place.
+  and re-runs the original request. Explicit lock lives on the platform lock chip; the
+  reader listens for the platform's `joinery:vault-locked` / `joinery:vault-unlocked`
+  events, so a lock or unlock from the chip re-seals or reveals content in place.
 - **Native `/api/v1`** — `mailbox/thread_list`, `mailbox/thread`, and `mailbox/mailboxes`
   return metadata plus `locked` (per-mailbox on the switcher, with each mailbox's
   `security_level`); `mailbox/send` returns `locked: true` instead of sending when a

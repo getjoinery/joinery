@@ -933,6 +933,14 @@
       "options_include": "includes/CoreSettingOptions.php"
     },
     {
+      "name": "member_area_app_chrome",
+      "default": "1",
+      "group": "theme",
+      "label": "Member area uses app chrome",
+      "type": "checkbox",
+      "helptext": "Render member pages (/profile, /drive) with the platform app layout instead of the public theme, so calendar, mail, and drive get full-width chrome. The public site keeps the theme either way."
+    },
+    {
       "name": "upload_web_dir",
       "default": "uploads",
       "group": "paths",

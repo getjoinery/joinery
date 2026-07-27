@@ -198,10 +198,6 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 				<span id="mbx-list-title" class="mbx-list-title">All mail</span>
 				<div class="mbx-list-header-actions">
 					<button type="button" id="mbx-new-message" class="mbx-new-btn" hidden>+ New message</button>
-					<!-- Explicit lock (specs/mailbox_security_levels.md § The Unlock Window):
-					     ends the vault window from any mail surface. Hidden until an
-					     unlock window is known to be open (the reader reveals it). -->
-					<button type="button" id="mbx-lock" class="mbx-iconbtn" title="Lock your vault" hidden>&#128274;</button>
 					<button type="button" id="mbx-refresh" class="mbx-iconbtn" title="Refresh">&#8635;</button>
 				</div>
 			</div>
