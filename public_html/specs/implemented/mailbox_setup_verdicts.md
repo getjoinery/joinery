@@ -1,6 +1,6 @@
 # Mailbox Setup Verdicts
 
-**Status: proposed 2026-07-25.**
+**Status: implemented 2026-07-27.**
 
 ## What this is
 
@@ -129,3 +129,24 @@ a day is soon enough for that. The cost is DNS lookups per domain per day.
 
 None. Recommended defaults: daily cadence, seven-day staleness, required-only
 grading, domain-level granularity.
+
+## Also built: the reader banner
+
+The same question — is this mailbox set up? — got a second surface in the reader,
+on different terms. It does not read the stored verdict (acceptance 7 still
+holds): opening a mailbox runs that mailbox's Setup checks live via
+`mailbox/setup_status`, and anything the tab paints amber or red banners the
+reader in place of the first conversation.
+
+The tiering above does not apply because the cost profile is different: one
+mailbox at a time, not a listing, and the answer is remembered per operator
+rather than recomputed. Rendering the Setup tab stamps that memory, so a record
+fixed there clears the banner on the way back to the mailbox.
+
+Grading differs from the badge on purpose. The badge counts only required
+failures, because it is a navigation hint about a domain. The banner claims the
+tab is not all green for this mailbox, so every amber and red row counts,
+severity included — only the absence of information (unknown, info, optional)
+stays silent. Both surfaces run the same grouping code
+(`plugins/mailbox/includes/mailbox_setup_scope.php`), so neither can drift from
+what the tab shows.

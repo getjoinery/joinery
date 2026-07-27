@@ -16,13 +16,14 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  * plugin, enable SRS, register a domain, or apply a one-click fix — each writes
  * through a model and redirects so the next render reads fresh settings.
  *
- * @version 2.6
+ * @version 2.7
  */
 function admin_mailbox_setup_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('data/settings_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailSetupCheck.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/mailbox_setup_scope.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundProviderRegistry.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
@@ -197,6 +198,8 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	$active_provider_is_webhook = $active_provider_class ? $active_provider_class::isWebhook() : false;
 
 	// --- Scoped checks for the chosen mailbox ---
+	// The grouping lives in mailbox_setup_scope.php, so the reader's setup
+	// banner grades exactly the rows this page renders.
 	$selected       = $selected_alias_id > 0;
 	$address        = '';
 	$focus_domain   = '';
@@ -208,54 +211,21 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	$selected_imap  = null;
 
 	if ($selected) {
-		$meta         = $mailbox_index[$selected_alias_id];
-		$address      = $meta['address'];
-		$focus_domain = $meta['domain'];
-		$mode         = $meta['mode'];
-		$forwards     = $meta['forwards'];
-		$arrival      = $meta['is_imap'] ? 'imap' : ($active_provider_is_webhook ? 'webhook' : 'postfix');
-
-		if ($arrival === 'imap') {
-			// IMAP-pull mailboxes have no MX/host stack — receiving is "is the
-			// feed connected and fetching". Build those rows from the feed model.
-			$feeds = new MultiInboundImapAccount(array('alias_id' => $selected_alias_id, 'deleted' => false));
-			$feeds->load();
-			$selected_imap = count($feeds) ? $feeds->get(0) : null;
-			$receiving_rows = _setup_imap_receiving_rows($selected_imap);
-
-			// Forwarding still applies if the mailbox forwards; those checks are
-			// server-global (relay/SRS), so a domain-less run supplies them.
-			if ($forwards) {
-				$all = (new InboundEmailSetupCheck())->run(null, null);
-				foreach ($all as $r) {
-					if (_setup_is_forwarding_row($r)) { $forwarding_rows[] = $r; }
-				}
-			}
-		} else {
-			$all = (new InboundEmailSetupCheck())->run($focus_domain, $address);
-			foreach ($all as $r) {
-				if ($forwards && _setup_is_forwarding_row($r)) {
-					$forwarding_rows[] = $r;
-				} elseif (!$forwards && _setup_is_sending_row($r)) {
-					$forwarding_rows[] = $r;
-				} elseif (_setup_is_receiving_row($r, $focus_domain)) {
-					$receiving_rows[] = $r;
-				}
-			}
-		}
-
-		// The relay reads as two cards among the checks — one per side of the
-		// mail path — rather than a section of its own above everything. Grey
-		// and optional until a relay exists; its health once one does. The
-		// receiving card only applies to mail this deployment actually receives,
-		// so an IMAP-pull mailbox gets the sending card alone.
-		$relay_cards = admin_mailbox_relay_check_rows(
+		$scoped = mailbox_setup_scoped_rows($selected_alias_id,
 			$state_qs(array('advanced' => true)) . '#relay-section');
-		if ($arrival !== 'imap' && $relay_cards['receiving'] !== null) {
-			$receiving_rows[] = $relay_cards['receiving'];
-		}
-		if ($relay_cards['sending'] !== null) {
-			$forwarding_rows[] = $relay_cards['sending'];
+		if ($scoped !== null) {
+			$address         = $scoped['address'];
+			$focus_domain    = $scoped['domain'];
+			$mode            = $scoped['mode'];
+			$forwards        = $scoped['forwards'];
+			$arrival         = $scoped['arrival'];
+			$selected_imap   = $scoped['imap'];
+			$receiving_rows  = $scoped['receiving'];
+			$forwarding_rows = $scoped['forwarding'];
+			// The checks just ran for real, so stamp the verdict the reader's
+			// banner reads. Fixing a record here and going back to the mailbox
+			// shows the fix immediately instead of waiting out a cache.
+			mailbox_setup_status_remember($selected_alias_id, mailbox_setup_verdict($scoped));
 		}
 	}
 
@@ -414,140 +384,6 @@ function _setup_dns_plan_for_alias(int $alias_id): ?DnsRecordPlan {
 		return null;   // an IMAP-pull mailbox has no MX/host stack to publish
 	}
 	return (new InboundEmailSetupCheck())->dnsPlan($name);
-}
-
-/**
- * Forwarding (outbound) rows: the relay, SRS, and DKIM signing — the only
- * checks that matter when a mailbox forwards mail back out.
- */
-function _setup_is_forwarding_row(array $r): bool {
-	return in_array($r['id'], array('plugin.srs_secret', 'plugin.relay', 'domain.dkim', 'host.opendkim'), true);
-}
-
-/**
- * Sending rows for a store-only mailbox: replies and new mail composed from
- * the reader still leave through the outbound stack, so the relay and DKIM
- * signing are its concerns too — everything a forwarding mailbox needs except
- * SRS, which only rewrites forwarded envelopes.
- */
-function _setup_is_sending_row(array $r): bool {
-	return in_array($r['id'], array('plugin.relay', 'domain.dkim', 'host.opendkim'), true);
-}
-
-/**
- * Receiving rows for a mailbox: the domain's inbound DNS (including the
- * fleet ownership proof), the inbound-auth verifier, that the plugin is on,
- * the relay cutover-completion row, that the alias resolves, and the
- * end-to-end proof. Server-internal host/mailhost rows are otherwise excluded —
- * they live in the Advanced server view.
- *
- * The exception is the mail host's own A record. When the mail hostname sits
- * inside the focused domain (mail.example.com under example.com), that record is
- * one this domain's owner has to publish in the same zone as its MX and SPF, so
- * it belongs beside them rather than behind a disclosure. Both rows come along:
- * one says the record exists, the other says it points at the right server —
- * an A record resolving to somebody else's address is a distinct failure and
- * hiding it would be the silent-wrong-answer this page exists to prevent.
- *
- * A mail host outside the domain (a shared devmail.example.net, a relay in the
- * operator's zone) stays in Advanced: it is not this domain owner's record.
- */
-function _setup_is_receiving_row(array $r, string $focus_domain = ''): bool {
-	if ($r['id'] === 'domain.dkim') { return false; }      // DKIM signing is outbound
-	if ($r['layer'] === 'domain')   { return true; }
-	if ($r['layer'] === 'address')  { return true; }
-	if ($r['layer'] === 'e2e')      { return true; }
-	if (in_array($r['id'], array('mailhost.a_record', 'mailhost.a_matches_ip'), true)) {
-		return _setup_row_is_in_zone($r, $focus_domain);
-	}
-	// 'plugin.relay_enable' (Relay cutover) is deliberately absent: it is a
-	// DEPLOYMENT-WIDE roll-up that reports the first domain whose MX has not
-	// moved yet, so inside "Receiving — info@example.com" it reads as a verdict
-	// on that mailbox while actually describing a different domain entirely.
-	// The per-domain question it looks like it answers is already answered
-	// properly one row above by 'domain.mx'. The roll-up lives in Advanced with
-	// the other server-wide facts.
-	return in_array($r['id'], array('plugin.enabled', 'host.inbound_verification'), true);
-}
-
-/**
- * Is the hostname a check row is about inside the focused domain's own zone?
- * Mailhost rows carry that hostname in their scope, so this works whether the
- * row passed or failed — a card that vanished once it went green would be worse
- * than one that was never there.
- */
-function _setup_row_is_in_zone(array $r, string $focus_domain): bool {
-	$host = strtolower(rtrim(trim((string)($r['scope'] ?? '')), '.'));
-	$domain = strtolower(rtrim(trim($focus_domain), '.'));
-	if ($host === '' || $domain === '') {
-		return false;
-	}
-	return $host === $domain || substr($host, -(strlen($domain) + 1)) === '.' . $domain;
-}
-
-/**
- * Synthetic receiving rows for an IMAP-pull mailbox, derived from its feed.
- * Mirrors the row shape InboundEmailSetupCheck::r() produces so the same
- * renderer handles them.
- */
-function _setup_imap_receiving_rows(?InboundImapAccount $imap): array {
-	$row = function ($status, $label, $summary, $detail = '', $fix = null) {
-		return array(
-			'id' => 'imap.' . strtolower(str_replace(' ', '_', $label)), 'scope' => '', 'layer' => 'imap',
-			'label' => $label, 'severity' => InboundEmailSetupCheck::REQUIRED, 'status' => $status,
-			'summary' => $summary, 'detail' => $detail, 'fix' => $fix, 'recheckable' => true,
-		);
-	};
-	$accounts_link = array('text' => 'Manage this mailbox on the Accounts tab.');
-
-	if (!$imap) {
-		return array($row(InboundEmailSetupCheck::FAIL, 'IMAP feed',
-			'This mailbox has no IMAP feed configured.',
-			'An IMAP-source mailbox needs a feed to pull mail. Add one from the Accounts tab.', $accounts_link));
-	}
-
-	$out = array();
-	if ($imap->isOAuth() && !$imap->hasOAuthToken()) {
-		$out[] = $row(InboundEmailSetupCheck::FAIL, 'IMAP connection',
-			'The mailbox is not connected yet.',
-			'Press "Connect" on the Accounts tab to authorize access.', $accounts_link);
-	} elseif ($imap->needsReauth()) {
-		$out[] = $row(InboundEmailSetupCheck::FAIL, 'IMAP connection',
-			'The stored authorization has expired and needs to be renewed.',
-			'Press "Reconnect" on the Accounts tab.', $accounts_link);
-	} else {
-		$out[] = $row(InboundEmailSetupCheck::PASS, 'IMAP connection', 'The mailbox is connected.');
-	}
-
-	if (!$imap->get('iia_is_enabled')) {
-		$out[] = $row(InboundEmailSetupCheck::WARN, 'Feed enabled',
-			'Fetching is turned off for this feed.',
-			'Enable it from the Accounts tab to resume pulling mail.', $accounts_link);
-	}
-
-	// Sync mode (specs/two_way_imap_sync.md §8): report Off / Read-only / Two-way
-	// and the CONDSTORE requirement so the operator sees why sync may be unavailable.
-	$modeLabels = array(
-		InboundImapAccount::SYNC_OFF  => 'Off (one-time import)',
-		InboundImapAccount::SYNC_PULL => 'Read-only (follow the source)',
-		InboundImapAccount::SYNC_BOTH => 'Two-way (full sync)',
-	);
-	$mode = $imap->syncMode();
-	if ($mode === InboundImapAccount::SYNC_OFF) {
-		$summary = $imap->supportsCondstore()
-			? 'Sync is off; this feed does a one-time import only.'
-			: 'Sync is off. This server does not advertise CONDSTORE, so only one-time import is available.';
-		$out[] = $row(InboundEmailSetupCheck::INFO, 'Sync', $summary);
-	} else {
-		$out[] = $row(InboundEmailSetupCheck::PASS, 'Sync', $modeLabels[$mode]);
-	}
-
-	$last = trim((string)$imap->get('iia_last_status'));
-	if ($last !== '') {
-		$out[] = $row(InboundEmailSetupCheck::INFO, 'Last fetch', $last);
-	}
-
-	return $out;
 }
 
 /**

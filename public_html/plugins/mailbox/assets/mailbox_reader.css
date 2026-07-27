@@ -1,7 +1,7 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.6
+ * Vanilla CSS, no framework. @version 2.8
  */
 
 .mbx-reader {
@@ -151,18 +151,19 @@
 
 .mbx-threads { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; }
 
-/* Gmail-style section bar (Unread / Starred / Everything else). */
+/* Gmail-style section heading (Unread / Starred / Everything else). */
 .mbx-section {
-	padding: 7px 14px;
-	background: #f1f3f5;
-	border-bottom: 1px solid #e4e7eb;
+	padding: 14px 14px 6px;
+	background: #fff;
 	font-size: 12px;
-	font-weight: 600;
-	color: #374151;
+	font-weight: 700;
+	letter-spacing: .02em;
+	color: #5f6368;
 	position: sticky;
 	top: 0;
 	z-index: 1;
 }
+.mbx-section:first-child { padding-top: 10px; }
 
 .mbx-thread-item {
 	display: flex;
@@ -532,6 +533,41 @@
 	cursor: pointer;
 }
 .mbx-unlock-btn:disabled { opacity: 0.6; cursor: default; }
+
+/* Setup banner (specs/mailbox_setup_verdicts.md): shown in place of the first
+   conversation when the open mailbox looks unfinished, and absent entirely
+   otherwise. It reads as a card, not a row, so it never scans as mail. */
+.mbx-setup-banner {
+	display: flex;
+	align-items: center;
+	gap: 1rem;
+	padding: 0.875rem 1rem;
+	margin: 0.5rem 0.5rem 0.75rem;
+	background: #fffbeb;
+	border: 1px solid #fcd34d;
+	border-left: 4px solid #f59e0b;
+	border-radius: 8px;
+}
+.mbx-setup-banner-body { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
+.mbx-setup-banner-title {
+	font-weight: 600;
+	font-size: 0.9375rem;
+	color: #78350f;
+}
+.mbx-setup-banner-reason { font-size: 0.8125rem; color: #92400e; }
+.mbx-setup-banner-btn {
+	margin-left: auto;
+	flex: 0 0 auto;
+	padding: 0.45rem 0.95rem;
+	border-radius: 6px;
+	background: #b45309;
+	color: #fff;
+	font-size: 0.8125rem;
+	font-weight: 600;
+	text-decoration: none;
+	white-space: nowrap;
+}
+.mbx-setup-banner-btn:hover { background: #92400e; color: #fff; }
 
 /* ── compose maturity: rich-text editor + Bcc toggle (§ Phase 1) ───────────── */
 .mbx-bcc-toggle-row { margin: -0.25rem 0 0.35rem; }

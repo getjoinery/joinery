@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.20
+ * No framework. @version 2.24
  *
  * Two-pane layout: the main pane swaps between the conversation list and an
  * opened conversation (toggled by the `reading` class on #mbx-reader); a back
@@ -36,7 +36,8 @@
 		draftSaving: false,   // an autosave is in flight
 		draftAttachments: [], // server-side attachments of a reopened draft (read-only chips)
 		contacts: [],         // the viewer's contacts (§ Phase 4), for recipient autocomplete
-		contactsView: false   // the Contacts manager pseudo-mailbox
+		contactsView: false,  // the Contacts manager pseudo-mailbox
+		setupStatus: {}       // alias id → the Setup tab's verdict for that mailbox
 	};
 
 	// ---- tiny DOM helpers ----
@@ -93,25 +94,42 @@
 	}
 
 	// Run the passkey unlock ceremony; resolves true on success. Reveals the
-	// Lock control once a window is open.
+	// Lock control once a window is open. Delegates to the shared platform
+	// ceremony (assets/js/vault-lock.js) when it's loaded, so the header lock
+	// chip and the presence beacon stay in sync with reader-initiated unlocks;
+	// the inline ceremony is the fallback for a page without the chip.
+	// selfUnlocking suppresses the generic vault-unlocked refresh listener
+	// while a reader action is about to re-run itself with fresher state.
+	var selfUnlocking = false;
 	async function unlockVault() {
-		if (!window.JoineryPasskeys) { alert('Unlocking is unavailable on this page.'); return false; }
+		selfUnlocking = true;
 		try {
-			var opt = await apiV1('vault_unlock_options', {});
-			if (!opt || !opt.options) {
-				throw new Error('Could not start unlock.');
+			if (window.JoineryVaultLock) {
+				var ok = await JoineryVaultLock.unlock();
+				if (ok) { showLockControl(true); }
+				return ok;
 			}
-			var credential = (await JoineryPasskeys.derive(opt.options)).response;
-			var res = await apiV1('vault_unlock_passkey', { credential: credential });
-			if (res && res.success === false) {
-				throw new Error(res.message || 'Unlock failed.');
+			if (!window.JoineryPasskeys) { alert('Unlocking is unavailable on this page.'); return false; }
+			try {
+				var opt = await apiV1('vault_unlock_options', {});
+				if (!opt || !opt.options) {
+					throw new Error('Could not start unlock.');
+				}
+				var credential = (await JoineryPasskeys.derive(opt.options)).response;
+				var res = await apiV1('vault_unlock_passkey', { credential: credential });
+				if (res && res.success === false) {
+					throw new Error(res.message || 'Unlock failed.');
+				}
+				showLockControl(true);
+				startHeartbeat();
+				document.dispatchEvent(new CustomEvent('joinery:vault-unlocked'));
+				return true;
+			} catch (e) {
+				alert(e.message || 'Could not unlock your vault.');
+				return false;
 			}
-			showLockControl(true);
-			startHeartbeat();
-			return true;
-		} catch (e) {
-			alert(e.message || 'Could not unlock your vault.');
-			return false;
+		} finally {
+			selfUnlocking = false;
 		}
 	}
 
@@ -320,23 +338,64 @@
 		state.spamView = false;
 		state.mailboxLabel = label || 'All mail';
 		$('#mbx-list-title').textContent = state.mailboxLabel;
-		updateSetupLink();
 		highlightMailbox();
 		highlightDrafts();
 		renderFolderRail();
 		loadThreads(true);
 	}
 
-	// The Setup link points at whichever single mailbox is open. It is hidden for
-	// the aggregate views (All mail, Drafts, Contacts), which have no one mailbox
-	// to check, and absent entirely on the member mount where setUpUrlBase is
-	// null — mail setup is operator work.
-	function updateSetupLink() {
-		var link = $('#mbx-setup');
-		if (!link) return;
-		var show = !!CFG.setupUrlBase && !!state.aliasId && !state.draftsView && !state.contactsView;
-		link.hidden = !show;
-		if (show) link.setAttribute('href', CFG.setupUrlBase + encodeURIComponent(state.aliasId));
+	// ---- setup banner ----
+	// The Setup tab's own verdict for the open mailbox, fetched once per mailbox
+	// and remembered for the page's life (the endpoint caches it server-side too,
+	// so a reload is not a fresh round of DNS lookups). A mailbox that is all
+	// green says nothing at all: silence is the normal state, so a banner means
+	// something when it appears.
+	//
+	// Only ever asked for a single open mailbox. The aggregate views (All mail,
+	// Drafts, Contacts) have no one mailbox to check, and the member mount has no
+	// setupUrlBase — mail setup is operator work.
+	function setupCheckable() {
+		return !!CFG.setupUrlBase && !!state.aliasId && !isNaN(Number(state.aliasId))
+			&& !state.draftsView && !state.contactsView;
+	}
+
+	// Ask (or re-use the answer) and paint. `fresh` forces a re-run server-side;
+	// `reask` keeps the server's memory but skips this page's, for when the
+	// answer may have changed under us (see the visibility handler).
+	function updateSetupBanner(fresh, reask) {
+		if (!setupCheckable()) return;
+		var aliasId = state.aliasId;
+		var known = state.setupStatus[aliasId];
+		if (known && !fresh && !reask) { paintSetupBanner(aliasId, known); return; }
+		joineryApi.post(CFG.setupStatusUrl, { alias_id: String(aliasId), fresh: fresh ? '1' : '0' })
+			.then(function (data) {
+				state.setupStatus[aliasId] = data || {};
+				paintSetupBanner(aliasId, state.setupStatus[aliasId]);
+			})
+			.catch(function () { /* an unanswered check is not a verdict — stay quiet */ });
+	}
+
+	// The banner sits where the first conversation would be — the one place in
+	// the reader an operator is already looking, and the place an empty inbox
+	// raises the question the banner answers.
+	function paintSetupBanner(aliasId, status) {
+		// The list may have moved on while the check ran.
+		if (String(aliasId) !== String(state.aliasId) || !setupCheckable()) return;
+		var listEl = $('#mbx-threads');
+		var existing = $('.mbx-setup-banner', listEl);
+		if (existing) listEl.removeChild(existing);
+		if (!status || status.status !== 'attention') return;
+
+		var li = el('li', 'mbx-setup-banner');
+		var body = el('div', 'mbx-setup-banner-body');
+		body.appendChild(el('span', 'mbx-setup-banner-title', 'This mailbox needs attention'));
+		body.appendChild(el('span', 'mbx-setup-banner-reason',
+			(status.label ? status.label + ': ' : '') + (status.reason || '')));
+		li.appendChild(body);
+		var link = el('a', 'mbx-setup-banner-btn', 'Check setup');
+		link.href = status.url || (CFG.setupUrlBase + encodeURIComponent(aliasId));
+		li.appendChild(link);
+		listEl.insertBefore(li, listEl.firstChild);
 	}
 
 	// The Drafts pseudo-mailbox: list the viewer's saved drafts (server-scoped to
@@ -351,7 +410,6 @@
 		state.spamView = false;
 		state.mailboxLabel = 'Drafts';
 		$('#mbx-list-title').textContent = 'Drafts';
-		updateSetupLink();
 		var prior = $('#mbx-folder-rail');
 		if (prior) prior.parentNode.removeChild(prior);
 		highlightMailbox();
@@ -425,6 +483,10 @@
 			if (!listEl.children.length) {
 				listEl.appendChild(emptyRow('No conversations.'));
 			}
+			// Setup banner above everything, including the unlock prompt and the
+			// empty-list row — an unfinished mailbox is why the list is empty.
+			// Only on a reset render; "Load more" appends below what is there.
+			if (reset) { updateSetupBanner(false); }
 			state.hasMore = !!data.has_more;
 			$('#mbx-more').hidden = !state.hasMore;
 		});
@@ -1485,7 +1547,6 @@
 		state.draftsView = false;
 		state.mailboxLabel = 'Contacts';
 		$('#mbx-list-title').textContent = 'Contacts';
-		updateSetupLink();
 		var prior = $('#mbx-folder-rail');
 		if (prior) prior.parentNode.removeChild(prior);
 		highlightMailbox();
@@ -2108,19 +2169,43 @@
 			loadThreads(true);
 		});
 
-		$('#mbx-refresh').addEventListener('click', function () { refreshMailboxes(); loadThreads(true); });
+		$('#mbx-refresh').addEventListener('click', function () {
+			refreshMailboxes();
+			loadThreads(true);
+			updateSetupBanner(true);   // Refresh means "check again", setup included
+		});
+
+		// Coming back to a reader left open in another tab: the operator may have
+		// been off fixing the very thing the banner is complaining about (the
+		// Setup tab stamps its verdict as it renders), so re-ask rather than
+		// trusting what this page decided minutes ago. Cheap — the server answers
+		// from its own memory unless that has aged out.
+		document.addEventListener('visibilitychange', function () {
+			if (!document.hidden) { updateSetupBanner(false, true); }
+		});
 		$('#mbx-more').addEventListener('click', function () { state.page += 1; loadThreads(false); });
 
 		// Explicit lock (specs/mailbox_security_levels.md § The Unlock Window):
-		// end the vault window now, then re-read so sealed rows re-seal to
-		// placeholders and the Lock control hides itself.
+		// end the vault window now; the vault-locked listener below re-reads so
+		// sealed rows re-seal to placeholders and the Lock control hides itself.
 		var lockBtn = document.getElementById('mbx-lock');
 		if (lockBtn) lockBtn.addEventListener('click', async function () {
 			lockBtn.disabled = true;
-			try { await apiV1('vault_lock', {}); } catch (e) {}
+			if (window.JoineryVaultLock) {
+				await JoineryVaultLock.lock();
+			} else {
+				try { await apiV1('vault_lock', {}); } catch (e) {}
+				document.dispatchEvent(new CustomEvent('joinery:vault-locked'));
+			}
+			lockBtn.disabled = false;
+		});
+
+		// Any lock — the Lock control above, the header chip's Lock now, or a
+		// heartbeat learning the window ended elsewhere — re-seals the reader:
+		// sealed rows back to placeholders, Lock control hidden.
+		document.addEventListener('joinery:vault-locked', function () {
 			stopHeartbeat();
 			showLockControl(false);
-			lockBtn.disabled = false;
 			refreshMailboxes();
 			loadThreads(true);
 			// Collapse any open sealed thread back to placeholders.
@@ -2128,6 +2213,16 @@
 				var open = state.openThread || { thread_key: state.threadKey, subject: '' };
 				openThread(open, null);
 			}
+		});
+
+		// An unlock that happened outside the reader (the header chip) reveals
+		// sealed content in place; a reader-initiated unlock re-runs its own
+		// action instead (selfUnlocking).
+		document.addEventListener('joinery:vault-unlocked', function () {
+			showLockControl(true);
+			if (selfUnlocking) { return; }
+			refreshMailboxes();
+			loadThreads(true);
 		});
 
 		var newMsgBtn = $('#mbx-new-message');

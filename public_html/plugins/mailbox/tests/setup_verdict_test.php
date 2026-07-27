@@ -7,8 +7,9 @@
  */
 
 /**
- * The two grading rules behind the Accounts page's "needs attention" badge
- * (specs/mailbox_setup_verdicts.md).
+ * The grading rules behind the two "needs attention" surfaces
+ * (specs/mailbox_setup_verdicts.md): the Accounts page's badge, and the
+ * reader's setup banner.
  *
  * Both exist to stop the badge crying wolf, and a badge that cries wolf gets
  * ignored — which costs more than the feature was worth. So they are worth
@@ -17,7 +18,12 @@
  *   - only a REQUIRED failure flags a domain; advice does not;
  *   - a check the resolver could not answer is never a failure.
  *
- * @version 1.0
+ * The reader's banner grades the same rows differently on purpose, and the
+ * difference is worth pinning down too: it claims to mean "the Setup tab is not
+ * all green for this mailbox", so ANYTHING the tab paints amber or red counts,
+ * severity included. What stays silent there is only the absence of information.
+ *
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -26,6 +32,7 @@ harness_boot();
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailSetupCheck.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/tasks/CheckDomainSetup.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/mailbox_setup_hints.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/mailbox_setup_scope.php'));
 
 /** One check row in the shape runDomainChecks() returns. */
 function row(string $status, string $severity = InboundEmailSetupCheck::REQUIRED): array {
@@ -108,5 +115,48 @@ check(_mailbox_setup_verdict_is_fresh(
 	'a month-old verdict is not shown');
 check(_mailbox_setup_verdict_is_fresh('') === false,
 	'a domain that was never checked shows nothing');
+
+// ---------------------------------------------------------------------------
+section('The reader banner: anything not green counts');
+// ---------------------------------------------------------------------------
+
+/** A scoped-rows result carrying these rows in its Receiving group. */
+function scoped(array $receiving, array $forwarding = array()): array {
+	return array('address' => 'info@example.com', 'domain' => 'example.com', 'mode' => 'store',
+		'forwards' => false, 'arrival' => 'postfix', 'imap' => null,
+		'receiving' => $receiving, 'forwarding' => $forwarding);
+}
+
+check(mailbox_setup_verdict(scoped(array(row(InboundEmailSetupCheck::PASS))))['status'] === 'ok',
+	'an all-green mailbox says nothing');
+
+// The case this banner exists for: the Setup tab shows amber, so the reader must
+// not report the mailbox as fine.
+$spf = row(InboundEmailSetupCheck::WARN, REQUIRED);
+$spf['label'] = 'SPF record';
+$spf['summary'] = 'SPF authorizes this server, but not the outbound provider.';
+$verdict = mailbox_setup_verdict(scoped(array(row(InboundEmailSetupCheck::PASS), $spf)));
+check($verdict['status'] === 'attention', 'a required warning banners the mailbox');
+check($verdict['label'] === 'SPF record' && strpos($verdict['reason'], 'outbound provider') !== false,
+	'and the banner quotes the row the operator will see on the tab');
+
+check(mailbox_setup_verdict(scoped(array(row(InboundEmailSetupCheck::WARN, RECOMMENDED))))['status'] === 'attention',
+	'a recommended warning is amber on the tab, so it banners too');
+
+check(mailbox_setup_verdict(scoped(array(), array(row(InboundEmailSetupCheck::FAIL, REQUIRED))))['status'] === 'attention',
+	'a broken sending path counts as much as a broken receiving one');
+
+// Absence of information stays silent — the anti-flapping rule the badge shares.
+check(mailbox_setup_verdict(scoped(array(row(InboundEmailSetupCheck::UNKNOWN, REQUIRED))))['status'] === 'unknown',
+	'a check that could not run is not a verdict');
+check(mailbox_setup_verdict(scoped(array(row(InboundEmailSetupCheck::INFO, REQUIRED))))['status'] === 'unknown',
+	'nor is an undecidable one');
+check(mailbox_setup_verdict(scoped(array(
+	row(InboundEmailSetupCheck::PASS),
+	row(InboundEmailSetupCheck::OPTIONAL, InboundEmailSetupCheck::RECOMMENDED),
+)))['status'] === 'ok', 'a capability nobody turned on is grey on the tab, not amber');
+
+check(mailbox_setup_verdict(null)['status'] === 'unknown',
+	'a mailbox that does not resolve reports nothing rather than guessing');
 
 harness_finish();
