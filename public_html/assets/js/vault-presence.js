@@ -17,8 +17,8 @@
  * alive:false stops the beacon (window ended elsewhere - explicit lock,
  * credential event, cap) and dispatches 'joinery:vault-locked' so the lock
  * chip and any consumer surface on the page re-seal without waiting for a
- * failed read. A 'joinery:vault-locked' dispatched by page code (the chip's
- * Lock now, a reader's Lock control) stops the beacon the same way.
+ * failed read. A 'joinery:vault-locked' dispatched by page code (the lock
+ * chip's Lock now) stops the beacon the same way.
  *
  * @version 1.2
  */

@@ -1,6 +1,6 @@
 {
     "name": "vault",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "description": "Zero-knowledge password manager - a client-custody consumer of the Sealed Vault. Passwords are encrypted and decrypted only in the browser; the server stores opaque ciphertext and never holds the key.",
     "author": "System Developer",
     "receives_upgrades": true,

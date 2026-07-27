@@ -97,7 +97,26 @@ class PathHelper {
      */
     public static function getActiveThemeDirectory() {
         $settings = Globalvars::get_instance();
-        
+
+        // Member-area app chrome (specs/member_area_app_chrome.md): member/app
+        // surfaces (/profile, /drive) render with the core page class and kit
+        // styling instead of the public theme, so app UIs (calendar, mail,
+        // drive) get full-width chrome on every theme. Returning null makes
+        // every getThemeFilePath() call resolve past the theme to plugin/core
+        // paths. Web requests only — CLI has no request path to scope by.
+        // Only an explicit '0' turns the pin off; a missing row is the
+        // factory default (on).
+        if (isset($_SERVER['REQUEST_URI']) && class_exists('RouteHelper')
+                && RouteHelper::isMemberAreaPath()) {
+            try {
+                if ((string)$settings->get_setting('member_area_app_chrome', false, true) !== '0') {
+                    return null;
+                }
+            } catch (Exception $e) {
+                // Settings unavailable (install/update) — fall through to the theme.
+            }
+        }
+
         // Try to get theme_template, with fallback handling during database updates
         try {
             $theme_template = $settings->get_setting('theme_template', true, true);
