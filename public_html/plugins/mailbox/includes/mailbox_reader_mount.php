@@ -29,7 +29,7 @@
  * on non-sealing domains converges them in the background via
  * mailbox/unseal_batch, silently stopping while their vault is locked.
  *
- * @version 1.7.0
+ * @version 1.8.0
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSender.php'));
@@ -45,9 +45,14 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSender.
  *   - message_detail_base (string|null)      single-message deep-link page, or
  *                                            null to omit deep links (member mount)
  *   - setup_url_base      (string|null)      admin Setup page prefix, ready for an
- *                                            alias id. Null on the member mount:
- *                                            mail setup is operator work, and a
- *                                            member reading their own mail has no
+ *                                            alias id. Its presence is also what
+ *                                            turns on the setup check: the reader
+ *                                            asks mailbox/setup_status for the
+ *                                            open mailbox and banners a verdict
+ *                                            of `attention` at the top of the
+ *                                            list. Null on the member mount: mail
+ *                                            setup is operator work, and a member
+ *                                            reading their own mail has no
  *                                            business being sent to it.
  */
 function mailbox_render_mailbox_reader($page, array $opts): void {
@@ -78,6 +83,7 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 		'contactDeleteUrl'  => '/api/v1/action/mailbox/contact_delete',
 		'contactsImportUrl' => '/api/v1/action/mailbox/contacts_import',
 		'senderContextUrl'  => '/api/v1/action/mailbox/sender_context',
+		'setupStatusUrl'    => '/api/v1/action/mailbox/setup_status',
 		// The member-context panel is admin-only (member records are operator data);
 		// the endpoint enforces it, this flag just suppresses the fetch for non-admins.
 		'canSeeContext'     => (SessionControl::get_instance()->get_permission() >= 5),
@@ -192,10 +198,6 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 				<span id="mbx-list-title" class="mbx-list-title">All mail</span>
 				<div class="mbx-list-header-actions">
 					<button type="button" id="mbx-new-message" class="mbx-new-btn" hidden>+ New message</button>
-				<!-- Checking a mailbox's setup from the mailbox itself: an empty
-				     inbox is exactly where the question "is this even wired up?"
-				     occurs, and the answer lived two tabs away. Admin mount only. -->
-				<a id="mbx-setup" class="mbx-iconbtn" title="Check this mailbox's setup" hidden>Setup</a>
 					<!-- Explicit lock (specs/mailbox_security_levels.md § The Unlock Window):
 					     ends the vault window from any mail surface. Hidden until an
 					     unlock window is known to be open (the reader reveals it). -->

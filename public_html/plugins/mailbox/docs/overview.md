@@ -622,6 +622,35 @@ you go and ask it. The Accounts listing badges the ones worth asking about, so a
 half-finished mailbox does not sit broken until somebody happens to open the
 page that would have said so.
 
+The reader answers the same question where an operator is already reading, and
+it answers it exactly: opening a mailbox asks `mailbox/setup_status`, which runs
+the Setup tab's own checks for that mailbox and returns its verdict. Anything the
+tab paints amber or red banners the reader in place of the first conversation,
+naming the offending check and linking to the tab. A mailbox that is all green
+shows nothing at all — silence is the normal state, so the banner means something
+when it appears.
+
+Both surfaces run the same grouping code (`mailbox_setup_scope.php`), so the
+banner and the tab cannot disagree: `mailbox_setup_scoped_rows()` builds the
+Receiving/Forwarding groups and `mailbox_setup_verdict()` grades them. A check
+that could not run (unknown), one that is legitimately undecidable yet (info),
+and a capability nobody turned on (optional) are all silent — a verdict that
+flaps with a DNS hiccup gets ignored.
+
+The checks cost DNS lookups and host probes, so the verdict is remembered per
+operator rather than re-resolved on every mailbox click. Freshness comes from
+writing it wherever the checks have genuinely just run: **rendering the Setup tab
+stamps the verdict for the mailbox it just checked**, so fixing a record there and
+going back to the mailbox clears the banner immediately — no waiting out a cache.
+The five-minute expiry is only the backstop for a mailbox nobody has looked at,
+the reader's Refresh control forces a re-run, and a reader left open in another
+tab re-asks when it regains focus. An `unknown` result never overwrites a real
+answer: one failed lookup should not make the banner flap.
+
+It is admin-only (permission 5+) and scoped to mailboxes the caller can already
+see: members reading their own mail never receive a verdict, and the member mount
+has no Setup page to link to.
+
 A badge is a **navigation hint, not a verdict**. It says go and look; the Setup
 tab re-runs everything live and is the only thing that claims a domain is
 correct or broken. That is why the copy reads *needs attention* rather than
@@ -1012,9 +1041,12 @@ normally.
 
 - **Web reader** (`mailbox_reader.js`) — `listThreads()`/`getThread()` carry a top-level
   `locked` flag; opening a sealed thread or searching sealed mail shows an inline
-  *Unlock to read* button that runs the passkey ceremony
-  (`vault_unlock_options` → `vault_unlock_passkey`) and re-runs the original request. A
-  header **Lock** control ends the window from the reader.
+  *Unlock to read* button that runs the shared platform ceremony
+  (`JoineryVaultLock`, [Sealed Vault § The lock chip](../../../docs/sealed_vault.md))
+  and re-runs the original request. A header **Lock** control ends the window from the
+  reader, and the reader listens for the platform's `joinery:vault-locked` /
+  `joinery:vault-unlocked` events, so a lock or unlock from the header padlock re-seals
+  or reveals content in place.
 - **Native `/api/v1`** — `mailbox/thread_list`, `mailbox/thread`, and `mailbox/mailboxes`
   return metadata plus `locked` (per-mailbox on the switcher, with each mailbox's
   `security_level`); `mailbox/send` returns `locked: true` instead of sending when a
