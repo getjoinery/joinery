@@ -31,6 +31,11 @@ function passkey_register_verify_logic(array $input): LogicResult {
 	}
 	$label = isset($input['label']) ? trim($input['label']) : '';
 
+	// Enrolling a first factor silently changes sign-in behavior (the account
+	// starts being asked for it), so the moment the predicate flips is reported
+	// for the page to say so (specs/second_factor_ux_coherence.md Change 3).
+	$had_second_factor = $session->user_has_second_factor($user);
+
 	try {
 		$service = new PasskeyService();
 		$passkey = $service->verifyRegistration(json_encode($credential), $label);
@@ -38,7 +43,10 @@ function passkey_register_verify_logic(array $input): LogicResult {
 		return LogicResult::error($e->getMessage());
 	}
 
-	return LogicResult::render(['passkey' => $passkey->export_for_api()]);
+	return LogicResult::render([
+		'passkey' => $passkey->export_for_api(),
+		'became_second_factor' => !$had_second_factor && $session->user_has_second_factor($user),
+	]);
 }
 
 function passkey_register_verify_logic_api() {

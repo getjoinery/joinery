@@ -38,6 +38,9 @@ function verify_totp_logic(array $input): LogicResult{
 	$pending_passkeys->load();
 	$page_vars['has_passkey'] = (count($pending_passkeys) > 0)
 		&& (bool)$page_vars['settings']->get_setting('passkeys_enabled');
+	// The "Trust this device" offer: hidden entirely when the trusted-device
+	// duration is 0 (the cookie would never be issued anyway).
+	$page_vars['trust_days'] = (int)$page_vars['settings']->get_setting('totp_remember_device_days');
 
 	if (!empty($_POST) && $page_vars['has_totp']) {
 		if (!RequestLogger::check_rate_limit('totp', 5, 300, false)) {
@@ -87,7 +90,7 @@ function verify_totp_logic(array $input): LogicResult{
 		}
 
 		require_once(PathHelper::getIncludePath('includes/Login2fa.php'));
-		return LogicResult::redirect(Login2fa::completePendingLogin($user));
+		return LogicResult::redirect(Login2fa::completePendingLogin($user, !empty($input['trust_device'])));
 	}
 
 	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
@@ -109,6 +112,7 @@ function verify_totp_logic_descriptor(): array {
 		'mutates'          => true,
 		'input'            => [
 			'totp_code' => ['type' => 'string', 'required' => true, 'label' => 'Authenticator code or backup code'],
+			'trust_device' => ['type' => 'string', 'required' => false, 'label' => 'Trust this device (skip the second factor here for the configured duration)'],
 		],
 	];
 }

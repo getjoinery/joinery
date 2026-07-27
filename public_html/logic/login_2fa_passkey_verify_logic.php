@@ -9,7 +9,7 @@
  * at sign-in, closing the quirk where a passkey-only Fortress user was never asked
  * a second factor.
  *
- * @version 1.0
+ * @version 1.1
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
@@ -54,7 +54,7 @@ function login_2fa_passkey_verify_logic(array $input): LogicResult {
 	}
 
 	RequestLogger::log('totp', 'passkey_2fa', true, ['user_id' => (int)$uid]);
-	$redirect = Login2fa::completePendingLogin($user);
+	$redirect = Login2fa::completePendingLogin($user, !empty($input['trust_device']));
 	return LogicResult::render(['redirect' => $redirect]);
 }
 

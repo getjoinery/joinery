@@ -25,8 +25,8 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	public static $pkey_column = 'usr_user_id';
 
 	// Universal unreadable floor (stripped from every API export). usr_password,
-	// usr_totp_secret and usr_totp_hmac_key are caught by CREDENTIAL_FIELD_PATTERN;
-	// these are the real secrets whose names do NOT match it.
+	// usr_totp_secret and usr_second_factor_hmac_key are caught by
+	// CREDENTIAL_FIELD_PATTERN; these are the real secrets whose names do NOT match it.
 	public static $api_unreadable_fields = array(
 		'usr_authhash', 'usr_remember_tokens', 'usr_totp_backup_codes',
 	);
@@ -141,7 +141,10 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	    'usr_totp_backup_codes' => array('type'=>'jsonb'),
 	    'usr_totp_enabled_time' => array('type'=>'timestamp(6)'),
 	    'usr_totp_last_used_step' => array('type'=>'int8'),
-	    'usr_totp_hmac_key' => array('type'=>'varchar(128)'),
+	    // Signs trusted-device cookies (sf_trusted) for ANY second-factor method.
+	    // Minted lazily when the first cookie is issued; rotating it is how every
+	    // trusted device is revoked at once (specs/second_factor_ux_coherence.md).
+	    'usr_second_factor_hmac_key' => array('type'=>'varchar(128)'),
 	    // 2FA cadence (specs/mailbox_security_levels.md § 5.2): 'every_login' asks
 	    // the second factor on each password sign-in; 'sensitive_only' signs in
 	    // password-only and defers the factor to sensitive actions (step-up).
@@ -740,8 +743,8 @@ private static function UcName($string) {
 	}
 
 	/**
-	 * Enable TOTP 2FA for this user. Stores the Base32 secret, sets enabled time,
-	 * generates a fresh per-user HMAC key for trusted-device cookies, and saves.
+	 * Enable TOTP for this user. Stores the Base32 secret, sets enabled time,
+	 * and saves.
 	 *
 	 * @param string $secret Base32-encoded TOTP secret (already validated against a TOTP code)
 	 */
@@ -749,30 +752,32 @@ private static function UcName($string) {
 		$this->set('usr_totp_secret', $secret);
 		$this->set('usr_totp_enabled_time', gmdate('Y-m-d H:i:s'));
 		$this->set('usr_totp_last_used_step', null);
-		$this->set('usr_totp_hmac_key', bin2hex(random_bytes(64)));
 		$this->save();
 	}
 
 	/**
 	 * Rotate the trusted-device HMAC key. Every outstanding trusted-device
 	 * cookie embeds an HMAC under this key, so rotation signs them all out of
-	 * the skip-2FA grant at once. TOTP itself is untouched.
+	 * the skip-second-factor grant at once — the shared revocation for every
+	 * factor-removal event (forget trusted devices, TOTP turn-off, passkey
+	 * revocation). The factors themselves are untouched.
 	 */
-	function rotate_totp_hmac_key() {
-		$this->set('usr_totp_hmac_key', bin2hex(random_bytes(64)));
+	function rotate_second_factor_hmac_key() {
+		$this->set('usr_second_factor_hmac_key', bin2hex(random_bytes(64)));
 		$this->save();
 	}
 
 	/**
-	 * Disable TOTP 2FA for this user. Clears all TOTP state including the
-	 * per-user HMAC key, which invalidates outstanding trusted-device cookies.
+	 * Disable TOTP for this user. Clears all TOTP state and rotates the
+	 * trusted-device HMAC key — removing a factor is the moment device trust
+	 * re-earns.
 	 */
 	function disable_totp() {
 		$this->set('usr_totp_secret', null);
 		$this->set('usr_totp_enabled_time', null);
 		$this->set('usr_totp_backup_codes', null);
 		$this->set('usr_totp_last_used_step', null);
-		$this->set('usr_totp_hmac_key', null);
+		$this->set('usr_second_factor_hmac_key', bin2hex(random_bytes(64)));
 		$this->save();
 	}
 

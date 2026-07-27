@@ -5,7 +5,9 @@
  * pass them to register()/authenticate()/derive(), then POST the returned
  * object back to the matching verify action.
  *
- * @version 1.2
+ * @version 1.3
+ * @changelog 1.3 - runFlow() merges extraBody into the verify POST too, so
+ *   per-attempt choices (e.g. trust_device) reach the completing action.
  * @changelog 1.2 - Automatic failure telemetry: every register/authenticate
  *   rejection is reported to passkey_client_report (surface, error name,
  *   timing, focus state) so browser-layer refusals are visible server-side.
@@ -231,7 +233,8 @@ window.JoineryPasskeys = (function () {
 	 * The full options -> authenticate -> verify round trip shared by every
 	 * password-flow passkey button (sign-in, password reset, reset second factor).
 	 * POSTs {} (plus any extraBody) to optionsUrl, runs the request ceremony, POSTs
-	 * the credential to verifyUrl, and resolves with verify's `data` object (e.g.
+	 * the credential (plus any extraBody — e.g. the interstitial's trust_device
+	 * choice) to verifyUrl, and resolves with verify's `data` object (e.g.
 	 * { redirect, second_factor_required }). Throws with the server error message on
 	 * any failure so callers can surface it uniformly.
 	 */
@@ -249,7 +252,7 @@ window.JoineryPasskeys = (function () {
 		var verRes = await fetch(verifyUrl, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ credential: credential }),
+			body: JSON.stringify(Object.assign({}, extraBody || {}, { credential: credential })),
 		});
 		var verJson = await verRes.json();
 		if (!verRes.ok) throw new Error((verJson && verJson.error) || 'Passkey verification failed.');

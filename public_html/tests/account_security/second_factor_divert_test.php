@@ -48,7 +48,6 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 $user = make_user('2fadivert');
 $user->set('usr_totp_enabled_time', gmdate('Y-m-d H:i:s'));
-$user->set('usr_totp_hmac_key', bin2hex(random_bytes(32)));
 
 // A remember-me cookie exactly as save_user_to_cookie() mints one: the browser
 // carries the raw token, the row carries only its hash.
@@ -61,7 +60,7 @@ $user->set('usr_remember_tokens', json_encode(array(array(
 $user->save();
 $user->load();
 
-// No totp_trusted cookie anywhere below — that absence IS the condition under
+// No sf_trusted cookie anywhere below — that absence IS the condition under
 // test, so it is never sent, not even incidentally.
 $remembered = 'tt=' . $raw_token;
 
@@ -83,7 +82,7 @@ $r = harness_request('GET', '/verify-totp', array('cookies' => $remembered, 'acc
 check($r['status'] === 200,
 	'/verify-totp answers 200, not another redirect',
 	'status ' . $r['status'] . ' -> ' . $r['redirect_url']);
-check(stripos($r['body'], 'Two-Factor Verification') !== false,
+check(stripos($r['body'], 'Confirm it&rsquo;s you') !== false,
 	'the body is the factor page, not a redirect stub');
 
 // ---------------------------------------------------------------------------
@@ -96,7 +95,7 @@ $r = harness_request('GET', '/', array('cookies' => $remembered, 'accept' => nul
 check($r['status'] === 200,
 	'following the divert reaches a page within the hop limit',
 	'status ' . $r['status'] . ' ' . $r['error']);
-check(stripos($r['body'], 'Two-Factor Verification') !== false,
+check(stripos($r['body'], 'Confirm it&rsquo;s you') !== false,
 	'the page it reaches is the factor page');
 
 // ---------------------------------------------------------------------------
