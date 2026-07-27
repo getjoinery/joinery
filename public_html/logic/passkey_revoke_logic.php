@@ -42,6 +42,12 @@ function passkey_revoke_logic(array $input): LogicResult {
 		return LogicResult::error($e->getMessage());
 	}
 
+	// Removing a factor is the moment device trust re-earns: rotate the
+	// trusted-device HMAC key so every skip-second-factor cookie dies
+	// (specs/second_factor_ux_coherence.md).
+	$user->rotate_second_factor_hmac_key();
+	$session->delete_trusted_device_cookie();
+
 	return LogicResult::render(['revoked' => true]);
 }
 

@@ -41,15 +41,58 @@
                 }
                 ?>
 
-                <div class="d-flex justify-content-between align-items-center">
-                    <h2>Two-Factor Authentication</h2>
+                <?php
+                // One panel, one vocabulary: the account has a second factor (or
+                // not); TOTP and passkeys are methods of it. The summary comes from
+                // the same predicate the sign-in divert and step-up gates use, so
+                // this line can never contradict what enforcement does.
+                $fs = $page_vars['factor_summary'] ?? array('active' => false, 'totp' => false, 'passkey_count' => 0);
+                $summary_parts = array();
+                if ($fs['passkey_count'] > 0) {
+                    $summary_parts[] = $fs['passkey_count'] . ' passkey' . ($fs['passkey_count'] == 1 ? '' : 's');
+                }
+                if ($fs['totp']) {
+                    $summary_parts[] = 'authenticator app';
+                } elseif ($fs['passkey_count'] > 0) {
+                    $summary_parts[] = 'authenticator app off';
+                }
+                ?>
+                <h2>Second-Factor Sign-In</h2>
+                <p><strong>Status:</strong> <?php echo $fs['active']
+                    ? 'Active — ' . htmlspecialchars(implode(' · ', $summary_parts))
+                    : 'Off'; ?></p>
+
+                <?php if ($fs['active']): $cadence = $page_vars['cadence'] ?? 'every_login'; ?>
+                    <form action="/profile/security" method="POST" class="jy-mt-2">
+                        <input type="hidden" name="action" value="set_cadence">
+                        <label class="jy-block jy-mt-2">
+                            <input type="radio" name="cadence" value="every_login" <?php echo $cadence === 'every_login' ? 'checked' : ''; ?>>
+                            Ask for it at every sign-in
+                        </label>
+                        <label class="jy-block jy-mt-2">
+                            <input type="radio" name="cadence" value="sensitive_only" <?php echo $cadence === 'sensitive_only' ? 'checked' : ''; ?>>
+                            Ask for it only at sensitive actions (less secure)
+                        </label>
+                        <div class="jy-mt-3">
+                            <button type="submit" class="btn btn-secondary">Save</button>
+                        </div>
+                    </form>
+
+                    <form action="/profile/security" method="POST" class="jy-mt-3"
+                          data-jy-confirm="Forget all trusted devices? No one is signed out - each device, including this one, will simply be asked for your second factor at its next sign-in.">
+                        <input type="hidden" name="action" value="revoke_trusted_devices">
+                        <button type="submit" class="btn btn-secondary">Forget Trusted Devices</button>
+                    </form>
+                <?php endif; ?>
+
+                <div class="d-flex justify-content-between align-items-center jy-mt-4">
+                    <h3>Authenticator app</h3>
                     <?php if (!empty($page_vars['totp_enabled']) && empty($page_vars['backup_codes'])): ?>
                     <details class="jy-actions-dropdown">
                         <summary class="btn btn-secondary">Actions</summary>
                         <div class="jy-actions-menu">
                             <button type="button" id="totp-regen-menu-btn">Regenerate Backup Codes</button>
-                            <button type="button" id="totp-revoke-trusted-menu-btn">Forget Trusted Devices</button>
-                            <button type="button" class="jy-action-danger" id="totp-disable-menu-btn">Disable 2FA…</button>
+                            <button type="button" class="jy-action-danger" id="totp-disable-menu-btn">Turn Off Authenticator App…</button>
                         </div>
                     </details>
                     <?php endif; ?>
@@ -57,7 +100,7 @@
 
                 <?php if (!empty($page_vars['just_enabled']) && !empty($page_vars['backup_codes'])): ?>
                     <div class="jy-alert jy-alert-success">
-                        <strong>Two-factor authentication is now enabled.</strong>
+                        <strong>Your authenticator app is set up.</strong>
                         Save the backup codes below — you'll need one if you lose access to your authenticator app. They're shown only once.
                     </div>
 
@@ -88,7 +131,7 @@
                     <p><a href="/profile/security" class="btn btn-primary">Done</a></p>
 
                 <?php elseif (!empty($page_vars['totp_enabled'])): ?>
-                    <p><strong>Status:</strong> Enabled
+                    <p>On
                     <?php if (!empty($page_vars['totp_enabled_time'])): ?>
                         (since <?php echo htmlspecialchars(LibraryFunctions::convert_time($page_vars['totp_enabled_time'], 'UTC',
                             SessionControl::get_instance()->get_timezone(), 'M j, Y')); ?>)
@@ -100,17 +143,15 @@
                         <input type="hidden" name="action" value="regenerate_backup_codes">
                     </form>
 
-                    <form action="/profile/security" method="POST" class="d-none" id="totp-revoke-trusted-form"
-                          data-jy-confirm="Forget all trusted devices? No one is signed out - each device, including this one, will simply be asked for a 2FA code at its next sign-in.">
-                        <input type="hidden" name="action" value="revoke_trusted_devices">
-                    </form>
-
                     <div class="d-none jy-mt-2" id="totp-disable-block">
-                        <p>Confirm with a current 6-digit code or an 8-character backup code. Disabling will also invalidate any trusted devices.</p>
+                        <p>Confirm with a current 6-digit code or an 8-character backup code. Turning it off also invalidates any trusted devices.
+                        <?php if ($fs['passkey_count'] > 0): ?>
+                            Sign-ins will still ask for your passkey.
+                        <?php endif; ?></p>
                         <form action="/profile/security" method="POST">
                             <input type="hidden" name="action" value="disable">
                             <input type="text" name="confirm_code" placeholder="6-digit or backup code" autocomplete="one-time-code" required>
-                            <button type="submit" class="btn btn-danger">Disable 2FA</button>
+                            <button type="submit" class="btn btn-danger">Turn Off Authenticator App</button>
                         </form>
                     </div>
 
@@ -118,10 +159,6 @@
                     document.addEventListener('DOMContentLoaded', function () {
                         document.getElementById('totp-regen-menu-btn').addEventListener('click', function () {
                             var f = document.getElementById('totp-regen-form');
-                            if (f.requestSubmit) f.requestSubmit(); else f.submit();
-                        });
-                        document.getElementById('totp-revoke-trusted-menu-btn').addEventListener('click', function () {
-                            var f = document.getElementById('totp-revoke-trusted-form');
                             if (f.requestSubmit) f.requestSubmit(); else f.submit();
                         });
                         document.getElementById('totp-disable-menu-btn').addEventListener('click', function () {
@@ -156,36 +193,16 @@
                     </form>
 
                 <?php else: ?>
-                    <p><strong>Status:</strong> Not enabled</p>
-                    <p>Two-factor authentication adds a second step when logging in: a 6-digit code from an authenticator app on your phone. This protects your account even if your password is compromised.</p>
+                    <p>Off</p>
+                    <p>An authenticator app on your phone generates a 6-digit code that confirms sign-ins as a second-factor method. This protects your account even if your password is compromised.</p>
 
                     <form action="/profile/security" method="POST">
                         <input type="hidden" name="action" value="start_enable">
-                        <button type="submit" class="btn btn-primary">Enable Two-Factor Authentication</button>
+                        <button type="submit" class="btn btn-primary">Set Up Authenticator App</button>
                     </form>
                 <?php endif; ?>
 
             </div>
-
-            <?php if (!empty($page_vars['has_second_factor'])): $cadence = $page_vars['cadence'] ?? 'every_login'; ?>
-            <div class="jy-panel jy-mt-4">
-                <h2>Ask for my second factor</h2>
-                <form action="/profile/security" method="POST" class="jy-mt-2">
-                    <input type="hidden" name="action" value="set_cadence">
-                    <label class="jy-block jy-mt-2">
-                        <input type="radio" name="cadence" value="every_login" <?php echo $cadence === 'every_login' ? 'checked' : ''; ?>>
-                        At every sign-in
-                    </label>
-                    <label class="jy-block jy-mt-2">
-                        <input type="radio" name="cadence" value="sensitive_only" <?php echo $cadence === 'sensitive_only' ? 'checked' : ''; ?>>
-                        Only at sensitive actions (less secure)
-                    </label>
-                    <div class="jy-mt-3">
-                        <button type="submit" class="btn btn-secondary">Save</button>
-                    </div>
-                </form>
-            </div>
-            <?php endif; ?>
 
             <div class="jy-panel jy-mt-4">
                 <h2>Recovery address</h2>
@@ -236,6 +253,10 @@
             </script>
             <div class="jy-panel jy-mt-4 d-none" id="passkeys-panel">
                 <h2>Passkeys</h2>
+
+                <div class="jy-alert jy-alert-success d-none" id="passkey-second-factor-notice">
+                    Your passkey now also protects password sign-ins — you'll confirm it when signing in with your password.
+                </div>
 
                 <table class="jy-table jy-w-full d-none" id="passkeys-table">
                     <thead>
@@ -502,10 +523,15 @@
                         if (currentPassword) body.current_password = currentPassword;
                         var options = await apiFetch('/api/v1/action/passkey_register_options', { method: 'POST', body: JSON.stringify(body) });
                         var credential = await JoineryPasskeys.register(options.data.options);
-                        await apiFetch('/api/v1/action/passkey_register_verify', {
+                        var regResult = await apiFetch('/api/v1/action/passkey_register_verify', {
                             method: 'POST',
                             body: JSON.stringify({ credential: credential, label: label }),
                         });
+                        // First factor enrolled: sign-in behavior just changed — say so
+                        // inline, once, right where the enrollment happened.
+                        if (regResult.data && regResult.data.became_second_factor) {
+                            document.getElementById('passkey-second-factor-notice').classList.remove('d-none');
+                        }
                         pwRow.classList.add('d-none');
                         pwInput.value = '';
                         await reloadAll();

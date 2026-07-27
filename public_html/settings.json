@@ -585,12 +585,12 @@
       "name": "totp_remember_device_days",
       "default": "0",
       "group": "two_factor",
-      "label": "Trust a device for this many days",
+      "label": "Trusted device duration (days)",
       "type": "number",
       "validation": {
         "min": 0
       },
-      "helptext": "After a successful check, skip the code on that device for this long. 0 always asks."
+      "helptext": "How long the sign-in interstitial's Trust-this-device choice skips the second factor on that device. 0 never offers it."
     },
     {
       "name": "totp_require_admins",

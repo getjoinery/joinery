@@ -29,13 +29,28 @@ function security_logic(array $input): LogicResult{
 	$page_vars['just_enabled'] = false;
 	$page_vars['has_second_factor'] = $session->user_has_second_factor($user);
 	$page_vars['cadence'] = $user->two_factor_cadence();
+	// Factor summary for the Second-factor sign-in panel — computed from the
+	// same predicate the sign-in divert and step-up gates use, so the page can
+	// never contradict what enforcement does (specs/second_factor_ux_coherence.md).
+	$live_passkey_count = 0;
+	if ($settings->get_setting('passkeys_enabled')) {
+		require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+		$live_passkeys = new MultiPasskey(array('user_id' => (int)$user->key));
+		$live_passkeys->load();
+		$live_passkey_count = count($live_passkeys);
+	}
+	$page_vars['factor_summary'] = array(
+		'active'        => $page_vars['has_second_factor'],
+		'totp'          => $page_vars['totp_enabled'],
+		'passkey_count' => $live_passkey_count,
+	);
 	// External recovery address (specs/mailbox_security_levels.md § Password reset).
 	$page_vars['recovery_email'] = trim((string)$user->get('usr_recovery_email'));
 	$page_vars['recovery_email_verified'] = $user->has_verified_recovery_email();
 
 	$msgtxt_from_get = $input['msgtext'] ?? null;
 	if ($msgtxt_from_get) {
-		$message = new DisplayMessage(htmlspecialchars($msgtxt_from_get), 'Two-Factor Authentication',
+		$message = new DisplayMessage(htmlspecialchars($msgtxt_from_get), 'Security',
 			'/\/profile\/security.*/', DisplayMessage::MESSAGE_WARNING,
 			DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'securitybox', TRUE);
 		$session->save_message($message);
@@ -57,7 +72,7 @@ function security_logic(array $input): LogicResult{
 		$msgtxt = $new_cadence === 'sensitive_only'
 			? 'Sign-in is now password-only. Your second factor is asked at sensitive actions. Note: a phished password can then see your Standard mail and mailbox metadata.'
 			: 'Your second factor is now asked at every sign-in.';
-		$message = new DisplayMessage($msgtxt, 'Two-factor cadence updated', '/\/profile\/security.*/',
+		$message = new DisplayMessage($msgtxt, 'Second-factor cadence updated', '/\/profile\/security.*/',
 			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'securitybox', TRUE);
 		$session->save_message($message);
 		return LogicResult::redirect('/profile/security');
@@ -236,10 +251,10 @@ function security_logic(array $input): LogicResult{
 		return LogicResult::render($page_vars);
 	}
 
-	if ($action === 'revoke_trusted_devices' && $page_vars['totp_enabled']) {
-		$user->rotate_totp_hmac_key();
+	if ($action === 'revoke_trusted_devices' && $page_vars['has_second_factor']) {
+		$user->rotate_second_factor_hmac_key();
 		$session->delete_trusted_device_cookie();
-		$msgtxt = 'All trusted devices forgotten. Every device will be asked for a 2FA code at its next sign-in.';
+		$msgtxt = 'All trusted devices forgotten. Every device will be asked for your second factor at its next sign-in.';
 		$message = new DisplayMessage($msgtxt, 'Trusted devices forgotten', '/\/profile\/security.*/',
 			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'securitybox', TRUE);
 		$session->save_message($message);
@@ -296,8 +311,11 @@ function security_logic(array $input): LogicResult{
 		VaultUnlock::lockAll($user->key);
 		$page_vars['totp_enabled'] = false;
 		$page_vars['totp_enabled_time'] = null;
-		$msgtxt = 'Two-factor authentication has been disabled.';
-		$message = new DisplayMessage($msgtxt, '2FA disabled', '/\/profile\/security.*/',
+		$msgtxt = 'The authenticator app has been turned off.';
+		if ($page_vars['factor_summary']['passkey_count'] > 0) {
+			$msgtxt .= ' Sign-ins will still ask for your passkey.';
+		}
+		$message = new DisplayMessage($msgtxt, 'Authenticator app turned off', '/\/profile\/security.*/',
 			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'securitybox', TRUE);
 		$session->save_message($message);
 		return LogicResult::redirect('/profile/security');

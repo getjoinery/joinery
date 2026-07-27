@@ -90,9 +90,10 @@ Whether a second factor is asked at password sign-in is the account's **2FA
 cadence** (`usr_2fa_cadence`): `every_login` asks it on each sign-in;
 `sensitive_only` signs in password-only and defers the factor to the step-up
 gate above. When it is asked, the sign-in stashes a pending-login state and
-diverts to `/verify-totp`, which offers **either** a TOTP/backup code **or a
-passkey step-up** (`login_2fa_passkey_options`/`_verify`) — both finish through
-the same `Login2fa::completePendingLogin()`. The divert fires whenever the
+diverts to `/verify-totp` (the **"Confirm it's you"** interstitial), which
+offers **either** a TOTP/backup code **or a passkey step-up**
+(`login_2fa_passkey_options`/`_verify`) — both finish through the same
+`Login2fa::completePendingLogin()`. The divert fires whenever the
 account holds *any* usable second factor (`user_has_second_factor()` — TOTP,
 or a live passkey while `passkeys_enabled` is on), so a passkey-only account is
 asked for its passkey at sign-in rather than silently skipping the second
@@ -113,6 +114,25 @@ proved or abandoned: `/verify-totp`, the two passkey actions that page calls,
 and `/logout`. Diverting any of them is an infinite redirect. The pending state
 is stashed once per pending login rather than per request, because stashing
 rotates the session id that carries it.
+
+**Trusted devices.** The interstitial offers a default-checked **"Trust this
+device for N days"** checkbox (N from `totp_remember_device_days`; 0 never
+offers it), and `Login2fa::completePendingLogin()` issues the trusted-device
+cookie (`sf_trusted`) only when it was checked — trust is an explicit choice,
+never a side effect of proving the factor. The cookie's HMAC is signed with
+`usr_second_factor_hmac_key`, a per-user key minted lazily by the first trust
+grant and independent of any factor *method* — a passkey-only account trusts
+devices exactly like a TOTP account. Rotating the key
+(`User::rotate_second_factor_hmac_key()`) is the revocation, and every
+factor-removal event rotates it: forgetting trusted devices, turning off the
+authenticator app, and revoking a passkey. Removing a factor is the moment
+device trust re-earns.
+
+**Enrollment flips the ask.** When enrolling a passkey makes
+`user_has_second_factor()` flip from false to true, the enrollment response
+carries `became_second_factor` and the security page says so inline — the
+account starts being factor-prompted at password sign-ins, and that change is
+stated at the moment it happens, not discovered at the next sign-in.
 
 **Dual-role passkeys.** Any live passkey may complete the second-factor step
 at sign-in — there is no per-credential role scoping — so a vault-active
@@ -315,16 +335,16 @@ core dependency on any one plugin.
 | Action | Requires |
 |---|---|
 | Sign in | Password — or passkey, only while the account has no vault |
-| Second factor at sign-in | Asked when cadence is `every_login` and the account holds any factor: a TOTP/backup code or a passkey step-up |
+| Second factor at sign-in | Asked when cadence is `every_login` and the account holds any factor: a TOTP/backup code or a passkey step-up — skipped on a device the user chose to trust (`sf_trusted`) |
 | Read sealed content | Open unlock window |
 | Open the window | Unlocker ceremony (passkey + user verification / recovery code / bypass phrase) |
 | Enroll first passkey | Session + password re-entry |
 | Enroll additional passkey | Session + recent step-up |
 | Add a vault unlocker | Open window (+ step-up for codes/bypass phrase) |
 | Deactivate a passkey for the vault | Session + recent step-up; refused if it breaks the unlocker floor |
-| Revoke a passkey | Session; refused if it breaks the unlocker floor, or if it is a vault holder's last passkey while TOTP is off |
-| Disable TOTP | Session + valid TOTP/backup code; refused for a vault holder with no live passkey |
-| Forget trusted devices | Session; rotates the device-trust HMAC key so every skip-2FA cookie dies — no session ends, TOTP untouched |
+| Revoke a passkey | Session; refused if it breaks the unlocker floor, or if it is a vault holder's last passkey while TOTP is off; trusted devices re-earn |
+| Turn off the authenticator app | Session + a current TOTP/backup code; refused for a vault holder with no live passkey; ends all windows; trusted devices re-earn |
+| Forget trusted devices | Session; rotates the device-trust HMAC key so every skip-second-factor cookie dies — no session ends, factor methods untouched |
 | Rotate the vault key | Live PRF assertion from an enrolled passkey |
 | Password reset | An authorizer — email link, passkey, TOTP (no-vault only), or verified recovery address; never opens a vault |
 | Passkey reset on a vault account | Passkey **plus** an independent second factor (TOTP or a different passkey), when one is enrolled |
@@ -332,7 +352,6 @@ core dependency on any one plugin.
 | Change the account password | Session + recent step-up; ends all windows + alerts |
 | Change the account (login) email | Session + recent step-up; a hosted address needs a non-email reset path first |
 | Regenerate 2FA backup codes | Session + recent step-up |
-| Disable 2FA | Session + a current TOTP/backup code; ends all windows |
 | Change 2FA cadence | Session + recent step-up |
 | Change a domain's security level | Session + recent second-factor step-up |
 | Unlock the vault with a recovery code | Session + recent step-up (if a factor is enrolled); ends all other windows + alerts |

@@ -638,23 +638,25 @@ class SessionControl{
 	}
 
 	/**
-	 * Trusted-device cookie format: {user_id};{expiry};{hmac_sha256(user_id+expiry+enabled_time, usr_totp_hmac_key)}
-	 * Allows skipping the TOTP step on devices the user has approved, for N days.
-	 * Invalidated automatically if the user disables/re-enables 2FA (rotates both enabled_time and hmac_key).
+	 * Trusted-device cookie format: {user_id};{expiry};{hmac_sha256(user_id+expiry, usr_second_factor_hmac_key)}
+	 * Skips the second-factor ask at sign-in on devices the user chose to trust,
+	 * for N days — regardless of which factor method (TOTP or passkey) proved
+	 * the trust. Rotating the key (User::rotate_second_factor_hmac_key) is the
+	 * revocation: it happens on forget-trusted-devices, TOTP turn-off, and
+	 * passkey revocation (specs/second_factor_ux_coherence.md).
 	 */
 	private function compute_trusted_device_hmac($user, $expiry) {
-		$key = $user->get('usr_totp_hmac_key');
+		$key = $user->get('usr_second_factor_hmac_key');
 		if (empty($key)) {
 			return null;
 		}
-		$enabled_time = $user->get('usr_totp_enabled_time');
-		$payload = $user->key . ':' . $expiry . ':' . $enabled_time;
+		$payload = $user->key . ':' . $expiry;
 		return hash_hmac('sha256', $payload, $key);
 	}
 
 	public function has_valid_trusted_device_cookie($user) {
-		if (empty($_COOKIE['totp_trusted'])) return false;
-		$parts = explode(';', $_COOKIE['totp_trusted']);
+		if (empty($_COOKIE['sf_trusted'])) return false;
+		$parts = explode(';', $_COOKIE['sf_trusted']);
 		if (count($parts) !== 3) return false;
 		[$cookie_user_id, $expiry, $sig] = $parts;
 		if ((int)$cookie_user_id !== (int)$user->key) return false;
@@ -669,15 +671,20 @@ class SessionControl{
 		$settings = Globalvars::get_instance();
 		$days = (int)$settings->get_setting('totp_remember_device_days');
 		if ($days <= 0) return;
+		// The signing key is minted lazily by the first trust grant — it exists
+		// exactly when at least one trusted device could.
+		if (empty($user->get('usr_second_factor_hmac_key'))) {
+			$user->rotate_second_factor_hmac_key();
+		}
 		$expiry = time() + ($days * 86400);
 		$sig = $this->compute_trusted_device_hmac($user, $expiry);
 		if (!$sig) return;
 		$value = $user->key . ';' . $expiry . ';' . $sig;
-		$this->set_secure_cookie('totp_trusted', $value, $expiry);
+		$this->set_secure_cookie('sf_trusted', $value, $expiry);
 	}
 
 	public function delete_trusted_device_cookie() {
-		$this->delete_cookie('totp_trusted');
+		$this->delete_cookie('sf_trusted');
 	}
 
 	public static function get_instance(){

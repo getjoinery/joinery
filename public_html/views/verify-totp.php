@@ -8,11 +8,12 @@
     $page = new PublicPage();
     $page->public_header([
         'is_valid_page' => $is_valid_page ?? false,
-        'title'         => 'Two-Factor Verification',
+        'title'         => 'Confirm it\'s you',
         'header_only'   => true,
     ]);
     $has_totp    = !empty($page_vars['has_totp']);
     $has_passkey = !empty($page_vars['has_passkey']);
+    $trust_days  = (int)($page_vars['trust_days'] ?? 0);
 ?>
 
 <div class="jy-ui">
@@ -23,7 +24,7 @@
             <a href="/"><?php $page->get_logo(); ?></a>
         </div>
 
-        <h3>Two-Factor Verification</h3>
+        <h3>Confirm it&rsquo;s you</h3>
         <?php if ($has_totp): ?>
             <p>Enter the 6-digit code from your authenticator app, or an 8-character backup code.</p>
         <?php else: ?>
@@ -47,6 +48,12 @@
                 'inputmode'    => 'text',
                 'autofocus'    => true,
             ]);
+            if ($trust_days > 0) {
+                $formwriter->checkboxinput('trust_device', 'Trust this device for ' . $trust_days . ' days', [
+                    'id'      => 'trust_device',
+                    'checked' => true,
+                ]);
+            }
             ?>
             <div class="jy-form-actions">
                 <?php $formwriter->submitbutton('verify-form-submit', 'Verify', ['class' => 'btn btn-primary']); ?>
@@ -58,6 +65,12 @@
 
         <?php if ($has_passkey): ?>
             <?php if ($has_totp): ?><p class="jy-auth-hint jy-mt-2">or</p><?php endif; ?>
+            <?php if (!$has_totp && $trust_days > 0): ?>
+                <label class="jy-block jy-mt-2">
+                    <input type="checkbox" id="trust_device" checked>
+                    Trust this device for <?php echo $trust_days; ?> days
+                </label>
+            <?php endif; ?>
             <div class="jy-mt-2">
                 <button type="button" class="btn btn-secondary jy-w-full" id="login-2fa-passkey-btn">Use a passkey</button>
             </div>
@@ -88,9 +101,11 @@ document.addEventListener('DOMContentLoaded', function () {
     btn.addEventListener('click', async function () {
         btn.disabled = true;
         try {
+            var trustEl = document.getElementById('trust_device');
             var data = await JoineryPasskeys.runFlow(
                 '/api/v1/action/login_2fa_passkey_options',
-                '/api/v1/action/login_2fa_passkey_verify'
+                '/api/v1/action/login_2fa_passkey_verify',
+                (trustEl && trustEl.checked) ? { trust_device: 1 } : {}
             );
             window.location.href = data.redirect || '/profile';
         } catch (e) {
