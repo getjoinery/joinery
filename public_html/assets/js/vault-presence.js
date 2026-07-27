@@ -15,9 +15,12 @@
  * (VaultUnlock::HEARTBEAT_MAX_STALE_SECONDS) sits above the worst throttle, so
  * a background Joinery tab still counts as present. A beat answering
  * alive:false stops the beacon (window ended elsewhere - explicit lock,
- * credential event, cap).
+ * credential event, cap) and dispatches 'joinery:vault-locked' so the lock
+ * chip and any consumer surface on the page re-seal without waiting for a
+ * failed read. A 'joinery:vault-locked' dispatched by page code (the chip's
+ * Lock now, a reader's Lock control) stops the beacon the same way.
  *
- * @version 1.1
+ * @version 1.2
  */
 (function () {
 	'use strict';
@@ -26,7 +29,10 @@
 
 	function beat() {
 		joineryApi.post('vault_heartbeat', {}).then(function (res) {
-			if (res && res.alive === false) { stop(); }
+			if (res && res.alive === false && timer) {
+				stop();
+				document.dispatchEvent(new CustomEvent('joinery:vault-locked'));
+			}
 		}).catch(function () { /* transient failure - keep beating */ });
 	}
 
@@ -46,8 +52,10 @@
 		if (timer && document.visibilityState === 'visible') { beat(); }
 	});
 
-	// A page that opens a window mid-life announces it.
+	// A page that opens a window mid-life announces it; an explicit lock
+	// anywhere on the page ends the beacon.
 	document.addEventListener('joinery:vault-unlocked', start);
+	document.addEventListener('joinery:vault-locked', stop);
 
 	window.JoineryVaultPresence = { start: start, stop: stop };
 

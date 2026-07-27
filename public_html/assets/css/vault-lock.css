@@ -1,0 +1,118 @@
+/**
+ * Vault lock chip (docs/sealed_vault.md § The lock chip).
+ *
+ * Styles the padlock chip vault-lock.js mounts into [data-vault-lock-slot]
+ * (or floats bottom-right on themes without a slot). Colors ride the .jy-ui
+ * kit tokens with plain fallbacks so the chip reads correctly on any theme.
+ *
+ * @version 1.0
+ */
+
+.jy-vault-lock {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+}
+
+.jy-vault-lock-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 2.125rem;
+	height: 2.125rem;
+	padding: 0;
+	border: none;
+	border-radius: 50%;
+	background: transparent;
+	color: var(--jy-color-text-muted, #6c6e71);
+	cursor: pointer;
+	transition: background 0.15s ease, color 0.15s ease;
+}
+
+.jy-vault-lock-btn:hover {
+	background: var(--jy-color-surface-alt, rgba(0, 0, 0, 0.06));
+}
+
+/* Unlocked: the open padlock carries the success accent so the state is
+   readable at a glance from anywhere on the site. */
+.jy-vault-lock[data-state="open"] .jy-vault-lock-btn {
+	color: var(--jy-color-success, #2e7d32);
+}
+
+.jy-vault-lock--busy .jy-vault-lock-btn {
+	opacity: 0.5;
+	pointer-events: none;
+}
+
+/* Fallback mount for themes without a [data-vault-lock-slot]: a fixed chip in
+   the bottom-right corner, above page content but below modals. */
+.jy-vault-lock--floating {
+	position: fixed;
+	right: 1rem;
+	bottom: 1rem;
+	z-index: 900;
+}
+
+.jy-vault-lock--floating .jy-vault-lock-btn {
+	width: 2.75rem;
+	height: 2.75rem;
+	background: var(--jy-color-surface, #fff);
+	border: 1px solid var(--jy-color-border, #d8dadd);
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+/* The unlocked-state popover: status line + Lock now. */
+.jy-vault-lock-pop {
+	position: absolute;
+	top: calc(100% + 0.5rem);
+	right: 0;
+	width: 16rem;
+	padding: 0.875rem;
+	background: var(--jy-color-surface, #fff);
+	border: 1px solid var(--jy-color-border, #d8dadd);
+	border-radius: 0.5rem;
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14);
+	z-index: 1000;
+	text-align: left;
+}
+
+.jy-vault-lock--floating .jy-vault-lock-pop {
+	top: auto;
+	bottom: calc(100% + 0.5rem);
+}
+
+.jy-vault-lock-pop-title {
+	font-weight: 600;
+	font-size: 0.875rem;
+	color: var(--jy-color-text, #1e1f21);
+	margin-bottom: 0.25rem;
+}
+
+.jy-vault-lock-pop-body {
+	font-size: 0.8125rem;
+	line-height: 1.4;
+	color: var(--jy-color-text-muted, #6c6e71);
+	margin-bottom: 0.75rem;
+}
+
+.jy-vault-lock-pop-btn {
+	display: block;
+	width: 100%;
+	padding: 0.4rem 0.75rem;
+	border: 1px solid var(--jy-color-border-strong, #b7babe);
+	border-radius: 0.375rem;
+	background: var(--jy-color-surface-alt, #f4f5f6);
+	color: var(--jy-color-text, #1e1f21);
+	font-size: 0.8125rem;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.jy-vault-lock-pop-btn:hover {
+	background: var(--jy-color-border, #e3e5e8);
+}
+
+.jy-vault-lock-pop-btn:disabled {
+	opacity: 0.6;
+	cursor: default;
+}

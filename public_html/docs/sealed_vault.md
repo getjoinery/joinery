@@ -178,6 +178,44 @@ pass) — surfaced informationally from `vault_setup_verify` and via
 `php maintenance_scripts/dev_tools/check_vault_health.php` (exits non-zero on
 any `unmet` check, mirroring `check_provisioning.php`'s convention).
 
+## The lock chip
+
+The platform-wide "you're locked" idiom: every signed-in page for a user with
+a set-up server-custody vault carries a padlock in a fixed place — closed
+while the vault is locked, open (success-colored) while an unlock window is
+live. Clicking the closed padlock runs the one-tap passkey unlock ceremony in
+place; clicking the open padlock opens a small popover with the idle-timeout
+note and a **Lock now** button — the walk-away affordance. Users without a
+vault never see the chip or load its assets.
+
+`PublicPageBase` drives it: for a signed-in user whose vault exists it emits
+`<meta name="joinery-vault" content="locked|open" data-idle-minutes="N">` and
+includes `assets/js/vault-lock.js` + `assets/css/vault-lock.css` (plus
+`passkeys.js` for the ceremony). The chip mounts into the page's
+`[data-vault-lock-slot]` element — the core page classes emit one from their
+header icon cluster via `PublicPageBase::render_vault_lock_slot()` (which
+emits nothing for chip-less users, so headers never carry an empty gap) — and
+falls back to a fixed bottom-right chip on any theme without a slot, so the
+idiom holds everywhere with zero theme work.
+
+**The ceremony surface.** `window.JoineryVaultLock` is the one client-side
+unlock/lock ceremony: `unlock()` (resolves `true` on success), `lock()`, and
+`state()`. Consumer surfaces (the mail reader's unlock banners, a Fortress
+compose) delegate to it when present rather than calling the vault actions
+directly, so every ceremony updates the chip and announces itself.
+
+**The event contract.** Two document-level events keep every surface on the
+page — chip, presence beacon, consumer UIs — in one state:
+
+- `joinery:vault-unlocked` — dispatched after any successful unlock. The chip
+  flips open, `vault-presence.js` starts beating, and consumer surfaces may
+  refresh sealed placeholders in place.
+- `joinery:vault-locked` — dispatched after any explicit lock, and by
+  `vault-presence.js` when a heartbeat answers `alive:false` (the window
+  ended elsewhere — another session's lock, a credential event, a cap). The
+  chip flips closed, the beacon stops, and consumer surfaces re-seal their
+  content to placeholders.
+
 ## The unlocker floor + revocation veto
 
 A wrapping delete is refused when it would leave fewer than 1 **live** passkey
@@ -359,7 +397,9 @@ independently of the vault row itself.
    (`VaultUnlock::onWipe()`), e.g. a plaintext search index.
 6. Own your own levels, scope, and locked-state surfaces (list placeholders,
    a content-action unlock prompt, a native `locked` flag) — the vault
-   provides everything below the content.
+   provides everything below the content. Run web unlock/lock ceremonies
+   through `JoineryVaultLock` and listen for the two lock-chip events (see
+   *The lock chip*) so your surface and the chip stay in one state.
 
 **One unlock opens every server-custody consumer** — the accepted tradeoff. A
 consumer with a genuinely higher sensitivity bar may enroll a second `uev`
