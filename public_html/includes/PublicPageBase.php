@@ -182,6 +182,85 @@ abstract class PublicPageBase {
 	}
 
 	/**
+	 * Path of the current request, without the query string.
+	 */
+	protected function request_path() {
+		$path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
+		return $path ?: '/';
+	}
+
+	/**
+	 * Whether the current request is inside the member area — the pages the
+	 * member section nav moves between. Delegates to the shared boundary
+	 * definition (RouteHelper::isMemberAreaPath()).
+	 */
+	protected function in_member_area() {
+		require_once(PathHelper::getIncludePath('includes/RouteHelper.php'));
+		return RouteHelper::isMemberAreaPath($this->request_path());
+	}
+
+	/**
+	 * The member section links: the seeded profile menu minus Home, Sign out
+	 * and the admin launcher items, which belong in the user dropdown instead.
+	 *
+	 * Returns an empty array whenever the nav should not appear at all (signed
+	 * out, or outside the member area), so a renderer can treat "no items" as
+	 * "emit nothing".
+	 *
+	 * @param array|null $menu_data Pre-fetched get_menu_data() payload. Header
+	 *                              renderers already hold one — pass it so this
+	 *                              does not repeat the menu queries.
+	 * @return array List of user-menu items (label, link, icon, slug).
+	 */
+	public function member_subnav_items($menu_data = NULL) {
+		if ($menu_data === NULL) {
+			$menu_data = $this->get_menu_data();
+		}
+		if (empty($menu_data['user_menu']['is_logged_in']) || !$this->in_member_area()) {
+			return array();
+		}
+
+		$items = array();
+		foreach ($menu_data['user_menu']['items'] as $item) {
+			$slug = $item['slug'] ?? '';
+			if ($slug === 'core-home' || $slug === 'core-signout' || self::isAdminMenuItem($item)) {
+				continue;
+			}
+			$items[] = $item;
+		}
+		return $items;
+	}
+
+	/**
+	 * Emit the member section nav — the menu a signed-in member uses to move
+	 * between the account pages (Profile, Email, Calendar, Drive, AI, ...).
+	 *
+	 * Every header renderer calls this immediately after its site header, so
+	 * the nav is present on every theme without each theme owning the list or
+	 * its permission/setting gates. A theme that wants different markup or a
+	 * different position overrides this method; one that wants it suppressed
+	 * overrides it to return early. Styling for the default markup ships in the
+	 * shared kit stylesheet (`.jy-member-subnav` in joinery-styles.css), which
+	 * every theme loads.
+	 *
+	 * @param array|null $menu_data Pre-fetched get_menu_data() payload.
+	 */
+	public function render_member_subnav($menu_data = NULL) {
+		$items = $this->member_subnav_items($menu_data);
+		if (empty($items)) {
+			return;
+		}
+
+		$request_path = $this->request_path();
+		echo '<div class="jy-member-subnav"><nav class="jy-member-subnav-inner" aria-label="Profile sections">';
+		foreach ($items as $item) {
+			$active = ($item['link'] === $request_path) ? ' active' : '';
+			echo '<a href="' . htmlspecialchars($item['link'], ENT_QUOTES, 'UTF-8') . '" class="jy-member-subnav-link' . $active . '">' . htmlspecialchars($item['label'], ENT_QUOTES, 'UTF-8') . '</a>';
+		}
+		echo '</nav></div>';
+	}
+
+	/**
 	 * Get comprehensive menu data for all menu types
 	 * Consolidates menu logic from various theme implementations
 	 *

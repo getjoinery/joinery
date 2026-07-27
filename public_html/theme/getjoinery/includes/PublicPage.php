@@ -41,6 +41,31 @@ class PublicPage extends PublicPageBase {
         return '</div>';
     }
 
+    /**
+     * Member section nav in this theme's own markup — it sits inside the site
+     * <nav> and uses the theme's .member-subnav styling rather than the shared
+     * kit classes. The item list and its gates stay with PublicPageBase.
+     */
+    public function render_member_subnav($menu_data = NULL) {
+        $items = $this->member_subnav_items($menu_data);
+        if (empty($items)) {
+            return;
+        }
+        $request_path = $this->request_path();
+        ?>
+    <div class="member-subnav">
+        <div class="container">
+            <nav class="member-subnav-links" aria-label="Profile sections">
+                <?php foreach ($items as $it):
+                    $active = ($it['link'] === $request_path) ? ' active' : '';
+                    echo '<a href="' . htmlspecialchars($it['link'], ENT_QUOTES, 'UTF-8') . '" class="member-subnav-link' . $active . '">' . htmlspecialchars($it['label'], ENT_QUOTES, 'UTF-8') . '</a>';
+                endforeach; ?>
+            </nav>
+        </div>
+    </div>
+        <?php
+    }
+
     public function public_header($options=array()) {
         $_GLOBALS['page_header_loaded'] = true;
         $settings = Globalvars::get_instance();
@@ -88,18 +113,6 @@ class PublicPage extends PublicPageBase {
     $register_link = $menu_data['user_menu']['register_link'] ?? null;
     $cart_count    = (int)($menu_data['cart']['count'] ?? 0);
     $cart_link     = $menu_data['cart']['link'] ?? '/cart';
-
-    // Secondary member nav lists the app sections only — drop Home, admin
-    // launcher items, and Sign out (those live in the avatar dropdown).
-    $member_items = [];
-    foreach ($user_items as $it) {
-        $slug = $it['slug'] ?? '';
-        if ($slug === 'core-home' || $slug === 'core-signout' || self::isAdminMenuItem($it)) {
-            continue;
-        }
-        $member_items[] = $it;
-    }
-    $in_member_area = (bool)preg_match('#^/(profile|drive)(/|$)#', $request_path);
 
     // Avatar initials from the display name.
     $initials = '';
@@ -181,18 +194,7 @@ class PublicPage extends PublicPageBase {
         </div>
     </div>
 
-    <?php if ($is_logged_in && $in_member_area && !empty($member_items)): ?>
-    <div class="member-subnav">
-        <div class="container">
-            <nav class="member-subnav-links" aria-label="Profile sections">
-                <?php foreach ($member_items as $it):
-                    $active = ($it['link'] === $request_path) ? ' active' : '';
-                    echo '<a href="' . htmlspecialchars($it['link'], ENT_QUOTES, 'UTF-8') . '" class="member-subnav-link' . $active . '">' . htmlspecialchars($it['label']) . '</a>';
-                endforeach; ?>
-            </nav>
-        </div>
-    </div>
-    <?php endif; ?>
+    <?php $this->render_member_subnav($menu_data); ?>
 </nav>
 <?php endif; ?>
 

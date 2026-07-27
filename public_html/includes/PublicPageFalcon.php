@@ -627,7 +627,9 @@ class PublicPageFalcon extends PublicPageBase {
             </ul>
           </nav>
 
-	<?php 
+	<?php $this->render_member_subnav(); ?>
+
+	<?php
 	}
 
 	public function public_footer($options=array()) {

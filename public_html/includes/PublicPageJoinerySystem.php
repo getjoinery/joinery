@@ -681,6 +681,8 @@ class PublicPageJoinerySystem extends PublicPageBase {
         </ul>
       </header><!-- .topbar -->
 
+      <?php $this->render_member_subnav(); ?>
+
       <main class="page-body">
         <?php
     }
