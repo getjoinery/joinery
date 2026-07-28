@@ -1524,6 +1524,7 @@ dialog.jy-ui::backdrop { background: rgba(0, 0, 0, 0.45); }
 .page-content--app .jy-ui .calgrid-grid { flex: 1; grid-template-rows: auto; grid-auto-rows: minmax(72px, 1fr); }
 .page-content--app .jy-ui .calgrid-cell { min-height: 72px; }
 .jy-ui .cal-note { background: var(--jy-color-success-bg, #e6f7ec); border: 1px solid var(--jy-color-success, #2d7d46); padding: .5rem .8rem; border-radius: var(--jy-radius-sm); margin-bottom: 1rem; }
+.jy-ui .cal-note-detail { margin: .4rem 0 0; padding-left: 1.2rem; font-size: .9em; }
 .jy-ui .cal-error { background: var(--jy-color-danger-bg); border: 1px solid var(--jy-color-danger); padding: .5rem .8rem; border-radius: var(--jy-radius-sm); margin-bottom: 1rem; }
 .jy-ui .cal-full-form { border: 1px solid var(--jy-color-border); border-radius: var(--jy-radius-md); padding: 1rem 1.25rem; margin-top: 1.5rem; background: var(--jy-color-surface); }
 .jy-ui .cal-full-form h2 { margin-top: 0; }

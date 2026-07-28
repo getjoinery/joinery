@@ -15,7 +15,7 @@
  * params, text unescaping, all-day, EXDATE), and a round-trip that pins the
  * reader to IcsHelper's writer so the two stay on the same format contract.
  *
- * @version 1.0
+ * @version 1.1
  */
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
@@ -105,6 +105,14 @@ $ics2 = "BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:d1\nSUMMARY:Holiday\nDTSTART;VALUE=D
 $p2 = IcsImporter::parse($ics2);
 ok('all-day event parses (bare LF, VALUE=DATE)',
       count($p2['events'])===1 && ($p2['events'][0]['props']['DTSTART']['params']['VALUE'] ?? null)==='DATE');
+
+// Truncated file — an event still open at EOF is reported, not silently dropped
+$ics_cut = "BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:ok1\nDTSTART:20260101T090000Z\nEND:VEVENT\nBEGIN:VEVENT\nUID:cut\nDTSTART:20260102T09";
+$p_cut = IcsImporter::parse($ics_cut);
+ok('truncated file: complete event still parsed', count($p_cut['events']) === 1);
+ok('truncated file: flagged as truncated', ($p_cut['truncated'] ?? null) === true);
+$p_ok = IcsImporter::parse($ics2);
+ok('well-formed file: not flagged as truncated', ($p_ok['truncated'] ?? null) === false);
 
 // =============================================================================
 // Round-trip — IcsHelper writes, IcsImporter reads back the same contract
