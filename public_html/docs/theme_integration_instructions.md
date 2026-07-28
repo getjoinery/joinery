@@ -495,6 +495,8 @@ Your theme's `BeginPage`/`EndPage` should use your CSS framework's container cla
 
 **Fallback:** `PublicPageBase` provides a basic default container (`max-width: 1140px; margin: 0 auto; padding: 2rem 1rem`) so pages are never completely unstyled, but themes should always override with framework-appropriate markup.
 
+**App surfaces:** Views that are applications rather than documents (mailbox, calendar, drive) pass `'app' => true` in the `BeginPage()` options. In the core kit this renders a full-bleed page that fills the viewport below the header — no max-width column, a compact title bar (`.jy-app-bar`) instead of the large page heading, and a flex column so the view's main component can stretch to the fold. An optional `'header_action'` option accepts HTML (e.g. an actions dropdown) rendered on the right side of the title bar. Member-area pages always render through the core kit (the member-area app chrome pin), so themes do not need to implement this mode.
+
 ### Step 7: Extract and Create Homepage Template
 
 **CRITICAL:** Use actual HTML from source template, not placeholder content!

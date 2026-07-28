@@ -5,7 +5,7 @@
  * as the admin mount (includes/mailbox_reader_mount.php); this page supplies the
  * theme chrome, the member attachment endpoint, and no detail-page deep links.
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -25,6 +25,7 @@ $hoptions = array(
 );
 $page->public_header($hoptions, NULL);
 
+$hoptions['app'] = true;
 echo PublicPage::BeginPage('Email', $hoptions);
 
 if (!$has_mailboxes) {

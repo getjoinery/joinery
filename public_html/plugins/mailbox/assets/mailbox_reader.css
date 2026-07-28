@@ -1,7 +1,7 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.8
+ * Vanilla CSS, no framework. @version 2.9
  */
 
 .mbx-reader {
@@ -10,6 +10,17 @@
 	overflow: hidden;
 	background: #fff;
 	height: calc(100vh - 220px);
+	min-height: 420px;
+}
+
+/* Inside a kit app page (.page-content--app, e.g. /profile/mailbox/mailbox)
+ * the host is a flex column sized to the viewport — grow to fill it instead
+ * of guessing chrome height. */
+.page-content--app .mbx-reader {
+	height: auto;
+	/* basis 0 so the reader's (internally scrolled) content doesn't inflate the
+	 * page's intrinsic height — it takes whatever the viewport leaves over. */
+	flex: 1 1 0;
 	min-height: 420px;
 }
 

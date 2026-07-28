@@ -213,6 +213,21 @@ class PublicPage extends PublicPageBase {
     }
 
     public static function BeginPage($title = '', $options = array()) {
+        // App surfaces (mailbox, calendar, drive) pass 'app' => true to get a
+        // full-bleed, viewport-filling layout with a compact title bar instead
+        // of the centered reading column and large page heading.
+        if (!empty($options['app'])) {
+            $output = '<div class="page-content page-content--app">';
+            if ($title || !empty($options['header_action'])) {
+                $output .= '<div class="jy-app-bar">';
+                $output .= '<h1>' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</h1>';
+                if (!empty($options['header_action'])) {
+                    $output .= '<div class="jy-app-bar-action">' . $options['header_action'] . '</div>';
+                }
+                $output .= '</div>';
+            }
+            return $output;
+        }
         $output = '<div class="page-content">';
         if ($title) {
             $output .= '<div class="jy-page-header">';
