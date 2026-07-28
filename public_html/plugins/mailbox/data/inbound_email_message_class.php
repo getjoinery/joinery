@@ -99,7 +99,7 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
- * @version 1.15
+ * @version 1.16
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -157,6 +157,10 @@ class InboundEmailMessage extends SystemBase {
 		'iem_ied_inbound_email_domain_id' => ['action' => 'permanent_delete'],
 		'iem_iea_inbound_email_alias_id'  => ['action' => 'null'],
 		'iem_iia_inbound_imap_account_id' => ['action' => 'null'],
+		// Deleting the import run must never delete the mail it brought in — that
+		// is what Undo is for, and it is an explicit choice. Losing the tag only
+		// costs the ability to reverse the run later.
+		'iem_mir_mail_import_run_id'      => ['action' => 'null'],
 	];
 
 	public static $field_specifications = array(
@@ -279,6 +283,13 @@ class InboundEmailMessage extends SystemBase {
 		// ilm_ row (present_local vs present_base); see specs/inbound_email_labels.md.
 		'iem_local_state_modified' => array('type'=>'timestamp(6)'),
 		'iem_synced_state_time'    => array('type'=>'timestamp(6)'),
+		// The archive import run that created this row (specs/mail_archive_import.md
+		// §3.3). NULL for everything that arrived normally, and this tag IS the undo
+		// mechanism: reversing a run permanently deletes exactly the rows carrying its
+		// id. A message that deduped against mail already present is never tagged —
+		// the tag is only written on a fresh insert — so undo cannot remove mail the
+		// import did not create.
+		'iem_mir_mail_import_run_id' => array('type'=>'int8', 'is_nullable'=>true, 'index'=>true),
 		'iem_received_time'       => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'iem_create_time'         => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'iem_delete_time'         => array('type'=>'timestamp(6)'),
@@ -989,6 +1000,11 @@ class MultiInboundEmailMessage extends SystemMultiBase {
 
 		if (isset($this->options['direction'])) {
 			$filters['iem_direction'] = [$this->options['direction'], PDO::PARAM_STR];
+		}
+
+		// Everything one archive import brought in — what Undo reverses.
+		if (isset($this->options['import_run_id'])) {
+			$filters['iem_mir_mail_import_run_id'] = [$this->options['import_run_id'], PDO::PARAM_INT];
 		}
 
 		if (isset($this->options['received_since'])) {

@@ -2387,14 +2387,23 @@ mailboxes where filters can actually fire** — those that store locally-receive
 mail (delivery mode store / forward-and-store, and not IMAP-backed); IMAP-polled
 and pure-forward mailboxes are omitted because the filter hook never runs for them.
 
-**Scope.** Filters run on **locally-received** mail only — the Postfix milter path
+**Scope.** Filters run on **freshly-received** mail only — the Postfix milter path
 and the provider-webhook path, both of which funnel through
-`InboundEmailRouter::storeMessage()`. They do **not** run on IMAP-polled feeds: an
-IMAP feed mirrors an upstream account that already applies its own filters, and the
-reader's two-way sync treats the remote as the source of truth for flag/label
-state. Because `storeMessage` is the single local-only path, the ingest hook there
-covers the Postfix and webhook paths identically with no per-path branch, and never
-touches IMAP mail.
+`InboundEmailRouter::storeMessage()`. Because `storeMessage` is the single such
+path, the ingest hook there covers Postfix and webhook identically with no per-path
+branch.
+
+Two ingest paths are exempt, for the same underlying reason: the mail did not just
+arrive, so acting on it would fire forwards and notifications for messages nobody
+received today.
+
+- **IMAP-polled feeds** mirror an upstream account that already applies its own
+  filters, and the reader's two-way sync treats the remote as the source of truth
+  for flag/label state. They use `storeExtracted()`, which has no filter hook at
+  all, so the exemption is structural.
+- **Archive imports** pass `run_filters => false` to `storeMessage()`. An archive
+  already reflects whatever filtering its source applied, and a decade of mail run
+  through live rules would act on all of it at once.
 
 **A filter has two parts** (Gmail's split):
 
@@ -2632,7 +2641,7 @@ An **idle poll writes nothing** — a mailbox polled every five minutes forever 
 otherwise bury the runs that matter under thousands of no-op rows. A backfill leaves
 one row per batch, which is the progress trail. The same summary goes to the error
 log prefixed `mailbox_imap_ingest:`, followed by one line per failed message (UID,
-folder, reason) capped at `ImapIngestor::MAX_LOGGED_FAILURES` so a wholesale folder
+folder, reason) capped at `MailRunRecord::MAX_LOGGED_FAILURES` so a wholesale folder
 failure cannot flood the log. Writing the row is best-effort: if it fails, the poll
 still succeeds and the mail is still stored.
 
@@ -2790,3 +2799,208 @@ source Sent folder itself. Sent dedup is **by Message-ID only**: a provider that
 preserves the Message-ID reconciles the filed copy to the locally-stored sent row,
 while a provider that rewrites it on send (Gmail) stores no local row — the message
 appears on the next Sent ingest (one poll-interval later).
+
+## Importing an existing archive
+
+An IMAP feed pulls from a **live** account. An archive import reads a **dead** one:
+a file the user already has — a Proton export, a Gmail Takeout, an mbox from
+Thunderbird, a folder of saved messages. Between the two there is a way in from any
+provider, including the ones that no longer exist.
+
+The unit of work is an **import run**: pick a source file, say which mailbox it goes
+into and which addresses were yours, choose what to bring, and let it grind. Runs are
+resumable, reportable and reversible.
+
+### Formats
+
+| Format | Covers |
+|---|---|
+| mbox | Gmail Takeout, Thunderbird, Apple Mail |
+| `.eml` / `.emlx` folder | Proton export, maildir, Apple Mail `Messages/`, any folder of saved mail |
+| single `.eml` | one message |
+| `.zip` | any of the above, zipped — which is how a folder actually arrives |
+| `.tar`, `.tar.gz` | any of the above, from a Unix-side export |
+
+`.pst` and `.olm` are **refused**, by magic bytes as well as by extension, so a
+renamed one is still caught. Reading them needs an external binary, which would break
+the zero-config install. The refusal names the way that does work: connect the account
+as an IMAP feed, which also keeps working as new mail arrives.
+
+Saved messages inside a zip are read **in place** through `zip://` — a 50GB archive of
+small messages is never expanded, which would otherwise double the disk this feature
+needs. An mbox member is the exception: splitting one means seeking inside it and zip
+streams cannot seek, so an mbox member is expanded into the run's working area once. A
+tar is sequential-access only and is expanded whole. Working areas are removed when the
+run finishes.
+
+A container inside a container is **reported, not followed** — that way lies a zip
+bomb, and no real export tool produces one.
+
+Provider conventions are read where present and cost nothing where absent: Proton's
+`<id>.metadata.json` sidecars, Gmail's `X-Gmail-Labels` header (where read state is
+the *presence* of `Unread`), and maildir's `:2,` filename flags. A bare folder of
+`.eml` files with none of these still imports correctly, just with less state.
+
+### The two sources
+
+Upload an archive, or pick a file already in your files. There is no server-path
+option — pointing at a folder on the machine is not something a member can do, and an
+uploaded archive becomes the user's own file the moment it lands, so an interrupted
+run resumes against it rather than needing a re-upload.
+
+A file in an **encrypted** folder is listed but refused, with the reason. Drive
+encryption is per-folder and inherited, and an encrypted file's plaintext exists only
+in the browser — the server genuinely cannot read it. It is shown rather than hidden
+because a user who cannot find their archive is worse off than one told why.
+
+### Declaring your addresses
+
+An archive carries no envelope. Without knowing which addresses were the user's, there
+is no way to tell sent mail from received, and no way to know which of several
+addresses a message actually reached. So the run asks, pre-filled from the account, and
+derives two things from the answer:
+
+- **Direction** — mail from one of those addresses is mail you sent. The source's own
+  filing outranks the headers: a message sitting in Sent was sent, even if its From is
+  an address the user forgot to declare.
+- **Delivery address** — the first of `Delivered-To`, `X-Original-To`, `Envelope-To`,
+  then `To`/`Cc`, that names a declared address. Nothing matching falls back to the
+  target mailbox's own address, which is the honest answer for a Bcc.
+
+Sent mail records its first `To`, matching how mail sent from the reader is stored.
+
+### Scan, then choose
+
+The scan walks the source **once** and writes one `mie_mail_import_entries` row per
+message. It stores no mail. That index is what makes any size work: nothing ever
+re-parses the archive to find out what is in it, the preview counts are exact rather
+than estimated, and resume is a `WHERE mie_state = 'pending'` query. A 500,000-message
+archive means 500,000 narrow rows, which is unremarkable for Postgres and bought
+cheaply — the scan writes them in bulk rather than one model save at a time.
+
+On completion the run holds at `scanned` and the user picks folders, with **Spam and
+Trash unticked**: an archive's spam folder is usually the largest thing in it and
+almost never what anyone meant to keep. Anything left out is marked `skipped` rather
+than deleted, so the final reconciliation can still account for every message found.
+
+### Storing
+
+Batches of entries, oldest first. Almost none of this is new code — live delivery
+already parses bodies, splits attachments into private Files, computes thread keys,
+seals content to the owner's vault, and treats a unique violation as a successful
+dedup — so the importer points the existing store path at a different source of bytes.
+
+Two properties of the schema carry the design:
+
+**Dedup is free and correct.** Re-running an import over the same archive stores
+nothing new, so resume-after-a-crash costs at most one batch, retry is safe, and "did I
+already do this" needs no bookkeeping. The importer asks whether *this mailbox already
+holds this message id in this direction*, which is stronger than the unique constraint
+alone: on a protected mailbox a sent message's recipient is sealed content and cannot
+be matched on a second pass.
+
+**Filing and delivery address are independent.** `iem_iea_inbound_email_alias_id`
+decides which mailbox the message appears in; `iem_recipient` records where it was
+delivered. Mail can be gathered into one mailbox while each message still says
+honestly which address received it.
+
+Messages with no `Message-ID` get a stable synthetic one, `<sha256(raw)@import.invalid>`,
+written into the stored copy so the row and its raw agree. It is derived from the bytes,
+so the same message scanned twice produces the same id and still dedups; `.invalid`
+(RFC 2606) can never collide with a real domain.
+
+Imported mail carries its own `Date` header as its received time, so a decade of mail
+sorts where it belongs instead of landing all at once at the import's clock. A folder
+that is not one of the platform's own buckets becomes a label of the same name; the
+standard buckets (Inbox, Sent, Spam, Trash, Starred, Archived) are columns on the
+message and are handled by the store. Trash arrives soft-deleted, which is how the
+platform models a bin.
+
+Imported mail carries **no authentication verdict** — `unverified` across the board.
+The stamps in an archived message were written by whichever server received it years
+ago, and this deployment cannot vouch for them.
+
+### Any size
+
+Both phases run in the **`RunMailImports`** scheduled task, because a 50GB scan cannot
+happen inside a web request. Each pass claims one run with an atomic conditional
+`UPDATE` — the same overlap guard `PollImapAccounts` uses — does **one bounded batch**,
+and returns. A claim goes stale after 30 minutes, which is how a run whose pass was
+killed gets picked up again rather than sitting claimed forever.
+
+Scanning gets a time budget rather than a message count (it reads sequentially and
+writes narrow rows), and hands back an opaque cursor the reader understands: a byte
+offset for an mbox, a member index for a container. Storing gets
+`mailbox_import_batch_size` entries. `mailbox_import_max_concurrent` caps how many runs
+are underway deployment-wide so one enthusiastic user cannot starve the mail stack.
+
+Progress is `mir_processed` against `mir_total_entries`, advanced by the importer with
+one atomic `UPDATE` per batch. Every write to a live run is a targeted column update
+rather than a model save, because the counters move underneath any model instance held
+for more than an instant.
+
+### The run record
+
+Per-entry failures are recorded on the entry with a reason and never abort the run —
+one unreadable message must not cost the other thirty-five thousand.
+
+Each batch that did something writes an `evl_event_logs` row under event
+**`mail_archive_import`**, with failures rolled up by reason so four hundred messages
+failing identically read as one line, plus bounded per-entry detail in the error log.
+This is the same `MailRunRecord` machinery the IMAP run record uses, with one extra
+bucket for what the user chose to leave out.
+
+The reconciliation tripwire applies here too: `stored + duplicates + skipped + failed`
+must equal what was seen. A shortfall is reported as `unaccounted` and marks the batch
+unsuccessful, because a message that vanishes without a reason is exactly the failure a
+set of counters alone hides.
+
+### Undo
+
+Available on a finished run. It permanently deletes every message carrying that run's
+id — through the message model's own permanent delete, so attachment Files, manifest
+rows, label memberships and stored raw objects all go with it — and removes labels the
+import created that are now empty.
+
+Mail that **deduped** against something already present was never tagged, so undo
+cannot remove mail the import did not create; neither can it touch anything that
+arrived afterwards. Labels that existed beforehand, or that still hold mail from
+elsewhere, are left alone: undo reverses the import, not the user's filing.
+
+The run itself moves to `undone` and keeps its entries, so the report of what happened
+outlives the reversal.
+
+### Surfaces
+
+**Member** — *Import old mail* at `/profile/mailbox/import`.
+**Admin** — the same tool in the Accounts tree beside IMAP feeds, at
+`/plugins/mailbox/admin/admin_mailbox_import`, with a mailbox picker covering every
+mailbox.
+
+Both render the same panel and call the same logic; the only difference is which
+mailboxes are offered, decided by `MailImportService`. A member must hold a live grant
+on the target mailbox; permission 5+ may target any. That check lives in the service,
+not in a view, so calling the API directly cannot bypass it.
+
+Actions are `mailbox/mail_import_start`, `mail_import_status`, `mail_import_select` and
+`mail_import_undo` on `/api/v1`, with the browser-session credential. The start action
+accepts `multipart/form-data` so an archive uploads in the same request that starts the
+run.
+
+### Settings
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `mailbox_import_enabled` | on | Master switch. Turning it off also stops runs already underway from advancing. |
+| `mailbox_import_batch_size` | 200 | Entries stored per task pass. |
+| `mailbox_import_max_concurrent` | 2 | Runs importing at once, deployment-wide. |
+
+### Adding a format
+
+One class extending `MailArchiveReader` (or `MailArchiveTreeReader`, if the format is a
+tree of members) and one line in `MailArchiveReaderRegistry::READERS`. Order in that
+list is priority: readers are asked in turn and the first to claim a file wins, so the
+list runs from the most specific sniff to the loosest. A reader answers three
+questions and no others — is this file mine, what messages are in it, and give me the
+bytes at this position. The locator it hands out is private to it; nothing else ever
+interprets one.

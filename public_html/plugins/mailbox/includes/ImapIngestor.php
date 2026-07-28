@@ -35,7 +35,7 @@
  * already classified it, so no auth rule runs. This gives the reader's Spam view
  * the same meaning for IMAP-polled mail as for locally-received mail.
  *
- * @version 1.5
+ * @version 1.6
  */
 
 require_once(PathHelper::getComposerAutoloadPath());
@@ -51,6 +51,7 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRo
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Client.php'));
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2ProviderRegistry.php'));
 require_once(PathHelper::getIncludePath('data/event_logs_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailRunRecord.php'));
 
 class ImapIngestorException extends Exception {}
 
@@ -59,10 +60,6 @@ class ImapIngestor {
 	/** Generous text-body ceiling. Bodies over this are truncated-and-marked,
 	 *  never dropped — the full part is still fetchable on demand like any part. */
 	const TEXT_BODY_CEILING = 2097152; // 2 MB
-
-	/** Per-message failure lines written to the error log per run. A folder that
-	 *  fails wholesale would otherwise flood the log with one line per message. */
-	const MAX_LOGGED_FAILURES = 100;
 
 	/** evl_event value for the run record. */
 	const RUN_EVENT = 'mailbox_imap_ingest';
@@ -522,33 +519,7 @@ class ImapIngestor {
 	 * @return array ['note'=>string, 'success'=>bool, 'unaccounted'=>int, 'failed_reasons'=>array]
 	 */
 	public static function summarizeRun(array $res, string $subject = ''): array {
-		$seen   = intval($res['seen'] ?? 0);
-		$stored = intval($res['stored'] ?? 0);
-		$dedup  = intval($res['dedup'] ?? 0);
-		$failed = intval($res['failed'] ?? 0);
-		$unaccounted = $seen - $stored - $dedup - $failed;
-
-		$reasons = array();
-		foreach ((array)($res['failed_detail'] ?? array()) as $f) {
-			$r = (string)($f['reason'] ?? 'Unknown error.');
-			$reasons[$r] = ($reasons[$r] ?? 0) + 1;
-		}
-		arsort($reasons);
-
-		$parts = array('seen ' . $seen, 'stored ' . $stored, 'duplicates ' . $dedup, 'failed ' . $failed);
-		if ($unaccounted !== 0) { $parts[] = 'unaccounted ' . $unaccounted; }
-
-		$note = ($subject !== '' ? $subject . ': ' : '') . implode(', ', $parts) . '.';
-		foreach ($reasons as $reason => $count) {
-			$note .= "\n  x{$count}: {$reason}";
-		}
-
-		return array(
-			'note'           => $note,
-			'success'        => ($failed === 0 && $unaccounted === 0),
-			'unaccounted'    => $unaccounted,
-			'failed_reasons' => $reasons,
-		);
+		return MailRunRecord::summarize($res, $subject, MailRunRecord::DIMENSIONS_POLL);
 	}
 
 	/**
@@ -566,31 +537,10 @@ class ImapIngestor {
 			return;
 		}
 
-		// Error log: the summary line always, then per-message detail, bounded so a
-		// wholesale folder failure cannot flood the log.
-		error_log('mailbox_imap_ingest: ' . str_replace("\n  ", ' | ', $summary['note']));
-		$detail = (array)($res['failed_detail'] ?? array());
-		$shown = 0;
-		foreach ($detail as $f) {
-			if ($shown++ >= self::MAX_LOGGED_FAILURES) {
-				error_log('mailbox_imap_ingest: ... and ' . (count($detail) - self::MAX_LOGGED_FAILURES)
-					. ' further failed message(s) not listed.');
-				break;
-			}
-			error_log('mailbox_imap_ingest: failed UID ' . $f['uid'] . ' in ' . $f['folder']
-				. ' — ' . $f['reason']);
-		}
-
-		try {
-			$log = new EventLog(NULL);
-			$log->set('evl_event',       self::RUN_EVENT);
-			$log->set('evl_was_success', $summary['success']);
-			$log->set('evl_note',        $summary['note']);
-			$log->save();
-		} catch (Throwable $e) {
-			// The mail is already stored; losing its audit row must not fail the poll.
-			error_log('mailbox_imap_ingest: could not write the run record — ' . $e->getMessage());
-		}
+		MailRunRecord::write(self::RUN_EVENT, $summary, (array)($res['failed_detail'] ?? array()),
+			function (array $f): string {
+				return 'failed UID ' . $f['uid'] . ' in ' . $f['folder'] . ' — ' . $f['reason'];
+			});
 	}
 
 	/** Human label for the account in logs — never the password or token. */

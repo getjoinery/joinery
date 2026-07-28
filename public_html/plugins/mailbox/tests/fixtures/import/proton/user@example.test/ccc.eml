@@ -1,0 +1,6 @@
+Date: Mon, 14 Nov 2022 10:00:00 +0000
+From: Nobody <nobody@nowhere.test>
+To: me@example.test
+Subject: No message id at all
+
+This one has no Message-ID header.
