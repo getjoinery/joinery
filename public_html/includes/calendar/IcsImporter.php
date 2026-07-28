@@ -14,13 +14,14 @@
  * Import is one-directional, manual, owner-scoped: each VEVENT becomes a native
  * cal_entries row owned by the given CalendarSubject. See docs/calendar.md.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('data/calendar_entry_class.php'));
 require_once(PathHelper::getIncludePath('data/calendar_entry_exception_class.php'));
 require_once(PathHelper::getIncludePath('includes/calendar/CalendarSubject.php'));
+require_once(PathHelper::getIncludePath('data/event_logs_class.php'));
 
 class IcsImporter {
 
@@ -106,7 +107,9 @@ class IcsImporter {
 			}
 		}
 
-		return ['calendar' => $calendar, 'events' => $events];
+		// A VEVENT still open at EOF is truncated — report it rather than dropping
+		// it on the floor, which would leave a gap no later stage could see.
+		return ['calendar' => $calendar, 'events' => $events, 'truncated' => ($cur !== null)];
 	}
 
 	/** Unescape an RFC 5545 TEXT value. Inverse of IcsHelper::escapeText(). */
@@ -292,7 +295,7 @@ class IcsImporter {
 	 * Best-effort per event: one bad VEVENT is recorded and skipped.
 	 *
 	 * @return array summary: created, skipped_duplicate, imported_as_single,
-	 *               warnings[], failed[], capped
+	 *               warnings[], failed[], failed_reasons[], read, capped
 	 */
 	public static function import(array $parsed, CalendarSubject $subject, string $tz): array {
 		$summary = [
@@ -301,8 +304,15 @@ class IcsImporter {
 			'imported_as_single' => 0,
 			'warnings'           => [],
 			'failed'             => [],
+			'failed_reasons'     => [], // reason => count, for display and the run record
+			'read'               => count($parsed['events'] ?? []), // VEVENTs the parser assembled
 			'capped'             => 0,
 		];
+
+		if (!empty($parsed['truncated'])) {
+			$summary['read']++; // an event was present in the file, just unreadable
+			$summary['failed'][] = ['uid' => '(none)', 'reason' => 'The file ended in the middle of an event; it may be incomplete.'];
+		}
 
 		$events = $parsed['events'] ?? [];
 		if (count($events) > self::MAX_EVENTS) {
@@ -377,7 +387,77 @@ class IcsImporter {
 			}
 		}
 
+		// Roll individual failures up by reason — 40 events failing the same way is
+		// one thing to fix, not 40. Individual UIDs stay in $summary['failed'] and
+		// go to the error log.
+		foreach ($summary['failed'] as $f) {
+			$r = $f['reason'];
+			$summary['failed_reasons'][$r] = ($summary['failed_reasons'][$r] ?? 0) + 1;
+		}
+		arsort($summary['failed_reasons']);
+
+		self::_recordRun($subject, $summary);
+
 		return $summary;
+	}
+
+	/**
+	 * Persist the outcome of one import run: an EventLog row (durable, queryable,
+	 * survives the one-shot on-page summary) plus error-log lines carrying the
+	 * per-event detail that is too bulky for the log row.
+	 *
+	 * Never allowed to break an import that otherwise succeeded.
+	 */
+	private static function _recordRun(CalendarSubject $subject, array $summary): void {
+		$failed_count = count($summary['failed']);
+		$unaccounted  = $summary['read']
+			- $summary['created'] - $summary['skipped_duplicate'] - $failed_count - $summary['capped'];
+
+		$parts = [
+			'read ' . $summary['read'],
+			'created ' . $summary['created'],
+			'duplicates ' . $summary['skipped_duplicate'],
+			'failed ' . $failed_count,
+		];
+		if ($summary['imported_as_single'] > 0) { $parts[] = 'advanced-repeat-as-single ' . $summary['imported_as_single']; }
+		if ($summary['capped'] > 0)             { $parts[] = 'over cap ' . $summary['capped']; }
+		if ($unaccounted != 0)                  { $parts[] = 'unaccounted ' . $unaccounted; }
+
+		$note = 'subject ' . $subject->getKey() . ': ' . implode(', ', $parts) . '.';
+		foreach ($summary['failed_reasons'] as $reason => $count) {
+			$note .= "\n  x{$count}: {$reason}";
+		}
+		foreach (array_unique($summary['warnings']) as $w) {
+			$note .= "\n  warning: {$w}";
+		}
+
+		$success = ($failed_count === 0 && $summary['capped'] === 0 && $unaccounted == 0);
+
+		// Error log: summary line always, then per-event detail, bounded so a
+		// pathological file cannot flood the log.
+		error_log('calendar_ics_import: ' . str_replace("\n  ", ' | ', $note));
+		$shown = 0;
+		foreach ($summary['failed'] as $f) {
+			if ($shown++ >= 100) {
+				error_log('calendar_ics_import: ... and ' . ($failed_count - 100) . ' further failed event(s) not listed.');
+				break;
+			}
+			error_log('calendar_ics_import: failed UID ' . $f['uid'] . ' — ' . $f['reason']);
+		}
+
+		try {
+			$log = new EventLog(NULL);
+			$log->set('evl_event',       'calendar_ics_import');
+			$log->set('evl_was_success', $success);
+			$log->set('evl_note',        $note);
+			if ($subject->type === CalendarSubject::TYPE_USER) {
+				$log->set('evl_usr_user_id', $subject->id);
+			}
+			$log->save();
+		} catch (Throwable $e) {
+			// The import itself succeeded; losing its audit row must not fail it.
+			error_log('calendar_ics_import: could not write the run record — ' . $e->getMessage());
+		}
 	}
 
 	/**

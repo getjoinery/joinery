@@ -94,6 +94,13 @@ echo PublicPage::BeginPage('My Calendar', $hoptions);
             <?php if (!empty($s['skipped_duplicate'])) { echo ' ' . (int)$s['skipped_duplicate'] . ' already imported.'; } ?>
             <?php if (!empty($s['capped'])) { echo ' ' . (int)$s['capped'] . ' not processed (file too large).'; } ?>
             <?php if (!empty($s['failed'])) { echo ' ' . count($s['failed']) . ' could not be read.'; } ?>
+            <?php if (!empty($s['failed_reasons'])): ?>
+                <ul class="cal-note-detail">
+                <?php foreach ($s['failed_reasons'] as $reason => $count): ?>
+                    <li><?php echo htmlspecialchars($reason); ?><?php if ($count > 1) { echo ' (' . (int)$count . ' events)'; } ?></li>
+                <?php endforeach; ?>
+                </ul>
+            <?php endif; ?>
             <?php if (!empty($s['warnings'])): ?><br><small><?php echo htmlspecialchars(implode(' ', array_unique($s['warnings']))); ?></small><?php endif; ?>
         </div>
     <?php endif; ?>

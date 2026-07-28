@@ -49,7 +49,7 @@ class EventLog extends SystemBase {	public static $prefix = 'evl';
 	    'evl_usr_user_id' => array('type'=>'int4'),
 	    'evl_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	    'evl_was_success' => array('type'=>'bool'),
-	    'evl_note' => array('type'=>'varchar(255)'),
+	    'evl_note' => array('type'=>'text'),
 	);
 
 }

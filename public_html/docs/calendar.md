@@ -137,7 +137,9 @@ Imported entries are `cal_type = personal`, `cal_visibility = details`, and `cal
 
 **Re-import.** Duplicates are matched within the subject by `cal_source = ical_import` and `cal_source_event_id` (the `UID`). An event whose `UID` was already imported is skipped, never updated or duplicated — so re-uploading a file does not overwrite edits made after a prior import. New `UID`s are inserted.
 
-**Summary.** `import()` returns counts surfaced as a banner on the calendar page: created, already-imported (skipped), imported-as-single (advanced recurrence), warnings, failed (per-event, best-effort — one bad `VEVENT` never aborts the rest), and capped (events beyond the per-file limit, reported rather than silently dropped).
+**Summary.** `import()` returns counts surfaced as a banner on the calendar page: `read` (VEVENTs the parser assembled), created, already-imported (skipped), imported-as-single (advanced recurrence), warnings, failed (per-event, best-effort — one bad `VEVENT` never aborts the rest), and capped (events beyond the per-file limit, reported rather than silently dropped). Failures are also rolled up by reason into `failed_reasons` (reason → count), which is what the banner lists — one malformed pattern repeated across forty events reads as one line, not forty. A `VEVENT` still open when the file ends sets `truncated` on the parse result and counts as a failure, so a partial download cannot leave an invisible gap.
+
+**Run record.** Every import writes an `EventLog` row (`evl_event = calendar_ics_import`, `evl_usr_user_id` = the subject when it is a user, `evl_was_success` false when anything failed, was capped, or is unaccounted for) whose note carries the full tally and the per-reason failure rollup. The same line goes to the error log, followed by one line per failed event naming its `UID` and reason, bounded at 100 events. The banner is a one-shot session flash; the log row is the durable record, queryable per user long after the page is gone. Losing the log row never fails an import that otherwise succeeded.
 
 ## Deletion
 
