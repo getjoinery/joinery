@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   Joinery Default UI Kit  ·  custom.css  ·  v2.2.0
+   Joinery Default UI Kit  ·  custom.css  ·  v2.3.0
    Pure Slate design. Themeable values live in --jy-* tokens on
    :root so branded themes can override them without understanding
    internals. Component rules are scoped under .jy-ui to prevent
@@ -491,6 +491,40 @@ body.jy-default blockquote {
 /* Page structure helpers */
 .jy-container { max-width: 1200px; margin: 0 auto; padding: 0 var(--jy-space-5); }
 .page-content { max-width: 1200px; margin: 0 auto; padding: var(--jy-space-8) var(--jy-space-5); }
+
+/* App pages (BeginPage 'app' option): full-bleed surfaces that fill the
+   viewport below the header — mailbox, calendar, drive. The body becomes a
+   flex column so the app page can grow, and the app's main component
+   (a flex child of .page-content--app) stretches to the fold. */
+body.jy-default:has(.page-content--app) { display: flex; flex-direction: column; margin: 0; min-height: 100vh; }
+/* The admin quickbar pushes body down 32px (margin-top !important) — take it
+   out of the fill height so the page still ends exactly at the fold. */
+body.jy-default.joinery-admin-bar-active:has(.page-content--app) { min-height: calc(100vh - 32px); }
+/* Grow-only fill: min-height stays auto at every level, so a page taller than
+   the viewport (e.g. the calendar with its edit form open) scrolls normally
+   instead of collapsing. Self-scrolling components (the mailbox reader) opt
+   into shrinking with flex-basis 0 + an explicit min-height. */
+body.jy-default:has(.page-content--app) .jy-main-content { flex: 1; display: flex; flex-direction: column; min-height: auto; }
+body.jy-default:has(.page-content--app) .jy-site-footer { margin-top: 0; }
+.page-content--app {
+  max-width: none;
+  width: 100%;
+  margin: 0;
+  padding: var(--jy-space-3) var(--jy-space-5) var(--jy-space-4);
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.jy-app-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--jy-space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--jy-space-3);
+}
+body.jy-default .jy-app-bar h1 { font-size: var(--jy-text-xl); font-weight: 600; margin: 0; }
+.jy-app-bar-action { flex-shrink: 0; }
 .jy-page-header { margin-bottom: var(--jy-space-6); }
 .jy-page-header h1 { margin-bottom: var(--jy-space-2); }
 .page-subtitle { color: var(--jy-color-text-muted); font-size: var(--jy-text-lg); margin-top: var(--jy-space-2); }
@@ -1483,14 +1517,23 @@ dialog.jy-ui::backdrop { background: rgba(0, 0, 0, 0.45); }
 
 /* ─── Personal calendar page (/profile/calendar) ────────────── */
 .jy-ui.cal-wrap { max-width: 980px; margin: 1rem auto; }
+/* Inside an app page the calendar goes full width and the month grid
+   stretches its week rows to fill the viewport (dow header row stays auto). */
+.page-content--app .jy-ui.cal-wrap { max-width: none; margin: 0; flex: 1; display: flex; flex-direction: column; }
+.page-content--app .jy-ui .joinery-calgrid { flex: 1; display: flex; flex-direction: column; }
+.page-content--app .jy-ui .calgrid-grid { flex: 1; grid-template-rows: auto; grid-auto-rows: minmax(72px, 1fr); }
+.page-content--app .jy-ui .calgrid-cell { min-height: 72px; }
 .jy-ui .cal-note { background: var(--jy-color-success-bg, #e6f7ec); border: 1px solid var(--jy-color-success, #2d7d46); padding: .5rem .8rem; border-radius: var(--jy-radius-sm); margin-bottom: 1rem; }
 .jy-ui .cal-error { background: var(--jy-color-danger-bg); border: 1px solid var(--jy-color-danger); padding: .5rem .8rem; border-radius: var(--jy-radius-sm); margin-bottom: 1rem; }
 .jy-ui .cal-full-form { border: 1px solid var(--jy-color-border); border-radius: var(--jy-radius-md); padding: 1rem 1.25rem; margin-top: 1.5rem; background: var(--jy-color-surface); }
 .jy-ui .cal-full-form h2 { margin-top: 0; }
 .jy-ui .cal-tz { color: var(--jy-color-text-muted); font-size: .85rem; }
-.jy-ui .cal-import { margin-bottom: 1rem; border: 1px solid var(--jy-color-border); border-radius: var(--jy-radius-md); background: var(--jy-color-surface); padding: .25rem .75rem; }
-.jy-ui .cal-import > summary { cursor: pointer; padding: .4rem 0; font-size: .9rem; color: var(--jy-color-text-muted); }
-.jy-ui .cal-import .form-group { margin-bottom: .6rem; }
+/* First-run import prompt — retires for good once the calendar has an entry. */
+.jy-ui .cal-firstrun { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; border: 1px solid var(--jy-color-border); border-radius: var(--jy-radius-md); background: var(--jy-color-surface); padding: .75rem 1rem; }
+.jy-ui .cal-firstrun strong { display: block; font-size: .95rem; }
+.jy-ui .cal-firstrun span { font-size: .85rem; color: var(--jy-color-text-muted); }
+/* Import form renders through JoineryModal.open; only inner content styled here. */
+.jy-ui .cal-import-form .form-group { margin-bottom: .6rem; }
 .jy-ui .cal-recurrence-section { margin-top: .75rem; border-top: 1px solid var(--jy-color-border); padding-top: .75rem; }
 .jy-ui .cal-rec-desc { font-size: .85rem; color: var(--jy-color-text-muted); font-style: italic; margin-top: .25rem; min-height: 1.2em; }
 .jy-ui .cal-rec-desc.is-static { font-style: normal; }

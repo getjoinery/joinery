@@ -266,6 +266,17 @@ function calendar_logic(array $input): LogicResult {
     $page_vars['saved']   = !empty($input['saved']);
     $page_vars['deleted'] = !empty($input['deleted']);
 
+    // Has this subject authored (or imported) anything of its own yet? Drives the
+    // first-run import prompt, which retires permanently on the first entry.
+    // Counted account-wide rather than per visible month, so paging to an empty
+    // month does not bring the prompt back.
+    $own_entries = new MultiCalendarEntry([
+        'subject_type' => $subject->type,
+        'subject_id'   => $subject->id,
+        'deleted'      => false,
+    ]);
+    $page_vars['has_own_entries'] = ($own_entries->count_all() > 0);
+
     // Import summary flash (set by the import branch before its redirect).
     $page_vars['import_summary'] = null;
     if (!empty($input['imported'])) {

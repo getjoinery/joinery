@@ -5,6 +5,9 @@
  * native entry chip to open the quick-entry popover. "More options" opens the
  * full form (shown below the grid when ?edit_entry or ?d are in the URL, or when
  * arriving via /profile/calendar/entry/{id}/occurrence/{date}).
+ *
+ * Importing an .ics lives in the Actions menu, and is additionally offered as a
+ * first-run prompt until the calendar holds an entry of its own.
  */
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/ComponentRenderer.php'));
@@ -69,6 +72,11 @@ $cur_rec_desc   = ($is_edit && $display_entry->is_recurring_parent()) ? $display
 $page = new PublicPage();
 $hoptions = ['is_valid_page' => true, 'title' => 'My Calendar', 'breadcrumbs' => ['My Profile' => '/profile', 'Calendar' => '']];
 $page->public_header($hoptions, NULL);
+$hoptions['app'] = true;
+$hoptions['header_action'] = '<details class="jy-ui jy-actions-dropdown">'
+    . '<summary class="btn btn-secondary">Actions</summary>'
+    . '<div class="jy-actions-menu"><button type="button" data-cal-import>Import from another calendar (.ics)&hellip;</button></div>'
+    . '</details>';
 echo PublicPage::BeginPage('My Calendar', $hoptions);
 ?>
 <div class="jy-ui cal-wrap">
@@ -91,8 +99,19 @@ echo PublicPage::BeginPage('My Calendar', $hoptions);
     <?php endif; ?>
 <?php endif; ?>
 
-<details class="cal-import">
-    <summary>Import from another calendar (.ics)</summary>
+<?php if (empty($has_own_entries)): ?>
+<div class="cal-firstrun">
+    <div>
+        <strong>No entries of your own yet</strong>
+        <span>Click any day to add one, or bring an existing calendar over.</span>
+    </div>
+    <button type="button" class="btn btn-secondary" data-cal-import>Import a calendar</button>
+</div>
+<?php endif; ?>
+
+<!-- Import form: rendered once, opened in JoineryModal from either trigger above. -->
+<div id="cal-import-content" class="cal-import-form" hidden>
+    <h3 class="cal-scope-heading">Import from another calendar</h3>
 <?php
 $impform = $page->getFormWriter('cal-import-form', ['action' => '/profile/calendar', 'enctype' => 'multipart/form-data']);
 $impform->begin_form();
@@ -101,7 +120,7 @@ $impform->fileinput('ics_file', 'Calendar file', ['accept' => '.ics,text/calenda
 $impform->submitbutton('btn_import', 'Import');
 $impform->end_form();
 ?>
-</details>
+</div>
 
 <?php
 echo ComponentRenderer::render(null, 'calendar_grid', [
@@ -386,6 +405,24 @@ $popwriter->checkboxinput('entry_blocks', 'Block this time (removes from booking
 <script>
 (function(){
     var USER_TZ = <?php echo json_encode($tz); ?>;
+
+    // =========================================================================
+    // Import (.ics) — one form, two triggers: the Actions menu and the
+    // first-run prompt. Delegated, so both work without per-trigger wiring.
+    // JoineryModal.open() moves the node into the dialog; the reference here
+    // keeps it valid across opens.
+    // =========================================================================
+    var importContent = document.getElementById('cal-import-content');
+
+    document.addEventListener('click', function(ev){
+        var trigger = ev.target.closest ? ev.target.closest('[data-cal-import]') : null;
+        if (!trigger || !importContent) { return; }
+        ev.preventDefault();
+        importContent.hidden = false;
+        JoineryModal.open(importContent, {
+            buttons: [{ label: 'Cancel', style: 'secondary' }]
+        });
+    });
 
     // =========================================================================
     // Scope modal (edit)
