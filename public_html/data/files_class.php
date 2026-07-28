@@ -16,7 +16,7 @@ class FileException extends SystemBaseException {}
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
- * @version 1.5.0
+ * @version 1.6.0
  */
 class File extends SystemBase {	public static $prefix = 'fil';
 	public static $tablename = 'fil_files';
@@ -47,6 +47,7 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	const SOURCE_AI_CHAT_UPLOAD   = 'ai_chat_upload';    // file uploaded into a joinery_ai chat
 	const SOURCE_DRIVE            = 'drive';             // member Drive item — the whole Drive surface (listings, trash, purge, quota) scopes to this tag
 	const SOURCE_MAILBOX_SEARCH_INDEX = 'mailbox_search_index'; // sealed FTS5 blob (MailboxIndex) — read server-side only, never streamed via serve_from_path
+	const SOURCE_MAIL_IMPORT_ARCHIVE  = 'mail_import_archive';  // mbox/zip/tar uploaded to be imported into a mailbox — held for the life of the run, not a Drive item
 
 	// MIME types safe to render inline in the browser. Only raster image
 	// formats that cannot carry executable script belong here. SVG is
@@ -387,6 +388,21 @@ public static function get_by_name($name, $search_deleted = false) {
 		$this->_blob_cache = $blob;
 		$this->_blob_cache_id = (int)$id;
 		return $blob;
+	}
+
+	/**
+	 * Size of this file's bytes, in bytes.
+	 *
+	 * There is no fil_size column — the byte count belongs to the BLOB, because
+	 * several files can share one set of bytes through dedup and only the blob
+	 * knows how big they are. Reading `fil_size` off a File silently yields
+	 * nothing, so anything showing a size to a user should come through here.
+	 *
+	 * Returns 0 for a blob-less row rather than guessing from the filesystem.
+	 */
+	function size_bytes(): int {
+		$blob = $this->_blob();
+		return $blob ? (int)$blob->get('fbb_size_bytes') : 0;
 	}
 
 	/**
@@ -1285,6 +1301,19 @@ class MultiFile extends SystemMultiBase {
 		// Origin filter: match exactly one source.
 		if (isset($this->options['source'])) {
 			$filters['fil_source'] = [$this->options['source'], PDO::PARAM_STR];
+		}
+
+		// Origin filter across SEVERAL sources — for a surface that spans more than
+		// one origin, e.g. a picker offering Drive items alongside files a subsystem
+		// stored for its own use. An empty list matches nothing rather than
+		// everything, so a caller that computed no sources gets no rows.
+		if (isset($this->options['sources'])) {
+			$dblink = DbConnector::get_instance()->get_db_link();
+			$quoted = array();
+			foreach ((array)$this->options['sources'] as $source) {
+				$quoted[] = $dblink->quote((string)$source);
+			}
+			$filters['fil_source'] = empty($quoted) ? 'IN (NULL)' : 'IN (' . implode(',', $quoted) . ')';
 		}
 
 		// Origin exclude: everything except one source. NULL (legacy/unspecified)

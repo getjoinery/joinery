@@ -12,6 +12,7 @@
 
 function drive_upload_complete_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+	require_once(PathHelper::getIncludePath('includes/UploadPurposeRegistry.php'));
 	require_once(PathHelper::getIncludePath('includes/DriveHelper.php'));
 	require_once(PathHelper::getIncludePath('data/files_class.php'));
 	require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
@@ -25,17 +26,24 @@ function drive_upload_complete_logic(array $input): LogicResult {
 	$session  = SessionControl::get_instance();
 	$user_id  = (int)$session->get_user_id();
 
-	if (!$settings->get_setting('drive_active')) {
-		return LogicResult::error('Drive is not enabled.');
-	}
 	if (!$user_id) {
-		return LogicResult::error('You must be signed in to use Drive.');
+		return LogicResult::error('You must be signed in to upload.');
 	}
 
 	$token = (string)($input['upload_token'] ?? '');
 	$up = FileUpload::load_by_token($token);
 	if (!$up || (int)$up->get('fup_usr_user_id') !== $user_id) {
 		return LogicResult::error('Upload not found or already completed.');
+	}
+
+	// The purpose is read from the UPLOAD, never from this request: it was settled
+	// at init, so an upload cannot be opened under one purpose and completed under
+	// another to borrow the other's policy.
+	$purpose  = (string)$up->get('fup_purpose');
+	$is_drive = UploadPurposeRegistry::isDrive($purpose);
+
+	if ($is_drive && !$settings->get_setting('drive_active')) {
+		return LogicResult::error('Drive is not enabled.');
 	}
 
 	$part = $up->part_path();
@@ -57,6 +65,13 @@ function drive_upload_complete_logic(array $input): LogicResult {
 	$expected_sha = (string)$up->get('fup_expected_sha256');
 	if ($expected_sha !== '' && hash_file('sha256', $part) !== $expected_sha) {
 		return LogicResult::error('Uploaded content failed its checksum; please retry.');
+	}
+
+	// Everything above is universal — the bytes are all here, the right size, and
+	// the checksum matches — so a purpose inherits it rather than restating it.
+	// Everything below is Drive's: versions, encryption, key grants, quota, folders.
+	if (!$is_drive) {
+		return drive_upload_complete_for_purpose($purpose, $up, $part, $user_id);
 	}
 
 	$folder_id = (int)$up->get('fup_fol_folder_id');
@@ -230,6 +245,40 @@ function drive_upload_complete_logic(array $input): LogicResult {
 	} finally {
 		DriveHelper::quota_unlock($owner_id);
 	}
+}
+
+/**
+ * Finish a resumable upload for a NON-Drive purpose: turn the staged bytes into
+ * the File that purpose asked for, and hand it back.
+ *
+ * The verified bytes arrive here already checked, so this only has to make the
+ * File and let the purpose do its own bookkeeping. The pending upload is discarded
+ * either way — on success the bytes have moved into a blob, and on failure keeping
+ * a part file whose File could not be created only leaks disk.
+ */
+function drive_upload_complete_for_purpose(string $purpose, $up, string $part, int $user_id): LogicResult {
+	require_once(PathHelper::getIncludePath('includes/UploadPurposeRegistry.php'));
+
+	$name = (string)$up->get('fup_display_name');
+	$mime = (string)($up->get('fup_mime_type') ?: 'application/octet-stream');
+
+	$file = UploadPurposeRegistry::finalize($purpose, $part, $name, $mime, $user_id, $up);
+	$up->discard();
+
+	if ($file === null) {
+		return LogicResult::error('The ' . UploadPurposeRegistry::label($purpose) . ' could not be stored.');
+	}
+
+	return LogicResult::render(array(
+		'ok'   => true,
+		'file' => array(
+			'id'         => (int)$file->key,
+			'name'       => (string)$file->get('fil_title'),
+			'size_bytes' => $file->size_bytes(),
+			'mime_type'  => (string)$file->get('fil_type'),
+			'source'     => (string)$file->get('fil_source'),
+		),
+	));
 }
 
 /**

@@ -895,6 +895,28 @@ Uploads use a resumable protocol rather than a single multipart POST:
 - **`drive_upload_complete`** verifies the bytes, enforces the storage quota at
   the boundary, and ingests (retry-safe via `Idempotency-Key`).
 
+#### Uploading something that is not a Drive file
+
+The transport above is the only way a file larger than one web request reaches the
+server, so it is not reserved for Drive. `drive_upload_init` takes an optional
+**`purpose`**, defaulting to `drive`; any other value names an entry in
+`UploadPurposeRegistry`, which supplies the policy — who may upload, what origin
+tag the resulting `File` carries, and what happens once it exists.
+
+The endpoint names are historical. They serve every purpose, and are not renamed
+because three shipped clients address them.
+
+A non-Drive purpose takes the same three steps and skips everything Drive-specific:
+no quota, no folder, no encryption, no dedup short-circuit. The purpose is recorded
+on the upload at init (`fup_purpose`), so an upload cannot be opened under one
+purpose and completed as another to borrow its policy. `drive_upload_complete`
+returns `{file: {id, name, size_bytes, mime_type, source}}` for these.
+
+Shipped purposes: **`mail_import_archive`** (a mail archive being imported into a
+mailbox — see the [Mailbox plugin](../plugins/mailbox/docs/overview.md)). Adding one
+is a single `UploadPurposeRegistry::register()` call from the owning subsystem's
+bootstrap; see `specs/implemented/chunked_upload_purposes.md`.
+
 `drive_share_sync`'s `grants` body field is a JSON **object** (grantee → role), so
 it is validated in the logic and passes through the descriptor boundary untouched.
 See [Drive](drive.md) for the full protocol and access model.

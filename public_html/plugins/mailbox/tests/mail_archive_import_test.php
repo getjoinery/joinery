@@ -66,11 +66,13 @@ class MailArchiveImportTest {
 			$this->testScanFindsEverythingAndStoresNothing();
 			$this->testSelectionSkipsSpam();
 			$this->testImportStoresAndFiles();
+			$this->testAttachmentsBecomeTaggedFiles();
 			$this->testFiltersDoNotRun();
 			$this->testReimportDedups();
 			$this->testCrossMailboxDedupIsNotAFailure();
 			$this->testCorruptEntryFailsAlone();
 			$this->testUndoRemovesOnlyWhatItCreated();
+			$this->testArchiveRetention();
 		} catch (\Throwable $e) {
 			check(false, 'EXCEPTION', $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
 		} finally {
@@ -106,8 +108,12 @@ class MailArchiveImportTest {
 	/** A run over a copy of the named fixture, owned by the system user. */
 	private function makeRun(string $fixture, string $displayName): MailImportRun {
 		$bytes = file_get_contents($this->fixtures . '/' . $fixture);
+		// Tagged exactly as an uploaded archive is in production. Without the tag
+		// the retention path treats it as the user's own file and refuses to
+		// reclaim it — a difference that only shows up if the fixture is honest.
 		$file = File::createFromBytes($bytes, $this->suffix . '-' . $displayName,
-			'application/octet-stream', User::USER_SYSTEM, array('fil_private' => true));
+			'application/octet-stream', User::USER_SYSTEM,
+			array('fil_private' => true, 'fil_source' => File::SOURCE_MAIL_IMPORT_ARCHIVE));
 		$this->file_ids[] = intval($file->key);
 
 		$run = new MailImportRun(NULL);
@@ -348,6 +354,73 @@ class MailArchiveImportTest {
 			'import: the run is still governed by its state machine');
 	}
 
+	/**
+	 * Imported mail is stored WHOLE, not reference-backed like an IMAP feed, so its
+	 * attachments genuinely land on platform storage: each non-text part becomes a
+	 * private File linked from the message's manifest.
+	 *
+	 * The File carries the email_attachment origin tag, which is what keeps it out
+	 * of the member's Drive listing and quota — an attachment is not something the
+	 * user put in their Drive, and a mailbox import of thirty thousand messages must
+	 * not silently fill it.
+	 */
+	private function testAttachmentsBecomeTaggedFiles() {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachment_class.php'));
+
+		$run = $this->makeRun('with_attachment.eml', 'photo.eml');
+		$importer = new MailArchiveImporter($run);
+		$this->scanToEnd($importer);
+		$run->load();
+		$run->moveTo(MailImportRun::STATE_SCANNED);
+		$importer->applySelection(array('*'), true, true);
+		$totals = $this->importToEnd($importer);
+
+		check($totals['stored'] === 1, 'attachments: the message stored', json_encode($totals));
+
+		$stmt = $this->db->prepare('SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
+			WHERE iem_message_id_header = ? AND iem_iea_inbound_email_alias_id = ?');
+		$stmt->execute(array('<attach-one@example.test>', intval($this->alias->key)));
+		$messageId = intval($stmt->fetchColumn());
+		check($messageId > 0, 'attachments: the message row exists');
+		if ($messageId <= 0) {
+			return;
+		}
+
+		$manifest = new MultiInboundMessageAttachment(array('message_id' => $messageId, 'file_backed' => true));
+		$manifest->load();
+		check(count($manifest) === 1, 'attachments: the attachment was split out into a File',
+			'manifest rows: ' . count($manifest));
+
+		foreach ($manifest as $att) {
+			$fileId = intval($att->get('ima_fil_file_id'));
+			check($fileId > 0, 'attachments: the manifest row points at a File');
+
+			$file = new File($fileId, TRUE);
+			// Through the accessor, not a fil_size column — there is no such column,
+			// because the byte count belongs to the shared blob.
+			check($file->key && $file->size_bytes() > 0,
+				'attachments: the File has real bytes, so the import stored them rather than a reference',
+				'size_bytes: ' . ($file->key ? $file->size_bytes() : 'no file'));
+			check((string)$file->get('fil_source') === File::SOURCE_EMAIL_ATTACHMENT,
+				'attachments: the File is tagged email_attachment, so it stays out of Drive',
+				(string)$file->get('fil_source'));
+			check((bool)$file->get('fil_private'),
+				'attachments: the File is private — mail attachments are never reachable by URL');
+			$this->file_ids[] = $fileId;
+		}
+
+		// Undo has to reclaim those bytes too, or reversing an import would leave
+		// its attachments behind on disk forever.
+		$importer->undo();
+		$stmt->execute(array('<attach-one@example.test>', intval($this->alias->key)));
+		check($stmt->fetchColumn() === false, 'attachments: undo removed the message');
+
+		$after = new MultiInboundMessageAttachment(array('message_id' => $messageId));
+		$after->load();
+		check(count($after) === 0, 'attachments: undo took the manifest rows with it',
+			'left behind: ' . count($after));
+	}
+
 	private function testFiltersDoNotRun() {
 		// A filter that would catch everything, of the kind that fires a visible
 		// side effect. Imported mail must pass it by: the archive already reflects
@@ -540,6 +613,77 @@ class MailArchiveImportTest {
 		try { $bystander->permanent_delete(); } catch (\Throwable $e) {}
 	}
 
+	/**
+	 * What happens to the source archive once an import is over.
+	 *
+	 * An archive is routinely hundreds of megabytes, so keeping every one forever
+	 * leaks exactly the resource this feature is most expensive in. But deleting on
+	 * completion is worse: undoing an import and running it again is a normal thing
+	 * to do and needs the same bytes. Hence a grace period, and the three
+	 * properties that make it safe.
+	 */
+	private function testArchiveRetention() {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/tasks/PurgeMailImportArchives.php'));
+
+		// 1. A live run's archive is never taken, whatever the retention window.
+		$live = $this->makeRun('takeout.mbox', 'still-going.mbox');
+		$refused = (new MailArchiveImporter($live))->discardArchive();
+		check(empty($refused['ok']),
+			'retention: a run still importing keeps its archive — it is the only copy',
+			json_encode($refused));
+
+		// 2. A finished run inside the grace period keeps its archive, so an undo
+		//    and re-run is still possible.
+		$recent = $this->makeRun('takeout.mbox', 'just-finished.mbox');
+		$recent->moveTo(MailImportRun::STATE_DONE);
+		$kept = MailImportRun::finishedBefore(7);
+		check(!in_array(intval($recent->key), $kept, true),
+			'retention: a run that finished moments ago is not swept');
+
+		// 3. Past the window it is collected.
+		$this->db->prepare("UPDATE mir_mail_import_runs SET mir_finish_time = now() - INTERVAL '30 days'
+			WHERE mir_mail_import_run_id = ?")->execute(array(intval($recent->key)));
+		check(in_array(intval($recent->key), MailImportRun::finishedBefore(7), true),
+			'retention: a run finished long ago is swept');
+
+		$file_id = intval($recent->get('mir_fil_file_id'));
+		$result = (new MailArchiveImporter($recent))->discardArchive();
+		check(!empty($result['ok']) && $result['freed'] > 0,
+			'retention: discarding reclaims the bytes', json_encode($result));
+
+		$stmt = $this->db->prepare('SELECT 1 FROM fil_files WHERE fil_file_id = ? AND fil_delete_time IS NULL');
+		$stmt->execute(array($file_id));
+		check($stmt->fetchColumn() === false, 'retention: the archive file is gone');
+
+		$recent->load();
+		check($recent->get('mir_fil_file_id') === null,
+			'retention: the run no longer points at bytes that do not exist');
+
+		// The run itself SURVIVES: the report of what was imported outlives the
+		// archive it came from.
+		check((string)$recent->get('mir_state') === MailImportRun::STATE_DONE,
+			'retention: the run and its report survive losing the archive');
+
+		// 4. An archive the user picked from their own Drive is released, never
+		//    deleted — the importer reclaims only what the importer created.
+		$owned = $this->makeRun('takeout.mbox', 'from-my-drive.mbox');
+		$owned_file = intval($owned->get('mir_fil_file_id'));
+		$this->db->prepare('UPDATE fil_files SET fil_source = ? WHERE fil_file_id = ?')
+			->execute(array(File::SOURCE_DRIVE, $owned_file));
+		$owned->moveTo(MailImportRun::STATE_DONE);
+
+		$released = (new MailArchiveImporter($owned))->discardArchive();
+		check(!empty($released['ok']) && intval($released['freed']) === 0,
+			'retention: a Drive-picked archive frees nothing because it is not deleted',
+			json_encode($released));
+
+		$stmt->execute(array($owned_file));
+		check($stmt->fetchColumn() !== false,
+			'retention: the user still has their own file');
+
+		$live->moveTo(MailImportRun::STATE_DONE);
+	}
+
 	private function truthy($v): bool {
 		return ($v === true || $v === 't' || $v === 1 || $v === '1' || $v === 'true');
 	}
@@ -569,7 +713,7 @@ class MailArchiveImportTest {
 		$ids = array('<takeout-one@example.test>', '<takeout-two@example.test>',
 			'<takeout-three@example.test>', '<truncated-one@example.test>',
 			'<proton-aaa@example.test>', '<proton-bbb@example.test>',
-			'<apple-one@example.test>', '<maildir-one@example.test>');
+			'<apple-one@example.test>', '<maildir-one@example.test>', '<attach-one@example.test>');
 		$in = implode(',', array_map(array($this->db, 'quote'), $ids));
 
 		$this->db->exec("DELETE FROM ilm_inbound_label_members WHERE ilm_iem_inbound_email_message_id IN
@@ -616,6 +760,17 @@ class MailArchiveImportTest {
 				$this->purgeDomain(intval($this->domain_id));
 			}
 			$this->purgeFixtureMessages();
+
+			// Runs reaching `scanned` or `done` announce themselves to their owner,
+			// so a test run leaves real notifications in a real person's list. Clear
+			// the ones this suite's fixtures produced.
+			$this->db->exec("DELETE FROM ntf_notifications
+				WHERE ntf_link = '/profile/mailbox/import'
+				  AND (ntf_title LIKE '%.mbox %' OR ntf_title LIKE '%.eml %'
+				       OR ntf_title LIKE 'task-driven%' OR ntf_title LIKE 'damaged%'
+				       OR ntf_title LIKE 'photo.eml%' OR ntf_title LIKE 'second-mailbox%'
+				       OR ntf_title LIKE 'queued-behind%' OR ntf_title LIKE 'statement.eml%')");
+
 			foreach ($this->file_ids as $fid) {
 				try {
 					$file = new File(intval($fid), TRUE);

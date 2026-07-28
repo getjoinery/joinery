@@ -1059,6 +1059,14 @@ class RouteHelper {
         // - Globalvars: Configuration and settings access
         // - SessionControl: Session management and authentication
 
+        // Note which protocol real requests arrive on, so headless code can build
+        // correct links. A scheduled task or CLI script has no request to detect
+        // from, and used to guess http — which mailed out plain-HTTP links from a
+        // TLS-only site. This is the one point every dynamic request passes, and
+        // the recording is a no-op once the answer has not changed.
+        require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+        LibraryFunctions::observe_protocol();
+
         // STATIC PAGE CACHE CHECK - For non-authenticated users only
         $cache_status = null;
         $cache_buffer_started = false;

@@ -2848,6 +2848,13 @@ option — pointing at a folder on the machine is not something a member can do,
 uploaded archive becomes the user's own file the moment it lands, so an interrupted
 run resumes against it rather than needing a re-upload.
 
+**Uploading has no size limit.** The archive goes up through the platform's
+resumable chunk transport under the `mail_import_archive` upload purpose
+(docs/api.md § Uploading something that is not a Drive file), so the bytes never
+ride in a single request and `upload_max_filesize` never applies. A dropped
+connection resumes from the server's byte count rather than starting the archive
+again, which on a large export is the difference between a hiccup and an afternoon.
+
 A file in an **encrypted** folder is listed but refused, with the reason. Drive
 encryption is per-folder and inherited, and an encrypted file's plaintext exists only
 in the browser — the server genuinely cannot read it. It is shown rather than hidden
@@ -2920,6 +2927,29 @@ Imported mail carries **no authentication verdict** — `unverified` across the 
 The stamps in an archived message were written by whichever server received it years
 ago, and this deployment cannot vouch for them.
 
+### Attachments and where the bytes go
+
+Every non-text part is split out into its own private `File` and linked from the
+message's attachment manifest, exactly as live delivery does — the importer inherits
+this by going through the same store path. Unlike an IMAP feed, which is
+reference-backed and fetches parts from the source on demand, an imported message is
+**self-contained**: the archive is the only copy of those bytes, so they are stored.
+A large Gmail archive is therefore a real disk commitment.
+
+Those Files are tagged `email_attachment` (`fil_source`), which is what keeps them
+out of the member's Drive listing and away from their Drive quota — an attachment is
+not something the user filed in their Drive, and a thirty-thousand-message import
+must not silently fill it.
+
+The uploaded archive itself is tagged `mail_import_archive`: also not a Drive item,
+because it is working material for one run rather than a file the member is keeping.
+The file picker therefore offers Drive items **and** previously-uploaded archives,
+which is what lets an interrupted run restart against the same file instead of
+re-uploading gigabytes.
+
+Undo reclaims all of it — attachment Files, manifest rows and any stored raw object
+go with the message, through the model's own permanent delete.
+
 ### Any size
 
 Both phases run in the **`RunMailImports`** scheduled task, because a 50GB scan cannot
@@ -2954,6 +2984,30 @@ The reconciliation tripwire applies here too: `stored + duplicates + skipped + f
 must equal what was seen. A shortfall is reported as `unaccounted` and marks the batch
 unsuccessful, because a message that vanishes without a reason is exactly the failure a
 set of counters alone hides.
+
+### What happens to the archive afterwards
+
+The uploaded archive is **kept for a grace period after the run finishes**, not
+deleted on completion. That is deliberate: undoing an import and running it again
+is a normal thing to do — a reader improves, a folder turns out to have been
+missed — and it needs the same bytes. Deleting them the moment a run completes
+would be tidier and would quietly remove that possibility.
+
+`PurgeMailImportArchives` (daily) collects archives whose run finished more than
+`mailbox_import_archive_retention_days` ago, and a *Discard archive* button on any
+finished run reclaims it immediately when the user knows they are done.
+
+**An archive picked from the user's own Drive is released, never deleted.** It is
+their file, it counts against their Drive quota, and they may well want it
+afterwards — the importer only reclaims what the importer created, which is what
+the `mail_import_archive` origin tag is for.
+
+The run itself always survives losing its archive: the record of what was imported
+outlives the file it came from.
+
+Working directories (used only by formats that cannot be read in place — a zip
+holding an mbox, a tar) are removed when a run finishes. The same task sweeps any
+left by a run that ended some other way, which nothing else would collect.
 
 ### Undo
 
@@ -2992,8 +3046,15 @@ run.
 | Setting | Default | Purpose |
 |---|---|---|
 | `mailbox_import_enabled` | on | Master switch. Turning it off also stops runs already underway from advancing. |
-| `mailbox_import_batch_size` | 200 | Entries stored per task pass. |
+| `mailbox_import_batch_size` | 200 | Entries stored per task pass. Measured cost is roughly 150ms per message, so this is also how long a pass holds the cron runner. |
 | `mailbox_import_max_concurrent` | 2 | Runs importing at once, deployment-wide. |
+| `mailbox_import_archive_retention_days` | 7 | How long a finished run keeps its uploaded archive, so it can be undone and re-run. |
+
+**Both tasks must be active** for imports to work: `RunMailImports` performs them
+and `PurgeMailImportArchives` reclaims the archives afterwards. A task is
+discovered from its manifest but activated in Scheduled Tasks — until then a run
+sits at *Waiting to start*, which the import surface says plainly rather than
+leaving it looking broken.
 
 ### Adding a format
 

@@ -1,0 +1,37 @@
+{
+  "Version": 1,
+  "Payload": [
+    {
+      "Path": "Inbox",
+      "ID": "0",
+      "ParentID": "",
+      "Name": "Inbox",
+      "Color": "#8080FF",
+      "Type": 1
+    },
+    {
+      "Path": "All Mail",
+      "ID": "5",
+      "ParentID": "",
+      "Name": "All Mail",
+      "Color": "#8080FF",
+      "Type": 1
+    },
+    {
+      "Path": "Archive",
+      "ID": "6",
+      "ParentID": "",
+      "Name": "Archive",
+      "Color": "#8080FF",
+      "Type": 3
+    },
+    {
+      "Path": "Meditation",
+      "ID": "kFn6eqxVdWEkL6aSalke==",
+      "ParentID": "",
+      "Name": "Meditation",
+      "Color": "#c44",
+      "Type": 3
+    }
+  ]
+}

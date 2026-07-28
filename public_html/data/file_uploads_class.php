@@ -33,6 +33,11 @@ class FileUpload extends SystemBase {
 		'fup_usr_user_id'    => array('type' => 'int4', 'is_nullable' => false, 'required' => true, 'index' => true),
 		'fup_fol_folder_id'  => array('type' => 'int8', 'is_nullable' => true),
 		'fup_fil_file_id'    => array('type' => 'int8', 'is_nullable' => true),
+		// What this upload is FOR (specs/chunked_upload_purposes.md). 'drive' is the
+		// default so every existing row and caller stays correct; anything else is a
+		// name registered in UploadPurposeRegistry, which supplies the policy. Recorded
+		// at init so an upload cannot be opened as one kind and completed as another.
+		'fup_purpose'        => array('type' => 'varchar(64)', 'is_nullable' => false, 'default' => 'drive'),
 		'fup_display_name'   => array('type' => 'varchar(255)', 'is_nullable' => false, 'required' => true),
 		'fup_mime_type'      => array('type' => 'varchar(128)', 'is_nullable' => true),
 		'fup_expected_bytes' => array('type' => 'int8', 'is_nullable' => false, 'required' => true),

@@ -13,6 +13,7 @@
 
 function drive_upload_init_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+	require_once(PathHelper::getIncludePath('includes/UploadPurposeRegistry.php'));
 	require_once(PathHelper::getIncludePath('includes/DriveHelper.php'));
 	require_once(PathHelper::getIncludePath('data/files_class.php'));
 	require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
@@ -26,11 +27,22 @@ function drive_upload_init_logic(array $input): LogicResult {
 	$session  = SessionControl::get_instance();
 	$user_id  = (int)$session->get_user_id();
 
+	if (!$user_id) {
+		return LogicResult::error('You must be signed in to upload.');
+	}
+
+	// A non-Drive purpose (specs/chunked_upload_purposes.md) takes the transport but
+	// none of Drive's policy, and branches out BEFORE any of it runs — no Drive
+	// gate, no quota, no folder, no encryption, no dedup. Drive's own path below is
+	// untouched, which is the point: it handles encrypted files and versions, and is
+	// not worth restructuring to make it an instance of something simpler.
+	$purpose = trim((string)($input['purpose'] ?? UploadPurposeRegistry::PURPOSE_DRIVE));
+	if (!UploadPurposeRegistry::isDrive($purpose)) {
+		return drive_upload_init_for_purpose($purpose, $user_id, $input);
+	}
+
 	if (!$settings->get_setting('drive_active')) {
 		return LogicResult::error('Drive is not enabled.');
-	}
-	if (!$user_id) {
-		return LogicResult::error('You must be signed in to use Drive.');
 	}
 
 	$name       = trim((string)($input['name'] ?? ''));
@@ -157,6 +169,71 @@ function drive_upload_init_logic(array $input): LogicResult {
 	));
 }
 
+/**
+ * Open a resumable upload for a NON-Drive purpose.
+ *
+ * Deliberately small: check the purpose will have it, mint a token, record the
+ * pending upload, hand back the chunk size. No quota, no folder, no encryption, no
+ * dedup — those are Drive's, and a purpose that wants something like them enforces
+ * it in its own authorize hook.
+ *
+ * Dedup is skipped rather than forgotten. It short-circuits by handing back a file
+ * built on bytes the caller already possesses, and "already possesses" is a
+ * Drive-shaped question; answering it wrongly for another purpose would hand
+ * somebody a file they should not have.
+ */
+function drive_upload_init_for_purpose(string $purpose, int $user_id, array $input): LogicResult {
+	require_once(PathHelper::getIncludePath('data/file_uploads_class.php'));
+
+	$spec = UploadPurposeRegistry::get($purpose);
+	if ($spec === null) {
+		return LogicResult::error('Unknown upload purpose.');
+	}
+
+	$name       = trim((string)($input['name'] ?? ''));
+	$size_bytes = (int)($input['size_bytes'] ?? 0);
+	$mime       = (string)($input['mime_type'] ?? 'application/octet-stream');
+
+	if ($name === '') {
+		return LogicResult::error('A file name is required.');
+	}
+	if ($size_bytes <= 0) {
+		return LogicResult::error('A file size is required.');
+	}
+
+	$refusal = UploadPurposeRegistry::authorize($purpose, $user_id, $input);
+	if ($refusal !== null) {
+		return LogicResult::error($refusal);
+	}
+
+	$raw_token = bin2hex(random_bytes(32));
+	$up = new FileUpload(NULL);
+	$up->set('fup_token_sha256', hash('sha256', $raw_token));
+	$up->set('fup_usr_user_id', $user_id);
+	$up->set('fup_purpose', substr($purpose, 0, 64));
+	$up->set('fup_display_name', substr($name, 0, 255));
+	$up->set('fup_mime_type', substr($mime, 0, 128));
+	$up->set('fup_expected_bytes', $size_bytes);
+	$sha256 = isset($input['sha256']) ? strtolower(trim((string)$input['sha256'])) : '';
+	if ($sha256 !== '') {
+		$up->set('fup_expected_sha256', $sha256);
+	}
+	$up->set('fup_received_bytes', 0);
+	$up->set('fup_update_time', gmdate('Y-m-d H:i:s'));
+	$up->save();
+
+	$settings = Globalvars::get_instance();
+	$chunk = (int)$settings->get_setting('drive_upload_chunk_bytes');
+	if ($chunk <= 0) { $chunk = 8388608; }
+
+	return LogicResult::render(array(
+		'ok'           => true,
+		'deduped'      => false,
+		'upload_token' => $raw_token,
+		'chunk_bytes'  => $chunk,
+	));
+}
+
 function drive_upload_init_logic_descriptor(): array {
 	return array(
 		'description'      => 'Begin a Drive upload: returns an upload token + chunk size, or dedup-completes immediately.',
@@ -169,6 +246,7 @@ function drive_upload_init_logic_descriptor(): array {
 			'size_bytes' => array('type' => 'int', 'required' => true, 'min' => 0, 'label' => 'File size in bytes'),
 			'sha256'     => array('type' => 'string', 'required' => false, 'max_length' => 64, 'label' => 'Content SHA-256 (enables dedup)'),
 			'mime_type'  => array('type' => 'string', 'required' => false, 'max_length' => 128, 'label' => 'MIME type'),
+			'purpose'    => array('type' => 'string', 'required' => false, 'max_length' => 64, 'label' => 'What the upload is for (default: drive)'),
 		),
 	);
 }

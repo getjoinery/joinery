@@ -1,0 +1,22 @@
+Message-ID: <attach-one@example.test>
+Date: Thu, 4 Aug 2016 10:00:00 +0000
+From: Sender <sender@elsewhere.test>
+To: me@example.test
+Delivered-To: me@example.test
+Subject: Photo attached
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="BOUND42"
+
+--BOUND42
+Content-Type: text/plain; charset=utf-8
+
+The picture is attached.
+
+--BOUND42
+Content-Type: image/png; name="dot.png"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="dot.png"
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==
+
+--BOUND42--

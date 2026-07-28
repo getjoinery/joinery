@@ -274,7 +274,47 @@ abstract class MailArchiveReader {
 	 * Returns the same shape gmailLabels() does, or null when the JSON is absent
 	 * or unreadable (never a reason to fail a message).
 	 */
-	public static function protonMetadata(?string $json): ?array {
+	/**
+	 * Parse a Proton export's `labels.json` into id => name.
+	 *
+	 * The export ships a manifest naming every label and folder in the account,
+	 * which is the only place a custom label's NAME appears — the per-message
+	 * sidecars carry opaque ids and nothing else. Without it a folder the user
+	 * called "Meditation" is an unreadable base64 string, and the choice is between
+	 * inventing a nonsense label and silently losing the folder. With it there is
+	 * no choice to make.
+	 *
+	 * @return array<string,string> label id => display name
+	 */
+	public static function protonLabelMap(?string $json): array {
+		if ($json === null || trim($json) === '') {
+			return array();
+		}
+		$data = json_decode($json, true);
+		if (!is_array($data)) {
+			return array();
+		}
+		$rows = isset($data['Payload']) && is_array($data['Payload']) ? $data['Payload'] : $data;
+
+		$map = array();
+		foreach ((array)$rows as $row) {
+			if (!is_array($row)) {
+				continue;
+			}
+			$id   = trim((string)($row['ID'] ?? ''));
+			$name = trim((string)($row['Name'] ?? ''));
+			if ($id !== '' && $name !== '') {
+				$map[$id] = $name;
+			}
+		}
+		return $map;
+	}
+
+	/**
+	 * @param array $labelMap id => name, from protonLabelMap(). Optional: a bare
+	 *        folder of .eml files has no manifest, and still imports.
+	 */
+	public static function protonMetadata(?string $json, array $labelMap = array()): ?array {
 		if ($json === null || trim($json) === '') {
 			return null;
 		}
@@ -297,33 +337,86 @@ abstract class MailArchiveReader {
 		}
 
 		foreach ((array)($payload['LabelIDs'] ?? $payload['Labels'] ?? array()) as $label) {
+			// Some exports carry objects with a Name; most carry bare ids. A real
+			// name is worth having, so prefer it when one is actually there.
+			$named = null;
 			if (is_array($label)) {
-				$label = $label['Name'] ?? $label['ID'] ?? '';
+				$named = isset($label['Name']) ? trim((string)$label['Name']) : null;
+				$label = $label['ID'] ?? $label['Name'] ?? '';
 			}
-			$name = trim((string)$label);
-			if ($name === '') {
+			$id = trim((string)$label);
+			if ($id === '') {
 				continue;
 			}
-			// Proton's numeric system label ids. 0 inbox, 2 sent, 3 trash, 4 spam,
-			// 5 all mail, 6 archive, 10 starred.
-			$system = array('0' => 'Inbox', '2' => 'Sent', '3' => 'Trash', '4' => 'Spam',
-				'5' => 'All mail', '6' => 'Archived', '10' => null);
-			if (array_key_exists($name, $system)) {
-				if ($name === '10') { $out['is_starred'] = true; continue; }
-				if ($name === '3')  { $out['class'] = 'trash'; }
-				if ($name === '4')  { $out['class'] = 'spam'; }
-				if ($out['folder'] === null) { $out['folder'] = $system[$name]; }
+
+			// A NUMERIC id is one of Proton's own system labels or views — never
+			// something the user named. Recognised ones become the message's folder
+			// or state; the rest are views this platform does not model (Almost All
+			// Mail, the inbox category tabs) and are dropped.
+			//
+			// Dropping them is the whole point. Treating an unrecognised number as a
+			// label name is how an import ends up tagging two thousand messages with
+			// a label called "15".
+			if (preg_match('/^\d+$/', $id)) {
+				if (isset(self::PROTON_SYSTEM_LABELS[$id])) {
+					$mapped = self::PROTON_SYSTEM_LABELS[$id];
+					if ($mapped === 'starred') { $out['is_starred'] = true; continue; }
+					if ($mapped === 'trash')   { $out['class'] = 'trash'; }
+					if ($mapped === 'spam')    { $out['class'] = 'spam'; }
+					if ($mapped !== null && $out['folder'] === null) {
+						$out['folder'] = self::PROTON_FOLDER_NAMES[$mapped] ?? null;
+					}
+				}
 				continue;
 			}
-			if (in_array(strtolower($name), array('starred'), true)) {
-				$out['is_starred'] = true;
-				continue;
+
+			// A non-numeric id is a genuine user label — a folder the person made.
+			// Its name comes from the export's own labels.json, or from the sidecar
+			// on the versions that inline it. An id is never used as a name: it is
+			// unreadable, and it is not what they called the folder.
+			$name = ($named !== null && $named !== '') ? $named : ($labelMap[$id] ?? '');
+			if ($name !== '') {
+				if (strtolower($name) === 'starred') { $out['is_starred'] = true; continue; }
+				$out['labels'][] = $name;
 			}
-			$out['labels'][] = $name;
 		}
 
 		return $out;
 	}
+
+	/**
+	 * Proton's system label ids, which are small integers. The value is what the
+	 * id MEANS here: a folder key, a state, or null for a view this platform has no
+	 * equivalent of and deliberately ignores.
+	 */
+	const PROTON_SYSTEM_LABELS = array(
+		'0'  => 'inbox',
+		'1'  => 'drafts',      // all drafts
+		'2'  => 'sent',        // all sent
+		'3'  => 'trash',
+		'4'  => 'spam',
+		'5'  => 'all_mail',
+		'6'  => 'archive',
+		'7'  => 'sent',
+		'8'  => 'drafts',
+		'9'  => 'outbox',
+		'10' => 'starred',
+		'11' => null,          // all scheduled
+		'12' => null,
+		'15' => null,          // almost all mail — a view over everything but spam/trash
+	);
+
+	/** Folder names for the mapped system labels that are genuinely folders. */
+	const PROTON_FOLDER_NAMES = array(
+		'inbox'    => 'Inbox',
+		'drafts'   => 'Drafts',
+		'sent'     => 'Sent',
+		'trash'    => 'Trash',
+		'spam'     => 'Spam',
+		'all_mail' => 'All mail',
+		'archive'  => 'Archived',
+		'outbox'   => 'Outbox',
+	);
 
 	/**
 	 * Whether a member of an archive looks like one saved message. Extensionless

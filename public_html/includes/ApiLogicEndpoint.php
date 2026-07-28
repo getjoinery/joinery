@@ -174,6 +174,26 @@ class ApiLogicEndpoint {
 		$json_params = json_decode($raw_input, true);
 		$post_params = is_array($json_params) ? $json_params : $_POST;
 
+		// A request body over post_max_size is DISCARDED by PHP before any code
+		// runs: $_POST, $_FILES and php://input all arrive empty while
+		// Content-Length still reports what was sent. Left alone, the request then
+		// fails schema validation on whichever field happens to be checked first,
+		// and the caller is told a field is missing that they did in fact supply —
+		// which sends them looking in exactly the wrong place. Every action taking a
+		// file upload can hit this, so it is caught once, here.
+		$content_length = intval($_SERVER['CONTENT_LENGTH'] ?? 0);
+		if ($content_length > 0 && empty($_POST) && empty($_FILES) && $raw_input === '') {
+			$limit = ini_get('post_max_size');
+			RequestLogger::log('api', 'action ' . $action_label, false, [
+				'user_id' => $user_id,
+				'status_code' => 413,
+				'error_type' => 'RequestTooLarge',
+				'note' => 'Content-Length ' . $content_length . ' exceeds post_max_size ' . $limit
+			]);
+			api_error('That request was too large for this server to accept (limit ' . $limit
+				. '). Nothing was received, so nothing was changed.', 'RequestTooLarge', 413);
+		}
+
 		// Idempotency, phase 1 (docs/api.md § Contract): resolve the key against
 		// stored outcomes FIRST — a replay or conflict exits here, before
 		// validation, session simulation, and any side effect. A key reused with

@@ -13,10 +13,11 @@
  *   the choose step  - shown inline on a run that has finished scanning
  *
  * Everything after the first render talks to /api/v1 with the browser-session
- * credential, including progress polling. The start form posts as multipart so an
- * archive can be uploaded in the same request that starts the run.
+ * credential, including progress polling. An uploaded archive goes up through the
+ * platform's resumable chunk transport under the mail_import_archive upload
+ * purpose, so its size is not bounded by any single-request limit.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailImportService.php'));
@@ -38,6 +39,14 @@ function mailbox_render_import_panel($page, array $vars): void {
 		return;
 	}
 
+	// Say up front when nothing will actually process the import. A run that sits
+	// at "Waiting to start" forever is indistinguishable from a broken feature, and
+	// the person looking at it cannot tell that the cause is one switch elsewhere.
+	$warning = $vars['scheduler_warning'] ?? null;
+	if ($warning) {
+		echo '<div class="jy-alert jy-alert-warning">' . htmlspecialchars($warning) . '</div>';
+	}
+
 	$alias_options = array();
 	foreach ($aliases as $id => $address) {
 		$alias_options[(string)$id] = $address;
@@ -54,9 +63,9 @@ function mailbox_render_import_panel($page, array $vars): void {
 		$file_options[(string)$file['id']] = $label;
 	}
 
-	$formwriter = $page->getFormWriter('mail_import_form', array(
-		'enctype' => 'multipart/form-data',
-	));
+	// No enctype: the form is never posted. The file is read from the input and
+	// sent in chunks, and the rest of the fields ride as JSON on the action call.
+	$formwriter = $page->getFormWriter('mail_import_form');
 
 	echo $formwriter->begin_form();
 
@@ -79,9 +88,13 @@ function mailbox_render_import_panel($page, array $vars): void {
 		),
 	));
 
+	// No size ceiling to warn about: the archive goes up in chunks, so it never
+	// rides in a single request and the server's upload limits do not apply.
 	$formwriter->fileinput('archive', 'Archive file', array(
 		'helptext' => 'A mailbox file (.mbox), a zip or tar of saved messages, or a single .eml. '
-			. 'Outlook .pst and .olm files cannot be read — connect that account as an IMAP feed instead.',
+			. 'Any size — it uploads in pieces and picks up where it left off if the connection '
+			. 'drops. Outlook .pst and .olm files cannot be read; connect that account as an '
+			. 'IMAP feed instead.',
 	));
 
 	$formwriter->dropinput('file_id', 'File', array(
@@ -153,6 +166,10 @@ function mailbox_import_runs_html(array $runs): string {
 			$html .= '<button type="button" class="jy-btn jy-btn-danger" data-import-undo="'
 				. intval($run['id']) . '">Undo this import</button>';
 		}
+		if (!empty($run['can_discard'])) {
+			$html .= ' <button type="button" class="jy-btn" data-import-discard="'
+				. intval($run['id']) . '">Discard archive</button>';
+		}
 		$html .= '</td></tr>';
 
 		$html .= '<tr class="mail-import-choose-row" data-choose-for="' . intval($run['id'])
@@ -188,16 +205,22 @@ function mailbox_import_panel_script(): void {
 	var runsBox = document.getElementById('mail-import-runs');
 	var polling = null;
 
-	function api(action, body, isForm) {
-		var opts = { method: 'POST', headers: { 'X-Joinery-Csrf': csrf } };
-		if (isForm) {
-			opts.body = body;
-		} else {
-			opts.headers['Content-Type'] = 'application/json';
-			opts.body = JSON.stringify(body || {});
-		}
-		return fetch('/api/v1/action/mailbox/' + action, opts).then(function (r) { return r.json(); });
+	function post(path, body) {
+		return fetch('/api/v1/action/' + path, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': csrf },
+			body: JSON.stringify(body || {})
+		}).then(function (r) { return r.json(); });
 	}
+
+	/** One of this plugin's actions. */
+	function api(action, body) { return post('mailbox/' + action, body); }
+
+	/**
+	 * A CORE action. The chunked upload endpoints belong to the platform, not to
+	 * mailbox — sending them through the plugin namespace is a 404.
+	 */
+	function coreApi(action, body) { return post(action, body); }
 
 	function say(text, bad) {
 		if (!feedback) { return; }
@@ -206,10 +229,17 @@ function mailbox_import_panel_script(): void {
 		if (!text) { feedback.className = 'jy-mt-2'; }
 	}
 
+	// The API's error envelope is {error, errortype}; a validation failure adds
+	// validation_errors. Reading the wrong key here turns every real explanation
+	// into a shrug, so take them in the order the API actually sends them.
 	function errorOf(json) {
-		return (json && (json.error_message || json.message)) ||
-			(json && json.validation_errors && Object.values(json.validation_errors)[0]) ||
-			'Something went wrong.';
+		if (!json) { return 'The server did not respond.'; }
+		if (json.error) { return json.error; }
+		if (json.validation_errors) {
+			var first = Object.keys(json.validation_errors)[0];
+			if (first) { return json.validation_errors[first]; }
+		}
+		return json.error_message || json.message || 'Something went wrong.';
 	}
 
 	// The start form posts as multipart so the archive rides along with the run's
@@ -228,17 +258,120 @@ function mailbox_import_panel_script(): void {
 			starting = true;
 
 			var data = new FormData(form);
-			// Only one source is meaningful; sending both would be ambiguous.
-			if (data.get('source') === 'pick') { data.delete('archive'); } else { data.delete('file_id'); }
-			say('Uploading and checking the archive...');
-			api('mail_import_start', data, true).then(function (j) {
-				if (!j || !j.data || !j.data.run) { say(errorOf(j), true); return; }
-				say(j.data.message);
-				form.reset();
-				refresh();
-			}).catch(function () {
-				say('The import could not be started.', true);
+			var usePicked = (data.get('source') === 'pick');
+			var picked = usePicked ? null : data.get('archive');
+
+			if (!usePicked && (!picked || !picked.size)) {
+				say('Choose an archive to upload, or pick one you already have here.', true);
+				starting = false;
+				return;
+			}
+
+			// An archive already here needs no transfer at all.
+			if (usePicked) {
+				startRun(data.get('file_id'), '', data).then(function () { starting = false; });
+				return;
+			}
+
+			// Otherwise send it in chunks. There is no size limit on this path — the
+			// bytes never ride in one request — so a multi-gigabyte archive is a
+			// progress bar rather than a refusal.
+			uploadInChunks(picked).then(function (fileId) {
+				return startRun(fileId, picked.name, data);
+			}).catch(function (err) {
+				say(String(err && err.message ? err.message : err), true);
 			}).then(function () { starting = false; });
+		});
+	}
+
+	/**
+	 * Send a file through the platform's resumable chunk transport and resolve with
+	 * the id of the File it became.
+	 *
+	 * Chunks go out strictly in order because the server tracks a single received
+	 * offset rather than sparse ranges — which is also what makes resuming cheap: a
+	 * rejected chunk comes back with the offset to continue from.
+	 */
+	function uploadInChunks(file) {
+		return coreApi('drive_upload_init', {
+			purpose: 'mail_import_archive',
+			name: file.name,
+			size_bytes: file.size,
+			mime_type: file.type || 'application/octet-stream'
+		}).then(function (j) {
+			var d = (j && j.data) || {};
+			if (!d.upload_token) { throw new Error(errorOf(j)); }
+
+			var token = d.upload_token;
+			var chunkSize = d.chunk_bytes || 8388608;
+			var total = file.size;
+			var sent = 0;
+
+			function sendNext() {
+				if (sent >= total) { return Promise.resolve(); }
+				var end = Math.min(sent + chunkSize, total);
+				var slice = file.slice(sent, end);
+				var range = 'bytes ' + sent + '-' + (end - 1) + '/' + total;
+
+				return fetch('/api/v1/drive_upload/' + encodeURIComponent(token), {
+					method: 'PUT',
+					headers: { 'X-Joinery-Csrf': csrf, 'Content-Range': range,
+						'Content-Type': 'application/octet-stream' },
+					body: slice
+				}).then(function (r) {
+					if (!r.ok) {
+						return r.json().catch(function () { return null; }).then(function (err) {
+							// On an offset mismatch the server reports where it actually
+							// got to (nested under data, as every API response is), so a
+							// lost chunk costs that chunk rather than the whole archive.
+							var at = err && err.data && err.data.received_bytes;
+							if (typeof at === 'number' && at !== sent) {
+								sent = at;
+								return sendNext();
+							}
+							throw new Error(errorOf(err) || 'The upload was interrupted.');
+						});
+					}
+					sent = end;
+					say('Uploading ' + humanBytes(sent) + ' of ' + humanBytes(total)
+						+ ' (' + Math.floor(sent * 100 / total) + '%)...');
+					return sendNext();
+				});
+			}
+
+			say('Uploading 0% of ' + humanBytes(total) + '...');
+			return sendNext().then(function () {
+				say('Finishing the upload...');
+				return coreApi('drive_upload_complete', { upload_token: token });
+			}).then(function (j2) {
+				var f = (j2 && j2.data && j2.data.file) || null;
+				if (!f || !f.id) { throw new Error(errorOf(j2)); }
+				return f.id;
+			});
+		});
+	}
+
+	/** Queue the run against a file that is now on the server. */
+	function startRun(fileId, sourceName, data) {
+		if (!fileId) {
+			say('Choose an archive to import — upload one, or pick a file you already have here.', true);
+			return Promise.resolve();
+		}
+		say('Checking the archive...');
+		return api('mail_import_start', {
+			alias_id: data.get('alias_id'),
+			own_addresses: data.get('own_addresses'),
+			file_id: fileId
+		}).then(function (j) {
+			if (!j || !j.data || !j.data.run) { say(errorOf(j), true); return; }
+			say(j.data.message);
+			// Clear only the chosen file. A full form.reset() puts the mailbox and
+			// the declared addresses back to their server-rendered defaults, which
+			// reads as though the choices were discarded — and they are exactly what
+			// a second import of the same account would want to keep.
+			var fileField = form.querySelector('input[type=file]');
+			if (fileField) { fileField.value = ''; }
+			refresh();
 		});
 	}
 
@@ -299,6 +432,10 @@ function mailbox_import_panel_script(): void {
 				html += '<button type="button" class="jy-btn jy-btn-danger" data-import-undo="'
 					+ r.id + '">Undo this import</button>';
 			}
+			if (r.can_discard) {
+				html += ' <button type="button" class="jy-btn" data-import-discard="'
+					+ r.id + '">Discard archive</button>';
+			}
 			html += '</td></tr>';
 			html += '<tr class="mail-import-choose-row" data-choose-for="' + r.id
 				+ '" hidden><td colspan="5"></td></tr>';
@@ -322,7 +459,26 @@ function mailbox_import_panel_script(): void {
 				.then(function (j) {
 					if (!j || !j.data) { say(errorOf(j), true); return; }
 					say(j.data.message);
-					location.reload();
+					// Re-render rather than reload: a full reload also throws away
+					// whatever the user had typed into the start form.
+					refresh();
+				});
+			return;
+		}
+
+		var discard = e.target.closest && e.target.closest('[data-import-discard]');
+		if (discard) {
+			if (!window.confirm('Delete the uploaded archive? The imported mail and this '
+					+ 'report are kept — only the source file goes, and it can no longer be '
+					+ 'used to re-run the import.')) {
+				return;
+			}
+			say('Discarding...');
+			api('mail_import_discard', { run_id: parseInt(discard.getAttribute('data-import-discard'), 10) })
+				.then(function (j) {
+					if (!j || !j.data) { say(errorOf(j), true); return; }
+					say(j.data.message);
+					refresh();
 				});
 			return;
 		}
@@ -383,7 +539,12 @@ function mailbox_import_panel_script(): void {
 		}).then(function (j) {
 			if (!j || !j.data) { say(errorOf(j), true); return; }
 			say(j.data.message);
-			location.reload();
+			// Close the chooser BEFORE refreshing: render() deliberately leaves the
+			// table alone while one is open, so refreshing with it still up would
+			// silently do nothing and the run would look stuck.
+			var row = runsBox.querySelector('[data-choose-for="' + runId + '"]');
+			if (row) { row.hidden = true; }
+			refresh();
 		});
 	}
 
@@ -393,6 +554,12 @@ function mailbox_import_panel_script(): void {
 		});
 	}
 	function escapeAttr(s) { return escapeHtml(s); }
+
+	function humanBytes(n) {
+		var units = ['B', 'KB', 'MB', 'GB', 'TB'], i = 0;
+		while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+		return (i === 0 ? n : Math.round(n * 10) / 10) + ' ' + units[i];
+	}
 
 	// One status call on load decides whether to poll at all, so a page with
 	// nothing underway makes no further requests.

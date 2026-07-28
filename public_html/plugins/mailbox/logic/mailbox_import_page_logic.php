@@ -35,6 +35,8 @@ function mailbox_import_page_logic(array $input): LogicResult {
 		'session'             => $session,
 		'settings'            => $settings,
 		'import_enabled'      => (bool)$settings->get_setting('mailbox_import_enabled'),
+		// Null when imports are actually being processed; otherwise why they are not.
+		'scheduler_warning'   => MailImportService::schedulerWarning(),
 		'is_operator'         => $service->isOperator(),
 		'aliases'             => $aliases,
 		'alias_id'            => $alias_id,

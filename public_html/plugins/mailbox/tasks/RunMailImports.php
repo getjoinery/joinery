@@ -21,7 +21,7 @@
  * pending entries of this run", so a crash mid-batch costs at most that batch, and
  * even re-running it is safe because storing an already-stored message dedups.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
@@ -129,6 +129,14 @@ class RunMailImports implements ScheduledTaskInterface {
 		}
 
 		$run->moveTo(MailImportRun::STATE_SCANNED);
+
+		// The run now STOPS and waits for a decision only its owner can make. Tell
+		// them, rather than relying on them remembering to come back to a page they
+		// were invited to leave.
+		self::announce('mail_import.scanned', $run, array(
+			'found' => intval($run->get('mir_total_entries')),
+		));
+
 		return array('status' => 'success', 'message' => 'Import run #' . $run->key . ' scanned: '
 			. $run->get('mir_total_entries') . ' message(s) found, waiting for the user to choose.' . $note);
 	}
@@ -139,6 +147,11 @@ class RunMailImports implements ScheduledTaskInterface {
 
 		if (!empty($counts['exhausted'])) {
 			$importer->finish();
+			$run->load();
+			self::announce('mail_import.finished', $run, array(
+				'stored' => intval($run->get('mir_stored')),
+				'failed' => intval($run->get('mir_failed')),
+			));
 			return array('status' => 'success', 'message' => 'Import run #' . $run->key . ' finished: '
 				. $run->get('mir_stored') . ' stored, ' . $run->get('mir_dedup') . ' already present, '
 				. $run->get('mir_skipped') . ' skipped, ' . $run->get('mir_failed') . ' failed.');
@@ -186,6 +199,45 @@ class RunMailImports implements ScheduledTaskInterface {
 		}
 		$run = new MailImportRun(intval($id), TRUE);
 		return $run->key ? $run : null;
+	}
+
+	/**
+	 * Tell the run's owner something happened to it.
+	 *
+	 * Targeted at exactly one person — the one who started it — rather than
+	 * broadcast to a topic: an import is personal, and nobody else can answer the
+	 * question it is asking. Delivery (in-app, email, both, neither) is the
+	 * recipient's own preference to make, which is precisely why this goes through
+	 * the signal bus instead of sending anything directly.
+	 *
+	 * Best-effort by construction: SignalBus::dispatch swallows its own failures,
+	 * and a lost notification must never fail a run whose mail is already safe.
+	 */
+	private static function announce(string $signal, MailImportRun $run, array $extra): void {
+		try {
+			require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
+			require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+
+			$mailbox = '';
+			try {
+				$alias = new InboundEmailAlias(intval($run->get('mir_iea_inbound_email_alias_id')), TRUE);
+				if ($alias->key) {
+					$mailbox = (string)$alias->get_full_address();
+				}
+			} catch (Throwable $e) {
+				// A missing mailbox is worth reporting around, not staying silent over.
+			}
+
+			SignalBus::dispatch($signal, array_merge(array(
+				'run_id'      => intval($run->key),
+				'source_name' => (string)($run->get('mir_source_name') ?: 'the archive'),
+				'mailbox'     => $mailbox,
+				'recipients'  => array(intval($run->get('mir_usr_user_id'))),
+			), $extra));
+		} catch (Throwable $e) {
+			error_log('RunMailImports: could not announce ' . $signal
+				. ' for run ' . $run->key . ' — ' . $e->getMessage());
+		}
 	}
 
 	/**
