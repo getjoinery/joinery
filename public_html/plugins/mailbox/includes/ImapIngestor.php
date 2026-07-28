@@ -25,12 +25,17 @@
  * failures are caught by the caller (the poller) and recorded as last_status so
  * one unreachable mailbox never stops the rest.
  *
+ * Every poll that did anything leaves a durable run record (evl_event_logs,
+ * event 'mailbox_imap_ingest') plus bounded error-log detail — see recordRun().
+ * iia_last_status is overwritten each poll, so it cannot answer "what did the
+ * backfill lose three hours ago"; the run record can.
+ *
  * Spam (specs/inbound_email_spam_filtering.md): a message ingested into a folder
  * whose iif_role is 'junk' is marked iem_spam_verdict='spam' — the remote server
  * already classified it, so no auth rule runs. This gives the reader's Spam view
  * the same meaning for IMAP-polled mail as for locally-received mail.
  *
- * @version 1.4
+ * @version 1.5
  */
 
 require_once(PathHelper::getComposerAutoloadPath());
@@ -45,6 +50,7 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ImapClient.php
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Client.php'));
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2ProviderRegistry.php'));
+require_once(PathHelper::getIncludePath('data/event_logs_class.php'));
 
 class ImapIngestorException extends Exception {}
 
@@ -53,6 +59,13 @@ class ImapIngestor {
 	/** Generous text-body ceiling. Bodies over this are truncated-and-marked,
 	 *  never dropped — the full part is still fetchable on demand like any part. */
 	const TEXT_BODY_CEILING = 2097152; // 2 MB
+
+	/** Per-message failure lines written to the error log per run. A folder that
+	 *  fails wholesale would otherwise flood the log with one line per message. */
+	const MAX_LOGGED_FAILURES = 100;
+
+	/** evl_event value for the run record. */
+	const RUN_EVENT = 'mailbox_imap_ingest';
 
 	/** @var InboundImapAccount */
 	private $account;
@@ -296,7 +309,8 @@ class ImapIngestor {
 	 * NOT close the connection — the caller (the poller, or a sibling ImapSyncer's
 	 * Pull → Ingest → Push cycle) owns the lifecycle (§6.2).
 	 *
-	 * Returns ['stored'=>int, 'dedup'=>int, 'seen'=>int, 'status'=>string].
+	 * Returns ['stored'=>int, 'dedup'=>int, 'seen'=>int, 'failed'=>int,
+	 * 'failed_detail'=>array, 'status'=>string].
 	 * Throws ImapIngestorException on connect/auth failure (the poller records it).
 	 */
 	public function poll(int $maxPerRun): array {
@@ -308,15 +322,17 @@ class ImapIngestor {
 		$this->detectCapabilities();
 
 		if ($this->account->syncEnabled()) {
-			return $this->ingestTrackedFolders($maxPerRun, $alias, $domain, $recipient);
+			$res = $this->ingestTrackedFolders($maxPerRun, $alias, $domain, $recipient);
+		} else {
+			// Off feed: the single configured folder only, no membership rows — behavior
+			// is identical to the pre-sync single-folder ingest, just cursored in iif_.
+			$folder = $this->ensureFolderCursor($this->account->get('iia_imap_folder') ?: 'INBOX',
+				InboundImapFolder::ROLE_INBOX);
+			$res = $this->ingestFolder($folder, $maxPerRun, false, $alias, $domain, $recipient);
+			$this->account->recordStatus($res['status']);
 		}
 
-		// Off feed: the single configured folder only, no membership rows — behavior
-		// is identical to the pre-sync single-folder ingest, just cursored in iif_.
-		$folder = $this->ensureFolderCursor($this->account->get('iia_imap_folder') ?: 'INBOX',
-			InboundImapFolder::ROLE_INBOX);
-		$res = $this->ingestFolder($folder, $maxPerRun, false, $alias, $domain, $recipient);
-		$this->account->recordStatus($res['status']);
+		$this->recordRun($res);
 		return $res;
 	}
 
@@ -346,23 +362,30 @@ class ImapIngestor {
 				InboundImapFolder::ROLE_INBOX);
 		}
 
-		$totalStored = 0; $totalDedup = 0; $totalSeen = 0; $parts = array();
+		$totalStored = 0; $totalDedup = 0; $totalSeen = 0; $totalFailed = 0;
+		$parts = array(); $failedDetail = array();
 		foreach ($folders as $folder) {
 			try {
 				$res = $this->ingestFolder($folder, $maxPerRun, $folder->isMembership(), $alias, $domain, $recipient);
 				$totalStored += $res['stored']; $totalDedup += $res['dedup']; $totalSeen += $res['seen'];
+				$totalFailed += $res['failed'];
+				$failedDetail = array_merge($failedDetail, $res['failed_detail']);
 				$parts[] = $res['status'];
 			} catch (Throwable $e) {
-				error_log('ImapIngestor: ingest failed for folder ' . $folder->get('iif_name')
-					. ' (account ' . $this->account->key . '): ' . $e->getMessage());
+				// The whole folder was lost, not one message — record it as a single
+				// failure so it shows up in the run record rather than only in the log.
+				$totalFailed++;
+				$failedDetail[] = array('uid' => '(whole folder)', 'folder' => (string)$folder->get('iif_name'),
+					'reason' => $e->getMessage());
 				$parts[] = $folder->get('iif_name') . ': ERROR';
 			}
 		}
 
 		$statusMsg = 'Ingested ' . count($folders) . ' folder(s): ' . $totalStored . ' stored, '
-			. $totalDedup . ' duplicate. ' . implode(' | ', $parts);
+			. $totalDedup . ' duplicate, ' . $totalFailed . ' failed. ' . implode(' | ', $parts);
 		$this->account->recordStatus($statusMsg);
-		return array('stored' => $totalStored, 'dedup' => $totalDedup, 'seen' => $totalSeen, 'status' => $statusMsg);
+		return array('stored' => $totalStored, 'dedup' => $totalDedup, 'seen' => $totalSeen,
+			'failed' => $totalFailed, 'failed_detail' => $failedDetail, 'status' => $statusMsg);
 	}
 
 	/**
@@ -422,8 +445,8 @@ class ImapIngestor {
 				$folder->set('iif_last_seen_uid', $highUid);
 				$folder->prepare();
 				$folder->save();
-				return array('stored' => 0, 'dedup' => 0, 'seen' => 0,
-					'status' => $folderName . ': seeded cursor');
+				return array('stored' => 0, 'dedup' => 0, 'seen' => 0, 'failed' => 0,
+					'failed_detail' => array(), 'status' => $folderName . ': seeded cursor');
 			}
 		}
 
@@ -432,7 +455,8 @@ class ImapIngestor {
 			$folder->set('iif_last_seen_uid', max($lastSeenUid, $highUid));
 			$folder->prepare();
 			$folder->save();
-			return array('stored' => 0, 'dedup' => 0, 'seen' => 0, 'status' => $folderName . ': no new');
+			return array('stored' => 0, 'dedup' => 0, 'seen' => 0, 'failed' => 0,
+				'failed_detail' => array(), 'status' => $folderName . ': no new');
 		}
 
 		// Walk forward one bounded UID window per run (oldest-first). A numeric UID
@@ -448,19 +472,29 @@ class ImapIngestor {
 
 		$router = new InboundEmailRouter();
 
-		$stored = 0; $dedup = 0; $seen = 0; $maxUid = $windowEnd;
+		$stored = 0; $dedup = 0; $seen = 0; $failed = 0; $failedDetail = array();
+		$maxUid = $windowEnd;
 		foreach ($uids as $uid) {
 			$seen++;
 			$data = $metaFetch[$uid] ?? null;
-			if ($data === null) { $maxUid = min($maxUid, $uid - 1); continue; }
+			if ($data === null) {
+				// The UID was in the window but the server returned nothing for it.
+				// Counting it keeps stored + dup + failed reconciled against seen.
+				$failed++;
+				$failedDetail[] = array('uid' => $uid, 'folder' => $folderName,
+					'reason' => 'The server returned no data for this message.');
+				$maxUid = min($maxUid, $uid - 1);
+				continue;
+			}
 
 			try {
 				$result = $this->ingestOne($client, $folder, $uid, $data, $router,
 					$alias, $domain, $recipient, $serverUidValidity, $recordMembership);
 				if ($result['dedup']) { $dedup++; } else { $stored++; }
 			} catch (Throwable $e) {
-				error_log('ImapIngestor: failed to ingest UID ' . $uid . ' in ' . $folderName
-					. ' for account ' . $this->account->key . ': ' . $e->getMessage());
+				// Logged in one bounded batch by recordRun, not one call per message.
+				$failed++;
+				$failedDetail[] = array('uid' => $uid, 'folder' => $folderName, 'reason' => $e->getMessage());
 				$maxUid = min($maxUid, $uid - 1);
 			}
 		}
@@ -470,7 +504,99 @@ class ImapIngestor {
 		$folder->save();
 
 		return array('stored' => $stored, 'dedup' => $dedup, 'seen' => $seen,
-			'status' => $folderName . ': ' . $stored . ' stored, ' . $dedup . ' dup');
+			'failed' => $failed, 'failed_detail' => $failedDetail,
+			'status' => $folderName . ': ' . $stored . ' stored, ' . $dedup . ' dup, ' . $failed . ' failed');
+	}
+
+	// ── Run record ─────────────────────────────────────────────────────────
+
+	/**
+	 * Reduce one poll's counters to the numbers a human needs: failures grouped by
+	 * reason (fifty messages failing the same way is one thing to fix, not fifty),
+	 * and an `unaccounted` reconciliation of stored + duplicate + failed against the
+	 * UIDs actually walked. A non-zero unaccounted means messages went missing
+	 * without anything reporting it, which is the failure mode a counter alone hides.
+	 *
+	 * Pure — no DB, no IMAP, no logging. recordRun() does the writing.
+	 *
+	 * @return array ['note'=>string, 'success'=>bool, 'unaccounted'=>int, 'failed_reasons'=>array]
+	 */
+	public static function summarizeRun(array $res, string $subject = ''): array {
+		$seen   = intval($res['seen'] ?? 0);
+		$stored = intval($res['stored'] ?? 0);
+		$dedup  = intval($res['dedup'] ?? 0);
+		$failed = intval($res['failed'] ?? 0);
+		$unaccounted = $seen - $stored - $dedup - $failed;
+
+		$reasons = array();
+		foreach ((array)($res['failed_detail'] ?? array()) as $f) {
+			$r = (string)($f['reason'] ?? 'Unknown error.');
+			$reasons[$r] = ($reasons[$r] ?? 0) + 1;
+		}
+		arsort($reasons);
+
+		$parts = array('seen ' . $seen, 'stored ' . $stored, 'duplicates ' . $dedup, 'failed ' . $failed);
+		if ($unaccounted !== 0) { $parts[] = 'unaccounted ' . $unaccounted; }
+
+		$note = ($subject !== '' ? $subject . ': ' : '') . implode(', ', $parts) . '.';
+		foreach ($reasons as $reason => $count) {
+			$note .= "\n  x{$count}: {$reason}";
+		}
+
+		return array(
+			'note'           => $note,
+			'success'        => ($failed === 0 && $unaccounted === 0),
+			'unaccounted'    => $unaccounted,
+			'failed_reasons' => $reasons,
+		);
+	}
+
+	/**
+	 * Persist what this poll did: one evl_event_logs row plus bounded error-log
+	 * detail. An idle poll (nothing stored, nothing failed, nothing unaccounted)
+	 * writes nothing — a mailbox polled every few minutes forever would otherwise
+	 * bury the runs that matter under thousands of no-op rows. A backfill therefore
+	 * leaves one row per batch, which is the progress trail.
+	 */
+	private function recordRun(array $res): void {
+		$summary = self::summarizeRun($res, 'account ' . $this->account->key . ' ' . $this->describeAccount());
+
+		if (intval($res['stored'] ?? 0) === 0 && intval($res['failed'] ?? 0) === 0
+				&& $summary['unaccounted'] === 0) {
+			return;
+		}
+
+		// Error log: the summary line always, then per-message detail, bounded so a
+		// wholesale folder failure cannot flood the log.
+		error_log('mailbox_imap_ingest: ' . str_replace("\n  ", ' | ', $summary['note']));
+		$detail = (array)($res['failed_detail'] ?? array());
+		$shown = 0;
+		foreach ($detail as $f) {
+			if ($shown++ >= self::MAX_LOGGED_FAILURES) {
+				error_log('mailbox_imap_ingest: ... and ' . (count($detail) - self::MAX_LOGGED_FAILURES)
+					. ' further failed message(s) not listed.');
+				break;
+			}
+			error_log('mailbox_imap_ingest: failed UID ' . $f['uid'] . ' in ' . $f['folder']
+				. ' — ' . $f['reason']);
+		}
+
+		try {
+			$log = new EventLog(NULL);
+			$log->set('evl_event',       self::RUN_EVENT);
+			$log->set('evl_was_success', $summary['success']);
+			$log->set('evl_note',        $summary['note']);
+			$log->save();
+		} catch (Throwable $e) {
+			// The mail is already stored; losing its audit row must not fail the poll.
+			error_log('mailbox_imap_ingest: could not write the run record — ' . $e->getMessage());
+		}
+	}
+
+	/** Human label for the account in logs — never the password or token. */
+	private function describeAccount(): string {
+		$label = (string)($this->account->get('iia_label') ?: $this->account->get('iia_username'));
+		return $label !== '' ? '(' . $label . ')' : '';
 	}
 
 	/**

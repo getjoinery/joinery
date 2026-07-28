@@ -2609,6 +2609,37 @@ choice. Failures are per-account and non-fatal: one unreachable mailbox or expir
 token never stops the rest, and the reason is recorded in the account's last status
 (`iia_needs_reauth` is set when a token refresh/auth fails, surfacing a Reconnect).
 
+### The run record
+
+`iia_last_status` and the scheduled task's last-run message are both overwritten
+every pass, and a full-history backfill is hundreds of passes — so neither can
+answer *what did the import lose two hours ago*. Every poll that did something
+therefore leaves a durable row in `evl_event_logs` under the event
+**`mailbox_imap_ingest`**, holding the counts (`seen`, `stored`, `duplicates`,
+`failed`) and each distinct failure reason with the number of messages it hit.
+Fifty messages failing the same way read as one line, not fifty.
+
+Two things make an otherwise-silent loss visible:
+
+- **`unaccounted`** — `seen` counts every UID the window walked. If
+  `stored + duplicates + failed` does not reconcile against it, the shortfall is
+  named in the note and the row is marked unsuccessful. This is the only signal
+  for a message that disappeared without anything reporting a reason.
+- **A UID the server returned no data for** is a counted failure rather than a
+  skip, so the reconciliation above stays honest.
+
+An **idle poll writes nothing** — a mailbox polled every five minutes forever would
+otherwise bury the runs that matter under thousands of no-op rows. A backfill leaves
+one row per batch, which is the progress trail. The same summary goes to the error
+log prefixed `mailbox_imap_ingest:`, followed by one line per failed message (UID,
+folder, reason) capped at `ImapIngestor::MAX_LOGGED_FAILURES` so a wholesale folder
+failure cannot flood the log. Writing the row is best-effort: if it fails, the poll
+still succeeds and the mail is still stored.
+
+A failed message leaves the folder cursor below it, so the next poll retries it —
+a permanently-broken message therefore records a failure every pass until it is
+dealt with.
+
 ### Reference-backed storage + the attachment list
 
 IMAP-sourced messages are **reference-backed**, not copied whole. Unlike a pushed
