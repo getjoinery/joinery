@@ -72,10 +72,12 @@
  * Inbound filters (specs/implemented/inbound_email_filters.md): after a locally-received
  * message is persisted and its spam verdict set, storeMessage runs every in-scope operator
  * filter via InboundEmailFilter::runForMessage — one hook covering the Postfix and webhook
- * paths alike, never IMAP-polled mail. forwardStoredMessage() relays a copy for a filter's
- * "Forward to" action, reusing the alias-forward envelope rebuild + relay.
+ * paths alike. Mail that did not just arrive is exempt: IMAP-polled feeds (which use
+ * storeExtracted) and archive imports (which pass run_filters => false).
+ * forwardStoredMessage() relays a copy for a filter's "Forward to" action, reusing the
+ * alias-forward envelope rebuild + relay.
  *
- * @version 1.24
+ * @version 1.25
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -375,8 +377,19 @@ class InboundEmailRouter {
 	 * $content_spam is the content-spam signal from resolveContentSpam()
 	 * (['signal'=>spam|ham|none, 'score'=>?float]); when null it is resolved here
 	 * (Postfix milter X-Spam header), so a direct caller still records it.
+	 *
+	 * $options tunes the store for callers that are not live delivery:
+	 *   run_filters   (bool, default true)  run the inbound filters after the store
+	 *   import_run_id (?int, default null)  stamp the archive-import run that created
+	 *                                       the row, which is what Undo reverses
+	 *   direction     (?string)             'outbound' for a message the user sent,
+	 *                                       recovered from an archive's Sent folder
+	 *   received_time (?string)             UTC 'Y-m-d H:i:s' from the message's own
+	 *                                       Date header, so imported mail sorts by
+	 *                                       when it was sent, not when it was read in
+	 *   is_read / is_starred / is_archived (bool) source state carried across
 	 */
-	public function storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $auth = null, $content_spam = null) {
+	public function storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $auth = null, $content_spam = null, array $options = array()) {
 		if ($auth === null) {
 			$auth = $this->readAuthResults($raw_email);
 		}
@@ -420,17 +433,26 @@ class InboundEmailRouter {
 		// A Standard domain stores plaintext even when its owner holds a vault.
 		$sealing = ($vault !== null && $domain->seals_content());
 
+		// A composed row (an archive's Sent mail arrives as one) treats iem_recipient
+		// as CONTENT, not as the routing address — that is what decryptSealedField
+		// does with it — so on a sealing mailbox it has to go through the seal like
+		// the body. Live delivery never hits this: its rows are always inbound.
+		$direction = (string)($options['direction'] ?? 'inbound');
+		$seal_recipient = ($sealing && InboundEmailMessage::isComposedDirection($direction));
+		$recipient_value = substr((string)$envelope_recipient, 0, 500);
+
 		$row = [
 			'iem_ied_inbound_email_domain_id' => $domain->key,
 			'iem_iea_inbound_email_alias_id'  => $alias ? $alias->key : null,
 			'iem_sender'      => $sealing ? '' : $sender,
-			'iem_recipient'   => substr($envelope_recipient, 0, 500),
+			'iem_recipient'   => $recipient_value,
 			'iem_subject'     => $sealing ? '' : $subject,
 			'iem_body_plain'  => $sealing ? '' : $bodies['plain'],
 			'iem_body_html'   => $sealing ? '' : $bodies['html'],
 			'iem_raw_message' => '', // raw goes to the store after insert (see below)
 			'iem_message_id_header' => $message_id_header,
 			'iem_thread_key'  => $thread_key,
+			'iem_direction'   => $direction,
 			'iem_dkim_result'  => $auth['dkim'],
 			'iem_spf_result'   => $auth['spf'],
 			'iem_dmarc_result' => $auth['dmarc'],
@@ -438,8 +460,20 @@ class InboundEmailRouter {
 			'iem_spam_verdict' => $this->classifySpam($auth, $content_spam['signal']),
 			'iem_spam_score'   => $content_spam['score'],
 			'iem_size_bytes'  => strlen($raw_email),
-			'iem_received_time' => gmdate('Y-m-d H:i:s'),
+			// Imported mail carries its own Date header, so a decade-old message sorts
+			// where it belongs rather than all of them landing at the import's clock.
+			'iem_received_time' => (string)($options['received_time'] ?? '') !== ''
+				? $options['received_time'] : gmdate('Y-m-d H:i:s'),
 		];
+
+		// Source state an importer carries across, and the run tag that makes the
+		// import reversible. All absent for live delivery, which wants the defaults.
+		if (!empty($options['is_read']))     { $row['iem_is_read'] = true; }
+		if (!empty($options['is_starred']))  { $row['iem_is_starred'] = true; }
+		if (!empty($options['is_archived'])) { $row['iem_is_archived'] = true; }
+		if (!empty($options['import_run_id'])) {
+			$row['iem_mir_mail_import_run_id'] = intval($options['import_run_id']);
+		}
 
 		// The whole store — the row insert, the content seal (when sealing), and
 		// the attachment/raw persistence — is ONE transaction, committed only
@@ -468,13 +502,18 @@ class InboundEmailRouter {
 			if ($owns_tx && $db->inTransaction()) {
 				$db->rollBack();
 			}
-			// Dedup: a unique violation (SQLSTATE 23505 on message-id/recipient/
-			// direction) means a fully stored message already exists — treat the
-			// retry as a success. Rolled back before any file was written, so no
-			// stored object is orphaned. Some SystemBase paths wrap the PDOException.
-			$code = ($e instanceof PDOException) ? $e->getCode() : null;
-			$prev = $e->getPrevious();
-			if ($code === '23505' || ($prev instanceof PDOException && $prev->getCode() === '23505')) {
+			// Dedup: the message is already stored, so treat this as a successful
+			// retry. Rolled back before any file was written, so no stored object is
+			// orphaned.
+			//
+			// It surfaces TWO ways, and both count. SystemBase::save() pre-validates
+			// the unique_with (message-id, recipient, direction) and throws a
+			// DisplayableUserException; a concurrent insert instead trips the database
+			// UNIQUE (SQLSTATE 23505, sometimes wrapped). Recognising only the second
+			// left the first as an unhandled failure — the same pairing storeExtracted
+			// already uses.
+			if ($this->isUniqueViolation($e)
+					|| $this->duplicateMessageExists($message_id_header, $row['iem_recipient'], $direction)) {
 				return ['message' => null, 'dedup' => true];
 			}
 			throw $e;
@@ -487,7 +526,8 @@ class InboundEmailRouter {
 			// seals the whole message, body and attachments alike.
 			$dek = null;
 			if ($sealing) {
-				$dek = $this->sealMessageContent(intval($msg->key), $vault, $sender, $subject, $bodies['plain'], $bodies['html']);
+				$dek = $this->sealMessageContent(intval($msg->key), $vault, $sender, $subject,
+					$bodies['plain'], $bodies['html'], $seal_recipient ? $recipient_value : null);
 			}
 
 			// Row inserted (we now have the serial id): split attachments into
@@ -513,8 +553,16 @@ class InboundEmailRouter {
 		// Inbound filters (specs/implemented/inbound_email_filters.md). storeMessage
 		// is the single local-only post-persist point, reached by every locally-
 		// received path (Postfix milter + provider webhook) — so this one call runs
-		// filters identically for all of them, and never for IMAP-polled mail (which
-		// uses storeExtracted). It runs AFTER the spam verdict is set, so a filter's
+		// filters identically for all of them.
+		//
+		// Two ingest paths are exempt, for the same reason: the mail did not just
+		// arrive. IMAP-polled mail never reaches here (it uses storeExtracted), and
+		// archive imports pass run_filters => false. An archive already reflects
+		// whatever filtering its source applied, and running years-old mail through
+		// live rules would fire forwards and notifications for messages nobody
+		// received today (specs/mail_archive_import.md § Deliberately not doing).
+		//
+		// It runs AFTER the spam verdict is set, so a filter's
 		// never_spam/mark_spam is the last word on disposition. Best-effort: a filter
 		// failure is logged but never aborts ingest (the message is already stored).
 		//
@@ -522,14 +570,16 @@ class InboundEmailRouter {
 		// $msg's own columns (specs/implemented/inbound_email_encryption_at_rest.md
 		// § 4.2): ingest runs with no unlock window, so a sealed row's iem_sender/
 		// iem_subject/iem_body_* would raise VaultLockedException on read.
-		try {
-			require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_filter_class.php'));
-			InboundEmailFilter::runForMessage($msg, $parsed, $alias, [
-				'sender' => $sender, 'subject' => $subject,
-				'body_plain' => $bodies['plain'], 'body_html' => $bodies['html'],
-			]);
-		} catch (\Throwable $e) {
-			error_log('InboundEmailRouter: inbound filter run failed for message ' . $msg->key . ': ' . $e->getMessage());
+		if (!array_key_exists('run_filters', $options) || $options['run_filters']) {
+			try {
+				require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_filter_class.php'));
+				InboundEmailFilter::runForMessage($msg, $parsed, $alias, [
+					'sender' => $sender, 'subject' => $subject,
+					'body_plain' => $bodies['plain'], 'body_html' => $bodies['html'],
+				]);
+			} catch (\Throwable $e) {
+				error_log('InboundEmailRouter: inbound filter run failed for message ' . $msg->key . ': ' . $e->getMessage());
+			}
 		}
 
 		return ['message' => $msg, 'dedup' => false];
@@ -790,11 +840,14 @@ class InboundEmailRouter {
 	 * Returns the per-message DEK (raw bytes) so the caller can also seal this
 	 * message's attachments under the SAME key.
 	 */
-	private function sealMessageContent(int $message_id, $vault, string $sender, string $subject, string $body_plain, string $body_html): string {
-		// iem_recipient is an inbound row's receiving alias address — routing
-		// metadata, not content — so $seal_recipient stays false; storeMessage
-		// already wrote it in cleartext at insert (it is never emptied above).
-		return InboundEmailMessage::sealAndPersistContent($message_id, $vault, $sender, '', $subject, $body_plain, $body_html, false);
+	private function sealMessageContent(int $message_id, $vault, string $sender, string $subject, string $body_plain, string $body_html, ?string $recipient = null): string {
+		// On an INBOUND row iem_recipient is the receiving alias address — routing
+		// metadata, not content — so it stays cleartext exactly as storeMessage wrote
+		// it at insert. $recipient is non-null only for a COMPOSED row (imported Sent
+		// mail), where the address list is genuinely content and the read path expects
+		// ciphertext.
+		return InboundEmailMessage::sealAndPersistContent($message_id, $vault, $sender,
+			(string)$recipient, $subject, $body_plain, $body_html, $recipient !== null);
 	}
 
 	/**
@@ -1212,17 +1265,28 @@ class InboundEmailRouter {
 		}
 	}
 
-	/** True if a row with this (message-id, recipient) already exists. */
-	private function duplicateMessageExists(?string $message_id_header, string $recipient): bool {
+	/**
+	 * True if a row with this (message-id, recipient) already exists — the unique
+	 * key, which is deliberately mailbox-agnostic: a message is stored once.
+	 *
+	 * $direction narrows it to the full key when the caller knows it. Omitting it
+	 * matches the IMAP path's older, looser question, which is right there because
+	 * that path only ever stores inbound.
+	 */
+	private function duplicateMessageExists(?string $message_id_header, string $recipient, ?string $direction = null): bool {
 		if ($message_id_header === null || $message_id_header === '') {
 			return false;
 		}
 		$db = DbConnector::get_instance()->get_db_link();
-		$stmt = $db->prepare(
-			"SELECT 1 FROM iem_inbound_email_messages
-			 WHERE iem_message_id_header = ? AND iem_recipient = ? LIMIT 1"
-		);
-		$stmt->execute(array($message_id_header, $recipient));
+		$sql = "SELECT 1 FROM iem_inbound_email_messages
+			 WHERE iem_message_id_header = ? AND iem_recipient = ?";
+		$params = array($message_id_header, $recipient);
+		if ($direction !== null) {
+			$sql .= ' AND iem_direction = ?';
+			$params[] = $direction;
+		}
+		$stmt = $db->prepare($sql . ' LIMIT 1');
+		$stmt->execute($params);
 		return (bool)$stmt->fetchColumn();
 	}
 

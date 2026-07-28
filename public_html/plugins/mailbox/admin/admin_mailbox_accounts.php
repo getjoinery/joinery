@@ -13,7 +13,7 @@
  * every Edit jump to the existing per-object editors with context pre-filled.
  * DNS/host diagnostics live on the Setup tab.
  *
- * @version 1.4
+ * @version 1.5
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -239,6 +239,10 @@ $connect_button = function ($imap) use ($imap_action) {
 							<?php endif; ?>
 						<?php endif; ?>
 					<?php endif; ?>
+
+					<?php // The other way in: a feed pulls from a live account, an import reads a dead export. ?>
+					<a class="btn btn-sm btn-outline-secondary"
+					   href="/plugins/mailbox/admin/admin_mailbox_import?alias_id=<?php echo intval($alias->key); ?>">Import archive</a>
 
 					<?php
 					echo PublicPageBase::action_button('Delete', $alias_action, array(

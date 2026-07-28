@@ -1,7 +1,7 @@
 {
     "name": "Mailbox",
     "description": "Self-hosted email: receiving, forwarding, local mailboxes, webmail reader, IMAP sync, DKIM/SRS",
-    "version": "1.52.0",
+    "version": "1.53.0",
     "author": "Joinery",
     "receives_upgrades": true,
     "included_in_publish": true,
@@ -43,6 +43,15 @@
             "visibility": "in",
             "permission": 0,
             "order": 58
+        },
+        {
+            "slug": "mailbox-import",
+            "title": "Import old mail",
+            "url": "/profile/mailbox/import",
+            "icon": "download",
+            "visibility": "in",
+            "permission": 0,
+            "order": 59
         }
     ],
     "provisioners": [
@@ -166,7 +175,8 @@
         "inbound": "Inbound mail",
         "forwarding": "Forwarding",
         "retention": "Retention and limits",
-        "spam": "Spam filtering"
+        "spam": "Spam filtering",
+        "import": "Importing mail"
     },
     "settings": [
         {
@@ -493,6 +503,44 @@
                 }
             },
             "helptext": "How long mail keeps flowing after the relay subscription lapses."
+        },
+        {
+            "name": "mailbox_import_enabled",
+            "default": "1",
+            "group": "import",
+            "label": "Mail archive import enabled",
+            "type": "checkbox",
+            "helptext": "Lets members bring an existing mailbox in from an exported file. Turning this off also stops runs already underway from advancing."
+        },
+        {
+            "name": "mailbox_import_batch_size",
+            "default": "200",
+            "group": "import",
+            "label": "Messages imported per pass",
+            "type": "number",
+            "validation": {
+                "number": true,
+                "min": 1,
+                "messages": {
+                    "min": "Must be 1 or more."
+                }
+            },
+            "helptext": "How many messages one scheduled-task pass stores. Higher finishes sooner and holds the runner longer."
+        },
+        {
+            "name": "mailbox_import_max_concurrent",
+            "default": "2",
+            "group": "import",
+            "label": "Imports underway at once",
+            "type": "number",
+            "validation": {
+                "number": true,
+                "min": 1,
+                "messages": {
+                    "min": "Must be 1 or more."
+                }
+            },
+            "helptext": "Across the whole deployment, so one large archive cannot starve everyone else's mail."
         }
     ]
 }

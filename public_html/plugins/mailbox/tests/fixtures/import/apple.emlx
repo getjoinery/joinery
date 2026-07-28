@@ -1,0 +1,9 @@
+172
+Message-ID: <apple-one@example.test>
+Date: Fri, 2 Jun 2017 14:00:00 +0000
+From: Colleague <c@work.test>
+To: me@example.test
+Subject: Notes from today
+
+See attached.
+<?xml version="1.0"?><plist><dict><key>flags</key><integer>1</integer></dict></plist>
