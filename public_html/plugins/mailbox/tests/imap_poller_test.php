@@ -18,10 +18,12 @@
  *  - A large RFC822.SIZE with a tiny body is still stored (size never gates ingest).
  *  - PollImapAccounts.run() polls only due/enabled accounts, skips uncredentialed
  *    ones, and reports a summary without throwing (one bad account ≠ failed run).
+ *  - Run-record accounting: failures roll up by reason, stored + duplicate + failed
+ *    reconcile against the UIDs walked, and a shortfall marks the run unsuccessful.
  *
  * Run: php plugins/mailbox/tests/imap_poller_test.php  (requires schema synced).
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -31,6 +33,7 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alia
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ImapIngestor.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/tasks/PollImapAccounts.php'));
 
 class ImapPollerTest {
@@ -55,6 +58,8 @@ class ImapPollerTest {
 			$this->testDedup();
 			$this->testLargeSizeStillStored();
 			$this->testPollerSummary();
+			$this->testRunRecordAccounting();
+			$this->testRunRecordWrite();
 		} catch (\Throwable $e) {
 			check(false, 'EXCEPTION', $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
 		} finally {
@@ -216,8 +221,106 @@ class ImapPollerTest {
 			'uncredentialed account status explains why it was skipped');
 	}
 
+	/**
+	 * summarizeRun() is the pure accounting stage — no DB, no IMAP. It is what turns
+	 * a pile of counters into the one line a human reads, so it gets the direct test.
+	 */
+	private function testRunRecordAccounting() {
+		// A clean run: everything walked is accounted for.
+		$s = ImapIngestor::summarizeRun(array('seen' => 10, 'stored' => 8, 'dedup' => 2,
+			'failed' => 0, 'failed_detail' => array()));
+		$this->ok($s['success'] === true, 'fully reconciled run is successful');
+		$this->ok($s['unaccounted'] === 0, 'clean run has nothing unaccounted');
+		$this->ok(strpos($s['note'], 'seen 10, stored 8, duplicates 2, failed 0.') !== false,
+			'note carries the counts');
+
+		// Repeated failures collapse to one line with a count.
+		$detail = array();
+		for ($i = 0; $i < 3; $i++) {
+			$detail[] = array('uid' => 100 + $i, 'folder' => 'INBOX', 'reason' => 'Body decode failed.');
+		}
+		$detail[] = array('uid' => 200, 'folder' => 'Sent', 'reason' => 'Envelope missing.');
+		$s = ImapIngestor::summarizeRun(array('seen' => 6, 'stored' => 2, 'dedup' => 0,
+			'failed' => 4, 'failed_detail' => $detail));
+		$this->ok($s['failed_reasons']['Body decode failed.'] === 3, 'identical reasons roll up to one entry');
+		$this->ok(count($s['failed_reasons']) === 2, 'distinct reasons stay distinct');
+		$this->ok($s['success'] === false, 'a run with failures is not successful');
+		$this->ok(strpos($s['note'], 'x3: Body decode failed.') !== false, 'note lists the rolled-up reason');
+
+		// The tripwire: messages walked but neither stored, deduped, nor reported.
+		$s = ImapIngestor::summarizeRun(array('seen' => 10, 'stored' => 4, 'dedup' => 1,
+			'failed' => 0, 'failed_detail' => array()));
+		$this->ok($s['unaccounted'] === 5, 'silent shortfall is counted');
+		$this->ok($s['success'] === false, 'a silent shortfall marks the run unsuccessful');
+		$this->ok(strpos($s['note'], 'unaccounted 5') !== false, 'note names the shortfall');
+	}
+
+	/**
+	 * recordRun() writes the durable row — and stays quiet on an idle poll, or a
+	 * mailbox polled every few minutes would bury real runs under no-op rows.
+	 */
+	private function testRunRecordWrite() {
+		$acct = new InboundImapAccount(NULL);
+		$acct->set('iia_label', 'RunRecord ' . $this->suffix);
+		$acct->set('iia_provider_key', 'imap_generic');
+		$acct->set('iia_imap_host', 'imap.invalid.test');
+		$acct->set('iia_iea_inbound_email_alias_id', $this->alias->key);
+		$acct->set('iia_username', 'runrecord@example.test');
+		$acct->set('iia_is_enabled', true);
+		$acct->prepare(); $acct->save();
+		$this->account_ids[] = intval($acct->key);
+
+		$record = new ReflectionMethod('ImapIngestor', 'recordRun');
+		$record->setAccessible(true);
+		$ingestor = new ImapIngestor($acct);
+
+		$before = $this->runRecordCount($acct->key);
+
+		// Idle poll: nothing happened, so nothing is written.
+		$record->invoke($ingestor, array('seen' => 0, 'stored' => 0, 'dedup' => 0,
+			'failed' => 0, 'failed_detail' => array()));
+		$this->ok($this->runRecordCount($acct->key) === $before, 'idle poll writes no run record');
+
+		// A poll that stored mail writes one successful row.
+		$record->invoke($ingestor, array('seen' => 3, 'stored' => 3, 'dedup' => 0,
+			'failed' => 0, 'failed_detail' => array()));
+		$this->ok($this->runRecordCount($acct->key) === $before + 1, 'a poll that stored mail writes a run record');
+
+		$row = $this->db->query("SELECT * FROM evl_event_logs
+			WHERE evl_event = " . $this->db->quote(ImapIngestor::RUN_EVENT) . "
+			  AND evl_note LIKE " . $this->db->quote('%account ' . intval($acct->key) . ' %') . "
+			ORDER BY evl_event_log_id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+		$this->ok($row && $this->truthy($row['evl_was_success']), 'clean run is recorded as successful');
+
+		// A poll that lost messages writes an unsuccessful row naming the reason.
+		$record->invoke($ingestor, array('seen' => 2, 'stored' => 1, 'dedup' => 0, 'failed' => 1,
+			'failed_detail' => array(array('uid' => 7, 'folder' => 'INBOX', 'reason' => 'Fetch timed out.'))));
+		$row = $this->db->query("SELECT * FROM evl_event_logs
+			WHERE evl_event = " . $this->db->quote(ImapIngestor::RUN_EVENT) . "
+			  AND evl_note LIKE " . $this->db->quote('%account ' . intval($acct->key) . ' %') . "
+			ORDER BY evl_event_log_id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+		$this->ok($row && !$this->truthy($row['evl_was_success']), 'a run with failures is recorded as unsuccessful');
+		$this->ok($row && strpos($row['evl_note'], 'Fetch timed out.') !== false,
+			'the failure reason survives into the stored note');
+	}
+
+	private function runRecordCount($accountId): int {
+		return intval($this->db->query("SELECT COUNT(*) FROM evl_event_logs
+			WHERE evl_event = " . $this->db->quote(ImapIngestor::RUN_EVENT) . "
+			  AND evl_note LIKE " . $this->db->quote('%account ' . intval($accountId) . ' %'))->fetchColumn());
+	}
+
+	private function truthy($v): bool {
+		return ($v === true || $v === 't' || $v === 1 || $v === '1' || $v === 'true');
+	}
+
 	private function tearDown() {
 		try {
+			foreach ($this->account_ids as $aid) {
+				$this->db->exec("DELETE FROM evl_event_logs
+					WHERE evl_event = " . $this->db->quote(ImapIngestor::RUN_EVENT) . "
+					  AND evl_note LIKE " . $this->db->quote('%account ' . intval($aid) . ' %'));
+			}
 			if ($this->domain_id) {
 				$aids = $this->db->query("SELECT iea_inbound_email_alias_id FROM iea_inbound_email_aliases
 					WHERE iea_ied_inbound_email_domain_id = " . intval($this->domain_id))->fetchAll(PDO::FETCH_COLUMN);

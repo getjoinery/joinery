@@ -13,7 +13,7 @@
  * same account's last_seen_uid. Failures are per-account and non-fatal — one
  * unreachable mailbox or expired token never stops the rest.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
@@ -55,7 +55,7 @@ class PollImapAccounts implements ScheduledTaskInterface {
 			return array('status' => 'success', 'message' => 'No IMAP accounts due for polling.');
 		}
 
-		$polled = 0; $stored = 0; $errors = 0; $skipped = 0;
+		$polled = 0; $stored = 0; $errors = 0; $skipped = 0; $failedMessages = 0;
 		$messages = array();
 
 		foreach ($accounts as $account) {
@@ -87,6 +87,7 @@ class PollImapAccounts implements ScheduledTaskInterface {
 					$result = $ingestor->poll($maxPerAccount);
 				}
 				$stored += intval($result['stored'] ?? 0);
+				$failedMessages += intval($result['failed'] ?? 0);
 				$messages[] = $this->describe($account) . ': ' . ($result['status'] ?? 'ok');
 			} catch (Throwable $e) {
 				$errors++;
@@ -99,9 +100,12 @@ class PollImapAccounts implements ScheduledTaskInterface {
 			}
 		}
 
+		// Message-level failures are counted separately from account-level errors:
+		// an account can connect fine and still lose individual messages. Per-run
+		// detail lives in the run record (evl_event_logs, mailbox_imap_ingest).
 		$summary = sprintf(
-			'Fetched from %d account(s): %d message(s) stored, %d error(s), %d skipped.',
-			$polled, $stored, $errors, $skipped
+			'Fetched from %d account(s): %d message(s) stored, %d message(s) failed, %d account error(s), %d skipped.',
+			$polled, $stored, $failedMessages, $errors, $skipped
 		);
 		if ($messages) {
 			$summary .= ' ' . implode(' | ', $messages);
