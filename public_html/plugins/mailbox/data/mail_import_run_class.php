@@ -264,6 +264,39 @@ class MailImportRun extends SystemBase {
 			. ' WHERE mir_mail_import_run_id = ?')->execute($params);
 	}
 
+	/** States where the run is over and its archive is no longer working material. */
+	const FINISHED_STATES = array(self::STATE_DONE, self::STATE_FAILED, self::STATE_UNDONE);
+
+	/** True when the run has finished, however it finished. */
+	function isFinished(): bool {
+		return in_array((string)$this->get('mir_state'), self::FINISHED_STATES, true);
+	}
+
+	/**
+	 * Runs whose archive can be discarded: finished at least $days ago and still
+	 * holding a file.
+	 *
+	 * The grace period is the point. Deleting an archive the moment a run completes
+	 * would be tidier and wrong — undoing an import and running it again is a
+	 * normal thing to do, and it needs the same bytes. The window is how long that
+	 * remains possible.
+	 *
+	 * @return int[] run ids
+	 */
+	static function finishedBefore(int $days): array {
+		$db = DbConnector::get_instance()->get_db_link();
+		$in = "'" . implode("','", self::FINISHED_STATES) . "'";
+		$stmt = $db->prepare(
+			"SELECT mir_mail_import_run_id FROM mir_mail_import_runs
+			 WHERE mir_state IN ($in)
+			   AND mir_fil_file_id IS NOT NULL
+			   AND mir_finish_time IS NOT NULL
+			   AND mir_finish_time < now() - (INTERVAL '1 day' * ?)
+			 ORDER BY mir_mail_import_run_id");
+		$stmt->execute(array(max(0, $days)));
+		return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN, 0));
+	}
+
 	/**
 	 * How many runs are actually underway deployment-wide. The concurrency cap
 	 * reads this so one enthusiastic user with a 50GB archive cannot starve the

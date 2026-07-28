@@ -82,8 +82,15 @@ The value is opaque to `File` — it stores and filters on the string but attach
 | `entity_photo` | `File::SOURCE_ENTITY_PHOTO` | avatar / event / location / gallery photo (`entity_photos_ajax.php`) |
 | `email_attachment` | `File::SOURCE_EMAIL_ATTACHMENT` | inbound-email attachment (`InboundEmailRouter.php`) |
 | `ai_chat_upload` | `File::SOURCE_AI_CHAT_UPLOAD` | file uploaded into a joinery_ai chat |
+| `drive` | `File::SOURCE_DRIVE` | member Drive item — the whole Drive surface (listings, trash, purge, quota) scopes to this tag |
+| `mailbox_search_index` | `File::SOURCE_MAILBOX_SEARCH_INDEX` | sealed FTS5 blob (`MailboxIndex`), read server-side only |
+| `mail_import_archive` | `File::SOURCE_MAIL_IMPORT_ARCHIVE` | mbox/zip/tar uploaded to be imported into a mailbox (`MailImportService`) |
 
-`NULL` means "unspecified / legacy." New file-creation sites should stamp a source. Filter a `MultiFile` collection with the `source` option (exact match) or `source_not` (everything except one source — legacy `NULL` files are always kept). The admin files browser (`/admin/admin_files`) exposes an **Exclude email attachments** scope built on `source_not`.
+The tag is what keeps surfaces from bleeding into each other. Drive lists only `drive`, so a mail attachment or an import archive never appears there or counts against a member's quota, even though all three belong to the same user.
+
+`NULL` means "unspecified / legacy." New file-creation sites should stamp a source. Filter a `MultiFile` collection with `source` (exact match), `sources` (any of several — for a surface spanning more than one origin, e.g. the mail-import picker offering Drive items alongside prior archives), or `source_not` (everything except one source — legacy `NULL` files are always kept). The admin files browser (`/admin/admin_files`) exposes an **Exclude email attachments** scope built on `source_not`.
+
+**Size lives on the blob, not the file.** There is no `fil_size` column — several files can share one set of bytes through dedup, so the byte count belongs to `fbb_size_bytes`. Use `File::size_bytes()`; reading `fil_size` yields nothing silently.
 
 ---
 

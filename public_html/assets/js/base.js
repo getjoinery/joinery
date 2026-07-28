@@ -284,7 +284,7 @@ const JoineryModal = (() => {
 // menu when the click lands outside it, and after a menu item is clicked.
 document.addEventListener('click', function (e) {
     document.querySelectorAll('details.jy-actions-dropdown[open]').forEach(function (dd) {
-        if (!dd.contains(e.target) || e.target.closest('.jy-actions-menu button')) {
+        if (!dd.contains(e.target) || e.target.closest('.jy-actions-menu button, .jy-actions-menu a')) {
             dd.removeAttribute('open');
         }
     });

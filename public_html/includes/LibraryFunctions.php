@@ -275,11 +275,109 @@ class LibraryFunctions {
 
 	}	
 	
+	/**
+	 * The protocol to build a URL with when protocol_mode is 'auto'.
+	 *
+	 * 'auto' means "work it out from the request" — which is fine in a browser and
+	 * useless everywhere else. A scheduled task, a CLI script or a queued email has
+	 * no request to inspect, so the naive answer is a guess, and it guessed http:
+	 * every link the platform mailed out from cron pointed at plain HTTP, on sites
+	 * that only serve HTTPS.
+	 *
+	 * The site knows the answer, though — it just was not writing it down. So
+	 * rather than guessing, take the first thing that is actually evidence:
+	 *
+	 *   1. The live request, when there is one. Ground truth.
+	 *   2. What live requests were seen to arrive on last time, recorded by (1).
+	 *      This is what makes the result correct for an HTTP-ONLY site as well as
+	 *      a TLS one: neither is assumed, both are observed. An http-only
+	 *      deployment observes http and keeps getting http.
+	 *   3. http, only on a deployment that has never served a web request at all.
+	 *      Conservative on purpose — an http link to a TLS site redirects, whereas
+	 *      an https link to a site with no TLS simply fails.
+	 *
+	 * An operator who wants to state the answer outright already can: setting
+	 * protocol_mode to 'http' or 'https' bypasses all of this. Observation exists
+	 * only to make 'auto' mean something outside a browser.
+	 *
+	 * @return string 'http' or 'https'
+	 */
+	static function detect_protocol() {
+		if (self::has_request_context()) {
+			$observed = self::isSecure() ? 'https' : 'http';
+			self::remember_protocol($observed);
+			return $observed;
+		}
+
+		$remembered = strtolower(trim((string)Globalvars::get_instance()
+			->get_setting('protocol_observed_scheme', true, true)));
+		if ($remembered === 'http' || $remembered === 'https') {
+			return $remembered;
+		}
+
+		return 'http';
+	}
+
+	/** True when this process is serving a web request rather than running headless. */
+	static function has_request_context() {
+		return php_sapi_name() !== 'cli' && !empty($_SERVER['REQUEST_METHOD']);
+	}
+
+	/**
+	 * Called once per dynamic request by the front controller: note the protocol
+	 * this request arrived on so headless code can build correct links later.
+	 *
+	 * Only meaningful while protocol_mode is 'auto' — every other mode states the
+	 * answer outright and needs no observation. Costs nothing in the steady state:
+	 * the value is compared against the already-loaded settings cache and only
+	 * written when it has actually changed.
+	 */
+	static function observe_protocol() {
+		try {
+			$settings = Globalvars::get_instance();
+			if (($settings->get_setting('protocol_mode') ?: 'auto') !== 'auto') {
+				return;
+			}
+			if (!self::has_request_context()) {
+				return;
+			}
+			self::remember_protocol(self::isSecure() ? 'https' : 'http');
+		} catch (Throwable $e) {
+			// Observing is a convenience for other processes; never let it affect
+			// the request that happened to be doing the observing.
+		}
+	}
+
+	/**
+	 * Record the scheme a real request arrived on, so headless code can use it.
+	 *
+	 * Compares against the cached settings value first and only writes when it has
+	 * genuinely changed, so the steady state costs no query at all. The write is a
+	 * single conditional UPDATE, making a concurrent write harmless, and is
+	 * best-effort — failing to remember must never break the page that observed it.
+	 */
+	private static function remember_protocol($observed) {
+		$settings = Globalvars::get_instance();
+		$known = strtolower(trim((string)$settings->get_setting('protocol_observed_scheme', true, true)));
+		if ($known === $observed) {
+			return; // already recorded — the common case, and it costs nothing
+		}
+		try {
+			$db = DbConnector::get_instance()->get_db_link();
+			$stmt = $db->prepare(
+				"UPDATE stg_settings SET stg_value = ?
+				 WHERE stg_name = 'protocol_observed_scheme' AND stg_value IS DISTINCT FROM ?");
+			$stmt->execute(array($observed, $observed));
+		} catch (Throwable $e) {
+			error_log('LibraryFunctions: could not record the observed protocol — ' . $e->getMessage());
+		}
+	}
+
 	//GENERATES ABSOLUTE URLS USING PROTOCOL_MODE SETTING
 	static function get_absolute_url($path = '') {
 		$settings = Globalvars::get_instance();
 		$protocol_mode = $settings->get_setting('protocol_mode') ?: 'auto';
-		
+
 		// Determine protocol based on protocol_mode
 		switch ($protocol_mode) {
 			case 'http':
@@ -291,10 +389,10 @@ class LibraryFunctions {
 				break;
 			case 'auto':
 			default:
-				$protocol = self::isSecure() ? 'https' : 'http';
+				$protocol = self::detect_protocol();
 				break;
 		}
-		
+
 		// Get host from webDir, stripping any protocol, otherwise use current host
 		$webDir = $settings->get_setting('webDir');
 		if ($webDir) {

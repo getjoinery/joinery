@@ -152,7 +152,7 @@ class Notify {
 
 			if ($send_email) {
 				try {
-					self::_enqueue_email($uid, $title, $body);
+					self::_enqueue_email($uid, $title, $body, $link);
 				} catch (Exception $e) {
 					error_log('[Notify] email enqueue failed for user ' . $uid . ': ' . $e->getMessage());
 				}
@@ -190,10 +190,16 @@ class Notify {
 	 * Queue an email for a recipient. The email is written to `equ_queued_emails`
 	 * with READY_TO_SEND status; the SendQueuedEmails scheduled task delivers it.
 	 * Nothing is sent inline.
+	 *
+	 * $link is the signal's rendered link_template — the same destination the
+	 * in-app notification points at. It is included as a real link, because an
+	 * email telling somebody that something needs their attention and then not
+	 * saying where leaves them to go and find it.
 	 */
-	private static function _enqueue_email($user_id, $title, $body) {
+	private static function _enqueue_email($user_id, $title, $body, $link = null) {
 		require_once(PathHelper::getIncludePath('data/users_class.php'));
 		require_once(PathHelper::getIncludePath('data/queued_email_class.php'));
+		require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 		$user  = new User($user_id, TRUE);
 		$email = $user->get('usr_email');
@@ -219,6 +225,18 @@ class Notify {
 
 		// Plain-text body -> safe HTML, then wrap in the standard inner template.
 		$html  = '<p>' . nl2br(htmlspecialchars((string)$body, ENT_QUOTES, 'UTF-8')) . '</p>';
+
+		// The link, made absolute — a mail client has no site to resolve "/profile/…"
+		// against. An already-absolute link (a signal pointing somewhere else
+		// entirely) is left as it is.
+		$link = trim((string)$link);
+		if ($link !== '') {
+			$url = preg_match('#^https?://#i', $link)
+				? $link
+				: LibraryFunctions::get_absolute_url($link);
+			$safe = htmlspecialchars($url, ENT_QUOTES, 'UTF-8');
+			$html .= '<p><a href="' . $safe . '">' . $safe . '</a></p>';
+		}
 		$inner = $settings->get_setting('individual_email_inner_template');
 		if ($inner) {
 			try {

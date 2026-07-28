@@ -16,7 +16,7 @@
  * code reads, and the reseal of a protected domain's sealed DKIM key alongside
  * the message DEKs on a vault key rotation.
  *
- * @version 1.3
+ * @version 1.4
  */
 
 require_once(PathHelper::getIncludePath('data/files_class.php'));
@@ -191,4 +191,34 @@ VaultUnlock::onWipe(function (int $user_id, ?string $scope) {
 	$index = new MailboxIndex();
 	$index->wipe($user_id);
 });
+
+// --- Chunked upload purpose (specs/chunked_upload_purposes.md) ---
+// A mail archive is routinely larger than a single web request can carry, so it
+// comes in through the platform's resumable chunked transport rather than a form
+// POST. This declares the policy around those bytes; the transport itself is
+// shared and needs to know nothing about mail.
+require_once(PathHelper::getIncludePath('includes/UploadPurposeRegistry.php'));
+UploadPurposeRegistry::register('mail_import_archive', array(
+	'source' => File::SOURCE_MAIL_IMPORT_ARCHIVE,
+	'label'  => 'mail archive',
+
+	// Private, and NOT a Drive item: the archive is working material for one
+	// import run, so it stays out of the member's Drive listing and off their
+	// Drive quota.
+	'restrictions' => array('fil_private' => true),
+
+	// Uploading is gated on the feature being on and the caller being signed in.
+	// Mailbox access is deliberately NOT checked here — a file can be uploaded
+	// before its destination is chosen, and mail_import_start checks the grant
+	// on the mailbox at the point it actually matters.
+	'authorize' => function (int $user_id, array $input): ?string {
+		if ($user_id <= 0) {
+			return 'Sign in required.';
+		}
+		if (!Globalvars::get_instance()->get_setting('mailbox_import_enabled')) {
+			return 'Mail archive import is switched off on this site.';
+		}
+		return null;
+	},
+));
 ?>

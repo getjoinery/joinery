@@ -5,7 +5,7 @@
  * as the admin mount (includes/mailbox_reader_mount.php); this page supplies the
  * theme chrome, the member attachment endpoint, and no detail-page deep links.
  *
- * @version 1.1.0
+ * @version 1.2.0
  */
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -26,6 +26,14 @@ $hoptions = array(
 $page->public_header($hoptions, NULL);
 
 $hoptions['app'] = true;
+// Actions menu, matching the calendar's. Importing old mail is a LINK rather
+// than a modal because it is a multi-step run — pick an archive, wait for it to
+// be read, then choose what to bring — where the calendar's is one file input.
+$hoptions['header_action'] = '<details class="jy-ui jy-actions-dropdown">'
+	. '<summary class="btn btn-secondary">Actions</summary>'
+	. '<div class="jy-actions-menu">'
+	. '<a href="/profile/mailbox/import">Import old mail from another provider&hellip;</a>'
+	. '</div></details>';
 echo PublicPage::BeginPage('Email', $hoptions);
 
 if (!$has_mailboxes) {

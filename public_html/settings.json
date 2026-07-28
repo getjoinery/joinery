@@ -904,6 +904,14 @@
       "helptext": "Controls the protocol on generated URLs and whether plain HTTP is redirected."
     },
     {
+      "name": "protocol_observed_scheme",
+      "default": "",
+      "group": "protocol",
+      "label": "Observed protocol",
+      "type": "text",
+      "helptext": "Recorded automatically from real web requests when Protocol mode is Auto. Cron and CLI have no request to detect from, so they use this to build correct links. Not normally edited by hand; setting Protocol mode explicitly overrides it."
+    },
+    {
       "name": "standard_error",
       "default": "Sorry, that operation caused an error.",
       "managed": true,

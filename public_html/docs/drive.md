@@ -201,6 +201,13 @@ Uploads never overwrite bytes directly — they flow through the one blob-ingest
 path, so dedup and accounting are automatic. The protocol is the complete server
 contract for sync clients:
 
+> **This protocol is not Drive-only.** It is the platform's route for any file
+> larger than a single request, and other subsystems use it by passing a `purpose`
+> to `drive_upload_init` — see [API § Uploading something that is not a Drive
+> file](api.md#uploading-something-that-is-not-a-drive-file). Everything described
+> below is the `drive` purpose specifically: quota, folders, encryption and the
+> dedup short-circuit belong to Drive and do not run for others.
+
 1. **`drive_upload_init`** — `{name, folder_id?, file_id?, size_bytes, sha256?,
    mime_type?}`. Gates folder/file write access, then the per-file size
    (`drive_max_file_bytes`; for an encrypted destination the gate is

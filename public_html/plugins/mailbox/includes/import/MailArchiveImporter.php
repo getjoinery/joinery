@@ -81,18 +81,21 @@ class MailArchiveImporter {
 	// ------------------------------------------------------------------ source
 
 	/**
-	 * The working area for this run. Only formats that cannot be read in place use
-	 * it, and it is removed when the run finishes.
+	 * Where this run may expand things it cannot read in place, and nothing more:
+	 * the path is NAMED here but deliberately not created.
+	 *
+	 * Most formats never need it — an mbox is seeked directly and a zip of saved
+	 * messages is read through the stream wrapper — so creating it up front left an
+	 * empty directory behind for every import that had no use for one. The two
+	 * readers that do expand (a zip holding an mbox, a tar) create it at the moment
+	 * they write, which means a directory existing is now evidence that something
+	 * was actually put in it.
 	 */
 	public function workDir(): string {
 		$dir = (string)$this->run->get('mir_work_dir');
 		if ($dir === '') {
 			$dir = sys_get_temp_dir() . '/joinery-mail-import-' . intval($this->run->key);
 			$this->run->writeColumns(array('mir_work_dir' => $dir));
-		}
-		if (!is_dir($dir)) {
-			@mkdir($dir, 0777, true);
-			@chmod($dir, 0777);
 		}
 		return $dir;
 	}
@@ -489,6 +492,72 @@ class MailArchiveImporter {
 	public function fail(string $reason): void {
 		$this->cleanup();
 		$this->run->moveTo(MailImportRun::STATE_FAILED, substr($reason, 0, 4000));
+	}
+
+	/**
+	 * Discard the run's source archive, reclaiming its bytes.
+	 *
+	 * Only ever deletes a file the IMPORTER created. A Drive-picked archive belongs
+	 * to the user — they put it there, it counts against their quota, and they may
+	 * well want it after the import — so it is detached from the run and left
+	 * entirely alone. The origin tag is what tells the two apart, which is the
+	 * reason uploads are tagged in the first place.
+	 *
+	 * Refuses while the run is still live: the archive is the only copy of what is
+	 * being imported, and deleting it mid-run would strand the run with no way to
+	 * finish and no way to retry.
+	 *
+	 * Returns ['ok'=>bool, 'freed'=>int bytes, 'message'=>string].
+	 */
+	public function discardArchive(): array {
+		if (!$this->run->isFinished()) {
+			return array('ok' => false, 'freed' => 0,
+				'message' => 'The archive is still being imported.');
+		}
+
+		$file_id = intval($this->run->get('mir_fil_file_id'));
+		if ($file_id <= 0) {
+			$this->cleanup();
+			return array('ok' => true, 'freed' => 0, 'message' => 'The archive was already discarded.');
+		}
+
+		$freed = 0;
+		try {
+			$file = new File($file_id, TRUE);
+			if ($file->key) {
+				$source = (string)$file->get('fil_source');
+				if ($source !== File::SOURCE_MAIL_IMPORT_ARCHIVE) {
+					// Somebody's own file, picked from their Drive. Let go of it
+					// without touching it.
+					$this->run->writeColumns(array('mir_fil_file_id' => null));
+					$this->cleanup();
+					return array('ok' => true, 'freed' => 0,
+						'message' => 'That archive is your own file, so it was left where it is.');
+				}
+				$freed = $file->size_bytes();
+				$file->permanent_delete();
+			}
+		} catch (Throwable $e) {
+			return array('ok' => false, 'freed' => 0,
+				'message' => 'The archive could not be removed: ' . $e->getMessage());
+		}
+
+		// Drop the reference before the working area, so a failure half way through
+		// never leaves the run pointing at bytes that are gone.
+		$this->run->writeColumns(array('mir_fil_file_id' => null));
+		$this->cleanup();
+
+		return array('ok' => true, 'freed' => $freed,
+			'message' => 'Archive discarded' . ($freed > 0 ? ', freeing ' . self::formatBytes($freed) : '') . '.');
+	}
+
+	/** Bytes as something a person reads without counting digits. */
+	public static function formatBytes(int $bytes): string {
+		$units = array('B', 'KB', 'MB', 'GB', 'TB');
+		$i = 0;
+		$n = max(0, $bytes);
+		while ($n >= 1024 && $i < count($units) - 1) { $n /= 1024; $i++; }
+		return ($i === 0 ? (int)$n : round($n, 1)) . ' ' . $units[$i];
 	}
 
 	/** Remove the working area. The source file itself is not ours to delete. */

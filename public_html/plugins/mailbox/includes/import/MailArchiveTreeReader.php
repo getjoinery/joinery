@@ -36,6 +36,9 @@ abstract class MailArchiveTreeReader extends MailArchiveReader {
 	/** Set by prepare(); where a member that cannot be read in place is expanded. */
 	protected $work_dir = '';
 
+	/** Cached id => name from the export's label manifest; null until looked for. */
+	private $label_map = null;
+
 	public function prepare(string $path, string $workDir): string {
 		$this->work_dir = $workDir;
 		return $path;
@@ -134,7 +137,7 @@ abstract class MailArchiveTreeReader extends MailArchiveReader {
 			try {
 				$head = $this->peek($path, $member);
 				$headers = self::parseHeaders(self::headerBlock(self::stripEmlx($head)));
-				$meta = self::protonMetadata($this->sidecarFor($path, $member));
+				$meta = self::protonMetadata($this->sidecarFor($path, $member), $this->labelMap($path));
 				if ($meta === null && self::header($headers, 'x-gmail-labels') !== '') {
 					$meta = self::gmailLabels($headers);
 				}
@@ -197,6 +200,39 @@ abstract class MailArchiveTreeReader extends MailArchiveReader {
 			return '';
 		}
 		return $bytes;
+	}
+
+	/**
+	 * The export's label manifest, as id => name, or an empty map when there is
+	 * none.
+	 *
+	 * A Proton export ships `labels.json` naming every folder and label in the
+	 * account. The per-message sidecars reference those by opaque id only, so
+	 * without this a folder somebody called "Meditation" arrives as an unreadable
+	 * base64 string. Looked up once per reader and cached, since it is one small
+	 * file consulted for every message.
+	 *
+	 * Absent for a bare folder of .eml files, which still imports — just without
+	 * custom label names, because there are none to be had.
+	 */
+	protected function labelMap(string $path): array {
+		if ($this->label_map !== null) {
+			return $this->label_map;
+		}
+		$this->label_map = array();
+		foreach ($this->listMembers($path) as $member) {
+			if (strtolower(basename($member)) !== 'labels.json') {
+				continue;
+			}
+			try {
+				$this->label_map = self::protonLabelMap($this->readMember($path, $member));
+			} catch (Throwable $e) {
+				error_log('MailArchiveTreeReader: could not read the label manifest ' . $member
+					. ' — ' . $e->getMessage());
+			}
+			break;
+		}
+		return $this->label_map;
 	}
 
 	/**

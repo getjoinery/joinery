@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   Joinery Default UI Kit  ·  custom.css  ·  v2.3.0
+   Joinery Default UI Kit  ·  custom.css  ·  v2.4.0
    Pure Slate design. Themeable values live in --jy-* tokens on
    :root so branded themes can override them without understanding
    internals. Component rules are scoped under .jy-ui to prevent
@@ -385,7 +385,8 @@ body.jy-default blockquote {
      <details class="jy-actions-dropdown">
        <summary class="btn btn-secondary">Actions</summary>
        <div class="jy-actions-menu">
-         <button type="button">…</button>
+         <button type="button">…</button>   an action on this page
+         <a href="…">…</a>                  an action that lives elsewhere
        </div>
      </details>
    base.js closes any open one on an outside click or after a menu click. */
@@ -407,7 +408,11 @@ body.jy-default blockquote {
   z-index: 200;
   text-align: left;
 }
-.jy-actions-menu button {
+/* An item is a <button> when it acts on this page and an <a> when it goes
+   somewhere else. They look identical, so the choice is about what the item
+   does, not how it should appear. */
+.jy-actions-menu button,
+.jy-actions-menu a {
   display: block;
   width: 100%;
   padding: var(--jy-space-2) var(--jy-space-4);
@@ -419,13 +424,17 @@ body.jy-default blockquote {
   text-align: left;
   white-space: nowrap;
   cursor: pointer;
+  text-decoration: none;
 }
-.jy-actions-menu button:hover {
+.jy-actions-menu button:hover,
+.jy-actions-menu a:hover {
   background: var(--jy-color-surface);
   color: var(--jy-color-primary);
 }
-.jy-actions-menu button.jy-action-danger { color: var(--jy-color-danger, #b42318); }
-.jy-actions-menu button.jy-action-danger:hover { background: var(--jy-color-surface); }
+.jy-actions-menu button.jy-action-danger,
+.jy-actions-menu a.jy-action-danger { color: var(--jy-color-danger, #b42318); }
+.jy-actions-menu button.jy-action-danger:hover,
+.jy-actions-menu a.jy-action-danger:hover { background: var(--jy-color-surface); }
 
 .jy-menu-toggle {
   display: none;

@@ -92,7 +92,14 @@ class MailImportService {
 	}
 
 	/**
-	 * Files in the caller's Drive that could be an archive.
+	 * Files in the caller's Drive that could be an archive, plus archives they
+	 * already uploaded here.
+	 *
+	 * Scoped by origin, not just by owner: a user's account holds files from every
+	 * subsystem — chat uploads, avatars, a sealed search index — and none of those
+	 * are things anyone means when they say "pick my archive". Prior import
+	 * archives are included so an interrupted run can be restarted against the same
+	 * file instead of re-uploading gigabytes.
 	 *
 	 * Encrypted files are LISTED, not hidden, and carry the reason they cannot be
 	 * used. A file in an encrypted folder is decryptable only in the browser, so
@@ -106,8 +113,11 @@ class MailImportService {
 		if ($userId <= 0) {
 			return array();
 		}
-		$files = new MultiFile(array('user_id' => $userId, 'deleted' => false),
-			array('fil_create_time' => 'DESC'), 500);
+		$files = new MultiFile(array(
+			'user_id' => $userId,
+			'deleted' => false,
+			'sources' => array(File::SOURCE_DRIVE, File::SOURCE_MAIL_IMPORT_ARCHIVE),
+		), array('fil_create_time' => 'DESC'), 500);
 		$files->load();
 
 		$extensions = MailArchiveReaderRegistry::acceptedExtensions();
@@ -129,7 +139,7 @@ class MailImportService {
 			$out[] = array(
 				'id'        => intval($file->key),
 				'name'      => $name,
-				'size'      => intval($file->get('fil_size')),
+				'size'      => $file->size_bytes(),
 				'encrypted' => $encrypted,
 				'reason'    => $encrypted ? MailArchiveImporter::ENCRYPTED_FILE_REASON : '',
 			);
@@ -148,9 +158,9 @@ class MailImportService {
 	 * @param array $upload one entry of $_FILES
 	 */
 	public function storeUpload(array $upload): File {
-		if (intval($upload['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-			throw new RuntimeException('The upload did not complete. A very large archive may exceed '
-				. 'this server\'s upload limit — if so, add it to your files first and pick it from there.');
+		$error = intval($upload['error'] ?? UPLOAD_ERR_NO_FILE);
+		if ($error !== UPLOAD_ERR_OK) {
+			throw new RuntimeException(self::uploadErrorMessage($error, $upload));
 		}
 
 		$file = File::createFromUpload(
@@ -158,14 +168,95 @@ class MailImportService {
 			basename((string)($upload['name'] ?? 'archive')),
 			(string)($upload['type'] ?? 'application/octet-stream'),
 			$this->viewer->getUserId(),
-			// Private: an archive of somebody's entire mail history must never be
-			// reachable by URL.
-			array('fil_private' => true)
+			array(
+				// Private: an archive of somebody's entire mail history must never be
+				// reachable by URL.
+				'fil_private' => true,
+				// Tagged as an import archive rather than left unspecified, and
+				// deliberately NOT as a Drive item: it is working material for one run,
+				// so it should not turn up in the member's Drive listing or count
+				// against their quota.
+				'fil_source'  => File::SOURCE_MAIL_IMPORT_ARCHIVE,
+			)
 		);
 		if (!$file || !$file->key) {
 			throw new RuntimeException('The archive could not be saved on the server.');
 		}
 		return $file;
+	}
+
+	/**
+	 * Is the scheduled task that actually performs imports switched on?
+	 *
+	 * Nothing here runs without it: a run is queued by the web request and moved
+	 * forward only by RunMailImports. A task discovered but never activated leaves
+	 * every import sitting at "Waiting to start" indefinitely, which looks exactly
+	 * like a broken feature and gives the user nothing to act on.
+	 *
+	 * Returns null when it is running, or the reason it is not.
+	 */
+	public static function schedulerWarning(): ?string {
+		try {
+			$db = DbConnector::get_instance()->get_db_link();
+			$stmt = $db->prepare("SELECT sct_is_active FROM sct_scheduled_tasks
+				WHERE sct_task_class = 'RunMailImports' AND sct_delete_time IS NULL LIMIT 1");
+			$stmt->execute();
+			$active = $stmt->fetchColumn();
+
+			if ($active === false) {
+				return 'Imports are not running: the Import mail archives task has never been '
+					. 'activated. An administrator can switch it on under Scheduled Tasks. '
+					. 'Anything started now waits until then — nothing is lost.';
+			}
+			if (!$active || $active === 'f') {
+				return 'Imports are paused: the Import mail archives task is switched off. '
+					. 'An administrator can re-enable it under Scheduled Tasks. Anything '
+					. 'started now waits until then — nothing is lost.';
+			}
+		} catch (Throwable $e) {
+			// Not being able to answer is not evidence of a problem; say nothing
+			// rather than warn about a fault of our own.
+			return null;
+		}
+		return null;
+	}
+
+	/**
+	 * What went wrong with an upload, in terms the person can act on.
+	 *
+	 * The size cases are the ones that matter here, because a real mail archive is
+	 * routinely larger than a single web request can carry. That is not a limit of
+	 * the importer — it will happily grind through fifty gigabytes — so the message
+	 * points at the route that has no such ceiling rather than implying the archive
+	 * is unusable.
+	 */
+	private static function uploadErrorMessage(int $error, array $upload): string {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/logic/mail_import_start_logic.php'));
+
+		switch ($error) {
+			case UPLOAD_ERR_INI_SIZE:
+			case UPLOAD_ERR_FORM_SIZE:
+				// The file was rejected before it landed, so its own size is reported
+				// as zero; the request length is the closest honest figure we have.
+				$attempted = intval($upload['size'] ?? 0) ?: intval($_SERVER['CONTENT_LENGTH'] ?? 0);
+				return mail_import_too_large_message($attempted);
+
+			case UPLOAD_ERR_PARTIAL:
+				return 'The upload was cut off before it finished. Try again, or add the file to '
+					. 'your Drive first — Drive resumes where it left off instead of starting over.';
+
+			case UPLOAD_ERR_NO_FILE:
+				return 'No file was received. Choose an archive and try again.';
+
+			case UPLOAD_ERR_NO_TMP_DIR:
+			case UPLOAD_ERR_CANT_WRITE:
+				return 'The server could not save the upload. This is a server problem, not '
+					. 'something wrong with your archive — please report it.';
+
+			case UPLOAD_ERR_EXTENSION:
+				return 'The upload was blocked by a server extension. Please report it.';
+		}
+		return 'The upload did not complete. Add the file to your Drive and pick it from there instead.';
 	}
 
 	/**
@@ -219,7 +310,7 @@ class MailImportService {
 		$run->set('mir_format', $reader::key());
 		$run->set('mir_state', MailImportRun::STATE_QUEUED);
 		$run->set('mir_own_addresses', implode("\n", MailImportRun::parseAddressList(implode("\n", $ownAddresses))));
-		$run->set('mir_bytes_total', intval($file->get('fil_size')));
+		$run->set('mir_bytes_total', $file->size_bytes());
 		$run->prepare();
 		$run->save();
 		$run->load();
@@ -298,6 +389,9 @@ class MailImportService {
 			'finished'    => (string)$run->get('mir_finish_time'),
 			'can_undo'    => ($state === MailImportRun::STATE_DONE && intval($run->get('mir_stored')) > 0),
 			'can_choose'  => ($state === MailImportRun::STATE_SCANNED),
+			// Only offered when the run is over AND still holds an archive — there
+			// is nothing to reclaim once it has been discarded or swept.
+			'can_discard' => ($run->isFinished() && intval($run->get('mir_fil_file_id')) > 0),
 		);
 	}
 

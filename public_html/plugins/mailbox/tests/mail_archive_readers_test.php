@@ -191,10 +191,58 @@ class MailArchiveReadersTest {
 		check($meta !== null, 'proton: the sidecar parses');
 		check($meta['is_read'] === true, 'proton: Unread 0 means the message was read');
 		check($meta['is_starred'] === true, 'proton: Starred carries across');
-		check(in_array('Finance', $meta['labels'], true),
-			'proton: a named label is kept', implode(',', $meta['labels']));
+		// Without the manifest this sidecar's custom folder is an opaque id and
+		// nothing more — the resolved case is covered below.
+		check($meta['labels'] === array(),
+			'proton: a sidecar read alone yields no custom label name',
+			implode(',', $meta['labels']));
 		check($meta['folder'] === 'Inbox', 'proton: the numeric system label maps to a folder',
 			(string)$meta['folder']);
+
+		// A real export's sidecar carries bare NUMERIC label ids — Proton's own
+		// system labels and views. Anything not recognised is a view this platform
+		// does not model, and must be DROPPED: treating an unknown number as a name
+		// is how an import tags two thousand messages with a label called "15".
+		$real = json_encode(array('Version' => 1, 'Payload' => array(
+			'LabelIDs' => array('2', '5', '6', '15', '24', '26'), 'Unread' => 0)));
+		$sys = MailArchiveReader::protonMetadata($real);
+		check($sys['labels'] === array(),
+			'proton: numeric system ids never become labels',
+			json_encode($sys['labels']));
+		check($sys['folder'] === 'Sent',
+			'proton: the recognised system id still resolves the folder', (string)$sys['folder']);
+
+		// A custom folder is referenced by an OPAQUE ID and named nowhere except the
+		// export's own labels.json. Resolving it through that manifest is the only
+		// way the user's folder survives with the name they gave it — losing it, or
+		// naming it after the id, both lose their data.
+		$manifest = MailArchiveReader::protonLabelMap(
+			file_get_contents($this->fixtures . '/proton/user@example.test/labels.json'));
+		check(($manifest['kFn6eqxVdWEkL6aSalke=='] ?? '') === 'Meditation',
+			'proton: labels.json resolves an opaque folder id to its real name');
+		check(($manifest['0'] ?? '') === 'Inbox',
+			'proton: the manifest names the system labels too');
+
+		$opaque = json_encode(array('Payload' => array(
+			'LabelIDs' => array('0', '5', 'kFn6eqxVdWEkL6aSalke=='))));
+		$resolved = MailArchiveReader::protonMetadata($opaque, $manifest);
+		check($resolved['labels'] === array('Meditation'),
+			'proton: a custom folder imports under its own name',
+			json_encode($resolved['labels']));
+		check($resolved['folder'] === 'Inbox',
+			'proton: system ids still resolve the folder, and never become labels',
+			(string)$resolved['folder']);
+
+		// Without the manifest the name simply is not available anywhere, so the id
+		// is dropped rather than used as one.
+		check(MailArchiveReader::protonMetadata($opaque)['labels'] === array(),
+			'proton: with no manifest, an opaque id is dropped rather than used as a name');
+
+		// A sidecar that inlines the name needs no manifest.
+		$withName = json_encode(array('Payload' => array(
+			'LabelIDs' => array(array('ID' => 'abc123def', 'Name' => 'Receipts')))));
+		check(MailArchiveReader::protonMetadata($withName)['labels'] === array('Receipts'),
+			'proton: a name inlined in the sidecar is used directly');
 
 		check(MailArchiveReader::protonMetadata(null) === null,
 			'proton: no sidecar is not an error');
@@ -228,8 +276,11 @@ class MailArchiveReadersTest {
 		$aaa = $byLocator['f|user@example.test/aaa.eml'] ?? null;
 		check($aaa !== null && $aaa['is_starred'] === true,
 			'directory: the sidecar beside a message is applied to it');
-		check($aaa !== null && in_array('Finance', $aaa['labels'], true),
-			'directory: sidecar labels reach the descriptor');
+		// End to end: the walk finds labels.json itself and resolves the sidecar's
+		// opaque id through it, without the caller doing anything.
+		check($aaa !== null && in_array('Meditation', $aaa['labels'], true),
+			'directory: a custom folder is resolved through the export label manifest',
+			$aaa ? json_encode($aaa['labels']) : 'no descriptor');
 
 		check(isset($byLocator['f|user@example.test/bbb.eml']),
 			'directory: a message with no sidecar is still found');

@@ -33,6 +33,15 @@ function mail_import_start_logic(array $input): LogicResult {
 		return LogicResult::error('Mail archive import is switched off on this site.');
 	}
 
+	// An upload over post_max_size is discarded by PHP BEFORE any of this runs:
+	// $_POST and $_FILES both arrive empty while Content-Length says otherwise.
+	// Without this check the request looks like a user who filled in nothing, and
+	// they get told to choose a mailbox they did in fact choose.
+	$posted_bytes = intval($_SERVER['CONTENT_LENGTH'] ?? 0);
+	if ($posted_bytes > 0 && empty($_POST) && empty($_FILES)) {
+		return LogicResult::error(mail_import_too_large_message($posted_bytes));
+	}
+
 	$alias_id = intval($input['alias_id'] ?? 0);
 	if ($alias_id <= 0) {
 		return LogicResult::error('Choose the mailbox the mail should go into.');
@@ -51,9 +60,17 @@ function mail_import_start_logic(array $input): LogicResult {
 
 	// Uploaded now, or picked from files already here. Upload wins when both are
 	// present — the user just chose a file, so that is what they meant.
+	//
+	// The branch is entered whenever a file was ATTEMPTED, not only when one
+	// arrived intact. A file rejected for size has an empty tmp_name and an error
+	// code; guarding on tmp_name would skip straight past it and report the far
+	// less useful "choose an archive".
 	$file_id = intval($input['file_id'] ?? 0);
 	$source_name = '';
-	if (!empty($_FILES['archive']['tmp_name']) && is_uploaded_file($_FILES['archive']['tmp_name'])) {
+	$attempted = isset($_FILES['archive'])
+		&& intval($_FILES['archive']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE;
+
+	if ($attempted) {
 		try {
 			$stored = $service->storeUpload($_FILES['archive']);
 		} catch (Throwable $e) {
@@ -78,6 +95,54 @@ function mail_import_start_logic(array $input): LogicResult {
 		'message' => 'Reading the archive. This runs in the background — you can leave this page, '
 			. 'and you will be asked what to bring in once it knows what is there.',
 	));
+}
+
+/**
+ * The largest archive a plain form upload can carry, in bytes.
+ *
+ * A file has to clear BOTH ini limits — upload_max_filesize for the file and
+ * post_max_size for the whole request — so the real ceiling is the smaller of
+ * them, and it is usually far below what a mail archive weighs.
+ */
+function mail_import_upload_ceiling(): int {
+	$to_bytes = function (string $value): int {
+		$value = trim($value);
+		if ($value === '') { return 0; }
+		$unit = strtolower(substr($value, -1));
+		$n = (int)$value;
+		if ($unit === 'g') { return $n * 1073741824; }
+		if ($unit === 'm') { return $n * 1048576; }
+		if ($unit === 'k') { return $n * 1024; }
+		return $n;
+	};
+	$file = $to_bytes((string)ini_get('upload_max_filesize'));
+	$post = $to_bytes((string)ini_get('post_max_size'));
+	$limits = array_filter(array($file, $post));
+	return $limits ? min($limits) : 0;
+}
+
+/** Bytes as something a person reads without counting digits. */
+function mail_import_format_bytes(int $bytes): string {
+	$units = array('B', 'KB', 'MB', 'GB', 'TB');
+	$i = 0;
+	$n = max(0, $bytes);
+	while ($n >= 1024 && $i < count($units) - 1) { $n /= 1024; $i++; }
+	return ($i === 0 ? (int)$n : round($n, 1)) . ' ' . $units[$i];
+}
+
+/**
+ * Say what actually happened and what to do instead. The archive is not too big
+ * for the importer — it is too big for a single web request, which is a different
+ * problem with a different answer.
+ */
+function mail_import_too_large_message(int $posted_bytes): string {
+	$ceiling = mail_import_upload_ceiling();
+	$size = $posted_bytes > 0 ? 'That archive is ' . mail_import_format_bytes($posted_bytes) . ', and this'
+		: 'That archive is too big to upload here: this';
+	return $size . ' server accepts at most ' . mail_import_format_bytes($ceiling)
+		. ' in a single upload. The importer itself has no size limit — add the file to your '
+		. 'Drive first, which uploads in chunks, then come back and choose it under '
+		. 'Use a file already in my files.';
 }
 
 /**
