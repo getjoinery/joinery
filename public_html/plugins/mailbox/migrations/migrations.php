@@ -541,4 +541,24 @@ return [
 			$stmt->execute(array('mailbox_max_per_window'));
 		},
 	],
+
+	[
+		// Restore the full-text GIN index. iem_012 dropped it when the sealed
+		// MailboxIndex arrived, but only a SEALED mailbox searches through that
+		// index — every unsealed scope still runs the tsvector expression in
+		// MailboxService, which was left doing a sequential scan over every body.
+		//
+		// Built from MailboxService::FULLTEXT_SQL rather than retyped, because the
+		// index is only usable while the two expressions match byte for byte —
+		// which is exactly how this one came to be silently unused before.
+		'id' => 'iem_013_restore_fulltext_gin_index',
+		'version' => '1.60.0',
+		'up' => function($dbconnector) {
+			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxService.php'));
+			$dbconnector->get_db_link()->exec(
+				"CREATE INDEX IF NOT EXISTS iem_fulltext_idx
+				 ON iem_inbound_email_messages
+				 USING GIN (" . MailboxService::FULLTEXT_SQL . ")");
+		},
+	],
 ];

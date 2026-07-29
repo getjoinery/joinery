@@ -22,7 +22,7 @@
  * Locators are "f|member" for a whole file and "m|member|offset:length" for a
  * message inside an mbox member.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/import/MailArchiveReader.php'));
@@ -38,6 +38,9 @@ abstract class MailArchiveTreeReader extends MailArchiveReader {
 
 	/** Cached id => name from the export's label manifest; null until looked for. */
 	private $label_map = null;
+
+	/** Cached id => 'folder'|'label' from the same manifest, read in the same pass. */
+	private $label_kinds = array();
 
 	public function prepare(string $path, string $workDir): string {
 		$this->work_dir = $workDir;
@@ -137,7 +140,8 @@ abstract class MailArchiveTreeReader extends MailArchiveReader {
 			try {
 				$head = $this->peek($path, $member);
 				$headers = self::parseHeaders(self::headerBlock(self::stripEmlx($head)));
-				$meta = self::protonMetadata($this->sidecarFor($path, $member), $this->labelMap($path));
+				$meta = self::protonMetadata($this->sidecarFor($path, $member),
+					$this->labelMap($path), $this->labelKinds($path));
 				if ($meta === null && self::header($headers, 'x-gmail-labels') !== '') {
 					$meta = self::gmailLabels($headers);
 				}
@@ -225,7 +229,9 @@ abstract class MailArchiveTreeReader extends MailArchiveReader {
 				continue;
 			}
 			try {
-				$this->label_map = self::protonLabelMap($this->readMember($path, $member));
+				$manifest = $this->readMember($path, $member);
+				$this->label_map   = self::protonLabelMap($manifest);
+				$this->label_kinds = self::protonLabelKinds($manifest);
 			} catch (Throwable $e) {
 				error_log('MailArchiveTreeReader: could not read the label manifest ' . $member
 					. ' — ' . $e->getMessage());
@@ -233,6 +239,15 @@ abstract class MailArchiveTreeReader extends MailArchiveReader {
 			break;
 		}
 		return $this->label_map;
+	}
+
+	/**
+	 * Which manifest entries are folders rather than labels. Populated by the same
+	 * read as labelMap(), so ask for that first.
+	 */
+	protected function labelKinds(string $path): array {
+		$this->labelMap($path);
+		return $this->label_kinds;
 	}
 
 	/**

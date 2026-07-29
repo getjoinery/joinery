@@ -17,7 +17,7 @@
  * platform's resumable chunk transport under the mail_import_archive upload
  * purpose, so its size is not bounded by any single-request limit.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailImportService.php'));
@@ -44,8 +44,14 @@ function mailbox_render_import_panel($page, array $vars): void {
 	// the person looking at it cannot tell that the cause is one switch elsewhere.
 	$warning = $vars['scheduler_warning'] ?? null;
 	if ($warning) {
-		echo '<div class="jy-alert jy-alert-warning">' . htmlspecialchars($warning) . '</div>';
+		echo '<div class="jy-callout jy-callout-warning">' . htmlspecialchars($warning) . '</div>';
 	}
+
+	// A run that has finished scanning is STOPPED until somebody answers it, and
+	// that answer has to be the first thing on the page. Below the start form it
+	// reads as history, and an import that is merely waiting looks identical to one
+	// that is broken — which is exactly how it goes unnoticed for an hour.
+	echo '<div id="mail-import-attention">' . mailbox_import_attention_html($runs) . '</div>';
 
 	$alias_options = array();
 	foreach ($aliases as $id => $address) {
@@ -123,6 +129,34 @@ function mailbox_render_import_panel($page, array $vars): void {
 	mailbox_import_panel_script();
 }
 
+/**
+ * The banner for every run that is waiting on a decision.
+ *
+ * Rendered empty when nothing needs the user, so the page is quiet in the normal
+ * case and the banner keeps its force for when it appears. The folder list itself
+ * is filled in by the script as soon as it loads — the counts come from the run's
+ * entries, which is a query this render deliberately does not make.
+ */
+function mailbox_import_attention_html(array $runs): string {
+	$html = '';
+	foreach ($runs as $run) {
+		if (empty($run['can_choose'])) {
+			continue;
+		}
+		$name = $run['source'] !== '' ? $run['source'] : 'the archive';
+		$html .= '<section class="jy-callout jy-callout-action" data-attention-for="'
+			. intval($run['id']) . '" role="region" aria-label="Import waiting for you">'
+			. '<h3 class="jy-callout-title">This import is waiting for you</h3>'
+			. '<p>Read ' . number_format($run['total']) . ' messages in '
+			. '<strong>' . htmlspecialchars($name) . '</strong>. '
+			. 'Nothing has been imported yet — tick what to bring across.</p>'
+			. '<div data-chooser-for="' . intval($run['id']) . '">'
+			. '<p class="jy-muted">Counting...</p></div>'
+			. '</section>';
+	}
+	return $html;
+}
+
 /** The run list, rendered server-side first and re-rendered by the poller after. */
 function mailbox_import_runs_html(array $runs): string {
 	if (!$runs) {
@@ -158,22 +192,18 @@ function mailbox_import_runs_html(array $runs): string {
 		$html .= '</td>';
 
 		$html .= '<td>';
-		if (!empty($run['can_choose'])) {
-			$html .= '<button type="button" class="jy-btn jy-btn-primary" data-import-choose="'
-				. intval($run['id']) . '">Choose what to bring</button>';
-		}
+		// No "choose" button here on purpose. The decision lives in the banner at
+		// the top of the page; offering it twice puts the important one in the
+		// easier place to miss.
 		if (!empty($run['can_undo'])) {
-			$html .= '<button type="button" class="jy-btn jy-btn-danger" data-import-undo="'
+			$html .= '<button type="button" class="btn btn-danger" data-import-undo="'
 				. intval($run['id']) . '">Undo this import</button>';
 		}
 		if (!empty($run['can_discard'])) {
-			$html .= ' <button type="button" class="jy-btn" data-import-discard="'
+			$html .= ' <button type="button" class="btn btn-secondary" data-import-discard="'
 				. intval($run['id']) . '">Discard archive</button>';
 		}
 		$html .= '</td></tr>';
-
-		$html .= '<tr class="mail-import-choose-row" data-choose-for="' . intval($run['id'])
-			. '" hidden><td colspan="5"></td></tr>';
 	}
 
 	return $html . '</tbody></table>';
@@ -203,6 +233,7 @@ function mailbox_import_panel_script(): void {
 	var form = document.getElementById('mail_import_form');
 	var feedback = document.getElementById('mail-import-feedback');
 	var runsBox = document.getElementById('mail-import-runs');
+	var attentionBox = document.getElementById('mail-import-attention');
 	var polling = null;
 
 	function post(path, body) {
@@ -392,14 +423,13 @@ function mailbox_import_panel_script(): void {
 	}
 
 	// The table is server-rendered on first paint and rebuilt here from the same
-	// fields afterwards. A chooser the user has open is left alone — replacing it
-	// mid-decision would throw away their ticks.
+	// fields afterwards. The waiting-for-you banners are reconciled separately, so
+	// the progress numbers keep ticking while a decision is still open.
 	function render(runs) {
 		if (!runsBox) { return; }
-		var open = runsBox.querySelector('.mail-import-choose-row:not([hidden])');
-		if (open) { return; }
 
 		if (!runs.length) {
+			renderAttention(runs);
 			runsBox.innerHTML = '<p class="jy-muted">No imports yet.</p>';
 			return;
 		}
@@ -424,30 +454,59 @@ function mailbox_import_panel_script(): void {
 			if (r.failed > 0)  { result += ', ' + r.failed.toLocaleString() + ' failed'; }
 			html += '<td>' + result + '</td><td>';
 
-			if (r.can_choose) {
-				html += '<button type="button" class="jy-btn jy-btn-primary" data-import-choose="'
-					+ r.id + '">Choose what to bring</button>';
-			}
+			// The choose action is in the banner at the top, never here.
 			if (r.can_undo) {
-				html += '<button type="button" class="jy-btn jy-btn-danger" data-import-undo="'
+				html += '<button type="button" class="btn btn-danger" data-import-undo="'
 					+ r.id + '">Undo this import</button>';
 			}
 			if (r.can_discard) {
-				html += ' <button type="button" class="jy-btn" data-import-discard="'
+				html += ' <button type="button" class="btn btn-secondary" data-import-discard="'
 					+ r.id + '">Discard archive</button>';
 			}
 			html += '</td></tr>';
-			html += '<tr class="mail-import-choose-row" data-choose-for="' + r.id
-				+ '" hidden><td colspan="5"></td></tr>';
 		});
 
 		runsBox.innerHTML = html + '</tbody></table>';
+		renderAttention(runs);
+	}
+
+	/**
+	 * Put every run that is waiting on a decision at the top of the page, with its
+	 * folder list already open.
+	 *
+	 * A banner the user is part-way through answering is left alone — re-rendering
+	 * it under them would throw away their ticks. That is why the loaded set is
+	 * tracked rather than rebuilt every poll.
+	 */
+	function renderAttention(runs) {
+		if (!attentionBox) { return; }
+
+		var waiting = runs.filter(function (r) { return r.can_choose; });
+		var wanted = waiting.map(function (r) { return String(r.id); });
+
+		// Drop banners for runs that have moved on.
+		attentionBox.querySelectorAll('[data-attention-for]').forEach(function (el) {
+			if (wanted.indexOf(el.getAttribute('data-attention-for')) === -1) { el.remove(); }
+		});
+
+		waiting.forEach(function (r) {
+			if (attentionBox.querySelector('[data-attention-for="' + r.id + '"]')) { return; }
+			var section = document.createElement('section');
+			section.className = 'jy-callout jy-callout-action';
+			section.setAttribute('data-attention-for', r.id);
+			section.setAttribute('role', 'region');
+			section.setAttribute('aria-label', 'Import waiting for you');
+			section.innerHTML = '<h3 class="jy-callout-title">This import is waiting for you</h3>'
+				+ '<p>Read ' + r.total.toLocaleString() + ' messages in <strong>'
+				+ escapeHtml(r.source || 'the archive') + '</strong>. '
+				+ 'Nothing has been imported yet — tick what to bring across.</p>'
+				+ '<div data-chooser-for="' + r.id + '"><p class="jy-muted">Counting...</p></div>';
+			attentionBox.appendChild(section);
+			openChooser(r.id);
+		});
 	}
 
 	document.addEventListener('click', function (e) {
-		var choose = e.target.closest && e.target.closest('[data-import-choose]');
-		if (choose) { openChooser(choose.getAttribute('data-import-choose')); return; }
-
 		var undo = e.target.closest && e.target.closest('[data-import-undo]');
 		if (undo) {
 			if (!window.confirm('Permanently delete every message this import brought in? '
@@ -488,45 +547,45 @@ function mailbox_import_panel_script(): void {
 	});
 
 	function openChooser(runId) {
-		var row = runsBox.querySelector('[data-choose-for="' + runId + '"]');
-		if (!row) { return; }
-		row.hidden = false;
-		row.firstElementChild.innerHTML = '<p class="jy-muted">Counting...</p>';
+		var box = attentionBox && attentionBox.querySelector('[data-chooser-for="' + runId + '"]');
+		if (!box) { return; }
+		box.innerHTML = '<p class="jy-muted">Counting...</p>';
 
 		api('mail_import_status', { run_id: parseInt(runId, 10) }).then(function (j) {
 			var preview = j && j.data && j.data.preview;
-			if (!preview) { row.firstElementChild.innerHTML = '<p>' + errorOf(j) + '</p>'; return; }
+			if (!preview) { box.innerHTML = '<p>' + errorOf(j) + '</p>'; return; }
 
 			var html = '<fieldset class="jy-fieldset"><legend>Found in this archive</legend>';
 			Object.keys(preview.folders).forEach(function (name) {
 				html += '<label class="jy-check"><input type="checkbox" checked value="'
 					+ escapeAttr(name) + '" data-folder-for="' + runId + '"> '
-					+ escapeHtml(name) + ' <span class="jy-muted">'
+					+ escapeHtml(name) + ' <span class="jy-muted jy-check-count">'
 					+ preview.folders[name].toLocaleString() + '</span></label>';
 			});
 			// Spam and Trash arrive unticked: an archive's spam folder is usually the
 			// biggest thing in it and almost never what anyone meant to keep.
 			if (preview.spam > 0) {
 				html += '<label class="jy-check"><input type="checkbox" data-spam-for="' + runId
-					+ '"> Spam <span class="jy-muted">' + preview.spam.toLocaleString() + '</span></label>';
+					+ '"> Spam <span class="jy-muted jy-check-count">' + preview.spam.toLocaleString() + '</span></label>';
 			}
 			if (preview.trash > 0) {
 				html += '<label class="jy-check"><input type="checkbox" data-trash-for="' + runId
-					+ '"> Trash <span class="jy-muted">' + preview.trash.toLocaleString() + '</span></label>';
+					+ '"> Trash <span class="jy-muted jy-check-count">' + preview.trash.toLocaleString() + '</span></label>';
 			}
-			html += '</fieldset><button type="button" class="jy-btn jy-btn-primary" data-import-go="'
+			html += '</fieldset><button type="button" class="btn btn-primary" data-import-go="'
 				+ runId + '">Import the ticked folders</button>';
-			row.firstElementChild.innerHTML = html;
+			box.innerHTML = html;
 		});
 	}
 
 	function submitChoice(runId) {
+		if (!attentionBox) { return; }
 		var folders = [];
-		runsBox.querySelectorAll('[data-folder-for="' + runId + '"]').forEach(function (box) {
+		attentionBox.querySelectorAll('[data-folder-for="' + runId + '"]').forEach(function (box) {
 			if (box.checked) { folders.push(box.value); }
 		});
-		var spamBox = runsBox.querySelector('[data-spam-for="' + runId + '"]');
-		var trashBox = runsBox.querySelector('[data-trash-for="' + runId + '"]');
+		var spamBox = attentionBox.querySelector('[data-spam-for="' + runId + '"]');
+		var trashBox = attentionBox.querySelector('[data-trash-for="' + runId + '"]');
 
 		say('Starting the import...');
 		api('mail_import_select', {
@@ -539,11 +598,11 @@ function mailbox_import_panel_script(): void {
 		}).then(function (j) {
 			if (!j || !j.data) { say(errorOf(j), true); return; }
 			say(j.data.message);
-			// Close the chooser BEFORE refreshing: render() deliberately leaves the
-			// table alone while one is open, so refreshing with it still up would
-			// silently do nothing and the run would look stuck.
-			var row = runsBox.querySelector('[data-choose-for="' + runId + '"]');
-			if (row) { row.hidden = true; }
+			// Drop the banner BEFORE refreshing. render() deliberately leaves an open
+			// chooser alone, so refreshing with this one still up would silently do
+			// nothing and the run would look stuck.
+			var section = attentionBox.querySelector('[data-attention-for="' + runId + '"]');
+			if (section) { section.remove(); }
 			refresh();
 		});
 	}
@@ -559,6 +618,15 @@ function mailbox_import_panel_script(): void {
 		var units = ['B', 'KB', 'MB', 'GB', 'TB'], i = 0;
 		while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
 		return (i === 0 ? n : Math.round(n * 10) / 10) + ' ' + units[i];
+	}
+
+	// Banners rendered by PHP arrive with an empty folder list, because counting
+	// them is a query the page render deliberately does not make. Fill them in
+	// before anything else, so a waiting import is answerable the moment it paints.
+	if (attentionBox) {
+		attentionBox.querySelectorAll('[data-chooser-for]').forEach(function (el) {
+			openChooser(el.getAttribute('data-chooser-for'));
+		});
 	}
 
 	// One status call on load decides whether to poll at all, so a page with

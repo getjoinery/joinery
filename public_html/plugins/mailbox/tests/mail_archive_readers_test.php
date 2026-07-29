@@ -29,7 +29,7 @@
  *
  * Run: php tests/run.php safe --filter=mail_archive_readers
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -209,8 +209,34 @@ class MailArchiveReadersTest {
 		check($sys['labels'] === array(),
 			'proton: numeric system ids never become labels',
 			json_encode($sys['labels']));
-		check($sys['folder'] === 'Sent',
-			'proton: the recognised system id still resolves the folder', (string)$sys['folder']);
+
+		// This message is ARCHIVED and was sent. Only "6" says where it lives; "2"
+		// (All Sent) and "5"/"15" (All Mail) are views laid over the whole mailbox.
+		// Reading a view as a folder is what filed an entire account under All mail.
+		check($sys['folder'] === 'Archived',
+			'proton: the location decides the folder, not a view sitting beside it',
+			(string)$sys['folder']);
+
+		// Every message in an export carries "5", so if it ever resolved a folder,
+		// every message would land in the same one.
+		$viewsOnly = json_encode(array('Payload' => array('LabelIDs' => array('5', '15', '24'))));
+		check(MailArchiveReader::protonMetadata($viewsOnly)['folder'] === null,
+			'proton: a message with nothing but views resolves no folder at all',
+			var_export(MailArchiveReader::protonMetadata($viewsOnly)['folder'], true));
+
+		// All Sent sits on sent mail wherever it now lives, so it cannot be the
+		// thing that decides Sent. The real Sent id can.
+		$reallySent = json_encode(array('Payload' => array('LabelIDs' => array('2', '5', '7'))));
+		check(MailArchiveReader::protonMetadata($reallySent)['folder'] === 'Sent',
+			'proton: the real Sent id resolves Sent');
+
+		// Trash and Spam still have to win, because they decide whether the message
+		// is offered for import at all.
+		$binned = json_encode(array('Payload' => array('LabelIDs' => array('2', '3', '5', '6'))));
+		$binnedMeta = MailArchiveReader::protonMetadata($binned);
+		check($binnedMeta['folder'] === 'Trash' && $binnedMeta['class'] === 'trash',
+			'proton: thrown away beats filed away',
+			$binnedMeta['folder'] . '/' . $binnedMeta['class']);
 
 		// A custom folder is referenced by an OPAQUE ID and named nowhere except the
 		// export's own labels.json. Resolving it through that manifest is the only
@@ -232,6 +258,22 @@ class MailArchiveReadersTest {
 		check($resolved['folder'] === 'Inbox',
 			'proton: system ids still resolve the folder, and never become labels',
 			(string)$resolved['folder']);
+
+		// The manifest also says which custom entries are FOLDERS. A message in one
+		// of those has no system location at all — the folder IS its location, and
+		// without this it would arrive filed nowhere.
+		$kinds = MailArchiveReader::protonLabelKinds(
+			file_get_contents($this->fixtures . '/proton/user@example.test/labels.json'));
+		check(($kinds['kFn6eqxVdWEkL6aSalke=='] ?? '') === 'folder',
+			'proton: the manifest Type marks a custom folder as a folder');
+		check(($kinds['5'] ?? '') === 'label',
+			'proton: a built-in view is not marked a folder');
+
+		$filed = json_encode(array('Payload' => array(
+			'LabelIDs' => array('5', '15', 'kFn6eqxVdWEkL6aSalke=='))));
+		check(MailArchiveReader::protonMetadata($filed, $manifest, $kinds)['folder'] === 'Meditation',
+			'proton: a message in a custom folder lands in that folder',
+			(string)MailArchiveReader::protonMetadata($filed, $manifest, $kinds)['folder']);
 
 		// Without the manifest the name simply is not available anywhere, so the id
 		// is dropped rather than used as one.

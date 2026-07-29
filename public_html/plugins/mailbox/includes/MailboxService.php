@@ -43,13 +43,14 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
- * @version 1.13
+ * @version 1.15
  */
 
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
 require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxViewer.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxIndex.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxHtmlSanitizer.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
@@ -90,6 +91,25 @@ class MailboxService {
 
 	/** SQL expression for a row's grouping key (real thread key, or m:<id>). */
 	const GROUP_KEY_SQL = "COALESCE(NULLIF(iem_thread_key,''), 'm:' || iem_inbound_email_message_id)";
+
+	/**
+	 * The searchable-text expression for unsealed mail. Declared once as a
+	 * constant because the GIN index that serves it (iem_013) must be built over
+	 * a BYTE-IDENTICAL expression — two copies of this string in two files is how
+	 * an index silently stops being used. The migration references this constant.
+	 *
+	 * Matching iem_body_html directly is deliberate and costs nothing in noise:
+	 * PostgreSQL's text-search parser classifies markup as `tag` and skips it, so
+	 * a stylesheet inside the document contributes no lexemes and an <a href>
+	 * indexes only its link text. (A preview built with strip_tags gets no such
+	 * help, which is why MailboxHtmlSanitizer::toReadableText exists for the
+	 * reader — the two problems look alike and are not.)
+	 */
+	const FULLTEXT_SQL = "to_tsvector('english',
+					coalesce(iem_sender, '')      || ' ' ||
+					coalesce(iem_subject, '')     || ' ' ||
+					coalesce(iem_body_plain, '')  || ' ' ||
+					coalesce(iem_body_html, ''))";
 
 	/**
 	 * Neutral product placeholder shown wherever sealed content cannot be read
@@ -599,16 +619,11 @@ class MailboxService {
 						: '1=0';
 				}
 			} else {
-				// The expression MUST stay byte-identical to iem_007's GIN index
+				// The expression MUST stay byte-identical to iem_013's GIN index
 				// expression (plugins/mailbox/migrations/migrations.php), or the
 				// planner will not use the index. websearch_to_tsquery tolerates
 				// arbitrary user input (stray quotes/operators won't raise).
-				$where[] = "to_tsvector('english',
-						coalesce(iem_sender, '')      || ' ' ||
-						coalesce(iem_subject, '')     || ' ' ||
-						coalesce(iem_body_plain, '')  || ' ' ||
-						coalesce(iem_body_html, ''))
-					@@ websearch_to_tsquery('english', ?)";
+				$where[] = self::FULLTEXT_SQL . " @@ websearch_to_tsquery('english', ?)";
 				$params[] = $filters['q'];
 			}
 		}
@@ -679,6 +694,9 @@ class MailboxService {
 			}
 		}
 		$content = $this->fetchAndDecryptContent(array_unique($page_ids));
+		// Which of this page's messages carry a real attachment, for the list
+		// paperclip. Presence only — the manifest itself is a thread-open cost.
+		$clipped = $this->messageIdsWithAttachments(array_unique($page_ids));
 
 		$section_for = array(0 => 'unread', 1 => 'starred', 2 => 'other');
 		$threads = array();
@@ -688,10 +706,14 @@ class MailboxService {
 			$latest = $content[$latest_id] ?? array('sender' => '', 'subject' => '', 'body_plain' => '', 'body_html' => '');
 
 			$senders = array();
+			$has_attachment = false;
 			foreach ($this->pgIntArray($r['member_ids']) as $mid) {
 				$s = trim((string)($content[$mid]['sender'] ?? ''));
 				if ($s !== '' && !in_array($s, $senders, true)) {
 					$senders[] = $s;
+				}
+				if (isset($clipped[$mid])) {
+					$has_attachment = true;
 				}
 			}
 
@@ -700,7 +722,9 @@ class MailboxService {
 				'subject'      => $latest['subject'],
 				'senders'      => implode(', ', $senders),
 				'sender'       => $latest['sender'],
-				'snippet'      => $this->buildSnippet(mb_substr($latest['body_plain'], 0, 400), mb_substr($latest['body_html'], 0, 2000)),
+				// The HTML is passed whole — the preview extractor caps its own input,
+				// and a fixed prefix of a marketing email is all stylesheet.
+				'snippet'      => $this->buildSnippet(mb_substr($latest['body_plain'], 0, 400), $latest['body_html']),
 				// AI triage (specs/implemented/joinery_ai_email_triage.md): the latest
 				// message's one-line AI summary, empty if untriaged. The reader shows
 				// this in place of the snippet when present.
@@ -710,6 +734,9 @@ class MailboxService {
 				'unread_count' => intval($r['unread_count']),
 				'any_starred'  => (bool)$this->pgBool($r['any_starred']),
 				'any_archived' => (bool)$this->pgBool($r['any_archived']),
+				// True when any message in the thread has a real (non-inline)
+				// attachment — the list shows a paperclip beside the time.
+				'has_attachment' => $has_attachment,
 				// AI security scan (specs/joinery_ai_email_security_scan.md):
 				// the highest danger score among the thread's messages, or
 				// null if none has been scanned. The list badge is silent
@@ -803,17 +830,15 @@ class MailboxService {
 
 	/**
 	 * One-line preview of the latest message for the list row. Prefers the plain
-	 * body; falls back to tag-stripped HTML. Whitespace is collapsed and the
-	 * result trimmed to a short, single-line snippet (Gmail-style).
+	 * body; an HTML-only message is read through
+	 * MailboxHtmlSanitizer::toReadableText(), which parses rather than pattern-
+	 * matches so a sender's embedded stylesheet cannot surface as the preview.
+	 * Whitespace is collapsed and the result trimmed to a short, single line.
 	 */
 	private function buildSnippet(?string $plain, ?string $html): string {
 		$text = trim((string)$plain);
-		if ($text === '' && (string)$html !== '') {
-			// The HTML preview is capped upstream; a tag may be truncated mid-way,
-			// so drop any trailing partial tag before stripping.
-			$text = preg_replace('/<[^>]*$/', '', (string)$html);
-			$text = strip_tags((string)$text);
-			$text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+		if ($text === '' && trim((string)$html) !== '') {
+			$text = MailboxHtmlSanitizer::toReadableText((string)$html);
 		}
 		$text = trim(preg_replace('/\s+/u', ' ', $text));
 		if (function_exists('mb_strimwidth')) {
@@ -1015,6 +1040,31 @@ class MailboxService {
 			);
 		}
 		return $by_msg;
+	}
+
+	/**
+	 * Which of the given messages carry at least one real attachment, as a set
+	 * keyed by message id. Same rule as attachmentsForMessages() — inline (cid:)
+	 * parts belong to the HTML body and are not attachments a reader would look
+	 * for. Ids only: the thread list needs to know whether to draw a paperclip,
+	 * not what the files are.
+	 *
+	 * @param int[] $message_ids
+	 * @return array<int, true>
+	 */
+	private function messageIdsWithAttachments(array $message_ids): array {
+		if (!count($message_ids)) {
+			return array();
+		}
+		$in = implode(',', array_map('intval', $message_ids));
+		$sql = "SELECT DISTINCT ima_iem_inbound_email_message_id AS mid
+				FROM ima_inbound_message_attachments
+				WHERE ima_iem_inbound_email_message_id IN ($in) AND ima_is_inline = false";
+		$out = array();
+		foreach ($this->db()->query($sql)->fetchAll(PDO::FETCH_ASSOC) as $r) {
+			$out[intval($r['mid'])] = true;
+		}
+		return $out;
 	}
 
 	/**

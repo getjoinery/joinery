@@ -29,7 +29,7 @@
  *
  * See specs/mail_archive_import.md.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/mail_import_run_class.php'));
@@ -139,6 +139,10 @@ class MailArchiveImporter {
 		if ($refusal !== null) {
 			throw new RuntimeException($refusal);
 		}
+
+		// The name the person uploaded, not the one on disk — the file store appends
+		// a uniquifier, and a folder named after it is unreadable noise.
+		$reader->setSourceName($name);
 
 		$this->reader = $reader;
 		$this->path = $reader->prepare($path, $this->workDir());
@@ -612,6 +616,17 @@ class MailArchiveImporter {
 		$labelStmt->execute(array($runId));
 		$labelIds = array_map('intval', $labelStmt->fetchAll(PDO::FETCH_COLUMN, 0));
 
+		// Memberships only find the labels that stuck. A label created for a message
+		// that then failed to store, or whose membership could not be written, holds
+		// nothing and would otherwise survive undo forever as an empty folder.
+		foreach ($this->labelNamesNamedBy($runId) as $name) {
+			$label = InboundEmailLabel::getByName($name);
+			if ($label !== null && $label->key) {
+				$labelIds[] = intval($label->key);
+			}
+		}
+		$labelIds = array_values(array_unique($labelIds));
+
 		$removed = 0; $failed = 0;
 		foreach ($ids as $id) {
 			try {
@@ -638,6 +653,34 @@ class MailArchiveImporter {
 		), array(), null, intval($this->run->get('mir_usr_user_id')));
 
 		return array('removed' => $removed, 'failed' => $failed, 'labels_removed' => $labelsRemoved);
+	}
+
+	/**
+	 * Every label name this run's entries would have produced — their own labels,
+	 * plus any source folder that is not one of the standard buckets. Read from the
+	 * entries rather than from what was written, so a label whose message never
+	 * made it is still accounted for.
+	 *
+	 * @return string[]
+	 */
+	private function labelNamesNamedBy(int $runId): array {
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare('SELECT DISTINCT mie_labels, mie_source_folder
+			FROM mie_mail_import_entries WHERE mie_mir_mail_import_run_id = ?');
+		$stmt->execute(array($runId));
+
+		$names = array();
+		foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+			$candidates = preg_split('/\r\n|\r|\n/', (string)$row['mie_labels']) ?: array();
+			$candidates[] = (string)$row['mie_source_folder'];
+			foreach ($candidates as $name) {
+				$name = trim($name);
+				if ($name !== '' && !self::isStandardFolder($name)) {
+					$names[$name] = true;
+				}
+			}
+		}
+		return array_keys($names);
 	}
 
 	/**

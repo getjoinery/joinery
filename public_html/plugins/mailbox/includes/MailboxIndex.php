@@ -32,15 +32,21 @@
  * an error. That extends to writing the cache: persisting the sealed blob is
  * best-effort and never throws, so a storage-layer failure costs a slower next
  * unlock rather than breaking the search in flight. Index source: sender +
- * subject + both bodies + attachment filenames. Attachment CONTENTS are never
- * indexed.
+ * subject + both bodies + attachment filenames, with the HTML body reduced to
+ * its readable text (MailboxHtmlSanitizer::toReadableText) so a sender's
+ * embedded stylesheet is not searchable. Attachment CONTENTS are never indexed.
  *
- * @version 1.3
+ * Changing what rowContent() indexes changes what the stored index contains:
+ * purgePersisted() the affected owners so the next unlock rebuilds, or the old
+ * text keeps matching.
+ *
+ * @version 1.4
  */
 
 require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
 require_once(PathHelper::getIncludePath('data/files_class.php'));
 require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxHtmlSanitizer.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_mailbox_search_index_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
@@ -365,6 +371,12 @@ class MailboxIndex {
 	 * attachment filenames — read the same way a viewer would (through the
 	 * sealed-field hook). Returns null when the row is gone or a decrypt fails
 	 * (fold only runs in-window, but never let one row abort the whole fold).
+	 *
+	 * The HTML body is reduced to its readable text, not merely tag-stripped:
+	 * bulk mail carries its stylesheet inside the document, so stripping tags
+	 * alone would index every sender's CSS and let a search for "container" or
+	 * "font" match hundreds of unrelated messages. What gets indexed is what a
+	 * person can see.
 	 */
 	private function rowContent(int $id): ?string {
 		$msg = new InboundEmailMessage($id, TRUE);
@@ -373,7 +385,8 @@ class MailboxIndex {
 		}
 		try {
 			return (string)$msg->get('iem_sender') . ' ' . (string)$msg->get('iem_subject') . ' '
-				. (string)$msg->get('iem_body_plain') . ' ' . strip_tags((string)$msg->get('iem_body_html'))
+				. (string)$msg->get('iem_body_plain') . ' '
+				. MailboxHtmlSanitizer::toReadableText((string)$msg->get('iem_body_html'))
 				. ' ' . $this->attachmentFilenames($id);
 		} catch (VaultLockedException $e) {
 			return null;

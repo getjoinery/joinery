@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   Joinery Default UI Kit  ·  custom.css  ·  v2.4.0
+   Joinery Default UI Kit  ·  custom.css  ·  v2.5.0
    Pure Slate design. Themeable values live in --jy-* tokens on
    :root so branded themes can override them without understanding
    internals. Component rules are scoped under .jy-ui to prevent
@@ -555,6 +555,64 @@ body.jy-default .jy-app-bar h1 { font-size: var(--jy-text-xl); font-weight: 600;
   box-shadow: var(--jy-shadow-sm);
   margin-bottom: var(--jy-space-5);
 }
+
+/* ─── Callouts ──────────────────────────────────────────────────
+   A block that has to be noticed before the page's ordinary content
+   is read: something is waiting on the person, or something is wrong.
+   The accent bar carries the meaning, so the tone survives a theme
+   that has overridden the background tokens.
+   Use --action when the page CANNOT proceed without an answer; it is
+   the loudest and should stay rare enough to keep meaning something. */
+.jy-callout {
+  border: 1px solid var(--jy-color-border);
+  border-left: 4px solid var(--jy-color-border-strong);
+  border-radius: var(--jy-radius-md);
+  background: var(--jy-color-surface);
+  padding: var(--jy-space-4);
+  margin-bottom: var(--jy-space-4);
+}
+.jy-callout > :first-child { margin-top: 0; }
+.jy-callout > :last-child  { margin-bottom: 0; }
+.jy-callout-title {
+  font-weight: 600;
+  font-size: var(--jy-text-lg);
+  margin: 0 0 var(--jy-space-2);
+}
+.jy-callout-info    { border-left-color: var(--jy-color-info);    background: var(--jy-color-info-bg); }
+.jy-callout-success { border-left-color: var(--jy-color-success); background: var(--jy-color-success-bg); }
+.jy-callout-warning { border-left-color: var(--jy-color-warning); background: var(--jy-color-warning-bg); }
+.jy-callout-danger  { border-left-color: var(--jy-color-danger);  background: var(--jy-color-danger-bg); }
+.jy-callout-action  {
+  border-left-color: var(--jy-color-primary);
+  background: var(--jy-color-info-bg);
+  box-shadow: var(--jy-shadow-sm);
+}
+
+/* ─── Tickable lists ────────────────────────────────────────────
+   A checkbox or radio and its label as ONE row. The default inline
+   flow runs several together into an unreadable line, which matters
+   most where the ticks are the decision being asked for. */
+.jy-fieldset {
+  border: 1px solid var(--jy-color-border);
+  border-radius: var(--jy-radius-md);
+  padding: var(--jy-space-3) var(--jy-space-4);
+  margin: 0 0 var(--jy-space-3);
+}
+.jy-fieldset > legend {
+  padding: 0 var(--jy-space-2);
+  font-size: var(--jy-text-sm);
+  font-weight: 600;
+  color: var(--jy-color-text-muted);
+}
+.jy-check {
+  display: flex;
+  align-items: center;
+  gap: var(--jy-space-2);
+  padding: var(--jy-space-1) 0;
+  cursor: pointer;
+}
+.jy-check input { flex-shrink: 0; margin: 0; }
+.jy-check-count { margin-left: auto; font-variant-numeric: tabular-nums; }
 
 /* Section layout helpers (used by base views like views/index.php) */
 .jy-content-section { padding: 64px 0; }

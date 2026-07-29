@@ -10,7 +10,7 @@
  * does), and otherwise from the file's own name — "Archived.mbox" is a folder
  * called Archived, which is exactly what Thunderbird means by it.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/import/MailArchiveReader.php'));
@@ -43,7 +43,7 @@ class MboxReader extends MailArchiveReader {
 	public function scan(string $path, callable $emit, array $state, float $deadline): array {
 		$offset = intval($state['offset'] ?? 0);
 		$ordinal = intval($state['ordinal'] ?? 0);
-		$folder = self::folderFromFilename($state['filename'] ?? basename($path));
+		$folder = self::folderFromFilename($state['filename'] ?? $this->sourceName($path));
 
 		$handle = fopen($path, 'rb');
 		if (!$handle) {
@@ -69,7 +69,7 @@ class MboxReader extends MailArchiveReader {
 		return array(
 			'offset'   => $result['next'] ?? $offset,
 			'ordinal'  => $ordinal,
-			'filename' => $state['filename'] ?? basename($path),
+			'filename' => $state['filename'] ?? $this->sourceName($path),
 			'done'     => $result['next'] === null,
 		);
 	}

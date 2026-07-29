@@ -1764,7 +1764,13 @@ the whole reader to that mailbox; below the switcher are All / Unread / Starred
 filters and a debounced search box. The search box runs a single PostgreSQL
 full-text query (`websearch_to_tsquery`) over the sender, subject, and both
 plain and HTML body fields at once, backed by the `iem_fulltext_idx` GIN index
-on the matching `to_tsvector` expression. A mailbox whose IMAP feed has discovered
+on the matching `to_tsvector` expression. Searching the HTML body directly is
+safe: PostgreSQL's text-search parser classifies markup as `tag` and skips it, so
+an embedded stylesheet contributes no lexemes and an `<a href>` indexes only its
+link text. The expression lives once in `MailboxService::FULLTEXT_SQL` and the
+migration builds the index **from that constant** — the index serves the query
+only while the two match byte for byte, and a silently-unused index is
+indistinguishable from a slow one. A mailbox whose IMAP feed has discovered
 folders also lists them **indented under the selected mailbox** (an "All Mail"
 root for the folder-unfiltered view, then each tracked folder); see the Sync
 subsection for how membership drives folder contents.
@@ -1775,6 +1781,33 @@ Threading is by `iem_thread_key`, computed at store time by
 `InboundEmailRouter::computeThreadKey()` (References first token → In-Reply-To →
 own Message-ID → null; a null key is a singleton, keyed client-side as `m:<id>`).
 Subject-based grouping for header-less mail is a deliberate non-goal.
+
+The row's **preview** is the plain body when there is one, and otherwise the
+reading text of the HTML via `MailboxHtmlSanitizer::toPreviewText()`. That is a
+DOM walk, not a `strip_tags()`: received bulk mail carries its stylesheet inside
+the document, and stripping tags keeps the CSS between them, so the preview
+would read `a.cta_button{-moz-box-sizing…`. The walk drops `<style>`, `<script>`,
+`<head>`, `<title>` and comments with their contents, treats block edges as word
+boundaries (table-built mail otherwise reads as `benefitTerms apply`), keeps link
+text without the URL, and removes the invisible characters — zero-width joiners,
+soft hyphens, combining grapheme joiners, non-breaking spaces — that senders use
+to pad a preheader. An image-only message previews as empty, which is honest.
+`toPlainText()` remains the separate, faithful plaintext copy of mail *we*
+composed, and does render links as `text <url>`.
+
+The **sealed search index** reduces an HTML body the same way, so a sender's
+stylesheet is never searchable — otherwise a search for `container` or
+`sans-serif` matches every newsletter in the mailbox. Changing what
+`MailboxIndex::rowContent()` indexes changes what a stored index holds:
+`purgePersisted()` the affected owners so the next unlock rebuilds, or the old
+text keeps matching.
+
+A list row also carries a **paperclip** between the subject line and the time
+when any message in the thread has a real attachment — `has_attachment` on the
+thread payload, from one id-only query over the page's messages
+(`MailboxService::messageIdsWithAttachments()`). Inline `cid:` parts do not
+count: they are body content, not something the reader would go looking for, so
+a message whose only "attachment" is an embedded signature image shows no clip.
 
 Read/star state lives **on the message row** (`iem_is_read`, `iem_is_starred`,
 `iem_read_time`) — not in a per-viewer table. On a shared mailbox this means read
@@ -2840,6 +2873,36 @@ Provider conventions are read where present and cost nothing where absent: Proto
 `<id>.metadata.json` sidecars, Gmail's `X-Gmail-Labels` header (where read state is
 the *presence* of `Unread`), and maildir's `:2,` filename flags. A bare folder of
 `.eml` files with none of these still imports correctly, just with less state.
+
+#### Where a message lives, and what is merely laid over it
+
+A message has one **location** and any number of **labels**, and an export gives both
+in the same list. Telling them apart is what decides the whole import: a view like
+Proton's *All Mail* sits on every message in the account, so reading one as a folder
+files an entire archive under a single heading and loses the real one.
+
+`MailArchiveReader::PROTON_LOCATIONS` is therefore an allow-list of the ids that name
+a place — Inbox, Trash, Spam, Archive, Sent, Drafts, Outbox. Everything else numeric
+is a view (*All Mail*, *Almost All Mail*, *All Sent*, *All Drafts*, *All Scheduled*,
+*Snoozed*, the inbox category tabs) and is dropped. Dropping is deliberate on both
+counts: a view is not a place, and an unrecognised number used as a name is how an
+import ends up tagging thousands of messages with a label called `15`. Where two
+locations somehow appear together, `PROTON_LOCATION_PRIORITY` decides — thrown away
+beats filed away, so Trash and Spam win and the message stays out of an import that
+did not ask for them.
+
+The export's `labels.json` names every custom folder and label, and its `Type` field
+says which is which — `3` for a folder, anything else for a label. A custom folder is
+a location in its own right, so a message in one lands there rather than nowhere. A
+custom label is applied as a label and leaves the location alone. Without the
+manifest, custom entries are treated as labels: the name survives, the placement does
+not, and a bare folder of `.eml` files still imports.
+
+Formats that carry no folder information of their own — a lone mbox, a single `.eml`
+— name the folder after the archive itself. That name is the one the **person typed**
+(`mir_source_name`), never the path on disk: the file store appends a uniquifier to
+keep names from colliding, and importing `Receipts.mbox` must not produce a folder
+called `Receipts a7f3k2q1`.
 
 ### The two sources
 

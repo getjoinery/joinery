@@ -1,7 +1,7 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.9
+ * Vanilla CSS, no framework. @version 2.10
  */
 
 .mbx-reader {
@@ -223,6 +223,16 @@
 .mbx-thread-item.unread .mbx-thread-from,
 .mbx-thread-item.unread .mbx-thread-subject { font-weight: 700; }
 .mbx-thread-time { flex: 0 0 auto; color: #9097a1; font-size: 11px; white-space: nowrap; }
+/* Paperclip marker, sitting just left of the time. */
+.mbx-thread-clip {
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	color: #9097a1;
+	margin-right: 4px;
+}
+.mbx-thread-clip svg { width: 13px; height: 13px; }
+.mbx-thread-item.unread .mbx-thread-clip { color: #4b5563; }
 .mbx-thread-count {
 	display: inline-block;
 	background: #e4e7eb;
