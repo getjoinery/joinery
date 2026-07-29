@@ -266,6 +266,16 @@ $formwriter->textinput('user_id', 'User ID', [
     'readonly' => true
 ]);
 
+// Digits only, with the numeric keypad on a phone. Use inputmode rather than
+// type=number for codes and account numbers: number strips leading zeros,
+// accepts exponent notation, and draws a spinner.
+$formwriter->textinput('totp_code', 'Code from your app', [
+    'inputmode' => 'numeric',
+    'pattern' => '[0-9]{6}',
+    'maxlength' => 6,
+    'autocomplete' => 'one-time-code'
+]);
+
 // With prepend text (Bootstrap)
 $formwriter->textinput('loc_link', 'Link', [
     'prepend' => $settings->get_setting('webDir').'/location/'

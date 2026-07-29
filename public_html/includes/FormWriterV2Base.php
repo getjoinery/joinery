@@ -7,7 +7,8 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
- * @version 2.17.0
+ * @version 2.18.0
+ * @changelog 2.18.0 - Added the inputmode option on text inputs, so a code or numeric field can raise the numeric keypad on a phone without becoming type=number
  * @changelog 2.16.0 - min/max validation tests presence against ''/null instead of empty(), so a `min: 1` rule rejects 0 (empty('0') is true, so it had been accepting the one value it exists to reject)
  * @changelog 2.15.0 - Added registerValidationField(): a caller with authoritative rules (SettingsWriter, from the setting declarations) can validate names this form never drew, so validation scope stops depending on what a page happened to render
  * @changelog 2.14.0 - preparePasswordData() discards any bound value and shows a "(stored — leave blank to keep)" placeholder instead: a password input never emits value="", so a stored credential can no longer reach the page source
@@ -3165,6 +3166,7 @@ document.addEventListener("DOMContentLoaded", function() {
         if (!empty($data['autofocus'])) $attrs .= ' autofocus';
         if (!empty($data['onchange'])) $attrs .= ' onchange="' . htmlspecialchars($data['onchange']) . '"';
         if (!empty($data['autocomplete'])) $attrs .= ' autocomplete="' . htmlspecialchars($data['autocomplete']) . '"';
+        if (!empty($data['inputmode'])) $attrs .= ' inputmode="' . htmlspecialchars($data['inputmode']) . '"';
         foreach ($extra_keys as $key => $attr_name) {
             if (isset($data[$key])) $attrs .= ' ' . $attr_name . '="' . htmlspecialchars($data[$key]) . '"';
         }
@@ -3420,6 +3422,7 @@ JS;
             'autofocus' => !empty($options['autofocus']),
             'required' => !empty($options['required']),
             'autocomplete' => $options['autocomplete'] ?? '',
+            'inputmode' => $options['inputmode'] ?? '',
             'onchange' => $options['onchange'] ?? '',
             'pattern' => $options['pattern'] ?? '',
             'min' => $options['min'] ?? null,

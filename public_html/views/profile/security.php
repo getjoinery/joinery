@@ -91,6 +91,7 @@
                     <details class="jy-actions-dropdown">
                         <summary class="btn btn-secondary">Actions</summary>
                         <div class="jy-actions-menu">
+                            <a href="/profile/test-authenticator">Test Authenticator App</a>
                             <button type="button" id="totp-regen-menu-btn">Regenerate Backup Codes</button>
                             <button type="button" class="jy-action-danger" id="totp-disable-menu-btn">Turn Off Authenticator App…</button>
                         </div>
