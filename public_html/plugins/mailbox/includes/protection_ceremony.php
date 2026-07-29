@@ -27,7 +27,7 @@
  * caller-scoped, since unsealing needs each holder's own unlock window —
  * and mailbox_lowering_receipt_render() is the downgrade's receipt card.
  *
- * @version 1.6
+ * @version 1.7
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
@@ -310,13 +310,21 @@ function mailbox_protection_first_failure(array $rows): string {
 	return '';
 }
 
-/** Unsealed, live rows on a domain — the backlog a raise must converge. */
+/**
+ * Unsealed, live rows on a domain — the backlog a raise must converge.
+ *
+ * A pending-parse row is excluded: the relay already sealed it to the owner's
+ * vault public key, and it holds no plaintext for this pass to seal. Counting
+ * it would report a sealed message as backlog and hand the seal batch a row
+ * whose only content is a blob it cannot open.
+ */
 function mailbox_protection_backlog_count(int $domain_id): int {
 	$db = DbConnector::get_instance()->get_db_link();
 	$stmt = $db->prepare(
 		"SELECT COUNT(*) FROM iem_inbound_email_messages
 		 WHERE iem_ied_inbound_email_domain_id = ?
-		   AND iem_content_sealed = false AND iem_delete_time IS NULL");
+		   AND iem_content_sealed = false AND iem_pending_parse = false
+		   AND iem_delete_time IS NULL");
 	$stmt->execute(array($domain_id));
 	return intval($stmt->fetchColumn());
 }
@@ -339,7 +347,9 @@ function mailbox_protection_sealed_count(int $domain_id): int {
  * holder vault — the same per-row work as the reader-driven backfill_seal
  * action, but driveable from any admin session: sealing uses only the
  * holder's vault PUBLIC key. Rows whose holder has no vault are skipped
- * (counted in remaining; the Setup tab's backlog row keeps them loud).
+ * (counted in remaining; the Setup tab's backlog row keeps them loud), and
+ * pending-parse rows are never selected — they carry no plaintext, so sealing
+ * one would store empty content under a fresh key and mark it done.
  * Returns ['sealed' => n, 'remaining' => n].
  */
 function mailbox_protection_seal_batch(InboundEmailDomain $domain, int $limit = 200): array {
@@ -350,7 +360,8 @@ function mailbox_protection_seal_batch(InboundEmailDomain $domain, int $limit = 
 		"SELECT iem_inbound_email_message_id, iem_iea_inbound_email_alias_id
 		 FROM iem_inbound_email_messages
 		 WHERE iem_ied_inbound_email_domain_id = ?
-		   AND iem_content_sealed = false AND iem_delete_time IS NULL
+		   AND iem_content_sealed = false AND iem_pending_parse = false
+		   AND iem_delete_time IS NULL
 		 ORDER BY iem_inbound_email_message_id ASC LIMIT " . intval($limit));
 	$stmt->execute(array(intval($domain->key)));
 	$targets = $stmt->fetchAll(PDO::FETCH_ASSOC);
