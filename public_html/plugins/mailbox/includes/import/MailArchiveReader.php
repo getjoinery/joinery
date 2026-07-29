@@ -27,13 +27,32 @@
  *
  * See specs/mail_archive_import.md § 4.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 abstract class MailArchiveReader {
 
 	/** Bytes of a member read to find its headers. Real headers are far smaller. */
 	const HEADER_PEEK_BYTES = 65536;
+
+	/**
+	 * The name the person gave the file they uploaded.
+	 *
+	 * Formats that carry no folder of their own name one after the file itself, so
+	 * this has to be what they called it. The path on disk will not do: the file
+	 * store appends a uniquifier to keep names from colliding, and importing
+	 * "Receipts.mbox" should not produce a folder called "Receipts a7f3k2q1".
+	 */
+	protected $source_name = '';
+
+	public function setSourceName(string $name): void {
+		$this->source_name = trim($name);
+	}
+
+	/** The upload's own name, falling back to the file on disk when unknown. */
+	protected function sourceName(string $path): string {
+		return $this->source_name !== '' ? $this->source_name : basename($path);
+	}
 
 	/** The registry key, and the value stored in mir_format. */
 	abstract public static function key(): string;
@@ -311,10 +330,49 @@ abstract class MailArchiveReader {
 	}
 
 	/**
-	 * @param array $labelMap id => name, from protonLabelMap(). Optional: a bare
-	 *        folder of .eml files has no manifest, and still imports.
+	 * Which of the manifest's entries are FOLDERS rather than labels, as id => kind.
+	 *
+	 * Proton draws a line this platform also draws: a message sits in exactly one
+	 * folder, and carries any number of labels. The manifest says which is which in
+	 * its `Type` field — 3 for a folder, anything else for a label or a built-in
+	 * view. Without that distinction a custom folder called "Meditation" can only
+	 * be guessed at, and the guess is wrong half the time.
+	 *
+	 * @return array<string,string> label id => 'folder' | 'label'
 	 */
-	public static function protonMetadata(?string $json, array $labelMap = array()): ?array {
+	public static function protonLabelKinds(?string $json): array {
+		if ($json === null || trim($json) === '') {
+			return array();
+		}
+		$data = json_decode($json, true);
+		if (!is_array($data)) {
+			return array();
+		}
+		$rows = isset($data['Payload']) && is_array($data['Payload']) ? $data['Payload'] : $data;
+
+		$kinds = array();
+		foreach ((array)$rows as $row) {
+			if (!is_array($row)) {
+				continue;
+			}
+			$id = trim((string)($row['ID'] ?? ''));
+			if ($id !== '') {
+				$kinds[$id] = (intval($row['Type'] ?? 0) === self::PROTON_TYPE_FOLDER)
+					? 'folder' : 'label';
+			}
+		}
+		return $kinds;
+	}
+
+	/**
+	 * @param array $labelMap   id => name, from protonLabelMap(). Optional: a bare
+	 *        folder of .eml files has no manifest, and still imports.
+	 * @param array $labelKinds id => 'folder'|'label', from protonLabelKinds().
+	 *        Optional for the same reason; without it a custom folder is treated
+	 *        as a label, which keeps its name but not its place.
+	 */
+	public static function protonMetadata(?string $json, array $labelMap = array(),
+			array $labelKinds = array()): ?array {
 		if ($json === null || trim($json) === '') {
 			return null;
 		}
@@ -336,6 +394,12 @@ abstract class MailArchiveReader {
 			$out['is_starred'] = (bool)$payload['Starred'];
 		}
 
+		// Where the message LIVES, and where it was found in the priority order, so
+		// a second location cannot quietly displace a better one.
+		$location = null;
+		$rank = PHP_INT_MAX;
+		$customFolder = null;
+
 		foreach ((array)($payload['LabelIDs'] ?? $payload['Labels'] ?? array()) as $label) {
 			// Some exports carry objects with a Name; most carry bare ids. A real
 			// name is worth having, so prefer it when one is actually there.
@@ -349,73 +413,101 @@ abstract class MailArchiveReader {
 				continue;
 			}
 
-			// A NUMERIC id is one of Proton's own system labels or views — never
-			// something the user named. Recognised ones become the message's folder
-			// or state; the rest are views this platform does not model (Almost All
-			// Mail, the inbox category tabs) and are dropped.
+			// A NUMERIC id is one of Proton's own system labels — never something the
+			// user named. Only a few of them say where the message LIVES; the rest
+			// are views laid over the whole mailbox, and must not be read as a place.
 			//
-			// Dropping them is the whole point. Treating an unrecognised number as a
-			// label name is how an import ends up tagging two thousand messages with
-			// a label called "15".
+			// This is the distinction the whole classification turns on. Every
+			// message carries "5" (All Mail) and most carry "15" — treating either as
+			// a folder files the entire account under one heading and loses the real
+			// one. The same goes for "1" and "2" (All Drafts, All Sent), which sit on
+			// archived mail as readily as on current mail.
 			if (preg_match('/^\d+$/', $id)) {
-				if (isset(self::PROTON_SYSTEM_LABELS[$id])) {
-					$mapped = self::PROTON_SYSTEM_LABELS[$id];
-					if ($mapped === 'starred') { $out['is_starred'] = true; continue; }
-					if ($mapped === 'trash')   { $out['class'] = 'trash'; }
-					if ($mapped === 'spam')    { $out['class'] = 'spam'; }
-					if ($mapped !== null && $out['folder'] === null) {
-						$out['folder'] = self::PROTON_FOLDER_NAMES[$mapped] ?? null;
-					}
+				if ($id === self::PROTON_STARRED) { $out['is_starred'] = true; continue; }
+				if (isset(self::PROTON_LOCATIONS[$id])) {
+					$mapped = self::PROTON_LOCATIONS[$id];
+					if ($mapped === 'trash') { $out['class'] = 'trash'; }
+					if ($mapped === 'spam')  { $out['class'] = 'spam'; }
+					$here = array_search($mapped, self::PROTON_LOCATION_PRIORITY, true);
+					$here = ($here === false) ? PHP_INT_MAX : $here;
+					if ($here < $rank) { $rank = $here; $location = $mapped; }
 				}
+				// Anything else is a view this platform does not model — All Mail,
+				// Almost All Mail, All Sent, Snoozed, the inbox category tabs. Dropped
+				// rather than kept: treating an unrecognised number as a label name is
+				// how an import ends up tagging two thousand messages with a label
+				// called "15".
 				continue;
 			}
 
-			// A non-numeric id is a genuine user label — a folder the person made.
-			// Its name comes from the export's own labels.json, or from the sidecar
-			// on the versions that inline it. An id is never used as a name: it is
-			// unreadable, and it is not what they called the folder.
+			// A non-numeric id is the user's own folder or label. Its name comes from
+			// the export's own labels.json, or from the sidecar on the versions that
+			// inline it. An id is never used as a name: it is unreadable, and it is
+			// not what they called the folder.
 			$name = ($named !== null && $named !== '') ? $named : ($labelMap[$id] ?? '');
-			if ($name !== '') {
-				if (strtolower($name) === 'starred') { $out['is_starred'] = true; continue; }
-				$out['labels'][] = $name;
+			if ($name === '') {
+				continue;
 			}
+			if (strtolower($name) === 'starred') { $out['is_starred'] = true; continue; }
+			$out['labels'][] = $name;
+			if ($customFolder === null && ($labelKinds[$id] ?? 'label') === 'folder') {
+				$customFolder = $name;
+			}
+		}
+
+		// A folder the user made is a location in its own right, and the only one a
+		// message in it has — Proton files it there INSTEAD of Archive or Inbox.
+		if ($location !== null) {
+			$out['folder'] = self::PROTON_FOLDER_NAMES[$location] ?? null;
+		} elseif ($customFolder !== null) {
+			$out['folder'] = $customFolder;
 		}
 
 		return $out;
 	}
 
 	/**
-	 * Proton's system label ids, which are small integers. The value is what the
-	 * id MEANS here: a folder key, a state, or null for a view this platform has no
-	 * equivalent of and deliberately ignores.
+	 * The Proton system ids that say where a message LIVES. A message has exactly
+	 * one of these, and it is the only thing that decides its folder.
+	 *
+	 * Deliberately absent are the ids that look like folders and are not: 1 (All
+	 * Drafts), 2 (All Sent), 5 and 15 (All Mail), 12 (All Scheduled), 16 (Snoozed),
+	 * and the inbox category tabs in the 20s. Those are views over mail that lives
+	 * somewhere else, and reading one as a place is how every message in an account
+	 * ends up in the same folder.
 	 */
-	const PROTON_SYSTEM_LABELS = array(
-		'0'  => 'inbox',
-		'1'  => 'drafts',      // all drafts
-		'2'  => 'sent',        // all sent
-		'3'  => 'trash',
-		'4'  => 'spam',
-		'5'  => 'all_mail',
-		'6'  => 'archive',
-		'7'  => 'sent',
-		'8'  => 'drafts',
-		'9'  => 'outbox',
-		'10' => 'starred',
-		'11' => null,          // all scheduled
-		'12' => null,
-		'15' => null,          // almost all mail — a view over everything but spam/trash
+	const PROTON_LOCATIONS = array(
+		'0' => 'inbox',
+		'3' => 'trash',
+		'4' => 'spam',
+		'6' => 'archive',
+		'7' => 'sent',
+		'8' => 'drafts',
+		'9' => 'outbox',
 	);
 
-	/** Folder names for the mapped system labels that are genuinely folders. */
+	/**
+	 * If an export ever puts two locations on one message, the earliest of these
+	 * wins — thrown away beats filed away, and a draft beats where it would be sent.
+	 */
+	const PROTON_LOCATION_PRIORITY = array('trash', 'spam', 'drafts', 'outbox', 'sent',
+		'archive', 'inbox');
+
+	/** The id for Proton's starred flag, which is a state rather than a place. */
+	const PROTON_STARRED = '10';
+
+	/** The manifest's `Type` for a folder; every other value is a label or a view. */
+	const PROTON_TYPE_FOLDER = 3;
+
+	/** Folder names for the locations above. */
 	const PROTON_FOLDER_NAMES = array(
-		'inbox'    => 'Inbox',
-		'drafts'   => 'Drafts',
-		'sent'     => 'Sent',
-		'trash'    => 'Trash',
-		'spam'     => 'Spam',
-		'all_mail' => 'All mail',
-		'archive'  => 'Archived',
-		'outbox'   => 'Outbox',
+		'inbox'   => 'Inbox',
+		'drafts'  => 'Drafts',
+		'sent'    => 'Sent',
+		'trash'   => 'Trash',
+		'spam'    => 'Spam',
+		'archive' => 'Archived',
+		'outbox'  => 'Outbox',
 	);
 
 	/**

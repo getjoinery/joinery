@@ -18,7 +18,7 @@
  * Run: php plugins/mailbox/tests/mailbox_reader_test.php
  * (requires schema synced — iem threading/state columns + ieg table).
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -100,6 +100,11 @@ class MailboxReaderTest {
 		// Unmatched (NULL alias).
 		$this->msg_ids['u1']  = $this->insertMsg(null, '<u1@x>', 'Nowhere', false, false, 10);
 
+		// A real attachment on ONE member of T1 (the list paperclip is thread-wide),
+		// and an inline-only part on T2 (which must NOT earn a paperclip).
+		$this->insertAttachment($this->msg_ids['t1b'], 'contract.pdf', false);
+		$this->insertAttachment($this->msg_ids['t2'], 'logo.png', true);
+
 		$this->out("  fixtures ready (suffix $suffix)");
 	}
 
@@ -154,6 +159,16 @@ class MailboxReaderTest {
 			$minutes_ago,
 		]);
 		return intval($stmt->fetchColumn());
+	}
+
+	/** One attachment manifest row; $inline marks a cid: body part rather than a file. */
+	private function insertAttachment($message_id, $filename, $inline) {
+		$stmt = $this->db->prepare("INSERT INTO ima_inbound_message_attachments
+			(ima_iem_inbound_email_message_id, ima_filename, ima_content_type,
+			 ima_size_bytes, ima_is_inline)
+			VALUES (?, ?, ?, ?, ?)");
+		$stmt->execute([$message_id, $filename, 'application/octet-stream', 1024,
+			$inline ? 't' : 'f']);
 	}
 
 	private function bethViewer() { return MailboxViewer::forUser($this->beth_user, 5); }
@@ -237,6 +252,11 @@ class MailboxReaderTest {
 		}
 		$this->ok($t1 && $t1['msg_count'] === 2 && $t1['unread_count'] === 2, 'T1 grouped: 2 msgs, 2 unread');
 		$this->ok($t2 && $t2['any_starred'] === true, 'T2 any_starred true');
+
+		// List paperclip: any member's real attachment flags the whole thread,
+		// while an inline-only cid: part is body content and flags nothing.
+		$this->ok($t1 && $t1['has_attachment'] === true, 'T1 has_attachment true (attachment on 2nd message)');
+		$this->ok($t2 && $t2['has_attachment'] === false, 'T2 has_attachment false (inline part only)');
 
 		// Scoped to a single mailbox.
 		$bethbox = $svc->listThreads($this->beth_alias, array(), 1, 50);

@@ -24,7 +24,7 @@
  *
  * Uses ext-dom (DOMDocument), always present in this deployment; no new dependency.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 class MailboxHtmlSanitizer {
@@ -110,7 +110,109 @@ class MailboxHtmlSanitizer {
 		return trim($text);
 	}
 
+	/**
+	 * Derive the one-line reading text of arbitrary RECEIVED HTML — what a list
+	 * row shows as its preview. Distinct from toPlainText(), which is a faithful
+	 * plaintext copy of mail we composed: a preview wants only the words a person
+	 * would read, so link URLs, image alts and invisible spacing characters are
+	 * left out and every block boundary becomes a single space.
+	 *
+	 * Received marketing mail is the hard case. It carries its stylesheet inside
+	 * the document, and strip_tags() removes the <style> TAGS while keeping the
+	 * CSS between them — which is how a preview ends up reading "a.cta_button{-moz-
+	 * box-sizing...". Parsing instead of pattern-matching drops those containers
+	 * with their contents, along with <head>, <title> and comments.
+	 *
+	 * @param string $html Raw received HTML (untrusted, possibly enormous).
+	 * @return string Collapsed single-line text; '' when there is nothing to read.
+	 */
+	public static function toReadableText(string $html): string {
+		$html = trim($html);
+		if ($html === '') {
+			return '';
+		}
+		// A preview needs the first readable sentence, not the whole newsletter.
+		// The cap bounds the parse; it is far past any document's <head>, so the
+		// stylesheet is never all that survives truncation.
+		if (strlen($html) > self::READABLE_INPUT_LIMIT) {
+			$html = substr($html, 0, self::READABLE_INPUT_LIMIT);
+		}
+		$doc = self::load($html);
+		if ($doc === null) {
+			// Unparseable — a naive strip is still better than returning nothing.
+			return self::collapseReadable(
+				html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+		}
+		$body = $doc->getElementsByTagName('body')->item(0);
+		if ($body === null) {
+			return '';
+		}
+		$text = '';
+		self::collectReadableText($body, $text);
+		return self::collapseReadable($text);
+	}
+
 	// ── internals ────────────────────────────────────────────────────────────
+
+	/** Ceiling on the HTML fed to toReadableText(), in bytes. */
+	const READABLE_INPUT_LIMIT = 200000;
+
+	/**
+	 * Tags whose edges are a word boundary in the reading text. Without them a
+	 * table-built email reads as "benefitReturn ProtectionTerms apply" — the
+	 * cells hold separate sentences that HTML never joins with whitespace.
+	 */
+	private static $READABLE_BREAK = array(
+		'p' => true, 'div' => true, 'br' => true, 'li' => true, 'ul' => true,
+		'ol' => true, 'dl' => true, 'dt' => true, 'dd' => true, 'table' => true,
+		'thead' => true, 'tbody' => true, 'tfoot' => true, 'tr' => true,
+		'td' => true, 'th' => true, 'h1' => true, 'h2' => true, 'h3' => true,
+		'h4' => true, 'h5' => true, 'h6' => true, 'blockquote' => true,
+		'section' => true, 'article' => true, 'aside' => true, 'header' => true,
+		'footer' => true, 'nav' => true, 'main' => true, 'hr' => true,
+		'pre' => true, 'address' => true, 'figure' => true, 'figcaption' => true,
+		'center' => true, 'fieldset' => true, 'legend' => true, 'caption' => true,
+	);
+
+	/** Accumulate readable text, honouring $DROP containers and block boundaries. */
+	private static function collectReadableText(DOMNode $node, string &$out): void {
+		foreach ($node->childNodes as $child) {
+			if ($child->nodeType === XML_TEXT_NODE) {
+				$out .= $child->nodeValue;   // DOM has already decoded entities
+				continue;
+			}
+			if ($child->nodeType !== XML_ELEMENT_NODE) {
+				continue;                    // comments (incl. MSO conditionals), PIs
+			}
+			$tag = strtolower($child->nodeName);
+			if (isset(self::$DROP[$tag])) {
+				continue;                    // style/script/head/title — contents and all
+			}
+			$breaks = isset(self::$READABLE_BREAK[$tag]);
+			if ($breaks) {
+				$out .= ' ';
+			}
+			self::collectReadableText($child, $out);
+			if ($breaks) {
+				$out .= ' ';
+			}
+		}
+	}
+
+	/** One line of readable text: invisible spacing gone, whitespace collapsed. */
+	private static function collapseReadable(string $text): string {
+		// Senders pad a preheader out to the length a client shows using invisible
+		// characters — zero-width joiners, soft hyphens, and the combining grapheme
+		// joiner, typically interleaved with non-breaking spaces. All spacing, no
+		// words, and it will fill a whole preview line if left in.
+		$text = preg_replace('/[\x{200B}-\x{200D}\x{2060}\x{FEFF}\x{00AD}\x{034F}\x{2800}]/u',
+			'', (string)$text);
+		// \s alone misses the Unicode spaces that padding leans on (NBSP above all),
+		// so name them: otherwise the collapse leaves the runs it was meant to remove.
+		$text = preg_replace('/[\s\x{00A0}\x{1680}\x{2000}-\x{200A}\x{202F}\x{205F}\x{3000}]+/u',
+			' ', (string)$text);
+		return trim((string)$text);
+	}
 
 	/** Parse an HTML fragment as UTF-8, errors suppressed. */
 	private static function load(string $html): ?DOMDocument {

@@ -27,7 +27,7 @@
  *
  * Run: php tests/run.php db --filter=mail_archive_import
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -752,6 +752,11 @@ class MailArchiveImportTest {
 			$this->db->exec("DELETE FROM evl_event_logs WHERE evl_event LIKE '"
 				. MailArchiveImporter::RUN_EVENT . "%' AND evl_note LIKE '%takeout%'");
 
+			// Every label name this suite's runs could have invented, read from the
+			// entries while they still exist. A fixed list cannot work: a run names a
+			// folder after its own archive, and those names carry a random suffix.
+			$invented = $this->labelNamesCreated();
+
 			foreach ($this->run_ids as $rid) {
 				$this->db->exec('DELETE FROM mie_mail_import_entries WHERE mie_mir_mail_import_run_id = ' . intval($rid));
 				$this->db->exec('DELETE FROM mir_mail_import_runs WHERE mir_mail_import_run_id = ' . intval($rid));
@@ -778,19 +783,50 @@ class MailArchiveImportTest {
 				} catch (\Throwable $e) {}
 			}
 			// Labels this import invented, so a re-run starts from the same place.
-			foreach (array('Receipts', 'Finance') as $name) {
+			// Anything still holding mail is somebody's real filing and stays.
+			foreach ($invented as $name) {
 				$label = InboundEmailLabel::getByName($name);
-				if ($label !== null) {
-					$stmt = $this->db->prepare('SELECT 1 FROM ilm_inbound_label_members
-						WHERE ilm_ilb_inbound_email_label_id = ? LIMIT 1');
-					$stmt->execute(array(intval($label->key)));
-					if ($stmt->fetchColumn() === false) {
-						$this->db->exec('DELETE FROM ilb_inbound_email_labels
-							WHERE ilb_inbound_email_label_id = ' . intval($label->key));
-					}
+				if ($label === null || !$label->key) {
+					continue;
+				}
+				$stmt = $this->db->prepare('SELECT 1 FROM ilm_inbound_label_members
+					WHERE ilm_ilb_inbound_email_label_id = ? LIMIT 1');
+				$stmt->execute(array(intval($label->key)));
+				if ($stmt->fetchColumn() === false) {
+					$this->db->exec('DELETE FROM ilb_inbound_email_labels
+						WHERE ilb_inbound_email_label_id = ' . intval($label->key));
 				}
 			}
 		} catch (\Throwable $e) {}
+	}
+
+	/**
+	 * The label names this suite's runs would have created — their entries' own
+	 * labels plus any non-standard source folder. Read before the entries go.
+	 *
+	 * @return string[]
+	 */
+	private function labelNamesCreated(): array {
+		if (!$this->run_ids) {
+			return array('Receipts', 'Finance');
+		}
+		$ids = implode(',', array_map('intval', $this->run_ids));
+		$rows = $this->db->query('SELECT DISTINCT mie_labels, mie_source_folder
+			FROM mie_mail_import_entries WHERE mie_mir_mail_import_run_id IN (' . $ids . ')')
+			->fetchAll(PDO::FETCH_ASSOC);
+
+		$names = array('Receipts' => true, 'Finance' => true);
+		foreach ($rows as $row) {
+			$candidates = preg_split('/\r\n|\r|\n/', (string)$row['mie_labels']) ?: array();
+			$candidates[] = (string)$row['mie_source_folder'];
+			foreach ($candidates as $name) {
+				$name = trim($name);
+				if ($name !== '' && !MailArchiveImporter::isStandardFolder($name)) {
+					$names[$name] = true;
+				}
+			}
+		}
+		return array_keys($names);
 	}
 }
 

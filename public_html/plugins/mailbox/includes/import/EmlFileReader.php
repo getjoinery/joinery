@@ -7,7 +7,7 @@
  * people do, and it goes through exactly the same run, report and undo as a
  * hundred-thousand-message archive.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/import/MailArchiveReader.php'));
@@ -43,7 +43,7 @@ class EmlFileReader extends MailArchiveReader {
 		}
 		$raw = self::stripEmlx((string)@file_get_contents($path));
 		$headers = self::parseHeaders(self::headerBlock($raw));
-		$filename = (string)($state['filename'] ?? basename($path));
+		$filename = (string)($state['filename'] ?? $this->sourceName($path));
 
 		$meta = self::header($headers, 'x-gmail-labels') !== '' ? self::gmailLabels($headers) : null;
 		if ($meta === null) {
