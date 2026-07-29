@@ -502,19 +502,21 @@ if ($show_form) {
 		<?php
 	}
 
-	// Protected sending identity — the outbound send protection ceremony lives on
-	// its own page (in-window key sealing, DNS shape, activation). Offered only for
-	// a saved, hosted (non-IMAP) domain.
-	if ($edit_domain && $edit_domain->key && !$edit_domain->get('ied_is_imap_source')) {
+	// Protected sending identity — Fortress only, and driven entirely from the
+	// Setup tab (the key is sealed by the raise; publishing and enforcing are
+	// steps in its checklist). This is a signpost, not a second control surface.
+	if ($edit_domain && $edit_domain->key && !$edit_domain->get('ied_is_imap_source')
+			&& $edit_domain->security_level() === InboundEmailDomain::LEVEL_FORTRESS) {
 		$page->begin_box(array('title' => 'Protected sending identity'));
 		if ($edit_domain->is_protected_identity()) {
-			echo '<p class="alert alert-success">Protection is enforced for this domain.</p>';
+			echo '<p class="alert alert-success">Protection is on — while you are signed out, nothing on this server '
+				. 'can send mail as this domain that anyone will accept.</p>';
 		} else {
-			echo '<p>Make it impossible for a compromised, locked box to send DMARC-passing mail as this domain. '
-				. 'DKIM signing moves in-app, gated by a vault unlock.</p>';
+			echo '<p>The signing key is made. Publishing its DNS and turning protection on are the remaining steps '
+				. 'on the Setup tab.</p>';
 		}
-		echo '<a class="btn btn-primary" href="/plugins/mailbox/admin/admin_mailbox_protect?ied_inbound_email_domain_id='
-			. (int)$edit_domain->key . '">Manage outbound send protection</a>';
+		echo '<a class="btn btn-primary" href="/plugins/mailbox/admin/admin_mailbox_setup?domain_id='
+			. (int)$edit_domain->key . '">Go to setup for this domain</a>';
 		$page->end_box();
 	}
 } // end show_form

@@ -12,11 +12,20 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  * disclosure (?advanced=1); they are useful but not per-mailbox, so they stay
  * out of the default view.
  *
+ * A domain with no mailbox yet can be focused directly (?domain_id=). Its setup
+ * is domain-level — the vault, outbound protection, the relay, the DNS shape —
+ * so it renders the guided steps, the publish box and runDomainChecks(), and no
+ * per-mailbox checks. For a Fortress domain those domain checks ARE the
+ * protected-shape verification, so publishing can prove itself with no mailbox.
+ *
+ * Outbound send protection has no page of its own: mailbox_protect_handle_action()
+ * runs every protect_* transition here and redirects back to the focused domain.
+ *
  * POST actions: save the mail hostname / public IP, switch provider, enable the
  * plugin, enable SRS, register a domain, or apply a one-click fix — each writes
  * through a model and redirects so the next render reads fresh settings.
  *
- * @version 2.7
+ * @version 2.9
  */
 function admin_mailbox_setup_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -50,31 +59,66 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	}
 
 	$base = '/plugins/mailbox/admin/admin_mailbox_setup';
-	$selected_alias_id = isset($input['alias_id']) ? (int)$input['alias_id'] : 0;
 	$advanced = !empty($input['advanced']);
+
+	// The page focuses either a mailbox or a bare domain. A domain is registered
+	// before any mailbox exists on it, and a Fortress domain's setup — vault,
+	// protect ceremony, relay, DNS shape — is entirely domain-level, so a
+	// mailbox-only picker would leave a freshly added domain with no guided
+	// surface at all. The two states share one dropdown ('a<id>' / 'd<id>') but
+	// stay separate query parameters, so every existing ?alias_id= link still
+	// resolves the same way.
+	$selected_alias_id  = isset($input['alias_id'])  ? (int)$input['alias_id']  : 0;
+	$selected_domain_id = isset($input['domain_id']) ? (int)$input['domain_id'] : 0;
+	if (isset($input['focus']) && is_string($input['focus']) && $input['focus'] !== '') {
+		$focus_raw = trim($input['focus']);
+		$focus_id  = (int)substr($focus_raw, 1);
+		if ($focus_raw[0] === 'd') {
+			$selected_domain_id = $focus_id;
+			$selected_alias_id  = 0;
+		} elseif ($focus_raw[0] === 'a') {
+			$selected_alias_id  = $focus_id;
+			$selected_domain_id = 0;
+		}
+	}
+	// A mailbox already names its domain; carrying both would let them disagree.
+	if ($selected_alias_id) { $selected_domain_id = 0; }
+
+	// Build a redirect URL that keeps the focused mailbox or domain and the
+	// advanced state, so a POST action returns the operator to exactly where they
+	// were. Declared before the DNS handler below, which redirects through it.
+	$state_qs = function (array $over = array()) use ($base, $selected_alias_id, $selected_domain_id, $advanced) {
+		$alias  = array_key_exists('alias_id', $over)  ? $over['alias_id']  : $selected_alias_id;
+		$domain = array_key_exists('domain_id', $over) ? $over['domain_id'] : $selected_domain_id;
+		$adv    = array_key_exists('advanced', $over)  ? $over['advanced']  : $advanced;
+		$parts = array();
+		if ($alias)       { $parts[] = 'alias_id=' . (int)$alias; }
+		elseif ($domain)  { $parts[] = 'domain_id=' . (int)$domain; }
+		if ($adv)         { $parts[] = 'advanced=1'; }
+		return $base . ($parts ? '?' . implode('&', $parts) : '');
+	};
+	$redirect_url = $state_qs();
+
+	// Outbound send protection state transitions. This tab is the surface that
+	// drives them — there is no separate ceremony page — so every protect_*
+	// action lands here and redirects back to the focused domain.
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protect_identity.php'));
+	$protect_redirect = mailbox_protect_handle_action($input, $session, $state_qs());
+	if ($protect_redirect !== null) {
+		return $protect_redirect;
+	}
 
 	// DNS publish actions (specs/dns_record_management.md). Handled before the
 	// setting saves below so a publish never also writes the hostname form.
 	require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
-	$dns_return_url = $base . ($selected_alias_id ? '?alias_id=' . (int)$selected_alias_id : '');
-	$dns_redirect = DnsPublishBox::handle($input, function () use ($input, $selected_alias_id) {
-		return _setup_dns_plan_for_alias($selected_alias_id);
-	}, $dns_return_url);
+	$dns_redirect = DnsPublishBox::handle($input, function () use ($selected_alias_id, $selected_domain_id) {
+		return $selected_alias_id
+			? _setup_dns_plan_for_alias($selected_alias_id)
+			: _setup_dns_plan_for_domain($selected_domain_id);
+	}, $state_qs());
 	if ($dns_redirect !== null) {
 		return $dns_redirect;
 	}
-
-	// Build a redirect URL that keeps the chosen mailbox and the advanced state,
-	// so a POST action returns the operator to exactly where they were.
-	$state_qs = function (array $over = array()) use ($base, $selected_alias_id, $advanced) {
-		$alias = array_key_exists('alias_id', $over) ? $over['alias_id'] : $selected_alias_id;
-		$adv   = array_key_exists('advanced', $over) ? $over['advanced'] : $advanced;
-		$parts = array();
-		if ($alias) { $parts[] = 'alias_id=' . (int)$alias; }
-		if ($adv)   { $parts[] = 'advanced=1'; }
-		return $base . ($parts ? '?' . implode('&', $parts) : '');
-	};
-	$redirect_url = $state_qs();
 
 	$announce = function ($msg, $title) use ($session) {
 		$session->save_message(new DisplayMessage(
@@ -148,9 +192,10 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		}
 	}
 
-	// --- Mailbox picker: every enabled, registered mailbox (Accounts tab) ---
-	$mailbox_options = array();   // alias_id => display label
-	$mailbox_index   = array();   // alias_id => meta about the mailbox
+	// --- Picker: every enabled mailbox, plus any domain with none yet ---
+	$mailbox_options = array();   // alias_id  => display label
+	$mailbox_index   = array();   // alias_id  => meta about the mailbox
+	$domain_options  = array();   // domain_id => display label
 	$domains = new MultiInboundEmailDomain(array('deleted' => false), array('ied_domain' => 'ASC'));
 	$domains->load();
 	foreach ($domains as $domain) {
@@ -175,16 +220,35 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 				'forwards'  => in_array($mode, array(InboundEmailAlias::MODE_FORWARD, InboundEmailAlias::MODE_FORWARD_AND_STORE), true),
 			);
 		}
+		// Only while it has no mailbox: once one exists the mailbox entry reaches
+		// the same domain-level guidance, and two ways in would just be two
+		// answers to the same question. An IMAP source has no DNS shape to set
+		// up here at all.
+		if (!$is_imap && !count($aliases)) {
+			$domain_options[$domain->key] = strtolower($domain->get('ied_domain')) . '  —  Domain, no mailbox yet';
+		}
 	}
 
-	// No mailbox is chosen by default. Every check below costs DNS lookups and
+	// Nothing is chosen by default. Every check below costs DNS lookups and
 	// host probes, and running a full suite against an arbitrary first mailbox
 	// is work nobody asked for — the page waits to be told what to check.
-	// An alias_id that no longer resolves falls back to unchosen rather than
-	// silently checking something else.
+	// An id that no longer resolves falls back to unchosen rather than silently
+	// checking something else.
 	if (!isset($mailbox_options[$selected_alias_id])) {
 		$selected_alias_id = 0;
 	}
+	if (!isset($domain_options[$selected_domain_id])) {
+		$selected_domain_id = 0;
+	}
+
+	// One dropdown, two kinds of entry. Mailboxes first: they are the common
+	// case, and a domain without one is a setup state on its way to becoming a
+	// mailbox.
+	$focus_options = array();
+	foreach ($mailbox_options as $id => $label) { $focus_options['a' . $id] = $label; }
+	foreach ($domain_options as $id => $label)  { $focus_options['d' . $id] = $label; }
+	$focus_value = $selected_alias_id ? 'a' . $selected_alias_id
+		: ($selected_domain_id ? 'd' . $selected_domain_id : '');
 
 	// --- Inbound provider (global) — needed for arrival shape + Advanced ---
 	$provider_classes = InboundProviderRegistry::all();
@@ -200,7 +264,8 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	// --- Scoped checks for the chosen mailbox ---
 	// The grouping lives in mailbox_setup_scope.php, so the reader's setup
 	// banner grades exactly the rows this page renders.
-	$selected       = $selected_alias_id > 0;
+	$selected        = $selected_alias_id > 0;
+	$domain_selected = $selected_domain_id > 0;
 	$address        = '';
 	$focus_domain   = '';
 	$arrival        = '';          // 'imap' | 'webhook' | 'postfix'
@@ -234,21 +299,46 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	// the one-time vault ceremony; Fortress adds the protect ceremony, the relay,
 	// and the session-gated-send confirmation. Reuse the built flows — link, never
 	// reimplement.
+	// A directly focused domain has no mailbox to resolve through, so name it
+	// here. Everything downstream — the guided box, the DNS plan, the Advanced
+	// health run — keys on $focus_domain and does not care which way it arrived.
+	if ($domain_selected) {
+		$domain_model = new InboundEmailDomain($selected_domain_id, TRUE);
+		if ($domain_model->key) {
+			$focus_domain = strtolower(trim((string)$domain_model->get('ied_domain')));
+		}
+	}
+
 	$focus_domain_model = null;
 	$security_level     = InboundEmailDomain::LEVEL_STANDARD;
 	$focus_domain_id    = 0;
 	$focus_is_protected = false;
 	$acting_has_vault   = false;
-	if ($selected && $arrival !== 'imap' && $focus_domain !== '') {
+	$protect            = null;   // protection state, for the guided box + Advanced
+	if ($arrival !== 'imap' && $focus_domain !== '') {
 		$focus_domain_model = InboundEmailDomain::GetByDomain($focus_domain);
+		$uid = (int)$session->get_user_id();
 		if ($focus_domain_model) {
 			$security_level     = $focus_domain_model->security_level();
 			$focus_domain_id    = (int)$focus_domain_model->key;
 			$focus_is_protected = $focus_domain_model->is_protected_identity();
+			if ($security_level === InboundEmailDomain::LEVEL_FORTRESS) {
+				$protect = mailbox_protect_state($focus_domain_model, $uid);
+			}
 		}
 		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
-		$uid = (int)$session->get_user_id();
 		$acting_has_vault = $uid > 0 && (UserEncryptionVault::loadForUser($uid) !== null);
+	}
+
+	// A focused domain has no mailbox to scope per-address checks to, but the
+	// domain-level DNS is exactly what its setup is about — and for a Fortress
+	// domain those rows ARE the protected-shape verification
+	// (InboundEmailSetupCheck::protectedShapeResults, reached from checkDomain).
+	// Without them a domain focus would show records to publish and no way to
+	// see whether publishing worked.
+	$domain_rows = array();
+	if ($domain_selected && $focus_domain !== '') {
+		$domain_rows = (new InboundEmailSetupCheck())->runDomainChecks($focus_domain);
 	}
 
 	// --- Advanced (server-wide) — only run the full suite when expanded ---
@@ -293,7 +383,7 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	$dns_box = DnsPublishBox::build(
 		($focus_domain !== '' && $arrival !== 'imap') ? $checker->dnsPlan($focus_domain) : null,
 		$input,
-		$base . ($selected_alias_id ? '?alias_id=' . (int)$selected_alias_id : '')
+		$state_qs()
 	);
 
 	// Where the publish box belongs: up front while there is DNS to fix, behind
@@ -302,7 +392,7 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	// they are correct, because the checks it just rendered say so. Asking for
 	// the diff explicitly always keeps the box in view, so pressing the button
 	// never makes it jump somewhere else.
-	$dns_box_in_advanced = !_setup_has_dns_work($receiving_rows, $forwarding_rows)
+	$dns_box_in_advanced = !_setup_has_dns_work($receiving_rows, $forwarding_rows, $domain_rows)
 		&& empty($input['dns_show']);
 
 	return LogicResult::render(array(
@@ -312,10 +402,16 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		'base'                       => $base,
 		'dns_box'                    => $dns_box,
 		'relay_section'              => $relay_section,
-		// Mailbox-first view
+		// Mailbox-first view, with a domain-only fallback for a domain that has
+		// no mailbox yet.
 		'mailbox_options'            => $mailbox_options,
+		'domain_options'             => $domain_options,
+		'focus_options'              => $focus_options,
+		'focus_value'                => $focus_value,
 		'selected_alias_id'          => $selected_alias_id,
+		'selected_domain_id'         => $selected_domain_id,
 		'selected'                   => $selected,
+		'domain_selected'            => $domain_selected,
 		'address'                    => $address,
 		'focus_domain'               => $focus_domain,
 		'arrival'                    => $arrival,
@@ -329,6 +425,8 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		'focus_domain_id'            => $focus_domain_id,
 		'focus_is_protected'         => $focus_is_protected,
 		'acting_has_vault'           => $acting_has_vault,
+		'protect'                    => $protect,
+		'domain_rows'                => $domain_rows,
 		// Advanced
 		'advanced'                   => $advanced,
 		'results'                    => $results,
@@ -382,6 +480,23 @@ function _setup_dns_plan_for_alias(int $alias_id): ?DnsRecordPlan {
 	$name = strtolower(trim((string)$domain->get('ied_domain')));
 	if ($name === '' || $domain->get('ied_is_imap_source')) {
 		return null;   // an IMAP-pull mailbox has no MX/host stack to publish
+	}
+	return (new InboundEmailSetupCheck())->dnsPlan($name);
+}
+
+/**
+ * The DNS plan for a directly focused domain — the same contract as
+ * _setup_dns_plan_for_alias(), for a domain that has no mailbox to reach it
+ * through.
+ */
+function _setup_dns_plan_for_domain(int $domain_id): ?DnsRecordPlan {
+	if ($domain_id <= 0) {
+		return null;
+	}
+	$domain = new InboundEmailDomain($domain_id, TRUE);
+	$name = strtolower(trim((string)$domain->get('ied_domain')));
+	if (!$domain->key || $name === '' || $domain->get('ied_is_imap_source')) {
+		return null;
 	}
 	return (new InboundEmailSetupCheck())->dnsPlan($name);
 }
