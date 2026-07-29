@@ -974,10 +974,17 @@ batches one page load at a time. A Fortress raise before outbound protection
 is activated renders the card as a handoff — the title stays honest
 ("Earlier messages sealed — one step left") and the button continues into the
 protect ceremony. The Setup tab carries a per-domain **Mail sealed at rest**
-row: PASS when every stored message on a protected domain is sealed, REQUIRED
-FAIL naming the unsealed count when protection has silently degraded — and
-the editor resumes the sealing pass on its next visit whenever a backlog
-exists.
+row, which separates the two states that wear the same not-sealed-yet flag.
+A message the pass *can* seal — the mailbox has one holder and that holder
+has a vault — is a RECOMMENDED WARN counting how many are waiting: every
+message is briefly unsealed between arriving and being sealed, so a failure
+there would fire on ordinary delivery. A message no pass can ever seal — no
+holder, several holders, or a vault deleted after the raise — is the REQUIRED
+FAIL, naming the mailbox, because that is protection silently degrading.
+Relay-sealed rows awaiting parse (`iem_pending_parse`) count as neither: the
+relay already sealed them to the owner's vault public key, and they open at
+the owner's next unlock. PASS says so when any are in flight. The editor
+resumes the sealing pass on its next visit whenever a backlog exists.
 
 **A lowering converges history back out**
 (specs/mailbox_lowering_unseal.md). Leaving a sealing level lands on the

@@ -14,7 +14,8 @@
  * where it already is has no blast radius; moving a zone takes the website and
  * every other name with it, and is not something this platform offers.
  *
- * @version 1.2
+ * @version 1.3
+ * @changelog 1.3 - The diff renders each record value in a copy field, so a value stays hand-publishable when an automatic publish is blocked
  * @changelog 1.2 - Renders the credential guide on the first credential field, and the OAuth app registration form when one is missing
  */
 
@@ -211,7 +212,16 @@ function dns_publish_box_diff($page, array $vars): void {
 		$record = $row['record'];
 		echo '<tr>';
 		echo '<td>' . dns_publish_box_badge($row['outcome']) . '</td>';
-		echo '<td><code>' . htmlspecialchars($record->describe()) . '</code>';
+		// Type and name read; the value is copied. A DKIM key or an SPF string
+		// retyped by eye is a broken record, and publishing here can be blocked
+		// — a refused credential, a provider with no driver — so the value has
+		// to stay hand-publishable without leaving the page.
+		echo '<td><code>' . htmlspecialchars($record->type) . '</code> '
+			. '<code>' . htmlspecialchars($record->name) . '</code>';
+		if ($record->type === DnsRecord::TYPE_MX && $record->priority !== null) {
+			echo ' <span class="text-muted small">priority ' . (int)$record->priority . '</span>';
+		}
+		echo '<div class="mt-1">' . PublicPageBase::copy_field($record->value) . '</div>';
 		if ($record->note !== '') {
 			echo '<div class="text-muted small">' . htmlspecialchars($record->note) . '</div>';
 		}

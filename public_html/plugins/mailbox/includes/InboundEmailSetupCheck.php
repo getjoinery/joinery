@@ -23,7 +23,7 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
- * @version 1.26
+ * @version 1.28
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -1156,37 +1156,99 @@ class InboundEmailSetupCheck {
 		}
 
 		// Unsealed mail on a protected domain (specs/mailbox_protection_ceremony.md
-		// § 3): the ceremony seals the backlog at raise time and the mutation-point
-		// refusals keep every mailbox sealable, so this row firing means protection
-		// silently degraded (a vault deleted after the raise, a legacy state) — the
-		// one outcome the ceremony exists to end, so it must be loud.
+		// § 3). Two states wear the same "not sealed yet" flag and mean opposite
+		// things, so they are counted and reported separately:
+		//
+		//   converging — the holder has a vault, so the next sealing pass will
+		//                seal it. Normal, temporary, and not a failure: every
+		//                message is briefly unsealed between arriving and being
+		//                sealed, and a red card in that window cries wolf.
+		//   blocked    — no holder with a vault, so no pass can ever seal it.
+		//                THAT is the silent degradation this row exists to catch.
+		//
+		// The old row asserted the blocked cause for every unsealed message
+		// without testing it, which made the common case both loud and wrong.
 		if ($model && $model->seals_content()) {
-			$unsealed = 0;
+			$pending    = 0;
+			$converging = 0;
+			$blocked    = 0;
+			$blocked_addresses = array();
+			$counted    = false;
 			try {
 				$db = DbConnector::get_instance()->get_db_link();
+				// A pending-parse row is sealed, in the other form: the relay
+				// sealed the whole raw message to the owner's vault public key
+				// before this deployment saw it, and the per-field seal happens
+				// when DeferredIngest parses it at the next unlock. Counting it
+				// as unsealed reports the safest arrival path as a failure.
 				$stmt = $db->prepare(
-					"SELECT COUNT(*) FROM iem_inbound_email_messages
-					 WHERE iem_ied_inbound_email_domain_id = ?
-					   AND iem_content_sealed = false AND iem_delete_time IS NULL");
+					"SELECT iem_iea_inbound_email_alias_id AS alias_id,
+					        COUNT(*) FILTER (WHERE iem_content_sealed = false AND iem_pending_parse = false) AS unsealed,
+					        COUNT(*) FILTER (WHERE iem_pending_parse = true) AS pending
+					   FROM iem_inbound_email_messages
+					  WHERE iem_ied_inbound_email_domain_id = ? AND iem_delete_time IS NULL
+					  GROUP BY iem_iea_inbound_email_alias_id");
 				$stmt->execute(array(intval($model->key)));
-				$unsealed = intval($stmt->fetchColumn());
+
+				require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
+				require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+				require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+				foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $group) {
+					$pending += intval($group['pending']);
+					$n = intval($group['unsealed']);
+					if ($n === 0) {
+						continue;
+					}
+					// Sealing needs only the holder's PUBLIC key, so a mailbox
+					// with one holder who has a vault is always sealable.
+					$alias_id = intval($group['alias_id']);
+					$owner_id = InboundEmailMessage::singleOwnerUserId($alias_id ?: null);
+					if ($owner_id !== null && UserEncryptionVault::loadForUser($owner_id) !== null) {
+						$converging += $n;
+						continue;
+					}
+					$blocked += $n;
+					try {
+						$alias = new InboundEmailAlias($alias_id, TRUE);
+						if ($alias->key) { $blocked_addresses[] = (string)$alias->get_full_address(); }
+					} catch (\Throwable $e) {
+						// Name unavailable — the count still tells the story.
+					}
+				}
+				$counted = true;
 			} catch (\Throwable $e) {
 				// Count unavailable — say nothing rather than fabricate a verdict.
-				$unsealed = -1;
 			}
-			if ($unsealed > 0) {
+
+			if ($blocked > 0) {
+				$where = $blocked_addresses
+					? ' (' . implode(', ', array_unique($blocked_addresses)) . ')'
+					: '';
 				$out[] = $this->r('domain.sealed_backlog', $domain, 'domain', 'Mail sealed at rest',
 					self::REQUIRED, self::FAIL,
-					$unsealed . ' message(s) on this protected domain are stored unsealed.',
-					'Every message on a Private or Fortress domain should be sealed to its mailbox '
-					. 'owner\'s vault. Unsealed rows mean the owner\'s vault is missing or was deleted '
-					. 'after the level was raised.',
-					array('text' => 'Open the domain editor — the sealing pass resumes automatically once '
-						. 'every mailbox owner has a vault.'));
-			} elseif ($unsealed === 0) {
+					$blocked . ' message(s) cannot be sealed' . $where
+					. ' — the mailbox has no single owner with a vault.',
+					'Sealing needs the mailbox owner\'s vault public key. A mailbox with no owner, '
+					. 'more than one owner, or an owner whose vault was deleted after the level was '
+					. 'raised has no key to seal to, so those messages stay plaintext at rest.',
+					array('text' => 'Give the mailbox exactly one owner and have them set up a vault '
+						. 'on their security page. The sealing pass converges the backlog from the '
+						. 'domain editor once it can.'));
+			} elseif ($converging > 0) {
+				$out[] = $this->r('domain.sealed_backlog', $domain, 'domain', 'Mail sealed at rest',
+					self::RECOMMENDED, self::WARN,
+					$converging . ' message(s) are waiting for the sealing pass.',
+					'Every message is briefly unsealed between arriving and being sealed. The owner '
+					. 'has a vault, so these will seal — they are stored as plaintext until they do.',
+					array('text' => 'Open the domain editor to run the pass now; it also resumes on '
+						. 'its own.'));
+			} elseif ($counted) {
 				$out[] = $this->r('domain.sealed_backlog', $domain, 'domain', 'Mail sealed at rest',
 					self::REQUIRED, self::PASS,
-					'Every stored message on this protected domain is sealed.');
+					'Every stored message on this protected domain is sealed.'
+					. ($pending > 0
+						? ' ' . $pending . ' arrived through the relay and open at your next vault unlock.'
+						: ''));
 			}
 		}
 
