@@ -189,6 +189,24 @@ written at Cloudflare on Jul 26, 2026 1:23 AM* — and no form, because offering
 submit button for records already in flight is what makes a successful publish
 look like a failed one.
 
+## Reporting the result
+
+The banner after a publish carries a severity, and it is part of the contract
+rather than styling. `DnsPublishBox::resultSeverity()` returns success only when
+every planned record is in place, a warning when some landed and some did not,
+and an error when nothing reached the provider at all. A refused credential
+rendered in success green reads as *published* and sends an operator away
+believing their DNS is live.
+
+**A provider that restricts a credential by client IP sees whichever address the
+outbound connection used.** A server holding both an IPv4 and an IPv6 address
+may reach the API over either, so an allowlist written from the IPv4 address
+alone refuses the request — Cloudflare's 403 for this names the address it saw,
+and the driver reports it as an address restriction rather than a permission
+problem, because the two need opposite fixes. Cloudflare mishandles /48 and /64
+ranges in that filter; list an IPv6 address on its own. Namecheap's allowlist has
+the same shape.
+
 ## Ownership
 
 The platform manages only records it created or adopted, and `dnr_dns_records`
@@ -418,5 +436,8 @@ Adding VPS providers changes nothing here.
   match with no DNS write, conflicts and cutovers requiring their own choice,
   per-record best-effort apply, convergence on re-run, and withdrawal touching
   only owned records.
+- `tests/dns/dns_publish_banner_test.php` — the severity of the banner a publish
+  leaves behind: green only when the whole plan is in place, amber when it is
+  partial, red when nothing reached the provider.
 
-Both are `safe` tier and need no credential or network.
+All three are `safe` tier and need no credential or network.

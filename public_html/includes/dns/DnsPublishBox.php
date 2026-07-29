@@ -24,7 +24,8 @@
  *   diff           the four outcomes, with cutovers called out
  *   all_green      every record is published as planned
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - Publish banners carry a severity: success only when the whole plan is in place, warning when partial, error when nothing reached the provider
  * @changelog 1.1 - Collects an OAuth app registration in place when the chosen provider has none, gated at permission 10, then continues to consent in the same request; carries credentialGuide() through to the box
  */
 
@@ -77,7 +78,8 @@ class DnsPublishBox {
 		$driver_class = DnsDriverRegistry::get($driver_key);
 		if ($driver_class === null) {
 			self::flash($session, 'This deployment has no driver for the DNS host '
-				. $plan->getDomain() . ' uses.', 'DNS host not supported');
+				. $plan->getDomain() . ' uses.', 'DNS host not supported',
+				DisplayMessage::MESSAGE_ERROR);
 			return LogicResult::redirect($return_url);
 		}
 
@@ -137,7 +139,8 @@ class DnsPublishBox {
 				// The box collects the app registration itself when it is missing,
 				// so this is a genuine failure rather than a setup step: say what
 				// went wrong and leave the diff on screen.
-				self::flash($session, $e->getMessage(), 'Could not start authorization');
+				self::flash($session, $e->getMessage(), 'Could not start authorization',
+					DisplayMessage::MESSAGE_ERROR);
 				return LogicResult::redirect(self::urlWith($return_url, array('dns_show' => '1')));
 			}
 			return LogicResult::redirect($consent_url);
@@ -157,7 +160,7 @@ class DnsPublishBox {
 			}
 			if ($credential[$field] === '') {
 				self::flash($session, 'Enter the ' . $driver_class::getLabel() . ' credential to publish.',
-					'Credential required');
+					'Credential required', DisplayMessage::MESSAGE_WARNING);
 				return LogicResult::redirect(self::urlWith($return_url, array('dns_show' => '1')));
 			}
 		}
@@ -165,7 +168,8 @@ class DnsPublishBox {
 		$results = self::publish($driver_class, $credential, $plan, $decisions, DnsReconciler::APPLY_CONFIRMED);
 		unset($credential);   // the only copy, gone before the response is built
 
-		self::flash($session, self::summarizeResults($results), 'DNS publish');
+		self::flash($session, self::summarizeResults($results), 'DNS publish',
+			self::resultSeverity($results));
 		return LogicResult::redirect(self::urlWith($return_url, array('dns_show' => '1')));
 	}
 
@@ -218,26 +222,26 @@ class DnsPublishBox {
 		$provider_class = OAuth2ProviderRegistry::get($driver_class::oauthProviderKey());
 		if ($provider_class === null) {
 			self::flash($session, 'This deployment has no OAuth provider for '
-				. $driver_class::getLabel() . '.', 'Cannot authorize');
+				. $driver_class::getLabel() . '.', 'Cannot authorize', DisplayMessage::MESSAGE_ERROR);
 			return LogicResult::redirect(self::urlWith($return_url, array('dns_show' => '1')));
 		}
 
 		if ($session->get_permission() < self::OAUTH_CONFIG_PERMISSION) {
 			self::flash($session, 'Connecting ' . $provider_class::getLabel()
 				. ' for the first time sets an application credential the whole site shares, '
-				. 'so it needs a full administrator.', 'Not permitted');
+				. 'so it needs a full administrator.', 'Not permitted', DisplayMessage::MESSAGE_WARNING);
 			return LogicResult::redirect(self::urlWith($return_url, array('dns_show' => '1')));
 		}
 
 		$error = OAuth2ProviderConfig::save($provider_class, $input, 'dns_oauth_', $session);
 		if ($error !== '') {
-			self::flash($session, $error, 'Could not save');
+			self::flash($session, $error, 'Could not save', DisplayMessage::MESSAGE_ERROR);
 			return LogicResult::redirect(self::urlWith($return_url, array('dns_show' => '1')));
 		}
 
 		if (!$provider_class::isConfigured()) {
 			self::flash($session, 'Enter both the client ID and the client secret for '
-				. $provider_class::getLabel() . '.', 'Incomplete');
+				. $provider_class::getLabel() . '.', 'Incomplete', DisplayMessage::MESSAGE_WARNING);
 			return LogicResult::redirect(self::urlWith($return_url, array('dns_show' => '1')));
 		}
 
@@ -511,10 +515,37 @@ class DnsPublishBox {
 		return $url;
 	}
 
-	private static function flash($session, string $message, string $title): void {
+	/**
+	 * A banner the operator will read as a verdict. The severity is not
+	 * decoration: a refused credential rendered in success green reads as
+	 * "published" and sends someone away believing their DNS is live.
+	 */
+	private static function flash($session, string $message, string $title,
+			int $severity = DisplayMessage::MESSAGE_ANNOUNCEMENT): void {
 		$session->save_message(new DisplayMessage(
 			$message, $title, '~.*~',
-			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+			$severity, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 		));
+	}
+
+	/**
+	 * How a publish should be reported: error when nothing reached the provider,
+	 * warning when some records landed and others did not, success only when
+	 * every record the plan asked for is in place.
+	 */
+	public static function resultSeverity(array $publish): int {
+		$wrote = false;
+		$failed = $publish['error'] !== '';
+		foreach ($publish['results'] as $result) {
+			if (empty($result['ok'])) {
+				$failed = true;
+			} elseif (in_array($result['action'], array('created', 'updated', 'adopted'), true)) {
+				$wrote = true;
+			}
+		}
+		if (!$failed) {
+			return DisplayMessage::MESSAGE_ANNOUNCEMENT;
+		}
+		return $wrote ? DisplayMessage::MESSAGE_WARNING : DisplayMessage::MESSAGE_ERROR;
 	}
 }
