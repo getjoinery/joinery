@@ -345,6 +345,7 @@ core dependency on any one plugin.
 | Deactivate a passkey for the vault | Session + recent step-up; refused if it breaks the unlocker floor |
 | Revoke a passkey | Session; refused if it breaks the unlocker floor, or if it is a vault holder's last passkey while TOTP is off; trusted devices re-earn |
 | Turn off the authenticator app | Session + a current TOTP/backup code; refused for a vault holder with no live passkey; ends all windows; trusted devices re-earn |
+| Test the authenticator app | Session only (`/profile/test-authenticator`, reached from the Actions menu on the Security page). Accepts a 6-digit code, never a backup code; a match consumes the time step exactly as a sign-in does, so a tested code cannot be replayed |
 | Forget trusted devices | Session; rotates the device-trust HMAC key so every skip-second-factor cookie dies — no session ends, factor methods untouched |
 | Rotate the vault key | Live PRF assertion from an enrolled passkey |
 | Password reset | An authorizer — email link, passkey, TOTP (no-vault only), or verified recovery address; never opens a vault |

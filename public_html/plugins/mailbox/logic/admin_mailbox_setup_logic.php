@@ -25,7 +25,7 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  * plugin, enable SRS, register a domain, or apply a one-click fix — each writes
  * through a model and redirects so the next render reads fresh settings.
  *
- * @version 2.9
+ * @version 2.10
  */
 function admin_mailbox_setup_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -46,16 +46,6 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	$gate_redirect = mailbox_receive_gate_handle($input);
 	if ($gate_redirect !== null) {
 		return $gate_redirect;
-	}
-
-	// Relay section actions (lifecycle, provisioning, hosted-slot enrollment)
-	// post back to this tab. Must run before the mail-hostname save below —
-	// the provision form also carries a mail_hostname field.
-	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/relay_admin.php'));
-	$relay_redirect = admin_mailbox_relay_tenant_actions($input, $session,
-		'/plugins/mailbox/admin/admin_mailbox_setup');
-	if ($relay_redirect !== null) {
-		return $relay_redirect;
 	}
 
 	$base = '/plugins/mailbox/admin/admin_mailbox_setup';
@@ -86,7 +76,9 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 
 	// Build a redirect URL that keeps the focused mailbox or domain and the
 	// advanced state, so a POST action returns the operator to exactly where they
-	// were. Declared before the DNS handler below, which redirects through it.
+	// were. Declared before every action handler below, all of which redirect
+	// through it, and handed to the view as self_url: a form that posts anywhere
+	// but here drops the focus and dumps the operator back on the picker.
 	$state_qs = function (array $over = array()) use ($base, $selected_alias_id, $selected_domain_id, $advanced) {
 		$alias  = array_key_exists('alias_id', $over)  ? $over['alias_id']  : $selected_alias_id;
 		$domain = array_key_exists('domain_id', $over) ? $over['domain_id'] : $selected_domain_id;
@@ -98,6 +90,15 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		return $base . ($parts ? '?' . implode('&', $parts) : '');
 	};
 	$redirect_url = $state_qs();
+
+	// Relay section actions (lifecycle, provisioning, hosted-slot enrollment)
+	// post back to this tab. Must run before the mail-hostname save below —
+	// the provision form also carries a mail_hostname field.
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/relay_admin.php'));
+	$relay_redirect = admin_mailbox_relay_tenant_actions($input, $session, $state_qs());
+	if ($relay_redirect !== null) {
+		return $relay_redirect;
+	}
 
 	// Outbound send protection state transitions. This tab is the surface that
 	// drives them — there is no separate ceremony page — so every protect_*
@@ -241,6 +242,17 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		$selected_domain_id = 0;
 	}
 
+	// One URL for every control on this page to post back to. The focus lives in
+	// the query string, so a form or button that posts to the bare path throws it
+	// away and the redirect lands the operator back on the picker. Rebuilt rather
+	// than reusing $state_qs so it reflects the ids after the check above dropped
+	// any that no longer resolve.
+	$self_parts = array();
+	if ($selected_alias_id)      { $self_parts[] = 'alias_id=' . (int)$selected_alias_id; }
+	elseif ($selected_domain_id) { $self_parts[] = 'domain_id=' . (int)$selected_domain_id; }
+	if ($advanced)               { $self_parts[] = 'advanced=1'; }
+	$self_url = $base . ($self_parts ? '?' . implode('&', $self_parts) : '');
+
 	// One dropdown, two kinds of entry. Mailboxes first: they are the common
 	// case, and a domain without one is a setup state on its way to becoming a
 	// mailbox.
@@ -383,7 +395,7 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	$dns_box = DnsPublishBox::build(
 		($focus_domain !== '' && $arrival !== 'imap') ? $checker->dnsPlan($focus_domain) : null,
 		$input,
-		$state_qs()
+		$self_url
 	);
 
 	// Where the publish box belongs: up front while there is DNS to fix, behind
@@ -400,6 +412,7 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		'session'                    => $session,
 		'settings'                   => $settings,
 		'base'                       => $base,
+		'self_url'                   => $self_url,
 		'dns_box'                    => $dns_box,
 		'relay_section'              => $relay_section,
 		// Mailbox-first view, with a domain-only fallback for a domain that has

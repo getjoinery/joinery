@@ -19,7 +19,11 @@
  * on), and Advanced carries the lifecycle (replace the key, switch over, turn it
  * off, the return address) next to the relay's, which splits the same way.
  *
- * @version 2.8
+ * Every control on the page posts to $self_url, which carries the focused
+ * mailbox or domain: a form that posts to the bare path loses the focus and the
+ * redirect lands the operator back on the picker.
+ *
+ * @version 2.9
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -211,7 +215,7 @@ if ($dom_id && ($level === 'private' || $level === 'fortress')) {
 			// The one thing that cannot be worked out: whose key this becomes.
 			echo '<li class="mb-2"><strong>Say who the signing key belongs to.</strong> Only that person will ever be '
 				. 'able to send as this domain. Mail here already belongs to somebody, so this is not ours to guess.';
-			$own_form = $page->getFormWriter('owner_form', array('action' => $base));
+			$own_form = $page->getFormWriter('owner_form', array('action' => $self_url));
 			echo $own_form->begin_form();
 			$own_form->hiddeninput('ied_inbound_email_domain_id', '', array('value' => $dom_id));
 			$own_form->hiddeninput('action', '', array('value' => 'protect_generate'));
@@ -228,7 +232,7 @@ if ($dom_id && ($level === 'private' || $level === 'fortress')) {
 			echo '<li class="mb-2"><strong>Publish the DNS records below, then turn protection on.</strong> '
 				. 'They tell every other mail server to reject mail claiming to be from you that your key did not '
 				. 'sign. Nothing is enforced, and your mail is unaffected, until you press this.';
-			echo '<div class="mt-2">' . PublicPageBase::action_button('Check DNS and turn on protection', $base,
+			echo '<div class="mt-2">' . PublicPageBase::action_button('Check DNS and turn on protection', $self_url,
 				array('hidden' => array('ied_inbound_email_domain_id' => $dom_id, 'action' => 'protect_activate'),
 					'class' => 'btn btn-sm btn-primary')) . '</div>';
 			echo '<p class="text-muted small mb-0 mt-1">Needs your vault unlocked — from here on only your key can '
@@ -307,6 +311,8 @@ if ($selected) {
 // =====================================================================
 // Advanced — server-wide setup & diagnostics
 // =====================================================================
+// Links only — every form and button on the page posts to $self_url, which
+// already carries the focus and the advanced state.
 $adv_focus_qs = $selected_alias_id ? '?alias_id=' . (int)$selected_alias_id
 	: ($selected_domain_id ? '?domain_id=' . (int)$selected_domain_id : '');
 $adv_base = $base . $adv_focus_qs;
@@ -344,28 +350,28 @@ if (!$advanced) {
 
 		echo '<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem">';
 		if ($protect['is_protected'] && !empty($protect['has_pending'])) {
-			echo PublicPageBase::action_button('Check DNS and switch over', $base,
+			echo PublicPageBase::action_button('Check DNS and switch over', $self_url,
 				array('hidden' => $prot_hidden + array('action' => 'protect_activate_rotation'),
 					'class' => 'btn btn-primary'));
-			echo PublicPageBase::action_button('Forget the new key', $base,
+			echo PublicPageBase::action_button('Forget the new key', $self_url,
 				array('hidden' => $prot_hidden + array('action' => 'protect_cancel_rotation'),
 					'class' => 'btn btn-soft-default',
 					'confirm' => 'Throw away the replacement key? Your current key was never touched and keeps working.'));
 		} elseif ($protect['is_protected']) {
-			echo PublicPageBase::action_button('Replace my key', $base,
+			echo PublicPageBase::action_button('Replace my key', $self_url,
 				array('hidden' => $prot_hidden + array('action' => 'protect_rotate'),
 					'class' => 'btn btn-soft-default',
 					'confirm' => 'Make a replacement key? Your current one keeps working the whole time — you publish '
 						. 'the new record, check it, and only then switch over.'));
 		} elseif ($protect['has_key']) {
-			echo PublicPageBase::action_button('Start over with a new key', $base,
+			echo PublicPageBase::action_button('Start over with a new key', $self_url,
 				array('hidden' => $prot_hidden + array('action' => 'protect_generate'),
 					'class' => 'btn btn-soft-default',
 					'confirm' => 'This throws away the key you have and makes a fresh one. You will have to publish a '
 						. 'new DNS record for it. Nothing is protected yet, so nothing breaks — continue?'));
 		}
 		if ($protect['is_protected']) {
-			echo PublicPageBase::action_button('Turn protection off', $base,
+			echo PublicPageBase::action_button('Turn protection off', $self_url,
 				array('hidden' => $prot_hidden + array('action' => 'protect_disable'),
 					'class' => 'btn btn-soft-danger',
 					'confirm' => 'Turn protection off? This server will be able to send as this domain again without '
@@ -382,7 +388,7 @@ if (!$advanced) {
 			. 'servers use to report delivery problems. Your protected name tells the world that no server may send '
 			. 'as it, so the hidden sender travels under this name instead. Nobody sees it and there is nothing to '
 			. 'register. Changing it means republishing its two DNS records.</p>';
-		$ra_form = $page->getFormWriter('return_address_form', array('action' => $adv_base));
+		$ra_form = $page->getFormWriter('return_address_form', array('action' => $self_url));
 		echo $ra_form->begin_form();
 		$ra_form->hiddeninput('ied_inbound_email_domain_id', '', array('value' => (int)$focus_domain_id));
 		$ra_form->hiddeninput('action', '', array('value' => 'protect_return_address'));
@@ -408,7 +414,7 @@ if (!$advanced) {
 	$page->begin_box(array('title' => 'Inbound provider'));
 	echo '<p class="mb-2">How this site receives inbound mail. Switching is a single setting change — '
 		. 'the same domain, alias and store machinery runs underneath.</p>';
-	$pform = $page->getFormWriter('provider_form', array('action' => $adv_base));
+	$pform = $page->getFormWriter('provider_form', array('action' => $self_url));
 	echo $pform->begin_form();
 	$pform->hiddeninput('action', '', array('value' => 'set_provider'));
 	$pform->dropinput('provider', 'Provider', array(
@@ -425,7 +431,7 @@ if (!$advanced) {
 
 	// --- Server mail identity ---
 	$page->begin_box(array('title' => "This server's mail identity"));
-	$formwriter = $page->getFormWriter('setup_form', array('action' => $adv_base));
+	$formwriter = $page->getFormWriter('setup_form', array('action' => $self_url));
 	echo $formwriter->begin_form();
 	$formwriter->textinput('mail_hostname', 'Mail server hostname', array(
 		'value'       => $mail_hostname,
