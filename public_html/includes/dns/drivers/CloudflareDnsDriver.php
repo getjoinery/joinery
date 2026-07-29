@@ -20,7 +20,7 @@
  *    disable Email Routing in the Cloudflare dashboard — rather than as a
  *    generic API failure.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/dns/DnsDriverBase.php'));
@@ -61,6 +61,8 @@ class CloudflareDnsDriver extends DnsDriverBase {
 				'Choose Create Token and use the "Edit zone DNS" template.',
 				'Under Zone Resources pick Include, Specific zone, and this domain.',
 				'Create the token and copy it — it is shown once.',
+				'If you restrict the token by client IP, list every address this server sends from, '
+					. 'IPv6 included — it may reach Cloudflare from either family.',
 			),
 			'caution'   => 'Not the Global API Key sitting next to it — that is a different credential '
 				. 'and Cloudflare will refuse the write.',
@@ -215,6 +217,19 @@ class CloudflareDnsDriver extends DnsDriverBase {
 				. 'in the Cloudflare dashboard, then publish again. (' . $reason . ')');
 		}
 		if ($status === 403) {
+			// Cloudflare returns 403 for two unrelated causes, and guessing wrong
+			// sends the operator to edit permissions on a token whose permissions
+			// are fine. A token restricted by client IP names the address it saw:
+			// commonly the server's IPv6 address, when the allowlist was written
+			// from the IPv4 one and the outbound connection preferred v6.
+			if (strpos($lower, 'access token from location') !== false) {
+				return new DnsProviderException('Cloudflare refused the token (403): ' . $reason
+					. ' — the token is restricted by client IP and this server is not on the list. In Cloudflare '
+					. 'under My Profile / API Tokens, edit the token and add that exact address to Client IP '
+					. 'Address Filtering, or remove the filter. A server holding both an IPv4 and an IPv6 address '
+					. 'reaches Cloudflare from either, so allow both — and add an IPv6 address on its own rather '
+					. 'than as a /48 or /64 range, which Cloudflare mishandles.', $status, $e);
+			}
 			return new DnsProviderException('Cloudflare refused the token (403): ' . $reason
 				. ' — the token needs the Zone · DNS · Edit permission on this zone.', $status, $e);
 		}
