@@ -21,7 +21,7 @@
  *
  * Run: php tests/run.php db --filter=protection_ceremony
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -127,6 +127,52 @@ try {
 	check(pc_row($rows, 'fortress_dns') !== null && pc_row($rows, 'fortress_dns')['status'] === 'info',
 		'the DNS/protect stage is announced as the next step, not a blocker');
 	check(mailbox_protection_required_ok($rows), 'fronted + clean facts clears a fortress raise');
+
+	// -----------------------------------------------------------------------
+	// Owning a Fortress domain locks the account out of every page but
+	// /profile/security until a second factor exists, and the raise seals the
+	// signing key to whoever performs it — so the requirement has to block the
+	// raise rather than ambush the operator immediately after it.
+	section('row evaluation: the acting user needs a second factor for fortress');
+
+	$facts_2fa = pc_facts(array(pc_alias(1, array(pc_holder(ACTING)))), true, true);
+
+	$rows = mailbox_protection_rows($facts_2fa, InboundEmailDomain::LEVEL_FORTRESS, ACTING);
+	check(pc_row($rows, 'second_factor_self') === null,
+		'facts that never mention the acting second factor raise no row');
+	check(mailbox_protection_required_ok($rows), 'and do not block the raise');
+
+	$rows = mailbox_protection_rows($facts_2fa + array('acting_has_second_factor' => true),
+		InboundEmailDomain::LEVEL_FORTRESS, ACTING);
+	check(pc_row($rows, 'second_factor_self') === null, 'an enrolled second factor raises no row');
+	check(mailbox_protection_required_ok($rows), 'and clears the fortress raise');
+
+	$rows = mailbox_protection_rows($facts_2fa + array('acting_has_second_factor' => false),
+		InboundEmailDomain::LEVEL_FORTRESS, ACTING);
+	$sf = pc_row($rows, 'second_factor_self');
+	check($sf !== null && $sf['status'] === 'fail' && $sf['severity'] === 'required',
+		'a missing second factor is a required failure');
+	check(!mailbox_protection_required_ok($rows), 'and blocks the fortress raise');
+	check($sf !== null && isset($sf['actions'][0]['type'])
+		&& $sf['actions'][0]['type'] === 'second_factor_self',
+		'the row carries the enrollment action');
+
+	$rows = mailbox_protection_rows($facts_2fa + array('acting_has_second_factor' => false),
+		InboundEmailDomain::LEVEL_PRIVATE, ACTING);
+	check(pc_row($rows, 'second_factor_self') === null,
+		'private never asks for it — only fortress makes you the signing owner');
+
+	// The rendered row must offer the way out, or the block is a dead end.
+	// An unsaved domain is enough — render only reads it for the backlog wording.
+	$sf_dom = new InboundEmailDomain(NULL);
+	$sf_dom->set('ied_domain', 'pc-2fa.example');
+	$sf_html = mailbox_protection_render(
+		mailbox_protection_rows($facts_2fa + array('acting_has_second_factor' => false),
+			InboundEmailDomain::LEVEL_FORTRESS, ACTING),
+		$sf_dom, array('editor_url' => '/x', 'alias_url' => '/y'),
+		InboundEmailDomain::LEVEL_FORTRESS);
+	check(strpos($sf_html, 'Add a second factor') !== false, 'the rendered row links to enrollment');
+	check(strpos($sf_html, '/profile/security') !== false, 'and points at the security page');
 
 	// -----------------------------------------------------------------------
 	section('mutation-point refusal: grants on a protected domain');

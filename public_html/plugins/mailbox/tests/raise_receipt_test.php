@@ -126,7 +126,7 @@ try {
 	check(strpos($html, 'Earlier messages sealed — one step left') !== false,
 		'the pre-protect Fortress receipt never claims Fortress');
 	check(strpos($html, 'activate outbound protection') !== false
-		&& strpos($html, 'admin_mailbox_protect') !== false,
+		&& strpos($html, 'admin_mailbox_setup') !== false,
 		'the handoff button continues into the protect ceremony');
 	check(strpos($html, 'This domain is now Fortress') === false,
 		'no premature Fortress claim anywhere in the card');

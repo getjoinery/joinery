@@ -1261,10 +1261,56 @@ forwarding subdomain included — is published. One assembly
 (`InboundEmailSetupCheck::protectedShapeResults()`) feeds both the Setup tab and
 the ceremony's pre-activation verify, so they can never disagree.
 
-**Enabling** is an in-window ceremony on the domain's *Protected sending
-identity* page (`admin_mailbox_protect`): set the forwarding subdomain, generate
-+ seal the key, publish the DNS shown, verify the shape, then flip the flag and
-run the opendkim removal.
+**Enabling starts with the Fortress raise itself.** Saving a domain at Fortress
+seals its DKIM key (`mailbox_protect_seal_new_key()`) and defaults
+`ied_forwarding_subdomain` to `fwd.<domain>`, so the operator lands on the Setup
+tab with the work only they can do: publish the DNS shown, then turn protection
+on. The key's owner is only asked for when the domain's mailboxes already have
+holders, since the admin performing the raise need not be the person who reads
+the mail.
+
+**Protection has no page of its own — the Setup tab is its whole surface.**
+`includes/protect_identity.php` owns the state transitions and nothing else;
+`mailbox_protect_handle_action()` runs any `protect_*` action posted to Setup and
+redirects back to the focused domain with a flash. The DNS records and the
+verification are not re-rendered anywhere: `dnsPlan()` and
+`protectedShapeResults()` both branch on `security_level()` rather than the
+enforced flag, so Setup's publish box and check rows already carry the protected
+shape from the moment Fortress is chosen. The tab splits the same way the relay
+does — the guided *Protected setup* box carries state and the one forward
+action, and Advanced carries the lifecycle (replace the key, switch over, cancel,
+turn off, and the return address behind a disclosure).
+
+**Proof of presence sits on enforcement, not on key creation.** Sealing needs
+only the owner's vault public key, and a key that exists publishes nothing and
+changes no mail, so `generate` and `rotate` run without an unlock window.
+`activate` and `activate_rotation` require one: those decide what the rest of
+the world will accept as this domain.
+
+**A Fortress raise requires the acting user's own second factor.** Sealing the
+key makes them `ied_owner_usr_user_id`, and
+`SessionControl::must_enroll_2fa_for_fortress()` holds any owner of a Fortress
+domain on `/profile/security` until they have a factor independent of any single
+passkey. The ceremony carries that as a required row (`second_factor_self`,
+Fortress-only) fed by `mailbox_protection_facts($domain, $acting_user_id)`, so
+the raise is refused with an enrollment link rather than completing and
+stranding the operator. Callers that omit `$acting_user_id` omit the fact, and
+the row is skipped rather than failed.
+
+The **Setup tab is that ceremony's parent surface**. Its *Protected setup* box
+lists every remaining step for a Private or Fortress domain — the vault, this
+ceremony, the relay, the automated-mail subdomain — and the ceremony page's
+breadcrumb and footer link return there. Saving a domain at Fortress lands on
+Setup focused on that domain, not on the ceremony. The ceremony keeps its own
+page rather than becoming a Setup card because it holds destructive actions
+(rotate, disable, re-generate) that do not belong on a diagnostics surface.
+
+Setup focuses either a mailbox (`?alias_id=`) or, for a domain that has no
+mailbox yet, the domain itself (`?domain_id=`) — a domain is registered before
+its first address, and all of this setup is domain-level, so the domain state
+renders the guided steps and the DNS publish box and skips the per-address
+checks. The picker lists a domain only while it has no enabled alias; once one
+exists the mailbox entry reaches the same guidance.
 
 **Rotation is staged.** On an enforced domain, *Rotate key* seals a fresh key
 under the next selector (`mailk{n}`) into the pending columns

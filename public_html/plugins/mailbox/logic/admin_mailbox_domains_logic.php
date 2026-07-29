@@ -183,7 +183,7 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 		// the button state is the convenience.
 		$acting_user_id = intval($session->get_user_id());
 		if ($raising && $new_seals && $domain->key) {
-			$rows = mailbox_protection_rows(mailbox_protection_facts($domain), $new_level, $acting_user_id);
+			$rows = mailbox_protection_rows(mailbox_protection_facts($domain, $acting_user_id), $new_level, $acting_user_id);
 			if (!mailbox_protection_required_ok($rows)) {
 				return $level_error(mailbox_protection_first_failure($rows));
 			}
@@ -244,8 +244,27 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 			// Fortress records the level immediately (sealing at ingest is safe
 			// from this moment) but never writes ied_is_protected_identity here —
 			// the verify-gated protect ceremony flips that after DNS proves the
-			// protected shape. Route the operator into that ceremony.
+			// protected shape. Land on Setup focused on this domain, not on the
+			// ceremony itself: Setup lists every remaining step (vault, protect,
+			// relay, automated-mail subdomain), and it is a place the operator
+			// can navigate back to. The ceremony is one button away from there.
 			if ($new_level === InboundEmailDomain::LEVEL_FORTRESS && !$domain->is_protected_identity()) {
+				// Make the signing key here rather than asking for it. Sealing needs
+				// only the owner's public key, so no unlock window is required, and
+				// a key that exists publishes nothing and changes no mail — the
+				// operator's confirmation belongs on activate, where enforcement
+				// starts. Skipped when the domain has mailbox holders: the key binds
+				// to ONE person for good, and the admin raising the level need not
+				// be the person who reads the mail. The protect page asks then.
+				require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protect_identity.php'));
+				if ((string)$domain->get('ied_dkim_sealed_key') === ''
+						&& mailbox_protect_owner_is_unambiguous($domain, $acting_user_id)) {
+					$key_error = mailbox_protect_seal_new_key($domain, $acting_user_id);
+					if ($key_error !== null) {
+						error_log('mailbox: Fortress raise could not seal a signing key for '
+							. $domain_name . ': ' . $key_error);
+					}
+				}
 				$session->save_message(new DisplayMessage(
 					'Domain saved. Finish Fortress setup: publish the protected DNS shape and activate outbound protection.',
 					'Saved',
@@ -253,7 +272,7 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 					DisplayMessage::MESSAGE_ANNOUNCEMENT,
 					DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 				));
-				return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_protect?ied_inbound_email_domain_id=' . (int)$domain->key);
+				return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_setup?domain_id=' . (int)$domain->key);
 			}
 
 			$session->save_message(new DisplayMessage(
@@ -368,7 +387,7 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 	$ceremony = null;
 	if ($edit_domain && $edit_domain->key) {
 		$acting_user_id = intval($session->get_user_id());
-		$facts = mailbox_protection_facts($edit_domain);
+		$facts = mailbox_protection_facts($edit_domain, $acting_user_id);
 		$backlog = mailbox_protection_backlog_count(intval($edit_domain->key));
 		$ceremony = array(
 			'facts' => $facts,
