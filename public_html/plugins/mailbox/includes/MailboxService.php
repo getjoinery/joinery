@@ -33,6 +33,12 @@
  * archived rows (iem_is_archived); All Mail shows them. setArchived() is the manual
  * Archive / Move-to-Inbox action, symmetric with a filter's archive action.
  *
+ * Trash (specs/mailbox_trash_folder.md): softDelete() stamps iem_delete_time and
+ * every read scope pins that column NULL, so a trashed message leaves every view.
+ * The Trash view inverts the pin (trashScopeSql) and is the ONLY read that sees
+ * those rows; restoreFromTrash() and purgeFromTrash() are the only mutations that
+ * reach them (trashMutationScopeSql). PurgeMailboxTrash purges on a window.
+ *
  * Native clients (specs/implemented/mobile_native_email_server_api_and_ios.md): withSignedTransport() enriches a
  * getThread() payload with short-lived signed URLs (docs/file_signed_urls.md) so
  * sessionless API clients can fetch attachments and render inline cid: images.
@@ -43,9 +49,10 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
- * @version 1.15
+ * @version 1.16
  */
 
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
 require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxViewer.php'));
@@ -173,6 +180,30 @@ class MailboxService {
 	}
 
 	/**
+	 * WHERE fragment scoping a READ to the TRASHED rows $aliasId resolves to for
+	 * this viewer — readScopeSql() with the delete pin inverted, branch for branch.
+	 * The Trash view is the only read that sees a soft-deleted row.
+	 *
+	 * Every branch is reproduced rather than parameterised: dropping the
+	 * "unmatched" case would show an all-access viewer a Trash that disagrees with
+	 * their inbox, and dropping the grant restriction would show one viewer
+	 * another mailbox's discarded mail.
+	 */
+	private function trashScopeSql(?int $aliasId): string {
+		if ($aliasId === self::UNMATCHED) {
+			return $this->viewer->isAllAccess()
+				? 'iem_delete_time IS NOT NULL AND iem_iea_inbound_email_alias_id IS NULL' . self::NO_DRAFTS
+				: '1=0';
+		}
+		if ($aliasId === null && $this->viewer->isAllAccess()) {
+			return 'iem_delete_time IS NOT NULL' . self::NO_DRAFTS;
+		}
+		$ids = array_map('intval', $this->viewer->scopeAliasIds($aliasId));
+		$in = count($ids) ? implode(',', $ids) : 'NULL';
+		return 'iem_delete_time IS NOT NULL AND iem_iea_inbound_email_alias_id IN (' . $in . ')' . self::NO_DRAFTS;
+	}
+
+	/**
 	 * READ scope for the Drafts view: the viewer's own draft rows across the
 	 * mailboxes they can access. Never all-access-broad — drafts are personal
 	 * compose state, keyed by their From alias (a grant the viewer holds).
@@ -201,6 +232,35 @@ class MailboxService {
 		$ids = array_map('intval', $this->viewer->accessibleAliasIds());
 		$in = count($ids) ? implode(',', $ids) : 'NULL';
 		return $base . ' AND iem_iea_inbound_email_alias_id IN (' . $in . ')';
+	}
+
+	/**
+	 * MUTATION scope for the two actions that act ON a trashed row — restore and
+	 * delete-forever. Identical to mutationScopeSql() with the delete pin inverted.
+	 *
+	 * restoreFromTrash() and purgeFromTrash() are its ONLY callers and must stay
+	 * so. The IS NULL pin every other mutation carries is what keeps discarded
+	 * mail out of the read/star/archive/spam/label paths, so it must never become
+	 * a parameter those methods can be handed.
+	 */
+	private function trashMutationScopeSql(): string {
+		$base = 'iem_delete_time IS NOT NULL' . self::NO_DRAFTS;
+		if ($this->viewer->isAllAccess()) {
+			return $base;
+		}
+		$ids = array_map('intval', $this->viewer->accessibleAliasIds());
+		$in = count($ids) ? implode(',', $ids) : 'NULL';
+		return $base . ' AND iem_iea_inbound_email_alias_id IN (' . $in . ')';
+	}
+
+	/**
+	 * How many days mail stays in Trash before PurgeMailboxTrash deletes it for
+	 * good; 0 means never. Read from the declared setting, so the reader's purge
+	 * dates and the task's cutoff can never disagree.
+	 */
+	public static function trashRetentionDays(): int {
+		$days = intval(Globalvars::get_instance()->get_setting('mailbox_trash_retention_days'));
+		return $days > 0 ? $days : 0;
 	}
 
 	// ------------------------------------------------------------ switcher
@@ -297,6 +357,10 @@ class MailboxService {
 				$info = $this->mailboxFolderInfo($aid);
 				$mailboxes[count($mailboxes) - 1]['folders'] = $info['folders'];
 				$mailboxes[count($mailboxes) - 1]['folders_exclusive'] = $info['exclusive'];
+				// Whether this mailbox pulls from a source server. The Trash view says
+				// so, because restore and delete-forever act locally — the copy in the
+				// provider's own Trash goes on the provider's schedule.
+				$mailboxes[count($mailboxes) - 1]['has_feed'] = $info['has_feed'];
 			}
 		}
 
@@ -358,7 +422,7 @@ class MailboxService {
 	 * Special-use folders (Sent/Trash/Junk/…) and the \All coverage view are excluded:
 	 * their state is a column on iem_inbound_email_messages, not a label.
 	 *
-	 * @return array{folders: array[], exclusive: bool}
+	 * @return array{folders: array[], exclusive: bool, has_feed: bool}
 	 */
 	private function mailboxFolderInfo(int $aliasId): array {
 		$accounts = new MultiInboundImapAccount(array(
@@ -385,7 +449,8 @@ class MailboxService {
 					'role' => $f->get('iif_role'),
 				);
 			}
-			return array('folders' => $out, 'exclusive' => $account->foldersExclusive());
+			return array('folders' => $out, 'exclusive' => $account->foldersExclusive(),
+				'has_feed' => true);
 		}
 
 		// No feed: the global custom-label set, applied as pure membership (never synced).
@@ -399,7 +464,7 @@ class MailboxService {
 				'role' => InboundImapFolder::ROLE_CUSTOM,
 			);
 		}
-		return array('folders' => $out, 'exclusive' => false);
+		return array('folders' => $out, 'exclusive' => false, 'has_feed' => false);
 	}
 
 	/**
@@ -409,8 +474,8 @@ class MailboxService {
 	 *
 	 * @return int[]
 	 */
-	public function threadFolderIds(?int $aliasId, string $thread_key): array {
-		$ids = $this->messageIdsInThread($aliasId, $thread_key);
+	public function threadFolderIds(?int $aliasId, string $thread_key, bool $trashed = false): array {
+		$ids = $this->messageIdsInThread($aliasId, $thread_key, $trashed);
 		if (!count($ids)) {
 			return array();
 		}
@@ -556,16 +621,25 @@ class MailboxService {
 		// drafts, each a singleton (grouped by its own id, not a shared thread key).
 		// Every other view excludes drafts via readScopeSql.
 		$drafts = !empty($filters['drafts']);
-		$where = array($drafts ? $this->draftScopeSql() : $this->readScopeSql($aliasId));
+		// Trash view (specs/mailbox_trash_folder.md): the soft-deleted rows in scope.
+		// Mutually exclusive with every other view — a discarded message is in Trash
+		// and nowhere else, whatever its read/archive/spam/label state says.
+		$trash = !$drafts && !empty($filters['trash']);
+		$where = array($drafts ? $this->draftScopeSql()
+			: ($trash ? $this->trashScopeSql($aliasId) : $this->readScopeSql($aliasId)));
 		$params = array();
 
 		// Spam disposition (specs/inbound_email_spam_filtering.md): the Spam view shows
 		// only judged-spam rows; every other view hides them. A verdict is independent
 		// of folder membership, so this works for local and IMAP mailboxes alike.
-		if (!empty($filters['spam'])) {
-			$where[] = "iem_spam_verdict = 'spam'";
-		} else {
-			$where[] = "iem_spam_verdict IS DISTINCT FROM 'spam'";
+		// Trash is the exception: it holds everything discarded, spam-judged included,
+		// or mail a filter trashed on arrival would be invisible in both views.
+		if (!$trash) {
+			if (!empty($filters['spam'])) {
+				$where[] = "iem_spam_verdict = 'spam'";
+			} else {
+				$where[] = "iem_spam_verdict IS DISTINCT FROM 'spam'";
+			}
 		}
 
 		// Inbox view (specs/implemented/inbound_email_filters.md): the default list
@@ -573,7 +647,7 @@ class MailboxService {
 		// view passes no inbox flag, so archived conversations remain reachable.
 		// IS NOT TRUE (not "= false") so a NULL iem_is_archived counts as not-archived
 		// — messages stored before the column existed are never-archived, not hidden.
-		if (!empty($filters['inbox'])) {
+		if (!$trash && !empty($filters['inbox'])) {
 			$where[] = "iem_is_archived IS NOT TRUE";
 		}
 
@@ -655,6 +729,7 @@ class MailboxService {
 					BOOL_OR(iem_is_starred) AS any_starred,
 					BOOL_OR(iem_is_archived) AS any_archived,
 					MAX(iem_ai_danger_score) AS danger_score,
+					MIN(iem_delete_time) AS trashed_time,
 					CASE
 						WHEN COUNT(*) FILTER (WHERE iem_is_read = false) > 0 THEN 0
 						WHEN BOOL_OR(iem_is_starred) THEN 1
@@ -697,6 +772,12 @@ class MailboxService {
 		// Which of this page's messages carry a real attachment, for the list
 		// paperclip. Presence only — the manifest itself is a thread-open cost.
 		$clipped = $this->messageIdsWithAttachments(array_unique($page_ids));
+
+		// When this thread purges, for the Trash list's date column. Computed for
+		// display and never stored: the window is a setting an operator can change,
+		// so a stored date would be a promise the next edit breaks. The earliest
+		// discard in the thread decides, since that message goes first.
+		$purge_days = $trash ? self::trashRetentionDays() : 0;
 
 		$section_for = array(0 => 'unread', 1 => 'starred', 2 => 'other');
 		$threads = array();
@@ -744,6 +825,11 @@ class MailboxService {
 				'danger_score' => $r['danger_score'] !== null ? intval($r['danger_score']) : null,
 				'latest_time'  => $r['latest_time'],
 				'latest_id'    => $latest_id,
+				// Trash only: when this thread is permanently deleted (UTC), or null
+				// when nothing purges it — retention 0, or any other view.
+				'purge_time'   => ($purge_days > 0 && !empty($r['trashed_time']))
+					? LibraryFunctions::time_shift($r['trashed_time'], $purge_days . ' days', 'Y-m-d H:i:s')
+					: null,
 			);
 		}
 
@@ -752,6 +838,11 @@ class MailboxService {
 			'has_more' => $has_more,
 			'page'     => $page,
 		);
+		if ($trash) {
+			// The window itself, so the Trash view can say what it is (0 = nothing
+			// purges) without the client inferring it from absent dates.
+			$result['trash_retention_days'] = $purge_days;
+		}
 		if ($search_locked) {
 			// The vault-holding mailbox being searched has no open window — the
 			// reader prompts to unlock rather than showing an empty result forever.
@@ -896,9 +987,9 @@ class MailboxService {
 		}
 	}
 
-	public function getThread(?int $aliasId, string $thread_key): array {
+	public function getThread(?int $aliasId, string $thread_key, bool $trashed = false): array {
 		$this->content_locked = false;
-		$ids = $this->messageIdsInThread($aliasId, $thread_key);
+		$ids = $this->messageIdsInThread($aliasId, $thread_key, $trashed);
 		if (!count($ids)) {
 			return array();
 		}
@@ -1204,11 +1295,14 @@ class MailboxService {
 	 * Resolve a thread key to its in-scope message ids — the only
 	 * thread-expansion logic, reused by every thread-level action.
 	 *
+	 * $trashed swaps the read scope for the Trash view's, so a discarded
+	 * conversation expands for restore / delete-forever and for nothing else.
+	 *
 	 * @return int[]
 	 */
-	public function messageIdsInThread(?int $aliasId, string $thread_key): array {
+	public function messageIdsInThread(?int $aliasId, string $thread_key, bool $trashed = false): array {
 		$db = $this->db();
-		$scope = $this->readScopeSql($aliasId);
+		$scope = $trashed ? $this->trashScopeSql($aliasId) : $this->readScopeSql($aliasId);
 
 		// Synthetic singleton key (m:<id>) → that one message, if in scope.
 		if (strncmp($thread_key, self::SINGLETON_PREFIX, strlen(self::SINGLETON_PREFIX)) === 0) {
@@ -1351,6 +1445,72 @@ class MailboxService {
 		// trashing is column-driven, not a label.
 
 		return $affected;
+	}
+
+	/**
+	 * Take in-scope messages back out of Trash (specs/mailbox_trash_folder.md).
+	 * Clearing the column is the whole restore: read, star, archive, spam verdict
+	 * and label membership were never touched by trashing, so the message returns
+	 * exactly as it left. Nothing to do for the search index either — it holds
+	 * every stored message and the read scope decides what a search returns.
+	 *
+	 * An IMAP-backed message returns here while the source copy stays in the
+	 * provider's own Trash; the reader says so in the Trash view.
+	 *
+	 * @return int rows affected
+	 */
+	public function restoreFromTrash(array $message_ids): int {
+		$ids = $this->intList($message_ids);
+		if (!count($ids)) {
+			return 0;
+		}
+		$in = implode(',', $ids);
+		$sql = "UPDATE iem_inbound_email_messages
+				SET iem_delete_time = NULL, iem_local_state_modified = now()
+				WHERE iem_inbound_email_message_id IN ($in) AND " . $this->trashMutationScopeSql();
+		$stmt = $this->db()->prepare($sql);
+		$stmt->execute();
+		return $stmt->rowCount();
+	}
+
+	/**
+	 * Delete in-scope trashed messages for good — the reader's "Delete forever"
+	 * and what PurgeMailboxTrash does on a timer.
+	 *
+	 * Row by row through the model, never a bulk DELETE: permanent_delete()
+	 * reclaims the attachment Files and the stored raw object, and raw SQL would
+	 * drop the row and leak both. Each id is enqueued for refold first, so the
+	 * owner's sealed search index drops the entry at their next fold.
+	 *
+	 * @return int messages deleted
+	 */
+	public function purgeFromTrash(array $message_ids): int {
+		$ids = $this->intList($message_ids);
+		if (!count($ids)) {
+			return 0;
+		}
+		$in = implode(',', $ids);
+		$rows = $this->db()->query(
+			"SELECT iem_inbound_email_message_id AS id, iem_iea_inbound_email_alias_id AS alias_id
+			 FROM iem_inbound_email_messages
+			 WHERE iem_inbound_email_message_id IN ($in) AND " . $this->trashMutationScopeSql())
+			->fetchAll(PDO::FETCH_ASSOC);
+
+		$count = 0;
+		foreach ($rows as $row) {
+			$mid = intval($row['id']);
+			$alias_id = intval($row['alias_id']);
+			if ($alias_id > 0) {
+				MailboxIndex::enqueueRefold($alias_id, $mid);
+			}
+			$msg = new InboundEmailMessage($mid, TRUE);
+			if (!$msg->key) {
+				continue;
+			}
+			$msg->permanent_delete();
+			$count++;
+		}
+		return $count;
 	}
 
 	// --------------------------------------------------------------- helpers

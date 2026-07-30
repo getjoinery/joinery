@@ -1,8 +1,24 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.10
+ * Vanilla CSS, no framework. @version 2.13
  */
+
+/* Every size the reader renders text at, in one ladder. Nothing in this file
+ * states a font-size literal — a rule picks the rung that matches its role, so
+ * making the whole surface a step larger or smaller is an edit to these eight
+ * values and nothing else. Declared at :root because the reader's modals mount
+ * on the body, outside .mbx-reader. */
+:root {
+	--mbx-text-micro: 11px;   /* pills and tags */
+	--mbx-text-xs:    12px;   /* rail labels, counts, timestamps */
+	--mbx-text-sm:    13px;   /* secondary metadata, small controls */
+	--mbx-text-base:  14px;   /* conversation rows, menus, buttons */
+	--mbx-text-md:    15px;   /* message bodies, compose fields */
+	--mbx-text-lg:    16px;   /* compose title, panel headings */
+	--mbx-text-xl:    18px;   /* icon glyphs, modal close */
+	--mbx-text-2xl:   20px;   /* open conversation subject, kebab glyph */
+}
 
 .mbx-reader {
 	display: flex;
@@ -28,7 +44,7 @@
 
 /* ---- Left rail ---- */
 .mbx-rail {
-	flex: 0 0 220px;
+	flex: 0 0 264px;
 	border-right: 1px solid #e4e7eb;
 	background: #f7f9fb;
 	overflow-y: auto;
@@ -39,7 +55,7 @@
  * theme's bare h1/h2 defaults (e.g. the kit's `body.jy-default h2`), which would
  * otherwise blow these labels up to a page-title size. */
 .mbx-reader .mbx-rail-title {
-	font-size: 11px;
+	font-size: var(--mbx-text-xs);
 	text-transform: uppercase;
 	letter-spacing: .05em;
 	color: #6b7280;
@@ -55,7 +71,7 @@
 	padding: 7px 9px;
 	border-radius: 5px;
 	cursor: pointer;
-	font-size: 13px;
+	font-size: var(--mbx-text-base);
 	color: #1f2933;
 }
 .mbx-mailbox:hover { background: #e9eef3; }
@@ -68,7 +84,7 @@
 	padding: 5px 9px 5px 22px;
 	border-radius: 5px;
 	cursor: pointer;
-	font-size: 12px;
+	font-size: var(--mbx-text-sm);
 	color: #3b4754;
 }
 .mbx-folder:hover { background: #eef2f6; }
@@ -80,7 +96,7 @@
 	text-align: center;
 	background: #2563eb;
 	color: #fff;
-	font-size: 11px;
+	font-size: var(--mbx-text-xs);
 	font-weight: 600;
 	border-radius: 10px;
 	padding: 1px 6px;
@@ -88,7 +104,7 @@
 .mbx-badge.zero { display: none; }
 /* Protection-level badge (specs/mailbox_protection_ceremony.md). */
 .mbx-level-badge {
-	flex: 0 0 auto; font-size: 10px; font-weight: 600; border-radius: 8px;
+	flex: 0 0 auto; font-size: var(--mbx-text-micro); font-weight: 600; border-radius: 8px;
 	padding: 0 6px; margin-left: 4px;
 }
 .mbx-level-private { background: #d7e7fb; color: #1e40af; }
@@ -100,7 +116,7 @@
 	border: 1px solid #cfd6dd;
 	background: #fff;
 	color: #374151;
-	font-size: 12px;
+	font-size: var(--mbx-text-sm);
 	padding: 5px 0;
 	border-radius: 5px;
 	cursor: pointer;
@@ -111,7 +127,7 @@
 	border: 1px solid #cfd6dd;
 	border-radius: 5px;
 	padding: 7px 9px;
-	font-size: 13px;
+	font-size: var(--mbx-text-base);
 }
 
 /* ---- Main pane (swaps between list view and reading view) ---- */
@@ -145,18 +161,18 @@
 	padding: 10px 14px;
 	border-bottom: 1px solid #eef1f4;
 }
-.mbx-list-title { font-weight: 600; font-size: 14px; color: #111827; }
+.mbx-list-title { font-weight: 600; font-size: var(--mbx-text-md); color: #111827; }
 .mbx-list-header-actions { display: flex; align-items: center; gap: 6px; }
 .mbx-new-btn {
 	border: 1px solid #2563eb; background: #2563eb; color: #fff;
 	border-radius: 16px; padding: 6px 14px; cursor: pointer;
-	font-size: 12px; font-weight: 600;
+	font-size: var(--mbx-text-sm); font-weight: 600;
 }
 .mbx-new-btn:hover { background: #1d4ed8; }
 .mbx-new-btn[hidden] { display: none; }
 .mbx-iconbtn {
 	border: none; background: none; cursor: pointer;
-	font-size: 16px; color: #6b7280; padding: 2px 6px; border-radius: 4px;
+	font-size: var(--mbx-text-xl); color: #6b7280; padding: 2px 6px; border-radius: 4px;
 }
 .mbx-iconbtn:hover { background: #eef1f4; color: #111827; }
 
@@ -166,7 +182,7 @@
 .mbx-section {
 	padding: 14px 14px 6px;
 	background: #fff;
-	font-size: 12px;
+	font-size: var(--mbx-text-sm);
 	font-weight: 700;
 	letter-spacing: .02em;
 	color: #5f6368;
@@ -183,7 +199,7 @@
 	padding: 9px 14px;
 	border-bottom: 1px solid #f1f3f5;
 	cursor: pointer;
-	font-size: 13px;
+	font-size: var(--mbx-text-base);
 	background: #f6f8fb;          /* read rows sit on a faint grey, like Gmail */
 }
 .mbx-thread-item:hover {
@@ -195,15 +211,17 @@
 .mbx-thread-star {
 	flex: 0 0 auto;
 	color: #c4c9d0;
-	font-size: 15px;
+	font-size: var(--mbx-text-lg);
 	cursor: pointer;
 	line-height: 1.2;
 }
 .mbx-thread-star.on { color: #f5b400; }
 
-/* Sender — fixed left column so subjects line up across rows. */
+/* Sender — fixed left column so subjects line up across rows. Sized off the
+ * row's own text size, so a step up the ladder widens it instead of clipping
+ * more of every name. */
 .mbx-thread-from {
-	flex: 0 0 168px;
+	flex: 0 0 13em;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -222,7 +240,24 @@
 .mbx-thread-ai { font-style: italic; }
 .mbx-thread-item.unread .mbx-thread-from,
 .mbx-thread-item.unread .mbx-thread-subject { font-weight: 700; }
-.mbx-thread-time { flex: 0 0 auto; color: #9097a1; font-size: 11px; white-space: nowrap; }
+.mbx-thread-time { flex: 0 0 auto; color: #9097a1; font-size: var(--mbx-text-xs); white-space: nowrap; }
+/* In Trash the right-hand date is when the conversation is permanently deleted,
+   not when it arrived — a deadline, so it does not read as quiet metadata. */
+.mbx-thread-purge { color: #b45309; }
+
+/* The Trash view's one line about itself: the retention window, plus the
+   source-server caveat on a mailbox that pulls from one. A note, not a row —
+   it must never scan as mail. */
+.mbx-trash-note {
+	padding: 0.6rem 0.9rem;
+	margin: 0.5rem 0.5rem 0.25rem;
+	background: #f8fafc;
+	border: 1px solid #e5e7eb;
+	border-radius: 8px;
+	font-size: var(--mbx-text-sm);
+	color: #4b5563;
+	line-height: 1.4;
+}
 /* Paperclip marker, sitting just left of the time. */
 .mbx-thread-clip {
 	flex: 0 0 auto;
@@ -238,7 +273,7 @@
 	background: #e4e7eb;
 	color: #4b5563;
 	border-radius: 9px;
-	font-size: 11px;
+	font-size: var(--mbx-text-xs);
 	padding: 0 6px;
 	margin-left: 6px;
 }
@@ -247,7 +282,7 @@
 .mbx-danger-badge {
 	display: inline-block;
 	border-radius: 9px;
-	font-size: 11px;
+	font-size: var(--mbx-text-xs);
 	font-weight: 700;
 	padding: 0 6px;
 	margin-left: 6px;
@@ -259,7 +294,7 @@
 .mbx-list-footer { padding: 10px 14px; text-align: center; }
 .mbx-more {
 	border: 1px solid #cfd6dd; background: #fff; border-radius: 5px;
-	padding: 6px 14px; cursor: pointer; font-size: 13px;
+	padding: 6px 14px; cursor: pointer; font-size: var(--mbx-text-base);
 }
 
 /* ---- Reading view ---- */
@@ -267,17 +302,17 @@
 .mbx-thread-back {
 	display: inline-flex; align-items: center; gap: 6px;
 	border: none; background: none; cursor: pointer;
-	color: #374151; font-size: 13px; padding: 4px 6px; border-radius: 4px;
+	color: #374151; font-size: var(--mbx-text-base); padding: 4px 6px; border-radius: 4px;
 	margin-bottom: 10px;
 }
 .mbx-thread-back:hover { background: #eef1f4; color: #111827; }
-.mbx-thread-back .mbx-back-arrow { font-size: 17px; line-height: 1; }
+.mbx-thread-back .mbx-back-arrow { font-size: var(--mbx-text-xl); line-height: 1; }
 .mbx-thread-header { margin-bottom: 14px; }
-.mbx-reader .mbx-thread-header h1 { font-size: 18px; margin: 0 0 6px; color: #111827; }
+.mbx-reader .mbx-thread-header h1 { font-size: var(--mbx-text-2xl); margin: 0 0 6px; color: #111827; }
 .mbx-thread-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .mbx-action {
 	border: 1px solid #cfd6dd; background: #fff; color: #374151;
-	border-radius: 5px; padding: 5px 11px; cursor: pointer; font-size: 12px;
+	border-radius: 5px; padding: 5px 11px; cursor: pointer; font-size: var(--mbx-text-sm);
 	text-decoration: none;
 }
 .mbx-action:hover { background: #f1f3f5; }
@@ -294,18 +329,18 @@
 }
 .mbx-folder-opt {
 	display: flex; align-items: center; gap: 6px;
-	padding: 6px 9px; border-radius: 5px; cursor: pointer; font-size: 12px; color: #374151;
+	padding: 6px 9px; border-radius: 5px; cursor: pointer; font-size: var(--mbx-text-sm); color: #374151;
 }
 .mbx-folder-opt:hover { background: #f1f3f5; }
 .mbx-folder-opt.current { font-weight: 600; background: #e3eefb; }
 .mbx-folder-newrow { display: flex; gap: 4px; padding: 6px; border-top: 1px solid #eef0f2; margin-top: 2px; }
 .mbx-folder-newinput {
 	flex: 1 1 auto; min-width: 0; border: 1px solid #cfd6dd; border-radius: 5px;
-	padding: 5px 8px; font-size: 12px;
+	padding: 5px 8px; font-size: var(--mbx-text-sm);
 }
 .mbx-folder-newbtn {
 	flex: 0 0 auto; border: 1px solid #cfd6dd; background: #fff; border-radius: 5px;
-	padding: 4px 10px; cursor: pointer; font-size: 14px; line-height: 1; color: #2563eb;
+	padding: 4px 10px; cursor: pointer; font-size: var(--mbx-text-md); line-height: 1; color: #2563eb;
 }
 .mbx-folder-newbtn:hover { background: #f1f3f5; }
 .mbx-folder-newbtn:disabled { opacity: .5; cursor: default; }
@@ -323,18 +358,18 @@
 	padding: 10px 12px;
 	background: #f7f9fb;
 	cursor: pointer;
-	font-size: 13px;
+	font-size: var(--mbx-text-base);
 }
 .mbx-message-from { font-weight: 600; color: #1f2933; }
-.mbx-message-meta { color: #6b7280; font-size: 12px; }
-.mbx-message-time { color: #9097a1; font-size: 12px; white-space: nowrap; }
+.mbx-message-meta { color: #6b7280; font-size: var(--mbx-text-sm); }
+.mbx-message-time { color: #9097a1; font-size: var(--mbx-text-sm); white-space: nowrap; }
 .mbx-message-right { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
 
 /* Per-message kebab (⋮) menu — Gmail-style "more" affordance. */
 .mbx-kebab-wrap { position: relative; }
 .mbx-kebab {
 	border: none; background: none; cursor: pointer;
-	font-size: 18px; line-height: 1; color: #6b7280;
+	font-size: var(--mbx-text-2xl); line-height: 1; color: #6b7280;
 	padding: 2px 6px; border-radius: 4px;
 }
 .mbx-kebab:hover { background: #e9eef3; color: #111827; }
@@ -346,11 +381,11 @@
 }
 .mbx-kebab-menu[hidden] { display: none; }
 .mbx-kebab-item {
-	display: block; padding: 8px 14px; font-size: 13px;
+	display: block; padding: 8px 14px; font-size: var(--mbx-text-base);
 	color: #1f2933; text-decoration: none; white-space: nowrap;
 }
 .mbx-kebab-item:hover { background: #f1f6fd; }
-.mbx-message-body { padding: 12px; font-size: 14px; }
+.mbx-message-body { padding: 12px; font-size: var(--mbx-text-md); }
 .mbx-message-body pre {
 	white-space: pre-wrap; word-break: break-word; margin: 0;
 	font-family: inherit;
@@ -366,14 +401,14 @@
    hides .mbx-message-body). */
 .mbx-danger-banner {
 	padding: 10px 12px;
-	font-size: 13px;
+	font-size: var(--mbx-text-base);
 	border-bottom: 1px solid #e4e7eb;
 }
 .mbx-danger-banner-head { font-weight: 700; margin-bottom: 4px; }
 .mbx-danger-banner-flags { margin: 4px 0 0; padding-left: 18px; }
 .mbx-danger-banner.safe {
 	background: #f0fdf4; color: #166534; border-bottom-color: #dcfce7;
-	font-size: 12px; padding: 6px 12px;
+	font-size: var(--mbx-text-sm); padding: 6px 12px;
 }
 .mbx-danger-banner.suspicious { background: #fffbeb; color: #92400e; }
 .mbx-danger-banner.dangerous  { background: #fef2f2; color: #991b1b; }
@@ -385,7 +420,7 @@
 }
 .mbx-collapsed .mbx-attachments { display: none; }
 .mbx-attachments-label {
-	font-size: 12px; color: #6b7280; font-weight: 600;
+	font-size: var(--mbx-text-sm); color: #6b7280; font-weight: 600;
 	margin: 8px 0 6px;
 }
 .mbx-attachment-grid {
@@ -411,10 +446,10 @@
 .mbx-attachment-icon--generic svg { width: 26px; height: 26px; }
 .mbx-attachment-meta { min-width: 0; }
 .mbx-attachment-name {
-	font-size: 13px; font-weight: 600;
+	font-size: var(--mbx-text-base); font-weight: 600;
 	white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.mbx-attachment-size { font-size: 11px; color: #6b7280; margin-top: 1px; }
+.mbx-attachment-size { font-size: var(--mbx-text-xs); color: #6b7280; margin-top: 1px; }
 
 /* Outbound (sent) messages read as the right-hand side of the dialog. */
 .mbx-message.mbx-outbound { border-color: #cfe0fb; }
@@ -422,18 +457,18 @@
 .mbx-sent-tag {
 	display: inline-block; margin-left: 8px;
 	background: #2563eb; color: #fff;
-	font-size: 10px; font-weight: 700; letter-spacing: .03em;
+	font-size: var(--mbx-text-micro); font-weight: 700; letter-spacing: .03em;
 	border-radius: 9px; padding: 1px 7px; vertical-align: middle;
 }
 
-.mbx-loading { color: #9097a1; font-size: 13px; padding: 14px; }
+.mbx-loading { color: #9097a1; font-size: var(--mbx-text-base); padding: 14px; }
 
 /* ---- Reply / Forward (Gmail-style: chips at the bottom of the conversation) ---- */
 .mbx-reply-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 20px; }
 .mbx-reply-btn {
 	display: inline-flex; align-items: center; gap: 6px;
 	border: 1px solid #cfd6dd; background: #fff; color: #1f2933;
-	border-radius: 18px; padding: 7px 16px; cursor: pointer; font-size: 13px;
+	border-radius: 18px; padding: 7px 16px; cursor: pointer; font-size: var(--mbx-text-base);
 }
 .mbx-reply-btn:hover { background: #f1f6fd; border-color: #9fc2f5; }
 
@@ -455,16 +490,16 @@
 	display: flex; align-items: center; justify-content: space-between;
 	padding: 12px 16px; border-bottom: 1px solid #eef1f4;
 }
-.mbx-compose-title { font-weight: 600; font-size: 15px; color: #111827; }
+.mbx-compose-title { font-weight: 600; font-size: var(--mbx-text-lg); color: #111827; }
 .mbx-compose-error {
 	margin: 12px 16px 0;
 	background: #fef0ee; border: 1px solid #f1c4bf; color: #b42318;
-	border-radius: 5px; padding: 8px 11px; font-size: 13px;
+	border-radius: 5px; padding: 8px 11px; font-size: var(--mbx-text-base);
 }
 /* The FormWriter form lives inside the panel. */
 .mbx-compose form { padding: 14px 16px 20px; }
 .mbx-compose .form-group { margin-bottom: 12px; }
-.mbx-compose label.form-label { display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px; }
+.mbx-compose label.form-label { display: block; font-size: var(--mbx-text-sm); color: #6b7280; margin-bottom: 4px; }
 .mbx-compose input[type="text"],
 .mbx-compose input[type="file"],
 .mbx-compose select,
@@ -473,13 +508,13 @@
 	border: 1px solid #cfd6dd;
 	border-radius: 5px;
 	padding: 8px 10px;
-	font-size: 14px;
+	font-size: var(--mbx-text-md);
 	font-family: inherit;
 }
 .mbx-compose textarea { resize: vertical; min-height: 160px; }
 .mbx-compose button[type="submit"] {
 	background: #2563eb; border: 1px solid #2563eb; color: #fff;
-	border-radius: 5px; padding: 8px 18px; cursor: pointer; font-size: 14px; font-weight: 600;
+	border-radius: 5px; padding: 8px 18px; cursor: pointer; font-size: var(--mbx-text-md); font-weight: 600;
 }
 .mbx-compose button[type="submit"]:hover { background: #1d4ed8; }
 .mbx-compose button[type="submit"]:disabled { opacity: .6; cursor: default; }
@@ -493,12 +528,12 @@
 	display: inline-flex; align-items: center; gap: 6px;
 	max-width: 220px;
 	background: #eef1f4; border-radius: 14px;
-	padding: 4px 6px 4px 10px; font-size: 12px; color: #1f2933;
+	padding: 4px 6px 4px 10px; font-size: var(--mbx-text-sm); color: #1f2933;
 }
 .mbx-attach-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mbx-attach-chip-size { color: #6b7280; flex: 0 0 auto; }
 .mbx-attach-chip-remove {
-	border: none; background: none; cursor: pointer; font-size: 13px;
+	border: none; background: none; cursor: pointer; font-size: var(--mbx-text-base);
 	color: #6b7280; line-height: 1; padding: 2px 4px; border-radius: 50%;
 }
 .mbx-attach-chip-remove:hover { color: #b42318; background: #fff; }
@@ -540,7 +575,7 @@
 	background: #fff7ed;
 	border: 1px solid #fed7aa;
 	border-radius: 8px;
-	font-size: 0.875rem;
+	font-size: var(--mbx-text-base);
 }
 .mbx-unlock-text { color: #7c2d12; }
 .mbx-unlock-btn {
@@ -550,7 +585,7 @@
 	border-radius: 6px;
 	background: #2563eb;
 	color: #fff;
-	font-size: 0.8125rem;
+	font-size: var(--mbx-text-sm);
 	cursor: pointer;
 }
 .mbx-unlock-btn:disabled { opacity: 0.6; cursor: default; }
@@ -572,10 +607,10 @@
 .mbx-setup-banner-body { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
 .mbx-setup-banner-title {
 	font-weight: 600;
-	font-size: 0.9375rem;
+	font-size: var(--mbx-text-md);
 	color: #78350f;
 }
-.mbx-setup-banner-reason { font-size: 0.8125rem; color: #92400e; }
+.mbx-setup-banner-reason { font-size: var(--mbx-text-sm); color: #92400e; }
 .mbx-setup-banner-btn {
 	margin-left: auto;
 	flex: 0 0 auto;
@@ -583,7 +618,7 @@
 	border-radius: 6px;
 	background: #b45309;
 	color: #fff;
-	font-size: 0.8125rem;
+	font-size: var(--mbx-text-sm);
 	font-weight: 600;
 	text-decoration: none;
 	white-space: nowrap;
@@ -597,7 +632,7 @@
 	border: none;
 	padding: 0;
 	color: #2563eb;
-	font-size: 0.8125rem;
+	font-size: var(--mbx-text-sm);
 	cursor: pointer;
 }
 .mbx-bcc-toggle:hover { text-decoration: underline; }
@@ -605,7 +640,7 @@
 .mbx-richwrap { margin: 0.5rem 0; }
 .mbx-rich-label {
 	display: block;
-	font-size: 0.8125rem;
+	font-size: var(--mbx-text-sm);
 	font-weight: 600;
 	color: #374151;
 	margin-bottom: 0.25rem;
@@ -629,7 +664,7 @@
 	border-radius: 4px;
 	background: none;
 	color: #374151;
-	font-size: 13px;
+	font-size: var(--mbx-text-base);
 	line-height: 1;
 	cursor: pointer;
 }
@@ -649,7 +684,7 @@
 	border: 1px solid #cfd6dd;
 	border-radius: 0 0 6px 6px;
 	background: #fff;
-	font-size: 0.9rem;
+	font-size: var(--mbx-text-md);
 	line-height: 1.5;
 	color: #1f2933;
 }
@@ -685,7 +720,7 @@
 	border: none;
 	padding: 0 4px;
 	margin-left: auto;
-	font-size: 12px;
+	font-size: var(--mbx-text-sm);
 	line-height: 1;
 	color: #9aa5b1;
 	cursor: pointer;
@@ -714,8 +749,8 @@
 	overflow-y: auto;
 	padding: 1.1rem 1.25rem 1rem;
 }
-.mbx-modal-title { margin: 0 0 .15rem; font-size: 1rem; color: #111827; }
-.mbx-modal-help { margin: 0 0 .75rem; font-size: .8125rem; color: #6b7280; }
+.mbx-modal-title { margin: 0 0 .15rem; font-size: var(--mbx-text-lg); color: #111827; }
+.mbx-modal-help { margin: 0 0 .75rem; font-size: var(--mbx-text-sm); color: #6b7280; }
 .mbx-sig-editor { min-height: 120px; max-height: 300px; }
 .mbx-modal-actions {
 	display: flex;
@@ -749,8 +784,8 @@
 	cursor: pointer;
 }
 .mbx-ac-item.active, .mbx-ac-item:hover { background: #e3eefb; }
-.mbx-ac-name { font-size: .85rem; color: #1f2933; }
-.mbx-ac-addr { font-size: .75rem; color: #6b7280; }
+.mbx-ac-name { font-size: var(--mbx-text-base); color: #1f2933; }
+.mbx-ac-addr { font-size: var(--mbx-text-xs); color: #6b7280; }
 
 .mbx-contacts-tools {
 	display: flex;
@@ -764,7 +799,7 @@
 	padding: .45rem .6rem;
 	border: 1px solid #cfd6dd;
 	border-radius: 6px;
-	font-size: .875rem;
+	font-size: var(--mbx-text-base);
 }
 .mbx-contacts-import { cursor: pointer; }
 .mbx-contacts-list { display: flex; flex-direction: column; }
@@ -776,27 +811,27 @@
 	border-bottom: 1px solid #f1f3f5;
 }
 .mbx-contact-info { display: flex; flex-direction: column; flex: 1; }
-.mbx-contact-name { font-size: .875rem; color: #1f2933; }
-.mbx-contact-addr { font-size: .78rem; color: #6b7280; }
+.mbx-contact-name { font-size: var(--mbx-text-base); color: #1f2933; }
+.mbx-contact-addr { font-size: var(--mbx-text-sm); color: #6b7280; }
 .mbx-contact-del {
 	background: none;
 	border: none;
 	color: #9aa5b1;
-	font-size: 1.1rem;
+	font-size: var(--mbx-text-xl);
 	line-height: 1;
 	cursor: pointer;
 	padding: 0 .4rem;
 }
 .mbx-contact-del:hover { color: #dc2626; }
 
-/* ── compose maturity: member-context panel (§ Phase 5) ────────────────────── */
+/* ── compose maturity: contact panel (§ Phase 5) ───────────────────────────── */
 .mbx-context {
 	flex: 0 0 260px;
 	border-left: 1px solid #e4e7eb;
 	background: #f7f9fb;
 	padding: .75rem .85rem;
 	overflow-y: auto;
-	font-size: .85rem;
+	font-size: var(--mbx-text-base);
 }
 .mbx-context-head {
 	display: flex;
@@ -813,20 +848,51 @@
 	margin-bottom: .75rem;
 }
 .mbx-context-name { font-weight: 600; color: #1f2933; }
-.mbx-context-email { color: #52606d; font-size: .8rem; margin-top: .1rem; }
-.mbx-context-since { color: #6b7280; font-size: .75rem; margin-top: .25rem; }
+.mbx-context-email { color: #52606d; font-size: var(--mbx-text-sm); margin-top: .1rem; }
+.mbx-context-since { color: #6b7280; font-size: var(--mbx-text-xs); margin-top: .25rem; }
 .mbx-context-link {
 	display: inline-block;
 	margin-top: .5rem;
 	color: #2563eb;
 	text-decoration: none;
-	font-size: .8rem;
+	font-size: var(--mbx-text-sm);
 }
 .mbx-context-link:hover { text-decoration: underline; }
-.mbx-context-notmember { color: #6b7280; font-style: italic; }
+.mbx-context-note { color: #6b7280; font-style: italic; font-size: var(--mbx-text-sm); }
+/* Saved-contact marker, and the one-click add offered when there is none. */
+.mbx-context-badge {
+	display: inline-block;
+	margin-top: .35rem;
+	padding: .1rem .4rem;
+	border-radius: 999px;
+	background: #e8f5ee;
+	color: #1b7a4b;
+	font-size: var(--mbx-text-micro);
+	font-weight: 600;
+}
+.mbx-context-addrow {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: .4rem;
+	margin-top: .35rem;
+}
+.mbx-context-add {
+	border: 1px solid #cbd2d9;
+	background: #fff;
+	color: #2563eb;
+	border-radius: 6px;
+	padding: .1rem .45rem;
+	font-size: var(--mbx-text-xs);
+	font-weight: 600;
+	cursor: pointer;
+	white-space: nowrap;
+}
+.mbx-context-add:hover { background: #eef2ff; border-color: #2563eb; }
+.mbx-context-add[disabled] { opacity: .6; cursor: default; }
 .mbx-context-section {
 	font-weight: 600;
-	font-size: .72rem;
+	font-size: var(--mbx-text-xs);
 	text-transform: uppercase;
 	letter-spacing: .03em;
 	color: #9aa5b1;

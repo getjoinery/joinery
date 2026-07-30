@@ -382,11 +382,17 @@ non_smtpd_milters = inet:localhost:8891
 smtpd_recipient_restrictions =
     permit_mynetworks, reject_unauth_destination,
     reject_rbl_client zen.spamhaus.org,
-    reject_rbl_client bl.spamcop.net,
-    reject_rbl_client b.barracudacentral.org,
     reject_rhsbl_helo dbl.spamhaus.org,
     reject_rhsbl_sender dbl.spamhaus.org, permit
 ```
+
+Spamhaus is the only list rejected on. Zen and DBL are built for it — low
+false positive, and Zen deliberately excludes the shared outbound ranges ESPs
+send from. Lists that do cover those ranges (SpamCop, Barracuda) list an IP on
+a brief automated trigger and de-list hours later, so rejecting on them bounces
+ordinary mail from Mailgun, SendGrid or Google at random, and permanently: a
+5xx tells the sender never to retry. A weaker signal belongs in content
+scoring, not at RCPT time.
 
 opendkim must run `Mode sv` with an `AuthservID` equal to your mail hostname
 (== `mailbox_mail_hostname`), and opendmarc with `SPFSelfValidate true`
@@ -525,6 +531,7 @@ identity and provisioning (provider, mail hostname/IP, SRS, the relay) live on t
 | `mailbox_forwarding_rate_limit_per_domain` | `200` | Per-domain limit per window |
 | `mailbox_forwarding_rate_limit_window` | `3600` | Rate limit window (seconds) |
 | `mailbox_log_retention_days` | `30` | Log cleanup threshold |
+| `mailbox_trash_retention_days` | `30` | Days mail stays in Trash before it is permanently deleted. `0` keeps it indefinitely. See [Trash and retention](#trash-and-retention). |
 | `mailbox_forwarding_smtp_host` | (empty) | Dedicated SMTP relay for forwarding. **When set, it forces the SMTP relay path** (overriding provider relay); falls back to base `smtp_*` for any field left blank. See [Forwarding relay](#forwarding-relay). |
 | `mailbox_forwarding_smtp_port` | (empty) | Falls back to `smtp_port` |
 | `mailbox_forwarding_smtp_username` | (empty) | Falls back to `smtp_username` |
@@ -1162,6 +1169,16 @@ not a silent empty result); every broader scope (all-mail, an unsealed mailbox) 
 the plain Postgres `tsvector` search, which simply never matches a sealed row's
 ciphertext.
 
+The index covers **every stored message** in the owner's mailboxes — trashed ones
+included, drafts excepted — and the **read scope decides what a search returns**: hits
+are intersected with the caller's scope, so an Inbox search never surfaces trashed mail
+and a Trash search finds it. One rule, in one place. Coverage cannot be narrowed by
+filtering the fold, because the high-water mark advances past every row a pass *saw*: a
+row the fold skipped is skipped permanently, and a rebuild runs the same query. Pruning
+follows the row's existence rather than a flag — `MailboxIndex::enqueueRefold()` queues
+an id whose row is about to go, and the refold pass re-inserts only if the message is
+still there.
+
 **Key rotation and window close.** Mail's `VaultUnlock::onReseal()` callback re-seals
 every message on the generation being drained (`iem_key_generation =
 old_key_generation` — the only generation the ceremony's old secret can open; idempotent,
@@ -1771,7 +1788,7 @@ a left rail (mailbox switcher + filters + search) and a single main pane that
 shows either the conversation list or an opened conversation full-width (a back
 arrow or Esc returns to the list). It supports threading, read/unread, star, and
 search, rich-text compose with Bcc and inline images, saved drafts, per-mailbox
-signatures, recipient autocomplete, and (for admins) a member-context panel. It is
+signatures, recipient autocomplete, and (for admins) a contact panel. It is
 a vanilla-JS client (`assets/mailbox_reader.js` + `.css`, cache-busted by file
 mtime) talking to the scoped AJAX/API actions listed under **API Surface**.
 
@@ -1868,6 +1885,39 @@ state is **shared** among everyone with access (team-inbox semantics: you see
 what a colleague already handled). Opening a thread marks it read for everyone on
 that mailbox. Read/star state is a property of the mailbox row, shared by everyone
 granted access to it.
+
+### Sender names
+
+`iem_sender` holds the `From` display name beside the address, in the form
+`"Name" <addr>`. `InboundEmailRouter::senderDisplayString()` builds it for the
+Postfix and webhook paths (both the immediate store and the deferred parse a
+sealed mailbox uses); the IMAP and archive paths get the same shape from Horde's
+envelope. Encoded words are decoded, a name identical to the address is dropped,
+and the name — attacker-chosen text arriving over SMTP — is stripped of quotes,
+angle brackets and CR/LF before being quoted. When the column limit bites, the
+**name** is what gets cut: an address short of bytes is an unreplyable sender.
+
+The `From` addr-spec is the **last** angle-addr in the header, not the first. A
+display name may legally be a quoted string containing angle brackets, so
+`From: "Support <billing@paypal.com>" <thief@evil.example>` is a valid header
+whose real address is `thief@evil.example`. Reading the first one would let a
+sender choose the address used for `iem_sender`, the reply address, the contact
+lookup, filter matching and the SRS envelope, while the authentication results
+still described the domain that actually sent the message.
+
+The reader's list column shows the name and keeps the address on the row's hover
+title. With no display name at all, the **sending organization** is the label —
+`hello@fireworks.ai` reads as `Fireworks`, since the local part of automated mail
+(`no-reply`, `meet`, `product`) identifies nothing. The organization label is the
+last host label below the public suffix, which drops infrastructure subdomains for
+free (`accounts.google.com` → `Google`). The exception is a consumer mail
+provider, where the person is the only identity available, so the local part is
+used instead (`jeremy.tunnell@gmail.com` → `Jeremy Tunnell`, never `Gmail`). Both
+lists live at the top of `mailbox_reader.js`.
+
+An open message shows the name **and** the address (`senderFull()`). A display
+name is only ever as trustworthy as the domain behind it, and the domain is the
+part that survived DKIM.
 
 ### The viewer seam
 
@@ -2081,16 +2131,30 @@ once and filters it client-side for To/Cc/Bcc autocomplete (no server prefix-sea
 ciphertext); a locked vault makes autocomplete silently absent. A **Contacts** rail entry
 manages the list (add, delete, and import a vCard / Google CSV via `mailbox/contacts_import`).
 
-### Member-context panel
+A row is **saved** when the user added it deliberately (`imc_source` `manual` or `import`)
+and merely **seen** when it warmed up through use (`sent` or `received`). Presence alone
+therefore says nothing about intent — every address in an opened thread is harvested — so
+`MailboxContacts::lookup()` reports the distinction, and `manualAdd()` stamps a seen row
+saved (filling a display name the harvest never captured) instead of inserting a second row.
 
-When a thread opens, an admin (permission 5+) sees a right-hand panel showing who the
-correspondent is on the platform (`mailbox/sender_context`). The client sends the
-**message id, never an address**, so the endpoint can't be a membership oracle — the
-server re-derives the counterparty from a message already in the caller's scope, resolves
-it with `User::GetByEmail`, and returns the member card (name, email-verified, member-since,
-a link to the admin edit page) plus recent orders / event registrations / conversation
-count — each section present only when its plugin/feature is active. Non-admins never see
-the panel; it is lazy, session-cached, collapsible, and hidden below a width breakpoint.
+### Contact panel
+
+When a thread opens, an admin (permission 5+) sees a right-hand **Contact** panel for the
+correspondent (`mailbox/sender_context`). The client sends the **message id, never an
+address**, so the endpoint can't be a membership oracle — the server re-derives the
+counterparty from a message already in the caller's scope.
+
+The panel's card names the correspondent, shows their address, and states whether they are
+**In Contacts** or **Not in Contacts** — the latter with a one-click **+ Add** that posts
+the address (with the display name from the message) to `mailbox/contacts_import` and
+re-renders from the server. For a known contact it also shows how often the address has
+been seen, when it was last and first seen, and a link that searches the mailbox for all
+mail with that address. A sealed contact store with no open window can answer neither way,
+so the card says **Contacts locked** and offers Unlock rather than asserting "not a contact". Below the card, a **Site account** section resolves the address with
+`User::GetByEmail` — joined date and a link to the admin edit page, or "No account on this
+site" — followed by recent orders / event registrations / conversation count, each present
+only when its plugin/feature is active. Non-admins never see the panel; it is lazy,
+session-cached, collapsible, and hidden below a width breakpoint.
 
 ## API Surface
 
@@ -2109,7 +2173,7 @@ The mailbox is exposed to API clients (the native mobile mail screens,
 | `draft_attachment_delete` | Remove one saved attachment from a draft — `draft_id`, `attachment_id` (author-scoped, non-inline) |
 | `signature_save` | Save the caller's compose signature for one of their mailboxes |
 | `contacts` / `contact_delete` / `contacts_import` | List (decrypted, ranked) / delete / import-or-add the caller's contacts |
-| `sender_context` | Resolve a thread counterparty (by message id) to their member record — admin only |
+| `sender_context` | Resolve a thread counterparty (by message id) to their contact-store entry and their member record — admin only |
 
 Each action is a `logic/{action}_logic.php` with an `_logic_api()` opt-in that
 builds a `MailboxViewer` for the key's user and goes through
@@ -2341,6 +2405,55 @@ permanent no-ops. A controller that is unreachable — not yet installed, or dow
 through an outage and rebuilds the corpus after a wipe rather than stranding corrections.
 (rspamd's classifier needs roughly 200 messages of each class before it contributes, so
 early corrections have little visible effect.)
+
+## Trash and retention
+
+Deleting mail from the reader is a **soft delete**: `MailboxService::softDelete()`
+stamps `iem_delete_time` and nothing else. Trash is a **view over that column**, not a
+label or a folder — the same shape as the Spam view — so nothing has to move and a
+restore has nothing to reassemble.
+
+**Exactly one view sees a trashed row.** Every read scope pins `iem_delete_time IS
+NULL`; `MailboxService::trashScopeSql()` inverts that pin, branch for branch (a single
+mailbox, an all-access "All mail", the superadmin "Unmatched" pseudo-mailbox). The Trash
+view is also the one view that ignores the spam verdict, so mail a filter trashed on
+arrival is not invisible in both places. `listThreads()` takes a `trash` filter,
+`getThread()` / `messageIdsInThread()` a `$trashed` flag; the reader passes them from
+its Trash rail entry.
+
+**Exactly two mutations reach a trashed row.** `restoreFromTrash()` clears the column;
+`purgeFromTrash()` deletes for good. Both resolve targets through
+`trashMutationScopeSql()` and are its only callers — the `IS NULL` pin that every other
+mutation carries is what keeps discarded mail out of the read/star/archive/spam/label
+paths, so it is not a parameter those methods can be handed. Restore needs no
+bookkeeping: trashing never touched read, star, archive, spam verdict or label
+membership, so the message returns exactly as it left.
+
+**A purge reclaims everything or it is not a purge.** Both the reader's *Delete forever*
+and the scheduled task go row by row through `InboundEmailMessage::permanent_delete()`,
+which frees the file-backed attachment `fil_` Files and the stored raw object (local file
+or cloud object). A bulk `DELETE` would drop the row in one statement and leak both. Each
+id is queued for refold first, so the owner's sealed search index drops the entry at their
+next fold. Sealed mailboxes purge **locked**: `permanent_delete()` works on columns and
+storage keys, never on plaintext, so a Fortress mailbox needs no unlock window.
+
+**The window.** `plugins/mailbox/tasks/PurgeMailboxTrash.php` runs daily and purges what
+was trashed longer than `mailbox_trash_retention_days` (default 30) ago. The task's own
+`days_to_keep` wins over the setting when set, so a deployment can run a different window
+without editing what the reader shows; `0` in either place means nothing purges and the
+task reports `skipped`. `max_per_run` (default 500) caps a run and says so in its result
+message, so a large backlog drains over several runs rather than one enormous transaction.
+`report_only` counts what would go and deletes nothing. Each Trash row shows **when it
+purges**, computed for display from the window and the row's delete time — never stored,
+because an operator can change the window.
+
+**IMAP-backed mailboxes are one-way.** `ImapSyncer::pushTrash()` moves the source copy
+into the account's Trash folder and repoints the locator (which doubles as the
+already-trashed marker). Restore and purge act **locally**: a restored message returns
+here while the source copy stays in the provider's Trash, and a purge deletes this row and
+these bytes without expunging anything remote. Providers run their own 30-day Trash purge,
+so the remote copy goes on its own schedule; the reader's Trash view says so on a mailbox
+that has a feed.
 
 ## AI security scan
 

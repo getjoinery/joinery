@@ -1,7 +1,7 @@
 {
     "name": "Mailbox",
     "description": "Self-hosted email: receiving, forwarding, local mailboxes, webmail reader, IMAP sync, DKIM/SRS",
-    "version": "1.65.0",
+    "version": "1.69.0",
     "author": "Joinery",
     "receives_upgrades": true,
     "included_in_publish": true,
@@ -42,7 +42,18 @@
             "icon": "envelope",
             "visibility": "in",
             "permission": 0,
-            "order": 58
+            "order": 52
+        }
+    ],
+    "settingsMenu": [
+        {
+            "slug": "mailbox-import",
+            "title": "Mail Import",
+            "url": "/profile/mailbox/import",
+            "icon": "envelope",
+            "permission": 0,
+            "order": 90,
+            "settingActivate": "mailbox_import_enabled"
         }
     ],
     "provisioners": [
@@ -209,6 +220,21 @@
             "label": "Show via Site Name in the From line of forwarded mail",
             "type": "checkbox",
             "helptext": "Off shows just the original sender name. The From address is the site verified address either way, which deliverability requires; the original sender stays in Reply-To."
+        },
+        {
+            "name": "mailbox_trash_retention_days",
+            "default": "30",
+            "group": "retention",
+            "label": "Trash retention (days)",
+            "type": "number",
+            "helptext": "Mail in Trash is permanently deleted after this many days. 0 keeps it indefinitely.",
+            "validation": {
+                "number": true,
+                "min": 0,
+                "messages": {
+                    "min": "Must be 0 or more."
+                }
+            }
         },
         {
             "name": "mailbox_log_retention_days",

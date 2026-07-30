@@ -7,9 +7,11 @@
  * spam, inbox, folder_id, page. Returns {threads, has_more, page} — the
  * exact shapes the web reader's list endpoint serves; every row is scoped
  * by MailboxViewer (specs/implemented/mobile_native_email_server_api_and_ios.md).
- * The `drafts` param switches to the Drafts view (specs/mailbox_compose_maturity.md).
+ * The `drafts` param switches to the Drafts view (specs/mailbox_compose_maturity.md);
+ * `trash` switches to the Trash view (specs/mailbox_trash_folder.md), whose rows
+ * carry a purge_time.
  *
- * @version 1.1.0
+ * @version 1.2.0
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -37,6 +39,9 @@ function thread_list_logic(array $input): LogicResult {
 		// Drafts view (specs/mailbox_compose_maturity.md § Phase 2): the viewer's saved
 		// drafts, singletons, excluded from every other view.
 		'drafts'       => !empty($input['drafts']),
+		// Trash view (specs/mailbox_trash_folder.md): the soft-deleted rows in scope,
+		// the only view that shows them.
+		'trash'        => !empty($input['trash']),
 	);
 
 	$page = isset($input['page']) ? intval($input['page']) : 1;
@@ -49,7 +54,7 @@ function thread_list_logic(array $input): LogicResult {
 function thread_list_logic_api() {
 	return [
 		'requires_session' => true,
-		'description' => 'List mail threads for a mailbox view (inbox/all/spam, search, labels), paged',
+		'description' => 'List mail threads for a mailbox view (inbox/all/spam/trash, search, labels), paged',
 	];
 }
 

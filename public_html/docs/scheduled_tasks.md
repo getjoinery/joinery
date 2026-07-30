@@ -294,6 +294,17 @@ Plugin-owned tasks follow the plugin lifecycle:
 - **Plugin reactivated** — Suspended tasks are resumed (`sct_is_active = true`).
 - **Plugin uninstalled** — Task records with matching `sct_plugin_name` are permanently deleted (not just suspended).
 
+### PurgeMailboxTrash — task config over a setting
+
+The Mailbox plugin's **PurgeMailboxTrash** task shows the pattern for a window that
+belongs to two places. The retention window is a declared setting
+(`mailbox_trash_retention_days`) because the reader shows each trashed message's purge
+date from it; the task also exposes `days_to_keep`, and **task config wins when set**. A
+deployment can therefore run a different purge window without editing what its members
+see, and `0` in either place means the task returns `skipped` rather than purging on a
+default. A task whose value only ever matters to the task itself needs no setting — this
+one is a setting first because a member-facing surface reads it.
+
 ### PollImapAccounts — task-floor vs. per-account cadence
 
 The Mailbox plugin's **PollImapAccounts** task (`every_run`) illustrates a

@@ -504,6 +504,24 @@ timed purge:
   destroying them — the destructive path goes through the trash logic, not the
   bare deletion rule.
 
+### Worked example: mail trash retention
+
+Mail (see [Mailbox](../plugins/mailbox/docs/overview.md#trash-and-retention)) has the
+same soft-delete / restore / timed-purge shape with no cascade at all — a message has no
+descendants, so there is nothing to restore selectively:
+
+- **Soft delete is one column.** `iem_delete_time`, stamped by
+  `MailboxService::softDelete()`. Trash is a *view* over that column, and every other
+  read and mutation pins it NULL, so a trashed row is unreachable rather than merely
+  hidden.
+- **The reclaim lives in the model.** `InboundEmailMessage::permanent_delete()` frees the
+  attachment `fil_` Files and the stored raw object (local file or cloud object) before
+  the row goes. This is why the purge loops row by row through the model: a bulk `DELETE`
+  would satisfy the schema and leak the bytes.
+- **Timed purge** — `PurgeMailboxTrash` calls `permanent_delete()` on messages trashed
+  longer than `mailbox_trash_retention_days` (default 30) ago, capped per run so a large
+  backlog drains over several passes.
+
 ## Best Practices
 
 1. **Use constants for sentinel values**: `User::USER_DELETED` instead of hardcoded `3`
