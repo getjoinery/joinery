@@ -301,6 +301,7 @@ class MultiPlugin extends SystemMultiBase {
                 'directory_exists' => true,
                 'deprecated' => false,
                 'superseded_by' => null,
+                'maturity' => null,
             );
 
             // Read manifest for deprecation metadata
@@ -317,6 +318,7 @@ class MultiPlugin extends SystemMultiBase {
                 $plugin_data['deprecated'] = !empty($metadata['deprecated']);
                 $plugin_data['superseded_by'] = $metadata['superseded_by'] ?? null;
                 $plugin_data['requires_joinery'] = $metadata['requires']['joinery'] ?? null;
+                $plugin_data['maturity'] = $metadata['status'] ?? null;
             } else {
                 $plugin_data['requires_joinery'] = null;
             }
@@ -365,6 +367,7 @@ class MultiPlugin extends SystemMultiBase {
                     'directory_exists' => false,
                     'deprecated' => false,
                     'superseded_by' => null,
+                    'maturity' => null,
                     'plugin' => $plugin,
                     'is_active' => $plugin->is_active(),
                     'status_badge' => '<span class="badge bg-warning">Missing</span>',

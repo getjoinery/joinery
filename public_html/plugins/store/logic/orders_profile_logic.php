@@ -1,8 +1,9 @@
 <?php
 /**
- * Orders profile logic — full order history with pagination.
+ * Orders profile logic — full order history with pagination, plus the
+ * user's plugin license keys.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 function orders_profile_logic(array $input): LogicResult {
@@ -40,6 +41,14 @@ function orders_profile_logic(array $input): LogicResult {
 	$page_vars['orders'] = $orders;
 	$page_vars['numorders'] = $numorders;
 	$page_vars['pager'] = $pager;
+
+	require_once(PathHelper::getIncludePath('plugins/store/data/license_keys_class.php'));
+	$license_keys = new MultiLicenseKey(
+		array('user_id' => $session->get_user_id()),
+		array('lck_license_key_id' => 'DESC')
+	);
+	$license_keys->load();
+	$page_vars['license_keys'] = $license_keys;
 
 	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
 

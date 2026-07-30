@@ -1,8 +1,9 @@
 {
     "name": "Items Management",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "description": "Item tracking and relationship management system",
     "author": "System Developer",
+    "license": "PolyForm-Shield-1.0.0",
     "receives_upgrades": true,
     "included_in_publish": true,
     "styles": ["assets/css/items.css"]

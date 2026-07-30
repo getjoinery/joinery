@@ -1,8 +1,10 @@
 {
     "name": "Server Manager",
-    "version": "1.14.0",
+    "version": "1.14.1",
     "description": "Remote server management for Joinery instances",
     "author": "Joinery",
+    "license": "Joinery-Commercial",
+    "requires_entitlement": true,
     "receives_upgrades": true,
     "included_in_publish": true,
     "host_installer": "provisioning/install_agent.sh",

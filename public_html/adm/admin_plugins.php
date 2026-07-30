@@ -142,6 +142,19 @@ $page->begin_box(array('altlinks' => $altlinks));
                 // Status column
                 $status_cell = $plugin['status_badge'];
 
+                // Maturity badge from the manifest status field. Labels only —
+                // an experimental plugin installs and updates like a stable one.
+                $maturity_badges = array(
+                    'experimental' => '<span class="badge bg-warning">Experimental</span>',
+                    'beta' => '<span class="badge bg-info">Beta</span>',
+                    'deprecated' => '<span class="badge bg-dark">Deprecated</span>',
+                );
+                $maturity = $plugin['maturity'] ?? null;
+                if ($maturity && isset($maturity_badges[$maturity])
+                    && !($maturity === 'deprecated' && !empty($plugin['deprecated']))) {
+                    $status_cell .= ' ' . $maturity_badges[$maturity];
+                }
+
                 // Add Preserved-on-deploy badge only when receives_upgrades=false
                 if ($plugin['plugin']) {
                     if (!$plugin['plugin']->receives_upgrades()) {

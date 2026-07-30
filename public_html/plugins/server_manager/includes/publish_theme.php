@@ -9,7 +9,7 @@
  *   ?download=name&type=plugin - Download a plugin archive
  *   ?core              - Redirect to core archive download
  *
- * Version: 1.2.0
+ * Version: 1.3.0
  */
 
 // When loaded via route, core classes are pre-loaded.
@@ -79,6 +79,9 @@ if (isset($_GET['list']) && $_GET['list'] === 'plugins') {
                     'description' => $plugin_data['description'] ?? '',
                     'author' => $plugin_data['author'] ?? '',
                     'is_system' => $plugin_data['is_system'] ?? false,
+                    'license' => $plugin_data['license'] ?? null,
+                    'status' => $plugin_data['status'] ?? 'stable',
+                    'requires_entitlement' => $plugin_data['requires_entitlement'] ?? false,
                     'included_in_publish' => true,
                 ];
             }

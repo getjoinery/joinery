@@ -1,8 +1,8 @@
 <?php
 /**
- * Full order history sub-page.
+ * Full order history sub-page, with the user's plugin license keys.
  *
- * @version 2.0
+ * @version 2.1
  */
 
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
@@ -88,6 +88,30 @@ $session = $page_vars['session'];
             </div>
             <?php endif; ?>
         </div>
+
+        <?php if (isset($page_vars['license_keys']) && $page_vars['license_keys']->count() > 0): ?>
+        <div class="card">
+            <div class="card-header">
+                <h6 class="jy-tight">License Keys</h6>
+            </div>
+            <div class="card-body">
+                <p class="muted text-sm">Each key licenses one production instance; staging and development copies are included.</p>
+                <?php $k = 0; foreach ($page_vars['license_keys'] as $license_key): ?>
+                <div class="jy-orders-row<?php echo $k > 0 ? ' is-divided' : ''; ?>">
+                    <div>
+                        <p class="jy-orders-num"><?php echo htmlspecialchars($license_key->get('lck_plugin_name')); ?></p>
+                        <p class="muted text-sm jy-tight"><code><?php echo htmlspecialchars($license_key->get('lck_key')); ?></code></p>
+                    </div>
+                    <div class="text-end">
+                        <p class="muted text-sm jy-tight">
+                            <?php echo LibraryFunctions::convert_time($license_key->get('lck_create_time'), 'UTC', $session->get_timezone(), 'M j, Y'); ?>
+                        </p>
+                    </div>
+                </div>
+                <?php $k++; endforeach; ?>
+            </div>
+        </div>
+        <?php endif; ?>
 
     </div>
 </section>
