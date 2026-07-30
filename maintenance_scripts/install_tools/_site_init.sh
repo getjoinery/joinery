@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 2.3 - Replace the seeded admin password with a per-site one on every
+#                fresh install. Honours JOINERY_ADMIN_PASSWORD for unattended
+#                installers; otherwise generates one and writes it to
+#                config/admin_credentials.txt (mode 600).
 # VERSION: 2.2 - Generate secret_box_key for SecretBox (secrets at rest) on install
 #
 # Called by install.sh and Dockerfile CMD
@@ -394,6 +398,69 @@ if [ "$SKIP_DB_VALIDATION" = false ] && [ "$DB_EXISTS" = false ]; then
     fi
 
     log "Database validation passed"
+fi
+
+# =============================================================================
+# ADMIN CREDENTIAL
+# =============================================================================
+#
+# The shipped database seeds a well-known admin login. Give every fresh site its
+# own password before it is reachable, so there is no window in which the login
+# is guessable and nothing for the default homepage to publish.
+#
+# JOINERY_ADMIN_PASSWORD lets an unattended installer hand in a password the
+# owner chose on a deploy form. When it is set, nothing is generated and nothing
+# is written to disk — there is no file to go and read. Cloned sites are skipped:
+# they carry the source site's real accounts, not the seeded default.
+if [ -z "$CLONE_FROM" ] && [ "$DB_EXISTS" = false ]; then
+    RESET_TOOL="${SITE_ROOT}/maintenance_scripts/sysadmin_tools/reset_admin_password.php"
+
+    if [ ! -f "$RESET_TOOL" ]; then
+        log_error "Warning: $RESET_TOOL not found — the seeded admin password is still in place."
+        log_error "Set one before exposing this site."
+    else
+        if [ -n "${JOINERY_ADMIN_PASSWORD:-}" ]; then
+            ADMIN_PASSWORD="$JOINERY_ADMIN_PASSWORD"
+            ADMIN_PASSWORD_SUPPLIED=true
+        else
+            ADMIN_PASSWORD=$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | cut -c1-24)
+            ADMIN_PASSWORD_SUPPLIED=false
+        fi
+
+        # Handed over in a file, never as an argument — arguments show up in `ps`.
+        ADMIN_PW_FILE=$(mktemp)
+        chmod 600 "$ADMIN_PW_FILE"
+        printf '%s\n' "$ADMIN_PASSWORD" > "$ADMIN_PW_FILE"
+
+        if php "$RESET_TOOL" --email=admin@example.com --password-file="$ADMIN_PW_FILE" --yes >/dev/null 2>&1; then
+            log "Per-site admin password applied"
+
+            if [ "$ADMIN_PASSWORD_SUPPLIED" = false ]; then
+                # Nobody chose this password, so it has to be legible somewhere.
+                CRED_FILE="${SITE_ROOT}/config/admin_credentials.txt"
+                : > "$CRED_FILE"
+                chmod 600 "$CRED_FILE"
+                chown root:root "$CRED_FILE" 2>/dev/null || true
+                {
+                    printf 'Joinery admin login for %s\n\n' "$SITENAME"
+                    printf 'URL:      http://%s/login\n' "$DOMAIN"
+                    printf 'Email:    admin@example.com\n'
+                    printf 'Password: %s\n\n' "$ADMIN_PASSWORD"
+                    printf 'You are asked to choose a new password at first sign-in.\n'
+                    printf 'Delete this file once you have signed in.\n'
+                } > "$CRED_FILE"
+                log "Admin credentials written to $CRED_FILE (mode 600)"
+            fi
+        else
+            log_error "Warning: could not apply a per-site admin password."
+            log_error "The seeded default is still in place — run"
+            log_error "  $RESET_TOOL"
+            log_error "before exposing this site."
+        fi
+
+        rm -f "$ADMIN_PW_FILE"
+        unset ADMIN_PASSWORD
+    fi
 fi
 
 # =============================================================================

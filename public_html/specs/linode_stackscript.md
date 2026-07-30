@@ -93,7 +93,7 @@ exists, and each one is a chance for a stranger to abandon the form.
 | Site domain | No | Blank means the site comes up on the instance's IP, which `install.sh` already handles by auto-detecting it. The SSL timer stays idle until a domain exists. |
 | Admin email | **Yes** | Sets the admin account's address at install instead of leaving `admin@example.com` for the owner to change by hand — the difference between a recoverable account and a locked-out one. |
 | Admin password | **Yes** | *Amended 2026-07-30 (was: derived, not asked).* Password-named so it is masked and kept out of the deployment log. The owner logs in with a credential they chose before the instance existed. A generated password written to a file on disk assumes the owner can SSH in and read it — the one thing this path exists to avoid, and something Akamai's no-command-line-intervention rule forbids relying on. Optional-and-blank would fall back to that file and strand exactly the non-CLI owner, so it is required. `usr_force_password_change` stays on regardless: a UDF value reaches the instance as an environment variable and can land in cloud-init logs on the box. |
-| SSH public key | No | Presence changes behavior rather than gating install. Supplied: installed on `user1`, sudo granted, root login hardened off. Blank: root key login is left working so the keys Linode already installed from the account keep functioning. This is what makes Gap 1's lockout impossible without forcing anyone to answer a question they may not understand. |
+| SSH public key | No | Presence changes behavior rather than gating install, and the handoff script only has to place it: written to `/root/.ssh/authorized_keys` before `install.sh server`, which then mirrors it to `user1` with sudo and hardens root login off on its own. Blank: root login is left as Linode configured it, which is `install.sh`'s third branch. Either answer is safe, so nobody is forced to understand the question. |
 | Linode API token | No | Password-named so it is masked. Only useful to deployers whose DNS is at Linode; buys first-pass SSL instead of waiting on the retry timer. |
 
 ### Install mode: bare-metal (decided)
@@ -199,8 +199,9 @@ installs turn into inbound "it didn't work" mail.
 - **Site name** — derived from the domain (or the instance ID when no domain
   is given). It determines the web root and database name and means nothing to
   the deployer.
-- **Admin password** — generated randomly, applied with
-  `usr_force_password_change` left on, written to the credentials file.
+- ~~**Admin password**~~ — moved to the field table above and made **required**
+  on 2026-07-30. A generated password lands in a file the non-CLI owner this
+  path exists for cannot read.
 - **Timezone — UTC.** `install.sh` currently hardcodes `America/New_York` into
   php.ini (`install.sh:1681`), which sits oddly against the platform's own
   doctrine that all database times are UTC with per-user display conversion.
@@ -213,8 +214,8 @@ installs turn into inbound "it didn't work" mail.
 |-------|-------|------|
 | Linode-side wrapper | StackScript body, authored once | UDF declarations plus a fetch-and-delegate. Kept under ~20 lines by construction. |
 | Handoff script | new `maintenance_scripts/install_tools/linode_stackscript.sh` | The real first-boot logic. Lives in the repo so it versions with the installer it drives. |
-| SSH access preservation | `install.sh` (`do_server_setup`) | New flag so server setup doesn't orphan the deployer's access. Gap 1. |
-| Admin credential | `install.sh` site path, `_site_init.sh` | New flag to randomize the seeded admin password and write it where the deployer can read it. Gap 2. |
+| SSH access preservation | `install.sh` `derive_ssh_access` | Built. Server setup derives a reachable account before disabling root login. Gap 1. |
+| Admin credential | `_site_init.sh` | Built. Pass the UDF password as `JOINERY_ADMIN_PASSWORD`; the site uses it instead of generating one, and writes no file. Gap 2. |
 | Deferred SSL | new systemd timer, written by the handoff script | Runs the existing `sysadmin_tools/setup_ssl.sh` until DNS resolves, then disables itself. Gap 3. |
 | DNS record creation (optional) | existing Linode DNS driver, invoked from the node | With a UDF-supplied API token, create the A record from the instance so SSL succeeds first pass. |
 | Release endpoint | `utils/latest_release.php`, `install.sh` `UPGRADE_SERVER` | Production default; optional version parameter for reproducible testing. Gap 4. |
@@ -226,76 +227,57 @@ installs turn into inbound "it didn't work" mail.
 These are the differences between "the control plane runs the installer" and
 "a stranger runs the installer." Each is a build item.
 
-Gaps 1, 3, and 7 are pre-existing defects in shipped behavior rather than
-anything this path introduces — they affect anyone following
-`docs/quickstart.md` today. They are tracked independently in
-`specs/installer_defects.md` so they are not hostage to this spec being
-scheduled. Whichever is built first fixes them; the other drops its
-workaround.
+Gaps 1, 2, 3, and 7 were pre-existing defects in shipped behavior rather than
+anything this path introduces — they affected anyone following
+`docs/quickstart.md`. They were tracked independently in
+`specs/installer_defects.md` and **are now fixed in core**
+(`specs/implemented/installer_defects.md`). What remains below for each is only
+the part this path still owns.
 
-### Gap 1 — server setup orphans the deployer's SSH access
+### Gap 1 — server setup orphans the deployer's SSH access — RESOLVED IN CORE
 
-`install.sh:1697` sets `PermitRootLogin no`, and `user1` is created with no
-password, no `authorized_keys`, and no sudo (`install.sh:1436-1453` —
-`usermod -aG www-data` is the only group grant). The managed flow survives
-this because the control plane pre-stages user1's key *before* running server
-setup ("Pre-stage user1 for managed access" in `build_install_node`). A
-self-serve deployer has no such step, so the root key Linode installed at
-create time stops working partway through and only the LISH console remains.
+`install.sh server` derives the account that survives hardening on its own
+(`derive_ssh_access`): running as root with a key in `/root/.ssh/authorized_keys`
+mirrors it to `user1` with passwordless sudo before disabling root login;
+running under `sudo` from an ordinary account leaves that account reachable;
+with neither, `PermitRootLogin` is left alone and the remedy is printed. No
+flags, so it protects a deployer who reads nothing.
 
-**Fix:** `install.sh server` grows an explicit
-`--admin-user=NAME --admin-key-file=FILE`, so pre-staging a reachable account
-is the installer's job rather than something a wrapper reaches into sshd to
-patch. The script passes `user1` — the name the managed flow already uses and
-already grants sudo — with the supplied key.
+**Nothing left for this path.** With no SSH key UDF supplied, the instance keeps
+whatever root access Linode configured, which is the third branch above.
 
-When no key is supplied, the hardening step is skipped entirely and root key
-login is left as Linode configured it. That is the case that matters: a
-deployer who answers nothing still has the access they started with, so the
-lockout cannot happen by omission.
+### Gap 2 — a well-known default password on a public IP — RESOLVED IN CORE
 
-This is not Linode-specific. Anyone following `docs/quickstart.md` on a
-key-only server loses SSH at the same point.
+The seeded account's password hash now has no known plaintext, `_site_init.sh`
+gives every fresh site its own password, and `views/index.php` no longer prints
+a credential. `JOINERY_ADMIN_PASSWORD` is the seam this path uses.
 
-### Gap 2 — a well-known default password on a public IP
-
-The seed database ships `admin@example.com` / `changeme123` with
-`usr_force_password_change` set — and `views/index.php:96-100` renders both to
-any anonymous visitor on a fresh site's homepage, so the values are published
-rather than merely well known.
-
-**This gap is now inherited, not owned.** `specs/installer_defects.md` §5 owns
-the fix, since the homepage disclosure affects every install rather than only
-unattended ones. What this path contributes is the delivery half: the admin
-password is a required user-defined field (see the field table above), so a
-one-click owner never needs to read a credentials file off the box. The
-terminal install keeps the generated-password-plus-file route, which is
-adequate for someone already at a shell.
+**What this path still owns:** the delivery half. The admin password is a
+required user-defined field (see the field table above), passed to the install
+as `JOINERY_ADMIN_PASSWORD`, so a one-click owner logs in with a credential they
+chose and never has to read a file off the box. When that variable is set,
+`_site_init.sh` writes no credentials file at all.
 
 ### Gap 3 — SSL has nowhere to land
 
 A brand-new instance has no DNS pointing at it; the IP doesn't exist until the
-instance does. This is worse than a skipped step: `install.sh site` with a
-real domain whose DNS doesn't resolve to this box **aborts before doing any
-work** (`install.sh:2131`, "Early DNS validation - fail before doing any
-work"). There is no `-y` bypass — only `--no-ssl`, a matching A record, or a
-detected Cloudflare proxy gets past it. A script that passes a domain at
-create time therefore fails the install outright rather than producing an
-HTTP-only site.
+instance does.
 
-Nothing on the node ever retries either; that logic lives in the control
-plane's Provision Pending SSL task.
+**The abort is gone.** `install.sh site` no longer exits when a domain's DNS
+does not resolve to this box — it warns, installs on HTTP, and names
+`sysadmin_tools/setup_ssl.sh` in the closing summary. `docs/quickstart.md` now
+describes what actually happens.
 
-Note: `docs/quickstart.md` currently tells readers that "the SSL step will be
-skipped automatically" if DNS hasn't propagated. That is not what happens, and
-it is a live trap for anyone following the published one-liner today. Correct
-it alongside this work.
+What remains is that nothing on the node ever *retries*; that logic lives only
+in the control plane's Provision Pending SSL task, and this path has no control
+plane.
 
 **Fix, two layers:**
 
-1. **Always install with `--no-ssl`**, so the site comes up over HTTP
-   regardless of DNS state and the install can never abort on the DNS check.
-   SSL becomes the script's responsibility, not the installer's.
+1. **Install with `--no-ssl`** so the run does not spend time on a certificate
+   attempt that cannot succeed on a minutes-old instance. This is now an
+   optimization rather than a requirement — without it the install still
+   completes, just slower.
 2. **Always:** install a systemd timer running `sysadmin_tools/setup_ssl.sh`
    on a backoff until it succeeds, then disabling itself. This covers both the
    user whose DNS propagates ten minutes later and the one who points it a
@@ -404,40 +386,31 @@ gone for good.
 
 ### Gap 7 — a fresh site cannot send email, so lockout is unrecoverable
 
-The install randomizes the admin password, writes it to the credentials file,
-and forces a change at first login — after which the file is stale, holding a
-password that no longer works. The only remaining recovery route is password
-reset, which needs email, which a fresh install does not have.
-
-There is no escape hatch today: `utils/` and `maintenance_scripts/` contain no
-admin password reset tool, and the reset flows in `logic/` are email-based
-apart from a passkey route a day-one user will not have configured. A deployer
-who forgets the password they just set is locked out of their own site short
-of hand-editing Postgres.
+The install gives the site its own admin password and forces a change at first
+login — after which the credentials file is stale, holding a password that no
+longer works. The remaining recovery route is password reset, which needs email,
+which a fresh install does not have.
 
 The obvious fix is unavailable. A local mail server will not deliver: **Linode
 blocks outbound port 25 at the account level**, confirmed by testing in
 `specs/step8_email_stack_activation.md`. Nothing can make a fresh instance
 send mail without the deployer supplying provider credentials.
 
-**Fix, two parts:**
+**Part 1 — the safety net — RESOLVED IN CORE.**
+`maintenance_scripts/sysadmin_tools/reset_admin_password.php` sets a new
+password with `usr_force_password_change` on, over SSH or the LISH console. It
+is CLI-only, outside the web root, takes the password from a prompt or a file
+rather than an argument, and logs its use.
 
-1. **A CLI admin password reset**, run on the box over SSH or the LISH
-   console, setting a new password with `usr_force_password_change` on. This
-   is the real safety net — it works regardless of email, and it is missing
-   from every deployment today, not only these.
-2. **Email setup as the obvious first task.** The post-install output and the
-   credentials file name `/admin/admin_settings_email` as step one, and the
-   forced-password-change screen hands off to it. Guidance at the one moment
-   it is useful, not a recurring prompt.
+**Part 2 — still owned here: email setup as the obvious first task.** The
+post-install output and the credentials file name `/admin/admin_settings_email`
+as step one, and the forced-password-change screen hands off to it. Guidance at
+the one moment it is useful, not a recurring prompt.
 
 Rejected: collecting SMTP credentials as a create-form field. Most deployers
 do not have them to hand at that moment, and a wall of questions in front of
 someone who has not yet seen the product converts a recoverable gap into an
 abandoned signup.
-
-The reset tool is a credential-changing script living on every box: require
-root and log its use.
 
 ### Gap 8 — script size (recorded, not a problem)
 
@@ -481,14 +454,11 @@ using the script before any listing review reads it.
 - `docs/installation.md` — the StackScript path, the UDF set, where
   credentials land.
 - `docs/quickstart.md` — lead with the one-click path, keep the SSH one-liner
-  as the manual alternative, and correct the default-credentials step once
-  Gap 2 lands.
+  as the manual alternative. The credentials step and the DNS/SSL claim are
+  already correct; the one-click path adds that the password came from the
+  deploy form and there is no file to read.
 - `docs/deploy_and_upgrade.md` — the release endpoint's version parameter and
   `upgrade_source` seeding.
-- `docs/quickstart.md` — also correct the claim that SSL is skipped
-  automatically when DNS hasn't propagated. It is not; the install aborts.
-- `docs/account_security.md` — the CLI admin password reset: what it does, who
-  can run it, and that its use is logged.
 - `docs/email_system.md` — configuring a provider is the first task on a fresh
   deployment, and why a local MTA is not an option on Linode.
 

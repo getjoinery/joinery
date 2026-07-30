@@ -1,7 +1,31 @@
 # Installer Defects — Live Faults in the Published Install Path
 
-**Status:** Unbuilt. Every item here is a defect in shipped behavior, not a
-new feature, and each is independently fixable.
+**Status:** Implemented 2026-07-30. All five items built; `safe` and the two new
+suites green. What shipped, against the sections below:
+
+| § | Where |
+|---|---|
+| 1 | `install.sh` 2.25 — abort removed, `SSL_DEFERRED` + `print_ssl_deferred_notice` |
+| 2 | `install.sh` 2.25 — new `derive_ssh_access`, `PermitRootLogin no` gated, `PasswordAuthentication yes` sed dropped |
+| 3 | new `maintenance_scripts/sysadmin_tools/reset_admin_password.php` |
+| 4 | `publish_upgrade.php` — license preflight + copy into `public_html/`; server_manager 1.14.0 |
+| 5 | `_site_init.sh` 2.3, `create_install_sql.php`, `views/index.php`, `fix_permissions.sh` 2.4 |
+
+Tests: `tests/unit/installer_contract_test.php` (safe),
+`tests/account_security/admin_password_reset_test.php` (db).
+Docs: `quickstart.md`, `installation.md`, `account_security.md`,
+`plugins/server_manager/docs/overview.md`.
+
+**Two things went further than written here.** The seeded password is not merely
+replaced at install — `create_install_sql.php` now seeds a hash with no known
+plaintext, so no release carries a shared credential even for someone who
+restores the SQL by hand. And `fix_permissions.sh` re-pins
+`config/admin_credentials.txt` to 600 root:root, because its blanket sweep
+(770 www-data:user1 in production, 777 in dev) would otherwise hand the new
+credentials file to the web server user.
+
+**Still open:** the live three-branch SSH verification in Testing below, which
+needs a real box. Everything else is verified.
 
 **Why this spec exists separately:** these were found while writing
 `specs/linode_stackscript.md`, where they appear as Gaps 1, 3, and 7 because

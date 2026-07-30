@@ -1,4 +1,17 @@
 #!/usr/bin/env bash
+#VERSION 2.25 - Three installer defects (spec installer_defects):
+#              (1) `site` no longer aborts when a domain's DNS isn't pointing
+#              here yet — it warns, installs on HTTP, and names setup_ssl.sh in
+#              the summary. provision_origin_cert was already failure-tolerant
+#              and the vhost guards :443 with <IfFile>, so the gate was the only
+#              thing turning "no cert yet" into "no site".
+#              (2) `server` derives a reachable SSH account (new
+#              derive_ssh_access) before disabling root login, mirroring root's
+#              keys to user1 with NOPASSWD sudo, or declining to touch
+#              PermitRootLogin when nothing else can reach the box. Also stops
+#              actively enabling PasswordAuthentication.
+#              (3) The summary prints the per-site admin password that
+#              _site_init.sh now generates, replacing the seeded default.
 #VERSION 2.24 - Postgres is local-only by default. Bare metal: listen_addresses
 #              = localhost + loopback-only pg_hba (no 0.0.0.0/0 rule). Docker:
 #              the container DB port publish binds 127.0.0.1 (docker's iptables
@@ -103,6 +116,9 @@ ASSUME_YES=0      # -y/--yes: Auto-accept all prompts (never deletes volumes on 
 WIPE_DATA=0       # --wipe-data: Also delete data volumes when removing an existing container (requires -y)
 QUIET_MODE=0      # -q/--quiet: Suppress most output
 CLOUDFLARE_PROXY=0  # Set to 1 if domain is behind Cloudflare proxy
+SSL_DEFERRED=0      # Set to 1 when DNS wasn't ready, so the closing summary can say so
+SSH_ROOT_LOGIN_SAFE=0    # Set by derive_ssh_access: 1 when disabling root SSH orphans nobody
+SSH_REACHABLE_ACCOUNT="" # Set by derive_ssh_access: the account that keeps access
 
 #==============================================================================
 # HELPER FUNCTIONS (from docker_install_master.sh)
@@ -155,6 +171,104 @@ print_final() {
 }
 
 #==============================================================================
+# ADMIN CREDENTIAL REPORTING
+#==============================================================================
+
+# _site_init.sh gives every fresh site its own admin password and, unless the
+# password was supplied through JOINERY_ADMIN_PASSWORD, writes it to
+# config/admin_credentials.txt. Surface it here so the operator does not have to
+# know the file exists.
+#
+# $1 = path to the credentials file
+# $2 = optional command for reading it (default cat; docker sites need docker exec)
+# $3 = optional command to show the operator for re-reading it later
+print_admin_login() {
+    local cred_path="$1"
+    local reader="${2:-cat}"
+    local show_cmd="${3:-cat $cred_path}"
+    local password=""
+
+    password=$($reader "$cred_path" 2>/dev/null | grep '^Password: ' | cut -d' ' -f2- || true)
+
+    echo "Admin login:"
+    echo -e "  Email:    ${YELLOW}admin@example.com${NC}"
+    if [ -n "$password" ]; then
+        echo -e "  Password: ${YELLOW}${password}${NC}"
+        echo ""
+        echo "You will be asked to choose a new password at first sign-in."
+        echo -e "To see it again: ${BLUE}sudo ${show_cmd}${NC}"
+    else
+        echo -e "  Password: ${YELLOW}the one supplied at install time${NC}"
+    fi
+    echo ""
+}
+
+#==============================================================================
+# SSH ACCESS DERIVATION
+#==============================================================================
+
+# Work out which account will still be able to reach this box once root SSH
+# login is disabled, and make one true where we can. Sets:
+#
+#   SSH_ROOT_LOGIN_SAFE     1 when disabling root login orphans nobody
+#   SSH_REACHABLE_ACCOUNT   the account that keeps access (informational)
+#
+# Three cases:
+#
+#   1. Running as root with keys in /root/.ssh/authorized_keys — copy them to
+#      user1 and grant it passwordless sudo. Root login can then be disabled.
+#   2. Running under sudo from a normal account — that account already holds a
+#      credential and sudo, so root login can be disabled with nothing to do.
+#   3. Neither (root reached by password, no key) — the only way in is root.
+#      Leave root login alone and print the remedy.
+#
+# This is the same pre-stage the control plane performs before running
+# `install.sh server` on a managed node (JobCommandBuilder::build_install_node,
+# "Pre-stage user1 for managed access"). Doing it here means a hand-run install
+# gets the same protection instead of relying on the operator knowing the trap.
+derive_ssh_access() {
+    SSH_ROOT_LOGIN_SAFE=0
+    SSH_REACHABLE_ACCOUNT=""
+
+    if [ -s /root/.ssh/authorized_keys ]; then
+        print_info "Root has authorized SSH keys — mirroring them to user1"
+
+        id user1 >/dev/null 2>&1 || useradd -m -s /bin/bash user1
+        install -d -m 700 -o user1 -g user1 /home/user1/.ssh
+        touch /home/user1/.ssh/authorized_keys
+        cat /root/.ssh/authorized_keys >> /home/user1/.ssh/authorized_keys
+        sort -u /home/user1/.ssh/authorized_keys -o /home/user1/.ssh/authorized_keys
+        chmod 600 /home/user1/.ssh/authorized_keys
+        chown user1:user1 /home/user1/.ssh/authorized_keys
+
+        echo 'user1 ALL=(ALL:ALL) NOPASSWD: ALL' > /etc/sudoers.d/user1
+        chmod 440 /etc/sudoers.d/user1
+
+        SSH_ROOT_LOGIN_SAFE=1
+        SSH_REACHABLE_ACCOUNT="user1"
+        print_success "user1 holds root's SSH key(s) and has passwordless sudo"
+        return 0
+    fi
+
+    if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+        SSH_ROOT_LOGIN_SAFE=1
+        SSH_REACHABLE_ACCOUNT="$SUDO_USER"
+        print_info "Running under sudo as '$SUDO_USER' — that account keeps its own SSH access"
+        return 0
+    fi
+
+    echo ""
+    print_warning "No SSH key in /root/.ssh/authorized_keys, and this run is not from a sudo account."
+    print_warning "Root password login is the only way into this server, so it is being left enabled."
+    echo ""
+    echo "To finish hardening, add your public key and re-run the hardening step:"
+    echo "  ssh-copy-id root@<this-server>            # from your own machine"
+    echo "  sudo ./install.sh host-harden             # on this server"
+    echo ""
+    return 0
+}
+
+#==============================================================================
 # SSL SETUP FUNCTIONS
 #==============================================================================
 
@@ -179,6 +293,18 @@ should_setup_ssl() {
     fi
 
     return 0
+}
+
+# Closing reminder for an install that came up on HTTP because DNS wasn't
+# pointing here yet. Printed in the summary so it survives a long scrollback.
+# $1 = on-host path to setup_ssl.sh for this install mode.
+print_ssl_deferred_notice() {
+    [ "$SSL_DEFERRED" -eq 1 ] || return 0
+    local ssl_script="$1"
+    echo -e "${YELLOW}No SSL certificate was issued — DNS did not point here during install.${NC}"
+    echo "Your site is serving HTTP. Once $DOMAIN_NAME resolves to this server, run:"
+    echo -e "  ${BLUE}sudo $ssl_script $DOMAIN_NAME${NC}"
+    echo ""
 }
 
 # Check if an IP address belongs to Cloudflare
@@ -1694,9 +1820,10 @@ EOF
         print_step "Configuring SSH security..."
         cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup
 
-        sed -i 's/#PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config
-        sed -i 's/PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config
-        sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+        # Work out whether anything other than root can still get in, and make
+        # that true where we can, before touching PermitRootLogin.
+        derive_ssh_access
+
         sed -i 's/#PubkeyAuthentication yes/PubkeyAuthentication yes/' /etc/ssh/sshd_config
         sed -i 's/#PermitEmptyPasswords no/PermitEmptyPasswords no/' /etc/ssh/sshd_config
         sed -i 's/PermitEmptyPasswords yes/PermitEmptyPasswords no/' /etc/ssh/sshd_config
@@ -1704,15 +1831,24 @@ EOF
         sed -i 's/#ClientAliveInterval 0/ClientAliveInterval 300/' /etc/ssh/sshd_config
         sed -i 's/#ClientAliveCountMax 3/ClientAliveCountMax 2/' /etc/ssh/sshd_config
 
-        # To disable password auth entirely (key-based only), uncomment these lines.
-        # Requires SSH keys to be in place first — run 'install.sh host-harden' after keys are confirmed.
-        # sed -i 's/PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
-        # sed -i 's/#PermitRootLogin yes/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
-        # sed -i 's/PermitRootLogin yes/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
+        # The one directive that can lock the operator out. Everything above is
+        # applied unconditionally; this is applied only when another account can
+        # still reach the box.
+        if [ "$SSH_ROOT_LOGIN_SAFE" -eq 1 ]; then
+            sed -i 's/#PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config
+            sed -i 's/PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config
+        fi
 
         service_restart ssh
 
-        print_success "SSH security configured"
+        if [ "$SSH_ROOT_LOGIN_SAFE" -eq 1 ]; then
+            print_success "SSH security configured (root login disabled; ${SSH_REACHABLE_ACCOUNT} retains access)"
+        else
+            print_success "SSH security configured (root login left enabled — see the warning above)"
+        fi
+
+        # To go key-only afterwards, add your public key to the reachable account
+        # and run 'install.sh host-harden' — it refuses unless a key is present.
 
         # Configure UFW firewall
         print_step "Configuring firewall..."
@@ -2129,9 +2265,12 @@ do_site_create() {
         print_info "SSL: disabled"
     fi
 
-    # Early DNS validation - fail before doing any work if SSL is expected but DNS isn't ready
+    # Early DNS check. Informational only: "no cert yet" is handled gracefully all
+    # the way down (provision_origin_cert tries HTTP-01, then DNS-01, then returns
+    # without issuing; the vhost guards its :443 block with <IfFile>, so a missing
+    # cert means the site serves HTTP rather than Apache refusing to start).
     if should_setup_ssl "$DOMAIN_NAME" "$NO_SSL"; then
-        print_step "Validating DNS configuration for SSL..."
+        print_step "Checking DNS configuration for SSL..."
         # Capture return code without set -e killing the script
         local dns_result=0
         check_dns_points_here "$DOMAIN_NAME" || dns_result=$?
@@ -2148,18 +2287,16 @@ do_site_create() {
             echo "  - Cloudflare SSL/TLS → Full (works with self-signed or no origin cert)"
             echo ""
         else
-            # DNS doesn't point here and it's not Cloudflare
+            # DNS doesn't point here and it's not Cloudflare. The install goes
+            # ahead on HTTP; the certificate is the only thing deferred.
+            SSL_DEFERRED=1
             echo ""
-            print_error "DNS for $DOMAIN_NAME does not point to this server"
+            print_warning "DNS for $DOMAIN_NAME does not point to this server yet"
             echo ""
-            echo "SSL requires DNS to be configured correctly before installation."
+            echo "Installation continues. Your site will be reachable over HTTP, and no"
+            echo "certificate will be issued during this run. The command to issue one"
+            echo "later is printed in the summary at the end of this install."
             echo ""
-            echo "Options:"
-            echo "  1. Update DNS to point $DOMAIN_NAME to this server's IP, then retry"
-            echo "  2. Use --no-ssl flag to skip SSL setup and configure it later:"
-            echo "     ./install.sh site $SITENAME PASSWORD $DOMAIN_NAME${PORT:+ $PORT} --no-ssl"
-            echo ""
-            exit 1
         fi
     fi
 
@@ -2629,9 +2766,10 @@ EOF
         fi
         echo -e "Access your site: ${GREEN}http://$DOMAIN_NAME:$PORT/${NC}"
         echo ""
-        echo "Default admin login:"
-        echo -e "  Email:    ${YELLOW}admin@example.com${NC}"
-        echo ""
+        print_admin_login "/var/www/html/$SITENAME/config/admin_credentials.txt" \
+            "docker exec $SITENAME cat" \
+            "docker exec $SITENAME cat /var/www/html/$SITENAME/config/admin_credentials.txt"
+        print_ssl_deferred_notice "$ARCHIVE_ROOT/maintenance_scripts/sysadmin_tools/setup_ssl.sh"
         echo "Useful commands:"
         echo -e "  View logs:      ${BLUE}docker logs $SITENAME${NC}"
         echo -e "  Shell access:   ${BLUE}docker exec -it $SITENAME bash${NC}"
@@ -2809,9 +2947,8 @@ do_site_baremetal() {
             echo -e "Test site:        ${GREEN}http://test.$DOMAIN_NAME/${NC}"
         fi
         echo ""
-        echo "Default admin login:"
-        echo -e "  Email:    ${YELLOW}admin@example.com${NC}"
-        echo ""
+        print_admin_login "/var/www/html/$SITENAME/config/admin_credentials.txt"
+        print_ssl_deferred_notice "/var/www/html/$SITENAME/maintenance_scripts/sysadmin_tools/setup_ssl.sh"
         echo "Useful commands:"
         echo -e "  View logs:      ${BLUE}tail -f /var/www/html/$SITENAME/logs/error.log${NC}"
         echo -e "  Restart Apache: ${BLUE}sudo systemctl restart apache2${NC}"

@@ -208,6 +208,25 @@ sudo ./install.sh server
 
 Installs and configures PHP 8.3, Apache (with `mod_rewrite`), PostgreSQL, Composer, Certbot, UFW, fail2ban, SSH hardening, and unattended security updates.
 
+#### How SSH hardening picks its account
+
+Turning off root SSH login is the one hardening step that can lock an operator out, so the installer works out who will still be able to reach the box before it does that. Everything else — `MaxAuthTries 3`, empty passwords refused, idle-session timeouts, fail2ban, UFW — is applied unconditionally.
+
+| What the installer finds | What it does |
+|---|---|
+| Running as root, and `/root/.ssh/authorized_keys` has keys | Copies those keys to `user1`, grants it passwordless sudo, then sets `PermitRootLogin no`. |
+| Running under `sudo` from an ordinary account | That account already has its own key and sudo, so it sets `PermitRootLogin no` and does nothing else. |
+| Neither — root reached by password, no key installed | Leaves `PermitRootLogin` alone and says so. Disabling it here would leave nothing able to log in. |
+
+The third case is the only one that finishes with root password login still enabled. It is what you get on a provider that boots you a machine with a root password and no SSH key attached. To finish hardening, add your key and run the dedicated step:
+
+```bash
+ssh-copy-id root@your-server        # from your own machine
+sudo ./install.sh host-harden       # on the server
+```
+
+`host-harden` refuses to run unless it can see a non-empty `authorized_keys`, then disables password authentication entirely and sets `PermitRootLogin prohibit-password`.
+
 ### Create a site
 
 ```bash
@@ -245,9 +264,15 @@ SSL is configured automatically when a domain (not localhost or an IP) is provid
 
 ### How it works
 
-1. After site creation, the installer verifies the domain's DNS points to this server.
-2. If DNS is correct, Certbot runs to fetch a Let's Encrypt certificate.
-3. If DNS isn't ready, SSL is skipped and the installer prints instructions for running Certbot manually later.
+1. The installer checks whether the domain's DNS points to this server.
+2. If it does, Certbot runs to fetch a Let's Encrypt certificate.
+3. If it doesn't, the install goes ahead anyway and no certificate is issued. The vhost guards its `:443` block with `<IfFile>`, so a missing certificate means the site serves HTTP rather than Apache refusing to start. The closing summary names the command to issue one later.
+
+DNS not being ready never stops an install. Run this once it resolves:
+
+```bash
+sudo /var/www/html/{sitename}/maintenance_scripts/sysadmin_tools/setup_ssl.sh mysite.example.com
+```
 
 Requirements: domain DNS pointing here, port 80 reachable from the internet, Certbot installed (included in `install.sh server`).
 
@@ -276,12 +301,10 @@ sudo ./install.sh site mysite mysite.example.com --no-ssl
 ### Manual SSL later
 
 ```bash
-# Bare-metal
-sudo certbot --apache -d mysite.example.com
-
-# Docker (after the host proxy exists)
-sudo certbot --apache -d mysite.example.com
+sudo /var/www/html/{sitename}/maintenance_scripts/sysadmin_tools/setup_ssl.sh mysite.example.com
 ```
+
+Works for both modes — Docker sites terminate TLS at the host's reverse proxy, which is the same Apache the script reloads. It tries an HTTP-01 challenge, falls back to DNS-01 when a provider credential file is present at `/etc/letsencrypt/<provider>.ini`, and leaves the site on HTTP if neither succeeds.
 
 ## Cloudflare Proxy Support
 

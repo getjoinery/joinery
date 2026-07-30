@@ -300,6 +300,46 @@ changed (`account_edit_logic.php`) and when a hosted address is chosen at
 `InboundEmailDomain::isHostedEmailAddress()`), stated at the moment the address
 is chosen, not during the crisis.
 
+### Reset from the server
+
+Every authorizer above is remote — an email, a passkey, a code. A day-one site
+holds none of them: no mail provider is configured yet, and on most cloud
+providers outbound port 25 is blocked at the account level, so a local MTA
+cannot deliver either. Someone who chooses a password at the forced first-login
+change and then loses it would otherwise be reduced to editing Postgres.
+
+`maintenance_scripts/sysadmin_tools/reset_admin_password.php` is the floor under
+that. Whoever holds the server can already read the database and rewrite any
+row; the tool is not a new privilege, it is a safe way to exercise one.
+
+```bash
+sudo php /var/www/html/{sitename}/maintenance_scripts/sysadmin_tools/reset_admin_password.php
+```
+
+- **CLI only.** It lives outside the web root, and refuses to run under any SAPI
+  but `cli`. It is deliberately not in `public_html/utils/` — `/utils/<name>` is
+  web-routable and the router applies no permission check of its own, so a
+  forgotten guard there would be an internet-facing account takeover.
+- **The password is never an argument.** Read from a prompt with echo off, or
+  from `--password-file=PATH`. A positional password would land in shell history
+  and in `ps`.
+- **`--email=ADDRESS`** selects the account. With no `--email` it targets the
+  sole permission-10 account, and refuses when there is more than one.
+- **`usr_force_password_change` is set**, so what is typed here is a way in, not
+  a permanent credential. Changing the password also revokes every active API
+  session key for that user, like any other password change.
+- **The second factor survives by default.** `--clear-second-factor` turns TOTP
+  off and rotates the trusted-device key, signing every "remember this device"
+  grant out at once. It is opt-in because losing a password often means losing
+  the authenticator with it — same phone, same laptop — but wiping a factor
+  should be a decision, not a side effect of a routine password change.
+- **Use is logged** to the site error log: the address, the user id, and whether
+  the second factor was cleared.
+
+Fresh installs also get their admin password this way. `_site_init.sh` generates
+one per site and applies it through this same tool, so no release ships a shared
+default and the seeded account's password hash has no known plaintext.
+
 ## Vault-gated routing settings
 
 Sealing protects *content at rest* — it does nothing about a setting that
