@@ -1,6 +1,6 @@
 # Mailbox Trash Folder
 
-**Status:** Not started
+**Status:** Implemented — mailbox 1.68.0, `plugins/mailbox/tests/mailbox_trash_test.php` 59/59
 
 ## Problem
 
@@ -78,10 +78,13 @@ Unread badges need no change: the switcher's count query already excludes
 deleted rows.
 
 Each row in the Trash list carries its **purge date** in place of the received
-time: `iem_delete_time` plus the retention window, rendered through
-`LibraryFunctions::convert_time()` in the viewer's timezone. The window is a
-setting an operator can change, so the date is computed for display, never
-stored. When retention is 0 the column reads "kept indefinitely".
+time: `iem_delete_time` plus the retention window. `listThreads()` computes the
+instant (`MIN(iem_delete_time)` for the thread, shifted by the window) and returns
+it as UTC in `purge_time`; the reader renders it in the viewer's own timezone with
+the same local formatting every other timestamp in the reader uses. The window is
+a setting an operator can change, so the date is computed for display, never
+stored. When retention is 0 the column reads "Kept", and the view's one-line note
+says mail is kept until deleted permanently.
 
 Search works in the Trash view exactly as it does elsewhere — the search box
 stays, and `q` combines with the trash scope. On the Postgres path this needs
@@ -301,3 +304,25 @@ Written as current state: no "previously", no migration narrative.
    get Spam. Suppressing it would be the special case.
 
 All three decisions are closed; nothing blocks implementation.
+
+## As built
+
+Two things the plan did not name, both required to make Change 2a true rather than
+true-for-new-mail:
+
+- **The refold queue moved to where it belongs.** `enqueueRefold()` was private to
+  `MailboxSender`; the purge needs the same queue, so it is now
+  `MailboxIndex::enqueueRefold()` — the index owns its own bookkeeping — and the
+  sender calls it there. One implementation, two callers.
+- **A migration resets existing indexes** (`imi_001_reset_index_for_full_coverage`).
+  An index built under the old fold skipped trashed rows while its high-water mark
+  advanced past them, so those rows would never be revisited. Each persisted index
+  is dropped and its mark reset, and the next unlock rebuilds with full coverage —
+  the index is a disposable cache, entirely reconstructible from the message rows.
+
+Also delivered beyond the plan: the switcher reports `has_feed` per mailbox (the
+Trash note needs to know whether a source server holds a second copy), the reader's
+ordinary **Delete** now confirms through the kit `<dialog>` rather than
+`window.confirm` alongside the new **Delete forever**, and the Trash view offers no
+Reply / Forward chips — writing back from a conversation on the retention clock
+invites a reply whose source disappears.

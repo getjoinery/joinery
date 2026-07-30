@@ -40,7 +40,20 @@
  * purgePersisted() the affected owners so the next unlock rebuilds, or the old
  * text keeps matching.
  *
- * @version 1.4
+ * COVERAGE: the index holds every stored message in the owner's mailboxes,
+ * trashed ones included (drafts excepted — few, in flux, and opened directly).
+ * The READ SCOPE decides what a search returns: MailboxService intersects index
+ * hits with the caller's scope, so an inbox search never surfaces trashed mail
+ * and a Trash search finds it. Filtering the fold by delete state instead would
+ * break restore: the high-water mark advances past every row the pass SAW, so a
+ * message trashed before its first fold would be skipped permanently and
+ * restoring it could never bring it back.
+ *
+ * Pruning follows the row's existence, not a flag. enqueueRefold() queues an id
+ * whose content changed or whose row is about to go; the refold pass deletes the
+ * FTS row and re-inserts only if the message still exists.
+ *
+ * @version 1.5
  */
 
 require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
@@ -158,6 +171,47 @@ class MailboxIndex {
 		$bookkeeping->set('imi_sealed_key', null);
 		$bookkeeping->set('imi_fts_high_water', 0);
 		$bookkeeping->save();
+	}
+
+	/**
+	 * Queue a message id for delete-and-reinsert at the next fold, for every
+	 * grantee of its mailbox who holds an index. Two callers need it and both mean
+	 * "this id's FTS row is stale":
+	 *
+	 *   - a draft morphing in place into its Sent row (same id, so the id > mark
+	 *     main pass never revisits it);
+	 *   - a purge about to delete the row (the re-insert then finds nothing, and
+	 *     the entry is dropped).
+	 *
+	 * Needs no vault: writing the queue is bookkeeping, and the fold that consumes
+	 * it happens whenever the owner next unlocks. Best-effort — a stale index entry
+	 * is a search-quality problem, never a reason to fail the operation that
+	 * queued it.
+	 */
+	public static function enqueueRefold(int $alias_id, int $message_id): void {
+		try {
+			foreach (InboundEmailMailboxGrant::user_ids_for_alias($alias_id) as $uid) {
+				$uid = intval($uid);
+				$multi = new MultiInboundMailboxSearchIndex(array('user_id' => $uid));
+				$multi->load();
+				if (!$multi->count()) {
+					continue; // no index yet — a first search rebuilds and folds this id
+				}
+				$bk = $multi->get(0);
+				$ids = json_decode((string)$bk->get('imi_refold_ids'), true);
+				if (!is_array($ids)) {
+					$ids = array();
+				}
+				$ids = array_map('intval', $ids);
+				if (!in_array($message_id, $ids, true)) {
+					$ids[] = $message_id;
+				}
+				$bk->set('imi_refold_ids', json_encode(array_values($ids)));
+				$bk->save();
+			}
+		} catch (\Throwable $e) {
+			error_log('MailboxIndex: refold enqueue failed for message ' . $message_id . ': ' . $e->getMessage());
+		}
 	}
 
 	// ------------------------------------------------------------- internals
@@ -289,12 +343,14 @@ class MailboxIndex {
 		$refold = json_decode((string)$bookkeeping->get('imi_refold_ids'), true);
 		$refold = is_array($refold) ? array_values(array_unique(array_map('intval', $refold))) : array();
 
-		// New rows since the mark (drafts stay OUT of the index — few, in flux, and
-		// opened directly, never searched).
+		// New rows since the mark. Delete state is deliberately not a condition (see
+		// COVERAGE above): a trashed row is indexed like any other and the read scope
+		// keeps it out of results. Drafts stay OUT — few, in flux, and opened
+		// directly, never searched.
 		$stmt = $db->prepare(
 			"SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
 			 WHERE iem_iea_inbound_email_alias_id IN ($in)
-			 AND iem_inbound_email_message_id > ? AND iem_delete_time IS NULL
+			 AND iem_inbound_email_message_id > ?
 			 AND iem_direction IS DISTINCT FROM 'draft'
 			 ORDER BY iem_inbound_email_message_id ASC");
 		$stmt->execute(array($since_id));
@@ -304,8 +360,10 @@ class MailboxIndex {
 			return; // nothing to fold and nothing queued — the early-out
 		}
 
-		// Which refold ids are still indexable (exist, non-deleted, non-draft, and in
-		// the user's scope) — the rest are only deleted from the FTS table.
+		// Which refold ids are still indexable (the row exists, non-draft, in the
+		// user's scope) — the rest are only deleted from the FTS table. A purged
+		// message fails this check because its row is gone, which is how the stale
+		// entry gets dropped.
 		$refold_valid = array();
 		if (count($refold)) {
 			$rin = implode(',', array_map('intval', $refold));
@@ -313,7 +371,7 @@ class MailboxIndex {
 				"SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
 				 WHERE iem_inbound_email_message_id IN ($rin)
 				 AND iem_iea_inbound_email_alias_id IN ($in)
-				 AND iem_delete_time IS NULL AND iem_direction IS DISTINCT FROM 'draft'");
+				 AND iem_direction IS DISTINCT FROM 'draft'");
 			$rstmt->execute();
 			$refold_valid = array_flip(array_map('intval', $rstmt->fetchAll(PDO::FETCH_COLUMN)));
 		}

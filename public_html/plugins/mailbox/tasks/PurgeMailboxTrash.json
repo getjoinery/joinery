@@ -1,0 +1,11 @@
+{
+    "name": "Purge Mailbox Trash",
+    "description": "Permanently deletes mail that has been in Trash longer than the retention window, reclaiming its attachments and stored raw message. Leave the window blank to follow the Trash retention (days) setting; 0 keeps trashed mail indefinitely.",
+    "default_frequency": "daily",
+    "default_time": "03:45:00",
+    "config_fields": {
+        "days_to_keep": {"type": "number", "label": "Days to keep trashed mail (blank follows the Trash retention setting)", "required": false},
+        "max_per_run": {"type": "number", "label": "Maximum messages to purge per run (default 500)", "required": false},
+        "report_only": {"type": "boolean", "label": "Report only — count what would be purged and delete nothing", "required": false}
+    }
+}

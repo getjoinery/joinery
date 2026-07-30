@@ -10,7 +10,11 @@
  * signed URLs (MailboxService::withSignedTransport()). Also returns the
  * thread's current folder/label ids. Empty messages = out of scope.
  *
- * @version 1.0.0
+ * `trash` opens the thread under the Trash scope (specs/mailbox_trash_folder.md) —
+ * a discarded conversation is invisible to every other read, so the Trash view
+ * says so when it asks.
+ *
+ * @version 1.1.0
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -34,7 +38,8 @@ function thread_logic(array $input): LogicResult {
 
 	$alias_id = MailboxService::parseAliasParam($input['alias_id'] ?? null);
 
-	$messages = $service->getThread($alias_id, $thread_key);
+	$trashed = !empty($input['trash']);
+	$messages = $service->getThread($alias_id, $thread_key, $trashed);
 	$messages = $service->withSignedTransport($messages);
 
 	// Harvest the thread's inbound senders into the contact store (§ Phase 4) —
@@ -58,7 +63,7 @@ function thread_logic(array $input): LogicResult {
 
 	return LogicResult::render(array(
 		'messages' => $messages,
-		'folders'  => $service->threadFolderIds($alias_id, $thread_key),
+		'folders'  => $service->threadFolderIds($alias_id, $thread_key, $trashed),
 		// Locked-state contract (specs/mailbox_security_levels.md § 4.2): metadata
 		// plus a `locked` flag rather than an error, so the client renders sealed
 		// placeholders and triggers the native unlock ceremony on a content action.

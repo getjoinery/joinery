@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.26
+ * No framework. @version 2.29
  *
  * Two-pane layout: the main pane swaps between the conversation list and an
  * opened conversation (toggled by the `reading` class on #mbx-reader); a back
@@ -25,6 +25,8 @@
 		folderId: null,       // null = folder-unfiltered (the mailbox's "All Mail")
 		inboxView: true,      // the Inbox view (non-archived); the default landing view
 		spamView: false,      // the Spam pseudo-folder (judged-spam, hidden from inbox)
+		trashView: false,     // the Trash pseudo-folder (discarded mail, awaiting purge)
+		trashRetentionDays: 0, // the purge window the server reported for the Trash view
 		mailboxLabel: '',     // the active mailbox label, for composing folder titles
 		draftsView: false,    // the Drafts pseudo-mailbox (saved drafts)
 		mailboxes: [],
@@ -58,6 +60,17 @@
 			? { hour: 'numeric', minute: '2-digit' }
 			: { month: 'short', day: 'numeric' };
 		return d.toLocaleString([], opts);
+	}
+
+	// A calendar date in the viewer's own timezone — for a purge date, where the
+	// day is the whole point and the hour is noise.
+	function fmtDate(iso) {
+		if (!iso) return '';
+		var d = new Date(iso.replace(' ', 'T') + 'Z');
+		if (isNaN(d.getTime())) return iso;
+		var opts = { month: 'short', day: 'numeric' };
+		if (d.getFullYear() !== new Date().getFullYear()) { opts.year = 'numeric'; }
+		return d.toLocaleDateString([], opts);
 	}
 
 	// The reader's endpoints are /api/v1 actions, called through the shared
@@ -236,9 +249,10 @@
 
 	function renderFolderRail() {
 		// Remove any prior rail, then render the active mailbox's rail: "All Mail"
-		// (folder-unfiltered root), any tracked IMAP folders, and the "Spam" view.
-		// The Spam view is always present — it reads the verdict, not folder
-		// membership, so it works for local and IMAP mailboxes alike.
+		// (folder-unfiltered root), any tracked IMAP folders, and the "Spam" and
+		// "Trash" views. Both are always present — they read a column (the verdict,
+		// the delete time), not folder membership, so they work for local and IMAP
+		// mailboxes alike.
 		var prior = $('#mbx-folder-rail');
 		if (prior) prior.parentNode.removeChild(prior);
 
@@ -254,6 +268,7 @@
 		ul.appendChild(folderItem(null, 'All Mail'));
 		folders.forEach(function (f) { ul.appendChild(folderItem(f.id, f.name)); });
 		ul.appendChild(folderItem('spam', 'Spam'));
+		ul.appendChild(folderItem('trash', 'Trash'));
 		li.parentNode.insertBefore(ul, li.nextSibling);
 		highlightFolder();
 	}
@@ -271,6 +286,7 @@
 
 	function highlightFolder() {
 		var cur = state.spamView ? 'spam'
+			: state.trashView ? 'trash'
 			: state.inboxView ? 'inbox'
 			: (state.folderId == null ? '' : String(state.folderId));
 		Array.prototype.forEach.call(document.querySelectorAll('.mbx-folder'), function (li) {
@@ -284,11 +300,15 @@
 		state.contactsView = false;
 		state.inboxView = false;
 		state.spamView = false;
+		state.trashView = false;
 		if (folderId === 'inbox') {
 			state.inboxView = true;
 			state.folderId = null;
 		} else if (folderId === 'spam') {
 			state.spamView = true;
+			state.folderId = null;
+		} else if (folderId === 'trash') {
+			state.trashView = true;
 			state.folderId = null;
 		} else {
 			state.folderId = folderId;    // null = All Mail; a number = a tracked folder
@@ -328,6 +348,7 @@
 		state.folderId = null;            // reset to the folder-unfiltered view
 		state.inboxView = true;           // default to the Inbox (non-archived) view
 		state.spamView = false;
+		state.trashView = false;
 		state.mailboxLabel = label || 'All mail';
 		$('#mbx-list-title').textContent = state.mailboxLabel;
 		highlightMailbox();
@@ -400,6 +421,7 @@
 		state.folderId = null;
 		state.inboxView = false;
 		state.spamView = false;
+		state.trashView = false;
 		state.mailboxLabel = 'Drafts';
 		$('#mbx-list-title').textContent = 'Drafts';
 		var prior = $('#mbx-folder-rail');
@@ -432,7 +454,8 @@
 		if (state.filter === 'unread') p.set('unread_only', '1');
 		if (state.filter === 'starred') p.set('starred_only', '1');
 		if (state.search) { p.set('q', state.search); }
-		if (state.spamView) { p.set('spam', '1'); }
+		if (state.trashView) { p.set('trash', '1'); }
+		else if (state.spamView) { p.set('spam', '1'); }
 		else if (state.folderId != null) { p.set('folder_id', String(state.folderId)); }
 		else if (state.inboxView) { p.set('inbox', '1'); }
 		p.set('page', String(state.page));
@@ -473,7 +496,13 @@
 				listEl.insertBefore(row, listEl.firstChild);
 			}
 			if (!listEl.children.length) {
-				listEl.appendChild(emptyRow('No conversations.'));
+				listEl.appendChild(emptyRow(state.trashView ? 'Trash is empty.' : 'No conversations.'));
+			}
+			// The retention line sits above whatever the list holds, empty included —
+			// an empty Trash is exactly when someone wonders where it all went.
+			if (state.trashView) {
+				state.trashRetentionDays = data.trash_retention_days || 0;
+				listEl.insertBefore(trashNoteRow(), listEl.firstChild);
 			}
 			// Setup banner above everything, including the unlock prompt and the
 			// empty-list row — an unfinished mailbox is why the list is empty.
@@ -484,6 +513,25 @@
 		});
 	}
 
+	// The one line the Trash view says about itself: how long things stay, and — on
+	// a mailbox that pulls from a source server — that restore and delete-forever
+	// act here, not there.
+	function trashNoteRow() {
+		var li = el('li', 'mbx-trash-note');
+		var days = state.trashRetentionDays;
+		var text = days > 0
+			? 'Mail here is permanently deleted ' + days + ' days after you delete it.'
+			: 'Mail here is kept until you delete it permanently.';
+		var hit = state.mailboxes.filter(function (m) {
+			return String(m.alias_id) === String(state.aliasId);
+		})[0];
+		if (hit && hit.has_feed) {
+			text += ' Restoring brings a message back here and leaves the copy on the source server alone.';
+		}
+		li.textContent = text;
+		return li;
+	}
+
 	function sectionHeader(section) {
 		return el('li', 'mbx-section', SECTION_LABELS[section] || section);
 	}
@@ -491,17 +539,70 @@
 	function loadingRow() { var li = el('li', 'mbx-loading', 'Loading…'); return li; }
 	function emptyRow(text) { var li = el('li', 'mbx-loading', text); return li; }
 
+	// Mail providers where the person is the identity and the domain says nothing:
+	// a bare address here falls back to the local part, not to 'Gmail'.
+	var CONSUMER_MAIL_DOMAINS = {
+		'gmail': 1, 'googlemail': 1, 'outlook': 1, 'hotmail': 1, 'live': 1, 'msn': 1,
+		'yahoo': 1, 'ymail': 1, 'aol': 1, 'icloud': 1, 'me': 1, 'mac': 1,
+		'proton': 1, 'protonmail': 1, 'pm': 1, 'fastmail': 1, 'hey': 1, 'zoho': 1,
+		'gmx': 1, 'web': 1, 'mail': 1, 'yandex': 1, 'qq': 1, '163': 1, '126': 1
+	};
+
+	// Registry-ish second levels, so example.co.uk yields 'example' and not 'co'.
+	var REGISTRY_SECOND_LEVELS = {
+		'co': 1, 'com': 1, 'net': 1, 'org': 1, 'edu': 1, 'gov': 1, 'ac': 1, 'or': 1, 'ne': 1
+	};
+
+	// 'jeremy.tunnell' -> 'Jeremy Tunnell', 'e-trade' -> 'E-Trade'.
+	function titleCase(label) {
+		return label.replace(/[._+]+/g, ' ')
+			.replace(/\s+/g, ' ')
+			.trim()
+			.replace(/(^|[\s-])([a-z])/g, function (all, lead, ch) { return lead + ch.toUpperCase(); });
+	}
+
+	// The organization label out of a host: accounts.google.com -> 'google',
+	// mail.notifications.example.co.uk -> 'example'. Taking the LAST remaining
+	// label after the public suffix drops infrastructure subdomains for free.
+	function orgLabel(host) {
+		var parts = String(host).toLowerCase().split('.').filter(Boolean);
+		if (parts.length < 2) return parts[0] || '';
+		parts.pop();                                                  // the TLD
+		if (parts.length > 1 && REGISTRY_SECOND_LEVELS[parts[parts.length - 1]]) {
+			parts.pop();                                              // a ccTLD's second level
+		}
+		return parts[parts.length - 1] || '';
+	}
+
 	// Pull a human display name from a "Name <addr>" / bare-address sender string,
-	// hiding the email address. Falls back to the local-part when there's no name.
+	// hiding the email address (it stays on the row's hover title and on the open
+	// message). With no display name the sending ORGANIZATION is the identity —
+	// hello@fireworks.ai reads as 'Fireworks', not 'hello' — except at a consumer
+	// mail provider, where the local part is the only identity there is.
 	function senderName(raw) {
 		if (!raw) return '(unknown)';
 		raw = String(raw).trim();
 		var m = /^\s*"?([^"<]*?)"?\s*<[^>]+>\s*$/.exec(raw);
 		if (m && m[1].trim()) return m[1].trim();
-		// Bare address (or no display name): show the local-part, address hidden.
-		var at = raw.indexOf('@');
-		if (at > 0) return raw.slice(0, at);
-		return raw.replace(/[<>]/g, '').trim() || '(unknown)';
+
+		var addr = raw.replace(/^[^<]*</, '').replace(/>.*$/, '').trim() || raw;
+		var at = addr.lastIndexOf('@');
+		if (at < 1) return addr.replace(/[<>]/g, '').trim() || '(unknown)';
+
+		var local = addr.slice(0, at);
+		var org = orgLabel(addr.slice(at + 1));
+		if (!org || CONSUMER_MAIL_DOMAINS[org]) return titleCase(local) || local;
+		return titleCase(org);
+	}
+
+	// The open message shows name AND address — the address is what survived DKIM,
+	// and a display name is only ever as trustworthy as the domain behind it. The
+	// stored form quotes the name; render it unquoted.
+	function senderFull(raw) {
+		if (!raw) return '(unknown)';
+		raw = String(raw).trim();
+		var m = /^\s*"([^"]*)"\s*(<[^>]+>)\s*$/.exec(raw);
+		return m ? (m[1].trim() + ' ' + m[2]) : raw;
 	}
 
 	function threadRow(t) {
@@ -520,7 +621,9 @@
 
 		// Sender name (address hidden), fixed left column.
 		var from = el('span', 'mbx-thread-from', senderName(t.sender || t.senders));
-		from.title = t.senders || '';
+		// Hover keeps the address reachable without widening the column. Ingest
+		// strips quotes out of names, so the only quotes here are the stored form's.
+		from.title = String(t.senders || '').replace(/"/g, '');
 		li.appendChild(from);
 
 		// Subject + snippet share one clipped line: "Subject — preview text…".
@@ -562,7 +665,18 @@
 			li.appendChild(clip);
 		}
 
-		li.appendChild(el('span', 'mbx-thread-time', fmtTime(t.latest_time)));
+		if (state.trashView) {
+			// In Trash the date that matters is when this goes for good, not when it
+			// arrived. Computed server-side from the retention window.
+			var purge = el('span', 'mbx-thread-time mbx-thread-purge',
+				t.purge_time ? fmtDate(t.purge_time) : 'Kept');
+			purge.title = t.purge_time
+				? 'Permanently deleted on ' + fmtDate(t.purge_time)
+				: 'Kept indefinitely — trash retention is switched off';
+			li.appendChild(purge);
+		} else {
+			li.appendChild(el('span', 'mbx-thread-time', fmtTime(t.latest_time)));
+		}
 
 		li.addEventListener('click', function () {
 			if (state.draftsView) { openDraft(t.latest_id); }
@@ -589,7 +703,10 @@
 		pane.innerHTML = '<div class="mbx-loading">Loading…</div>';
 
 		var url = CFG.threadUrl + '?thread_key=' + encodeURIComponent(t.thread_key)
-			+ (state.aliasId != null ? '&alias_id=' + encodeURIComponent(state.aliasId) : '');
+			+ (state.aliasId != null ? '&alias_id=' + encodeURIComponent(state.aliasId) : '')
+			// A discarded conversation is invisible to the read scope, so the Trash
+			// view has to say which scope it is asking under.
+			+ (state.trashView ? '&trash=1' : '');
 		apiGet(url).then(function (data) {
 			// Track the thread's locked state so content actions within it (e.g. an
 			// attachment download) can prompt one-tap unlock first (§ 4.1).
@@ -611,8 +728,10 @@
 				banner.appendChild(btn);
 				pane.insertBefore(banner, pane.firstChild);
 			}
-			// Opening marks the whole thread read (shared per mailbox).
-			if (t.unread_count > 0) {
+			// Opening marks the whole thread read (shared per mailbox). Not in Trash:
+			// every other mutation pins the row as not-deleted, so this would be a
+			// round trip that changes nothing.
+			if (t.unread_count > 0 && !state.trashView) {
 				apiAction({ action: 'mark_read', threadKey: t.thread_key, aliasId: state.aliasId })
 					.then(function () {
 						if (rowEl) { rowEl.classList.remove('unread'); }
@@ -650,6 +769,29 @@
 		header.appendChild(el('h1', null, t.subject || '(no subject)'));
 
 		var actions = el('div', 'mbx-thread-actions');
+		if (state.trashView) {
+			// A discarded conversation has two things it can do: come back, or go for
+			// good. Read/star/archive/spam are all refused server-side while it sits
+			// here, so offering them would be offering nothing.
+			actions.appendChild(actionBtn('Restore', false, function () {
+				apiAction({ action: 'restore', threadKey: t.thread_key, aliasId: state.aliasId })
+					.then(function () { closeThread(); refreshMailboxes(); loadThreads(true); });
+			}));
+			actions.appendChild(actionBtn('Delete forever', true, function () {
+				JoineryModal.confirm(
+					'Permanently delete this conversation? This cannot be undone.',
+					function () {
+						apiAction({ action: 'purge', threadKey: t.thread_key, aliasId: state.aliasId })
+							.then(function () { closeThread(); refreshMailboxes(); loadThreads(true); });
+					},
+					{ confirmLabel: 'Delete forever' }
+				);
+			}));
+			header.appendChild(actions);
+			pane.appendChild(header);
+			renderThreadMessages(pane, t, messages);
+			return;
+		}
 		actions.appendChild(actionBtn('Mark unread', false, function () {
 			apiAction({ action: 'mark_unread', threadKey: t.thread_key, aliasId: state.aliasId })
 				.then(function () { refreshMailboxes(); loadThreads(true); });
@@ -660,9 +802,10 @@
 				.then(function () { t.any_starred = turnOn; refreshMailboxes(); loadThreads(true); });
 		}));
 		actions.appendChild(actionBtn('Delete', true, function () {
-			if (!confirm('Delete this conversation?')) return;
-			apiAction({ action: 'delete', threadKey: t.thread_key, aliasId: state.aliasId })
-				.then(function () { closeThread(); refreshMailboxes(); loadThreads(true); });
+			JoineryModal.confirm('Move this conversation to Trash?', function () {
+				apiAction({ action: 'delete', threadKey: t.thread_key, aliasId: state.aliasId })
+					.then(function () { closeThread(); refreshMailboxes(); loadThreads(true); });
+			}, { confirmLabel: 'Move to Trash' });
 		}));
 		// Archive ("Skip the Inbox") / Move to Inbox — symmetric with star/spam, which
 		// also have manual + filter-driven paths. Hidden in the Spam view (a spam
@@ -710,6 +853,15 @@
 		// so it opens inline beneath the chips like Gmail.
 		var compose = document.getElementById('mbx-compose');
 		if (compose) { compose.hidden = true; pane.appendChild(compose); }
+	}
+
+	// The message blocks alone — what the Trash view renders. No reply/forward
+	// chips: writing back from a conversation that is on its way out invites a
+	// reply whose source disappears on the retention clock. Restore it first.
+	function renderThreadMessages(pane, t, messages) {
+		messages.forEach(function (m, idx) {
+			pane.appendChild(messageBlock(m, idx === messages.length - 1));
+		});
 	}
 
 	function replyChip(label, onClick) {
@@ -877,7 +1029,7 @@
 
 		var head = el('div', 'mbx-message-head');
 		var left = el('div');
-		var from = el('div', 'mbx-message-from', m.sender || '(unknown)');
+		var from = el('div', 'mbx-message-from', senderFull(m.sender));
 		if (outbound) from.appendChild(el('span', 'mbx-sent-tag', 'Sent'));
 		left.appendChild(from);
 		left.appendChild(el('div', 'mbx-message-meta', 'to ' + (m.recipient || '')));
@@ -1385,7 +1537,7 @@
 		return (clone.innerText || '').replace(/ /g, ' ').trim() === '' && !clone.querySelector('img');
 	}
 
-	// ---- member-context panel (§ Phase 5) ----
+	// ---- contact panel (§ Phase 5) ----
 	var contextCache = {}; // message_id -> payload, per session
 
 	function fmtDate(iso) {
@@ -1394,9 +1546,10 @@
 		return isNaN(d.getTime()) ? iso : d.toLocaleDateString();
 	}
 
-	// Lazily fetch + render who the thread's counterparty is on the platform. Admin
-	// only (CFG.canSeeContext); the client sends a message id (never an address), so
-	// the endpoint can't be a membership oracle.
+	// Lazily fetch + render who the thread's counterparty is: their entry in the
+	// caller's contact store, plus (admin only, CFG.canSeeContext) their account here.
+	// The client sends a message id (never an address), so the endpoint can't be a
+	// membership oracle.
 	function loadSenderContext(messages) {
 		var panel = $('#mbx-context');
 		if (!panel) return;
@@ -1405,15 +1558,36 @@
 		if (!target || target.alias_id == null) { panel.hidden = true; return; }
 		var mid = target.id;
 		if (contextCache[mid]) { renderSenderContext(contextCache[mid]); return; }
+		fetchSenderContext(mid);
+	}
+
+	function fetchSenderContext(mid) {
+		var panel = $('#mbx-context');
 		joineryApi.post(CFG.senderContextUrl, { message_id: String(mid) }).then(function (data) {
 			data = data || {};
-			if (data.locked) { panel.hidden = true; return; }
+			if (data.locked) { if (panel) panel.hidden = true; return; }
 			contextCache[mid] = data;
 			renderSenderContext(data);
-		}).catch(function () { panel.hidden = true; });
+		}).catch(function () { if (panel) panel.hidden = true; });
 	}
 
 	function contextSection(t) { return el('div', 'mbx-context-section', t); }
+
+	// "Name <address>" when the message carried a display name — what the contact
+	// store stores, so a one-click add keeps the name it showed in the thread.
+	function contactToken(data) {
+		var name = (data.display_name || '').replace(/["<>]/g, '').trim();
+		return name ? ('"' + name + '" <' + data.address + '>') : data.address;
+	}
+
+	// Put an address in the search box and run it — the panel's "all mail" link.
+	function searchForAddress(address) {
+		var box = $('#mbx-search');
+		if (box) box.value = address;
+		state.search = address;
+		closeThread();
+		loadThreads(true);
+	}
 
 	function renderSenderContext(data) {
 		var panel = $('#mbx-context');
@@ -1428,22 +1602,81 @@
 		head.appendChild(hide);
 		panel.appendChild(head);
 
-		if (!data.is_member) {
-			panel.appendChild(el('div', 'mbx-context-notmember',
-				'Not a member' + (data.address ? ' — ' + data.address : '')));
-			panel.hidden = false;
-			return;
+		if (!data.address) { panel.hidden = false; return; }
+
+		var m = data.is_member ? data.member : null;
+		var contact = data.contact || null;
+		var card = el('div', 'mbx-context-card');
+
+		// Best name available: what the contact store holds, else the account name,
+		// else the display name off the message, else nothing but the address.
+		var name = (contact && contact.name) || (m && m.name) || data.display_name || '';
+		if (name && name !== data.address) card.appendChild(el('div', 'mbx-context-name', name));
+		card.appendChild(el('div', 'mbx-context-email',
+			data.address + (m && m.email_verified ? ' ✓' : '')));
+
+		if (contact && contact.locked) {
+			// A sealed contact store with no open window: whether they are a contact is
+			// unknown, so say that rather than claiming they are not one.
+			var lockRow = el('div', 'mbx-context-addrow');
+			lockRow.appendChild(el('span', 'mbx-context-note', 'Contacts locked'));
+			var unlock = el('button', 'mbx-context-add', 'Unlock');
+			unlock.type = 'button';
+			unlock.addEventListener('click', async function () {
+				if (await unlockVault()) fetchSenderContext(data.message_id);
+			});
+			lockRow.appendChild(unlock);
+			card.appendChild(lockRow);
+		} else if (contact && contact.saved) {
+			card.appendChild(el('div', 'mbx-context-badge', 'In Contacts'));
+		} else {
+			var row = el('div', 'mbx-context-addrow');
+			row.appendChild(el('span', 'mbx-context-note', 'Not in Contacts'));
+			var add = el('button', 'mbx-context-add', '+ Add');
+			add.type = 'button';
+			add.title = 'Add ' + data.address + ' to Contacts';
+			add.addEventListener('click', function () {
+				add.disabled = true;
+				joineryApi.post(CFG.contactsImportUrl, { address: contactToken(data) })
+					.then(function () {
+						delete contextCache[data.message_id];
+						loadContacts();                       // keep compose autocomplete current
+						fetchSenderContext(data.message_id);  // re-render from the server's truth
+					})
+					.catch(function () { add.disabled = false; add.textContent = 'Could not add'; });
+			});
+			row.appendChild(add);
+			card.appendChild(row);
 		}
 
-		var m = data.member;
-		var card = el('div', 'mbx-context-card');
-		card.appendChild(el('div', 'mbx-context-name', m.name));
-		card.appendChild(el('div', 'mbx-context-email', m.email + (m.email_verified ? ' ✓' : '')));
-		if (m.member_since) card.appendChild(el('div', 'mbx-context-since', 'Member since ' + fmtDate(m.member_since)));
-		var link = el('a', 'mbx-context-link', 'Open member →');
-		link.href = m.edit_url; link.target = '_blank'; link.rel = 'noopener';
-		card.appendChild(link);
+		if (contact && !contact.locked) {
+			// use_count counts harvests (a send, or opening a thread), not messages —
+			// so the wording is "seen", which is what the store actually knows.
+			var seen = 'Seen ' + contact.use_count + (contact.use_count === 1 ? ' time' : ' times');
+			if (contact.last_time) seen += ' · last ' + fmtDate(contact.last_time);
+			card.appendChild(el('div', 'mbx-context-since', seen));
+			if (contact.first_time) {
+				card.appendChild(el('div', 'mbx-context-since', 'First seen ' + fmtDate(contact.first_time)));
+			}
+		}
+
+		var all = el('a', 'mbx-context-link', 'All mail with this address →');
+		all.href = '#';
+		all.addEventListener('click', function (e) { e.preventDefault(); searchForAddress(data.address); });
+		card.appendChild(all);
 		panel.appendChild(card);
+
+		panel.appendChild(contextSection('Site account'));
+		if (!m) {
+			panel.appendChild(el('div', 'mbx-context-note', 'No account on this site'));
+		} else {
+			if (m.member_since) {
+				panel.appendChild(el('div', 'mbx-context-row', 'Joined ' + fmtDate(m.member_since)));
+			}
+			var link = el('a', 'mbx-context-link', 'Open account →');
+			link.href = m.edit_url; link.target = '_blank'; link.rel = 'noopener';
+			panel.appendChild(link);
+		}
 
 		if (data.orders && data.orders.length) {
 			panel.appendChild(contextSection('Recent orders'));
@@ -1550,6 +1783,7 @@
 		closeThread();
 		state.contactsView = true;
 		state.draftsView = false;
+		state.trashView = false;
 		state.mailboxLabel = 'Contacts';
 		$('#mbx-list-title').textContent = 'Contacts';
 		var prior = $('#mbx-folder-rail');

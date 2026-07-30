@@ -51,7 +51,7 @@
  * cid-rewritten into the stored/sent HTML). The stored iem_body_plain is derived from
  * the final sanitized HTML.
  *
- * @version 1.8
+ * @version 1.9
  */
 
 require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
@@ -63,6 +63,7 @@ require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php')
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxViewer.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxHtmlSanitizer.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxIndex.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
@@ -297,7 +298,7 @@ class MailboxSender {
 		// Queue the id on each grantee's search-index bookkeeping for an explicit
 		// refold (Fix 6). Best-effort — never fails the send.
 		if ($draft !== null) {
-			$this->enqueueRefold(intval($alias->key), intval($stored['id']));
+			MailboxIndex::enqueueRefold(intval($alias->key), intval($stored['id']));
 		}
 
 		// Harvest every recipient into the contact store (§ Phase 4) — best-effort,
@@ -756,42 +757,6 @@ class MailboxSender {
 	private function isSealedRow(InboundMessageAttachment $att): bool {
 		$v = $att->get('ima_is_sealed');
 		return ($v === true || $v === 't' || $v === 'true' || $v === '1' || $v === 1);
-	}
-
-	/**
-	 * Queue a morphed-draft Sent row id for an explicit refold on each grantee's
-	 * sealed search index (Fix 6). The draft folded OUT of the index (drafts are
-	 * excluded), then morphed in place into the Sent row keeping its id ≤ the
-	 * high-water mark, so a plain `id > since` fold never revisits it. Only a user
-	 * with an EXISTING index row needs the queue — one with none rebuilds from 0 on
-	 * first search. Best-effort; never throws into the send.
-	 */
-	private function enqueueRefold(int $alias_id, int $message_id): void {
-		try {
-			require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
-			require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_mailbox_search_index_class.php'));
-			foreach (InboundEmailMailboxGrant::user_ids_for_alias($alias_id) as $uid) {
-				$uid = intval($uid);
-				$multi = new MultiInboundMailboxSearchIndex(array('user_id' => $uid));
-				$multi->load();
-				if (!$multi->count()) {
-					continue; // no index yet — a first search rebuilds and folds this id
-				}
-				$bk = $multi->get(0);
-				$ids = json_decode((string)$bk->get('imi_refold_ids'), true);
-				if (!is_array($ids)) {
-					$ids = array();
-				}
-				$ids = array_map('intval', $ids);
-				if (!in_array($message_id, $ids, true)) {
-					$ids[] = $message_id;
-				}
-				$bk->set('imi_refold_ids', json_encode(array_values($ids)));
-				$bk->save();
-			}
-		} catch (\Throwable $e) {
-			error_log('MailboxSender: refold enqueue failed for message ' . $message_id . ': ' . $e->getMessage());
-		}
 	}
 
 	/**

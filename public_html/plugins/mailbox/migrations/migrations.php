@@ -543,6 +543,28 @@ return [
 	],
 
 	[
+		// The sealed search index covers every stored message, trashed ones
+		// included (specs/mailbox_trash_folder.md § Change 2a). An index built
+		// before that skipped trashed rows while its high-water mark advanced past
+		// them, so those rows would never be revisited and restoring one could
+		// never make it searchable again. Drop each persisted index and reset its
+		// mark, so the next unlock rebuilds with full coverage — the index is a
+		// disposable cache, entirely reconstructible from the message rows.
+		'id' => 'imi_001_reset_index_for_full_coverage',
+		'version' => '1.67.0',
+		'up' => function($dbconnector) {
+			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxIndex.php'));
+			$index = new MailboxIndex();
+			$rows = $dbconnector->get_db_link()
+				->query('SELECT imi_usr_user_id FROM imi_inbound_mailbox_search_index')
+				->fetchAll(PDO::FETCH_COLUMN);
+			foreach ($rows as $uid) {
+				$index->purgePersisted(intval($uid));
+			}
+		},
+	],
+
+	[
 		// Restore the full-text GIN index. iem_012 dropped it when the sealed
 		// MailboxIndex arrived, but only a SEALED mailbox searches through that
 		// index — every unsealed scope still runs the tsvector expression in

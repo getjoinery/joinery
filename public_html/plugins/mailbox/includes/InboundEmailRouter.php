@@ -77,7 +77,12 @@
  * forwardStoredMessage() relays a copy for a filter's "Forward to" action, reusing the
  * alias-forward envelope rebuild + relay.
  *
- * @version 1.25
+ * Sender display names: iem_sender stores the From display name beside the address
+ * ("Name" <addr>) so the reader can show who mail is from rather than a local part.
+ * senderDisplayString() owns the decode-and-sanitize; the IMAP and archive paths get
+ * the same shape from Horde's envelope.
+ *
+ * @version 1.26
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -412,7 +417,7 @@ class InboundEmailRouter {
 
 		$subject_raw = $parsed['subject'] ?? '';
 		$subject = substr($this->decodeMimeHeader($subject_raw), 0, 4000);
-		$sender = substr($parsed['from_email'] ?? ($parsed['from'] ?? ''), 0, 500);
+		$sender = $this->senderDisplayString($parsed);
 
 		// Conversation grouping for the Mailbox Reader. Computed in-memory from
 		// the already-parsed In-Reply-To / References headers — the raw headers
@@ -623,7 +628,7 @@ class InboundEmailRouter {
 		$parsed = $this->parseEmail($raw);
 		$bodies = $this->extractBodies($raw, $parsed);
 		$subject = substr($this->decodeMimeHeader($parsed['subject'] ?? ''), 0, 4000);
-		$sender  = substr($parsed['from_email'] ?? ($parsed['from'] ?? ''), 0, 500);
+		$sender  = $this->senderDisplayString($parsed);
 
 		$owner_id = intval($msg->get('iem_sealed_owner_user_id'));
 		$vault = ($owner_id > 0) ? $this->loadOwnerVault($owner_id) : null;
@@ -1500,10 +1505,19 @@ class InboundEmailRouter {
 		$to = is_array($headers['to'] ?? '') ? ($headers['to'][0] ?? '') : ($headers['to'] ?? '');
 		$subject = is_array($headers['subject'] ?? '') ? ($headers['subject'][0] ?? '') : ($headers['subject'] ?? '');
 
-		// Extract plain email from From header (may contain "Name <email>")
+		// Extract plain email from From header (may contain "Name <email>").
+		// The addr-spec is the LAST angle-addr, not the first: a display name is
+		// allowed to be a quoted string, so a sender can put angle brackets inside
+		// it — From: "Support <billing@paypal.com>" <thief@evil.example> is a valid
+		// header whose real address is thief@evil.example. Taking the first match
+		// hands that sender the address of their choice for iem_sender, the reply
+		// address, the contact lookup, filter matching and the SRS envelope.
 		$from_email = $from;
-		if (preg_match('/<([^>]+)>/', $from, $m)) {
-			$from_email = $m[1];
+		if (preg_match_all('/<([^<>]*)>/', $from, $mm) && count($mm[1])) {
+			$last = trim((string)end($mm[1]));
+			if ($last !== '') {
+				$from_email = $last;
+			}
 		}
 
 		return array(
@@ -2529,6 +2543,56 @@ class InboundEmailRouter {
 		return $original_sender_name
 			? $original_sender_name . ' via ' . $site
 			: 'Forwarded via ' . $site;
+	}
+
+	/**
+	 * Build the sender string stored in iem_sender: the From display name beside
+	 * the address as "Name" <addr>, or the bare address when the header carries no
+	 * usable name.
+	 *
+	 * The reader shows the name and keeps the address on hover, so keeping only
+	 * the address left recipients reading local parts — "no-reply", "meet",
+	 * "product". Every consumer of iem_sender already accepts this shape:
+	 * MailboxContacts::parseAddress(), the reader's senderName(), the reply
+	 * builder's address extraction, and the filter engine's substring match on a
+	 * From criterion (a term that matched the address still matches).
+	 *
+	 * The name is attacker-chosen text arriving over SMTP, so it is treated as
+	 * hostile: encoded words are decoded for display, then the characters that
+	 * would let it forge a second address or fold into another header — quotes,
+	 * angle brackets, CR/LF, tabs — are stripped, and the result is quoted. The
+	 * name is what gets truncated to fit the column, never the address.
+	 */
+	private function senderDisplayString(array $parsed): string {
+		$address = trim((string)($parsed['from_email'] ?? ''));
+		$from    = trim((string)($parsed['from'] ?? ''));
+		if ($address === '') {
+			return substr($from, 0, 500);
+		}
+		$address = substr($address, 0, 500);
+
+		$name = $this->decodeMimeHeader($this->extractName($from));
+		$name = preg_replace('/[\r\n\t"<>]+/', ' ', (string)$name);
+		$name = trim(preg_replace('/\s+/', ' ', $name));
+		// A name equal to the address (common on bulk senders) adds nothing.
+		if ($name === '' || strcasecmp($name, $address) === 0) {
+			return $address;
+		}
+
+		$budget = 500 - strlen($address) - 5; // ' <' . addr . '>' plus the two quotes
+		if ($budget < 4) {
+			return $address;
+		}
+		if (strlen($name) > $budget) {
+			// Byte-limited but character-safe, so a truncated UTF-8 name stays valid.
+			$name = rtrim(function_exists('mb_strcut')
+				? mb_strcut($name, 0, $budget, 'UTF-8')
+				: substr($name, 0, $budget));
+			if ($name === '') {
+				return $address;
+			}
+		}
+		return '"' . $name . '" <' . $address . '>';
 	}
 
 	/**
