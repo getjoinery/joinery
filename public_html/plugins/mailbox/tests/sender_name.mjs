@@ -12,10 +12,13 @@
  *     hello@fireworks.ai reads as Fireworks, which is the whole point
  *   - except at a consumer mail provider, where the local part is the only
  *     identity there is, so Gmail must never become the label
+ *   - and that exception covers only what could be somebody's mailbox: a role
+ *     address (no-reply@, support@) or one below the provider's own domain
+ *     (notify.proton.me) is the company writing, so the org is the label
  *   - the open message keeps the address beside the name: a display name is
  *     attacker-chosen, and the address is what survived DKIM
  *
- * @version 1.0
+ * @version 1.1
  */
 
 import { readFileSync } from 'node:fs';
@@ -38,7 +41,8 @@ if (from < 0 || to < 0 || to <= from) {
 
 const block = source.slice(from, to);
 const helpers = new Function(block
-	+ '; return { senderName: senderName, senderFull: senderFull, orgLabel: orgLabel };')();
+	+ '; return { senderName: senderName, senderFull: senderFull, orgLabel: orgLabel,'
+	+ ' isRoleLocalPart: isRoleLocalPart, hasSubdomain: hasSubdomain };')();
 
 let passed = 0;
 let failed = 0;
@@ -85,6 +89,25 @@ eq('proton address', name('someone@proton.me'), 'Someone');
 ok('no consumer provider ever becomes the label',
 	['gmail', 'Gmail', 'Yahoo', 'Icloud', 'Proton', 'Outlook']
 		.indexOf(name('x.y@yahoo.com')) === -1);
+
+console.log('== a role mailbox is the company, not a person ==');
+// The consumer-provider exception only covers what could be somebody's mailbox.
+eq('no-reply below a provider domain', name('no-reply@notify.proton.me'), 'Proton');
+eq('role address at a provider domain', name('support@proton.me'), 'Proton');
+eq('no-reply marker inside a longer local part',
+	name('AmericanExpress-no-reply@alerts.americanexpress.com'), 'Americanexpress');
+eq('a person at the provider domain is still the person', name('someone@proton.me'), 'Someone');
+eq('a person keeps their name even when it reads like a word', name('info.smith@gmail.com'), 'Info Smith');
+ok('noreply never becomes a label',
+	['No-Reply', 'Noreply', 'No Reply'].indexOf(name('noreply@icloud.com')) === -1);
+eq('role rule is moot off a provider (the org already wins)',
+	name('donotreply@mail.schwab.com'), 'Schwab');
+
+console.log('== the subdomain rule ==');
+ok('a provider subdomain is infrastructure', helpers.hasSubdomain('notify.proton.me'));
+ok('the provider domain itself is not', !helpers.hasSubdomain('proton.me'));
+ok('a ccTLD registrable domain is not', !helpers.hasSubdomain('example.co.uk'));
+ok('below a ccTLD registrable domain is', helpers.hasSubdomain('mail.example.co.uk'));
 
 console.log('== degenerate input ==');
 eq('empty', name(''), '(unknown)');

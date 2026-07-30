@@ -388,7 +388,7 @@
         },
         {
             "slug": "core-profile",
-            "title": "My Profile",
+            "title": "Dashboard",
             "url": "/profile",
             "order": 50,
             "permission": 0,
@@ -451,7 +451,7 @@
             "title": "Admin Utilities",
             "url": "/admin/admin_utilities",
             "order": 130,
-            "permission": 6,
+            "permission": 10,
             "icon": "tools"
         },
         {
@@ -461,6 +461,64 @@
             "order": 200,
             "permission": 0,
             "icon": "sign-out"
+        }
+    ],
+    "settingsMenu": [
+        {
+            "slug": "core-settings-account",
+            "title": "Account",
+            "url": "/profile/account_edit",
+            "order": 10,
+            "permission": 0,
+            "icon": "user"
+        },
+        {
+            "slug": "core-settings-password",
+            "title": "Password",
+            "url": "/profile/password_edit",
+            "order": 20,
+            "permission": 0,
+            "icon": "key"
+        },
+        {
+            "slug": "core-settings-address",
+            "title": "Address",
+            "url": "/profile/address_edit",
+            "order": 30,
+            "permission": 0,
+            "icon": "home"
+        },
+        {
+            "slug": "core-settings-phone",
+            "title": "Phone Numbers",
+            "url": "/profile/phone_numbers_edit",
+            "order": 40,
+            "permission": 0,
+            "icon": "phone"
+        },
+        {
+            "slug": "core-settings-contact",
+            "title": "Contact Preferences",
+            "url": "/profile/contact_preferences",
+            "order": 50,
+            "permission": 0,
+            "icon": "envelope"
+        },
+        {
+            "slug": "core-settings-notify",
+            "title": "Notifications",
+            "url": "/profile/notification_preferences",
+            "order": 60,
+            "permission": 0,
+            "icon": "bell"
+        },
+        {
+            "slug": "core-settings-security",
+            "title": "Security",
+            "url": "/profile/security",
+            "order": 70,
+            "permission": 0,
+            "icon": "shield"
         }
     ]
 }

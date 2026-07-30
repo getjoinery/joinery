@@ -183,10 +183,16 @@ class PluginHelper extends ComponentBase {
             }
         }
 
-        // Validate profile menu items if present
-        $profileItems = $this->getProfileMenuItems();
-        foreach ($profileItems as $index => $item) {
-            $prefix = "profileMenu[{$index}]";
+        // Validate profile and settings menu items if present. Both are flat
+        // lists; profile/settings entries may name a 'parent' slug (one level)
+        // but never nest 'items'.
+        $flat_menus = [
+            'profileMenu'  => $this->getProfileMenuItems(),
+            'settingsMenu' => $this->getSettingsMenuItems(),
+        ];
+        foreach ($flat_menus as $menu_kind => $flat_items) {
+        foreach ($flat_items as $index => $item) {
+            $prefix = "{$menu_kind}[{$index}]";
 
             if (empty($item['slug']) || !is_string($item['slug'])) {
                 $errors[] = "{$prefix}: missing required field 'slug'";
@@ -226,11 +232,15 @@ class PluginHelper extends ComponentBase {
                 $errors[] = "{$prefix}: visibility must be 'in', 'out', or 'both'";
             }
 
-            if (isset($item['parent']) || isset($item['items'])) {
-                $errors[] = "{$prefix}: profile menu items must be flat — 'parent' and 'items' are not supported";
+            if (isset($item['items'])) {
+                $errors[] = "{$prefix}: {$menu_kind} items must be flat — nested 'items' are not supported";
+            }
+            if (isset($item['parent']) && (!is_string($item['parent']) || $item['parent'] === '')) {
+                $errors[] = "{$prefix}: 'parent' must be a non-empty slug string";
             }
         }
-        
+        }
+
         // Validate API endpoints if present
         $endpoints = $this->getApiEndpoints();
         foreach ($endpoints as $index => $endpoint) {
@@ -331,6 +341,15 @@ class PluginHelper extends ComponentBase {
      */
     public function getProfileMenuItems() {
         return $this->manifestData['profileMenu'] ?? [];
+    }
+
+    /**
+     * Get plugin member-settings rail items declared in plugin.json.
+     * These render in the /profile/settings hub's left nav.
+     * @return array The settingsMenu array from the manifest
+     */
+    public function getSettingsMenuItems() {
+        return $this->manifestData['settingsMenu'] ?? [];
     }
 
     /**

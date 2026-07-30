@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.29
+ * No framework. @version 2.31
  *
  * Two-pane layout: the main pane swaps between the conversation list and an
  * opened conversation (toggled by the `reading` class on #mbx-reader); a back
@@ -171,7 +171,7 @@
 		list.innerHTML = '';
 
 		state.mailboxes.forEach(function (m) {
-			list.appendChild(mailboxItem(m.address, m.alias_id, m.unread, m.folders, m.own, m.security_level));
+			list.appendChild(mailboxItem(m.address, m.alias_id, m.unread, m.folders, m.own));
 		});
 		if (state.allAccess && data.unmatched && data.unmatched.total > 0) {
 			var li = mailboxItem('Unmatched', 'unmatched', data.unmatched.unread, []);
@@ -200,6 +200,9 @@
 		// Highlight current selection + render the active mailbox's folder rail.
 		highlightMailbox();
 		renderFolderRail();
+		// The switcher data is what says how a mailbox is protected, so the chip
+		// beside the list title can only be right once this has run.
+		updateLevelChip();
 
 		// New message is only ever composable when the viewer has at least one
 		// accessible mailbox to send as (canCompose, mirrored client-side).
@@ -207,20 +210,40 @@
 		if (newBtn) newBtn.hidden = !state.mailboxes.length;
 	}
 
-	function mailboxItem(label, aliasId, unread, folders, own, securityLevel) {
+	// ---- list title + protection chip ----
+	// The protection level belongs beside the name of the mailbox being read, not
+	// in the rail: there it competed with the address for the same narrow line and
+	// won, hiding the very thing the row exists to show.
+	function setListTitle(text) {
+		var title = $('#mbx-list-title');
+		if (title) title.textContent = text;
+		updateLevelChip();
+	}
+
+	function updateLevelChip() {
+		var chip = $('#mbx-level-chip');
+		if (!chip) return;
+		var level = '';
+		// Only a single open mailbox has a level to state. The aggregate views
+		// (Drafts, Contacts, all-mail) span mailboxes that may differ.
+		if (!state.draftsView && !state.contactsView && state.aliasId != null) {
+			state.mailboxes.forEach(function (m) {
+				if (String(m.alias_id) !== String(state.aliasId)) return;
+				if (m.security_level && m.security_level !== 'standard') { level = m.security_level; }
+			});
+		}
+		chip.hidden = !level;
+		chip.textContent = level ? (level.charAt(0).toUpperCase() + level.slice(1)) : '';
+		chip.className = 'mbx-level-badge' + (level ? ' mbx-level-' + level : '');
+		chip.title = level ? 'Mail protection level (set on the domain)' : '';
+	}
+
+	function mailboxItem(label, aliasId, unread, folders, own) {
 		var li = el('li', 'mbx-mailbox');
 		li.dataset.alias = (aliasId == null ? '' : String(aliasId));
 		li._folders = folders || [];
 		var addr = el('span', 'mbx-mailbox-addr', label);
 		li.appendChild(addr);
-		// Protection-level badge (specs/mailbox_protection_ceremony.md): a
-		// protected mailbox shows its level wherever the mailbox shows.
-		if (securityLevel && securityLevel !== 'standard') {
-			var lvl = el('span', 'mbx-level-badge mbx-level-' + securityLevel,
-				securityLevel.charAt(0).toUpperCase() + securityLevel.slice(1));
-			lvl.title = 'Mail protection level (set on the domain)';
-			li.appendChild(lvl);
-		}
 		// Signature gear (§ Phase 3) — only on mailboxes the viewer is a member of
 		// (a signature lives on a grant), never the superadmin's all-access extras.
 		if (own && aliasId != null && aliasId !== 'unmatched' && !isNaN(Number(aliasId))) {
@@ -315,8 +338,8 @@
 		}
 		// Inbox is the mailbox's default, so its title is just the mailbox; the other
 		// views append their name.
-		$('#mbx-list-title').textContent = (state.mailboxLabel || 'All mail')
-			+ (state.inboxView ? '' : ' / ' + (name || 'All Mail'));
+		setListTitle((state.mailboxLabel || 'All mail')
+			+ (state.inboxView ? '' : ' / ' + (name || 'All Mail')));
 		highlightFolder();
 		loadThreads(true);
 	}
@@ -350,7 +373,7 @@
 		state.spamView = false;
 		state.trashView = false;
 		state.mailboxLabel = label || 'All mail';
-		$('#mbx-list-title').textContent = state.mailboxLabel;
+		setListTitle(state.mailboxLabel);
 		highlightMailbox();
 		highlightDrafts();
 		renderFolderRail();
@@ -423,7 +446,7 @@
 		state.spamView = false;
 		state.trashView = false;
 		state.mailboxLabel = 'Drafts';
-		$('#mbx-list-title').textContent = 'Drafts';
+		setListTitle('Drafts');
 		var prior = $('#mbx-folder-rail');
 		if (prior) prior.parentNode.removeChild(prior);
 		highlightMailbox();
@@ -553,6 +576,37 @@
 		'co': 1, 'com': 1, 'net': 1, 'org': 1, 'edu': 1, 'gov': 1, 'ac': 1, 'or': 1, 'ne': 1
 	};
 
+	// Mailboxes no person owns. A role address is infrastructure, so its local part is
+	// never the identity — the sending organization is, even at a consumer provider:
+	// no-reply@notify.proton.me is Proton writing to you, not somebody named No-Reply.
+	var ROLE_LOCAL_PARTS = {
+		'noreply': 1, 'donotreply': 1, 'notify': 1, 'notification': 1, 'notifications': 1,
+		'alert': 1, 'alerts': 1, 'bounce': 1, 'bounces': 1, 'postmaster': 1,
+		'mailerdaemon': 1, 'abuse': 1, 'webmaster': 1, 'root': 1, 'support': 1,
+		'help': 1, 'info': 1, 'billing': 1, 'sales': 1, 'admin': 1, 'contact': 1
+	};
+
+	// A role mailbox by name: exact match on the punctuation-stripped local part, or a
+	// no-reply marker anywhere in it (AmericanExpress-no-reply, DOTServicesnoreply).
+	function isRoleLocalPart(local) {
+		var key = String(local).toLowerCase().replace(/[^a-z0-9]+/g, '');
+		if (ROLE_LOCAL_PARTS[key]) return true;
+		return key.indexOf('noreply') !== -1 || key.indexOf('donotreply') !== -1;
+	}
+
+	// True when the address sits BELOW a domain rather than at it (notify.proton.me vs
+	// proton.me). A personal mailbox is never at a subdomain of its provider, so this
+	// is what separates a provider's own outbound infrastructure from its users.
+	function hasSubdomain(host) {
+		var parts = String(host).toLowerCase().split('.').filter(Boolean);
+		if (parts.length < 2) return false;
+		parts.pop();
+		if (parts.length > 1 && REGISTRY_SECOND_LEVELS[parts[parts.length - 1]]) {
+			parts.pop();
+		}
+		return parts.length > 1;
+	}
+
 	// 'jeremy.tunnell' -> 'Jeremy Tunnell', 'e-trade' -> 'E-Trade'.
 	function titleCase(label) {
 		return label.replace(/[._+]+/g, ' ')
@@ -578,7 +632,9 @@
 	// hiding the email address (it stays on the row's hover title and on the open
 	// message). With no display name the sending ORGANIZATION is the identity —
 	// hello@fireworks.ai reads as 'Fireworks', not 'hello' — except at a consumer
-	// mail provider, where the local part is the only identity there is.
+	// mail provider, where the local part is the only identity there is. That
+	// exception holds only for what could actually be a person's mailbox: a role
+	// address, or one below the provider's own domain, is the company writing.
 	function senderName(raw) {
 		if (!raw) return '(unknown)';
 		raw = String(raw).trim();
@@ -590,9 +646,11 @@
 		if (at < 1) return addr.replace(/[<>]/g, '').trim() || '(unknown)';
 
 		var local = addr.slice(0, at);
-		var org = orgLabel(addr.slice(at + 1));
-		if (!org || CONSUMER_MAIL_DOMAINS[org]) return titleCase(local) || local;
-		return titleCase(org);
+		var host = addr.slice(at + 1);
+		var org = orgLabel(host);
+		if (!org) return titleCase(local) || local;
+		var personal = CONSUMER_MAIL_DOMAINS[org] && !hasSubdomain(host) && !isRoleLocalPart(local);
+		return personal ? (titleCase(local) || local) : titleCase(org);
 	}
 
 	// The open message shows name AND address — the address is what survived DKIM,
@@ -1637,6 +1695,7 @@
 			add.title = 'Add ' + data.address + ' to Contacts';
 			add.addEventListener('click', function () {
 				add.disabled = true;
+				add.textContent = 'Adding…';   // the round trip can take a moment; say so
 				joineryApi.post(CFG.contactsImportUrl, { address: contactToken(data) })
 					.then(function () {
 						delete contextCache[data.message_id];
@@ -1666,16 +1725,20 @@
 		card.appendChild(all);
 		panel.appendChild(card);
 
-		panel.appendChild(contextSection('Site account'));
-		if (!m) {
-			panel.appendChild(el('div', 'mbx-context-note', 'No account on this site'));
-		} else {
-			if (m.member_since) {
-				panel.appendChild(el('div', 'mbx-context-row', 'Joined ' + fmtDate(m.member_since)));
+		// Site account: admins only. For everyone else the server never looked, so the
+		// section is absent rather than reporting an absence it can't vouch for.
+		if (data.account_visible) {
+			panel.appendChild(contextSection('Site account'));
+			if (!m) {
+				panel.appendChild(el('div', 'mbx-context-note', 'No account on this site'));
+			} else {
+				if (m.member_since) {
+					panel.appendChild(el('div', 'mbx-context-row', 'Joined ' + fmtDate(m.member_since)));
+				}
+				var link = el('a', 'mbx-context-link', 'Open account →');
+				link.href = m.edit_url; link.target = '_blank'; link.rel = 'noopener';
+				panel.appendChild(link);
 			}
-			var link = el('a', 'mbx-context-link', 'Open account →');
-			link.href = m.edit_url; link.target = '_blank'; link.rel = 'noopener';
-			panel.appendChild(link);
 		}
 
 		if (data.orders && data.orders.length) {
@@ -1785,7 +1848,7 @@
 		state.draftsView = false;
 		state.trashView = false;
 		state.mailboxLabel = 'Contacts';
-		$('#mbx-list-title').textContent = 'Contacts';
+		setListTitle('Contacts');
 		var prior = $('#mbx-folder-rail');
 		if (prior) prior.parentNode.removeChild(prior);
 		highlightMailbox();

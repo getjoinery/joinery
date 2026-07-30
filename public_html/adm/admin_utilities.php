@@ -28,8 +28,8 @@ echo '<h3>General Utilities</h3>';
 echo '<h4>Update database script</h4>';
 echo '<a href="/utils/update_database">Update database</a><br>';
 echo '<a href="/utils/update_database?verbose=1">Update database (verbose)</a><br>';
-echo '<a href="/utils/update_database">Upgrade database (fix mismatched column types)</a><br>';
-echo '<a href="/utils/update_database">Cleanup database (delete unused fields)</a><br>';
+echo '<a href="/utils/update_database?upgrade=1">Upgrade database (fix mismatched column types)</a><br>';
+echo '<a href="/utils/update_database?cleanup=1">Cleanup database (delete unused fields)</a><br>';
 
 $page->end_box();
 

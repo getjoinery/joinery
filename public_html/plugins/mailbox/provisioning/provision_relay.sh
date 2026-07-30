@@ -10,6 +10,9 @@
 # recipient's public key at acceptance, and spools ciphertext; each tenant's
 # Joinery box dials out over WireGuard and pulls its own sealed blobs.
 #
+# Version: 2.1 - Only Spamhaus (zen + dbl) is rejected on at RCPT time; SpamCop
+#                and Barracuda list shared ESP outbound IPs on brief triggers, so
+#                rejecting on them permanently bounced ordinary Mailgun/SendGrid mail
 # Version: 2.0 - TENANCY-NATIVE (specs/mailbox_relay_shared_fleet.md): the relay
 #                stack is multi-tenant at every layer and a self-hosted relay is
 #                a fleet of one. Provisioning creates the shard skeleton; each
@@ -560,7 +563,15 @@ postconf -e "transport_maps = hash:${MAP_TRANSPORT}"
 # validation against the merged access map (preserving reject_unmatched: listed
 # aliases OK, unmatched under a reject domain REJECTed, no backscatter). The
 # permit_mynetworks lead is present only in smarthost mode (see above).
-postconf -e "smtpd_recipient_restrictions = ${RCPT_LEAD}reject_unauth_destination, reject_rbl_client zen.spamhaus.org, reject_rbl_client bl.spamcop.net, reject_rbl_client b.barracudacentral.org, reject_rhsbl_helo dbl.spamhaus.org, reject_rhsbl_sender dbl.spamhaus.org, check_recipient_access regexp:${MAP_SRS}, check_recipient_access hash:${MAP_RECIPIENTS}, permit"
+#
+# Only Spamhaus rejects. Zen and DBL are built to be rejected on: low false
+# positive, and Zen deliberately excludes the shared outbound ranges every ESP
+# sends from. SpamCop and Barracuda list those shared IPs on brief automated
+# triggers and de-list hours later, so rejecting on them bounces ordinary mail
+# from Mailgun, SendGrid or Google at random — permanently, since a 5xx stops
+# the sender retrying. SpamCop says as much itself: use it to score, not to
+# refuse. Content scoring is where a weaker signal belongs.
+postconf -e "smtpd_recipient_restrictions = ${RCPT_LEAD}reject_unauth_destination, reject_rbl_client zen.spamhaus.org, reject_rhsbl_helo dbl.spamhaus.org, reject_rhsbl_sender dbl.spamhaus.org, check_recipient_access regexp:${MAP_SRS}, check_recipient_access hash:${MAP_RECIPIENTS}, permit"
 echo "main.cf: relay_domains, transport, recipient validation, RBL, anvil limits set"
 
 # --- 6. opendkim + opendmarc (verify-mode, verbatim from install_email.sh) ----

@@ -365,14 +365,6 @@ function security_logic(array $input): LogicResult{
 	$app_sessions->load();
 	$page_vars['app_sessions'] = $app_sessions;
 
-	$page_vars['tab_menus'] = array(
-		'Edit Account' => '/profile/account_edit',
-		'Change Password' => '/profile/password_edit',
-		'Edit Address' => '/profile/address_edit',
-		'Edit Phone Number' => '/profile/phone_numbers_edit',
-		'Change Contact Preferences' => '/profile/contact_preferences',
-		'Security' => '/profile/security',
-	);
 
 	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
 	$session->clear_clearable_messages();

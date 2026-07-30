@@ -1091,3 +1091,26 @@
 	$migration['migration_file'] = 'purge_dead_integration_settings.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// Menu redesign: core seeding is insert-only, so realign existing core
+	// rows — the /profile entry is titled Dashboard, and the Admin Utilities
+	// row's permission matches the page's permission-10 check.
+	$migration = array();
+	$migration['database_version'] = '157';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'menu_redesign_row_updates.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
+	// Menu rows on installs seeded under the old convention store -1 for
+	// no parent; the current convention is NULL/0 (see the model's
+	// has_no_parent_menu_id filter), and nav code treats any non-empty
+	// parent as a child row — so -1 rows vanish from the member nav.
+	// Normalize the sentinel. Row ids start at 1, so < 1 only matches
+	// sentinels. Idempotent.
+	$migration = array();
+	$migration['database_version'] = '158';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = NULL;
+	$migration['migration_sql'] = 'UPDATE amu_admin_menus SET amu_parent_menu_id = NULL WHERE amu_parent_menu_id < 1;';
+	$migrations[] = $migration;

@@ -1,6 +1,6 @@
 {
     "name": "Store",
-    "version": "1.1.9",
+    "version": "1.2.0",
     "description": "Sell products: cart, checkout, orders, coupons, Stripe/PayPal, Apple/Google mobile billing, recurring subscriptions, billing portal, and product requirements",
     "author": "Joinery",
     "receives_upgrades": true,
@@ -87,25 +87,32 @@
             ]
         }
     ],
-    "profileMenu": [
+    "settingsMenu": [
         {
-            "slug": "store-orders",
-            "title": "Orders",
-            "url": "/profile/orders",
-            "order": 60,
+            "slug": "store-billing",
+            "title": "Billing",
+            "url": "/profile/billing",
+            "order": 80,
             "permission": 0,
-            "icon": "shopping-bag",
-            "nativeScreen": "orders",
+            "icon": "credit-card",
             "settingActivate": "products_active"
         },
         {
-            "slug": "store-subscriptions",
+            "slug": "store-settings-orders",
+            "title": "Orders",
+            "url": "/profile/orders",
+            "order": 82,
+            "permission": 0,
+            "icon": "shopping-bag",
+            "settingActivate": "products_active"
+        },
+        {
+            "slug": "store-settings-subs",
             "title": "Subscriptions",
             "url": "/profile/subscriptions",
-            "order": 70,
+            "order": 84,
             "permission": 0,
             "icon": "refresh",
-            "nativeScreen": "subscriptions",
             "settingActivate": "subscriptions_active"
         }
     ],

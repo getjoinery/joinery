@@ -201,16 +201,118 @@ public struct MailThread: Equatable, Sendable {
 // MARK: - Address + date display helpers
 
 public enum MailDisplay {
-    /// "Jane Doe <jane@x.com>" → "Jane Doe"; bare addresses → local part.
+    // The sender-label rules below mirror the web reader's helpers in
+    // plugins/mailbox/assets/mailbox_reader.js — one mail surface, one label for the
+    // same message. Change them together.
+
+    /// Mail providers where the person is the identity and the domain says nothing:
+    /// a bare address here falls back to the local part, not to "Gmail".
+    static let consumerMailDomains: Set<String> = [
+        "gmail", "googlemail", "outlook", "hotmail", "live", "msn",
+        "yahoo", "ymail", "aol", "icloud", "me", "mac",
+        "proton", "protonmail", "pm", "fastmail", "hey", "zoho",
+        "gmx", "web", "mail", "yandex", "qq", "163", "126"
+    ]
+
+    /// Registry-ish second levels, so example.co.uk yields "example" and not "co".
+    static let registrySecondLevels: Set<String> = [
+        "co", "com", "net", "org", "edu", "gov", "ac", "or", "ne"
+    ]
+
+    /// Mailboxes no person owns. A role address is infrastructure, so its local part is
+    /// never the identity — the sending organization is, even at a consumer provider:
+    /// no-reply@notify.proton.me is Proton writing to you, not somebody named No-Reply.
+    static let roleLocalParts: Set<String> = [
+        "noreply", "donotreply", "notify", "notification", "notifications",
+        "alert", "alerts", "bounce", "bounces", "postmaster",
+        "mailerdaemon", "abuse", "webmaster", "root", "support",
+        "help", "info", "billing", "sales", "admin", "contact"
+    ]
+
+    /// "jeremy.tunnell" → "Jeremy Tunnell", "e-trade" → "E-Trade".
+    static func titleCase(_ label: String) -> String {
+        let spaced = label
+            .replacingOccurrences(of: "[._+]+", with: " ", options: .regularExpression)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
+        var out = ""
+        var atWordStart = true
+        for ch in spaced {
+            // ASCII-only, matching the web helper's /[a-z]/ — and one lowercase letter
+            // can uppercase into two (ß → SS), which a Character could not hold.
+            if atWordStart, ch.isASCII, ch.isLowercase {
+                out += ch.uppercased()
+            } else {
+                out.append(ch)
+            }
+            atWordStart = (ch == " " || ch == "-")
+        }
+        return out
+    }
+
+    /// The host labels left after dropping the public suffix: accounts.google.com →
+    /// ["accounts", "google"], mail.example.co.uk → ["mail", "example"].
+    private static func registrableLabels(_ host: String) -> [String] {
+        var parts = host.lowercased().split(separator: ".").map(String.init).filter { !$0.isEmpty }
+        guard parts.count >= 2 else { return parts }
+        parts.removeLast()                                              // the TLD
+        if parts.count > 1, registrySecondLevels.contains(parts[parts.count - 1]) {
+            parts.removeLast()                                          // a ccTLD's second level
+        }
+        return parts
+    }
+
+    /// The organization label out of a host: accounts.google.com → "google". Taking the
+    /// LAST remaining label after the public suffix drops infrastructure subdomains.
+    static func orgLabel(_ host: String) -> String {
+        let parts = registrableLabels(host)
+        if parts.count < 2 { return parts.first ?? "" }
+        return parts.last ?? ""
+    }
+
+    /// True when the address sits BELOW a domain rather than at it (notify.proton.me vs
+    /// proton.me). A personal mailbox is never at a subdomain of its provider, so this
+    /// is what separates a provider's own outbound infrastructure from its users.
+    static func hasSubdomain(_ host: String) -> Bool {
+        registrableLabels(host).count > 1
+    }
+
+    /// A role mailbox by name: exact match on the punctuation-stripped local part, or a
+    /// no-reply marker anywhere in it (AmericanExpress-no-reply, DOTServicesnoreply).
+    static func isRoleLocalPart(_ local: String) -> Bool {
+        let key = String(local.lowercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber) })
+        if roleLocalParts.contains(key) { return true }
+        return key.contains("noreply") || key.contains("donotreply")
+    }
+
+    /// "Jane Doe <jane@x.com>" → "Jane Doe". With no display name the sending
+    /// ORGANIZATION is the identity — hello@fireworks.ai reads as "Fireworks", not
+    /// "hello" — except at a consumer mail provider, where the local part is the only
+    /// identity there is. That exception holds only for what could actually be a
+    /// person's mailbox: a role address, or one below the provider's own domain, is the
+    /// company writing.
     public static func senderName(_ raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty { return "(unknown)" }
         if let lt = trimmed.firstIndex(of: "<") {
             let name = String(trimmed[..<lt])
                 .trimmingCharacters(in: CharacterSet(charactersIn: " \"'"))
             if !name.isEmpty { return name }
         }
         let addr = address(trimmed)
-        return addr.split(separator: "@").first.map(String.init) ?? addr
+        guard let at = addr.lastIndex(of: "@"), at != addr.startIndex else {
+            let bare = addr.trimmingCharacters(in: CharacterSet(charactersIn: "<> "))
+            return bare.isEmpty ? "(unknown)" : bare
+        }
+        let local = String(addr[addr.startIndex..<at])
+        let host = String(addr[addr.index(after: at)...])
+        let org = orgLabel(host)
+        let asPerson = { titleCase(local).isEmpty ? local : titleCase(local) }
+        if org.isEmpty { return asPerson() }
+        let personal = consumerMailDomains.contains(org)
+            && !hasSubdomain(host)
+            && !isRoleLocalPart(local)
+        return personal ? asPerson() : titleCase(org)
     }
 
     /// The bare address inside an RFC-style sender string.

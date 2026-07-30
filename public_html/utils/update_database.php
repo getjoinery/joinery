@@ -717,14 +717,16 @@
 					$plugin_manager->syncMenus(
 						'core',
 						[
-							'admin'   => $core_menus_data['adminMenu']   ?? [],
-							'profile' => $core_menus_data['profileMenu'] ?? [],
+							'admin'    => $core_menus_data['adminMenu']    ?? [],
+							'profile'  => $core_menus_data['profileMenu']  ?? [],
+							'settings' => $core_menus_data['settingsMenu'] ?? [],
 						],
 						['overwrite' => false, 'prune' => false]
 					);
-					$admin_count   = count($core_menus_data['adminMenu']   ?? []);
-					$profile_count = count($core_menus_data['profileMenu'] ?? []);
-					echo "✓ Core menus seeded ({$admin_count} admin, {$profile_count} profile)<br>\n";
+					$admin_count    = count($core_menus_data['adminMenu']    ?? []);
+					$profile_count  = count($core_menus_data['profileMenu']  ?? []);
+					$settings_count = count($core_menus_data['settingsMenu'] ?? []);
+					echo "✓ Core menus seeded ({$admin_count} admin, {$profile_count} profile, {$settings_count} settings)<br>\n";
 				}
 			} else {
 				echo "⚠️  admin_menus.json not found at public_html root; skipping core menu seed.<br>\n";

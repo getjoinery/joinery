@@ -8,7 +8,11 @@
  * address is available to hash and seal. The address hash is a keyed blind index for vault
  * holders (never leaks the sealed address) and a plain SHA-256 otherwise — see addressHash().
  *
- * @version 1.0
+ * A row is SAVED when the user added it deliberately (source manual or import) and merely
+ * SEEN when it warmed up through use (source sent or received) — lookup() reports which,
+ * and manualAdd() stamps a seen row as saved.
+ *
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
@@ -109,16 +113,12 @@ class MailboxContacts {
 		$hash = $this->addressHash($addr, $secret);
 		$db = $this->db();
 
-		$find = $db->prepare('SELECT imc_mailbox_contact_id FROM imc_mailbox_contacts
-			WHERE imc_usr_user_id = ? AND imc_address_hash = ? LIMIT 1');
-		$find->execute(array($user_id, $hash));
-		$existing_id = intval($find->fetchColumn());
-
-		if ($existing_id > 0) {
+		$existing = $this->findRow($user_id, $addr, $secret);
+		if ($existing !== null) {
 			$bump = $db->prepare('UPDATE imc_mailbox_contacts
 				SET imc_use_count = imc_use_count + 1, imc_last_used_time = now()
 				WHERE imc_mailbox_contact_id = ?');
-			$bump->execute(array($existing_id));
+			$bump->execute(array(intval($existing['imc_mailbox_contact_id'])));
 			return;
 		}
 
@@ -159,6 +159,59 @@ class MailboxContacts {
 			intval($vault->get('uev_usr_user_id')),
 			$contact_id,
 		));
+	}
+
+	/** The row for one normalized address, or null when the user has none. */
+	private function findRow(int $user_id, string $normalized, ?string $secret): ?array {
+		$stmt = $this->db()->prepare('SELECT * FROM imc_mailbox_contacts
+			WHERE imc_usr_user_id = ? AND imc_address_hash = ? LIMIT 1');
+		$stmt->execute(array($user_id, $this->addressHash($normalized, $secret)));
+		$row = $stmt->fetch(PDO::FETCH_ASSOC);
+		return $row ? $row : null;
+	}
+
+	// ── lookup ───────────────────────────────────────────────────────────────
+
+	/**
+	 * What the user's contact store knows about one address:
+	 * ['id','name','source','saved','use_count','first_time','last_time'], null when there
+	 * is no row, or ['locked'=>true] when a vault holder's window is closed — the keyed
+	 * hash can't be computed then, so the state is unknown rather than absent, and the
+	 * caller must not present it as "not a contact".
+	 *
+	 * 'saved' distinguishes a contact the user deliberately added from one the store
+	 * merely warmed up on: every address in an opened thread is harvested, so presence
+	 * alone says nothing about intent.
+	 */
+	public function lookup(int $user_id, string $address): ?array {
+		$parsed = self::parseAddress($address);
+		if ($user_id <= 0 || $parsed === null) {
+			return null;
+		}
+		try {
+			$vault = UserEncryptionVault::loadForUser($user_id);
+			$secret = ($vault !== null) ? VaultUnlock::secretKey($user_id) : null;
+			if ($vault !== null && $secret === null) {
+				return array('locked' => true);
+			}
+			$row = $this->findRow($user_id, $parsed[0], $secret);
+			if ($row === null) {
+				return null;
+			}
+			$source = (string)$row['imc_source'];
+			return array(
+				'id'         => intval($row['imc_mailbox_contact_id']),
+				'name'       => (string)MailboxContact::decryptSealedFieldStatic('imc_display_name', $row['imc_display_name'], $row),
+				'source'     => $source,
+				'saved'      => in_array($source, array(MailboxContact::SOURCE_MANUAL, MailboxContact::SOURCE_IMPORT), true),
+				'use_count'  => intval($row['imc_use_count']),
+				'first_time' => $row['imc_create_time'],
+				'last_time'  => $row['imc_last_used_time'],
+			);
+		} catch (\Throwable $e) {
+			error_log('MailboxContacts::lookup failed for user ' . $user_id . ': ' . $e->getMessage());
+			return null;
+		}
 	}
 
 	// ── list ─────────────────────────────────────────────────────────────────
@@ -260,13 +313,70 @@ class MailboxContacts {
 		return array('imported' => $imported, 'skipped' => $skipped);
 	}
 
-	/** Manual single add (the contacts management "add" form). */
+	/** Manual single add (the contacts management "add" form, the reader's Add button). */
 	public function manualAdd(int $user_id, string $raw): bool {
-		if (self::parseAddress($raw) === null) {
+		$parsed = self::parseAddress($raw);
+		if ($parsed === null) {
 			return false;
 		}
 		$this->harvest($user_id, array($raw), MailboxContact::SOURCE_MANUAL);
+		// harvest() only bumps a row that already exists, and every address in an opened
+		// thread is already harvested — so a deliberate add stamps the source itself,
+		// which is what turns a merely-seen address into a saved contact.
+		$this->markSaved($user_id, $parsed[0], $parsed[1]);
 		return true;
+	}
+
+	/**
+	 * Stamp an existing row as deliberately saved, filling in the display name when the
+	 * add supplied one and the row has none. Best-effort: a locked vault holder or a
+	 * missing row leaves the harvest result as it stands.
+	 */
+	private function markSaved(int $user_id, string $normalized, string $name): void {
+		try {
+			$vault = UserEncryptionVault::loadForUser($user_id);
+			$secret = ($vault !== null) ? VaultUnlock::secretKey($user_id) : null;
+			if ($vault !== null && $secret === null) {
+				return;
+			}
+			$row = $this->findRow($user_id, $normalized, $secret);
+			if ($row === null) {
+				return;
+			}
+			$id = intval($row['imc_mailbox_contact_id']);
+			$stmt = $this->db()->prepare('UPDATE imc_mailbox_contacts SET imc_source = ?
+				WHERE imc_mailbox_contact_id = ? AND imc_usr_user_id = ?');
+			$stmt->execute(array(MailboxContact::SOURCE_MANUAL, $id, $user_id));
+			if ($name !== '') {
+				$stored = (string)MailboxContact::decryptSealedFieldStatic('imc_display_name', $row['imc_display_name'], $row);
+				if (trim($stored) === '') {
+					$this->setDisplayName($row, $name, $secret);
+				}
+			}
+		} catch (\Throwable $e) {
+			error_log('MailboxContacts::markSaved failed for user ' . $user_id . ': ' . $e->getMessage());
+		}
+	}
+
+	/** Write a display name onto an existing row, re-sealing under that row's own DEK. */
+	private function setDisplayName(array $row, string $name, ?string $secret): void {
+		$id = intval($row['imc_mailbox_contact_id']);
+		$value = $name;
+		if (!empty($row['imc_content_sealed']) && !empty($row['imc_sealed_key'])) {
+			// $secret is the row owner's only when the row was sealed to their own vault
+			// (always so in practice) — otherwise leave the stored name alone.
+			$sealed_owner = intval($row['imc_sealed_owner_user_id'] ?? 0);
+			if ($secret === null || $sealed_owner !== intval($row['imc_usr_user_id'])) {
+				return;
+			}
+			require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
+			$crypto = new VaultCrypto();
+			$dek = $crypto->openItemDek((string)$row['imc_sealed_key'], $secret);
+			$value = $crypto->sealField($name, $dek, MailboxContact::sealAd($id, 'imc_display_name'));
+		}
+		$stmt = $this->db()->prepare('UPDATE imc_mailbox_contacts SET imc_display_name = ?
+			WHERE imc_mailbox_contact_id = ?');
+		$stmt->execute(array($value, $id));
 	}
 
 	/**

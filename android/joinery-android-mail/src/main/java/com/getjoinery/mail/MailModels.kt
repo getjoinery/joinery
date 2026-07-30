@@ -236,16 +236,107 @@ data class MailThread(
 // MARK: - Address + date display helpers
 
 object MailDisplay {
-    /** "Jane Doe <jane@x.com>" → "Jane Doe"; bare addresses → local part. */
+    // The sender-label rules below mirror the web reader's helpers in
+    // plugins/mailbox/assets/mailbox_reader.js — one mail surface, one label for the
+    // same message. Change them together.
+
+    /** Mail providers where the person is the identity and the domain says nothing:
+     *  a bare address here falls back to the local part, not to "Gmail". */
+    private val CONSUMER_MAIL_DOMAINS = setOf(
+        "gmail", "googlemail", "outlook", "hotmail", "live", "msn",
+        "yahoo", "ymail", "aol", "icloud", "me", "mac",
+        "proton", "protonmail", "pm", "fastmail", "hey", "zoho",
+        "gmx", "web", "mail", "yandex", "qq", "163", "126"
+    )
+
+    /** Registry-ish second levels, so example.co.uk yields "example" and not "co". */
+    private val REGISTRY_SECOND_LEVELS = setOf("co", "com", "net", "org", "edu", "gov", "ac", "or", "ne")
+
+    /** Mailboxes no person owns. A role address is infrastructure, so its local part is
+     *  never the identity — the sending organization is, even at a consumer provider:
+     *  no-reply@notify.proton.me is Proton writing to you, not somebody named No-Reply. */
+    private val ROLE_LOCAL_PARTS = setOf(
+        "noreply", "donotreply", "notify", "notification", "notifications",
+        "alert", "alerts", "bounce", "bounces", "postmaster",
+        "mailerdaemon", "abuse", "webmaster", "root", "support",
+        "help", "info", "billing", "sales", "admin", "contact"
+    )
+
+    /** "jeremy.tunnell" → "Jeremy Tunnell", "e-trade" → "E-Trade". */
+    fun titleCase(label: String): String {
+        val spaced = label.replace(Regex("[._+]+"), " ").replace(Regex("\\s+"), " ").trim()
+        val out = StringBuilder()
+        var atWordStart = true
+        for (ch in spaced) {
+            // ASCII-only, matching the web helper's /[a-z]/.
+            if (atWordStart && ch in 'a'..'z') out.append(ch.uppercaseChar()) else out.append(ch)
+            atWordStart = (ch == ' ' || ch == '-')
+        }
+        return out.toString()
+    }
+
+    /** The host labels left after dropping the public suffix: accounts.google.com →
+     *  ["accounts", "google"], mail.example.co.uk → ["mail", "example"]. */
+    private fun registrableLabels(host: String): List<String> {
+        val parts = host.lowercase().split('.').filter { it.isNotEmpty() }.toMutableList()
+        if (parts.size < 2) return parts
+        parts.removeAt(parts.size - 1)                                  // the TLD
+        if (parts.size > 1 && REGISTRY_SECOND_LEVELS.contains(parts[parts.size - 1])) {
+            parts.removeAt(parts.size - 1)                              // a ccTLD's second level
+        }
+        return parts
+    }
+
+    /** The organization label out of a host: accounts.google.com → "google". Taking the
+     *  LAST remaining label after the public suffix drops infrastructure subdomains. */
+    fun orgLabel(host: String): String {
+        val parts = registrableLabels(host)
+        if (parts.size < 2) return parts.firstOrNull() ?: ""
+        return parts.last()
+    }
+
+    /** True when the address sits BELOW a domain rather than at it (notify.proton.me vs
+     *  proton.me). A personal mailbox is never at a subdomain of its provider, so this
+     *  is what separates a provider's own outbound infrastructure from its users. */
+    fun hasSubdomain(host: String): Boolean = registrableLabels(host).size > 1
+
+    /** A role mailbox by name: exact match on the punctuation-stripped local part, or a
+     *  no-reply marker anywhere in it (AmericanExpress-no-reply, DOTServicesnoreply). */
+    fun isRoleLocalPart(local: String): Boolean {
+        val key = local.lowercase().filter { it in 'a'..'z' || it in '0'..'9' }
+        if (ROLE_LOCAL_PARTS.contains(key)) return true
+        return key.contains("noreply") || key.contains("donotreply")
+    }
+
+    /** "Jane Doe <jane@x.com>" → "Jane Doe". With no display name the sending
+     *  ORGANIZATION is the identity — hello@fireworks.ai reads as "Fireworks", not
+     *  "hello" — except at a consumer mail provider, where the local part is the only
+     *  identity there is. That exception holds only for what could actually be a
+     *  person's mailbox: a role address, or one below the provider's own domain, is the
+     *  company writing. */
     fun senderName(raw: String): String {
         val trimmed = raw.trim()
+        if (trimmed.isEmpty()) return "(unknown)"
         val lt = trimmed.indexOf('<')
         if (lt > -1) {
             val name = trimmed.substring(0, lt).trim(' ', '"', '\'')
             if (name.isNotEmpty()) return name
         }
         val addr = address(trimmed)
-        return addr.substringBefore('@')
+        val at = addr.lastIndexOf('@')
+        if (at < 1) {
+            val bare = addr.trim('<', '>', ' ')
+            return if (bare.isEmpty()) "(unknown)" else bare
+        }
+        val local = addr.substring(0, at)
+        val host = addr.substring(at + 1)
+        val org = orgLabel(host)
+        val asPerson = { titleCase(local).ifEmpty { local } }
+        if (org.isEmpty()) return asPerson()
+        val personal = CONSUMER_MAIL_DOMAINS.contains(org) &&
+            !hasSubdomain(host) &&
+            !isRoleLocalPart(local)
+        return if (personal) asPerson() else titleCase(org)
     }
 
     /** The bare address inside an RFC-style sender string. */

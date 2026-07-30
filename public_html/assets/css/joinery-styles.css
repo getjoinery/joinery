@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   Joinery Default UI Kit  ·  custom.css  ·  v2.5.0
+   Joinery Default UI Kit  ·  custom.css  ·  v2.6.1
    Pure Slate design. Themeable values live in --jy-* tokens on
    :root so branded themes can override them without understanding
    internals. Component rules are scoped under .jy-ui to prevent
@@ -83,7 +83,12 @@
    though base.css/custom.css load on every page.
    ─────────────────────────────────────────────────────────── */
 
+/* No default body margin, and a stable scrollbar gutter: both keep the
+   header from shifting when navigating between scrolling pages and
+   viewport-fit app pages. */
+html:has(body.jy-default) { scrollbar-gutter: stable; }
 body.jy-default {
+  margin: 0;
   font-family: var(--jy-font-sans);
   font-size: var(--jy-text-base);
   line-height: var(--jy-leading-base);
@@ -505,10 +510,7 @@ body.jy-default blockquote {
    viewport below the header — mailbox, calendar, drive. The body becomes a
    flex column so the app page can grow, and the app's main component
    (a flex child of .page-content--app) stretches to the fold. */
-body.jy-default:has(.page-content--app) { display: flex; flex-direction: column; margin: 0; min-height: 100vh; }
-/* The admin quickbar pushes body down 32px (margin-top !important) — take it
-   out of the fill height so the page still ends exactly at the fold. */
-body.jy-default.joinery-admin-bar-active:has(.page-content--app) { min-height: calc(100vh - 32px); }
+body.jy-default:has(.page-content--app) { display: flex; flex-direction: column; min-height: 100vh; }
 /* Grow-only fill: min-height stays auto at every level, so a page taller than
    the viewport (e.g. the calendar with its edit form open) scrolls normally
    instead of collapsing. Self-scrolling components (the mailbox reader) opt
@@ -1570,17 +1572,17 @@ dialog.jy-ui::backdrop { background: rgba(0, 0, 0, 0.45); }
 .jy-ui .calgrid-title { font-weight: 600; margin: 0 .5rem; }
 .jy-ui .calgrid-views { margin-left: auto; }
 .jy-ui .calgrid-grid { display: grid; grid-template-columns: repeat(7, 1fr); border: 1px solid var(--cg-border); border-bottom: none; }
-.jy-ui .calgrid-dow { text-align: center; font-size: .8rem; color: var(--jy-color-text-muted); padding: .3rem 0; border-bottom: 1px solid var(--cg-border); border-right: 1px solid var(--cg-border); background: var(--jy-color-surface); }
-.jy-ui .calgrid-cell { min-height: 92px; border-bottom: 1px solid var(--cg-border); border-right: 1px solid var(--cg-border); padding: .25rem; vertical-align: top; }
+.jy-ui .calgrid-dow { text-align: center; font-size: .875rem; color: var(--jy-color-text-muted); padding: .3rem 0; border-bottom: 1px solid var(--cg-border); border-right: 1px solid var(--cg-border); background: var(--jy-color-surface); }
+.jy-ui .calgrid-cell { min-height: 100px; border-bottom: 1px solid var(--cg-border); border-right: 1px solid var(--cg-border); padding: .25rem; vertical-align: top; }
 .jy-ui .calgrid-cell.is-other { background: var(--jy-color-surface); color: var(--jy-color-text-subtle); }
 .jy-ui .calgrid-cell.is-today .calgrid-daynum { background: var(--cg-accent); color: #fff; border-radius: 50%; padding: 0 .35rem; }
-.jy-ui .calgrid-daynum { font-size: .8rem; display: inline-block; margin-bottom: .2rem; }
-.jy-ui .calgrid-chip { display: block; font-size: .72rem; line-height: 1.3; padding: .1rem .3rem; margin-bottom: .15rem; border-radius: 3px; color: #fff; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jy-ui .calgrid-daynum { font-size: .875rem; display: inline-block; margin-bottom: .2rem; }
+.jy-ui .calgrid-chip { display: block; font-size: .8rem; line-height: 1.3; padding: .1rem .3rem; margin-bottom: .15rem; border-radius: 3px; color: #fff; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .jy-ui .calgrid-week-day { border: 1px solid var(--cg-border); border-bottom: none; padding: .4rem; display: flex; gap: .6rem; }
 .jy-ui .calgrid-week-day:last-child { border-bottom: 1px solid var(--cg-border); }
-.jy-ui .calgrid-week-date { min-width: 5.5rem; font-size: .85rem; color: var(--jy-color-text-muted); }
+.jy-ui .calgrid-week-date { min-width: 6rem; font-size: .9375rem; color: var(--jy-color-text-muted); }
 .jy-ui .calgrid-week-events { flex: 1; }
-.jy-ui .calgrid-empty { color: var(--jy-color-text-subtle); font-size: .8rem; }
+.jy-ui .calgrid-empty { color: var(--jy-color-text-subtle); font-size: .875rem; }
 
 /* ─── Personal calendar page (/profile/calendar) ────────────── */
 .jy-ui.cal-wrap { max-width: 980px; margin: 1rem auto; }
@@ -1588,45 +1590,45 @@ dialog.jy-ui::backdrop { background: rgba(0, 0, 0, 0.45); }
    stretches its week rows to fill the viewport (dow header row stays auto). */
 .page-content--app .jy-ui.cal-wrap { max-width: none; margin: 0; flex: 1; display: flex; flex-direction: column; }
 .page-content--app .jy-ui .joinery-calgrid { flex: 1; display: flex; flex-direction: column; }
-.page-content--app .jy-ui .calgrid-grid { flex: 1; grid-template-rows: auto; grid-auto-rows: minmax(72px, 1fr); }
-.page-content--app .jy-ui .calgrid-cell { min-height: 72px; }
+.page-content--app .jy-ui .calgrid-grid { flex: 1; grid-template-rows: auto; grid-auto-rows: minmax(78px, 1fr); }
+.page-content--app .jy-ui .calgrid-cell { min-height: 78px; }
 .jy-ui .cal-note { background: var(--jy-color-success-bg, #e6f7ec); border: 1px solid var(--jy-color-success, #2d7d46); padding: .5rem .8rem; border-radius: var(--jy-radius-sm); margin-bottom: 1rem; }
 .jy-ui .cal-note-detail { margin: .4rem 0 0; padding-left: 1.2rem; font-size: .9em; }
 .jy-ui .cal-error { background: var(--jy-color-danger-bg); border: 1px solid var(--jy-color-danger); padding: .5rem .8rem; border-radius: var(--jy-radius-sm); margin-bottom: 1rem; }
 .jy-ui .cal-full-form { border: 1px solid var(--jy-color-border); border-radius: var(--jy-radius-md); padding: 1rem 1.25rem; margin-top: 1.5rem; background: var(--jy-color-surface); }
 .jy-ui .cal-full-form h2 { margin-top: 0; }
-.jy-ui .cal-tz { color: var(--jy-color-text-muted); font-size: .85rem; }
+.jy-ui .cal-tz { color: var(--jy-color-text-muted); font-size: .9375rem; }
 /* First-run import prompt — retires for good once the calendar has an entry. */
 .jy-ui .cal-firstrun { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; border: 1px solid var(--jy-color-border); border-radius: var(--jy-radius-md); background: var(--jy-color-surface); padding: .75rem 1rem; }
-.jy-ui .cal-firstrun strong { display: block; font-size: .95rem; }
-.jy-ui .cal-firstrun span { font-size: .85rem; color: var(--jy-color-text-muted); }
+.jy-ui .cal-firstrun strong { display: block; font-size: 1.05rem; }
+.jy-ui .cal-firstrun span { font-size: .9375rem; color: var(--jy-color-text-muted); }
 /* Import form renders through JoineryModal.open; only inner content styled here. */
 .jy-ui .cal-import-form .form-group { margin-bottom: .6rem; }
 .jy-ui .cal-recurrence-section { margin-top: .75rem; border-top: 1px solid var(--jy-color-border); padding-top: .75rem; }
-.jy-ui .cal-rec-desc { font-size: .85rem; color: var(--jy-color-text-muted); font-style: italic; margin-top: .25rem; min-height: 1.2em; }
+.jy-ui .cal-rec-desc { font-size: .9375rem; color: var(--jy-color-text-muted); font-style: italic; margin-top: .25rem; min-height: 1.2em; }
 .jy-ui .cal-rec-desc.is-static { font-style: normal; }
 /* Scope choosers (edit/delete recurring) render through JoineryModal.open;
    only their inner content is styled here. */
-.jy-ui .cal-scope-heading { margin: 0 0 1rem; font-size: 1.05rem; }
+.jy-ui .cal-scope-heading { margin: 0 0 1rem; font-size: 1.15rem; }
 .jy-ui .cal-scope-options { display: flex; flex-direction: column; gap: .5rem; }
-.jy-ui .cal-scope-options label { display: flex; align-items: center; gap: .6rem; font-size: .95rem; cursor: pointer; }
-.jy-ui .cal-scope-options label small { color: var(--jy-color-text-muted); display: block; font-size: .82rem; }
+.jy-ui .cal-scope-options label { display: flex; align-items: center; gap: .6rem; font-size: 1.05rem; cursor: pointer; }
+.jy-ui .cal-scope-options label small { color: var(--jy-color-text-muted); display: block; font-size: .875rem; }
 .jy-ui.cal-popup { position: fixed; z-index: 9000; width: 340px; background: var(--jy-color-bg); border-radius: var(--jy-radius-lg); box-shadow: 0 8px 28px rgba(0, 0, 0, .18), 0 2px 8px rgba(0, 0, 0, .10); display: none; }
 .jy-ui .cal-popup-header { display: flex; align-items: center; justify-content: space-between; padding: .6rem .8rem .4rem; border-bottom: 1px solid var(--jy-color-border); }
-.jy-ui .cal-popup-title { font-weight: 600; font-size: .9rem; color: var(--jy-color-text-muted); }
-.jy-ui .cal-popup-close { background: none; border: none; cursor: pointer; font-size: 1.2rem; color: var(--jy-color-text-subtle); padding: .1rem .3rem; border-radius: var(--jy-radius-sm); }
+.jy-ui .cal-popup-title { font-weight: 600; font-size: 1rem; color: var(--jy-color-text-muted); }
+.jy-ui .cal-popup-close { background: none; border: none; cursor: pointer; font-size: 1.3rem; color: var(--jy-color-text-subtle); padding: .1rem .3rem; border-radius: var(--jy-radius-sm); }
 .jy-ui .cal-popup-close:hover { background: var(--jy-color-surface); color: var(--jy-color-text); }
 .jy-ui .cal-popup-body { padding: .5rem .8rem; overflow-y: auto; max-height: calc(100vh - 190px); }
 .jy-ui .cal-popup-body .form-group { margin-bottom: .6rem; }
 .jy-ui .cal-popup-footer { display: flex; align-items: center; justify-content: space-between; padding: .6rem .8rem .8rem; border-top: 1px solid var(--jy-color-border); gap: .4rem; }
-.jy-ui .cal-popup-more { background: none; border: none; cursor: pointer; color: var(--jy-color-text-muted); font: inherit; font-size: .85rem; padding: .3rem .5rem; border-radius: var(--jy-radius-sm); text-decoration: none; }
+.jy-ui .cal-popup-more { background: none; border: none; cursor: pointer; color: var(--jy-color-text-muted); font: inherit; font-size: .9375rem; padding: .3rem .5rem; border-radius: var(--jy-radius-sm); text-decoration: none; }
 .jy-ui .cal-popup-more:hover { background: var(--jy-color-surface); }
 .jy-ui .cal-popup-right { display: flex; gap: .4rem; margin-left: auto; }
-.jy-ui .cal-popup-delete { background: none; border: 1px solid var(--jy-color-danger); color: var(--jy-color-danger); border-radius: var(--jy-radius-sm); padding: .3rem .7rem; cursor: pointer; font: inherit; font-size: .85rem; }
+.jy-ui .cal-popup-delete { background: none; border: 1px solid var(--jy-color-danger); color: var(--jy-color-danger); border-radius: var(--jy-radius-sm); padding: .3rem .7rem; cursor: pointer; font: inherit; font-size: .9375rem; }
 .jy-ui .cal-popup-delete:hover { background: var(--jy-color-danger-bg); }
-.jy-ui .cal-popup-save { background: var(--jy-color-primary); color: var(--jy-color-primary-text); border: none; border-radius: var(--jy-radius-sm); padding: .3rem .9rem; cursor: pointer; font: inherit; font-size: .85rem; font-weight: 600; }
+.jy-ui .cal-popup-save { background: var(--jy-color-primary); color: var(--jy-color-primary-text); border: none; border-radius: var(--jy-radius-sm); padding: .3rem .9rem; cursor: pointer; font: inherit; font-size: .9375rem; font-weight: 600; }
 .jy-ui .cal-popup-save:hover { background: var(--jy-color-primary-hover); }
-.jy-ui .cal-popup-error { background: var(--jy-color-danger-bg); border: 1px solid var(--jy-color-danger); padding: .3rem .6rem; border-radius: var(--jy-radius-sm); font-size: .82rem; margin: 0 .8rem .4rem; display: none; }
+.jy-ui .cal-popup-error { background: var(--jy-color-danger-bg); border: 1px solid var(--jy-color-danger); padding: .3rem .6rem; border-radius: var(--jy-radius-sm); font-size: .875rem; margin: 0 .8rem .4rem; display: none; }
 .jy-ui .cal-pop-times.is-allday { display: none; }
 .jy-ui .cal-pop-time-row { display: flex; gap: .6rem; }
 .jy-ui .cal-pop-time-row .form-group { flex: 1; }
@@ -1681,6 +1683,27 @@ dialog.jy-ui::backdrop { background: rgba(0, 0, 0, 0.45); }
 /* ─── Generic page helpers (reused across views) ─── */
 .jy-ui .jy-narrow { max-width: 720px; margin: 0 auto; }
 .jy-ui .jy-narrow-sm { max-width: 640px; margin: 0 auto; }
+
+/* Settings hub: left rail of sections + content column (see
+   PublicPageBase::settings_layout_start()). */
+.jy-ui .jy-settings-shell { max-width: 1000px; margin: 0 auto; }
+.jy-settings-layout { display: flex; gap: var(--jy-space-6); align-items: flex-start; }
+.jy-settings-nav { flex: 0 0 200px; display: flex; flex-direction: column; gap: 2px; position: sticky; top: 76px; }
+.jy-settings-nav-link {
+  display: block;
+  padding: .5rem .75rem;
+  border-radius: 6px;
+  color: var(--jy-color-text, #1f2937);
+  text-decoration: none;
+  font-size: .9375rem;
+}
+.jy-settings-nav-link:hover { background: var(--jy-color-bg-muted, #f3f4f6); }
+.jy-settings-nav-link.active { background: var(--jy-color-bg-muted, #eef2f7); font-weight: 600; }
+.jy-settings-content { flex: 1; min-width: 0; }
+@media (max-width: 768px) {
+  .jy-settings-layout { flex-direction: column; }
+  .jy-settings-nav { position: static; flex-direction: row; flex-wrap: wrap; width: 100%; }
+}
 .jy-ui .jy-row-center { display: flex; gap: var(--jy-space-4); align-items: center; }
 
 /* ─── Blog post (views/post.php) ─── */

@@ -1,12 +1,22 @@
 {
     "name": "Server Manager",
-    "version": "1.12.0",
+    "version": "1.13.0",
     "description": "Remote server management for Joinery instances",
     "author": "Joinery",
     "receives_upgrades": true,
     "included_in_publish": true,
     "host_installer": "provisioning/install_agent.sh",
     "styles": ["assets/css/server_manager.css"],
+    "settingsMenu": [
+        {
+            "slug": "server-manager-account",
+            "title": "Server Account",
+            "url": "/profile/server_manager/connect_cloud",
+            "icon": "cloud",
+            "permission": 0,
+            "order": 95
+        }
+    ],
     "adminMenu": [
         {
             "slug": "server-manager",

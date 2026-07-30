@@ -14,7 +14,7 @@
 <div class="jy-ui">
 <section class="jy-content-section">
     <div class="jy-container">
-        <div class="jy-narrow">
+        <div class="jy-settings-shell">
 
             <div class="jy-page-header">
                 <div class="jy-page-header-bar">
@@ -22,7 +22,7 @@
                     <nav class="jy-breadcrumbs" aria-label="breadcrumb">
                         <ol>
                             <li><a href="/">Home</a></li>
-                            <li><a href="/profile">My Profile</a></li>
+                            <li><a href="/profile">Dashboard</a></li>
                             <li><a href="/profile/security">Security</a></li>
                             <li class="active">Test Authenticator App</li>
                         </ol>
@@ -30,7 +30,7 @@
                 </div>
             </div>
 
-            <?php echo PublicPage::tab_menu($page_vars['tab_menus'] ?? [], 'Security'); ?>
+            <?php echo PublicPage::settings_layout_start('/profile/security'); ?>
 
             <div class="jy-panel jy-mt-4">
 
@@ -78,6 +78,7 @@
 
             </div>
 
+            <?php echo PublicPage::settings_layout_end(); ?>
         </div>
     </div>
 </section>

@@ -1023,8 +1023,10 @@ raised state cannot be corrupted afterward.
 **Protection badges.** Every domain row on the Accounts tree shows its level
 as a badge linking to the domain editor (the badge IS the path to raising
 protection); mailboxes on protected domains carry the badge on their Accounts
-rows and in the reader's mailbox rail (both the staff reader and
-`/profile/mailbox/mailbox`).
+rows, and in the reader (both the staff reader and `/profile/mailbox/mailbox`) as
+a chip beside the name of the open mailbox in the conversation-list header. The
+chip states the level of the one mailbox being read, so the aggregate views
+(Drafts, Contacts, all-mail) show none.
 
 **Rows are sealed per-row** (`iem_content_sealed`): mail sealed under one posture stays
 readable after the domain's level changes — the read hooks key off the row, not the
@@ -1784,11 +1786,12 @@ use the same sequence; N=1 is the same job.
 ## Mailbox Reader
 
 The Mailbox Reader is a two-pane Gmail-style reader over the stored messages:
-a left rail (mailbox switcher + filters + search) and a single main pane that
-shows either the conversation list or an opened conversation full-width (a back
-arrow or Esc returns to the list). It supports threading, read/unread, star, and
+a left rail (the mailbox switcher and its folders) and a single main pane that
+shows either the conversation list (headed by its own name, search box and
+compose button) or an opened conversation full-width (a back arrow or Esc returns
+to the list). It supports threading, read/unread, star, and
 search, rich-text compose with Bcc and inline images, saved drafts, per-mailbox
-signatures, recipient autocomplete, and (for admins) a contact panel. It is
+signatures, recipient autocomplete, and a contact panel. It is
 a vanilla-JS client (`assets/mailbox_reader.js` + `.css`, cache-busted by file
 mtime) talking to the scoped AJAX/API actions listed under **API Surface**.
 
@@ -1829,9 +1832,14 @@ which diffs the set (insert added, delete removed). Grants cascade-delete with
 either the alias or the user.
 
 The reader's **left rail** is a switcher over the addresses the viewer has been
-granted, each independently badged with its unread count. Selecting one scopes
-the whole reader to that mailbox; below the switcher are All / Unread / Starred
-filters and a debounced search box. The search box runs a single PostgreSQL
+granted, each independently badged with its unread count, each with its folders
+beneath it. Selecting one scopes the whole reader to that mailbox.
+
+A debounced search box sits in the middle of the conversation-list header,
+centred between the mailbox name and the compose button (its own full-width line
+on a narrow screen). Enter commits the search and closes any open
+conversation, because the reading view replaces the list that results would
+otherwise land behind. The search box runs a single PostgreSQL
 full-text query (`websearch_to_tsquery`) over the sender, subject, and both
 plain and HTML body fields at once, backed by the `iem_fulltext_idx` GIN index
 on the matching `to_tsvector` expression. Searching the HTML body directly is
@@ -1912,8 +1920,21 @@ title. With no display name at all, the **sending organization** is the label �
 last host label below the public suffix, which drops infrastructure subdomains for
 free (`accounts.google.com` → `Google`). The exception is a consumer mail
 provider, where the person is the only identity available, so the local part is
-used instead (`jeremy.tunnell@gmail.com` → `Jeremy Tunnell`, never `Gmail`). Both
-lists live at the top of `mailbox_reader.js`.
+used instead (`jeremy.tunnell@gmail.com` → `Jeremy Tunnell`, never `Gmail`).
+
+That exception covers only what could actually be somebody's mailbox. A **role
+address** — `no-reply@`, `support@`, or anything carrying a no-reply marker
+(`AmericanExpress-no-reply`) — is infrastructure, and an address **below** a
+provider's own domain is the provider writing rather than one of its users, since
+a personal mailbox never lives at a subdomain. Both fall back to the organization:
+`no-reply@notify.proton.me` reads as `Proton`, not `No-Reply`.
+
+All four lists live at the top of `mailbox_reader.js`. The same rules are mirrored
+in the native mail kits (`MailDisplay` in `ios/joinery-kit/.../MailModels.swift`
+and `android/joinery-android-mail/.../MailModels.kt`) so one message reads the same
+in the app and the browser — change them together. Each of the three has its own
+guard: `plugins/mailbox/tests/sender_name.mjs`, `MailParsingTests.swift`, and
+`MailParsingTest.kt`.
 
 An open message shows the name **and** the address (`senderFull()`). A display
 name is only ever as trustworthy as the domain behind it, and the domain is the
@@ -2139,10 +2160,11 @@ saved (filling a display name the harvest never captured) instead of inserting a
 
 ### Contact panel
 
-When a thread opens, an admin (permission 5+) sees a right-hand **Contact** panel for the
+When a thread opens, every mailbox user sees a right-hand **Contact** panel for the
 correspondent (`mailbox/sender_context`). The client sends the **message id, never an
 address**, so the endpoint can't be a membership oracle — the server re-derives the
-counterparty from a message already in the caller's scope.
+counterparty from a message already in the caller's scope, and that scope binds admin and
+non-admin alike.
 
 The panel's card names the correspondent, shows their address, and states whether they are
 **In Contacts** or **Not in Contacts** — the latter with a one-click **+ Add** that posts
@@ -2150,10 +2172,15 @@ the address (with the display name from the message) to `mailbox/contacts_import
 re-renders from the server. For a known contact it also shows how often the address has
 been seen, when it was last and first seen, and a link that searches the mailbox for all
 mail with that address. A sealed contact store with no open window can answer neither way,
-so the card says **Contacts locked** and offers Unlock rather than asserting "not a contact". Below the card, a **Site account** section resolves the address with
-`User::GetByEmail` — joined date and a link to the admin edit page, or "No account on this
-site" — followed by recent orders / event registrations / conversation count, each present
-only when its plugin/feature is active. Non-admins never see the panel; it is lazy,
+so the card says **Contacts locked** and offers Unlock rather than asserting "not a contact".
+
+Below the card, a **Site account** section is **admin-only** (permission 5+), because member
+records, orders and registrations are operator data: it resolves the address with
+`User::GetByEmail` and shows the joined date and a link to the admin edit page, or "No
+account on this site", followed by recent orders / event registrations / conversation count,
+each present only when its plugin/feature is active. For a non-admin the server never looks,
+returns `account_visible:false`, and the client omits the whole section — so an absent
+section reads as "not disclosed to you", never as "no account". The panel is lazy,
 session-cached, collapsible, and hidden below a width breakpoint.
 
 ## API Surface
@@ -2173,7 +2200,7 @@ The mailbox is exposed to API clients (the native mobile mail screens,
 | `draft_attachment_delete` | Remove one saved attachment from a draft — `draft_id`, `attachment_id` (author-scoped, non-inline) |
 | `signature_save` | Save the caller's compose signature for one of their mailboxes |
 | `contacts` / `contact_delete` / `contacts_import` | List (decrypted, ranked) / delete / import-or-add the caller's contacts |
-| `sender_context` | Resolve a thread counterparty (by message id) to their contact-store entry and their member record — admin only |
+| `sender_context` | Resolve a thread counterparty (by message id) to the caller's contact-store entry, plus (admins only) their member record, orders and registrations |
 
 Each action is a `logic/{action}_logic.php` with an `_logic_api()` opt-in that
 builds a `MailboxViewer` for the key's user and goes through

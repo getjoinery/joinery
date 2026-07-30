@@ -221,9 +221,14 @@ abstract class PublicPageBase {
 		}
 
 		$items = array();
-		foreach ($menu_data['user_menu']['items'] as $item) {
+		foreach (($menu_data['user_menu']['member_nav'] ?? array()) as $item) {
 			$slug = $item['slug'] ?? '';
 			if ($slug === 'core-home' || $slug === 'core-signout' || self::isAdminMenuItem($item)) {
+				continue;
+			}
+			// A parented row (AI Memory under AI, Devices under Filtering) lives
+			// inside its section, not on the top-level nav.
+			if (!empty($item['parent'])) {
 				continue;
 			}
 			$items[] = $item;
@@ -258,6 +263,68 @@ abstract class PublicPageBase {
 			echo '<a href="' . htmlspecialchars($item['link'], ENT_QUOTES, 'UTF-8') . '" class="jy-member-subnav-link' . $active . '">' . htmlspecialchars($item['label'], ENT_QUOTES, 'UTF-8') . '</a>';
 		}
 		echo '</nav></div>';
+	}
+
+	/**
+	 * The member settings rail: seeded 'member_settings' menu rows — the core
+	 * account pages plus plugin-contributed sections (declared as settingsMenu
+	 * in plugin.json), permission- and setting-gated like every menu location.
+	 *
+	 * @return array List of items (label, link, icon, slug).
+	 */
+	public static function member_settings_items() {
+		$session = SessionControl::get_instance();
+		if (!$session->is_logged_in()) {
+			return array();
+		}
+		require_once(PathHelper::getIncludePath('data/admin_menus_class.php'));
+		try {
+			$rows = MultiAdminMenu::get_user_dropdown_items(true, $session->get_permission(), 'member_settings');
+		} catch (PDOException $e) {
+			// Location not yet seeded (before update_database has run).
+			return array();
+		}
+		$items = array();
+		foreach ($rows as $row) {
+			$items[] = array(
+				'label' => $row->get('amu_menudisplay'),
+				'link'  => $row->get('amu_defaultpage'),
+				'icon'  => $row->get('amu_icon'),
+				'slug'  => $row->get('amu_slug'),
+			);
+		}
+		return $items;
+	}
+
+	/**
+	 * Open the settings hub layout: the left rail listing every member
+	 * settings section, plus the content column the caller's page body
+	 * renders into. Close with settings_layout_end().
+	 *
+	 * @param string|null $active_link Rail link to mark active; defaults to
+	 *                                 the current request path (pass one when
+	 *                                 the page is a sub-page of a section,
+	 *                                 e.g. the authenticator test under
+	 *                                 /profile/security).
+	 */
+	public static function settings_layout_start($active_link = NULL) {
+		if ($active_link === NULL) {
+			$active_link = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+		}
+		$output = '<div class="jy-settings-layout">';
+		$output .= '<nav class="jy-settings-nav" aria-label="Settings sections">';
+		foreach (self::member_settings_items() as $item) {
+			$active = ($item['link'] === $active_link) ? ' active' : '';
+			$output .= '<a href="' . htmlspecialchars($item['link'], ENT_QUOTES, 'UTF-8') . '" class="jy-settings-nav-link' . $active . '">'
+				. htmlspecialchars($item['label'], ENT_QUOTES, 'UTF-8') . '</a>';
+		}
+		$output .= '</nav>';
+		$output .= '<div class="jy-settings-content">';
+		return $output;
+	}
+
+	public static function settings_layout_end() {
+		return '</div></div><!-- /.jy-settings-layout -->';
 	}
 
 	/**
@@ -343,19 +410,37 @@ abstract class PublicPageBase {
 		$user_permission = $is_logged_in ? $session->get_permission() : 0;
 		try {
 			$rows = MultiAdminMenu::get_user_dropdown_items($is_logged_in, $user_permission);
-			$items = array();
+			$nav_items = array();
 			foreach ($rows as $row) {
-				$items[] = [
-					'label' => $row->get('amu_menudisplay'),
-					'link'  => $row->get('amu_defaultpage'),
-					'icon'  => $row->get('amu_icon'),
-					'slug'  => $row->get('amu_slug'),
+				$nav_items[] = [
+					'label'  => $row->get('amu_menudisplay'),
+					'link'   => $row->get('amu_defaultpage'),
+					'icon'   => $row->get('amu_icon'),
+					'slug'   => $row->get('amu_slug'),
+					'parent' => $row->get('amu_parent_menu_id'),
 				];
 			}
-			$menu_data['user_menu']['items'] = $items;
 		} catch (PDOException $e) {
 			// Columns missing during initial deploy / before update_database has run.
-			$menu_data['user_menu']['items'] = [];
+			$nav_items = array();
+		}
+
+		// The seeded profile-menu rows drive two surfaces: the member section
+		// nav (member_nav) and the admin launcher (launcher_items). The user
+		// dropdown itself is identity-only — account, settings, sign out — so
+		// it stops mirroring the section nav.
+		$menu_data['user_menu']['member_nav'] = $nav_items;
+		$menu_data['user_menu']['launcher_items'] = array_values(array_filter($nav_items, function ($item) {
+			return self::isAdminLauncherItem($item);
+		}));
+		if ($is_logged_in) {
+			$menu_data['user_menu']['items'] = [
+				['label' => 'Dashboard', 'link' => '/profile', 'icon' => 'user', 'slug' => 'core-profile'],
+				['label' => 'Settings', 'link' => '/profile/settings', 'icon' => 'cog', 'slug' => 'core-settings'],
+				['label' => 'Sign out', 'link' => '/logout', 'icon' => 'sign-out', 'slug' => 'core-signout'],
+			];
+		} else {
+			$menu_data['user_menu']['items'] = $nav_items;
 		}
 
 		// 3. Header menu providers (cart, etc.)
@@ -897,43 +982,15 @@ abstract class PublicPageBase {
 			echo '<script>document.addEventListener("DOMContentLoaded",function(){document.body.classList.add("jy-app-mode");});</script>' . "\n";
 		}
 
-		// Auto-inject admin bar CSS in head
-		if ($this->should_show_admin_bar()) {
-			$this->render_admin_bar_css();
-			// Add JavaScript to inject admin bar HTML after page loads
-			echo '<script>
-			document.addEventListener("DOMContentLoaded", function() {
-				document.body.classList.add("joinery-admin-bar-active");
-				var adminBarHtml = ' . json_encode($this->get_admin_bar_html()) . ';
-				document.body.insertAdjacentHTML("afterbegin", adminBarHtml);
-				
-				// Add theme switcher functionality
-				window.joineryAdminBarSwitchTheme = function(theme) {
-					joineryApi.post("theme_switch", { theme: theme })
-					.then(function() { window.location.reload(); })
-					.catch(function(error) {
-						console.error("Theme switch error:", error);
-						alert("Failed to switch theme: " + error.message);
-					});
-				};
-
-				// Tap-to-toggle admin bar dropdowns. Desktop keeps its hover behaviour
-				// (unchanged); this only adds a click path so the theme switcher and
-				// "+ New" menus are reachable on touch devices where hover does not fire.
-				document.querySelectorAll("#joinery-admin-bar .joinery-admin-bar-dropdown > span").forEach(function(trigger){
-					trigger.addEventListener("click", function(e){
-						e.stopPropagation();
-						var dd = trigger.parentElement;
-						var wasOpen = dd.classList.contains("open");
-						document.querySelectorAll("#joinery-admin-bar .joinery-admin-bar-dropdown.open").forEach(function(o){ o.classList.remove("open"); });
-						if (!wasOpen) dd.classList.add("open");
-					});
-				});
-				document.addEventListener("click", function(){
-					document.querySelectorAll("#joinery-admin-bar .joinery-admin-bar-dropdown.open").forEach(function(o){ o.classList.remove("open"); });
-				});
-			});
-			</script>';
+		// Floating Admin chip: gives a permission-5+ user browsing the public
+		// site a one-click path into the admin area. Member pages already carry
+		// an Admin header button and admin pages are the destination, so
+		// neither shows the chip (see should_show_admin_chip()).
+		if ($this->should_show_admin_chip()) {
+			$this->render_admin_chip_css();
+			echo '<script>document.addEventListener("DOMContentLoaded", function() {'
+				. 'document.body.insertAdjacentHTML("beforeend", ' . json_encode($this->get_admin_chip_html()) . ');'
+				. '});</script>';
 		}
 
 		// NOTE: Do not default $options['title'] / $options['meta_description'] here.
@@ -1081,27 +1138,15 @@ abstract class PublicPageBase {
 	}
 
 	/**
-	 * Auto-inject admin bar after <body> tag - call this early in body content
+	 * Get the admin chip HTML as a string for JavaScript injection.
 	 */
-	public function auto_inject_admin_bar() {
-		if ($this->should_show_admin_bar()) {
-			echo '<script>document.body.classList.add("joinery-admin-bar-active");</script>';
-			$this->render_admin_bar();
-		}
-	}
-
-	/**
-	 * Get admin bar HTML as string for JavaScript injection
-	 */
-	private function get_admin_bar_html() {
-		if (!$this->should_show_admin_bar()) {
+	private function get_admin_chip_html() {
+		if (!$this->should_show_admin_chip()) {
 			return '';
 		}
-		
 		ob_start();
-		$this->render_admin_bar();
-		$html = ob_get_clean();
-		return $html;
+		$this->render_admin_chip();
+		return ob_get_clean();
 	}
 
 
@@ -1447,16 +1492,25 @@ abstract class PublicPageBase {
 	abstract protected function getTableClasses();
 
 	/**
-	 * Check if admin bar should be displayed.
-	 * Requires permission level 10 and the show_admin_bar setting to be enabled (default: on).
+	 * Whether the floating Admin chip should render on this page.
+	 * Requires permission 5+ and the show_admin_bar setting (default: on).
+	 * Suppressed in app webviews, in the member area (its header already has an
+	 * Admin button), and on admin pages (the chip's destination).
 	 */
-	protected function should_show_admin_bar() {
+	protected function should_show_admin_chip() {
 		$session = SessionControl::get_instance();
-		// The admin bar is site chrome — never shown inside app webviews.
+		// The chip is site chrome — never shown inside app webviews.
 		if ($session->is_app_session()) {
 			return false;
 		}
-		if ($session->get_permission() < 10) {
+		if ($session->get_permission() < 5) {
+			return false;
+		}
+		if ($this->in_member_area()) {
+			return false;
+		}
+		$path = $this->request_path();
+		if (str_starts_with($path, '/admin') || preg_match('#^/plugins/[^/]+/admin(/|$)#', $path)) {
 			return false;
 		}
 		$settings = Globalvars::get_instance();
@@ -1466,206 +1520,37 @@ abstract class PublicPageBase {
 	}
 
 	/**
-	 * Render the admin bar CSS
+	 * Render the floating Admin chip CSS.
 	 */
-	protected function render_admin_bar_css() {
-		if (!$this->should_show_admin_bar()) {
+	protected function render_admin_chip_css() {
+		if (!$this->should_show_admin_chip()) {
 			return;
 		}
 		?>
-		<style id="joinery-admin-bar-css">
-			/* Admin Bar Styles */
-			body.joinery-admin-bar-active {
-				margin-top: 32px !important;
+		<style id="joinery-admin-chip-css">
+			#joinery-admin-chip {
+				position: fixed;
+				bottom: 16px;
+				left: 16px;
+				z-index: 9999;
+				display: inline-flex;
+				align-items: center;
+				gap: 6px;
+				background: #23282d;
+				color: #eee;
+				font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+				font-size: 13px;
+				font-weight: 500;
+				line-height: 1;
+				padding: 8px 14px;
+				border-radius: 999px;
+				text-decoration: none;
+				box-shadow: 0 2px 8px rgba(0,0,0,.25);
+				opacity: .85;
 			}
-			
-			/* Fix for Falcon theme sticky navbar */
-			body.joinery-admin-bar-active .navbar-top {
-				top: 32px !important;
-			}
-			
-			/* Fix for Falcon theme admin sidebar */
-			body.joinery-admin-bar-active .navbar-vertical {
-				top: 32px !important;
-				height: calc(100vh - 32px) !important;
-			}
-
-			/* Fix for joinery-system theme sidebar and topbar */
-			body.joinery-admin-bar-active .sidebar {
-				top: 32px !important;
-				height: calc(100vh - 32px) !important;
-			}
-			body.joinery-admin-bar-active .topbar {
-				top: 32px !important;
-			}
-			
-			/* Fix for any other sticky/fixed elements */
-			body.joinery-admin-bar-active .sticky-top {
-				top: 32px !important;
-			}
-			
-			body.joinery-admin-bar-active .fixed-top {
-				top: 32px !important;
-			}
-			
-			#joinery-admin-bar {
-				background: #23282d !important;
-				height: 32px !important;
-				position: fixed !important;
-				top: 0 !important;
-				left: 0 !important;
-				right: 0 !important;
-				z-index: 99999 !important;
-				font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
-				font-size: 13px !important;
-				line-height: 32px !important;
-				box-shadow: 0 1px 0 rgba(0,0,0,.1) !important;
-			}
-			
-			#joinery-admin-bar * {
-				margin: 0 !important;
-				padding: 0 !important;
-				box-sizing: border-box !important;
-				color: #eee !important;
-				text-decoration: none !important;
-			}
-			
-			.joinery-admin-bar-left,
-			.joinery-admin-bar-right {
-				display: inline-block !important;
-			}
-			
-			.joinery-admin-bar-left {
-				float: left !important;
-			}
-			
-			.joinery-admin-bar-right {
-				float: right !important;
-				padding-right: 10px !important;
-			}
-			
-			.joinery-admin-bar-logo,
-			.joinery-admin-bar-site-name,
-			.joinery-admin-bar-new,
-			.joinery-admin-bar-template,
-			.joinery-admin-bar-admin,
-			.joinery-admin-bar-user {
-				display: inline-block !important;
-				padding: 0 15px !important;
-				height: 32px !important;
-				line-height: 32px !important;
-			}
-			
-			#joinery-admin-bar .joinery-admin-bar-user {
-				padding-right: 10px !important;
-			}
-			
-			.joinery-admin-bar-logo {
-				background: #32373c !important;
-				font-weight: bold !important;
-				width: 32px !important;
-				text-align: center !important;
-			}
-			
-			#joinery-admin-bar > div > a {
-				padding: 0 15px !important;
-			}
-			
-			#joinery-admin-bar a:hover {
-				background: #32373c !important;
-				color: #00b9eb !important;
-			}
-			
-			.joinery-admin-bar-dropdown {
-				display: inline-block !important;
-				position: relative !important;
-			}
-			
-			.joinery-admin-bar-dropdown-content {
-				display: none !important;
-				position: absolute !important;
-				background: #32373c !important;
-				min-width: 160px !important;
-				box-shadow: 0 2px 5px rgba(0,0,0,0.2) !important;
-				top: 32px !important;
-				left: 0 !important;
-				padding: 4px 0 !important;
-			}
-			
-			.joinery-admin-bar-dropdown:hover .joinery-admin-bar-dropdown-content {
-				display: block !important;
-			}
-			
-			#joinery-admin-bar .joinery-admin-bar-dropdown-content a {
-				display: block !important;
-				padding: 3px 12px !important;
-				line-height: 20px !important;
-				white-space: nowrap !important;
-			}
-			
-			#joinery-admin-bar .joinery-admin-bar-dropdown-content a:hover {
-				background: #23282d !important;
-			}
-			
-			.joinery-admin-bar-new {
-				cursor: pointer !important;
-				padding: 0 15px !important;
-			}
-			
-			.joinery-admin-bar-new:hover {
-				background: #32373c !important;
-				color: #00b9eb !important;
-			}
-			
-			/* Theme switcher styles */
-			.joinery-admin-bar-theme-dropdown {
-				display: inline-block !important;
-				position: relative !important;
-			}
-			
-			.joinery-admin-bar-theme-current {
-				cursor: pointer !important;
-				display: inline-block !important;
-				padding: 0 15px !important;
-			}
-			
-			.joinery-admin-bar-theme-current:hover {
-				background: #32373c !important;
-				color: #00b9eb !important;
-			}
-			
-			.joinery-admin-bar-theme-current:after {
-				content: " ▼" !important;
-				font-size: 10px !important;
-				margin-left: 5px !important;
-			}
-			
-			/* Tap-to-toggle support (added by admin bar JS on touch / mobile) */
-			.joinery-admin-bar-dropdown.open .joinery-admin-bar-dropdown-content {
-				display: block !important;
-			}
-
-			/* Responsive adjustments */
-			@media screen and (max-width: 768px) {
-				.joinery-admin-bar-template {
-					display: none !important;
-				}
-			}
-			@media screen and (max-width: 767px) {
-				/* On admin pages the admin topbar already provides navigation, so the
-				   admin bar is redundant clutter on a phone — drop it and reclaim the
-				   32px offsets it reserves. Public pages (no .admin-layout) keep it. */
-				body:has(.admin-layout) #joinery-admin-bar { display: none !important; }
-				body.joinery-admin-bar-active:has(.admin-layout) { margin-top: 0 !important; }
-				body.joinery-admin-bar-active:has(.admin-layout) .sidebar {
-					top: 0 !important;
-					height: 100vh !important;
-				}
-				body.joinery-admin-bar-active:has(.admin-layout) .topbar { top: 0 !important; }
-
-				/* On public pages, slim the bar so it fits one line instead of wrapping */
-				#joinery-admin-bar .joinery-admin-bar-site-name,
-				#joinery-admin-bar .joinery-admin-bar-user { display: none !important; }
+			#joinery-admin-chip:hover {
+				opacity: 1;
+				color: #fff;
 			}
 		</style>
 		<?php
@@ -1710,76 +1595,17 @@ abstract class PublicPageBase {
 	}
 
 	/**
-	 * Render the admin bar HTML
+	 * Render the floating Admin chip — a single link into the admin area.
 	 */
-	public function render_admin_bar() {
-		if (!$this->should_show_admin_bar()) {
+	public function render_admin_chip() {
+		if (!$this->should_show_admin_chip()) {
 			return;
 		}
-		
-		$session = SessionControl::get_instance();
-		$settings = Globalvars::get_instance();
-		$user = new User($session->get_user_id());
-		
-		$site_name = $settings->get_setting('site_name', true, true) ?: 'Joinery';
-		$theme_template = $settings->get_setting('theme_template', true, true) ?: 'default';
-		$user_name = $user->display_name();
-		$permission = $session->get_permission();
-		
-		// Get themes from directory only
-		$directory_themes = ThemeHelper::getAvailableThemes();
-		
 		?>
-		<div id="joinery-admin-bar">
-			<div class="joinery-admin-bar-left">
-				<span class="joinery-admin-bar-logo">J</span>
-				<a href="/" class="joinery-admin-bar-site-name"><?php echo htmlspecialchars($site_name); ?></a>
-				<div class="joinery-admin-bar-dropdown">
-					<span class="joinery-admin-bar-new">+ New</span>
-					<div class="joinery-admin-bar-dropdown-content">
-						<a href="/admin/admin_page_edit">Page</a>
-						<a href="/admin/admin_post_edit">Post</a>
-						<a href="/admin/admin_user_add">User</a>
-						<a href="/admin/admin_file_upload">File</a>
-					</div>
-				</div>
-			</div>
-			<div class="joinery-admin-bar-right">
-				<div class="joinery-admin-bar-theme-dropdown joinery-admin-bar-dropdown">
-					<span class="joinery-admin-bar-theme-current">Theme: <?php echo htmlspecialchars($theme_template); ?></span>
-					<div class="joinery-admin-bar-dropdown-content">
-						<?php
-						// Display directory themes
-						foreach ($directory_themes as $theme_key => $theme_obj):
-							if (method_exists($theme_obj, 'get')) {
-								$display_name = $theme_obj->get('display_name', $theme_key);
-								$is_plugin_theme = $theme_obj->get('is_plugin_theme', false);
-							} else {
-								$display_name = $theme_key;
-								$is_plugin_theme = false;
-							}
-							$is_active = ($theme_key == $theme_template);
-							if ($is_plugin_theme): ?>
-								<a href="/admin/admin_settings"
-								   <?php echo $is_active ? 'style="font-weight: bold !important;"' : ''; ?>>
-									<?php echo htmlspecialchars($display_name); ?> &#x2192;
-									<?php echo $is_active ? ' ✓' : ''; ?>
-								</a>
-							<?php else: ?>
-							<a href="#" onclick="joineryAdminBarSwitchTheme('<?php echo htmlspecialchars($theme_key); ?>'); return false;"
-							   <?php echo $is_active ? 'style="font-weight: bold !important;"' : ''; ?>>
-								<?php echo htmlspecialchars($display_name); ?>
-								<?php echo $is_active ? ' ✓' : ''; ?>
-							</a>
-							<?php endif; ?>
-						<?php endforeach; ?>
-
-					</div>
-				</div>
-				<a href="/admin/admin_users" class="joinery-admin-bar-admin">Dashboard</a>
-				<span class="joinery-admin-bar-user"><?php echo htmlspecialchars($user_name); ?> (<?php echo $permission; ?>)</span>
-			</div>
-		</div>
+		<a id="joinery-admin-chip" href="/admin" title="Admin area">
+			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+			Admin
+		</a>
 		<?php
 	}
 }

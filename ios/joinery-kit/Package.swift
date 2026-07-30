@@ -16,7 +16,7 @@
 // JoineryBillingKit — the native in-app purchase surface (StoreKit 2 purchase,
 // plan change, restore, server-authoritative status), registered as the
 // `billing` screen; same layering as mail.
-// Version: 0.7.0 (native billing surface: StoreKit 2 purchase/restore, billing screen)
+// Version: 0.7.1 (sender labels match the web reader: organization over local part)
 import PackageDescription
 
 let package = Package(

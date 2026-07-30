@@ -139,9 +139,15 @@ class PublicPage extends PublicPageBase {
             <?php $this->get_logo(); ?>
         </a>
         <div class="jy-header-right">
+            <?php
+            $menu_data = $this->get_menu_data();
+            // The public marketing menu belongs to the public site; member
+            // pages are an app surface and the member section nav is the nav.
+            $show_marketing_nav = !$this->in_member_area();
+            if ($show_marketing_nav):
+            ?>
             <nav class="jy-nav-links" aria-label="Main navigation">
                 <?php
-                $menu_data = $this->get_menu_data();
                 foreach ($menu_data['main_menu'] as $menu_item) {
                     $active_class = !empty($menu_item['is_active']) ? ' class="active"' : '';
                     if (!empty($menu_item['submenu'])) {
@@ -160,12 +166,15 @@ class PublicPage extends PublicPageBase {
                 }
                 ?>
             </nav>
+            <?php endif; ?>
             <div class="jy-header-icons">
                 <?php $this->top_right_menu(); ?>
             </div>
+            <?php if ($show_marketing_nav): ?>
             <button class="jy-menu-toggle" aria-label="Toggle navigation menu" aria-expanded="false">
                 <span></span><span></span><span></span>
             </button>
+            <?php endif; ?>
         </div>
     </div>
 </header>
