@@ -82,15 +82,33 @@ class EmailSender {
     }
 
     /**
-     * The platform's active outbound provider instance (the configured
-     * email_service, default mailgun), or null when that key resolves to no
-     * provider. Exposed so the hidden-origin compose path
-     * (RawRelayComposeTransport) can reach the same provider a normal send()
-     * would use and submit an app-signed raw message through its API.
+     * The outbound provider this site is set to use, as a bare key, or '' when
+     * nobody has chosen one.
+     *
+     * An empty answer is a real answer here and is deliberately not filled in
+     * with a guess. Substituting a provider nobody selected means a site that
+     * has never been configured fails at that provider's API with an
+     * authentication error, which describes a credential problem rather than
+     * the actual problem: no email service is set up. Every caller below
+     * handles '' explicitly and says so.
+     */
+    public static function activeServiceKey(): string {
+        $settings = Globalvars::get_instance();
+        return trim((string)$settings->get_setting('email_service'));
+    }
+
+    /**
+     * The platform's active outbound provider instance, or null when none is
+     * configured or the configured key resolves to no provider. Exposed so the
+     * hidden-origin compose path (RawRelayComposeTransport) can reach the same
+     * provider a normal send() would use and submit an app-signed raw message
+     * through its API.
      */
     public static function getActiveProvider(): ?EmailServiceProvider {
-        $settings = Globalvars::get_instance();
-        $service = $settings->get_setting('email_service') ?: 'mailgun';
+        $service = self::activeServiceKey();
+        if ($service === '') {
+            return null;
+        }
         return self::getProvider($service);
     }
 
@@ -215,8 +233,26 @@ class EmailSender {
         }
 
         // Use service selection with fallback
-        $service = $settings->get_setting('email_service') ?: 'mailgun';
-        $fallback = $settings->get_setting('email_fallback_service') ?: 'smtp';
+        $service = self::activeServiceKey();
+        $fallback = trim((string)$settings->get_setting('email_fallback_service'));
+
+        if ($service === '' && $fallback === '') {
+            // Nothing to try. Queued rather than dropped, so the messages a
+            // brand-new site generates before anyone reaches the settings page
+            // are still there to go out once a provider is named.
+            $this->logEmailDebug('No email service is configured — nothing was sent. Set one at /admin/admin_settings_email.');
+            if ($queue_on_failure) {
+                $this->queueForRetry($message);
+            }
+            return false;
+        }
+
+        if ($service === '') {
+            // Only a fallback is named. Use it rather than refusing: the
+            // operator has clearly configured something.
+            $service = $fallback;
+            $fallback = '';
+        }
 
         $result = $this->sendWithService($service, $message);
 
@@ -323,8 +359,18 @@ class EmailSender {
         }
 
         $settings = Globalvars::get_instance();
-        $service = $settings->get_setting('email_service') ?: 'mailgun';
-        $fallback = $settings->get_setting('email_fallback_service') ?: '';
+        $service = self::activeServiceKey();
+        $fallback = trim((string)$settings->get_setting('email_fallback_service'));
+
+        if ($service === '' && $fallback !== '') {
+            $service = $fallback;
+            $fallback = '';
+        }
+
+        if ($service === '') {
+            $this->logEmailDebug('No email service is configured — batch not sent. Set one at /admin/admin_settings_email.');
+            return ['success' => false, 'failed_recipients' => $recipients];
+        }
 
         $provider = self::getProvider($service);
         if (!$provider) {
@@ -430,7 +476,15 @@ class EmailSender {
      * Validate email service configuration
      */
     public function validateServiceConfiguration($service = null) {
-        $service = $service ?: $this->settings->get_setting('email_service') ?: 'mailgun';
+        $service = $service ?: self::activeServiceKey();
+
+        if ($service === '') {
+            return [
+                'valid' => false,
+                'service' => '',
+                'errors' => ['No email service is configured. Choose one under Settings → Email.'],
+            ];
+        }
 
         $provider_class = self::getProviderClass($service);
         if (!$provider_class) {
@@ -458,7 +512,10 @@ class EmailSender {
      * Get which service would be used to send (for testing)
      */
     public function getServiceType() {
-        $service = $this->settings->get_setting('email_service') ?: 'mailgun';
+        $service = self::activeServiceKey();
+        if ($service === '') {
+            return 'none';
+        }
         $provider_class = self::getProviderClass($service);
 
         if ($provider_class) {

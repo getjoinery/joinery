@@ -71,9 +71,31 @@ check(count($labelled) === count($mailgun_fields),
 	'every provider field carries a label, so a page never has to invent one');
 
 section('the configured active provider resolves to a real instance');
-$active = EmailSender::getActiveProvider();
-check($active instanceof EmailServiceProvider, 'getActiveProvider returns an EmailServiceProvider',
-	'email_service=' . ($settings->get_setting('email_service') ?: '(default mailgun)'));
+
+// No provider chosen is a legitimate state, and the whole point of leaving the
+// setting empty by default is that the platform says so instead of guessing.
+// A guess would send a fresh install's first password reset at a provider
+// nobody selected and report that provider's auth error as the reason.
+$active_key = EmailSender::activeServiceKey();
+
+if ($active_key === '') {
+	$sender = new EmailSender();
+	check(EmailSender::getActiveProvider() === null,
+		'an unconfigured site resolves to no provider rather than a default one');
+	check($sender->getServiceType() === 'none',
+		'getServiceType reports none, not a provider that was never chosen');
+	$validation = $sender->validateServiceConfiguration();
+	check(isset($validation['valid']) && $validation['valid'] === false,
+		'validateServiceConfiguration reports invalid when nothing is configured');
+	check(!empty($validation['errors'])
+		&& stripos(implode(' ', $validation['errors']), 'no email service') !== false,
+		'and gives the real reason rather than a credential error',
+		implode(' ', $validation['errors'] ?? []));
+} else {
+	$active = EmailSender::getActiveProvider();
+	check($active instanceof EmailServiceProvider, 'getActiveProvider returns an EmailServiceProvider',
+		'email_service=' . $active_key);
+}
 $fallback_key = $settings->get_setting('email_fallback_service');
 if ($fallback_key) {
 	check(isset($discovered[$fallback_key]), "the fallback provider ('$fallback_key') is a discovered provider");

@@ -31,15 +31,22 @@ harness_boot();
 $site_root   = dirname(PathHelper::getRootDir());
 $install_sh  = $site_root . '/maintenance_scripts/install_tools/install.sh';
 $site_init   = $site_root . '/maintenance_scripts/install_tools/_site_init.sh';
+$handoff     = $site_root . '/maintenance_scripts/install_tools/linode_stackscript.sh';
+$wrapper     = $site_root . '/maintenance_scripts/install_tools/linode_stackscript_wrapper.sh';
 $reset_tool  = $site_root . '/maintenance_scripts/sysadmin_tools/reset_admin_password.php';
+$bundle_tool = $site_root . '/maintenance_scripts/sysadmin_tools/install_bundle.php';
 $license     = $site_root . '/LICENSE.md';
 $publish     = PathHelper::getIncludePath('plugins/server_manager/includes/publish_upgrade.php');
 $quickstart  = PathHelper::getIncludePath('docs/quickstart.md');
+$upgrade     = PathHelper::getIncludePath('utils/upgrade.php');
 
 $install_src   = is_file($install_sh) ? file_get_contents($install_sh) : '';
 $site_init_src = is_file($site_init) ? file_get_contents($site_init) : '';
+$handoff_src   = is_file($handoff) ? file_get_contents($handoff) : '';
+$wrapper_src   = is_file($wrapper) ? file_get_contents($wrapper) : '';
 $publish_src   = is_file($publish) ? file_get_contents($publish) : '';
 $quickstart_md = is_file($quickstart) ? file_get_contents($quickstart) : '';
+$upgrade_src   = is_file($upgrade) ? file_get_contents($upgrade) : '';
 
 
 section('DNS not being ready does not stop an install');
@@ -198,5 +205,242 @@ if ($newest === null) {
 	check($rc === 0, 'the newest core archive carries public_html/LICENSE.md',
 		basename($newest) . ($rc === 0 ? '' : ' — the copy did not land in the archive'));
 }
+
+section('A published install fetches from the release site, and knows it');
+
+// The default is what every stranger following the published one-liner gets.
+// It pointed at dev for as long as the one-liner existed, so the audience the
+// docs were written for was handed the working tree of a development box.
+check(preg_match('/UPGRADE_SERVER="\$\{UPGRADE_SERVER:-https:\/\/getjoinery\.com\}"/', $install_src) === 1,
+    'install.sh defaults UPGRADE_SERVER to the release site');
+check(strpos($quickstart_md, 'https://getjoinery.com/utils/latest_release') !== false,
+    'the published one-liner fetches from the same place');
+
+// Two unconnected knobs until this landed: --upgrade-server chose where the
+// installer fetched from, upgrade_source told the finished site where to fetch
+// from ever after, and nothing made them agree. A fresh install could come up
+// already ahead of the upstream it believed in.
+check(strpos($site_init_src, 'upgrade_source') !== false,
+    '_site_init.sh records where this install came from');
+check(strpos($site_init_src, 'UPGRADE_SOURCE_VALUE="${UPGRADE_SERVER%/}"') !== false,
+    'and records the endpoint actually installed from, not a hardcoded one');
+check(strpos($install_src, 'export UPGRADE_SERVER') !== false,
+    'install.sh exports it so _site_init.sh can see it');
+
+
+section('The OS pin is a stop, not a warning');
+
+// PHP 8.3 paths are hardcoded from server setup down, so continuing on another
+// release produced a box that looked installed and was not.
+check(strpos($install_src, '--allow-unsupported-os') !== false,
+    'there is a documented way past the check',
+    'a check with no override gets deleted the first time someone needs past it');
+check(preg_match('/Unsupported OS.*?exit 1/s', $install_src) === 1,
+    'and without it the run stops');
+// One check, one place. `site` presupposes `server` ran and nothing persists
+// the override, so a second copy would only fire on a box prepared by other
+// means and would demand the flag twice.
+check(substr_count($install_src, '--allow-unsupported-os) ALLOW_UNSUPPORTED_OS=1') === 1,
+    'the guard lives in exactly one subcommand');
+
+
+section('A deferred certificate finishes on its own');
+
+// The install no longer aborts when DNS is not ready — but nothing on the node
+// ever retried either. That logic lived only in the control plane, and this
+// path has no control plane.
+check(strpos($install_src, 'install_ssl_retry_timer') !== false,
+    'a deferred certificate installs a retry timer');
+check(strpos($install_src, 'joinery-ssl-retry@.timer') !== false,
+    'the timer is templated per domain, so a multi-site box gets one each');
+
+// The DNS lookup before certbot is what makes an indefinite retry safe: Let's
+// Encrypt counts five failed validations per hostname per hour, and a failed
+// lookup counts for nothing.
+$retry_block = '';
+if (preg_match('/install_ssl_retry_timer\(\) \{.*?\nRETRY_EOF/s', $install_src, $m)) {
+    $retry_block = $m[0];
+}
+check($retry_block !== '', 'the retry script is findable');
+check($retry_block !== '' && strpos($retry_block, 'dig +short') !== false,
+    'it resolves the domain before spending a validation attempt');
+check($retry_block !== '' && strpos($retry_block, 'have_real_cert') !== false,
+    'it disables itself on a CA-issued certificate, not on any file at the cert path',
+    'provision_origin_cert falls back to self-signed, so file-exists would end the retries at once');
+
+
+section('An upgrade proves the code it just installed');
+
+// A publish captures whatever was on the publisher's disk at that moment.
+// Nothing between there and a node reads a line of it; this is the first thing
+// that does.
+check(strpos($upgrade_src, "'/tests/run.php'") !== false
+    || strpos($upgrade_src, '/tests/run.php') !== false,
+    'upgrade.php runs the test suite after the swap');
+check(preg_match('/tests\/run\.php.*?\)\s*\.\s*\' safe/s', $upgrade_src) === 1
+    || strpos($upgrade_src, "' safe 2>&1'") !== false,
+    'the safe tier, not db',
+    'db is five and a half minutes and writes to a database — not an automatic step on a node');
+check(preg_match('/failed its own tests.*?performRollback/s', $upgrade_src) === 1,
+    'a failure rolls back to public_html_last');
+check(strpos($upgrade_src, 'The database was NOT rolled back') !== false,
+    'and says plainly that the schema did not come back with it',
+    'migrations run before the tests, so this is a recovery rather than a clean undo');
+
+
+section('The platform runs on one clock');
+
+// Every stored time is UTC and display conversion is per user, so a web request
+// and a scheduled task on the same box have to agree. They did not: the sed
+// touched only the Apache ini, leaving CLI and Docker on UTC and web requests
+// on New York.
+check(strpos($install_src, 'date.timezone = UTC') !== false,
+    'install.sh sets php.ini to UTC');
+check(strpos($install_src, 'America\\/New_York') === false,
+    'and no longer writes a local zone into php.ini');
+
+// The seeded user's own display timezone is a different question and stays put.
+$install_sql = PathHelper::getIncludePath('utils/create_install_sql.php');
+$install_sql_src = is_file($install_sql) ? file_get_contents($install_sql) : '';
+check(strpos($install_sql_src, 'America/New_York') !== false,
+    'the seeded account still displays in America/New_York',
+    'platform timezone and a user\'s display timezone are separate; only the first changed');
+
+
+section('A fresh site installs the product, not the bare platform');
+
+$bundles_path = PathHelper::getIncludePath('install_bundles.json');
+check(is_file($bundles_path), 'install_bundles.json exists at the public_html root', $bundles_path);
+
+$bundles = is_file($bundles_path) ? json_decode((string)file_get_contents($bundles_path), true) : null;
+check(is_array($bundles), 'and is valid JSON');
+
+$declared = [];
+foreach ((array)$bundles as $name => $definition) {
+    if (strpos((string)$name, '_') === 0 || !is_array($definition)) {
+        continue;
+    }
+    $declared[$name] = $definition;
+}
+check(isset($declared['personal']), 'the default bundle is defined');
+
+// A bundle naming a plugin that is not shipped installs a shorter set than the
+// deployment promised, and reports success doing it.
+$missing = [];
+foreach ($declared as $name => $definition) {
+    foreach ((array)($definition['plugins'] ?? []) as $plugin) {
+        if (!is_dir(PathHelper::getIncludePath('plugins/' . $plugin))) {
+            $missing[] = $name . ':' . $plugin;
+        }
+    }
+}
+check(empty($missing), 'every plugin named in a bundle exists on disk',
+    $missing ? implode(', ', $missing) : '');
+
+check(is_file($bundle_tool), 'the bundle installer exists', $bundle_tool);
+$bundle_src = is_file($bundle_tool) ? file_get_contents($bundle_tool) : '';
+check(strpos($bundle_src, "PHP_SAPI !== 'cli'") !== false,
+    'it refuses to run outside the CLI');
+check(strpos($bundle_tool, '/maintenance_scripts/sysadmin_tools/') !== false,
+    'and lives outside the web root',
+    '/utils/<name> is routable with no router-level permission check');
+// Installing nothing and exiting 0 would leave a site missing the product it
+// was meant to be, with a status that said everything went fine.
+check(strpos($bundle_src, "no bundle named") !== false && strpos($bundle_src, 'exit(1)') !== false,
+    'an unknown bundle name is an error, not a silent no-op');
+check(strpos($site_init_src, 'install_bundle.php') !== false,
+    '_site_init.sh installs the bundle on a fresh site');
+check(strpos($site_init_src, 'JOINERY_INSTALL_BUNDLE') !== false,
+    'and the bundle name can be supplied by an unattended installer');
+
+
+section('The admin account is reachable by email from the start');
+
+// The address was hardcoded as admin@example.com everywhere, so a one-click
+// owner ended up with the only account on the site pointing at a mailbox
+// nobody can receive at — and password reset is the way back in.
+$reset_src_full = is_file($reset_tool) ? file_get_contents($reset_tool) : '';
+check(strpos($reset_src_full, '--set-email') !== false,
+    'the reset tool can change the address');
+check(preg_match('/set\(\'usr_email\', \$new_email\).*?\$user->save\(\)/s', $reset_src_full) === 1,
+    'in the same save as the password',
+    'otherwise there is a window where a fresh credential sits on an unreachable address');
+check(strpos($site_init_src, 'JOINERY_ADMIN_EMAIL') !== false,
+    '_site_init.sh honours an installer-supplied address');
+check(strpos($install_src, '--admin-email=') !== false,
+    'install.sh site takes it as a flag');
+
+
+section('An unconfigured mailer says so');
+
+// email_service defaulted to smtp, so a site that had never been configured
+// looked configured and simply could not deliver. Worse, EmailSender fell back
+// to mailgun in five places, so an empty setting silently meant Mailgun — and a
+// failed send reported a credential error for a provider nobody chose.
+$sender_src = file_get_contents(PathHelper::getIncludePath('includes/EmailSender.php'));
+check(strpos($sender_src, "?: 'mailgun'") === false,
+    'EmailSender never substitutes a provider nobody selected');
+check(strpos($sender_src, 'activeServiceKey') !== false,
+    'the configured provider is read through one place that can answer "none"');
+
+$settings_json = json_decode((string)file_get_contents(PathHelper::getIncludePath('settings.json')), true);
+$email_default = null;
+foreach ((array)($settings_json['settings'] ?? $settings_json) as $declaration) {
+    if (is_array($declaration) && ($declaration['name'] ?? '') === 'email_service') {
+        $email_default = $declaration['default'];
+    }
+}
+check($email_default === '', 'email_service declares no default',
+    'a preselected provider with no credentials is configured-but-useless, and denies an honest unconfigured state');
+
+// Unconditional, in both places an installer's output is read. A detection rule
+// that guesses wrong is worse than one extra line for an admin who is already
+// set up.
+check(strpos($install_src, 'admin_settings_email') !== false,
+    'the install summary points at email setup');
+check(strpos($site_init_src, 'admin_settings_email') !== false,
+    'so does the credentials file');
+
+
+section('The Linode path delegates and keeps its secrets');
+
+check(is_file($handoff), 'the handoff script ships in the archive', $handoff);
+check(is_file($wrapper), 'the pasted StackScript body is kept in the repo', $wrapper);
+
+// A wrapper that contains logic means every fix to that logic waits on a
+// Marketplace review. A wrapper that contains a handoff never needs touching
+// unless the field set changes.
+check(strpos($wrapper_src, 'linode_stackscript.sh') !== false,
+    'the wrapper hands off to the archive rather than doing the work');
+check(strpos($wrapper_src, 'getjoinery.com/utils/latest_release') !== false,
+    'and fetches from the release site');
+check(strpos($wrapper_src, 'version=') === false,
+    'with no pinned version',
+    'a pin needs a bump every publish, and a stale pin is worse than none');
+
+// A field is masked in the Linode UI, and kept out of the deployment log, only
+// if its name contains "password".
+check(preg_match('/UDF name="JOINERY_ADMIN_PASSWORD"/', $wrapper_src) === 1,
+    'the admin password field is named so Linode masks it');
+check(preg_match('/UDF name="JOINERY_LINODE_TOKEN_PASSWORD"/', $wrapper_src) === 1,
+    'and so is the API token');
+
+// The deployment log is readable by the deployer and outlives the install.
+check(!preg_match('/echo[^\n]*\$\{?JOINERY_ADMIN_PASSWORD/', $handoff_src),
+    'the handoff script never echoes the password');
+check(!preg_match('/echo[^\n]*\$\{?(JOINERY_)?LINODE_TOKEN/', $handoff_src),
+    'and never echoes the API token');
+check(strpos($handoff_src, 'export JOINERY_ADMIN_PASSWORD') !== false
+    && !preg_match('/install\.sh[^\n]*\$ADMIN_PASSWORD/', $handoff_src),
+    'the password reaches install.sh through the environment, not an argument',
+    'arguments are visible in ps to every user on the box');
+
+// install.sh already hard-fails on the wrong OS a few lines into the handoff, so
+// a second check here would just be a second place to update.
+check(strpos($handoff_src, '/etc/os-release') === false,
+    'the handoff script carries no OS check of its own');
+check(strpos($handoff_src, '--allow-unsupported-os') === false,
+    'and never passes the override');
+
 
 harness_finish();

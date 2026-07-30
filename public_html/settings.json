@@ -841,7 +841,7 @@
     },
     {
       "name": "email_fallback_service",
-      "default": "smtp",
+      "default": "",
       "group": "email_delivery",
       "label": "Fallback email service",
       "type": "select",
@@ -851,8 +851,9 @@
       "helptext": "Used when the primary service fails."
     },
     {
+      "_comment": "Empty by default, and deliberately so. A new site has no mail credentials of any kind, so any preselected provider would be configured-but-useless: the site would look set up, and a failed send would report that provider's authentication error rather than the truth, which is that nobody has chosen a provider yet. Empty is representable here and EmailSender reports it as unconfigured. Existing sites carry a value in stg_settings and are unaffected, since a declared default only applies when the row is absent.",
       "name": "email_service",
-      "default": "smtp",
+      "default": "",
       "group": "email_delivery",
       "label": "Primary email service",
       "type": "select",

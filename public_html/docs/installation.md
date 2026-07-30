@@ -29,7 +29,7 @@ Docker:
 
 ```bash
 mkdir -p /tmp/joinery && \
-  curl -sL https://dev.getjoinery.com/utils/latest_release | tar xz -C /tmp/joinery && \
+  curl -sL https://getjoinery.com/utils/latest_release | tar xz -C /tmp/joinery && \
   cd /tmp/joinery/maintenance_scripts/install_tools && \
   sudo ./install.sh docker && \
   sudo ./install.sh site mysite example.com 8080
@@ -39,11 +39,35 @@ Bare-metal:
 
 ```bash
 mkdir -p /tmp/joinery && \
-  curl -sL https://dev.getjoinery.com/utils/latest_release | tar xz -C /tmp/joinery && \
+  curl -sL https://getjoinery.com/utils/latest_release | tar xz -C /tmp/joinery && \
   cd /tmp/joinery/maintenance_scripts/install_tools && \
   sudo ./install.sh server && \
   sudo ./install.sh site mysite example.com
 ```
+
+### One-click deployment (Linode StackScript)
+
+A StackScript installs Joinery while the instance first boots, so the deployer fills in a form and never opens a terminal. Select it when creating a Linode, answer the fields, and a few minutes later the site is running with SSL and a login.
+
+The deploy form asks for as little as it can — every field is a chance for someone to abandon the form, and once this is a Marketplace listing each one is expensive to change:
+
+| Field | Required | What it does |
+|---|---|---|
+| Admin email address | Yes | The admin account's address. Password reset needs a mailbox someone can receive at. |
+| Admin password | Yes | The password for that account. Masked in the UI and kept out of the deployment log, which is what the `password` in its field name buys. A password change is still forced at first sign-in. |
+| Site domain | No | Blank brings the site up on the instance's IP. |
+| SSH public key | No | Placed in root's `authorized_keys` before server setup, which then mirrors it to `user1` with sudo and disables root login. Blank leaves root access as the provider configured it, so omitting it cannot lock anyone out. |
+| Linode API token | No | Only useful when the domain's DNS is already at Linode. Creates the A record from the instance so the first certificate attempt succeeds rather than the retry timer's. Used once, never written to disk, never printed. |
+
+Nothing is asked that can be worked out. The site name comes from the domain (or the instance ID); the install is always bare-metal, one site per instance.
+
+There is no credentials file on this path — the owner already knows the password, because they chose it. Every other install writes one, since nobody chose that password.
+
+An instance built this way is entirely the deployer's: no agent, no registration, no enrollment, no outbound call beyond fetching the release archive.
+
+**How it is put together.** The script hosted at Linode is a wrapper of about twenty lines: it declares the fields, fetches the release archive, and hands off to `maintenance_scripts/install_tools/linode_stackscript.sh` inside it. All the real logic lives in the archive, so it ships with every release and an instance created today installs what was published this morning — with nothing to update on the Linode side. The pasted wrapper is kept in the repo at `maintenance_scripts/install_tools/linode_stackscript_wrapper.sh` so it stays reviewable.
+
+If a step fails the script stops and says so in `/var/log/stackscript.log`, rather than continuing into a half-installed box that looks alive. The remedy is to destroy the instance and redeploy with the field corrected.
 
 ### Manual transfer
 
@@ -68,7 +92,7 @@ The presence of a port signals Docker mode; omitting it signals bare-metal. To f
 
 ### Server requirements
 
-- Fresh Ubuntu 24.04 LTS
+- Fresh Ubuntu 24.04 LTS — `install.sh server` refuses to run on anything else. PHP 8.3 paths are hardcoded throughout, so continuing would configure a server that does not work while looking like it installed. To proceed anyway and finish the setup by hand, pass `--allow-unsupported-os`; the check is not repeated by `install.sh site`, which presupposes `server` already ran.
 - Root access
 - 1 GB RAM minimum
 - 3 GB disk minimum
@@ -235,16 +259,48 @@ sudo ./install.sh site SITENAME DOMAIN_NAME [OPTIONS]
 
 Common options:
 
+- `--admin-email=ADDRESS` — the admin account's address. Set at the same moment as its password, so the only account on a new site is recoverable by email from the start. Omitted, the account is `admin@example.com`.
 - `--activate THEME` — activate a specific theme after install
 - `--with-test-site` — create a companion test site (bare-metal only)
+- `--upgrade-server=URL` — fetch the code from somewhere other than the release site (see [Where a site gets its upgrades](#where-a-site-gets-its-upgrades))
 
 The installer:
 
 1. Verifies prerequisites (Apache, PHP, PostgreSQL).
 2. Deploys code to `/var/www/html/{sitename}/`.
-3. Runs `_site_init.sh` to create directories, configure `Globalvars_site.php`, create the database, load the schema, install Composer deps, and create the Apache VirtualHost.
+3. Runs `_site_init.sh` to create directories, configure `Globalvars_site.php`, create the database, load the schema, record where upgrades come from, install Composer deps, install the default plugin bundle, and create the Apache VirtualHost.
 4. Optionally creates a test site.
 5. Verifies the site responds.
+
+### What a new site comes with
+
+A fresh install is not the bare platform. Drive and the personal calendar are core and always present; on top of them the installer turns on a **bundle** — a named set of plugins declared in `install_bundles.json` at the `public_html/` root.
+
+The default bundle is `personal`: mail and the AI assistant, which together with Drive and Calendar make the deployment a self-hosted replacement for the everyday Google tools. Everything else — events, commerce, bookings, the password vault, DNS filtering, server management — is installed from `/admin/admin_plugins` when it is wanted.
+
+Both bundled plugins arrive installed and unconfigured, and each needs the owner to supply something before it does anything: mail needs MX and DKIM records and an outbound provider, the assistant needs a model provider.
+
+```bash
+# choose a different bundle at install time
+JOINERY_INSTALL_BUNDLE=personal sudo ./install.sh site mysite mysite.com
+
+# or apply one to an existing site
+sudo php /var/www/html/{sitename}/maintenance_scripts/sysadmin_tools/install_bundle.php --list
+sudo php /var/www/html/{sitename}/maintenance_scripts/sysadmin_tools/install_bundle.php --bundle=personal
+```
+
+`JOINERY_INSTALL_BUNDLE=none` installs no plugins. Bundles are flat lists and never extend one another — they are alternative products rather than layers, so each names everything it wants.
+
+### Where a site gets its upgrades
+
+Two separate things, which the installer keeps in agreement:
+
+- `--upgrade-server=URL` tells *this run* where to fetch the archive from. It defaults to `https://getjoinery.com`, the release site.
+- `upgrade_source`, a setting on the finished site, tells `upgrade.php` where to fetch from every time after.
+
+`_site_init.sh` writes the second from the first, so whatever a site was installed from is what it upgrades from. Nothing to configure and nothing to keep in sync: pass `--upgrade-server` and both follow, leave it off and the site tracks stable releases.
+
+Cloned sites are the exception — they carry the source site's `upgrade_source`, which is the right answer for a copy of that site.
 
 ### Directory layout
 
@@ -266,9 +322,24 @@ SSL is configured automatically when a domain (not localhost or an IP) is provid
 
 1. The installer checks whether the domain's DNS points to this server.
 2. If it does, Certbot runs to fetch a Let's Encrypt certificate.
-3. If it doesn't, the install goes ahead anyway and no certificate is issued. The vhost guards its `:443` block with `<IfFile>`, so a missing certificate means the site serves HTTP rather than Apache refusing to start. The closing summary names the command to issue one later.
+3. If it doesn't, the install goes ahead anyway and no certificate is issued. The vhost guards its `:443` block with `<IfFile>`, so a missing certificate means the site serves HTTP rather than Apache refusing to start.
 
-DNS not being ready never stops an install. Run this once it resolves:
+DNS not being ready never stops an install, and it does not leave you anything to remember either.
+
+#### The retry timer
+
+An install that could not issue a certificate leaves behind a systemd timer, `joinery-ssl-retry@{domain}`, that finishes the job whenever DNS lands — minutes later or a week later. Nothing needs to be run by hand.
+
+Each run resolves the domain first and only invokes Certbot when the A record actually points at this server. That is what makes an open-ended retry safe: Let's Encrypt allows five *failed validations* per hostname per hour, and a DNS lookup that comes back empty costs nothing against that budget. On a CA-issued certificate the timer disables itself and removes its config.
+
+```bash
+sudo systemctl list-timers 'joinery-ssl-retry@*'      # is one pending
+sudo journalctl -fu joinery-ssl-retry@mysite.example.com   # what it is seeing
+```
+
+Its state is a single file per domain at `/etc/joinery/ssl-retry/{domain}.conf`. Delete it to stop the retries.
+
+To issue immediately rather than wait for the next check:
 
 ```bash
 sudo /var/www/html/{sitename}/maintenance_scripts/sysadmin_tools/setup_ssl.sh mysite.example.com

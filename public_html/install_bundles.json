@@ -1,0 +1,9 @@
+{
+    "_comment": "Named sets of plugins a fresh install turns on. Read by maintenance_scripts/sysadmin_tools/install_bundle.php, which _site_init.sh runs once on a new site. Lists are flat — a bundle names every plugin it wants, and bundles never extend one another, because they are product selections rather than layers. Drive and the personal calendar are core and appear in no bundle.",
+
+    "personal": {
+        "label": "Personal suite",
+        "description": "A self-hosted replacement for the everyday Google tools: files, calendar, mail and an assistant.",
+        "plugins": ["mailbox", "joinery_ai"]
+    }
+}

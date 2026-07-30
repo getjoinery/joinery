@@ -85,17 +85,27 @@ Copy the command below, replace `yourdomain.com` with your actual domain, then p
 
 ```bash
 mkdir -p /tmp/joinery && \
-  curl -sL https://dev.getjoinery.com/utils/latest_release | tar xz -C /tmp/joinery && \
+  curl -sL https://getjoinery.com/utils/latest_release | tar xz -C /tmp/joinery && \
   cd /tmp/joinery/maintenance_scripts/install_tools && \
   sudo ./install.sh server && \
-  sudo ./install.sh site mysite yourdomain.com
+  sudo ./install.sh site mysite yourdomain.com --admin-email=you@example.com
 ```
+
+Put your own address in `--admin-email`. That becomes the login for the admin account, and it's how you get back in if you ever lose the password — leave it off and the account is created as `admin@example.com`, which you'd have to change by hand.
 
 If you don't have a domain yet, substitute your server's IP address for `yourdomain.com`. The site will work, but you won't get SSL until you add a domain later.
 
-The install takes a few minutes. You'll see output scrolling past — that's normal. When it finishes, your site is live.
+The install takes a few minutes. You'll see output scrolling past — that's normal. When it finishes, your site is live, with Drive, Calendar, mail and the AI assistant already installed.
 
-**If DNS hasn't propagated yet:** the SSL step is skipped automatically and the install continues. Your site is reachable over HTTP in the meantime. The installer prints the command to run once DNS is ready — it looks like this:
+**If DNS hasn't propagated yet:** the SSL step is skipped automatically and the install continues. Your site is reachable over HTTP in the meantime, and a background timer watches for your domain — once it points at this server, a certificate is issued within a few minutes with nothing for you to do.
+
+To watch that happen:
+
+```bash
+sudo journalctl -fu joinery-ssl-retry@yourdomain.com
+```
+
+To issue one immediately instead of waiting for the next check:
 
 ```bash
 sudo /var/www/html/yoursite/maintenance_scripts/sysadmin_tools/setup_ssl.sh yourdomain.com
@@ -117,7 +127,7 @@ https://yourdomain.com/admin
 
 Log in as:
 
-- **Email:** `admin@example.com`
+- **Email:** the address you passed to `--admin-email` (or `admin@example.com` if you left it off)
 - **Password:** the one the installer printed when it finished
 
 Every site gets its own admin password — there is no shared default. If you've lost the line the installer printed, it's also saved on the server at `/var/www/html/yoursite/config/admin_credentials.txt` (readable by root only):
@@ -136,14 +146,17 @@ sudo php /var/www/html/yoursite/maintenance_scripts/sysadmin_tools/reset_admin_p
 
 Once you're in, two housekeeping items before anything else:
 
-1. **Update your admin email address.** Go to `/admin/admin_user?usr_user_id=1` and change the email from `admin@example.com` to your real address. This is important for password recovery and system notifications.
+1. **Set up email.** Go to `/admin/admin_settings_email` and name a provider. Do this first: password reset is the only way back into your account once the installer's password is gone, and it needs somewhere to send from. A new site has no provider configured, and most hosts — Linode included — block outbound port 25, so running a mail server on this machine will not deliver.
 2. **Set your site name.** Go to `/admin/admin_settings` and update the Site Name field.
+
+If you installed without `--admin-email`, also change the admin address at `/admin/admin_user?usr_user_id=1`.
 
 ---
 
 ## What's Next
 
 - **Install a theme** — `/admin/admin_themes`
-- **Install plugins** — `/admin/admin_plugins`
-- **Configure email sending** — `/admin/admin_settings_email` (so your site can send registration confirmations, etc.)
+- **Install more plugins** — `/admin/admin_plugins`. A fresh install comes with mail and the AI assistant; events, commerce and the password vault are there to add.
+- **Set up your mailbox** — the mail plugin needs MX and DKIM records you control before it can receive
+- **Give the AI assistant a provider** — `/admin/admin_settings` under AI
 - **Full installation reference** — for multi-site setups, site cloning, manual SSL, and advanced configuration, see [Installation](installation.md)

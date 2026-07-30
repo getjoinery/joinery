@@ -51,6 +51,17 @@
 
         <?php $formwriter->end_form(); ?>
 
+        <?php if (!empty($page_vars['show_email_setup_hint'])) { ?>
+        <div class="jy-auth-note">
+            <p class="jy-auth-subhead">
+                Once you are in, set up email at
+                <a href="/admin/admin_settings_email">Settings &rarr; Email</a>.
+                Password reset is how you get back into this account, and it needs
+                a mail provider.
+            </p>
+        </div>
+        <?php } ?>
+
         <div class="auth-footer-text">
             <a href="/logout">Log out</a>
         </div>
