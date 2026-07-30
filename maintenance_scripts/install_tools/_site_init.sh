@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 2.4 - Core half of spec linode_stackscript: honour JOINERY_ADMIN_EMAIL
+#                so the admin account is recoverable by email from the start;
+#                record upgrade_source as whatever endpoint this install came
+#                from; install the default plugin bundle on fresh sites; point
+#                the operator at email setup, which is the first thing a new
+#                deployment needs and the thing that makes lockout recoverable.
 # VERSION: 2.3 - Replace the seeded admin password with a per-site one on every
 #                fresh install. Honours JOINERY_ADMIN_PASSWORD for unattended
 #                installers; otherwise generates one and writes it to
@@ -412,6 +418,13 @@ fi
 # owner chose on a deploy form. When it is set, nothing is generated and nothing
 # is written to disk — there is no file to go and read. Cloned sites are skipped:
 # they carry the source site's real accounts, not the seeded default.
+#
+# JOINERY_ADMIN_EMAIL moves the account to the owner's real address in the same
+# call. That ordering matters: a password reset needs a mailbox someone can
+# actually receive at, so setting the address afterwards would leave a window
+# where the only account on the site is unrecoverable.
+ADMIN_EMAIL="${JOINERY_ADMIN_EMAIL:-admin@example.com}"
+
 if [ -z "$CLONE_FROM" ] && [ "$DB_EXISTS" = false ]; then
     RESET_TOOL="${SITE_ROOT}/maintenance_scripts/sysadmin_tools/reset_admin_password.php"
 
@@ -432,8 +445,16 @@ if [ -z "$CLONE_FROM" ] && [ "$DB_EXISTS" = false ]; then
         chmod 600 "$ADMIN_PW_FILE"
         printf '%s\n' "$ADMIN_PASSWORD" > "$ADMIN_PW_FILE"
 
-        if php "$RESET_TOOL" --email=admin@example.com --password-file="$ADMIN_PW_FILE" --yes >/dev/null 2>&1; then
+        RESET_ARGS="--email=admin@example.com --password-file=$ADMIN_PW_FILE --yes"
+        if [ "$ADMIN_EMAIL" != "admin@example.com" ]; then
+            RESET_ARGS="$RESET_ARGS --set-email=$ADMIN_EMAIL"
+        fi
+
+        if php "$RESET_TOOL" $RESET_ARGS >/dev/null 2>&1; then
             log "Per-site admin password applied"
+            if [ "$ADMIN_EMAIL" != "admin@example.com" ]; then
+                log "Admin account address set to $ADMIN_EMAIL"
+            fi
 
             if [ "$ADMIN_PASSWORD_SUPPLIED" = false ]; then
                 # Nobody chose this password, so it has to be legible somewhere.
@@ -444,10 +465,16 @@ if [ -z "$CLONE_FROM" ] && [ "$DB_EXISTS" = false ]; then
                 {
                     printf 'Joinery admin login for %s\n\n' "$SITENAME"
                     printf 'URL:      http://%s/login\n' "$DOMAIN"
-                    printf 'Email:    admin@example.com\n'
+                    printf 'Email:    %s\n' "$ADMIN_EMAIL"
                     printf 'Password: %s\n\n' "$ADMIN_PASSWORD"
                     printf 'You are asked to choose a new password at first sign-in.\n'
-                    printf 'Delete this file once you have signed in.\n'
+                    printf 'Delete this file once you have signed in.\n\n'
+                    printf 'FIRST TASK: set up email at\n'
+                    printf '  http://%s/admin/admin_settings_email\n\n' "$DOMAIN"
+                    printf 'A new site cannot send mail until you name a provider, and\n'
+                    printf 'password reset is the only way back into this account once the\n'
+                    printf 'password above stops working. Most hosts block outbound port 25,\n'
+                    printf 'so a mail server on this machine is generally not an option.\n'
                 } > "$CRED_FILE"
                 log "Admin credentials written to $CRED_FILE (mode 600)"
             fi
@@ -461,6 +488,37 @@ if [ -z "$CLONE_FROM" ] && [ "$DB_EXISTS" = false ]; then
         rm -f "$ADMIN_PW_FILE"
         unset ADMIN_PASSWORD
     fi
+fi
+
+# =============================================================================
+# UPGRADE SOURCE
+# =============================================================================
+#
+# Whatever endpoint this install fetched its code from is the endpoint it will
+# fetch every future upgrade from. One rule covers both audiences: nobody
+# overrides UPGRADE_SERVER, so a public install upgrades from the release site;
+# we pass --upgrade-server, so ours upgrade from wherever we said. Without this
+# a fresh site could come up believing it upgrades from somewhere it is already
+# ahead of.
+#
+# Clones are skipped. UPGRADE_SERVER is pointed at the clone source for the
+# duration of a clone, and that is a peer site rather than a release endpoint —
+# the cloned database already carries the source's own upgrade_source, which is
+# the right answer.
+if [ -z "$CLONE_FROM" ] && [ -n "${UPGRADE_SERVER:-}" ]; then
+    UPGRADE_SOURCE_VALUE="${UPGRADE_SERVER%/}"
+
+    psql -U postgres -d "$SITENAME" -q -c \
+        "UPDATE stg_settings SET stg_value = '${UPGRADE_SOURCE_VALUE}' WHERE stg_name = 'upgrade_source';" \
+        2>/dev/null || true
+
+    psql -U postgres -d "$SITENAME" -q -c \
+        "INSERT INTO stg_settings (stg_name, stg_value)
+         SELECT 'upgrade_source', '${UPGRADE_SOURCE_VALUE}'
+         WHERE NOT EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'upgrade_source');" \
+        2>/dev/null || true
+
+    log "Upgrades will come from $UPGRADE_SOURCE_VALUE"
 fi
 
 # =============================================================================
@@ -493,6 +551,38 @@ else
         $COMPOSER_CMD install --no-dev --optimize-autoloader --quiet 2>/dev/null || {
             log_error "Composer not found or install failed - skipping dependency installation"
         }
+    fi
+fi
+
+# =============================================================================
+# DEFAULT PLUGIN BUNDLE
+# =============================================================================
+#
+# A new site otherwise arrives as the bare platform: every plugin's files are on
+# disk and none of them are installed. The bundle is what makes the deployment
+# the product someone thought they were installing.
+#
+# Fresh installs only. A clone carries the source site's own plugin set, and a
+# site coming back up on an existing database has already been through this.
+# Set JOINERY_INSTALL_BUNDLE=none to skip it.
+BUNDLE_NAME="${JOINERY_INSTALL_BUNDLE:-personal}"
+
+if [ -z "$CLONE_FROM" ] && [ "$DB_EXISTS" = false ] && [ "$BUNDLE_NAME" != "none" ]; then
+    BUNDLE_TOOL="${SITE_ROOT}/maintenance_scripts/sysadmin_tools/install_bundle.php"
+
+    if [ ! -f "$BUNDLE_TOOL" ]; then
+        log_error "Warning: $BUNDLE_TOOL not found — no plugins were installed."
+    else
+        log "Installing the '$BUNDLE_NAME' plugin bundle..."
+        # Non-fatal. A site with no plugins is a working site; the operator can
+        # install them from /admin/admin_plugins. Losing the whole install over
+        # it would be the wrong trade.
+        if php "$BUNDLE_TOOL" --bundle="$BUNDLE_NAME"; then
+            log "Plugin bundle installed"
+        else
+            log_error "Warning: the '$BUNDLE_NAME' bundle did not install cleanly."
+            log_error "Install what you need from /admin/admin_plugins."
+        fi
     fi
 fi
 

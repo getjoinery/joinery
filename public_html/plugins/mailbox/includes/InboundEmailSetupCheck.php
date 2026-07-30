@@ -2297,7 +2297,10 @@ class InboundEmailSetupCheck {
 	private function activeProviderClass(): ?string {
 		try {
 			require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
-			$service = (string)$this->settings->get_setting('email_service') ?: 'mailgun';
+			$service = EmailSender::activeServiceKey();
+			if ($service === '') {
+				return null;
+			}
 			return EmailSender::getDiscoveredProviders()[$service] ?? null;
 		} catch (\Throwable $e) {
 			return null;

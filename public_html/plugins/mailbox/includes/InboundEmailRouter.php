@@ -1767,7 +1767,10 @@ class InboundEmailRouter {
 			return null;
 		}
 
-		$service = $this->settings->get_setting('email_service') ?: 'mailgun';
+		$service = EmailSender::activeServiceKey();
+		if ($service === '') {
+			return null;
+		}
 		$providers = EmailSender::getDiscoveredProviders();
 		$class = $providers[$service] ?? null;
 		if ($class && in_array('RawMessageRelay', class_implements($class))) {

@@ -1417,6 +1417,66 @@
 			}
 
 		// ============================================
+		// POST-DEPLOY SMOKE TEST
+		// ============================================
+		// A published archive is built from whatever was on the publisher's disk
+		// at that moment, half-finished edits included, and nothing between there
+		// and here reads a single line of the code being installed. This is the
+		// first thing that does.
+		//
+		// The `safe` tier, not `db`: about fifteen seconds, needs no database,
+		// and catches the failure actually in scope — a parse error or fatal in
+		// code that shipped mid-edit. The db tier is five and a half minutes and
+		// writes to a database, neither of which belongs in an automatic step on
+		// a production node.
+		//
+		// A failure restores public_html_last. That returns the code but not the
+		// schema: migrations have already run, and this is a recovery rather than
+		// a clean undo. Schema changes are additive, so the previous code
+		// generally runs against the newer schema — but the operator is told
+		// plainly rather than left to discover it.
+		//
+		// Fresh installs never reach this file, so there is no case where the
+		// tests run with nothing to roll back to.
+		$test_runner = $live_directory . '/tests/run.php';
+		if (file_exists($test_runner) && is_dir($backup_directory)) {
+			out_step('Verifying the Deployed Code');
+
+			$test_output = [];
+			$test_return = 0;
+			// Subprocess for the same reason update_database runs as one: this
+			// process holds model classes loaded from the pre-swap tree.
+			exec('/usr/bin/php ' . escapeshellarg($test_runner) . ' safe 2>&1', $test_output, $test_return);
+
+			if ($test_return === 0) {
+				upgrade_echo('✓ Safe-tier tests passed against the deployed code<br>');
+				if ($verbose) {
+					echo nl2br(htmlspecialchars(implode("\n", array_slice($test_output, -15)))) . "<br>\n";
+				}
+			} else {
+				echo '<strong>Deployed code failed its own tests — reverting.</strong><br>';
+				echo nl2br(htmlspecialchars(implode("\n", array_slice($test_output, -40)))) . "<br>\n";
+
+				$rollback = DeploymentHelper::performRollback($site_template, true, $verbose);
+				if ($rollback['success']) {
+					echo '✓ Previous code restored from public_html_last<br>';
+					if ($rollback['failed_dir']) {
+						echo '  Failed deployment preserved at: ' . htmlspecialchars($rollback['failed_dir']) . '<br>';
+					}
+					out_alert('warning', 'The database was NOT rolled back',
+						'Migrations for this release ran before the tests did, so the schema is the new one while the code is the old one. '
+						. 'Schema changes are additive and the previous code normally runs against them, but this is a recovery, not a clean undo. '
+						. 'Fix the release and upgrade forward rather than leaving the node here.');
+				} else {
+					echo '✗ Rollback FAILED: ' . htmlspecialchars($rollback['error']) . '<br>';
+				}
+				exit(1);
+			}
+		} else if (!file_exists($test_runner)) {
+			upgrade_echo('⚠ tests/run.php not found in the deployed tree — deployed code was not verified<br>');
+		}
+
+		// ============================================
 		// PLUGIN HOST INSTALLERS
 		// ============================================
 		// Run every active plugin's declared host_installer (idempotent by

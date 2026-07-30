@@ -78,6 +78,18 @@ function change_password_required_logic(array $input): LogicResult{
 		return LogicResult::redirect('/admin/admin_users');
 	}
 
+	// A superadmin standing here is, on most sites, the owner of a deployment
+	// that is minutes old — and the credential they are about to replace is the
+	// one written to a file at install time. From here on the only way back into
+	// the account is a password reset, which needs a mail provider that a fresh
+	// site does not have. So this screen is where they are told.
+	//
+	// A link, not a redirect: someone who just chose a password is mid-task, and
+	// being thrown into a settings form reads as a bug. Shown unconditionally
+	// rather than only when email looks unconfigured — an owner who already set
+	// it up sees one extra line, once, on a page they see once.
+	$page_vars['show_email_setup_hint'] = ($session->get_permission() >= 10);
+
 	return LogicResult::render($page_vars);
 }
 

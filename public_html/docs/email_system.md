@@ -86,6 +86,7 @@ $result = $sender->sendBatch($message, $recipients);
 - Fallback service: `email_fallback_service` setting
 - Automatic fallback if primary fails
 - Queue failed emails for retry
+- **Neither set means nothing is sent.** No provider is substituted, so `send()` returns false with "no email service is configured" and queues the message rather than reporting some provider's authentication error to a deployer who never chose that provider. Read the setting through `EmailSender::activeServiceKey()`, which returns `''` when nobody has chosen one — the honest answer, and the one every caller handles.
 
 **Sending defaults.** A message with no From gets `defaultemail` /
 `defaultemailname`. A message with no Reply-To gets `defaultreplyto` (when the
@@ -340,15 +341,25 @@ smtp_encryption = "tls"  // or "ssl"
 
 **Service Selection:**
 ```php
-// Primary service
+// Primary service — empty on a new install, and empty means unconfigured
 email_service = "mailgun"  // or "smtp"
 
-// Fallback service  
+// Fallback service
 email_fallback_service = "smtp"  // or "mailgun"
 
 // Default template for HTML emails
 default_email_template = "default_outer_template"
 ```
+
+### Configuring a provider is the first task on a new deployment
+
+Both service settings ship with no default, and that is deliberate. A new site has no credentials of any kind, so any preselected provider would be configured-but-useless: the site would look set up, and a failed send would report that provider's authentication error instead of the truth. Empty is a state the platform can report honestly.
+
+It matters more than a missed newsletter. Password reset is the only route back into an account whose password is lost, and it needs somewhere to send from — a fresh deployment with no provider is one forgotten password away from needing SSH and `sysadmin_tools/reset_admin_password.php`. So the installer names `/admin/admin_settings_email` in its closing summary and in the credentials file it writes, and the forced-password-change screen links to it for permission-10 users.
+
+A local mail server is generally not the answer: most hosting providers, Linode included, block outbound port 25 at the account level, so a self-hosted MTA cannot deliver at all. Name a provider.
+
+Existing sites are unaffected — they carry a value in `stg_settings`, and a declared default applies only when the row is absent.
 
 ### Debug and Testing
 

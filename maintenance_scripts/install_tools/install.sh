@@ -1,4 +1,16 @@
 #!/usr/bin/env bash
+#VERSION 2.26 - Core half of spec linode_stackscript:
+#              (1) UPGRADE_SERVER defaults to https://getjoinery.com — the
+#              published one-liner handed every public install a dev build.
+#              (2) `server` hard-fails off Ubuntu 24.04 (PHP 8.3 paths are
+#              hardcoded throughout, so continuing produced a half-configured
+#              box), with --allow-unsupported-os to proceed anyway.
+#              (3) php.ini gets date.timezone = UTC, matching the CLI and
+#              Docker defaults and the platform's UTC-in-the-database doctrine.
+#              (4) A deferred certificate now installs a self-disabling systemd
+#              timer that resolves the domain before each certbot attempt, so a
+#              site whose DNS lands later gets HTTPS with no operator action.
+#              (5) `site` takes --admin-email=, passed to _site_init.sh.
 #VERSION 2.25 - Three installer defects (spec installer_defects):
 #              (1) `site` no longer aborts when a domain's DNS isn't pointing
 #              here yet — it warns, installs on HTTP, and names setup_ssl.sh in
@@ -51,7 +63,7 @@
 #   ./install.sh docker                              # One-time: install Docker
 #   ./install.sh host-harden                          # One-time: harden a Docker host server
 #   ./install.sh build-base                          # One-time per host: build joinery-base image
-#   ./install.sh server                              # One-time: set up bare-metal server
+#   ./install.sh server [--allow-unsupported-os]     # One-time: set up bare-metal server
 #   ./install.sh site SITENAME [DOMAIN] [PORT]      # Create a site (auto-generates password)
 #   ./install.sh list                                # List existing sites
 #
@@ -61,6 +73,7 @@
 #
 # Site Options:
 #   --password-file=FILE   Read database password from file (recommended for special chars)
+#   --admin-email=EMAIL    Address for the site's admin account (default admin@example.com)
 #   --activate THEME       Set active theme after installation
 #   --with-test-site       Create companion test site (bare-metal only)
 #   --no-ssl               Skip automatic SSL certificate setup
@@ -187,11 +200,14 @@ print_admin_login() {
     local reader="${2:-cat}"
     local show_cmd="${3:-cat $cred_path}"
     local password=""
+    local email=""
 
     password=$($reader "$cred_path" 2>/dev/null | grep '^Password: ' | cut -d' ' -f2- || true)
+    email=$($reader "$cred_path" 2>/dev/null | grep '^Email: ' | cut -d' ' -f2- || true)
+    [ -n "$email" ] || email="${JOINERY_ADMIN_EMAIL:-admin@example.com}"
 
     echo "Admin login:"
-    echo -e "  Email:    ${YELLOW}admin@example.com${NC}"
+    echo -e "  Email:    ${YELLOW}${email}${NC}"
     if [ -n "$password" ]; then
         echo -e "  Password: ${YELLOW}${password}${NC}"
         echo ""
@@ -200,6 +216,22 @@ print_admin_login() {
     else
         echo -e "  Password: ${YELLOW}the one supplied at install time${NC}"
     fi
+    echo ""
+    print_email_setup_notice
+}
+
+# Configuring an email provider is the first task on any new deployment, and
+# the one that decides whether a forgotten password is a nuisance or a locked
+# door. Said unconditionally rather than only when it looks unconfigured: a
+# detection rule that guesses wrong is worse than one extra line for an admin
+# who has already done it.
+print_email_setup_notice() {
+    echo -e "${YELLOW}First task: set up email${NC}"
+    echo -e "  ${BLUE}http://${DOMAIN_NAME}/admin/admin_settings_email${NC}"
+    echo ""
+    echo "  This site cannot send mail until you name a provider, and password reset"
+    echo "  is how you get back in if the admin password is ever lost. Most hosts"
+    echo "  block outbound port 25, so a mail server on this machine will not deliver."
     echo ""
 }
 
@@ -295,15 +327,164 @@ should_setup_ssl() {
     return 0
 }
 
+# An install that came up on HTTP because DNS wasn't pointing here yet leaves
+# behind a timer that keeps watching for it. The deployer points DNS whenever
+# they get to it — an hour later or a week later — and the certificate arrives
+# without them doing anything or knowing this existed.
+#
+# The DNS lookup before each attempt is what makes an indefinite retry safe.
+# Let's Encrypt allows five failed validations per hostname per hour, so
+# hammering certbot on a domain that cannot resolve would burn the budget that
+# the eventually-correct attempt needs. A failed lookup costs nothing.
+#
+# Units are templated on the domain so a multi-site box gets one instance per
+# site rather than one timer that can only ever serve the first.
+#
+# $1 = domain, $2 = on-host path to setup_ssl.sh for this install mode.
+install_ssl_retry_timer() {
+    local domain="$1"
+    local ssl_script="$2"
+
+    if ! command -v systemctl > /dev/null 2>&1 || ! systemctl list-units > /dev/null 2>&1; then
+        return 1
+    fi
+
+    mkdir -p /etc/joinery/ssl-retry
+    cat > "/etc/joinery/ssl-retry/${domain}.conf" <<EOF
+# Written by install.sh when a certificate was deferred. Read by
+# /usr/local/sbin/joinery-ssl-retry. Removing this file stops the retries.
+DOMAIN=${domain}
+SETUP_SSL=${ssl_script}
+EOF
+    chmod 600 "/etc/joinery/ssl-retry/${domain}.conf"
+
+    cat > /usr/local/sbin/joinery-ssl-retry <<'RETRY_EOF'
+#!/usr/bin/env bash
+# Issue the certificate an install could not, once DNS finally points here.
+#
+# Installed by install.sh. Run from joinery-ssl-retry@<domain>.timer every few
+# minutes; does nothing at all until the domain resolves to this server, then
+# issues once and disables its own timer.
+set -u
+
+DOMAIN="${1:-}"
+[ -n "$DOMAIN" ] || exit 0
+
+CONF="/etc/joinery/ssl-retry/${DOMAIN}.conf"
+[ -f "$CONF" ] || exit 0
+# shellcheck source=/dev/null
+. "$CONF"
+
+SETUP_SSL="${SETUP_SSL:-}"
+if [ ! -x "$SETUP_SSL" ] && [ ! -f "$SETUP_SSL" ]; then
+    echo "setup_ssl.sh is no longer at $SETUP_SSL — nothing to run"
+    exit 0
+fi
+
+give_up() {
+    echo "$1"
+    rm -f "$CONF"
+    systemctl disable "joinery-ssl-retry@${DOMAIN}.timer" > /dev/null 2>&1 || true
+    systemctl stop --no-block "joinery-ssl-retry@${DOMAIN}.timer" > /dev/null 2>&1 || true
+    exit 0
+}
+
+# A certificate signed by somebody else is the finish line. provision_origin_cert
+# falls back to a self-signed certificate rather than failing, so "a file exists
+# at the cert path" would end the retries on the first run and never issue a
+# real one. Self-signed means issuer equals subject.
+have_real_cert() {
+    local pem="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
+    [ -f "$pem" ] || return 1
+    local issuer subject
+    issuer=$(openssl x509 -in "$pem" -noout -issuer 2>/dev/null | sed 's/^issuer=//')
+    subject=$(openssl x509 -in "$pem" -noout -subject 2>/dev/null | sed 's/^subject=//')
+    [ -n "$issuer" ] && [ "$issuer" != "$subject" ]
+}
+
+have_real_cert && give_up "A CA-issued certificate is already in place for $DOMAIN."
+
+# The cheap check, before spending an attempt. Let's Encrypt counts failed
+# validations, not failed lookups.
+SERVER_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null)
+DNS_IP=$(dig +short "$DOMAIN" 2>/dev/null | grep -E '^[0-9.]+$' | head -1)
+
+if [ -z "$DNS_IP" ]; then
+    echo "$DOMAIN does not resolve yet — waiting."
+    exit 0
+fi
+if [ -z "$SERVER_IP" ]; then
+    echo "Could not determine this server's public IP — waiting."
+    exit 0
+fi
+if [ "$DNS_IP" != "$SERVER_IP" ]; then
+    echo "$DOMAIN resolves to $DNS_IP, this server is $SERVER_IP — waiting."
+    exit 0
+fi
+
+echo "$DOMAIN now points here. Requesting a certificate."
+bash "$SETUP_SSL" "$DOMAIN" || echo "setup_ssl.sh returned non-zero; will try again."
+
+have_real_cert && give_up "Certificate issued for $DOMAIN. Retry timer disabled."
+
+echo "Still no CA-issued certificate for $DOMAIN — will try again."
+exit 0
+RETRY_EOF
+    chmod 755 /usr/local/sbin/joinery-ssl-retry
+
+    cat > /etc/systemd/system/joinery-ssl-retry@.service <<'EOF'
+[Unit]
+Description=Issue a deferred Joinery SSL certificate for %i
+After=network-online.target apache2.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/joinery-ssl-retry %i
+EOF
+
+    cat > /etc/systemd/system/joinery-ssl-retry@.timer <<'EOF'
+[Unit]
+Description=Retry a deferred Joinery SSL certificate for %i
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Unit=joinery-ssl-retry@%i.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    systemctl daemon-reload > /dev/null 2>&1 || true
+    systemctl enable --now "joinery-ssl-retry@${domain}.timer" > /dev/null 2>&1 || return 1
+    return 0
+}
+
 # Closing reminder for an install that came up on HTTP because DNS wasn't
 # pointing here yet. Printed in the summary so it survives a long scrollback.
+# Installs the retry timer at the same time — this is called once per install
+# mode, from the summary, with the on-host path that mode uses.
 # $1 = on-host path to setup_ssl.sh for this install mode.
 print_ssl_deferred_notice() {
     [ "$SSL_DEFERRED" -eq 1 ] || return 0
     local ssl_script="$1"
+
     echo -e "${YELLOW}No SSL certificate was issued — DNS did not point here during install.${NC}"
-    echo "Your site is serving HTTP. Once $DOMAIN_NAME resolves to this server, run:"
-    echo -e "  ${BLUE}sudo $ssl_script $DOMAIN_NAME${NC}"
+    echo "Your site is serving HTTP."
+    echo ""
+
+    if install_ssl_retry_timer "$DOMAIN_NAME" "$ssl_script"; then
+        echo "Nothing further is needed. Point $DOMAIN_NAME at this server whenever you"
+        echo "are ready and a certificate will be issued within a few minutes, on its own."
+        echo ""
+        echo -e "To watch it: ${BLUE}journalctl -fu joinery-ssl-retry@${DOMAIN_NAME}${NC}"
+        echo -e "To issue one immediately: ${BLUE}sudo $ssl_script $DOMAIN_NAME${NC}"
+    else
+        echo "Once $DOMAIN_NAME resolves to this server, run:"
+        echo -e "  ${BLUE}sudo $ssl_script $DOMAIN_NAME${NC}"
+    fi
     echo ""
 }
 
@@ -845,8 +1026,16 @@ install_declared_dependencies() {
 # THEME/PLUGIN DOWNLOAD FUNCTIONS
 #==============================================================================
 
-# Default upgrade server (can be overridden via --upgrade-server)
-UPGRADE_SERVER="${UPGRADE_SERVER:-https://dev.getjoinery.com}"
+# Where this install fetches its code from, and — because _site_init.sh seeds
+# upgrade_source from it — where the finished site will fetch every upgrade
+# after. getjoinery.com serves stable releases; it is running the code it
+# serves, because a release reaches it by being published there.
+#
+# Override with --upgrade-server to install from somewhere else, which is what
+# we do internally to install from dev. The override is the only distinction
+# between our sites and a stranger's, and it is enough: whatever an install
+# came from is what it upgrades from.
+UPGRADE_SERVER="${UPGRADE_SERVER:-https://getjoinery.com}"
 
 # Download themes and plugins from distribution server
 # Usage: download_themes_and_plugins TARGET_DIR [THEMES_LIST]
@@ -1508,9 +1697,11 @@ do_server_setup() {
     # placeholder). Per-site postgres passwords are set by _site_init.sh at
     # first container run.
     local SKIP_POSTGRES_PASSWORD=0
+    local ALLOW_UNSUPPORTED_OS=0
     for arg in "$@"; do
         case "$arg" in
             --skip-postgres-password) SKIP_POSTGRES_PASSWORD=1 ;;
+            --allow-unsupported-os) ALLOW_UNSUPPORTED_OS=1 ;;
         esac
     done
 
@@ -1520,9 +1711,31 @@ do_server_setup() {
         exit 1
     fi
 
-    # Check if we're on Ubuntu 24.04
+    # Ubuntu 24.04 is not a preference, it is the only thing this produces a
+    # working box on: PHP 8.3 paths are hardcoded from here down. Continuing on
+    # anything else used to leave a half-configured server that looked
+    # installed, and the failure surfaced much later and much less clearly.
+    #
+    # `site` deliberately does not repeat this check. It presupposes `server`
+    # ran, so this is the one place it can fire on a real path, and nothing
+    # persists the override for a second command to find.
     if ! grep -q "Ubuntu 24.04" /etc/os-release; then
-        print_warning "This script is designed for Ubuntu 24.04. Continuing anyway..."
+        local detected
+        detected=$(grep '^PRETTY_NAME=' /etc/os-release 2>/dev/null | cut -d'"' -f2)
+        if [ "$ALLOW_UNSUPPORTED_OS" -eq 1 ]; then
+            print_warning "Unsupported OS: ${detected:-unknown}. Proceeding because --allow-unsupported-os was given."
+            print_warning "PHP 8.3 paths are hardcoded throughout this script. Expect to finish the setup by hand."
+        else
+            print_error "Unsupported OS: ${detected:-unknown}"
+            echo ""
+            echo "Joinery server setup targets Ubuntu 24.04 LTS. This script hardcodes PHP 8.3"
+            echo "paths, so on another release it would configure a server that does not work."
+            echo ""
+            echo "To proceed anyway and finish the setup by hand:"
+            echo -e "  ${BLUE}sudo ./install.sh server --allow-unsupported-os${NC}"
+            echo ""
+            exit 1
+        fi
     fi
 
     # Get PostgreSQL password (skipped when building the shared base image)
@@ -1804,7 +2017,11 @@ EOF
     sed -i 's/post_max_size = .*/post_max_size = 32M/' /etc/php/8.3/apache2/php.ini
     sed -i 's/max_execution_time = .*/max_execution_time = 300/' /etc/php/8.3/apache2/php.ini
     sed -i 's/memory_limit = .*/memory_limit = 128M/' /etc/php/8.3/apache2/php.ini
-    sed -i 's/;date.timezone =/date.timezone = America\/New_York/' /etc/php/8.3/apache2/php.ini
+    # UTC, matching what the CLI and a Docker site already get. Every stored
+    # time in the platform is UTC and display conversion is per user, so a web
+    # request and a scheduled task on the same box have to agree about what
+    # date() means. Individual users still see their own timezone.
+    sed -i 's/;date.timezone =/date.timezone = UTC/' /etc/php/8.3/apache2/php.ini
 
     # Enable PDO PostgreSQL extension
     sed -i 's/^;extension=pdo_pgsql/extension=pdo_pgsql/' /etc/php/8.3/apache2/php.ini
@@ -2036,6 +2253,7 @@ do_site_create() {
     local THEMES=""
     local CLONE_FROM=""
     local CLONE_KEY=""
+    local ADMIN_EMAIL=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -2067,6 +2285,14 @@ do_site_create() {
             --no-ssl)
                 NO_SSL=true
                 shift
+                ;;
+            --admin-email=*)
+                ADMIN_EMAIL="${1#*=}"
+                shift
+                ;;
+            --admin-email)
+                ADMIN_EMAIL="$2"
+                shift 2
                 ;;
             --password-file=*)
                 PASSWORD_FILE="${1#*=}"
@@ -2123,6 +2349,7 @@ do_site_create() {
                 echo "  --bare-metal  Force bare-metal mode (requires Apache/PHP/PostgreSQL)"
                 echo ""
                 echo "Site Options:"
+                echo "  --admin-email=EMAIL    Address for the admin account (default admin@example.com)"
                 echo "  --activate THEME       Set active theme after installation"
                 echo "  --with-test-site       Create companion test site (bare-metal only)"
                 echo "  --no-ssl               Skip automatic SSL certificate setup"
@@ -2343,6 +2570,14 @@ do_site_create() {
         # Use clone source as upgrade server for themes/plugins
         UPGRADE_SERVER="$CLONE_FROM"
     fi
+
+    # _site_init.sh reads both of these from the environment, the same way it
+    # already reads JOINERY_ADMIN_PASSWORD. UPGRADE_SERVER is exported because
+    # the finished site records it as the place its upgrades come from.
+    if [ -n "$ADMIN_EMAIL" ]; then
+        export JOINERY_ADMIN_EMAIL="$ADMIN_EMAIL"
+    fi
+    export UPGRADE_SERVER
 
     if [ "$MODE" = "docker" ]; then
         do_site_docker "$SITENAME" "$POSTGRES_PASSWORD" "$DOMAIN_NAME" "$PORT" "$ACTIVATE_THEME" "$NO_SSL" "$CLONE_FROM" "$CLONE_KEY"
@@ -3061,7 +3296,11 @@ show_help() {
     echo "  site         Create a new Joinery site"
     echo "  list         List existing Joinery sites (Docker and bare-metal)"
     echo ""
+    echo "Server Command Options:"
+    echo "  --allow-unsupported-os Proceed on an OS other than Ubuntu 24.04 LTS"
+    echo ""
     echo "Site Command Options:"
+    echo "  --admin-email=EMAIL    Address for the admin account (default admin@example.com)"
     echo "  --activate THEME       Activate specified theme after installation"
     echo "  --with-test-site       Also create a test site (bare-metal only)"
     echo "  --no-ssl               Skip automatic SSL certificate setup"

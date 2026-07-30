@@ -16,11 +16,18 @@
  * outside the web root entirely; the CLI SAPI check below is the second line.
  *
  * Usage:
- *   sudo php reset_admin_password.php [--email=ADDRESS] [--password-file=PATH]
+ *   sudo php reset_admin_password.php [--email=ADDRESS] [--set-email=ADDRESS]
+ *                                     [--password-file=PATH]
  *                                     [--clear-second-factor] [--yes]
  *
  *   --email=ADDRESS         Account to reset. Defaults to the only permission-10
  *                           account when there is exactly one.
+ *   --set-email=ADDRESS     Also change the account's address, in the same save
+ *                           as the password. An installer supplies the owner's
+ *                           real address here so the account is recoverable by
+ *                           email from the moment it has a working password —
+ *                           there is no window in which a fresh credential sits
+ *                           on an address nobody can receive mail at.
  *   --password-file=PATH    Read the new password from the first line of PATH.
  *                           Without it, the password is prompted for with echo
  *                           off. There is no positional password argument —
@@ -40,7 +47,7 @@
  * Validate with `php -l` only — never the file validator, which executes the
  * file it is checking.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 if (PHP_SAPI !== 'cli') {
@@ -58,6 +65,7 @@ function rap_usage($code = 2) {
     $stream = ($code === 0) ? STDOUT : STDERR;
     fwrite($stream, "Usage: php reset_admin_password.php [options]\n\n");
     fwrite($stream, "  --email=ADDRESS         account to reset (default: the sole permission-10 account)\n");
+    fwrite($stream, "  --set-email=ADDRESS     also change the account's address, in the same save\n");
     fwrite($stream, "  --password-file=PATH    read the new password from the first line of PATH\n");
     fwrite($stream, "  --clear-second-factor   also disable TOTP and rotate the trusted-device key\n");
     fwrite($stream, "  --yes                   skip the confirmation prompt\n");
@@ -148,6 +156,31 @@ if ($email === '') {
 }
 
 // ---------------------------------------------------------------------------
+// Validate the replacement address, if one was given
+// ---------------------------------------------------------------------------
+
+$new_email = isset($opts['set-email']) && is_string($opts['set-email']) ? trim($opts['set-email']) : '';
+
+if ($new_email !== '') {
+    if (!filter_var($new_email, FILTER_VALIDATE_EMAIL)) {
+        fwrite(STDERR, "ERROR: --set-email is not a valid address: '{$new_email}'\n");
+        exit(1);
+    }
+    // Checked before anything is written. An installer that mistypes should
+    // leave the account exactly as it found it, not half-changed.
+    if (strcasecmp($new_email, (string)$user->get('usr_email')) === 0) {
+        $new_email = '';
+    } else {
+        $existing = User::GetByEmail($new_email);
+        if ($existing !== NULL) {
+            fwrite(STDERR, "ERROR: another account already uses '{$new_email}' (user "
+                . $existing->get('usr_user_id') . "). Nothing has been changed.\n");
+            exit(1);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Collect the new password
 // ---------------------------------------------------------------------------
 
@@ -191,6 +224,9 @@ $totp_on = (bool)$user->get('usr_totp_enabled_time');
 
 if (!isset($opts['yes'])) {
     fwrite(STDOUT, "\nAbout to reset the password for {$email} (user " . $user->get('usr_user_id') . ").\n");
+    if ($new_email !== '') {
+        fwrite(STDOUT, "The account's address will change to {$new_email} at the same time.\n");
+    }
     fwrite(STDOUT, "They will be required to choose a new password at their next sign-in.\n");
     if ($clear_second_factor) {
         fwrite(STDOUT, "Their authenticator app will also be turned off and every trusted device signed out.\n");
@@ -209,6 +245,9 @@ if (!isset($opts['yes'])) {
 try {
     $user->set('usr_password', User::GeneratePassword($password));
     $user->set('usr_force_password_change', true);
+    if ($new_email !== '') {
+        $user->set('usr_email', $new_email);
+    }
     $user->save();
 } catch (Exception $e) {
     fwrite(STDERR, 'ERROR: ' . $e->getMessage() . "\n");
@@ -227,11 +266,17 @@ if ($clear_second_factor) {
 }
 
 $note = $clear_second_factor ? ' (second factor cleared)' : '';
+if ($new_email !== '') {
+    $note .= ' (address changed to ' . $new_email . ')';
+}
 error_log('reset_admin_password.php: password reset for ' . $email
     . ' (user ' . $user->get('usr_user_id') . ') by uid ' . (function_exists('posix_geteuid') ? posix_geteuid() : 'unknown')
     . $note);
 
 fwrite(STDOUT, "\nPassword reset for {$email}.\n");
+if ($new_email !== '') {
+    fwrite(STDOUT, "Account address changed to {$new_email} — sign in with that from now on.\n");
+}
 fwrite(STDOUT, "They will be asked to choose a new password at their next sign-in.\n");
 if ($clear_second_factor) {
     fwrite(STDOUT, "Authenticator app turned off; all trusted devices signed out.\n");

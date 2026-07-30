@@ -151,6 +151,7 @@ php /var/www/html/joinerytest/public_html/utils/upgrade.php --verbose
 - Database migrations and composer integration
 - **Declared-dependency install** — after the file swap, installs any PHP extension the new code declares (root `composer.json` `ext-*` + plugin `requires.extensions`, resolved by `utils/list_dependencies.php --apt`) and reloads web PHP. Needs root (Docker `docker exec` has it; a non-root run degrades to a warning naming the manual `apt-get install`). Then runs every active plugin's declared `host_installer` via `_plugin_installers_start.sh` so new host requirements land with the deploy.
 - **Graceful handling of missing archives** — if a theme or plugin archive returns 404, the upgrade warns and skips it instead of aborting. The core upgrade and all other themes/plugins proceed normally. A summary of skipped items is shown at the end.
+- **Post-deploy smoke test** — after the new code is in place and migrations have run, the `safe` test tier runs against it. A failure restores `public_html_last` and preserves the broken tree for diagnosis. This is the first thing in the pipeline that reads a line of the code being installed: `publish_upgrade.php` builds its archive from whatever is on the publisher's disk at that moment, half-finished edits included. The `safe` tier is about fifteen seconds and needs no database — it catches a parse error or fatal in code that shipped mid-edit, which is the failure in scope. The `db` tier is not used: it takes five and a half minutes and writes to a database, neither of which belongs in an automatic step on a production node. The rollback returns the code but **not** the schema, because migrations ran first; schema changes are additive so the previous code normally runs against them, but the output says plainly that this is a recovery rather than a clean undo, and the node should be upgraded forward rather than left there.
 - **Site-root `maintenance_scripts/`** — the core archive carries `install_tools/` and `sysadmin_tools/` alongside `public_html/`, and the upgrade syncs them into the site root after the deploy swap and before `fix_permissions.sh` runs, so a release applies as one piece rather than with its own tooling a version behind. The sync compares by content (`rsync --checksum`), because the staged files carry the publishing box's timestamps while the node keeps its own and a same-size edit can otherwise look unchanged. It does not delete: a node can legitimately hold scripts the archive does not ship, so files absent from a release are left in place. `*.sh` are made executable afterwards. A failed sync is a warning, not an abort — `public_html` is already live — and it says explicitly that the node's backup, restore and permission scripts are still the previous version.
 
 **Plugin refresh scope:** the upgrade download loop iterates **plugins that are installed** (rows in `plg_plugins`) and attempts an archive fetch for each. Plugins published by the source succeed; plugins not in the source's catalog 404 at the upgrade endpoint (they were never packaged because they have `included_in_publish: false` — see [Extension Distribution Flags](#extension-distribution-flags) below) and are skipped via the warning path above. Uninstalling a plugin removes its row, so an uninstalled plugin is not re-downloaded on subsequent upgrades — the operator's removal sticks. Conversely, a new upstream plugin won't auto-appear on existing sites; the operator gets it via the admin Plugins page (install a plugin already on disk) or a plugin upload.
@@ -552,10 +553,39 @@ Every site installed by `install.sh` has the same Apache vhost shape, regardless
 | `baseDir` | Base directory (e.g., `/var/www/html/`) |
 | `site_template` | Site directory name (e.g., `joinerytest`) |
 | `system_version` | Current version (e.g., `3.25`) |
-| `upgrade_source` | URL of upgrade server to download from (e.g., `https://dev.getjoinery.com`) |
+| `upgrade_source` | URL of upgrade server to download from (e.g., `https://getjoinery.com`) |
 | `composerAutoLoad` | Composer vendor path |
 
 **Note:** A site acts as an upgrade server when the **Server Manager** plugin is active. The `upgrade_source` setting specifies where a site *downloads* upgrades from.
+
+### Where a site's `upgrade_source` comes from
+
+It is not a decision anyone makes twice. `_site_init.sh` writes it at install time from the endpoint the install actually fetched its code from — `install.sh`'s `UPGRADE_SERVER`, which defaults to `https://getjoinery.com` and is overridden with `--upgrade-server=URL`. One rule covers both audiences: leave the flag off and the site tracks stable releases; pass it and the site follows wherever it was installed from.
+
+Clones are the exception: `UPGRADE_SERVER` points at the clone source for the duration of a clone, and that is a peer site rather than a release endpoint, so the cloned database keeps the source's own `upgrade_source`.
+
+### The release channel
+
+`getjoinery.com` serves stable releases. It is a site rather than a flag on a row: no schema, no promotion state to forget, and it reuses the chaining `utils/latest_release` already implements.
+
+A release reaches it by being published *there*, and `publish_upgrade.php` builds its archive from the tree of the site it runs on. So promotion is three steps, done by hand:
+
+1. Publish on dev.
+2. `upgrade.php` brings getjoinery to that build.
+3. Publish on getjoinery, **passing the version explicitly**.
+
+Step 3 needs the explicit version because `publish_upgrade.php` auto-detects the next patch from `VERSION` and writes the new number back — so upgrade-to-0.8.199-then-publish would emit 0.8.200 carrying 0.8.199's code, and dev's next publish would also be 0.8.200. Two archives, one number. Nothing blocks passing it: the downgrade guard rejects only *lower*, and the duplicate check reads the local `upg_upgrades` table, which does not hold dev's rows.
+
+```bash
+# on getjoinery, after upgrade.php brings it to 0.8.199
+php plugins/server_manager/includes/publish_upgrade.php 0.8.199 "release notes"
+```
+
+The ordering earns something beyond housekeeping: getjoinery is running the code it serves, so a build reaching strangers has at least come up on a real site first.
+
+getjoinery keeps `upgrade_source = https://dev.getjoinery.com` permanently, which is not circular — upgrades flow *into* getjoinery from dev, releases flow *out of* getjoinery to the world.
+
+`latest_release` also accepts `?version=X.Y.Z` to serve one specific published release, for reproducing a build. Installers use plain `latest_release`: a pinned installer needs a bump on every publish, and a stale pin hands out old code to people who asked for current code.
 
 ---
 
