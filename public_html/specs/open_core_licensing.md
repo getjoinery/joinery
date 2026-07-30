@@ -209,9 +209,11 @@ the commercial license forbids, and that is the enforceable part.
    hosting commoditized) or source-available with a hosting restriction (keeps
    the hosting line, loses the permissive-license adoption effect). This is the
    decision the rest of the spec hangs from.
-2. **Does `event_manager` stay free and system?** It is not a payments
-   extension, so the default answer is yes, but it is the other system-flagged
-   plugin and the call should be explicit.
+2. **Does `event_manager` stay free?** Partly answered: it is de-emphasised for
+   v1 and drops out of the default install bundle (see
+   `specs/linode_stackscript.md`). That is a marketing decision, not a pricing
+   one — it is not a payments extension, so the remaining question is only
+   whether it stays free and available on demand. Default answer: yes.
 3. **Is a key scoped to one deployment, or to a buyer?** Per-buyer is simpler
    and friendlier — the same key works on a staging copy and a rebuild.
    Per-deployment is tighter but produces support tickets every time someone
