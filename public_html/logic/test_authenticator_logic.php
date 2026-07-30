@@ -42,14 +42,6 @@ function test_authenticator_logic(array $input): LogicResult {
 		'totp_enabled_time' => $user->get('usr_totp_enabled_time'),
 		// null until a code is submitted, then 'match' or 'no_match'.
 		'result'            => null,
-		'tab_menus'         => array(
-			'Edit Account'               => '/profile/account_edit',
-			'Change Password'            => '/profile/password_edit',
-			'Edit Address'               => '/profile/address_edit',
-			'Edit Phone Number'          => '/profile/phone_numbers_edit',
-			'Change Contact Preferences' => '/profile/contact_preferences',
-			'Security'                   => '/profile/security',
-		),
 	);
 
 	if (($input['action'] ?? '') === 'test_totp') {

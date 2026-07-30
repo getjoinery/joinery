@@ -5,15 +5,21 @@
  * POST /api/v1/action/mailbox/sender_context (session credential). Param: message_id (the
  * client sends a MESSAGE id, never an address, so this endpoint can't be used as a
  * membership oracle — the counterparty address is re-derived server-side from a message
- * the caller can already see). Auth: the message must be in the caller's mailbox scope AND
- * the caller must be an admin (permission 5+) — member records (orders, registrations) are
- * operator data, so a non-admin mailbox grantee never gets another member's history.
+ * the caller can already see). Auth: the message must be in the caller's mailbox scope.
  *
- * On a match by email (User::GetByEmail, case-insensitive) returns the member card plus
- * recent event registrations / orders / conversation count — each section present only when
- * its plugin/feature is active. No match → {is_member:false}.
+ * Every mailbox user gets the contact half: the counterparty's address, the display name
+ * from the message, and what the CALLER'S OWN contact store knows about that address
+ * ({contact:null} when nothing, {contact:{locked:true}} when their vault is closed).
  *
- * @version 1.0.0
+ * The site-account half is admin-only (permission 5+) — member records, orders and
+ * registrations are operator data, so a non-admin mailbox grantee never gets another
+ * member's history. `account_visible` says whether that half was evaluated at all, so the
+ * client can tell "no account here" from "not disclosed to you". For an admin, a match by
+ * email (User::GetByEmail, case-insensitive) adds the member card plus recent event
+ * registrations / orders / conversation count — each section present only when its
+ * plugin/feature is active. No match → {is_member:false}.
+ *
+ * @version 1.2.0
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -29,10 +35,9 @@ function sender_context_logic(array $input): LogicResult {
 	if (!$session->get_user_id()) {
 		return LogicResult::error('Sign in required.');
 	}
-	// Member records are operator data — admins only (level 5+).
-	if (intval($session->get_permission()) < 5) {
-		return LogicResult::error('Not authorized.');
-	}
+	// Member records are operator data — the site-account half is admins only (level 5+).
+	// The contact half is the caller's own data and needs no such gate.
+	$can_see_account = (intval($session->get_permission()) >= 5);
 
 	$message_id = intval($input['message_id'] ?? 0);
 	if ($message_id <= 0) {
@@ -74,19 +79,41 @@ function sender_context_logic(array $input): LogicResult {
 		}
 	}
 	if ($parsed === null) {
-		return LogicResult::render(array('is_member' => false, 'address' => ''));
+		return LogicResult::render(array(
+			'is_member'       => false,
+			'account_visible' => $can_see_account,
+			'address'         => '',
+			'message_id'      => $message_id,
+		));
 	}
 	$address = $parsed[0];
 
+	// What the caller's own contact store holds for this address — saved, merely seen, or
+	// nothing. Independent of whether they also have an account here.
+	$contact = (new MailboxContacts())->lookup(intval($session->get_user_id()), $address);
+
+	$base = array(
+		'message_id'      => $message_id,
+		'address'         => $address,
+		'display_name'    => (string)$parsed[1],
+		'contact'         => $contact,
+		'account_visible' => $can_see_account,
+	);
+
+	// A non-admin stops here: the contact half only, and no signal either way about
+	// whether this address belongs to a member.
+	if (!$can_see_account) {
+		return LogicResult::render(array_merge($base, array('is_member' => false)));
+	}
+
 	$user = User::GetByEmail($address);
 	if (!$user || !$user->key) {
-		return LogicResult::render(array('is_member' => false, 'address' => $address));
+		return LogicResult::render(array_merge($base, array('is_member' => false)));
 	}
 	$uid = intval($user->key);
 
-	$payload = array(
+	$payload = array_merge($base, array(
 		'is_member' => true,
-		'address'   => $address,
 		'member'    => array(
 			'user_id'        => $uid,
 			'name'           => trim((string)$user->display_name()) ?: $address,
@@ -95,7 +122,7 @@ function sender_context_logic(array $input): LogicResult {
 			'member_since'   => $user->get('usr_terms_accepted_time'),
 			'edit_url'       => '/admin/admin_user_edit?usr_user_id=' . $uid,
 		),
-	);
+	));
 
 	// Recent event registrations — only when the event_manager plugin is active.
 	if (PluginHelper::isPluginActive('event_manager')) {
@@ -161,7 +188,7 @@ function sender_context_logic(array $input): LogicResult {
 function sender_context_logic_api() {
 	return array(
 		'requires_session' => true,
-		'description' => 'Resolve a thread counterparty to their member record (admin only)',
+		'description' => 'Resolve a thread counterparty to the caller\'s contact entry, plus their member record (admin only)',
 	);
 }
 ?>

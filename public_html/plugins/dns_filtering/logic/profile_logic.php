@@ -40,6 +40,7 @@ function profile_logic(array $input): LogicResult{
 
 	$page_vars['tab_menus'] = array(
 		'My Profile' => '/profile',
+		'Devices' => '/profile/dns_filtering/devices',
 		'Edit Account' => '/profile/account_edit',
 		'Change Password' => '/profile/password_edit',
 		'Edit Address' => '/profile/address_edit',

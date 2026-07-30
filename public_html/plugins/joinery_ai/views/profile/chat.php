@@ -30,10 +30,13 @@ $page->public_header([
                 <nav class="jy-breadcrumbs" aria-label="breadcrumb">
                     <ol>
                         <li><a href="/">Home</a></li>
-                        <li><a href="/profile">My Profile</a></li>
+                        <li><a href="/profile">Dashboard</a></li>
                         <li class="active">AI Chat</li>
                     </ol>
                 </nav>
+                <div class="jy-page-header-action">
+                    <a href="/profile/joinery_ai/memory" class="btn btn-sm btn-outline">Memory</a>
+                </div>
             </div>
         </div>
 

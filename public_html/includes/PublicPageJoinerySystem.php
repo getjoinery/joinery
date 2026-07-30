@@ -103,6 +103,7 @@ class PublicPageJoinerySystem extends PublicPageBase {
             'wrench'          => '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.7 1.7 0 0 0 .33 1.82l.05.05a2 2 0 1 1-2.82 2.83l-.06-.06a1.7 1.7 0 0 0-1.83-.33 1.7 1.7 0 0 0-1 1.51v.09a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.51 1.7 1.7 0 0 0-1.83.33l-.06.06a2 2 0 1 1-2.82-2.83l.05-.05a1.7 1.7 0 0 0 .33-1.82 1.7 1.7 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.51-1 1.7 1.7 0 0 0-.33-1.82l-.05-.05a2 2 0 1 1 2.82-2.83l.06.06a1.7 1.7 0 0 0 1.83.33h.09A1.7 1.7 0 0 0 9 3.09V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.51h.09a1.7 1.7 0 0 0 1.83-.33l.06-.06a2 2 0 1 1 2.82 2.83l-.05.05a1.7 1.7 0 0 0-.33 1.82 1.7 1.7 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z"/></svg>',
             'tools'           => '<svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 3h6v6H3zM15 3h6v6h-6zM15 15h6v6h-6zM3 15h6v6H3z"/></svg>',
             'question-circle' => '<svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 1 1 5.83 1c-.26 1.2-1.5 2-2.92 2v1"/><circle cx="12" cy="17" r="1"/></svg>',
+            'search'          => '<svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
         ];
         return $icons[$icon_name] ?? $icons['dashboard'];
     }
@@ -489,8 +490,7 @@ class PublicPageJoinerySystem extends PublicPageBase {
           </button>
           <div class="dropdown-menu" style="min-width:16rem;right:0;left:auto;">
             <div style="display:grid;grid-template-columns:repeat(3,1fr);padding:0.5rem;gap:0.125rem;">
-              <?php foreach ($user_menu['items'] as $item):
-                if (!self::isAdminLauncherItem($item)) continue;
+              <?php foreach (($user_menu['launcher_items'] ?? []) as $item):
                 $icon = $this->get_admin_icon_svg($item['icon']);
                 ?>
                 <a href="<?php echo htmlspecialchars($item['link']); ?>"

@@ -6,21 +6,22 @@
  * needs: []
  */
 /**
- * Compose maturity Phase 5 — member-context panel (specs/mailbox_compose_maturity.md
- * § Phase 5).
+ * Compose maturity Phase 5 — contact panel (specs/mailbox_compose_maturity.md § Phase 5).
  *
  * Covers:
- *  - Permission gate: a non-admin (level < 5) is refused.
+ *  - Permission split: every mailbox grantee gets the contact half (address, display
+ *    name, their own contact-store entry); the site-account half — the member card,
+ *    orders, registrations — is admins only, and `account_visible` says which they got.
  *  - Resolution hit/miss: a message from a member email resolves the member card;
  *    a non-member email → is_member:false.
  *  - No-oracle + scope: the input is a message id (never an address), and a message
- *    outside the caller's mailbox scope is refused.
+ *    outside the caller's mailbox scope is refused — admin or not.
  *  - Plugin sections track PluginHelper::isPluginActive.
  *
  * Sessions are simulated with SessionControl::set_api_user (the same mechanism the API
  * dispatcher uses), so the logic runs exactly as it would behind /api/v1.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -76,11 +77,15 @@ $mk_alias = function ($local) use ($domain) {
 $alias = $mk_alias('inbox');       // admin is granted this one
 $other_alias = $mk_alias('other'); // admin is NOT granted this one
 
-$g = new InboundEmailMailboxGrant(NULL);
-$g->set('ieg_iea_inbound_email_alias_id', $alias);
-$g->set('ieg_usr_user_id', $admin_uid);
-$g->save();
-harness_register_row('ieg_inbound_email_mailbox_grants', 'ieg_inbound_email_mailbox_grant_id', (int)$g->key);
+$mk_grant = function ($uid) use ($alias) {
+	$g = new InboundEmailMailboxGrant(NULL);
+	$g->set('ieg_iea_inbound_email_alias_id', $alias);
+	$g->set('ieg_usr_user_id', $uid);
+	$g->save();
+	harness_register_row('ieg_inbound_email_mailbox_grants', 'ieg_inbound_email_mailbox_grant_id', (int)$g->key);
+};
+$mk_grant($admin_uid);
+$mk_grant($plain_uid);   // a non-admin mailbox grantee — gets the contact half only
 
 $mk_msg = function ($alias_id, $sender, $mid) use ($domain) {
 	$m = new InboundEmailMessage(NULL);
@@ -100,15 +105,23 @@ $member_msg = $mk_msg($alias, 'Member Person <' . $member_email . '>', '<ctx-mem
 $stranger_msg = $mk_msg($alias, 'nobody-' . bin2hex(random_bytes(3)) . '@stranger.example', '<ctx-str@x>');
 $other_msg = $mk_msg($other_alias, 'Member Person <' . $member_email . '>', '<ctx-oth@x>');
 
-// ── Permission gate ──────────────────────────────────────────────────────────
-section('Permission gate');
+// ── Permission split: contact half for all, account half for admins ──────────
+section('Permission split');
 $r = $run($plain_uid, $member_msg);
-check($r->error !== null, 'a non-admin (level < 5) is refused', json_encode($r->data));
+check($r->error === null, 'a non-admin mailbox grantee gets a result', (string)$r->error);
+check(($r->data['address'] ?? '') === strtolower($member_email), 'the non-admin gets the contact half (address)', json_encode($r->data['address'] ?? null));
+check(array_key_exists('contact', $r->data), 'the non-admin gets their own contact-store entry (or null)');
+check(empty($r->data['account_visible']), 'account_visible is false for a non-admin', json_encode($r->data['account_visible'] ?? null));
+check(!array_key_exists('member', $r->data), 'the member card is withheld from a non-admin', json_encode(array_keys($r->data)));
+check(!array_key_exists('orders', $r->data) && !array_key_exists('registrations', $r->data),
+	'orders and registrations are withheld from a non-admin');
+check(empty($r->data['is_member']), 'a non-admin is told nothing about membership either way');
 
 // ── Resolution — member match ────────────────────────────────────────────────
 section('Resolution — member');
 $r = $run($admin_uid, $member_msg);
 check($r->error === null, 'an admin gets a result', (string)$r->error);
+check(!empty($r->data['account_visible']), 'account_visible is true for an admin');
 check(!empty($r->data['is_member']), 'the sender resolves to a member', json_encode($r->data['is_member'] ?? null));
 check(($r->data['member']['email'] ?? '') === $member_email, 'member email matches', json_encode($r->data['member']['email'] ?? null));
 check(($r->data['member']['user_id'] ?? 0) === $member_uid, 'member user_id matches');
@@ -136,6 +149,8 @@ check($r->error === null && empty($r->data['is_member']), 'a non-member email �
 section('Scope + no-oracle');
 $r = $run($admin_uid, $other_msg);
 check($r->error !== null, 'a message in a mailbox the admin cannot access is refused (no cross-mailbox oracle)', json_encode($r->data));
+$r = $run($plain_uid, $other_msg);
+check($r->error !== null, 'mailbox scope still binds the non-admin (no cross-mailbox oracle)', json_encode($r->data));
 $r = $run($admin_uid, 0);
 check($r->error !== null, 'a missing message id is refused (input is a message id, never an address)');
 

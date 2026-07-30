@@ -286,7 +286,7 @@ function dashboard_render_section($section) {
                         <?php else: ?>
                         <div class="jy-mb-4"></div>
                         <?php endif; ?>
-                        <a href="/profile/account_edit" class="btn btn-primary btn-block">Edit Account</a>
+                        <a href="/profile/settings" class="btn btn-primary btn-block">Settings</a>
                     </div>
                 </div>
 

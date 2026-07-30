@@ -1,7 +1,7 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.13
+ * Vanilla CSS, no framework. @version 2.17
  */
 
 /* Every size the reader renders text at, in one ladder. Nothing in this file
@@ -41,6 +41,15 @@
 }
 
 .mbx-reader * { box-sizing: border-box; }
+
+/* The conversation row's column geometry, stated once so the list header and the
+ * rows below space themselves the same way. The sender width is in base-text
+ * units rather than em so a rule with a different font-size can still use it. */
+.mbx-reader {
+	--mbx-row-gap:  10px;
+	--mbx-star-w:   18px;
+	--mbx-from-w:   calc(13 * var(--mbx-text-base));
+}
 
 /* ---- Left rail ---- */
 .mbx-rail {
@@ -102,33 +111,14 @@
 	padding: 1px 6px;
 }
 .mbx-badge.zero { display: none; }
-/* Protection-level badge (specs/mailbox_protection_ceremony.md). */
+/* Protection-level chip (specs/mailbox_protection_ceremony.md) — beside the list
+ * title, naming the protection of the mailbox being read. */
 .mbx-level-badge {
 	flex: 0 0 auto; font-size: var(--mbx-text-micro); font-weight: 600; border-radius: 8px;
-	padding: 0 6px; margin-left: 4px;
+	padding: 1px 7px;
 }
 .mbx-level-private { background: #d7e7fb; color: #1e40af; }
 .mbx-level-fortress { background: #ede9fe; color: #5b21b6; }
-
-.mbx-filters { display: flex; gap: 4px; margin-bottom: 10px; }
-.mbx-filter {
-	flex: 1;
-	border: 1px solid #cfd6dd;
-	background: #fff;
-	color: #374151;
-	font-size: var(--mbx-text-sm);
-	padding: 5px 0;
-	border-radius: 5px;
-	cursor: pointer;
-}
-.mbx-filter.active { background: #2563eb; border-color: #2563eb; color: #fff; }
-.mbx-search {
-	width: 100%;
-	border: 1px solid #cfd6dd;
-	border-radius: 5px;
-	padding: 7px 9px;
-	font-size: var(--mbx-text-base);
-}
 
 /* ---- Main pane (swaps between list view and reading view) ---- */
 .mbx-main {
@@ -157,12 +147,52 @@
 .mbx-list-header {
 	display: flex;
 	align-items: center;
-	justify-content: space-between;
+	flex-wrap: wrap;
+	gap: var(--mbx-row-gap);
 	padding: 10px 14px;
 	border-bottom: 1px solid #eef1f4;
 }
-.mbx-list-title { font-weight: 600; font-size: var(--mbx-text-md); color: #111827; }
-.mbx-list-header-actions { display: flex; align-items: center; gap: 6px; }
+/* The name group and the button group each take an equal share of the leftover
+ * width, which is what centres the search box between them. A long mailbox name
+ * clips rather than shoving the box off centre. */
+.mbx-list-heading {
+	flex: 1 1 0;
+	min-width: 0;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+.mbx-list-title {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-weight: 600;
+	font-size: var(--mbx-text-md);
+	color: #111827;
+}
+.mbx-list-header-actions {
+	flex: 1 1 0;
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 6px;
+}
+.mbx-searchbar { flex: 0 1 380px; min-width: 0; }
+.mbx-search {
+	width: 100%;
+	border: 1px solid #cfd6dd;
+	border-radius: 16px;
+	padding: 6px 12px;
+	font-size: var(--mbx-text-sm);
+	background: #f3f5f8;
+}
+.mbx-search:focus {
+	outline: none;
+	border-color: #2563eb;
+	background: #fff;
+	box-shadow: 0 0 0 3px rgba(37, 99, 235, .15);
+}
 .mbx-new-btn {
 	border: 1px solid #2563eb; background: #2563eb; color: #fff;
 	border-radius: 16px; padding: 6px 14px; cursor: pointer;
@@ -195,7 +225,7 @@
 .mbx-thread-item {
 	display: flex;
 	align-items: baseline;
-	gap: 10px;
+	gap: var(--mbx-row-gap);
 	padding: 9px 14px;
 	border-bottom: 1px solid #f1f3f5;
 	cursor: pointer;
@@ -208,8 +238,10 @@
 }
 .mbx-thread-item.active { background: #eaf1fb; }
 .mbx-thread-item.unread { background: #fff; }     /* unread rows pop on white */
+/* Fixed width, not the glyph's own, so stars line up down the column. */
 .mbx-thread-star {
-	flex: 0 0 auto;
+	flex: 0 0 var(--mbx-star-w);
+	text-align: center;
 	color: #c4c9d0;
 	font-size: var(--mbx-text-lg);
 	cursor: pointer;
@@ -221,7 +253,7 @@
  * row's own text size, so a step up the ladder widens it instead of clipping
  * more of every name. */
 .mbx-thread-from {
-	flex: 0 0 13em;
+	flex: 0 0 var(--mbx-from-w);
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -562,6 +594,12 @@
 	.mbx-rail { flex-basis: auto; border-right: none; border-bottom: 1px solid #e4e7eb; }
 	/* While reading on a small screen, hide the rail so the message gets full width. */
 	.mbx-reader.reading .mbx-rail { display: none; }
+	/* Too narrow for three things on one row: search drops to its own full-width
+	 * line under the mailbox name and the buttons, which then take only the width
+	 * they need instead of half the row each. */
+	.mbx-list-header .mbx-searchbar { order: 3; flex: 1 1 100%; }
+	.mbx-list-header .mbx-list-heading { flex: 1 1 auto; }
+	.mbx-list-header .mbx-list-header-actions { flex: 0 0 auto; }
 }
 
 /* Locked-state unlock affordances (specs/mailbox_security_levels.md § 4.1):

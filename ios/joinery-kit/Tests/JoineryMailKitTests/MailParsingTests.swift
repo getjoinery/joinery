@@ -71,7 +71,8 @@ final class MailParsingTests: XCTestCase {
 
     func testSenderDisplayParsing() {
         XCTAssertEqual(MailDisplay.senderName("Jane Doe <jane@example.com>"), "Jane Doe")
-        XCTAssertEqual(MailDisplay.senderName("jane@example.com"), "jane")
+        // With no display name the sending organization is the label, not the local part.
+        XCTAssertEqual(MailDisplay.senderName("jane@example.com"), "Example")
         XCTAssertEqual(MailDisplay.address("Jane Doe <jane@example.com>"), "jane@example.com")
         XCTAssertEqual(MailDisplay.address("  jane@example.com "), "jane@example.com")
         // Stable avatar bucket, in range.
@@ -79,6 +80,46 @@ final class MailParsingTests: XCTestCase {
         let b = MailDisplay.avatarColorIndex("jane@example.com", paletteSize: 8)
         XCTAssertEqual(a, b, "same address hashes to the same bucket regardless of display name")
         XCTAssertTrue((0..<8).contains(a))
+    }
+
+    /// The label rules, mirroring the web reader's sender_name.mjs gate: the same
+    /// message must read the same way in the app and in the browser.
+    func testSenderLabelRules() {
+        // A display name always wins, verbatim.
+        XCTAssertEqual(MailDisplay.senderName("\"Fireworks Team\" <hello@fireworks.ai>"), "Fireworks Team")
+        XCTAssertEqual(MailDisplay.senderName("\"iA Writer\" <news@ia.net>"), "iA Writer")
+
+        // No name: the organization, not the local part.
+        XCTAssertEqual(MailDisplay.senderName("hello@fireworks.ai"), "Fireworks")
+        XCTAssertEqual(MailDisplay.senderName("no-reply@accounts.google.com"), "Google")
+        XCTAssertEqual(MailDisplay.senderName("alerts@e-trade.com"), "E-Trade")
+        XCTAssertEqual(MailDisplay.senderName("noreply@mail.notifications.example.co.uk"), "Example")
+        XCTAssertEqual(MailDisplay.senderName("info@bundesbank.de"), "Bundesbank")
+
+        // Consumer providers: the person is the identity.
+        XCTAssertEqual(MailDisplay.senderName("jeremy.tunnell@gmail.com"), "Jeremy Tunnell")
+        XCTAssertEqual(MailDisplay.senderName("a.b.cooper@icloud.com"), "A B Cooper")
+        XCTAssertEqual(MailDisplay.senderName("someone@proton.me"), "Someone")
+
+        // ...but only for what could be a person's mailbox.
+        XCTAssertEqual(MailDisplay.senderName("no-reply@notify.proton.me"), "Proton")
+        XCTAssertEqual(MailDisplay.senderName("support@proton.me"), "Proton")
+        XCTAssertEqual(MailDisplay.senderName("AmericanExpress-no-reply@alerts.americanexpress.com"), "Americanexpress")
+        XCTAssertEqual(MailDisplay.senderName("info.smith@gmail.com"), "Info Smith")
+
+        // Degenerate input never crashes or shows an empty label.
+        XCTAssertEqual(MailDisplay.senderName(""), "(unknown)")
+        XCTAssertEqual(MailDisplay.senderName("garbage"), "garbage")
+        XCTAssertEqual(MailDisplay.senderName("@gmail.com"), "@gmail.com")
+
+        // The host reducer.
+        XCTAssertEqual(MailDisplay.orgLabel("accounts.google.com"), "google")
+        XCTAssertEqual(MailDisplay.orgLabel("example.co.uk"), "example")
+        XCTAssertEqual(MailDisplay.orgLabel("localhost"), "localhost")
+        XCTAssertTrue(MailDisplay.hasSubdomain("notify.proton.me"))
+        XCTAssertFalse(MailDisplay.hasSubdomain("proton.me"))
+        XCTAssertFalse(MailDisplay.hasSubdomain("example.co.uk"))
+        XCTAssertTrue(MailDisplay.hasSubdomain("mail.example.co.uk"))
     }
 
     func testDateStamps() {

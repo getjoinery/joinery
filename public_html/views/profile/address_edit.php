@@ -15,7 +15,7 @@
 <div class="jy-ui">
 <section class="jy-content-section">
     <div class="jy-container">
-        <div class="jy-narrow">
+        <div class="jy-settings-shell">
 
             <div class="jy-page-header">
                 <div class="jy-page-header-bar">
@@ -23,14 +23,14 @@
                     <nav class="jy-breadcrumbs" aria-label="breadcrumb">
                         <ol>
                             <li><a href="/">Home</a></li>
-                            <li><a href="/profile">My Profile</a></li>
+                            <li><a href="/profile">Dashboard</a></li>
                             <li class="active">Edit Address</li>
                         </ol>
                     </nav>
                 </div>
             </div>
 
-            <?php echo PublicPage::tab_menu($tab_menus, 'Edit Address'); ?>
+            <?php echo PublicPage::settings_layout_start(); ?>
 
             <div class="jy-panel jy-form-actions">
                 <?php
@@ -61,6 +61,7 @@
                 ?>
             </div>
 
+            <?php echo PublicPage::settings_layout_end(); ?>
         </div>
     </div>
 </section>

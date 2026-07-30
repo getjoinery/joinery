@@ -74,14 +74,6 @@ function address_edit_logic(array $input): LogicResult{
 
 	$page_vars['address'] = $address;
 	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
-	$page_vars['tab_menus'] = array(
-		'Edit Account' => '/profile/account_edit',
-		'Change Password' => '/profile/password_edit',
-		'Edit Address' => '/profile/address_edit',
-		'Edit Phone Number' => '/profile/phone_numbers_edit',
-		'Change Contact Preferences' => '/profile/contact_preferences',
-		'Security' => '/profile/security',
-	);
 
 	return LogicResult::render($page_vars);
 }

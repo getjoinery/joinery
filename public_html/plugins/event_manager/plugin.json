@@ -1,6 +1,6 @@
 {
     "name": "Event Manager",
-    "version": "1.0.10",
+    "version": "1.1.0",
     "description": "Events toolkit: events, locations, event sessions and waiting lists, with store integration for ticketed events and event surveys at checkout",
     "author": "Joinery",
     "receives_upgrades": true,
@@ -59,7 +59,7 @@
     "profileMenu": [
         {
             "slug": "event-manager-events",
-            "title": "My Events",
+            "title": "Events",
             "url": "/profile/events",
             "order": 80,
             "permission": 0,

@@ -576,21 +576,23 @@ read live from disk) — no activation or `update_database` step.
 
 ### Plugin Menus (Declarative)
 
-Plugins declare menu contributions in `plugin.json` under two keys:
+Plugins declare menu contributions in `plugin.json` under three keys:
 
 - `adminMenu` — items in the admin sidebar (`/admin/*`).
-- `profileMenu` — items in the member profile menu (logged-in avatar menu, logged-out auth links, etc.).
+- `profileMenu` — items in the member section nav (the horizontal nav across the member area) and the logged-out auth links.
+- `settingsMenu` — sections in the member settings hub's left rail (`/profile/settings`).
 
-Both keys are synced into the same `amu_admin_menus` table, distinguished by an `amu_location` column (`admin_sidebar` vs `user_dropdown`). The system automatically creates menu rows on activation, updates them on sync, and removes them on deactivation/uninstall. This is the only supported way to register plugin menus — do not INSERT into `amu_admin_menus` from migrations.
+All three keys are synced into the same `amu_admin_menus` table, distinguished by an `amu_location` column (`admin_sidebar` / `user_dropdown` / `member_settings`). The system automatically creates menu rows on activation, updates them on sync, and removes them on deactivation/uninstall. This is the only supported way to register plugin menus — do not INSERT into `amu_admin_menus` from migrations.
 
-A `profileMenu` entry is the single way onto the member menu, everywhere: every theme renders the seeded store via `PublicPageBase::get_menu_data()` (`$menu_data['user_menu']['items']`, each item `{label, link, icon, slug}`), and the mobile apps' navigation endpoint reads the same store. Themes style the markup but never hardcode member menu entries — adding one entry in a manifest surfaces it on all web themes and in every shipped app with no theme edits or app release.
+A `profileMenu` entry is the single way onto the member nav, everywhere: every theme renders the seeded store (`$menu_data['user_menu']['member_nav']`, each item `{label, link, icon, slug, parent}`) via `PublicPageBase::render_member_subnav()`, and the mobile apps' navigation endpoint reads the same store. Themes style the markup but never hardcode member nav entries — adding one entry in a manifest surfaces it on all web themes and in every shipped app with no theme edits or app release. The avatar dropdown itself is identity-only (Dashboard, Settings, Sign out) and is not extensible.
 
 **Locations:**
 
-| Location        | Source key    | Permission floor | Visibility |
-|-----------------|---------------|------------------|------------|
-| `admin_sidebar` | `adminMenu`   | ≥ 1              | always `in` (logged in) |
-| `user_dropdown` | `profileMenu` | ≥ 0              | `in` / `out` / `both` |
+| Location          | Source key     | Permission floor | Visibility |
+|-------------------|----------------|------------------|------------|
+| `admin_sidebar`   | `adminMenu`    | ≥ 1              | always `in` (logged in) |
+| `user_dropdown`   | `profileMenu`  | ≥ 0              | `in` / `out` / `both` |
+| `member_settings` | `settingsMenu` | ≥ 0              | `in` |
 
 **Slug rules (both locations):**
 
@@ -680,7 +682,7 @@ The `parent` value is the `amu_slug` of any menu in the system -- core menus, ot
 
 #### `profileMenu`
 
-Profile menu items appear in the user dropdown. They are flat — no parent/items nesting — and support a per-row `visibility` value that selects between logged-in, logged-out, and both states.
+Profile menu items appear in the member section nav (logged-in) or as auth links (logged-out, per `visibility`). Entries may name a `parent` slug — a parented entry belongs inside its section (linked from that section's own pages) and is dropped from the top-level nav; nested `items` are not supported.
 
 ```json
 {
@@ -712,9 +714,37 @@ Profile menu items appear in the user dropdown. They are flat — no parent/item
 | `settingActivate` | No | null | Setting that must be truthy for the row to display. |
 | `disabled` | No | false | Whether disabled by default. |
 
-`parent` and `items` are not supported on `profileMenu` — the user dropdown is rendered as a flat list. Themes that need additional grouping handle it at the render layer.
+`parent` names another profile-menu slug; nested `items` are not supported. A parented entry (e.g. AI Memory under AI) stays in the store — the mobile apps and the admin menu editor still see it — but the top-level member nav skips it, so its own section must link to it.
 
-**Themes consuming the dropdown:** themes read `$menu_data['user_menu']['items']` returned by `PublicPageBase::get_menu_data()`. Each item carries `label`, `link`, `icon`, and `slug`. Filter by `slug` (e.g. `str_starts_with($item['slug'], 'core-admin-')`) — never by `label`, since admins can rename labels in the admin UI.
+**Themes consuming the menu data** (`PublicPageBase::get_menu_data()`):
+
+- `$menu_data['user_menu']['member_nav']` — the full seeded list `{label, link, icon, slug, parent}`; the member section nav renders the unparented, non-admin rows (`PublicPageBase::member_subnav_items()`).
+- `$menu_data['user_menu']['items']` — the avatar dropdown: identity-only when logged in (Dashboard, Settings, Sign out); the seeded auth links when logged out.
+- `$menu_data['user_menu']['launcher_items']` — the admin nine-dots launcher rows (`core-home`, `core-profile`, `core-admin-*`).
+
+Filter by `slug` (e.g. `str_starts_with($item['slug'], 'core-admin-')`) — never by `label`, since admins can rename labels in the admin UI.
+
+#### `settingsMenu`
+
+Settings menu entries are sections on the member settings hub's left rail, rendered by `PublicPageBase::settings_layout_start()` across every settings page. Core seeds the account sections (Account, Password, Address, Phone Numbers, Contact Preferences, Notifications, Security); a plugin adds its member-owned configuration or account-scoped pages here.
+
+```json
+{
+  "settingsMenu": [
+    {
+      "slug": "myplugin-preferences",
+      "title": "My Plugin",
+      "url": "/profile/myplugin/preferences",
+      "icon": "cog",
+      "permission": 0,
+      "order": 85,
+      "settingActivate": "myplugin_active"
+    }
+  ]
+}
+```
+
+Fields match `profileMenu` (minus `visibility` and `nativeScreen` — the rail is logged-in web only). Core sections occupy orders 10–70; plugin sections conventionally start at 80. The rows are editable at `/admin/admin_admin_menu?location=member_settings`.
 
 ### Plugin Settings (Declarative)
 

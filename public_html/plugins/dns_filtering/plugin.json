@@ -1,6 +1,6 @@
 {
     "name": "DNS Filtering",
-    "version": "1.1.6",
+    "version": "1.2.0",
     "depends": { "store": ">=1.0.0" },
     "description": "Self-hosted DNS filtering service with per-device filtering profiles",
     "author": "System Developer",
@@ -100,7 +100,8 @@
             "visibility": "in",
             "permission": 0,
             "order": 76,
-            "nativeScreen": "dns_devices"
+            "nativeScreen": "dns_devices",
+            "parent": "dns-filtering"
         }
     ]
 }

@@ -53,12 +53,18 @@
 	)
 	);
 
-	// Tabs — Admin Sidebar / User Dropdown
+	// Tabs — one per menu location
 	$tabs = array(
 		'Admin Sidebar' => '/admin/admin_admin_menu?location=admin_sidebar',
-		'User Dropdown' => '/admin/admin_admin_menu?location=user_dropdown',
+		'Member Nav' => '/admin/admin_admin_menu?location=user_dropdown',
+		'Member Settings' => '/admin/admin_admin_menu?location=member_settings',
 	);
-	$current_tab = ($location === 'user_dropdown') ? 'User Dropdown' : 'Admin Sidebar';
+	$tab_labels = array(
+		'admin_sidebar' => 'Admin Sidebar',
+		'user_dropdown' => 'Member Nav',
+		'member_settings' => 'Member Settings',
+	);
+	$current_tab = $tab_labels[$location] ?? 'Admin Sidebar';
 	echo $page->tab_menu($tabs, $current_tab);
 
 	$show_visibility_column = ($location === 'user_dropdown');

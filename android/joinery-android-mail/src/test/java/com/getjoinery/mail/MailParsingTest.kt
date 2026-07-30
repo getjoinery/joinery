@@ -93,7 +93,8 @@ class MailParsingTest {
     @Test
     fun senderDisplayParsing() {
         assertEquals("Jane Doe", MailDisplay.senderName("Jane Doe <jane@example.com>"))
-        assertEquals("jane", MailDisplay.senderName("jane@example.com"))
+        // With no display name the sending organization is the label, not the local part.
+        assertEquals("Example", MailDisplay.senderName("jane@example.com"))
         assertEquals("jane@example.com", MailDisplay.address("Jane Doe <jane@example.com>"))
         assertEquals("jane@example.com", MailDisplay.address("  jane@example.com "))
         // Stable avatar bucket, in range, blind to the display name.
@@ -101,6 +102,49 @@ class MailParsingTest {
         val b = MailDisplay.avatarColorIndex("jane@example.com", 8)
         assertEquals(a, b)
         assertTrue(a in 0 until 8)
+    }
+
+    /**
+     * The label rules, mirroring the web reader's sender_name.mjs gate: the same
+     * message must read the same way in the app and in the browser.
+     */
+    @Test
+    fun senderLabelRules() {
+        // A display name always wins, verbatim.
+        assertEquals("Fireworks Team", MailDisplay.senderName("\"Fireworks Team\" <hello@fireworks.ai>"))
+        assertEquals("iA Writer", MailDisplay.senderName("\"iA Writer\" <news@ia.net>"))
+
+        // No name: the organization, not the local part.
+        assertEquals("Fireworks", MailDisplay.senderName("hello@fireworks.ai"))
+        assertEquals("Google", MailDisplay.senderName("no-reply@accounts.google.com"))
+        assertEquals("E-Trade", MailDisplay.senderName("alerts@e-trade.com"))
+        assertEquals("Example", MailDisplay.senderName("noreply@mail.notifications.example.co.uk"))
+        assertEquals("Bundesbank", MailDisplay.senderName("info@bundesbank.de"))
+
+        // Consumer providers: the person is the identity.
+        assertEquals("Jeremy Tunnell", MailDisplay.senderName("jeremy.tunnell@gmail.com"))
+        assertEquals("A B Cooper", MailDisplay.senderName("a.b.cooper@icloud.com"))
+        assertEquals("Someone", MailDisplay.senderName("someone@proton.me"))
+
+        // ...but only for what could be a person's mailbox.
+        assertEquals("Proton", MailDisplay.senderName("no-reply@notify.proton.me"))
+        assertEquals("Proton", MailDisplay.senderName("support@proton.me"))
+        assertEquals("Americanexpress", MailDisplay.senderName("AmericanExpress-no-reply@alerts.americanexpress.com"))
+        assertEquals("Info Smith", MailDisplay.senderName("info.smith@gmail.com"))
+
+        // Degenerate input never crashes or shows an empty label.
+        assertEquals("(unknown)", MailDisplay.senderName(""))
+        assertEquals("garbage", MailDisplay.senderName("garbage"))
+        assertEquals("@gmail.com", MailDisplay.senderName("@gmail.com"))
+
+        // The host reducer.
+        assertEquals("google", MailDisplay.orgLabel("accounts.google.com"))
+        assertEquals("example", MailDisplay.orgLabel("example.co.uk"))
+        assertEquals("localhost", MailDisplay.orgLabel("localhost"))
+        assertTrue(MailDisplay.hasSubdomain("notify.proton.me"))
+        assertFalse(MailDisplay.hasSubdomain("proton.me"))
+        assertFalse(MailDisplay.hasSubdomain("example.co.uk"))
+        assertTrue(MailDisplay.hasSubdomain("mail.example.co.uk"))
     }
 
     @Test

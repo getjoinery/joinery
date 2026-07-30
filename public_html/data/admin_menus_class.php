@@ -57,7 +57,7 @@ class AdminMenu extends SystemBase {	public static $prefix = 'amu';
 	    'amu_visibility' => array('type'=>'varchar(8)', 'default'=>'in', 'is_nullable'=>false),
 	);
 
-	const LOCATIONS = array('admin_sidebar', 'user_dropdown');
+	const LOCATIONS = array('admin_sidebar', 'user_dropdown', 'member_settings');
 	const VISIBILITIES = array('in', 'out', 'both');
 
 function authenticate_write($data) {
@@ -165,9 +165,11 @@ class MultiAdminMenu extends SystemMultiBase {
 	 *
 	 * @param bool $is_logged_in Whether the current session is authenticated
 	 * @param int $user_permission Effective permission level (0 when logged out)
+	 * @param string $location Menu location to read ('user_dropdown' for the
+	 *                         member nav, 'member_settings' for the settings rail)
 	 * @return AdminMenu[] Array of loaded AdminMenu objects
 	 */
-	static function get_user_dropdown_items($is_logged_in, $user_permission) {
+	static function get_user_dropdown_items($is_logged_in, $user_permission, $location = 'user_dropdown') {
 		$settings = Globalvars::get_instance();
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
@@ -186,7 +188,7 @@ class MultiAdminMenu extends SystemMultiBase {
 				AND amu_min_permission <= ?
 				ORDER BY amu_order ASC, amu_slug ASC";
 
-		$params = array_merge(['user_dropdown'], $allowed_visibilities, [$permission_value]);
+		$params = array_merge([$location], $allowed_visibilities, [$permission_value]);
 
 		$q = $dblink->prepare($sql);
 		$q->execute($params);

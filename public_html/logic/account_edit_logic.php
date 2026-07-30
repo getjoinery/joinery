@@ -140,14 +140,6 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
 
-	$page_vars['tab_menus'] = array(
-		'Edit Account' => '/profile/account_edit',
-		'Change Password' => '/profile/password_edit',
-		'Edit Address' => '/profile/address_edit',
-		'Edit Phone Number' => '/profile/phone_numbers_edit',
-		'Change Contact Preferences' => '/profile/contact_preferences',
-		'Security' => '/profile/security',
-	);
 	
 	$page_vars['user'] = $user;
 	$page_vars['user_photos'] = $user->get_photos();

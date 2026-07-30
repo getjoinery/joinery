@@ -1,12 +1,24 @@
 {
     "name": "Bookings Management",
-    "version": "1.1.8",
+    "version": "1.2.0",
     "depends": { "store": ">=1.0.0" },
     "description": "Booking and booking type management system",
     "author": "System Developer",
     "receives_upgrades": true,
     "included_in_publish": true,
     "styles": ["assets/css/bookings.css"],
+    "profileMenu": [
+        {
+            "slug": "bookings-member",
+            "title": "Bookings",
+            "url": "/profile/bookings/my_bookings",
+            "icon": "calendar",
+            "visibility": "in",
+            "permission": 0,
+            "order": 78,
+            "settingActivate": "bookings_active"
+        }
+    ],
     "adminMenu": [
         {
             "slug": "bookings-parent",

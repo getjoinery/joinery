@@ -1503,17 +1503,20 @@ class PluginManager extends AbstractExtensionManager {
     }
 
     /**
-     * Sync menus (admin sidebar + user dropdown) from a declared source —
-     * either a plugin's plugin.json or the core admin_menus.json.
+     * Sync menus (admin sidebar + user dropdown + member settings rail) from a
+     * declared source — either a plugin's plugin.json or the core
+     * admin_menus.json.
      *
-     * Handles creation, update, and removal. Pass ['admin' => [], 'profile' => []]
-     * to remove all menus owned by the source (plugin deactivate/uninstall).
+     * Handles creation, update, and removal. Pass
+     * ['admin' => [], 'profile' => [], 'settings' => []] to remove all menus
+     * owned by the source (plugin deactivate/uninstall).
      *
      * @param string $source_name Plugin directory name, or 'core' for core menus.
      * @param array|null $declared When null, reads from plugin.json (plugins only;
      *                             throws for source_name='core'). When an array,
-     *                             must use shape ['admin' => [...], 'profile' => [...]].
-     *                             Missing keys are treated as empty arrays.
+     *                             must use shape ['admin' => [...], 'profile' => [...],
+     *                             'settings' => [...]]. Missing keys are treated
+     *                             as empty arrays.
      * @param array $options ['overwrite' => bool, 'prune' => bool]. Defaults:
      *                       overwrite=true, prune=true (preserves plugin behavior).
      *                       Core caller passes overwrite=false, prune=false to
@@ -1536,17 +1539,19 @@ class PluginManager extends AbstractExtensionManager {
             try {
                 $helper = PluginHelper::getInstance($source_name);
                 $declared = [
-                    'admin'   => $helper->getAdminMenuItems(),
-                    'profile' => $helper->getProfileMenuItems(),
+                    'admin'    => $helper->getAdminMenuItems(),
+                    'profile'  => $helper->getProfileMenuItems(),
+                    'settings' => $helper->getSettingsMenuItems(),
                 ];
             } catch (Exception $e) {
                 error_log("syncMenus: could not read plugin.json for '$source_name': " . $e->getMessage());
-                $declared = ['admin' => [], 'profile' => []];
+                $declared = ['admin' => [], 'profile' => [], 'settings' => []];
             }
         }
 
-        $admin_items   = $declared['admin']   ?? [];
-        $profile_items = $declared['profile'] ?? [];
+        $admin_items    = $declared['admin']    ?? [];
+        $profile_items  = $declared['profile']  ?? [];
+        $settings_items = $declared['settings'] ?? [];
 
         // === Strict per-entry validation up front (before any DB work). ===
         // Required fields per entry: slug, title, order, permission.
@@ -1609,6 +1614,10 @@ class PluginManager extends AbstractExtensionManager {
             $validate($item, 'profileMenu', (string)$idx, false);
             $reserved_check($item, 'profileMenu', (string)$idx);
         }
+        foreach ($settings_items as $idx => $item) {
+            $validate($item, 'settingsMenu', (string)$idx, false);
+            $reserved_check($item, 'settingsMenu', (string)$idx);
+        }
 
         // === Build flat entry list ===
         $admin_parents  = [];
@@ -1652,9 +1661,8 @@ class PluginManager extends AbstractExtensionManager {
             }
         }
 
-        $profile_entries = [];
-        foreach ($profile_items as $item) {
-            $profile_entries[] = [
+        $flat_map = function (array $item, string $location): array {
+            return [
                 'slug' => $item['slug'],
                 'title' => $item['title'],
                 'url' => $item['url'] ?? '',
@@ -1663,14 +1671,30 @@ class PluginManager extends AbstractExtensionManager {
                 'icon' => $item['icon'] ?? null,
                 'settingActivate' => $item['settingActivate'] ?? null,
                 'disabled' => $item['disabled'] ?? false,
-                'parent_slug' => null,
-                'location' => 'user_dropdown',
+                // A parented profile entry (e.g. AI Memory under AI) belongs to
+                // its section, not the top-level member nav.
+                'parent_slug' => $item['parent'] ?? null,
+                'location' => $location,
                 'visibility' => $item['visibility'] ?? 'in',
                 // App platform: names the native screen apps render for this
                 // entry (web page stays the fallback for older builds).
                 'nativeScreen' => $item['nativeScreen'] ?? null,
             ];
+        };
+
+        $profile_entries = [];
+        foreach ($profile_items as $item) {
+            $profile_entries[] = $flat_map($item, 'user_dropdown');
         }
+        // Member settings rail (the /profile/settings hub's left nav).
+        foreach ($settings_items as $item) {
+            $profile_entries[] = $flat_map($item, 'member_settings');
+        }
+        // Parents before children so a freshly-inserted parent's id is
+        // available when its child's parent slug is resolved.
+        usort($profile_entries, function ($a, $b) {
+            return (int)!empty($a['parent_slug']) <=> (int)!empty($b['parent_slug']);
+        });
 
         $flat_entries = array_merge($admin_parents, $admin_children, $profile_entries);
         $declared_slugs = array_column($flat_entries, 'slug');

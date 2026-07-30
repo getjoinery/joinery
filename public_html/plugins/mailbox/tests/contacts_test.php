@@ -16,8 +16,10 @@
  *  - listForUser ranks by use_count and de-duplicates by address.
  *  - Import (vCard + Google CSV): counts, junk-row skip.
  *  - Delete is owner-scoped.
+ *  - lookup(): a harvested address reads back as seen-not-saved; a deliberate add stamps
+ *    it saved and fills a missing display name; an unknown address returns null.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -58,6 +60,30 @@ check($total === 2, 'no duplicate row created for the repeat', (string)$total);
 $list = $svc->listForUser($uid);
 check(empty($list['locked']) && count($list['contacts']) === 2, 'listForUser returns both, unlocked');
 check($list['contacts'][0]['address'] === 'alice@example.com', 'most-used contact ranked first', $list['contacts'][0]['address']);
+
+// ── Lookup: seen vs saved ────────────────────────────────────────────────────
+section('Lookup — seen vs saved');
+
+$look = $svc->lookup($uid, 'ALICE@example.com');
+check($look !== null, 'lookup finds a harvested address (case-insensitive)');
+check($look && $look['saved'] === false, 'a harvested contact is seen, not saved', $look ? $look['source'] : '');
+check($look && intval($look['use_count']) === 2, 'lookup reports use_count', $look ? (string)$look['use_count'] : '');
+check($svc->lookup($uid, 'nobody@example.com') === null, 'an unknown address looks up as null');
+
+// A deliberate add stamps the existing row saved rather than inserting a second one.
+check($svc->manualAdd($uid, 'bob@example.com') === true, 'manual add accepts a bare address');
+$after = $svc->lookup($uid, 'bob@example.com');
+check($after && $after['saved'] === true, 'a deliberate add marks the contact saved', $after ? $after['source'] : '');
+$bob_rows = intval($db->query("SELECT COUNT(*) FROM imc_mailbox_contacts WHERE imc_usr_user_id = $uid AND imc_address = 'bob@example.com'")->fetchColumn());
+check($bob_rows === 1, 'adding an already-harvested address does not duplicate the row', (string)$bob_rows);
+check($after && $after['name'] === '', 'bob still has no display name (none was harvested)', $after ? $after['name'] : '');
+
+// Adding with a display name fills one the harvest never captured.
+$svc->manualAdd($uid, 'Bob Builder <bob@example.com>');
+$named = $svc->lookup($uid, 'bob@example.com');
+check($named && $named['name'] === 'Bob Builder', 'a named add fills the missing display name', $named ? $named['name'] : '');
+
+check($svc->manualAdd($uid, 'not-an-address') === false, 'manual add rejects a non-address');
 
 // ── Sealed store (vault) ─────────────────────────────────────────────────────
 section('Harvest — sealed (vault)');

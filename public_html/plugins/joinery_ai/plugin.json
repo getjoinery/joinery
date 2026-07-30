@@ -1,6 +1,6 @@
 {
     "name": "Joinery AI",
-    "version": "0.10.5",
+    "version": "0.11.0",
     "description": "Scheduled LLM recipes that gather information, write to a workspace, and deliver results to a dashboard or email.",
     "author": "Joinery",
     "receives_upgrades": true,
@@ -11,7 +11,7 @@
     "profileMenu": [
         {
             "slug": "joinery-ai-member-chat",
-            "title": "AI Chat",
+            "title": "AI",
             "url": "/profile/joinery_ai/chat",
             "nativeScreen": "ai_chat",
             "icon": "robot",
@@ -26,7 +26,8 @@
             "icon": "memory",
             "visibility": "in",
             "permission": 0,
-            "order": 73
+            "order": 73,
+            "parent": "joinery-ai-member-chat"
         }
     ],
     "adminMenu": [

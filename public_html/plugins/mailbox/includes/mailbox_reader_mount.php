@@ -29,7 +29,7 @@
  * on non-sealing domains converges them in the background via
  * mailbox/unseal_batch, silently stopping while their vault is locked.
  *
- * @version 1.8.0
+ * @version 1.12.0
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSender.php'));
@@ -84,9 +84,10 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 		'contactsImportUrl' => '/api/v1/action/mailbox/contacts_import',
 		'senderContextUrl'  => '/api/v1/action/mailbox/sender_context',
 		'setupStatusUrl'    => '/api/v1/action/mailbox/setup_status',
-		// The member-context panel is admin-only (member records are operator data);
-		// the endpoint enforces it, this flag just suppresses the fetch for non-admins.
-		'canSeeContext'     => (SessionControl::get_instance()->get_permission() >= 5),
+		// Every mailbox user gets the Contact panel (their own contact store); the
+		// endpoint decides what goes in it — the site-account half is admin-only,
+		// because member records are operator data.
+		'canSeeContext'     => TRUE,
 		'messageDetailBase' => $opts['message_detail_base'] ?? null,
 		'setupUrlBase'      => $opts['setup_url_base'] ?? null,
 		'attachmentUrlBase' => (string)$opts['attachment_url_base'],
@@ -102,10 +103,6 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 		<div class="mbx-rail-section">
 			<h2 class="mbx-rail-title">Mailboxes</h2>
 			<ul id="mbx-mailboxes" class="mbx-mailbox-list"></ul>
-		</div>
-		<div class="mbx-rail-section">
-			<h2 class="mbx-rail-title">Search</h2>
-			<input type="search" id="mbx-search" class="mbx-search" placeholder="Search mail…" autocomplete="off">
 		</div>
 	</aside>
 
@@ -195,7 +192,19 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 		</div>
 		<div class="mbx-list-view" id="mbx-list-view">
 			<div class="mbx-list-header">
-				<span id="mbx-list-title" class="mbx-list-title">All mail</span>
+				<!-- Name of what is being listed, plus (for a protected mailbox) its
+				     protection level. The chip lives here rather than in the rail,
+				     where it crowded out the address it sat beside; the reader JS
+				     fills it per selected mailbox. -->
+				<div class="mbx-list-heading">
+					<span id="mbx-list-title" class="mbx-list-title">All mail</span>
+					<span id="mbx-level-chip" class="mbx-level-badge" hidden></span>
+				</div>
+				<!-- Search sits in the middle of the list header, centred between the
+				     mailbox name and the compose button. -->
+				<div class="mbx-searchbar">
+					<input type="search" id="mbx-search" class="mbx-search" placeholder="Search mail…" autocomplete="off">
+				</div>
 				<div class="mbx-list-header-actions">
 					<button type="button" id="mbx-new-message" class="mbx-new-btn" hidden>+ New message</button>
 					<button type="button" id="mbx-refresh" class="mbx-iconbtn" title="Refresh">&#8635;</button>

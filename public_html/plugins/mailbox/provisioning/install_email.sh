@@ -2,6 +2,9 @@
 #
 # install_email.sh - host installer + base configurator for Mailbox.
 #
+# Version: 2.14 - Only Spamhaus (zen + dbl) is rejected on at RCPT time; SpamCop
+#                and Barracuda list shared ESP outbound IPs on brief triggers, so
+#                rejecting on them permanently bounced ordinary Mailgun/SendGrid mail
 # Version: 2.13 - The local spam scanner ships with the mail stack: provision_
 #                spam_scanner.sh is installed unconditionally, so enabling spam
 #                learning later is a pure settings toggle (nothing to install)
@@ -241,7 +244,15 @@ else
 fi
 
 # RBL spam filtering at RCPT time (fixed config).
-postconf -e "smtpd_recipient_restrictions = permit_mynetworks, reject_unauth_destination, reject_rbl_client zen.spamhaus.org, reject_rbl_client bl.spamcop.net, reject_rbl_client b.barracudacentral.org, reject_rhsbl_helo dbl.spamhaus.org, reject_rhsbl_sender dbl.spamhaus.org, permit"
+#
+# Only Spamhaus rejects. Zen and DBL are built to be rejected on: low false
+# positive, and Zen deliberately excludes the shared outbound ranges every ESP
+# sends from. SpamCop and Barracuda list those shared IPs on brief automated
+# triggers and de-list hours later, so rejecting on them bounces ordinary mail
+# from Mailgun, SendGrid or Google at random — permanently, since a 5xx stops
+# the sender retrying. SpamCop says as much itself: use it to score, not to
+# refuse. Content scoring is where a weaker signal belongs.
+postconf -e "smtpd_recipient_restrictions = permit_mynetworks, reject_unauth_destination, reject_rbl_client zen.spamhaus.org, reject_rhsbl_helo dbl.spamhaus.org, reject_rhsbl_sender dbl.spamhaus.org, permit"
 echo "main.cf: smtpd_recipient_restrictions set (RBL clients)"
 
 # myhostname: a mail server needs a fully-qualified HELO name. If Postfix has
