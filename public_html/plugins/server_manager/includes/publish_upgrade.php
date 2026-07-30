@@ -187,6 +187,21 @@
 		}
 
 		// =====================================================
+		// License preflight
+		// =====================================================
+		// Every install performed by the published one-liner gets its license
+		// text from the archive and nowhere else, so a release without one ships
+		// code nobody has been told the terms for. Checked here, alongside the
+		// agent guard, because nothing has been written to the tree yet.
+		$license_source = $full_site_dir . '/LICENSE.md';
+		if (!is_file($license_source) || trim((string)file_get_contents($license_source)) === '') {
+			publish_output("\nRefusing to publish {$version} — LICENSE.md is missing or empty at {$license_source}.");
+			publish_output("Every archive carries the license text. Nothing has been written.");
+			exit;
+		}
+		publish_output("License present at {$license_source}");
+
+		// =====================================================
 		// Bundle the management agent artifact (release channel)
 		// =====================================================
 		// Runs here — before the VERSION file, the core archive, the release
@@ -345,6 +360,17 @@
 		}
 		if (!is_dir($core_temp_dir . '/public_html/plugins')) {
 			mkdir($core_temp_dir . '/public_html/plugins', 0755, true);
+		}
+
+		// Carry the license into public_html rather than the archive root.
+		// upgrade.php deploys only two things from a staged archive — it swaps
+		// public_html and rsyncs maintenance_scripts. A root-level file would be
+		// laid down once by install.sh and never refreshed, so every upgraded site
+		// would keep whatever license it was born with. The canonical copy stays at
+		// the repo root, where GitHub and license scanners look for it.
+		if (!copy($license_source, $core_temp_dir . '/public_html/LICENSE.md')) {
+			publish_output("ERROR: Failed to copy LICENSE.md into the core archive.");
+			exit;
 		}
 
 		// Copy config template

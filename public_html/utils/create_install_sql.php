@@ -266,17 +266,26 @@ foreach ($essential_tables as $table) {
 
 echo "[7/10] Generating default users...\n";
 
-// Generate bcrypt hash for default password
-$default_password = 'changeme123';
-$bcrypt_hash = password_hash($default_password, PASSWORD_BCRYPT);
+// The seeded admin account ships with no usable password. The plaintext below is
+// random and is never printed, written down, or recorded anywhere — the hash is
+// the only thing that survives this function. A fixed default here would be a
+// shared credential across every install of the release, and a fresh site would
+// have to be trusted to change it before anyone found it.
+//
+// _site_init.sh gives the account a real password at install time (generated per
+// site, or the one the owner chose on a deploy form). Anything that restores this
+// SQL by hand sets one with maintenance_scripts/sysadmin_tools/reset_admin_password.php.
+$unusable_password = bin2hex(random_bytes(32));
+$bcrypt_hash = password_hash($unusable_password, PASSWORD_BCRYPT);
+unset($unusable_password);
 
 // Create admin user SQL (user_id 1) - explicit ID to ensure correct ordering
 $admin_user_sql = sprintf(
-    "-- Default admin user (email: admin@example.com, password: %s)\n" .
+    "-- Default admin user (email: admin@example.com). The password hash below has no\n" .
+    "-- known plaintext; a password is set at install time.\n" .
     "INSERT INTO public.usr_users (usr_user_id, usr_first_name, usr_last_name, usr_email, usr_permission, " .
     "usr_is_activated, usr_email_is_verified, usr_password, usr_signup_date, usr_force_password_change, usr_timezone) " .
     "VALUES (1, 'Admin', '', 'admin@example.com', 10, true, true, '%s', CURRENT_DATE, true, 'America/New_York');\n\n",
-    $default_password,
     $bcrypt_hash
 );
 
@@ -296,7 +305,7 @@ $deleted_user_sql = "-- Deleted user (user_id 3) - placeholder for reassigning o
 
 $admin_file = $temp_dir . '/admin_user.sql';
 file_put_contents($admin_file, $admin_user_sql . $system_user_sql . $deleted_user_sql);
-echo "   Generated admin user (admin@example.com / $default_password)\n";
+echo "   Generated admin user (admin@example.com, no usable password until install)\n";
 echo "   Generated system user (user_id 2)\n";
 echo "   Generated deleted user (user_id 3)\n";
 
@@ -377,11 +386,11 @@ $header .= <<<SQL
 -- for a fresh Joinery installation. It is generated on demand during the
 -- publish_upgrade process to ensure install SQL is always up-to-date.
 --
--- Default admin credentials:
---   Email: admin@example.com
---   Password: changeme123
+-- Seeded admin account: admin@example.com
 --
--- SECURITY WARNING: Change the default password immediately after installation!
+-- Its password hash has no known plaintext. install.sh sets a real password when
+-- it creates the site. If you restore this file by hand, set one with:
+--   php maintenance_scripts/sysadmin_tools/reset_admin_password.php
 --
 
 SET statement_timeout = 0;
@@ -807,7 +816,7 @@ echo "File size:         $file_size_mb MB (" . number_format($file_size) . " byt
 echo "Database version:  $version\n";
 echo "Tables with data:  " . count($data_files) . "\n";
 echo "Compression:       " . ($compress ? "Enabled (gzip)" : "Disabled") . "\n";
-echo "Default admin:     admin@example.com / changeme123\n";
+echo "Default admin:     admin@example.com (password set at install time)\n";
 echo "Generated at:      " . date('Y-m-d H:i:s T') . "\n";
 echo str_repeat("=", 70) . "\n\n";
 

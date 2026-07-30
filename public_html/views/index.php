@@ -66,7 +66,7 @@ $page->public_header([
 
                 <?php
                 $steps = [
-                    ['title' => 'Sign in to Admin Panel',      'desc' => 'Use the default admin credentials to access the administration area.'],
+                    ['title' => 'Sign in to Admin Panel',      'desc' => 'Use the admin password set during installation to access the administration area.'],
                     ['title' => 'Configure Site Settings',      'desc' => 'Update your organization name, contact details, and branding.'],
                     ['title' => 'Set Up Payment Processing',    'desc' => 'Connect Stripe or PayPal to start accepting payments.'],
                     ['title' => 'Customize This Page',          'desc' => 'Replace this welcome page with your own content in <code>views/index.php</code>.'],
@@ -89,19 +89,21 @@ $page->public_header([
                     Admin Access
                 </div>
                 <div class="jy-home-admin-body">
-                    <p>Default administrator login:</p>
+                    <p>Administrator login:</p>
                     <div class="jy-home-creds">
                         <div class="jy-home-cred-row">
                             <span class="jy-home-cred-label">Email:</span>
                             <code>admin@example.com</code>
                         </div>
-                        <div class="d-flex">
+                        <div class="jy-home-cred-row">
                             <span class="jy-home-cred-label">Password:</span>
-                            <code>changeme123</code>
+                            <span>set when this site was installed</span>
                         </div>
                     </div>
                     <div class="alert alert-info jy-home-alert">
-                        You will be prompted to change the default password on first login.
+                        The installer printed the password when it finished and saved it to
+                        <code>config/admin_credentials.txt</code> on the server. If you chose one
+                        on a deploy form, use that. You will be asked to change it at first login.
                     </div>
                     <a href="/admin" class="btn btn-primary jy-w-full">Go to Admin Panel</a>
                 </div>

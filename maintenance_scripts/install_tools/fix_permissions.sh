@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#VERSION 2.4 - Re-pin config/admin_credentials.txt to 600 root:root after the sweep, alongside the SSH key
 #VERSION 2.3 - Re-pin SSH private keys to 600 after the blanket sweep (ssh refuses group-accessible keys; the relay mail pull broke on every deploy)
 #
 # Fix permissions for a Joinery site
@@ -102,5 +103,15 @@ for keyfile in "$SITE_ROOT/config/relay_pull_key"; do
         chmod 600 "$keyfile"
     fi
 done
+
+# The install-time admin password, for whoever can already reach the server as
+# root. The sweep above would hand it to the web server user and, in dev mode,
+# to everyone — so re-pin it last, in both modes, same as the SSH key.
+CRED_FILE="$SITE_ROOT/config/admin_credentials.txt"
+if [ -f "$CRED_FILE" ]; then
+    echo "  Pinning $CRED_FILE to 600 root:root..."
+    chown root:root "$CRED_FILE" 2>/dev/null || true
+    chmod 600 "$CRED_FILE"
+fi
 
 echo -e "${GREEN}Done. Permissions fixed for $SITE_NAME.${NC}"

@@ -95,7 +95,11 @@ If you don't have a domain yet, substitute your server's IP address for `yourdom
 
 The install takes a few minutes. You'll see output scrolling past — that's normal. When it finishes, your site is live.
 
-**If DNS hasn't propagated yet:** the SSL step will be skipped automatically, and the installer will print instructions for running it manually once DNS is ready. Your site will still be accessible over HTTP in the meantime.
+**If DNS hasn't propagated yet:** the SSL step is skipped automatically and the install continues. Your site is reachable over HTTP in the meantime. The installer prints the command to run once DNS is ready — it looks like this:
+
+```bash
+sudo /var/www/html/yoursite/maintenance_scripts/sysadmin_tools/setup_ssl.sh yourdomain.com
+```
 
 **If you see an error:** the most common cause is a typo in the command. Check that `yourdomain.com` was replaced correctly. For other issues, see the [Troubleshooting section](installation.md#troubleshooting) in the full installation docs.
 
@@ -111,12 +115,24 @@ https://yourdomain.com/admin
 
 (Use `http://` if SSL was skipped temporarily.)
 
-Log in with the default credentials:
+Log in as:
 
 - **Email:** `admin@example.com`
-- **Password:** `changeme123`
+- **Password:** the one the installer printed when it finished
 
-You'll be asked to set a new password immediately. Do that first — use something strong and save it somewhere safe.
+Every site gets its own admin password — there is no shared default. If you've lost the line the installer printed, it's also saved on the server at `/var/www/html/yoursite/config/admin_credentials.txt` (readable by root only):
+
+```bash
+sudo cat /var/www/html/yoursite/config/admin_credentials.txt
+```
+
+You'll be asked to set a new password immediately. Do that first — use something strong and save it somewhere safe, then delete the credentials file.
+
+**If you've lost the password entirely,** reset it from the server:
+
+```bash
+sudo php /var/www/html/yoursite/maintenance_scripts/sysadmin_tools/reset_admin_password.php
+```
 
 Once you're in, two housekeeping items before anything else:
 
