@@ -1,10 +1,14 @@
 # Open Core — Shield-Licensed Core, Paid Extensions, Entitled Delivery
 
-**Status:** Unbuilt spec. Licensing decided: PolyForm Shield 1.0.0 core
-(decision 1), `event_manager` free (decision 2), Server Manager paid under
-the commercial license (decision 5), keys per-buyer with no activation
-(decision 3), perpetual purchases with updates included (decision 4). All
-five decisions resolved; exact price points are a launch-time call.
+**Status:** BUILT 2026-07-30 (phase 1: sell now, enforce later). Licensing
+decided: PolyForm Shield 1.0.0 core (decision 1), `event_manager` free
+(decision 2), Server Manager paid under the commercial license (decision 5),
+keys per-buyer with no activation (decision 3), perpetual purchases with
+updates included (decision 4). All five decisions resolved; exact price
+points are a launch-time call. The deferred enforcement half (build items 3
+and 4's key entry, installer skip, client key transmission, gate tests) is
+carried by `specs/plugin_entitlement_gate.md`. Remaining launch step: create
+the license products on getjoinery.com (admin config, no code).
 **Relationship to `specs/linode_quick_deploy_app.md`:** this spec resolves that
 one's open decision #1 and deletes its licensing work. The Shield core makes
 the Linode listing "free for your own use — source available", with no

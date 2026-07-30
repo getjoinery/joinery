@@ -1,9 +1,10 @@
 {
     "name": "DNS Filtering",
-    "version": "1.2.0",
+    "version": "1.2.1",
     "depends": { "store": ">=1.0.0" },
     "description": "Self-hosted DNS filtering service with per-device filtering profiles",
     "author": "System Developer",
+    "license": "PolyForm-Shield-1.0.0",
     "receives_upgrades": true,
     "included_in_publish": true,
     "styles": [

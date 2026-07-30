@@ -236,6 +236,7 @@ Routes outside the namespace are dropped with a logged warning.
     "version": "2.1.0",
     "author": "Your Name or Company",
     "license": "MIT",
+    "status": "beta",
     "homepage": "https://yoursite.com/plugin-docs",
     "requires": {
         "php": ">=8.0",
@@ -258,7 +259,33 @@ Routes outside the namespace are dropped with a logged warning.
 > declaring `provides: ["widget-support"]` does not make another plugin able to `depends` on it.
 > The keys the loader actually consumes are `name`, `version`, `description`, `requires`,
 > `depends`/`conflicts`, `settings`, `adminMenu`, `profileMenu`, `provisioners`,
-> `host_installer`, `receives_upgrades`, `included_in_publish`, and `deprecated`/`superseded_by`.
+> `host_installer`, `receives_upgrades`, `included_in_publish`, `status`, and
+> `deprecated`/`superseded_by`.
+
+#### Licensing and maturity metadata
+
+**`license`** names the terms the plugin ships under and must agree with the
+`LICENSE.md` file in the plugin's directory. First-party free plugins declare
+`PolyForm-Shield-1.0.0`; the commercial ones (`store`, `server_manager`)
+declare `Joinery-Commercial`. The core `LICENSE.md`'s plugin and theme
+exception means third-party authors license their own plugins however they
+choose — a plugin that interfaces with the platform through its extension
+points is not a derivative work of the core.
+
+**`status`** is an honest maturity label: one of `experimental`, `beta`,
+`stable`, or `deprecated`. Absent means `stable` and renders no badge; any
+other value renders a badge wherever the plugin is listed (the admin Plugins
+page and the distribution catalog). An unknown value is a manifest validation
+error, not a silently ignored string. Status gates nothing — an
+`experimental` plugin installs, activates, and updates exactly like a
+`stable` one.
+
+**`requires_entitlement`** marks a commercial plugin whose license is sold as
+a store product. It is surfaced by the distribution catalog
+(`?list=plugins`) so installers and marketplace listings can tell paid
+plugins from free ones. Delivery is not gated on it — buying the plugin
+issues a per-buyer license key (see the store docs), and the license terms,
+not a technical check, carry the one-production-instance grant.
 
 #### Component Versioning
 

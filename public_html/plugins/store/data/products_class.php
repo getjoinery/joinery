@@ -89,6 +89,7 @@ class Product extends SystemBase {
 	    'pro_link' => array('type'=>'varchar(255)', 'required'=>true),
 	    'pro_delete_time' => array('type'=>'timestamp(6)'),
 	    'pro_product_scripts' => array('type'=>'text'),
+	    'pro_licensed_plugin' => array('type'=>'varchar(64)'),
 	    'pro_stripe_product_id' => array('type'=>'varchar(64)'),
 	    'pro_stripe_product_id_test' => array('type'=>'varchar(64)'),
 	    'pro_sbt_subscription_tier_id' => array('type'=>'int4'),

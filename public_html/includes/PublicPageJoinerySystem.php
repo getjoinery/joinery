@@ -696,6 +696,7 @@ class PublicPageJoinerySystem extends PublicPageBase {
 
       <footer class="page-footer">
         <span>v0.5.0</span>
+        <span> &middot; <a href="/license">License</a></span>
       </footer>
     </div><!-- .main-content -->
   </div><!-- .admin-layout -->

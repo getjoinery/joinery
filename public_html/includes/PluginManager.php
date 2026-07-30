@@ -466,7 +466,15 @@ class PluginManager extends AbstractExtensionManager {
             $results['errors'][] = "Invalid plugin manifest";
             return $results;
         }
-        
+
+        // Maturity status is honest labeling only and gates nothing, but an
+        // unknown value is a manifest error, not a silently ignored string.
+        if (isset($manifest['status'])
+            && !in_array($manifest['status'], array('experimental', 'beta', 'stable', 'deprecated'), true)) {
+            $results['valid'] = false;
+            $results['errors'][] = "Unknown status '" . $manifest['status'] . "' — must be one of: experimental, beta, stable, deprecated";
+        }
+
         // Check PHP version requirement
         if (isset($manifest['requires']['php'])) {
             $required_php = $manifest['requires']['php'];

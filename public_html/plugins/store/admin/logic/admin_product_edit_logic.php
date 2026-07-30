@@ -123,7 +123,7 @@ function admin_product_edit_logic(array $input): LogicResult {
 			$product->set('pro_product_scripts', implode(',', $input['product_scripts']));
 		}
 
-		$editable_fields = array('pro_name', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_grp_group_id', 'pro_sbt_subscription_tier_id', 'pro_digital_link', 'pro_short_description', 'pro_emt_receipt_template_id');
+		$editable_fields = array('pro_name', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_grp_group_id', 'pro_sbt_subscription_tier_id', 'pro_digital_link', 'pro_short_description', 'pro_emt_receipt_template_id', 'pro_licensed_plugin');
 
 		foreach($editable_fields as $field) {
 			$product->set($field, $input[$field]);

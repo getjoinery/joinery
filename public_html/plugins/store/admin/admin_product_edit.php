@@ -177,6 +177,17 @@ $formwriter->textinput('pro_digital_link', 'Digital item link', [
 	'validation' => ['maxlength' => 255]
 ]);
 
+// License products: which plugin a purchase of this product entitles. Pair
+// with the mint_license_key script below so purchase mints and emails a key.
+$licensed_plugin_options = ['' => '-- None --'];
+foreach (LibraryFunctions::list_plugins() as $plugin_dir_name) {
+	$licensed_plugin_options[$plugin_dir_name] = $plugin_dir_name;
+}
+$formwriter->dropinput('pro_licensed_plugin', 'Licenses plugin', [
+	'options' => $licensed_plugin_options,
+	'helptext' => 'Purchasing this product buys a license for this plugin. Also check "mint_license_key_product_script" below so the key is minted and emailed.',
+]);
+
 // Receipt template override (optional). Falls back to purchase_receipt_product_default.
 $receipt_template_options = ['' => '-- Use system default --'];
 foreach ($receipt_templates as $rt) {

@@ -4,6 +4,8 @@
 
 The Store plugin (`/plugins/store/`) is the platform's commerce subsystem: products, the shopping cart, checkout, orders, coupons, subscriptions, and payment-provider integration (Stripe and PayPal). It owns every "money" surface — with the plugin inactive, the platform runs as a pure membership/content site: no cart in the header, store URLs hard-404, and tier gating falls back to its contact-us prompt.
 
+The plugin is a **commercial extension** (`license: Joinery-Commercial`, `requires_entitlement` in its manifest; terms in its `LICENSE.md`). Buying it issues a per-buyer license key by email, also listed with the buyer's order history on their profile. The license grants one production instance per purchase, with staging and dev copies included.
+
 **Owns:** `pro_products` (+ versions, groups, details), `ord_orders` / `odi_order_items`, coupon codes, product requirements, `stc_stripe_customers`, Stripe invoices.
 
 **Core URLs (plugin-delegated in serve.php):** `/products`, `/product/{slug}`, `/pricing`, `/cart`, `/checkout`, `/cart_charge`, `/cart_confirm`, `/cart_clear`, and the `/profile/orders`, `/profile/billing`, `/profile/subscriptions` pages. Admin pages live at `/plugins/store/admin/*`.
@@ -51,6 +53,20 @@ Settings keep their pre-extraction core names (`products_active`, `checkout_type
 ### Optional piggyback donation
 
 A buyer entering an amount in a `UserPriceRequirement` field ("User Chooses Price" on the product edit page) gets a second cart item: the site's donation product, identified by the `store_optional_donation_product_id` setting (the "Optional donation product" dropdown on the settings page). The donation product prices itself from the buyer's entered amount (`Product::is_optional_donation()`); it shows no fixed price in listings. Blank setting = feature off — entered amounts are logged and skipped, never charged. The donation product is never identified by a hardcoded product ID.
+
+## Plugin license sales
+
+Any plugin license is an ordinary store product. The product's **Licenses
+plugin** field (`pro_licensed_plugin`, on the admin product edit page under
+advanced options) names the plugin a purchase entitles, and checking the
+`mint_license_key_product_script` purchase script makes the sale mint a key.
+On purchase the hook records a `JNRY-XXXX-XXXX-XXXX-XXXX` key in
+`lck_license_keys` (buyer, order, order item, plugin name), emails it to the
+buyer, and the profile orders page lists it. Minting is idempotent per order
+item, so a webhook retry never issues a duplicate. Keys identify a purchase
+and nothing more — there is no activation step, no install registry, and no
+runtime check anywhere; the one-production-instance scope lives in the
+commercial license terms stated at checkout and in the key email.
 
 ## Related Docs
 
