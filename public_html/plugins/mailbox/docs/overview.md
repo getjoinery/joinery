@@ -3113,12 +3113,42 @@ encryption is per-folder and inherited, and an encrypted file's plaintext exists
 in the browser — the server genuinely cannot read it. It is shown rather than hidden
 because a user who cannot find their archive is worse off than one told why.
 
+### One at a time
+
+A person may have **one import going at a time**. While they do, the start form is not
+on the page: in its place is a line naming the archive that holds the slot and what it
+is doing. The form returns by itself when that run finishes — the page is already
+polling, so no reload is needed.
+
+A run counts as going in every state except `done`, `failed` and `undone`. That
+includes `scanned`, where nothing is moving because the run has stopped to ask which
+folders to bring: it resumes on the answer, so it holds the slot until it gets one.
+
+The rule is scoped to **runs the caller started**, not to the mailbox. An operator
+setting up somebody else's mailbox is still the person doing the importing, and two
+grantees of one shared mailbox are two people.
+
+`MailImportService::activeRun()` is the single answer to *is this person busy*. The
+page render reads it, `mailbox/mail_import_status` returns it as `busy_run` so the
+poller can flip the form back without re-deriving anything, and
+`mailbox/mail_import_start` refuses on it — so a second browser tab cannot queue what
+the first is already carrying.
+
+### Where the form picks up from
+
+Importing is rarely one archive. A Takeout arrives split across several files and a
+provider migration means the same mailbox and the same address list over and over, so
+the form opens on the **last run's answers**: the mailbox that run targeted, and the
+addresses declared for it. An explicit `?alias_id` still wins, a mailbox the caller no
+longer holds is not re-offered, and asking about a different mailbox falls back to the
+suggestion for that one rather than carrying across a list written for another.
+
 ### Declaring your addresses
 
 An archive carries no envelope. Without knowing which addresses were the user's, there
 is no way to tell sent mail from received, and no way to know which of several
-addresses a message actually reached. So the run asks, pre-filled from the account, and
-derives two things from the answer:
+addresses a message actually reached. So the run asks — pre-filled from the last import
+when there was one, otherwise from the account — and derives two things from the answer:
 
 - **Direction** — mail from one of those addresses is mail you sent. The source's own
   filing outranks the headers: a message sitting in Sent was sent, even if its From is

@@ -14,7 +14,7 @@
  *
  * See specs/mail_archive_import.md § 10.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/mail_import_run_class.php'));
@@ -407,6 +407,72 @@ class MailImportService {
 			MailImportRun::STATE_UNDONE    => 'Reversed',
 		);
 		return $labels[$state] ?? $state;
+	}
+
+	/**
+	 * The caller's import that is still going, or null when they can start one.
+	 *
+	 * One import at a time, per person. An archive import is the heaviest thing a
+	 * member can ask this platform to do, and two of them at once means two sets of
+	 * progress numbers, two folder questions, and no way to tell which answer
+	 * belongs to which — while the second one waits behind the first anyway.
+	 *
+	 * Scoped to runs this person started, not to the mailbox: an operator setting
+	 * up somebody else's mailbox is still the person doing the importing, and two
+	 * grantees of a shared mailbox are two people.
+	 *
+	 * `scanned` counts as still going. The run has stopped to ask a question and
+	 * resumes on the answer, so it holds the slot until it is answered.
+	 */
+	public function activeRun(): ?array {
+		$userId = $this->viewer->getUserId();
+		if ($userId <= 0) {
+			return null;
+		}
+		$runs = new MultiMailImportRun(array(
+			'user_id' => $userId,
+			'states'  => MailImportRun::UNFINISHED_STATES,
+			'deleted' => false,
+		), array('mir_mail_import_run_id' => 'DESC'), 1);
+		$runs->load();
+		foreach ($runs as $run) {
+			return self::describe($run);
+		}
+		return null;
+	}
+
+	/**
+	 * What this person chose the last time they imported.
+	 *
+	 * Importing is rarely one archive: a Gmail Takeout arrives split across several
+	 * files, and a provider migration means the same mailbox and the same list of
+	 * addresses over and over. Re-typing them on every visit is the sort of small
+	 * repeated cost that makes a job feel long, so the last run's answers come back
+	 * as the starting point.
+	 *
+	 * The mailbox comes back only if the caller can still import into it — a grant
+	 * withdrawn since is not silently re-offered.
+	 *
+	 * @return array{alias_id:int,own_addresses:string}|null
+	 */
+	public function lastChoices(): ?array {
+		$userId = $this->viewer->getUserId();
+		if ($userId <= 0) {
+			return null;
+		}
+		$runs = new MultiMailImportRun(array(
+			'user_id' => $userId,
+			'deleted' => false,
+		), array('mir_mail_import_run_id' => 'DESC'), 1);
+		$runs->load();
+		foreach ($runs as $run) {
+			$aliasId = intval($run->get('mir_iea_inbound_email_alias_id'));
+			return array(
+				'alias_id'      => $this->canTarget($aliasId) ? $aliasId : 0,
+				'own_addresses' => trim((string)$run->get('mir_own_addresses')),
+			);
+		}
+		return null;
 	}
 
 	/**
