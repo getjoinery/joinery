@@ -65,6 +65,13 @@ class RecordingMockDriver implements CloudStorageDriver {
 		file_put_contents($local_path, "bytes:$remote_key\n");
 	}
 
+	public function get_range(string $remote_key, string $local_path, int $start, int $end): void {
+		$this->calls[] = ['op' => 'get_range', 'key' => $remote_key, 'start' => $start, 'end' => $end];
+		$dir = dirname($local_path);
+		if (!is_dir($dir)) { mkdir($dir, 0777, true); }
+		file_put_contents($local_path, substr("bytes:$remote_key\n", $start, $end - $start + 1));
+	}
+
 	public function delete(string $remote_key): void {
 		$this->calls[] = ['op' => 'delete', 'key' => $remote_key];
 	}
@@ -98,6 +105,14 @@ class InMemoryBlobDriver implements CloudStorageDriver {
 		$dir = dirname($local_path);
 		if (!is_dir($dir)) { mkdir($dir, 0777, true); }
 		file_put_contents($local_path, $this->objects[$remote_key]);
+	}
+	public function get_range(string $remote_key, string $local_path, int $start, int $end): void {
+		if (!array_key_exists($remote_key, $this->objects)) {
+			throw new RuntimeException('mock: no such object ' . $remote_key);
+		}
+		$dir = dirname($local_path);
+		if (!is_dir($dir)) { mkdir($dir, 0777, true); }
+		file_put_contents($local_path, substr($this->objects[$remote_key], $start, $end - $start + 1));
 	}
 	public function delete(string $remote_key): void { unset($this->objects[$remote_key]); }
 	public function url(string $remote_key): string { return ''; }

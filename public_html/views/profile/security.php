@@ -887,6 +887,62 @@
             </script>
             <?php endif; ?>
 
+            <?php
+            $sync_devices = $page_vars['sync_devices'] ?? null;
+            $has_sync_devices = $sync_devices && count($sync_devices);
+            $tz = SessionControl::get_instance()->get_timezone();
+            ?>
+            <?php if ($has_sync_devices): ?>
+            <div class="jy-panel jy-mt-4">
+                <h2>Sync Devices</h2>
+                <p>Computers syncing your Drive. Unlinking one cuts off its access immediately.</p>
+
+                <table class="jy-table jy-w-full">
+                    <thead>
+                        <tr>
+                            <th>Device</th>
+                            <th>Linked</th>
+                            <th>Last synced</th>
+                            <th>Encrypted folders</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    <?php foreach ($sync_devices as $sync_device):
+                        $seen = $sync_device->get('sde_last_seen_time');
+                    ?>
+                        <tr>
+                            <td>
+                                <form action="/profile/security" method="POST" class="jy-inline">
+                                    <input type="hidden" name="action" value="rename_sync_device">
+                                    <input type="hidden" name="sde_sync_device_id" value="<?php echo (int)$sync_device->key; ?>">
+                                    <input type="text" name="sde_device_name" maxlength="64"
+                                           value="<?php echo htmlspecialchars($sync_device->get('sde_device_name')); ?>"
+                                           aria-label="Device name">
+                                    <button type="submit" class="btn btn-secondary">Rename</button>
+                                </form>
+                                <span class="jy-text-muted"><?php echo htmlspecialchars($sync_device->get('sde_platform')); ?></span>
+                            </td>
+                            <td><?php echo htmlspecialchars(LibraryFunctions::convert_time($sync_device->get('sde_create_time'), 'UTC', $tz, 'M j, Y')); ?></td>
+                            <td><?php echo $seen
+                                ? htmlspecialchars(LibraryFunctions::convert_time($seen, 'UTC', $tz, 'M j, Y g:i A'))
+                                : 'Not yet'; ?></td>
+                            <td><?php echo $sync_device->get('sde_device_pubkey') ? 'Yes' : 'No'; ?></td>
+                            <td class="text-end">
+                                <form action="/profile/security" method="POST" class="jy-inline"
+                                      data-jy-confirm="Unlink this device? It will stop syncing straight away.">
+                                    <input type="hidden" name="action" value="revoke_sync_device">
+                                    <input type="hidden" name="sde_sync_device_id" value="<?php echo (int)$sync_device->key; ?>">
+                                    <button type="submit" class="btn btn-danger">Unlink</button>
+                                </form>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+            <?php endif; ?>
+
             <?php if (!empty($page_vars['app_sessions']) && count($page_vars['app_sessions'])): ?>
             <div class="jy-panel jy-mt-4">
                 <h2>App Sessions</h2>
@@ -902,7 +958,12 @@
                         </tr>
                     </thead>
                     <tbody>
-                    <?php foreach ($page_vars['app_sessions'] as $app_session): ?>
+                    <?php foreach ($page_vars['app_sessions'] as $app_session):
+                        // A sync device's key is already shown, with more detail,
+                        // in the panel above — listing it twice would look like
+                        // two things signed in.
+                        if (isset($page_vars['sync_device_key_ids'][(int)$app_session->key])) { continue; }
+                    ?>
                         <tr>
                             <td><?php echo htmlspecialchars($app_session->get('apk_name')); ?></td>
                             <td><?php echo htmlspecialchars(LibraryFunctions::convert_time($app_session->get('apk_create_time'), 'UTC',

@@ -1,0 +1,19 @@
+[package]
+name = "jd-vfs"
+description = "Filesystem adaptation for the sync engine: the Vfs trait jd-core is written against, a real OS implementation, and the per-OS name/case/normalization rules that keep the engine's view of the tree clean."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+unicode-normalization = "0.1"
+thiserror = "1"
+sha2 = "0.10"
+# Watcher backends per OS (inotify / FSEvents / ReadDirectoryChangesW),
+# normalized to one event stream.
+notify = "6"
+# The XDG trash spec on Linux, NSFileManager on macOS, SHFileOperation on
+# Windows. Deleting a user's file is the one operation worth a dependency to
+# get exactly right.
+trash = "5"

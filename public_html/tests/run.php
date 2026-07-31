@@ -13,11 +13,12 @@
  *   php tests/run.php db              # safe + db + test-db (the pre-deploy gate)
  *   php tests/run.php test-db         # only the test-database suites
  *   php tests/run.php live            # only live (never implied)
+ *   php tests/run.php deploy          # does the deployed code run here (upgrade.php runs this)
  *   php tests/run.php db --filter=api # narrow by name or path substring
  *   php tests/run.php --json          # emit the aggregate JSON contract
  *   php tests/run.php --list          # list discovered tests, run nothing
  *
- * tier and env are separate axes: tier (safe|db|test-db|live) is blast radius
+ * tier and env are separate axes: tier (safe|db|test-db|live|deploy) is blast radius
  * and drives which batch runs; env (any|prod-verify|dev-only) is where a test
  * may execute. dev-only tests are skipped (locked) when the `debug` setting is
  * off. prod-verify and live tests are never part of a batch run — each is run
@@ -51,7 +52,7 @@ foreach ($args as $a) {
 	$tier_arg = $a; // first bare positional is the tier
 }
 
-$valid_tiers = array('safe', 'db', 'test-db', 'live');
+$valid_tiers = array('safe', 'db', 'test-db', 'live', 'deploy');
 if (!in_array($tier_arg, $valid_tiers, true)) {
 	fwrite(STDERR, "Unknown tier '$tier_arg'. Use one of: " . implode(', ', $valid_tiers) . "\n");
 	exit(2);
@@ -64,11 +65,22 @@ if (!in_array($tier_arg, $valid_tiers, true)) {
 //
 // test-db suites declare needs:[test-db], so an install without the database
 // copy skips them rather than failing the gate.
+//
+// `deploy` stands apart from all of them and pulls in nothing. The others are
+// development gates: they run in a checkout and are free to assert things about
+// one — the full first-party plugin set, the components manifest, the layout of
+// maintenance_scripts. A deployed site legitimately has none of that, so those
+// assertions are not failures there, they are category errors. `deploy` asks the
+// only question that means anything on a node: does the code that just landed
+// actually run on this machine. It is what upgrade.php runs after a swap, and a
+// failure there rolls the deploy back — so nothing in it may assume a
+// repository, a network, or a plugin it did not find.
 $tiers_to_run = array(
 	'safe'    => array('safe'),
 	'db'      => array('safe', 'db', 'test-db'),
 	'test-db' => array('test-db'),
 	'live'    => array('live'),
+	'deploy'  => array('deploy'),
 );
 $selected_tiers = $tiers_to_run[$tier_arg];
 
@@ -94,6 +106,9 @@ function harness_unmet_needs(array $needs) {
 			switch ($need) {
 				case 'node':
 					$cache[$need] = trim((string)shell_exec('command -v node 2>/dev/null')) !== '';
+					break;
+				case 'curl':
+					$cache[$need] = trim((string)shell_exec('command -v curl 2>/dev/null')) !== '';
 					break;
 				case 'rust':
 					// rustup installs per-user without touching PATH for other

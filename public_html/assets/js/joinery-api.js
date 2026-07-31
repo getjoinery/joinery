@@ -50,6 +50,13 @@
 					var err = new Error((env && env.error) || 'Request failed (' + r.status + ')');
 					err.status = r.status;
 					err.errorType = env && env.errortype;
+					// An error envelope still carries a data payload, and some
+					// refusals are instructions rather than dead ends — the
+					// step-up gates answer with requires_stepup so the caller can
+					// send the user to confirm and then retry. Dropping it would
+					// turn "prove it is you" into "something went wrong".
+					err.data = (env && env.data) || {};
+					err.validationErrors = env && env.validation_errors;
 					throw err;
 				}
 				return (env && env.data !== undefined) ? env.data : env;

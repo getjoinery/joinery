@@ -216,8 +216,12 @@ class DriveHelper {
 	 *                    user's wrapped file key (from their FileKeyGrant); the
 	 *                    browser unwraps it with the unlocked drive vault. null
 	 *                    when the file is plaintext or the caller holds no key.
+	 * @param bool     $with_urls mint download_url / thumb_url. The bulk sync
+	 *                    surfaces (drive_index, drive_stat) pass false: signing a
+	 *                    URL per file is real work, and a client walking 100k
+	 *                    files wants identity, not links it will not follow.
 	 */
-	public static function file_export($file, $size = null, $starred = null, $wrapped_file_key = null) {
+	public static function file_export($file, $size = null, $starred = null, $wrapped_file_key = null, $with_urls = true) {
 		self::require_classes();
 		$file_id = (int)$file->key;
 
@@ -242,6 +246,8 @@ class DriveHelper {
 		$mime = $file->get('fil_type');
 		$is_image = $encrypted ? false : File::is_inline_safe_type($mime);
 
+		$sync = self::sync_meta_for($file_id);
+
 		$out = array(
 			'entity_type'  => self::ENTITY_FILE,
 			'id'           => $file_id,
@@ -254,7 +260,17 @@ class DriveHelper {
 			'owner_id'     => (int)$file->get('fil_usr_user_id'),
 			'create_time'  => $file->get('fil_create_time'),
 			'deleted'      => $file->get('fil_delete_time') !== null && $file->get('fil_delete_time') !== '',
-			'download_url' => $file->mintSignedUrl('original', 3600),
+			'download_url' => $with_urls ? $file->mintSignedUrl('original', 3600) : null,
+			// Sync identity. content_sha256 is the head blob's hash — plaintext
+			// bytes for a plaintext file, ciphertext bytes for an encrypted one;
+			// either way it identifies the content a client holds. modified_time
+			// is the client's own mtime (plaintext only — see
+			// fil_content_modified_time). head_change_id is the change-feed
+			// position that established this content, so a client can say "what I
+			// have matches feed position N" without hashing anything.
+			'content_sha256'  => $sync['content_sha256'],
+			'modified_time'   => $encrypted ? null : $file->get('fil_content_modified_time'),
+			'head_change_id'  => $sync['head_change_id'],
 		);
 		if ($encrypted) {
 			// The stored bytes and the thumbnail slot are ciphertext; the browser
@@ -263,13 +279,13 @@ class DriveHelper {
 			$out['encrypted']          = true;
 			$out['encrypted_metadata'] = $file->get('fil_encrypted_metadata');
 			$out['wrapped_file_key']   = $wrapped_file_key;
-			$thumb = self::thumb_size_key();
+			$thumb = $with_urls ? self::thumb_size_key() : null;
 			if ($thumb !== null) {
 				$out['thumb_url'] = $file->mintSignedUrl($thumb, 3600);
 			}
 		} elseif ($is_image) {
 			$out['encrypted'] = false;
-			$thumb = self::thumb_size_key();
+			$thumb = $with_urls ? self::thumb_size_key() : null;
 			if ($thumb !== null) {
 				$out['thumb_url'] = $file->mintSignedUrl($thumb, 3600);
 			}
@@ -277,6 +293,97 @@ class DriveHelper {
 			$out['encrypted'] = false;
 		}
 		return $out;
+	}
+
+	/**
+	 * A safe SQL IN-list body from an array of ids. Every id is int-cast, so the
+	 * result is literal-safe; an empty set becomes 'NULL', which matches nothing
+	 * (an empty IN () is a syntax error, and the "matches nothing" reading is
+	 * always what the callers want).
+	 */
+	public static function int_in_list($ids) {
+		$clean = array_values(array_filter(array_map('intval', (array)$ids)));
+		return empty($clean) ? 'NULL' : implode(',', $clean);
+	}
+
+	/** @var array<int,array> per-request sync-metadata memo, by file id */
+	private static $sync_meta_memo = array();
+
+	/**
+	 * Content identity for a set of files — the two facts a sync client needs
+	 * that do not live on the file row: the head blob's hash, and the change-feed
+	 * position that established the current content.
+	 *
+	 * Two queries for the whole set. Any listing that exports many files primes
+	 * this first so file_export() never queries per row.
+	 *
+	 * @return array<int,array{content_sha256:?string,head_change_id:int}>
+	 */
+	public static function prime_sync_meta(array $file_ids) {
+		$ids = array_values(array_unique(array_filter(array_map('intval', $file_ids))));
+		$want = array();
+		foreach ($ids as $id) {
+			if (!isset(self::$sync_meta_memo[$id])) {
+				$want[] = $id;
+			}
+		}
+		if (empty($want)) {
+			return self::$sync_meta_memo;
+		}
+		$in = implode(',', $want);
+		$dblink = DbConnector::get_instance()->get_db_link();
+
+		foreach ($want as $id) {
+			self::$sync_meta_memo[$id] = array('content_sha256' => null, 'head_change_id' => 0);
+		}
+
+		$q = $dblink->query(
+			"SELECT f.fil_file_id, b.fbb_sha256
+			   FROM fil_files f
+			   LEFT JOIN fbb_file_blobs b ON b.fbb_file_blob_id = f.fil_fbb_file_blob_id
+			  WHERE f.fil_file_id IN ($in)");
+		foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+			$sha = $row['fbb_sha256'];
+			self::$sync_meta_memo[(int)$row['fil_file_id']]['content_sha256'] =
+				($sha === null || $sha === '') ? null : (string)$sha;
+		}
+
+		// The head content position. 'created' counts alongside 'content': both
+		// establish head bytes, and a file uploaded once and never revised has
+		// only a 'created' row. A file that predates the feed has neither and
+		// stays at 0 — a client treats that as "no feed proof, compare hashes".
+		$q = $dblink->query(
+			"SELECT fch_entity_id, MAX(fch_file_change_id) AS head
+			   FROM fch_file_changes
+			  WHERE fch_entity_type = 'file'
+			    AND fch_change_kind IN ('content', 'created')
+			    AND fch_entity_id IN ($in)
+			  GROUP BY fch_entity_id");
+		foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+			self::$sync_meta_memo[(int)$row['fch_entity_id']]['head_change_id'] = (int)$row['head'];
+		}
+
+		return self::$sync_meta_memo;
+	}
+
+	/** Sync metadata for one file, from the memo when a batch already primed it. */
+	public static function sync_meta_for($file_id) {
+		$file_id = (int)$file_id;
+		if (!isset(self::$sync_meta_memo[$file_id])) {
+			self::prime_sync_meta(array($file_id));
+		}
+		return isset(self::$sync_meta_memo[$file_id])
+			? self::$sync_meta_memo[$file_id]
+			: array('content_sha256' => null, 'head_change_id' => 0);
+	}
+
+	/**
+	 * Forget a file's memoized sync metadata. A mutation that changes head
+	 * content within the same request (upload complete, version restore) calls
+	 * this so the export it returns reflects what it just wrote.
+	 */
+	public static function forget_sync_meta($file_id) {
+		unset(self::$sync_meta_memo[(int)$file_id]);
 	}
 
 	/** The smallest configured image size variant key, for thumbnails (or null). */

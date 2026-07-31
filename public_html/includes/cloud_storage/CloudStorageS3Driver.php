@@ -119,6 +119,23 @@ class CloudStorageS3Driver implements CloudStorageDriver {
 		}
 	}
 
+	public function get_range(string $remote_key, string $local_path, int $start, int $end): void {
+		$dir = dirname($local_path);
+		if (!is_dir($dir)) {
+			mkdir($dir, 0777, true);
+		}
+		try {
+			$this->client->getObject([
+				'Bucket' => $this->bucket,
+				'Key'    => self::pathPrefix() . '/' . ltrim($remote_key, '/'),
+				'Range'  => 'bytes=' . (int)$start . '-' . (int)$end,
+				'SaveAs' => $local_path,
+			]);
+		} catch (S3Exception $e) {
+			throw new RuntimeException('S3 ranged get failed for ' . $remote_key . ': ' . $e->getAwsErrorMessage(), 0, $e);
+		}
+	}
+
 	public function delete(string $remote_key): void {
 		try {
 			$this->client->deleteObject([

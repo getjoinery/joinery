@@ -131,6 +131,9 @@ function drive_list_logic(array $input): LogicResult {
 	}
 	$size_map    = DriveHelper::file_sizes($file_ids);
 	$starred_set = DriveHelper::starred_file_ids($user_id);
+	// Content hash + head change position for the whole page in two queries, so
+	// the per-file export below never goes back to the database.
+	DriveHelper::prime_sync_meta($file_ids);
 	// Wrapped file keys for any encrypted files in the listing (one query): the
 	// caller's own FileKeyGrant blob, which their browser unwraps to read.
 	$key_map     = FileKeyGrant::wrapped_keys_for_user($file_ids, $user_id);

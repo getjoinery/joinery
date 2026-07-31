@@ -7,6 +7,9 @@ resolver = "2"
 members = [
     "jd-crypto",
     "jd-proto",
+    "jd-vfs",
+    "jd-core",
+    "jd-sim",
 ]
 
 [workspace.package]

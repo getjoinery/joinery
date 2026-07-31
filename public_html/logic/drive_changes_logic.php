@@ -36,6 +36,15 @@ function drive_changes_logic(array $input): LogicResult {
 
 	$dblink = DbConnector::get_instance()->get_db_link();
 
+	// Liveness, for free, and BEFORE the reset branch below returns. A sync
+	// client polls this constantly, so the poll itself is the check-in — no
+	// separate heartbeat call, and no client that can forget to send one. It is
+	// stamped here rather than at the end because a device whose cursor has
+	// fallen outside the retained window is exactly the one whose owner needs to
+	// see it is alive: it did reach the server, it just has to re-list. Recording
+	// only the happy path would show that device as having stopped days ago.
+	_drive_changes_stamp_device($cursor);
+
 	// Reset when the cursor cannot be proven contiguous with the retained
 	// window: it points before the earliest retained row, or the log is empty
 	// (MIN is NULL after a purge) so nothing can vouch for the gap. Either way
@@ -51,8 +60,8 @@ function drive_changes_logic(array $input): LogicResult {
 	// Visibility: own changes plus changes on entities shared to me.
 	$file_ids = FileAccessGrant::entity_ids_for_user($user_id, DriveHelper::ENTITY_FILE);
 	$folder_ids = FileAccessGrant::entity_ids_for_user($user_id, DriveHelper::ENTITY_FOLDER);
-	$file_in = _drive_int_in_list($file_ids);
-	$folder_in = _drive_int_in_list($folder_ids);
+	$file_in = DriveHelper::int_in_list($file_ids);
+	$folder_in = DriveHelper::int_in_list($folder_ids);
 
 	$sql = "SELECT fch_file_change_id, fch_entity_type, fch_entity_id, fch_change_kind,
 	               fch_usr_user_id, fch_source_usr_user_id, fch_create_time
@@ -90,10 +99,29 @@ function drive_changes_logic(array $input): LogicResult {
 	));
 }
 
-/** A safe SQL IN-list body from an array of ids ('NULL' when empty → matches nothing). */
-function _drive_int_in_list($ids) {
-	$clean = array_values(array_filter(array_map('intval', (array)$ids)));
-	return empty($clean) ? 'NULL' : implode(',', $clean);
+/**
+ * Stamp the calling device's check-in, when the caller is a linked device at
+ * all (a browser or a machine key is not). Never allowed to disturb the
+ * response it rode in on.
+ */
+function _drive_changes_stamp_device($cursor) {
+	try {
+		$session = SessionControl::get_instance();
+		if (!method_exists($session, 'get_api_key_id')) {
+			return;
+		}
+		$api_key_id = (int)$session->get_api_key_id();
+		if ($api_key_id <= 0) {
+			return;
+		}
+		require_once(PathHelper::getIncludePath('data/sync_devices_class.php'));
+		$device = SyncDevice::for_api_key($api_key_id);
+		if ($device) {
+			$device->touch_seen($cursor);
+		}
+	} catch (Exception $e) {
+		error_log('drive_changes device stamp failed: ' . $e->getMessage());
+	}
 }
 
 function drive_changes_logic_descriptor(): array {

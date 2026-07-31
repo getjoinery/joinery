@@ -1424,11 +1424,18 @@
 		// and here reads a single line of the code being installed. This is the
 		// first thing that does.
 		//
-		// The `safe` tier, not `db`: about fifteen seconds, needs no database,
-		// and catches the failure actually in scope — a parse error or fatal in
-		// code that shipped mid-edit. The db tier is five and a half minutes and
-		// writes to a database, neither of which belongs in an automatic step on
-		// a production node.
+		// The `deploy` tier, and only that. It exists for exactly this call: it
+		// compiles every deployable PHP file, boots the core classes, checks the
+		// database is reachable and the release internally consistent, and asks
+		// the site for a page over HTTP. A couple of seconds, all reads.
+		//
+		// Not `safe`, which was the obvious-looking choice and is wrong. safe is
+		// the development gate: its tests are entitled to assert things about a
+		// checkout — the full first-party plugin set, the components manifest,
+		// the layout of maintenance_scripts. A deployed node has none of those
+		// and never should, so pointing safe at one fails eleven suites for
+		// reasons that say nothing about the release, and would roll back every
+		// upgrade in the fleet. Nothing in `deploy` may assume a repository.
 		//
 		// A failure restores public_html_last. That returns the code but not the
 		// schema: migrations have already run, and this is a recovery rather than
@@ -1446,10 +1453,10 @@
 			$test_return = 0;
 			// Subprocess for the same reason update_database runs as one: this
 			// process holds model classes loaded from the pre-swap tree.
-			exec('/usr/bin/php ' . escapeshellarg($test_runner) . ' safe 2>&1', $test_output, $test_return);
+			exec('/usr/bin/php ' . escapeshellarg($test_runner) . ' deploy 2>&1', $test_output, $test_return);
 
 			if ($test_return === 0) {
-				upgrade_echo('✓ Safe-tier tests passed against the deployed code<br>');
+				upgrade_echo('✓ Deploy checks passed against the newly deployed code<br>');
 				if ($verbose) {
 					echo nl2br(htmlspecialchars(implode("\n", array_slice($test_output, -15)))) . "<br>\n";
 				}

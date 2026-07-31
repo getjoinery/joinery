@@ -652,6 +652,28 @@
       "helptext": "900 is fifteen minutes."
     },
     {
+      "name": "api_device_link_rate_limit_requests",
+      "default": "600",
+      "group": "api_rate_limits",
+      "label": "Max device-link requests per window",
+      "type": "number",
+      "validation": {
+        "min": 1
+      },
+      "helptext": "Counted per IP. A computer being linked polls every few seconds for up to ten minutes, so this is deliberately roomier than the sign-in limit."
+    },
+    {
+      "name": "api_device_link_rate_limit_window",
+      "default": "3600",
+      "group": "api_rate_limits",
+      "label": "Device-link window (seconds)",
+      "type": "number",
+      "validation": {
+        "min": 1
+      },
+      "helptext": "3600 is one hour."
+    },
+    {
       "name": "api_rate_limit_requests",
       "default": "1000",
       "group": "api_rate_limits",

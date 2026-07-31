@@ -336,6 +336,43 @@ function security_logic(array $input): LogicResult{
 		return LogicResult::redirect('/profile/security');
 	}
 
+	// Sync devices. Unlinking must also revoke the credential, or the page would
+	// be telling the user something untrue — the machine would vanish from the
+	// list and carry on syncing.
+	if ($action === 'revoke_sync_device' || $action === 'rename_sync_device') {
+		require_once(PathHelper::getIncludePath('data/sync_devices_class.php'));
+		$device_id = (int)($input['sde_sync_device_id'] ?? 0);
+		$device = $device_id ? new SyncDevice($device_id, TRUE) : NULL;
+		$owned = $device && $device->key
+			&& (int)$device->get('sde_usr_user_id') === (int)$user->key
+			&& !$device->get('sde_delete_time');
+
+		if ($owned && $action === 'revoke_sync_device') {
+			$key_id = (int)$device->get('sde_apk_api_key_id');
+			if ($key_id > 0) {
+				$device_key = new ApiKey($key_id, TRUE);
+				if ($device_key->key && $device_key->get('apk_usr_user_id') == $user->key
+					&& !$device_key->get('apk_delete_time')) {
+					$device_key->soft_delete();
+				}
+			}
+			$device->soft_delete();
+			$message = new DisplayMessage(
+				htmlspecialchars($device->get('sde_device_name')) . ' can no longer reach your files. Anything it already downloaded stays on that computer.',
+				'Device unlinked',
+				'/\/profile\/security.*/', DisplayMessage::MESSAGE_ANNOUNCEMENT,
+				DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'securitybox', TRUE);
+			$session->save_message($message);
+		} elseif ($owned && $action === 'rename_sync_device') {
+			$new_name = trim((string)($input['sde_device_name'] ?? ''));
+			if ($new_name !== '') {
+				$device->set('sde_device_name', substr($new_name, 0, 64));
+				$device->save();
+			}
+		}
+		return LogicResult::redirect('/profile/security');
+	}
+
 	if ($action === 'revoke_all_app_sessions') {
 		ApiKey::RevokeSessionKeysForUser($user->key);
 		// Credential event (specs/mailbox_security_levels.md § 6.6): revoking app
@@ -364,6 +401,26 @@ function security_logic(array $input): LogicResult{
 	), array('create_time' => 'DESC'));
 	$app_sessions->load();
 	$page_vars['app_sessions'] = $app_sessions;
+
+	// Linked sync devices. Listed separately from app sessions even though each
+	// one owns a session key underneath: a computer that continuously syncs the
+	// user's files is a different thing to reason about than a phone that has
+	// signed in, and it carries facts (last check-in, feed position) that a bare
+	// credential does not have.
+	require_once(PathHelper::getIncludePath('data/sync_devices_class.php'));
+	$sync_devices = new MultiSyncDevice(array(
+		'user_id' => $user->key,
+		'deleted' => false,
+	), array('sde_create_time' => 'DESC'));
+	$sync_devices->load();
+	$page_vars['sync_devices'] = $sync_devices;
+	// The api keys those devices own, so the App Sessions list below does not
+	// show the same machine twice under a second name.
+	$device_key_ids = array();
+	foreach ($sync_devices as $sync_device) {
+		$device_key_ids[(int)$sync_device->get('sde_apk_api_key_id')] = true;
+	}
+	$page_vars['sync_device_key_ids'] = $device_key_ids;
 
 
 	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);

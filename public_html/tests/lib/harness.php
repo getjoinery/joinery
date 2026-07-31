@@ -15,7 +15,7 @@
  *
  *   /** @joinery-test
  *    * name: cloud_offload_engine
- *    * tier: safe            # safe | db | test-db | live      (blast radius)
+ *    * tier: safe            # safe | db | test-db | live | deploy  (blast radius)
  *    * env: dev-only         # any | prod-verify | dev-only    (where it may run)
  *    * needs: []             # e.g. [stripe-test-keys, macmini, mailgun]
  *    * /
@@ -126,7 +126,7 @@ function harness_parse_metadata($filepath) {
 	// pre-deploy gate. `live` never runs unless explicitly named, so a typo
 	// fails safe (the test simply won't run until its header is corrected).
 	if (!in_array($meta['env'], array('any', 'prod-verify', 'dev-only'), true)) $meta['env'] = 'dev-only';
-	if (!in_array($meta['tier'], array('safe', 'db', 'test-db', 'live'), true)) $meta['tier'] = 'live';
+	if (!in_array($meta['tier'], array('safe', 'db', 'test-db', 'live', 'deploy'), true)) $meta['tier'] = 'live';
 	if ($meta['name'] === '') $meta['name'] = pathinfo($filepath, PATHINFO_FILENAME);
 	return $meta;
 }

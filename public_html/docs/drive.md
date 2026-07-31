@@ -316,6 +316,111 @@ retained row, **or the log is empty after a purge** — returns `{reset: true}`
 so the client re-lists from scratch rather than silently missing changes.
 `DrivePurgeChanges` trims rows past its window (default 90 days).
 
+## Sync clients
+
+A desktop client keeps a folder on a computer matching the user's Drive. Four
+server surfaces serve it, on top of the change feed above.
+
+### Content identity on exports
+
+`DriveHelper::file_export` carries three fields a syncing client needs and a
+browser ignores:
+
+| Field | What it is |
+|---|---|
+| `content_sha256` | The head blob's hash. Plaintext bytes for a plaintext file, ciphertext bytes for an encrypted one — either way it identifies the content a client holds. |
+| `modified_time` | The mtime the uploading client declared (`fil_content_modified_time`), so a file copied back down keeps its original timestamp. Plaintext files only. |
+| `head_change_id` | The feed position of the change that established the current content (`content`, or `created` for a file uploaded once). Lets a client say "what I have matches position N" without hashing. `0` means no feed row exists — compare hashes instead. |
+
+An encrypted file never reports a plaintext `modified_time`: a timestamp on
+ciphertext would leak when the file was last worked on, so the real mtime lives
+inside the encrypted metadata blob. `drive_upload_init` refuses a
+`modified_time` parameter for a vault destination for the same reason.
+
+Listings prime these in two queries for the whole page
+(`DriveHelper::prime_sync_meta()`); a mutation that changes head content within
+a request calls `DriveHelper::forget_sync_meta()` so the export it returns
+reflects what it just wrote.
+
+### `drive_stat` — batch fetch
+
+The change feed carries id-only rows so it stays cheap however far behind a
+client is; this turns a list of ids back into entities in one round trip.
+`{entities: [{entity_type, entity_id}, …]}`, up to 500, deduped. Entities that
+are gone or no longer visible come back under `missing` rather than as an
+error — a client must be able to tell "delete the local copy" from "retry
+later". Signed URLs are withheld unless `urls: true`.
+
+### `drive_index` — full walk
+
+Cold start, and whatever `drive_changes` returns `{reset: true}`. Keyset
+paginated: pass the previous page's `next_after_id` back as `after_id` and stop
+when `done` is true. The cursor is an opaque token (`folder:123` / `file:456`)
+because folders and files have separate id spaces and a bare integer cannot say
+which it points into. Folders come before files, so a client materializing as it
+reads always has somewhere to put the next file.
+
+`scope: 'mine'` walks everything the caller owns; `scope: 'shared'` walks
+everything they reach through grants, each item annotated with `grant_root` —
+the granted entity it hangs off — so the client can mount it under the right
+"Shared with me" root. Trashed items are included with `deleted: true`: a client
+that could not see the trash would read a trashed file as vanished and delete
+the local copy, and would never recognize a restore.
+
+### `drive_vault_status` — lean vault probe
+
+`{scope: 'drive'}` → `{set_up, public_key, key_generation}`, reachable with a
+session key. Enough to seal file keys for uploads and to notice a key rotation.
+Wrappings, salts, and KDF parameters are unlock material and stay on the
+browser-only `vault_client_status`.
+
+## Device linking
+
+A sync client cannot sign a user in well: it has no trustworthy password field,
+WebAuthn does not work outside a browser, and a passkey-first account has no
+password at all. So it does not try. It opens a ceremony, shows a code, and the
+user approves in the browser they are already signed into.
+
+1. The client calls `POST /api/v1/auth/device_link` with its name, platform, and
+   (optionally) an X25519 public key, and gets a code plus a poll token.
+2. The user opens `/profile/devices/link?code=…`, which requires a signed-in
+   session and a recent step-up, and shows what is asking — name, platform, and
+   the address the request came from. If they have encrypted folders they may
+   tick a box to give this device access: the browser unlocks the vault and
+   seals the vault secret key to the device's public key
+   (`VaultKeyring` session `sealSecretKeyTo()`). Approval calls
+   `drive_device_link_approve`, which mints the session `ApiKey`, creates the
+   `SyncDevice`, and parks the sealed key and the encrypted one-time secret on
+   the ceremony row.
+3. The client polls `GET /api/v1/auth/device_link/{poll_token}` and collects the
+   credential exactly once; the row is scrubbed immediately after.
+
+**Data model.** `SyncDevice` (`sde_sync_devices`) is the device identity, paired
+1:1 with the session key it authenticates with, holding the device public key,
+last check-in, and last acknowledged cursor. `DeviceLink` (`dlk_device_links`)
+is the ten-minute ceremony state: code and poll token stored only as hashes, the
+minted secret SecretBox-encrypted at rest and deliverable once.
+`DrivePurgeDeviceLinks` sweeps finished rows hourly.
+
+Codes are 8 characters of a Crockford-style alphabet, and lookalike characters
+fold on entry (`O`→`0`, `I`/`L`→`1`) so a font cannot defeat someone reading a
+code off another screen. Wrong codes are counted per IP address rather than per
+ceremony — a guesser by definition matches no row — and 20 misses in 15 minutes
+shuts that address out.
+
+**Management.** `drive_devices`, `drive_device_rename`, `drive_device_revoke`,
+surfaced on `/profile/security` alongside App Sessions. Revoking unlinks the
+device *and* revokes its session key; a device row without its credential
+revoked would be a list that lies. Bytes already downloaded stay on that
+computer — what stops is future access.
+
+**Liveness comes for free.** When the caller of `drive_changes` maps to a
+`SyncDevice`, the handler stamps `sde_last_seen_time` (throttled to hourly, like
+`apk_last_used_time`) and `sde_last_cursor` from the request. There is no
+separate heartbeat call and therefore no client that can forget to send one, and
+the security page can say "last synced 4 minutes ago" — which is what makes a
+stalled device visible instead of silent.
+
 ## Settings and tier features
 
 Settings (`settings.json`): `drive_active` (`'0'`), `drive_max_folder_depth`

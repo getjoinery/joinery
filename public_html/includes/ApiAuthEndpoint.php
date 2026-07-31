@@ -50,6 +50,16 @@ class ApiAuthEndpoint {
 			// handle_login() always exits.
 		}
 
+		if ($endpoint === 'device_link') {
+			// Both halves of the ceremony are pre-auth by definition: the device
+			// has no credential yet — acquiring one is the whole point.
+			if (isset($url_segments[4]) && $url_segments[4] !== '') {
+				self::handle_device_link_poll($url_segments[4]);
+			}
+			self::handle_device_link_begin();
+			// Both always exit.
+		}
+
 		if (!in_array($endpoint, array('session', 'logout', 'web_session'))) {
 			api_error('Unknown auth endpoint: ' . $endpoint, 'ActionError', 404);
 		}
@@ -142,6 +152,165 @@ class ApiAuthEndpoint {
 			'expires_time' => $api_key->get('apk_expires_time'),
 			'user' => self::user_summary($user),
 		), 'Login successful');
+	}
+
+	/**
+	 * POST /api/v1/auth/device_link — open a device-link ceremony.
+	 *
+	 * The desktop client calls this with nothing but a description of itself,
+	 * gets back a short code and a poll token, and shows the user where to go.
+	 * No credential is issued here and nothing about the account is revealed —
+	 * at this point the server does not know whose device this is.
+	 *
+	 * Always exits.
+	 */
+	protected static function handle_device_link_begin() {
+		if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+			api_error('Device link must use POST method', 'ActionError', 405);
+		}
+
+		// This endpoint carries its own bucket. It is polled every few seconds
+		// for ten minutes by design, so it cannot share the deliberately tiny
+		// failed-auth allowance, and it must not be an unmetered door either.
+		$settings = Globalvars::get_instance();
+		$limit  = (int)($settings->get_setting('api_device_link_rate_limit_requests') ?: 600);
+		$window = (int)($settings->get_setting('api_device_link_rate_limit_window') ?: 3600);
+		if (!RequestLogger::check_rate_limit('api_device_link', $limit, $window)) {
+			api_error('Too many device link requests. Please try again later.', 'RateLimitError', 429);
+		}
+
+		require_once(PathHelper::getIncludePath('data/device_links_class.php'));
+		require_once(PathHelper::getIncludePath('data/sync_devices_class.php'));
+
+		$params = self::request_params();
+		$device_name = trim((string)($params['device_name'] ?? ''));
+		$platform    = strtolower(trim((string)($params['platform'] ?? '')));
+		$pubkey      = trim((string)($params['device_pubkey'] ?? ''));
+
+		if ($device_name === '') {
+			api_error('A device name is required', 'ActionError', 400);
+		}
+		if (!in_array($platform, SyncDevice::platforms(), true)) {
+			api_error('Platform must be one of: ' . implode(', ', SyncDevice::platforms()), 'ActionError', 400);
+		}
+		// The public key is optional (a client that will never touch encrypted
+		// folders need not have one) but a malformed one is refused rather than
+		// stored, so the browser can seal to it without checking first.
+		if ($pubkey !== '') {
+			$raw = base64_decode($pubkey, true);
+			if ($raw === false || strlen($raw) !== 32) {
+				api_error('device_pubkey must be standard base64 of a 32-byte X25519 public key', 'ActionError', 400);
+			}
+		}
+
+		$code = DeviceLink::generate_code();
+		$poll_token = bin2hex(random_bytes(32));
+
+		$link = new DeviceLink(NULL);
+		$link->set('dlk_code_hash', DeviceLink::hash_code($code));
+		$link->set('dlk_poll_token_hash', DeviceLink::hash_token($poll_token));
+		$link->set('dlk_device_name', substr($device_name, 0, 64));
+		$link->set('dlk_platform', $platform);
+		if ($pubkey !== '') {
+			$link->set('dlk_device_pubkey', $pubkey);
+		}
+		$link->set('dlk_request_ip', substr((string)($_SERVER['REMOTE_ADDR'] ?? ''), 0, 45));
+		$link->set('dlk_status', DeviceLink::STATUS_PENDING);
+		$link->set('dlk_expires_time', gmdate('Y-m-d H:i:s', time() + DeviceLink::TTL_SECONDS));
+		$link->save();
+
+		$display_code = substr($code, 0, 4) . '-' . substr($code, 4);
+
+		// The code itself is never logged — it is a bearer credential for the
+		// ten minutes it lives.
+		RequestLogger::log('api_auth', 'auth/device_link', true, ['status_code' => 200]);
+
+		api_success(array(
+			'link_code'    => $display_code,
+			'poll_token'   => $poll_token,
+			'verify_url'   => LibraryFunctions::get_absolute_url('/profile/devices/link?code=' . urlencode($display_code)),
+			'expires_time' => $link->get('dlk_expires_time'),
+			'poll_after'   => 3,
+		), 'Device link opened');
+	}
+
+	/**
+	 * GET /api/v1/auth/device_link/{poll_token} — collect the outcome.
+	 *
+	 * While the user has not acted this says `pending` and nothing else. On the
+	 * first successful poll after approval it hands over the credential — and
+	 * only then — after which the row is scrubbed and further polls report the
+	 * ceremony as already claimed. A secret delivered twice is a secret that can
+	 * be stolen by whoever polls second.
+	 *
+	 * Always exits.
+	 */
+	protected static function handle_device_link_poll($poll_token) {
+		if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
+			api_error('Device link polling must use GET method', 'ActionError', 405);
+		}
+
+		$settings = Globalvars::get_instance();
+		$limit  = (int)($settings->get_setting('api_device_link_rate_limit_requests') ?: 600);
+		$window = (int)($settings->get_setting('api_device_link_rate_limit_window') ?: 3600);
+		if (!RequestLogger::check_rate_limit('api_device_link', $limit, $window)) {
+			api_error('Too many device link requests. Please try again later.', 'RateLimitError', 429);
+		}
+
+		require_once(PathHelper::getIncludePath('data/device_links_class.php'));
+
+		$link = DeviceLink::load_by_poll_token($poll_token);
+		// An unknown token and an expired ceremony are the same answer on
+		// purpose: neither tells a prober whether a ceremony ever existed.
+		if (!$link || !$link->key) {
+			api_error('This device link is no longer valid', 'AuthenticationError', 404);
+		}
+
+		$status = (string)$link->get('dlk_status');
+
+		if ($status === DeviceLink::STATUS_PENDING) {
+			if ($link->is_expired()) {
+				api_error('This device link has expired', 'AuthenticationError', 404);
+			}
+			api_success(array('status' => DeviceLink::STATUS_PENDING, 'poll_after' => 3));
+		}
+
+		if ($status === DeviceLink::STATUS_DENIED) {
+			api_success(array('status' => DeviceLink::STATUS_DENIED));
+		}
+
+		// Approved. The secret is present only until the first collector takes it.
+		$secret = $link->open_secret();
+		if ($secret === null) {
+			api_error('This device link has already been claimed', 'AuthenticationError', 409);
+		}
+
+		require_once(PathHelper::getIncludePath('data/api_keys_class.php'));
+		$api_key = new ApiKey((int)$link->get('dlk_apk_api_key_id'), true);
+		if (!$api_key->key) {
+			api_error('This device link is no longer valid', 'AuthenticationError', 404);
+		}
+
+		$payload = array(
+			'status'     => DeviceLink::STATUS_APPROVED,
+			'public_key' => $api_key->get('apk_public_key'),
+			'secret_key' => $secret,
+			'device_id'  => (int)$link->get('dlk_sde_sync_device_id'),
+			'expires_time' => $api_key->get('apk_expires_time'),
+		);
+		$sealed = $link->get('dlk_sealed_vault_key');
+		if ($sealed !== null && $sealed !== '') {
+			$payload['sealed_vault_key'] = $sealed;
+		}
+
+		$link->scrub_secrets();
+
+		RequestLogger::log('api_auth', 'auth/device_link/claim', true, [
+			'user_id' => (int)$link->get('dlk_usr_user_id'),
+			'status_code' => 200,
+		]);
+
+		api_success($payload, 'Device linked');
 	}
 
 	/**

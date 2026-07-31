@@ -1,0 +1,15 @@
+[package]
+name = "jd-sim"
+description = "Deterministic simulation harness for the sync engine: virtual filesystem with per-OS personality, mock server implementing the Phase 0 contract, controlled clock and RNG, and the fault matrix. Every run is reproducible from a seed."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+jd-core = { path = "../jd-core" }
+jd-vfs = { path = "../jd-vfs" }
+jd-proto = { path = "../jd-proto" }
+serde_json = "1"
+sha2 = "0.10"
+unicode-normalization = "0.1"

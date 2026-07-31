@@ -1,0 +1,578 @@
+//! The actual filesystem.
+//!
+//! Everything interesting here is about the two moments where a mistake is
+//! unrecoverable: making a file visible, and making one disappear.
+//!
+//! A file becomes visible by an atomic rename from a spool file, never by
+//! writing into place. So there is no instant at which the user can open a
+//! half-downloaded document, and a process killed mid-transfer leaves a stray
+//! spool file rather than a corrupted one they will discover in six months.
+//!
+//! A file disappears into the OS trash, never by unlink. The engine is a
+//! program that deletes files for a living, and programs that do that get it
+//! wrong sometimes; the difference between an incident and a catastrophe is
+//! whether the user can get the file back.
+
+use std::fs::{self, File};
+use std::io::{BufReader, Read, Write};
+use std::path::{Path, PathBuf};
+
+use sha2::{Digest, Sha256};
+
+use crate::{DirEntry, EntryKind, Fingerprint, Personality, SpoolFile, Vfs, VfsError, VfsResult};
+
+/// Bytes read per chunk when hashing. Large enough that syscall overhead is
+/// noise on a big file, small enough not to matter on a small one.
+const HASH_CHUNK: usize = 256 * 1024;
+
+pub struct OsVfs {
+    root: PathBuf,
+    /// Where spool files live: alongside the state store, outside the synced
+    /// tree, but on the same volume as the root wherever possible so a commit
+    /// is a rename rather than a copy across filesystems.
+    spool_dir: PathBuf,
+    personality: Personality,
+    /// Supplies the random part of a spool name. Injected so a simulated run
+    /// reproduces from its seed.
+    next_token: Box<dyn Fn() -> String + Send + Sync>,
+}
+
+impl OsVfs {
+    pub fn new(root: PathBuf, spool_dir: PathBuf) -> VfsResult<OsVfs> {
+        Self::with_personality(root, spool_dir, Personality::native())
+    }
+
+    pub fn with_personality(
+        root: PathBuf,
+        spool_dir: PathBuf,
+        personality: Personality,
+    ) -> VfsResult<OsVfs> {
+        fs::create_dir_all(&spool_dir).map_err(|e| VfsError::Io {
+            path: spool_dir.clone(),
+            source: e,
+        })?;
+        let counter = std::sync::atomic::AtomicU64::new(0);
+        Ok(OsVfs {
+            root,
+            spool_dir,
+            personality,
+            next_token: Box::new(move || {
+                let n = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                format!("{}-{}", std::process::id(), n)
+            }),
+        })
+    }
+
+    /// Clear out spool files left behind by a previous run.
+    ///
+    /// These are always safe to remove: a spool file only ever becomes a real
+    /// file through a rename, so anything still sitting here by definition
+    /// never made it, and the transfer that produced it will be re-derived.
+    pub fn sweep_spool(&self) -> VfsResult<usize> {
+        let mut removed = 0;
+        let entries = match fs::read_dir(&self.spool_dir) {
+            Ok(e) => e,
+            Err(_) => return Ok(0),
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if crate::names::is_internal(&name) && fs::remove_file(entry.path()).is_ok() {
+                removed += 1;
+            }
+        }
+        Ok(removed)
+    }
+}
+
+fn io_err(path: &Path, e: std::io::Error) -> VfsError {
+    match e.kind() {
+        std::io::ErrorKind::NotFound => VfsError::NotFound(path.to_path_buf()),
+        std::io::ErrorKind::PermissionDenied => VfsError::PermissionDenied(path.to_path_buf()),
+        std::io::ErrorKind::AlreadyExists => VfsError::AlreadyExists(path.to_path_buf()),
+        _ => VfsError::Io {
+            path: path.to_path_buf(),
+            source: e,
+        },
+    }
+}
+
+#[cfg(unix)]
+fn fingerprint_of(md: &fs::Metadata) -> Fingerprint {
+    use std::os::unix::fs::MetadataExt;
+    Fingerprint {
+        size: md.len(),
+        // Nanosecond resolution where the filesystem provides it. On one that
+        // does not, the coarse value is what the fingerprint comparison is
+        // told to tolerate via Personality::mtime_granularity_ns.
+        mtime_ns: (md.mtime() as u64)
+            .saturating_mul(1_000_000_000)
+            .saturating_add(md.mtime_nsec() as u64),
+        file_id: md.ino(),
+    }
+}
+
+#[cfg(windows)]
+fn fingerprint_of(md: &fs::Metadata) -> Fingerprint {
+    use std::os::windows::fs::MetadataExt;
+    Fingerprint {
+        size: md.len(),
+        // Windows reports 100-nanosecond ticks since 1601; the epoch does not
+        // matter because every comparison is against another value from the
+        // same source.
+        mtime_ns: md.last_write_time().saturating_mul(100),
+        // file_index() needs an opened handle; the creation time plus size is a
+        // usable stand-in for pairing until the daemon opens handles itself.
+        file_id: md.creation_time(),
+    }
+}
+
+impl Vfs for OsVfs {
+    fn personality(&self) -> Personality {
+        self.personality
+    }
+
+    fn root(&self) -> Option<PathBuf> {
+        // An unmounted volume or a folder the user moved: the engine must read
+        // this as "pause", never as "every file was deleted". Returning None is
+        // what stops an unplugged drive from propagating as a mass delete.
+        if self.root.is_dir() {
+            Some(self.root.clone())
+        } else {
+            None
+        }
+    }
+
+    fn read_dir(&self, path: &Path) -> VfsResult<Vec<DirEntry>> {
+        let rd = fs::read_dir(path).map_err(|e| io_err(path, e))?;
+        let mut out = Vec::new();
+        for entry in rd {
+            let entry = entry.map_err(|e| io_err(path, e))?;
+            let name = entry.file_name().to_string_lossy().to_string();
+            // The engine's own spool and swap files are not part of the tree.
+            if crate::names::is_internal(&name) {
+                continue;
+            }
+            // symlink_metadata, not metadata: a symlink must be reported as a
+            // symlink rather than silently followed to whatever it points at,
+            // which could be outside the root or a loop back into it.
+            let md = match entry.path().symlink_metadata() {
+                Ok(md) => md,
+                Err(_) => continue, // vanished between listing and stat — the rescan will catch up
+            };
+            let kind = if md.file_type().is_symlink() {
+                EntryKind::Symlink
+            } else if md.is_dir() {
+                EntryKind::Directory
+            } else if md.is_file() {
+                EntryKind::File
+            } else {
+                EntryKind::Other
+            };
+            out.push(DirEntry {
+                name,
+                kind,
+                fingerprint: if kind == EntryKind::File {
+                    Some(fingerprint_of(&md))
+                } else {
+                    None
+                },
+            });
+        }
+        // A stable order so two scans of an unchanged directory produce
+        // identical results; readdir order is not guaranteed.
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(out)
+    }
+
+    fn fingerprint(&self, path: &Path) -> VfsResult<Option<Fingerprint>> {
+        match path.symlink_metadata() {
+            Ok(md) if md.is_file() => Ok(Some(fingerprint_of(&md))),
+            Ok(_) => Ok(None),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(io_err(path, e)),
+        }
+    }
+
+    fn hash(&self, path: &Path) -> VfsResult<String> {
+        let file = File::open(path).map_err(|e| io_err(path, e))?;
+        let mut reader = BufReader::new(file);
+        let mut hasher = Sha256::new();
+        let mut buf = vec![0u8; HASH_CHUNK];
+        loop {
+            let n = reader.read(&mut buf).map_err(|e| io_err(path, e))?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+        }
+        Ok(format!("{:x}", hasher.finalize()))
+    }
+
+    fn create_dir(&self, path: &Path) -> VfsResult<()> {
+        match fs::create_dir_all(path) {
+            Ok(()) => Ok(()),
+            Err(e) => Err(io_err(path, e)),
+        }
+    }
+
+    fn rename(&self, from: &Path, to: &Path) -> VfsResult<()> {
+        if let Some(parent) = to.parent() {
+            fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?;
+        }
+        fs::rename(from, to).map_err(|e| io_err(from, e))
+    }
+
+    fn trash(&self, path: &Path) -> VfsResult<()> {
+        if !path.exists() {
+            // Already gone. The desired state holds, so this is success — a
+            // retry after a crash must not fail on its own prior success.
+            return Ok(());
+        }
+        trash::delete(path).map_err(|e| VfsError::Io {
+            path: path.to_path_buf(),
+            source: std::io::Error::other(e.to_string()),
+        })
+    }
+
+    fn spool(&self, target: &Path) -> VfsResult<Box<dyn SpoolFile>> {
+        let name = format!(".jd-tmp-{}", (self.next_token)());
+        let path = self.spool_dir.join(name);
+        let file = File::create(&path).map_err(|e| io_err(&path, e))?;
+        Ok(Box::new(OsSpoolFile {
+            file: Some(file),
+            path,
+            target: target.to_path_buf(),
+        }))
+    }
+
+    fn open_read(&self, path: &Path) -> VfsResult<Box<dyn Read>> {
+        let f = File::open(path).map_err(|e| io_err(path, e))?;
+        Ok(Box::new(BufReader::new(f)))
+    }
+}
+
+struct OsSpoolFile {
+    file: Option<File>,
+    path: PathBuf,
+    #[allow(dead_code)]
+    target: PathBuf,
+}
+
+impl Write for OsSpoolFile {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self.file.as_mut() {
+            Some(f) => f.write(buf),
+            None => Err(std::io::Error::other("spool file already committed")),
+        }
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self.file.as_mut() {
+            Some(f) => f.flush(),
+            None => Ok(()),
+        }
+    }
+}
+
+impl SpoolFile for OsSpoolFile {
+    fn commit(
+        mut self: Box<Self>,
+        target: &Path,
+        expect: Option<Fingerprint>,
+    ) -> VfsResult<Fingerprint> {
+        // Durable before visible. Without the fsync, a power cut just after the
+        // rename can leave a file that exists, has the right name and length,
+        // and contains zeroes — the worst possible outcome, because everything
+        // downstream would treat it as real content.
+        if let Some(mut f) = self.file.take() {
+            f.flush().map_err(|e| io_err(&self.path, e))?;
+            f.sync_all().map_err(|e| io_err(&self.path, e))?;
+        }
+
+        // The guard against overwriting work done while we were downloading. If
+        // the file at the target is no longer what the engine decided against,
+        // somebody changed it in the meantime and this download is stale.
+        if let Some(expected) = expect {
+            if let Ok(md) = target.symlink_metadata() {
+                if md.is_file() {
+                    let actual = fingerprint_of(&md);
+                    if !actual.unchanged_from(&expected, &Personality::native()) {
+                        let _ = fs::remove_file(&self.path);
+                        return Err(VfsError::AlreadyExists(target.to_path_buf()));
+                    }
+                }
+            }
+        }
+
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?;
+        }
+        fs::rename(&self.path, target).map_err(|e| io_err(&self.path, e))?;
+
+        let md = target.symlink_metadata().map_err(|e| io_err(target, e))?;
+        Ok(fingerprint_of(&md))
+    }
+
+    fn discard(mut self: Box<Self>) {
+        self.file.take();
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TempDir(PathBuf);
+    impl TempDir {
+        fn new(tag: &str) -> TempDir {
+            let p = std::env::temp_dir().join(format!(
+                "jd-vfs-{}-{}-{:?}",
+                tag,
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            let _ = fs::remove_dir_all(&p);
+            fs::create_dir_all(&p).unwrap();
+            TempDir(p)
+        }
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn vfs(dir: &TempDir) -> OsVfs {
+        let root = dir.path().join("root");
+        fs::create_dir_all(&root).unwrap();
+        OsVfs::new(root, dir.path().join("spool")).unwrap()
+    }
+
+    #[test]
+    fn hashing_matches_a_known_sha256() {
+        let d = TempDir::new("hash");
+        let v = vfs(&d);
+        let p = v.root().unwrap().join("a.txt");
+        fs::write(&p, b"hello").unwrap();
+        assert_eq!(
+            v.hash(&p).unwrap(),
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
+    }
+
+    #[test]
+    fn hashing_is_chunk_boundary_safe() {
+        // A file larger than the read buffer must hash the same as one hashed
+        // in a single pass, or every large file would sync forever.
+        let d = TempDir::new("bighash");
+        let v = vfs(&d);
+        let p = v.root().unwrap().join("big.bin");
+        let bytes: Vec<u8> = (0..(HASH_CHUNK * 2 + 12345))
+            .map(|i| (i % 251) as u8)
+            .collect();
+        fs::write(&p, &bytes).unwrap();
+
+        let mut expect = Sha256::new();
+        expect.update(&bytes);
+        assert_eq!(v.hash(&p).unwrap(), format!("{:x}", expect.finalize()));
+    }
+
+    #[test]
+    fn a_spool_file_only_becomes_visible_on_commit() {
+        let d = TempDir::new("spool");
+        let v = vfs(&d);
+        let target = v.root().unwrap().join("downloaded.txt");
+
+        let mut spool = v.spool(&target).unwrap();
+        spool.write_all(b"partial").unwrap();
+        // Mid-transfer: nothing at the destination yet.
+        assert!(!target.exists());
+
+        spool.commit(&target, None).unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"partial");
+    }
+
+    #[test]
+    fn a_discarded_spool_file_leaves_nothing_behind() {
+        let d = TempDir::new("discard");
+        let v = vfs(&d);
+        let target = v.root().unwrap().join("never.txt");
+
+        let mut spool = v.spool(&target).unwrap();
+        spool.write_all(b"abandoned").unwrap();
+        spool.discard();
+
+        assert!(!target.exists());
+        assert_eq!(fs::read_dir(d.path().join("spool")).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn committing_refuses_to_overwrite_a_file_that_changed_underneath() {
+        // The download started against a known state; while it ran, the user
+        // saved over the file. Landing the download would destroy their edit.
+        let d = TempDir::new("guard");
+        let v = vfs(&d);
+        let target = v.root().unwrap().join("contested.txt");
+        fs::write(&target, b"original").unwrap();
+        let seen = v.fingerprint(&target).unwrap().unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        fs::write(&target, b"the user's newer edit").unwrap();
+
+        let mut spool = v.spool(&target).unwrap();
+        spool.write_all(b"stale download").unwrap();
+        let err = spool.commit(&target, Some(seen)).unwrap_err();
+
+        assert!(matches!(err, VfsError::AlreadyExists(_)));
+        assert_eq!(fs::read(&target).unwrap(), b"the user's newer edit");
+    }
+
+    #[test]
+    fn committing_proceeds_when_the_target_is_untouched() {
+        let d = TempDir::new("guard-ok");
+        let v = vfs(&d);
+        let target = v.root().unwrap().join("quiet.txt");
+        fs::write(&target, b"original").unwrap();
+        let seen = v.fingerprint(&target).unwrap().unwrap();
+
+        let mut spool = v.spool(&target).unwrap();
+        spool.write_all(b"new content").unwrap();
+        spool.commit(&target, Some(seen)).unwrap();
+
+        assert_eq!(fs::read(&target).unwrap(), b"new content");
+    }
+
+    #[test]
+    fn committing_creates_missing_parent_directories() {
+        let d = TempDir::new("mkparent");
+        let v = vfs(&d);
+        let target = v.root().unwrap().join("deep/nested/file.txt");
+
+        let mut spool = v.spool(&target).unwrap();
+        spool.write_all(b"x").unwrap();
+        spool.commit(&target, None).unwrap();
+
+        assert!(target.exists());
+    }
+
+    #[test]
+    fn listing_hides_the_engines_own_files_and_flags_symlinks() {
+        let d = TempDir::new("list");
+        let v = vfs(&d);
+        let root = v.root().unwrap();
+        fs::write(root.join("real.txt"), b"x").unwrap();
+        fs::write(root.join(".jd-tmp-leftover"), b"x").unwrap();
+        fs::create_dir(root.join("folder")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(root.join("real.txt"), root.join("link.txt")).unwrap();
+
+        let listed = v.read_dir(&root).unwrap();
+        let names: Vec<&str> = listed.iter().map(|e| e.name.as_str()).collect();
+
+        assert!(
+            !names.contains(&".jd-tmp-leftover"),
+            "spool files are not tree content"
+        );
+        assert!(names.contains(&"real.txt"));
+        assert!(names.contains(&"folder"));
+
+        #[cfg(unix)]
+        {
+            // Never followed: a symlink can escape the root or loop back into
+            // it, so it is reported as what it is and handled as unsyncable.
+            let link = listed.iter().find(|e| e.name == "link.txt").unwrap();
+            assert_eq!(link.kind, EntryKind::Symlink);
+        }
+    }
+
+    #[test]
+    fn listing_is_ordered_so_two_scans_agree() {
+        let d = TempDir::new("order");
+        let v = vfs(&d);
+        let root = v.root().unwrap();
+        for n in ["c.txt", "a.txt", "b.txt"] {
+            fs::write(root.join(n), b"x").unwrap();
+        }
+        let names: Vec<String> = v
+            .read_dir(&root)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        assert_eq!(names, vec!["a.txt", "b.txt", "c.txt"]);
+    }
+
+    #[test]
+    fn a_rewritten_file_gets_a_different_fingerprint() {
+        let d = TempDir::new("fp");
+        let v = vfs(&d);
+        let p = v.root().unwrap().join("f.txt");
+        fs::write(&p, b"one").unwrap();
+        let before = v.fingerprint(&p).unwrap().unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        fs::write(&p, b"two but longer").unwrap();
+        let after = v.fingerprint(&p).unwrap().unwrap();
+
+        assert!(!after.unchanged_from(&before, &Personality::native()));
+    }
+
+    #[test]
+    fn fingerprinting_something_absent_is_not_an_error() {
+        // A file that vanished between being listed and being examined is an
+        // ordinary race, not a failure — the next scan settles it.
+        let d = TempDir::new("absent");
+        let v = vfs(&d);
+        assert_eq!(
+            v.fingerprint(&v.root().unwrap().join("nope.txt")).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn an_unavailable_root_reads_as_unavailable_not_as_an_empty_tree() {
+        // The distinction that stops an unmounted drive propagating as a mass
+        // delete of everything on the server.
+        let d = TempDir::new("unmounted");
+        let v = vfs(&d);
+        assert!(v.root().is_some());
+        fs::remove_dir_all(v.root().unwrap()).unwrap();
+        assert!(v.root().is_none());
+    }
+
+    #[test]
+    fn trashing_something_already_gone_succeeds() {
+        // Retry after a crash must not fail on its own prior success.
+        let d = TempDir::new("trash-absent");
+        let v = vfs(&d);
+        assert!(v.trash(&v.root().unwrap().join("ghost.txt")).is_ok());
+    }
+
+    #[test]
+    fn sweeping_removes_leftover_spool_files() {
+        let d = TempDir::new("sweep");
+        let v = vfs(&d);
+        let mut spool = v.spool(&v.root().unwrap().join("t.txt")).unwrap();
+        spool.write_all(b"interrupted").unwrap();
+        drop(spool); // process died here — the spool file is orphaned
+
+        assert_eq!(v.sweep_spool().unwrap(), 1);
+        assert_eq!(fs::read_dir(d.path().join("spool")).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn renaming_creates_the_destination_directory() {
+        let d = TempDir::new("rename");
+        let v = vfs(&d);
+        let root = v.root().unwrap();
+        let from = root.join("here.txt");
+        fs::write(&from, b"x").unwrap();
+        let to = root.join("new/place/here.txt");
+
+        v.rename(&from, &to).unwrap();
+        assert!(to.exists() && !from.exists());
+    }
+}

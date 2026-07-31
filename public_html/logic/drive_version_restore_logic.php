@@ -42,6 +42,7 @@ function drive_version_restore_logic(array $input): LogicResult {
 	FileVersion::restore_version($file, $version, $user_id);
 	DriveUsage::recompute((int)$file->get('fil_usr_user_id'));
 	FileChange::record(FileChange::KIND_CONTENT, DriveHelper::ENTITY_FILE, $file->key, (int)$file->get('fil_usr_user_id'), $user_id);
+	DriveHelper::forget_sync_meta($file->key);
 
 	$fresh = DriveHelper::load_file($file->key);
 	return LogicResult::render(array('ok' => true, 'file' => DriveHelper::file_export($fresh)));

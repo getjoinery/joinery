@@ -128,6 +128,7 @@ class NoopDriver implements CloudStorageDriver {
 	public function putMany(array $items): array { $o = []; foreach ($items as $i) { $this->puts[] = $i['remote_key']; $o[$i['remote_key']] = true; } return $o; }
 	public function put(string $l, string $k, string $c): void { $this->puts[] = $k; }
 	public function get(string $k, string $l): void { if (!is_dir(dirname($l))) mkdir(dirname($l), 0777, true); file_put_contents($l, "x"); }
+	public function get_range(string $k, string $l, int $s, int $e): void { if (!is_dir(dirname($l))) mkdir(dirname($l), 0777, true); file_put_contents($l, substr("x", $s, $e - $s + 1)); }
 	public function delete(string $k): void {}
 	public function url(string $k): string { return 'noop://' . $k; }
 	public function ping(): array { return ['ok' => true, 'message' => 'noop']; }

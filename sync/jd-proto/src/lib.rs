@@ -8,7 +8,11 @@
 //! simplest correct shape, and the network trait this crate will grow for
 //! `jd-sim` injection stays trivially mockable.
 
+pub mod api;
+
 use std::io::{Read, Seek, SeekFrom, Write};
+
+pub use api::{DriveApi, ReadSeek};
 
 use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
@@ -369,15 +373,35 @@ impl Client {
     // ---- download -----------------------------------------------------------
 
     /// Stream a signed `download_url` (from a file export) into `out`.
-    /// Returns bytes written. Whole-file; ranged resume rides the Phase 0
-    /// server work (`docs/file_signed_urls.md` range contract).
+    /// Returns bytes written.
     pub fn download_to<W: Write>(&self, download_url: &str, out: &mut W) -> Result<u64> {
+        self.download_range_to(download_url, 0, out)
+    }
+
+    /// The same, resuming at byte `from` (`docs/file_signed_urls.md` range
+    /// contract).
+    ///
+    /// A server that answers 200 to a range request has ignored it and is
+    /// sending the file from the beginning. Writing that into a partial spool
+    /// would corrupt it silently, so the mismatch is refused rather than
+    /// accommodated: the caller restarts the download from zero, which costs
+    /// bandwidth and nothing else.
+    pub fn download_range_to<W: Write + ?Sized>(
+        &self,
+        download_url: &str,
+        from: u64,
+        out: &mut W,
+    ) -> Result<u64> {
         let url = if download_url.starts_with("http://") || download_url.starts_with("https://") {
             download_url.to_string()
         } else {
             format!("{}{}", self.base_url, download_url)
         };
-        let resp = match self.agent.request("GET", &url).call() {
+        let mut req = self.agent.request("GET", &url);
+        if from > 0 {
+            req = req.set("Range", &format!("bytes={from}-"));
+        }
+        let resp = match req.call() {
             Ok(r) => r,
             Err(ureq::Error::Status(status, _)) => {
                 return Err(ProtoError::Api {
@@ -389,6 +413,12 @@ impl Client {
             }
             Err(e) => return Err(ProtoError::Transport(e.to_string())),
         };
+        if from > 0 && resp.status() != 206 {
+            return Err(ProtoError::Contract(format!(
+                "resume from {from} was answered {} — the range was ignored",
+                resp.status()
+            )));
+        }
         let mut reader = resp.into_reader();
         let written = std::io::copy(&mut reader, out)?;
         Ok(written)
