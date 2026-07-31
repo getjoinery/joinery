@@ -48,7 +48,7 @@ class PublicPage extends PublicPageBase {
 
         // Admin link
         if ($user_menu['permission_level'] >= 5) {
-            echo ' <a href="/admin" class="btn btn-sm btn-outline">Admin</a>';
+            echo '<a href="/admin" class="jy-header-admin-link">Admin</a>';
         }
 
         // Login / Register or user dropdown
@@ -60,7 +60,7 @@ class PublicPage extends PublicPageBase {
         } else {
             echo '<details class="jy-user-dropdown">';
             echo '<summary class="jy-user-dropdown-toggle" aria-label="User menu">';
-            echo '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg>';
+            echo '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg>';
             if ($user_menu['display_name']) {
                 echo ' <span class="jy-user-name">' . htmlspecialchars($user_menu['display_name'], ENT_QUOTES, 'UTF-8') . '</span>';
             }

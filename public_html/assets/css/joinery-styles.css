@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   Joinery Default UI Kit  ·  custom.css  ·  v2.6.1
+   Joinery Default UI Kit  ·  custom.css  ·  v2.7.1
    Pure Slate design. Themeable values live in --jy-* tokens on
    :root so branded themes can override them without understanding
    internals. Component rules are scoped under .jy-ui to prevent
@@ -116,8 +116,11 @@ body.jy-default h6 { font-size: var(--jy-text-base); }
 
 body.jy-default p { margin-bottom: var(--jy-space-4); }
 body.jy-default p:last-child { margin-bottom: 0; }
-body.jy-default a { color: var(--jy-color-link); text-decoration: none; }
-body.jy-default a:hover { text-decoration: underline; }
+/* :where() keeps these at bare-element specificity so any component rule
+   that declares its own link color/decoration (.jy-logo, .jy-nav-links a,
+   .jy-member-subnav-link, dropdown menus, …) wins without escalation. */
+:where(body.jy-default) a { color: var(--jy-color-link); text-decoration: none; }
+:where(body.jy-default) a:hover { text-decoration: underline; }
 body.jy-default small { font-size: var(--jy-text-sm); }
 
 body.jy-default code {
@@ -311,7 +314,9 @@ body.jy-default blockquote {
   padding: 0 3px;
 }
 
-.jy-header-icon-link {
+.jy-header-icon-link,
+.jy-header-icons .header-messages-link,
+.jy-header-icons .header-notifications-link {
   display: inline-flex;
   align-items: center;
   color: var(--jy-color-text);
@@ -321,8 +326,12 @@ body.jy-default blockquote {
   text-decoration: none;
   position: relative;
 }
-.jy-header-icon-link:hover { background: var(--jy-color-surface); text-decoration: none; }
-.jy-icon-badge {
+.jy-header-icon-link:hover,
+.jy-header-icons .header-messages-link:hover,
+.jy-header-icons .header-notifications-link:hover { background: var(--jy-color-surface); text-decoration: none; }
+.jy-icon-badge,
+.jy-header-icons .messages-count,
+.jy-header-icons .notifications-count {
   position: absolute;
   top: 0;
   right: 0;
@@ -338,6 +347,31 @@ body.jy-default blockquote {
   justify-content: center;
   padding: 0 3px;
 }
+
+/* Vault lock chip inside the header cluster rides the same ghost-icon
+   geometry as the other header icons (vault-lock.css styles the chip's
+   default/floating forms). */
+.jy-header-icons .jy-vault-lock-btn {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: var(--jy-radius-md);
+  color: var(--jy-color-text);
+}
+.jy-header-icons .jy-vault-lock-btn:hover { background: var(--jy-color-surface); }
+
+.jy-header-icons .jy-header-admin-link {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--jy-space-2) var(--jy-space-3);
+  border-radius: var(--jy-radius-md);
+  font-size: var(--jy-text-sm);
+  font-weight: 500;
+  color: var(--jy-color-text);
+  transition: background 0.15s;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.jy-header-icons .jy-header-admin-link:hover { background: var(--jy-color-surface); text-decoration: none; }
 
 /* User dropdown uses <details>/<summary> */
 .jy-user-dropdown { position: relative; }
