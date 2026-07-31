@@ -30,51 +30,105 @@ twelve config forms. They will see one task, **Retention Sweep**, and set each
 retention window where that window is already meaningful — as a normal setting on
 the settings page, next to the feature it governs.
 
-### The registry
+### Where a rule is declared
 
-A retention rule is declared, not coded. Core rules live in a new
-`includes/retention_rules.json`; plugin rules live under a `retentionRules` key in
-the plugin's `plugin.json`, alongside the `settings` key that already declares that
-plugin's settings.
+A retention rule is declared on the data class that owns the table. That class
+already declares `$tablename`, every column in `$field_specifications`, and
+`$foreign_key_actions` — its deletion strategy. Retention is deletion on a timer,
+so it belongs in the same place:
 
-```json
-{
-  "retentionRules": [
-    {
-      "key": "mailbox_inbound_logs",
-      "label": "Inbound email logs",
-      "table": "iel_inbound_email_log",
-      "column": "iel_create_time",
-      "unit": "day",
-      "window_setting": "mailbox_inbound_log_retention_days"
-    },
-    {
-      "key": "mailbox_trash",
-      "label": "Mailbox trash",
-      "callable": "MailboxRetention::purgeTrash",
-      "window_setting": "mailbox_trash_retention_days"
-    }
-  ]
+```php
+class GeneralError extends SystemBase {
+    public static $tablename = 'err_general_errors';
+
+    public static $retention_policy = [
+        'label'          => 'Error log',
+        'age_column'     => 'err_create_time',
+        'age_unit'       => 'days',
+        'window_setting' => 'error_log_retention_days',
+    ];
 }
 ```
 
-**Declarative form** (`table` + `column` + `unit`) covers eight of the twelve rules
-verbatim. Optional `where` appends an extra condition for rules that qualify their
-delete — `NotificationCleanup` only removes notifications that have been read,
-`DrivePurgeStaleUploads` only removes pending uploads.
+It reads as a sentence: rows age by `err_create_time`, in days, against whatever
+`error_log_retention_days` is set to. There is no `table` key — the class declares
+that already — and no rule key; a rule is identified by its `$tablename`, which is
+unique by construction. Because the column is named alongside
+`$field_specifications`, a typo is a declaration-time failure rather than a sweep
+that silently deletes nothing forever.
 
-**Callable form** (`callable`) covers the four that do more than one SQL statement:
-`PurgeMailboxTrash` (reclaims attachments and the stored raw message),
+**Age form** (`age_column` + `age_unit`) covers eight of the eleven rules verbatim.
+Optional `only_where` appends a qualifier for the two that do not purge everything:
+
+```php
+    public static $retention_policy = [
+        'label'          => 'Notifications',
+        'age_column'     => 'ntf_create_time',
+        'age_unit'       => 'days',
+        'window_setting' => 'notification_retention_days',
+        'only_where'     => 'ntf_read_time IS NOT NULL',
+    ];
+```
+
+`NotificationCleanup` only removes notifications that have been read;
+`DrivePurgeStaleUploads` uses the same shape to restrict itself to pending uploads.
+
+**Method form** (`purge_method`) covers the three that do more than one SQL
+statement — `PurgeMailboxTrash` (reclaims attachments and the stored raw message),
 `PurgeMailImportArchives` (releases Drive-sourced archives rather than deleting
-them, and clears abandoned working directories), `SweepMailboxIndexTemp`
-(filesystem, not SQL), and `DrivePurgeTrash` (recursive folder purge). The callable
-receives the resolved window and returns `['removed' => int, 'message' => string]`.
+them, and clears abandoned working directories), and `DrivePurgeTrash` (recursive
+folder purge):
 
-Every rule, both forms, must name a `window_setting`.
+```php
+    public static $retention_policy = [
+        'label'          => 'Mailbox trash',
+        'window_setting' => 'mailbox_trash_retention_days',
+        'purge_method'   => 'purgeExpiredTrash',
+    ];
+```
+
+`purge_method` names a **static method on the same class**, receiving the resolved
+window and returning `['removed' => int, 'message' => string]`. Keeping the method
+on the class means there is no `Class::method` string able to point at a class that
+no longer exists, and the code sits beside the declaration that calls it — the same
+arrangement as the `authenticate_read()` / `authenticate_write()` methods these
+models already carry.
+
+A `purge_method` rule that touches several tables is declared on the class that
+anchors the operation, not split across them — `DrivePurgeTrash` sits on `File` and
+handles folders from there. One rule, one owner, one entry in the run summary.
+
+The whole vocabulary is five keys, and a rule uses four: `label`, `window_setting`,
+then either `age_column` + `age_unit` (plus optional `only_where`) or
+`purge_method`. Every rule must name a `window_setting`.
+
+### Discovery
+
+`LibraryFunctions::discover_model_classes()` already walks core and plugin data
+classes, and already accepts `'plugin_status' => 'active'` — an option that exists
+so a deactivated plugin stops exposing its REST endpoints. The sweep reuses it as-is:
+
+```php
+$classes = LibraryFunctions::discover_model_classes([
+    'include_plugins' => true,
+    'plugin_status'   => 'active',
+]);
+```
+
+A deactivated plugin therefore drops its retention rules with no additional check,
+matching how plugin task suspension already works. There is no new manifest to
+parse and no second plugin-active lookup to keep in step with the first.
+
+**A deleted class takes its rule with it**, which is the reason the policy lives on
+the model rather than in a manifest. A standalone rules file can outlive the table
+it deletes from: drop the table, forget the entry, and the sweep errors against
+something that is no longer there — the exact failure Part 4 exists to prevent,
+reintroduced through a side door. With the policy on the class, absent code means
+the rule is simply gone. No reconcile logic, no grace window.
 
 ### Windows are settings, not task config
 
-Each of the twelve windows becomes a declared setting — core windows in
+Each of the eleven windows becomes a declared setting — core windows in
 `settings.json`, plugin windows in that plugin's `plugin.json`. This is already the
 established pattern: `mailbox_trash_retention_days` exists as a setting today
 precisely because the mail reader shows each trashed message its purge date, and
@@ -104,9 +158,10 @@ factory default:
 | `mailbox_trash_retention_days` | *(exists)* | `PurgeMailboxTrash.days_to_keep` |
 | `mailbox_import_archive_retention_days` | 7 | `PurgeMailImportArchives.retention_days` |
 
-`SweepMailboxIndexTemp` has no window — its rule is unconditional and needs no
-setting; it is expressed as a callable with `"window_setting": null` explicitly
-allowed for this one shape.
+`SweepMailboxIndexTemp` is not a rule at all. It sweeps a filesystem directory, so
+it has no table, no data class, and no window — nothing for a retention policy to
+attach to. It becomes a plain step inside `RetentionSweep` rather than a registry
+entry pretending to be a rule.
 
 **Existing sites take the factory defaults.** No carry-over is read out of
 `sct_task_config`. There are no production deployments whose tuned windows need
@@ -118,15 +173,12 @@ forever to serve a case that never occurs.
 `tasks/RetentionSweep.php`, `default_frequency: daily`, `default_time: 03:00:00`,
 no `config_fields`, `activate_on_install: true`.
 
-It walks every rule from every *active* plugin plus core, resolves each window from
-its setting, skips rules whose window is `0`, and runs the rest. **A rule that
-throws is caught, recorded, and does not stop the remaining rules** — one bad table
-must not leave every other retention window unswept. The run message summarizes
-per-rule counts; the overall status is `error` if any rule failed, `success`
-otherwise.
-
-Rules belonging to an inactive plugin are skipped, matching how plugin task
-suspension already works.
+It collects every class carrying a `$retention_policy`, resolves each window from
+its setting, skips rules whose window is `0`, and runs the rest — then the mailbox
+index-temp directory sweep. **A rule that throws is caught, recorded, and does not
+stop the remaining rules** — one bad table must not leave every other retention
+window unswept. The run message summarizes per-rule counts; the overall status is
+`error` if any rule failed, `success` otherwise.
 
 `DrivePurgeDeviceLinks` runs hourly today. Folded into a daily sweep it becomes
 daily, which is correct — the rows are already expired by then and the hourly
@@ -255,7 +307,10 @@ Move discovery to `includes/ScheduledTaskRegistry.php`:
 - `ScheduledTaskRegistry::activateDeclared($scope)` — `$scope` is `'core'` or a
   plugin name; creates rows for flagged tasks under the safety rule above. Returns
   the list of task names it activated, for the caller to print.
-- `ScheduledTaskRegistry::retentionRules()` — collects core + active-plugin rules.
+- `ScheduledTaskRegistry::retentionRules()` — returns the `$retention_policy` of
+  every class found by `discover_model_classes(include_plugins, plugin_status =>
+  'active')`, keyed by `$tablename`. A thin collector; the declarations themselves
+  live on the models.
 - `ScheduledTaskRegistry::reconcileMissing($skip_grace = false)` — the retirement
   logic from Part 4, shared by the cron runner and `update_database`.
 
@@ -396,9 +451,11 @@ out of the admin list is optional housekeeping.
 
 `docs/scheduled_tasks.md` is rewritten to describe the end state:
 
-- **Retention** section replacing the per-task purge examples: how to add a rule to
-  `retention_rules.json` or `plugin.json`, both rule forms, the `window_setting`
-  requirement, and `0` meaning never.
+- **Retention** section replacing the per-task purge examples: declaring
+  `$retention_policy` on a data class, both rule forms, the `window_setting`
+  requirement, and `0` meaning never. `docs/example_class.php` gains a
+  `$retention_policy` block alongside its deletion-strategy section, since that
+  template is where a developer looks when writing a new model.
 - **Activate on install** section: the JSON key, the three call sites, and the
   create-only-if-no-row-exists rule with its reasoning.
 - **Task discovery** section repointed at `includes/ScheduledTaskRegistry.php`.
@@ -408,8 +465,8 @@ out of the admin list is optional housekeeping.
 - A **Failure containment** note on the runner: `Throwable` plus the shutdown
   handler mean one task's fatal cannot end the pass or leave a stale status.
 - The `PurgeMailboxTrash` "task config over a setting" section is replaced — the
-  window is now unconditionally a setting, and the section becomes the worked
-  example of a callable retention rule.
+  window is unconditionally a setting, and the section becomes the worked example
+  of a `purge_method` rule.
 - Related Files table corrected and updated.
 
 `docs/settings.md` gains the retention window settings in whatever inventory it
@@ -419,10 +476,12 @@ carries. Plugin-owned windows are documented in each plugin's own overview.
 
 New, under `tests/integration/`:
 
-- `retention_registry_test.php` — every declared rule resolves (table and column
-  exist, or the callable is callable); every rule names a `window_setting` that is
-  itself declared; a window of `0` skips its rule; a throwing rule does not prevent
-  later rules from running.
+- `retention_registry_test.php` — every declared `$retention_policy` resolves
+  (`age_column` is a real column in that class's `$field_specifications`, or
+  `purge_method` is a callable static method on that class); every rule names a
+  `window_setting` that is itself declared; a window of `0` skips its rule; a
+  throwing rule does not prevent later rules from running; a class belonging to an
+  inactive plugin contributes no rule.
 - `scheduled_task_activation_test.php` — a flagged task with no row is created; a
   flagged task with an active row is not duplicated; a flagged task with a
   soft-deleted row is **not** recreated; an unflagged task is never auto-created.
@@ -452,6 +511,11 @@ or plugin lifecycle.
 - **Existing sites take factory defaults for retention windows.** No carry-over
   from `sct_task_config`. Owner decision, 2026-07-31 — pre-launch, no tuned
   production windows exist to preserve.
+- **Retention policy is declared on the data class, not in a manifest file.** Owner
+  decision, 2026-07-31. The class already owns the table name, the columns, and its
+  deletion strategy, and `discover_model_classes()` already provides active-plugin
+  discovery — so a manifest would restate facts the class holds and add a second
+  source of truth that can outlive the table it points at.
 - **`RunNodeUptimeChecks` stays out of the provisioning merge** — monitoring must
   not be blocked behind provisioning.
 - **A task whose code disappears retires silently; it never errors and never
