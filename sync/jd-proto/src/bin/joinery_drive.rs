@@ -430,6 +430,7 @@ fn cmd_put(rest: &[String]) -> Result<(), String> {
                 size_bytes,
                 sha256,
                 mime_type: None,
+                idempotency_key: None,
             },
             reader,
         )

@@ -31,7 +31,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::model::{ContentId, EntityId, EntityType, Entry, LocalStatus, Placement};
 
 /// Bumped when the schema changes in a way an older engine could misread.
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -148,6 +148,7 @@ impl Store {
                 remote_size            INTEGER,
                 remote_modified_time   TEXT,
                 head_change_id         INTEGER NOT NULL DEFAULT 0,
+                remote_deleted         INTEGER NOT NULL DEFAULT 0,
 
                 -- the last state both sides agreed on
                 synced_content_sha256  TEXT,
@@ -272,10 +273,10 @@ impl Store {
             "INSERT INTO entries (
                 entity_type, server_id, parent_folder_id, remote_name, local_name,
                 is_encrypted, remote_content_sha256, remote_size, remote_modified_time,
-                head_change_id, synced_content_sha256, synced_size, synced_parent_id,
+                head_change_id, remote_deleted, synced_content_sha256, synced_size, synced_parent_id,
                 synced_name, synced_fp_size, synced_fp_mtime_ns, synced_fp_file_id,
                 local_status, unsyncable_reason, wrapped_file_key
-             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)
              ON CONFLICT(entity_type, server_id) DO UPDATE SET
                 parent_folder_id = excluded.parent_folder_id,
                 remote_name = excluded.remote_name,
@@ -285,6 +286,7 @@ impl Store {
                 remote_size = excluded.remote_size,
                 remote_modified_time = excluded.remote_modified_time,
                 head_change_id = excluded.head_change_id,
+                remote_deleted = excluded.remote_deleted,
                 synced_content_sha256 = excluded.synced_content_sha256,
                 synced_size = excluded.synced_size,
                 synced_parent_id = excluded.synced_parent_id,
@@ -306,6 +308,7 @@ impl Store {
                 e.remote_content.as_ref().map(|c| c.size as i64),
                 e.remote_modified_time,
                 e.head_change_id,
+                e.remote_deleted as i64,
                 e.synced_content.as_ref().map(|c| c.sha256.clone()),
                 e.synced_content.as_ref().map(|c| c.size as i64),
                 e.synced_placement.as_ref().and_then(|p| p.parent),
@@ -327,7 +330,7 @@ impl Store {
             .query_row(
                 "SELECT entity_type, server_id, parent_folder_id, remote_name, local_name,
                         is_encrypted, remote_content_sha256, remote_size, remote_modified_time,
-                        head_change_id, synced_content_sha256, synced_size, synced_parent_id,
+                        head_change_id, remote_deleted, synced_content_sha256, synced_size, synced_parent_id,
                         synced_name, synced_fp_size, synced_fp_mtime_ns, synced_fp_file_id,
                         local_status, unsyncable_reason, wrapped_file_key
                    FROM entries WHERE entity_type = ?1 AND server_id = ?2",
@@ -349,7 +352,7 @@ impl Store {
     pub fn children_of(&self, parent: Option<i64>) -> StoreResult<Vec<Entry>> {
         let sql = "SELECT entity_type, server_id, parent_folder_id, remote_name, local_name,
                           is_encrypted, remote_content_sha256, remote_size, remote_modified_time,
-                          head_change_id, synced_content_sha256, synced_size, synced_parent_id,
+                          head_change_id, remote_deleted, synced_content_sha256, synced_size, synced_parent_id,
                           synced_name, synced_fp_size, synced_fp_mtime_ns, synced_fp_file_id,
                           local_status, unsyncable_reason, wrapped_file_key
                      FROM entries
@@ -362,6 +365,67 @@ impl Store {
             out.push(r?);
         }
         Ok(out)
+    }
+
+    /// Reserve an id for something created here that the server has not named
+    /// yet. Counts downward from -1; see [`EntityId::is_provisional`].
+    pub fn next_provisional_id(&self) -> StoreResult<i64> {
+        let last: i64 = self
+            .get_meta("last_provisional_id")?
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        let next = last - 1;
+        self.set_meta("last_provisional_id", &next.to_string())?;
+        Ok(next)
+    }
+
+    /// Re-key an entry once the server has named it.
+    ///
+    /// Children move with it. A folder created here holds its contents under
+    /// the provisional id, and if that link were not carried across, every file
+    /// inside a newly created folder would be orphaned at the moment the folder
+    /// became real — present locally, parented to an id nothing recognizes.
+    ///
+    /// The whole thing is one transaction because a half-applied re-key is a
+    /// tree with a hole in it, which no later round can repair.
+    pub fn rekey_entry(&self, from: EntityId, to: EntityId) -> StoreResult<()> {
+        if from == to {
+            return Ok(());
+        }
+        let t = from.entity_type.to_string();
+        self.conn.execute("BEGIN IMMEDIATE", [])?;
+        let result = (|| -> StoreResult<()> {
+            self.conn.execute(
+                "UPDATE entries SET server_id = ?3 WHERE entity_type = ?1 AND server_id = ?2",
+                params![t, from.server_id, to.server_id],
+            )?;
+            if from.entity_type == EntityType::Folder {
+                self.conn.execute(
+                    "UPDATE entries SET parent_folder_id = ?2 WHERE parent_folder_id = ?1",
+                    params![from.server_id, to.server_id],
+                )?;
+            }
+            self.conn.execute(
+                "UPDATE local_index SET server_id = ?3
+                  WHERE entity_type = ?1 AND server_id = ?2",
+                params![t, from.server_id, to.server_id],
+            )?;
+            self.conn.execute(
+                "UPDATE ops SET server_id = ?3 WHERE entity_type = ?1 AND server_id = ?2",
+                params![t, from.server_id, to.server_id],
+            )?;
+            Ok(())
+        })();
+        match result {
+            Ok(()) => {
+                self.conn.execute("COMMIT", [])?;
+                Ok(())
+            }
+            Err(e) => {
+                let _ = self.conn.execute("ROLLBACK", []);
+                Err(e)
+            }
+        }
     }
 
     /// How many entries are currently in agreement — the denominator the
@@ -439,6 +503,29 @@ impl Store {
         self.ops_in_state(OpState::Queued)
     }
 
+    /// Entities that already have work journaled against them.
+    ///
+    /// A round must leave these alone. The journal is the plan of record for
+    /// anything in it, and deciding afresh for an entity that already has an
+    /// operation waiting produces a second operation that does the same thing —
+    /// once per pass, for as long as the first one keeps failing.
+    pub fn entities_with_open_ops(&self) -> StoreResult<Vec<EntityId>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT entity_type, server_id FROM ops WHERE state IN ('queued','in_flight')",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(EntityId {
+                entity_type: parse_entity_type(&r.get::<_, String>(0)?),
+                server_id: r.get(1)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
     fn ops_in_state(&self, state: OpState) -> StoreResult<Vec<Op>> {
         let mut stmt = self.conn.prepare(
             "SELECT op_id, kind, entity_type, server_id, params, state,
@@ -466,6 +553,18 @@ impl Store {
             out.push(r?);
         }
         Ok(out)
+    }
+
+    /// Withdraw one op.
+    ///
+    /// For an intent whose premise has evaporated — the file was deleted while
+    /// the op waited, the entry is gone from the server. Retrying it forever
+    /// would leave a client permanently busy achieving nothing, and marking it
+    /// done would be a lie in a journal whose whole value is being true.
+    pub fn drop_op(&self, op_id: i64) -> StoreResult<()> {
+        self.conn
+            .execute("DELETE FROM ops WHERE op_id = ?1", params![op_id])?;
+        Ok(())
     }
 
     /// Drop completed ops. Kept as a separate step so the journal can be
@@ -657,15 +756,15 @@ fn row_to_entry(r: &rusqlite::Row<'_>) -> rusqlite::Result<Entry> {
     let entity_type = parse_entity_type(&r.get::<_, String>(0)?);
     let remote_sha: Option<String> = r.get(6)?;
     let remote_size: Option<i64> = r.get(7)?;
-    let synced_sha: Option<String> = r.get(10)?;
-    let synced_size: Option<i64> = r.get(11)?;
-    let synced_parent: Option<i64> = r.get(12)?;
-    let synced_name: Option<String> = r.get(13)?;
-    let fp_size: Option<i64> = r.get(14)?;
-    let fp_mtime: Option<i64> = r.get(15)?;
-    let fp_file_id: Option<i64> = r.get(16)?;
-    let status: String = r.get(17)?;
-    let reason: Option<String> = r.get(18)?;
+    let synced_sha: Option<String> = r.get(11)?;
+    let synced_size: Option<i64> = r.get(12)?;
+    let synced_parent: Option<i64> = r.get(13)?;
+    let synced_name: Option<String> = r.get(14)?;
+    let fp_size: Option<i64> = r.get(15)?;
+    let fp_mtime: Option<i64> = r.get(16)?;
+    let fp_file_id: Option<i64> = r.get(17)?;
+    let status: String = r.get(18)?;
+    let reason: Option<String> = r.get(19)?;
 
     Ok(Entry {
         id: EntityId {
@@ -687,6 +786,7 @@ fn row_to_entry(r: &rusqlite::Row<'_>) -> rusqlite::Result<Entry> {
         },
         remote_modified_time: r.get(8)?,
         head_change_id: r.get(9)?,
+        remote_deleted: r.get::<_, i64>(10)? != 0,
         synced_content: match (synced_sha, synced_size) {
             (Some(sha256), Some(size)) => Some(ContentId {
                 sha256,
@@ -707,7 +807,7 @@ fn row_to_entry(r: &rusqlite::Row<'_>) -> rusqlite::Result<Entry> {
             _ => None,
         },
         status: decode_status(&status, reason),
-        wrapped_file_key: r.get(19)?,
+        wrapped_file_key: r.get(20)?,
     })
 }
 
@@ -728,6 +828,7 @@ mod tests {
             }),
             remote_modified_time: Some("2026-07-16 10:00:00".into()),
             head_change_id: 42,
+            remote_deleted: false,
             is_encrypted: false,
             synced_content: Some(ContentId {
                 sha256: "agreed-sha".into(),

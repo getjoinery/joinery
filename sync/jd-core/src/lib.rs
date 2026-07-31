@@ -21,6 +21,12 @@
 //! - [`remote`] — what the server did, always measured from the last agreement
 //!   rather than the last observation, so an interrupted round loses nothing.
 //! - [`round`] — the pieces meeting, plus the mass-delete guard.
+//! - [`pass`] — the whole loop: poll the server, walk the disk, decide,
+//!   journal, execute, and only then advance the cursor.
+//! - [`execute`] — doing it, on a machine that can be switched off between any
+//!   two instructions. Every intent is journaled with its idempotency key
+//!   before it is acted on, which is what makes an interrupted operation
+//!   recoverable rather than a guess.
 //! - [`store`] — the last-agreed state, kept transactionally so a crash at any
 //!   instruction is recoverable.
 //!
@@ -29,15 +35,21 @@
 //! the simulator run a thousand crash-and-corrupt scenarios per second against
 //! the real engine.
 
+pub mod execute;
 pub mod model;
 pub mod order;
+pub mod pass;
 pub mod reconcile;
 pub mod remote;
 pub mod round;
 pub mod scan;
 pub mod store;
 
+pub use execute::{
+    journal, recover, run_one, run_queued, ExecEnv, ExecError, ExecReport, OpOutcome,
+};
 pub use model::{ContentId, Delta, EntityId, EntityType, Entry, LocalStatus, Placement};
+pub use pass::{run_pass, PassOutcome};
 pub use reconcile::{is_mass_delete, reconcile, Action, Context, Issue, Resolution, Side};
 pub use remote::{local_delta, remote_delta, RemoteState};
 pub use round::{run_round, DeletePolicy, MassDeletePause, RoundInput, RoundOutcome};

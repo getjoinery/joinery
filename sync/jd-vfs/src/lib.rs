@@ -125,6 +125,11 @@ pub trait SpoolFile: std::io::Write {
     /// `expect` guards the replace: if the file at `target` no longer matches
     /// the fingerprint the engine decided against, the swap is refused so a
     /// change made while the download was in flight is not overwritten.
+    ///
+    /// **A commit that fails leaves nothing behind.** It consumes the handle,
+    /// so after it returns the caller has no way to clean up; a temporary file
+    /// abandoned here is one the user can neither see nor delete, and enough of
+    /// them is a disk that fills up for no visible reason.
     fn commit(
         self: Box<Self>,
         target: &Path,
@@ -134,6 +139,12 @@ pub trait SpoolFile: std::io::Write {
     /// Abandon the spool file and remove it.
     fn discard(self: Box<Self>);
 }
+
+/// A byte source that can be rewound. `?Sized` on the blanket implementation so
+/// that a `dyn ReadSeek` handed back by [`Vfs::open_read`] still satisfies it,
+/// and can therefore be passed straight to the upload protocol.
+pub trait ReadSeek: std::io::Read + std::io::Seek {}
+impl<T: std::io::Read + std::io::Seek + ?Sized> ReadSeek for T {}
 
 /// Everything the engine may do to a filesystem.
 pub trait Vfs: Send + Sync {
@@ -161,7 +172,12 @@ pub trait Vfs: Send + Sync {
     /// rather than a copy.
     fn spool(&self, target: &Path) -> VfsResult<Box<dyn SpoolFile>>;
 
-    fn open_read(&self, path: &Path) -> VfsResult<Box<dyn std::io::Read>>;
+    /// Open a file for reading.
+    ///
+    /// Seekable, not merely readable: a chunked upload told to resume at an
+    /// earlier offset has to go back and read from there, and a source that
+    /// cannot rewind turns every resync into starting the whole file again.
+    fn open_read(&self, path: &Path) -> VfsResult<Box<dyn ReadSeek>>;
 }
 
 #[cfg(test)]

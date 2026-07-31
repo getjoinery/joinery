@@ -360,6 +360,7 @@ mod tests {
             remote_content: Some(content(sha, 10)),
             remote_modified_time: None,
             head_change_id: 5,
+            remote_deleted: false,
             is_encrypted: false,
             synced_content: Some(content(sha, 10)),
             synced_placement: Some(placement(None, name)),

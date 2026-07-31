@@ -8,5 +8,8 @@ publish.workspace = true
 
 [dependencies]
 jd-vfs = { path = "../jd-vfs" }
+jd-proto = { path = "../jd-proto" }
+serde_json = "1"
+sha2 = "0.10"
 thiserror = "1"
 rusqlite = { version = "0.31", features = ["bundled"] }

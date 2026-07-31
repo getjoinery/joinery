@@ -28,7 +28,7 @@
 //! still there, and everything the process was holding is gone.
 
 use std::collections::BTreeMap;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -282,6 +282,23 @@ impl MemFs {
                 )
             })
             .collect()
+    }
+
+    /// The fingerprint of a path, as the engine would see it. For a scenario
+    /// that needs to record what the engine last agreed about a file.
+    pub fn fingerprint_at(&self, path: &str) -> Option<Fingerprint> {
+        let key = self.store_path(path);
+        let st = self.state.lock().unwrap();
+        MemFs::fingerprint_of(&st, &key)
+    }
+
+    /// How many spool files are still open.
+    ///
+    /// Always zero once a scenario settles. A transfer that was abandoned
+    /// without cleaning up leaves the user's disk filling with invisible
+    /// half-files, which is a slow version of running out of space.
+    pub fn spool_count(&self) -> usize {
+        self.state.lock().unwrap().spools.len()
     }
 
     pub fn file_id_of(&self, path: &str) -> Option<u64> {
@@ -571,7 +588,7 @@ impl Vfs for MemFs {
         }))
     }
 
-    fn open_read(&self, path: &Path) -> VfsResult<Box<dyn Read>> {
+    fn open_read(&self, path: &Path) -> VfsResult<Box<dyn jd_vfs::ReadSeek>> {
         let key = self.key_for(path)?;
         self.check_failure(FsOp::OpenRead, &key, path)?;
         let st = self.state.lock().unwrap();
@@ -610,8 +627,20 @@ impl SpoolFile for MemSpool {
         target: &Path,
         expect: Option<Fingerprint>,
     ) -> VfsResult<Fingerprint> {
-        let key = self.fs.key_for(target)?;
-        self.fs.check_failure(FsOp::Commit, &key, target)?;
+        // Whatever happens below, the spool goes. The handle is consumed by
+        // this call, so a spool left behind on a failure is one nothing can
+        // ever reach again.
+        let key = match self.fs.key_for(target) {
+            Ok(k) => k,
+            Err(e) => {
+                self.fs.state.lock().unwrap().spools.remove(&self.name);
+                return Err(e);
+            }
+        };
+        if let Err(e) = self.fs.check_failure(FsOp::Commit, &key, target) {
+            self.fs.state.lock().unwrap().spools.remove(&self.name);
+            return Err(e);
+        }
         let mtime = self.fs.truncated_now();
         let mut st = self.fs.state.lock().unwrap();
         st.spools.remove(&self.name);
@@ -620,11 +649,16 @@ impl SpoolFile for MemSpool {
         // us is not the one the engine decided about, the user changed it while
         // we were fetching, and their change wins by default. Overwriting here
         // would destroy work that was never uploaded.
+        // Only when something is actually there. An absent target has no
+        // change to protect: refusing then would deadlock a file that was moved
+        // away locally while the server moved it somewhere else, because the
+        // download that would settle it can never land. The real filesystem
+        // behaves this way too, and a simulator that is stricter than the thing
+        // it simulates reports bugs that do not exist while hiding ones that do.
         let current = MemFs::fingerprint_of(&st, &key);
-        if let Some(want) = expect {
-            match current {
-                Some(now) if now.unchanged_from(&want, &self.fs.personality) => {}
-                _ => return Err(VfsError::AlreadyExists(target.to_path_buf())),
+        if let (Some(want), Some(now)) = (expect, current) {
+            if !now.unchanged_from(&want, &self.fs.personality) {
+                return Err(VfsError::AlreadyExists(target.to_path_buf()));
             }
         }
 

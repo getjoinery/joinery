@@ -245,7 +245,7 @@ impl Vfs for OsVfs {
         }))
     }
 
-    fn open_read(&self, path: &Path) -> VfsResult<Box<dyn Read>> {
+    fn open_read(&self, path: &Path) -> VfsResult<Box<dyn crate::ReadSeek>> {
         let f = File::open(path).map_err(|e| io_err(path, e))?;
         Ok(Box::new(BufReader::new(f)))
     }
@@ -256,6 +256,43 @@ struct OsSpoolFile {
     path: PathBuf,
     #[allow(dead_code)]
     target: PathBuf,
+}
+
+impl OsSpoolFile {
+    /// The commit proper. Split out so every way it can fail runs through one
+    /// cleanup path rather than each needing to remember.
+    fn try_commit(&mut self, target: &Path, expect: Option<Fingerprint>) -> VfsResult<Fingerprint> {
+        // Durable before visible. Without the fsync, a power cut just after the
+        // rename can leave a file that exists, has the right name and length,
+        // and contains zeroes — the worst possible outcome, because everything
+        // downstream would treat it as real content.
+        if let Some(mut f) = self.file.take() {
+            f.flush().map_err(|e| io_err(&self.path, e))?;
+            f.sync_all().map_err(|e| io_err(&self.path, e))?;
+        }
+
+        // The guard against overwriting work done while we were downloading. If
+        // the file at the target is no longer what the engine decided against,
+        // somebody changed it in the meantime and this download is stale.
+        if let Some(expected) = expect {
+            if let Ok(md) = target.symlink_metadata() {
+                if md.is_file() {
+                    let actual = fingerprint_of(&md);
+                    if !actual.unchanged_from(&expected, &Personality::native()) {
+                        return Err(VfsError::AlreadyExists(target.to_path_buf()));
+                    }
+                }
+            }
+        }
+
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?;
+        }
+        fs::rename(&self.path, target).map_err(|e| io_err(&self.path, e))?;
+
+        let md = target.symlink_metadata().map_err(|e| io_err(target, e))?;
+        Ok(fingerprint_of(&md))
+    }
 }
 
 impl Write for OsSpoolFile {
@@ -279,37 +316,15 @@ impl SpoolFile for OsSpoolFile {
         target: &Path,
         expect: Option<Fingerprint>,
     ) -> VfsResult<Fingerprint> {
-        // Durable before visible. Without the fsync, a power cut just after the
-        // rename can leave a file that exists, has the right name and length,
-        // and contains zeroes — the worst possible outcome, because everything
-        // downstream would treat it as real content.
-        if let Some(mut f) = self.file.take() {
-            f.flush().map_err(|e| io_err(&self.path, e))?;
-            f.sync_all().map_err(|e| io_err(&self.path, e))?;
+        let spool = self.path.clone();
+        let result = self.try_commit(target, expect);
+        if result.is_err() {
+            // The handle is gone once this returns, so the caller cannot tidy up
+            // after us. Anything left here is invisible to the user and stays
+            // until the disk is full.
+            let _ = fs::remove_file(&spool);
         }
-
-        // The guard against overwriting work done while we were downloading. If
-        // the file at the target is no longer what the engine decided against,
-        // somebody changed it in the meantime and this download is stale.
-        if let Some(expected) = expect {
-            if let Ok(md) = target.symlink_metadata() {
-                if md.is_file() {
-                    let actual = fingerprint_of(&md);
-                    if !actual.unchanged_from(&expected, &Personality::native()) {
-                        let _ = fs::remove_file(&self.path);
-                        return Err(VfsError::AlreadyExists(target.to_path_buf()));
-                    }
-                }
-            }
-        }
-
-        if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?;
-        }
-        fs::rename(&self.path, target).map_err(|e| io_err(&self.path, e))?;
-
-        let md = target.symlink_metadata().map_err(|e| io_err(target, e))?;
-        Ok(fingerprint_of(&md))
+        result
     }
 
     fn discard(mut self: Box<Self>) {

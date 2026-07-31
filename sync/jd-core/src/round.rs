@@ -144,10 +144,22 @@ pub fn run_round(
             }
 
             let mut item = PlanItem::new(input.entry.id, action.clone(), input.depth);
-            // Give the planner what it needs to spot rename cycles.
-            if let (Some(from), Some(to)) =
-                (input.entry.synced_placement.clone(), move_target(&action))
-            {
+            // Where the thing is right now, on the side the move applies to.
+            //
+            // Applying the server's move means moving a file on this computer,
+            // and if the user already moved it here then that is where it is —
+            // not the agreed path, which it left. Pushing our own move means
+            // renaming on the server, where nothing has happened yet, so the
+            // agreement is what is current there.
+            let current = match &action {
+                Action::ApplyRemoteMove { .. } => input
+                    .local
+                    .placement()
+                    .cloned()
+                    .or_else(|| input.entry.synced_placement.clone()),
+                _ => input.entry.synced_placement.clone(),
+            };
+            if let (Some(from), Some(to)) = (current, move_target(&action)) {
                 item = item.moving(from, to);
             }
             items.push(item);
@@ -226,6 +238,7 @@ mod tests {
             remote_content: Some(content("sha")),
             remote_modified_time: None,
             head_change_id: 1,
+            remote_deleted: false,
             is_encrypted: false,
             synced_content: Some(content("sha")),
             synced_placement: Some(placement(name)),

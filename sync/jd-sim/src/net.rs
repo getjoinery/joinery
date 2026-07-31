@@ -329,10 +329,14 @@ impl DriveApi for SimNet {
             }
         }
 
+        let complete_key = params
+            .idempotency_key
+            .clone()
+            .unwrap_or_else(|| format!("complete-{token}"));
         let complete = self.run(
             "drive_upload_complete",
             &json!({ "upload_token": token }),
-            Some(&format!("complete-{token}")),
+            Some(&complete_key),
         )?;
         let file = complete
             .get("file")
@@ -491,6 +495,7 @@ mod tests {
             size_bytes: body.len() as u64,
             sha256: sha256_hex(body),
             mime_type: None,
+            idempotency_key: None,
         };
         let out = n
             .upload(&params, &mut std::io::Cursor::new(body.to_vec()))
@@ -515,6 +520,7 @@ mod tests {
             size_bytes: body.len() as u64,
             sha256: sha256_hex(body),
             mime_type: None,
+            idempotency_key: None,
         };
         let out = n.upload(&params, &mut std::io::Cursor::new(body.to_vec()));
         assert!(out.is_err(), "corrupt bytes must be refused at completion");

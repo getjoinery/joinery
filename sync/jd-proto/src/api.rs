@@ -23,7 +23,7 @@ use crate::{Client, Result, UploadOutcome, UploadParams};
 /// upload that is told to resume at an earlier offset has to go back and read
 /// from there.
 pub trait ReadSeek: Read + Seek {}
-impl<T: Read + Seek> ReadSeek for T {}
+impl<T: Read + Seek + ?Sized> ReadSeek for T {}
 
 /// Everything the engine may ask of a server.
 pub trait DriveApi: Send + Sync {
