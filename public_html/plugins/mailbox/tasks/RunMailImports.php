@@ -21,7 +21,7 @@
  * pending entries of this run", so a crash mid-batch costs at most that batch, and
  * even re-running it is safe because storing an already-stored message dedups.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
@@ -30,8 +30,13 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/import/MailArc
 
 class RunMailImports implements ScheduledTaskInterface {
 
-	/** Entries stored per pass when no batch size is configured. */
-	const DEFAULT_BATCH_SIZE = 200;
+	/**
+	 * Entries stored per pass when no batch size is configured. Measured against a
+	 * real archive rather than guessed: 200 left a pass finishing in seconds and
+	 * then waiting for the next cron tick, so most of the elapsed time of a large
+	 * import was the gaps between passes rather than the work.
+	 */
+	const DEFAULT_BATCH_SIZE = 1000;
 
 	/** Runs importing at once, deployment-wide, when nothing is configured. */
 	const DEFAULT_MAX_CONCURRENT = 2;
