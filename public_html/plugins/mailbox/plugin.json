@@ -1,7 +1,7 @@
 {
     "name": "Mailbox",
     "description": "Self-hosted email: receiving, forwarding, local mailboxes, webmail reader, IMAP sync, DKIM/SRS",
-    "version": "1.73.1",
+    "version": "1.74.2",
     "author": "Joinery",
     "license": "PolyForm-Shield-1.0.0",
     "status": "beta",

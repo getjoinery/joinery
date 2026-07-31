@@ -29,7 +29,13 @@
  * on non-sealing domains converges them in the background via
  * mailbox/unseal_batch, silently stopping while their vault is locked.
  *
- * @version 1.12.0
+ * The conversation list is headed by a Gmail-style toolbar (select-all + its
+ * selection menu, Refresh, and the bulk-action icons that appear with a
+ * selection) rather than by the mailbox name — the rail already says which
+ * mailbox is open. See plugins/mailbox/docs/overview.md § The list toolbar and
+ * multi-select.
+ *
+ * @version 1.13.0
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSender.php'));
@@ -192,22 +198,32 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 		</div>
 		<div class="mbx-list-view" id="mbx-list-view">
 			<div class="mbx-list-header">
-				<!-- Name of what is being listed, plus (for a protected mailbox) its
-				     protection level. The chip lives here rather than in the rail,
-				     where it crowded out the address it sat beside; the reader JS
-				     fills it per selected mailbox. -->
-				<div class="mbx-list-heading">
-					<span id="mbx-list-title" class="mbx-list-title">All mail</span>
+				<!-- Toolbar over the list, Gmail's placement: the select-all box and
+				     its selection menu, then Refresh, then the bulk actions that
+				     appear only once something is ticked. The reader JS fills
+				     #mbx-select-panel and #mbx-bulk; the protection chip trails the
+				     row for a mailbox that has a level worth naming. -->
+				<div class="mbx-list-tools">
+					<span class="mbx-selectall">
+						<input type="checkbox" id="mbx-select-all" class="mbx-check-input"
+							aria-label="Select all conversations">
+						<button type="button" id="mbx-select-caret" class="mbx-select-caret"
+							aria-haspopup="true" aria-expanded="false" aria-label="Selection options">&#9662;</button>
+						<div class="mbx-select-panel" id="mbx-select-panel" hidden></div>
+					</span>
+					<button type="button" id="mbx-refresh" class="mbx-toolbtn" title="Refresh" aria-label="Refresh"></button>
+					<span class="mbx-tool-sep" id="mbx-tool-sep" hidden aria-hidden="true"></span>
+					<div class="mbx-bulk" id="mbx-bulk" hidden></div>
+					<span class="mbx-select-count" id="mbx-select-count" hidden></span>
 					<span id="mbx-level-chip" class="mbx-level-badge" hidden></span>
 				</div>
 				<!-- Search sits in the middle of the list header, centred between the
-				     mailbox name and the compose button. -->
+				     toolbar and the compose button. -->
 				<div class="mbx-searchbar">
 					<input type="search" id="mbx-search" class="mbx-search" placeholder="Search mail…" autocomplete="off">
 				</div>
 				<div class="mbx-list-header-actions">
 					<button type="button" id="mbx-new-message" class="mbx-new-btn" hidden>+ New message</button>
-					<button type="button" id="mbx-refresh" class="mbx-iconbtn" title="Refresh">&#8635;</button>
 				</div>
 			</div>
 			<ul id="mbx-threads" class="mbx-threads"></ul>

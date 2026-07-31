@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.31
+ * No framework. @version 2.34
  *
  * Two-pane layout: the main pane swaps between the conversation list and an
  * opened conversation (toggled by the `reading` class on #mbx-reader); a back
@@ -39,7 +39,14 @@
 		draftAttachments: [], // server-side attachments of a reopened draft (read-only chips)
 		contacts: [],         // the viewer's contacts (§ Phase 4), for recipient autocomplete
 		contactsView: false,  // the Contacts manager pseudo-mailbox
-		setupStatus: {}       // alias id → the Setup tab's verdict for that mailbox
+		setupStatus: {},      // alias id → the Setup tab's verdict for that mailbox
+		// List multi-select: thread_key → the thread payload of every ticked row.
+		// Holding the payload (not just the key) is what lets the toolbar decide
+		// which way each action points — Archive vs Move to Inbox, Mark as read vs
+		// unread — without re-asking the server for rows it just rendered.
+		selected: {},
+		lastCheckedKey: null,  // anchor for shift-click range selection
+		listContext: ''        // what the list is showing, for the list's aria-label
 	};
 
 	// ---- tiny DOM helpers ----
@@ -50,6 +57,49 @@
 		if (text != null) n.textContent = text;
 		return n;
 	}
+	// ---- toolbar icons ----
+	// Line icons drawn in the same 24-grid, stroke-only style as the paperclip the
+	// mount already ships, so the toolbar reads as one set. Keyed by role, not by
+	// shape: an action renames without redrawing.
+	var ICONS = {
+		refresh: '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>'
+			+ '<path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>',
+		archive: '<polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/>'
+			+ '<line x1="10" y1="12" x2="14" y2="12"/>',
+		inbox: '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/>'
+			+ '<path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+		spam: '<polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86"/>'
+			+ '<line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>',
+		notspam: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
+		trash: '<polyline points="3 6 5 6 21 6"/>'
+			+ '<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>'
+			+ '<line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>',
+		mailRead: '<path d="M3 9l9-6 9 6v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="3 9 12 15 21 9"/>',
+		mailUnread: '<rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="22 6 12 13 2 6"/>',
+		folder: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
+		tag: '<path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>'
+			+ '<line x1="7" y1="7" x2="7.01" y2="7"/>',
+		restore: '<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>'
+	};
+
+	function iconSvg(name) {
+		return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"'
+			+ ' stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+			+ (ICONS[name] || '') + '</svg>';
+	}
+
+	// A toolbar icon button: the icon carries the meaning, the title/aria-label
+	// carry the words.
+	function toolBtn(icon, label, danger, onClick) {
+		var b = el('button', 'mbx-toolbtn' + (danger ? ' danger' : ''));
+		b.type = 'button';
+		b.title = label;
+		b.setAttribute('aria-label', label);
+		b.innerHTML = iconSvg(icon);
+		b.addEventListener('click', function (e) { e.stopPropagation(); onClick(e); });
+		return b;
+	}
+
 	function fmtTime(iso) {
 		if (!iso) return '';
 		// DB times are UTC ISO strings; show a compact local time.
@@ -90,6 +140,7 @@
 		var body = { action: payload.action };
 		if (payload.aliasId != null) body.alias_id = String(payload.aliasId);
 		if (payload.threadKey != null) body.thread_key = payload.threadKey;
+		if (payload.threadKeys) body.thread_keys = payload.threadKeys.map(String);
 		if (payload.ids) body.ids = payload.ids.map(function (id) { return String(id); });
 		if (payload.folderId != null) body.folder_id = String(payload.folderId);
 		if (payload.present != null) body.present = payload.present ? '1' : '0';
@@ -210,13 +261,15 @@
 		if (newBtn) newBtn.hidden = !state.mailboxes.length;
 	}
 
-	// ---- list title + protection chip ----
-	// The protection level belongs beside the name of the mailbox being read, not
-	// in the rail: there it competed with the address for the same narrow line and
-	// won, hiding the very thing the row exists to show.
-	function setListTitle(text) {
-		var title = $('#mbx-list-title');
-		if (title) title.textContent = text;
+	// ---- list context + protection chip ----
+	// What the list is showing is said by the rail (the selected mailbox and
+	// folder are highlighted there), so the list header carries the toolbar
+	// instead of a name. The context still names the list for a screen reader,
+	// which has no rail highlight to read.
+	function setListContext(text) {
+		state.listContext = text || '';
+		var list = $('#mbx-threads');
+		if (list) list.setAttribute('aria-label', state.listContext || 'Conversations');
 		updateLevelChip();
 	}
 
@@ -338,7 +391,7 @@
 		}
 		// Inbox is the mailbox's default, so its title is just the mailbox; the other
 		// views append their name.
-		setListTitle((state.mailboxLabel || 'All mail')
+		setListContext((state.mailboxLabel || 'All mail')
 			+ (state.inboxView ? '' : ' / ' + (name || 'All Mail')));
 		highlightFolder();
 		loadThreads(true);
@@ -373,7 +426,7 @@
 		state.spamView = false;
 		state.trashView = false;
 		state.mailboxLabel = label || 'All mail';
-		setListTitle(state.mailboxLabel);
+		setListContext(state.mailboxLabel);
 		highlightMailbox();
 		highlightDrafts();
 		renderFolderRail();
@@ -446,7 +499,7 @@
 		state.spamView = false;
 		state.trashView = false;
 		state.mailboxLabel = 'Drafts';
-		setListTitle('Drafts');
+		setListContext('Drafts');
 		var prior = $('#mbx-folder-rail');
 		if (prior) prior.parentNode.removeChild(prior);
 		highlightMailbox();
@@ -462,6 +515,289 @@
 
 	function refreshMailboxes() {
 		return apiGet(CFG.mailboxesUrl).then(renderMailboxes);
+	}
+
+	// ---- list multi-select (Gmail-style) ----
+	// A row's checkbox ticks its conversation; the toolbar above the list then acts
+	// on the whole selection in ONE request (thread_keys[]), so a bulk archive is a
+	// single round trip and a single scope check. The selection is keyed by
+	// thread_key, which survives "Load more" appending rows beneath it and is
+	// cleared whenever the list is rebuilt from scratch (a new view, a search, a
+	// refresh — anything where the rows underneath may no longer be the same mail).
+
+	function selectedKeys() { return Object.keys(state.selected); }
+	function selectedThreads() {
+		return selectedKeys().map(function (k) { return state.selected[k]; });
+	}
+
+	// Checkboxes only where a bulk action can actually land: the Contacts manager
+	// renders no conversations, and the Drafts view gets them for delete alone.
+	function selectionAvailable() { return !state.contactsView; }
+
+	function clearSelection() {
+		state.selected = {};
+		state.lastCheckedKey = null;
+		Array.prototype.forEach.call(document.querySelectorAll('.mbx-thread-item'), function (li) {
+			li.classList.remove('selected');
+			var cb = li.querySelector('.mbx-check-input');
+			if (cb) cb.checked = false;
+		});
+		syncSelectionUI();
+	}
+
+	function setRowSelected(li, t, on) {
+		if (on) { state.selected[t.thread_key] = t; }
+		else { delete state.selected[t.thread_key]; }
+		li.classList.toggle('selected', on);
+		var cb = li.querySelector('.mbx-check-input');
+		if (cb) cb.checked = on;
+	}
+
+	function renderedRows() {
+		return Array.prototype.slice.call(document.querySelectorAll('#mbx-threads .mbx-thread-item'));
+	}
+
+	// Shift-click selects the run between the last box touched and this one — the
+	// one interaction that makes "select these forty" bearable.
+	function onRowCheckClick(t, li, e) {
+		var box = li.querySelector('.mbx-check-input');
+		var on = box ? box.checked : !state.selected[t.thread_key];
+		if (e.shiftKey && state.lastCheckedKey && state.lastCheckedKey !== t.thread_key) {
+			var rows = renderedRows();
+			var from = -1, to = -1;
+			rows.forEach(function (r, i) {
+				if (r._thread && r._thread.thread_key === state.lastCheckedKey) from = i;
+				if (r === li) to = i;
+			});
+			if (from !== -1 && to !== -1) {
+				var lo = Math.min(from, to), hi = Math.max(from, to);
+				for (var i = lo; i <= hi; i++) {
+					if (rows[i]._thread) setRowSelected(rows[i], rows[i]._thread, on);
+				}
+			} else {
+				setRowSelected(li, t, on);
+			}
+		} else {
+			setRowSelected(li, t, on);
+		}
+		state.lastCheckedKey = t.thread_key;
+		syncSelectionUI();
+	}
+
+	// Paint everything that depends on how much is ticked: the select-all box's
+	// three states, the count, and which bulk actions are on offer.
+	function syncSelectionUI() {
+		var rows = renderedRows();
+		var count = selectedKeys().length;
+
+		var all = $('#mbx-select-all');
+		if (all) {
+			all.disabled = !selectionAvailable() || !rows.length;
+			all.checked = count > 0 && count >= rows.length;
+			all.indeterminate = count > 0 && count < rows.length;
+		}
+		var caret = $('#mbx-select-caret');
+		if (caret) caret.hidden = !selectionAvailable();
+
+		var label = $('#mbx-select-count');
+		if (label) {
+			label.hidden = count === 0;
+			label.textContent = count === 1 ? '1 selected' : count + ' selected';
+		}
+		var sep = $('#mbx-tool-sep');
+		if (sep) sep.hidden = count === 0;
+		renderBulkActions();
+	}
+
+	// The bulk toolbar, rebuilt per selection because what a selection can do
+	// depends on where it is (Trash restores, Spam un-spams) and on what is in it
+	// (an all-archived selection moves to the Inbox; an all-read one marks unread).
+	function renderBulkActions() {
+		var bar = $('#mbx-bulk');
+		if (!bar) return;
+		bar.innerHTML = '';
+		var keys = selectedKeys();
+		bar.hidden = !keys.length;
+		if (!keys.length) return;
+
+		var threads = selectedThreads();
+
+		// A bulk action fires on the click. Mail actions undo by doing the opposite —
+		// Delete lands in Trash, Archive comes back from All Mail — so a dialog in
+		// front of every one of them is a step charged to every use to guard against
+		// a mistake the next click already fixes.
+		if (state.draftsView) {
+			// A draft is not a conversation: it is deleted through the draft endpoint,
+			// so delete is the only bulk action the Drafts view can honestly offer.
+			bar.appendChild(toolBtn('trash', 'Delete drafts', true, function () {
+				Promise.all(threads.map(function (t) {
+					return joineryApi.post(CFG.draftDeleteUrl, { draft_id: String(t.latest_id) })
+						.catch(function () { });
+				})).then(afterBulk);
+			}));
+			return;
+		}
+
+		if (state.trashView) {
+			bar.appendChild(toolBtn('restore', 'Restore', false, function () {
+				bulkAction('restore');
+			}));
+			bar.appendChild(toolBtn('trash', 'Delete forever', true, function () {
+				bulkAction('purge');
+			}));
+			return;
+		}
+
+		// Archive / Move to Inbox — a selection that is already entirely archived can
+		// only come back, so the icon points the one way that does anything.
+		if (!state.spamView) {
+			var allArchived = threads.every(function (t) { return !!t.any_archived; });
+			bar.appendChild(allArchived
+				? toolBtn('inbox', 'Move to Inbox', false, function () { bulkAction('unarchive'); })
+				: toolBtn('archive', 'Archive', false, function () { bulkAction('archive'); }));
+		}
+
+		bar.appendChild(state.spamView
+			? toolBtn('notspam', 'Not spam', false, function () { bulkAction('mark_not_spam'); })
+			: toolBtn('spam', 'Report spam', false, function () { bulkAction('mark_spam'); }));
+
+		bar.appendChild(toolBtn('trash', 'Delete', true, function () {
+			bulkAction('delete');
+		}));
+
+		bar.appendChild(el('span', 'mbx-tool-sep'));
+
+		// One read/unread control, pointing wherever the selection isn't: anything
+		// unread in it reads as "mark these read".
+		var anyUnread = threads.some(function (t) { return (t.unread_count || 0) > 0; });
+		bar.appendChild(anyUnread
+			? toolBtn('mailRead', 'Mark as read', false, function () { bulkAction('mark_read'); })
+			: toolBtn('mailUnread', 'Mark as unread', false, function () { bulkAction('mark_unread'); }));
+
+		// Move / Labels, only for a single open mailbox with tracked folders — the
+		// aggregate views span mailboxes whose folder sets are different things.
+		var folderCtl = bulkFolderControl();
+		if (folderCtl) {
+			bar.appendChild(el('span', 'mbx-tool-sep'));
+			bar.appendChild(folderCtl);
+		}
+	}
+
+	// Fire one action over the whole selection, then put the list back the way any
+	// other mutation does — the rows that moved are gone, so the selection goes too.
+	function bulkAction(action) {
+		var keys = selectedKeys();
+		if (!keys.length) return;
+		apiAction({ action: action, threadKeys: keys, aliasId: state.aliasId }).then(afterBulk);
+	}
+
+	function afterBulk() {
+		clearSelection();
+		refreshMailboxes();
+		loadThreads(true);
+	}
+
+	/**
+	 * Move/Labels for the selection. Same panel as the open conversation's control
+	 * (shared markup and CSS), with one difference: a selection has no single
+	 * membership to show, so every box starts unticked and a tick means "put all of
+	 * these in that folder". Returns null when there is nowhere to move to.
+	 */
+	function bulkFolderControl() {
+		if (state.aliasId == null || isNaN(Number(state.aliasId))) return null;
+		var info = mailboxFolders(state.aliasId);
+		if (!info.folders.length) return null;
+
+		var keys = selectedKeys();
+		var wrap = el('div', 'mbx-folder-ctl');
+		var btn = toolBtn(info.exclusive ? 'folder' : 'tag',
+			info.exclusive ? 'Move to' : 'Labels', false, function (e) {
+				var willOpen = panel.hidden;
+				closeAllFolderPanels();
+				closeAllKebabs();
+				panel.hidden = !willOpen;
+			});
+		var panel = el('div', 'mbx-folder-panel');
+		panel.hidden = true;
+
+		info.folders.forEach(function (f) {
+			if (info.exclusive) {
+				var item = el('div', 'mbx-folder-opt', f.name);
+				item.addEventListener('click', function () {
+					panel.hidden = true;
+					apiAction({ action: 'set_membership', threadKeys: keys, aliasId: state.aliasId,
+						folderId: f.id, present: true }).then(afterBulk);
+				});
+				panel.appendChild(item);
+			} else {
+				var lab = el('label', 'mbx-folder-opt');
+				var cb = document.createElement('input');
+				cb.type = 'checkbox';
+				cb.addEventListener('change', function () {
+					apiAction({ action: 'set_membership', threadKeys: keys, aliasId: state.aliasId,
+						folderId: f.id, present: cb.checked })
+						.then(function () {
+							refreshMailboxes();
+							if (state.folderId != null) { afterBulk(); }  // a filtered view may change
+						});
+				});
+				lab.appendChild(cb);
+				lab.appendChild(el('span', null, ' ' + f.name));
+				panel.appendChild(lab);
+			}
+		});
+
+		var newRow = el('div', 'mbx-folder-newrow');
+		var input = document.createElement('input');
+		input.type = 'text';
+		input.placeholder = info.exclusive ? 'New folder…' : 'New label…';
+		input.className = 'mbx-folder-newinput';
+		var addBtn = el('button', 'mbx-folder-newbtn', '+');
+		addBtn.type = 'button';
+		var submit = function () {
+			var name = input.value.trim();
+			if (name === '') { input.focus(); return; }
+			addBtn.disabled = true;
+			apiAction({ action: 'create_folder', threadKeys: keys, aliasId: state.aliasId, name: name })
+				.then(function (resp) {
+					addBtn.disabled = false;
+					if (!resp || !resp.folder) { alert('Could not create the label.'); return; }
+					input.value = '';
+					panel.hidden = true;
+					afterBulk();
+				});
+		};
+		addBtn.addEventListener('click', submit);
+		input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); submit(); } });
+		newRow.appendChild(input);
+		newRow.appendChild(addBtn);
+		panel.appendChild(newRow);
+
+		// Clicks inside stay inside — the document handler dismisses open panels.
+		panel.addEventListener('click', function (e) { e.stopPropagation(); });
+		wrap.appendChild(btn);
+		wrap.appendChild(panel);
+		return wrap;
+	}
+
+	// The select-all menu (Gmail's caret): the bulk selections worth having as one
+	// click rather than as forty.
+	var SELECT_PRESETS = [
+		{ label: 'All',       match: function () { return true; } },
+		{ label: 'None',      match: null },
+		{ label: 'Read',      match: function (t) { return !(t.unread_count > 0); } },
+		{ label: 'Unread',    match: function (t) { return t.unread_count > 0; } },
+		{ label: 'Starred',   match: function (t) { return !!t.any_starred; } },
+		{ label: 'Unstarred', match: function (t) { return !t.any_starred; } }
+	];
+
+	function applySelectPreset(preset) {
+		if (!preset.match) { clearSelection(); return; }
+		renderedRows().forEach(function (li) {
+			if (li._thread) setRowSelected(li, li._thread, !!preset.match(li._thread));
+		});
+		state.lastCheckedKey = null;
+		syncSelectionUI();
 	}
 
 	// ---- thread list (center) ----
@@ -491,7 +827,14 @@
 	function loadThreads(reset) {
 		if (reset) { state.page = 1; state.lastSection = null; }
 		var listEl = $('#mbx-threads');
-		if (reset) { listEl.innerHTML = ''; listEl.appendChild(loadingRow()); }
+		if (reset) {
+			// A rebuilt list is different mail — a selection made against the old rows
+			// must not survive into it. "Load more" appends, so it keeps its ticks.
+			state.selected = {};
+			state.lastCheckedKey = null;
+			listEl.innerHTML = '';
+			listEl.appendChild(loadingRow());
+		}
 		apiGet(buildListQuery()).then(function (data) {
 			if (reset) { listEl.innerHTML = ''; state.lastSection = null; }
 			(data.threads || []).forEach(function (t) {
@@ -533,6 +876,7 @@
 			if (reset) { updateSetupBanner(false); }
 			state.hasMore = !!data.has_more;
 			$('#mbx-more').hidden = !state.hasMore;
+			syncSelectionUI();
 		});
 	}
 
@@ -666,6 +1010,31 @@
 	function threadRow(t) {
 		var li = el('li', 'mbx-thread-item' + (t.unread_count > 0 ? ' unread' : ''));
 		li.dataset.threadKey = t.thread_key;
+		li._thread = t;                  // the payload the toolbar reads when ticked
+
+		// Select box, left of the star (Gmail's column order). A click here ticks
+		// the row rather than opening it, and shift-click takes the run from the
+		// last box touched.
+		if (selectionAvailable()) {
+			if (state.selected[t.thread_key]) { li.classList.add('selected'); }
+			var check = el('span', 'mbx-thread-check');
+			var cb = document.createElement('input');
+			cb.type = 'checkbox';
+			cb.className = 'mbx-check-input';
+			cb.checked = !!state.selected[t.thread_key];
+			cb.setAttribute('aria-label', 'Select conversation');
+			// Click, not change: it carries shiftKey, which the range select needs.
+			// The browser has already toggled this box by the time the handler runs,
+			// so its new state IS the intent — never preventDefault here, or the
+			// clicked box alone would snap back while its row stayed picked.
+			cb.addEventListener('click', function (e) {
+				e.stopPropagation();
+				onRowCheckClick(t, li, e);
+			});
+			check.addEventListener('click', function (e) { e.stopPropagation(); });
+			check.appendChild(cb);
+			li.appendChild(check);
+		}
 
 		var star = el('span', 'mbx-thread-star' + (t.any_starred ? ' on' : ''), '★');
 		star.title = t.any_starred ? 'Unstar' : 'Star';
@@ -673,7 +1042,14 @@
 			e.stopPropagation();
 			var turnOn = !t.any_starred;
 			apiAction({ action: turnOn ? 'star' : 'unstar', threadKey: t.thread_key, aliasId: state.aliasId })
-				.then(function () { t.any_starred = turnOn; star.classList.toggle('on', turnOn); refreshMailboxes(); });
+				.then(function () {
+					t.any_starred = turnOn;
+					star.classList.toggle('on', turnOn);
+					refreshMailboxes();
+					// A ticked row that just changed its star changes what the
+					// "Starred" preset would pick, so keep the toolbar honest.
+					if (state.selected[t.thread_key]) { syncSelectionUI(); }
+				});
 		});
 		li.appendChild(star);
 
@@ -745,6 +1121,7 @@
 
 	// ---- reading pane (right) ----
 	function openThread(t, rowEl) {
+		enterReadingHistory();   // give Back something to return to
 		state.threadKey = t.thread_key;
 		state.openThread = t;
 		Array.prototype.forEach.call(document.querySelectorAll('.mbx-thread-item'), function (n) {
@@ -821,7 +1198,7 @@
 		back.type = 'button';
 		back.appendChild(el('span', 'mbx-back-arrow', '←'));
 		back.appendChild(el('span', null, 'Back to list'));
-		back.addEventListener('click', closeThread);
+		back.addEventListener('click', function () { closeThread(); });
 		header.appendChild(back);
 
 		header.appendChild(el('h1', null, t.subject || '(no subject)'));
@@ -836,14 +1213,8 @@
 					.then(function () { closeThread(); refreshMailboxes(); loadThreads(true); });
 			}));
 			actions.appendChild(actionBtn('Delete forever', true, function () {
-				JoineryModal.confirm(
-					'Permanently delete this conversation? This cannot be undone.',
-					function () {
-						apiAction({ action: 'purge', threadKey: t.thread_key, aliasId: state.aliasId })
-							.then(function () { closeThread(); refreshMailboxes(); loadThreads(true); });
-					},
-					{ confirmLabel: 'Delete forever' }
-				);
+				apiAction({ action: 'purge', threadKey: t.thread_key, aliasId: state.aliasId })
+					.then(function () { closeThread(); refreshMailboxes(); loadThreads(true); });
 			}));
 			header.appendChild(actions);
 			pane.appendChild(header);
@@ -860,10 +1231,8 @@
 				.then(function () { t.any_starred = turnOn; refreshMailboxes(); loadThreads(true); });
 		}));
 		actions.appendChild(actionBtn('Delete', true, function () {
-			JoineryModal.confirm('Move this conversation to Trash?', function () {
-				apiAction({ action: 'delete', threadKey: t.thread_key, aliasId: state.aliasId })
-					.then(function () { closeThread(); refreshMailboxes(); loadThreads(true); });
-			}, { confirmLabel: 'Move to Trash' });
+			apiAction({ action: 'delete', threadKey: t.thread_key, aliasId: state.aliasId })
+				.then(function () { closeThread(); refreshMailboxes(); loadThreads(true); });
 		}));
 		// Archive ("Skip the Inbox") / Move to Inbox — symmetric with star/spam, which
 		// also have manual + filter-driven paths. Hidden in the Spam view (a spam
@@ -1848,15 +2217,17 @@
 		state.draftsView = false;
 		state.trashView = false;
 		state.mailboxLabel = 'Contacts';
-		setListTitle('Contacts');
+		setListContext('Contacts');
 		var prior = $('#mbx-folder-rail');
 		if (prior) prior.parentNode.removeChild(prior);
 		highlightMailbox();
 		highlightDrafts();
+		clearSelection();          // contacts are not conversations — nothing to act on
 		renderContactsManager();
 	}
 
 	function renderContactsManager() {
+		enterReadingHistory();   // a full-pane view, so Back returns from it too
 		$('#mbx-reader').classList.add('reading');
 		var pane = $('#mbx-thread');
 		parkCompose();
@@ -1870,7 +2241,7 @@
 			back.type = 'button';
 			back.appendChild(el('span', 'mbx-back-arrow', '←'));
 			back.appendChild(el('span', null, 'Back'));
-			back.addEventListener('click', closeThread);
+			back.addEventListener('click', function () { closeThread(); });
 			header.appendChild(back);
 			header.appendChild(el('h1', null, 'Contacts'));
 			pane.appendChild(header);
@@ -2237,6 +2608,7 @@
 
 	// Render the reading pane as just the composer (a draft has no conversation).
 	function showDraftComposer(data) {
+		enterReadingHistory();   // a full-pane view, so Back returns from it too
 		$('#mbx-reader').classList.add('reading');
 		$('#mbx-read-pane').scrollTop = 0;
 		var pane = $('#mbx-thread');
@@ -2436,7 +2808,7 @@
 		});
 	}
 
-	function closeThread() {
+	function closeThread(fromHistory) {
 		closeCompose();
 		parkCompose();        // preserve the compose box before clearing the thread
 		state.threadKey = null;
@@ -2447,10 +2819,51 @@
 		Array.prototype.forEach.call(document.querySelectorAll('.mbx-thread-item'), function (n) {
 			n.classList.remove('active');
 		});
+		// Hand the history entry back unless Back is what closed us — otherwise it
+		// lingers and the next Back press is spent going nowhere.
+		if (!fromHistory) { leaveReadingHistory(); }
+	}
+
+	// ---- browser history: Back leaves the conversation, not the reader ----
+	// Opening a conversation replaces the list with it, so Back should undo that
+	// step — the browser button, a phone's hardware back, an edge-swipe. Reading
+	// pushes a marked history entry to have something to go back TO; the entry
+	// carries no URL change, because a thread key is not a route the server can
+	// serve and a reload must land on the list rather than on a conversation the
+	// URL promises and the page cannot restore.
+	function readingEntryActive() {
+		return !!(window.history.state && window.history.state.mbxReading);
+	}
+
+	function enterReadingHistory() {
+		if (readingEntryActive()) { return; }   // already inside one — reopening in place
+		try { window.history.pushState({ mbxReading: true }, ''); } catch (e) {}
+	}
+
+	function leaveReadingHistory() {
+		if (readingEntryActive()) {
+			try { window.history.back(); } catch (e) {}
+		}
 	}
 
 	// ---- wiring ----
 	function init() {
+		// A reload while reading keeps the entry we pushed but lands on the list, so
+		// clear the marker first — otherwise the reader would think it is one Back
+		// away from a conversation that is no longer open, and spend that press.
+		if (readingEntryActive()) {
+			try { window.history.replaceState(null, ''); } catch (e) {}
+		}
+
+		// Back (browser button, phone back key, edge-swipe) off a reading entry
+		// returns to the list. Any other entry is not ours — let it navigate.
+		window.addEventListener('popstate', function (e) {
+			var goingToReading = !!(e.state && e.state.mbxReading);
+			if (!goingToReading && $('#mbx-reader').classList.contains('reading')) {
+				closeThread(true);
+			}
+		});
+
 		// Debounced search.
 		var searchTimer = null;
 		$('#mbx-search').addEventListener('input', function (e) {
@@ -2471,11 +2884,51 @@
 			loadThreads(true);
 		});
 
-		$('#mbx-refresh').addEventListener('click', function () {
+		var refreshBtn = $('#mbx-refresh');
+		refreshBtn.innerHTML = iconSvg('refresh');
+		refreshBtn.addEventListener('click', function () {
 			refreshMailboxes();
 			loadThreads(true);
 			updateSetupBanner(true);   // Refresh means "check again", setup included
 		});
+
+		// Select-all: ticks every rendered row, or clears when anything is ticked
+		// (Gmail's behaviour — a partial selection collapses to none).
+		var selectAll = $('#mbx-select-all');
+		if (selectAll) selectAll.addEventListener('click', function (e) {
+			e.preventDefault();
+			if (selectedKeys().length) { clearSelection(); }
+			else { applySelectPreset(SELECT_PRESETS[0]); }
+		});
+
+		// The caret menu beside it: All / None / Read / Unread / Starred / Unstarred.
+		var caret = $('#mbx-select-caret');
+		var selectPanel = $('#mbx-select-panel');
+		if (caret && selectPanel) {
+			SELECT_PRESETS.forEach(function (p) {
+				var item = el('div', 'mbx-select-opt', p.label);
+				item.addEventListener('click', function () {
+					selectPanel.hidden = true;
+					caret.setAttribute('aria-expanded', 'false');
+					applySelectPreset(p);
+				});
+				selectPanel.appendChild(item);
+			});
+			caret.addEventListener('click', function (e) {
+				e.stopPropagation();
+				var willOpen = selectPanel.hidden;
+				closeAllFolderPanels();
+				closeAllKebabs();
+				selectPanel.hidden = !willOpen;
+				caret.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+			});
+			selectPanel.addEventListener('click', function (e) { e.stopPropagation(); });
+			document.addEventListener('click', function () {
+				selectPanel.hidden = true;
+				caret.setAttribute('aria-expanded', 'false');
+			});
+		}
+		syncSelectionUI();
 
 		// Coming back to a reader left open in another tab: the operator may have
 		// been off fixing the very thing the banner is complaining about (the
@@ -2628,13 +3081,21 @@
 		// A click anywhere else closes any open kebab (⋮) menu or Move/Labels panel.
 		document.addEventListener('click', function () { closeAllKebabs(); closeAllFolderPanels(); });
 
-		// Esc closes any kebab menu or Move/Labels panel, then compose, then the conversation.
+		// Esc unwinds one layer at a time: an open menu or panel, then compose, then
+		// the conversation, then the selection.
 		document.addEventListener('keydown', function (e) {
 			if (e.key !== 'Escape') return;
-			var open = document.querySelector('.mbx-kebab-menu:not([hidden]), .mbx-folder-panel:not([hidden])');
-			if (open) { closeAllKebabs(); closeAllFolderPanels(); }
+			var open = document.querySelector(
+				'.mbx-kebab-menu:not([hidden]), .mbx-folder-panel:not([hidden]), .mbx-select-panel:not([hidden])');
+			if (open) {
+				closeAllKebabs();
+				closeAllFolderPanels();
+				var sp = $('#mbx-select-panel');
+				if (sp) { sp.hidden = true; }
+			}
 			else if (!composeHidden()) { closeCompose(); }
 			else if (state.threadKey != null) { closeThread(); }
+			else if (selectedKeys().length) { clearSelection(); }
 		});
 
 		// Seed switcher, then pick a default mailbox.

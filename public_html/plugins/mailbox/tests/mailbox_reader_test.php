@@ -13,12 +13,14 @@
  *  - MailboxService.listMailboxes / listThreads grouping, unread, any-starred, search
  *  - Unmatched (NULL-alias) visibility (hidden from grantees, shown to superadmin)
  *  - Mutations (markRead/setStarred/softDelete), shared state, out-of-scope rejection
+ *  - Bulk selection: thread_action's thread_keys[] union, and that an out-of-scope
+ *    key in a selection reaches nothing
  *  - InboundEmailRouter.computeThreadKey precedence
  *
  * Run: php plugins/mailbox/tests/mailbox_reader_test.php
  * (requires schema synced — iem threading/state columns + ieg table).
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -30,6 +32,7 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mail
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxViewer.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxService.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/logic/thread_action_logic.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 class MailboxReaderTest {
@@ -58,6 +61,7 @@ class MailboxReaderTest {
 			$this->testListThreads();
 			$this->testUnmatched();
 			$this->testSearch();
+			$this->testBulkSelection();
 			$this->testMutations();
 		} catch (\Throwable $e) {
 			check(false, 'uncaught exception', $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
@@ -306,6 +310,46 @@ class MailboxReaderTest {
 		$this->ok(in_array('<t1@x>', $this->threadKeys($res3), true), 'unread_only includes T1');
 	}
 
+	// ---- bulk selection (thread_keys[]) ----
+	// The list's multi-select sends a whole selection as thread_keys[]; the action
+	// expands each key under the caller's own scope and unions the ids. What has to
+	// hold is that naming a conversation cannot reach it: a key the caller cannot
+	// see contributes nothing, even when it rides along with keys they can.
+	private function testBulkSelection() {
+		section('bulk thread_keys[] selection');
+		$session = SessionControl::get_instance();
+		$run = function ($uid, $input) use ($session) {
+			$session->set_api_user($uid);
+			try { return thread_action_logic($input); }
+			finally { $session->clear_api_user(); }
+		};
+
+		// Beth holds both mailboxes: one call stars T1 (2 messages) and T2 (1).
+		$r = $run($this->beth_user, array('action' => 'star', 'thread_keys' => array('<t1@x>', '<t2@x>')));
+		$this->ok($r->error === null, 'bulk star returns a result', (string)$r->error);
+		$this->ok(intval($r->data['count'] ?? 0) === 3, 'bulk star touched all 3 messages across 2 threads',
+			json_encode($r->data));
+		$this->ok($this->isStarred($this->msg_ids['t1a']) && $this->isStarred($this->msg_ids['t1b'])
+			&& $this->isStarred($this->msg_ids['t2']), 'every message in both threads is starred');
+
+		// Bob holds legal@ only. The same selection reaches T2 and stops at T1.
+		$run($this->beth_user, array('action' => 'unstar', 'thread_keys' => array('<t1@x>', '<t2@x>')));
+		$r = $run($this->bob_user, array('action' => 'star', 'thread_keys' => array('<t1@x>', '<t2@x>')));
+		$this->ok(intval($r->data['count'] ?? 0) === 1, 'out-of-scope key contributes nothing to the union',
+			json_encode($r->data));
+		$this->ok($this->isStarred($this->msg_ids['t2']) === true, 'bob starred the thread he holds');
+		$this->ok($this->isStarred($this->msg_ids['t1a']) === false, 'beth@ thread untouched by bob');
+
+		// A selection of nothing but out-of-scope keys is a no-op, not an error.
+		$r = $run($this->bob_user, array('action' => 'delete', 'thread_keys' => array('<t1@x>', '<o1@x>')));
+		$this->ok(intval($r->data['count'] ?? 0) === 0, 'wholly out-of-scope selection affects nothing');
+		$this->ok($this->deleteTime($this->msg_ids['o1']) === null, 'un-granted mailbox row not deleted');
+
+		// Leave the fixture as the mutation section expects to find it.
+		$run($this->bob_user, array('action' => 'unstar', 'thread_keys' => array('<t2@x>')));
+		$this->ok($this->isStarred($this->msg_ids['t2']) === false, 'fixture star state restored');
+	}
+
 	// ---- mutations ----
 	private function testMutations() {
 		section('mutations + shared state + scope');
@@ -351,6 +395,7 @@ class MailboxReaderTest {
 	private function isRead($id)    { $v = $this->scalar($id, 'iem_is_read'); return ($v === true || $v === 't'); }
 	private function isStarred($id) { $v = $this->scalar($id, 'iem_is_starred'); return ($v === true || $v === 't'); }
 	private function readTime($id)  { $v = $this->scalar($id, 'iem_read_time'); return ($v === false || $v === null) ? null : $v; }
+	private function deleteTime($id){ $v = $this->scalar($id, 'iem_delete_time'); return ($v === false || $v === null) ? null : $v; }
 
 	private function tearDown() {
 		try {
