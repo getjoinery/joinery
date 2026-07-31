@@ -42,6 +42,13 @@ pub struct PlannedOp {
     pub stage: Stage,
     /// Ordering within the stage. Lower runs first.
     pub rank: i64,
+    /// For a move: where the thing is right now.
+    ///
+    /// Carried because it is not derivable later. A file the user moved on this
+    /// computer is no longer at the agreed placement, and an executor that
+    /// looks for it there finds nothing and can only give up — every round,
+    /// forever, because nothing about that situation ever changes on its own.
+    pub from: Option<Placement>,
 }
 
 /// What the planner needs to know about an action beyond the action itself.
@@ -113,7 +120,9 @@ pub fn plan(items: Vec<PlanItem>, token_for: &mut dyn FnMut(EntityId) -> String)
     let mut plan = Plan::default();
 
     // Which entities need parking to break a rename cycle.
-    let parked = find_cycle_breakers(&items);
+    let waits_for = dependency_graph(&items);
+    let parked = find_cycle_breakers(&waits_for);
+    let move_rank = move_ranks(&waits_for, &parked);
 
     for item in &items {
         let stage = stage_for(&item.action);
@@ -128,6 +137,11 @@ pub fn plan(items: Vec<PlanItem>, token_for: &mut dyn FnMut(EntityId) -> String)
                 };
                 -item.depth * 2 + type_bias
             }
+            // Moves run in dependency order, not depth order: a rename into a
+            // name someone else is still using has to wait for them to leave.
+            // Depth says nothing about that, and a chain executed by depth
+            // fails on its first link.
+            Stage::Move => move_rank.get(&item.entity).copied().unwrap_or(0),
             _ => item.depth,
         };
 
@@ -142,6 +156,7 @@ pub fn plan(items: Vec<PlanItem>, token_for: &mut dyn FnMut(EntityId) -> String)
             action: item.action.clone(),
             stage,
             rank,
+            from: item.move_from.clone(),
         });
     }
 
@@ -174,15 +189,12 @@ fn slot(p: &Placement) -> (Option<i64>, String) {
     )
 }
 
-/// Find the moves that must be parked under a scratch name because their
-/// destinations form a cycle.
+/// Who has to get out of whose way.
 ///
-/// The graph: a move *into* a slot depends on whatever currently occupies that
-/// slot getting out of the way first. Follow those dependencies; any cycle
-/// needs exactly one member parked to break it, and the member is chosen
-/// deterministically (lowest id) so every device breaks the same cycle the same
-/// way.
-fn find_cycle_breakers(items: &[PlanItem]) -> HashSet<EntityId> {
+/// A move *into* a slot depends on whatever currently occupies that slot
+/// leaving first. That single edge per mover is the whole graph — a slot has at
+/// most one occupant, so nothing can wait on two things at once.
+fn dependency_graph(items: &[PlanItem]) -> HashMap<EntityId, EntityId> {
     // Who currently sits in each slot, among the entities that are moving.
     let mut occupant: HashMap<(Option<i64>, String), EntityId> = HashMap::new();
     for item in items {
@@ -202,7 +214,69 @@ fn find_cycle_breakers(items: &[PlanItem]) -> HashSet<EntityId> {
             }
         }
     }
+    waits_for
+}
 
+/// The order the moves actually run in.
+///
+/// Everything waits for whoever is in its way, so a mover's rank is one past
+/// the rank of what it waits for. A parked entity has already vacated by the
+/// time this stage runs, so nothing waits on it — and its own move goes last,
+/// after every slot it might want has been freed.
+fn move_ranks(
+    waits_for: &HashMap<EntityId, EntityId>,
+    parked: &HashSet<EntityId>,
+) -> HashMap<EntityId, i64> {
+    fn rank_of(
+        e: EntityId,
+        waits_for: &HashMap<EntityId, EntityId>,
+        parked: &HashSet<EntityId>,
+        memo: &mut HashMap<EntityId, i64>,
+        visiting: &mut HashSet<EntityId>,
+    ) -> i64 {
+        if let Some(r) = memo.get(&e) {
+            return *r;
+        }
+        // Cycles are already broken by parking; this only guards against a
+        // caller handing us a graph we did not derive.
+        if !visiting.insert(e) {
+            return 0;
+        }
+        let rank = match waits_for.get(&e) {
+            // A parked blocker is already out of the way.
+            Some(blocker) if !parked.contains(blocker) => {
+                rank_of(*blocker, waits_for, parked, memo, visiting) + 1
+            }
+            _ => 0,
+        };
+        visiting.remove(&e);
+        memo.insert(e, rank);
+        rank
+    }
+
+    let mut memo = HashMap::new();
+    let mut visiting = HashSet::new();
+    for e in waits_for.keys().copied() {
+        rank_of(e, waits_for, parked, &mut memo, &mut visiting);
+    }
+    for blocker in waits_for.values().copied() {
+        rank_of(blocker, waits_for, parked, &mut memo, &mut visiting);
+    }
+
+    let last = memo.values().copied().max().unwrap_or(0) + 1;
+    for e in parked {
+        memo.insert(*e, last);
+    }
+    memo
+}
+
+/// Find the moves that must be parked under a scratch name because their
+/// destinations form a cycle.
+///
+/// Follow the dependencies; any cycle needs exactly one member parked to break
+/// it, and the member is chosen deterministically (lowest id) so every device
+/// breaks the same cycle the same way.
+fn find_cycle_breakers(waits_for: &HashMap<EntityId, EntityId>) -> HashSet<EntityId> {
     let mut breakers = HashSet::new();
     let mut settled: HashSet<EntityId> = HashSet::new();
 
@@ -465,6 +539,111 @@ mod tests {
             jd_vfs::names::to_local_name(&name, &jd_vfs::Personality::linux()),
             jd_vfs::LocalName::Unsyncable(jd_vfs::UnsyncableReason::ReservedPrefix)
         ));
+    }
+
+    /// The order the moves come out in, for readability in the tests below.
+    fn move_order(p: &Plan) -> Vec<EntityId> {
+        p.ordered()
+            .iter()
+            .filter(|o| o.stage == Stage::Move)
+            .map(|o| o.entity)
+            .collect()
+    }
+
+    #[test]
+    fn a_chain_of_renames_runs_from_the_far_end() {
+        // A→B, B→C. Doing A first hits a name B has not left yet, and every
+        // filesystem and the server both refuse it. B has to go first.
+        let items = vec![
+            PlanItem::new(
+                EntityId::file(1),
+                Action::ApplyLocalMove {
+                    to: placement(None, "B"),
+                },
+                0,
+            )
+            .moving(placement(None, "A"), placement(None, "B")),
+            PlanItem::new(
+                EntityId::file(2),
+                Action::ApplyLocalMove {
+                    to: placement(None, "C"),
+                },
+                0,
+            )
+            .moving(placement(None, "B"), placement(None, "C")),
+        ];
+        let mut t = tokens();
+        let p = plan(items, &mut t);
+        assert_eq!(move_order(&p), vec![EntityId::file(2), EntityId::file(1)]);
+    }
+
+    #[test]
+    fn a_parked_entity_moves_last() {
+        // A→B, B→A. A is parked, so B can take A's name; A's own move runs
+        // once B has left B.
+        let items = vec![
+            PlanItem::new(
+                EntityId::file(1),
+                Action::ApplyLocalMove {
+                    to: placement(None, "B"),
+                },
+                0,
+            )
+            .moving(placement(None, "A"), placement(None, "B")),
+            PlanItem::new(
+                EntityId::file(2),
+                Action::ApplyLocalMove {
+                    to: placement(None, "A"),
+                },
+                0,
+            )
+            .moving(placement(None, "B"), placement(None, "A")),
+        ];
+        let mut t = tokens();
+        let p = plan(items, &mut t);
+        assert_eq!(p.broken_cycles[0].0, EntityId::file(1));
+        assert_eq!(move_order(&p), vec![EntityId::file(2), EntityId::file(1)]);
+    }
+
+    #[test]
+    fn a_three_way_rotation_runs_in_an_order_that_works() {
+        // C→A, A→B, B→C with A parked. Whoever wants a slot must come after
+        // whoever is sitting in it.
+        let items = vec![
+            PlanItem::new(
+                EntityId::file(3),
+                Action::ApplyLocalMove {
+                    to: placement(None, "A"),
+                },
+                0,
+            )
+            .moving(placement(None, "C"), placement(None, "A")),
+            PlanItem::new(
+                EntityId::file(1),
+                Action::ApplyLocalMove {
+                    to: placement(None, "B"),
+                },
+                0,
+            )
+            .moving(placement(None, "A"), placement(None, "B")),
+            PlanItem::new(
+                EntityId::file(2),
+                Action::ApplyLocalMove {
+                    to: placement(None, "C"),
+                },
+                0,
+            )
+            .moving(placement(None, "B"), placement(None, "C")),
+        ];
+        let mut t = tokens();
+        let p = plan(items, &mut t);
+        let order = move_order(&p);
+        let at = |e: EntityId| order.iter().position(|o| *o == e).unwrap();
+        // 3 leaves C before 2 wants it. 3 can go first because the slot it
+        // wants, A, was freed by the parking rather than by a move.
+        assert!(at(EntityId::file(3)) < at(EntityId::file(2)));
+        // The parked one goes last.
+        assert_eq!(*order.last().unwrap(), EntityId::file(1));
     }
 
     #[test]

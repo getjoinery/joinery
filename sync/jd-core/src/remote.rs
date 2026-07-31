@@ -161,6 +161,7 @@ mod tests {
             remote_content: Some(content(sha)),
             remote_modified_time: None,
             head_change_id: 10,
+            remote_deleted: false,
             is_encrypted: false,
             synced_content: Some(content(sha)),
             synced_placement: Some(placement(None, name)),

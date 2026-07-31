@@ -49,6 +49,21 @@ impl EntityId {
             server_id: id,
         }
     }
+
+    /// Does this thing exist on the server yet?
+    ///
+    /// Something created on this computer needs an identity before the server
+    /// has given it one — a file has to be queued for upload, and a folder has
+    /// to be able to hold children, both before anything is sent. Those get a
+    /// **negative** id, allocated locally and counting downward.
+    ///
+    /// Negative rather than a separate flag, because a sign cannot get out of
+    /// step with the thing it describes: server ids are always positive, so any
+    /// id either is one or plainly is not. Once the create lands, the entry is
+    /// re-keyed to the real id and the provisional one is never reused.
+    pub fn is_provisional(&self) -> bool {
+        self.server_id < 0
+    }
 }
 
 /// Where an entry sits and what it is called, on one side.
@@ -105,6 +120,13 @@ pub struct Entry {
     /// the engine say "what I hold corresponds to feed position N" without
     /// hashing anything.
     pub head_change_id: i64,
+    /// The server has trashed it.
+    ///
+    /// Recorded rather than acted on immediately, because the feed mentions a
+    /// deletion exactly once. A pass that heard it and died before removing the
+    /// local file would never hear it again, and the file would sit there
+    /// forever looking synced.
+    pub remote_deleted: bool,
     pub is_encrypted: bool,
 
     // ---- the last state both sides agreed on ------------------------------
@@ -125,9 +147,26 @@ pub struct Entry {
 }
 
 impl Entry {
+    /// Where this entry sits **on this computer**.
+    ///
+    /// The last agreed placement, not the remote one. They differ exactly while
+    /// a remote move is known but not yet applied, and reaching for the remote
+    /// placement there is a bug with teeth: the file is still at the old path,
+    /// so the scanner finds it somewhere its own records say it is not, reads
+    /// that as a local move in the opposite direction, and pushes it back. Two
+    /// devices then rename the same file at each other forever.
+    ///
+    /// Falls back to the remote placement only when nothing has been agreed
+    /// yet, where it is not a second opinion but the only one.
+    pub fn local_placement(&self) -> &Placement {
+        self.synced_placement.as_ref().unwrap_or(&self.remote)
+    }
+
     /// The name this entry is materialized under locally.
     pub fn effective_local_name(&self) -> &str {
-        self.local_name.as_deref().unwrap_or(&self.remote.name)
+        self.local_name
+            .as_deref()
+            .unwrap_or(&self.local_placement().name)
     }
 
     /// Has this entry ever completed a sync? A `None` last-agreed state means

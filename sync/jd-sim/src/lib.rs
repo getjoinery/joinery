@@ -26,6 +26,9 @@
 //!   remembers every version ever committed. That memory is the oracle.
 //! - [`net`] — the network, including the failure that matters most: the work
 //!   was done and the answer never came back.
+//! - [`engine`] — one simulated computer with all of the above wired into the
+//!   real executor, and a restart that keeps the disk and the journal while
+//!   throwing away everything the process was holding.
 //!
 //! Two invariants get asserted after every scenario, and they are the whole
 //! point:
@@ -41,13 +44,17 @@
 //! unforgivable and silent.
 
 pub mod clock;
+pub mod engine;
 pub mod net;
 pub mod rng;
+pub mod scenario;
 pub mod server;
 pub mod vfs;
 
 pub use clock::SimClock;
+pub use engine::Device;
 pub use net::{NetFaults, NetStats, SimNet};
 pub use rng::SimRng;
+pub use scenario::{assert_invariants, Committed, World};
 pub use server::{sha256_hex, MockServer, VersionRow};
 pub use vfs::{FailureKind, FsOp, MemFs};

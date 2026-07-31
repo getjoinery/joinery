@@ -358,7 +358,11 @@ impl Client {
         let complete = self.action_idempotent(
             "drive_upload_complete",
             json!({ "upload_token": token }),
-            &Self::new_idempotency_key(),
+            params
+                .idempotency_key
+                .clone()
+                .unwrap_or_else(Self::new_idempotency_key)
+                .as_str(),
         )?;
         let file = complete
             .get("file")
@@ -437,6 +441,14 @@ pub struct UploadParams {
     /// possessed-hash dedup short-circuit).
     pub sha256: String,
     pub mime_type: Option<String>,
+    /// The key the completion call carries.
+    ///
+    /// Supply one that outlives the process — written down before the upload
+    /// starts — and a retry after a lost completion answer is recognized rather
+    /// than performed again. Without it the retry creates a second file, which
+    /// is the one upload failure the user actually notices. `None` generates a
+    /// fresh key, which is only safe for a one-shot caller that will not retry.
+    pub idempotency_key: Option<String>,
 }
 
 #[derive(Debug)]
