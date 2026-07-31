@@ -1,12 +1,13 @@
 {
-    "name": "Booking Reminders & Follow-ups",
-    "description": "Sends booking reminder emails at the configured offsets before start, and a follow-up after the booking ends. Idempotent via the bke_booking_emails send log.",
-    "default_frequency": "every_run",
-    "config_fields": {
-        "followup_grace_hours": {
-            "label": "Only send follow-ups within this many hours after a booking ends",
-            "type": "number",
-            "default": 24
-        }
+  "name": "Booking Reminders & Follow-ups",
+  "description": "Sends booking reminder emails at the configured offsets before start, and a follow-up after the booking ends. Idempotent via the bke_booking_emails send log.",
+  "activate_on_install": true,
+  "default_frequency": "every_run",
+  "config_fields": {
+    "followup_grace_hours": {
+      "label": "Only send follow-ups within this many hours after a booking ends",
+      "type": "number",
+      "default": 24
     }
+  }
 }

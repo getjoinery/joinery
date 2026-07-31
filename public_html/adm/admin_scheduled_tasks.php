@@ -176,16 +176,18 @@ if (empty($active_tasks)) {
 		// Status badge
 		$status = $task->get('sct_last_run_status');
 		$run_message = $task->get('sct_last_run_message');
-		// Orphaned = the task's code file is missing on disk. Detected live
-		// (file resolution in the logic) so it reflects the current deploy,
-		// not the stale stored status; also honored if the cron runner has
-		// already recorded an 'orphaned' status. It is a remove-or-restore
-		// cleanup item, not a run failure, so it gets its own badge.
-		$is_orphaned = !empty($orphaned_tasks[$task->key]) || $status === 'orphaned';
+		// Retired = the task's code file is no longer on disk, because an
+		// upgrade removed or consolidated it. Detected live (file resolution
+		// in the logic) so it reflects the current deploy rather than the
+		// stored status, and also honored once the reconcile has recorded
+		// 'retired'. A retired row is inert, not broken: it is deactivated but
+		// keeps its schedule and config, so restoring costs a click.
+		$is_retired = !empty($retired_tasks[$task->key]) || $status === 'retired';
 		$status_display = '';
-		if ($is_orphaned) {
-			$status_display = '<span class="badge bg-danger" style="background-color: #dc3545; color: #fff; padding: 3px 8px; border-radius: 3px;">Orphaned</span>';
-			$status_display .= '<br><small class="text-muted">Code file is missing — remove this task, or restore the file</small>';
+		if ($is_retired) {
+			$status_display = '<span class="badge" style="background-color: #6c757d; color: #fff; padding: 3px 8px; border-radius: 3px;">Retired</span>';
+			$reason = $run_message ?: 'Task code file is no longer present';
+			$status_display .= '<br><small class="text-muted">' . htmlspecialchars($reason) . '</small>';
 		} elseif ($status === 'success') {
 			$status_display = '<span class="badge bg-success" style="background-color: #28a745; color: #fff; padding: 3px 8px; border-radius: 3px;">Success</span>';
 		} elseif ($status === 'error') {
@@ -195,14 +197,18 @@ if (empty($active_tasks)) {
 		} else {
 			$status_display = '<span style="color: #999;">—</span>';
 		}
-		if (!$is_orphaned && $run_message) {
+		if (!$is_retired && $run_message) {
 			$status_display .= '<br><small class="text-muted">' . htmlspecialchars($run_message) . '</small>';
 		}
 
 		// Status display
-		$active_display = $is_active
-			? '<span style="color: #28a745; font-weight: bold;">Active</span>'
-			: '<span style="color: #e6a817; font-weight: bold;">Paused</span>';
+		if ($is_retired) {
+			$active_display = '<span style="color: #6c757d; font-weight: bold;">Retired</span>';
+		} elseif ($is_active) {
+			$active_display = '<span style="color: #28a745; font-weight: bold;">Active</span>';
+		} else {
+			$active_display = '<span style="color: #e6a817; font-weight: bold;">Paused</span>';
+		}
 
 		echo '<tr>';
 		$description = $discovered_tasks[$task_class]['json']['description'] ?? '';
@@ -218,6 +224,25 @@ if (empty($active_tasks)) {
 		echo '<td>' . $status_display . '</td>';
 		echo '<td>' . $active_display . '</td>';
 		echo '<td>';
+
+		if ($is_retired) {
+			// A retired task has no code to run or configure. Restore puts it
+			// back if the file returns (a rename, a botched deploy); Remove
+			// clears the row once the retirement is accepted. Neither is
+			// required — a retired row is inert either way.
+			echo AdminPage::action_button('Restore', '/admin/admin_scheduled_tasks', [
+				'hidden' => ['action' => 'resume', 'sct_scheduled_task_id' => $task->key],
+				'class'  => 'btn btn-sm btn-outline-secondary me-1',
+			]);
+			echo AdminPage::action_button('Remove', '/admin/admin_scheduled_tasks', [
+				'hidden'  => ['action' => 'deactivate', 'sct_scheduled_task_id' => $task->key],
+				'confirm' => 'Remove this retired task? Its saved schedule and config are discarded.',
+				'class'   => 'btn btn-sm btn-outline-secondary',
+			]);
+			echo '</td>';
+			echo '</tr>';
+			continue;
+		}
 
 		// Edit button
 		echo '<a href="/admin/admin_scheduled_tasks?edit=' . $task->key . '" class="btn btn-sm btn-outline-secondary me-1">Edit</a>';

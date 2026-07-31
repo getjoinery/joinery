@@ -256,7 +256,8 @@ contract for sync clients:
    see [Drive Encryption](drive_encryption.md) for that contract.
 
 Chunk size is `drive_upload_chunk_bytes` (8 MiB). Abandoned uploads (rows + part
-files idle > 24h) are swept by the `DrivePurgeStaleUploads` task.
+files idle past `drive_stale_upload_retention_hours`, default 24) are swept by the
+daily retention sweep.
 
 ## Versioning
 
@@ -296,7 +297,7 @@ folder **first** (earliest timestamp in its cascade) then every descendant, so
 in the trash. "Delete forever" runs an impact preview
 (`DriveHelper::delete_impact`) before `permanent_delete_tree` destroys the subtree
 (a raw folder permanent-delete instead orphans its files to root via the
-`fil_fol_folder_id` → `null` rule). The `DrivePurgeTrash` task permanently deletes
+`fil_fol_folder_id` → `null` rule). The daily retention sweep permanently deletes
 **Drive** items (`fil_source = 'drive'`, plus folders) trashed longer than its
 window (default 30 days) — a soft-deleted file belonging to another subsystem
 is that subsystem's to reclaim and is never touched. Restoring a folder whose
@@ -314,7 +315,8 @@ entities shared to them — with `next_cursor`. A nonzero cursor that cannot be
 proven contiguous with the retained window — it points before the earliest
 retained row, **or the log is empty after a purge** — returns `{reset: true}`
 so the client re-lists from scratch rather than silently missing changes.
-`DrivePurgeChanges` trims rows past its window (default 90 days).
+The daily retention sweep trims rows past `drive_change_feed_retention_days`
+(default 30).
 
 ## Sync clients
 
@@ -400,7 +402,8 @@ user approves in the browser they are already signed into.
 last check-in, and last acknowledged cursor. `DeviceLink` (`dlk_device_links`)
 is the ten-minute ceremony state: code and poll token stored only as hashes, the
 minted secret SecretBox-encrypted at rest and deliverable once.
-`DrivePurgeDeviceLinks` sweeps finished rows hourly.
+The daily retention sweep removes finished rows past
+`drive_device_link_grace_minutes` (default 60).
 
 Codes are 8 characters of a Crockford-style alphabet, and lookalike characters
 fold on entry (`O`→`0`, `I`/`L`→`1`) so a font cannot defeat someone reading a

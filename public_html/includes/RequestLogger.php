@@ -91,7 +91,7 @@ class RequestLogger {
 
 	/**
 	 * Delete records older than the given number of days.
-	 * Called by the PurgeOldRequestLogs scheduled task.
+	 * Kept for callers that need an explicit purge; the scheduled sweep uses RequestLog::$retention_policy.
 	 *
 	 * @param int $days Records older than this many days are deleted
 	 * @return int Number of rows deleted

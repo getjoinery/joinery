@@ -8,8 +8,8 @@
  * Idempotency-Key, and finalized with the response status + body after the
  * action runs. A retry with the same key (same credential, same body) replays
  * the stored response without re-executing; a NULL aik_response_status marks an
- * in-flight original. Rows expire after 24 hours via the PurgeIdempotencyKeys
- * scheduled task — this is a retry-dedup window, not an archive.
+ * in-flight original. Rows expire on the window declared in $retention_policy —
+ * this is a retry-dedup window, not an archive.
  *
  * The raw client key is never stored (aik_key_hash is its SHA-256, the same
  * store-a-hash convention as session keys). aik_credential_scope pins the row
@@ -32,6 +32,15 @@ class ApiIdempotencyKey extends SystemBase {
 	public static $prefix = 'aik';
 	public static $tablename = 'aik_api_idempotency_keys';
 	public static $pkey_column = 'aik_api_idempotency_key_id';
+
+	// Retention: a key only has to outlive the retry window a client would use.
+	// 0 in the setting means never purge.
+	public static $retention_policy = array(
+		'label'          => 'API idempotency keys',
+		'age_column'     => 'aik_create_time',
+		'age_unit'       => 'hours',
+		'window_setting' => 'idempotency_key_retention_hours',
+	);
 
 	public static $field_specifications = array(
 		'aik_api_idempotency_key_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
@@ -87,7 +96,8 @@ class ApiIdempotencyKey extends SystemBase {
 
 	/**
 	 * Delete rows older than $hours (the retry-dedup window). Returns the
-	 * number of rows removed. Called by the PurgeIdempotencyKeys task.
+	 * number of rows removed. Kept for callers wanting an explicit purge; the
+	 * scheduled sweep works from $retention_policy instead.
 	 */
 	public static function purge_older_than($hours) {
 		$hours = max(1, (int) $hours);

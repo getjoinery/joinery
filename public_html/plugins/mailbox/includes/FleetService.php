@@ -14,7 +14,7 @@
  *   - The fleet_* API actions (called by tenant deployments with their
  *     customer-account API key) run as that customer: they read/write the
  *     customer's OWN slot and claims, and flag work.
- *   - The FleetReconcile scheduled task (cron, operator context) dispatches
+ *   - The relay reconcile scheduled task (cron, operator context) dispatches
  *     the flagged jobs, reconciles finished ones, and re-checks entitlement.
  *
  * @version 1.3
@@ -186,7 +186,7 @@ class FleetService {
 
 	/**
 	 * Release a slot (the tenant's exit ramp). Marks it released — the
-	 * FleetReconcile task dispatches the remove-tenant job once the spool
+	 * relay reconcile task dispatches the remove-tenant job once the spool
 	 * drains — and revokes every live domain claim immediately: release means
 	 * the domains are moving, and their next home (a new slot here or another
 	 * fleet) must be able to claim them before this slot finishes evicting.
@@ -249,7 +249,7 @@ class FleetService {
 	/**
 	 * Run the DNS TXT challenge for a pending claim. On success the claim is
 	 * verified and the slot is flagged for a shard allowlist sync (the
-	 * FleetReconcile task dispatches the set-domains job — the merge then
+	 * relay reconcile task dispatches the set-domains job — the merge then
 	 * enforces the claim on every subsequent map sync).
 	 */
 	public static function verifyClaim(MailboxFleetSlot $slot, MailboxFleetDomainClaim $claim): array {
@@ -320,7 +320,7 @@ class FleetService {
 
 	/**
 	 * Fold a finished lifecycle job back into the slot's status. Called from
-	 * fleet_status (lazy) and from the FleetReconcile task. Only touches the
+	 * fleet_status (lazy) and from the relay reconcile task. Only touches the
 	 * slot row (the customer's own).
 	 */
 	public static function reconcile(MailboxFleetSlot $slot): void {
@@ -362,7 +362,7 @@ class FleetService {
 	// ------------------------------------------------- job dispatch (cron only)
 
 	/**
-	 * Dispatch a lifecycle job for a slot. Runs from the FleetReconcile task
+	 * Dispatch a lifecycle job for a slot. Runs from the relay reconcile task
 	 * (operator/cron context — job rows are server_manager's, and only an
 	 * elevated context may write them). $kind: add_tenant | set_domains |
 	 * remove_tenant.

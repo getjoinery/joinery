@@ -18,6 +18,7 @@
  * RELATED DOCS:
  * - docs/api.md ............................ REST API exposure, row scope, field floors
  * - docs/deletion_system.md ................ $foreign_key_actions / $permanent_delete_actions
+ * - docs/scheduled_tasks.md ................ $retention_policy (deletion on a timer)
  * - docs/validation.md ..................... field validation
  * - docs/logic_architecture.md ............. the logic layer that wraps these models
  * - plugins/joinery_ai/docs/overview.md .... AI model read/write surface
@@ -377,6 +378,37 @@ class Example extends SystemBase
         // )
     );
     
+    // OPTIONAL: Retention — full reference: docs/scheduled_tasks.md#retention-windows
+    // ====================================================================
+    //
+    // Retention is deletion on a timer, so it is declared here beside the rest
+    // of this table's deletion behavior. The daily RetentionSweep task runs
+    // every rule declared this way; adding one never means adding a task.
+    //
+    // Two forms. Age form, for a plain "delete rows older than N":
+    //
+    //   public static $retention_policy = array(
+    //       'label'          => 'Example records',
+    //       'age_column'     => 'exm_create_time',
+    //       'age_unit'       => 'days',           // days | hours | minutes
+    //       'only_where'     => 'exm_active = false',  // OPTIONAL qualifier
+    //       'window_setting' => 'example_retention_days',
+    //   );
+    //
+    // Method form, when a row owns files, needs recursion, or touches disk —
+    // names a STATIC method on this class taking the window and returning
+    // array('removed' => int, 'message' => string):
+    //
+    //   public static $retention_policy = array(
+    //       'label'          => 'Example records',
+    //       'purge_method'   => 'purgeExpired',
+    //       'window_setting' => 'example_retention_days',
+    //   );
+    //
+    // window_setting must name a DECLARED setting (settings.json for core,
+    // plugin.json for a plugin). 0 in that setting means never purge — the rule
+    // is skipped, not run on a default.
+
     // JSON fields are auto-detected from field_specifications types ('json' /
     // 'jsonb') — no separate declaration needed. get_json() / smart_get()
     // decode them automatically.

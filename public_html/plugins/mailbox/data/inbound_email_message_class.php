@@ -111,6 +111,16 @@ class InboundEmailMessage extends SystemBase {
 	public static $tablename = 'iem_inbound_email_messages';
 	public static $pkey_column = 'iem_inbound_email_message_id';
 
+	// Retention: Trash. A method rather than an age column because each row owns
+	// attachment Files and a stored raw object that a bulk DELETE would leak.
+	// 0 in the setting means never purge — the mail reader shows each trashed
+	// message its purge date from this same setting.
+	public static $retention_policy = array(
+		'label'          => 'Mailbox trash',
+		'purge_method'   => 'purgeExpiredTrash',
+		'window_setting' => 'mailbox_trash_retention_days',
+	);
+
 	// Spam disposition (specs/inbound_email_spam_filtering.md). A NULL verdict
 	// means the message was not evaluated (filtering disabled).
 	const SPAM_VERDICT_HAM  = 'ham';
@@ -213,7 +223,7 @@ class InboundEmailMessage extends SystemBase {
 		// Deferred ingest — hardened ingest relay (specs/inbound_email_hardened_ingest_relay_executor.md
 		// § Phase 5). For MX-path Fortress mail the relay seals the WHOLE raw message to the
 		// owner's vault public key (crypto_box_seal → SealedBox::openDek, NOT the per-message
-		// DEK). While the owner is logged out the pull consumer (PullRelaySpool) can only store
+		// DEK). While the owner is logged out the pull consumer (the relay reconcile task) can only store
 		// operational metadata + this sealed blob in a PENDING-PARSE state: threading and unread
 		// counts work, but subject/sender/body/attachments do not exist as fields yet. At the next
 		// unlock DeferredIngest opens iem_relay_sealed_raw, runs the full pipeline (parse, filters,
@@ -929,6 +939,80 @@ class InboundEmailMessage extends SystemBase {
 			$stmt->bindValue($i + 1, $value, $type);
 		}
 		$stmt->execute();
+	}
+
+	/** Backlog cap per run, so a long-neglected Trash drains over several runs. */
+	const PURGE_MAX_PER_RUN = 500;
+
+	/**
+	 * Permanently delete mail that has sat in Trash past the retention window.
+	 *
+	 * Trashing is column-driven (iem_delete_time); this is the only thing that
+	 * ever makes it final.
+	 *
+	 * Row-by-row through permanent_delete(), which reclaims the attachment Files
+	 * and the stored raw object. A bulk DELETE would drop the row in one
+	 * statement and leak both.
+	 *
+	 * Sealed mailboxes purge locked: permanent_delete() works on columns and
+	 * storage keys, never on plaintext, so a Fortress mailbox needs no vault
+	 * window here. Each id is queued for refold BEFORE the row goes — the refold
+	 * pass re-inserts only if the message still exists, so a purged id drops out
+	 * of the owner's sealed search index at their next fold.
+	 *
+	 * @param int $days  Retention window from the setting
+	 * @return array     removed, message
+	 */
+	public static function purgeExpiredTrash($days) {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxIndex.php'));
+
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare(
+			"SELECT iem_inbound_email_message_id AS id, iem_iea_inbound_email_alias_id AS alias_id
+			   FROM iem_inbound_email_messages
+			  WHERE iem_delete_time IS NOT NULL
+			    AND iem_delete_time < now() - (INTERVAL '1 day' * :days)
+			  ORDER BY iem_delete_time ASC
+			  LIMIT :cap");
+		$stmt->bindValue(':days', (int)$days, PDO::PARAM_INT);
+		$stmt->bindValue(':cap', self::PURGE_MAX_PER_RUN, PDO::PARAM_INT);
+		$stmt->execute();
+		$rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+		if (!count($rows)) {
+			return array('removed' => 0, 'message' => 'no mail past the ' . (int)$days . '-day window');
+		}
+
+		$purged = 0;
+		$failed = 0;
+		foreach ($rows as $row) {
+			$id = (int)$row['id'];
+			$alias_id = (int)$row['alias_id'];
+			try {
+				if ($alias_id > 0) {
+					MailboxIndex::enqueueRefold($alias_id, $id);
+				}
+				$message = new self($id, TRUE);
+				if (!$message->key) {
+					continue;
+				}
+				$message->permanent_delete();
+				$purged++;
+			} catch (Throwable $e) {
+				// One unreclaimable message must not strand the rest of the backlog.
+				$failed++;
+				error_log('InboundEmailMessage::purgeExpiredTrash: failed for message ' . $id . ': ' . $e->getMessage());
+			}
+		}
+
+		$message = $purged . ' message(s)';
+		if (count($rows) >= self::PURGE_MAX_PER_RUN) {
+			$message .= ' (hit the ' . self::PURGE_MAX_PER_RUN . '-per-run cap; the rest drains next run)';
+		}
+		if ($failed) {
+			$message .= '; ' . $failed . ' failed (see the error log)';
+		}
+		return array('removed' => $purged, 'message' => $message);
 	}
 }
 

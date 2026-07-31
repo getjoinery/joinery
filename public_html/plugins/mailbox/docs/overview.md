@@ -530,7 +530,7 @@ identity and provisioning (provider, mail hostname/IP, SRS, the relay) live on t
 | `mailbox_forwarding_rate_limit_per_alias` | `50` | Per-alias limit per window |
 | `mailbox_forwarding_rate_limit_per_domain` | `200` | Per-domain limit per window |
 | `mailbox_forwarding_rate_limit_window` | `3600` | Rate limit window (seconds) |
-| `mailbox_log_retention_days` | `30` | Log cleanup threshold |
+| `mailbox_log_retention_days` | `30` | Days the inbound delivery log is kept. `0` keeps it indefinitely. |
 | `mailbox_trash_retention_days` | `30` | Days mail stays in Trash before it is permanently deleted. `0` keeps it indefinitely. See [Trash and retention](#trash-and-retention). |
 | `mailbox_forwarding_smtp_host` | (empty) | Dedicated SMTP relay for forwarding. **When set, it forces the SMTP relay path** (overriding provider relay); falls back to base `smtp_*` for any field left blank. See [Forwarding relay](#forwarding-relay). |
 | `mailbox_forwarding_smtp_port` | (empty) | Falls back to `smtp_port` |
@@ -556,7 +556,7 @@ identity and provisioning (provider, mail hostname/IP, SRS, the relay) live on t
 │                    render_pgsql_map.php
 ├── admin/         — Admin pages (setup, aliases, alias edit, domains, logs)
 ├── logic/         — Logic files for admin pages
-├── tasks/         — PurgeOldInboundEmailLogs scheduled task
+├── tasks/         — Scheduled tasks (relay reconcile, IMAP poll, imports, filters)
 └── migrations/    — Settings and menu entry
 ```
 
@@ -1162,9 +1162,10 @@ working copy as a private File (seal-after-fold; the sealed blob and its bookkee
 high-water mark, sealed DEK — live in `imi_inbound_mailbox_search_index`), so a crash
 never loses folded work and a fresh unlock restores instantly instead of rebuilding.
 Missing, stale, or corrupt → `rebuild()` from the sealed message rows; the cache is
-never the source of truth. `plugins/mailbox/tasks/SweepMailboxIndexTemp.php` is the
+never the source of truth. `InboundMailboxSearchIndex::sweepWorkingCopies()` is the
 passive-close safety net for a working copy the wipe callback missed (an idle APCu
-expiry, a worker recycle) — worst case it lingers one cron interval.
+expiry, a worker recycle); it is declared as that class's `$retention_policy` and runs
+in the daily retention sweep, so worst case a copy lingers until the next sweep.
 `MailboxService::listThreads()`'s `q` path uses the index only when the scope resolves
 to a single, vault-holding owner (locked surfaces as `search_locked` in the response,
 not a silent empty result); every broader scope (all-mail, an unsealed mailbox) keeps
@@ -2461,15 +2462,13 @@ id is queued for refold first, so the owner's sealed search index drops the entr
 next fold. Sealed mailboxes purge **locked**: `permanent_delete()` works on columns and
 storage keys, never on plaintext, so a Fortress mailbox needs no unlock window.
 
-**The window.** `plugins/mailbox/tasks/PurgeMailboxTrash.php` runs daily and purges what
-was trashed longer than `mailbox_trash_retention_days` (default 30) ago. The task's own
-`days_to_keep` wins over the setting when set, so a deployment can run a different window
-without editing what the reader shows; `0` in either place means nothing purges and the
-task reports `skipped`. `max_per_run` (default 500) caps a run and says so in its result
-message, so a large backlog drains over several runs rather than one enormous transaction.
-`report_only` counts what would go and deletes nothing. Each Trash row shows **when it
-purges**, computed for display from the window and the row's delete time — never stored,
-because an operator can change the window.
+**The window.** `InboundEmailMessage::purgeExpiredTrash()` is declared as that class's
+`$retention_policy` and runs in the platform's daily retention sweep, purging what was
+trashed longer than `mailbox_trash_retention_days` (default 30) ago. `0` means nothing
+purges. A per-run cap (500) keeps a large backlog draining over several runs rather than
+one enormous transaction, and says so in its result message. Each Trash row shows **when
+it purges**, computed for display from the same setting and the row's delete time — never
+stored, because an operator can change the window.
 
 **IMAP-backed mailboxes are one-way.** `ImapSyncer::pushTrash()` moves the source copy
 into the account's Trash folder and repoints the locator (which doubles as the

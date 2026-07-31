@@ -27,6 +27,16 @@ class FileChange extends SystemBase {
 		'fch_usr_user_id' => array('action' => 'cascade'),
 	);
 
+	// Retention: the change feed is a replay log for sync clients, not history.
+	// Once a row is older than any client's plausible catch-up window it is
+	// noise. 0 in the setting means never purge.
+	public static $retention_policy = array(
+		'label'          => 'Drive change feed',
+		'age_column'     => 'fch_create_time',
+		'age_unit'       => 'days',
+		'window_setting' => 'drive_change_feed_retention_days',
+	);
+
 	const KIND_CREATED       = 'created';
 	const KIND_CONTENT       = 'content';
 	const KIND_RENAMED       = 'renamed';

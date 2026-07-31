@@ -17,7 +17,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
  * token are stored only as hashes, the minted API secret is encrypted at rest
  * and delivered exactly once, and wrong codes are counted per address until
  * that address is shut out.
- * Nothing here survives the ceremony — DrivePurgeDeviceLinks sweeps the row.
+ * Nothing here survives the ceremony — the retention sweep removes the row (see $retention_policy).
  *
  * @version 1.0.0
  */
@@ -30,6 +30,14 @@ class DeviceLink extends SystemBase {
 		'dlk_usr_user_id'         => array('action' => 'permanent_delete'),
 		'dlk_apk_api_key_id'      => array('action' => 'null'),
 		'dlk_sde_sync_device_id'  => array('action' => 'null'),
+	);
+
+	// Retention: two ways a link finishes, so the rule is a method rather than
+	// a single age column. 0 in the setting means never purge.
+	public static $retention_policy = array(
+		'label'          => 'Finished device links',
+		'purge_method'   => 'purgeFinishedLinks',
+		'window_setting' => 'drive_device_link_grace_minutes',
 	);
 
 	const STATUS_PENDING  = 'pending';
@@ -195,6 +203,32 @@ class DeviceLink extends SystemBase {
 			'error_type' => 'AuthenticationError',
 			'note' => 'Unknown or expired device link code',
 		));
+	}
+
+	/**
+	 * Remove device links that are finished with.
+	 *
+	 * A link finishes two ways and both are covered: it expired without anyone
+	 * acting on it, or it was approved/denied and the ceremony is over. The
+	 * grace is measured from each of those moments, not from creation, so a
+	 * link is never removed while its window is still open.
+	 *
+	 * @param int $minutes  Grace period from the retention setting
+	 * @return array        removed, message
+	 */
+	public static function purgeFinishedLinks($minutes) {
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$q = $dblink->prepare(
+			"DELETE FROM dlk_device_links
+			  WHERE dlk_expires_time < now() - (INTERVAL '1 minute' * :grace)
+			     OR (dlk_status <> 'pending' AND dlk_create_time < now() - (INTERVAL '1 minute' * :grace2))");
+		$q->execute(array(':grace' => (int)$minutes, ':grace2' => (int)$minutes));
+		$removed = $q->rowCount();
+
+		return array(
+			'removed' => $removed,
+			'message' => $removed === 0 ? 'no finished device links' : $removed . ' finished device link(s)',
+		);
 	}
 }
 

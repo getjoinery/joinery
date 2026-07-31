@@ -7,7 +7,7 @@
  * ['user_id' => N, 'provider' => 'linode'], ...). The shared /oauth_callback
  * exchanges the code and dispatches here. This consumer stores the token set
  * (encrypted) on the user's CustomerCloudAccount and flips any of their
- * pending_connect provisions to ready — the ProvisionCustomerCloud task takes
+ * pending_connect provisions to ready — the provisioning task takes
  * it from there.
  *
  * Discovered by interface from this plugin's includes/oauth_consumers/;

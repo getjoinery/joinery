@@ -16,7 +16,7 @@
  * can report map freshness.
  *
  * Called both push-on-change (whenever a domain/alias changes) and on the
- * periodic reconcile (SyncRelayMap scheduled task), so freshness beats the
+ * periodic reconcile (the relay reconcile scheduled task), so freshness beats the
  * reject_unmatched gate.
  *
  * @version 2.1 - fragment push + merge-verdict flow (replaces the root-login

@@ -1,6 +1,0 @@
-{
-    "name": "Advance Relay Cloud Provisions",
-    "description": "Works the relay cloud-provision state machine: creates the instance on the customer's cloud account, waits for boot, runs the relay build over SSH, and registers the relay row. Failed runs destroy the instance they created and erase the in-flight credentials.",
-    "default_frequency": "every_run",
-    "config_fields": {}
-}

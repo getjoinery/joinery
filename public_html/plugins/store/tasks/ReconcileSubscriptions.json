@@ -1,0 +1,12 @@
+{
+  "name": "Reconcile subscriptions",
+  "description": "Daily backstop that checks every active subscription against its payment provider, catching cancellations and status changes a webhook missed. Covers all enabled providers in one pass; dry run previews what would change.",
+  "activate_on_install": true,
+  "default_frequency": "daily",
+  "default_time": "04:00:00",
+  "config_fields": {},
+  "replaces": [
+    "ReconcileStripeSubscriptions",
+    "SyncPaypalSubscriptions"
+  ]
+}

@@ -1,6 +1,6 @@
 <?php
 /**
- * ReconcileStripeSubscriptions
+ * StripeSubscriptionReconciler
  *
  * Periodic backstop that reconciles every active Stripe subscription order item
  * against Stripe. Stripe webhooks are the authoritative real-time path; this
@@ -14,9 +14,8 @@
  *
  * @version 1.0
  */
-require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 
-class ReconcileStripeSubscriptions implements ScheduledTaskInterface, ScheduledTaskDryRunnable {
+class StripeSubscriptionReconciler {
 
     const EVENT_NAME = 'stripe_subscription_reconciliation';
     const PAGE_SIZE = 100;

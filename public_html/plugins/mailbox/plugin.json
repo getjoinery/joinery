@@ -242,7 +242,8 @@
             "name": "mailbox_log_retention_days",
             "default": "30",
             "group": "retention",
-            "label": "Transaction-log retention (days)",
+            "helptext": "How long the inbound delivery log is kept for troubleshooting. Stored mail has its own window above. 0 keeps the log indefinitely.",
+            "label": "Delivery-log retention (days)",
             "type": "number",
             "validation": {
                 "number": true,
@@ -574,7 +575,7 @@
                     "min": "Must be 0 or more."
                 }
             },
-            "helptext": "How long the uploaded archive is kept after an import finishes, so it can be undone and re-run. 0 purges on the next daily pass. Archives picked from a member's own Drive are never deleted."
+            "helptext": "How long the uploaded archive is kept after an import finishes, so it can be undone and re-run. 0 keeps archives indefinitely. Archives picked from a member's own Drive are never deleted, only released."
         }
     ],
     "signals": {

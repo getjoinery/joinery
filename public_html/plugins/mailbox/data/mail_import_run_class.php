@@ -37,6 +37,15 @@ class MailImportRun extends SystemBase {
 	public static $tablename = 'mir_mail_import_runs';
 	public static $pkey_column = 'mir_mail_import_run_id';
 
+	// Retention: runs age by when they FINISHED, and what is reclaimed is the
+	// archive each one holds — so the rule is anchored here, not in Drive, which
+	// is only where the bytes live. 0 in the setting means never reclaim.
+	public static $retention_policy = array(
+		'label'          => 'Mail import archives',
+		'purge_method'   => 'purgeExpiredArchives',
+		'window_setting' => 'mailbox_import_archive_retention_days',
+	);
+
 	const STATE_QUEUED    = 'queued';
 	const STATE_SCANNING  = 'scanning';
 	const STATE_SCANNED   = 'scanned';
@@ -318,6 +327,133 @@ class MailImportRun extends SystemBase {
 		$stmt = $db->query('SELECT COUNT(*) FROM mir_mail_import_runs
 			WHERE mir_state IN (' . $in . ') AND mir_delete_time IS NULL');
 		return intval($stmt->fetchColumn());
+	}
+
+	/** Archives reclaimed per pass, so a backlog cannot hold the sweep open. */
+	const PURGE_MAX_PER_RUN = 50;
+
+	/** A working directory older than this with no live run is litter. */
+	const ORPHAN_DIR_AGE_SECONDS = 86400;
+
+	/**
+	 * Reclaim what finished imports leave behind.
+	 *
+	 * A GRACE PERIOD, not deletion on completion. Undoing an import and running
+	 * it again is a normal thing to do — a reader improves, a folder was missed
+	 * — and it needs the same bytes.
+	 *
+	 * Only ever deletes files the IMPORTER created (fil_source =
+	 * mail_import_archive). An archive picked from the user's own Drive is
+	 * theirs, counts against their quota, and may still be wanted, so it is
+	 * released rather than removed — which frees nothing here, and is counted
+	 * separately so the report does not overstate the work.
+	 *
+	 * @param int $days  Retention window from the setting
+	 * @return array     removed, message
+	 */
+	static function purgeExpiredArchives($days) {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/import/MailArchiveImporter.php'));
+
+		$purged = 0; $freed = 0; $failed = 0; $released = 0;
+
+		foreach (array_slice(self::finishedBefore((int)$days), 0, self::PURGE_MAX_PER_RUN) as $run_id) {
+			try {
+				$run = new self($run_id, TRUE);
+				if (!$run->key) {
+					continue;
+				}
+				$result = (new MailArchiveImporter($run))->discardArchive();
+				if (empty($result['ok'])) {
+					$failed++;
+					error_log('MailImportRun::purgeExpiredArchives: run ' . $run_id . ' — ' . $result['message']);
+					continue;
+				}
+				if ((int)$result['freed'] > 0) {
+					$purged++;
+					$freed += (int)$result['freed'];
+				} else {
+					$released++;
+				}
+			} catch (Throwable $e) {
+				$failed++;
+				error_log('MailImportRun::purgeExpiredArchives: run ' . $run_id . ' failed: ' . $e->getMessage());
+			}
+		}
+
+		$dirs = self::sweepOrphanedWorkDirs();
+
+		$message = sprintf(
+			'%d archive(s) freeing %s, %d user-owned file(s) released, %d orphaned director%s, %d failure(s)',
+			$purged, MailArchiveImporter::formatBytes($freed), $released,
+			$dirs, $dirs === 1 ? 'y' : 'ies', $failed
+		);
+		return array('removed' => $purged + $released + $dirs, 'message' => $message);
+	}
+
+	/**
+	 * Remove working directories with no live run behind them.
+	 *
+	 * Bundled with the archive reclamation rather than standing as its own rule:
+	 * it is keyed on the run id embedded in the directory name and checks
+	 * mir_state before removing anything, so it is this table's own litter. A
+	 * directory an import is still reading from is never touched. Age is a
+	 * second guard for the case where the name cannot be parsed at all.
+	 */
+	private static function sweepOrphanedWorkDirs(): int {
+		$dirs = glob(sys_get_temp_dir() . '/joinery-mail-import-*', GLOB_ONLYDIR);
+		if (!$dirs) {
+			return 0;
+		}
+
+		$db = DbConnector::get_instance()->get_db_link();
+		$removed = 0;
+
+		foreach ($dirs as $dir) {
+			if (!preg_match('/joinery-mail-import-(\d+)$/', $dir, $m)) {
+				continue;
+			}
+
+			$stmt = $db->prepare('SELECT mir_state FROM mir_mail_import_runs
+				WHERE mir_mail_import_run_id = ?');
+			$stmt->execute(array((int)$m[1]));
+			$state = $stmt->fetchColumn();
+
+			// A run still in flight owns its directory, whatever its age.
+			if ($state !== false && in_array((string)$state, self::ACTIVE_STATES, true)) {
+				continue;
+			}
+			// A run waiting on the user keeps its scan working area too.
+			if ((string)$state === self::STATE_SCANNED) {
+				continue;
+			}
+			// Nothing is racing an unknown run, but give a just-created directory
+			// the benefit of the doubt in case a run is mid-insert.
+			if ($state === false && (time() - (int)@filemtime($dir)) < self::ORPHAN_DIR_AGE_SECONDS) {
+				continue;
+			}
+
+			if (self::removeTree($dir)) {
+				$removed++;
+			}
+		}
+
+		return $removed;
+	}
+
+	/** Delete a directory and everything under it. Best-effort. */
+	private static function removeTree(string $dir): bool {
+		try {
+			$items = new RecursiveIteratorIterator(
+				new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
+				RecursiveIteratorIterator::CHILD_FIRST);
+			foreach ($items as $item) {
+				$item->isDir() ? @rmdir($item->getPathname()) : @unlink($item->getPathname());
+			}
+			return @rmdir($dir);
+		} catch (Throwable $e) {
+			error_log('MailImportRun: could not remove ' . $dir . ' — ' . $e->getMessage());
+			return false;
+		}
 	}
 }
 

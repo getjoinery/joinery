@@ -4,7 +4,7 @@
  *
  * (specs/mailbox_relay_shared_fleet.md § Enrollment step 2). On success the
  * fleet writes the domain into the tenant's shard-side allowlist (a
- * set-domains job dispatched by FleetReconcile), which the shard's map merge
+ * set-domains job dispatched by the relay reconcile task), which the shard's map merge
  * then enforces on EVERY subsequent sync — the claim is checked continuously,
  * not once at enrollment.
  */

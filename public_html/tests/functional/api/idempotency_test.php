@@ -15,7 +15,7 @@
  *   - Keys are scoped per credential: a second user reusing the same key
  *     string executes independently.
  *   - Requests without the header keep executing every time (baseline).
- *   - Expiry: a backdated row is removed by the PurgeIdempotencyKeys task,
+ *   - Expiry: a backdated row is removed by the retention purge,
  *     after which the same key executes fresh.
  *
  * USAGE (CLI only):
@@ -34,7 +34,6 @@ require_once(__DIR__ . '/api_test_harness.php');
 api_test_boot($argv);
 
 require_once(PathHelper::getIncludePath('data/api_idempotency_keys_class.php'));
-require_once(PathHelper::getIncludePath('tasks/PurgeIdempotencyKeys.php'));
 
 // Register every idempotency row in a credential scope for teardown.
 function register_aik_rows($scope) {
@@ -128,9 +127,8 @@ try {
 	$stored->load();
 	$stored->set('aik_create_time', LibraryFunctions::time_shift(gmdate('Y-m-d H:i:s'), '-25 hours', 'Y-m-d H:i:s'));
 	$stored->save();
-	$task = new PurgeIdempotencyKeys();
-	$result = $task->run(array('hours_to_keep' => 24));
-	check(($result['status'] ?? '') === 'success', 'purge task ran', json_encode($result));
+	$removed = ApiIdempotencyKey::purge_older_than(24);
+	check($removed >= 1, 'the purge removed the backdated row', "removed=$removed");
 	check(ApiIdempotencyKey::find(hash('sha256', $idem_key), $scope_a) === null,
 		'backdated row was purged');
 	$r = api_request('POST', '/api/v1/action/account_edit', array_merge($ha,

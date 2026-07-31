@@ -36,6 +36,15 @@ class File extends SystemBase {	public static $prefix = 'fil';
 		'fil_fol_folder_id' => ['action' => 'null']
 	];
 
+	// Retention: Drive trash. Declared here rather than on Folder because files
+	// must be purged first (that is what releases blob refcounts) and the same
+	// pass then takes the folders — one rule, one owner. 0 means never purge.
+	public static $retention_policy = array(
+		'label'          => 'Drive trash',
+		'purge_method'   => 'purgeExpiredTrash',
+		'window_setting' => 'drive_trash_retention_days',
+	);
+
 	// Origin tags for fil_source: a short, self-describing key saying where a file
 	// came from, stamped by whatever code created it. Opaque to File — it stores and
 	// filters on the string but attaches no behavior to any value. NULL means
@@ -1332,6 +1341,70 @@ public static function get_by_name($name, $search_deleted = false) {
 		}
 
 		return true;
+	}
+
+	/**
+	 * Permanently delete Drive items that have sat in the trash past the window.
+	 *
+	 * Files first: permanent_delete() releases the blob refcount, so the bytes
+	 * only free once the last reference lets go. Folders follow.
+	 *
+	 * ONLY Drive files (fil_source = 'drive'). fil_files is platform-wide, and a
+	 * soft-deleted avatar, store image or mail attachment belongs to its own
+	 * subsystem's lifecycle — Drive trash retention must never destroy it.
+	 *
+	 * @param int $days  Retention window from the setting
+	 * @return array     removed, message
+	 */
+	public static function purgeExpiredTrash($days) {
+		require_once(PathHelper::getIncludePath('data/folders_class.php'));
+		require_once(PathHelper::getIncludePath('data/drive_usage_class.php'));
+
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$cutoff = "now() - (INTERVAL '1 day' * :days)";
+
+		$qf = $dblink->prepare(
+			"SELECT fil_file_id, fil_usr_user_id FROM fil_files
+			  WHERE fil_delete_time IS NOT NULL AND fil_delete_time < $cutoff
+			    AND fil_source = 'drive'");
+		$qf->execute(array(':days' => (int)$days));
+		$owners = array();
+		$files_deleted = 0;
+		foreach ($qf->fetchAll(PDO::FETCH_ASSOC) as $row) {
+			$file = new self((int)$row['fil_file_id'], true);
+			if ($file->key) {
+				$file->permanent_delete();
+				$files_deleted++;
+				$owners[(int)$row['fil_usr_user_id']] = true;
+			}
+		}
+
+		// Then folders. Any file still under one is orphaned to root by the FK
+		// 'null' rule, but every trashed descendant was already caught above.
+		$qfo = $dblink->prepare(
+			"SELECT fol_folder_id FROM fol_folders
+			  WHERE fol_delete_time IS NOT NULL AND fol_delete_time < $cutoff");
+		$qfo->execute(array(':days' => (int)$days));
+		$folders_deleted = 0;
+		foreach ($qfo->fetchAll(PDO::FETCH_COLUMN) as $fid) {
+			$folder = new Folder((int)$fid, true);
+			if ($folder->key) {
+				$folder->permanent_delete();
+				$folders_deleted++;
+			}
+		}
+
+		foreach (array_keys($owners) as $uid) {
+			DriveUsage::recompute($uid);
+		}
+
+		if ($files_deleted === 0 && $folders_deleted === 0) {
+			return array('removed' => 0, 'message' => 'no trashed Drive items past the window');
+		}
+		return array(
+			'removed' => $files_deleted + $folders_deleted,
+			'message' => $files_deleted . ' file(s), ' . $folders_deleted . ' folder(s)',
+		);
 	}
 
 }

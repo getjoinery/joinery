@@ -766,11 +766,27 @@ class PluginManager extends AbstractExtensionManager {
         $model->set('plg_last_activated_time', $now);
         $model->set('plg_install_error', null);
 
+        // Create rows for this plugin's tasks declaring activate_on_install.
+        // Runs before the resume step below so a task added to the plugin since
+        // it was last active lands activated rather than waiting for a click.
+        require_once(PathHelper::getIncludePath('includes/ScheduledTaskRegistry.php'));
+        try {
+            ScheduledTaskRegistry::activateDeclared($name);
+        } catch (Throwable $e) {
+            error_log("Failed to activate declared tasks for plugin '$name': " . $e->getMessage());
+        }
+
         // Resume scheduled tasks that belong to this plugin
         require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
         $suspended = new MultiScheduledTask(array('plugin_name' => $name, 'active' => false, 'deleted' => false));
         $suspended->load();
         foreach ($suspended as $task) {
+            // A retired task is deactivated because its code file is gone, not
+            // because the plugin was off. Resuming it would put back a row that
+            // cannot run and would retire itself again on the next reconcile.
+            if ($task->get('sct_last_run_status') === 'retired') {
+                continue;
+            }
             $task->set('sct_is_active', true);
             $task->save();
         }
@@ -1386,9 +1402,30 @@ class PluginManager extends AbstractExtensionManager {
             $result['settings_messages'] = $settings_messages;
         }
 
+        // Activate declared tasks for all active plugins — picks up a task added
+        // to a plugin that was already active, which no activate cycle would.
+        // Runs after syncSettings so a task's settings exist before it can run.
+        require_once(PathHelper::getIncludePath('includes/ScheduledTaskRegistry.php'));
+        $task_messages = [];
+        foreach ($active_plugins as $plugin) {
+            $plugin_name = $plugin->get('plg_name');
+            try {
+                $activated = ScheduledTaskRegistry::activateDeclared($plugin_name);
+                foreach ($activated as $task_name) {
+                    $task_messages[] = "$plugin_name: activated '$task_name'";
+                }
+            } catch (Throwable $e) {
+                $task_messages[] = "$plugin_name: task activation failed — " . $e->getMessage();
+                error_log("activateDeclared skipped for '$plugin_name': " . $e->getMessage());
+            }
+        }
+        if (!empty($task_messages)) {
+            $result['task_messages'] = $task_messages;
+        }
+
         return $result;
     }
-    
+
     /**
      * Install plugin from ZIP (alias for backward compatibility)
      * @param string $zip_path Path to ZIP file

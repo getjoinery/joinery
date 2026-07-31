@@ -5,7 +5,7 @@
  * Data model for the scheduled tasks system. Rows are created when
  * an admin activates a discovered task, not via migrations.
  *
- * @version 1.3.1
+ * @version 1.4.0
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -32,6 +32,11 @@ class ScheduledTask extends SystemBase {
 		'sct_create_time'          => array('type'=>'timestamp(6)', 'is_nullable'=>true, 'default'=>'now()'),
 		'sct_delete_time'          => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 		'sct_plugin_name'          => array('type'=>'varchar(100)', 'is_nullable'=>true),
+		// Set the first time the task's code file is found absent, cleared if it
+		// comes back. A task retires only after being continuously missing past
+		// the grace window, so a file that vanishes mid-deploy is not mistaken
+		// for a task that was removed. See ScheduledTaskRegistry::reconcileMissing().
+		'sct_missing_since'        => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	);
 
 	/**

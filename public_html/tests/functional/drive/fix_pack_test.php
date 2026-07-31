@@ -31,7 +31,6 @@ require_once(PathHelper::getIncludePath('logic/drive_share_sync_logic.php'));
 require_once(PathHelper::getIncludePath('logic/drive_changes_logic.php'));
 require_once(PathHelper::getIncludePath('logic/drive_upload_init_logic.php'));
 require_once(PathHelper::getIncludePath('logic/drive_upload_complete_logic.php'));
-require_once(PathHelper::getIncludePath('tasks/DrivePurgeTrash.php'));
 
 $dblink = DbConnector::get_instance()->get_db_link();
 
@@ -302,8 +301,7 @@ $stale = gmdate('Y-m-d H:i:s', time() - 40 * 86400);
 $dblink->prepare("UPDATE fil_files SET fil_delete_time = ? WHERE fil_file_id IN (?, ?)")->execute(array($stale, (int)$nonDrive->key, (int)$oldDrive->key));
 $dblink->prepare("UPDATE fil_files SET fil_delete_time = now() WHERE fil_file_id = ?")->execute(array((int)$newDrive->key));
 
-$task = new DrivePurgeTrash();
-$task->run(array('days_to_keep' => 30));
+File::purgeExpiredTrash(30);
 
 $exists = function ($id) use ($dblink) {
 	$q = $dblink->prepare("SELECT 1 FROM fil_files WHERE fil_file_id = ?");

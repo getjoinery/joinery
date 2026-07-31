@@ -1,0 +1,12 @@
+{
+  "name": "Advance customer provisioning",
+  "description": "Works the customer provisioning pipeline every cron pass: polls getjoinery for newly paid hosting orders, advances customer-cloud provisions, then provisions SSL for hosts that are ready. One place to look when a customer's site is stuck.",
+  "activate_on_install": true,
+  "default_frequency": "every_run",
+  "config_fields": {},
+  "replaces": [
+    "PollHostingOrders",
+    "ProvisionCustomerCloud",
+    "ProvisionPendingSsl"
+  ]
+}

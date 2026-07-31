@@ -31,6 +31,18 @@ class Notification extends SystemBase {
 	public static $tablename = 'ntf_notifications';
 	public static $pkey_column = 'ntf_notification_id';
 
+	// Retention: only READ notifications age out. An unread notification is
+	// still owed to its recipient however old it is, so the qualifier is part
+	// of the rule rather than a cutoff the operator has to get right.
+	// 0 in the setting means never purge.
+	public static $retention_policy = array(
+		'label'          => 'Read notifications',
+		'age_column'     => 'ntf_create_time',
+		'age_unit'       => 'days',
+		'only_where'     => 'ntf_is_read = true',
+		'window_setting' => 'notification_retention_days',
+	);
+
 	// REST CRUD exposure (Layer 1). User-owned (Bucket B): readable + writable
 	// under the deny-by-default owner-or-staff row scope.
 	public static $api_readable = true;

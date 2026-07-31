@@ -7,7 +7,7 @@
  * account's API key; runs as that customer. Validates entitlement (the
  * mailbox_fleet_slot tier feature), assigns a shard, allocates the tunnel
  * address, and returns the connection coordinates. The shard-side provisioning
- * job is dispatched by the FleetReconcile task; the slot reports
+ * job is dispatched by the relay reconcile task; the slot reports
  * status=provisioning until it lands (poll fleet_status).
  *
  * Idempotent: re-enrolling returns the existing live slot (re-provisioning it

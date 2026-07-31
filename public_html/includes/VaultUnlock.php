@@ -296,7 +296,7 @@ class VaultUnlock {
 	 * True if ANY session currently holds an open window for this user/scope —
 	 * unlike isOpen(), not scoped to the calling session. For a consumer's
 	 * passive-close sweep task (e.g. plugins/mailbox/tasks/
-	 * SweepMailboxIndexTemp.php): a disposable working copy tied to $user_id
+	 * InboundMailboxSearchIndex::sweepWorkingCopies()): a disposable working copy tied to $user_id
 	 * can be reclaimed once no session's window still covers it.
 	 *
 	 * The signal is the /dev/shm window marker, NOT APCu: the sweep runs under

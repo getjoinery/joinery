@@ -15,6 +15,16 @@ class InboundEmailLog extends SystemBase {
 	public static $tablename = 'iel_inbound_email_logs';
 	public static $pkey_column = 'iel_inbound_email_log_id';
 
+	// Retention: a delivery log, kept for troubleshooting rather than for the
+	// mail itself (stored messages live in iem_inbound_email_messages and have
+	// their own window). 0 in the setting means never purge.
+	public static $retention_policy = array(
+		'label'          => 'Inbound email logs',
+		'age_column'     => 'iel_create_time',
+		'age_unit'       => 'days',
+		'window_setting' => 'mailbox_log_retention_days',
+	);
+
 	// Status constants
 	const STATUS_FORWARDED = 'forwarded';
 	const STATUS_REJECTED = 'rejected';

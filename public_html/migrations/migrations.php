@@ -1115,14 +1115,13 @@
 	$migration['migration_sql'] = 'UPDATE amu_admin_menus SET amu_parent_menu_id = NULL WHERE amu_parent_menu_id < 1;';
 	$migrations[] = $migration;
 
-	// Register the sweep for finished device-link ceremonies. The rows are
-	// ten-minute scraps holding one-time codes, so an install that never gets
-	// the task ends up keeping every one of them forever. Insert-only and
-	// guarded by its own test, so re-running is a no-op and an operator who
-	// deactivated it deliberately does not get it back.
+	// Retained as version history only. Sweeping finished device-link ceremonies
+	// is a retention rule declared on DeviceLink ($retention_policy), run by the
+	// daily Retention Sweep — so there is no task row for this migration to
+	// insert. Its slot stays occupied so version numbering is unbroken.
 	$migration = array();
 	$migration['database_version'] = '159';
-	$migration['test'] = "SELECT count(1) as count FROM sct_scheduled_tasks WHERE sct_task_class = 'DrivePurgeDeviceLinks'";
+	$migration['test'] = NULL;
 	$migration['migration_file'] = NULL;
-	$migration['migration_sql'] = "INSERT INTO sct_scheduled_tasks (sct_name, sct_task_class, sct_is_active, sct_frequency, sct_task_config, sct_create_time) VALUES ('Purge finished device links', 'DrivePurgeDeviceLinks', true, 'hourly', '{}', now());";
+	$migration['migration_sql'] = "SELECT 1;";
 	$migrations[] = $migration;

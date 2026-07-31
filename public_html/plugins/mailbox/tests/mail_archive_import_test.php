@@ -627,7 +627,6 @@ class MailArchiveImportTest {
 	 * properties that make it safe.
 	 */
 	private function testArchiveRetention() {
-		require_once(PathHelper::getIncludePath('plugins/mailbox/tasks/PurgeMailImportArchives.php'));
 
 		// 1. A live run's archive is never taken, whatever the retention window.
 		$live = $this->makeRun('takeout.mbox', 'still-going.mbox');

@@ -32,6 +32,15 @@ class GeneralError extends SystemBase {	public static $prefix = 'err';
 		'err_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
 	];
 
+	// Retention: the daily sweep deletes rows older than the window.
+	// 0 in the setting means never purge. See docs/scheduled_tasks.md.
+	public static $retention_policy = array(
+		'label'          => 'Error log',
+		'age_column'     => 'err_create_time',
+		'age_unit'       => 'days',
+		'window_setting' => 'error_log_retention_days',
+	);
+
 		/**
 	 * Field specifications define database column properties and validation rules
 	 * 

@@ -390,7 +390,7 @@ class InboundEmailHealth {
         }
         $last = trim((string)$relay->get('mrl_last_pull_time'));
         if ($last === '') {
-            throw new ProvisioningCheckFailed('The relay spool has never been pulled — is the PullRelaySpool task enabled?');
+            throw new ProvisioningCheckFailed('The relay spool has never been pulled — is the relay reconcile task enabled?');
         }
         // The pull runs every cron pass; the threshold allows several missed
         // 5-minute passes before calling it stalled.
@@ -442,7 +442,7 @@ class InboundEmailHealth {
         }
         if (RelayMapSync::contentHash($artifacts) !== (string)$relay->get('mrl_map_content_hash')) {
             throw new ProvisioningCheckFailed(
-                'The relay alias map is out of date — the SyncRelayMap task has not pushed the latest domains/aliases yet.'
+                'The relay alias map is out of date — the relay reconcile task has not pushed the latest domains/aliases yet.'
             );
         }
     }

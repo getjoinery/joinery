@@ -1,0 +1,24 @@
+{
+  "name": "Reconcile mail relay",
+  "description": "Keeps a hardened ingest relay in step with this deployment: pushes the alias routing map, pulls the sealed mail spool, advances relay cloud provisioning, and reconciles the hosted relay fleet — in that order, every cron pass. No-op on colocated deployments.",
+  "activate_on_install": true,
+  "default_frequency": "every_run",
+  "config_fields": {
+    "spool_max_per_run": {
+      "type": "number",
+      "label": "Max spool entries per run (default 500)",
+      "required": false
+    },
+    "force_map_push": {
+      "type": "boolean",
+      "label": "Force an alias-map re-push even when unchanged (e.g. after a relay rebuild)",
+      "required": false
+    }
+  },
+  "replaces": [
+    "SyncRelayMap",
+    "PullRelaySpool",
+    "AdvanceRelayCloudProvisions",
+    "FleetReconcile"
+  ]
+}
