@@ -583,4 +583,26 @@ return [
 				 USING GIN (" . MailboxService::FULLTEXT_SQL . ")");
 		},
 	],
+
+	[
+		// Carry the raised batch size to deployments that already hold a row.
+		// Declared settings seed only where the name is MISSING, so a factory
+		// default only ever reaches a fresh install — every site installed before
+		// this kept importing 200 messages a pass, which is what made a large
+		// import crawl.
+		//
+		// Only rows still sitting at the old factory value are touched. A number an
+		// operator actually chose is left exactly as they left it.
+		'id' => 'stg_004_raise_import_batch_size',
+		'version' => '1.76.0',
+		'up' => function($dbconnector) {
+			$q = $dbconnector->get_db_link()->prepare(
+				"UPDATE stg_settings SET stg_value = '1000'
+				 WHERE stg_name = 'mailbox_import_batch_size' AND stg_value = '200'");
+			$q->execute();
+			echo $q->rowCount() > 0
+				? "mailbox_import_batch_size raised from the old factory 200 to 1000.\n"
+				: "mailbox_import_batch_size left alone (not at the old factory 200).\n";
+		},
+	],
 ];

@@ -3329,7 +3329,7 @@ run.
 | Setting | Default | Purpose |
 |---|---|---|
 | `mailbox_import_enabled` | on | Master switch. Turning it off also stops runs already underway from advancing. |
-| `mailbox_import_batch_size` | 200 | Entries stored per task pass. Measured cost is roughly 150ms per message, so this is also how long a pass holds the cron runner. |
+| `mailbox_import_batch_size` | 1000 | Entries stored per task pass. Measured cost is roughly 150ms per message, so this is also how long a pass holds the cron runner. Below a few hundred, a large import spends most of its elapsed time waiting for the next cron tick rather than working. |
 | `mailbox_import_max_concurrent` | 2 | Runs importing at once, deployment-wide. |
 | `mailbox_import_archive_retention_days` | 7 | How long a finished run keeps its uploaded archive, so it can be undone and re-run. |
 
