@@ -18,6 +18,7 @@ Every test declares a **tier** (blast radius — what it touches) and an **env**
 | `db` | Writes the dev database and self-cleans. |
 | `test-db` | Runs against the copied **test** database (`DbConnector::set_test_mode()`). |
 | `live` | Real external effects — sends mail, hits a storage bucket, uses Stripe test keys, drives a remote host. |
+| `deploy` | Runs on a **deployed node** after an upgrade swap, with a rollback hanging on the result. Reads only, and assumes no repository. |
 
 **env** — where a test may execute:
 
@@ -43,7 +44,7 @@ running anything:
  * name: cloud_offload_engine
  * tier: safe            # safe | db | test-db | live
  * env: dev-only         # any | prod-verify | dev-only
- * needs: []             # e.g. [stripe-test-keys, macmini, mailgun, b2, rust]
+ * needs: []             # e.g. [stripe-test-keys, macmini, mailgun, b2, rust, curl]
  * timeout: 180          # optional wall-clock cap in seconds (default 180, max 1800)
  */
 ```
@@ -67,6 +68,7 @@ php tests/run.php              # the safe tier
 php tests/run.php db           # safe + db + test-db — the pre-deploy gate
 php tests/run.php test-db      # only the test-database suites
 php tests/run.php live         # only live tests (never implied)
+php tests/run.php deploy       # does the deployed code run here — what upgrade.php runs
 php tests/run.php db --filter=api   # narrow by name or path substring
 php tests/run.php --only=tests/unit/dns_resolver_test.php  # one exact test by repo-relative path
 php tests/run.php db --timeout=30   # override every test's declared wall-clock cap (seconds)
@@ -80,6 +82,33 @@ never pulls in the others — it has real external effects, so it is always an
 explicit choice. Each test runs in its own subprocess, so a fatal in one file
 cannot take down the run. The runner exits non-zero if any test failed — it is
 the CI entry point.
+
+### `deploy` is not a development tier
+
+`safe`, `db` and `test-db` all run in a checkout, and their tests are entitled
+to assert things about one: that every first-party plugin is present, that the
+components manifest matches the repository, that `maintenance_scripts` has the
+layout the installer expects. That is what `env: any` has always meant in
+practice — safe on any *development* environment.
+
+A deployed site is not a checkout. It carries the plugins it uses and no others,
+keeps its own themes, and has no repository around it. Eleven `safe` suites fail
+on a production node for reasons that say nothing about the release, so `safe`
+must never be pointed at one — `upgrade.php` did that once and rolled back a
+perfectly good deploy on getjoinery.
+
+`deploy` is the tier that may run there. It pulls in nothing and nothing pulls it
+in. Three rules for anything added to it:
+
+- **Assume no repository** — not the plugin set, not the theme set, not a git
+  checkout, not a sibling directory.
+- **Reads only.** It runs on production, after a swap, with a rollback on the
+  result.
+- **An unreachable dependency is a SKIP, not a failure.** Reverting a working
+  release because a socket would not open is the worse error.
+
+See [Deploy and Upgrade](deploy_and_upgrade.md#the-deploy-tier) for what it
+currently checks.
 
 ### What each tier costs
 
@@ -125,7 +154,7 @@ test simply does not run until its header is corrected. `env` fails closed the
 same way, defaulting to `dev-only`.
 
 A test's `needs` are enforced: before running, the runner probes each declared
-dependency (`macmini`, `node`, `rust`, `stripe-test-keys`, `mailgun`, `b2`, …). An unmet
+dependency (`macmini`, `node`, `rust`, `curl`, `stripe-test-keys`, `mailgun`, `b2`, …). An unmet
 need makes the test a reported **SKIP** with its reason — never a silent pass and
 never a hard failure — so a box without the dependency stays green honestly. An
 unrecognized need name is treated as met (it never blindly skips).

@@ -30,6 +30,22 @@ interface CloudStorageDriver {
 	public function get(string $remote_key, string $local_path): void;
 
 	/**
+	 * Pull one byte span of an object to a local path.
+	 *
+	 * A resuming download asks for the tail of a file it already half has;
+	 * pulling the whole object to answer that would move the bytes twice and
+	 * cost egress on every retry. S3 and every compatible service answer a
+	 * ranged GetObject natively, so the range goes to the service.
+	 *
+	 * @param string $remote_key  Bucket key (without prefix).
+	 * @param string $local_path  Destination filesystem path (receives ONLY the span).
+	 * @param int    $start       First byte offset, inclusive.
+	 * @param int    $end         Last byte offset, inclusive.
+	 * @throws RuntimeException on GET failure.
+	 */
+	public function get_range(string $remote_key, string $local_path, int $start, int $end): void;
+
+	/**
 	 * Delete an object. No-op if the key does not exist.
 	 *
 	 * @param string $remote_key  Bucket key (without prefix).

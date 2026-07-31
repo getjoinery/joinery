@@ -277,10 +277,35 @@ section('An upgrade proves the code it just installed');
 check(strpos($upgrade_src, "'/tests/run.php'") !== false
     || strpos($upgrade_src, '/tests/run.php') !== false,
     'upgrade.php runs the test suite after the swap');
-check(preg_match('/tests\/run\.php.*?\)\s*\.\s*\' safe/s', $upgrade_src) === 1
-    || strpos($upgrade_src, "' safe 2>&1'") !== false,
-    'the safe tier, not db',
-    'db is five and a half minutes and writes to a database — not an automatic step on a node');
+
+// The tier matters more than it looks. `safe` is the development gate and its
+// tests are entitled to assert things about a checkout — the full first-party
+// plugin set, the components manifest, the maintenance_scripts layout. A
+// deployed node has none of that, so pointing safe at one fails eleven suites
+// for reasons that say nothing about the release, and rolls back every upgrade
+// in the fleet. That happened once, on getjoinery, which is why this is pinned.
+check(strpos($upgrade_src, "' deploy 2>&1'") !== false,
+    'it runs the deploy tier',
+    'safe asserts the shape of a repository and a node is not one');
+check(strpos($upgrade_src, "' safe 2>&1'") === false,
+    'and not the safe tier');
+check(strpos($upgrade_src, "' db 2>&1'") === false,
+    'and not db, which is minutes long and writes to a database');
+
+// Whatever the deploy tier holds must be runnable on a node. A test that needs
+// a checkout is the exact failure above, reintroduced.
+$deploy_dir = PathHelper::getIncludePath('tests/deploy');
+$deploy_tests = is_dir($deploy_dir) ? glob($deploy_dir . '/*_test.php') : array();
+check(count($deploy_tests) > 0, 'the deploy tier has tests in it', $deploy_dir);
+$mistiered = array();
+foreach ($deploy_tests as $deploy_test) {
+    $head = (string)file_get_contents($deploy_test, false, null, 0, 2048);
+    if (!preg_match('/^\s*\*\s*tier:\s*deploy\s*$/m', $head)) {
+        $mistiered[] = basename($deploy_test);
+    }
+}
+check(empty($mistiered), 'every test in tests/deploy declares tier: deploy',
+    $mistiered ? implode(', ', $mistiered) : '');
 check(preg_match('/failed its own tests.*?performRollback/s', $upgrade_src) === 1,
     'a failure rolls back to public_html_last');
 check(strpos($upgrade_src, 'The database was NOT rolled back') !== false,

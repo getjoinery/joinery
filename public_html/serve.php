@@ -162,6 +162,11 @@ $routes = [
         '/profile/event_sessions'        => ['view' => 'views/profile/event_sessions',        'plugin' => 'event_manager', 'check_setting' => 'events_active'],
         '/profile/event_sessions_course' => ['view' => 'views/profile/event_sessions_course', 'plugin' => 'event_manager', 'check_setting' => 'events_active'],
         '/profile/event_withdraw'        => ['view' => 'views/profile/event_withdraw',        'plugin' => 'event_manager', 'check_setting' => 'events_active'],
+        // Device-link approval. Explicit because the path has a segment the
+        // /profile/* wildcard would not resolve to a flat view file, and the URL
+        // is printed on another screen for the user to type — it has to be the
+        // readable one.
+        '/profile/devices/link' => ['view' => 'views/profile/devices_link', 'check_setting' => 'drive_active'],
         '/profile/*' => ['view' => 'views/profile/{path}'],
         '/events' => ['view' => 'views/events', 'plugin' => 'event_manager', 'check_setting' => 'events_active'],
         '/event_waiting_list' => ['view' => 'views/event_waiting_list', 'plugin' => 'event_manager', 'check_setting' => 'events_active'],
@@ -325,18 +330,42 @@ $routes = [
                     }
                     $driver = CloudStorageDriverFactory::forVisibilityWithFallback('private');
                     if ($driver) {
+                        // A Range request is answered by the bucket, not by
+                        // pulling the object down and throwing most of it away.
+                        // Only the original variant qualifies: its size is known
+                        // from the blob without a round trip, and nobody
+                        // range-requests a thumbnail.
+                        $range = null;
+                        if ($size_key === 'original') {
+                            $total = (int)$file_obj->size_bytes();
+                            $parsed = File::parse_range_header($_SERVER['HTTP_RANGE'] ?? null, $total);
+                            if ($parsed === false) {
+                                http_response_code(416);
+                                header('Accept-Ranges: bytes');
+                                header('Content-Range: bytes */' . $total);
+                                header('Content-Length: 0');
+                                return true;
+                            }
+                            if (is_array($parsed)) {
+                                $range = $parsed + array('total' => $total);
+                            }
+                        }
                         $tmp = tempnam(sys_get_temp_dir(), 'fil_priv_');
                         $got = false;
                         if ($tmp !== false) {
                             try {
-                                $driver->get($file_obj->remote_key_for($size_key), $tmp);
+                                if ($range !== null) {
+                                    $driver->get_range($file_obj->remote_key_for($size_key), $tmp, $range['start'], $range['end']);
+                                } else {
+                                    $driver->get($file_obj->remote_key_for($size_key), $tmp);
+                                }
                                 $got = true;
                             } catch (Exception $e) {
                                 error_log('Private cloud serve: GET failed for fil=' . $file_obj->key . ' — ' . $e->getMessage());
                             }
                         }
                         if ($got) {
-                            $file_obj->serve_from_path($tmp, 'private, max-age=0, no-store');
+                            $file_obj->serve_from_path($tmp, 'private, max-age=0, no-store', $range);
                             @unlink($tmp);
                             return true;
                         }

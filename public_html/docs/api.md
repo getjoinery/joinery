@@ -245,6 +245,28 @@ The web-session bridge for native app webviews: derives a web session from the p
 
 The webview loads `bridge_url`; the server validates the token, starts an **app-context** web session for the key's user, and 302s to the target. Bridged sessions render without site chrome and live only as long as the originating key — revoking the key (logout, App Sessions page, password change) ends them too. Machine keys and browser sessions get 403. Full flow: `docs/mobile_apps.md`.
 
+### `POST /api/v1/auth/device_link` — unauthenticated
+
+Opens a device-link ceremony: how a desktop sync client acquires a credential without ever handling the user's password. Body: `{"device_name": "Studio PC", "platform": "windows", "device_pubkey": "<base64 X25519, optional>"}` — platform is one of `macos`, `windows`, `linux`.
+
+```json
+{ "data": { "link_code": "K4RT-9WZP", "poll_token": "…", "verify_url": "https://…/profile/devices/link?code=K4RT-9WZP", "expires_time": "…", "poll_after": 3 } }
+```
+
+The client shows `link_code` and opens `verify_url`. The user approves in a browser, where they are already signed in and where a step-up can be demanded. `device_pubkey` is the target for the encrypted-folder key handoff — omit it and the device simply never receives one. Ceremonies last 10 minutes.
+
+### `GET /api/v1/auth/device_link/{poll_token}` — unauthenticated
+
+Collects the outcome. `{"status": "pending", "poll_after": 3}` until the user acts; `{"status": "denied"}` if refused. On approval the **first** successful poll — and only the first — returns the credential:
+
+```json
+{ "data": { "status": "approved", "public_key": "sess_…", "secret_key": "…", "device_id": 12, "expires_time": "…", "sealed_vault_key": "…" } }
+```
+
+`sealed_vault_key` is present only when the user chose to share their encrypted folders: it is the drive vault secret key sealed to `device_pubkey` in the approving browser, opaque to the server. The row is scrubbed immediately after; a second poll gets 409. An unknown token and an expired ceremony both get 404, so neither confirms the other exists.
+
+Both halves use their own rate bucket (`api_device_link_rate_limit_requests` / `_window`, default 600 per hour per IP) — polling every three seconds for ten minutes cannot share the deliberately small failed-sign-in allowance.
+
 ## App Endpoints
 
 `GET /api/v1/app/navigation` — session-key-authenticated. The user's profile menu as a routing table for a native app's tab bar and More list: filtered entries (permission, visibility, setting gates; shell-owned auth entries excluded), each with a version-safe `destination` (`{type: "web", url}` today; `{type: "native", screen, fallback_url}` once a surface goes native), plus the `tabs` slug list pinned for the requesting `client_app` (from the `app_navigation` setting). Machine keys and browser sessions get 403. Response shape and semantics: `docs/mobile_apps.md`.

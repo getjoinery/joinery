@@ -231,6 +231,48 @@ files (`File::is_encrypted()` is the gate):
     encryption boundary; `drive_upload_init` gates a vault destination against
     the ciphertext size ceiling; `drive_list` accepts `offset` for complete
     subtree enumeration.
+  - `drive_vault_status` — `{scope: 'drive'}` → `{set_up, public_key,
+    key_generation}`, reachable with a session key. The lean probe a native sync
+    client needs to seal file keys and to notice a rotation; it carries no
+    wrappings, salts, or KDF parameters, because those are unlock material and
+    unlocking stays in the browser.
+
+## Device custody — encrypted folders on a sync client
+
+A desktop client that only ever received ciphertext could sync encrypted
+folders but never open one. So the vault key is handed to a named device, once,
+during the device-link ceremony (`docs/drive.md` § Device linking).
+
+The device generates an X25519 keypair at first launch and sends only the public
+half. In the approving browser — the one place the vault can be unlocked — the
+unlocked `VaultKeyring` session seals the vault **secret** key to that public
+key (`session.sealSecretKeyTo(devicePublicKey)`, the standard sealed-box
+primitive) and posts the result. The server stores ciphertext it has no key for,
+holds it until the device polls once, and scrubs it.
+
+The sealing lives inside the session closure deliberately: a consumer can hand
+the vault key to a device it names, and cannot read the raw bytes itself. On the
+device the private half lives in the OS keychain (macOS Keychain, Windows DPAPI
++ Credential Manager, libsecret), and so does the vault secret key once
+unsealed — nothing lands on disk in plaintext.
+
+Consequences worth stating plainly: a linked device with the vault key can read
+every encrypted file the user can, without a further ceremony, for as long as it
+stays linked. That is what "this laptop syncs my encrypted folders" means. The
+control is `drive_device_revoke`, which cuts off future access; files already
+synced to that computer are already on that computer.
+
+Sharing the key is per device and opt-in — the checkbox on the approval page.
+Decline it and the device syncs everything else and simply skips encrypted
+folders. A device that never offered a public key is not offered the choice.
+
+### Timestamps
+
+An encrypted file carries no plaintext `fil_content_modified_time`: a
+modification time sitting next to ciphertext would tell an observer when the
+file was last worked on. The true mtime is a field inside the encrypted metadata
+blob, and `drive_upload_init` refuses a `modified_time` parameter when the
+destination is a vault folder rather than silently dropping it.
 
 ## Client modules
 

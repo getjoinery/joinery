@@ -12,7 +12,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
  * assembled bytes into a File (or a new FileVersion) and deletes the row. Stale
  * rows + part-files are swept by DrivePurgeStaleUploads.
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 class FileUpload extends SystemBase {
 	public static $prefix = 'fup';
@@ -42,6 +42,10 @@ class FileUpload extends SystemBase {
 		'fup_mime_type'      => array('type' => 'varchar(128)', 'is_nullable' => true),
 		'fup_expected_bytes' => array('type' => 'int8', 'is_nullable' => false, 'required' => true),
 		'fup_expected_sha256'=> array('type' => 'varchar(64)', 'is_nullable' => true),
+		// Client-declared content modification time, settled at init and carried
+		// onto the file at complete (see fil_content_modified_time). Plaintext
+		// Drive uploads only.
+		'fup_content_modified_time' => array('type' => 'timestamp(6)', 'is_nullable' => true),
 		'fup_received_bytes' => array('type' => 'int8', 'is_nullable' => false, 'default' => 0, 'zero_on_create' => true),
 		'fup_update_time'    => array('type' => 'timestamp(6)', 'is_nullable' => true),
 		'fup_create_time'    => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()'),

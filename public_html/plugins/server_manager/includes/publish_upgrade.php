@@ -193,9 +193,27 @@
 		// text from the archive and nowhere else, so a release without one ships
 		// code nobody has been told the terms for. Checked here, alongside the
 		// agent guard, because nothing has been written to the tree yet.
-		$license_source = $full_site_dir . '/LICENSE.md';
-		if (!is_file($license_source) || trim((string)file_get_contents($license_source)) === '') {
-			publish_output("\nRefusing to publish {$version} — LICENSE.md is missing or empty at {$license_source}.");
+		// Two legitimate homes, because a publisher is not always a checkout.
+		// A development tree keeps LICENSE.md at the site root, beside
+		// public_html. A deployed site — and getjoinery, the release-serving
+		// site, is one — has it INSIDE public_html, because that is where the
+		// archive puts it and `upgrade.php` swaps public_html alone. Checking
+		// only the site root meant a deployed publisher could never satisfy this
+		// guard, however correctly it had been upgraded.
+		$license_candidates = array(
+			$full_site_dir . '/LICENSE.md',
+			$full_site_dir . '/public_html/LICENSE.md',
+		);
+		$license_source = '';
+		foreach ($license_candidates as $candidate) {
+			if (is_file($candidate) && trim((string)file_get_contents($candidate)) !== '') {
+				$license_source = $candidate;
+				break;
+			}
+		}
+		if ($license_source === '') {
+			publish_output("\nRefusing to publish {$version} — LICENSE.md is missing or empty.");
+			publish_output("Looked in: " . implode(', ', $license_candidates));
 			publish_output("Every archive carries the license text. Nothing has been written.");
 			exit;
 		}

@@ -151,7 +151,7 @@ php /var/www/html/joinerytest/public_html/utils/upgrade.php --verbose
 - Database migrations and composer integration
 - **Declared-dependency install** — after the file swap, installs any PHP extension the new code declares (root `composer.json` `ext-*` + plugin `requires.extensions`, resolved by `utils/list_dependencies.php --apt`) and reloads web PHP. Needs root (Docker `docker exec` has it; a non-root run degrades to a warning naming the manual `apt-get install`). Then runs every active plugin's declared `host_installer` via `_plugin_installers_start.sh` so new host requirements land with the deploy.
 - **Graceful handling of missing archives** — if a theme or plugin archive returns 404, the upgrade warns and skips it instead of aborting. The core upgrade and all other themes/plugins proceed normally. A summary of skipped items is shown at the end.
-- **Post-deploy smoke test** — after the new code is in place and migrations have run, the `safe` test tier runs against it. A failure restores `public_html_last` and preserves the broken tree for diagnosis. This is the first thing in the pipeline that reads a line of the code being installed: `publish_upgrade.php` builds its archive from whatever is on the publisher's disk at that moment, half-finished edits included. The `safe` tier is about fifteen seconds and needs no database — it catches a parse error or fatal in code that shipped mid-edit, which is the failure in scope. The `db` tier is not used: it takes five and a half minutes and writes to a database, neither of which belongs in an automatic step on a production node. The rollback returns the code but **not** the schema, because migrations ran first; schema changes are additive so the previous code normally runs against them, but the output says plainly that this is a recovery rather than a clean undo, and the node should be upgraded forward rather than left there.
+- **Post-deploy smoke test** — after the new code is in place and migrations have run, the **`deploy` test tier** runs against it. A failure restores `public_html_last` and preserves the broken tree for diagnosis. This is the first thing in the pipeline that reads a line of the code being installed: `publish_upgrade.php` builds its archive from whatever is on the publisher's disk at that moment, half-finished edits included. The tier takes a couple of seconds, is entirely reads, and asks only whether the code runs on this machine — every deployable PHP file compiles, the core classes load, the database answers, the declarative manifests parse, and the site returns a page over HTTP. See [The deploy tier](#the-deploy-tier) below for why it is not `safe`. The rollback returns the code but **not** the schema, because migrations ran first; schema changes are additive so the previous code normally runs against them, but the output says plainly that this is a recovery rather than a clean undo, and the node should be upgraded forward rather than left there.
 - **Site-root `maintenance_scripts/`** — the core archive carries `install_tools/` and `sysadmin_tools/` alongside `public_html/`, and the upgrade syncs them into the site root after the deploy swap and before `fix_permissions.sh` runs, so a release applies as one piece rather than with its own tooling a version behind. The sync compares by content (`rsync --checksum`), because the staged files carry the publishing box's timestamps while the node keeps its own and a same-size edit can otherwise look unchanged. It does not delete: a node can legitimately hold scripts the archive does not ship, so files absent from a release are left in place. `*.sh` are made executable afterwards. A failed sync is a warning, not an abort — `public_html` is already live — and it says explicitly that the node's backup, restore and permission scripts are still the previous version.
 
 **Plugin refresh scope:** the upgrade download loop iterates **plugins that are installed** (rows in `plg_plugins`) and attempts an archive fetch for each. Plugins published by the source succeed; plugins not in the source's catalog 404 at the upgrade endpoint (they were never packaged because they have `included_in_publish: false` — see [Extension Distribution Flags](#extension-distribution-flags) below) and are skipped via the warning path above. Uninstalling a plugin removes its row, so an uninstalled plugin is not re-downloaded on subsequent upgrades — the operator's removal sticks. Conversely, a new upstream plugin won't auto-appear on existing sites; the operator gets it via the admin Plugins page (install a plugin already on disk) or a plugin upload.
@@ -557,6 +557,28 @@ Every site installed by `install.sh` has the same Apache vhost shape, regardless
 | `composerAutoLoad` | Composer vendor path |
 
 **Note:** A site acts as an upgrade server when the **Server Manager** plugin is active. The `upgrade_source` setting specifies where a site *downloads* upgrades from.
+
+### The deploy tier
+
+`php tests/run.php deploy` is the set `upgrade.php` runs after a swap. It pulls in no other tier and no other tier pulls it in.
+
+It exists because `safe`, `db` and `test-db` are **development** gates. They run in a checkout and are entitled to assert things about one: that the full first-party plugin set is present, that the components manifest lists what the repository holds, that `maintenance_scripts` has the layout the installer expects. A deployed site has none of that and never should — it carries the plugins it uses and no repository around it. Eleven of those suites fail on a production node, for reasons that say nothing whatever about the release.
+
+So `deploy` asks the only question that means anything on a node: **does the code that just landed run on this machine.**
+
+| Check | What it catches |
+|---|---|
+| `deploy_syntax_sweep` | Every deployable PHP file compiles. The failure in scope: an edit left half-finished on the publishing box, in a file loaded on one page, waiting for someone to visit it. |
+| `deploy_bootstrap` | Core classes load, the database is reachable, `settings.json` / `admin_menus.json` / `install_bundles.json` parse, the licence shipped. Catches a class that moved between core and a plugin, or a require pointing at a path the release removed. |
+| `deploy_site_responds` | The homepage and sign-in page come back without a 5xx, through Apache and the theme. The only check that exercises the web SAPI. |
+
+Three rules for anything added to it, all of them learned the hard way:
+
+- **No assumption of a repository.** Not the plugin set, not the theme set, not a git checkout, not a sibling directory.
+- **Reads only.** It runs on production, after a swap, with a rollback hanging on the result.
+- **An unreachable dependency is a SKIP, not a failure.** Reverting a working release because a socket would not open is worse than the thing being guarded against.
+
+The sweep compiles rather than lints: `opcache_compile_file()` parses without executing, doing the whole tree in about a second where `php -l` per file takes over a minute. One process shares one symbol table, so two files that legitimately declare the same function name collide — anything that fails the fast pass is re-checked with an isolated `php -l` before it counts.
 
 ### Where a site's `upgrade_source` comes from
 

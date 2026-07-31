@@ -50,6 +50,39 @@ copy must not outlive the grant. Private cloud-stored files keep their
 never-302 rule: a valid signature streams the bytes through PHP from the
 private bucket, exactly like the sessioned path.
 
+## Ranged downloads
+
+Every served response carries `Accept-Ranges: bytes`, and a `Range` request
+gets the span it asked for. This is what lets a client resume an interrupted
+download from where it stopped instead of starting over — the difference
+between a 4 GB transfer that survives a dropped connection and one that does
+not.
+
+- A valid single range → `206` with `Content-Range: bytes start-end/total`
+  and exactly those bytes. Supported forms: `bytes=start-end`,
+  `bytes=start-` (to the end), `bytes=-suffix` (the last N bytes). A range
+  whose end runs past the object is clamped rather than refused.
+- A syntactically valid range that starts past the end, or any range on a
+  zero-length object → `416` with `Content-Range: bytes */total`.
+- A multi-range request, an unknown range unit, or a malformed header → the
+  whole object, `200`. RFC 7233 permits ignoring a `Range` the server will
+  not honor, and serving everything is always a correct answer.
+
+The signature is unaffected: it covers `{file_id}:{size_key}:{expires}`, and
+asking for part of a file is not asking for a different file.
+
+Cloud-offloaded blobs pass the range to the storage driver
+(`CloudStorageDriver::get_range()` → S3 `GetObject` with a `Range` header),
+so a resume moves the requested bytes and no more. This applies to the
+`original` variant, whose size is known from the blob without a round trip;
+image variants are small enough that ranging them is pointless and they are
+served whole.
+
+Files served through a registered decrypt hook (server-custody sealed
+sources — not Drive) are the exception: their plaintext is produced in memory
+from the entire ciphertext, so there is nothing to seek into. They advertise
+no `Accept-Ranges` and ignore a `Range` header rather than half-honoring it.
+
 ## The signing key
 
 A dedicated 32-byte key, generated on first mint and stored

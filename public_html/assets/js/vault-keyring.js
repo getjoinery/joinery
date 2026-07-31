@@ -65,6 +65,20 @@ window.VaultKeyring = (function () {
 			sealTo: function (bytes, publicKeyB64Target) {
 				return VaultCrypto.sealToPublicKey(bytes, publicKeyB64Target || publicKeyB64);
 			},
+			// Seal the vault's own SECRET key to another public key — the device
+			// handoff. This is the one operation that lets the vault identity
+			// itself leave this browser, so it stays inside the session closure
+			// rather than exposing the raw bytes to the caller: a consumer can
+			// hand the key to a device it names, and cannot read it.
+			//
+			// The recipient (a sync client with its private half in the OS
+			// keychain) opens the result and can then unwrap file keys exactly as
+			// the browser does.
+			sealSecretKeyTo: function (targetPublicKeyB64) {
+				if (secret === null) return Promise.reject(new Error('Vault is locked.'));
+				if (!targetPublicKeyB64) return Promise.reject(new Error('No recipient key to seal to.'));
+				return VaultCrypto.sealToPublicKey(secret, targetPublicKeyB64);
+			},
 			// re-wrap the secret key under a fresh KEK (adding an unlocker)
 			wrapUnder: function (kek, type, credentialId) {
 				if (secret === null) return Promise.reject(new Error('Vault is locked.'));

@@ -501,21 +501,62 @@ mapsofwisdom and the rest pull from dev directly, with no getjoinery in
 between, so they eat a bad dev publish first.
 
 **Fix: `upgrade.php` runs the tests, not the publisher.** After the new code is
-in place, the `safe` tier runs; on failure the upgrade rolls back to
+in place, a test tier runs; on failure the upgrade rolls back to
 `public_html_last`, which `upgrade.php` already keeps and already has a restore
 path for. The failure lands where it can be acted on rather than being guessed
 at from the publishing side.
 
-- **`safe` tier, not `db`.** Roughly fifteen seconds, needs no database, and
-  catches exactly the failure in scope: a parse error or fatal in code that
-  shipped mid-edit. The db tier is five and a half minutes and writes to a
-  database, which should not happen automatically on a production node.
 - **Fresh installs run no tests.** There is nothing to roll back to and
   nothing to regress from.
 - Migrations run before the swap, so a rollback returns the code but not the
   schema. Schema changes here are additive, so old code against a new schema
   generally runs — but this is a recovery, not a clean undo, and should be
   described that way in the output.
+
+#### Which tier — corrected 2026-07-30, after it rolled back a good release
+
+This spec originally said the `safe` tier, on the reasoning that it is fifteen
+seconds, needs no database, and catches a parse error in code that shipped
+mid-edit. The reasoning about *what to catch* was right. `safe` was the wrong
+instrument, and the first real promotion proved it: getjoinery took 0.8.199,
+migrated cleanly, then failed **eleven** suites and reverted.
+
+None of the eleven said anything about the release. `safe`, `db` and `test-db`
+are **development** gates — they run in a checkout and are entitled to assert
+things about one: the full first-party plugin set, the components manifest, the
+layout of `maintenance_scripts`. getjoinery carries four plugins because it uses
+four. `env: any` has always meant *safe on any development environment*, and
+nothing exercised that assumption until a node was made to run them.
+
+`prod-verify` looked like the ready-made answer and is not — all four of those
+tests are `live` tier and hit the network. There was no deployment-verification
+set, so one was built.
+
+**A new `deploy` tier** (`php tests/run.php deploy`), cumulative with nothing in
+either direction, holding three checks in `tests/deploy/`:
+
+| Check | What it catches |
+|---|---|
+| `deploy_syntax_sweep` | Every deployable PHP file compiles — the failure actually in scope. |
+| `deploy_bootstrap` | Core classes load, the database answers, the declarative manifests parse, the licence shipped. |
+| `deploy_site_responds` | Homepage and sign-in return without a 5xx, through Apache and the theme. |
+
+About two seconds, entirely reads. Three rules for anything added to it: assume
+no repository, read only, and treat an unreachable dependency as a SKIP rather
+than a failure — reverting a working release because a socket would not open is
+the worse error of the two.
+
+The sweep compiles rather than lints. `opcache_compile_file()` parses without
+executing, doing the whole tree in about a second against a minute-plus for
+`php -l` per file, which matters on the 1 GB instances this path targets. One
+process shares one symbol table, so files that legitimately declare the same
+function name collide; anything failing the fast pass is re-checked with an
+isolated `php -l` before it counts. Verified against a deliberately broken file,
+and against the exact getjoinery tree that failed.
+
+**The version-agreement check was removed from the gate.** It compared `VERSION`
+to `system_version` and would have reverted a deploy over bookkeeping. The two
+numbers are reported in the upgrade output instead.
 
 ### Gap 7 — a fresh site cannot send email, so lockout is unrecoverable
 

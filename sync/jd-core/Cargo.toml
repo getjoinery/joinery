@@ -1,0 +1,12 @@
+[package]
+name = "jd-core"
+description = "The sync engine: last-agreed state store, the reconciliation matrix, operation ordering, and the loops that drive them."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+jd-vfs = { path = "../jd-vfs" }
+thiserror = "1"
+rusqlite = { version = "0.31", features = ["bundled"] }

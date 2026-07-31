@@ -62,6 +62,13 @@ function drive_upload_init_logic(array $input): LogicResult {
 		return LogicResult::error('Invalid content hash.');
 	}
 
+	// The client's own modification time for the content, carried onto the file
+	// at complete. Optional — the browser uploader does not send one.
+	$modified_time = _drive_parse_modified_time($input['modified_time'] ?? null);
+	if ($modified_time === false) {
+		return LogicResult::error('Invalid modification time; use ISO-8601 UTC.');
+	}
+
 	// Resolve the write target: a new version of an existing file, or a new file
 	// in a folder. The OWNER of the result — who is billed, and whose tier
 	// limits apply — is the target file's owner, else the destination folder's
@@ -91,6 +98,13 @@ function drive_upload_init_logic(array $input): LogicResult {
 		}
 		$owner_id = (int)$folder->get('fol_usr_user_id');
 		$encrypted = DriveHelper::folder_is_encrypted($folder);
+	}
+
+	// A plaintext modification time on an encrypted file would leak when the
+	// file was last worked on, so the vault path refuses it: the client puts the
+	// true mtime inside the encrypted metadata blob instead.
+	if ($encrypted && $modified_time !== null) {
+		return LogicResult::error('An encrypted upload carries its modification time inside its encrypted metadata, not as a parameter.');
 	}
 
 	// Tier gates — the owner's plan, since the owner is billed. The per-file cap
@@ -124,8 +138,13 @@ function drive_upload_init_logic(array $input): LogicResult {
 			if ($target_file) {
 				if (FileBlob::retain($cand->key)) {
 					FileVersion::save_new_content($target_file, $cand, $user_id);
+					if ($modified_time !== null) {
+						$target_file->set('fil_content_modified_time', $modified_time);
+						$target_file->save();
+					}
 					DriveUsage::recompute($owner_id);
 					FileChange::record(FileChange::KIND_CONTENT, DriveHelper::ENTITY_FILE, $target_file->key, $owner_id, $user_id);
+					DriveHelper::forget_sync_meta($target_file->key);
 					$fresh = DriveHelper::load_file($target_file->key);
 					return LogicResult::render(array('ok' => true, 'deduped' => true, 'file' => DriveHelper::file_export($fresh)));
 				}
@@ -133,9 +152,12 @@ function drive_upload_init_logic(array $input): LogicResult {
 				$restrictions = array('fil_private' => true, 'fil_source' => File::SOURCE_DRIVE);
 				$file = File::createFromExistingBlob($cand, $name, $mime, $owner_id, $restrictions);
 				if ($file && $file->key) {
-					if ($folder_id) { $file->set('fil_fol_folder_id', $folder_id); $file->save(); }
+					if ($folder_id) { $file->set('fil_fol_folder_id', $folder_id); }
+					if ($modified_time !== null) { $file->set('fil_content_modified_time', $modified_time); }
+					if ($folder_id || $modified_time !== null) { $file->save(); }
 					DriveUsage::recompute($owner_id);
 					FileChange::record(FileChange::KIND_CREATED, DriveHelper::ENTITY_FILE, $file->key, $owner_id, $user_id);
+					DriveHelper::forget_sync_meta($file->key);
 					return LogicResult::render(array('ok' => true, 'deduped' => true, 'file' => DriveHelper::file_export($file)));
 				}
 			}
@@ -154,6 +176,7 @@ function drive_upload_init_logic(array $input): LogicResult {
 	$up->set('fup_mime_type', substr($mime, 0, 128));
 	$up->set('fup_expected_bytes', $size_bytes);
 	if ($sha256 !== '') { $up->set('fup_expected_sha256', $sha256); }
+	if ($modified_time !== null) { $up->set('fup_content_modified_time', $modified_time); }
 	$up->set('fup_received_bytes', 0);
 	$up->set('fup_update_time', gmdate('Y-m-d H:i:s'));
 	$up->save();
@@ -234,6 +257,36 @@ function drive_upload_init_for_purpose(string $purpose, int $user_id, array $inp
 	));
 }
 
+/**
+ * Parse a client-supplied content modification time into the UTC string the
+ * database stores.
+ *
+ * Returns null when nothing was sent, false when what was sent is unusable
+ * (the caller turns that into an error rather than silently dropping a
+ * timestamp the client believes it set). Anything strtotime understands is
+ * accepted and normalized to UTC; a bare naive timestamp is read as UTC, which
+ * is what the parameter is documented to carry.
+ */
+function _drive_parse_modified_time($raw) {
+	if ($raw === null || $raw === '' || $raw === false) {
+		return null;
+	}
+	if (!is_string($raw) && !is_numeric($raw)) {
+		return false;
+	}
+	$ts = strtotime((string)$raw . (preg_match('/(Z|[+\-]\d{2}:?\d{2})$/', (string)$raw) ? '' : ' UTC'));
+	if ($ts === false) {
+		return false;
+	}
+	// A timestamp far outside anything a real filesystem reports is a client bug
+	// or a hostile value, not a date. Postgres would take it; sync clients that
+	// sort on it would not enjoy it.
+	if ($ts < 0 || $ts > strtotime('+50 years')) {
+		return false;
+	}
+	return gmdate('Y-m-d H:i:s', $ts);
+}
+
 function drive_upload_init_logic_descriptor(): array {
 	return array(
 		'description'      => 'Begin a Drive upload: returns an upload token + chunk size, or dedup-completes immediately.',
@@ -247,6 +300,7 @@ function drive_upload_init_logic_descriptor(): array {
 			'sha256'     => array('type' => 'string', 'required' => false, 'max_length' => 64, 'label' => 'Content SHA-256 (enables dedup)'),
 			'mime_type'  => array('type' => 'string', 'required' => false, 'max_length' => 128, 'label' => 'MIME type'),
 			'purpose'    => array('type' => 'string', 'required' => false, 'max_length' => 64, 'label' => 'What the upload is for (default: drive)'),
+			'modified_time' => array('type' => 'string', 'required' => false, 'max_length' => 40, 'label' => 'Content modification time (ISO-8601 UTC; plaintext files only)'),
 		),
 	);
 }

@@ -78,6 +78,10 @@ function drive_upload_complete_logic(array $input): LogicResult {
 	$file_id   = (int)$up->get('fup_fil_file_id');
 	$mime      = (string)($up->get('fup_mime_type') ?: 'application/octet-stream');
 	$name      = (string)$up->get('fup_display_name');
+	// Settled at init (and refused there for a vault destination), so an upload
+	// cannot acquire a plaintext mtime it was not opened with.
+	$modified_time = $up->get('fup_content_modified_time');
+	if ($modified_time === '') { $modified_time = null; }
 
 	// Re-resolve the target and its OWNER (billed; single-owner-tree rule) —
 	// access may have been revoked between init and complete.
@@ -197,9 +201,17 @@ function drive_upload_complete_logic(array $input): LogicResult {
 					_drive_store_encrypted_thumbnail($fresh_target, $enc_thumb_b64);
 				}
 			}
+			if (!$encrypted && $modified_time !== null) {
+				$fresh_target = DriveHelper::load_file($target_file->key);
+				if ($fresh_target) {
+					$fresh_target->set('fil_content_modified_time', $modified_time);
+					$fresh_target->save();
+				}
+			}
 			$up->discard();
 			DriveUsage::recompute($owner_id);
 			FileChange::record(FileChange::KIND_CONTENT, DriveHelper::ENTITY_FILE, $target_file->key, $owner_id, $user_id);
+			DriveHelper::forget_sync_meta($target_file->key);
 			$fresh = DriveHelper::load_file($target_file->key);
 			$wrapped = $encrypted ? FileKeyGrant::wrapped_key_for($fresh->key, $user_id) : null;
 			return LogicResult::render(array('ok' => true, 'file' => DriveHelper::file_export($fresh, null, null, $wrapped)));
@@ -221,6 +233,11 @@ function drive_upload_complete_logic(array $input): LogicResult {
 		}
 		if ($folder_id) {
 			$file->set('fil_fol_folder_id', $folder_id);
+		}
+		if (!$encrypted && $modified_time !== null) {
+			$file->set('fil_content_modified_time', $modified_time);
+		}
+		if ($folder_id || (!$encrypted && $modified_time !== null)) {
 			$file->save();
 		}
 		if ($encrypted) {
@@ -239,6 +256,7 @@ function drive_upload_complete_logic(array $input): LogicResult {
 		$up->discard();
 		DriveUsage::recompute($owner_id);
 		FileChange::record(FileChange::KIND_CREATED, DriveHelper::ENTITY_FILE, $file->key, $owner_id, $user_id);
+		DriveHelper::forget_sync_meta($file->key);
 
 		$wrapped = $encrypted ? (isset($wrapped_keys[$user_id]) ? $wrapped_keys[$user_id] : null) : null;
 		return LogicResult::render(array('ok' => true, 'file' => DriveHelper::file_export($file, null, null, $wrapped)));

@@ -16,7 +16,7 @@ class FileException extends SystemBaseException {}
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
- * @version 1.6.0
+ * @version 1.7.0
  */
 class File extends SystemBase {	public static $prefix = 'fil';
 	public static $tablename = 'fil_files';
@@ -111,6 +111,14 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	    // JSON-encoded then encrypted under the file key, produced in the browser.
 	    // Opaque here.
 	    'fil_encrypted_metadata' => array('type'=>'text', 'is_nullable'=>true),
+	    // The content's own modification time on the client that uploaded it, as
+	    // distinct from fil_create_time (when the server first saw it). Sync
+	    // clients set it so a file copied back down keeps its original timestamp
+	    // and so a local mtime change is comparable to the server's. Plaintext
+	    // files only: an encrypted file's true mtime lives inside its encrypted
+	    // metadata blob, because a plaintext timestamp on ciphertext would leak
+	    // when the file was last worked on.
+	    'fil_content_modified_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	);
 
 public static function get_by_name($name, $search_deleted = false) {
@@ -510,7 +518,71 @@ public static function get_by_name($name, $search_deleted = false) {
 		return ($source !== null && isset(self::$decrypt_hooks[$source])) ? self::$decrypt_hooks[$source] : null;
 	}
 
-	function serve_from_path($path, $cache_control) {
+	/**
+	 * Parse a Range request header against a known object size.
+	 *
+	 * Single ranges only. A multi-range request, an unparseable header, or a
+	 * unit we do not speak all come back as "no range": RFC 7233 lets a server
+	 * ignore a Range it cannot honor, and serving the whole thing is always a
+	 * correct answer. Only a syntactically valid range that falls outside the
+	 * object is a refusal, because that one is the client being wrong about the
+	 * file rather than asking for something we chose not to do.
+	 *
+	 * @param string|null $header the raw Range header value
+	 * @param int         $total  the full object size in bytes
+	 * @return array{start:int,end:int}|null|false range, null to ignore, false = unsatisfiable (416)
+	 */
+	public static function parse_range_header($header, $total) {
+		if (!is_string($header) || trim($header) === '') {
+			return null;
+		}
+		$total = (int)$total;
+		if (!preg_match('/^\s*bytes\s*=\s*(\d*)\s*-\s*(\d*)\s*$/i', $header, $m)) {
+			return null; // multi-range, another unit, or malformed — serve it whole
+		}
+		$first = $m[1];
+		$last  = $m[2];
+		if ($first === '' && $last === '') {
+			return null;
+		}
+
+		if ($first === '') {
+			// Suffix form: the last N bytes. N of 0 asks for nothing, which is
+			// the one suffix form that cannot be satisfied.
+			$suffix = (int)$last;
+			if ($suffix <= 0 || $total <= 0) {
+				return false;
+			}
+			$start = max(0, $total - $suffix);
+			return array('start' => $start, 'end' => $total - 1);
+		}
+
+		$start = (int)$first;
+		if ($total <= 0 || $start >= $total) {
+			return false;
+		}
+		$end = ($last === '') ? $total - 1 : (int)$last;
+		if ($end < $start) {
+			return false;
+		}
+		if ($end > $total - 1) {
+			$end = $total - 1; // a client may ask past the end; clamp, do not refuse
+		}
+		return array('start' => $start, 'end' => $end);
+	}
+
+	/**
+	 * Stream a file's bytes with the serve-back headers this File owns.
+	 *
+	 * @param string     $path          bytes to serve
+	 * @param string     $cache_control Cache-Control header value
+	 * @param array|null $range_info    when the caller has ALREADY resolved a
+	 *        range and $path holds only that slice (the cloud path asks the
+	 *        storage driver for the byte span rather than pulling the whole
+	 *        object): ['start' => int, 'end' => int, 'total' => int]. Null means
+	 *        $path is the complete object and any Range header is resolved here.
+	 */
+	function serve_from_path($path, $cache_control, $range_info = null) {
 		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
 		VaultUnlock::loadConsumerBootstraps(); // a consumer's decrypt hook is registered lazily, at first use
 		$bytes = null;
@@ -540,14 +612,66 @@ public static function get_by_name($name, $search_deleted = false) {
 			header('Content-Disposition: attachment; filename="' . basename($this->get('fil_name')) . '"');
 		}
 		if ($bytes !== null) {
+			// Served through a decrypt hook: the plaintext is produced in memory
+			// from the whole ciphertext, so there is nothing to seek into and no
+			// honest way to answer a range. No Accept-Ranges is advertised, and a
+			// Range header is ignored rather than half-honored.
 			header('Content-Length: ' . strlen($bytes));
 			echo $bytes;
-		} else {
-			if (($len = @filesize($path)) !== false) {
-				header('Content-Length: ' . $len);
-			}
-			readfile($path);
+			return;
 		}
+
+		header('Accept-Ranges: bytes');
+
+		// The caller already fetched exactly the requested span.
+		if (is_array($range_info)) {
+			$start = (int)$range_info['start'];
+			$end   = (int)$range_info['end'];
+			$total = (int)$range_info['total'];
+			http_response_code(206);
+			header('Content-Range: bytes ' . $start . '-' . $end . '/' . $total);
+			header('Content-Length: ' . ($end - $start + 1));
+			readfile($path);
+			return;
+		}
+
+		$total = @filesize($path);
+		$total = ($total === false) ? 0 : (int)$total;
+		$range = self::parse_range_header($_SERVER['HTTP_RANGE'] ?? null, $total);
+
+		if ($range === false) {
+			http_response_code(416);
+			header('Content-Range: bytes */' . $total);
+			header('Content-Length: 0');
+			return;
+		}
+
+		if ($range === null) {
+			header('Content-Length: ' . $total);
+			readfile($path);
+			return;
+		}
+
+		$length = $range['end'] - $range['start'] + 1;
+		http_response_code(206);
+		header('Content-Range: bytes ' . $range['start'] . '-' . $range['end'] . '/' . $total);
+		header('Content-Length: ' . $length);
+
+		$fh = @fopen($path, 'rb');
+		if ($fh === false) {
+			return;
+		}
+		fseek($fh, $range['start']);
+		$remaining = $length;
+		while ($remaining > 0 && !feof($fh)) {
+			$chunk = fread($fh, min(262144, $remaining));
+			if ($chunk === false || $chunk === '') {
+				break;
+			}
+			echo $chunk;
+			$remaining -= strlen($chunk);
+		}
+		fclose($fh);
 	}
 
 	/**

@@ -387,6 +387,8 @@ core dependency on any one plugin.
 | Turn off the authenticator app | Session + a current TOTP/backup code; refused for a vault holder with no live passkey; ends all windows; trusted devices re-earn |
 | Test the authenticator app | Session only (`/profile/test-authenticator`, reached from the Actions menu on the Security page). Accepts a 6-digit code, never a backup code; a match consumes the time step exactly as a sign-in does, so a tested code cannot be replayed |
 | Forget trusted devices | Session; rotates the device-trust HMAC key so every skip-second-factor cookie dies — no session ends, factor methods untouched |
+| Link a sync device | Session + recent step-up; the browser mints the device's credential, so an unattended unlocked browser must not be enough |
+| Unlink a sync device | Session; revokes the device's session key in the same step |
 | Rotate the vault key | Live PRF assertion from an enrolled passkey |
 | Password reset | An authorizer — email link, passkey, TOTP (no-vault only), or verified recovery address; never opens a vault |
 | Passkey reset on a vault account | Passkey **plus** an independent second factor (TOTP or a different passkey), when one is enrolled |
@@ -441,3 +443,28 @@ screen shows passkey count and vault status from `security_overview` and
 links out to the web security page for management; native enrollment and
 revocation belong to a dedicated future
 `mobile_native_security_credentials` spec.
+
+## Sync devices
+
+A computer running the desktop sync client is listed on `/profile/security`
+under **Sync Devices**, separately from App Sessions. A machine that
+continuously syncs the user's files is a different thing to reason about than
+a phone that has signed in, and it carries facts a bare credential does not:
+when it last checked in, and how far through the change feed it has got. Its
+underlying session key is hidden from the App Sessions list below, so one
+computer never appears as two things signed in.
+
+Linking is the browser ceremony described in `docs/drive.md` § Device linking.
+It is gated on a recent step-up, because approving one mints a standing
+credential for a machine — the same bar as adding a vault unlocker, and for the
+same reason.
+
+Unlinking revokes the device's session key in the same operation. Anything the
+device already downloaded stays on that computer; what stops is future access.
+The blanket sweeps still apply — a password change revokes every session key,
+which cuts off every linked device at once.
+
+The check-in time comes from the device's own change-feed polling rather than a
+separate heartbeat, so there is no client that can forget to send one. A device
+that has quietly stopped syncing shows a stale "last synced" instead of looking
+healthy.
