@@ -29,7 +29,7 @@
     "cookie_consent": "Cookie consent",
     "api": "API",
     "api_rate_limits": "API rate limiting",
-    "logging": "Log retention",
+    "logging": "Data retention",
     "upgrade": "Upgrade settings",
     "cloud_storage": "Cloud storage",
     "oauth": "OAuth providers",
@@ -95,6 +95,17 @@
       "type": "number",
       "validation": {
         "min": 1
+      }
+    },
+    {
+      "name": "idempotency_key_retention_hours",
+      "default": "24",
+      "helptext": "How long a stored idempotency key is honoured for replay. Needs only to outlive the retry window a client would use. 0 keeps them indefinitely.",
+      "group": "api",
+      "label": "Idempotency key retention (hours)",
+      "type": "number",
+      "validation": {
+        "min": 0
       }
     },
     {
@@ -713,7 +724,29 @@
       "validation": {
         "min": 0
       },
-      "helptext": "The scheduled task purges anything older. 0 keeps them indefinitely."
+      "helptext": "The daily retention sweep deletes anything older. 0 keeps them indefinitely."
+    },
+    {
+      "name": "error_log_retention_days",
+      "default": "30",
+      "group": "logging",
+      "label": "Days to keep error records",
+      "type": "number",
+      "validation": {
+        "min": 0
+      },
+      "helptext": "The daily retention sweep deletes anything older. 0 keeps them indefinitely."
+    },
+    {
+      "name": "notification_retention_days",
+      "default": "30",
+      "group": "logging",
+      "label": "Days to keep read notifications",
+      "type": "number",
+      "validation": {
+        "min": 0
+      },
+      "helptext": "Only notifications a member has already read are removed; unread ones are kept however old. 0 keeps everything indefinitely."
     },
     {
       "name": "allowed_upload_extensions",
@@ -1964,6 +1997,50 @@
       "options": {
         "1": "Yes",
         "0": "No"
+      }
+    },
+    {
+      "name": "drive_trash_retention_days",
+      "default": "30",
+      "helptext": "A file or folder in Drive trash is permanently deleted this many days after it was trashed. 0 keeps trash indefinitely.",
+      "group": "drive",
+      "label": "Trash retention (days)",
+      "type": "number",
+      "validation": {
+        "min": 0
+      }
+    },
+    {
+      "name": "drive_change_feed_retention_days",
+      "default": "30",
+      "helptext": "How long the change feed sync clients replay is kept. Must comfortably exceed the longest a client might stay offline. 0 keeps it indefinitely.",
+      "group": "drive",
+      "label": "Change feed retention (days)",
+      "type": "number",
+      "validation": {
+        "min": 0
+      }
+    },
+    {
+      "name": "drive_stale_upload_retention_hours",
+      "default": "24",
+      "helptext": "An upload that stops partway is discarded after this many idle hours, along with its scratch file. 0 keeps them indefinitely.",
+      "group": "drive",
+      "label": "Abandoned upload retention (hours)",
+      "type": "number",
+      "validation": {
+        "min": 0
+      }
+    },
+    {
+      "name": "drive_device_link_grace_minutes",
+      "default": "60",
+      "helptext": "How long a finished device-linking code is kept after it expires or is answered. 0 keeps them indefinitely.",
+      "group": "drive",
+      "label": "Device link retention (minutes)",
+      "type": "number",
+      "validation": {
+        "min": 0
       }
     },
     {

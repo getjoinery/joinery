@@ -1,15 +1,14 @@
 <?php
 /**
- * SyncPaypalSubscriptions
+ * PaypalSubscriptionReconciler
  *
  * Safety net: checks PayPal subscription status for all active PayPal subscriptions.
  * Catches cancellations or status changes that webhooks may have missed.
  *
  * @version 1.0
  */
-require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 
-class SyncPaypalSubscriptions implements ScheduledTaskInterface {
+class PaypalSubscriptionReconciler {
 
     public function run(array $config) {
         require_once(PathHelper::getIncludePath('plugins/store/includes/PaypalHelper.php'));

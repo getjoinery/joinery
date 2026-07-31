@@ -4,7 +4,7 @@
  *
  * On a relay-fronted deployment (specs/inbound_email_hardened_ingest_relay_executor.md),
  * MX-path Fortress mail arrives sealed to the owner's vault public key. While the
- * owner is logged out the pull consumer (PullRelaySpool) can only store operational
+ * owner is logged out the pull consumer (the relay reconcile task) can only store operational
  * metadata + the sealed raw blob in a PENDING-PARSE state — threading and unread
  * counts work, but the subject/sender/body/attachments do not exist as fields yet.
  *

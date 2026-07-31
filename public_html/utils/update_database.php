@@ -803,9 +803,44 @@
 					echo "  Deletion rule: " . htmlspecialchars($dm) . "<br>\n";
 				}
 			}
+			if (!empty($plugin_sync_result['task_messages'])) {
+				foreach ($plugin_sync_result['task_messages'] as $tkm) {
+					echo "  Task: " . htmlspecialchars($tkm) . "<br>\n";
+				}
+			}
 		} catch (Exception $e) {
 			echo "⚠️  Plugin/Theme sync failed: " . htmlspecialchars($e->getMessage()) . "<br>\n";
 			// Non-fatal — core DB update already succeeded
+		}
+
+		// Step: Reconcile scheduled tasks against the filesystem.
+		// The cron runner waits out a grace window before retiring a task whose
+		// file is absent, because a file can be missing mid-deploy. A deploy has
+		// no such doubt: the filesystem is authoritative the moment plugin sync
+		// finishes, so the grace is skipped here. An upgrade therefore retires
+		// the tasks it removed in the same run that installs their replacements,
+		// and the first cron tick afterwards is already clean.
+		echo "<br>\n<strong>Scheduled Task Reconcile</strong><br>\n";
+		try {
+			require_once(PathHelper::getIncludePath('includes/ScheduledTaskRegistry.php'));
+			$retired = ScheduledTaskRegistry::reconcileMissing(true);
+			if (empty($retired['retired'])) {
+				echo "✓ No tasks to retire<br>\n";
+			} else {
+				echo "✓ Retired " . count($retired['retired']) . " task(s): "
+					. htmlspecialchars(implode(', ', $retired['retired'])) . "<br>\n";
+			}
+
+			$activated = ScheduledTaskRegistry::activateDeclared('core');
+			if (empty($activated)) {
+				echo "✓ No core tasks to activate<br>\n";
+			} else {
+				echo "✓ Activated " . count($activated) . " core task(s): "
+					. htmlspecialchars(implode(', ', $activated)) . "<br>\n";
+			}
+		} catch (Throwable $e) {
+			echo "⚠️  Scheduled task reconcile failed: " . htmlspecialchars($e->getMessage()) . "<br>\n";
+			// Non-fatal — tasks reconcile again on the next cron tick.
 		}
 
 		// Step: One-time conditional store / event_manager activation (upgrade path).

@@ -1,8 +1,13 @@
 {
-    "name": "Apply Inbound Email Filters to Existing Mail",
-    "description": "Drains the backlog from filters saved with 'Also apply to matching existing mail'. Pages through each mailbox's locally-received, non-deleted stored messages in bounded batches and applies the same match and actions the ingest hook uses (forwarding is never re-applied to historical mail). Resumes across runs via a per-filter cursor.",
-    "default_frequency": "every_run",
-    "config_fields": {
-        "batch_size": {"type": "number", "label": "Messages per filter per run (default 200)", "required": false}
+  "name": "Apply Inbound Email Filters to Existing Mail",
+  "description": "Drains the backlog from filters saved with 'Also apply to matching existing mail'. Pages through each mailbox's locally-received, non-deleted stored messages in bounded batches and applies the same match and actions the ingest hook uses (forwarding is never re-applied to historical mail). Resumes across runs via a per-filter cursor.",
+  "activate_on_install": true,
+  "default_frequency": "every_run",
+  "config_fields": {
+    "batch_size": {
+      "type": "number",
+      "label": "Messages per filter per run (default 200)",
+      "required": false
     }
+  }
 }

@@ -67,7 +67,7 @@ class MailboxFleetSlot extends SystemBase {
 		// dispatched for this slot; fleet_status reconciles from it lazily.
 		'mft_last_job_id'           => array('type'=>'int8'),
 		// Set when the slot's verified-domain set changed (a claim verified, a
-		// suspension); the FleetReconcile task dispatches the set-domains job
+		// suspension); the relay reconcile task dispatches the set-domains job
 		// and clears it once the shard allowlist matches again.
 		'mft_needs_domain_sync'     => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		// Entitlement bookkeeping: last successful re-check, and when a lapse was

@@ -24,6 +24,15 @@ class RequestLog extends SystemBase {
 	public static $pkey_column = 'rql_request_log_id';
 	public static $permanent_delete_actions = array();
 
+	// Retention: the daily sweep deletes rows older than the window.
+	// 0 in the setting means never purge. See docs/scheduled_tasks.md.
+	public static $retention_policy = array(
+		'label'          => 'Request log',
+		'age_column'     => 'rql_create_time',
+		'age_unit'       => 'days',
+		'window_setting' => 'request_log_retention_days',
+	);
+
 	/**
 	 * Field specifications define database column properties and validation rules
 	 *

@@ -1,6 +1,0 @@
-{
-    "name": "Provision Customer Cloud",
-    "description": "Advances customer-cloud hosting provisions: creates the instance on the buyer's connected cloud account once they grant access, waits for boot, dispatches the standard install job, and drives result processing to completion. Pairs with Poll Hosting Orders.",
-    "default_frequency": "every_run",
-    "config_fields": []
-}

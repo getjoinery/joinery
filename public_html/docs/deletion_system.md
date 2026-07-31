@@ -497,7 +497,8 @@ timed purge:
 - **Selective restore** captures the folder's `delete_time` before `undelete()` and
   restores only descendants with `delete_time >=` it — a child trashed
   independently *earlier* stays in the trash.
-- **Timed purge** — the `DrivePurgeTrash` scheduled task calls `permanent_delete()`
+- **Timed purge** — the daily retention sweep calls `File::purgeExpiredTrash()`,
+  which calls `permanent_delete()`
   on items trashed longer than its window (default 30 days); blob reference counts
   reclaim the shared bytes. A file's `fil_fol_folder_id` uses `'action' => 'null'`
   so a raw folder permanent-delete *orphans* files to the root rather than

@@ -33,6 +33,16 @@ class InboundMailboxSearchIndex extends SystemBase {
 		'imi_usr_user_id' => ['action' => 'cascade'],
 	];
 
+	// Retention: the /dev/shm working copies of this index, not the rows.
+	// window_setting is null because the rule is unconditional — a working copy
+	// whose vault window has closed is never wanted, so there is no age for an
+	// operator to choose. See sweepWorkingCopies() for what actually runs.
+	public static $retention_policy = array(
+		'label'          => 'Mailbox index working copies',
+		'purge_method'   => 'sweepWorkingCopies',
+		'window_setting' => null,
+	);
+
 	public static $field_specifications = array(
 		'imi_inbound_mailbox_search_index_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true, 'is_primary_key'=>true),
 		'imi_usr_user_id'      => array('type'=>'int8', 'is_nullable'=>false, 'unique'=>true,
@@ -61,6 +71,49 @@ class InboundMailboxSearchIndex extends SystemBase {
 		$row->save();
 		$row->load();
 		return $row;
+	}
+
+	/**
+	 * Passive-close safety net for the /dev/shm working copies of this index
+	 * (specs/implemented/inbound_email_encryption_at_rest.md § 6.4).
+	 *
+	 * The wipe callback (plugins/mailbox/includes/bootstrap.php) already deletes
+	 * a user's working copy on an explicit lock or credential event. This
+	 * catches everything else that ends a window without firing that callback —
+	 * an APCu TTL idle expiry, a php-fpm worker recycle. Worst case a working
+	 * copy lingers until the next sweep.
+	 *
+	 * Unconditional: a copy whose vault window has closed is plaintext nobody
+	 * asked for, so there is no window to wait out. $window is ignored.
+	 *
+	 * @return array  removed, message
+	 */
+	public static function sweepWorkingCopies($window = 0) {
+		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
+
+		$files = glob('/dev/shm/mailfts_*.sqlite');
+		if ($files === false || !count($files)) {
+			return array('removed' => 0, 'message' => 'no working copies present');
+		}
+
+		$swept = 0;
+		foreach ($files as $path) {
+			if (!preg_match('/mailfts_(\d+)\.sqlite$/', basename($path), $m)) {
+				continue; // not one of ours — leave it alone
+			}
+			if (VaultUnlock::hasAnyOpenWindow((int)$m[1], UserEncryptionVault::SCOPE_USER)) {
+				continue; // still in-window somewhere — not this sweep's to touch
+			}
+			if (@unlink($path)) {
+				$swept++;
+			}
+		}
+
+		return array(
+			'removed' => $swept,
+			'message' => $swept === 0 ? 'no orphaned working copies' : $swept . ' orphaned working cop' . ($swept === 1 ? 'y' : 'ies'),
+		);
 	}
 }
 

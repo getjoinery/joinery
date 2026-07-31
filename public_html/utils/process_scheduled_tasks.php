@@ -8,7 +8,14 @@
  * Crontab (one line per site):
  * STAR/15 * * * * php /var/www/html/{sitename}/public_html/utils/process_scheduled_tasks.php >> /var/www/html/{sitename}/logs/cron_scheduled_tasks.log 2>&1
  *
- * @version 1.4
+ * FAILURE CONTAINMENT: one task must never take down the pass. Every task is
+ * guarded against Throwable (not just Exception — a TypeError or a parse error
+ * in a task file is an Error), the file load happens inside that guard, and a
+ * shutdown handler catches the fatals PHP cannot. A task can fail; it cannot
+ * stop the tasks ordered after it, and it cannot leave its row showing a stale
+ * last-run-success.
+ *
+ * @version 2.0
  */
 
 // Reject non-CLI access
@@ -25,9 +32,48 @@ require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
+require_once(PathHelper::getIncludePath('includes/ScheduledTaskRegistry.php'));
 
 $timestamp = date('Y-m-d H:i:s');
 echo "[$timestamp] Scheduled tasks cron runner started\n";
+
+// The id of the task currently executing, read by the shutdown handler below.
+// Null whenever the runner is between tasks.
+$current_task_id = null;
+
+/**
+ * Last-resort status recorder.
+ *
+ * Registered so that a failure PHP cannot catch — an out-of-memory kill, a
+ * fatal in a task's file scope, a task calling exit() — still lands on the
+ * responsible row. Without it, the one class of failure that can still end the
+ * run is also the one that leaves no trace: the row would keep its previous
+ * successful status and admin would show the task as healthy.
+ */
+register_shutdown_function(function () use (&$current_task_id) {
+	if ($current_task_id === null) {
+		return;
+	}
+	$error = error_get_last();
+	if (!$error || !in_array($error['type'], array(E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR), true)) {
+		// A task that called exit() leaves no error; it still died mid-run.
+		$message = 'Task ended the process without returning a result';
+	} else {
+		$message = $error['message'] . ' in ' . $error['file'] . ':' . $error['line'];
+	}
+	try {
+		$dying = new ScheduledTask($current_task_id, true);
+		if ($dying->key) {
+			$dying->set('sct_last_run_time', 'now()');
+			$dying->set('sct_last_run_status', 'error');
+			$dying->set('sct_last_run_message', mb_substr($message, 0, 500));
+			$dying->save();
+		}
+	} catch (Throwable $e) {
+		// Nothing further can be done from a shutdown handler.
+	}
+	echo "[" . date('Y-m-d H:i:s') . "]   FATAL: $message\n";
+});
 
 // Update the heartbeat setting
 $dbconnector = DbConnector::get_instance();
@@ -44,6 +90,18 @@ try {
 	}
 } catch (PDOException $e) {
 	echo "[$timestamp] Warning: Could not update heartbeat setting: " . $e->getMessage() . "\n";
+}
+
+// Reconcile rows against the filesystem before anything tries to run them.
+// A task whose code file was removed by an upgrade retires quietly here rather
+// than erroring on every tick — see ScheduledTaskRegistry::reconcileMissing().
+try {
+	$reconciled = ScheduledTaskRegistry::reconcileMissing();
+	foreach ($reconciled['retired'] as $retired_name) {
+		echo "[$timestamp] Retired: $retired_name\n";
+	}
+} catch (Throwable $e) {
+	echo "[$timestamp] Warning: reconcile failed: " . $e->getMessage() . "\n";
 }
 
 // Load all active, non-deleted tasks
@@ -92,24 +150,15 @@ foreach ($tasks as $task) {
 		// Resolve the task class file
 		$task_file = $task->resolve_task_file();
 		if (!$task_file) {
-			// The task's code file is gone — almost always because the
-			// task was removed or consolidated in a deploy while its
-			// activation row was left behind (orphan-by-design; deploys
-			// never delete operator-configured task rows). This is an
-			// operator-cleanup item, not a task that ran and failed, so it
-			// gets a distinct 'orphaned' status with a clear "remove or
-			// restore" message. It still counts toward the error tally so
-			// the cron-health summary stays honest.
-			echo "[$timestamp]   ORPHANED: No class file for $task_class — remove the task in admin or restore the file\n";
-			$task->set('sct_last_run_time', 'now()');
-			$task->set('sct_last_run_status', 'orphaned');
-			$task->set('sct_last_run_message', 'Task code file is missing — remove this task in admin, or restore the file');
-			$task->save();
-			$tasks_errored++;
+			// The reconcile at the top of this pass has already stamped or
+			// retired this row. Absent code is a normal upgrade event, not a
+			// task that ran and failed, so it is counted as neither.
 			continue;
 		}
 
-		// Load and instantiate the task
+		// Load and instantiate the task. The require sits inside the guard so
+		// that a parse error in a task file is contained to that task.
+		$current_task_id = $task->key;
 		try {
 			require_once($task_file);
 
@@ -159,13 +208,19 @@ foreach ($tasks as $task) {
 			} else {
 				$tasks_errored++;
 			}
-		} catch (Exception $e) {
-			echo "[$timestamp]   EXCEPTION: " . $e->getMessage() . "\n";
+		} catch (Throwable $e) {
+			// Throwable, not Exception: a TypeError, a call to a method that
+			// an upgrade removed, or a ParseError in the task file is an Error
+			// and would otherwise be an uncaught fatal — killing the process
+			// mid-loop and silently skipping every task ordered after this one.
+			echo "[$timestamp]   " . get_class($e) . ": " . $e->getMessage() . "\n";
 			$task->set('sct_last_run_time', 'now()');
 			$task->set('sct_last_run_status', 'error');
-			$task->set('sct_last_run_message', substr($e->getMessage(), 0, 500));
+			$task->set('sct_last_run_message', mb_substr($e->getMessage(), 0, 500));
 			$task->save();
 			$tasks_errored++;
+		} finally {
+			$current_task_id = null;
 		}
 	} finally {
 		try {

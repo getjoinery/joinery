@@ -15,9 +15,8 @@
  * @version 1.2 - port allocation delegates to JobCommandBuilder::next_container_port (single allocator)
  * @version 1.1
  */
-require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 
-class PollHostingOrders implements ScheduledTaskInterface {
+class PollHostingOrders {
 
 	public function run(array $config): array {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_host_class.php'));
@@ -64,7 +63,7 @@ class PollHostingOrders implements ScheduledTaskInterface {
 		$handled = array_map('intval', array_column($q->fetchAll(PDO::FETCH_ASSOC), 'mjb_external_order_item_id'));
 
 		// Customer-cloud orders are handled the moment their provision row exists
-		// (any status) — the ProvisionCustomerCloud task owns them from there.
+		// (any status) — the provisioning task owns them from there.
 		$q = $db->query(
 			"SELECT cvp_external_order_item_id FROM cvp_customer_cloud_provisions WHERE cvp_delete_time IS NULL"
 		);

@@ -36,9 +36,8 @@
  *
  * @version 1.4
  */
-require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 
-class ProvisionCustomerCloud implements ScheduledTaskInterface {
+class ProvisionCustomerCloud {
 
 	const BOOT_TIMEOUT_SECONDS = 1800; // 30 min from instance create to running
 

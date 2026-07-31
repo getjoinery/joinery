@@ -169,13 +169,14 @@ HTML;
 		 WHERE stg_name = 'tier_upgrade_url' AND (stg_value IS NULL OR stg_value = '')"
 	);
 
-	// ---- 4. Re-attribute pre-extraction scheduled-task rows -----------------
-	// These task classes seeded their sct_scheduled_tasks rows while the task
-	// files lived in core /tasks/ (sct_plugin_name NULL). Claim any unattributed
-	// rows so deactivate/uninstall suspends them. Idempotent.
+	// ---- 4. Re-attribute unclaimed scheduled-task rows ----------------------
+	// Claim any store task row left unattributed (sct_plugin_name NULL) so
+	// deactivate/uninstall suspends it. Idempotent. The named classes are rows a
+	// site may still carry from earlier releases; they retire on their own once
+	// their code is absent, and this only makes sure they retire as the store's.
 	$reattr = $dblink->prepare(
 		"UPDATE sct_scheduled_tasks SET sct_plugin_name = 'store'
-		 WHERE sct_task_class IN ('ReconcileStripeSubscriptions', 'SyncPaypalSubscriptions')
+		 WHERE sct_task_class IN ('ReconcileSubscriptions', 'ReconcileStripeSubscriptions', 'SyncPaypalSubscriptions')
 		   AND sct_plugin_name IS NULL"
 	);
 	$reattr->execute();

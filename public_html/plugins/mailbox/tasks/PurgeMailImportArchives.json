@@ -1,8 +1,0 @@
-{
-    "name": "Purge finished mail import archives",
-    "description": "Reclaims the source archives of imports that finished more than the retention period ago, and clears working directories left by runs that ended abnormally. Archives picked from a member's own Drive are released, never deleted. A grace period is kept deliberately so an import can be undone and re-run.",
-    "default_frequency": "daily",
-    "config_fields": {
-        "retention_days": {"type": "number", "label": "Days to keep a finished import's archive (default 7)", "required": false}
-    }
-}

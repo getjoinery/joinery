@@ -3,7 +3,7 @@
  * fleet_release - relinquish the tenant's fleet slot (the exit ramp).
  *
  * (specs/mailbox_relay_shared_fleet.md § Goal — the exit ramp keeps the trust
- * cheap). Marks the slot released; the FleetReconcile task dispatches the
+ * cheap). Marks the slot released; the relay reconcile task dispatches the
  * remove-tenant job, which refuses while the tenant's spool still holds
  * undrained sealed mail — so release, keep pulling until the spool drains,
  * and the slot evicts cleanly. Mail queues at senders during the tenant's

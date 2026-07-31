@@ -3,7 +3,7 @@
  * Profile dashboard logic — loads summary data for the member dashboard.
  *
  * Subscription reconciliation runs on the cron runner
- * (tasks/ReconcileStripeSubscriptions), never inline here — a page render is
+ * (the ReconcileSubscriptions task), never inline here — a page render is
  * read-only.
  *
  * @version 2.1

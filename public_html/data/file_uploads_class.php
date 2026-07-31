@@ -10,7 +10,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
  * stored). The chunk transport (PUT /api/v1/drive_upload/{token}) appends bytes
  * to a scratch part-file outside the web root; drive_upload_complete ingests the
  * assembled bytes into a File (or a new FileVersion) and deletes the row. Stale
- * rows + part-files are swept by DrivePurgeStaleUploads.
+ * rows + part-files are swept by the retention sweep (see $retention_policy).
  *
  * @version 1.1.0
  */
@@ -25,6 +25,14 @@ class FileUpload extends SystemBase {
 		'fup_usr_user_id'   => array('action' => 'cascade'),
 		'fup_fol_folder_id' => array('action' => 'null'),
 		'fup_fil_file_id'   => array('action' => 'cascade'),
+	);
+
+	// Retention: a pending upload row owns a scratch file on disk, so this
+	// needs more than a DELETE. 0 in the setting means never purge.
+	public static $retention_policy = array(
+		'label'          => 'Stale Drive uploads',
+		'purge_method'   => 'purgeStaleUploads',
+		'window_setting' => 'drive_stale_upload_retention_hours',
 	);
 
 	public static $field_specifications = array(
@@ -92,6 +100,51 @@ class FileUpload extends SystemBase {
 			@unlink($part);
 		}
 		$this->permanent_delete();
+	}
+
+	/**
+	 * Discard resumable uploads that went idle and never completed.
+	 *
+	 * Row-by-row through discard(), because each row owns a scratch .part file
+	 * on disk — a bulk DELETE would drop the rows and leak the bytes. The second
+	 * pass catches the reverse: a .part file whose row is already gone, which
+	 * nothing else would ever collect.
+	 *
+	 * @param int $hours  Idle window from the retention setting
+	 * @return array      removed, message
+	 */
+	public static function purgeStaleUploads($hours) {
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$q = $dblink->prepare(
+			"SELECT fup_file_upload_id FROM fup_file_uploads
+			  WHERE COALESCE(fup_update_time, fup_create_time) < now() - (INTERVAL '1 hour' * :hours)");
+		$q->execute(array(':hours' => (int)$hours));
+
+		$purged = 0;
+		foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $id) {
+			$up = new self((int)$id, true);
+			if ($up->key) {
+				$up->discard();
+				$purged++;
+			}
+		}
+
+		$orphans = 0;
+		foreach (glob(self::scratch_dir() . '/*.part') ?: array() as $path) {
+			$row = new self((int)basename($path, '.part'), true);
+			if (!$row->key) {
+				@unlink($path);
+				$orphans++;
+			}
+		}
+
+		if ($purged === 0 && $orphans === 0) {
+			return array('removed' => 0, 'message' => 'no stale Drive uploads');
+		}
+		return array(
+			'removed' => $purged + $orphans,
+			'message' => $purged . ' stale upload(s), ' . $orphans . ' orphan part-file(s)',
+		);
 	}
 }
 

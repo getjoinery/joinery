@@ -10,10 +10,9 @@
  * @version 1.2 - CF domains awaiting routing (CF_ROUTING_UNVERIFIED) are exempt from the 16h give-up
  * @version 1.1 - P-6: dispatch Cloudflare-proxied domains (builder's CF branch) instead of skipping on the A-record gate
  */
-require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
 
-class ProvisionPendingSsl implements ScheduledTaskInterface {
+class ProvisionPendingSsl {
 
 	public function run(array $config): array {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));

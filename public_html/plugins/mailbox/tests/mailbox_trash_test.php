@@ -20,7 +20,7 @@
  *  - purge: the row, the attachment File and the refold queue entry
  *  - purge dates: computed from the retention setting, absent when it is 0
  *  - a sealed (Fortress-shaped) message purges with no unlock window
- *  - PurgeMailboxTrash: the window, report_only, the per-run cap, 0 = skipped
+ *  - the retention rule: the declared policy, the window, and 0 = never purge
  *  - the search index holds trashed mail and the read scope decides (Change 2a),
  *    including the restore-then-search regression that change exists to fix
  *
@@ -363,11 +363,17 @@ if (!is_dir(MailboxIndex::SHM_DIR)) {
 	$idx->wipe($owner_id);
 }
 
-// ---- the purge task ------------------------------------------------------
-section('PurgeMailboxTrash');
+// ---- the retention rule --------------------------------------------------
+// Trash purging is declared as InboundEmailMessage::$retention_policy and run by
+// the platform's daily Retention Sweep. The window is the setting the mail
+// reader already shows members as each message's purge date.
+section('Trash retention rule');
 
-require_once(PathHelper::getIncludePath('plugins/mailbox/tasks/PurgeMailboxTrash.php'));
-$task = new PurgeMailboxTrash();
+$policy = InboundEmailMessage::$retention_policy;
+check(($policy['window_setting'] ?? null) === 'mailbox_trash_retention_days',
+	'the rule reads the same setting the reader shows members', json_encode($policy));
+check(is_callable(array('InboundEmailMessage', $policy['purge_method'] ?? '')),
+	'the declared purge method exists on the class');
 
 $old_one = $make_msg($mine_alias, '<old1@x>', 'Old one', 'oldbody1');
 $old_two = $make_msg($mine_alias, '<old2@x>', 'Old two', 'oldbody2');
@@ -377,27 +383,20 @@ $db->exec("UPDATE iem_inbound_email_messages
 	SET iem_delete_time = now() - interval '40 days'
 	WHERE iem_inbound_email_message_id IN ($old_one, $old_two)");
 
-$res = $task->run(array('days_to_keep' => 0));
-check(($res['status'] ?? '') === 'skipped', 'days_to_keep 0 skips the run', json_encode($res));
-check($row_exists($old_one), 'nothing was purged');
-
+// A window of 0 means never purge. The sweep enforces that by not calling the
+// rule at all, so the guarantee is tested where it lives.
 harness_set_setting_mem('mailbox_trash_retention_days', '0');
-$res = $task->run(array());
-check(($res['status'] ?? '') === 'skipped', 'an unset window follows the setting, which is off', json_encode($res));
+require_once(PathHelper::getIncludePath('tasks/RetentionSweep.php'));
+$sweep = new RetentionSweep();
+$sweep->run(array());
+check($row_exists($old_one) && $row_exists($old_two),
+	'a window of 0 means never purge — the sweep skips the rule entirely');
+
 harness_set_setting_mem('mailbox_trash_retention_days', '30');
-
-$res = $task->run(array('report_only' => '1'));
-check(($res['status'] ?? '') === 'success' && strpos($res['message'], 'Report only') === 0,
-	'report_only reports', json_encode($res));
-check($row_exists($old_one) && $row_exists($old_two), 'report_only deleted nothing');
-
-$res = $task->run(array('max_per_run' => 1));
-check(strpos($res['message'], 'cap') !== false, 'hitting the per-run cap is stated', json_encode($res));
-$left = ($row_exists($old_one) ? 1 : 0) + ($row_exists($old_two) ? 1 : 0);
-check($left === 1, 'exactly one of the two was purged under the cap', "left=$left");
-
-$res = $task->run(array());
-check(($res['status'] ?? '') === 'success', 'the unset window follows the 30-day setting', json_encode($res));
+$res = InboundEmailMessage::purgeExpiredTrash(30);
+check(isset($res['removed']) && isset($res['message']),
+	'the purge method returns the removed/message contract', json_encode($res));
+check((int)$res['removed'] === 2, 'both past-window messages were counted', json_encode($res));
 check(!$row_exists($old_one) && !$row_exists($old_two), 'both past-window messages are gone');
 check($row_exists($recent), 'a message trashed today is untouched');
 

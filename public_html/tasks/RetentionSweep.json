@@ -1,0 +1,21 @@
+{
+  "name": "Retention Sweep",
+  "description": "Enforces every retention window on the platform. Each window is a setting on the page for the feature it governs; 0 means never purge.",
+  "activate_on_install": true,
+  "default_frequency": "daily",
+  "default_time": "03:00:00",
+  "replaces": [
+    "PurgeOldErrors",
+    "PurgeOldRequestLogs",
+    "NotificationCleanup",
+    "PurgeIdempotencyKeys",
+    "DrivePurgeChanges",
+    "DrivePurgeTrash",
+    "DrivePurgeStaleUploads",
+    "DrivePurgeDeviceLinks",
+    "PurgeOldInboundEmailLogs",
+    "PurgeMailboxTrash",
+    "PurgeMailImportArchives",
+    "SweepMailboxIndexTemp"
+  ]
+}

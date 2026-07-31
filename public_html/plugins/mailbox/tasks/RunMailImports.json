@@ -1,10 +1,23 @@
 {
-    "name": "Import mail archives",
-    "description": "Advances mail archive imports one bounded batch per run per pass: scans a source archive to find what is in it, then stores the messages the user selected. Runs every cron pass; a large import simply takes many passes. Failures are per-message and never abort a run.",
-    "default_frequency": "every_run",
-    "config_fields": {
-        "batch_size": {"type": "number", "label": "Messages stored per pass (default 200)", "required": false},
-        "max_concurrent": {"type": "number", "label": "Imports underway at once (default 2)", "required": false},
-        "scan_seconds": {"type": "number", "label": "Seconds spent scanning per pass (default 120)", "required": false}
+  "name": "Import mail archives",
+  "description": "Advances mail archive imports one bounded batch per run per pass: scans a source archive to find what is in it, then stores the messages the user selected. Runs every cron pass; a large import simply takes many passes. Failures are per-message and never abort a run.",
+  "activate_on_install": true,
+  "default_frequency": "every_run",
+  "config_fields": {
+    "batch_size": {
+      "type": "number",
+      "label": "Messages stored per pass (default 200)",
+      "required": false
+    },
+    "max_concurrent": {
+      "type": "number",
+      "label": "Imports underway at once (default 2)",
+      "required": false
+    },
+    "scan_seconds": {
+      "type": "number",
+      "label": "Seconds spent scanning per pass (default 120)",
+      "required": false
     }
+  }
 }

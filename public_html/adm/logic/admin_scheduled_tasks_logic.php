@@ -152,7 +152,7 @@ function admin_scheduled_tasks_logic(array $input): LogicResult {
 	// Determine which active tasks support dry run
 	require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 	$dry_run_supported = array();
-	$orphaned_tasks = array();
+	$retired_tasks = array();
 	foreach ($active_tasks as $task) {
 		$task_class = $task->get('sct_task_class');
 		$task_file = $task->resolve_task_file();
@@ -165,11 +165,11 @@ function admin_scheduled_tasks_logic(array $input): LogicResult {
 				}
 			}
 		} else {
-			// Code file is gone — the activation row is an orphan (task
-			// removed/consolidated in a deploy). Flag it live so the row
-			// reads as "remove or restore" rather than relying on the
-			// stored status, which is stale until the next cron tick.
-			$orphaned_tasks[$task->key] = true;
+			// Code file is gone — the task was removed or consolidated in a
+			// deploy. Flag it live so the row reads as retired immediately,
+			// rather than relying on the stored status, which is stale until
+			// the reconcile on the next cron tick.
+			$retired_tasks[$task->key] = true;
 		}
 	}
 
@@ -191,7 +191,7 @@ function admin_scheduled_tasks_logic(array $input): LogicResult {
 		'mailing_lists' => $mailing_lists,
 		'site_timezone' => $site_timezone,
 		'dry_run_supported' => $dry_run_supported,
-		'orphaned_tasks' => $orphaned_tasks,
+		'retired_tasks' => $retired_tasks,
 		'dry_run_preview_html' => $dry_run_preview_html,
 	));
 }
@@ -199,57 +199,15 @@ function admin_scheduled_tasks_logic(array $input): LogicResult {
 /**
  * Discover tasks by scanning /tasks/ and plugin task directories.
  *
+ * The scan itself lives in ScheduledTaskRegistry so the cron runner,
+ * PluginManager and update_database can reach it without requiring an admin
+ * logic file.
+ *
  * @return array  Keyed by class name, value is array with json data and source path
  */
 function _discover_tasks() {
-	$tasks = array();
-
-	// Scan /tasks/
-	$core_tasks_dir = PathHelper::getIncludePath('tasks');
-	if (is_dir($core_tasks_dir)) {
-		$json_files = glob($core_tasks_dir . '/*.json');
-		foreach ($json_files as $json_file) {
-			$class_name = basename($json_file, '.json');
-			$php_file = dirname($json_file) . '/' . $class_name . '.php';
-			if (file_exists($php_file)) {
-				$json_data = json_decode(file_get_contents($json_file), true);
-				if ($json_data) {
-					$tasks[$class_name] = array(
-						'json' => $json_data,
-						'source' => 'core',
-						'json_path' => $json_file,
-						'php_path' => $php_file,
-					);
-				}
-			}
-		}
-	}
-
-	// Scan plugin task directories
-	$plugins_dir = PathHelper::getIncludePath('plugins');
-	if (is_dir($plugins_dir)) {
-		$plugin_task_jsons = glob($plugins_dir . '/*/tasks/*.json');
-		foreach ($plugin_task_jsons as $json_file) {
-			$class_name = basename($json_file, '.json');
-			$php_file = dirname($json_file) . '/' . $class_name . '.php';
-			if (file_exists($php_file)) {
-				$json_data = json_decode(file_get_contents($json_file), true);
-				if ($json_data) {
-					// Extract plugin name from path
-					$path_parts = explode('/', dirname($json_file));
-					$plugin_name = $path_parts[count($path_parts) - 2];
-					$tasks[$class_name] = array(
-						'json' => $json_data,
-						'source' => 'plugin:' . $plugin_name,
-						'json_path' => $json_file,
-						'php_path' => $php_file,
-					);
-				}
-			}
-		}
-	}
-
-	return $tasks;
+	require_once(PathHelper::getIncludePath('includes/ScheduledTaskRegistry.php'));
+	return ScheduledTaskRegistry::discover();
 }
 
 /**

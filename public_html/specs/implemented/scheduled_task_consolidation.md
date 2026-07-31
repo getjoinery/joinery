@@ -98,6 +98,12 @@ A `purge_method` rule that touches several tables is declared on the class that
 anchors the operation, not split across them — `DrivePurgeTrash` sits on `File` and
 handles folders from there. One rule, one owner, one entry in the run summary.
 
+`PurgeMailImportArchives` anchors on `MailImportRun`: it ages import runs by when
+they finished, and Drive is only where the reclaimed bytes live. Its orphaned
+working-directory sweep stays inside that same purge method rather than becoming a
+rule of its own — it parses a run id out of each directory name and checks
+`mir_state` before removing anything, so it is the run's own litter.
+
 The whole vocabulary is five keys, and a rule uses four: `label`, `window_setting`,
 then either `age_column` + `age_unit` (plus optional `only_where`) or
 `purge_method`. Every rule must name a `window_setting`.
@@ -139,7 +145,13 @@ rather than buried in a task edit form, a member-facing surface can read it, and
 the sweep task itself ends up with no `config_fields` at all.
 
 **`0` in any window means "never purge"** — the rule is skipped, not run with a
-default. This preserves the existing `PurgeMailboxTrash` semantics.
+default. This preserves the existing `PurgeMailboxTrash` semantics and applies it
+everywhere.
+
+It changes one task's behavior. `PurgeMailImportArchives` today treats a window of
+`0` as "fall back to 7 days", so an operator cannot currently turn it off. Under
+the unified rule `0` turns it off and 7 remains the factory default, which is the
+answer an operator would expect from a field they can set to zero.
 
 Settings to declare, with their current task-config defaults carried over as the
 factory default:
@@ -530,3 +542,36 @@ or plugin lifecycle.
 - **The runner catches `Throwable`, not `Exception`.** Pre-existing defect, not
   introduced here — a task fatal currently ends the entire cron pass and leaves the
   culprit showing its previous successful run.
+
+## As built
+
+Implemented and verified 2026-07-31 (`db` tier 203/203, 6220 checks; a live cron
+pass reporting 9 run, 0 errors). Seven things landed differently from the plan
+above, each because the existing code said otherwise:
+
+- **The rule split is 6 age-form / 6 method-form, not 8/3.**
+  `DrivePurgeStaleUploads` discards each row through `discard()` because every row
+  owns a scratch `.part` file, and `DrivePurgeDeviceLinks` ages on two different
+  columns in an `OR`. Neither fits a single `DELETE`.
+- **`request_log_retention_days` already existed**, declared with default 90 and
+  read by nothing. Reused rather than adding a second 30-day setting, so it has a
+  reader for the first time.
+- **`mailbox_inbound_log_retention_days` was not created.**
+  `mailbox_log_retention_days` already meant exactly that; the rule points at it.
+- **`SweepMailboxIndexTemp` became a windowless rule, not a hardcoded step.** A
+  step inside `RetentionSweep` would make core `require` mailbox code. It is
+  `InboundMailboxSearchIndex::sweepWorkingCopies()` with `window_setting` null,
+  which is the shape this spec had removed and then needed.
+- **`PurgeMailboxTrash` lost `report_only` and a configurable `max_per_run`.** The
+  sweep has no `config_fields`, so both went; the per-run cap is a constant 500.
+  `report_only` was a small dry-run capability and has no replacement.
+- **Migration 159's `INSERT` is neutralized rather than left live.** As written it
+  would create a `DrivePurgeDeviceLinks` row on every *fresh* install, which would
+  then immediately retire — a new site showing a retired task it never had. The
+  entry stays so version numbering is unbroken.
+- **The provisioning and subscription phase bodies moved rather than being
+  rewritten**, to `plugins/server_manager/includes/provisioning/` and
+  `plugins/store/includes/subscriptions/`, as plain classes.
+
+`docs/settings.md` carries no per-setting inventory, so the documentation item
+naming it had nothing to add.

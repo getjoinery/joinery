@@ -37,7 +37,7 @@
  * every read scope pins that column NULL, so a trashed message leaves every view.
  * The Trash view inverts the pin (trashScopeSql) and is the ONLY read that sees
  * those rows; restoreFromTrash() and purgeFromTrash() are the only mutations that
- * reach them (trashMutationScopeSql). PurgeMailboxTrash purges on a window.
+ * reach them (trashMutationScopeSql). The retention sweep purges on a window.
  *
  * Native clients (specs/implemented/mobile_native_email_server_api_and_ios.md): withSignedTransport() enriches a
  * getThread() payload with short-lived signed URLs (docs/file_signed_urls.md) so
@@ -254,7 +254,7 @@ class MailboxService {
 	}
 
 	/**
-	 * How many days mail stays in Trash before PurgeMailboxTrash deletes it for
+	 * How many days mail stays in Trash before the retention sweep deletes it for
 	 * good; 0 means never. Read from the declared setting, so the reader's purge
 	 * dates and the task's cutoff can never disagree.
 	 */
@@ -1475,7 +1475,7 @@ class MailboxService {
 
 	/**
 	 * Delete in-scope trashed messages for good — the reader's "Delete forever"
-	 * and what PurgeMailboxTrash does on a timer.
+	 * and what the retention sweep does on a timer.
 	 *
 	 * Row by row through the model, never a bulk DELETE: permanent_delete()
 	 * reclaims the attachment Files and the stored raw object, and raw SQL would

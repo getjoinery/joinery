@@ -1,9 +1,0 @@
-{
-    "name": "Drive: Purge Change Feed",
-    "description": "Trims the Drive change feed (fch_file_changes) past the retention window.",
-    "default_frequency": "daily",
-    "default_time": "04:15:00",
-    "config_fields": {
-        "days_to_keep": {"type": "number", "label": "Days of change history to keep", "required": true}
-    }
-}
