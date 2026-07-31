@@ -6,9 +6,11 @@
  * action ∈ {mark_read, mark_unread, star, unstar, delete, archive,
  * unarchive, mark_spam, mark_not_spam, restore, purge, set_membership,
  * create_folder},
- * targets as ids[] (message ids) OR thread_key (expanded server-side,
- * optionally narrowed by alias_id), plus folder_id/present for
- * set_membership and name for create_folder. Every mutation re-checks scope
+ * targets as ids[] (message ids) OR thread_key OR thread_keys[] (each expanded
+ * server-side, optionally narrowed by alias_id), plus folder_id/present for
+ * set_membership and name for create_folder. thread_keys[] is what the reader's
+ * multi-select sends: one request for a whole selection, so a bulk archive is
+ * one scope check and one write rather than N of each. Every mutation re-checks scope
  * in SQL — same guarantees as the web reader's action endpoint, same
  * MailboxService brain (specs/implemented/mobile_native_email_server_api_and_ios.md).
  *
@@ -16,7 +18,7 @@
  * (specs/mailbox_trash_folder.md), so they expand a thread_key under the Trash
  * scope; every other action refuses a discarded row by scope.
  *
- * @version 1.1.0
+ * @version 1.2.0
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -36,7 +38,9 @@ function thread_action_logic(array $input): LogicResult {
 	$action = isset($input['action']) ? (string)$input['action'] : '';
 	$alias_id = MailboxService::parseAliasParam($input['alias_id'] ?? null);
 
-	// Resolve target ids: explicit ids[] or a thread_key expanded server-side.
+	// Resolve target ids: explicit ids[], one thread_key, or a whole selection as
+	// thread_keys[] — each expanded server-side and unioned, so a caller can never
+	// reach a message by naming a conversation it cannot see.
 	// The two trash actions expand under the Trash scope — the read scope cannot
 	// see a discarded conversation, so it would resolve to nothing.
 	$trashed = ($action === 'restore' || $action === 'purge');
@@ -45,6 +49,18 @@ function thread_action_logic(array $input): LogicResult {
 		foreach ($input['ids'] as $id) {
 			$ids[] = intval($id);
 		}
+	} elseif (isset($input['thread_keys']) && is_array($input['thread_keys'])) {
+		$seen = array();
+		foreach ($input['thread_keys'] as $key) {
+			$key = (string)$key;
+			if ($key === '') {
+				continue;
+			}
+			foreach ($service->messageIdsInThread($alias_id, $key, $trashed) as $id) {
+				$seen[$id] = true;
+			}
+		}
+		$ids = array_keys($seen);
 	} elseif (isset($input['thread_key']) && $input['thread_key'] !== '') {
 		$ids = $service->messageIdsInThread($alias_id, (string)$input['thread_key'], $trashed);
 	}

@@ -1787,11 +1787,7 @@ use the same sequence; N=1 is the same job.
 
 The Mailbox Reader is a two-pane Gmail-style reader over the stored messages:
 a left rail (the mailbox switcher and its folders) and a single main pane that
-shows either the conversation list (headed by its own name, search box and
-compose button) or an opened conversation full-width (a back arrow or Esc returns
-to the list). It supports threading, read/unread, star, and
-search, rich-text compose with Bcc and inline images, saved drafts, per-mailbox
-signatures, recipient autocomplete, and a contact panel. It is
+shows either the conversation list or an opened conversation full-width. It is
 a vanilla-JS client (`assets/mailbox_reader.js` + `.css`, cache-busted by file
 mtime) talking to the scoped AJAX/API actions listed under **API Surface**.
 
@@ -1835,11 +1831,14 @@ The reader's **left rail** is a switcher over the addresses the viewer has been
 granted, each independently badged with its unread count, each with its folders
 beneath it. Selecting one scopes the whole reader to that mailbox.
 
-A debounced search box sits in the middle of the conversation-list header,
-centred between the mailbox name and the compose button (its own full-width line
-on a narrow screen). Enter commits the search and closes any open
-conversation, because the reading view replaces the list that results would
-otherwise land behind. The search box runs a single PostgreSQL
+Selecting rows in the list and acting on them sends the whole selection to
+`thread_action` as `thread_keys[]`, which expands each key **under the caller's
+own scope** and unions the resulting message ids. A key the caller cannot see
+contributes nothing, so naming a conversation can never reach it — the same
+guarantee the single-`thread_key` path carries, and the mutations re-check scope
+in SQL besides.
+
+A debounced search box sits in the conversation-list header. It runs a single PostgreSQL
 full-text query (`websearch_to_tsquery`) over the sender, subject, and both
 plain and HTML body fields at once, backed by the `iem_fulltext_idx` GIN index
 on the matching `to_tsvector` expression. Searching the HTML body directly is
@@ -1981,7 +1980,7 @@ cookie + `X-Joinery-Csrf`). The reader consumes the response envelope's `data`.
 | `mailbox/mailboxes` | switcher: accessible mailboxes + unread |
 | `mailbox/thread_list` | thread list (`alias_id`, filters, `page`) |
 | `mailbox/thread` | messages in a `thread_key` (with bodies) |
-| `mailbox/thread_action` | mark read/unread, star/unstar, delete — accepts `ids[]` or a `thread_key` expanded server-side |
+| `mailbox/thread_action` | mark read/unread, star/unstar, delete — accepts `ids[]`, a `thread_key`, or a whole selection as `thread_keys[]` — each expanded server-side |
 | `mailbox/send` | multipart: send a reply / reply-all / forward / new message AS the mailbox; stores the sent copy |
 
 HTML bodies stay sandboxed (`<iframe sandbox="">`, no `allow-scripts`) exactly as
@@ -2021,9 +2020,7 @@ see "New message" below for what differs.
   `Horde_Mime`. If a reference-backed original is no longer in the source mailbox,
   the forward fails with a clear message rather than sending an empty body.
   User-uploaded attachments ride along in every mode.
-- **Uploading new attachments.** The web reader's compose panel has a paperclip
-  button, removable pending-file chips, and drag-and-drop onto the open compose
-  panel — the same UX as the Joinery AI chat composer. `POST
+- **Uploading new attachments.** `POST
   /api/v1/action/mailbox/send` accepts the identical multipart
   `attachments[]` field (a multipart POST leaves `php://input` empty, so the
   dispatcher falls back to `$_POST` and PHP fills `$_FILES` natively — no
@@ -2194,7 +2191,7 @@ The mailbox is exposed to API clients (the native mobile mail screens,
 | `mailboxes` | The viewer's granted mailboxes with unread/total counts, folder rails, per-mailbox `signature`, `own` flag, plus `can_compose` and a `drafts` count |
 | `thread_list` | Paged threads for a mailbox view — params `alias_id`, `q`, `unread_only`, `starred_only`, `spam`, `inbox`, `folder_id`, `drafts`, `page`; same row shapes as the web reader's list endpoint |
 | `thread` | One full thread: messages with plain/HTML bodies, attachment manifest, and the thread's folder ids; harvests inbound senders into contacts |
-| `thread_action` | The reader's full mutation set: `mark_read`/`mark_unread`, `star`/`unstar`, `archive`/`unarchive`, `delete`, `mark_spam`/`mark_not_spam`, `set_membership`, `create_folder` — targets `ids[]` or a `thread_key` |
+| `thread_action` | The reader's full mutation set: `mark_read`/`mark_unread`, `star`/`unstar`, `archive`/`unarchive`, `delete`, `mark_spam`/`mark_not_spam`, `set_membership`, `create_folder` — targets `ids[]`, a `thread_key`, or `thread_keys[]` (the list's multi-select) |
 | `send` | Reply / reply-all / forward / new message as the mailbox — `source_id` or `alias_id`, plus optional `bcc`, `body_html`, `inline_manifest`, `draft_id` (morph a draft); plain JSON or multipart `attachments[]`; forwards re-attach the original's parts server-side |
 | `draft_save` / `draft_get` / `draft_delete` | Create/update, reopen, and discard a compose draft (multipart attachments + `inline_manifest` on save; save returns the persisted `attachments`/`inline` lists) |
 | `draft_attachment_delete` | Remove one saved attachment from a draft — `draft_id`, `attachment_id` (author-scoped, non-inline) |

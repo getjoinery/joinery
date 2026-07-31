@@ -1,7 +1,7 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.17
+ * Vanilla CSS, no framework. @version 2.18
  */
 
 /* Every size the reader renders text at, in one ladder. Nothing in this file
@@ -47,6 +47,7 @@
  * units rather than em so a rule with a different font-size can still use it. */
 .mbx-reader {
 	--mbx-row-gap:  10px;
+	--mbx-check-w:  18px;
 	--mbx-star-w:   18px;
 	--mbx-from-w:   calc(13 * var(--mbx-text-base));
 }
@@ -111,8 +112,8 @@
 	padding: 1px 6px;
 }
 .mbx-badge.zero { display: none; }
-/* Protection-level chip (specs/mailbox_protection_ceremony.md) — beside the list
- * title, naming the protection of the mailbox being read. */
+/* Protection-level chip (specs/mailbox_protection_ceremony.md) — trailing the
+ * list toolbar, naming the protection of the mailbox being read. */
 .mbx-level-badge {
 	flex: 0 0 auto; font-size: var(--mbx-text-micro); font-weight: 600; border-radius: 8px;
 	padding: 1px 7px;
@@ -152,25 +153,74 @@
 	padding: 10px 14px;
 	border-bottom: 1px solid #eef1f4;
 }
-/* The name group and the button group each take an equal share of the leftover
- * width, which is what centres the search box between them. A long mailbox name
- * clips rather than shoving the box off centre. */
-.mbx-list-heading {
-	flex: 1 1 0;
-	min-width: 0;
+/* The toolbar takes the width it needs and never gives it up — a clipped bulk
+ * action is a control the reader silently loses. The search box takes the
+ * leftover width up to its own maximum, and its auto margins keep it centred in
+ * whatever is left; when a selection's icons crowd it out, the header wraps and
+ * search drops to its own line rather than squeezing anything off the row. */
+.mbx-list-tools {
+	flex: 0 0 auto;
 	display: flex;
 	align-items: center;
-	gap: 8px;
-}
-.mbx-list-title {
+	gap: 2px;
 	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	font-weight: 600;
-	font-size: var(--mbx-text-md);
-	color: #111827;
 }
+/* Select-all box and its caret menu, sharing the row's checkbox column so the
+ * box sits directly above the ones on the rows below it. */
+.mbx-selectall {
+	position: relative;
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	gap: 0;
+	padding-left: 2px;
+}
+.mbx-check-input {
+	width: 15px; height: 15px; margin: 0; cursor: pointer;
+	accent-color: #2563eb;
+}
+.mbx-check-input:disabled { cursor: default; opacity: .5; }
+.mbx-select-caret {
+	border: none; background: none; cursor: pointer; color: #6b7280;
+	font-size: var(--mbx-text-xs); line-height: 1; padding: 4px 2px; border-radius: 4px;
+}
+.mbx-select-caret:hover { background: #eef1f4; color: #111827; }
+.mbx-select-panel {
+	position: absolute; z-index: 20; top: calc(100% + 6px); left: 0;
+	min-width: 140px;
+	background: #fff; border: 1px solid #cfd6dd; border-radius: 6px;
+	box-shadow: 0 6px 18px rgba(16,24,40,.12); padding: 4px;
+}
+.mbx-select-opt {
+	padding: 6px 10px; border-radius: 5px; cursor: pointer;
+	font-size: var(--mbx-text-sm); color: #374151; white-space: nowrap;
+}
+.mbx-select-opt:hover { background: #f1f3f5; }
+
+/* Toolbar icon buttons — one square hit area each, the icon sized inside it. */
+.mbx-toolbtn {
+	flex: 0 0 auto;
+	display: inline-flex; align-items: center; justify-content: center;
+	width: 32px; height: 32px;
+	border: none; background: none; border-radius: 50%;
+	color: #5f6368; cursor: pointer; padding: 0;
+}
+.mbx-toolbtn svg { width: 18px; height: 18px; display: block; }
+.mbx-toolbtn:hover { background: #eef1f4; color: #111827; }
+.mbx-toolbtn.danger:hover { background: #fee4e2; color: #b42318; }
+.mbx-toolbtn:disabled { opacity: .4; cursor: default; background: none; }
+/* The bulk group appears only with a selection; it shares the toolbar's line. */
+.mbx-bulk { display: flex; align-items: center; gap: 2px; }
+.mbx-bulk[hidden] { display: none; }
+.mbx-tool-sep {
+	flex: 0 0 auto; width: 1px; height: 20px; margin: 0 5px; background: #e0e3e7;
+}
+.mbx-tool-sep[hidden] { display: none; }
+.mbx-select-count {
+	flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+	margin-left: 6px; font-size: var(--mbx-text-sm); color: #5f6368;
+}
+.mbx-select-count[hidden] { display: none; }
 .mbx-list-header-actions {
 	flex: 1 1 0;
 	display: flex;
@@ -178,7 +228,7 @@
 	justify-content: flex-end;
 	gap: 6px;
 }
-.mbx-searchbar { flex: 0 1 380px; min-width: 0; }
+.mbx-searchbar { flex: 1 1 200px; min-width: 0; max-width: 380px; margin: 0 auto; }
 .mbx-search {
 	width: 100%;
 	border: 1px solid #cfd6dd;
@@ -238,6 +288,19 @@
 }
 .mbx-thread-item.active { background: #eaf1fb; }
 .mbx-thread-item.unread { background: #fff; }     /* unread rows pop on white */
+/* A ticked row stays visibly picked under hover — the selection outlives the
+ * pointer, so hover must not be able to hide it. */
+.mbx-thread-item.selected,
+.mbx-thread-item.selected:hover { background: #fdf3d6; }
+/* Select box, first column, above-baseline with the rest of the row. */
+.mbx-thread-check {
+	flex: 0 0 var(--mbx-check-w);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	align-self: center;
+	cursor: default;
+}
 /* Fixed width, not the glyph's own, so stars line up down the column. */
 .mbx-thread-star {
 	flex: 0 0 var(--mbx-star-w);
@@ -595,10 +658,10 @@
 	/* While reading on a small screen, hide the rail so the message gets full width. */
 	.mbx-reader.reading .mbx-rail { display: none; }
 	/* Too narrow for three things on one row: search drops to its own full-width
-	 * line under the mailbox name and the buttons, which then take only the width
+	 * line under the toolbar and the buttons, which then take only the width
 	 * they need instead of half the row each. */
-	.mbx-list-header .mbx-searchbar { order: 3; flex: 1 1 100%; }
-	.mbx-list-header .mbx-list-heading { flex: 1 1 auto; }
+	.mbx-list-header .mbx-searchbar { order: 3; flex: 1 1 100%; max-width: none; margin: 0; }
+	.mbx-list-header .mbx-list-tools { flex: 1 1 auto; }
 	.mbx-list-header .mbx-list-header-actions { flex: 0 0 auto; }
 }
 
