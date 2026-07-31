@@ -10,7 +10,7 @@
  * No action happens here. Starting, choosing and undoing all go through the API
  * actions, which the panel calls.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 function mailbox_import_page_logic(array $input): LogicResult {
@@ -26,10 +26,27 @@ function mailbox_import_page_logic(array $input): LogicResult {
 	$service = MailImportService::fromSession($session);
 
 	$aliases = $service->targetableAliases();
+	$last = $service->lastChoices();
+
+	// What the form opens on, in order of how much it knows about this person:
+	// an explicit ?alias_id, then the mailbox they last imported into, then the
+	// first one they hold. Coming back to this page mid-migration and finding the
+	// picker reset to somebody else's mailbox is how mail lands in the wrong place.
 	$alias_id = intval($input['alias_id'] ?? 0);
+	if ($alias_id <= 0 && $last && $last['alias_id'] > 0 && isset($aliases[$last['alias_id']])) {
+		$alias_id = $last['alias_id'];
+	}
 	if ($alias_id <= 0 && $aliases) {
 		$alias_id = intval(array_key_first($aliases));
 	}
+
+	// The declared addresses are the answer to "who were you at the old provider",
+	// and that answer does not change between the three files of one Takeout. Carry
+	// the last run's list forward — but only for the mailbox it was written for.
+	// Asked about a different mailbox, the suggestion is the honest starting point.
+	$own_addresses = ($last && $last['own_addresses'] !== '' && $last['alias_id'] === $alias_id)
+		? $last['own_addresses']
+		: implode("\n", $alias_id > 0 ? $service->suggestedAddresses($alias_id) : array());
 
 	return LogicResult::render(array(
 		'session'             => $session,
@@ -41,7 +58,10 @@ function mailbox_import_page_logic(array $input): LogicResult {
 		'aliases'             => $aliases,
 		'alias_id'            => $alias_id,
 		'files'               => $service->pickableFiles(),
-		'suggested_addresses' => $alias_id > 0 ? $service->suggestedAddresses($alias_id) : array(),
+		'own_addresses'       => $own_addresses,
+		// The run holding the one-at-a-time slot, or null. The panel hides the start
+		// form while this is set, and the poller takes over from there.
+		'active_run'          => $service->activeRun(),
 		'runs'                => $service->history(),
 	));
 }

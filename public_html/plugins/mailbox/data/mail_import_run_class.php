@@ -25,7 +25,7 @@
  *
  * See specs/mail_archive_import.md.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -266,6 +266,16 @@ class MailImportRun extends SystemBase {
 
 	/** States where the run is over and its archive is no longer working material. */
 	const FINISHED_STATES = array(self::STATE_DONE, self::STATE_FAILED, self::STATE_UNDONE);
+
+	/**
+	 * Every state in which a run is still going on — the complement of
+	 * FINISHED_STATES. Wider than ACTIVE_STATES, because `scanned` is a run that is
+	 * still going even though nothing is moving: it has stopped to ask the user a
+	 * question, and it resumes the moment they answer. That is why the one-import-
+	 * at-a-time rule counts it.
+	 */
+	const UNFINISHED_STATES = array(
+		self::STATE_QUEUED, self::STATE_SCANNING, self::STATE_SCANNED, self::STATE_IMPORTING);
 
 	/** True when the run has finished, however it finished. */
 	function isFinished(): bool {

@@ -16,7 +16,11 @@
  * without them nothing can tell sent mail from received, or say which of several
  * addresses a message actually reached.
  *
- * @version 1.0
+ * One at a time: a caller with a run still going is refused, and told which run
+ * and what it is doing. The rule lives here rather than in the page, so a second
+ * tab cannot queue what the first one is already carrying.
+ *
+ * @version 1.1
  */
 
 function mail_import_start_logic(array $input): LogicResult {
@@ -42,12 +46,27 @@ function mail_import_start_logic(array $input): LogicResult {
 		return LogicResult::error(mail_import_too_large_message($posted_bytes));
 	}
 
+	$service = MailImportService::fromSession($session);
+
+	// One import at a time, checked before anything is read or stored. The page
+	// hides the form while a run is going, so reaching this is either a second tab
+	// or a direct API call — both of which have to be answered the same way, since
+	// the rule is the platform's and not the page's.
+	$busy = $service->activeRun();
+	if ($busy !== null) {
+		return LogicResult::error('An import is already going: '
+			. ($busy['source'] !== '' ? $busy['source'] : 'an archive') . ' — '
+			. lcfirst((string)$busy['state_label']) . '. Only one runs at a time. '
+			. ($busy['can_choose']
+				? 'Choose what to bring in from it, and you can start another when it finishes.'
+				: 'Start the next one when this has finished.'));
+	}
+
 	$alias_id = intval($input['alias_id'] ?? 0);
 	if ($alias_id <= 0) {
 		return LogicResult::error('Choose the mailbox the mail should go into.');
 	}
 
-	$service = MailImportService::fromSession($session);
 	if (!$service->canTarget($alias_id)) {
 		return LogicResult::error('You do not have access to that mailbox.');
 	}

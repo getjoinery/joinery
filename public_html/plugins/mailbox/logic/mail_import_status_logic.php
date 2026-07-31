@@ -2,15 +2,15 @@
 /**
  * API action: mailbox/mail_import_status — how an import is getting on.
  *
- * With no run id, the caller's recent runs; with one, that run plus — when it has
- * finished scanning — the per-folder counts the choose-what-to-bring screen is
- * built from.
+ * With no run id, the caller's recent runs plus whichever of them is still going;
+ * with one, that run plus — when it has finished scanning — the per-folder counts
+ * the choose-what-to-bring screen is built from.
  *
  * This is what the page polls, so it is deliberately cheap: counters live on the
  * run row and are advanced by the importer as it goes, and the folder breakdown
  * is one GROUP BY rather than half a million loaded models.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 function mail_import_status_logic(array $input): LogicResult {
@@ -29,6 +29,11 @@ function mail_import_status_logic(array $input): LogicResult {
 		$alias_id = intval($input['alias_id'] ?? 0);
 		return LogicResult::render(array(
 			'runs' => $service->history($alias_id > 0 ? $alias_id : null),
+			// The run holding the caller's one-at-a-time slot, or null when they are
+			// free to start one. Answered here rather than left for the page to work
+			// out from the history, so the page and the start action cannot disagree
+			// about whether a second import is allowed.
+			'busy_run' => $service->activeRun(),
 		));
 	}
 

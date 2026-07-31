@@ -24,10 +24,13 @@
  *    reader test could never catch and the one most likely to regress
  *  - undo removes exactly what the run created and nothing else
  *  - a corrupt entry fails on its own and the rest of the batch still lands
+ *  - one import at a time: a run holds the slot until it FINISHES, including while
+ *    it sits waiting to be told which folders to bring
+ *  - the next form opens on the mailbox and addresses the last run used
  *
  * Run: php tests/run.php db --filter=mail_archive_import
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -73,6 +76,7 @@ class MailArchiveImportTest {
 			$this->testCorruptEntryFailsAlone();
 			$this->testUndoRemovesOnlyWhatItCreated();
 			$this->testArchiveRetention();
+			$this->testOneImportAtATime();
 		} catch (\Throwable $e) {
 			check(false, 'EXCEPTION', $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
 		} finally {
@@ -682,6 +686,61 @@ class MailArchiveImportTest {
 			'retention: the user still has their own file');
 
 		$live->moveTo(MailImportRun::STATE_DONE);
+	}
+
+	/**
+	 * One import at a time, and the form that remembers what you told it.
+	 *
+	 * Both are decisions MailImportService makes, so both are checked there rather
+	 * than through the page: `mailbox/mail_import_start` refuses on exactly this
+	 * answer, and the panel hides the start form on exactly this answer, so the
+	 * rule holding here is the rule holding in both places.
+	 *
+	 * The interesting case is `scanned`. Nothing is moving — the run has stopped to
+	 * ask which folders to bring — and a naive "is anything running" would hand the
+	 * slot back and let a second import be started on top of an unanswered question.
+	 */
+	private function testOneImportAtATime() {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailImportService.php'));
+
+		// Settle everything this test made first, so the slot is provably free
+		// before the rule is exercised on a run of its own.
+		if ($this->run_ids) {
+			$this->db->exec("UPDATE mir_mail_import_runs SET mir_state = 'done'
+				WHERE mir_mail_import_run_id IN (" . implode(',', array_map('intval', $this->run_ids)) . ")");
+		}
+
+		$service = new MailImportService(
+			MailboxViewer::forUser(User::USER_SYSTEM, MailImportService::OPERATOR_PERMISSION));
+
+		check($service->activeRun() === null,
+			'one at a time: with nothing going, the start form is offered');
+
+		$run = $this->makeRun('takeout.mbox', 'slot-holder.mbox');
+		$active = $service->activeRun();
+		check($active !== null && $active['id'] === intval($run->key),
+			'one at a time: a queued run holds the slot',
+			json_encode($active));
+
+		$run->moveTo(MailImportRun::STATE_SCANNED);
+		$active = $service->activeRun();
+		check($active !== null && $active['id'] === intval($run->key) && !empty($active['can_choose']),
+			'one at a time: a run waiting to be answered still holds the slot',
+			json_encode($active));
+
+		$run->moveTo(MailImportRun::STATE_DONE);
+		check($service->activeRun() === null,
+			'one at a time: finishing hands the slot back');
+
+		// And what the next form opens on: the mailbox and the address list that
+		// run used, not the defaults the very first import started from.
+		$last = $service->lastChoices();
+		check($last !== null && $last['alias_id'] === intval($this->alias->key),
+			'remembered: the next form opens on the mailbox last imported into',
+			json_encode($last));
+		check($last !== null && $last['own_addresses'] === "me@example.test\nold@example.test",
+			'remembered: and on the addresses declared for it',
+			json_encode($last));
 	}
 
 	private function truthy($v): bool {

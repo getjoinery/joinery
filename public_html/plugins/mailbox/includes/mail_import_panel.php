@@ -12,12 +12,18 @@
  *   the run list     - live progress, polled while anything is moving
  *   the choose step  - shown inline on a run that has finished scanning
  *
+ * One import at a time. While the caller has a run going the start form is not on
+ * the page at all, replaced by a line saying what is holding it; it comes back by
+ * itself when that run finishes, without a reload. Which run counts is decided by
+ * MailImportService, and the API refuses a second start regardless of what the
+ * page is showing.
+ *
  * Everything after the first render talks to /api/v1 with the browser-session
  * credential, including progress polling. An uploaded archive goes up through the
  * platform's resumable chunk transport under the mail_import_archive upload
  * purpose, so its size is not bounded by any single-request limit.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailImportService.php'));
@@ -26,12 +32,14 @@ if (!function_exists('mailbox_render_import_panel')) {
 
 /**
  * @param object $page  AdminPage or PublicPage — anything with getFormWriter()
- * @param array  $vars  aliases, files, suggested_addresses, runs, is_operator
+ * @param array  $vars  aliases, alias_id, files, own_addresses, active_run, runs, is_operator
  */
 function mailbox_render_import_panel($page, array $vars): void {
 	$aliases   = (array)($vars['aliases'] ?? array());
 	$files     = (array)($vars['files'] ?? array());
-	$suggested = implode("\n", (array)($vars['suggested_addresses'] ?? array()));
+	$suggested = (string)($vars['own_addresses'] ?? '');
+	$alias_id  = intval($vars['alias_id'] ?? 0);
+	$active    = $vars['active_run'] ?? null;
 	$runs      = (array)($vars['runs'] ?? array());
 
 	if (!$aliases) {
@@ -69,6 +77,15 @@ function mailbox_render_import_panel($page, array $vars): void {
 		$file_options[(string)$file['id']] = $label;
 	}
 
+	// The one-at-a-time notice and the start form are both always rendered, one of
+	// them hidden. The poller flips them as runs come and go, so a member who
+	// leaves the tab open sees the form return the moment their import lands
+	// instead of wondering whether the page is stale.
+	echo '<div id="mail-import-busy"' . ($active ? '' : ' hidden') . '>'
+		. mailbox_import_busy_html($active) . '</div>';
+
+	echo '<div id="mail-import-start"' . ($active ? ' hidden' : '') . '>';
+
 	// No enctype: the form is never posted. The file is read from the input and
 	// sent in chunks, and the rest of the fields ride as JSON on the action call.
 	$formwriter = $page->getFormWriter('mail_import_form');
@@ -77,6 +94,7 @@ function mailbox_render_import_panel($page, array $vars): void {
 
 	$formwriter->dropinput('alias_id', 'Import into', array(
 		'options' => $alias_options,
+		'value' => (string)$alias_id,
 		'validation' => array('required' => true),
 		'helptext' => 'The mail lands in this mailbox. It still records the address each message '
 			. 'was actually delivered to.',
@@ -122,6 +140,7 @@ function mailbox_render_import_panel($page, array $vars): void {
 	$formwriter->submitbutton('btn_import', 'Read the archive');
 
 	echo $formwriter->end_form();
+	echo '</div>';
 
 	echo '<div id="mail-import-feedback" class="jy-mt-2" role="status" aria-live="polite"></div>';
 	echo '<div id="mail-import-runs" class="jy-mt-3">' . mailbox_import_runs_html($runs) . '</div>';
@@ -155,6 +174,35 @@ function mailbox_import_attention_html(array $runs): string {
 			. '</section>';
 	}
 	return $html;
+}
+
+/**
+ * What stands in for the start form while an import is going.
+ *
+ * Says which archive is holding the slot and what it is doing, because "the form
+ * is gone" with no reason reads as a broken page. A run waiting on a decision gets
+ * pointed at the banner above rather than repeating the question here.
+ */
+function mailbox_import_busy_html(?array $run): string {
+	if (!$run) {
+		return '';
+	}
+	$name = ($run['source'] ?? '') !== '' ? $run['source'] : 'An archive';
+	// The state label carries its own punctuation on the run that is waiting to be
+	// answered ("Ready — choose what to bring"), so that case says it in a sentence
+	// instead of pasting a label after a dash.
+	$html = '<div class="jy-callout jy-callout-info">'
+		. '<h3 class="jy-callout-title">An import is already going</h3>'
+		. '<p><strong>' . htmlspecialchars($name) . '</strong> '
+		. (empty($run['can_choose'])
+			? '&mdash; ' . htmlspecialchars(lcfirst((string)$run['state_label'])) . '.'
+			: 'has been read and is waiting for your answer.') . '</p>';
+	$html .= empty($run['can_choose'])
+		? '<p class="jy-muted">Only one import runs at a time. Starting another is offered again '
+			. 'as soon as this one finishes &mdash; you do not need to stay on this page.</p>'
+		: '<p class="jy-muted">Answer the question above to let it carry on. Starting another '
+			. 'import is offered again once it finishes.</p>';
+	return $html . '</div>';
 }
 
 /** The run list, rendered server-side first and re-rendered by the poller after. */
@@ -234,6 +282,8 @@ function mailbox_import_panel_script(): void {
 	var feedback = document.getElementById('mail-import-feedback');
 	var runsBox = document.getElementById('mail-import-runs');
 	var attentionBox = document.getElementById('mail-import-attention');
+	var startBox = document.getElementById('mail-import-start');
+	var busyBox = document.getElementById('mail-import-busy');
 	var polling = null;
 
 	function post(path, body) {
@@ -406,10 +456,44 @@ function mailbox_import_panel_script(): void {
 		});
 	}
 
+	/**
+	 * Show either the start form or the reason it is not there.
+	 *
+	 * The server decides which run holds the one-at-a-time slot and hands it over
+	 * as busy_run, so this never has to re-derive the rule from the history table —
+	 * a page that let you start a second import the API would refuse is worse than
+	 * one that simply waits.
+	 */
+	function renderStart(busy) {
+		if (startBox) { startBox.hidden = !!busy; }
+		if (!busyBox) { return; }
+		busyBox.hidden = !busy;
+		if (!busy) { busyBox.innerHTML = ''; return; }
+
+		var name = busy.source || 'An archive';
+		// Same two sentences the server renders, for the same reason: the waiting
+		// run's label already contains a dash, so it is said rather than pasted.
+		var what = busy.can_choose
+			? 'has been read and is waiting for your answer.'
+			: '&mdash; ' + escapeHtml(lowerFirst(busy.state_label || '')) + '.';
+		var tail = busy.can_choose
+			? 'Answer the question above to let it carry on. Starting another import is '
+				+ 'offered again once it finishes.'
+			: 'Only one import runs at a time. Starting another is offered again as soon as '
+				+ 'this one finishes — you do not need to stay on this page.';
+		busyBox.innerHTML = '<div class="jy-callout jy-callout-info">'
+			+ '<h3 class="jy-callout-title">An import is already going</h3>'
+			+ '<p><strong>' + escapeHtml(name) + '</strong> ' + what + '</p>'
+			+ '<p class="jy-muted">' + tail + '</p></div>';
+	}
+
+	function lowerFirst(s) { return s ? s.charAt(0).toLowerCase() + s.slice(1) : s; }
+
 	function refresh() {
 		return api('mail_import_status', {}).then(function (j) {
 			var runs = (j && j.data && j.data.runs) || [];
 			render(runs);
+			renderStart((j && j.data && j.data.busy_run) || null);
 			var moving = runs.some(function (r) {
 				return ['queued', 'scanning', 'importing'].indexOf(r.state) !== -1;
 			});
