@@ -991,6 +991,87 @@
                 </form>
             </div>
             <?php endif; ?>
+            <?php
+            $recovery_items = $page_vars['recovery_items'] ?? [];
+            $recovery_stepup = $page_vars['recovery_stepup'] ?? ['needed' => false, 'passkey' => false];
+            $settings = $page_vars['settings'];
+            $user = $page_vars['user'];
+            $session = SessionControl::get_instance();
+            if (!empty($recovery_items)): ?>
+            <div class="jy-panel jy-mt-4">
+                <h2>Recovery Codes</h2>
+                <p class="jy-text-muted">These codes are the way back into your encrypted content if you lose your
+                    other sign-in methods. Check one from your saved set now and then — checking never uses a code up.</p>
+                <?php
+                $rr_client_configs = [];
+                foreach ($recovery_items as $rr_i => $rr_item):
+                    $rr_is_client = ($rr_item['custody'] ?? '') === 'client';
+                    if ($rr_is_client) {
+                        $rr_client_configs[$rr_item['scope']] = ['wrappings' => $rr_item['client_wrappings']];
+                    }
+                ?>
+                <div class="jy-mt-3">
+                    <h3><?php echo htmlspecialchars($rr_item['title']); ?></h3>
+                    <?php if ($rr_item['last_verified']): ?>
+                        <?php if ($rr_item['stale']): ?>
+                            <div class="jy-alert jy-alert-warning">Last checked <?php echo htmlspecialchars(LibraryFunctions::convert_time($rr_item['last_verified'], 'UTC', $session->get_timezone(), 'M j, Y')); ?> — check a code again.</div>
+                        <?php endif; ?>
+                    <?php else: ?>
+                        <div class="jy-alert jy-alert-warning">Never checked — confirm you still have these codes saved.</div>
+                    <?php endif; ?>
+                    <?php foreach ($rr_item['warnings'] as $rr_warning): ?>
+                        <div class="jy-alert jy-alert-warning"><?php echo htmlspecialchars($rr_warning); ?></div>
+                    <?php endforeach; ?>
+                    <p class="jy-text-muted jy-mt-1">
+                        <?php echo (int)$rr_item['facts']['Unused recovery codes']; ?> unused codes ·
+                        save them as <code><?php echo htmlspecialchars(str_replace(['{site}', '{account}'], [(string)$settings->get_setting('site_name'), (string)$user->get('usr_email')], $rr_item['label'])); ?></code>
+                        <button type="button" class="btn btn-secondary btn-sm" data-jy-copy="<?php echo htmlspecialchars(str_replace(['{site}', '{account}'], [(string)$settings->get_setting('site_name'), (string)$user->get('usr_email')], $rr_item['label']), ENT_QUOTES); ?>">Copy</button>
+                    </p>
+                    <?php if ($rr_is_client): ?>
+                        <label for="rr-m-code-<?php echo $rr_i; ?>" class="d-block">Enter one code (checked in your browser, never sent, never used up):</label>
+                        <input type="password" id="rr-m-code-<?php echo $rr_i; ?>" class="form-control" style="max-width:22rem;" autocomplete="off">
+                        <button type="button" class="btn btn-primary jy-mt-1"
+                            data-rr-client-check data-rr-scope="<?php echo htmlspecialchars($rr_item['scope'], ENT_QUOTES); ?>"
+                            data-rr-code="rr-m-code-<?php echo $rr_i; ?>" data-rr-status="rr-m-status-<?php echo $rr_i; ?>">Check code</button>
+                        <div id="rr-m-status-<?php echo $rr_i; ?>" class="jy-mt-1"></div>
+                        <div data-rr-client-form="<?php echo htmlspecialchars($rr_item['scope'], ENT_QUOTES); ?>" hidden>
+                            <form action="/profile/security" method="POST">
+                                <input type="hidden" name="action" value="vault_code_check_client">
+                                <input type="hidden" name="scope" value="<?php echo htmlspecialchars($rr_item['scope'], ENT_QUOTES); ?>">
+                                <input type="hidden" name="passed" value="">
+                            </form>
+                        </div>
+                    <?php else: ?>
+                        <form action="/profile/security" method="POST">
+                            <input type="hidden" name="action" value="vault_code_check">
+                            <input type="hidden" name="scope" value="<?php echo htmlspecialchars($rr_item['scope'], ENT_QUOTES); ?>">
+                            <label for="rr-m-code-<?php echo $rr_i; ?>" class="d-block">Enter one code (checked, not used up):</label>
+                            <input type="password" id="rr-m-code-<?php echo $rr_i; ?>" name="code" class="form-control" style="max-width:22rem;" autocomplete="off">
+                            <button type="submit" class="btn btn-primary jy-mt-1">Check code</button>
+                        </form>
+                    <?php endif; ?>
+                </div>
+                <?php endforeach; ?>
+            </div>
+            <?php if (count($rr_client_configs)): ?>
+            <script src="/assets/js/vault-crypto.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/vault-crypto.js')) ?: '1'; ?>"></script>
+            <?php endif; ?>
+            <?php if (!empty($recovery_stepup['needed']) && !empty($recovery_stepup['passkey'])): ?>
+            <script src="/assets/js/joinery-api.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/joinery-api.js')) ?: '1'; ?>"></script>
+            <script src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
+            <?php endif; ?>
+            <script defer src="/assets/js/recovery-readiness.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/recovery-readiness.js')) ?: '1'; ?>"></script>
+            <script>
+            window.rrClientConfigs = <?php echo json_encode($rr_client_configs); ?>;
+            window.rrStepup = <?php echo json_encode($recovery_stepup); ?>;
+            document.addEventListener('DOMContentLoaded', function () {
+                if (window.recoveryReadiness) {
+                    window.recoveryReadiness.attachClientChecks();
+                    window.recoveryReadiness.attachStepUp(window.rrStepup);
+                }
+            });
+            </script>
+            <?php endif; ?>
             <?php echo PublicPage::settings_layout_end(); ?>
         </div>
     </div>

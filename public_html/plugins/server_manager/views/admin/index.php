@@ -3,6 +3,7 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.16 - recovery-readiness attention line (never-verified/stale must-save secrets) linking to the readiness page
  * @version 1.15 - escrow alert covers recovery-not-set-up as its own row and links to the guided
  *                 walkthrough; heading no longer assumes every row is a node
  * @version 1.14 - Show-all-sites toggle (?show_all=1) surfaces removed (soft-deleted) nodes with a Removed badge
@@ -91,6 +92,15 @@ $inflight_provisions->load();
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeMonitorHealth.php'));
 $monitor_problems = NodeMonitorHealth::problems();
 $escrow_problems  = NodeMonitorHealth::backup_escrow_problems();
+
+// Recovery readiness: must-save secrets never verified or verified too long
+// ago. One line; the details live on the readiness page.
+require_once(PathHelper::getIncludePath('includes/RecoveryReadiness.php'));
+try {
+	$readiness_attention = RecoveryReadiness::attention($session);
+} catch (Throwable $e) {
+	$readiness_attention = ['never' => 0, 'stale' => 0, 'warnings' => 0];
+}
 
 // Cron health: active if ran within 20 minutes
 $settings        = Globalvars::get_instance();
@@ -223,6 +233,20 @@ if ($agent_online) {
 			</li>
 		<?php endforeach; ?>
 	</ul>
+</div>
+<?php endif; ?>
+
+<?php if ($readiness_attention['never'] + $readiness_attention['stale'] + $readiness_attention['warnings'] > 0): ?>
+<div class="alert alert-warning" role="alert">
+	<strong>Recovery readiness needs attention.</strong>
+	<?php
+	$bits = [];
+	if ($readiness_attention['never'])    { $bits[] = $readiness_attention['never'] . ' must-save ' . ($readiness_attention['never'] === 1 ? 'secret has' : 'secrets have') . ' never been verified'; }
+	if ($readiness_attention['stale'])    { $bits[] = $readiness_attention['stale'] . ' ' . ($readiness_attention['stale'] === 1 ? 'was' : 'were') . ' last verified over ' . RecoveryReadiness::STALE_DAYS . ' days ago'; }
+	if ($readiness_attention['warnings']) { $bits[] = $readiness_attention['warnings'] . ' ' . ($readiness_attention['warnings'] === 1 ? 'carries' : 'carry') . ' warnings (low recovery codes, missing passkey)'; }
+	echo htmlspecialchars(implode('; ', $bits)) . '.';
+	?>
+	<a href="/admin/admin_recovery_readiness" class="alert-link">Review and verify</a>.
 </div>
 <?php endif; ?>
 
