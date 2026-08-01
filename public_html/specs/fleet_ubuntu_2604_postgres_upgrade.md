@@ -27,7 +27,9 @@ The entire fleet runs Ubuntu 24.04 LTS with the distro-default stack: PostgreSQL
 
 ## Phase 0 — Verify Target Stack and App Compatibility
 
-Exact shipped versions must be confirmed, not assumed (expected: PostgreSQL 18, PHP 8.4 or 8.5, Apache 2.4.x):
+Verified against the 26.04 (resolute) archive 2026-08-01: **PostgreSQL 18, PHP 8.5**. Note the PHP jump is two major versions (8.3 → 8.5) — the deprecation sweep in step 3 covers both 8.4's and 8.5's removals. Timing gate: 26.04 is in the LTS upgrade channel but still `Supported: 0` — `do-release-upgrade` will not offer the jump from 24.04 until 26.04.1 is released (historically mid-to-late August; 24.04.1 was Aug 29). Do not use `-d` to force it on fleet boxes; scratch-box work in this phase can use `-d` or a fresh 26.04 image.
+
+Remaining Phase 0 steps:
 
 1. Bring up a scratch 26.04 container/VM; record `postgresql`, `php`, `apache2` versions from the default archive.
 2. Run `install.sh` dev/server setup against it (after the Phase 1 parameterization) and stand up a site from a dev backup.

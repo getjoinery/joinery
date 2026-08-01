@@ -98,10 +98,11 @@ End-state chain (after envelope + DR card): `password manager → provider conso
 
 ### Phase A — DR card + loud escrow (no code risk, do first)
 
-1. **Recovery card generator**: an admin action (superadmin, Backup Targets page) that renders a printable/copyable recovery sheet: provider + bucket + endpoint + path prefix per target, node slugs, the fresh-credentials-from-console procedure, the recovery public key fingerprint, the unseal procedure, and per-site `secret_box_key` **only if the operator opts in** (Open Decision 3). Stored nowhere server-side; generated on demand for the operator to file in the password manager.
-2. **Make escrow replication failures fail the backup job** (interim until the envelope model lands): `replicateBlob()` failure becomes a job failure, not a log line.
-3. Delete `config/cloudflare_dns_token` (orphaned, zero references) after owner confirms it's not used manually.
-4. Pin `config/Globalvars_site.php` and `config/` to 0640/0750 in `fix_permissions.sh` (currently world-writable on dev; the file holds `secret_box_key` and the DB password).
+1. **Standing re-verify action** — owned by `specs/recovery_readiness.md` (the Recovery Readiness page's verify tool for the recovery key).
+2. **Recovery card generator** — candidate to fold into the Recovery Readiness page (its Open Decision 2); requirements stay as written here: a printable/copyable recovery sheet: provider + bucket + endpoint + path prefix per target, node slugs, the fresh-credentials-from-console procedure, the recovery public key fingerprint, the unseal procedure, and per-site `secret_box_key` **only if the operator opts in** (Open Decision 3). Stored nowhere server-side; generated on demand for the operator to file in the password manager.
+3. **Make escrow replication failures fail the backup job** (interim until the envelope model lands): `replicateBlob()` failure becomes a job failure, not a log line.
+4. Delete `config/cloudflare_dns_token` (orphaned, zero references) after owner confirms it's not used manually.
+5. Pin `config/Globalvars_site.php` and `config/` to 0640/0750 in `fix_permissions.sh` (currently world-writable on dev; the file holds `secret_box_key` and the DB password).
 
 ### Phase B — Encrypt-at-rest sweep for declared secrets
 

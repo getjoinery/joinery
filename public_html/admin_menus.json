@@ -346,6 +346,14 @@
             "order": 8,
             "permission": 9,
             "parent": "system"
+        },
+        {
+            "slug": "recovery-readiness",
+            "title": "Recovery Readiness",
+            "url": "admin_recovery_readiness",
+            "order": 9,
+            "permission": 10,
+            "parent": "system"
         }
     ],
     "profileMenu": [

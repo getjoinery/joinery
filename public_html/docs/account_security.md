@@ -242,6 +242,39 @@ refusal names what to enroll first. Losing every unlocker loses the sealed
 content permanently; the floor exists so no single careless click can get an
 account there.
 
+## Recovery readiness
+
+`/admin/admin_recovery_readiness` (superadmin) lists every secret that must
+exist **outside** the platform to prevent permanent data loss, derived live
+from system state, and gives each a verify tool and a canonical
+password-manager label (fingerprint included). Items come from a registry
+(`includes/RecoveryReadiness.php`): core contributes the signed-in user's
+vault recovery codes per scope; plugins declare providers under
+`recoveryReadiness` in `plugin.json` (server_manager contributes the backup
+recovery key and one console-access attestation per enabled backup target).
+
+Verify tools, by kind:
+
+- **Ceremony** (backup recovery key): the in-browser WebCrypto possession
+  check — the pasted private key opens a sealed challenge entirely client-side
+  and never reaches the server.
+- **Dry run** (vault recovery codes): the code is checked exactly as the real
+  recovery flow would, but **nothing is consumed** — `uew_is_used` is never
+  touched. Server-custody codes check server-side; client-custody codes check
+  in the browser (`assets/js/recovery-readiness.js` + `vault-crypto.js`) and
+  report only pass/fail.
+- **Attestation** (bucket console logins): a timestamped honor-system
+  checkbox; the page says plainly that the platform cannot check it.
+
+Every attempt appends to the verification ledger
+(`rcv_recovery_verifications` — pass/fail, method, user, time; never the
+secret). Items warn when never verified or last verified more than
+`RecoveryReadiness::STALE_DAYS` (180) days ago, when unused recovery codes run
+low, or when a vault scope has content but no passkey. The server_manager
+dashboard shows a one-line attention summary linking here. Verify actions are
+step-up gated and rate-limited so no verify tool is a better guessing oracle
+than the recovery flow it mirrors.
+
 ## Password reset
 
 A password reset re-issues the **session, never the vault**: an authorizer

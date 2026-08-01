@@ -58,6 +58,35 @@ function security_logic(array $input): LogicResult{
 
 	$action = $input['action'] ?? '';
 
+	if ($action === 'vault_code_check' || $action === 'vault_code_check_client') {
+		// Recovery-code dry run (specs/recovery_readiness.md): checked, never
+		// consumed. Sensitive enough to demand a fresh second factor, and
+		// rate-limited so the check is no better a guessing oracle than the
+		// real recovery flow.
+		$stepup = $session->require_recent_second_factor('/profile/security');
+		if ($stepup !== null) {
+			return $stepup;
+		}
+		require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
+		require_once(PathHelper::getIncludePath('includes/RecoveryReadiness.php'));
+		if (!RequestLogger::check_rate_limit('recovery_readiness_verify', 10, 900, false)) {
+			$outcome = array('ok' => false, 'message' => 'Too many verification attempts. Wait a few minutes and try again.');
+		} elseif ($action === 'vault_code_check') {
+			$outcome = RecoveryReadiness::verifyMemberVaultCode($session,
+				(string)($input['scope'] ?? ''), (string)($input['code'] ?? ''));
+		} else {
+			$outcome = RecoveryReadiness::recordClientDryRun((int)$session->get_user_id(),
+				(string)($input['scope'] ?? ''), ($input['passed'] ?? '') === '1', $session);
+		}
+		$message = new DisplayMessage(htmlspecialchars($outcome['message']),
+			$outcome['ok'] ? 'Success' : 'Recovery code check',
+			'/\/profile\/security.*/',
+			$outcome['ok'] ? DisplayMessage::MESSAGE_ANNOUNCEMENT : DisplayMessage::MESSAGE_WARNING,
+			DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'securitybox', TRUE);
+		$session->save_message($message);
+		return LogicResult::redirect('/profile/security');
+	}
+
 	if ($action === 'set_cadence') {
 		// 2FA cadence (specs/mailbox_security_levels.md § 5.2). Changing it is a
 		// sensitive action — re-confirm the second factor first.
@@ -401,6 +430,19 @@ function security_logic(array $input): LogicResult{
 	), array('create_time' => 'DESC'));
 	$app_sessions->load();
 	$page_vars['app_sessions'] = $app_sessions;
+
+	// Recovery-code cards (specs/recovery_readiness.md): the user's own vault
+	// scopes with unlocker counts, warnings, and the dry-run check.
+	require_once(PathHelper::getIncludePath('includes/RecoveryReadiness.php'));
+	try {
+		$page_vars['recovery_items'] = RecoveryReadiness::memberVaultItems($session);
+	} catch (Throwable $e) {
+		$page_vars['recovery_items'] = array();
+	}
+	$page_vars['recovery_stepup'] = array(
+		'needed'  => $page_vars['has_second_factor'] && !$session->has_recent_second_factor(),
+		'passkey' => $live_passkey_count > 0,
+	);
 
 	// Linked sync devices. Listed separately from app sessions even though each
 	// one owns a session key underneath: a computer that continuously syncs the
