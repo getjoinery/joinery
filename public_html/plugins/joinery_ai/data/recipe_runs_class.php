@@ -21,6 +21,10 @@ class RecipeRun extends SystemBase {
 
     const TRIGGER_SCHEDULE = 'schedule';
     const TRIGGER_MANUAL   = 'manual';
+    // A slice run inside the owner's open vault window, because the recipe's
+    // job reads sealed content and so can never run from cron
+    // (specs/in_window_deferred_work.md).
+    const TRIGGER_WINDOW   = 'window';
 
     public static $field_specifications = array(
         'rcr_run_id'            => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),

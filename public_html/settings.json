@@ -461,6 +461,17 @@
       }
     },
     {
+      "name": "vault_deferred_work_slice_seconds",
+      "default": "10",
+      "helptext": "How long one batch of deferred work may run. Deferred work is work that can only happen while a user has their vault unlocked \u2014 parsing encrypted mail, and the AI email features on an encrypted domain. It runs in its own request, not on the keep-alive ping, so a slow model can never stall the ping that holds the window open.",
+      "group": "vault_unlock",
+      "label": "Deferred work batch length (seconds)",
+      "type": "number",
+      "validation": {
+        "min": 1
+      }
+    },
+    {
       "name": "vault_unlock_idle_minutes",
       "default": "30",
       "helptext": "Sealed Vault unlock window idle timeout, in minutes. One unlock opens every server-custody consumer (mail, chat); the window is extended on activity and wiped on close.",

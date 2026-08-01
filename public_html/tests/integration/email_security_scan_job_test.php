@@ -9,7 +9,7 @@
  *   - configDescriptor() lists the test alias as an option.
  *   - validateConfig() rejects an owner with no mailbox grant, accepts one
  *     with a grant.
- *   - nextItem() picks the oldest non-spam, not-yet-logged message on the
+ *   - nextItem() picks the newest unread, non-spam, not-yet-logged message on the
  *     configured alias; excludes spam-verdict messages entirely.
  *   - validateVerdict() enforces the score/verdict band agreement.
  *   - recordVerdict() writes the three iem_ai_* fields on the right message,
@@ -143,7 +143,7 @@ harness_defer(function () use ($recipe_cleanup_id) {
     if ($rr->key) { $rr->permanent_delete(); }
 });
 
-// --- 4. nextItem(): oldest non-spam, not-yet-logged, on the configured alias
+// --- 4. nextItem(): newest unread, non-spam, not-yet-logged, on the configured alias
 section("4. nextItem");
 function make_message(int $domain_id, int $alias_id, string $subject, string $body,
         ?string $spam_verdict, string $received_offset_minutes) {
@@ -173,21 +173,34 @@ $msg_newer  = make_message((int)$domain->key, (int)$alias->key, 'Newer — phish
 
 $config = DescriptorValidator::coerce($job->configDescriptor(), Recipe::decodeSourceConfig($recipe));
 $item1 = $job->nextItem($config, $recipe);
-ok('nextItem returns the oldest non-spam message first', $item1 !== null && $item1['item_key'] === (string)$msg_oldest->key);
-ok('label carries the subject', ($item1['label'] ?? '') === 'Oldest — benign');
+// Newest first (specs/in_window_deferred_work.md § New mail goes first): fresh
+// mail is judged ahead of a backlog, not behind it.
+ok('nextItem returns the newest non-spam message first', $item1 !== null && $item1['item_key'] === (string)$msg_newer->key);
+ok('label carries the subject', ($item1['label'] ?? '') === 'Newer — phishy');
 ok('digest carries the fixed digest header', strpos($item1['digest'] ?? '', '=== EMAIL DIGEST ===') !== false);
 
-// Log the oldest as done, then the spam-verdict message must still be
-// skipped entirely (never selected) and the newer message comes next.
+// Log the newest as done, then the spam-verdict message must still be
+// skipped entirely (never selected) and the older message comes next.
 $log = new AipRecipeItemLog(NULL);
 $log->set('aip_rcp_recipe_id', (int)$recipe->key);
-$log->set('aip_item_key', (string)$msg_oldest->key);
+$log->set('aip_item_key', (string)$msg_newer->key);
 $log->set('aip_status', AipRecipeItemLog::STATUS_DONE);
 $log->prepare();
 $log->save();
 
 $item2 = $job->nextItem($config, $recipe);
-ok('spam-verdict message is skipped; the newer message is next', $item2 !== null && $item2['item_key'] === (string)$msg_newer->key);
+ok('spam-verdict message is skipped; the older message is next', $item2 !== null && $item2['item_key'] === (string)$msg_oldest->key);
+
+// Read mail is never judged: a summary helps you decide whether to open
+// something, and a danger score is no use once you have.
+// Targeted update: a full save() on a message row runs the alias-side
+// bookkeeping this fixture has no need of.
+InboundEmailMessage::updateColumns((int)$msg_oldest->key, ['iem_is_read' => true]);
+ok('a message marked read drops out of selection', $job->nextItem($config, $recipe) === null);
+ok('hasWork agrees with nextItem when nothing is left',
+    $job->hasWork($config, $recipe) === false);
+InboundEmailMessage::updateColumns((int)$msg_oldest->key, ['iem_is_read' => false]);
+ok('and comes back when it is unread again', $job->hasWork($config, $recipe) === true);
 
 // --- 5. validateVerdict(): score/verdict band agreement ---------------------
 section("5. validateVerdict");
@@ -221,11 +234,15 @@ ok('iem_ai_scan_time stamped', trim((string)$msg_newer->get('iem_ai_scan_time'))
 
 // recordVerdict() only ever writes the scan fields — logging the item as
 // processed is PipelineRunner's job, normally done in the same loop
-// iteration right after recordVerdict() returns. Replicate that pairing
-// here since this test called recordVerdict() directly.
+// iteration right after recordVerdict() returns.
+//
+// msg_newer was already logged in step 4 (it is the newest, so it was the
+// first item the queue handed out). Logging the remaining unread message here
+// leaves the recipe genuinely caught up, which is the precondition step 7
+// asserts on.
 $log2 = new AipRecipeItemLog(NULL);
 $log2->set('aip_rcp_recipe_id', (int)$recipe->key);
-$log2->set('aip_item_key', (string)$msg_newer->key);
+$log2->set('aip_item_key', (string)$msg_oldest->key);
 $log2->set('aip_status', AipRecipeItemLog::STATUS_DONE);
 $log2->prepare();
 $log2->save();
@@ -277,9 +294,11 @@ $run2->set('rcr_started_time', gmdate('Y-m-d H:i:s'));
 $run2->save();
 $ctx2 = new RecipeRunContext($recipe, $run2);
 
+// Scripted in the order the queue hands items out: NEWEST first, so the
+// account alert (msg_b, -1 min) is judged before the newsletter (msg_a, -2 min).
 $provider2 = new ScriptedLlmProvider([
-    ['text' => '{"score": 1, "verdict": "safe", "red_flags": [], "summary": "Ordinary newsletter."}'],
     ['text' => '{"score": 8, "verdict": "dangerous", "red_flags": [{"check":"D","finding":"Demands immediate sign-in."}], "summary": "Likely phishing."}'],
+    ['text' => '{"score": 1, "verdict": "safe", "red_flags": [], "summary": "Ordinary newsletter."}'],
 ]);
 $result2 = PipelineRunner::run($provider2, 'fake/test-model', $recipe, $ctx2, 5, 5000, null, null, 'off');
 ok('second run also ends caught-up', $result2['stop_reason'] === 'end_turn');

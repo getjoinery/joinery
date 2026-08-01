@@ -380,7 +380,11 @@ independently of the vault row itself.
 ## The consumer contract (server-custody)
 
 1. Seal content with `VaultCrypto`, storing a per-item `*_sealed_key` on your
-   own rows and using your own AD row-binding convention.
+   own rows and using your own AD row-binding convention. Decide deliberately
+   whose key each item seals to, including items that have no obvious owner —
+   mail resolves the mailbox's single owner, falling back to the domain's owner
+   for mail that belongs to no mailbox, because an item with no resolvable owner
+   is stored in the clear.
 2. Read via `VaultUnlock::secretKey($user_id)`; treat `null` as locked — a
    one-tap prompt, never an error.
 3. Reuse the File decrypt hook for sealed attachments (`File::registerDecryptHook`)
@@ -404,6 +408,61 @@ independently of the vault row itself.
 **One unlock opens every server-custody consumer** — the accepted tradeoff. A
 consumer with a genuinely higher sensitivity bar may enroll a second `uev`
 scope instead of sharing `user`.
+
+## Deferred work in the window
+
+Some work over sealed content cannot happen when the user asks for it — mail
+arrives while they are logged out, and AI features want to run continuously.
+That work cannot run from cron either: the secret key lives in APCu keyed to
+the **browser session**, so a CLI process has a different APCu segment and
+`VaultUnlock::secretKey()` returns null there by construction. It has to run
+inside a web request carrying a live window.
+
+`includes/VaultDeferredWork.php` schedules it. A consumer registers from its
+`includes/bootstrap.php` — already loaded by `loadConsumerBootstraps()`:
+
+```php
+VaultDeferredWork::register(
+    'mailbox_parse',
+    fn(int $user_id) => bool,                                   // cheap, indexed, no decrypt
+    fn(int $user_id, string $key, float $deadline) => int        // work until the deadline
+);
+```
+
+**What starts it.** `assets/js/vault-presence.js` already beats
+`vault_heartbeat` every 25s from every signed-in page with an open vault. The
+beat now also reports `work_pending`, and the client fires the separate
+`vault_deferred_work` action when it is true, chaining while work remains.
+`VaultUnlock::open()` runs one batch immediately so work starts on the tap.
+
+The work never runs inside the beat. A batch can involve a language model whose
+timeout is measured in minutes; a beat blocked that long would stack up behind
+itself while the window it exists to protect lapsed.
+
+**Order and budget.** Consumers run in registration order — which is
+`CONSUMER_PLUGINS` order, and is meaningful: mail parsing precedes AI judging,
+because an unparsed message has no fields to read. Each batch is bounded by
+`vault_deferred_work_slice_seconds` (default 10), shared round-robin so one slow
+consumer cannot starve another. The deadline is checked **between** items, never
+inside one — an in-flight model call cannot be cut off cleanly, so a batch may
+overrun by a single item. Each consumer's turn holds a Postgres advisory lock on
+`(user, consumer)`, so two open tabs never double-process; a held lock is
+skipped, not waited on. A consumer that throws is logged and skipped for that
+batch, and retried on the next.
+
+**Background work is not user activity.** `secretKey()` normally stamps the
+content-decrypt time the Fortress idle cap measures from. If a drain's reads
+counted, a tab left open at an empty desk would hold the window open forever and
+the idle cap would stop existing. Every batch therefore runs inside
+`VaultDeferredWork::withBackgroundWork()`, which sets
+`VaultUnlock::setActivitySuppressed(true)` for the duration: the key is still
+returned and every policy check still applies, but the TTL is not re-stored, the
+`/dev/shm` marker is not touched, and the content stamp is not refreshed. It is a
+request-scoped flag rather than a separate accessor because consumer code below
+the drain reaches `secretKey()` on its own.
+
+A test asserts the property directly: a window whose only reads come from
+background work still expires on schedule.
 
 ## The vault-activation flip
 

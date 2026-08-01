@@ -1,13 +1,14 @@
 # Work that runs while you're signed in
 
-**Status:** Built 2026-08-01, uncommitted. Everything in this spec is
-implemented and the db tier is green (207 tests, 6,288 checks), including a
-suite that exercises the whole path against a real Fortress domain with
-genuinely sealed mail.
+**Status:** Implemented and shipped in 0.8.205 / 0.8.206. Verified by the db
+tier (208 tests) including a suite exercising the whole path against a real
+Fortress domain with sealed mail.
 
-Still unverified: behaviour in a live browser, and anything on
-jeremytunnell.com — no recipe has been created there and the domain has not
-opted in.
+Two follow-ups live outside this spec's scope: the Catch up prompt counts work
+items rather than distinct messages, so it overstates with several recipes on
+one mailbox; and no browser pass has been made. On jeremytunnell.com the
+feature is deployed but deliberately off — the per-domain AI consent flag is
+unticked and no recipes exist.
 
 ## The problem in one paragraph
 

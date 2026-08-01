@@ -3,6 +3,7 @@ require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeWorkerSpawner.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeVaultScope.php'));
 
 /**
  * Recipe dispatcher — runs every cron tick.
@@ -69,6 +70,12 @@ class RecipeDispatcher implements ScheduledTaskInterface {
         $inserted = 0;
 
         foreach ($recipes as $recipe) {
+            // A recipe whose job reads sealed content cannot run from cron at
+            // all — this process holds no unlock window and never will
+            // (specs/in_window_deferred_work.md). It runs in slices inside its
+            // owner's browser session instead, so queueing it here would only
+            // create rows no worker could ever complete.
+            if (RecipeVaultScope::requiresWindow($recipe)) continue;
             if (!$this->isDue($recipe, $now_utc)) continue;
             if ($this->hasActiveRun((int)$recipe->key)) continue;
 

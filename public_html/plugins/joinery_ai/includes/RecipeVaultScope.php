@@ -1,0 +1,203 @@
+<?php
+/**
+ * RecipeVaultScope — which recipes need an unlocked vault, and running them
+ * (specs/in_window_deferred_work.md § Feature 2).
+ *
+ * A pipeline job declares the vault scope its items need. When it declares one,
+ * that recipe can never run from cron: the vault secret lives in APCu keyed to
+ * the browser session, so a command-line worker holds no window and would read
+ * nothing. Those recipes are skipped by the dispatcher, refused by the spawner,
+ * and executed here instead — in slices, inside the owner's own request, while
+ * their window is open.
+ *
+ * @version 1.0.0
+ */
+
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobRegistry.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobInterface.php'));
+
+class RecipeVaultScope {
+
+	/**
+	 * The vault scope this recipe needs, or null when it needs none.
+	 *
+	 * Null for every agent-mode recipe and for any pipeline job whose binding
+	 * doesn't touch sealed content — those keep running on their schedule.
+	 * A job that cannot be resolved (removed plugin, renamed job) is treated as
+	 * needing no scope: it will fail its own way at run time, and guessing
+	 * "needs the vault" here would silently strand a schedule.
+	 */
+	public static function forRecipe(Recipe $recipe): ?string {
+		if ((string)$recipe->get('rcp_mode') !== Recipe::MODE_PIPELINE) {
+			return null;
+		}
+		$job = self::job($recipe);
+		if ($job === null) {
+			return null;
+		}
+		try {
+			return $job->requiresVaultScope(self::config($recipe));
+		} catch (\Throwable $e) {
+			error_log('RecipeVaultScope: scope check failed for recipe '
+				. (int)$recipe->key . ': ' . $e->getMessage());
+			return null;
+		}
+	}
+
+	/**
+	 * The recipe's job, or null when it cannot be resolved (empty job id,
+	 * uninstalled plugin, renamed job).
+	 *
+	 * Deliberately silent: this runs on a hot path — every heartbeat, for every
+	 * one of the user's recipes — and a recipe with an unresolvable job already
+	 * reports itself properly when the runner tries to execute it. Logging here
+	 * as well would repeat the same fact every 25 seconds.
+	 */
+	private static function job(Recipe $recipe): ?PipelineJobInterface {
+		$job_id = trim((string)$recipe->get('rcp_pipeline_job'));
+		if ($job_id === '') {
+			return null;
+		}
+		try {
+			$job = PipelineJobRegistry::get($job_id);
+		} catch (\Throwable $e) {
+			return null;
+		}
+		return $job instanceof PipelineJobInterface ? $job : null;
+	}
+
+	/**
+	 * The recipe's stored binding, uncoerced.
+	 *
+	 * DescriptorValidator::coerce() is a SAVE-time check: it validates the value
+	 * against the current option list, which costs a query per recipe and throws
+	 * when a recipe points at a mailbox that has since been renamed or disabled.
+	 * Asking which mailbox a recipe is bound to needs neither — the jobs read the
+	 * value defensively, and a stale binding resolves to no alias and therefore
+	 * no work.
+	 */
+	private static function config(Recipe $recipe): array {
+		$config = Recipe::decodeSourceConfig($recipe);
+		return is_array($config) ? $config : array();
+	}
+
+	/** Convenience for the dispatcher and spawner. */
+	public static function requiresWindow(Recipe $recipe): bool {
+		return self::forRecipe($recipe) !== null;
+	}
+
+	/**
+	 * Enabled, window-requiring recipes owned by this user that currently have
+	 * something to do. Used by both the work predicate and the drain, so the
+	 * heartbeat and the drain always agree about whether there is work.
+	 *
+	 * @return Recipe[]
+	 */
+	public static function pendingForOwner(int $user_id): array {
+		if ($user_id <= 0) {
+			return array();
+		}
+		$recipes = new MultiRecipe(array('enabled' => true, 'deleted' => false, 'owner_user_id' => $user_id));
+		$recipes->load();
+
+		$pending = array();
+		foreach ($recipes as $recipe) {
+			if (!self::requiresWindow($recipe)) {
+				continue;
+			}
+			$job = self::job($recipe);
+			if ($job === null) {
+				continue;
+			}
+			try {
+				if ($job->hasWork(self::config($recipe), $recipe)) {
+					$pending[] = $recipe;
+				}
+			} catch (\Throwable $e) {
+				error_log('RecipeVaultScope: work check failed for recipe '
+					. (int)$recipe->key . ': ' . $e->getMessage());
+			}
+		}
+		return $pending;
+	}
+
+	/** Does this user have any in-window recipe work waiting? */
+	public static function hasWork(int $user_id): bool {
+		return count(self::pendingForOwner($user_id)) > 0;
+	}
+
+	/**
+	 * How many items are waiting across this user's in-window recipes.
+	 *
+	 * For surfaces that tell someone how far behind they are — never the
+	 * heartbeat, which asks the cheaper hasWork(). Three recipes on one mailbox
+	 * each count the same message once, which is correct: each has to judge it
+	 * separately.
+	 */
+	public static function outstandingItemCount(int $user_id): int {
+		$total = 0;
+		foreach (self::pendingForOwner($user_id) as $recipe) {
+			$job = self::job($recipe);
+			if ($job === null) {
+				continue;
+			}
+			try {
+				$total += $job->countWork(self::config($recipe), $recipe);
+			} catch (\Throwable $e) {
+				error_log('RecipeVaultScope: count failed for recipe '
+					. (int)$recipe->key . ': ' . $e->getMessage());
+			}
+		}
+		return $total;
+	}
+
+	/**
+	 * Run in-window recipes for this user until $deadline. Returns the number
+	 * of recipe runs executed (not items — each run's own tally records those).
+	 *
+	 * Each recipe gets its own RecipeRun row, exactly as a scheduled run would,
+	 * so run history, token accounting, the kill switch, and delivery all work
+	 * unchanged. The trigger is recorded as 'window' to distinguish these from
+	 * schedule and manual runs.
+	 *
+	 * A recipe already mid-run elsewhere is skipped rather than doubled up.
+	 */
+	public static function drain(int $user_id, string $secret_key, float $deadline): int {
+		$ran = 0;
+		foreach (self::pendingForOwner($user_id) as $recipe) {
+			if (microtime(true) >= $deadline) {
+				break;
+			}
+			if (self::hasActiveRun((int)$recipe->key)) {
+				continue;
+			}
+			$run = new RecipeRun(NULL);
+			$run->set('rcr_rcp_recipe_id', (int)$recipe->key);
+			$run->set('rcr_status', RecipeRun::STATUS_PENDING);
+			$run->set('rcr_trigger', RecipeRun::TRIGGER_WINDOW);
+			$run->set('rcr_started_time', gmdate('Y-m-d H:i:s'));
+			$run->prepare();
+			$run->save();
+
+			require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunner.php'));
+			RecipeRunner::run($run, $deadline);
+			$ran++;
+		}
+		return $ran;
+	}
+
+	private static function hasActiveRun(int $recipe_id): bool {
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare(
+			"SELECT 1 FROM rcr_recipe_runs
+			  WHERE rcr_rcp_recipe_id = ?
+			    AND rcr_status IN (?, ?)
+			    AND rcr_delete_time IS NULL
+			  LIMIT 1");
+		$q->execute(array($recipe_id, RecipeRun::STATUS_PENDING, RecipeRun::STATUS_RUNNING));
+		return (bool)$q->fetchColumn();
+	}
+}
+?>

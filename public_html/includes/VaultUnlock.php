@@ -19,7 +19,7 @@
  * heartbeat/IP-change policy, a permission cap — is always a consumer
  * *policy* decision; this class only makes wiping callable (lock/lockAll).
  *
- * @version 1.2
+ * @version 1.3
  */
 
 /** Thrown by a consumer's decrypt path when it needs the vault open but the
@@ -63,6 +63,20 @@ class VaultUnlock {
 
 	/** @var callable[] consulted, in registration order, whenever a window closes. */
 	private static $wipe_callbacks = array();
+
+	/**
+	 * @var bool While set, secretKey() hands back the key WITHOUT counting as
+	 * user activity — no TTL re-store, no marker touch, no content stamp.
+	 *
+	 * Deferred work (VaultDeferredWork) decrypts on a timer the user did not
+	 * initiate. Left as ordinary activity it would hold a window open forever
+	 * for someone who walked away from an open tab, so the Fortress idle cap —
+	 * which measures from the last content decrypt — would stop existing. The
+	 * flag is set for the duration of a drain slice only, via
+	 * VaultDeferredWork::withBackgroundWork(). Every other policy check still
+	 * runs, so a suppressed read still fails closed on a lapsed window.
+	 */
+	private static $activity_suppressed = false;
 
 	/** @var bool guards loadConsumerBootstraps() to once per request. */
 	private static $consumer_bootstraps_loaded = false;
@@ -190,10 +204,30 @@ class VaultUnlock {
 		if (self::endedByPolicy($sid, $user_id, $scope)) {
 			return null;
 		}
-		apcu_store($key, $value, self::idleSeconds());
-		self::touchWindowMarker($user_id, $scope);
-		self::stampMeta($sid, $user_id, $scope, 'content'); // this fetch IS a content decrypt
+		// Deferred work reads the key on a timer the user did not initiate, so
+		// it must not extend the window or restart the idle cap. Every check
+		// above still applied — suppression skips the accounting, never the
+		// policy (see $activity_suppressed).
+		if (!self::$activity_suppressed) {
+			apcu_store($key, $value, self::idleSeconds());
+			self::touchWindowMarker($user_id, $scope);
+			self::stampMeta($sid, $user_id, $scope, 'content'); // this fetch IS a content decrypt
+		}
 		return $value;
+	}
+
+	/**
+	 * Set by VaultDeferredWork::withBackgroundWork() around a drain slice —
+	 * see $activity_suppressed. Not for general use: anything a user actually
+	 * asked for is activity and should extend their window.
+	 */
+	public static function setActivitySuppressed(bool $suppressed): void {
+		self::$activity_suppressed = $suppressed;
+	}
+
+	/** True while background work is reading the key without counting as activity. */
+	public static function isActivitySuppressed(): bool {
+		return self::$activity_suppressed;
 	}
 
 	/**

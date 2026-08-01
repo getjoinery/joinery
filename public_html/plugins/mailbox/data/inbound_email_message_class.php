@@ -99,7 +99,7 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
- * @version 1.16
+ * @version 1.17
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -380,12 +380,13 @@ class InboundEmailMessage extends SystemBase {
 	}
 
 	/**
-	 * The single grantee who owns this alias's mailbox — the vault the message
-	 * seals to. Mirrors InboundEmailRouter::attachmentOwnerId(): sealing only
-	 * applies to a single-reader mailbox (the ProtonMail model this package
-	 * targets); a shared alias or NULL/catch-all alias has no single owner to
-	 * seal to and is never sealed (specs/implemented/inbound_email_encryption_at_rest.md § 4.3).
-	 * Returns null when there is no single owner.
+	 * The single grantee who owns this alias's mailbox. Sealing only applies to
+	 * a single-reader mailbox (the ProtonMail model this package targets), so a
+	 * shared mailbox has no single owner and returns null.
+	 *
+	 * This answers only "who owns this MAILBOX". For "whose key does this
+	 * MESSAGE seal to" — which also covers mail that belongs to no mailbox —
+	 * use sealOwnerUserId().
 	 */
 	public static function singleOwnerUserId(?int $alias_id): ?int {
 		if (!$alias_id) {
@@ -394,6 +395,50 @@ class InboundEmailMessage extends SystemBase {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
 		$grantees = InboundEmailMailboxGrant::user_ids_for_alias($alias_id);
 		return (count($grantees) === 1) ? intval($grantees[0]) : null;
+	}
+
+	/**
+	 * Whose vault a message seals to (specs/mailbox_unmatched_sealing.md).
+	 *
+	 * A message in a mailbox seals to that mailbox's single owner. A message
+	 * that belongs to NO mailbox — accepted by the domain's catch-all for an
+	 * address nobody created, like postmaster@ or a typo — seals to the DOMAIN's
+	 * owner. It arrived for that domain, so the domain's owner is whose it is.
+	 * Without this fallback such mail has no key at all and is written in
+	 * plaintext on a domain whose whole purpose is that it is not, and the only
+	 * remedy would be creating a mailbox for every address a stranger invents.
+	 *
+	 * The fallback is deliberately ONLY for "no mailbox". A mailbox with no
+	 * owner, or with several, still returns null: sealing that to the domain
+	 * owner would hand someone else's mail to a third party and quietly defeat
+	 * the one-reader rule the protection ceremony enforces. Those stay blocked
+	 * until an operator fixes the mailbox.
+	 *
+	 * Returns null when nothing resolves — the caller stores plaintext (Standard)
+	 * or leaves the row in the backlog (a sealing level).
+	 */
+	public static function sealOwnerUserId(?int $alias_id, ?int $domain_id): ?int {
+		if ($alias_id) {
+			return self::singleOwnerUserId($alias_id);
+		}
+		return self::domainOwnerUserId($domain_id);
+	}
+
+	/**
+	 * The domain's owner (ied_owner_usr_user_id) — the same person whose vault
+	 * seals the domain's DKIM key. Null when the domain has none, which the
+	 * protection ceremony refuses to allow at a sealing level.
+	 */
+	public static function domainOwnerUserId(?int $domain_id): ?int {
+		if (!$domain_id) {
+			return null;
+		}
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare('SELECT ied_owner_usr_user_id FROM ied_inbound_email_domains
+			WHERE ied_inbound_email_domain_id = ? AND ied_delete_time IS NULL');
+		$q->execute(array($domain_id));
+		$owner = $q->fetchColumn();
+		return ($owner !== false && intval($owner) > 0) ? intval($owner) : null;
 	}
 
 	/**

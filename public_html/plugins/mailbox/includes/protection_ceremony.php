@@ -27,7 +27,7 @@
  * caller-scoped, since unsealing needs each holder's own unlock window —
  * and mailbox_lowering_receipt_render() is the downgrade's receipt card.
  *
- * @version 1.7
+ * @version 1.8
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
@@ -93,10 +93,35 @@ function mailbox_protection_facts(InboundEmailDomain $domain, int $acting_user_i
 		);
 	}
 
+	// The domain owner is who mail with NO mailbox seals to
+	// (specs/mailbox_unmatched_sealing.md). The catch-all accepts mail for
+	// addresses nobody created — postmaster@, typos, guesses — and that mail has
+	// no mailbox and therefore no holder. Without an owner it cannot be sealed at
+	// all, so at a sealing level the owner is a prerequisite, not a nicety.
+	$owner_id = intval($domain->get('ied_owner_usr_user_id'));
+	$owner_name = '';
+	$owner_has_vault = false;
+	if ($owner_id > 0) {
+		$owner_user = new User($owner_id, TRUE);
+		if ($owner_user->key) {
+			$owner_name = trim((string)$owner_user->get('usr_first_name') . ' '
+				. (string)$owner_user->get('usr_last_name'));
+			if ($owner_name === '') {
+				$owner_name = (string)$owner_user->get('usr_email');
+			}
+			$owner_has_vault = (UserEncryptionVault::loadForUser($owner_id) !== null);
+		} else {
+			$owner_id = 0;   // a deleted user is no owner at all
+		}
+	}
+
 	$facts = array(
 		'passkeys_enabled' => (bool)$settings->get_setting('passkeys_enabled'),
 		'relay_fronted'    => $fronted,
 		'aliases'          => $aliases_out,
+		'domain_owner_id'        => $owner_id,
+		'domain_owner_name'      => $owner_name,
+		'domain_owner_has_vault' => $owner_has_vault,
 	);
 
 	// Whether the person doing the raise already satisfies the Fortress posture
@@ -123,6 +148,7 @@ function mailbox_protection_facts(InboundEmailDomain $domain, int $acting_user_i
  *   vault_self   {}                         — session user sets up their vault
  *   passkey_self {}                         — session user enrolls a passkey
  *   second_factor_self {}                   — session user enrolls a 2nd factor
+ *   set_domain_owner {}                     — choose who owns the domain
  */
 function mailbox_protection_rows(array $facts, string $target, int $acting_user_id): array {
 	$rows = array();
@@ -224,6 +250,43 @@ function mailbox_protection_rows(array $facts, string $target, int $acting_user_
 		$rows[] = array('id' => 'holder_vault', 'severity' => 'required', 'status' => 'pass',
 			'label' => 'Reader vaults',
 			'summary' => 'Every reader\'s vault is ready to seal to.', 'actions' => array());
+	}
+
+	// The domain owner — whose key mail with no mailbox seals to. Absent from
+	// $facts means an older caller that never resolved it; skip rather than block.
+	if (array_key_exists('domain_owner_id', $facts)) {
+		$owner_id = intval($facts['domain_owner_id']);
+		$owner_name = (string)$facts['domain_owner_name'];
+		if ($owner_id <= 0) {
+			$rows[] = array('id' => 'domain_owner', 'severity' => 'required', 'status' => 'fail',
+				'label' => 'Domain owner',
+				'summary' => 'Not all mail arrives in a mailbox. Anything sent to an address you have not '
+					. 'created — postmaster@, a typo, an address a spammer guessed — is accepted for the '
+					. 'domain itself, and it seals to the domain\'s owner. This domain has no owner, so that '
+					. 'mail would be stored unencrypted. Choose who owns this domain first.',
+				'actions' => array(array('type' => 'set_domain_owner')));
+		} elseif (!$facts['domain_owner_has_vault']) {
+			if ($owner_id === $acting_user_id) {
+				$rows[] = array('id' => 'domain_owner_vault', 'severity' => 'required', 'status' => 'fail',
+					'label' => 'Your vault (domain owner)',
+					'summary' => 'You own this domain, so mail that arrives for an address without a mailbox '
+						. 'seals to your vault — and you don\'t have one yet. Set it up now; you\'ll come '
+						. 'straight back here.',
+					'actions' => array(array('type' => 'vault_self')));
+			} else {
+				$rows[] = array('id' => 'domain_owner_vault', 'severity' => 'required', 'status' => 'fail',
+					'label' => 'Vault — ' . $owner_name . ' (domain owner)',
+					'summary' => $owner_name . ' owns this domain, so mail arriving for an address with no '
+						. 'mailbox seals to their vault. They have none yet, and only they can create it. '
+						. 'Ask them to set it up from their Security page, then return here.',
+					'actions' => array());
+			}
+		} else {
+			$rows[] = array('id' => 'domain_owner', 'severity' => 'required', 'status' => 'pass',
+				'label' => 'Domain owner',
+				'summary' => 'Mail arriving for an address with no mailbox seals to ' . $owner_name . '.',
+				'actions' => array());
+		}
 	}
 
 	// Unlock by touch — recommended. Vault setup enrolls a PRF passkey, so this
@@ -346,7 +409,9 @@ function mailbox_protection_sealed_count(int $domain_id): int {
  * Seal one bounded batch of a domain's unsealed rows to each mailbox's
  * holder vault — the same per-row work as the reader-driven backfill_seal
  * action, but driveable from any admin session: sealing uses only the
- * holder's vault PUBLIC key. Rows whose holder has no vault are skipped
+ * holder's vault PUBLIC key. A row belonging to no mailbox seals to the domain
+ * owner instead (specs/mailbox_unmatched_sealing.md). Rows with nobody to seal
+ * to are skipped
  * (counted in remaining; the Setup tab's backlog row keeps them loud), and
  * pending-parse rows are never selected — they carry no plaintext, so sealing
  * one would store empty content under a fresh key and mark it done.
@@ -372,12 +437,17 @@ function mailbox_protection_seal_batch(InboundEmailDomain $domain, int $limit = 
 	foreach ($targets as $t) {
 		$alias_id = intval($t['iem_iea_inbound_email_alias_id']);
 		if (!isset($vault_cache[$alias_id])) {
-			$owner_id = $alias_id ? InboundEmailMessage::singleOwnerUserId($alias_id) : null;
+			// alias 0 means the row belongs to no mailbox — the catch-all stored
+			// it for an address nobody created. Those seal to the DOMAIN owner
+			// (specs/mailbox_unmatched_sealing.md); sealOwnerUserId() decides,
+			// so delivery and this backlog pass can never disagree about whose
+			// key a message belongs under.
+			$owner_id = InboundEmailMessage::sealOwnerUserId($alias_id ?: null, intval($domain->key));
 			$vault_cache[$alias_id] = ($owner_id !== null) ? UserEncryptionVault::loadForUser($owner_id) : null;
 		}
 		$vault = $vault_cache[$alias_id];
 		if ($vault === null) {
-			continue; // no single holder with a vault — stays in the backlog count
+			continue; // nobody with a vault to seal to — stays in the backlog count
 		}
 		$msg = new InboundEmailMessage(intval($t['iem_inbound_email_message_id']), TRUE);
 		if (!$msg->key) {
@@ -549,6 +619,15 @@ function mailbox_protection_render(array $rows, InboundEmailDomain $domain, arra
 				$html .= ' <a class="btn btn-sm btn-outline-primary" style="margin-left:.5rem;" href="'
 					. htmlspecialchars($urls['alias_url'] . '?iea_inbound_email_alias_id=' . intval($action['alias_id']))
 					. '">Add its owner</a>';
+			} elseif ($action['type'] === 'set_domain_owner') {
+				// No owner picker exists, and the Fortress outbound ceremony
+				// already establishes "the person doing this becomes the owner".
+				// Make that explicit and deliberate rather than a side effect.
+				$html .= '<form method="post" style="display:inline;margin-left:.5rem;">'
+					. '<input type="hidden" name="action" value="ceremony_set_domain_owner">'
+					. '<input type="hidden" name="ied_inbound_email_domain_id" value="' . intval($domain->key) . '">'
+					. '<button type="submit" class="btn btn-sm btn-outline-primary">Make me the owner</button>'
+					. '</form>';
 			} elseif ($action['type'] === 'vault_self') {
 				$html .= ' <a class="btn btn-sm btn-primary" style="margin-left:.5rem;" href="'
 					. htmlspecialchars($security_url) . '#vault-panel">Set up your vault</a>';

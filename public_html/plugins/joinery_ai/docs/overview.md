@@ -119,7 +119,9 @@ interface PipelineJobInterface {
     public function configDescriptor(): array;
     public function validateConfig(array $config, Recipe $recipe): void;
     public function untrustedDigest(): bool;
+    public function requiresVaultScope(array $config): ?string;
     public function nextItem(array $config, Recipe $recipe): ?array;
+    public function hasWork(array $config, Recipe $recipe): bool;
     public function verdictDescriptor(): array;
     public function defaultPrompt(): string;
     public function recordVerdict(string $item_key, array $verdict, Recipe $recipe, string $model): void;
@@ -128,6 +130,8 @@ interface PipelineJobInterface {
 
 - **`configDescriptor()`** — the per-recipe binding config (which mailbox, which alias, …), in `DescriptorValidator` shape. Rendered on the edit form via FormWriter's `fromDescriptor()`; coerced and passed to `validateConfig()` at save time and again at each run.
 - **`untrustedDigest()`** — whether item digests carry attacker-controlled text (an inbound email body, a user-submitted message). Drives the taint posture (below).
+- **`requiresVaultScope()`** — the vault scope this binding's items need, or null. Answered from `$config` because the same job can need a window for one binding and not another: the email jobs need one only when the mailbox they point at is on a domain that encrypts mail at rest. A job returning non-null puts the recipe on the in-window path described below.
+- **`hasWork()`** — the same question `nextItem()` answers, without building an item. It must stay a single indexed query: the vault heartbeat calls it for every in-window recipe on every beat.
 - **`nextItem()`** — the next unhandled item, oldest first, or `null` when the recipe is caught up. Returns `['item_key' => ..., 'digest' => ..., 'label' => ...]`. Must exclude items already in the processing log — `MultiAipRecipeItemLog::notExistsClause()` gives the NOT-EXISTS SQL fragment to splice into the job's own item-source query. The job owns the digest's size cap so it fits the smallest intended model's context.
 - **`verdictDescriptor()`** — the verdict contract, in the same descriptor shape `configDescriptor()` uses. The runner renders this into the model-facing output instruction and validates the model's answer against it, so the prompt half and the validator can't drift apart.
 - **`defaultPrompt()`** — the job's built-in instructions, used whenever the recipe's `rcp_prompt` is empty (the normal case — a non-technical admin creating a pipeline recipe touches only: job, the job's config fields, model, and schedule). A non-empty `rcp_prompt` replaces it entirely as a power-user override.
@@ -179,6 +183,35 @@ Pipeline mode is deliberately narrow. When a recipe idea doesn't fit, here's wha
 - **`email_security_scan`** (`plugins/joinery_ai/pipeline_jobs/EmailSecurityScanJob.php`) — scores each inbound email on one configured mailbox for phishing/scam danger. Config is a single mailbox selector (`mailbox_alias`, the alias's full address); `validateConfig()` requires the recipe owner to hold a mailbox grant (`ieg_inbound_email_mailbox_grants`) on it. `nextItem()` selects the oldest non-spam, not-yet-logged message on that mailbox and renders it via `EmailSecurityDigest::build()` (see `plugins/mailbox/docs/overview.md`) — never raw MIME. The verdict is `score` (0-10), `verdict` (`safe` / `suspicious` / `dangerous`), `red_flags` (up to 12, each a checklist letter A-G plus a one-sentence finding), and `summary`; `validateVerdict()` rejects a verdict whose `verdict` disagrees with the score band (0-2 safe / 3-6 suspicious / 7-10 dangerous). `recordVerdict()` writes exactly three fields on the scanned message (`iem_ai_danger_score`, `iem_ai_scan`, `iem_ai_scan_time`) and refuses to write to a message outside the configured mailbox. `untrustedDigest()` is `true` — the recipe is tainted-capable and needs `rcp_allow_tainted_writes`.
 - **`email_triage`** (`plugins/joinery_ai/pipeline_jobs/EmailTriageJob.php`) — sorts each inbound email on one configured mailbox into the mailbox owner's existing labels and writes a one-line summary, so the inbox is triaged automatically. Config is the same single mailbox selector (`mailbox_alias`) as the security scan job, sharing its access check via `MailboxAliasConfig::validateOwnerGrant()` (`plugins/mailbox/includes/MailboxAliasConfig.php`, also shared with `email_security_scan`). `nextItem()` selects the oldest non-spam, non-sealed, not-yet-logged message on that mailbox — the same query shape as `email_security_scan`, a separate `aip_recipe_item_log` row so both jobs can run on one mailbox without clobbering each other — and renders it via `EmailSecurityDigest::build()` plus, when the message carries non-inline attachments, an appended `EmailAttachmentDigest::build()` section (metadata for every part; readable text for file-backed `text/plain` bodies and rendered `.ics` invites — see `plugins/mailbox/docs/overview.md`). The verdict is `label` (an enum of the mailbox owner's live label names plus the sentinel `none`, built fresh on every call so it never drifts from what labels actually exist — a label literally named `none` can never be applied, since the sentinel owns that string) and `summary` (one plain-language sentence, up to 280 characters). `recordVerdict()` applies the chosen label via `InboundLabelMember::apply()` (an *existing* label only — this job never creates one) and writes `iem_ai_summary`; it refuses to write to a message outside the configured mailbox, and silently skips the label application (summary still records) if the label was deleted between descriptor build and verdict. `untrustedDigest()` is `true` — the recipe is tainted-capable and needs `rcp_allow_tainted_writes`.
 - **`email_schedule`** (`plugins/joinery_ai/pipeline_jobs/EmailScheduleJob.php`) — reads each inbound email on one configured mailbox for a real, dated event (meeting, deadline, reservation, …) and puts it on the recipe owner's own calendar. Config and item selection are the same `mailbox_alias` shape as the other two email jobs, its own `aip_recipe_item_log` row, and the same `EmailSecurityDigest::build()` + `EmailAttachmentDigest::build()` digest as `email_triage`. When the digest's ATTACHMENTS section carries an ICS EVENT block, the prompt directs the model to take that invite's title/start/end/timezone verbatim as the authoritative statement of the event rather than deriving them from prose. The verdict is `event_found` (bool) plus, when true, `title`/`start_local`/`end_local`/`timezone`/`all_day`; `validateVerdict()` requires a well-formed `title` and `start_local` when `event_found` is true and rejects an `end_local` that isn't after `start_local`. `recordVerdict()` does **not** configure a write target — the calendar is always the recipe owner's own, fixed in code — and resolves a missing/invalid `timezone` to the owner's profile timezone before calling `CalendarEntryImporter::upsert()` (see [Calendar access](#calendar-access)) with `source = 'email'`, `source_ref` = the message id, so a log-row reset and re-run updates the same entry instead of duplicating it. `event_found = false` records nothing beyond the processing-log row. `untrustedDigest()` is `true` — the recipe is tainted-capable and needs `rcp_allow_tainted_writes`.
+
+### Recipes that run in the owner's unlock window
+
+A job whose `requiresVaultScope()` returns a scope reads content encrypted to
+one user, which changes how — and whether — its recipe can run at all.
+
+Such a recipe **never runs from cron**. The vault secret lives in APCu keyed to
+the browser session, so a CLI worker holds no window and would read nothing.
+`RecipeDispatcher` skips these recipes when scheduling, and
+`RecipeWorkerSpawner` refuses to spawn a worker for one — refusing in both
+places covers Run Now and the worker self-chain, not just the scheduled path.
+
+They run through `RecipeVaultScope`, registered as a
+[deferred-work consumer](../../../docs/sealed_vault.md#deferred-work-in-the-window):
+in slices, inside the owner's own request, while their vault is open. Each slice
+creates an ordinary `RecipeRun` with `rcr_trigger = 'window'`, so run history,
+token accounting, the kill switch, and delivery all work unchanged. The slice
+deadline reaches `PipelineRunner`, which checks it before starting each item and
+stops with `stop_reason = 'deadline'` — a normal partial batch, not a failure.
+The pipeline already records each item as it completes, so a slice that ends
+mid-batch resumes exactly where it stopped.
+
+**One rule.** `RecipeRunner::setupActorSession()` normally installs a synthetic
+actor session for the recipe owner. Inside an in-window slice that would
+overwrite the live session of the person browsing, so it is skipped when the
+acting user already *is* the owner — which is the only way a slice ever runs.
+
+Standard-tier bindings are unaffected: `requiresVaultScope()` returns null, and
+those recipes keep running unattended on their schedule.
 
 ## LLM providers
 
@@ -628,6 +661,8 @@ Extraction is pure string/DOM work on already-downloaded bytes — the SSRF guar
 `CostGuard` is initialized per run from plugin settings (`max_input_tokens_per_run`, `max_output_tokens_per_run`, `max_dollars_per_run`). Each provider response includes usage metrics in the canonical usage block; the guard accumulates them and raises if the next call would exceed any ceiling. The runner catches the exception, marks the run as `error`, and persists the partial trace.
 
 For recipes that are expected to be expensive, raise the ceilings on the recipe row. For recipes that should be cheap, lower them.
+
+Only **paid** usage counts toward the monthly ceilings. A recipe run on a local provider costs nothing — its `estimateCost()` is `0.0`, so the run records `rcr_cost_estimate = 0` and is excluded. Cost is the signal rather than `isPrivate()`, which is about training policy: Fireworks is private *and* paid, and keeps counting. Chat turns count in full regardless of provider — the message row records tokens but neither a cost nor a model, so nothing distinguishes a free turn from a paid one, and counting them is the conservative direction.
 
 The one cost concern shared across surfaces is the **plugin-wide monthly ceiling** (`joinery_ai_global_monthly_token_cap`). `CostGuard::enforceGlobalCap()` checks it without a `Recipe` — both `RecipeRunner` (via `check($recipe)`) and each chat turn call it, and its month total unions recipe-run and chat-message tokens, so the cap is meaningful regardless of which surface spent them. The per-recipe caps and the 80% owner-alert emails stay recipe-only in `check($recipe)`.
 

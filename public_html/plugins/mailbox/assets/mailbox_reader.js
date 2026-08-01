@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.34
+ * No framework. @version 2.35
  *
  * Two-pane layout: the main pane swaps between the conversation list and an
  * opened conversation (toggled by the `reading` class on #mbx-reader); a back
@@ -224,7 +224,12 @@
 		state.mailboxes.forEach(function (m) {
 			list.appendChild(mailboxItem(m.address, m.alias_id, m.unread, m.folders, m.own));
 		});
-		if (state.allAccess && data.unmatched && data.unmatched.total > 0) {
+		// Offered whenever it holds anything at all, live OR discarded. Hiding an
+		// emptied box also hides its trash, because Trash is scoped to the selected
+		// mailbox — that made deleted mail unreachable through the UI even though
+		// it was still there (specs/mailbox_unmatched_sealing.md).
+		if (state.allAccess && data.unmatched
+				&& (data.unmatched.total > 0 || data.unmatched.trashed > 0)) {
 			var li = mailboxItem('Unmatched', 'unmatched', data.unmatched.unread, []);
 			li.title = 'Unrouted mail that matched no mailbox';
 			list.appendChild(li);

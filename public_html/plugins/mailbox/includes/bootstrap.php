@@ -16,7 +16,11 @@
  * code reads, and the reseal of a protected domain's sealed DKIM key alongside
  * the message DEKs on a vault key rotation.
  *
- * @version 1.4
+ * It also registers mail parsing as a deferred-work consumer
+ * (specs/in_window_deferred_work.md), so a Fortress backlog drains anywhere the
+ * owner is on the site with an open window, not only on a mailbox view.
+ *
+ * @version 1.5
  */
 
 require_once(PathHelper::getIncludePath('data/files_class.php'));
@@ -191,6 +195,24 @@ VaultUnlock::onWipe(function (int $user_id, ?string $scope) {
 	$index = new MailboxIndex();
 	$index->wipe($user_id);
 });
+
+// --- Deferred work consumer (specs/in_window_deferred_work.md) ---
+// Fortress mail arrives sealed and unparsed while the owner is logged out; only
+// their open window can turn it into readable fields. Registering here means the
+// backlog drains wherever the owner happens to be on the site, not only when
+// they open the mailbox. Mailbox registers FIRST (VaultUnlock::CONSUMER_PLUGINS
+// order) because the AI email jobs skip unparsed mail — parsing has to lead.
+require_once(PathHelper::getIncludePath('includes/VaultDeferredWork.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/DeferredIngest.php'));
+VaultDeferredWork::register(
+	'mailbox_parse',
+	function (int $user_id): bool {
+		return DeferredIngest::hasWork($user_id);
+	},
+	function (int $user_id, string $secret_key, float $deadline): int {
+		return DeferredIngest::drainForUser($user_id, $secret_key, DeferredIngest::DEFAULT_MAX, $deadline);
+	}
+);
 
 // --- Chunked upload purpose (specs/chunked_upload_purposes.md) ---
 // A mail archive is routinely larger than a single web request can carry, so it

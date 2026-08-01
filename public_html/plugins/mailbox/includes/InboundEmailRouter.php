@@ -82,7 +82,7 @@
  * senderDisplayString() owns the decode-and-sanitize; the IMAP and archive paths get
  * the same shape from Horde's envelope.
  *
- * @version 1.26
+ * @version 1.27
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -425,13 +425,20 @@ class InboundEmailRouter {
 		$thread_key = $this->computeThreadKey($parsed, $message_id_header);
 
 		// Encryption at rest (specs/implemented/inbound_email_encryption_at_rest.md
-		// § 4.1), resolved BEFORE the insert: the owner (this alias's single
-		// grantee — the same resolution attachmentOwnerId() already does for
-		// attachment ownership) and, if they hold a Sealed Vault, key material to
-		// seal to. A sealing row is built with EMPTY content columns from the
-		// start — no plaintext is ever written, even transiently.
+		// § 4.1), resolved BEFORE the insert: whose key this seals to and, if they
+		// hold a Sealed Vault, the key material. A sealing row is built with EMPTY
+		// content columns from the start — no plaintext is ever written, even
+		// transiently.
+		//
+		// Attachment ownership and SEALING ownership are different questions and
+		// must not share an answer: mail with no mailbox seals to the DOMAIN owner
+		// (specs/mailbox_unmatched_sealing.md), while its attachment Files keep the
+		// system ownership they have always had.
 		$owner_id = $this->attachmentOwnerId($alias);
-		$vault = ($owner_id !== User::USER_SYSTEM) ? $this->loadOwnerVault($owner_id) : null;
+		$seal_owner_id = InboundEmailMessage::sealOwnerUserId(
+			($alias && $alias->key) ? intval($alias->key) : null,
+			($domain && $domain->key) ? intval($domain->key) : null);
+		$vault = ($seal_owner_id !== null) ? $this->loadOwnerVault($seal_owner_id) : null;
 		// Sealing is capability-based (a single owner who holds a vault) AND
 		// posture-based: the domain's security level must opt into sealing
 		// (specs/mailbox_security_levels.md § Level → mechanism-branch switch).

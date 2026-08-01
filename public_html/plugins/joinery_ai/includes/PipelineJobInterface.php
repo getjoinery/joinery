@@ -48,8 +48,26 @@ interface PipelineJobInterface {
     public function untrustedDigest(): bool;
 
     /**
-     * The next unhandled item for this recipe, oldest first, or null when
-     * the recipe is caught up. MUST exclude items already present in the
+     * The vault scope this job's items require, or null when it can read them
+     * without one (specs/in_window_deferred_work.md).
+     *
+     * Answered from $config because the same job can need a window for one
+     * binding and not another — the email jobs need one only when the mailbox
+     * they point at is on a sealed domain.
+     *
+     * A job returning non-null cannot run from cron AT ALL: the vault secret
+     * lives in APCu keyed to the browser session, so a command-line worker can
+     * never hold a window. Such a recipe is skipped by the dispatcher, refused
+     * by the spawner, and executed only in slices inside its owner's open
+     * window, via the VaultDeferredWork consumer.
+     */
+    public function requiresVaultScope(array $config): ?string;
+
+    /**
+     * The next unhandled item for this recipe, or null when the recipe is
+     * caught up. The job chooses the order; the email jobs take the newest
+     * first, so fresh arrivals are judged ahead of a backlog rather than
+     * behind one. MUST exclude items already present in the
      * processing log (aip_recipe_item_log) — MultiAipRecipeItemLog provides
      * the NOT-EXISTS building block for this.
      *
@@ -62,6 +80,25 @@ interface PipelineJobInterface {
      *   - label: a short human string for the run tally (e.g. the subject)
      */
     public function nextItem(array $config, Recipe $recipe): ?array;
+
+    /**
+     * Is there at least one unhandled item? Same rules as nextItem(), asked
+     * without building an item.
+     *
+     * It must stay CHEAP — a single indexed query, no decryption, no digest
+     * construction, no model call. The vault heartbeat calls this for every
+     * in-window recipe on every beat to decide whether a drain is worth firing
+     * (specs/in_window_deferred_work.md).
+     */
+    public function hasWork(array $config, Recipe $recipe): bool;
+
+    /**
+     * How many unhandled items remain. Separate from hasWork() because the two
+     * have different costs and different callers: hasWork() is an EXISTS on the
+     * heartbeat path, this is a COUNT used to tell someone how far behind they
+     * are. Never call this per beat.
+     */
+    public function countWork(array $config, Recipe $recipe): int;
 
     /**
      * The verdict contract, DescriptorValidator shape. The runner renders

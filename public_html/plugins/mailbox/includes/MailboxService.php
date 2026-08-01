@@ -49,7 +49,7 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
- * @version 1.16
+ * @version 1.17
  */
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -396,14 +396,24 @@ class MailboxService {
 			);
 
 			// "Unmatched" — rows that belong to no mailbox.
-			$row = $db->query("SELECT COUNT(*) AS total,
-					COUNT(*) FILTER (WHERE iem_is_read = false) AS unread
+			//
+			// `trashed` is counted because the box is only offered when it has
+			// something in it, and Trash is scoped to the selected mailbox. Count
+			// live rows alone and emptying the box hides it — along with the only
+			// route to its own trash, leaving discarded mail recoverable in the
+			// database and unreachable in the interface until retention purges it
+			// (specs/mailbox_unmatched_sealing.md § unmatched mail you cannot reach).
+			$row = $db->query("SELECT
+					COUNT(*) FILTER (WHERE iem_delete_time IS NULL) AS total,
+					COUNT(*) FILTER (WHERE iem_delete_time IS NULL AND iem_is_read = false) AS unread,
+					COUNT(*) FILTER (WHERE iem_delete_time IS NOT NULL) AS trashed
 				FROM iem_inbound_email_messages
-				WHERE iem_delete_time IS NULL AND iem_iea_inbound_email_alias_id IS NULL" . self::NO_DRAFTS . "")
+				WHERE iem_iea_inbound_email_alias_id IS NULL" . self::NO_DRAFTS . "")
 				->fetch(PDO::FETCH_ASSOC);
 			$result['unmatched'] = array(
-				'unread' => intval($row['unread']),
-				'total'  => intval($row['total']),
+				'unread'  => intval($row['unread']),
+				'total'   => intval($row['total']),
+				'trashed' => intval($row['trashed']),
 			);
 		}
 
