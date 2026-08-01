@@ -726,7 +726,16 @@ contracts, skip-if-toolchain-missing like `drive_crypto_gate.sh`):
   claim exists.
 - **Phase 3 — macOS and Windows.** Watcher backends, FS personalities
   (case-fold, NFD, illegal names, `\\?\`), keychain backends, macOS gate on
-  the mini. Tray shell (all three OSes) with the health model.
+  the mini. Tray shell (all three OSes) with the health model. **BUILT
+  2026-07-31.** Naming wired into the pass (`jd-core::naming`), volume-probed
+  personalities, NFC at the `Vfs` boundary, Windows file identity and verbatim
+  paths, watcher root resolution; new `jd-platform` (secrets, directories,
+  autostart, browser, control channel), `jd-daemon` (link ceremony, the loop,
+  health model, CLI), `jd-shell` (tray on all three). Verified by per-platform
+  simulator scenarios, a cross-build gate, and `sync_macos_gate.sh` on the mini.
+  Two pre-existing engine defects surfaced and fixed on the way: a folder
+  renamed locally was rebuilt server-side rather than renamed, and a folder
+  deleted locally was never propagated at all.
 - **Phase 4 — encrypted vault sync.** Vault handoff in the link ceremony,
   keychain custody, encrypted engine ops (§III.3), parity gate extended.
 - **Phase 5 — shared-with-me + multi-device hardening.** Grant-root mounts,
