@@ -1,293 +1,453 @@
-# In-window deferred work
+# Work that runs while you're signed in
 
-**Status:** Active spec, unbuilt.
+**Status:** Built 2026-08-01, uncommitted. Everything in this spec is
+implemented and the db tier is green (207 tests, 6,288 checks), including a
+suite that exercises the whole path against a real Fortress domain with
+genuinely sealed mail.
 
-## What this gives the user
+Still unverified: behaviour in a live browser, and anything on
+jeremytunnell.com — no recipe has been created there and the domain has not
+opted in.
 
-Some work can only happen while you are standing there with your vault open —
-because the content it works on is encrypted to you and the server genuinely
-cannot read it otherwise. Today that means: mail on a sealed domain arrives and
-sits unparsed until you next open your inbox, and the AI email features
-(triage, security scan, calendar extraction) cannot run on sealed mail at all.
+## The problem in one paragraph
 
-This spec makes "work that needs the user present" a first-class platform
-capability: any feature can register work that runs automatically, in bounded
-slices, whenever the owner has an unlock window open — on any page, not just
-the feature's own screen.
+On a Fortress domain, your mail is encrypted with a key only you can supply.
+You supply it by unlocking your vault, which happens when you sign in and tap
+your passkey. The server holds that key in memory for a while afterward. That
+period is called the unlock window. While the window is open, the server can
+read your mail. While it's closed, the server cannot — not partially, not with
+effort. The mail is just encrypted bytes.
 
-The first two consumers are mail parsing (which already does this by hand) and
-the AI email pipeline jobs (which currently cannot).
+That means anything the server wants to do with your mail has to happen while
+you're there with the window open.
 
-## The structural constraint this is built around
+## What we want
 
-The vault secret key lives in APCu keyed to the **browser session**
-(`vault:{session_id}:{user_id}:{scope}`), unwrapped only in web-worker RAM.
-A CLI process has its own APCu segment and can never see it —
-`VaultUnlock::secretKey()` returns null under the CLI SAPI by construction.
+Three AI features already exist and work: triage (file mail under your labels
+and write a one-line summary), security scan (score mail for phishing), and
+schedule (pull dated events onto your calendar). They run today on ordinary
+domains. They cannot run on a Fortress domain, because they run from cron, and
+cron can't read encrypted mail.
 
-Therefore: **no cron task can ever process sealed content.** Not with more
-effort, not with a better job design. Work over sealed content must execute
-inside a web request carrying a live window for that user, or not at all.
+We want them working on Fortress domains.
 
-This is not a mailbox quirk or an AI-pipeline quirk. It is a property of the
-vault, and every future consumer that seals content will hit it.
+## Why cron can never do it
 
-## What already exists (and what this generalizes)
+The unlock key is stored in shared memory tied to your browser session. Cron
+jobs run as separate command-line processes. Those processes get their own
+separate shared memory, so they cannot see the key. This isn't a bug or an
+oversight to route around. `VaultUnlock::secretKey()` returns nothing at all
+when called from the command line, on purpose.
 
-`plugins/mailbox/includes/DeferredIngest.php` solves exactly this problem for
-one consumer: Fortress mail arrives sealed, parks in `iem_pending_parse`, and
-drains when `MailboxService` happens to run with an open window, capped at 200
-per pass so it never blocks a render.
+So the work has to move. It can't run on a timer. It has to run inside a web
+request that happens while your window is open.
 
-That is the right shape with a consumer-specific trigger ("someone looked at
-their inbox") and no shared budget, ordering, or concurrency guard. This spec
-lifts the shape into core and re-points mailbox at it.
+This applies to any future feature that encrypts content, not just mail and not
+just AI. That's why this is a shared piece of the platform rather than a fix
+inside the AI plugin.
 
-## The interface
+## We already do this once, by hand
 
-New core class `includes/VaultDeferredWork.php`. `VaultUnlock` stays focused on
-the window itself (it already declares that policy belongs to consumers).
+Mail parsing has the same problem and already solves it.
 
-### Registration
+On a Fortress domain, mail arrives while you're logged out. The server can
+store it, but it can't read it, so it can't pull out the subject, sender, or
+body. It parks the message in an unparsed state. Later, when you open your
+inbox with your vault unlocked, a helper called `DeferredIngest` grabs up to
+200 of those parked messages and parses them.
 
-Consumers register from their existing `plugins/{name}/includes/bootstrap.php`
-— already loaded by `VaultUnlock::loadConsumerBootstraps()`, and both `mailbox`
-and `joinery_ai` are already in `CONSUMER_PLUGINS`.
+That's the right idea. What it lacks:
+
+- It only runs when you visit the mailbox. Nothing else wakes it.
+- It has no time limit, so a big backlog can slow down a page load.
+- Nothing stops two browser tabs from doing the same work twice.
+
+This spec turns that idea into a shared service and moves mail parsing onto it.
+
+## The design
+
+A new core class, `includes/VaultDeferredWork.php`.
+
+### Features sign up
+
+Each feature that has work needing an unlock window registers two functions.
+Registration happens in the plugin's existing `includes/bootstrap.php` file,
+which the vault already loads.
 
 ```php
 VaultDeferredWork::register(
-    'mailbox_parse',                       // consumer id, stable, appears in logs
-    fn(int $user_id) => bool,              // hasWork(): cheap, indexed, no plaintext
-    fn(int $user_id, string $secret_key, float $deadline) => int   // drain(): returns items done
+    'mailbox_parse',                                  // a name, for logs
+    fn(int $user_id) => bool,                         // is there work to do?
+    fn(int $user_id, string $key, float $deadline) => int   // do some of it
 );
 ```
 
-`hasWork()` runs on every heartbeat for every registered consumer, so it must be
-a cheap indexed query — never a decrypt, never an LLM call.
+The first function answers "is there anything to do for this user?" It runs
+often, so it must be a fast database check. It must never decrypt anything or
+call a model.
 
-**No queue table.** Both real consumers already have a durable record of
-outstanding work (`iem_pending_parse`; the AI item log's not-exists clause). A
-shared queue table would duplicate that state and introduce a sync failure mode
-with no benefit. The abstraction is the trigger, the budget, and the safe key
-access — not storage.
+The second function does the work and stops by the deadline it's given.
 
-### Trigger
+### What starts the work
 
-Two entry points, both core:
+Every page you load while signed in with an open vault already sends a small
+ping to the server every 25 seconds, saying "I'm still here, keep my window
+open." That ping is core, not mailbox-specific, so it fires on every page.
+That's the clock this hangs off — work gets done wherever you happen to be on
+the site, and features don't need their own trigger.
 
-- **`vault_heartbeat_logic`** — after a successful heartbeat, run one slice.
-  `assets/js/vault-presence.js` already beats from **every signed-in page** with
-  an open vault (emitted by `PublicPageBase`, not by mailbox), so this gives
-  platform-wide background processing with no per-consumer trigger.
-- **`VaultUnlock::open()`** — run one slice immediately on unlock, so work
-  starts on the tap rather than at the next beat.
+**The work does not run inside the ping.** The ping's job is to be small and
+reliable, and it must never be able to stall on a language model — the local
+provider's timeout is 300 seconds, so one slow message would leave a keep-alive
+request in flight for minutes while the browser's timer kept firing more behind
+it. The thing that keeps your vault open cannot depend on an AI call.
 
-Drain order is registration order, and it is meaningful: mailbox parsing must
-precede AI judging, because an unparsed message has no fields for the AI to
-read. Registration order is declared in `VaultUnlock::CONSUMER_PLUGINS`.
+So the ping answers one extra question — *is there work pending?* — and when
+the answer is yes, the browser makes a **separate drain request**. The
+keep-alive stays fast. The drain is bounded on its own terms.
 
-### Budget
+Unlocking also triggers one drain immediately, so work starts on the tap rather
+than at the next tick.
 
-- A wall-clock slice deadline, setting `vault_deferred_work_slice_seconds`
-  (default 3), passed to each `drain()` as an absolute deadline it must respect.
-- Consumers with work are visited round-robin within the slice so a slow
-  consumer cannot starve a fast one.
-- A consumer that throws is logged, skipped for the rest of the slice, and
-  retried next beat. One broken consumer never stalls the others.
+### Order matters
 
-### Concurrency
+Features run in the order they registered, and that order is deliberate. Mail
+parsing goes before AI processing, because the AI has nothing to read until the
+message has been parsed. The order is set in one place,
+`VaultUnlock::CONSUMER_PLUGINS`.
 
-Two open tabs beat independently. Each slice takes
-`pg_try_advisory_lock` on `(user_id, consumer_id)` — non-blocking; a slice that
-cannot take the lock skips that consumer and moves on. No double-processing, no
-waiting.
+### Keeping it small
 
-## The idle-cap trap (must not be got wrong)
+Each drain request gets a time limit, set by
+`vault_deferred_work_slice_seconds` (default 10 seconds). Features with work to
+do take turns inside that limit, so a slow one can't hog it. A feature that
+crashes is logged, skipped for the rest of that drain, and tried again on the
+next one. One broken feature never stops the others.
 
-`VaultUnlock::secretKey()` stamps `meta['content']` on every fetch, and the
-**Fortress idle cap measures from that stamp** (`FORTRESS_IDLE_CAP_SECONDS`,
-2 hours). A drain that calls `secretKey()` every heartbeat would keep a Fortress
-window alive indefinitely for a user who walked away with a tab open — silently
-converting the strictest posture into an unbounded one.
+Ten seconds inside a 25-second cycle gives roughly a 40% duty cycle, which
+clears a 79-message backlog in about twenty minutes of ordinary browsing.
 
-Background work must therefore **not** count as user activity. A dedicated
-accessor is not enough, because consumer code below the drain (the sealed-field
-model hook, `EmailSecurityDigest`) calls `secretKey()` itself.
+**The limit is checked between items, not inside them.** An in-flight call to a
+model can't be cut off cleanly, so the deadline governs how many items a drain
+*starts*. A drain can overrun by one slow item. That's acceptable for a
+background request, and it's the second reason this doesn't ride on the ping.
 
-The mechanism is a request-scoped suppression wrapper:
+### Two tabs open
+
+If you have two tabs open, both ping, and both would fire drain requests for
+the same work. Each drain takes a database lock on the pair (user, feature). If
+the lock is already held, that drain skips the feature and moves on. No
+duplicate work, no waiting.
+
+### No new queue table
+
+Both features already know what work is outstanding. Mail has its unparsed
+flag. The AI pipeline has its log of already-processed items. A new shared
+queue table would just be a second copy of that, which could drift out of sync
+with the first. So this spec adds no storage. It's a scheduler, not a queue.
+
+## One thing that must not be got wrong
+
+Fortress windows close automatically after two hours of inactivity. "Activity"
+is measured by when the key was last used to decrypt something.
+
+Background work uses the key to decrypt things. So if we're not careful,
+background work counts as activity, and a browser tab you left open at your
+desk keeps your window alive forever. The two-hour limit quietly stops
+existing.
+
+So background work must not count as activity.
+
+A separate "background" version of the key-fetching function isn't enough,
+because the code underneath the drain fetches the key on its own. Instead we
+set a flag for the duration of the batch:
 
 ```php
 VaultDeferredWork::withBackgroundWork(function () { ... });
 ```
 
-While the flag is set, `VaultUnlock::secretKey()` returns the key but does
-**not** stamp `content`, does **not** re-store the APCu TTL, and does **not**
-touch the `/dev/shm` window marker. It still fails closed on every existing
-policy check. The absolute cap (measured from `armed`) is unaffected either way.
+While that flag is set, fetching the key still works and still refuses when the
+vault is locked, but it doesn't record activity and doesn't extend the window.
 
-A test asserts this directly: a window whose only reads come from background
-work still ends at the Fortress idle cap.
+There's a test for this specifically: a window where the only activity is
+background work must still close after two hours.
 
-## Consumer 1: mailbox parse
+## Feature 1: mail parsing
 
-`DeferredIngest::drainForUser()` keeps its logic and gains a deadline
-parameter. Mailbox's bootstrap registers it as `mailbox_parse` with
-`hasWork()` = "any `iem_pending_parse` rows for this owner".
+`DeferredIngest` keeps its logic and gains a deadline. Mailbox registers it as
+`mailbox_parse`. Its "is there work?" check is "any unparsed messages for this
+user."
 
-The two existing ad-hoc call sites (`MailboxService`, `protection_ceremony`)
-stay — draining on an inbox view is still correct and lower-latency than
-waiting for a beat — but they route through the registry so they share the lock
-and the budget.
+The two places that already call it directly stay as they are, because parsing
+when you open your inbox is faster than waiting for a ping. They just route
+through the new service so they share the lock and the time limit.
 
-## Consumer 2: the AI email pipeline
+## Feature 2: the AI email jobs
 
-### Jobs declare their vault requirement
+### Jobs say whether they need the vault
 
-New method on `PipelineJobInterface`:
+A new method on the job interface:
 
 ```php
-public function requiresVaultScope(array $config): ?string;   // null = runs anywhere
+public function requiresVaultScope(array $config): ?string;   // null = doesn't need it
 ```
 
-The three email jobs resolve the target alias's domain and return `'user'` when
-its `ied_security_level` is `private` or `fortress`, `null` when `standard`.
-A standard-domain recipe therefore keeps running on cron exactly as it does
-now — overnight, unattended. Only sealed domains move to the in-window path.
+Each of the three email jobs looks at the domain of the mailbox it's pointed
+at. On an ordinary domain it returns nothing, and the job keeps running on cron
+exactly as it does today, overnight, unattended. On a Private or Fortress
+domain it returns `'user'`, and the job moves to the in-window path.
 
-### Execution
+Nothing changes for anyone not using a sealed domain.
 
-A recipe whose job requires a scope is never spawned as a CLI worker.
-`RecipeDispatcher` skips it; `RecipeWorkerSpawner` refuses it. Instead
-`joinery_ai`'s bootstrap registers `ai_pipeline`, whose `drain()` calls the
-existing `RecipeRunner`/`PipelineRunner` with `max_iterations` bounded by the
-slice deadline.
+### How they run
 
-The pipeline is already one-item-at-a-time with a durable item log, so it is
-naturally resumable across slices — a slice that ends mid-batch loses nothing.
+A recipe whose job needs the vault is never launched as a background
+command-line process. The dispatcher skips it. The spawner refuses it. Instead,
+`joinery_ai` registers itself with the new service, and its work function runs
+the existing pipeline for as many items as fit in the time limit.
 
-**Session invariant:** `RecipeRunner::setupActorSession()` installs a synthetic
-actor session, which would clobber the live browser session it is running
-inside. An in-window run instead asserts that the acting session user **is** the
-recipe owner and skips actor setup entirely. A drained recipe only ever runs as
-its own owner, in that owner's own session. Anything else is a bug.
+The pipeline already handles one message at a time and records each one as it
+finishes, so stopping partway through loses nothing. It picks up where it left
+off on the next ping.
 
-### Item selection changes
+**One rule to enforce:** the recipe runner normally creates a fake session for
+the recipe's owner. Running inside your live browser request, that would
+overwrite your real session. So the in-window path skips that step and instead
+requires that the person browsing *is* the recipe's owner. A recipe drained
+this way only ever runs as its own owner, in that owner's session.
 
-All three jobs' `nextItem()` queries:
+### Which messages they pick up
 
-- drop `AND iem_content_sealed IS NOT TRUE` — sealed content is now readable
-  through the open window;
-- add `AND iem_pending_parse IS NOT TRUE` — an unparsed row has empty content
-  columns. This also fixes a live defect: today those rows are selected,
-  judged on empty digests, and permanently written to the item log, so they
-  are never re-judged once parsed.
+Three changes to the selection each job makes.
 
-### Draining a backlog
+**Encrypted messages stop being skipped.** That filter comes out, since the
+whole point is that they can now be read.
 
-One slice per heartbeat processes very few items when each item is an LLM call
-(seconds each on a local model). That is fine for steady state and useless for
-a backlog — jeremytunnell.com currently holds 1,958 sealed messages.
+**Unparsed messages start being skipped.** This fixes a live bug. Right now
+they aren't skipped, so on a Fortress domain the jobs would pick them up, judge
+them on empty content, and permanently mark them as processed — never looked at
+again once they were parsed.
 
-So: a **Catch up** control on the recipe page runs a longer bounded pass with
-visible progress while the page stays open, using the same drain under the same
-lock. Background drain keeps up with new mail; catch-up burns down history when
-the owner chooses to sit and watch it.
+**Only unread mail is processed.** This is the scope of the whole feature, not
+a performance tweak. A summary exists to help you decide whether to open
+something, and a danger score is no use after you've read it. Mail you've
+already read doesn't need either.
 
-Whether to process the full history at all is an owner decision (see Open
-decisions).
+The practical effect is large. On jeremytunnell.com, 79 of the 1,966 stored
+messages are unread. That's the backlog — not 1,958.
 
-## The opt-in flag
+The filter is `iem_is_read = false`. A message you read before the AI reaches
+it simply never gets processed, which is the intended behaviour rather than a
+gap. One consequence worth knowing: on a Fortress domain, processing can only
+happen while you're signed in, which is also when you're reading. So you will
+sometimes open a message before its summary exists. Summaries are best-effort
+for mail you haven't got to yet.
 
-Turning this on changes what Fortress means in practice: from "the server
-cannot read my mail unless I am present" to "the server reads my mail while I
-am present, and sends it to my model host." That is a defensible trade, and it
-must never become true silently.
+### New mail goes first
 
-New field on `ied_inbound_email_domains`:
+All three jobs currently take the oldest unprocessed message. That's backwards
+even for a small backlog: mail from three weeks ago gets a summary before mail
+from this morning.
 
-```php
-'ied_ai_processing_enabled' => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
-```
+So the ordering flips. Every job takes the **newest** unread, unprocessed
+message (`ORDER BY iem_received_time DESC`). Today's mail is always handled
+first, and anything older drains underneath it.
 
-- Surfaced on the same admin screen as `ied_security_level`, in plain language:
+**Mail parsing flips too.** `DeferredIngest` parses oldest-first today. It
+becomes newest-first, for two reasons.
+
+The obvious one: on first unlock with a backlog, your most recent mail should
+be the first to become readable, not the last.
+
+The one that actually forces it: the AI skips unparsed messages. If parsing ran
+oldest-first while the AI ran newest-first, the two would fight. Come back from
+two weeks away with hundreds of messages waiting, and the parser would work
+forward from the oldest while the AI waited on the newest — stalling the AI on
+exactly the mail you most want summarized until the parser had ground through
+everything else. The two orders have to agree.
+
+This is safe to change. Parsing is self-contained per message: decrypt, parse,
+seal the fields, classify spam, run that message's filters. Thread keys are
+assigned when a message is stored, not when it's parsed, which is why threading
+and unread counts already work on unparsed mail. No filter reads a neighbouring
+message.
+
+One small edge case: a filter that forwards is subject to a per-alias rate
+limit, so the order decides which messages get forwarded when a large batch
+hits the limit. Recent mail is the better use of a limited allowance.
+
+### Catching up
+
+79 unread messages across three jobs is roughly 240 model calls — a few minutes
+of ordinary background batches, spread over a session or two. Normal use needs
+no tool at all.
+
+Catch up is insurance for the case where you've been away and come back to
+several hundred unread messages and no summaries. It lives **in the mailbox**,
+not on the recipe page, because the mailbox is where you feel the problem. It
+also covers all three jobs at once, since they're all just work registered
+against your open window.
+
+It isn't a permanent button. When more than roughly twenty unread messages are
+waiting to be processed, a quiet line appears at the top of the inbox saying how
+many are outstanding, with a control to work through them and a progress
+display. Below that threshold there's nothing to see, because background
+batches will have it done shortly anyway.
+
+Nothing about it is special: it's the same work function under the same lock,
+without the per-batch time limit.
+
+The recipe page gets no equivalent. Its existing Run Now already covers testing
+a recipe without opening a mailbox, and it has to keep working for in-window
+recipes regardless.
+
+## Token caps have to stop counting free work
+
+This is independent of the vault work and would be worth fixing on its own.
+
+Both monthly caps count tokens rather than money, and they count them whichever
+model ran — so a model running on your own hardware, costing nothing, still
+burns through them.
+
+The numbers on this box: the plugin-wide cap is 25,000,000 tokens a month,
+which is comfortable. The **per-recipe** cap defaults to 200,000. The initial
+unread backlog alone is roughly 380,000 tokens across the three jobs, so the
+recipes would stop about a third of the way in, on their first day, having
+spent nothing.
+
+Raising the number by hand on each recipe is a workaround. The caps exist to
+stop runaway spending, and there's no spending to stop.
+
+So the caps become provider-aware: **usage on a local provider doesn't count
+toward either monthly cap.** Paid providers are unchanged, including the 80%
+warning email. Runaway protection for local runs comes from the limits that
+already bound every run — the per-run item count, the output-token budget, and
+the batch deadline. None of those change.
+
+`CostGuard` needs to know which provider a run used. `LlmProviderInterface`
+already exposes `isPrivate()`, which draws exactly this line, so the check hangs
+off that rather than a new flag. Both `check()` and `enforceGlobalCap()` need
+it, since the chat surface shares the plugin-wide cap.
+
+## Turning it on has to be a deliberate choice
+
+Right now, Fortress means the server can't read your mail unless you're there.
+After this, it means the server reads your mail while you're there, and sends
+it to your model host.
+
+That's a reasonable trade, since the model runs on your own Mac over your own
+private network. But it's a real change in what the setting buys you, and it
+must never switch on quietly.
+
+So: a new checkbox on the domain, `ied_ai_processing_enabled`, off by default.
+
+- It sits on the same admin screen as the security level, and reads:
   *"Let Joinery AI read this domain's mail while your vault is unlocked."*
-- Only consequential when the level is `private` or `fortress`; on `standard`
-  the mail is already server-readable and the flag is not shown.
-- Changing it requires a recent step-up, like other vault-consequential
-  actions.
-- A pipeline job's `validateConfig()` refuses a sealed-domain alias while the
-  flag is off, naming the domain and the setting. The refusal happens at recipe
-  save, not silently at run time.
+- It only appears for Private and Fortress domains. On an ordinary domain the
+  server already reads the mail, so there's nothing to consent to.
+- Changing it requires a fresh identity check, like other vault-related
+  changes.
+- Saving a recipe pointed at a sealed domain with the box unticked fails, and
+  says which domain and which setting. You find out when you save, not
+  silently at 3am.
 
-## Explicitly rejected
+## Things we considered and rejected
 
-- **A second vault scope with server-held custody for AI.** Would allow true
-  overnight processing by sealing the digest to a key the server holds. It is
-  Fortress in name only for everything the AI can see. Rejected.
-- **Handing the secret key to the CLI worker** (argv, env, temp file). Puts an
-  unwrapped secret key on disk or in a process listing and defeats the vault's
-  central property. Rejected.
-- **A shared queue table.** Duplicates state both consumers already keep.
-  Rejected.
+**Give the AI its own key that the server keeps.** This would allow overnight
+processing, because the server could decrypt without you. It also means the
+server can read your mail whenever it likes, which is the exact thing Fortress
+exists to prevent. Rejected.
 
-## What this deliberately does not deliver
+**Pass the key to the cron job.** Any way of doing this puts your unwrapped key
+into a command line, an environment variable, or a file. Rejected.
 
-Overnight AI triage on a sealed domain. Summaries appear seconds after the
-owner opens their mail, not before they arrive. This is inherent to Fortress,
-not a limitation of the design, and no amount of interface work changes it.
-Anyone who wants a triaged inbox waiting for them must run that domain at
-`standard`.
+**A shared queue table.** Duplicates information both features already have.
+Rejected.
 
-## Data model changes
+## What this does not give you
+
+A triaged inbox waiting for you in the morning.
+
+On a Fortress domain, summaries appear a few seconds after you open your mail,
+not before you arrive. That's what encrypting your mail to yourself means. No
+design gets around it. If you want overnight triage on a domain, that domain
+has to run at the ordinary security level.
+
+## Database changes
 
 | Table | Change |
 |---|---|
-| `ied_inbound_email_domains` | `ied_ai_processing_enabled` bool, default false |
+| `ied_inbound_email_domains` | add `ied_ai_processing_enabled`, boolean, default false |
 
-No other schema changes — the interface stores nothing of its own.
+Nothing else. The new service stores nothing of its own, and the token-cap
+change is logic only — the existing usage rows already record which run spent
+what.
 
-New setting (declared in `settings.json`, per the declared-settings rule):
-`vault_deferred_work_slice_seconds`, default 3.
+One new setting in `settings.json`: `vault_deferred_work_slice_seconds`,
+default 10.
+
+One new endpoint: the drain request the browser fires when the keep-alive ping
+reports work pending. It declares `requires_browser_session`, like every other
+vault endpoint — the unlock window is keyed to the browser session, so an API
+key could never carry one.
 
 ## Docs to update
 
-Per the docs rule, all written as current state with no migration narration:
+Written as current state, with no mention of how things used to work:
 
-- **`docs/sealed_vault.md`** — new section *Deferred work in the window*: the
-  registry, the trigger, the budget, and the background-work suppression rule
-  with its reason.
-- **`docs/scheduled_tasks.md`** — state plainly that vault-scoped work never
+- **`docs/sealed_vault.md`** — a new section on deferred work: how features
+  sign up, what starts a batch, the time limit, and the rule that background
+  work doesn't count as activity, with the reason.
+- **`docs/scheduled_tasks.md`** — say plainly that work needing the vault never
   runs from cron, and why.
-- **`plugins/mailbox/docs/overview.md`** — `DeferredIngest` as a registered
-  consumer; the AI-processing flag on sealed domains.
-- **`plugins/joinery_ai/docs/overview.md`** — pipeline jobs may declare a vault
-  scope; such recipes run in the owner's unlock window rather than on cron, and
-  what that means for scheduling.
+- **`plugins/mailbox/docs/overview.md`** — mail parsing as a registered
+  feature; the AI checkbox on sealed domains.
+- **`plugins/joinery_ai/docs/overview.md`** — jobs can require the vault; those
+  recipes run while the owner is signed in rather than on a schedule, and what
+  that means in practice. Also: monthly token caps apply to paid providers
+  only, and pipeline jobs take the newest candidate item first.
+- **`plugins/mailbox/docs/overview.md`** — the email jobs process unread mail
+  only.
 
 ## Tests
 
-`tests/vault/` (safe tier where possible):
+In `tests/vault/`:
 
-- registration order is respected across consumers;
-- the slice deadline is honoured and a long consumer cannot overrun it;
-- a second concurrent slice is skipped by the advisory lock, not blocked;
-- a consumer that throws is skipped and the rest of the slice still runs;
-- **regression:** a window whose only reads come from background work still
-  ends at the Fortress idle cap;
-- a locked user drains nothing.
+- features run in registration order;
+- the time limit stops new items starting, and one long item may overrun it;
+- a second simultaneous drain is skipped by the lock, not blocked;
+- a feature that throws is skipped, and the rest of the drain still runs;
+- the keep-alive ping returns without doing any work of its own, however much
+  work is pending;
+- **the important one:** a window whose only activity is background work still
+  closes after two hours;
+- a locked user gets no work done.
 
-`plugins/mailbox/tests/` — a pending-parse backlog drains through the registry.
+In `plugins/mailbox/tests/` — a backlog of unparsed mail drains through the new
+service, newest message first.
 
-`plugins/joinery_ai/tests/` — a sealed message is a candidate in-window and not
-while locked; `pending_parse` rows never enter the item log; a sealed-domain
-recipe is refused by the dispatcher and by `validateConfig()` without the flag.
+In `plugins/joinery_ai/tests/` — an encrypted message is available to the job
+while unlocked and not while locked; unparsed messages never get logged as
+processed; read messages are never selected; a recipe on a sealed domain is
+refused without the checkbox; jobs take the newest candidate, so a fresh
+arrival is picked up ahead of a backlog; local-provider usage doesn't count
+toward either monthly cap, and paid usage still does, including the 80% alert.
 
-## Open decisions
+## Decisions
 
-1. **Backlog cutoff.** Should triage process all 1,958 historical messages on
-   jeremytunnell.com, or start from a cutoff date? Judging years of old mail
-   costs a lot of local inference for little value; a `since` config field on
-   the email jobs would make it a per-recipe choice.
-2. **Where Catch up lives** — the recipe page, the mailbox reader, or both.
-3. **Slice budget default** — 3s is a guess; worth tuning once real drain
-   timings on the 35B local model are known.
+All settled. Nothing is waiting on an answer.
+
+- Only unread mail is processed. Read mail is never picked up, however old.
+- Newest first everywhere — both AI selection and mail parsing — so today's
+  mail is always handled before a backlog, and the two never fight.
+- Monthly token caps ignore local-provider usage.
+- Work runs in its own request, not inside the keep-alive ping, with a
+  10-second limit checked between items.
+- Catch up lives in the mailbox, appearing only when the backlog is worth
+  mentioning. The recipe page keeps Run Now and gains nothing.
+- Per-domain opt-in checkbox, off by default, identity check to change.
+- No server-held AI key. Overnight processing on a sealed domain is off the
+  table, permanently.
+
+The one number worth revisiting after real use is the 10-second limit, once we
+know how long the 35B model actually takes per message.
