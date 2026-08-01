@@ -439,6 +439,42 @@ impl Store {
         Ok(n as usize)
     }
 
+    /// How many entries sit in each state.
+    ///
+    /// The health indicator is a reduction of exactly this, and it is computed
+    /// from the store rather than accumulated as passes run. A counter that is
+    /// incremented and decremented drifts — one missed decrement and the client
+    /// shows work in flight forever, which is the same as showing nothing at
+    /// all, because a user learns to ignore it.
+    pub fn status_counts(&self) -> StoreResult<Vec<(String, usize)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT local_status, COUNT(*) FROM entries GROUP BY local_status")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as usize))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        out.sort();
+        Ok(out)
+    }
+
+    /// Operations waiting to run, whether they are due yet or held on a backoff.
+    ///
+    /// Both count as work. A client reporting itself idle while four uploads sit
+    /// waiting on a retry is telling the user their files are safely synced when
+    /// they are not.
+    pub fn pending_op_count(&self) -> StoreResult<usize> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM ops WHERE state IN ('queued','in_flight')",
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(n as usize)
+    }
+
     // ---- the intent journal ------------------------------------------------
 
     /// Record an intent before acting on it.
@@ -734,7 +770,7 @@ fn encode_status(status: &LocalStatus) -> (String, Option<String>) {
         LocalStatus::Conflict => ("conflict".into(), None),
         LocalStatus::PendingKey => ("pending_key".into(), None),
         LocalStatus::OutOfScope => ("out_of_scope".into(), None),
-        LocalStatus::Unsyncable(reason) => ("unsyncable".into(), Some(format!("{:?}", reason))),
+        LocalStatus::Unsyncable(reason) => ("unsyncable".into(), Some(encode_reason(reason))),
     }
 }
 
@@ -745,10 +781,60 @@ fn decode_status(status: &str, reason: Option<String>) -> LocalStatus {
         "conflict" => LocalStatus::Conflict,
         "pending_key" => LocalStatus::PendingKey,
         "out_of_scope" => LocalStatus::OutOfScope,
-        "unsyncable" => LocalStatus::Unsyncable(jd_vfs::UnsyncableReason::CaseClash {
-            with: reason.unwrap_or_default(),
-        }),
+        "unsyncable" => match reason.as_deref().and_then(decode_reason) {
+            Some(r) => LocalStatus::Unsyncable(r),
+            // A reason this build cannot read. Rather than invent one — the UI
+            // would then tell the user something specific and false about their
+            // file — hand the entry back as unresolved. The naming layer derives
+            // this status from scratch on every pass, so the real verdict is
+            // back within milliseconds, with the right reason attached.
+            None => LocalStatus::PendingDownload,
+        },
         _ => LocalStatus::Synced,
+    }
+}
+
+/// Why an entry cannot be materialized here, as a string that survives a
+/// restart.
+///
+/// Written out by hand rather than through the debug formatter, because the
+/// debug formatter is not a format — it is whatever the struct definition
+/// happens to print today, and reading it back is guesswork. What made that
+/// worth fixing: the reason is the entire user-facing content of an unsyncable
+/// entry, so a reason that does not round-trip is a panel that tells somebody
+/// their file clashes with a file called `NameTooLong { bytes: 300, limit: 255 }`.
+fn encode_reason(reason: &jd_vfs::UnsyncableReason) -> String {
+    use jd_vfs::UnsyncableReason as R;
+    match reason {
+        R::CaseClash { with } => format!("case_clash:{with}"),
+        R::UnicodeClash { with } => format!("unicode_clash:{with}"),
+        R::NameTooLong { bytes, limit } => format!("name_too_long:{bytes}:{limit}"),
+        R::PathTooLong { bytes, limit } => format!("path_too_long:{bytes}:{limit}"),
+        R::Empty => "empty".into(),
+        R::ReservedPrefix => "reserved_prefix".into(),
+    }
+}
+
+fn decode_reason(raw: &str) -> Option<jd_vfs::UnsyncableReason> {
+    use jd_vfs::UnsyncableReason as R;
+    let (kind, rest) = raw.split_once(':').unwrap_or((raw, ""));
+    match kind {
+        // A filename may contain colons, so the name takes the whole remainder.
+        "case_clash" => Some(R::CaseClash { with: rest.into() }),
+        "unicode_clash" => Some(R::UnicodeClash { with: rest.into() }),
+        "name_too_long" | "path_too_long" => {
+            let (bytes, limit) = rest.split_once(':')?;
+            let bytes = bytes.parse().ok()?;
+            let limit = limit.parse().ok()?;
+            Some(if kind == "name_too_long" {
+                R::NameTooLong { bytes, limit }
+            } else {
+                R::PathTooLong { bytes, limit }
+            })
+        }
+        "empty" => Some(R::Empty),
+        "reserved_prefix" => Some(R::ReservedPrefix),
+        _ => None,
     }
 }
 
@@ -814,6 +900,67 @@ fn row_to_entry(r: &rusqlite::Row<'_>) -> rusqlite::Result<Entry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_unsyncable_reason_survives_a_restart_intact() {
+        // The reason is the whole user-facing content of an unsyncable entry. A
+        // reason that does not round-trip is a panel telling somebody their file
+        // clashes with one called `NameTooLong { bytes: 300, limit: 255 }`.
+        use jd_vfs::UnsyncableReason as R;
+        for reason in [
+            R::CaseClash {
+                with: "Report.txt".into(),
+            },
+            R::UnicodeClash {
+                with: "caf\u{e9}.txt".into(),
+            },
+            R::NameTooLong {
+                bytes: 300,
+                limit: 255,
+            },
+            R::PathTooLong {
+                bytes: 32_100,
+                limit: 32_000,
+            },
+            R::Empty,
+            R::ReservedPrefix,
+        ] {
+            let status = LocalStatus::Unsyncable(reason.clone());
+            let (kind, encoded) = encode_status(&status);
+            assert_eq!(
+                decode_status(&kind, encoded),
+                status,
+                "{reason:?} did not survive"
+            );
+        }
+    }
+
+    #[test]
+    fn a_name_containing_a_colon_still_round_trips() {
+        // The encoding is colon-separated and filenames may contain colons, so
+        // the name has to take the whole remainder rather than one field.
+        use jd_vfs::UnsyncableReason as R;
+        let status = LocalStatus::Unsyncable(R::CaseClash {
+            with: "Q3: final: v2.txt".into(),
+        });
+        let (kind, encoded) = encode_status(&status);
+        assert_eq!(decode_status(&kind, encoded), status);
+    }
+
+    #[test]
+    fn an_unreadable_reason_becomes_unresolved_rather_than_a_made_up_one() {
+        // Written by a future build, or corrupted. Inventing a reason would tell
+        // the user something specific and false; handing the entry back
+        // unresolved gets the real verdict re-derived on the next pass.
+        assert_eq!(
+            decode_status("unsyncable", Some("something_from_the_future:x".into())),
+            LocalStatus::PendingDownload
+        );
+        assert_eq!(
+            decode_status("unsyncable", None),
+            LocalStatus::PendingDownload
+        );
+    }
 
     fn entry(id: i64, name: &str) -> Entry {
         Entry {

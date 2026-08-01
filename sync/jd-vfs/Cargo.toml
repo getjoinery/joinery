@@ -17,3 +17,14 @@ notify = "6"
 # Windows. Deleting a user's file is the one operation worth a dependency to
 # get exactly right.
 trash = "5"
+
+# File identity on Windows is the volume file index, and it only comes from an
+# opened handle — the standard library will not report it from a metadata call.
+# The stand-in everybody reaches for instead, creation time, is preserved across
+# moves and restores, so unrelated files share one and the pairing logic calls
+# them the same file.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+] }

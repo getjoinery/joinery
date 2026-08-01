@@ -55,6 +55,6 @@ pub use clock::SimClock;
 pub use engine::Device;
 pub use net::{NetFaults, NetStats, SimNet};
 pub use rng::SimRng;
-pub use scenario::{assert_invariants, Committed, World};
+pub use scenario::{assert_invariants, Committed, Platform, World};
 pub use server::{sha256_hex, MockServer, VersionRow};
 pub use vfs::{FailureKind, FsOp, MemFs};

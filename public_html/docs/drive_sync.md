@@ -1,0 +1,511 @@
+# Drive Sync Client
+
+The desktop client that keeps a folder on a computer matching a member's Drive.
+It lives at `{repo root}/sync/`, is written in Rust, and ships as one background
+process plus an optional tray icon on macOS, Windows, and Linux.
+
+The server side it talks to is documented in [Drive](drive.md#sync-clients);
+this file is the client.
+
+---
+
+## What it is made of
+
+```
+{repo root}/sync/
+  jd-proto/      the server API: auth, actions, chunked upload, ranged download
+  jd-crypto/     the client-custody crypto, byte-matching the browser's
+  jd-vfs/        the filesystem the engine is allowed to see
+  jd-platform/   the operating system, everywhere it is not the filesystem
+  jd-core/       the engine: state store, reconciler, ordering, executor
+  jd-sim/        a simulated world: virtual disks, a mock server, injected faults
+  jd-daemon/     the program: linking, the loop, health, the control channel
+  jd-shell/      the tray icon
+```
+
+Two boundaries carry most of the design.
+
+**The engine takes its filesystem and its network by injection.** `jd-core`
+never calls `std::fs` and never opens a socket; it goes through the `Vfs` and
+`DriveApi` traits. That is what lets `jd-sim` run the shipping engine against a
+disk that lies about modification times and a network that loses answers.
+
+**Everything per-operating-system is data, not `#[cfg]`.** Whether a volume can
+tell `Report.txt` from `report.txt`, whether it hands names back decomposed,
+which characters it refuses — all of it is a [`Personality`](#filesystem-personalities)
+value. So the Windows rules can be exercised on Linux, and a Windows-only bug is
+findable on a Linux dev box.
+
+---
+
+## The state store
+
+One SQLite database per sync root, in the state directory and never inside the
+synced tree. It holds:
+
+| Table | What it is for |
+|---|---|
+| `meta` | Schema version, instance URL, device id, and the **cursor** — this device's position in the change feed. |
+| `entries` | One row per known entity, keyed by `(entity_type, server_id)`. |
+| `ops` | The intent journal: every operation is written here, with its idempotency key, before it runs. |
+| `local_index` | A hash cache keyed by `(file_id, size, mtime_ns)`, so a rescan does not re-read unchanged files. |
+| `issues` | The things a person is told about. |
+
+### Last-agreed state
+
+An `entries` row carries three pictures of one entity: what the server has now,
+what is on this disk now, and — the field everything turns on — **what the two
+sides last agreed on**. Sync is not "copy the newer one"; it is working out what
+each side did since they agreed, from those three.
+
+A store whose `schema_version` is newer than the running build is refused rather
+than opened. Half-understanding it would produce confident wrong answers about
+what was agreed, and those answers overwrite files.
+
+### Identity is the server id
+
+An entry is `(entity_type, server_id)`; paths are labels. Renaming a folder of
+ten thousand files is therefore one operation, and a moved file keeps its
+sharing and its version history.
+
+Something created locally needs an identity before the server has given it one,
+so it gets a **negative** id, allocated locally and counting down. Negative
+rather than a flag, because a sign cannot get out of step with the thing it
+describes. When the create lands, the row is re-keyed to the real id — together
+with its children's parent pointers, its `local_index` rows, and its journal
+rows, in one transaction.
+
+---
+
+## One pass
+
+The client is this loop, run over and over:
+
+1. **Read the change feed** from the stored cursor (`drive_changes`), or walk
+   the whole index (`drive_index`) when the server answers `{reset: true}`.
+2. **Absorb** what the server reports into the remote side of `entries`. An
+   observation, never an agreement.
+3. **Resolve names** for this filesystem ([below](#filesystem-personalities)).
+4. **Walk the disk**, hashing what the fingerprint cache says may have changed.
+5. **Pair** what is on disk against what the engine believes it is called.
+6. **Decide**, per entry, through the reconciliation matrix.
+7. **Order** the decided actions into a safe sequence.
+8. **Journal** every operation, with its idempotency key, before any runs.
+9. **Execute**, with bounded concurrency and per-entry serialization.
+10. **Advance the cursor** — last, and only now.
+
+Two orderings there are load-bearing. The cursor moves last, because the feed
+mentions a change exactly once and a cursor advanced early is a change nobody
+will look for again. And **deltas are measured from the last agreement, never
+from the last observation**: an edit reported once and interrupted before it
+landed is reported again next pass, and the pass after, until the bytes are
+actually here.
+
+### When a pass runs
+
+In the order the daemon checks: something on disk changed and has gone quiet
+(2 s); the watcher admitted it lost events; the poll interval elapsed (30 s);
+somebody asked for one. Anything that changes the server schedules an immediate
+next pass rather than waiting out the interval.
+
+The last two conditions are what make the client work when the first two fail. A
+watcher that dies degrades this into a thirty-second polling client, not into a
+client that has stopped.
+
+---
+
+## Deciding what happens
+
+Per entry, each side's change is one of: none, edited, created, deleted, or
+moved. Content and location are separate axes, so a remote move and a local edit
+compose into "apply the move, then upload" rather than fighting.
+
+Three rules run underneath the whole table:
+
+**An edit beats a delete, in both directions.** They are not symmetric outcomes:
+a delete that loses is recoverable from a trash, an edit that loses is gone. So
+the edit survives, even where that resurrects a file somebody meant to remove.
+
+**Deletes only ever win against unchanged content.** A remote move with a local
+delete resolves as a delete only when the last-agreed hash still matches the
+remote head.
+
+**Nothing is adopted on a fingerprint's word.** Whenever the engine concludes
+"these two are the same, no transfer needed", that comes from comparing content
+hashes. Size and modification time only decide whether it is worth hashing.
+
+### Conflicts
+
+The remote head keeps the path the user knows. The losing local content is
+preserved beside it and uploaded as a new file:
+
+```
+Report (conflicted copy 2026-07-31 from MacBook).xlsx
+```
+
+Both versions exist on both sides within one sync round, and the conflict always
+lands in the issues panel.
+
+### The mass-delete guard
+
+If one round would delete more than `max(50, 25%)` of the settled entries — in
+either direction — that class of operations is withheld and a person is asked.
+Ransomware, a volume that mounted empty, and a legitimate cleanup are
+byte-for-byte identical from here, and there is no clever test that separates
+them.
+
+Only deletes are withheld, and only in the blocked direction; ordinary transfers
+in the same round still run. An unavailable sync root is a separate case: it
+hard-pauses rather than reading as a mass local delete.
+
+---
+
+## Filesystem personalities
+
+The engine is written against one clean tree: case-sensitive, NFC, legal names
+only. `jd-vfs` makes every real filesystem look like that, and reports what it
+could not.
+
+A `Personality` records what a filesystem will do: case sensitivity, whether it
+decomposes Unicode, which characters and stems it refuses, whether it strips
+trailing dots, its name and path budgets, and its modification-time granularity.
+
+**Case sensitivity and Unicode normalization are probed from the volume, not
+assumed from the operating system.** A developer's case-sensitive APFS volume, a
+Windows directory with per-directory case sensitivity, an exFAT stick on Linux —
+all are the same OS and a different answer. `Personality::probe()` writes one
+file, asks for it back under a different spelling, and believes the result.
+
+### Three possible names
+
+Every entry is asked what it is called here, and there are exactly three
+answers:
+
+- **The same as on the server** — the overwhelming majority.
+- **An adjusted name**, recorded in the entry's `local_name`. `Q3: final.xlsx`
+  becomes `Q3%3A final.xlsx` on Windows; `CON.txt` and `report.` are escaped for
+  the same reason. The recorded mapping is authoritative — the escape is not
+  relied on to be reversible, so a genuine `%3A` in a filename is not a trap.
+- **It cannot exist here** — recorded as `unsyncable` with a reason, and
+  surfaced.
+
+The third is the one that matters. Materializing the second of two
+case-clashing siblings under a mangled name would look tidier and be worse: the
+mangled name reads as a rename on the next scan and gets pushed to the server,
+renaming the user's file on every device they own. Refusing leaves the file
+exactly where it was, and says so.
+
+Which sibling wins: anything already on this disk claims first, then the lowest
+server id. The consequence, stated honestly — two devices that downloaded a
+clashing pair in different orders keep different members of it. Both remain on
+the server and both devices report the clash. An entry recovers by itself, with
+no user action, as soon as the clash clears.
+
+### Unicode normalization
+
+Names are composed at one boundary — `Vfs::read_dir` returns NFC, always —
+because a volume that hands a name back in a different normal form than it was
+written reads as a rename on the very next scan, and two devices then rename the
+file at each other forever.
+
+**APFS does not decompose.** HFS+ normalized every name to NFD on write, and
+"macOS decomposes your filenames" became folklore that outlived the filesystem;
+APFS, which replaced it in 2017, stores exactly the bytes it is given and only
+*compares* insensitively. `Personality::macos()` says so. Volumes that do
+decompose are still real — HFS+ disks, Time Machine drives, network shares — and
+`Personality::hfs_plus()` models them; the engine cannot tell which it has except
+by probing, and does not need to.
+
+### macOS
+
+FSEvents reports *resolved* paths, with symlinks followed. A watcher started on
+`/var/…` receives events under `/private/var/…`, discards every one of them, and
+reports itself perfectly healthy. So the root is resolved once, up front, and
+never spelled any other way.
+
+### Windows
+
+Every filesystem call goes out as an extended-length (`\\?\`) path, so the
+260-character limit does not apply; the real ceiling is the Win32 one. The
+recycle-bin API is a shell API and does not understand that prefix, so paths are
+converted back before they reach it.
+
+File identity is the volume file index, from `GetFileInformationByHandle` on a
+handle opened with `FILE_READ_ATTRIBUTES` and full sharing. The stand-in
+everybody reaches for instead — creation time — is preserved across moves and
+copied onto restored files, so unrelated files share one and the pairing logic
+calls them the same file.
+
+### Watcher backends
+
+`notify` provides inotify, FSEvents, and `ReadDirectoryChangesW`. Every one of
+them can drop events under load, and none can tell you afterwards that it did
+not, so the stream is treated as a **hint** and never as truth:
+
+- Events mark paths dirty; the truth is always the filesystem itself.
+- A path is examined only after it has been quiet for 2 s, which turns an
+  application's write-temp-rename-touch storm into one look at one file.
+- A backend reporting it fell behind marks **nothing** dirty. It raises a
+  rescan request, because we do not know what was missed and guessing would be
+  worse than admitting it.
+- A freshly started watcher requests a full scan immediately: nothing that
+  changed while the client was closed produced an event.
+- A full walk runs every 24 hours regardless, as the floor under all three
+  backends.
+
+---
+
+## Crash consistency
+
+The client may stop at any instruction.
+
+**Downloads** stream to a spool file, are verified, then `fsync`ed and renamed
+onto the target. A partial download is never something a user can open. The
+rename is guarded by the fingerprint the engine decided against, so a file
+edited while the download was in flight is not overwritten — the download is
+withdrawn and the local edit wins. A download's byte count comes from the bytes
+that reached the spool, never from a header.
+
+**Uploads** commit their hash at init. A file that changes mid-upload fails
+verification at completion and re-queues. After the transfer the fingerprint is
+re-checked: unchanged means record the agreement, changed means leave the entry
+pending so the newer content is still sent.
+
+**Every mutating request carries an idempotency key journaled before it was
+sent.** This is what makes the worst network fault survivable: the request
+arrived, the server did the work, and the answer never came back. That is
+indistinguishable from "never arrived" and demands the opposite response.
+
+**Recovery on start** re-derives interrupted operations by re-checking both
+sides rather than blindly re-running them.
+
+**Losing the state store is survivable by design**: a fresh index walk plus a
+full local scan, pairing by path and hash. Identical bytes are never
+re-transferred, because an upload of a hash the server already possesses moves
+no bytes.
+
+---
+
+## Health, and never stopping silently
+
+Every entry is always in exactly one visible state — `synced`, `pending_*`,
+`conflict`, `unsyncable`, `pending_key`, or `out_of_scope` — and those reduce to
+one indicator:
+
+| Indicator | Meaning |
+|---|---|
+| **Green** | Converged: everything is in agreement or deliberately not synced here. |
+| **Working** | Transfers in flight or queued. |
+| **Attention** | *n* things need a person: name clashes, conflicts, a full Drive, a key not yet granted. |
+| **Stopped** | Cannot sync at all: no server, dead credentials, the folder is missing, or paused. |
+
+Two rules decide between them, and both are about refusing to look better than
+things are. **Attention outranks working** — a cheerful spinner running while
+three files cannot sync has hidden the three files. And **work waiting on a
+backoff is work** — a queue held for fifteen minutes after a failure is not an
+idle client.
+
+The indicator is computed from the store on every request, not accumulated as
+passes run. An incremented counter drifts, and one missed decrement means a tray
+that spins forever, which teaches the user to ignore it.
+
+Issues carry a sentence rather than a code: "Cannot be saved here: the name
+differs from *Report.txt* only by capitalization, and this disk cannot tell the
+two apart. Rename one of them." The most important one is the missing folder,
+which leads with *nothing has been deleted*.
+
+The server side of the same promise is `sde_last_seen_time`: the security page
+shows when each device last synced, so a stalled device is visible from every
+other device.
+
+---
+
+## Linking a device
+
+Authentication happens in the browser, not the terminal. A passkey-first account
+has no password to type, a step-up challenge cannot be answered at a prompt, and
+the vault key can only be unlocked where WebAuthn works.
+
+1. The client generates an X25519 keypair — **before** the request, because its
+   public half is what an enabled vault key comes back sealed to.
+2. `POST /api/v1/auth/device_link` returns a code, a poll token, and a URL. The
+   client opens the URL and prints both, because the ceremony works just as well
+   with a person reading the code off one screen and typing it into another,
+   which is the only way it works on a headless box.
+3. The user approves in a signed-in browser, with recent step-up, optionally
+   ticking "enable encrypted folders on this device".
+4. The client polls every 3 s. On approval it receives the session key and, if
+   enabled, the vault key sealed to its public key. **The credential is
+   delivered exactly once** and scrubbed from the link row, so it is stored
+   before anything else that could fail.
+
+A denial or an expiry is an ordinary outcome, not an error — a user clicking
+"not me" is doing what that button is for.
+
+---
+
+## Where things live
+
+| | macOS | Windows | Linux |
+|---|---|---|---|
+| Config | `~/Library/Application Support/com.joinery.drive/config` | `%APPDATA%\Joinery Drive\config` | `$XDG_CONFIG_HOME/joinery-drive` |
+| State | same, `/state` | `%LOCALAPPDATA%\Joinery Drive\state` | `$XDG_STATE_HOME/joinery-drive` |
+| Logs | `~/Library/Logs/com.joinery.drive` | `%LOCALAPPDATA%\Joinery Drive\logs` | `$XDG_STATE_HOME/joinery-drive/logs` |
+| Sync root | `~/Joinery Drive` | `~\Joinery Drive` | `~/Joinery Drive` |
+
+State is `LOCALAPPDATA` on Windows on purpose: a roaming profile that copied one
+machine's record of what it had agreed to onto another machine would have the
+second act on the first one's memory.
+
+`JOINERY_DRIVE_HOME` overrides all three at once. One variable rather than three,
+because three would allow a config pointing at one account and a state store
+holding another — which reads as mass corruption on the very next pass.
+
+### Credentials
+
+Three secrets: the API secret, the device X25519 key, and (when enabled) the
+Drive vault key.
+
+- **macOS** — the login Keychain. **Windows** — the Credential Manager.
+- **Linux** — a mode-0600 file in the state directory, by default. The Secret
+  Service needs a desktop session and a build-time system package, and the
+  daemon explicitly supports headless servers. Build with the `secret-service`
+  feature on a desktop to use the keyring instead.
+
+**A keychain is only available in a session somebody has logged in to.** Over
+SSH, or at boot before a graphical login, the login keychain is locked and no
+prompt can be shown to unlock it — macOS answers "user interaction is not
+allowed". The client falls back to a file there, which is correct, and says so.
+
+What it must never do is confuse that with a missing credential. A user who links
+from their desktop puts the secret in the Keychain; a daemon that later starts
+where the Keychain is locked would find nothing in the file and report the
+credential as gone — sending them to replace something that is sitting right
+there. So a locked store is a distinct answer with its own advice: *start Joinery
+Drive from your desktop session after signing in*. Autostart uses a LaunchAgent
+precisely because it runs inside the user's session, where the Keychain is
+open.
+
+The file fallback's custody class is exactly that of `~/.ssh/id_ed25519`: safe
+against another user on the box, worthless against someone who already has the
+user's account. There is no honest way to do better with a file — encrypting it
+with a key stored beside it protects against nobody — so the client reports which
+custody it got, and `joinery-drive status` prints it.
+
+Whether a real credential store exists is a **compile-time** question. With no
+platform backend compiled in, the `keyring` crate hands back a working
+in-process map: every runtime probe passes, and every secret is gone when the
+process exits. A client built that way appears to link successfully and cannot
+start afterwards.
+
+### Starting at login
+
+macOS gets a LaunchAgent, Windows a per-user `Run` value, Linux a systemd user
+unit. All three come back from a crash and stay down when the user asked them to
+stop, so `joinery-drive pause` is not a fight with the service manager. The
+artifacts are generated by pure functions and asserted in tests, because none of
+these fail loudly — a malformed plist simply never starts, and the user finds out
+when their files are a week stale.
+
+---
+
+## The program
+
+```
+joinery-drive login <instance-url> [--device NAME] [--root PATH]
+joinery-drive daemon
+joinery-drive status | issues | dismiss <id>
+joinery-drive pause | resume | sync-now | stop
+joinery-drive autostart on|off
+joinery-drive unlink
+```
+
+Everything except `login` and `daemon` is a request to the running daemon, so
+every answer is what the daemon actually believes rather than a second opinion.
+`status` exits non-zero when the client is stopped, so a monitoring script does
+not have to parse prose.
+
+`unlink` revokes the device's key on the server *before* forgetting it locally —
+the other order leaves a live credential nothing on this machine can name, which
+is exactly the key a lost laptop carries. It leaves the synced files alone.
+
+### Two threads
+
+The **sync thread** owns the state store. Nothing else ever opens that database:
+a second connection deciding what the last agreement was, concurrently with the
+first, is how two answers to that question come to exist.
+
+The **control thread** answers the tray, the CLI, and the settings page, and
+holds no database handle at all. It reads a snapshot the sync thread refreshes,
+and posts commands into a queue the sync thread drains. A hung tray can slow
+nothing down and corrupt nothing.
+
+### The control channel
+
+An HTTP server on `127.0.0.1`, on a port the kernel picks, plus a token in a
+0600 file beside it (`control.json` in the state directory). Loopback is not a
+permission boundary — any local process can connect — so the token is what
+carries the permission. Requests without it are refused before the body is read.
+
+The port is kernel-chosen because a fixed one is a fight with whatever else
+wanted it, and a second instance silently failing to bind is a daemon nothing can
+talk to. Shutting down removes the endpoint file: a stale one sends a client to
+whatever now holds that port.
+
+### The tray
+
+`joinery-drive-tray` is deliberately the thinnest thing in the repository. It
+asks the daemon for status, draws it, and turns clicks back into requests — it
+holds no state, opens no database, and decides nothing. Every judgement about
+what a state *means* is a pure function in `jd-shell/src/view.rs`, tested on
+every platform, because a tray needs a desktop session and a human to look at it
+and three copies of that reasoning would drift apart three different ways.
+
+Linux uses the StatusNotifierItem protocol over D-Bus through `zbus` — pure Rust,
+so a Linux build needs no widget toolkit and no system development package.
+macOS and Windows use the native tray APIs.
+
+The daemon is a separate process on purpose: sync has to keep running when the
+desktop session restarts and on machines with no desktop at all. Quitting the
+tray stops the tray, not the sync.
+
+---
+
+## Testing
+
+The edge-case space is combinatorial, so the client is built around a
+deterministic simulator rather than a list of hand-written cases.
+
+`jd-sim` provides a virtual filesystem with a per-OS personality (case-folding,
+NFD, coarse mtimes, inode reuse, scheduled failures), a mock server implementing
+the documented contract (cursor feed with resets, chunk resync, dedup, quota,
+idempotency replay), a controlled clock, and a network that loses, delays,
+reorders, and duplicates. Every run is reproducible from a seed, and seeds that
+found bugs are frozen in the repository.
+
+Two invariants are asserted around **every pass**, not at the end of a run:
+
+1. **Convergence** — each device's disk and the server agree.
+2. **Nothing committed is lost** — anything that was on a disk before a pass and
+   is gone after it must still be reachable: the server's live tree, its version
+   history, another device, a trash, or a conflict copy. The mock server keeps
+   every version it has ever been given, which is what makes this a question with
+   a checkable answer rather than a hope.
+
+| Gate | Tier / env | Covers |
+|---|---|---|
+| `tests/functional/sync/sync_engine_gate.sh` | safe, needs `[rust]` | The pure decision-making: naming, reconciliation, ordering, the mass-delete guard, secret custody, the health model, the tray's presentation. |
+| `tests/functional/sync/sync_sim_gate.sh` | safe, needs `[rust]` | The simulator itself — a harness with a bug in it reports a clean run rather than a problem. |
+| `tests/functional/sync/sync_cross_build_gate.sh` | safe, needs `[rust]` | The per-OS code compiles for Windows and macOS. |
+| `tests/functional/drive/sync_crypto_parity_gate.sh` | safe, needs `[rust, node]` | Rust and the browser produce bytes each other can read. |
+| `tests/functional/drive/sync_contract_test.php` | db, dev-only | The server surface the client depends on. |
+| `tests/functional/sync/sync_macos_gate.sh` | live, needs `[macmini, rust]` | Built and green on a real Mac; the volume probe, NFD round trip, and Keychain persistence across processes. |
+| `tests/functional/drive/ranged_download_gate.sh` | live, dev-only | Range semantics over HTTP. |
+
+The cross-build gate is what makes per-OS work verifiable from a Linux box at
+all. It does not run anything; it catches the failure that actually happens to
+code nobody builds, which is that somebody edits a shared path and the branch
+they cannot compile stops compiling — found six weeks later by whoever tries to
+cut a release. Behavior is covered instead by the simulator's per-platform
+scenarios, which run the shipping engine over macOS and Windows filesystem
+personalities on Linux.

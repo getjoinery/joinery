@@ -185,6 +185,52 @@ impl Client {
         }
     }
 
+    /// `POST /auth/device_link` — start the browser ceremony.
+    ///
+    /// The device asks for a link, the *user's browser* approves it, and only
+    /// then does a credential exist. That order is the whole point: it works for
+    /// an account with no password at all, it can demand a step-up the way a
+    /// terminal never could, and it is where the vault key can be unlocked and
+    /// sealed to this device — none of which a password prompt in a CLI can do.
+    ///
+    /// `device_pubkey` is this device's X25519 public key, standard base64 of
+    /// the raw 32 bytes. It is what an enabled vault key comes back sealed to,
+    /// so it has to exist before the ceremony starts rather than after.
+    pub fn device_link_begin(
+        &self,
+        device_name: &str,
+        platform: &str,
+        device_pubkey: &str,
+    ) -> Result<Value> {
+        Self::envelope(
+            self.request("POST", "auth/device_link", false)?
+                .send_json(json!({
+                    "device_name": device_name,
+                    "platform": platform,
+                    "device_pubkey": device_pubkey,
+                })),
+        )
+    }
+
+    /// `GET /auth/device_link/{poll_token}` — wait for the user to approve.
+    ///
+    /// The credential is delivered on the **first successful poll after
+    /// approval and never again** — the server scrubs it immediately. So a
+    /// caller that receives `approved` has one chance to store what it was
+    /// given, and losing it means starting the ceremony over rather than asking
+    /// again.
+    pub fn device_link_poll(&self, poll_token: &str) -> Result<Value> {
+        Self::envelope(
+            self.request("GET", &format!("auth/device_link/{poll_token}"), false)?
+                .call(),
+        )
+    }
+
+    /// Install a credential obtained by some route other than `login`.
+    pub fn set_credentials(&mut self, creds: Credentials) {
+        self.creds = Some(creds);
+    }
+
     /// `GET /auth/session` — who am I / key expiry probe.
     pub fn session(&self) -> Result<Value> {
         Self::envelope(self.request("GET", "auth/session", true)?.call())

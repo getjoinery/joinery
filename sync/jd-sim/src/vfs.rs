@@ -140,9 +140,16 @@ impl MemFs {
     pub fn linux(clock: SimClock) -> MemFs {
         MemFs::new(Personality::linux(), clock)
     }
+    /// A modern Mac: case-insensitive, and it hands names back exactly as they
+    /// were written.
     pub fn macos(clock: SimClock) -> MemFs {
         MemFs::new(Personality::macos(), clock)
     }
+    /// A volume that really does decompose — an HFS+ disk, or a network share.
+    pub fn hfs_plus(clock: SimClock) -> MemFs {
+        MemFs::new(Personality::hfs_plus(), clock)
+    }
+
     pub fn windows(clock: SimClock) -> MemFs {
         MemFs::new(Personality::windows(), clock)
     }
@@ -491,7 +498,12 @@ impl Vfs for MemFs {
                 continue;
             }
             out.push(DirEntry {
-                name: rest.to_string(),
+                // Composed on the way out, exactly as `OsVfs` does it — the
+                // `Vfs` contract is that the engine only ever sees NFC. A
+                // simulator that handed back the stored spelling would be
+                // reproducing macOS's behavior at the wrong layer and failing
+                // scenarios the real client passes.
+                name: jd_vfs::nfc(rest),
                 kind: match node {
                     Node::Dir => EntryKind::Directory,
                     Node::File { .. } => EntryKind::File,
@@ -762,20 +774,29 @@ mod tests {
     }
 
     #[test]
-    fn a_decomposing_filesystem_hands_back_what_it_stored() {
-        // "café" written composed comes back decomposed on macOS. Comparing raw
-        // bytes would read that as a rename of every accented file on the disk.
-        let f = MemFs::macos(SimClock::new());
+    fn a_decomposing_filesystem_stores_decomposed_and_reports_composed() {
+        // Both halves are the contract. macOS really does store `café` in
+        // decomposed form — that is why `all_paths` shows it — but the `Vfs`
+        // trait promises the engine only ever sees NFC, so `read_dir` composes
+        // on the way out exactly as `OsVfs` does. A simulator that leaked the
+        // stored spelling would fail scenarios the real client passes.
+        let f = MemFs::hfs_plus(SimClock::new());
         f.user_write("caf\u{e9}.txt", b"x");
+
+        assert!(
+            f.all_paths().iter().any(|p| p == "cafe\u{301}.txt"),
+            "the volume stores it decomposed"
+        );
         let names: Vec<String> = f
             .read_dir(&p(""))
             .unwrap()
             .into_iter()
             .map(|e| e.name)
             .collect();
-        assert_eq!(names, vec!["cafe\u{301}.txt"]);
-        // ...and it is still the same file when asked for by the composed name.
+        assert_eq!(names, vec!["caf\u{e9}.txt"], "the engine is handed NFC");
+        // ...and it is still the same file when asked for by either spelling.
         assert!(f.fingerprint(&p("caf\u{e9}.txt")).unwrap().is_some());
+        assert!(f.fingerprint(&p("cafe\u{301}.txt")).unwrap().is_some());
     }
 
     #[test]

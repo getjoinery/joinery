@@ -454,7 +454,8 @@ when it last checked in, and how far through the change feed it has got. Its
 underlying session key is hidden from the App Sessions list below, so one
 computer never appears as two things signed in.
 
-Linking is the browser ceremony described in `docs/drive.md` § Device linking.
+Linking is the browser ceremony described in `docs/drive.md` § Device linking;
+the client's half of it is in [Drive Sync Client](drive_sync.md#linking-a-device).
 It is gated on a recent step-up, because approving one mints a standing
 credential for a machine — the same bar as adding a vault unlocker, and for the
 same reason.

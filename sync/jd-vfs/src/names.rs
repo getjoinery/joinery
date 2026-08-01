@@ -50,6 +50,10 @@ pub enum UnsyncableReason {
     UnicodeClash { with: String },
     /// Too long for this filesystem once encoded.
     NameTooLong { bytes: usize, limit: usize },
+    /// The name is fine; the folder it sits in is too deep for this
+    /// filesystem's total path budget. A different failure with a different
+    /// fix — the user moves the folder up, they do not rename the file.
+    PathTooLong { bytes: usize, limit: usize },
     /// Nothing survived escaping (a name made entirely of illegal characters).
     Empty,
     /// Collides with the engine's own reserved prefix.
@@ -154,6 +158,17 @@ pub fn to_local_name(remote_name: &str, p: &Personality) -> LocalName {
             reason: r,
         },
     }
+}
+
+/// Whether a path relative to the sync root fits this filesystem's budget.
+///
+/// The root's own prefix is included by the caller — the same tree under
+/// `C:\Users\a\Joinery Drive` and under `D:\jd` has different headroom, and the
+/// user's answer to "it does not fit" depends on which one they are looking at.
+pub fn path_fits(relative_path_bytes: usize, root_prefix_bytes: usize, p: &Personality) -> bool {
+    // The `<` rather than `<=` accounts for the separator between the root and
+    // the first component, which is one byte nobody counted.
+    relative_path_bytes + root_prefix_bytes < p.max_path_bytes
 }
 
 /// One sibling's resolution within a folder, in server order.
@@ -404,6 +419,30 @@ mod tests {
         assert!(matches!(first[0].outcome, LocalName::AsIs(_)));
         assert!(matches!(first[1].outcome, LocalName::Unsyncable(_)));
         assert!(matches!(first[2].outcome, LocalName::Unsyncable(_)));
+    }
+
+    #[test]
+    fn a_deep_tree_from_a_mac_does_not_fit_a_windows_path_budget() {
+        // Every name in it is legal; the problem is only where it sits. The two
+        // are reported separately because the fixes are different.
+        let deep = 400;
+        let win = Personality {
+            max_path_bytes: 260,
+            ..Personality::windows()
+        };
+        assert!(!path_fits(deep, 24, &win));
+        assert!(path_fits(deep, 24, &Personality::linux()));
+    }
+
+    #[test]
+    fn the_root_prefix_counts_against_the_budget() {
+        let p = Personality {
+            max_path_bytes: 100,
+            ..Personality::windows()
+        };
+        assert!(path_fits(50, 40, &p));
+        // Same file, root moved somewhere with a longer name: no longer fits.
+        assert!(!path_fits(50, 60, &p));
     }
 
     #[test]

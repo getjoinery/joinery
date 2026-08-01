@@ -1,6 +1,6 @@
 [package]
 name = "jd-proto"
-description = "Joinery server API client: session-key auth, action calls, resumable chunk uploads, downloads. Carries the joinery-drive plumbing CLI until jd-daemon lands (Phase 2)."
+description = "Joinery server API client: session-key auth, action calls, resumable chunk uploads, downloads. Also carries joinery-drive-probe, a protocol-level tool for exercising the server surface directly."
 edition.workspace = true
 version.workspace = true
 license.workspace = true
@@ -15,6 +15,9 @@ thiserror = "1"
 rand_core = { version = "0.6", features = ["getrandom"] }
 rpassword = "7"
 
+# Named apart from the shipped client on purpose: two binaries called
+# `joinery-drive` collide on one output path, and the one that wins the race is
+# whichever cargo compiled last.
 [[bin]]
-name = "joinery-drive"
-path = "src/bin/joinery_drive.rs"
+name = "joinery-drive-probe"
+path = "src/bin/joinery_drive_probe.rs"

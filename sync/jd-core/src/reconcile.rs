@@ -125,6 +125,14 @@ pub struct Context {
     pub device_name: String,
     /// Disambiguator when a name is already taken.
     pub conflict_suffix: u32,
+    /// What this computer's filesystem will and will not do.
+    ///
+    /// Carried here because "do these two entries want the same slot" has a
+    /// different answer on each platform: `Report.txt` and `report.txt` are two
+    /// files on Linux and one on macOS. Deciding that with a hardcoded
+    /// personality means the ordering stage plans two moves into one slot on
+    /// every Mac and every PC, and the second one silently replaces the first.
+    pub personality: jd_vfs::Personality,
 }
 
 /// Work out what to do with one entry.
@@ -376,6 +384,7 @@ mod tests {
             date: "2026-07-16".into(),
             device_name: "MacBook".into(),
             conflict_suffix: 1,
+            personality: jd_vfs::Personality::linux(),
         }
     }
 

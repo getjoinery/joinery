@@ -99,6 +99,100 @@ fn a_rename_is_a_rename_and_not_a_delete_plus_an_upload() {
 }
 
 #[test]
+fn renaming_a_folder_renames_the_folder_and_does_not_rebuild_it() {
+    // The claim this defends is the one in the design: a folder of ten thousand
+    // files renames in one operation. Get it wrong and the folder is re-created
+    // under the new name, every file inside is re-parented one at a time, and
+    // the original — with its sharing and its history — is left behind as an
+    // empty shell nobody can find.
+    //
+    // The evidence a folder was renamed is what is inside it: renaming a folder
+    // does not touch one file in it, so the files are still recognizable.
+    let world = World::new(31, &["laptop"]);
+    let mut committed = Committed::default();
+    let fs = &world.device("laptop").fs;
+
+    fs.user_mkdir("Reports");
+    for (path, body) in [
+        ("Reports/q1.txt", &b"january through march"[..]),
+        ("Reports/q2.txt", &b"april through june"[..]),
+    ] {
+        fs.user_write(path, body);
+        committed.note(path, body);
+    }
+    assert!(world.settle().is_some());
+    let versions_before = world.server.all_versions().len();
+    let (folders_before, files_before) = world.server.live_counts();
+
+    fs.user_rename("Reports", "Quarterly Reports");
+    assert!(world.settle().is_some());
+
+    assert_invariants(&world, &committed);
+    assert_eq!(
+        world.server.live_counts(),
+        (folders_before, files_before),
+        "one folder became one folder — no shell left behind, no files duplicated"
+    );
+    assert_eq!(
+        world.server.all_versions().len(),
+        versions_before,
+        "not a byte moved"
+    );
+    assert!(world.server.tree().contains_key("Quarterly Reports/q1.txt"));
+}
+
+#[test]
+fn a_nested_folder_rename_moves_the_whole_subtree_as_one() {
+    let world = World::new(32, &["laptop"]);
+    let mut committed = Committed::default();
+    let fs = &world.device("laptop").fs;
+
+    fs.user_mkdir("Work");
+    fs.user_mkdir("Work/2026");
+    for (path, body) in [
+        ("Work/readme.txt", &b"top level"[..]),
+        ("Work/2026/plan.txt", &b"the plan"[..]),
+    ] {
+        fs.user_write(path, body);
+        committed.note(path, body);
+    }
+    assert!(world.settle().is_some());
+    let (folders_before, files_before) = world.server.live_counts();
+
+    fs.user_rename("Work", "Archive");
+    assert!(world.settle().is_some());
+
+    assert_invariants(&world, &committed);
+    assert_eq!(
+        world.server.live_counts(),
+        (folders_before, files_before),
+        "the inner folder rides along; it did not move relative to its parent"
+    );
+    assert!(world.server.tree().contains_key("Archive/2026/plan.txt"));
+}
+
+#[test]
+fn an_empty_folder_renamed_is_still_one_folder_afterwards() {
+    // There is nothing inside to recognize it by, so this genuinely reads as one
+    // folder removed and another created. Nothing is lost — an empty folder
+    // holds nothing — and guessing from the name instead would pair two
+    // unrelated folders and drag one's sharing onto the other.
+    let world = World::new(33, &["laptop"]);
+    let fs = &world.device("laptop").fs;
+
+    fs.user_mkdir("Empty");
+    assert!(world.settle().is_some());
+    assert_eq!(world.server.live_counts(), (1, 0));
+
+    fs.user_rename("Empty", "Still Empty");
+    assert!(world.settle().is_some());
+
+    assert_eq!(world.server.live_counts(), (1, 0));
+    assert!(world.server.tree().contains_key("Still Empty"));
+    assert_converged(&world);
+}
+
+#[test]
 fn a_deleted_file_goes_to_the_server_trash() {
     let world = World::new(5, &["laptop"]);
     let mut committed = Committed::default();
